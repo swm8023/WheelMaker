@@ -13,21 +13,33 @@ import (
 //  3. If caps.LoadSession and a sessionID is stored, attempt session/load.
 //  4. Otherwise, create a new session via session/new.
 //
-// Must be called with a.mu held when checking a.ready, but releases mu
-// before network I/O to avoid holding the lock during slow operations.
-// Callers must re-check invariants after ensureReady returns.
+// Single-flight: if concurrent callers race here, only one performs the I/O;
+// others wait on initCond and return immediately once ready is set.
 func (a *Agent) ensureReady(ctx context.Context) error {
 	a.mu.Lock()
+	// Wait out any concurrent initialization in progress.
+	for a.initializing {
+		a.initCond.Wait() // atomically releases a.mu and waits; re-acquires on signal
+	}
 	if a.ready {
 		a.mu.Unlock()
 		return nil
 	}
-	// Snapshot fields needed for initialization; unlock before network I/O.
+	// We are the initializer: claim the slot.
+	a.initializing = true
 	conn := a.conn
 	savedSessionID := a.sessionID
 	cwd := a.cwd
 	mcpServers := a.mcpServers
 	a.mu.Unlock()
+
+	// notifyDone releases the initializing slot and wakes up any waiters.
+	notifyDone := func() {
+		a.mu.Lock()
+		a.initializing = false
+		a.mu.Unlock()
+		a.initCond.Broadcast()
+	}
 
 	// Step 1: initialize handshake.
 	var initResult acp.InitializeResult
@@ -42,6 +54,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		},
 		ClientInfo: &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"},
 	}, &initResult); err != nil {
+		notifyDone()
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
@@ -61,7 +74,9 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 			a.caps = initResult.AgentCapabilities
 			// sessionID is already set (savedSessionID)
 			a.ready = true
+			a.initializing = false
 			a.mu.Unlock()
+			a.initCond.Broadcast()
 			return nil
 		}
 		// session/load failed — fall through to session/new.
@@ -73,6 +88,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		CWD:        cwd,
 		MCPServers: mcpServers,
 	}, &newResult); err != nil {
+		notifyDone()
 		return fmt.Errorf("ensureReady: session/new: %w", err)
 	}
 
@@ -80,6 +96,9 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	a.caps = initResult.AgentCapabilities
 	a.sessionID = newResult.SessionID
 	a.ready = true
+	a.initializing = false
 	a.mu.Unlock()
+	a.initCond.Broadcast()
 	return nil
 }
+

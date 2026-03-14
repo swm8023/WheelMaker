@@ -13,6 +13,11 @@ import (
 // The caller must drain the channel until a Update with Done=true is received.
 // The channel is closed after the Done update.
 func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) {
+	// Clear lastReply so SwitchWithContext never sees a stale value from a prior prompt.
+	a.mu.Lock()
+	a.lastReply = ""
+	a.mu.Unlock()
+
 	if err := a.ensureReady(ctx); err != nil {
 		return nil, err
 	}
@@ -23,6 +28,12 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	a.mu.Unlock()
 
 	updates := make(chan Update, 32)
+
+	// sendMu and channelClosed coordinate the subscriber and the close operation.
+	// Sending to a closed channel panics even inside a select, so we use a flag
+	// guarded by a mutex to prevent any send after close.
+	var sendMu sync.Mutex
+	var channelClosed bool
 
 	// replyMu protects replyBuf, which accumulates text for lastReply.
 	var replyMu sync.Mutex
@@ -50,16 +61,21 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			replyMu.Unlock()
 		}
 
-		select {
-		case updates <- u:
-		case <-ctx.Done():
+		// Guard against send-on-closed-channel: sending to a closed channel panics
+		// even inside a select. The mutex ensures close() and send are mutually exclusive.
+		sendMu.Lock()
+		if !channelClosed {
+			select {
+			case updates <- u:
+			case <-ctx.Done():
+			}
 		}
+		sendMu.Unlock()
 	})
 
 	// Goroutine: send session/prompt; emit Done or Error update when complete.
 	go func() {
 		defer cancelSub()
-		defer close(updates)
 
 		var result acp.SessionPromptResult
 		err := conn.Send(ctx, "session/prompt", acp.SessionPromptParams{
@@ -67,28 +83,30 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			Prompt:    text,
 		}, &result)
 
-		// Consolidate accumulated reply into lastReply.
+		// Always update lastReply (even if empty) to clear stale values from previous prompts.
 		replyMu.Lock()
 		reply := replyBuf.String()
 		replyMu.Unlock()
-		if reply != "" {
-			a.mu.Lock()
-			a.lastReply = reply
-			a.mu.Unlock()
-		}
+		a.mu.Lock()
+		a.lastReply = reply
+		a.mu.Unlock()
 
+		// Acquire sendMu to close the channel safely: set channelClosed first so
+		// concurrent subscriber goroutines see it and stop sending, then close.
+		var finalUpdate Update
 		if err != nil {
-			select {
-			case updates <- Update{Type: UpdateError, Err: err, Done: true}:
-			case <-ctx.Done():
-			}
-			return
+			finalUpdate = Update{Type: UpdateError, Err: err, Done: true}
+		} else {
+			finalUpdate = Update{Type: UpdateDone, Content: result.StopReason, Done: true}
 		}
-
+		sendMu.Lock()
+		channelClosed = true
 		select {
-		case updates <- Update{Type: UpdateDone, Content: result.StopReason, Done: true}:
+		case updates <- finalUpdate:
 		case <-ctx.Done():
 		}
+		close(updates)
+		sendMu.Unlock()
 	}()
 
 	return updates, nil

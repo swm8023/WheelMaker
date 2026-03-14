@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/swm8023/wheelmaker/internal/adapter"
 	"github.com/swm8023/wheelmaker/internal/adapter/codex"
 	"github.com/swm8023/wheelmaker/internal/client"
 )
@@ -32,8 +33,12 @@ func run() error {
 	store := client.NewJSONStore(statePath)
 	c := client.New(store, nil) // no IM adapter in MVP
 
-	// Register the Codex adapter (reads ExePath from state config if set).
-	c.RegisterAdapter(codex.NewAdapter(codex.Config{}))
+	// Register the Codex adapter factory.
+	// The factory is called at connect time with ExePath and Env from persisted state,
+	// so any runtime-configured binary path or environment overrides are applied.
+	c.RegisterAdapter("codex", func(exePath string, env map[string]string) adapter.Adapter {
+		return codex.NewAdapter(codex.Config{ExePath: exePath, Env: env})
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

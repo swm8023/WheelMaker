@@ -186,6 +186,13 @@ type SessionLoadResult struct {
 	// Modes and ConfigOptions are optional; WheelMaker ignores them in MVP.
 }
 
+// SessionSetConfigOptionParams sets a configuration option on an active session.
+type SessionSetConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Value     string `json:"value"`
+}
+
 // --- Agent→Client callback types ---
 
 // FSReadTextFileParams is sent by the agent to request a file read.

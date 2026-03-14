@@ -13,17 +13,22 @@ import (
 	"github.com/swm8023/wheelmaker/internal/im"
 )
 
+// AdapterFactory creates a new Adapter instance configured with the given ExePath and Env.
+// The factory is invoked at each connect (Start/switchAdapter) with the persisted config
+// so that runtime-configured paths are applied without re-registering.
+type AdapterFactory func(exePath string, env map[string]string) adapter.Adapter
+
 // Client is the top-level coordinator for WheelMaker.
-// It holds a pool of stateless Adapter factories and two references to the active Agent:
+// It holds a pool of AdapterFactory functions and two references to the active Agent:
 //   - session agent.Session  — narrow interface for Prompt/Cancel/SetMode, mockable in tests.
 //   - ag      *agent.Agent   — concrete type for Switch (to avoid type assertion on mock).
 //
 // Switching adapters is done via c.ag.Switch() (never via c.session), so
 // injecting a mock Session in tests does not break the Switch code path.
 type Client struct {
-	adapters map[string]adapter.Adapter
-	session  agent.Session // narrow interface, can be mock in tests
-	ag       *agent.Agent  // concrete type, used for Switch only; nil when mock injected
+	adapterFacs map[string]AdapterFactory
+	session     agent.Session // narrow interface, can be mock in tests
+	ag          *agent.Agent  // concrete type, used for Switch only; nil when mock injected
 
 	store Store
 	state *State
@@ -37,16 +42,18 @@ type Client struct {
 // imAdapter may be nil; in that case Run() drives the stdin loop.
 func New(store Store, imAdapter im.Adapter) *Client {
 	return &Client{
-		adapters: make(map[string]adapter.Adapter),
-		store:    store,
-		imRun:    imAdapter,
+		adapterFacs: make(map[string]AdapterFactory),
+		store:       store,
+		imRun:       imAdapter,
 	}
 }
 
-// RegisterAdapter registers an adapter factory under its Name().
-func (c *Client) RegisterAdapter(a adapter.Adapter) {
+// RegisterAdapter registers an AdapterFactory under the given name.
+// The factory is called at each connect with the ExePath and Env from persisted state,
+// allowing runtime configuration without re-registration.
+func (c *Client) RegisterAdapter(name string, factory AdapterFactory) {
 	c.mu.Lock()
-	c.adapters[a.Name()] = a
+	c.adapterFacs[name] = factory
 	c.mu.Unlock()
 }
 
@@ -68,16 +75,17 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	adpt := c.adapters[name]
+	fac := c.adapterFacs[name]
 	savedSessionID := state.SessionIDs[name]
+	cfg := state.Adapters[name] // zero value if not configured
 	c.mu.Unlock()
 
-	if adpt == nil {
+	if fac == nil {
 		return fmt.Errorf("client: no adapter registered for %q", name)
 	}
 
-	// Start the subprocess eagerly.
-	conn, err := adpt.Connect(ctx)
+	// Create adapter with persisted config and connect.
+	conn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("client: connect %q: %w", name, err)
 	}
@@ -283,16 +291,26 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 // and calls ag.Switch() to replace the connection.
 // Always uses c.ag (concrete type) for Switch, never c.session (interface),
 // to avoid type assertion panics when a mock is injected in tests.
+//
+// The outgoing session ID is snapshotted BEFORE calling ag.Switch() (which
+// clears sessionID), ensuring it is persisted even after the switch completes.
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
-	adpt := c.adapters[name]
+	fac := c.adapterFacs[name]
 	sess := c.session
 	ag := c.ag
 	promptCh := c.currentPromptCh
 	c.mu.Unlock()
 
-	if adpt == nil {
+	if fac == nil {
 		return fmt.Errorf("unknown adapter: %q (registered: %v)", name, c.registeredAdapterNames())
+	}
+
+	// Snapshot outgoing session info BEFORE Switch clears a.sessionID.
+	var outgoingName, outgoingSessionID string
+	if sess != nil {
+		outgoingName = sess.AdapterName()
+		outgoingSessionID = sess.SessionID()
 	}
 
 	// Step 1: cancel and drain any in-progress prompt.
@@ -307,8 +325,15 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.mu.Unlock()
 	}
 
-	// Step 2: connect the new binary.
-	newConn, err := adpt.Connect(ctx)
+	// Step 2: connect the new adapter using persisted config.
+	c.mu.Lock()
+	cfg := AdapterConfig{}
+	if c.state != nil {
+		cfg = c.state.Adapters[name]
+	}
+	c.mu.Unlock()
+
+	newConn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
@@ -320,9 +345,15 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		}
 	}
 
-	// Persist the new active adapter name.
+	// Persist results: save outgoing session ID and update active adapter.
 	c.mu.Lock()
 	if c.state != nil {
+		if outgoingName != "" && outgoingSessionID != "" {
+			if c.state.SessionIDs == nil {
+				c.state.SessionIDs = map[string]string{}
+			}
+			c.state.SessionIDs[outgoingName] = outgoingSessionID
+		}
 		c.state.ActiveAdapter = name
 	}
 	c.mu.Unlock()
@@ -336,8 +367,8 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 func (c *Client) registeredAdapterNames() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.adapters))
-	for n := range c.adapters {
+	names := make([]string, 0, len(c.adapterFacs))
+	for n := range c.adapterFacs {
 		names = append(names, n)
 	}
 	return names

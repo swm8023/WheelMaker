@@ -4,17 +4,32 @@ package client
 // Uses package-internal access to inject mock dependencies.
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/swm8023/wheelmaker/internal/adapter"
 	"github.com/swm8023/wheelmaker/internal/agent"
+	"github.com/swm8023/wheelmaker/internal/agent/acp"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
+
+// TestMain intercepts the test binary to act as a minimal ACP mock server when
+// GO_CLIENT_ACP_MOCK=1 is set. This allows client tests to use real acp.Conn
+// connections without depending on an external binary.
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_CLIENT_ACP_MOCK") == "1" {
+		runClientMockAgent()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 // --- mock Session ---
 
@@ -441,5 +456,181 @@ func TestJSONStore_NewKeysTakePrecedenceOverLegacy(t *testing.T) {
 	}
 	if state.SessionIDs["new-codex"] != "new-sess" {
 		t.Errorf("SessionIDs[new-codex] = %q, want new-sess", state.SessionIDs["new-codex"])
+	}
+}
+
+func TestJSONStore_MigratesLegacyAgentsExePath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	// Write old hub.State format with "agents[name].exe_path".
+	legacy := map[string]any{
+		"active_agent": "codex",
+		"agents": map[string]any{
+			"codex": map[string]any{"exe_path": "/usr/local/bin/codex-acp"},
+		},
+	}
+	data, _ := json.MarshalIndent(legacy, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+
+	store := NewJSONStore(path)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if state.Adapters["codex"].ExePath != "/usr/local/bin/codex-acp" {
+		t.Errorf("Adapters[codex].ExePath = %q, want /usr/local/bin/codex-acp",
+			state.Adapters["codex"].ExePath)
+	}
+}
+
+// --- Tests: switch session persistence ---
+
+// minimalMockAdapter is an adapter.Adapter that connects to the mock ACP server
+// embedded in the test binary itself (activated via GO_CLIENT_ACP_MOCK=1).
+type minimalMockAdapter struct{}
+
+func (a *minimalMockAdapter) Name() string { return "mock" }
+func (a *minimalMockAdapter) Connect(_ context.Context) (*acp.Conn, error) {
+	conn := acp.New(os.Args[0], []string{"GO_CLIENT_ACP_MOCK=1"})
+	if err := conn.Start(); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+func (a *minimalMockAdapter) Close() error { return nil }
+
+var _ adapter.Adapter = (*minimalMockAdapter)(nil)
+
+// TestSwitchAdapter_PersistsOutgoingSessionID verifies that the outgoing adapter's
+// session ID is saved to state before the switch completes.
+func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
+	outgoingSession := &mockSession{adapterN: "codex", sessionN: "outgoing-sess-123"}
+	store := &mockStore{state: &State{
+		ActiveAdapter: "codex",
+		SessionIDs:    map[string]string{"codex": "outgoing-sess-123"},
+		Adapters:      map[string]AdapterConfig{},
+	}}
+	c := New(store, nil)
+	c.state = &State{
+		ActiveAdapter: "codex",
+		SessionIDs:    map[string]string{"codex": "outgoing-sess-123"},
+		Adapters:      map[string]AdapterConfig{},
+	}
+	c.session = outgoingSession
+
+	// Register the "new-adapter" factory using the embedded mock ACP server.
+	c.RegisterAdapter("new-adapter", func(exePath string, env map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-adapter"})
+
+	// Verify state was saved.
+	if len(store.saved) == 0 {
+		t.Fatal("state was not saved after switch")
+	}
+	lastState := store.saved[len(store.saved)-1]
+
+	// The outgoing "codex" session ID must be persisted.
+	if got := lastState.SessionIDs["codex"]; got != "outgoing-sess-123" {
+		t.Errorf("SessionIDs[codex] = %q, want outgoing-sess-123", got)
+	}
+	// The active adapter must be updated.
+	if lastState.ActiveAdapter != "new-adapter" {
+		t.Errorf("ActiveAdapter = %q, want new-adapter", lastState.ActiveAdapter)
+	}
+
+	// Switch success reply expected.
+	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "new-adapter") {
+		t.Errorf("reply = %v, want switch confirmation", *msgs)
+	}
+}
+
+// TestRegisterAdapter_FactoryCalledWithStateConfig verifies that RegisterAdapter
+// factories receive ExePath and Env from persisted State.Adapters at connect time.
+func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
+	store := &mockStore{state: &State{
+		ActiveAdapter: "codex",
+		Adapters: map[string]AdapterConfig{
+			"codex": {ExePath: "/custom/codex", Env: map[string]string{"API_KEY": "test-key"}},
+		},
+		SessionIDs: map[string]string{},
+	}}
+
+	var gotExePath string
+	var gotEnv map[string]string
+	c := New(store, nil)
+	c.RegisterAdapter("codex", func(exePath string, env map[string]string) adapter.Adapter {
+		gotExePath = exePath
+		gotEnv = env
+		return &minimalMockAdapter{}
+	})
+
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	if gotExePath != "/custom/codex" {
+		t.Errorf("factory exePath = %q, want /custom/codex", gotExePath)
+	}
+	if gotEnv["API_KEY"] != "test-key" {
+		t.Errorf("factory env[API_KEY] = %q, want test-key", gotEnv["API_KEY"])
+	}
+}
+
+// --- Minimal ACP mock server for client tests ---
+
+// runClientMockAgent is a minimal ACP server that handles initialize and session/new.
+// Activated when GO_CLIENT_ACP_MOCK=1 is set (used by minimalMockAdapter).
+func runClientMockAgent() {
+	enc := json.NewEncoder(os.Stdout)
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var raw struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal(line, &raw); err != nil || raw.ID == nil {
+			continue
+		}
+		id := *raw.ID
+
+		switch raw.Method {
+		case "initialize":
+			_ = enc.Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion":   "0.1",
+					"agentCapabilities": map[string]any{"loadSession": false},
+					"agentInfo":         map[string]any{"name": "client-mock-agent"},
+				},
+			})
+		case "session/new":
+			_ = enc.Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  map[string]any{"sessionId": fmt.Sprintf("client-mock-sess-%d", id)},
+			})
+		default:
+			_ = enc.Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  map[string]any{},
+			})
+		}
 	}
 }
