@@ -92,7 +92,10 @@ func (c *Client) Start(ctx context.Context) error {
 		return fmt.Errorf("client: connect %q: %w", name, err)
 	}
 
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
 	var ag *agent.Agent
 	if savedSessionID != "" {
 		ag = agent.NewWithSessionID(name, conn, cwd, savedSessionID)
@@ -368,6 +371,12 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 				c.state.SessionIDs = map[string]string{}
 			}
 			c.state.SessionIDs[outgoingName] = outgoingSessionID
+		}
+		// For a clean switch, remove the incoming adapter's stale saved session so
+		// the next startup creates a fresh session rather than resuming a stale one.
+		// (SwitchWithContext bootstraps a new session synchronously; Close() will save it.)
+		if mode == agent.SwitchClean {
+			delete(c.state.SessionIDs, name)
 		}
 		c.state.ActiveAdapter = name
 	}

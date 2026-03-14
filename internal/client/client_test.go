@@ -689,6 +689,39 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 	}
 }
 
+// TestSwitchAdapter_ClearsIncomingSessionIDOnCleanSwitch verifies that a plain
+// /use clears state.SessionIDs for the incoming adapter, so that the next startup
+// does not resume a stale session.
+func TestSwitchAdapter_ClearsIncomingSessionIDOnCleanSwitch(t *testing.T) {
+	outgoing := &mockSession{adapterN: "codex", sessionN: "codex-sess-1"}
+	store := &mockStore{}
+	c := client.New(store, nil)
+	c.InjectSession(outgoing)
+	c.InjectState(&client.State{
+		ActiveAdapter: "codex",
+		SessionIDs: map[string]string{
+			"codex":       "codex-sess-1",
+			"new-adapter": "old-stale-sess", // pre-existing saved session for target
+		},
+		Adapters: map[string]client.AdapterConfig{},
+	})
+	c.RegisterAdapter("new-adapter", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+
+	captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-adapter"})
+
+	if len(store.saved) == 0 {
+		t.Fatal("state was not saved after switch")
+	}
+	last := store.saved[len(store.saved)-1]
+
+	if sid, ok := last.SessionIDs["new-adapter"]; ok && sid != "" {
+		t.Errorf("SessionIDs[new-adapter] = %q, want empty (cleared on SwitchClean)", sid)
+	}
+}
+
 // TestRegisterAdapter_FactoryCalledWithStateConfig verifies that RegisterAdapter
 // factories receive ExePath and Env from persisted State.Adapters at connect time.
 func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
