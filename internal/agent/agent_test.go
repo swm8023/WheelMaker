@@ -155,6 +155,24 @@ func TestAgent_Cancel_AfterReady(t *testing.T) {
 	}
 }
 
+// TestAgent_Cancel_SeededSessionID_BeforeReady covers the regression where
+// NewWithSessionID pre-seeds sessionID before the ACP handshake runs.
+// Cancel() must be a no-op in this state (ready==false), not fire a
+// session/cancel RPC on an uninitialized connection.
+func TestAgent_Cancel_SeededSessionID_BeforeReady(t *testing.T) {
+	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	if err := conn.Start(); err != nil {
+		t.Fatalf("conn.Start: %v", err)
+	}
+	ag := agent.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
+	t.Cleanup(func() { _ = ag.Close() })
+
+	// No Prompt() called yet; ready==false but sessionID is non-empty.
+	if err := ag.Cancel(); err != nil {
+		t.Errorf("Cancel with seeded session ID before ready: %v", err)
+	}
+}
+
 func TestAgent_SetMode_BeforeReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	if err := ag.SetMode(context.Background(), "auto"); err == nil {
@@ -174,6 +192,22 @@ func TestAgent_SetMode_AfterReady(t *testing.T) {
 	}
 	if err := ag.SetMode(ctx, "auto"); err != nil {
 		t.Errorf("SetMode after ready: %v", err)
+	}
+}
+
+// TestAgent_SetMode_SeededSessionID_BeforeReady covers the same regression as the
+// Cancel variant: calling SetMode when sessionID is seeded but ready==false must
+// return an error without sending an RPC on an uninitialized connection.
+func TestAgent_SetMode_SeededSessionID_BeforeReady(t *testing.T) {
+	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	if err := conn.Start(); err != nil {
+		t.Fatalf("conn.Start: %v", err)
+	}
+	ag := agent.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
+	t.Cleanup(func() { _ = ag.Close() })
+
+	if err := ag.SetMode(context.Background(), "auto"); err == nil {
+		t.Error("expected error from SetMode with seeded session ID before ready")
 	}
 }
 

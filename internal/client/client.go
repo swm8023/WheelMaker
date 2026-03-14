@@ -84,30 +84,30 @@ func (c *Client) Start(ctx context.Context) error {
 	c.mu.Unlock()
 
 	if fac == nil {
-		return fmt.Errorf("client: no adapter registered for %q", name)
-	}
-
-	// Attempt to connect; a failure is non-fatal so the process can still start.
-	// The user can issue /use <adapter> to connect a working adapter.
-	conn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "wheelmaker: warning: could not connect adapter %q: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "wheelmaker: warning: adapter %q is not registered; use /use <adapter> to connect\n", name)
 	} else {
-		cwd, err := os.Getwd()
+		// Attempt to connect; a failure is non-fatal so the process can still start.
+		// The user can issue /use <adapter> to connect a working adapter.
+		conn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
 		if err != nil {
-			cwd = "."
-		}
-		var ag *agent.Agent
-		if savedSessionID != "" {
-			ag = agent.NewWithSessionID(name, conn, cwd, savedSessionID)
+			fmt.Fprintf(os.Stderr, "wheelmaker: warning: could not connect adapter %q: %v\n", name, err)
 		} else {
-			ag = agent.New(name, conn, cwd)
-		}
+			cwd, err := os.Getwd()
+			if err != nil {
+				cwd = "."
+			}
+			var ag *agent.Agent
+			if savedSessionID != "" {
+				ag = agent.NewWithSessionID(name, conn, cwd, savedSessionID)
+			} else {
+				ag = agent.New(name, conn, cwd)
+			}
 
-		c.mu.Lock()
-		c.ag = ag
-		c.session = ag
-		c.mu.Unlock()
+			c.mu.Lock()
+			c.ag = ag
+			c.session = ag
+			c.mu.Unlock()
+		}
 	}
 
 	if c.imRun != nil {
