@@ -580,6 +580,40 @@ func TestJSONStore_MigratesLegacyAgentsExePath(t *testing.T) {
 	}
 }
 
+func TestJSONStore_MigratesLegacyAgentsEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+
+	legacy := map[string]any{
+		"active_agent": "codex",
+		"agents": map[string]any{
+			"codex": map[string]any{
+				"exe_path": "/usr/local/bin/codex-acp",
+				"env":      map[string]string{"OPENAI_API_KEY": "sk-test"},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(legacy, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+
+	store := client.NewJSONStore(path)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if state.Adapters["codex"].ExePath != "/usr/local/bin/codex-acp" {
+		t.Errorf("Adapters[codex].ExePath = %q, want /usr/local/bin/codex-acp",
+			state.Adapters["codex"].ExePath)
+	}
+	if state.Adapters["codex"].Env["OPENAI_API_KEY"] != "sk-test" {
+		t.Errorf("Adapters[codex].Env[OPENAI_API_KEY] = %q, want sk-test",
+			state.Adapters["codex"].Env["OPENAI_API_KEY"])
+	}
+}
+
 // --- Tests: switch session persistence ---
 
 // minimalMockAdapter is an adapter.Adapter that connects to the mock ACP server

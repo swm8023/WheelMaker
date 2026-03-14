@@ -67,17 +67,18 @@ func (s *JSONStore) Load() (*State, error) {
 		}
 	}
 
-	// Migrate legacy key: "agents[name].exe_path" → Adapters[name].ExePath
+	// Migrate legacy key: "agents[name].exe_path" + "agents[name].env" → Adapters[name]
 	if len(state.Adapters) == 0 {
 		if v, ok := raw["agents"]; ok {
 			var legacyAgents map[string]struct {
-				ExePath string `json:"exe_path"`
+				ExePath string            `json:"exe_path"`
+				Env     map[string]string `json:"env"`
 			}
 			if err := json.Unmarshal(v, &legacyAgents); err == nil && len(legacyAgents) > 0 {
 				state.Adapters = make(map[string]AdapterConfig, len(legacyAgents))
 				for name, ag := range legacyAgents {
-					if ag.ExePath != "" {
-						state.Adapters[name] = AdapterConfig{ExePath: ag.ExePath}
+					if ag.ExePath != "" || len(ag.Env) > 0 {
+						state.Adapters[name] = AdapterConfig{ExePath: ag.ExePath, Env: ag.Env}
 					}
 				}
 			}

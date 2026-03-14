@@ -183,6 +183,10 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 //
 // Switch acquires mu to update fields atomically, but closes oldConn outside the
 // lock to avoid blocking the lock during potentially slow I/O.
+//
+// For SwitchWithContext, Switch blocks until the bootstrap prompt completes.
+// This preserves the caller's promptMu hold across the full switch + bootstrap,
+// preventing any concurrent user prompt from racing with the hidden bootstrap.
 func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode SwitchMode) error {
 	a.mu.Lock()
 	var summary string
@@ -209,21 +213,21 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	}
 
 	// For SwitchWithContext, bootstrap the new session with the previous reply.
-	// The channel MUST be drained to prevent the Prompt goroutine from leaking.
+	// Drain the channel synchronously so that this call blocks until the bootstrap
+	// completes. The caller (Client.switchAdapter) holds promptMu for the duration,
+	// which prevents any user prompt from running concurrently with the bootstrap.
 	if mode == SwitchWithContext && summary != "" {
 		ch, err := a.Prompt(ctx, "[context] "+summary)
 		if err != nil {
 			log.Printf("agent: SwitchWithContext bootstrap prompt failed: %v", err)
 		} else {
-			go func() {
-				for u := range ch {
-					if u.Err != nil {
-						// Bootstrap Prompt() itself succeeded (ensureReady passed)
-						// but the RPC call completed with an error; log and continue draining.
-						log.Printf("agent: SwitchWithContext bootstrap prompt failed: %v", u.Err)
-					}
+			for u := range ch {
+				if u.Err != nil {
+					// Bootstrap Prompt() itself succeeded (ensureReady passed)
+					// but the RPC call completed with an error; log and continue draining.
+					log.Printf("agent: SwitchWithContext bootstrap prompt failed: %v", u.Err)
 				}
-			}()
+			}
 		}
 	}
 	return nil
