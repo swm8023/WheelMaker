@@ -11,6 +11,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/agent/acp"
@@ -64,15 +65,17 @@ type Agent struct {
 	permission PermissionHandler // injectable; defaults to AutoAllowHandler
 	terminals  *terminalManager
 
-	lastReply string // most recent complete agent reply, used for SwitchWithContext
-	mu        sync.Mutex
-	ready     bool // true after initialize + session/new or session/load
+	lastReply    string // most recent complete agent reply, used for SwitchWithContext
+	mu           sync.Mutex
+	ready        bool       // true after initialize + session/new or session/load
+	initCond     *sync.Cond // guards single-flight initialization (associated with mu)
+	initializing bool       // true while one goroutine is running ensureReady I/O
 }
 
 // New creates an Agent using an already-started *acp.Conn.
 // The caller (Client) is responsible for calling adapter.Connect() first.
 func New(name string, conn *acp.Conn, cwd string) *Agent {
-	return &Agent{
+	ag := &Agent{
 		name:       name,
 		conn:       conn,
 		cwd:        cwd,
@@ -80,6 +83,8 @@ func New(name string, conn *acp.Conn, cwd string) *Agent {
 		permission: &AutoAllowHandler{},
 		terminals:  newTerminalManager(),
 	}
+	ag.initCond = sync.NewCond(&ag.mu)
+	return ag
 }
 
 // SetPermissionHandler replaces the permission handler (thread-safe).
@@ -151,6 +156,24 @@ func (a *Agent) Close() error {
 
 // --- Extended methods (called by Client via concrete type, not Session interface) ---
 
+// SetConfigOption sends a session/set_config_option request to update a config value.
+// This is an extended method; it is not part of the Session interface.
+func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) error {
+	a.mu.Lock()
+	sessID := a.sessionID
+	conn := a.conn
+	a.mu.Unlock()
+	if sessID == "" {
+		return fmt.Errorf("agent: no active session")
+	}
+	return conn.Send(ctx, "session/set_config_option",
+		acp.SessionSetConfigOptionParams{
+			SessionID: sessID,
+			ConfigID:  configID,
+			Value:     value,
+		}, nil)
+}
+
 // Switch replaces the underlying conn with a new one, resetting session state.
 //
 // Concurrency contract: the caller (Client) MUST call Cancel() and drain the
@@ -172,9 +195,13 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	a.conn = newConn
 	a.name = name
 	a.ready = false
+	a.initializing = false // reset any in-progress initialization
 	a.sessionID = ""
 	a.lastReply = ""
 	a.mu.Unlock()
+
+	// Wake up any goroutines waiting in ensureReady so they retry with the new conn.
+	a.initCond.Broadcast()
 
 	// Close old conn outside the lock to avoid holding it during slow I/O.
 	if oldConn != nil {
@@ -185,13 +212,14 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	// The channel MUST be drained to prevent the Prompt goroutine from leaking.
 	if mode == SwitchWithContext && summary != "" {
 		ch, err := a.Prompt(ctx, "[context] "+summary)
-		if err == nil {
+		if err != nil {
+			log.Printf("agent: SwitchWithContext bootstrap prompt failed: %v", err)
+		} else {
 			go func() {
 				for range ch {
 				} // drain to prevent goroutine leak
 			}()
 		}
-		// Prompt failure is non-fatal; we degrade to SwitchClean behavior silently.
 	}
 	return nil
 }
