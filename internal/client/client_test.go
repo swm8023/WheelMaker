@@ -649,6 +649,18 @@ func (a *contextRejectMockAdapter) Close() error { return nil }
 
 var _ adapter.Adapter = (*contextRejectMockAdapter)(nil)
 
+// failConnectAdapter is an adapter.Adapter whose Connect always returns an error.
+// Used to test that Start() is non-fatal when the active adapter cannot connect.
+type failConnectAdapter struct{}
+
+func (a *failConnectAdapter) Name() string { return "fail" }
+func (a *failConnectAdapter) Connect(_ context.Context) (*acp.Conn, error) {
+	return nil, fmt.Errorf("mock: binary not found")
+}
+func (a *failConnectAdapter) Close() error { return nil }
+
+var _ adapter.Adapter = (*failConnectAdapter)(nil)
+
 // TestSwitchAdapter_PersistsOutgoingSessionID verifies that the outgoing
 // adapter's session ID is saved to state before the switch completes.
 func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
@@ -802,6 +814,61 @@ func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
 	}
 	if gotEnv["API_KEY"] != "test-key" {
 		t.Errorf("factory env[API_KEY] = %q, want test-key", gotEnv["API_KEY"])
+	}
+}
+
+// TestStart_ConnectError_NonFatal verifies that Start() succeeds when the active
+// adapter fails to connect, leaving session nil. Subsequent messages get
+// "No active session" rather than causing a hard startup failure.
+// Also verifies that /use <adapter> can recover by connecting a working adapter.
+func TestStart_ConnectError_NonFatal(t *testing.T) {
+	store := &mockStore{state: &client.State{
+		ActiveAdapter: "codex",
+		Adapters:      map[string]client.AdapterConfig{"codex": {}},
+		SessionIDs:    map[string]string{},
+	}}
+	c := client.New(store, nil)
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+		return &failConnectAdapter{}
+	})
+
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() returned error %v, want nil (connect failure should be non-fatal)", err)
+	}
+
+	// With no active session, messages should get "No active session".
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
+		t.Errorf("reply = %v, want 'No active session'", *msgs)
+	}
+
+	// /use with a working adapter should recover and allow prompts.
+	c.RegisterAdapter("other", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Switched to adapter") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("messages = %v, expected switch confirmation after /use other", *msgs)
+	}
+
+	// After recovery, a prompt should not return "No active session".
+	prevLen := len(*msgs)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "prompt after recovery"})
+	if len(*msgs) > prevLen {
+		for _, m := range (*msgs)[prevLen:] {
+			if strings.Contains(m, "No active session") {
+				t.Errorf("prompt after recovery got 'No active session'; /use did not restore session")
+			}
+		}
 	}
 }
 
