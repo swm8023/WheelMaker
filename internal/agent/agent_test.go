@@ -483,6 +483,53 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	}
 }
 
+// TestAgent_SwitchWithContext_WarningOnBootstrapFailure verifies AC-6's requirement
+// that when SwitchWithContext bootstrap Prompt() fails, Switch returns nil (not error)
+// and logs a warning. This is the "warning-only" path.
+//
+// Strategy: do a normal prompt (sets lastReply = non-empty), then switch with a new
+// conn whose mock rejects "[context]" bootstrap prompts. Switch must return nil,
+// and the log must contain the expected warning.
+func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	// First prompt to populate lastReply.
+	ch, err := ag.Prompt(ctx, "normal")
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	text, _ := drainUpdates(ch)
+	if text == "" {
+		t.Skip("mock should return text for 'normal'")
+	}
+
+	// New conn that rejects any "[context]" bootstrap so the bootstrap Prompt() fails.
+	conn2 := acp.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
+	if err := conn2.Start(); err != nil {
+		t.Fatalf("conn2.Start: %v", err)
+	}
+	t.Cleanup(func() { _ = conn2.Close() })
+
+	// Capture log output to detect the expected warning.
+	var logBuf strings.Builder
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	// Switch must return nil even though bootstrap will fail.
+	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext); err != nil {
+		t.Fatalf("Switch must return nil on bootstrap failure, got: %v", err)
+	}
+
+	// Allow the bootstrap goroutine to run and fail.
+	time.Sleep(200 * time.Millisecond)
+
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, "SwitchWithContext bootstrap prompt failed") {
+		t.Errorf("expected warning about bootstrap failure in log; got: %q", logOutput)
+	}
+}
+
 // --- Mock ACP server (activated when GO_AGENT_MOCK=1) ---
 
 // mockServer handles bidirectional JSON-RPC 2.0 communication.

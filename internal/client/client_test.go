@@ -648,6 +648,105 @@ func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
 
 // --- Minimal ACP mock server for client tests ---
 
+// TestHandleMessage_Use_Continue verifies that /use <name> --continue is parsed
+// correctly and performs a successful adapter switch (SwitchWithContext mode).
+func TestHandleMessage_Use_Continue(t *testing.T) {
+	mock := &mockSession{adapterN: "codex"}
+	c := newTestClient(mock)
+	msgs := captureReplies(c)
+
+	c.RegisterAdapter("other", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use other --continue"})
+
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Switched to adapter") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("messages = %v, missing switch confirmation for /use --continue", *msgs)
+	}
+}
+
+// TestClient_Close_PersistsSessionID verifies that Close() saves the current
+// agent session ID to the store, satisfying AC-5.
+// Uses Start() to create a real agent.Agent so c.ag is non-nil.
+func TestClient_Close_PersistsSessionID(t *testing.T) {
+	store := &mockStore{state: &client.State{
+		ActiveAdapter: "codex",
+		Adapters:      map[string]client.AdapterConfig{"codex": {}},
+		SessionIDs:    map[string]string{},
+	}}
+	c := client.New(store, nil)
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Trigger ensureReady to establish a session ID via session/new.
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	_ = msgs
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if len(store.saved) == 0 {
+		t.Fatal("state not saved after Close")
+	}
+	last := store.saved[len(store.saved)-1]
+	if last.SessionIDs["codex"] == "" {
+		t.Errorf("Close did not persist codex session ID; SessionIDs = %v", last.SessionIDs)
+	}
+}
+
+// TestClient_Run_StdinLoop verifies that Run() drives the stdin read loop when no
+// IM adapter is configured, forwarding each line as an im.Message to HandleMessage.
+func TestClient_Run_StdinLoop(t *testing.T) {
+	mock := &mockSession{adapterN: "codex"}
+	c := newTestClient(mock)
+
+	// Replace os.Stdin with a pipe to simulate typed input.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() {
+		os.Stdin = oldStdin
+		r.Close()
+	}()
+
+	// Write one message then close stdin to trigger EOF and exit the loop.
+	go func() {
+		defer w.Close()
+		fmt.Fprintln(w, "hello from stdin")
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := c.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	mock.mu.Lock()
+	calls := mock.promptCalls
+	mock.mu.Unlock()
+	if len(calls) == 0 || calls[0] != "hello from stdin" {
+		t.Errorf("Run did not forward stdin message; promptCalls = %v", calls)
+	}
+}
+
 // runClientMockAgent is a minimal ACP server for client-level tests.
 // Activated when GO_CLIENT_ACP_MOCK=1 is set (used by minimalMockAdapter).
 func runClientMockAgent() {
