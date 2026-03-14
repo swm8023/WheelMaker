@@ -59,8 +59,9 @@ func (c *Client) RegisterAdapter(name string, factory AdapterFactory) {
 	c.mu.Unlock()
 }
 
-// Start loads persisted state and eagerly connects the active adapter.
-// After Start returns, the subprocess is running and the first Prompt will be fast.
+// Start loads persisted state and attempts to connect the active adapter.
+// A connect failure is non-fatal: Start still succeeds with no active session.
+// The user can issue /use <adapter> to connect a working adapter.
 func (c *Client) Start(ctx context.Context) error {
 	state, err := c.store.Load()
 	if err != nil {
@@ -86,27 +87,28 @@ func (c *Client) Start(ctx context.Context) error {
 		return fmt.Errorf("client: no adapter registered for %q", name)
 	}
 
-	// Create adapter with persisted config and connect.
+	// Attempt to connect; a failure is non-fatal so the process can still start.
+	// The user can issue /use <adapter> to connect a working adapter.
 	conn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
 	if err != nil {
-		return fmt.Errorf("client: connect %q: %w", name, err)
-	}
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		cwd = "."
-	}
-	var ag *agent.Agent
-	if savedSessionID != "" {
-		ag = agent.NewWithSessionID(name, conn, cwd, savedSessionID)
+		fmt.Fprintf(os.Stderr, "wheelmaker: warning: could not connect adapter %q: %v\n", name, err)
 	} else {
-		ag = agent.New(name, conn, cwd)
-	}
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = "."
+		}
+		var ag *agent.Agent
+		if savedSessionID != "" {
+			ag = agent.NewWithSessionID(name, conn, cwd, savedSessionID)
+		} else {
+			ag = agent.New(name, conn, cwd)
+		}
 
-	c.mu.Lock()
-	c.ag = ag
-	c.session = ag
-	c.mu.Unlock()
+		c.mu.Lock()
+		c.ag = ag
+		c.session = ag
+		c.mu.Unlock()
+	}
 
 	if c.imRun != nil {
 		c.imRun.OnMessage(c.HandleMessage)
@@ -368,6 +370,19 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		if err := ag.Switch(ctx, name, newConn, mode); err != nil {
 			return fmt.Errorf("switch %q: %w", name, err)
 		}
+	} else {
+		// No active agent (Start() could not connect): create one from scratch.
+		// SwitchWithContext has no lastReply to bootstrap from; behaves like SwitchClean.
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = "."
+		}
+		newAg := agent.New(name, newConn, cwd)
+		c.mu.Lock()
+		c.ag = newAg
+		c.session = newAg
+		c.mu.Unlock()
+		ag = newAg
 	}
 
 	// Persist results: save outgoing session ID and update active adapter.

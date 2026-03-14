@@ -8,8 +8,8 @@ import (
 )
 
 // ensureReady performs the ACP handshake if the agent is not yet ready:
-//  1. Send "initialize" and store the agent capabilities.
-//  2. Register the callback handler on conn.
+//  1. Register the callback handler on conn so requests arriving during handshake are handled.
+//  2. Send "initialize" and store the agent capabilities.
 //  3. If caps.LoadSession and a sessionID is stored, attempt session/load.
 //  4. Otherwise, create a new session via session/new.
 //
@@ -41,7 +41,11 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		a.initCond.Broadcast()
 	}
 
-	// Step 1: initialize handshake.
+	// Step 1: register the callback handler before sending initialize so that
+	// any ACP backend that fires requests during startup is handled correctly.
+	conn.OnRequest(a.handleCallback)
+
+	// Step 2: initialize handshake.
 	var initResult acp.InitializeResult
 	if err := conn.Send(ctx, "initialize", acp.InitializeParams{
 		ProtocolVersion: "0.1",
@@ -57,9 +61,6 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		notifyDone()
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
-
-	// Step 2: register the callback handler.
-	conn.OnRequest(a.handleCallback)
 
 	// Step 3: attempt session/load if possible.
 	if savedSessionID != "" && initResult.AgentCapabilities.LoadSession {
