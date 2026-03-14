@@ -34,12 +34,14 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	a.mu.Unlock()
 
 	// notifyDone releases the initializing slot and wakes up any waiters.
-	// It also clears any pre-seeded sessionID so that a stale value from
-	// NewWithSessionID does not survive a failed initialize or session/new.
+	// The pre-seeded sessionID is intentionally preserved so that a transient
+	// error (e.g. subprocess crash, network glitch) does not discard the only
+	// in-memory copy of the persisted session ID. If a subsequent retry succeeds
+	// it can still attempt session/load with the original ID; if session/load then
+	// fails, ensureReady falls through to session/new as usual.
 	notifyDone := func() {
 		a.mu.Lock()
 		a.initializing = false
-		a.sessionID = "" // clear pre-seeded ID on initialization failure
 		a.mu.Unlock()
 		a.initCond.Broadcast()
 	}
