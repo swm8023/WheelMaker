@@ -104,12 +104,15 @@ func NewWithSessionID(name string, conn *acp.Conn, cwd string, sessionID string)
 // --- Session interface implementation ---
 
 // Cancel sends a session/cancel notification to abort the current prompt.
+// It is a no-op when the agent is not yet ready (handshake not complete),
+// because sessionID seeded by NewWithSessionID must not be used before initialize.
 func (a *Agent) Cancel() error {
 	a.mu.Lock()
 	sessID := a.sessionID
 	conn := a.conn
+	ready := a.ready
 	a.mu.Unlock()
-	if sessID == "" {
+	if sessID == "" || !ready {
 		return nil
 	}
 	return conn.Notify("session/cancel", acp.SessionCancelParams{SessionID: sessID})
@@ -120,8 +123,9 @@ func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 	a.mu.Lock()
 	sessID := a.sessionID
 	conn := a.conn
+	ready := a.ready
 	a.mu.Unlock()
-	if sessID == "" {
+	if sessID == "" || !ready {
 		return fmt.Errorf("agent: no active session")
 	}
 	return conn.Send(ctx, "session/set_mode",
@@ -162,8 +166,9 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 	a.mu.Lock()
 	sessID := a.sessionID
 	conn := a.conn
+	ready := a.ready
 	a.mu.Unlock()
-	if sessID == "" {
+	if sessID == "" || !ready {
 		return fmt.Errorf("agent: no active session")
 	}
 	return conn.Send(ctx, "session/set_config_option",

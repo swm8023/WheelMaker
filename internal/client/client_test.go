@@ -817,6 +817,47 @@ func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
 	}
 }
 
+// TestStart_UnregisteredAdapter_NonFatal verifies that Start() succeeds when the
+// persisted activeAdapter was not registered in this build, leaving session nil.
+// The user can issue /use <adapter> to connect a registered adapter and recover.
+func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
+	store := &mockStore{state: &client.State{
+		ActiveAdapter: "unknown-adapter",
+		Adapters:      map[string]client.AdapterConfig{},
+		SessionIDs:    map[string]string{},
+	}}
+	c := client.New(store, nil)
+	// Register "codex" but NOT "unknown-adapter" (simulating a removed adapter).
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start() returned error %v, want nil (unregistered adapter should be non-fatal)", err)
+	}
+
+	// With no active session, messages should get "No active session".
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
+		t.Errorf("reply = %v, want 'No active session'", *msgs)
+	}
+
+	// /use with a registered adapter should recover.
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use codex"})
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Switched to adapter") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("messages = %v, expected switch confirmation after /use codex", *msgs)
+	}
+}
+
 // TestStart_ConnectError_NonFatal verifies that Start() succeeds when the active
 // adapter fails to connect, leaving session nil. Subsequent messages get
 // "No active session" rather than causing a hard startup failure.
