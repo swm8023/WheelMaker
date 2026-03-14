@@ -303,9 +303,9 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 // Always uses c.ag (concrete type) for Switch, never c.session (interface),
 // to avoid type assertion panics when a mock is injected in tests.
 //
-// Ordering: Cancel() → promptMu.Lock() → Connect() → ag.Switch() → persist.
-// This ensures ag.Switch() is never called while ensureReady() or an active
-// update drain is running in handlePrompt.
+// Ordering: Cancel() → promptMu.Lock() → drain → session-ID-snapshot → Connect() → ag.Switch() → persist.
+// Session ID is snapshotted AFTER promptMu is held so that any concurrent ensureReady
+// (which sets the session ID) has already completed before we read it.
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.adapterFacs[name]
@@ -317,11 +317,10 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		return fmt.Errorf("unknown adapter: %q (registered: %v)", name, c.registeredAdapterNames())
 	}
 
-	// Snapshot outgoing session info BEFORE Switch clears a.sessionID.
-	var outgoingName, outgoingSessionID string
+	// Snapshot adapter name early — it never changes once set.
+	var outgoingName string
 	if sess != nil {
 		outgoingName = sess.AdapterName()
-		outgoingSessionID = sess.SessionID()
 	}
 
 	// Step 1: signal cancel so any in-progress prompt winds down quickly,
@@ -341,6 +340,14 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.mu.Lock()
 		c.currentPromptCh = nil
 		c.mu.Unlock()
+	}
+
+	// Re-read session ID AFTER promptMu is held and the channel is drained.
+	// Any concurrent handlePrompt that called ensureReady has now exited, so
+	// sess.SessionID() reflects the final outgoing session ID.
+	var outgoingSessionID string
+	if sess != nil {
+		outgoingSessionID = sess.SessionID()
 	}
 
 	// Step 2: connect the new adapter using persisted config.
@@ -374,9 +381,18 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		}
 		// For a clean switch, remove the incoming adapter's stale saved session so
 		// the next startup creates a fresh session rather than resuming a stale one.
-		// (SwitchWithContext bootstraps a new session synchronously; Close() will save it.)
 		if mode == agent.SwitchClean {
 			delete(c.state.SessionIDs, name)
+		}
+		// For SwitchWithContext, ag.Switch bootstrapped a new session synchronously.
+		// Save its session ID immediately so a crash before Close() doesn't lose it.
+		if mode == agent.SwitchWithContext && ag != nil {
+			if newSID := ag.SessionID(); newSID != "" {
+				if c.state.SessionIDs == nil {
+					c.state.SessionIDs = map[string]string{}
+				}
+				c.state.SessionIDs[name] = newSID
+			}
 		}
 		c.state.ActiveAdapter = name
 	}

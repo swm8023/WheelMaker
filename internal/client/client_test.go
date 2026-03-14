@@ -722,6 +722,55 @@ func TestSwitchAdapter_ClearsIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	}
 }
 
+// TestSwitchAdapter_PersistsTargetSessionIDOnContinue verifies that after
+// /use <adapter> --continue, the new session ID for the target adapter is saved
+// to state immediately (not deferred to Close()), so a crash before shutdown
+// does not lose the bootstrapped session.
+func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
+	store := &mockStore{state: &client.State{
+		ActiveAdapter: "codex",
+		Adapters:      map[string]client.AdapterConfig{"codex": {}},
+		SessionIDs:    map[string]string{},
+	}}
+	c := client.New(store, nil)
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+	c.RegisterAdapter("other", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	// Prime lastReply so SwitchWithContext has something to bootstrap with.
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	_ = msgs
+
+	// Reset saves so we only inspect the switch-triggered save.
+	store.mu.Lock()
+	store.saved = nil
+	store.mu.Unlock()
+
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other --continue"})
+
+	store.mu.Lock()
+	saved := store.saved
+	store.mu.Unlock()
+
+	if len(saved) == 0 {
+		t.Fatal("state was not saved after /use --continue")
+	}
+	last := saved[len(saved)-1]
+	if last.SessionIDs["other"] == "" {
+		t.Errorf("SessionIDs[other] is empty after /use --continue; want bootstrapped session ID")
+	}
+}
+
 // TestRegisterAdapter_FactoryCalledWithStateConfig verifies that RegisterAdapter
 // factories receive ExePath and Env from persisted State.Adapters at connect time.
 func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
