@@ -7,30 +7,9 @@
 
 ## 整体架构
 
-```
-飞书 App (手机)
-    ↕ WebSocket 长连接 (go-lark SDK)
-internal/im/feishu    — IM 适配层
-    ↕ im.Message / im.Adapter
-internal/hub          — 核心调度（agent 切换、持久化、命令解析）
-    ↕ agent.Agent
-internal/agent/codex  — Codex ACP 适配器
-    ↕ stdin/stdout JSON-RPC 2.0
-codex-acp.exe         — 子进程（ACP 协议实现）
-```
+
 
 ## 包职责
-
-| 包 | 职责 |
-|----|------|
-| `internal/acp` | 低层 ACP JSON-RPC stdio 传输（spawn 子进程、读写 stdin/stdout） |
-| `internal/agent` | Agent 接口定义 + Update 类型 |
-| `internal/agent/codex` | Codex ACP 适配器（实现 Agent 接口） |
-| `internal/im` | IM Adapter 接口定义 + Message 类型 |
-| `internal/im/feishu` | 飞书 WebSocket 适配器（实现 Adapter 接口） |
-| `internal/hub` | 核心调度器：agent 切换、命令解析、状态持久化 |
-| `internal/tools` | 工具二进制路径解析（跨平台） |
-| `cmd/wheelmaker` | 启动入口，组装各层 |
 
 ## 开发约定
 
@@ -44,8 +23,6 @@ codex-acp.exe         — 子进程（ACP 协议实现）
 - ACP 协议：[docs/acp-protocol-full.zh-CN.md](docs/acp-protocol-full.zh-CN.md)
 - codex-acp：[docs/codex-acp.md](docs/codex-acp.md)
 - 飞书 Bot：[docs/feishu-bot.md](docs/feishu-bot.md)
-- 设计规范：[docs/specs/2026-03-14-wheelmaker-design.md](docs/specs/2026-03-14-wheelmaker-design.md)
-- MVP 计划：[docs/plan/2026-03-14-wheelmaker-mvp-plan.md](docs/plan/2026-03-14-wheelmaker-mvp-plan.md)
 
 ## 本地开发
 
