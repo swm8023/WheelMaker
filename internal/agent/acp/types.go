@@ -1,5 +1,6 @@
 // Package acp implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
-// Reference: https://agentclientprotocol.com/protocol/transports
+// This package is an internal detail of the agent layer and is not imported directly
+// by the client or adapter layers; they interact through the agent.Session interface.
 package acp
 
 import "encoding/json"
@@ -61,9 +62,9 @@ type InitializeParams struct {
 
 // InitializeResult is returned by the agent during the initialize handshake.
 type InitializeResult struct {
-	ProtocolVersion    string             `json:"protocolVersion"`
-	AgentCapabilities  AgentCapabilities  `json:"agentCapabilities"`
-	AgentInfo          *AgentInfo         `json:"agentInfo,omitempty"`
+	ProtocolVersion   string            `json:"protocolVersion"`
+	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
+	AgentInfo         *AgentInfo        `json:"agentInfo,omitempty"`
 }
 
 // ClientCapabilities declares which client-side callbacks the client supports.
@@ -185,7 +186,7 @@ type SessionLoadResult struct {
 	// Modes and ConfigOptions are optional; WheelMaker ignores them in MVP.
 }
 
-// --- Agent→Client callback types (§5.2 of ACP protocol) ---
+// --- Agent→Client callback types ---
 
 // FSReadTextFileParams is sent by the agent to request a file read.
 type FSReadTextFileParams struct {

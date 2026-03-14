@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
@@ -11,8 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/swm8023/wheelmaker/internal/hub"
-	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/adapter/codex"
+	"github.com/swm8023/wheelmaker/internal/client"
 )
 
 func main() {
@@ -30,42 +29,19 @@ func run() error {
 	}
 	statePath := filepath.Join(home, ".wheelmaker", "state.json")
 
-	store := hub.NewJSONStore(statePath)
-	h := hub.New(store, nil) // no IM adapter in MVP
+	store := client.NewJSONStore(statePath)
+	c := client.New(store, nil) // no IM adapter in MVP
+
+	// Register the Codex adapter (reads ExePath from state config if set).
+	c.RegisterAdapter(codex.NewAdapter(codex.Config{}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := h.Start(ctx); err != nil {
+	if err := c.Start(ctx); err != nil {
 		return fmt.Errorf("start: %w", err)
 	}
-	defer h.Close()
+	defer c.Close()
 
-	fmt.Fprintln(os.Stderr, "WheelMaker ready. Type a message or /status, /use <agent>, /cancel. Ctrl+C to quit.")
-
-	// CLI test mode: read messages from stdin.
-	scanner := bufio.NewScanner(os.Stdin)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-
-		fmt.Fprint(os.Stderr, "> ")
-		if !scanner.Scan() {
-			return nil
-		}
-		text := scanner.Text()
-		if text == "" {
-			continue
-		}
-
-		h.HandleMessage(im.Message{
-			ChatID:    "cli",
-			MessageID: "cli-msg",
-			UserID:    "local",
-			Text:      text,
-		})
-	}
+	return c.Run(ctx) // blocks: CLI mode drives stdin loop
 }

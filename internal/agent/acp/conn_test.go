@@ -1,6 +1,6 @@
 package acp_test
 
-// Unit tests for acp.Client using a self-referential mock agent.
+// Unit tests for acp.Conn using a self-referential mock agent.
 //
 // Pattern: when GO_ACP_MOCK=1 is set, this test binary acts as the ACP
 // mock server (reading stdin, writing stdout). Otherwise it runs the tests,
@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/acp"
 )
 
 // mockAgentBin is set in TestMain to the current test binary path.
@@ -32,12 +32,12 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// newMockClient creates a Client pointed at the mock agent subprocess.
-func newMockClient(t *testing.T) *acp.Client {
+// newMockConn creates a Conn pointed at the mock agent subprocess.
+func newMockConn(t *testing.T) *acp.Conn {
 	t.Helper()
 	c := acp.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
-		t.Fatalf("client.Start: %v", err)
+		t.Fatalf("conn.Start: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return c
@@ -47,7 +47,7 @@ func newMockClient(t *testing.T) *acp.Client {
 
 // TestSend_Initialize verifies the basic request/response cycle.
 func TestSend_Initialize(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	var result acp.InitializeResult
 	err := c.Send(context.Background(), "initialize", acp.InitializeParams{
 		ProtocolVersion: "0.1",
@@ -69,7 +69,7 @@ func TestSend_Initialize(t *testing.T) {
 
 // TestSend_SessionNew verifies session/new returns a sessionId.
 func TestSend_SessionNew(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	var result acp.SessionNewResult
 	err := c.Send(context.Background(), "session/new", acp.SessionNewParams{
 		CWD:        "/tmp",
@@ -85,7 +85,7 @@ func TestSend_SessionNew(t *testing.T) {
 
 // TestSend_RPCError verifies JSON-RPC error responses are returned as errors.
 func TestSend_RPCError(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	err := c.Send(context.Background(), "error_test", nil, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -95,7 +95,7 @@ func TestSend_RPCError(t *testing.T) {
 
 // TestSend_ContextCancel verifies that Send returns ctx.Err() when cancelled.
 func TestSend_ContextCancel(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 	err := c.Send(ctx, "slow_response", nil, nil)
@@ -107,7 +107,7 @@ func TestSend_ContextCancel(t *testing.T) {
 
 // TestSend_ContextTimeout verifies that Send returns error on timeout.
 func TestSend_ContextTimeout(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	// slow_response waits 200ms in mock; set a 50ms timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -120,7 +120,7 @@ func TestSend_ContextTimeout(t *testing.T) {
 
 // TestSend_Concurrent verifies multiple simultaneous requests are routed correctly.
 func TestSend_Concurrent(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	const n = 20
 	var wg sync.WaitGroup
 	var errCount atomic.Int32
@@ -148,7 +148,7 @@ func TestSend_Concurrent(t *testing.T) {
 
 // TestSubscribe_Notification verifies that subscribers receive incoming notifications.
 func TestSubscribe_Notification(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 
 	// Initialize and create a session first.
 	var initResult acp.InitializeResult
@@ -211,7 +211,7 @@ func TestSubscribe_Notification(t *testing.T) {
 
 // TestSubscribe_Cancel verifies that a cancelled subscription stops receiving notifications.
 func TestSubscribe_Cancel(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 
 	var count atomic.Int32
 	cancelSub := c.Subscribe(func(n acp.Notification) {
@@ -235,7 +235,7 @@ func TestSubscribe_Cancel(t *testing.T) {
 
 // TestNotify verifies fire-and-forget notifications don't block or error.
 func TestNotify(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	err := c.Notify("session/cancel", acp.SessionCancelParams{SessionID: "some-id"})
 	if err != nil {
 		t.Fatalf("Notify: %v", err)
@@ -256,7 +256,7 @@ func TestClose_Idempotent(t *testing.T) {
 	}
 }
 
-// TestSend_AfterClose verifies Send returns error after the client is closed.
+// TestSend_AfterClose verifies Send returns error after the conn is closed.
 func TestSend_AfterClose(t *testing.T) {
 	c := acp.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
@@ -274,9 +274,9 @@ func TestSend_AfterClose(t *testing.T) {
 
 // TestSend_ProcessExit verifies pending Sends receive an error when the process exits.
 func TestSend_ProcessExit(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	// "exit_now" causes the mock agent to exit without responding.
-	// The client's readLoop should unblock all pending requests.
+	// The conn's readLoop should unblock all pending requests.
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- c.Send(context.Background(), "exit_now", nil, nil)
@@ -295,7 +295,7 @@ func TestSend_ProcessExit(t *testing.T) {
 // TestIncomingRequest_Handler verifies that Agent→Client requests are routed
 // to the registered RequestHandler and that the response is sent back.
 func TestIncomingRequest_Handler(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 
 	var receivedMethod string
 	var receivedParams json.RawMessage
@@ -325,10 +325,10 @@ func TestIncomingRequest_Handler(t *testing.T) {
 	}
 }
 
-// TestIncomingRequest_NoHandler verifies that without a handler, the client
+// TestIncomingRequest_NoHandler verifies that without a handler, the conn
 // sends a -32601 method-not-found error back to the agent.
 func TestIncomingRequest_NoHandler(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	// No OnRequest registered — mock expects a -32601 error back.
 	err := c.Send(context.Background(), "trigger_incoming_request_no_handler", nil, nil)
 	if err != nil {
@@ -338,7 +338,7 @@ func TestIncomingRequest_NoHandler(t *testing.T) {
 
 // TestSend_NilResult verifies that Send with nil result doesn't panic.
 func TestSend_NilResult(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 	err := c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, nil)
 	if err != nil {
 		t.Fatalf("Send with nil result: %v", err)
@@ -347,7 +347,7 @@ func TestSend_NilResult(t *testing.T) {
 
 // TestMultipleSubscribers verifies all subscribers receive notifications.
 func TestMultipleSubscribers(t *testing.T) {
-	c := newMockClient(t)
+	c := newMockConn(t)
 
 	const nSubs = 5
 	counts := make([]atomic.Int32, nSubs)
@@ -493,12 +493,12 @@ func runMockAgent() {
 			})
 
 		case "trigger_incoming_request_no_handler":
-			// Send an incoming request; expect -32601 error back from client (no handler set).
+			// Send an incoming request; expect -32601 error back from conn (no handler set).
 			mockIncomingRequest(enc, 8888, "fs/read_text_file", map[string]any{
 				"sessionId": "test",
 				"path":      "/mock/file.txt",
 			})
-			// Read whatever response the client sends.
+			// Read whatever response the conn sends.
 			if !scanner.Scan() {
 				return
 			}

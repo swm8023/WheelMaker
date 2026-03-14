@@ -15,3 +15,6 @@ bin/**/*
 .vscode/
 .idea/
 *.swp
+
+# RLCR loop state (humanize plugin)
+.humanize*
