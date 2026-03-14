@@ -61,16 +61,19 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			replyMu.Unlock()
 		}
 
-		// Guard against send-on-closed-channel: sending to a closed channel panics
-		// even inside a select. The mutex ensures close() and send are mutually exclusive.
-		sendMu.Lock()
-		if !channelClosed {
-			select {
-			case updates <- u:
-			case <-ctx.Done():
+		// Forward via a goroutine so this handler returns immediately and never
+		// blocks acp.Conn.dispatch(), which runs synchronously on the read loop.
+		// sendMu and channelClosed ensure the send is safe and ordered.
+		go func(u Update) {
+			sendMu.Lock()
+			if !channelClosed {
+				select {
+				case updates <- u:
+				case <-ctx.Done():
+				}
 			}
-		}
-		sendMu.Unlock()
+			sendMu.Unlock()
+		}(u)
 	})
 
 	// Goroutine: send session/prompt; emit Done or Error update when complete.
