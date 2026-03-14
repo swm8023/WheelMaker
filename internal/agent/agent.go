@@ -216,8 +216,13 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 			log.Printf("agent: SwitchWithContext bootstrap prompt failed: %v", err)
 		} else {
 			go func() {
-				for range ch {
-				} // drain to prevent goroutine leak
+				for u := range ch {
+					if u.Err != nil {
+						// Bootstrap Prompt() itself succeeded (ensureReady passed)
+						// but the RPC call completed with an error; log and continue draining.
+						log.Printf("agent: SwitchWithContext bootstrap prompt failed: %v", u.Err)
+					}
+				}
 			}()
 		}
 	}

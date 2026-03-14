@@ -300,7 +300,18 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	c.mu.Unlock()
 }
 
-// dispatch calls all registered notification handlers in separate goroutines.
+// dispatch calls all registered notification handlers synchronously on the readLoop goroutine.
+//
+// Synchronous dispatch guarantees that all notification handlers for messages received before
+// a given response have completed before that response unblocks conn.Send(). This prevents
+// the race where a session/update notification and the session/prompt response are adjacent on
+// the wire: without synchronous dispatch, the notification goroutine can lose the race to the
+// prompt goroutine that closes the update channel.
+//
+// Handlers MUST NOT call conn.Send() — this would deadlock the readLoop waiting for a
+// response that can never arrive because the readLoop is blocked in the handler.
+// Handlers may safely send to buffered channels, acquire local mutexes, or do other
+// non-blocking work.
 func (c *Conn) dispatch(n Notification) {
 	c.subsMu.RLock()
 	handlers := make([]NotificationHandler, len(c.subscribers))
@@ -309,7 +320,7 @@ func (c *Conn) dispatch(n Notification) {
 
 	for _, h := range handlers {
 		if h != nil {
-			go h(n)
+			h(n)
 		}
 	}
 }
