@@ -104,6 +104,38 @@ func TestAgent_Prompt_TextUpdates(t *testing.T) {
 	}
 }
 
+// TestAgent_Prompt_ManyUpdates verifies that a prompt producing more than 32
+// session/update notifications (the updates channel buffer size) completes
+// correctly. Before the goroutine-dispatch fix, the synchronous subscriber
+// would block the read loop after 32 items, preventing the session/prompt
+// response from being received and hanging the prompt indefinitely.
+func TestAgent_Prompt_ManyUpdates(t *testing.T) {
+	ag := newAgent(t, "test")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := ag.Prompt(ctx, "many-updates-prompt")
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	var count int
+	for u := range ch {
+		if u.Err != nil {
+			t.Fatalf("update error: %v", u.Err)
+		}
+		if u.Type == agent.UpdateText {
+			count++
+		}
+		if u.Done {
+			break
+		}
+	}
+	if count != 64 {
+		t.Errorf("received %d text updates, want 64", count)
+	}
+}
+
 func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
@@ -890,6 +922,21 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 				"content":       map[string]any{"type": "text", "text": textToEcho},
 			},
 		})
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// many-updates-prompt: send 64 chunks to exercise the out-of-read-loop dispatch.
+	if params.Prompt == "many-updates-prompt" {
+		for i := range 64 {
+			ms.sendNotification("session/update", map[string]any{
+				"sessionId": sessID,
+				"update": map[string]any{
+					"sessionUpdate": "agent_message_chunk",
+					"content":       map[string]any{"type": "text", "text": fmt.Sprintf("c%d", i)},
+				},
+			})
+		}
 		ms.respond(id, map[string]any{"stopReason": "end_turn"})
 		return
 	}

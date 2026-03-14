@@ -305,9 +305,11 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 // Always uses c.ag (concrete type) for Switch, never c.session (interface),
 // to avoid type assertion panics when a mock is injected in tests.
 //
-// Ordering: Cancel() → promptMu.Lock() → drain → session-ID-snapshot → Connect() → ag.Switch() → persist.
-// Session ID is snapshotted AFTER promptMu is held so that any concurrent ensureReady
-// (which sets the session ID) has already completed before we read it.
+// Ordering: Cancel() → promptMu.Lock() → drain → outgoing-snapshot → Connect() → ag.Switch() → persist.
+// Both outgoing name and session ID are snapshotted AFTER promptMu is held so that:
+//   - ensureReady (which sets session ID) has completed before we read it.
+//   - a concurrent prior switch that mutated the agent in-place is complete, so
+//     we read the correct outgoing adapter name rather than a stale pre-switch name.
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.adapterFacs[name]
@@ -317,12 +319,6 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 
 	if fac == nil {
 		return fmt.Errorf("unknown adapter: %q (registered: %v)", name, c.registeredAdapterNames())
-	}
-
-	// Snapshot adapter name early — it never changes once set.
-	var outgoingName string
-	if sess != nil {
-		outgoingName = sess.AdapterName()
 	}
 
 	// Step 1: signal cancel so any in-progress prompt winds down quickly,
@@ -344,11 +340,13 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.mu.Unlock()
 	}
 
-	// Re-read session ID AFTER promptMu is held and the channel is drained.
-	// Any concurrent handlePrompt that called ensureReady has now exited, so
-	// sess.SessionID() reflects the final outgoing session ID.
+	// Snapshot BOTH outgoing adapter name and session ID AFTER promptMu is held
+	// and the channel is drained. Any concurrent switch that ran first has already
+	// mutated the agent in-place; reading here gives the correct outgoing state.
+	var outgoingName string
 	var outgoingSessionID string
 	if sess != nil {
+		outgoingName = sess.AdapterName()
 		outgoingSessionID = sess.SessionID()
 	}
 
