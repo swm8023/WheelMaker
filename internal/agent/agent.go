@@ -181,6 +181,10 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 
 // Switch replaces the underlying conn with a new one, resetting session state.
 //
+// savedSessionID, if non-empty, is pre-seeded into the agent so that ensureReady
+// will attempt session/load on the new connection (same as NewWithSessionID).
+// For SwitchWithContext pass "" — a fresh session is created by the bootstrap prompt.
+//
 // Concurrency contract: the caller (Client) MUST call Cancel() and drain the
 // current prompt channel before calling Switch. Agent does not wait for in-progress
 // Prompt goroutines internally (doing so would risk deadlock since Cancel sends
@@ -192,7 +196,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 // For SwitchWithContext, Switch blocks until the bootstrap prompt completes.
 // This preserves the caller's promptMu hold across the full switch + bootstrap,
 // preventing any concurrent user prompt from racing with the hidden bootstrap.
-func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode SwitchMode) error {
+func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode SwitchMode, savedSessionID string) error {
 	a.mu.Lock()
 	var summary string
 	if mode == SwitchWithContext && a.lastReply != "" {
@@ -205,7 +209,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	a.name = name
 	a.ready = false
 	a.initializing = false // reset any in-progress initialization
-	a.sessionID = ""
+	a.sessionID = savedSessionID
 	a.lastReply = ""
 	a.mu.Unlock()
 

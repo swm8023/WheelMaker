@@ -351,10 +351,16 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	}
 
 	// Step 2: connect the new adapter using persisted config.
+	// Also read the saved session ID for the incoming adapter (SwitchClean only),
+	// so ensureReady can attempt session/load if the backend supports it.
 	c.mu.Lock()
 	cfg := AdapterConfig{}
+	var savedSID string
 	if c.state != nil {
 		cfg = c.state.Adapters[name]
+		if mode == agent.SwitchClean {
+			savedSID = c.state.SessionIDs[name]
+		}
 	}
 	c.mu.Unlock()
 
@@ -365,7 +371,7 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 
 	// Step 3: replace the connection via the concrete Agent type.
 	if ag != nil {
-		if err := ag.Switch(ctx, name, newConn, mode); err != nil {
+		if err := ag.Switch(ctx, name, newConn, mode, savedSID); err != nil {
 			return fmt.Errorf("switch %q: %w", name, err)
 		}
 	} else {
@@ -375,7 +381,12 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		if err != nil {
 			cwd = "."
 		}
-		newAg := agent.New(name, newConn, cwd)
+		var newAg *agent.Agent
+		if savedSID != "" {
+			newAg = agent.NewWithSessionID(name, newConn, cwd, savedSID)
+		} else {
+			newAg = agent.New(name, newConn, cwd)
+		}
 		c.mu.Lock()
 		c.ag = newAg
 		c.session = newAg
@@ -391,11 +402,6 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 				c.state.SessionIDs = map[string]string{}
 			}
 			c.state.SessionIDs[outgoingName] = outgoingSessionID
-		}
-		// For a clean switch, remove the incoming adapter's stale saved session so
-		// the next startup creates a fresh session rather than resuming a stale one.
-		if mode == agent.SwitchClean {
-			delete(c.state.SessionIDs, name)
 		}
 		// For SwitchWithContext, ag.Switch bootstrapped a new session synchronously.
 		// Save its session ID immediately so a crash before Close() doesn't lose it.

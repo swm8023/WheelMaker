@@ -701,10 +701,11 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 	}
 }
 
-// TestSwitchAdapter_ClearsIncomingSessionIDOnCleanSwitch verifies that a plain
-// /use clears state.SessionIDs for the incoming adapter, so that the next startup
-// does not resume a stale session.
-func TestSwitchAdapter_ClearsIncomingSessionIDOnCleanSwitch(t *testing.T) {
+// TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch verifies that a plain
+// /use does NOT clear state.SessionIDs for the incoming adapter. The saved ID is
+// threaded through to ag.Switch() so ensureReady can attempt session/load on
+// backends that support it.
+func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	outgoing := &mockSession{adapterN: "codex", sessionN: "codex-sess-1"}
 	store := &mockStore{}
 	c := client.New(store, nil)
@@ -729,8 +730,10 @@ func TestSwitchAdapter_ClearsIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	}
 	last := store.saved[len(store.saved)-1]
 
-	if sid, ok := last.SessionIDs["new-adapter"]; ok && sid != "" {
-		t.Errorf("SessionIDs[new-adapter] = %q, want empty (cleared on SwitchClean)", sid)
+	// The incoming adapter's saved session ID must be preserved (not deleted),
+	// so that a subsequent switch back can pass it to ag.Switch for session/load.
+	if sid := last.SessionIDs["new-adapter"]; sid != "old-stale-sess" {
+		t.Errorf("SessionIDs[new-adapter] = %q, want old-stale-sess (preserved for session/load)", sid)
 	}
 }
 
