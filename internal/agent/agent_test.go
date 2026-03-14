@@ -160,7 +160,7 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchWithContext); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 }
@@ -284,7 +284,7 @@ func TestAgent_Switch_Clean(t *testing.T) {
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchClean); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchClean, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchWithContext); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -536,7 +536,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	log.SetOutput(&logBuf)
 	defer log.SetOutput(os.Stderr)
 
-	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext); err != nil {
+	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -583,7 +583,7 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	// Switch must return nil even though bootstrap will fail.
-	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext); err != nil {
+	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch must return nil on bootstrap failure, got: %v", err)
 	}
 
