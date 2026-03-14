@@ -5,13 +5,26 @@ package agent_test
 // Pattern: when GO_AGENT_MOCK=1 is set, the test binary acts as the ACP mock
 // server (reading stdin, writing stdout). Otherwise it runs the tests,
 // pointing acp.New() at os.Args[0] with GO_AGENT_MOCK=1.
+//
+// The mock supports bidirectional communication: during session/prompt handling
+// it can send Agent→Client requests (callbacks) and wait for responses.
+// Prompt text controls mock behavior:
+//   - "no-text-prompt"                  → no text chunks emitted (tests stale-context)
+//   - "test-callback-fs-read:<path>"    → sends fs/read_text_file callback
+//   - "test-callback-fs-write:<p>:<c>"  → sends fs/write_text_file callback
+//   - "test-callback-permission"        → sends session/request_permission callback
+//   - "test-callback-terminal"          → full terminal lifecycle callback
+//   - "test-callback-terminal-kill"     → terminal create+kill lifecycle callback
+//   - any other text                    → 2 text chunks + done
 
 import (
 	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,17 +45,6 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// newMockConn creates an *acp.Conn pointing at the mock ACP server.
-func newMockConn(t *testing.T) *acp.Conn {
-	t.Helper()
-	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
-	if err := conn.Start(); err != nil {
-		t.Fatalf("conn.Start: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return conn
-}
-
 // newAgent creates an Agent backed by a fresh mock ACP subprocess.
 func newAgent(t *testing.T, name string) *agent.Agent {
 	t.Helper()
@@ -50,12 +52,12 @@ func newAgent(t *testing.T, name string) *agent.Agent {
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := agent.New(name, conn, "/tmp/test")
+	ag := agent.New(name, conn, t.TempDir())
 	t.Cleanup(func() { _ = ag.Close() })
 	return ag
 }
 
-// drainUpdates drains an update channel and returns accumulated text.
+// drainUpdates drains an update channel and returns accumulated text and any error.
 func drainUpdates(ch <-chan agent.Update) (text string, err error) {
 	for u := range ch {
 		if u.Err != nil {
@@ -71,11 +73,9 @@ func drainUpdates(ch <-chan agent.Update) (text string, err error) {
 
 // --- Tests ---
 
-// TestAgent_SessionID_AfterReady verifies SessionID is populated after the first Prompt.
 func TestAgent_SessionID_AfterReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
-
 	ch, err := ag.Prompt(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -83,17 +83,14 @@ func TestAgent_SessionID_AfterReady(t *testing.T) {
 	if _, err := drainUpdates(ch); err != nil {
 		t.Fatalf("updates error: %v", err)
 	}
-
 	if sid := ag.SessionID(); sid == "" {
 		t.Error("SessionID should be non-empty after prompt completes")
 	}
 }
 
-// TestAgent_Prompt_TextUpdates verifies that text chunks are received as UpdateText updates.
 func TestAgent_Prompt_TextUpdates(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
-
 	ch, err := ag.Prompt(ctx, "hello")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -107,13 +104,10 @@ func TestAgent_Prompt_TextUpdates(t *testing.T) {
 	}
 }
 
-// TestAgent_Prompt_ClearsLastReply verifies lastReply is cleared at the start of each Prompt.
-// We test this indirectly: a SwitchClean after the second prompt sees the second reply, not the first.
 func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
 
-	// First prompt — runs fine.
 	ch, err := ag.Prompt(ctx, "first")
 	if err != nil {
 		t.Fatalf("first Prompt: %v", err)
@@ -122,7 +116,6 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 		t.Fatalf("first updates error: %v", err)
 	}
 
-	// Second prompt — also runs fine.
 	ch, err = ag.Prompt(ctx, "second")
 	if err != nil {
 		t.Fatalf("second Prompt: %v", err)
@@ -131,8 +124,6 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 		t.Fatalf("second updates error: %v", err)
 	}
 
-	// If lastReply were stale, Switch would use the first reply. We just verify
-	// that Switch does not fail (relies on lastReply being correctly managed).
 	newConn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
@@ -142,7 +133,6 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 	}
 }
 
-// TestAgent_Cancel_BeforeReady verifies Cancel is a no-op (no panic) before readiness.
 func TestAgent_Cancel_BeforeReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	if err := ag.Cancel(); err != nil {
@@ -150,11 +140,9 @@ func TestAgent_Cancel_BeforeReady(t *testing.T) {
 	}
 }
 
-// TestAgent_Cancel_AfterReady verifies Cancel sends a notification after a session is established.
 func TestAgent_Cancel_AfterReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
-
 	ch, err := ag.Prompt(ctx, "setup")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -162,13 +150,11 @@ func TestAgent_Cancel_AfterReady(t *testing.T) {
 	if _, err := drainUpdates(ch); err != nil {
 		t.Fatalf("updates error: %v", err)
 	}
-
 	if err := ag.Cancel(); err != nil {
 		t.Errorf("Cancel after ready: %v", err)
 	}
 }
 
-// TestAgent_SetMode_BeforeReady verifies SetMode returns error before readiness.
 func TestAgent_SetMode_BeforeReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	if err := ag.SetMode(context.Background(), "auto"); err == nil {
@@ -176,11 +162,9 @@ func TestAgent_SetMode_BeforeReady(t *testing.T) {
 	}
 }
 
-// TestAgent_SetMode_AfterReady verifies SetMode sends the request successfully.
 func TestAgent_SetMode_AfterReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
-
 	ch, err := ag.Prompt(ctx, "setup")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -188,13 +172,11 @@ func TestAgent_SetMode_AfterReady(t *testing.T) {
 	if _, err := drainUpdates(ch); err != nil {
 		t.Fatalf("updates error: %v", err)
 	}
-
 	if err := ag.SetMode(ctx, "auto"); err != nil {
 		t.Errorf("SetMode after ready: %v", err)
 	}
 }
 
-// TestAgent_SetConfigOption_BeforeReady verifies SetConfigOption returns error before readiness.
 func TestAgent_SetConfigOption_BeforeReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	if err := ag.SetConfigOption(context.Background(), "model", "gpt-4"); err == nil {
@@ -202,11 +184,9 @@ func TestAgent_SetConfigOption_BeforeReady(t *testing.T) {
 	}
 }
 
-// TestAgent_SetConfigOption_AfterReady verifies SetConfigOption sends the request successfully.
 func TestAgent_SetConfigOption_AfterReady(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
-
 	ch, err := ag.Prompt(ctx, "setup")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -214,18 +194,15 @@ func TestAgent_SetConfigOption_AfterReady(t *testing.T) {
 	if _, err := drainUpdates(ch); err != nil {
 		t.Fatalf("updates error: %v", err)
 	}
-
 	if err := ag.SetConfigOption(ctx, "model", "gpt-4"); err != nil {
 		t.Errorf("SetConfigOption after ready: %v", err)
 	}
 }
 
-// TestAgent_Switch_Clean verifies a SwitchClean resets session state.
 func TestAgent_Switch_Clean(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
 
-	// Make ready.
 	ch, err := ag.Prompt(ctx, "first")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -237,7 +214,6 @@ func TestAgent_Switch_Clean(t *testing.T) {
 		t.Fatal("expected non-empty SessionID before switch")
 	}
 
-	// Switch to new adapter.
 	newConn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
@@ -246,7 +222,6 @@ func TestAgent_Switch_Clean(t *testing.T) {
 		t.Fatalf("Switch: %v", err)
 	}
 
-	// After SwitchClean, session ID is cleared; adapter name updated.
 	if ag.SessionID() != "" {
 		t.Errorf("SessionID should be empty after SwitchClean, got %q", ag.SessionID())
 	}
@@ -255,12 +230,10 @@ func TestAgent_Switch_Clean(t *testing.T) {
 	}
 }
 
-// TestAgent_Switch_WithContext verifies SwitchWithContext bootstraps the new session.
 func TestAgent_Switch_WithContext(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
 
-	// Make ready and accumulate lastReply.
 	ch, err := ag.Prompt(ctx, "context-prompt")
 	if err != nil {
 		t.Fatalf("Prompt: %v", err)
@@ -269,7 +242,6 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 		t.Fatalf("updates error: %v", err)
 	}
 
-	// Switch with context; bootstrap prompt is fired in a goroutine.
 	newConn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
@@ -278,21 +250,16 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 		t.Fatalf("Switch: %v", err)
 	}
 
-	// Adapter name should be updated immediately.
 	if ag.AdapterName() != "test2" {
 		t.Errorf("AdapterName = %q, want test2", ag.AdapterName())
 	}
 
-	// Wait briefly for the bootstrap goroutine to complete, then verify ready.
 	time.Sleep(200 * time.Millisecond)
 	if ag.SessionID() == "" {
 		t.Error("expected non-empty SessionID after SwitchWithContext bootstrap")
 	}
 }
 
-// TestAgent_EnsureReady_NoDoubleInit verifies concurrent Prompts don't double-initialize.
-// With the single-flight guard, only one goroutine performs the I/O;
-// all concurrent callers succeed without error.
 func TestAgent_EnsureReady_NoDoubleInit(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
@@ -325,13 +292,12 @@ func TestAgent_EnsureReady_NoDoubleInit(t *testing.T) {
 	}
 }
 
-// TestAgent_SessionLoad verifies that a pre-loaded sessionID is passed to session/load.
 func TestAgent_SessionLoad(t *testing.T) {
 	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := agent.NewWithSessionID("test", conn, "/tmp/test", "existing-session-id")
+	ag := agent.NewWithSessionID("test", conn, t.TempDir(), "existing-session-id")
 	t.Cleanup(func() { _ = ag.Close() })
 
 	ctx := context.Background()
@@ -342,20 +308,528 @@ func TestAgent_SessionLoad(t *testing.T) {
 	if _, err := drainUpdates(ch); err != nil {
 		t.Fatalf("updates error: %v", err)
 	}
-	// After session/load succeeds, SessionID should be the saved one.
 	if ag.SessionID() != "existing-session-id" {
 		t.Errorf("SessionID = %q, want existing-session-id", ag.SessionID())
 	}
 }
 
+// --- Callback handler tests ---
+
+// TestAgent_Callback_FSRead verifies the fs/read_text_file callback handler.
+// The mock sends a read request during session/prompt; agent reads the temp file
+// and the mock includes the result as a text update so the test can verify it.
+func TestAgent_Callback_FSRead(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/hello.txt"
+	if err := os.WriteFile(path, []byte("callback-read-ok"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	ch, err := ag.Prompt(ctx, "test-callback-fs-read:"+path)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	text, pErr := drainUpdates(ch)
+	if pErr != nil {
+		t.Fatalf("updates error: %v", pErr)
+	}
+	if !strings.Contains(text, "callback-read-ok") {
+		t.Errorf("fs/read_text_file result not reflected in updates, got %q", text)
+	}
+}
+
+// TestAgent_Callback_FSWrite verifies the fs/write_text_file callback handler.
+// The mock sends a write request during session/prompt; agent writes the file;
+// test verifies the file exists with the expected content.
+func TestAgent_Callback_FSWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/written.txt"
+	content := "callback-write-ok"
+
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	ch, err := ag.Prompt(ctx, "test-callback-fs-write:"+path+":"+content)
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	if _, err := drainUpdates(ch); err != nil {
+		t.Fatalf("updates error: %v", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile after callback: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("file content = %q, want %q", string(got), content)
+	}
+}
+
+// TestAgent_Callback_Permission verifies the session/request_permission callback.
+// AutoAllowHandler should respond with "selected" + an allow option ID.
+func TestAgent_Callback_Permission(t *testing.T) {
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	ch, err := ag.Prompt(ctx, "test-callback-permission")
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	text, pErr := drainUpdates(ch)
+	if pErr != nil {
+		t.Fatalf("updates error: %v", pErr)
+	}
+	// Mock echoes the permission outcome in the text update.
+	if !strings.Contains(text, "selected") {
+		t.Errorf("permission response not reflected in updates, got %q", text)
+	}
+}
+
+// TestAgent_Callback_TerminalLifecycle verifies create → wait_for_exit → output → release.
+func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	ch, err := ag.Prompt(ctx, "test-callback-terminal")
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	text, pErr := drainUpdates(ch)
+	if pErr != nil {
+		t.Fatalf("updates error: %v", pErr)
+	}
+	// Mock echoes "terminal-ok" on successful lifecycle.
+	if !strings.Contains(text, "terminal-ok") {
+		t.Errorf("terminal lifecycle result not reflected in updates, got %q", text)
+	}
+}
+
+// TestAgent_Callback_TerminalKill verifies create → kill → release lifecycle.
+func TestAgent_Callback_TerminalKill(t *testing.T) {
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	ch, err := ag.Prompt(ctx, "test-callback-terminal-kill")
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+	text, pErr := drainUpdates(ch)
+	if pErr != nil {
+		t.Fatalf("updates error: %v", pErr)
+	}
+	if !strings.Contains(text, "kill-ok") {
+		t.Errorf("terminal kill result not reflected in updates, got %q", text)
+	}
+}
+
+// TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt is the stale-context
+// prevention test. It verifies that when a prompt produces no text (lastReply=""),
+// a subsequent SwitchWithContext does NOT reuse the reply from a prior prompt.
+//
+// Strategy: the new conn's mock rejects any "[context]" bootstrap prompt with an
+// error. If stale context were reused, Switch would send the bootstrap, the mock
+// would reject it, and agent.go would log the warning. Capturing the log output
+// lets the test assert no warning was produced.
+func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
+	ag := newAgent(t, "test")
+	ctx := context.Background()
+
+	// First prompt: normal → sets lastReply = "chunk0 chunk1 ".
+	ch, err := ag.Prompt(ctx, "normal")
+	if err != nil {
+		t.Fatalf("first Prompt: %v", err)
+	}
+	text1, _ := drainUpdates(ch)
+	if text1 == "" {
+		t.Skip("mock should return text for 'normal'")
+	}
+
+	// Second prompt: no text chunks → lastReply must be cleared to "".
+	ch, err = ag.Prompt(ctx, "no-text-prompt")
+	if err != nil {
+		t.Fatalf("second Prompt: %v", err)
+	}
+	text2, _ := drainUpdates(ch)
+	if text2 != "" {
+		t.Fatalf("expected empty text from 'no-text-prompt', got %q", text2)
+	}
+
+	// New conn that rejects any "[context]" bootstrap prompt.
+	conn2 := acp.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
+	if err := conn2.Start(); err != nil {
+		t.Fatalf("conn2.Start: %v", err)
+	}
+	t.Cleanup(func() { _ = conn2.Close() })
+
+	// Capture log output to detect an unexpected SwitchWithContext warning.
+	var logBuf strings.Builder
+	log.SetOutput(&logBuf)
+	defer log.SetOutput(os.Stderr)
+
+	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext); err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+
+	// Allow potential bootstrap goroutine to run and complete.
+	time.Sleep(200 * time.Millisecond)
+
+	logOutput := logBuf.String()
+	if strings.Contains(logOutput, "SwitchWithContext bootstrap prompt failed") {
+		t.Errorf("stale context was reused (old reply leaked into bootstrap): %q", logOutput)
+	}
+}
+
 // --- Mock ACP server (activated when GO_AGENT_MOCK=1) ---
 
+// mockServer handles bidirectional JSON-RPC 2.0 communication.
+// It both responds to client requests and can send Agent→Client callback requests.
+type mockServer struct {
+	enc    *json.Encoder
+	encMu  sync.Mutex
+
+	nextOutboundID atomic.Int64 // IDs for agent→client requests (start at 10000)
+	pendMu         sync.Mutex
+	pending        map[int64]chan json.RawMessage // pending agent→client responses
+
+	sessCounter atomic.Int64
+}
+
+func newMockServer() *mockServer {
+	ms := &mockServer{
+		enc:     json.NewEncoder(os.Stdout),
+		pending: make(map[int64]chan json.RawMessage),
+	}
+	ms.nextOutboundID.Store(10000)
+	return ms
+}
+
+// respond sends a JSON-RPC result response to the client.
+func (ms *mockServer) respond(id int64, result any) {
+	ms.encMu.Lock()
+	_ = ms.enc.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
+	ms.encMu.Unlock()
+}
+
+// respondError sends a JSON-RPC error response.
+func (ms *mockServer) respondError(id int64, message string) {
+	ms.encMu.Lock()
+	_ = ms.enc.Encode(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error":   map[string]any{"code": -32603, "message": message},
+	})
+	ms.encMu.Unlock()
+}
+
+// sendNotification sends a JSON-RPC notification (no response expected).
+func (ms *mockServer) sendNotification(method string, params any) {
+	ms.encMu.Lock()
+	_ = ms.enc.Encode(map[string]any{"jsonrpc": "2.0", "method": method, "params": params})
+	ms.encMu.Unlock()
+}
+
+// callbackRequest sends an Agent→Client request and waits for the response.
+func (ms *mockServer) callbackRequest(method string, params any) (json.RawMessage, error) {
+	id := ms.nextOutboundID.Add(1)
+	ch := make(chan json.RawMessage, 1)
+	ms.pendMu.Lock()
+	ms.pending[id] = ch
+	ms.pendMu.Unlock()
+
+	ms.encMu.Lock()
+	_ = ms.enc.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+	ms.encMu.Unlock()
+
+	select {
+	case result := <-ch:
+		return result, nil
+	case <-time.After(5 * time.Second):
+		ms.pendMu.Lock()
+		delete(ms.pending, id)
+		ms.pendMu.Unlock()
+		return nil, fmt.Errorf("timeout waiting for %s response", method)
+	}
+}
+
+// routeResponse routes an incoming response to the correct pending callback channel.
+func (ms *mockServer) routeResponse(id int64, result json.RawMessage) {
+	ms.pendMu.Lock()
+	ch, ok := ms.pending[id]
+	if ok {
+		delete(ms.pending, id)
+	}
+	ms.pendMu.Unlock()
+	if ok {
+		ch <- result
+	}
+}
+
+// handleRequest dispatches a client→mock request in a goroutine.
+func (ms *mockServer) handleRequest(id int64, method string, params json.RawMessage) {
+	rejectContext := os.Getenv("GO_AGENT_MOCK_REJECT_CONTEXT") == "1"
+
+	switch method {
+	case "initialize":
+		ms.respond(id, map[string]any{
+			"protocolVersion": "0.1",
+			"agentCapabilities": map[string]any{
+				"loadSession": true,
+			},
+			"agentInfo": map[string]any{"name": "mock-agent", "version": "0.1"},
+		})
+
+	case "session/new":
+		n := ms.sessCounter.Add(1)
+		ms.respond(id, map[string]any{
+			"sessionId": fmt.Sprintf("mock-session-%d", n),
+		})
+
+	case "session/load":
+		ms.respond(id, map[string]any{})
+
+	case "session/prompt":
+		go ms.handlePrompt(id, params, rejectContext)
+
+	case "session/set_mode", "session/set_config_option":
+		ms.respond(id, map[string]any{})
+
+	default:
+		ms.respond(id, map[string]any{})
+	}
+}
+
+// handlePrompt is the async prompt handler that supports sending callbacks.
+func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectContext bool) {
+	var params struct {
+		SessionID string `json:"sessionId"`
+		Prompt    string `json:"prompt"`
+	}
+	_ = json.Unmarshal(rawParams, &params)
+	sessID := params.SessionID
+
+	// Reject context bootstrap prompts when requested (stale-context test).
+	if rejectContext && strings.HasPrefix(params.Prompt, "[context]") {
+		ms.respondError(id, "mock: unexpected context bootstrap – stale context detected")
+		return
+	}
+
+	// Empty-text prompt: respond with no chunks (clears lastReply).
+	if params.Prompt == "no-text-prompt" {
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// FS read callback test.
+	if strings.HasPrefix(params.Prompt, "test-callback-fs-read:") {
+		path := strings.TrimPrefix(params.Prompt, "test-callback-fs-read:")
+		result, err := ms.callbackRequest("fs/read_text_file", map[string]any{
+			"sessionId": sessID,
+			"path":      path,
+		})
+		var textToEcho string
+		if err != nil {
+			textToEcho = "fs-read-error: " + err.Error()
+		} else {
+			var r struct {
+				Content string `json:"content"`
+			}
+			_ = json.Unmarshal(result, &r)
+			textToEcho = r.Content
+		}
+		ms.sendNotification("session/update", map[string]any{
+			"sessionId": sessID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": textToEcho},
+			},
+		})
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// FS write callback test.
+	if strings.HasPrefix(params.Prompt, "test-callback-fs-write:") {
+		rest := strings.TrimPrefix(params.Prompt, "test-callback-fs-write:")
+		// Format: "<path>:<content>" — use LAST colon so Windows drive letters work.
+		colonIdx := strings.LastIndex(rest, ":")
+		var path, content string
+		if colonIdx >= 0 {
+			path = rest[:colonIdx]
+			content = rest[colonIdx+1:]
+		} else {
+			path = rest
+		}
+		_, err := ms.callbackRequest("fs/write_text_file", map[string]any{
+			"sessionId": sessID,
+			"path":      path,
+			"content":   content,
+		})
+		statusText := "fs-write-ok"
+		if err != nil {
+			statusText = "fs-write-error: " + err.Error()
+		}
+		ms.sendNotification("session/update", map[string]any{
+			"sessionId": sessID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": statusText},
+			},
+		})
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// Permission callback test.
+	if params.Prompt == "test-callback-permission" {
+		result, err := ms.callbackRequest("session/request_permission", map[string]any{
+			"sessionId": sessID,
+			"toolCall":  map[string]any{"name": "shell_exec", "args": map[string]any{}},
+			"options": []map[string]any{
+				{"id": "allow_once", "label": "Allow once", "kind": "allow_once"},
+				{"id": "reject_once", "label": "Reject once", "kind": "reject_once"},
+			},
+		})
+		var textToEcho string
+		if err != nil {
+			textToEcho = "permission-error: " + err.Error()
+		} else {
+			var r struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			}
+			_ = json.Unmarshal(result, &r)
+			textToEcho = r.Outcome
+			if r.OptionID != "" {
+				textToEcho += ":" + r.OptionID
+			}
+		}
+		ms.sendNotification("session/update", map[string]any{
+			"sessionId": sessID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": textToEcho},
+			},
+		})
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// Terminal lifecycle test: create → wait_for_exit → output → release.
+	if params.Prompt == "test-callback-terminal" {
+		result, err := ms.callbackRequest("terminal/create", map[string]any{
+			"sessionId": sessID,
+			"command":   "echo",
+			"args":      []string{"terminal-echo-ok"},
+		})
+		var textToEcho string
+		if err != nil {
+			textToEcho = "terminal-create-error: " + err.Error()
+		} else {
+			var cr struct {
+				TerminalID string `json:"terminalId"`
+			}
+			_ = json.Unmarshal(result, &cr)
+			termID := cr.TerminalID
+
+			// wait_for_exit
+			_, _ = ms.callbackRequest("terminal/wait_for_exit", map[string]any{
+				"sessionId":  sessID,
+				"terminalId": termID,
+			})
+
+			// output
+			outResult, outErr := ms.callbackRequest("terminal/output", map[string]any{
+				"sessionId":  sessID,
+				"terminalId": termID,
+			})
+			if outErr != nil {
+				textToEcho = "terminal-output-error: " + outErr.Error()
+			} else {
+				var or struct{ Output string `json:"output"` }
+				_ = json.Unmarshal(outResult, &or)
+				if strings.Contains(or.Output, "terminal-echo-ok") {
+					textToEcho = "terminal-ok"
+				} else {
+					textToEcho = "terminal-unexpected-output: " + or.Output
+				}
+			}
+
+			// release
+			_, _ = ms.callbackRequest("terminal/release", map[string]any{
+				"sessionId":  sessID,
+				"terminalId": termID,
+			})
+		}
+		ms.sendNotification("session/update", map[string]any{
+			"sessionId": sessID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": textToEcho},
+			},
+		})
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// Terminal kill test: create → kill → release.
+	if params.Prompt == "test-callback-terminal-kill" {
+		result, err := ms.callbackRequest("terminal/create", map[string]any{
+			"sessionId": sessID,
+			"command":   "echo",
+			"args":      []string{"kill-test"},
+		})
+		var textToEcho string
+		if err != nil {
+			textToEcho = "terminal-create-error: " + err.Error()
+		} else {
+			var cr struct {
+				TerminalID string `json:"terminalId"`
+			}
+			_ = json.Unmarshal(result, &cr)
+			termID := cr.TerminalID
+
+			_, _ = ms.callbackRequest("terminal/kill", map[string]any{
+				"sessionId":  sessID,
+				"terminalId": termID,
+			})
+			_, _ = ms.callbackRequest("terminal/release", map[string]any{
+				"sessionId":  sessID,
+				"terminalId": termID,
+			})
+			textToEcho = "kill-ok"
+		}
+		ms.sendNotification("session/update", map[string]any{
+			"sessionId": sessID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": textToEcho},
+			},
+		})
+		ms.respond(id, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	// Default: send 2 text chunks then complete.
+	for i := range 2 {
+		ms.sendNotification("session/update", map[string]any{
+			"sessionId": sessID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_message_chunk",
+				"content":       map[string]any{"type": "text", "text": fmt.Sprintf("chunk%d ", i)},
+			},
+		})
+	}
+	ms.respond(id, map[string]any{"stopReason": "end_turn"})
+}
+
 func runMockAgent() {
-	enc := json.NewEncoder(os.Stdout)
+	ms := newMockServer()
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
-
-	var sessionCounter atomic.Int64
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -364,85 +838,36 @@ func runMockAgent() {
 		}
 
 		var raw struct {
-			JSONRPC string          `json:"jsonrpc"`
-			ID      *int64          `json:"id"`
-			Method  string          `json:"method"`
-			Params  json.RawMessage `json:"params,omitempty"`
+			ID     *int64          `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params,omitempty"`
+			Result json.RawMessage `json:"result,omitempty"`
 		}
 		if err := json.Unmarshal(line, &raw); err != nil {
 			continue
 		}
 
-		// Ignore notifications (no id).
-		if raw.ID == nil {
+		if raw.ID != nil && raw.Method == "" {
+			// Response to one of our outbound Agent→Client requests.
+			ms.routeResponse(*raw.ID, raw.Result)
 			continue
 		}
+
+		if raw.ID == nil {
+			// Notification from client (e.g. session/cancel) — ignore.
+			continue
+		}
+
+		// Client→mock request: dispatch synchronously for fast methods,
+		// or in a goroutine when the handler may block (e.g. session/prompt).
 		id := *raw.ID
-
-		switch raw.Method {
-		case "initialize":
-			mockAgentRespond(enc, id, map[string]any{
-				"protocolVersion": "0.1",
-				"agentCapabilities": map[string]any{
-					"loadSession": true,
-				},
-				"agentInfo": map[string]any{
-					"name":    "mock-agent",
-					"version": "0.1",
-				},
-			})
-
-		case "session/new":
-			n := sessionCounter.Add(1)
-			mockAgentRespond(enc, id, map[string]any{
-				"sessionId": fmt.Sprintf("mock-session-%d", n),
-			})
-
-		case "session/load":
-			// Return success; sessionId is preserved from the request (saved by agent).
-			mockAgentRespond(enc, id, map[string]any{})
-
-		case "session/prompt":
-			var params struct {
-				SessionID string `json:"sessionId"`
-				Prompt    string `json:"prompt"`
-			}
-			_ = json.Unmarshal(raw.Params, &params)
-
-			// Send 2 text chunk notifications before the final response.
-			for i := range 2 {
-				_ = enc.Encode(map[string]any{
-					"jsonrpc": "2.0",
-					"method":  "session/update",
-					"params": map[string]any{
-						"sessionId": params.SessionID,
-						"update": map[string]any{
-							"sessionUpdate": "agent_message_chunk",
-							"content": map[string]any{
-								"type": "text",
-								"text": fmt.Sprintf("chunk%d ", i),
-							},
-						},
-					},
-				})
-			}
-			mockAgentRespond(enc, id, map[string]any{
-				"stopReason": "end_turn",
-			})
-
-		case "session/set_mode", "session/set_config_option":
-			mockAgentRespond(enc, id, map[string]any{})
-
-		default:
-			mockAgentRespond(enc, id, map[string]any{})
+		method := raw.Method
+		params := raw.Params
+		if method == "session/prompt" {
+			rejectContext := os.Getenv("GO_AGENT_MOCK_REJECT_CONTEXT") == "1"
+			go ms.handlePrompt(id, params, rejectContext)
+		} else {
+			ms.handleRequest(id, method, params)
 		}
 	}
-}
-
-func mockAgentRespond(enc *json.Encoder, id int64, result any) {
-	_ = enc.Encode(map[string]any{
-		"jsonrpc": "2.0",
-		"id":      id,
-		"result":  result,
-	})
 }
