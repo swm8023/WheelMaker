@@ -305,11 +305,13 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 // Always uses c.ag (concrete type) for Switch, never c.session (interface),
 // to avoid type assertion panics when a mock is injected in tests.
 //
-// Ordering: Cancel() → promptMu.Lock() → drain → outgoing-snapshot → Connect() → ag.Switch() → persist.
-// Both outgoing name and session ID are snapshotted AFTER promptMu is held so that:
+// Ordering: Cancel() → promptMu.Lock() → drain → ag-refresh → outgoing-snapshot → Connect() → ag.Switch() → persist.
+// Both c.ag and the outgoing name/session ID are re-read AFTER promptMu is held so that:
 //   - ensureReady (which sets session ID) has completed before we read it.
 //   - a concurrent prior switch that mutated the agent in-place is complete, so
 //     we read the correct outgoing adapter name rather than a stale pre-switch name.
+//   - if c.ag was nil at entry and a concurrent switch installed one while we waited,
+//     we use the fresh agent (not the stale nil) and avoid leaking a subprocess.
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.adapterFacs[name]
@@ -343,6 +345,15 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	// Snapshot BOTH outgoing adapter name and session ID AFTER promptMu is held
 	// and the channel is drained. Any concurrent switch that ran first has already
 	// mutated the agent in-place; reading here gives the correct outgoing state.
+	//
+	// Also re-read c.ag: if startup left c.ag==nil and a concurrent /use completed
+	// while we were waiting on promptMu, it will have installed a new agent. Using
+	// the stale nil snapshot would overwrite that agent without closing its subprocess.
+	c.mu.Lock()
+	ag = c.ag
+	sess = c.session
+	c.mu.Unlock()
+
 	var outgoingName string
 	var outgoingSessionID string
 	if sess != nil {
@@ -351,16 +362,16 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	}
 
 	// Step 2: connect the new adapter using persisted config.
-	// Also read the saved session ID for the incoming adapter (SwitchClean only),
-	// so ensureReady can attempt session/load if the backend supports it.
+	// Read the saved session ID for the incoming adapter regardless of mode:
+	// for SwitchClean ensureReady uses it for session/load; for SwitchWithContext
+	// the bootstrap may be skipped (no lastReply) and the clean-switch fallback
+	// inside ag.Switch also needs it to restore the saved session.
 	c.mu.Lock()
 	cfg := AdapterConfig{}
 	var savedSID string
 	if c.state != nil {
 		cfg = c.state.Adapters[name]
-		if mode == agent.SwitchClean {
-			savedSID = c.state.SessionIDs[name]
-		}
+		savedSID = c.state.SessionIDs[name]
 	}
 	c.mu.Unlock()
 
