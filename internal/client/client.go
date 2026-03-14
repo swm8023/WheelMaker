@@ -34,7 +34,9 @@ type Client struct {
 	state *State
 	imRun im.Adapter // nil in CLI/test mode
 
-	mu              sync.Mutex
+	mu       sync.Mutex
+	promptMu sync.Mutex // serializes handlePrompt and switchAdapter
+
 	currentPromptCh <-chan agent.Update // tracked for draining during switchAdapter
 }
 
@@ -241,6 +243,8 @@ func (c *Client) handleCommand(msg im.Message, text string) {
 }
 
 // handlePrompt sends text to the active session and streams the response.
+// promptMu is held for the entire duration so that switchAdapter cannot race
+// with ensureReady or an active update drain.
 func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Lock()
 	sess := c.session
@@ -249,6 +253,10 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		c.reply(msg.ChatID, "No active session. Use /use <adapter> to start.")
 		return
 	}
+
+	// Hold promptMu for the full duration, covering ensureReady inside sess.Prompt.
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
 
 	ctx := context.Background()
 	updates, err := sess.Prompt(ctx, text)
@@ -287,19 +295,19 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	}
 }
 
-// switchAdapter cancels any in-progress prompt, connects a new binary,
-// and calls ag.Switch() to replace the connection.
+// switchAdapter cancels any in-progress prompt, waits for it to finish via
+// promptMu, connects a new binary, and calls ag.Switch() to replace the connection.
 // Always uses c.ag (concrete type) for Switch, never c.session (interface),
 // to avoid type assertion panics when a mock is injected in tests.
 //
-// The outgoing session ID is snapshotted BEFORE calling ag.Switch() (which
-// clears sessionID), ensuring it is persisted even after the switch completes.
+// Ordering: Cancel() → promptMu.Lock() → Connect() → ag.Switch() → persist.
+// This ensures ag.Switch() is never called while ensureReady() or an active
+// update drain is running in handlePrompt.
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.adapterFacs[name]
 	sess := c.session
 	ag := c.ag
-	promptCh := c.currentPromptCh
 	c.mu.Unlock()
 
 	if fac == nil {
@@ -313,10 +321,17 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		outgoingSessionID = sess.SessionID()
 	}
 
-	// Step 1: cancel and drain any in-progress prompt.
+	// Step 1: signal cancel so any in-progress prompt winds down quickly,
+	// then wait for handlePrompt to release promptMu (covering ensureReady).
 	if sess != nil {
 		_ = sess.Cancel()
 	}
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
+	// Belt-and-suspenders: drain any channel published between Cancel and promptMu.Lock.
+	c.mu.Lock()
+	promptCh := c.currentPromptCh
+	c.mu.Unlock()
 	if promptCh != nil {
 		for range promptCh {
 		}
