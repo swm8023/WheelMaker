@@ -5,9 +5,11 @@ package client_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +143,30 @@ func (a *captureAdapter) SendReaction(_, _ string) error              { return n
 func (a *captureAdapter) Run(_ context.Context) error                 { return nil }
 
 var _ im.Adapter = (*captureAdapter)(nil)
+
+// testLogWriter is a goroutine-safe log output writer for capturing log output in tests.
+type testLogWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *testLogWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *testLogWriter) Contains(s string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Contains(w.buf.String(), s)
+}
+
+func (w *testLogWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
 
 // --- Tests: command routing ---
 
@@ -572,6 +598,23 @@ func (a *minimalMockAdapter) Close() error { return nil }
 
 var _ adapter.Adapter = (*minimalMockAdapter)(nil)
 
+// contextRejectMockAdapter spawns the mock ACP server with GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1,
+// causing it to reject [context] bootstrap prompts with a JSON-RPC error.
+// This makes SwitchWithContext observable: the agent's drain goroutine logs a warning.
+type contextRejectMockAdapter struct{}
+
+func (a *contextRejectMockAdapter) Name() string { return "mock-reject" }
+func (a *contextRejectMockAdapter) Connect(_ context.Context) (*acp.Conn, error) {
+	conn := acp.New(os.Args[0], []string{"GO_CLIENT_ACP_MOCK=1", "GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"})
+	if err := conn.Start(); err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+func (a *contextRejectMockAdapter) Close() error { return nil }
+
+var _ adapter.Adapter = (*contextRejectMockAdapter)(nil)
+
 // TestSwitchAdapter_PersistsOutgoingSessionID verifies that the outgoing
 // adapter's session ID is saved to state before the switch completes.
 func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
@@ -648,27 +691,102 @@ func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
 
 // --- Minimal ACP mock server for client tests ---
 
-// TestHandleMessage_Use_Continue verifies that /use <name> --continue is parsed
-// correctly and performs a successful adapter switch (SwitchWithContext mode).
-func TestHandleMessage_Use_Continue(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
-	c := newTestClient(mock)
-	msgs := captureReplies(c)
-
-	c.RegisterAdapter("other", func(_ string, _ map[string]string) adapter.Adapter {
+// TestHandleMessage_Use_Continue_BootstrapsContext verifies that /use <name> --continue
+// calls ag.Switch with SwitchWithContext, which sends a [context] bootstrap prompt to the
+// new adapter. Uses a real Client.Start() so c.ag is non-nil and switchAdapter executes
+// ag.Switch(..., mode).
+func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
+	store := &mockStore{state: &client.State{
+		ActiveAdapter: "codex",
+		Adapters:      map[string]client.AdapterConfig{"codex": {}},
+		SessionIDs:    map[string]string{},
+	}}
+	c := client.New(store, nil)
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
 	})
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use other --continue"})
 
-	found := false
-	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to adapter") {
-			found = true
-			break
-		}
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
 	}
-	if !found {
-		t.Errorf("messages = %v, missing switch confirmation for /use --continue", *msgs)
+	defer c.Close()
+
+	// Redirect the default logger so we can observe the bootstrap warning.
+	lw := &testLogWriter{}
+	origOutput := log.Writer()
+	log.SetOutput(lw)
+	defer log.SetOutput(origOutput)
+
+	// Prime lastReply: the mock sends "client-mock-reply" text notification for session/prompt.
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	_ = msgs
+
+	// Register "other" with a backend that rejects [context] bootstrap prompts.
+	c.RegisterAdapter("other", func(_ string, _ map[string]string) adapter.Adapter {
+		return &contextRejectMockAdapter{}
+	})
+
+	// /use other --continue: ag.Switch sends "[context] client-mock-reply" to the new adapter.
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other --continue"})
+
+	// Poll until the async drain goroutine logs the rejection warning (or timeout).
+	const want = "SwitchWithContext bootstrap prompt failed"
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if lw.Contains(want) {
+			return // success
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("expected log to contain %q after /use --continue; log was: %s", want, lw.String())
+}
+
+// TestHandleMessage_Use_Clean_NoBootstrap verifies that plain /use (SwitchClean) does NOT
+// send a [context] bootstrap prompt to the new adapter, even when lastReply is non-empty.
+func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
+	store := &mockStore{state: &client.State{
+		ActiveAdapter: "codex",
+		Adapters:      map[string]client.AdapterConfig{"codex": {}},
+		SessionIDs:    map[string]string{},
+	}}
+	c := client.New(store, nil)
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+		return &minimalMockAdapter{}
+	})
+
+	ctx := context.Background()
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	// Redirect the default logger; no bootstrap warning should appear.
+	lw := &testLogWriter{}
+	origOutput := log.Writer()
+	log.SetOutput(lw)
+	defer log.SetOutput(origOutput)
+
+	// Prime lastReply so that if SwitchWithContext were used, it would have content.
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	_ = msgs
+
+	// Register "other" using a context-rejecting backend.
+	c.RegisterAdapter("other", func(_ string, _ map[string]string) adapter.Adapter {
+		return &contextRejectMockAdapter{}
+	})
+
+	// Plain /use (SwitchClean): should NOT send a bootstrap prompt.
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
+
+	// Wait long enough for any async operations before asserting.
+	time.Sleep(200 * time.Millisecond)
+
+	const forbidden = "SwitchWithContext bootstrap prompt failed"
+	if lw.Contains(forbidden) {
+		t.Errorf("plain /use triggered unexpected SwitchWithContext bootstrap; log: %s", lw.String())
 	}
 }
 
@@ -760,8 +878,9 @@ func runClientMockAgent() {
 			continue
 		}
 		var raw struct {
-			ID     *int64 `json:"id"`
-			Method string `json:"method"`
+			ID     *int64          `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params,omitempty"`
 		}
 		if err := json.Unmarshal(line, &raw); err != nil || raw.ID == nil {
 			continue
@@ -785,6 +904,38 @@ func runClientMockAgent() {
 				"id":      id,
 				"result":  map[string]any{"sessionId": fmt.Sprintf("client-mock-sess-%d", id)},
 			})
+		case "session/prompt":
+			rejectCtx := os.Getenv("GO_CLIENT_ACP_MOCK_REJECT_CONTEXT") == "1"
+			var params struct {
+				SessionID string `json:"sessionId"`
+				Prompt    string `json:"prompt"`
+			}
+			_ = json.Unmarshal(raw.Params, &params)
+			if rejectCtx && strings.HasPrefix(params.Prompt, "[context]") {
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error":   map[string]any{"code": -32603, "message": "mock: context bootstrap rejected"},
+				})
+			} else {
+				// Send a text notification so lastReply is populated for SwitchWithContext.
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"method":  "session/update",
+					"params": map[string]any{
+						"sessionId": params.SessionID,
+						"update": map[string]any{
+							"sessionUpdate": "agent_message_chunk",
+							"content":       map[string]any{"type": "text", "text": "client-mock-reply"},
+						},
+					},
+				})
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"result":  map[string]any{"stopReason": "end_turn"},
+				})
+			}
 		default:
 			_ = enc.Encode(map[string]any{
 				"jsonrpc": "2.0",
