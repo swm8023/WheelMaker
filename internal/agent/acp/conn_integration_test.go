@@ -1,7 +1,7 @@
 //go:build integration
 
-// Integration tests for acp.Client against the real codex-acp binary.
-// Run with: go test -tags integration ./internal/acp/... -v -timeout 60s
+// Integration tests for acp.Conn against the real codex-acp binary.
+// Run with: go test -tags integration ./internal/agent/acp/... -v -timeout 60s
 // Requires: OPENAI_API_KEY set and codex-acp binary available.
 package acp_test
 
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/acp"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 

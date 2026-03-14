@@ -15,19 +15,19 @@ import (
 // NotificationHandler is called for each incoming notification from the agent.
 type NotificationHandler func(Notification)
 
-// RequestHandler is called when the agent sends an Agent→Client request.
+// RequestHandler is called when the agent sends an Agent→Conn request.
 // It must return (result, nil) on success or (nil, error) on failure.
 // The returned result is JSON-encoded and sent back as the response.
 type RequestHandler func(ctx context.Context, method string, params json.RawMessage) (any, error)
 
-// Client manages a single codex-acp (or compatible) subprocess and communicates
+// Conn manages a single ACP-compatible subprocess and communicates
 // with it over stdin/stdout using JSON-RPC 2.0.
 //
 // The ACP protocol is bidirectional:
-//   - Client→Agent requests: Send() — we initiate, agent responds.
-//   - Agent→Client requests: OnRequest() handler — agent initiates, we respond.
+//   - Conn→Agent requests: Send() — we initiate, agent responds.
+//   - Agent→Conn requests: OnRequest() handler — agent initiates, we respond.
 //   - Notifications (either direction, no response): Subscribe() / Notify().
-type Client struct {
+type Conn struct {
 	exePath string
 	env     []string // additional environment variables
 
@@ -50,10 +50,10 @@ type Client struct {
 	done chan struct{}
 }
 
-// New creates a new Client for the given binary.
+// New creates a new Conn for the given binary.
 // env is a list of "KEY=VALUE" strings appended to the process environment.
-func New(exePath string, env []string) *Client {
-	return &Client{
+func New(exePath string, env []string) *Conn {
+	return &Conn{
 		exePath: exePath,
 		env:     env,
 		pending: make(map[int64]chan Response),
@@ -61,14 +61,14 @@ func New(exePath string, env []string) *Client {
 	}
 }
 
-// OnRequest registers the handler for Agent→Client requests.
-// Must be called before Start(). Replaces any previously set handler.
+// OnRequest registers the handler for Agent→Conn requests.
+// Replaces any previously set handler.
 //
 // The handler is responsible for implementing:
 //   - session/request_permission
 //   - fs/read_text_file, fs/write_text_file
 //   - terminal/create, terminal/output, terminal/wait_for_exit, terminal/kill, terminal/release
-func (c *Client) OnRequest(h RequestHandler) {
+func (c *Conn) OnRequest(h RequestHandler) {
 	c.reqMu.Lock()
 	c.reqHandler = h
 	c.reqMu.Unlock()
@@ -76,7 +76,7 @@ func (c *Client) OnRequest(h RequestHandler) {
 
 // Start launches the agent subprocess and begins the read loop.
 // stderr of the subprocess is forwarded to os.Stderr for visibility.
-func (c *Client) Start() error {
+func (c *Conn) Start() error {
 	cmd := exec.Command(c.exePath)
 	cmd.Env = append(cmd.Environ(), c.env...)
 	cmd.Stderr = os.Stderr // forward agent logs/errors to our stderr
@@ -105,7 +105,7 @@ func (c *Client) Start() error {
 
 // Send sends a JSON-RPC request and waits for the matching response.
 // result must be a pointer; on success it is populated by json.Unmarshal.
-func (c *Client) Send(ctx context.Context, method string, params any, result any) error {
+func (c *Conn) Send(ctx context.Context, method string, params any, result any) error {
 	id := c.nextID.Add(1)
 
 	ch := make(chan Response, 1)
@@ -147,12 +147,12 @@ func (c *Client) Send(ctx context.Context, method string, params any, result any
 		}
 		return nil
 	case <-c.done:
-		return fmt.Errorf("acp: client closed")
+		return fmt.Errorf("acp: connection closed")
 	}
 }
 
 // Notify sends a JSON-RPC notification (no id, no response expected).
-func (c *Client) Notify(method string, params any) error {
+func (c *Conn) Notify(method string, params any) error {
 	n := struct {
 		JSONRPC string `json:"jsonrpc"`
 		Method  string `json:"method"`
@@ -172,7 +172,7 @@ func (c *Client) Notify(method string, params any) error {
 
 // Subscribe registers a handler to receive all incoming notifications.
 // Returns a cancel function to deregister the handler.
-func (c *Client) Subscribe(handler NotificationHandler) (cancel func()) {
+func (c *Conn) Subscribe(handler NotificationHandler) (cancel func()) {
 	c.subsMu.Lock()
 	c.subscribers = append(c.subscribers, handler)
 	idx := len(c.subscribers) - 1
@@ -188,8 +188,8 @@ func (c *Client) Subscribe(handler NotificationHandler) (cancel func()) {
 	}
 }
 
-// Close shuts down the client: closes stdin and waits for the process to exit.
-func (c *Client) Close() error {
+// Close shuts down the connection: closes stdin and waits for the process to exit.
+func (c *Conn) Close() error {
 	select {
 	case <-c.done:
 		return nil // already closed
@@ -207,10 +207,10 @@ func (c *Client) Close() error {
 //
 // ACP is bidirectional JSON-RPC 2.0. The three message types are:
 //
-//	Client→Agent response:  id != nil, method == ""  → route to pending[id]
-//	Agent→Client request:   id != nil, method != ""  → call reqHandler, send response
-//	Notification:           id == nil,  method != ""  → dispatch to subscribers
-func (c *Client) readLoop(r io.Reader) {
+//	Response:     id != nil, method == ""  → route to pending[id]
+//	Request:      id != nil, method != ""  → call reqHandler, send response
+//	Notification: id == nil,  method != ""  → dispatch to subscribers
+func (c *Conn) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	// Increase buffer for large messages (e.g. file contents in tool calls).
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
@@ -228,11 +228,11 @@ func (c *Client) readLoop(r io.Reader) {
 
 		switch {
 		case raw.ID != nil && raw.Method != "":
-			// Agent→Client request: agent wants us to do something and expects a response.
+			// Agent→Conn request: agent wants us to do something and expects a response.
 			go c.handleIncomingRequest(*raw.ID, raw.Method, raw.Params)
 
 		case raw.ID != nil:
-			// Response to one of our Client→Agent requests.
+			// Response to one of our Conn→Agent requests.
 			resp := Response{
 				JSONRPC: raw.JSONRPC,
 				ID:      *raw.ID,
@@ -269,8 +269,8 @@ func (c *Client) readLoop(r io.Reader) {
 	c.mu.Unlock()
 }
 
-// handleIncomingRequest processes an Agent→Client request and sends the response.
-func (c *Client) handleIncomingRequest(id int64, method string, params json.RawMessage) {
+// handleIncomingRequest processes an Agent→Conn request and sends the response.
+func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMessage) {
 	c.reqMu.RLock()
 	handler := c.reqHandler
 	c.reqMu.RUnlock()
@@ -301,7 +301,7 @@ func (c *Client) handleIncomingRequest(id int64, method string, params json.RawM
 }
 
 // dispatch calls all registered notification handlers in separate goroutines.
-func (c *Client) dispatch(n Notification) {
+func (c *Conn) dispatch(n Notification) {
 	c.subsMu.RLock()
 	handlers := make([]NotificationHandler, len(c.subscribers))
 	copy(handlers, c.subscribers)
