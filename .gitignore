@@ -11,6 +11,7 @@ bin/**/*
 *.out
 /vendor/
 .gocache/
+.gomodcache/
 
 # IDE
 .vscode/
