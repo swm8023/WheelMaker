@@ -30,18 +30,22 @@ func ResolveBinary(name, configPath string) (string, error) {
 	// 2. bin/{GOOS}_{GOARCH}/ relative to the executable.
 	exeDir, err := executableDir()
 	if err == nil {
-		candidate := filepath.Join(exeDir, "bin", platformDir(), binaryName(name))
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
+		for _, n := range binaryNames(name) {
+			candidate := filepath.Join(exeDir, "bin", platformDir(), n)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate, nil
+			}
 		}
 	}
 
 	// Fallback: also check relative to the working directory (useful during `go run`).
-	candidate := filepath.Join("bin", platformDir(), binaryName(name))
-	if _, err := os.Stat(candidate); err == nil {
-		abs, err := filepath.Abs(candidate)
-		if err == nil {
-			return abs, nil
+	for _, n := range binaryNames(name) {
+		candidate := filepath.Join("bin", platformDir(), n)
+		if _, err := os.Stat(candidate); err == nil {
+			abs, err := filepath.Abs(candidate)
+			if err == nil {
+				return abs, nil
+			}
 		}
 	}
 
@@ -63,12 +67,14 @@ func platformDir() string {
 	return runtime.GOOS + "_" + runtime.GOARCH
 }
 
-// binaryName appends ".exe" on Windows.
-func binaryName(name string) string {
+// binaryNames returns the ordered list of filenames to probe for a binary.
+// On Windows, native .exe is preferred, then .cmd (for Node.js-based tools).
+// On other platforms, only the bare name is returned.
+func binaryNames(name string) []string {
 	if runtime.GOOS == "windows" {
-		return name + ".exe"
+		return []string{name + ".exe", name + ".cmd"}
 	}
-	return name
+	return []string{name}
 }
 
 // executableDir returns the directory containing the running executable.

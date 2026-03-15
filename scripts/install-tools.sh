@@ -61,19 +61,17 @@ install_claude_agent_acp() {
         fi
     fi
 
-    # Fallback: npm install
+    # Fallback: npm install then copy the wrapper script.
+    # claude-agent-acp is a Node.js package; npm creates a shell wrapper in the global bin dir.
     if command -v npm &>/dev/null; then
         echo "Falling back to npm install -g @zed-industries/claude-agent-acp..."
         npm install -g @zed-industries/claude-agent-acp >/dev/null 2>&1 || true
 
-        # Search candidate locations
-        NPM_ROOT=$(npm root -g 2>/dev/null || true)
+        # Use npm prefix -g to find the global bin directory (works with nvm, scoop, standard npm).
+        NPM_PREFIX=$(npm prefix -g 2>/dev/null || true)
         CANDIDATES=()
-        if [ -n "$NPM_ROOT" ]; then
-            CANDIDATES+=(
-                "$NPM_ROOT/@zed-industries/claude-agent-acp/claude-agent-acp"
-                "$NPM_ROOT/@zed-industries/claude-agent-acp/node_modules/@zed-industries/claude-agent-acp-${GOOS}-${GOARCH/amd64/x64}/bin/claude-agent-acp"
-            )
+        if [ -n "$NPM_PREFIX" ]; then
+            CANDIDATES+=("$NPM_PREFIX/bin/claude-agent-acp")
         fi
 
         for c in "${CANDIDATES[@]}"; do
