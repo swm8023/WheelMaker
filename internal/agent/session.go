@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"github.com/swm8023/wheelmaker/internal/agent/acp"
 )
@@ -91,6 +92,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 			a.initializing = false
 			a.mu.Unlock()
 			a.initCond.Broadcast()
+			log.Printf("[agent] connected: adapter=%s session=%s (resumed)", a.name, savedSessionID)
 			return nil
 		}
 		// session/load failed — fall through to session/new.
@@ -119,6 +121,17 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	a.initializing = false
 	a.mu.Unlock()
 	a.initCond.Broadcast()
+
+	modeID := ""
+	if newResult.Modes != nil {
+		modeID = newResult.Modes.CurrentModeID
+	}
+	modelID := ""
+	if newResult.Models != nil {
+		modelID = newResult.Models.CurrentModelID
+	}
+	log.Printf("[agent] connected: adapter=%s session=%s mode=%s model=%s",
+		a.name, newResult.SessionID, modeID, modelID)
 	return nil
 }
 
