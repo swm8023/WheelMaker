@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -80,7 +81,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 
 	// Enable ACP JSON debug logging for console projects with debug=true.
 	if pc.IM.Type == "console" && pc.IM.Debug {
-		c.SetDebugLogger(os.Stderr)
+		c.SetDebugLogger(log.Writer())
 	}
 
 	// Register all known adapter factories so users can switch between them at runtime.
@@ -119,7 +120,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		go func(c *client.Client) {
 			defer wg.Done()
 			if err := c.Run(ctx); err != nil && ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "wheelmaker: project run error: %v\n", err)
+				log.Printf("wheelmaker: project run error: %v", err)
 			}
 		}(c)
 	}
