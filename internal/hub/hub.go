@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/adapter"
+	"github.com/swm8023/wheelmaker/internal/adapter/claude"
 	"github.com/swm8023/wheelmaker/internal/adapter/codex"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -82,14 +83,21 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		c.SetDebugLogger(os.Stderr)
 	}
 
-	// Register the codex adapter factory.
+	// Register the adapter factory based on config.
 	adapterName := pc.Client.Adapter
 	if adapterName == "" {
 		adapterName = "codex"
 	}
-	c.RegisterAdapter(adapterName, func(_ string, _ map[string]string) adapter.Adapter {
-		return codex.NewAdapter(codex.Config{})
-	})
+	switch adapterName {
+	case "claude":
+		c.RegisterAdapter("claude", func(_ string, _ map[string]string) adapter.Adapter {
+			return claude.NewAdapter(claude.Config{})
+		})
+	default:
+		c.RegisterAdapter(adapterName, func(_ string, _ map[string]string) adapter.Adapter {
+			return codex.NewAdapter(codex.Config{})
+		})
+	}
 
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
