@@ -7,102 +7,115 @@ import (
 	"path/filepath"
 )
 
-// Store persists and loads WheelMaker state.
+// Store persists and loads a single project's WheelMaker state.
 type Store interface {
 	Load() (*State, error)
 	Save(s *State) error
 }
 
-// JSONStore persists State to a local JSON file.
+// JSONStore persists State to a local JSON file in the multi-project FileState format.
+// It reads and writes only the entry for its configured projectName, leaving all
+// other projects' data untouched.
 type JSONStore struct {
-	Path string
+	Path        string
+	projectName string
 }
 
-// NewJSONStore creates a JSONStore at the given path.
-// The directory is created automatically on first Save.
+// NewJSONStore creates a JSONStore for the "default" project at the given path.
+// Use NewProjectJSONStore when managing named projects (e.g. from hub config).
 func NewJSONStore(path string) *JSONStore {
-	return &JSONStore{Path: path}
+	return &JSONStore{Path: path, projectName: "default"}
 }
 
-// Load reads and unmarshals State from disk.
-// If the file does not exist a default State is returned.
-// Migrates legacy JSON keys from the old hub.State format.
+// NewProjectJSONStore creates a JSONStore scoped to a specific project name.
+func NewProjectJSONStore(path, projectName string) *JSONStore {
+	return &JSONStore{Path: path, projectName: projectName}
+}
+
+// Load reads the state file and returns the ProjectState for this store's project.
+// If the file does not exist, a default ProjectState is returned.
+// Migrates legacy flat-format state files (pre-multi-project) into the "default" project.
 func (s *JSONStore) Load() (*State, error) {
 	data, err := os.ReadFile(s.Path)
 	if os.IsNotExist(err) {
-		return defaultState(), nil
+		return defaultProjectState(), nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store load: %w", err)
 	}
 
-	// Parse into a raw map first to detect legacy keys.
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("store unmarshal: %w", err)
 	}
 
-	var state State
-	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("store unmarshal state: %w", err)
+	// New multi-project format: {"projects": {...}}
+	if rawProjects, ok := raw["projects"]; ok {
+		var projects map[string]*ProjectState
+		if err := json.Unmarshal(rawProjects, &projects); err != nil {
+			return nil, fmt.Errorf("store unmarshal projects: %w", err)
+		}
+		if ps := projects[s.projectName]; ps != nil {
+			ensureStateMaps(ps)
+			return ps, nil
+		}
+		return defaultProjectState(), nil
 	}
 
-	// Migrate legacy key: "active_agent" → ActiveAdapter
-	if state.ActiveAdapter == "" {
+	// Legacy flat format: migrate to ProjectState.
+	// Only the "default" project inherits the migrated state; other names get empty defaults.
+	if s.projectName != "default" {
+		return defaultProjectState(), nil
+	}
+
+	ps := &ProjectState{}
+
+	if v, ok := raw["activeAdapter"]; ok {
+		_ = json.Unmarshal(v, &ps.ActiveAdapter)
+	}
+	if ps.ActiveAdapter == "" {
 		if v, ok := raw["active_agent"]; ok {
-			var legacy string
-			if err := json.Unmarshal(v, &legacy); err == nil && legacy != "" {
-				state.ActiveAdapter = legacy
-			}
+			_ = json.Unmarshal(v, &ps.ActiveAdapter)
 		}
 	}
 
-	// Migrate legacy key: "acp_session_ids" → SessionIDs
-	if len(state.SessionIDs) == 0 {
+	if v, ok := raw["session_ids"]; ok {
+		_ = json.Unmarshal(v, &ps.SessionIDs)
+	}
+	if len(ps.SessionIDs) == 0 {
 		if v, ok := raw["acp_session_ids"]; ok {
-			var legacy map[string]string
-			if err := json.Unmarshal(v, &legacy); err == nil && len(legacy) > 0 {
-				state.SessionIDs = legacy
-			}
+			_ = json.Unmarshal(v, &ps.SessionIDs)
 		}
 	}
 
-	// Migrate legacy key: "agents[name].exe_path" + "agents[name].env" → Adapters[name]
-	if len(state.Adapters) == 0 {
-		if v, ok := raw["agents"]; ok {
-			var legacyAgents map[string]struct {
-				ExePath string            `json:"exe_path"`
-				Env     map[string]string `json:"env"`
-			}
-			if err := json.Unmarshal(v, &legacyAgents); err == nil && len(legacyAgents) > 0 {
-				state.Adapters = make(map[string]AdapterConfig, len(legacyAgents))
-				for name, ag := range legacyAgents {
-					if ag.ExePath != "" || len(ag.Env) > 0 {
-						state.Adapters[name] = AdapterConfig{ExePath: ag.ExePath, Env: ag.Env}
-					}
-				}
-			}
-		}
-	}
-
-	// Ensure maps are non-nil.
-	if state.Adapters == nil {
-		state.Adapters = map[string]AdapterConfig{}
-	}
-	if state.SessionIDs == nil {
-		state.SessionIDs = map[string]string{}
-	}
-
-	return &state, nil
+	ensureStateMaps(ps)
+	return ps, nil
 }
 
-// Save marshals and writes State to disk, creating directories as needed.
-// Only writes new key names (never writes legacy hub.State keys).
+// Save writes the ProjectState for this store's project into the shared FileState file.
+// Other projects in the file are preserved. Always writes the new multi-project format.
 func (s *JSONStore) Save(state *State) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return fmt.Errorf("store mkdir: %w", err)
 	}
-	data, err := json.MarshalIndent(state, "", "  ")
+
+	// Read existing FileState so other projects are not overwritten.
+	var projects map[string]*ProjectState
+	if data, err := os.ReadFile(s.Path); err == nil {
+		var raw map[string]json.RawMessage
+		if json.Unmarshal(data, &raw) == nil {
+			if rawProjects, ok := raw["projects"]; ok {
+				_ = json.Unmarshal(rawProjects, &projects)
+			}
+		}
+	}
+	if projects == nil {
+		projects = map[string]*ProjectState{}
+	}
+	projects[s.projectName] = state
+
+	fs := FileState{Projects: projects}
+	data, err := json.MarshalIndent(fs, "", "  ")
 	if err != nil {
 		return fmt.Errorf("store marshal: %w", err)
 	}
@@ -110,4 +123,14 @@ func (s *JSONStore) Save(state *State) error {
 		return fmt.Errorf("store write: %w", err)
 	}
 	return nil
+}
+
+// ensureStateMaps initialises nil maps in a ProjectState to avoid nil-dereference panics.
+func ensureStateMaps(ps *ProjectState) {
+	if ps.SessionIDs == nil {
+		ps.SessionIDs = map[string]string{}
+	}
+	if ps.Agents == nil {
+		ps.Agents = map[string]*AgentState{}
+	}
 }

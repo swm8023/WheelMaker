@@ -1,0 +1,30 @@
+{
+  "projects": [
+    {
+      "name": "local-dev",
+      "im": {
+        "type": "console",
+        "debug": true
+      },
+      "client": {
+        "adapter": "codex",
+        "path": "/path/to/your/project"
+      }
+    },
+    {
+      "name": "feishu-prod",
+      "im": {
+        "type": "feishu",
+        "appID": "cli_xxx",
+        "appSecret": "yyy"
+      },
+      "client": {
+        "adapter": "codex",
+        "path": "/path/to/other/project"
+      }
+    }
+  ],
+  "feishu": {
+    "verificationToken": "zzz"
+  }
+}

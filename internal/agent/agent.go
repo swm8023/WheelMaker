@@ -51,6 +51,22 @@ const (
 	SwitchWithContext
 )
 
+// InitMeta holds agent-level metadata captured from the initialize handshake.
+type InitMeta struct {
+	ProtocolVersion   string
+	AgentCapabilities acp.AgentCapabilities
+	AgentInfo         *acp.AgentInfo
+	AuthMethods       []acp.AuthMethod
+}
+
+// SessionMeta holds session-level metadata captured from session/new.
+type SessionMeta struct {
+	Modes             *acp.ModeState
+	Models            *acp.ModelState
+	ConfigOptions     []acp.ConfigOption
+	AvailableCommands []acp.AvailableCommand
+}
+
 // Agent is the complete ACP protocol encapsulation.
 // It owns an active *acp.Conn and handles all outbound ACP calls and inbound callbacks.
 // Adapter is not stored here; after Connect(), the Conn owns the subprocess lifecycle.
@@ -62,6 +78,9 @@ type Agent struct {
 	cwd        string                // working directory for session/new
 	mcpServers []acp.MCPServer       // MCP server list for session/new
 
+	initMeta    InitMeta    // metadata from initialize handshake
+	sessionMeta SessionMeta // metadata from session/new
+
 	permission PermissionHandler // injectable; defaults to AutoAllowHandler
 	terminals  *terminalManager
 
@@ -70,6 +89,10 @@ type Agent struct {
 	ready        bool       // true after initialize + session/new or session/load
 	initCond     *sync.Cond // guards single-flight initialization (associated with mu)
 	initializing bool       // true while one goroutine is running ensureReady I/O
+
+	// FL2: per-prompt context; cancelled by Cancel() to unblock pending permission requests.
+	promptCtx    context.Context
+	promptCancel context.CancelFunc
 }
 
 // New creates an Agent using an already-started *acp.Conn.
@@ -111,7 +134,14 @@ func (a *Agent) Cancel() error {
 	sessID := a.sessionID
 	conn := a.conn
 	ready := a.ready
+	cancel := a.promptCancel // FL2
 	a.mu.Unlock()
+
+	// FL2: cancel per-prompt context to unblock any pending permission request.
+	if cancel != nil {
+		cancel()
+	}
+
 	if sessID == "" || !ready {
 		return nil
 	}
@@ -240,6 +270,22 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 		}
 	}
 	return nil
+}
+
+// Meta returns a snapshot of the agent's current init and session metadata.
+// Returns zero-value structs if the agent has not completed initialization.
+func (a *Agent) Meta() (InitMeta, SessionMeta) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.initMeta, a.sessionMeta
+}
+
+// setAvailableCommands updates the session metadata with the latest command list.
+// Called from the prompt subscription handler when an available_commands_update arrives.
+func (a *Agent) setAvailableCommands(cmds []acp.AvailableCommand) {
+	a.mu.Lock()
+	a.sessionMeta.AvailableCommands = cmds
+	a.mu.Unlock()
 }
 
 // compile-time check: Agent implements Session.

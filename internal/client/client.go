@@ -1,38 +1,49 @@
 package client
 
 import (
-	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"os"
+	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/swm8023/wheelmaker/internal/adapter"
 	"github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
 
-// AdapterFactory creates a new Adapter instance configured with the given ExePath and Env.
-// The factory is invoked at each connect (Start/switchAdapter) with the persisted config
-// so that runtime-configured paths are applied without re-registering.
+const idleTimeout = 30 * time.Minute
+
+// AdapterFactory creates a new Adapter instance.
+// The exePath and env arguments are provided for compatibility; hub-registered
+// factories typically ignore them and use closure-captured config instead.
 type AdapterFactory func(exePath string, env map[string]string) adapter.Adapter
 
-// Client is the top-level coordinator for WheelMaker.
+// Client is the top-level coordinator for a single WheelMaker project.
 // It holds a pool of AdapterFactory functions and two references to the active Agent:
 //   - session agent.Session  — narrow interface for Prompt/Cancel/SetMode, mockable in tests.
 //   - ag      *agent.Agent   — concrete type for Switch (to avoid type assertion on mock).
 //
-// Switching adapters is done via c.ag.Switch() (never via c.session), so
-// injecting a mock Session in tests does not break the Switch code path.
+// Agent initialization is lazy: the first incoming message triggers ensureAgent(),
+// which connects the active adapter and creates the agent. After 30 minutes of idle
+// the agent is disconnected (idleClose) and re-created on the next message.
 type Client struct {
+	projectName string
+	cwd         string
+
 	adapterFacs map[string]AdapterFactory
 	session     agent.Session // narrow interface, can be mock in tests
 	ag          *agent.Agent  // concrete type, used for Switch only; nil when mock injected
 
 	store Store
 	state *State
-	imRun im.Adapter // nil in CLI/test mode
+	imRun im.Adapter // nil when no IM adapter configured
+
+	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
+
+	idleTimer *time.Timer // fires idleClose after idleTimeout of inactivity
 
 	mu       sync.Mutex
 	promptMu sync.Mutex // serializes handlePrompt and switchAdapter
@@ -40,28 +51,38 @@ type Client struct {
 	currentPromptCh <-chan agent.Update // tracked for draining during switchAdapter
 }
 
-// New creates a Client with the given store and optional IM adapter.
-// imAdapter may be nil; in that case Run() drives the stdin loop.
-func New(store Store, imAdapter im.Adapter) *Client {
+// New creates a Client for the given project.
+//   - store: persistent state store scoped to this project
+//   - imAdapter: IM adapter; nil means Run() returns an error (use Hub with a console project)
+//   - projectName: identifier used in logs and state keys
+//   - cwd: working directory for agent sessions
+func New(store Store, imAdapter im.Adapter, projectName string, cwd string) *Client {
 	return &Client{
+		projectName: projectName,
+		cwd:         cwd,
 		adapterFacs: make(map[string]AdapterFactory),
 		store:       store,
 		imRun:       imAdapter,
 	}
 }
 
+// SetDebugLogger enables ACP JSON debug logging on every subsequent adapter connection.
+// Pass nil to disable. The writer is injected into acp.Conn at connect time.
+func (c *Client) SetDebugLogger(w io.Writer) {
+	c.mu.Lock()
+	c.debugLog = w
+	c.mu.Unlock()
+}
+
 // RegisterAdapter registers an AdapterFactory under the given name.
-// The factory is called at each connect with the ExePath and Env from persisted state,
-// allowing runtime configuration without re-registration.
 func (c *Client) RegisterAdapter(name string, factory AdapterFactory) {
 	c.mu.Lock()
 	c.adapterFacs[name] = factory
 	c.mu.Unlock()
 }
 
-// Start loads persisted state and attempts to connect the active adapter.
-// A connect failure is non-fatal: Start still succeeds with no active session.
-// The user can issue /use <adapter> to connect a working adapter.
+// Start loads persisted state and registers the IM message callback.
+// Agent initialization is deferred until the first incoming message (lazy init).
 func (c *Client) Start(ctx context.Context) error {
 	state, err := c.store.Load()
 	if err != nil {
@@ -71,113 +92,34 @@ func (c *Client) Start(ctx context.Context) error {
 	c.state = state
 	c.mu.Unlock()
 
-	// Determine the active adapter name.
-	name := state.ActiveAdapter
-	if name == "" {
-		name = "codex"
-	}
-
-	c.mu.Lock()
-	fac := c.adapterFacs[name]
-	savedSessionID := state.SessionIDs[name]
-	cfg := state.Adapters[name] // zero value if not configured
-	c.mu.Unlock()
-
-	if fac == nil {
-		fmt.Fprintf(os.Stderr, "wheelmaker: warning: adapter %q is not registered; use /use <adapter> to connect\n", name)
-	} else {
-		// Attempt to connect; a failure is non-fatal so the process can still start.
-		// The user can issue /use <adapter> to connect a working adapter.
-		conn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "wheelmaker: warning: could not connect adapter %q: %v\n", name, err)
-		} else {
-			cwd, err := os.Getwd()
-			if err != nil {
-				cwd = "."
-			}
-			var ag *agent.Agent
-			if savedSessionID != "" {
-				ag = agent.NewWithSessionID(name, conn, cwd, savedSessionID)
-			} else {
-				ag = agent.New(name, conn, cwd)
-			}
-
-			c.mu.Lock()
-			c.ag = ag
-			c.session = ag
-			c.mu.Unlock()
-		}
-	}
-
 	if c.imRun != nil {
 		c.imRun.OnMessage(c.HandleMessage)
 	}
 	return nil
 }
 
-// Run blocks until ctx is cancelled.
-// With an IM adapter it delegates to im.Adapter.Run; otherwise it drives the stdin loop.
+// Run blocks until ctx is cancelled, delegating to the IM adapter's Run loop.
+// Returns an error if no IM adapter is configured.
 func (c *Client) Run(ctx context.Context) error {
 	if c.imRun != nil {
 		return c.imRun.Run(ctx)
 	}
-	// CLI mode: read messages from stdin.
-	fmt.Fprintln(os.Stderr, "WheelMaker ready. Type a message or /status, /use <adapter>, /cancel. Ctrl+C to quit.")
-	scanner := bufio.NewScanner(os.Stdin)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
-		fmt.Fprint(os.Stderr, "> ")
-		if !scanner.Scan() {
-			return nil
-		}
-		text := scanner.Text()
-		if text == "" {
-			continue
-		}
-		c.HandleMessage(im.Message{
-			ChatID:    "cli",
-			MessageID: "cli-msg",
-			UserID:    "local",
-			Text:      text,
-		})
-	}
-}
-
-// HandleMessage routes an incoming IM (or CLI) message to the appropriate handler.
-func (c *Client) HandleMessage(msg im.Message) {
-	text := strings.TrimSpace(msg.Text)
-	if text == "" {
-		return
-	}
-	if strings.HasPrefix(text, "/") {
-		c.handleCommand(msg, text)
-		return
-	}
-	c.handlePrompt(msg, text)
+	return errors.New("no IM adapter configured; add a console project to config.json")
 }
 
 // Close saves state and shuts down the active agent.
+// Stops the idle timer to prevent double-close races.
 func (c *Client) Close() error {
 	c.mu.Lock()
+	if c.idleTimer != nil {
+		c.idleTimer.Stop()
+		c.idleTimer = nil
+	}
 	ag := c.ag
-	state := c.state
 	c.mu.Unlock()
 
 	if ag != nil {
-		// Persist the final session ID before closing.
-		if sid := ag.SessionID(); sid != "" && state != nil {
-			c.mu.Lock()
-			if state.SessionIDs == nil {
-				state.SessionIDs = map[string]string{}
-			}
-			state.SessionIDs[ag.AdapterName()] = sid
-			c.mu.Unlock()
-		}
+		c.persistAgentMeta(ag)
 		_ = ag.Close()
 	}
 
@@ -190,22 +132,51 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// HandleMessage routes an incoming IM message to the appropriate handler.
+// Known commands (/use, /cancel, /status) are dispatched to handleCommand;
+// everything else — including lines starting with "/" that are not known commands —
+// is forwarded to the agent as a prompt.
+func (c *Client) HandleMessage(msg im.Message) {
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		return
+	}
+	if cmd, args, ok := parseCommand(text); ok {
+		c.handleCommand(msg, cmd, args)
+		return
+	}
+	c.handlePrompt(msg, text)
+}
+
 // --- internal ---
 
-// handleCommand processes "/" prefixed commands.
-func (c *Client) handleCommand(msg im.Message, text string) {
+// parseCommand checks whether text is a recognized WheelMaker command.
+// Only exact first-word matches (/use, /cancel, /status) are treated as commands;
+// all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
+func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
-	cmd := strings.ToLower(parts[0])
+	if len(parts) == 0 {
+		return
+	}
+	switch parts[0] {
+	case "/use", "/cancel", "/status":
+		return parts[0], strings.Join(parts[1:], " "), true
+	}
+	return
+}
 
+// handleCommand processes recognized "/" commands.
+func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	switch cmd {
 	case "/use":
-		if len(parts) < 2 {
+		if args == "" {
 			c.reply(msg.ChatID, "Usage: /use <adapter-name> [--continue]  (e.g. /use codex)")
 			return
 		}
-		name := strings.ToLower(parts[1])
+		parts := strings.Fields(args)
+		name := strings.ToLower(parts[0])
 		mode := agent.SwitchClean
-		for _, p := range parts[2:] {
+		for _, p := range parts[1:] {
 			if p == "--continue" {
 				mode = agent.SwitchWithContext
 			}
@@ -241,27 +212,31 @@ func (c *Client) handleCommand(msg im.Message, text string) {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
 		c.reply(msg.ChatID, status)
-
-	default:
-		c.reply(msg.ChatID, fmt.Sprintf("Unknown command: %s\nAvailable: /use <adapter>, /cancel, /status", cmd))
 	}
 }
 
-// handlePrompt sends text to the active session and streams the response.
-// promptMu is held for the entire duration so that switchAdapter cannot race
-// with ensureReady or an active update drain.
+// handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
+// promptMu is held for the full duration, serializing with switchAdapter.
 func (c *Client) handlePrompt(msg im.Message, text string) {
-	c.mu.Lock()
-	sess := c.session
-	c.mu.Unlock()
-	if sess == nil {
-		c.reply(msg.ChatID, "No active session. Use /use <adapter> to start.")
-		return
-	}
-
-	// Hold promptMu for the full duration, covering ensureReady inside sess.Prompt.
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
+
+	// Lazily initialize the agent if no session exists yet.
+	c.mu.Lock()
+	if err := c.ensureAgent(context.Background()); err != nil {
+		c.mu.Unlock()
+		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <adapter> to connect.", err))
+		return
+	}
+	sess := c.session
+	ag := c.ag // capture early so error paths can persist the session ID
+	c.resetIdleTimer() // refresh timeout before sending prompt
+	c.mu.Unlock()
+
+	// SD fix: persist session ID immediately after ensureAgent so it survives a mid-prompt crash.
+	// This is a lightweight JSON write that covers both the "just created" and "already running" cases.
+	c.persistAgentMeta(ag)
+	_ = c.store.Save(c.state)
 
 	ctx := context.Background()
 	updates, err := sess.Prompt(ctx, text)
@@ -293,30 +268,104 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 	c.mu.Lock()
 	c.currentPromptCh = nil
+	c.resetIdleTimer() // reset after prompt completes: 30 min from last activity
 	c.mu.Unlock()
+
+	// Persist again after prompt completes: AvailableCommands etc. may have changed.
+	c.persistAgentMeta(ag)
+	_ = c.store.Save(c.state)
 
 	if buf.Len() > 0 {
 		c.reply(msg.ChatID, buf.String())
 	}
 }
 
+// ensureAgent connects the active adapter and creates the agent if not already running.
+// Must be called while holding c.mu.
+func (c *Client) ensureAgent(ctx context.Context) error {
+	if c.session != nil {
+		return nil
+	}
+	if c.state == nil {
+		return errors.New("state not loaded")
+	}
+	name := c.state.ActiveAdapter
+	if name == "" {
+		name = "codex"
+	}
+	fac := c.adapterFacs[name]
+	if fac == nil {
+		return fmt.Errorf("no adapter registered for %q", name)
+	}
+	conn, err := fac("", nil).Connect(ctx)
+	if err != nil {
+		return fmt.Errorf("connect %q: %w", name, err)
+	}
+	if c.debugLog != nil {
+		conn.SetDebugLogger(c.debugLog)
+	}
+	savedSID := ""
+	if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
+		savedSID = as.LastSessionID
+	} else {
+		savedSID = c.state.SessionIDs[name]
+	}
+	var ag *agent.Agent
+	if savedSID != "" {
+		ag = agent.NewWithSessionID(name, conn, c.cwd, savedSID)
+	} else {
+		ag = agent.New(name, conn, c.cwd)
+	}
+	c.ag = ag
+	c.session = ag
+	c.resetIdleTimer()
+	return nil
+}
+
+// resetIdleTimer restarts the 30-minute idle timer.
+// Must be called while holding c.mu.
+func (c *Client) resetIdleTimer() {
+	if c.idleTimer != nil {
+		c.idleTimer.Stop()
+	}
+	c.idleTimer = time.AfterFunc(idleTimeout, c.idleClose)
+}
+
+// idleClose is called by the idle timer when no activity has occurred for idleTimeout.
+// It acquires promptMu (to wait for any in-progress prompt) then saves state and closes
+// the agent subprocess.
+func (c *Client) idleClose() {
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
+
+	c.mu.Lock()
+	if c.session == nil {
+		c.mu.Unlock()
+		return
+	}
+	ag := c.ag
+	c.mu.Unlock()
+
+	c.persistAgentMeta(ag)
+
+	c.mu.Lock()
+	_ = c.store.Save(c.state)
+	_ = ag.Close()
+	c.session = nil
+	c.ag = nil
+	c.mu.Unlock()
+}
+
 // switchAdapter cancels any in-progress prompt, waits for it to finish via
-// promptMu, connects a new binary, and calls ag.Switch() to replace the connection.
-// Always uses c.ag (concrete type) for Switch, never c.session (interface),
-// to avoid type assertion panics when a mock is injected in tests.
+// promptMu, connects a new adapter binary, and calls ag.Switch() to replace
+// the connection. Always uses c.ag (concrete type) for Switch.
 //
-// Ordering: Cancel() → promptMu.Lock() → drain → ag-refresh → outgoing-snapshot → Connect() → ag.Switch() → persist.
-// Both c.ag and the outgoing name/session ID are re-read AFTER promptMu is held so that:
-//   - ensureReady (which sets session ID) has completed before we read it.
-//   - a concurrent prior switch that mutated the agent in-place is complete, so
-//     we read the correct outgoing adapter name rather than a stale pre-switch name.
-//   - if c.ag was nil at entry and a concurrent switch installed one while we waited,
-//     we use the fresh agent (not the stale nil) and avoid leaking a subprocess.
+// Ordering: Cancel() → promptMu.Lock() → drain → ag-refresh → outgoing-snapshot →
+// Connect() → ag.Switch() → persist → resetIdleTimer().
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.adapterFacs[name]
 	sess := c.session
-	ag := c.ag
 	c.mu.Unlock()
 
 	if fac == nil {
@@ -342,15 +391,10 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.mu.Unlock()
 	}
 
-	// Snapshot BOTH outgoing adapter name and session ID AFTER promptMu is held
-	// and the channel is drained. Any concurrent switch that ran first has already
-	// mutated the agent in-place; reading here gives the correct outgoing state.
-	//
-	// Also re-read c.ag: if startup left c.ag==nil and a concurrent /use completed
-	// while we were waiting on promptMu, it will have installed a new agent. Using
-	// the stale nil snapshot would overwrite that agent without closing its subprocess.
+	// Re-read c.ag/c.session after acquiring promptMu: a concurrent switch that completed
+	// while we were waiting may have installed a new agent (nil-ag creation path).
 	c.mu.Lock()
-	ag = c.ag
+	ag := c.ag
 	sess = c.session
 	c.mu.Unlock()
 
@@ -361,23 +405,29 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		outgoingSessionID = sess.SessionID()
 	}
 
-	// Step 2: connect the new adapter using persisted config.
-	// Read the saved session ID for the incoming adapter regardless of mode:
-	// for SwitchClean ensureReady uses it for session/load; for SwitchWithContext
-	// the bootstrap may be skipped (no lastReply) and the clean-switch fallback
-	// inside ag.Switch also needs it to restore the saved session.
+	// Step 2: read saved session ID for the incoming adapter and connect.
+	// Prefer the richer Agents map; fall back to legacy SessionIDs.
 	c.mu.Lock()
-	cfg := AdapterConfig{}
 	var savedSID string
 	if c.state != nil {
-		cfg = c.state.Adapters[name]
-		savedSID = c.state.SessionIDs[name]
+		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
+			savedSID = as.LastSessionID
+		} else {
+			savedSID = c.state.SessionIDs[name]
+		}
 	}
 	c.mu.Unlock()
 
-	newConn, err := fac(cfg.ExePath, cfg.Env).Connect(ctx)
+	newConn, err := fac("", nil).Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
+	}
+
+	c.mu.Lock()
+	dw := c.debugLog
+	c.mu.Unlock()
+	if dw != nil {
+		newConn.SetDebugLogger(dw)
 	}
 
 	// Step 3: replace the connection via the concrete Agent type.
@@ -386,17 +436,12 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 			return fmt.Errorf("switch %q: %w", name, err)
 		}
 	} else {
-		// No active agent (Start() could not connect): create one from scratch.
-		// SwitchWithContext has no lastReply to bootstrap from; behaves like SwitchClean.
-		cwd, err := os.Getwd()
-		if err != nil {
-			cwd = "."
-		}
+		// No active agent (lazy init never ran or idleClose fired): create from scratch.
 		var newAg *agent.Agent
 		if savedSID != "" {
-			newAg = agent.NewWithSessionID(name, newConn, cwd, savedSID)
+			newAg = agent.NewWithSessionID(name, newConn, c.cwd, savedSID)
 		} else {
-			newAg = agent.New(name, newConn, cwd)
+			newAg = agent.New(name, newConn, c.cwd)
 		}
 		c.mu.Lock()
 		c.ag = newAg
@@ -406,26 +451,28 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	}
 
 	// Persist results: save outgoing session ID and update active adapter.
+	// For outgoing adapter, capture current session ID into state before switch.
+	if outgoingName != "" && outgoingSessionID != "" {
+		c.mu.Lock()
+		if c.state != nil {
+			c.state.SessionIDs[outgoingName] = outgoingSessionID
+			if as := c.state.Agents[outgoingName]; as != nil {
+				as.LastSessionID = outgoingSessionID
+			}
+		}
+		c.mu.Unlock()
+	}
+
+	// For SwitchWithContext, ag.Switch bootstrapped a new session; persist its metadata.
+	if ag != nil {
+		c.persistAgentMeta(ag)
+	}
+
 	c.mu.Lock()
 	if c.state != nil {
-		if outgoingName != "" && outgoingSessionID != "" {
-			if c.state.SessionIDs == nil {
-				c.state.SessionIDs = map[string]string{}
-			}
-			c.state.SessionIDs[outgoingName] = outgoingSessionID
-		}
-		// For SwitchWithContext, ag.Switch bootstrapped a new session synchronously.
-		// Save its session ID immediately so a crash before Close() doesn't lose it.
-		if mode == agent.SwitchWithContext && ag != nil {
-			if newSID := ag.SessionID(); newSID != "" {
-				if c.state.SessionIDs == nil {
-					c.state.SessionIDs = map[string]string{}
-				}
-				c.state.SessionIDs[name] = newSID
-			}
-		}
 		c.state.ActiveAdapter = name
 	}
+	c.resetIdleTimer()
 	c.mu.Unlock()
 	_ = c.store.Save(c.state)
 
@@ -444,7 +491,63 @@ func (c *Client) registeredAdapterNames() []string {
 	return names
 }
 
-// reply sends a text response to the chat, or prints to stdout in CLI mode.
+// persistAgentMeta snapshots the current agent metadata and writes it into state.
+// Must be called while NOT holding c.mu (it acquires c.mu internally).
+func (c *Client) persistAgentMeta(ag *agent.Agent) {
+	if ag == nil {
+		return
+	}
+	initMeta, sessMeta := ag.Meta()
+	sessionID := ag.SessionID()
+	adapterName := ag.AdapterName()
+	if adapterName == "" {
+		return
+	}
+
+	c.mu.Lock()
+	if c.state == nil {
+		c.mu.Unlock()
+		return
+	}
+	if c.state.Agents == nil {
+		c.state.Agents = map[string]*AgentState{}
+	}
+	as := c.state.Agents[adapterName]
+	if as == nil {
+		as = &AgentState{}
+		c.state.Agents[adapterName] = as
+	}
+	as.LastSessionID = sessionID
+	as.ProtocolVersion = initMeta.ProtocolVersion
+	as.AgentCapabilities = initMeta.AgentCapabilities
+	as.AgentInfo = initMeta.AgentInfo
+	as.AuthMethods = initMeta.AuthMethods
+
+	if sessionID != "" {
+		ss := buildAgentSessionState(sessMeta)
+		if as.Sessions == nil {
+			as.Sessions = map[string]*AgentSessionState{}
+		}
+		as.Sessions[sessionID] = ss
+	}
+	// Also keep SessionIDs in sync for backward compat.
+	if sessionID != "" {
+		c.state.SessionIDs[adapterName] = sessionID
+	}
+	c.mu.Unlock()
+}
+
+// buildAgentSessionState converts agent.SessionMeta into the persisted AgentSessionState.
+func buildAgentSessionState(m agent.SessionMeta) *AgentSessionState {
+	return &AgentSessionState{
+		Modes:             m.Modes,
+		Models:            m.Models,
+		ConfigOptions:     m.ConfigOptions,
+		AvailableCommands: m.AvailableCommands,
+	}
+}
+
+// reply sends a text response to the chat via the IM adapter.
 func (c *Client) reply(chatID, text string) {
 	if c.imRun != nil {
 		_ = c.imRun.SendText(chatID, text)

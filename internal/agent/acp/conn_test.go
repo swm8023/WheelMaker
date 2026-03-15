@@ -50,7 +50,7 @@ func TestSend_Initialize(t *testing.T) {
 	c := newMockConn(t)
 	var result acp.InitializeResult
 	err := c.Send(context.Background(), "initialize", acp.InitializeParams{
-		ProtocolVersion: "0.1",
+		ProtocolVersion: 1,
 		ClientInfo:      &acp.AgentInfo{Name: "test", Version: "0"},
 	}, &result)
 	if err != nil {
@@ -152,7 +152,7 @@ func TestSubscribe_Notification(t *testing.T) {
 
 	// Initialize and create a session first.
 	var initResult acp.InitializeResult
-	if err := c.Send(context.Background(), "initialize", acp.InitializeParams{ProtocolVersion: "0.1"}, &initResult); err != nil {
+	if err := c.Send(context.Background(), "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	var sessResult acp.SessionNewResult
@@ -181,7 +181,7 @@ func TestSubscribe_Notification(t *testing.T) {
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
-		Prompt:    "hello",
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "hello"}},
 	}, &promptResult); err != nil {
 		t.Fatalf("session/prompt: %v", err)
 	}
@@ -203,8 +203,10 @@ func TestSubscribe_Notification(t *testing.T) {
 		if n.Update.SessionUpdate != "agent_message_chunk" {
 			t.Errorf("unexpected update type: %s", n.Update.SessionUpdate)
 		}
-		if n.Update.Content == nil || n.Update.Content.Type != "text" {
-			t.Errorf("unexpected content: %+v", n.Update.Content)
+		// F4 fix: Content is now json.RawMessage.
+		var cb acp.ContentBlock
+		if err := json.Unmarshal(n.Update.Content, &cb); err != nil || cb.Type != "text" {
+			t.Errorf("unexpected content: %s", n.Update.Content)
 		}
 	}
 }
@@ -224,7 +226,7 @@ func TestSubscribe_Cancel(t *testing.T) {
 	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
 	_ = c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
-		Prompt:    "test",
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "test"}},
 	}, nil)
 
 	time.Sleep(30 * time.Millisecond)
@@ -369,7 +371,7 @@ func TestMultipleSubscribers(t *testing.T) {
 	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
 	_ = c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
-		Prompt:    "multi",
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "multi"}},
 	}, nil)
 
 	time.Sleep(30 * time.Millisecond)
@@ -429,8 +431,8 @@ func runMockAgent() {
 
 		case "session/prompt":
 			var params struct {
-				SessionID string `json:"sessionId"`
-				Prompt    string `json:"prompt"`
+				SessionID string          `json:"sessionId"`
+				Prompt    json.RawMessage `json:"prompt"`
 			}
 			_ = json.Unmarshal(raw.Params, &params)
 

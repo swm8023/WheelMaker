@@ -1,5 +1,5 @@
 // Command wheelmaker runs the WheelMaker daemon.
-// In MVP mode (no IM configured), it reads messages from stdin for testing.
+// It reads ~/.wheelmaker/config.json to configure projects and IM adapters.
 package main
 
 import (
@@ -10,9 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/swm8023/wheelmaker/internal/adapter"
-	"github.com/swm8023/wheelmaker/internal/adapter/codex"
-	"github.com/swm8023/wheelmaker/internal/client"
+	"github.com/swm8023/wheelmaker/internal/hub"
 )
 
 func main() {
@@ -23,30 +21,26 @@ func main() {
 }
 
 func run() error {
-	// State file: ~/.wheelmaker/state.json
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
 	}
+	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
 	statePath := filepath.Join(home, ".wheelmaker", "state.json")
 
-	store := client.NewJSONStore(statePath)
-	c := client.New(store, nil) // no IM adapter in MVP
-
-	// Register the Codex adapter factory.
-	// The factory is called at connect time with ExePath and Env from persisted state,
-	// so any runtime-configured binary path or environment overrides are applied.
-	c.RegisterAdapter("codex", func(exePath string, env map[string]string) adapter.Adapter {
-		return codex.NewAdapter(codex.Config{ExePath: exePath, Env: env})
-	})
+	cfg, err := hub.LoadConfig(cfgPath)
+	if err != nil {
+		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := c.Start(ctx); err != nil {
-		return fmt.Errorf("start: %w", err)
+	h := hub.New(cfg, statePath)
+	if err := h.Start(ctx); err != nil {
+		return err
 	}
-	defer c.Close()
+	defer h.Close()
 
-	return c.Run(ctx) // blocks: CLI mode drives stdin loop
+	return h.Run(ctx)
 }

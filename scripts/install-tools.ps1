@@ -37,31 +37,26 @@ function Install-CodexAcp {
         return
     }
 
-    Write-Host "Trying npx @zed-industries/codex-acp..."
-    $npxSuccess = $false
+    Write-Host "Trying npm install -g @zed-industries/codex-acp..."
     try {
-        & npx --yes @zed-industries/codex-acp --version
-        $npxSuccess = $true
+        & npm install -g @zed-industries/codex-acp 2>&1 | Out-Null
     } catch {
-        Write-Host "npx invocation failed: $_"
+        Write-Host "npm install failed: $_"
     }
 
-    if (-not $npxSuccess) {
-        Write-Warning "Could not install codex-acp automatically."
-        Write-Warning "Place codex-acp.exe manually at: $Dest\codex-acp.exe"
-        return
-    }
-
-    # Find the binary in npm global bin or npx cache
+    # Find the binary: check npm global root and common locations
     $candidates = @()
-    $npmBin = & npm bin -g 2>$null
-    if ($npmBin) {
-        $candidates += Join-Path $npmBin "codex-acp.exe"
+    $npmRoot = & npm root -g 2>$null
+    if ($npmRoot) {
+        # Direct binary in package
+        $candidates += Join-Path $npmRoot "@zed-industries\codex-acp\codex-acp.exe"
+        # Platform-specific binary nested inside the package
+        $candidates += Join-Path $npmRoot "@zed-industries\codex-acp\node_modules\@zed-industries\codex-acp-win32-x64\bin\codex-acp.exe"
     }
     $appData = $env:APPDATA
     if ($appData) {
         $candidates += "$appData\npm\codex-acp.exe"
-        $candidates += "$appData\npm\node_modules\@zed-industries\codex-acp\codex-acp.exe"
+        $candidates += "$appData\npm\node_modules\@zed-industries\codex-acp\node_modules\@zed-industries\codex-acp-win32-x64\bin\codex-acp.exe"
     }
 
     foreach ($c in $candidates) {

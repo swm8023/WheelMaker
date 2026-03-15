@@ -20,14 +20,15 @@ type AutoAllowHandler struct{}
 func (h *AutoAllowHandler) RequestPermission(_ context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	optionID := ""
 	for _, opt := range params.Options {
+		// B1 fix: field is OptionID (json:"optionId"), was ID (json:"id").
 		if opt.Kind == "allow_once" {
-			optionID = opt.ID
+			optionID = opt.OptionID
 			break
 		}
 	}
 	// Fall back to first option if allow_once is not present.
 	if optionID == "" && len(params.Options) > 0 {
-		optionID = params.Options[0].ID
+		optionID = params.Options[0].OptionID
 	}
 	return acp.PermissionResult{
 		Outcome:  "selected",

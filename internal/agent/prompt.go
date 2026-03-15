@@ -25,21 +25,30 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	a.mu.Lock()
 	conn := a.conn
 	sessID := a.sessionID
+	// FL2: create per-prompt context so Cancel() can unblock pending permission requests.
+	promptCtx, promptCancel := context.WithCancel(ctx)
+	a.promptCtx = promptCtx
+	a.promptCancel = promptCancel
 	a.mu.Unlock()
 
 	updates := make(chan Update, 32)
 
-	// sendMu and channelClosed coordinate the subscriber and the close operation.
-	// Sending to a closed channel panics even inside a select, so we use a flag
-	// guarded by a mutex to prevent any send after close.
-	var sendMu sync.Mutex
-	var channelClosed bool
+	// promptDone is closed by the response goroutine just before it closes updates.
+	// The notification handler selects on it so it never sends to a closed channel
+	// in the ctx-cancelled case (where conn.Send returns early before the wire response).
+	promptDone := make(chan struct{})
 
 	// replyMu protects replyBuf, which accumulates text for lastReply.
 	var replyMu sync.Mutex
 	var replyBuf strings.Builder
 
 	// Subscribe to session/update notifications for this session.
+	// The handler runs synchronously inside acp.Conn.dispatch(), which is called
+	// on the readLoop goroutine. Because dispatch() is synchronous, all notifications
+	// received before a response on the wire are fully processed before conn.Send()
+	// returns — so under normal completion the response goroutine closes the channel
+	// only after all prior notifications are handled. Do NOT call conn.Send() from
+	// this handler (would deadlock readLoop).
 	cancelSub := conn.Subscribe(func(n acp.Notification) {
 		if n.Method != "session/update" {
 			return
@@ -52,6 +61,11 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			return
 		}
 
+		// Track available commands in agent state so the client can persist them.
+		if p.Update.SessionUpdate == "available_commands_update" && len(p.Update.AvailableCommands) > 0 {
+			a.setAvailableCommands(p.Update.AvailableCommands)
+		}
+
 		u := sessionUpdateToUpdate(p.Update, n.Params)
 
 		// Accumulate text content for SwitchWithContext.
@@ -61,29 +75,48 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			replyMu.Unlock()
 		}
 
-		// Forward via a goroutine so this handler returns immediately and never
-		// blocks acp.Conn.dispatch(), which runs synchronously on the read loop.
-		// sendMu and channelClosed ensure the send is safe and ordered.
-		go func(u Update) {
-			sendMu.Lock()
-			if !channelClosed {
-				select {
-				case updates <- u:
-				case <-ctx.Done():
-				}
+		// Send directly to preserve wire ordering. The channel is buffered (32);
+		// if full, readLoop pauses until the caller drains — no deadlock because
+		// the caller drains from a separate goroutine.
+		//
+		// We need to handle two cases where updates may be closed before this
+		// handler runs:
+		//   1. ctx cancelled: conn.Send returns early, response goroutine closes
+		//      updates before all in-flight notifications are dispatched.
+		//   2. Concurrent Prompts sharing a session: another prompt's handler
+		//      fires after our channel is already closed.
+		// recover() catches the "send on closed channel" panic from either case.
+		// promptDone serves as a fast-path signal to skip the send without a
+		// panic in the common cancellation scenario.
+		func() {
+			defer func() { recover() }() //nolint:errcheck
+			select {
+			case updates <- u:
+			case <-ctx.Done():
+			case <-promptDone:
 			}
-			sendMu.Unlock()
-		}(u)
+		}()
 	})
 
 	// Goroutine: send session/prompt; emit Done or Error update when complete.
 	go func() {
 		defer cancelSub()
+		defer func() {
+			// FL2: clear per-prompt context when this goroutine exits.
+			a.mu.Lock()
+			if a.promptCancel != nil {
+				a.promptCtx = nil
+				a.promptCancel = nil
+			}
+			a.mu.Unlock()
+			promptCancel()
+		}()
 
 		var result acp.SessionPromptResult
+		// F2 fix: Prompt is []ContentBlock per spec (was plain string).
 		err := conn.Send(ctx, "session/prompt", acp.SessionPromptParams{
 			SessionID: sessID,
-			Prompt:    text,
+			Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
 		}, &result)
 
 		// Always update lastReply (even if empty) to clear stale values from previous prompts.
@@ -94,22 +127,19 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		a.lastReply = reply
 		a.mu.Unlock()
 
-		// Acquire sendMu to close the channel safely: set channelClosed first so
-		// concurrent subscriber goroutines see it and stop sending, then close.
 		var finalUpdate Update
 		if err != nil {
 			finalUpdate = Update{Type: UpdateError, Err: err, Done: true}
 		} else {
 			finalUpdate = Update{Type: UpdateDone, Content: result.StopReason, Done: true}
 		}
-		sendMu.Lock()
-		channelClosed = true
 		select {
 		case updates <- finalUpdate:
 		case <-ctx.Done():
 		}
+		// Signal handlers to stop sending, then close the channel.
+		close(promptDone)
 		close(updates)
-		sendMu.Unlock()
 	}()
 
 	return updates, nil
@@ -121,15 +151,22 @@ func sessionUpdateToUpdate(u acp.SessionUpdate, rawParams json.RawMessage) Updat
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		text := ""
-		if u.Content != nil && u.Content.Type == "text" {
-			text = u.Content.Text
+		// F4 fix: Content is now json.RawMessage (was *ContentBlock).
+		if u.Content != nil {
+			var cb acp.ContentBlock
+			if err := json.Unmarshal(u.Content, &cb); err == nil && cb.Type == "text" {
+				text = cb.Text
+			}
 		}
 		return Update{Type: UpdateText, Content: text}
 
 	case "agent_thought_chunk":
 		text := ""
 		if u.Content != nil {
-			text = u.Content.Text
+			var cb acp.ContentBlock
+			if err := json.Unmarshal(u.Content, &cb); err == nil {
+				text = cb.Text
+			}
 		}
 		return Update{Type: UpdateThought, Content: text}
 

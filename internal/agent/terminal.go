@@ -53,8 +53,9 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 	}
 	if len(params.Env) > 0 {
 		env := os.Environ()
-		for k, v := range params.Env {
-			env = append(env, k+"="+v)
+		// B5 fix: Env is now []EnvVariable (was map[string]string).
+		for _, e := range params.Env {
+			env = append(env, e.Name+"="+e.Value)
 		}
 		cmd.Env = env
 	}
@@ -120,14 +121,19 @@ func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, 
 	}
 	output := string(raw)
 	exitCode := t.exitCode
+	sig := t.signal
 	t.mu.Unlock()
 
 	result := acp.TerminalOutputResult{
 		Output:    output,
 		Truncated: truncated,
 	}
-	if exitCode != nil {
-		result.ExitStatus = exitCode
+	// B6 fix: exitStatus is an object {exitCode, signal}, not a plain integer.
+	if exitCode != nil || sig != nil {
+		result.ExitStatus = &acp.TerminalExitStatus{
+			ExitCode: exitCode,
+			Signal:   sig,
+		}
 	}
 	return result, nil
 }

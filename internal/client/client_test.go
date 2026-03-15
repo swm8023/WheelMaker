@@ -117,7 +117,7 @@ var _ client.Store = (*mockStore)(nil)
 // newTestClient creates a Client for testing with an injected mock session.
 func newTestClient(mock *mockSession) *client.Client {
 	store := &mockStore{}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.InjectSession(mock)
 	return c
 }
@@ -187,7 +187,7 @@ func TestHandleMessage_Cancel(t *testing.T) {
 
 func TestHandleMessage_Cancel_NoSession(t *testing.T) {
 	store := &mockStore{}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	msgs := captureReplies(c)
 
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/cancel"})
@@ -218,25 +218,13 @@ func TestHandleMessage_Status(t *testing.T) {
 
 func TestHandleMessage_Status_NoSession(t *testing.T) {
 	store := &mockStore{}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	msgs := captureReplies(c)
 
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/status"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want no active session message", *msgs)
-	}
-}
-
-func TestHandleMessage_UnknownCommand(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
-	c := newTestClient(mock)
-	msgs := captureReplies(c)
-
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/foobar"})
-
-	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Unknown command") {
-		t.Errorf("reply = %v, want Unknown command", *msgs)
 	}
 }
 
@@ -336,7 +324,7 @@ func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
 
 func TestHandleMessage_Prompt_NoSession(t *testing.T) {
 	store := &mockStore{}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	msgs := captureReplies(c)
 
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
@@ -420,9 +408,6 @@ func TestJSONStore_DefaultState(t *testing.T) {
 	if state.ActiveAdapter != "codex" {
 		t.Errorf("ActiveAdapter = %q, want codex", state.ActiveAdapter)
 	}
-	if state.Adapters == nil {
-		t.Error("Adapters should not be nil")
-	}
 	if state.SessionIDs == nil {
 		t.Error("SessionIDs should not be nil")
 	}
@@ -434,9 +419,6 @@ func TestJSONStore_SaveLoad(t *testing.T) {
 
 	original := &client.State{
 		ActiveAdapter: "codex",
-		Adapters: map[string]client.AdapterConfig{
-			"codex": {ExePath: "/usr/bin/codex-acp"},
-		},
 		SessionIDs: map[string]string{
 			"codex": "session-xyz-123",
 		},
@@ -510,17 +492,17 @@ func TestJSONStore_SaveWritesNewKeys(t *testing.T) {
 		t.Fatalf("unmarshal saved file: %v", err)
 	}
 
-	if _, ok := raw["activeAdapter"]; !ok {
-		t.Error("saved file missing 'activeAdapter' key")
-	}
-	if _, ok := raw["session_ids"]; !ok {
-		t.Error("saved file missing 'session_ids' key")
+	if _, ok := raw["projects"]; !ok {
+		t.Error("saved file missing top-level 'projects' key")
 	}
 	if _, ok := raw["active_agent"]; ok {
 		t.Error("saved file should not contain legacy 'active_agent' key")
 	}
 	if _, ok := raw["acp_session_ids"]; ok {
 		t.Error("saved file should not contain legacy 'acp_session_ids' key")
+	}
+	if _, ok := raw["activeAdapter"]; ok {
+		t.Error("saved file should not have flat 'activeAdapter' key (must be nested under 'projects')")
 	}
 }
 
@@ -550,67 +532,6 @@ func TestJSONStore_NewKeysTakePrecedenceOverLegacy(t *testing.T) {
 	}
 	if state.SessionIDs["new-codex"] != "new-sess" {
 		t.Errorf("SessionIDs[new-codex] = %q, want new-sess", state.SessionIDs["new-codex"])
-	}
-}
-
-func TestJSONStore_MigratesLegacyAgentsExePath(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-
-	legacy := map[string]any{
-		"active_agent": "codex",
-		"agents": map[string]any{
-			"codex": map[string]any{"exe_path": "/usr/local/bin/codex-acp"},
-		},
-	}
-	data, _ := json.MarshalIndent(legacy, "", "  ")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write legacy file: %v", err)
-	}
-
-	store := client.NewJSONStore(path)
-	state, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	if state.Adapters["codex"].ExePath != "/usr/local/bin/codex-acp" {
-		t.Errorf("Adapters[codex].ExePath = %q, want /usr/local/bin/codex-acp",
-			state.Adapters["codex"].ExePath)
-	}
-}
-
-func TestJSONStore_MigratesLegacyAgentsEnv(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-
-	legacy := map[string]any{
-		"active_agent": "codex",
-		"agents": map[string]any{
-			"codex": map[string]any{
-				"exe_path": "/usr/local/bin/codex-acp",
-				"env":      map[string]string{"OPENAI_API_KEY": "sk-test"},
-			},
-		},
-	}
-	data, _ := json.MarshalIndent(legacy, "", "  ")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write legacy file: %v", err)
-	}
-
-	store := client.NewJSONStore(path)
-	state, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	if state.Adapters["codex"].ExePath != "/usr/local/bin/codex-acp" {
-		t.Errorf("Adapters[codex].ExePath = %q, want /usr/local/bin/codex-acp",
-			state.Adapters["codex"].ExePath)
-	}
-	if state.Adapters["codex"].Env["OPENAI_API_KEY"] != "sk-test" {
-		t.Errorf("Adapters[codex].Env[OPENAI_API_KEY] = %q, want sk-test",
-			state.Adapters["codex"].Env["OPENAI_API_KEY"])
 	}
 }
 
@@ -668,15 +589,13 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 	st := &client.State{
 		ActiveAdapter: "codex",
 		SessionIDs:    map[string]string{"codex": "outgoing-sess-123"},
-		Adapters:      map[string]client.AdapterConfig{},
 	}
 	store := &mockStore{state: st}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.InjectSession(outgoing)
 	c.InjectState(&client.State{
 		ActiveAdapter: "codex",
 		SessionIDs:    map[string]string{"codex": "outgoing-sess-123"},
-		Adapters:      map[string]client.AdapterConfig{},
 	})
 	c.RegisterAdapter("new-adapter", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -708,7 +627,7 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	outgoing := &mockSession{adapterN: "codex", sessionN: "codex-sess-1"}
 	store := &mockStore{}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.InjectSession(outgoing)
 	c.InjectState(&client.State{
 		ActiveAdapter: "codex",
@@ -716,7 +635,6 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 			"codex":       "codex-sess-1",
 			"new-adapter": "old-stale-sess", // pre-existing saved session for target
 		},
-		Adapters: map[string]client.AdapterConfig{},
 	})
 	c.RegisterAdapter("new-adapter", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -744,10 +662,9 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		Adapters:      map[string]client.AdapterConfig{"codex": {}},
 		SessionIDs:    map[string]string{},
 	}}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
 	})
@@ -786,50 +703,15 @@ func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 	}
 }
 
-// TestRegisterAdapter_FactoryCalledWithStateConfig verifies that RegisterAdapter
-// factories receive ExePath and Env from persisted State.Adapters at connect time.
-func TestRegisterAdapter_FactoryCalledWithStateConfig(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "codex",
-		Adapters: map[string]client.AdapterConfig{
-			"codex": {ExePath: "/custom/codex", Env: map[string]string{"API_KEY": "test-key"}},
-		},
-		SessionIDs: map[string]string{},
-	}}
-
-	var gotExePath string
-	var gotEnv map[string]string
-	c := client.New(store, nil)
-	c.RegisterAdapter("codex", func(exePath string, env map[string]string) adapter.Adapter {
-		gotExePath = exePath
-		gotEnv = env
-		return &minimalMockAdapter{}
-	})
-
-	ctx := context.Background()
-	if err := c.Start(ctx); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer c.Close()
-
-	if gotExePath != "/custom/codex" {
-		t.Errorf("factory exePath = %q, want /custom/codex", gotExePath)
-	}
-	if gotEnv["API_KEY"] != "test-key" {
-		t.Errorf("factory env[API_KEY] = %q, want test-key", gotEnv["API_KEY"])
-	}
-}
-
 // TestStart_UnregisteredAdapter_NonFatal verifies that Start() succeeds when the
 // persisted activeAdapter was not registered in this build, leaving session nil.
 // The user can issue /use <adapter> to connect a registered adapter and recover.
 func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "unknown-adapter",
-		Adapters:      map[string]client.AdapterConfig{},
 		SessionIDs:    map[string]string{},
 	}}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	// Register "codex" but NOT "unknown-adapter" (simulating a removed adapter).
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -868,10 +750,9 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 func TestStart_ConnectError_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		Adapters:      map[string]client.AdapterConfig{"codex": {}},
 		SessionIDs:    map[string]string{},
 	}}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &failConnectAdapter{}
 	})
@@ -925,10 +806,9 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		Adapters:      map[string]client.AdapterConfig{"codex": {}},
 		SessionIDs:    map[string]string{},
 	}}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
 	})
@@ -975,10 +855,9 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		Adapters:      map[string]client.AdapterConfig{"codex": {}},
 		SessionIDs:    map[string]string{},
 	}}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
 	})
@@ -1023,10 +902,9 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 func TestClient_Close_PersistsSessionID(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		Adapters:      map[string]client.AdapterConfig{"codex": {}},
 		SessionIDs:    map[string]string{},
 	}}
-	c := client.New(store, nil)
+	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
 	})
@@ -1051,44 +929,6 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 	last := store.saved[len(store.saved)-1]
 	if last.SessionIDs["codex"] == "" {
 		t.Errorf("Close did not persist codex session ID; SessionIDs = %v", last.SessionIDs)
-	}
-}
-
-// TestClient_Run_StdinLoop verifies that Run() drives the stdin read loop when no
-// IM adapter is configured, forwarding each line as an im.Message to HandleMessage.
-func TestClient_Run_StdinLoop(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
-	c := newTestClient(mock)
-
-	// Replace os.Stdin with a pipe to simulate typed input.
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe: %v", err)
-	}
-	oldStdin := os.Stdin
-	os.Stdin = r
-	defer func() {
-		os.Stdin = oldStdin
-		r.Close()
-	}()
-
-	// Write one message then close stdin to trigger EOF and exit the loop.
-	go func() {
-		defer w.Close()
-		fmt.Fprintln(w, "hello from stdin")
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	if err := c.Run(ctx); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	mock.mu.Lock()
-	calls := mock.promptCalls
-	mock.mu.Unlock()
-	if len(calls) == 0 || calls[0] != "hello from stdin" {
-		t.Errorf("Run did not forward stdin message; promptCalls = %v", calls)
 	}
 }
 
@@ -1134,11 +974,20 @@ func runClientMockAgent() {
 		case "session/prompt":
 			rejectCtx := os.Getenv("GO_CLIENT_ACP_MOCK_REJECT_CONTEXT") == "1"
 			var params struct {
-				SessionID string `json:"sessionId"`
-				Prompt    string `json:"prompt"`
+				SessionID string            `json:"sessionId"`
+				Prompt    json.RawMessage   `json:"prompt"`
 			}
 			_ = json.Unmarshal(raw.Params, &params)
-			if rejectCtx && strings.HasPrefix(params.Prompt, "[context]") {
+			// Prompt is now []ContentBlock; extract text from first block.
+			var blocks []struct {
+				Text string `json:"text"`
+			}
+			_ = json.Unmarshal(params.Prompt, &blocks)
+			promptText := ""
+			if len(blocks) > 0 {
+				promptText = blocks[0].Text
+			}
+			if rejectCtx && strings.HasPrefix(promptText, "[context]") {
 				_ = enc.Encode(map[string]any{
 					"jsonrpc": "2.0",
 					"id":      id,
