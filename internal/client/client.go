@@ -305,10 +305,8 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 		conn.SetDebugLogger(c.debugLog)
 	}
 	savedSID := ""
-	if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
+	if as := c.state.Agents[name]; as != nil {
 		savedSID = as.LastSessionID
-	} else {
-		savedSID = c.state.SessionIDs[name]
 	}
 	var ag *agent.Agent
 	if savedSID != "" {
@@ -406,14 +404,11 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	}
 
 	// Step 2: read saved session ID for the incoming adapter and connect.
-	// Prefer the richer Agents map; fall back to legacy SessionIDs.
 	c.mu.Lock()
 	var savedSID string
 	if c.state != nil {
-		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
+		if as := c.state.Agents[name]; as != nil {
 			savedSID = as.LastSessionID
-		} else {
-			savedSID = c.state.SessionIDs[name]
 		}
 	}
 	c.mu.Unlock()
@@ -450,15 +445,17 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		ag = newAg
 	}
 
-	// Persist results: save outgoing session ID and update active adapter.
-	// For outgoing adapter, capture current session ID into state before switch.
+	// Persist outgoing session ID before switching active adapter.
 	if outgoingName != "" && outgoingSessionID != "" {
 		c.mu.Lock()
 		if c.state != nil {
-			c.state.SessionIDs[outgoingName] = outgoingSessionID
-			if as := c.state.Agents[outgoingName]; as != nil {
-				as.LastSessionID = outgoingSessionID
+			if c.state.Agents == nil {
+				c.state.Agents = map[string]*AgentState{}
 			}
+			if c.state.Agents[outgoingName] == nil {
+				c.state.Agents[outgoingName] = &AgentState{}
+			}
+			c.state.Agents[outgoingName].LastSessionID = outgoingSessionID
 		}
 		c.mu.Unlock()
 	}
@@ -492,6 +489,8 @@ func (c *Client) registeredAdapterNames() []string {
 }
 
 // persistAgentMeta snapshots the current agent metadata and writes it into state.
+// Only fields with non-zero values are updated, so stale saved data is not overwritten
+// by an uninitialized agent (e.g. immediately after a clean switch before ensureReady).
 // Must be called while NOT holding c.mu (it acquires c.mu internally).
 func (c *Client) persistAgentMeta(ag *agent.Agent) {
 	if ag == nil {
@@ -517,34 +516,26 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) {
 		as = &AgentState{}
 		c.state.Agents[adapterName] = as
 	}
-	as.LastSessionID = sessionID
-	as.ProtocolVersion = initMeta.ProtocolVersion
-	as.AgentCapabilities = initMeta.AgentCapabilities
-	as.AgentInfo = initMeta.AgentInfo
-	as.AuthMethods = initMeta.AuthMethods
-
+	// Only overwrite LastSessionID when we have a real value; preserve the
+	// previously saved ID so session/load can be attempted on the next restart.
 	if sessionID != "" {
-		ss := buildAgentSessionState(sessMeta)
-		if as.Sessions == nil {
-			as.Sessions = map[string]*AgentSessionState{}
-		}
-		as.Sessions[sessionID] = ss
+		as.LastSessionID = sessionID
 	}
-	// Also keep SessionIDs in sync for backward compat.
-	if sessionID != "" {
-		c.state.SessionIDs[adapterName] = sessionID
+	// Only overwrite agent-level info when the initialize handshake has completed.
+	if initMeta.ProtocolVersion != "" {
+		as.ProtocolVersion = initMeta.ProtocolVersion
+		as.AgentCapabilities = initMeta.AgentCapabilities
+		as.AgentInfo = initMeta.AgentInfo
+		as.AuthMethods = initMeta.AuthMethods
+	}
+	// Update session-level metadata when real data is available.
+	if sessMeta.Modes != nil || len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 {
+		as.Modes = sessMeta.Modes
+		as.Models = sessMeta.Models
+		as.ConfigOptions = sessMeta.ConfigOptions
+		as.AvailableCommands = sessMeta.AvailableCommands
 	}
 	c.mu.Unlock()
-}
-
-// buildAgentSessionState converts agent.SessionMeta into the persisted AgentSessionState.
-func buildAgentSessionState(m agent.SessionMeta) *AgentSessionState {
-	return &AgentSessionState{
-		Modes:             m.Modes,
-		Models:            m.Models,
-		ConfigOptions:     m.ConfigOptions,
-		AvailableCommands: m.AvailableCommands,
-	}
 }
 
 // reply sends a text response to the chat via the IM adapter.
