@@ -119,7 +119,7 @@ func (c *Client) Close() error {
 	c.mu.Unlock()
 
 	if ag != nil {
-		c.persistAgentMeta(ag)
+		c.saveAgentState(ag)
 		_ = ag.Close()
 	}
 
@@ -233,11 +233,6 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.resetIdleTimer() // refresh timeout before sending prompt
 	c.mu.Unlock()
 
-	// SD fix: persist session ID immediately after ensureAgent so it survives a mid-prompt crash.
-	// This is a lightweight JSON write that covers both the "just created" and "already running" cases.
-	c.persistAgentMeta(ag)
-	_ = c.store.Save(c.state)
-
 	ctx := context.Background()
 	updates, err := sess.Prompt(ctx, text)
 	if err != nil {
@@ -271,9 +266,8 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.resetIdleTimer() // reset after prompt completes: 30 min from last activity
 	c.mu.Unlock()
 
-	// Persist again after prompt completes: AvailableCommands etc. may have changed.
-	c.persistAgentMeta(ag)
-	_ = c.store.Save(c.state)
+	// Persist after prompt completes: session ID, configOptions, modes etc. may have changed.
+	c.saveAgentState(ag)
 
 	if buf.Len() > 0 {
 		c.reply(msg.ChatID, buf.String())
@@ -344,10 +338,9 @@ func (c *Client) idleClose() {
 	ag := c.ag
 	c.mu.Unlock()
 
-	c.persistAgentMeta(ag)
+	c.saveAgentState(ag) // persist + save outside lock (file I/O should not hold c.mu)
 
 	c.mu.Lock()
-	_ = c.store.Save(c.state)
 	_ = ag.Close()
 	c.session = nil
 	c.ag = nil
@@ -445,7 +438,7 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		ag = newAg
 	}
 
-	// Persist outgoing session ID before switching active adapter.
+	// Save outgoing session ID as soon as it's known (before the new adapter is active).
 	if outgoingName != "" && outgoingSessionID != "" {
 		c.mu.Lock()
 		if c.state != nil {
@@ -458,11 +451,17 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 			c.state.Agents[outgoingName].LastSessionID = outgoingSessionID
 		}
 		c.mu.Unlock()
+		c.mu.Lock()
+		s := c.state
+		c.mu.Unlock()
+		if s != nil {
+			_ = c.store.Save(s)
+		}
 	}
 
-	// For SwitchWithContext, ag.Switch bootstrapped a new session; persist its metadata.
+	// Persist incoming adapter metadata (e.g. after SwitchWithContext bootstrap).
 	if ag != nil {
-		c.persistAgentMeta(ag)
+		c.saveAgentState(ag)
 	}
 
 	c.mu.Lock()
@@ -470,8 +469,11 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.state.ActiveAdapter = name
 	}
 	c.resetIdleTimer()
+	s := c.state
 	c.mu.Unlock()
-	_ = c.store.Save(c.state)
+	if s != nil {
+		_ = c.store.Save(s)
+	}
 
 	c.reply(chatID, fmt.Sprintf("Switched to adapter: %s", name))
 	return nil
@@ -486,6 +488,19 @@ func (c *Client) registeredAdapterNames() []string {
 		names = append(names, n)
 	}
 	return names
+}
+
+// saveAgentState calls persistAgentMeta to update in-memory state and then
+// immediately writes it to disk. This is the single call site to use whenever
+// agent state may have changed — it ensures the disk and in-memory state stay in sync.
+func (c *Client) saveAgentState(ag *agent.Agent) {
+	c.persistAgentMeta(ag)
+	c.mu.Lock()
+	s := c.state
+	c.mu.Unlock()
+	if s != nil {
+		_ = c.store.Save(s)
+	}
 }
 
 // persistAgentMeta snapshots the current agent metadata and writes it into state.
