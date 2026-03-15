@@ -83,21 +83,13 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		c.SetDebugLogger(os.Stderr)
 	}
 
-	// Register the adapter factory based on config.
-	adapterName := pc.Client.Adapter
-	if adapterName == "" {
-		adapterName = "codex"
-	}
-	switch adapterName {
-	case "claude":
-		c.RegisterAdapter("claude", func(_ string, _ map[string]string) adapter.Adapter {
-			return claude.NewAdapter(claude.Config{})
-		})
-	default:
-		c.RegisterAdapter(adapterName, func(_ string, _ map[string]string) adapter.Adapter {
-			return codex.NewAdapter(codex.Config{})
-		})
-	}
+	// Register all known adapter factories so users can switch between them at runtime.
+	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+		return codex.NewAdapter(codex.Config{})
+	})
+	c.RegisterAdapter("claude", func(_ string, _ map[string]string) adapter.Adapter {
+		return claude.NewAdapter(claude.Config{})
+	})
 
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
