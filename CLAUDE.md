@@ -27,7 +27,7 @@ Hub (internal/hub/)          — 多 project 生命周期管理，读 config.jso
 ## 配置文件
 
 - `~/.wheelmaker/config.json` — 项目配置（IM 类型、adapter、工作目录）
-- `~/.wheelmaker/state.json` — 运行时状态（per-project sessionID 持久化）
+- `~/.wheelmaker/state.json` — 运行时状态持久化（session ID、agent 元数据、session 状态）
 
 config.json 格式：
 ```json
@@ -38,6 +38,31 @@ config.json 格式：
   ]
 }
 ```
+
+## state.go 设计
+
+`internal/client/state.go` 定义序列化结构，用于：
+1. 跨进程持久化运行时状态（sessionID、agent 元数据、最近 session 状态）
+2. 启动时恢复上次连接（session/load）
+
+```
+FileState
+  └─ Projects map[name]*ProjectState
+       ├─ ActiveAdapter string            — 当前激活的 adapter 名称
+       ├─ Connection *ConnectionConfig    — 最近一次 initialize 时发送的客户端参数
+       └─ Agents map[name]*AgentState     — 每个 adapter 的持久化元数据
+            ├─ LastSessionID              — 下次启动时传给 session/load
+            ├─ ProtocolVersion / AgentCapabilities / AgentInfo / AuthMethods
+            │                             — initialize 响应的 agent 级别数据
+            ├─ Session *SessionState      — 最后使用的 session 状态（非全量）
+            │    └─ Modes / Models / ConfigOptions / AvailableCommands / Title / UpdatedAt
+            └─ Sessions []SessionSummary  — 已知 session 的轻量列表（按需填充，不自动维护）
+```
+
+**设计原则：**
+- 每个 adapter 只存最后一次使用的 session 状态；切换 session 时会同步更新
+- `Sessions` 列表是懒加载的：仅在用户查询历史时写入，不随每次 prompt 自动更新
+- `Connection` 在 initialize 握手完成后由 `persistAgentMeta` 写入，所有 adapter 共用同一份客户端参数
 
 ## 开发约定
 
