@@ -408,8 +408,8 @@ func TestJSONStore_DefaultState(t *testing.T) {
 	if state.ActiveAdapter != "codex" {
 		t.Errorf("ActiveAdapter = %q, want codex", state.ActiveAdapter)
 	}
-	if state.SessionIDs == nil {
-		t.Error("SessionIDs should not be nil")
+	if state.Agents == nil {
+		t.Error("Agents should not be nil")
 	}
 }
 
@@ -419,8 +419,8 @@ func TestJSONStore_SaveLoad(t *testing.T) {
 
 	original := &client.State{
 		ActiveAdapter: "codex",
-		SessionIDs: map[string]string{
-			"codex": "session-xyz-123",
+		Agents: map[string]*client.AgentState{
+			"codex": {LastSessionID: "session-xyz-123"},
 		},
 	}
 
@@ -435,8 +435,8 @@ func TestJSONStore_SaveLoad(t *testing.T) {
 	if loaded.ActiveAdapter != "codex" {
 		t.Errorf("ActiveAdapter = %q, want codex", loaded.ActiveAdapter)
 	}
-	if loaded.SessionIDs["codex"] != "session-xyz-123" {
-		t.Errorf("SessionIDs[codex] = %q, want session-xyz-123", loaded.SessionIDs["codex"])
+	if loaded.Agents["codex"] == nil || loaded.Agents["codex"].LastSessionID != "session-xyz-123" {
+		t.Errorf("Agents[codex].LastSessionID = %q, want session-xyz-123", loaded.Agents["codex"].LastSessionID)
 	}
 }
 
@@ -467,9 +467,9 @@ func TestJSONStore_MigratesLegacyActiveAgent(t *testing.T) {
 	if state.ActiveAdapter != "codex" {
 		t.Errorf("ActiveAdapter = %q, want codex (migrated from active_agent)", state.ActiveAdapter)
 	}
-	if state.SessionIDs["codex"] != "legacy-session-id" {
-		t.Errorf("SessionIDs[codex] = %q, want legacy-session-id (migrated from acp_session_ids)",
-			state.SessionIDs["codex"])
+	if state.Agents["codex"] == nil || state.Agents["codex"].LastSessionID != "legacy-session-id" {
+		t.Errorf("Agents[codex].LastSessionID = %q, want legacy-session-id (migrated from acp_session_ids)",
+			state.Agents["codex"].LastSessionID)
 	}
 }
 
@@ -480,7 +480,7 @@ func TestJSONStore_SaveWritesNewKeys(t *testing.T) {
 
 	state := &client.State{
 		ActiveAdapter: "myagent",
-		SessionIDs:    map[string]string{"myagent": "sess-123"},
+		Agents:        map[string]*client.AgentState{"myagent": {LastSessionID: "sess-123"}},
 	}
 	if err := store.Save(state); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -510,6 +510,8 @@ func TestJSONStore_NewKeysTakePrecedenceOverLegacy(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
 
+	// Legacy flat format: session_ids takes precedence over acp_session_ids.
+	// Both are migrated into Agents[name].LastSessionID.
 	mixed := map[string]any{
 		"activeAdapter":   "new-codex",
 		"active_agent":    "old-codex",
@@ -530,8 +532,9 @@ func TestJSONStore_NewKeysTakePrecedenceOverLegacy(t *testing.T) {
 	if state.ActiveAdapter != "new-codex" {
 		t.Errorf("ActiveAdapter = %q, want new-codex", state.ActiveAdapter)
 	}
-	if state.SessionIDs["new-codex"] != "new-sess" {
-		t.Errorf("SessionIDs[new-codex] = %q, want new-sess", state.SessionIDs["new-codex"])
+	// session_ids is used (takes precedence over acp_session_ids) and migrated to Agents.
+	if state.Agents["new-codex"] == nil || state.Agents["new-codex"].LastSessionID != "new-sess" {
+		t.Errorf("Agents[new-codex].LastSessionID = %q, want new-sess", state.Agents["new-codex"].LastSessionID)
 	}
 }
 
@@ -586,16 +589,14 @@ var _ adapter.Adapter = (*failConnectAdapter)(nil)
 // adapter's session ID is saved to state before the switch completes.
 func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 	outgoing := &mockSession{adapterN: "codex", sessionN: "outgoing-sess-123"}
-	st := &client.State{
-		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{"codex": "outgoing-sess-123"},
-	}
-	store := &mockStore{state: st}
+	store := &mockStore{}
 	c := client.New(store, nil, "test", "/tmp")
 	c.InjectSession(outgoing)
 	c.InjectState(&client.State{
 		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{"codex": "outgoing-sess-123"},
+		Agents: map[string]*client.AgentState{
+			"codex": {LastSessionID: "outgoing-sess-123"},
+		},
 	})
 	c.RegisterAdapter("new-adapter", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -609,8 +610,8 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 	}
 	last := store.saved[len(store.saved)-1]
 
-	if got := last.SessionIDs["codex"]; got != "outgoing-sess-123" {
-		t.Errorf("SessionIDs[codex] = %q, want outgoing-sess-123", got)
+	if last.Agents["codex"] == nil || last.Agents["codex"].LastSessionID != "outgoing-sess-123" {
+		t.Errorf("Agents[codex].LastSessionID = %q, want outgoing-sess-123", last.Agents["codex"].LastSessionID)
 	}
 	if last.ActiveAdapter != "new-adapter" {
 		t.Errorf("ActiveAdapter = %q, want new-adapter", last.ActiveAdapter)
@@ -631,9 +632,9 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	c.InjectSession(outgoing)
 	c.InjectState(&client.State{
 		ActiveAdapter: "codex",
-		SessionIDs: map[string]string{
-			"codex":       "codex-sess-1",
-			"new-adapter": "old-stale-sess", // pre-existing saved session for target
+		Agents: map[string]*client.AgentState{
+			"codex":       {LastSessionID: "codex-sess-1"},
+			"new-adapter": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
 		},
 	})
 	c.RegisterAdapter("new-adapter", func(_ string, _ map[string]string) adapter.Adapter {
@@ -648,10 +649,11 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	}
 	last := store.saved[len(store.saved)-1]
 
-	// The incoming adapter's saved session ID must be preserved (not deleted),
+	// The incoming adapter's saved session ID must be preserved (not overwritten by "")
 	// so that a subsequent switch back can pass it to ag.Switch for session/load.
-	if sid := last.SessionIDs["new-adapter"]; sid != "old-stale-sess" {
-		t.Errorf("SessionIDs[new-adapter] = %q, want old-stale-sess (preserved for session/load)", sid)
+	if last.Agents["new-adapter"] == nil || last.Agents["new-adapter"].LastSessionID != "old-stale-sess" {
+		t.Errorf("Agents[new-adapter].LastSessionID = %q, want old-stale-sess (preserved for session/load)",
+			last.Agents["new-adapter"].LastSessionID)
 	}
 }
 
@@ -662,7 +664,6 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{},
 	}}
 	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
@@ -698,8 +699,8 @@ func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 		t.Fatal("state was not saved after /use --continue")
 	}
 	last := saved[len(saved)-1]
-	if last.SessionIDs["other"] == "" {
-		t.Errorf("SessionIDs[other] is empty after /use --continue; want bootstrapped session ID")
+	if last.Agents["other"] == nil || last.Agents["other"].LastSessionID == "" {
+		t.Errorf("Agents[other].LastSessionID is empty after /use --continue; want bootstrapped session ID")
 	}
 }
 
@@ -709,8 +710,7 @@ func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "unknown-adapter",
-		SessionIDs:    map[string]string{},
-	}}
+			}}
 	c := client.New(store, nil, "test", "/tmp")
 	// Register "codex" but NOT "unknown-adapter" (simulating a removed adapter).
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
@@ -750,8 +750,7 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 func TestStart_ConnectError_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{},
-	}}
+			}}
 	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &failConnectAdapter{}
@@ -806,8 +805,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{},
-	}}
+			}}
 	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -855,8 +853,7 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{},
-	}}
+			}}
 	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -902,8 +899,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 func TestClient_Close_PersistsSessionID(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
-		SessionIDs:    map[string]string{},
-	}}
+			}}
 	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
 		return &minimalMockAdapter{}
@@ -927,8 +923,8 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 		t.Fatal("state not saved after Close")
 	}
 	last := store.saved[len(store.saved)-1]
-	if last.SessionIDs["codex"] == "" {
-		t.Errorf("Close did not persist codex session ID; SessionIDs = %v", last.SessionIDs)
+	if last.Agents["codex"] == nil || last.Agents["codex"].LastSessionID == "" {
+		t.Errorf("Close did not persist codex session ID; Agents = %v", last.Agents)
 	}
 }
 

@@ -79,16 +79,30 @@ func (s *JSONStore) Load() (*State, error) {
 		}
 	}
 
+	// Migrate legacy session ID maps into Agents[name].LastSessionID.
+	var sessionIDs map[string]string
 	if v, ok := raw["session_ids"]; ok {
-		_ = json.Unmarshal(v, &ps.SessionIDs)
+		_ = json.Unmarshal(v, &sessionIDs)
 	}
-	if len(ps.SessionIDs) == 0 {
+	if len(sessionIDs) == 0 {
 		if v, ok := raw["acp_session_ids"]; ok {
-			_ = json.Unmarshal(v, &ps.SessionIDs)
+			_ = json.Unmarshal(v, &sessionIDs)
 		}
 	}
 
 	ensureStateMaps(ps)
+	for name, sid := range sessionIDs {
+		if sid == "" {
+			continue
+		}
+		if ps.Agents[name] == nil {
+			ps.Agents[name] = &AgentState{}
+		}
+		if ps.Agents[name].LastSessionID == "" {
+			ps.Agents[name].LastSessionID = sid
+		}
+	}
+
 	return ps, nil
 }
 
@@ -127,9 +141,6 @@ func (s *JSONStore) Save(state *State) error {
 
 // ensureStateMaps initialises nil maps in a ProjectState to avoid nil-dereference panics.
 func ensureStateMaps(ps *ProjectState) {
-	if ps.SessionIDs == nil {
-		ps.SessionIDs = map[string]string{}
-	}
 	if ps.Agents == nil {
 		ps.Agents = map[string]*AgentState{}
 	}
