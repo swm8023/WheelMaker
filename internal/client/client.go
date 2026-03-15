@@ -389,12 +389,8 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	sess = c.session
 	c.mu.Unlock()
 
-	var outgoingName string
-	var outgoingSessionID string
-	if sess != nil {
-		outgoingName = sess.AdapterName()
-		outgoingSessionID = sess.SessionID()
-	}
+	// Outgoing adapter state is captured in step 3 below via persistAgentMeta(ag),
+	// before ag.Switch() resets initMeta/sessionMeta to zero.
 
 	// Step 2: read saved session ID for the incoming adapter and connect.
 	c.mu.Lock()
@@ -418,11 +414,21 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		newConn.SetDebugLogger(dw)
 	}
 
-	// Step 3: replace the connection via the concrete Agent type.
+	// Step 3: persist outgoing adapter's full state NOW, while ag still holds its
+	// name/initMeta/sessionMeta. After ag.Switch() those fields are reset to zero.
+	// This is also where the outgoing LastSessionID is captured.
+	if ag != nil {
+		c.persistAgentMeta(ag)
+	}
+
+	// Step 4: replace the connection via the concrete Agent type.
 	if ag != nil {
 		if err := ag.Switch(ctx, name, newConn, mode, savedSID); err != nil {
 			return fmt.Errorf("switch %q: %w", name, err)
 		}
+		// After Switch(), ag.name == name and initMeta/sessionMeta are reset.
+		// For SwitchWithContext the bootstrap prompt ran; capture the new session data.
+		c.persistAgentMeta(ag)
 	} else {
 		// No active agent (lazy init never ran or idleClose fired): create from scratch.
 		var newAg *agent.Agent
@@ -435,35 +441,9 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.ag = newAg
 		c.session = newAg
 		c.mu.Unlock()
-		ag = newAg
 	}
 
-	// Save outgoing session ID as soon as it's known (before the new adapter is active).
-	if outgoingName != "" && outgoingSessionID != "" {
-		c.mu.Lock()
-		if c.state != nil {
-			if c.state.Agents == nil {
-				c.state.Agents = map[string]*AgentState{}
-			}
-			if c.state.Agents[outgoingName] == nil {
-				c.state.Agents[outgoingName] = &AgentState{}
-			}
-			c.state.Agents[outgoingName].LastSessionID = outgoingSessionID
-		}
-		c.mu.Unlock()
-		c.mu.Lock()
-		s := c.state
-		c.mu.Unlock()
-		if s != nil {
-			_ = c.store.Save(s)
-		}
-	}
-
-	// Persist incoming adapter metadata (e.g. after SwitchWithContext bootstrap).
-	if ag != nil {
-		c.saveAgentState(ag)
-	}
-
+	// Update ActiveAdapter and trigger a single save for all accumulated mutations.
 	c.mu.Lock()
 	if c.state != nil {
 		c.state.ActiveAdapter = name
@@ -490,11 +470,12 @@ func (c *Client) registeredAdapterNames() []string {
 	return names
 }
 
-// saveAgentState calls persistAgentMeta to update in-memory state and then
-// immediately writes it to disk. This is the single call site to use whenever
-// agent state may have changed — it ensures the disk and in-memory state stay in sync.
+// saveAgentState updates in-memory state via persistAgentMeta and writes to disk
+// only if anything actually changed. Call this whenever agent state may have changed.
 func (c *Client) saveAgentState(ag *agent.Agent) {
-	c.persistAgentMeta(ag)
+	if !c.persistAgentMeta(ag) {
+		return
+	}
 	c.mu.Lock()
 	s := c.state
 	c.mu.Unlock()
@@ -503,25 +484,28 @@ func (c *Client) saveAgentState(ag *agent.Agent) {
 	}
 }
 
-// persistAgentMeta snapshots the current agent metadata and writes it into state.
-// Only fields with non-zero values are updated, so stale saved data is not overwritten
-// by an uninitialized agent (e.g. immediately after a clean switch before ensureReady).
-// Must be called while NOT holding c.mu (it acquires c.mu internally).
-func (c *Client) persistAgentMeta(ag *agent.Agent) {
+// persistAgentMeta snapshots current agent metadata into in-memory state.
+// Returns true if anything changed (caller should then call store.Save).
+// Only fields with non-zero values are written, so an uninitialized agent
+// (e.g. right after a clean switch before ensureReady runs) never overwrites
+// previously saved data.
+// Must be called while NOT holding c.mu.
+func (c *Client) persistAgentMeta(ag *agent.Agent) bool {
 	if ag == nil {
-		return
+		return false
 	}
 	initMeta, sessMeta := ag.Meta()
 	sessionID := ag.SessionID()
 	adapterName := ag.AdapterName()
 	if adapterName == "" {
-		return
+		return false
 	}
 
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.state == nil {
-		c.mu.Unlock()
-		return
+		return false
 	}
 	if c.state.Agents == nil {
 		c.state.Agents = map[string]*AgentState{}
@@ -531,26 +515,32 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) {
 		as = &AgentState{}
 		c.state.Agents[adapterName] = as
 	}
-	// Only overwrite LastSessionID when we have a real value; preserve the
-	// previously saved ID so session/load can be attempted on the next restart.
-	if sessionID != "" {
+
+	changed := false
+
+	// Session ID: only update when a real value is available.
+	if sessionID != "" && as.LastSessionID != sessionID {
 		as.LastSessionID = sessionID
+		changed = true
 	}
-	// Only overwrite agent-level info when the initialize handshake has completed.
+
+	// Agent-level data: only available after initialize handshake completes.
 	if initMeta.ProtocolVersion != "" {
 		as.ProtocolVersion = initMeta.ProtocolVersion
 		as.AgentCapabilities = initMeta.AgentCapabilities
 		as.AgentInfo = initMeta.AgentInfo
 		as.AuthMethods = initMeta.AuthMethods
-		// Persist client-side connection params (same for all adapters).
+		// Client-side connection params are the same for all adapters.
 		if c.state.Connection == nil {
 			c.state.Connection = &ConnectionConfig{}
 		}
 		c.state.Connection.ProtocolVersion = initMeta.ClientProtocolVersion
 		c.state.Connection.ClientCapabilities = initMeta.ClientCapabilities
 		c.state.Connection.ClientInfo = initMeta.ClientInfo
+		changed = true
 	}
-	// Write session-level metadata to AgentState.Session.
+
+	// Session-level data: only available after session/new or session/load.
 	hasSessionData := sessMeta.Modes != nil || sessMeta.Models != nil ||
 		len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 ||
 		sessMeta.Title != "" || sessMeta.UpdatedAt != ""
@@ -568,8 +558,10 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) {
 		if sessMeta.UpdatedAt != "" {
 			as.Session.UpdatedAt = sessMeta.UpdatedAt
 		}
+		changed = true
 	}
-	c.mu.Unlock()
+
+	return changed
 }
 
 // reply sends a text response to the chat via the IM adapter.

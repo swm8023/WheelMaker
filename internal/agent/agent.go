@@ -252,6 +252,10 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	a.initializing = false // reset any in-progress initialization
 	a.sessionID = savedSessionID
 	a.lastReply = ""
+	// Reset metadata so the new adapter's own initialize handshake populates it
+	// from scratch — prevents stale metadata from the old adapter being read back.
+	a.initMeta = InitMeta{}
+	a.sessionMeta = SessionMeta{}
 	a.mu.Unlock()
 
 	// Wake up any goroutines waiting in ensureReady so they retry with the new conn.
