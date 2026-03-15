@@ -71,5 +71,65 @@ function Install-CodexAcp {
     Write-Warning "Place codex-acp.exe manually at: $Dest\codex-acp.exe"
 }
 
+function Install-ClaudeAgentAcp {
+    Write-Host "Installing claude-agent-acp..."
+    $OutFile = Join-Path $Dest "claude-agent-acp.exe"
+
+    # Try GitHub Releases first
+    $githubSuccess = $false
+    try {
+        $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/zed-industries/claude-agent-acp/releases/latest" -ErrorAction Stop
+        $tag = $rel.tag_name
+        $url = "https://github.com/zed-industries/claude-agent-acp/releases/download/$tag/claude-agent-acp-windows-amd64.exe"
+        Invoke-WebRequest -Uri $url -OutFile $OutFile -ErrorAction Stop
+        Write-Host "claude-agent-acp installed from GitHub Releases ($tag)"
+        $githubSuccess = $true
+    } catch {
+        Write-Host "GitHub Releases not available: $_"
+    }
+
+    if ($githubSuccess) { return }
+
+    # Fallback: npm install then locate the binary
+    $npxCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npxCmd) {
+        Write-Warning "npm not found. Install Node.js from https://nodejs.org/"
+        Write-Warning "Then place claude-agent-acp.exe at: $Dest\claude-agent-acp.exe"
+        return
+    }
+
+    Write-Host "Trying npm install -g @zed-industries/claude-agent-acp..."
+    try {
+        & npm install -g @zed-industries/claude-agent-acp 2>&1 | Out-Null
+    } catch {
+        Write-Host "npm install failed: $_"
+    }
+
+    # Find the binary: check npm global root and common locations
+    $candidates = @()
+    $npmRoot = & npm root -g 2>$null
+    if ($npmRoot) {
+        $candidates += Join-Path $npmRoot "@zed-industries\claude-agent-acp\claude-agent-acp.exe"
+        $candidates += Join-Path $npmRoot "@zed-industries\claude-agent-acp\node_modules\@zed-industries\claude-agent-acp-win32-x64\bin\claude-agent-acp.exe"
+    }
+    $appData = $env:APPDATA
+    if ($appData) {
+        $candidates += "$appData\npm\claude-agent-acp.exe"
+        $candidates += "$appData\npm\node_modules\@zed-industries\claude-agent-acp\node_modules\@zed-industries\claude-agent-acp-win32-x64\bin\claude-agent-acp.exe"
+    }
+
+    foreach ($c in $candidates) {
+        if (Test-Path $c) {
+            Copy-Item $c $OutFile
+            Write-Host "claude-agent-acp copied from $c"
+            return
+        }
+    }
+
+    Write-Warning "npm ran but could not locate claude-agent-acp.exe binary."
+    Write-Warning "Place claude-agent-acp.exe manually at: $Dest\claude-agent-acp.exe"
+}
+
 Install-CodexAcp
+Install-ClaudeAgentAcp
 Write-Host "Done."
