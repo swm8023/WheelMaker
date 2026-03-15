@@ -288,5 +288,13 @@ func (a *Agent) setAvailableCommands(cmds []acp.AvailableCommand) {
 	a.mu.Unlock()
 }
 
+// setConfigOptions updates the session metadata with the latest config option list.
+// Called from the prompt subscription handler when a config_option_update arrives.
+func (a *Agent) setConfigOptions(opts []acp.ConfigOption) {
+	a.mu.Lock()
+	a.sessionMeta.ConfigOptions = opts
+	a.mu.Unlock()
+}
+
 // compile-time check: Agent implements Session.
 var _ Session = (*Agent)(nil)

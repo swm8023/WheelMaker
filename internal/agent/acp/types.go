@@ -345,7 +345,6 @@ type PermissionResponse struct {
 // SessionLoadResult is the response to session/load.
 // Note: unlike session/new, session/load does NOT return sessionId in the response.
 type SessionLoadResult struct {
-	// Modes and ConfigOptions are optional; WheelMaker ignores them in MVP.
 }
 
 // SessionSetConfigOptionParams sets a configuration option on an active session.

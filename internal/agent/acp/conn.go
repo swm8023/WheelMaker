@@ -170,7 +170,7 @@ func (c *Conn) Send(ctx context.Context, method string, params any, result any) 
 		return ctx.Err()
 	case resp := <-ch:
 		if resp.Error != nil {
-			return fmt.Errorf("acp rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+			return fmt.Errorf("acp rpc error %d: %s", resp.Error.Code, resp.Error.Error())
 		}
 		if result != nil && len(resp.Result) > 0 {
 			if err := json.Unmarshal(resp.Result, result); err != nil {

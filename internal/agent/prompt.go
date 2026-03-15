@@ -65,6 +65,10 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		if p.Update.SessionUpdate == "available_commands_update" && len(p.Update.AvailableCommands) > 0 {
 			a.setAvailableCommands(p.Update.AvailableCommands)
 		}
+		// Track config options so the client can persist them.
+		if p.Update.SessionUpdate == "config_option_update" && len(p.Update.ConfigOptions) > 0 {
+			a.setConfigOptions(p.Update.ConfigOptions)
+		}
 
 		u := sessionUpdateToUpdate(p.Update, n.Params)
 
