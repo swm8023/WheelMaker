@@ -73,15 +73,19 @@ function Install-CodexAcp {
 
 function Install-ClaudeAgentAcp {
     Write-Host "Installing claude-agent-acp..."
-    $OutFile = Join-Path $Dest "claude-agent-acp.exe"
 
-    # Try GitHub Releases first
+    # claude-agent-acp is a Node.js package; it ships a .cmd wrapper, not a native .exe.
+    # We copy the npm-generated .cmd wrapper to bin\windows_amd64\claude-agent-acp.cmd.
+    $OutFile = Join-Path $Dest "claude-agent-acp.cmd"
+
+    # Try GitHub Releases first (in case a native binary is published in the future).
     $githubSuccess = $false
     try {
         $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/zed-industries/claude-agent-acp/releases/latest" -ErrorAction Stop
         $tag = $rel.tag_name
         $url = "https://github.com/zed-industries/claude-agent-acp/releases/download/$tag/claude-agent-acp-windows-amd64.exe"
-        Invoke-WebRequest -Uri $url -OutFile $OutFile -ErrorAction Stop
+        $exeOut = Join-Path $Dest "claude-agent-acp.exe"
+        Invoke-WebRequest -Uri $url -OutFile $exeOut -ErrorAction Stop
         Write-Host "claude-agent-acp installed from GitHub Releases ($tag)"
         $githubSuccess = $true
     } catch {
@@ -90,11 +94,11 @@ function Install-ClaudeAgentAcp {
 
     if ($githubSuccess) { return }
 
-    # Fallback: npm install then locate the binary
-    $npxCmd = Get-Command npm -ErrorAction SilentlyContinue
-    if (-not $npxCmd) {
+    # Fallback: npm install then locate the .cmd wrapper.
+    $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npmCmd) {
         Write-Warning "npm not found. Install Node.js from https://nodejs.org/"
-        Write-Warning "Then place claude-agent-acp.exe at: $Dest\claude-agent-acp.exe"
+        Write-Warning "Then run: npm install -g @zed-industries/claude-agent-acp"
         return
     }
 
@@ -105,29 +109,28 @@ function Install-ClaudeAgentAcp {
         Write-Host "npm install failed: $_"
     }
 
-    # Find the binary: check npm global root and common locations
+    # Locate the .cmd wrapper using npm prefix -g (works with scoop, nvm, standard npm).
     $candidates = @()
-    $npmRoot = & npm root -g 2>$null
-    if ($npmRoot) {
-        $candidates += Join-Path $npmRoot "@zed-industries\claude-agent-acp\claude-agent-acp.exe"
-        $candidates += Join-Path $npmRoot "@zed-industries\claude-agent-acp\node_modules\@zed-industries\claude-agent-acp-win32-x64\bin\claude-agent-acp.exe"
+    $npmPrefix = & npm prefix -g 2>$null
+    if ($npmPrefix) {
+        $candidates += Join-Path $npmPrefix "claude-agent-acp.cmd"
     }
     $appData = $env:APPDATA
     if ($appData) {
-        $candidates += "$appData\npm\claude-agent-acp.exe"
-        $candidates += "$appData\npm\node_modules\@zed-industries\claude-agent-acp\node_modules\@zed-industries\claude-agent-acp-win32-x64\bin\claude-agent-acp.exe"
+        $candidates += "$appData\npm\claude-agent-acp.cmd"
     }
 
     foreach ($c in $candidates) {
         if (Test-Path $c) {
             Copy-Item $c $OutFile
-            Write-Host "claude-agent-acp copied from $c"
+            Write-Host "claude-agent-acp.cmd copied from $c"
             return
         }
     }
 
-    Write-Warning "npm ran but could not locate claude-agent-acp.exe binary."
-    Write-Warning "Place claude-agent-acp.exe manually at: $Dest\claude-agent-acp.exe"
+    Write-Warning "npm ran but could not locate claude-agent-acp.cmd wrapper."
+    Write-Warning "Run: npm install -g @zed-industries/claude-agent-acp"
+    Write-Warning "Then copy the generated .cmd to: $Dest\claude-agent-acp.cmd"
 }
 
 Install-CodexAcp
