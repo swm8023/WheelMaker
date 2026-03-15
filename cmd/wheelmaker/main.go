@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -25,6 +26,16 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
 	}
+
+	logPath := filepath.Join(home, ".wheelmaker", "wheelmaker.log")
+	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open log file %s: %w", logPath, err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
+	log.SetFlags(log.LstdFlags)
+
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
 	statePath := filepath.Join(home, ".wheelmaker", "state.json")
 

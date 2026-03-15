@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
+	"log"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -98,11 +98,11 @@ func (c *Conn) OnRequest(h RequestHandler) {
 }
 
 // Start launches the agent subprocess and begins the read loop.
-// stderr of the subprocess is forwarded to os.Stderr for visibility.
+// stderr of the subprocess is forwarded to the application log via log.Writer().
 func (c *Conn) Start() error {
 	cmd := exec.Command(c.exePath)
 	cmd.Env = append(cmd.Environ(), c.env...)
-	cmd.Stderr = os.Stderr // forward agent logs/errors to our stderr
+	cmd.Stderr = log.Writer() // forward subprocess stderr to the application log
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -217,8 +217,8 @@ func (c *Conn) Subscribe(handler NotificationHandler) (cancel func()) {
 	}
 }
 
-// Close shuts down the connection: cancels in-flight callbacks, closes stdin,
-// and waits for the process to exit.
+// Close shuts down the connection: cancels in-flight callbacks, kills the subprocess,
+// and waits for it to exit.
 func (c *Conn) Close() error {
 	select {
 	case <-c.done:
@@ -229,6 +229,11 @@ func (c *Conn) Close() error {
 	c.connCancel()
 	_ = c.stdin.Close()
 	if c.cmd != nil {
+		// Kill the process explicitly so Close() never blocks waiting for a subprocess
+		// that ignores stdin EOF (e.g. Node.js-based agents).
+		if c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
 		_ = c.cmd.Wait()
 	}
 	return nil
