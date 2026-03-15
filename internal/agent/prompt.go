@@ -69,6 +69,14 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		if p.Update.SessionUpdate == "config_option_update" && len(p.Update.ConfigOptions) > 0 {
 			a.setConfigOptions(p.Update.ConfigOptions)
 		}
+		// Track current mode changes.
+		if p.Update.SessionUpdate == "current_mode_update" && p.Update.ModeID != "" {
+			a.setCurrentMode(p.Update.ModeID)
+		}
+		// Track session title and updatedAt.
+		if p.Update.SessionUpdate == "session_info_update" {
+			a.setSessionInfo(p.Update.Title, p.Update.UpdatedAt)
+		}
 
 		u := sessionUpdateToUpdate(p.Update, n.Params)
 

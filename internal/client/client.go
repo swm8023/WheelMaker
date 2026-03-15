@@ -527,13 +527,32 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) {
 		as.AgentCapabilities = initMeta.AgentCapabilities
 		as.AgentInfo = initMeta.AgentInfo
 		as.AuthMethods = initMeta.AuthMethods
+		// Persist client-side connection params (same for all adapters).
+		if c.state.Connection == nil {
+			c.state.Connection = &ConnectionConfig{}
+		}
+		c.state.Connection.ProtocolVersion = initMeta.ClientProtocolVersion
+		c.state.Connection.ClientCapabilities = initMeta.ClientCapabilities
+		c.state.Connection.ClientInfo = initMeta.ClientInfo
 	}
-	// Update session-level metadata when real data is available.
-	if sessMeta.Modes != nil || len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 {
-		as.Modes = sessMeta.Modes
-		as.Models = sessMeta.Models
-		as.ConfigOptions = sessMeta.ConfigOptions
-		as.AvailableCommands = sessMeta.AvailableCommands
+	// Write session-level metadata to AgentState.Session.
+	hasSessionData := sessMeta.Modes != nil || sessMeta.Models != nil ||
+		len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 ||
+		sessMeta.Title != "" || sessMeta.UpdatedAt != ""
+	if hasSessionData {
+		if as.Session == nil {
+			as.Session = &SessionState{}
+		}
+		as.Session.Modes = sessMeta.Modes
+		as.Session.Models = sessMeta.Models
+		as.Session.ConfigOptions = sessMeta.ConfigOptions
+		as.Session.AvailableCommands = sessMeta.AvailableCommands
+		if sessMeta.Title != "" {
+			as.Session.Title = sessMeta.Title
+		}
+		if sessMeta.UpdatedAt != "" {
+			as.Session.UpdatedAt = sessMeta.UpdatedAt
+		}
 	}
 	c.mu.Unlock()
 }
