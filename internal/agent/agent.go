@@ -51,20 +51,31 @@ const (
 	SwitchWithContext
 )
 
-// InitMeta holds agent-level metadata captured from the initialize handshake.
+// InitMeta holds agent-level metadata from the initialize handshake.
+// Both the agent's response fields and the client-side params we sent are stored
+// so the client can persist the full connection config.
 type InitMeta struct {
+	// Agent-side: from initialize response.
 	ProtocolVersion   string
 	AgentCapabilities acp.AgentCapabilities
 	AgentInfo         *acp.AgentInfo
 	AuthMethods       []acp.AuthMethod
+
+	// Client-side: what we sent in the initialize request.
+	ClientProtocolVersion int
+	ClientCapabilities    acp.ClientCapabilities
+	ClientInfo            *acp.AgentInfo
 }
 
-// SessionMeta holds session-level metadata captured from session/new.
+// SessionMeta holds session-level metadata captured from session/new and
+// updated by session/update notifications throughout the session lifetime.
 type SessionMeta struct {
 	Modes             *acp.ModeState
 	Models            *acp.ModelState
 	ConfigOptions     []acp.ConfigOption
 	AvailableCommands []acp.AvailableCommand
+	Title             string
+	UpdatedAt         string
 }
 
 // Agent is the complete ACP protocol encapsulation.
@@ -293,6 +304,30 @@ func (a *Agent) setAvailableCommands(cmds []acp.AvailableCommand) {
 func (a *Agent) setConfigOptions(opts []acp.ConfigOption) {
 	a.mu.Lock()
 	a.sessionMeta.ConfigOptions = opts
+	a.mu.Unlock()
+}
+
+// setCurrentMode updates the current mode ID in session metadata.
+// Called from the prompt subscription handler when a current_mode_update arrives.
+func (a *Agent) setCurrentMode(modeID string) {
+	a.mu.Lock()
+	if a.sessionMeta.Modes == nil {
+		a.sessionMeta.Modes = &acp.ModeState{}
+	}
+	a.sessionMeta.Modes.CurrentModeID = modeID
+	a.mu.Unlock()
+}
+
+// setSessionInfo updates the session title and updatedAt in session metadata.
+// Called from the prompt subscription handler when a session_info_update arrives.
+func (a *Agent) setSessionInfo(title, updatedAt string) {
+	a.mu.Lock()
+	if title != "" {
+		a.sessionMeta.Title = title
+	}
+	if updatedAt != "" {
+		a.sessionMeta.UpdatedAt = updatedAt
+	}
 	a.mu.Unlock()
 }
 

@@ -52,27 +52,34 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	conn.OnRequest(a.handleCallback)
 
 	// Step 2: initialize handshake.
+	clientCaps := acp.ClientCapabilities{
+		FS: &acp.FSCapabilities{
+			ReadTextFile:  true,
+			WriteTextFile: true,
+		},
+		Terminal: true,
+	}
+	clientInfo := &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
+	const clientProtocolVersion = 1 // B3 fix: integer per spec (was string "0.1")
+
 	var initResult acp.InitializeResult
 	if err := conn.Send(ctx, "initialize", acp.InitializeParams{
-		ProtocolVersion: 1, // B3 fix: integer per spec (was string "0.1")
-		ClientCapabilities: acp.ClientCapabilities{
-			FS: &acp.FSCapabilities{
-				ReadTextFile:  true,
-				WriteTextFile: true,
-			},
-			Terminal: true,
-		},
-		ClientInfo: &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"},
+		ProtocolVersion:    clientProtocolVersion,
+		ClientCapabilities: clientCaps,
+		ClientInfo:         clientInfo,
 	}, &initResult); err != nil {
 		notifyDone()
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
 	newInitMeta := InitMeta{
-		ProtocolVersion:   initResult.ProtocolVersion.String(),
-		AgentCapabilities: initResult.AgentCapabilities,
-		AgentInfo:         initResult.AgentInfo,
-		AuthMethods:       initResult.AuthMethods,
+		ProtocolVersion:       initResult.ProtocolVersion.String(),
+		AgentCapabilities:     initResult.AgentCapabilities,
+		AgentInfo:             initResult.AgentInfo,
+		AuthMethods:           initResult.AuthMethods,
+		ClientProtocolVersion: clientProtocolVersion,
+		ClientCapabilities:    clientCaps,
+		ClientInfo:            clientInfo,
 	}
 
 	// Step 3: attempt session/load if possible.
