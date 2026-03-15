@@ -53,7 +53,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	// Step 2: initialize handshake.
 	var initResult acp.InitializeResult
 	if err := conn.Send(ctx, "initialize", acp.InitializeParams{
-		ProtocolVersion: "0.1",
+		ProtocolVersion: 1, // B3 fix: integer per spec (was string "0.1")
 		ClientCapabilities: acp.ClientCapabilities{
 			FS: &acp.FSCapabilities{
 				ReadTextFile:  true,
@@ -67,6 +67,13 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
+	newInitMeta := InitMeta{
+		ProtocolVersion:   initResult.ProtocolVersion.String(),
+		AgentCapabilities: initResult.AgentCapabilities,
+		AgentInfo:         initResult.AgentInfo,
+		AuthMethods:       initResult.AuthMethods,
+	}
+
 	// Step 3: attempt session/load if possible.
 	if savedSessionID != "" && initResult.AgentCapabilities.LoadSession {
 		var loadResult acp.SessionLoadResult
@@ -78,6 +85,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		if err == nil {
 			a.mu.Lock()
 			a.caps = initResult.AgentCapabilities
+			a.initMeta = newInitMeta
 			// sessionID is already set (savedSessionID)
 			a.ready = true
 			a.initializing = false
@@ -100,7 +108,13 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 
 	a.mu.Lock()
 	a.caps = initResult.AgentCapabilities
+	a.initMeta = newInitMeta
 	a.sessionID = newResult.SessionID
+	a.sessionMeta = SessionMeta{
+		Modes:         newResult.Modes,
+		Models:        newResult.Models,
+		ConfigOptions: newResult.ConfigOptions,
+	}
 	a.ready = true
 	a.initializing = false
 	a.mu.Unlock()

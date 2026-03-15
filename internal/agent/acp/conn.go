@@ -41,11 +41,20 @@ type Conn struct {
 	nextID  atomic.Int64
 	pending map[int64]chan Response
 
-	subsMu      sync.RWMutex
-	subscribers []NotificationHandler
+	subsMu     sync.RWMutex
+	subscribers map[int64]NotificationHandler
+	nextSubID  atomic.Int64
 
 	reqMu      sync.RWMutex
 	reqHandler RequestHandler
+
+	debugMu  sync.RWMutex
+	debugLog io.Writer // nil = no debug logging; set via SetDebugLogger
+
+	// connCtx is cancelled when Close() is called, providing a cancellation
+	// signal for in-flight Agent→Conn request handlers.
+	connCtx    context.Context
+	connCancel context.CancelFunc
 
 	done chan struct{}
 }
@@ -53,12 +62,26 @@ type Conn struct {
 // New creates a new Conn for the given binary.
 // env is a list of "KEY=VALUE" strings appended to the process environment.
 func New(exePath string, env []string) *Conn {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
-		exePath: exePath,
-		env:     env,
-		pending: make(map[int64]chan Response),
-		done:    make(chan struct{}),
+		exePath:     exePath,
+		env:         env,
+		pending:     make(map[int64]chan Response),
+		subscribers: make(map[int64]NotificationHandler),
+		connCtx:     ctx,
+		connCancel:  cancel,
+		done:        make(chan struct{}),
 	}
+}
+
+// SetDebugLogger sets an optional writer for debug logging of all ACP JSON
+// messages. When non-nil, outgoing messages are prefixed with "→ " and
+// incoming messages with "← ". Set to nil to disable.
+// Safe to call at any time; uses a separate RWMutex to avoid log contention.
+func (c *Conn) SetDebugLogger(w io.Writer) {
+	c.debugMu.Lock()
+	c.debugLog = w
+	c.debugMu.Unlock()
 }
 
 // OnRequest registers the handler for Agent→Conn requests.
@@ -130,6 +153,15 @@ func (c *Conn) Send(ctx context.Context, method string, params any, result any) 
 		return fmt.Errorf("acp: encode request: %w", err)
 	}
 
+	c.debugMu.RLock()
+	dw := c.debugLog
+	c.debugMu.RUnlock()
+	if dw != nil {
+		if raw, e := json.Marshal(req); e == nil {
+			fmt.Fprintf(dw, "→ %s\n", raw)
+		}
+	}
+
 	select {
 	case <-ctx.Done():
 		c.mu.Lock()
@@ -173,22 +205,20 @@ func (c *Conn) Notify(method string, params any) error {
 // Subscribe registers a handler to receive all incoming notifications.
 // Returns a cancel function to deregister the handler.
 func (c *Conn) Subscribe(handler NotificationHandler) (cancel func()) {
+	id := c.nextSubID.Add(1)
 	c.subsMu.Lock()
-	c.subscribers = append(c.subscribers, handler)
-	idx := len(c.subscribers) - 1
+	c.subscribers[id] = handler
 	c.subsMu.Unlock()
 
 	return func() {
 		c.subsMu.Lock()
-		defer c.subsMu.Unlock()
-		// Replace with nil to preserve indices; cleaned up lazily.
-		if idx < len(c.subscribers) {
-			c.subscribers[idx] = nil
-		}
+		delete(c.subscribers, id)
+		c.subsMu.Unlock()
 	}
 }
 
-// Close shuts down the connection: closes stdin and waits for the process to exit.
+// Close shuts down the connection: cancels in-flight callbacks, closes stdin,
+// and waits for the process to exit.
 func (c *Conn) Close() error {
 	select {
 	case <-c.done:
@@ -196,6 +226,7 @@ func (c *Conn) Close() error {
 	default:
 	}
 	close(c.done)
+	c.connCancel()
 	_ = c.stdin.Close()
 	if c.cmd != nil {
 		_ = c.cmd.Wait()
@@ -219,6 +250,13 @@ func (c *Conn) readLoop(r io.Reader) {
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
+		}
+
+		c.debugMu.RLock()
+		dw := c.debugLog
+		c.debugMu.RUnlock()
+		if dw != nil {
+			fmt.Fprintf(dw, "← %s\n", line)
 		}
 
 		var raw rawMessage
@@ -270,6 +308,7 @@ func (c *Conn) readLoop(r io.Reader) {
 }
 
 // handleIncomingRequest processes an Agent→Conn request and sends the response.
+// Uses connCtx so that callbacks are cancelled when the connection is closed.
 func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMessage) {
 	c.reqMu.RLock()
 	handler := c.reqHandler
@@ -287,7 +326,7 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	if handler == nil {
 		resp.Error = &RPCError{Code: -32601, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
-		result, err := handler(context.Background(), method, params)
+		result, err := handler(c.connCtx, method, params)
 		if err != nil {
 			resp.Error = &RPCError{Code: -32603, Message: err.Error()}
 		} else {
@@ -314,13 +353,13 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 // non-blocking work.
 func (c *Conn) dispatch(n Notification) {
 	c.subsMu.RLock()
-	handlers := make([]NotificationHandler, len(c.subscribers))
-	copy(handlers, c.subscribers)
+	handlers := make([]NotificationHandler, 0, len(c.subscribers))
+	for _, h := range c.subscribers {
+		handlers = append(handlers, h)
+	}
 	c.subsMu.RUnlock()
 
 	for _, h := range handlers {
-		if h != nil {
-			h(n)
-		}
+		h(n)
 	}
 }

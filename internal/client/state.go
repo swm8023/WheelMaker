@@ -1,41 +1,63 @@
 // Package client provides the top-level coordinator for WheelMaker.
 package client
 
-// AdapterConfig holds configuration for a single adapter.
-type AdapterConfig struct {
-	// ExePath is the path to the adapter binary.
-	// If empty, tools.ResolveBinary will locate it automatically.
-	ExePath string `json:"exePath,omitempty"`
+import "github.com/swm8023/wheelmaker/internal/agent/acp"
 
-	// Env contains extra environment variables passed to the adapter process.
-	Env map[string]string `json:"env,omitempty"`
+// AgentSessionState holds per-session metadata captured from session/new and session/update.
+type AgentSessionState struct {
+	Modes             *acp.ModeState          `json:"modes,omitempty"`
+	Models            *acp.ModelState         `json:"models,omitempty"`
+	ConfigOptions     []acp.ConfigOption      `json:"configOptions,omitempty"`
+	AvailableCommands []acp.AvailableCommand  `json:"availableCommands,omitempty"`
 }
 
-// State is the persisted global state of WheelMaker.
-//
-// Migration note (backward compatibility with old hub.State JSON keys):
-//   - "active_agent"          → "activeAdapter"        (Load copies old key if new is absent)
-//   - "acp_session_ids"       → "session_ids"           (Load copies old key if new is absent)
-//   - "agents[name].exe_path" → "adapters[name].exePath" (Load migrates old adapter configs)
-//
-// Save() writes only the new keys.
-type State struct {
+// AgentState holds all persisted metadata for one adapter type.
+// It stores agent-level info from initialize and per-session info keyed by session ID.
+type AgentState struct {
+	LastSessionID     string                        `json:"lastSessionId,omitempty"`
+	ProtocolVersion   string                        `json:"protocolVersion,omitempty"`
+	AgentCapabilities acp.AgentCapabilities         `json:"agentCapabilities,omitempty"`
+	AgentInfo         *acp.AgentInfo                `json:"agentInfo,omitempty"`
+	AuthMethods       []acp.AuthMethod              `json:"authMethods,omitempty"`
+	Sessions          map[string]*AgentSessionState `json:"sessions,omitempty"`
+}
+
+// ProjectState is the persisted state for a single WheelMaker project.
+// It stores the active adapter name and last-known ACP session IDs.
+type ProjectState struct {
 	// ActiveAdapter is the name of the currently active adapter (e.g. "codex").
 	ActiveAdapter string `json:"activeAdapter,omitempty"`
 
-	// Adapters maps adapter names to their configurations.
-	Adapters map[string]AdapterConfig `json:"adapters,omitempty"`
-
 	// SessionIDs maps adapter names to their last known ACP sessionId.
-	// Used to attempt session/load on restart.
+	// Used to attempt session/load on restart or after idle timeout.
+	// Deprecated: new code should use Agents[name].LastSessionID.
+	// Kept for backward compatibility with existing state files.
 	SessionIDs map[string]string `json:"session_ids,omitempty"`
+
+	// Agents maps adapter names to their persisted metadata.
+	Agents map[string]*AgentState `json:"agents,omitempty"`
 }
 
-// defaultState returns a State with sensible defaults.
-func defaultState() *State {
-	return &State{
+// State is a backward-compatibility alias for ProjectState.
+// Existing code and tests can continue to use client.State.
+type State = ProjectState
+
+// FileState is the top-level on-disk state format for multi-project setups.
+// It maps project names to their ProjectState.
+type FileState struct {
+	Projects map[string]*ProjectState `json:"projects"`
+}
+
+// defaultProjectState returns a ProjectState with sensible defaults.
+func defaultProjectState() *ProjectState {
+	return &ProjectState{
 		ActiveAdapter: "codex",
-		Adapters:      map[string]AdapterConfig{},
 		SessionIDs:    map[string]string{},
+		Agents:        map[string]*AgentState{},
 	}
+}
+
+// defaultState is an alias for defaultProjectState, kept for test compatibility.
+func defaultState() *State {
+	return defaultProjectState()
 }

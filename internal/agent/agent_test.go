@@ -717,28 +717,38 @@ func (ms *mockServer) handleRequest(id int64, method string, params json.RawMess
 
 // handlePrompt is the async prompt handler that supports sending callbacks.
 func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectContext bool) {
-	var params struct {
-		SessionID string `json:"sessionId"`
-		Prompt    string `json:"prompt"`
+	// F2 fix: Prompt is now []ContentBlock. Extract sessionId and first text block.
+	var raw struct {
+		SessionID string          `json:"sessionId"`
+		Prompt    json.RawMessage `json:"prompt"`
 	}
-	_ = json.Unmarshal(rawParams, &params)
-	sessID := params.SessionID
+	_ = json.Unmarshal(rawParams, &raw)
+	sessID := raw.SessionID
+
+	var promptText string
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw.Prompt, &blocks) == nil && len(blocks) > 0 {
+		promptText = blocks[0].Text
+	}
 
 	// Reject context bootstrap prompts when requested (stale-context test).
-	if rejectContext && strings.HasPrefix(params.Prompt, "[context]") {
+	if rejectContext && strings.HasPrefix(promptText, "[context]") {
 		ms.respondError(id, "mock: unexpected context bootstrap – stale context detected")
 		return
 	}
 
 	// Empty-text prompt: respond with no chunks (clears lastReply).
-	if params.Prompt == "no-text-prompt" {
+	if promptText == "no-text-prompt" {
 		ms.respond(id, map[string]any{"stopReason": "end_turn"})
 		return
 	}
 
 	// FS read callback test.
-	if strings.HasPrefix(params.Prompt, "test-callback-fs-read:") {
-		path := strings.TrimPrefix(params.Prompt, "test-callback-fs-read:")
+	if strings.HasPrefix(promptText, "test-callback-fs-read:") {
+		path := strings.TrimPrefix(promptText, "test-callback-fs-read:")
 		result, err := ms.callbackRequest("fs/read_text_file", map[string]any{
 			"sessionId": sessID,
 			"path":      path,
@@ -765,8 +775,8 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	}
 
 	// FS write callback test.
-	if strings.HasPrefix(params.Prompt, "test-callback-fs-write:") {
-		rest := strings.TrimPrefix(params.Prompt, "test-callback-fs-write:")
+	if strings.HasPrefix(promptText, "test-callback-fs-write:") {
+		rest := strings.TrimPrefix(promptText, "test-callback-fs-write:")
 		// Format: "<path>:<content>" — use LAST colon so Windows drive letters work.
 		colonIdx := strings.LastIndex(rest, ":")
 		var path, content string
@@ -797,27 +807,30 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	}
 
 	// Permission callback test.
-	if params.Prompt == "test-callback-permission" {
+	if promptText == "test-callback-permission" {
 		result, err := ms.callbackRequest("session/request_permission", map[string]any{
 			"sessionId": sessID,
-			"toolCall":  map[string]any{"name": "shell_exec", "args": map[string]any{}},
+			"toolCall":  map[string]any{"toolCallId": "call_001"},
 			"options": []map[string]any{
-				{"id": "allow_once", "label": "Allow once", "kind": "allow_once"},
-				{"id": "reject_once", "label": "Reject once", "kind": "reject_once"},
+				{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"},
+				{"optionId": "reject_once", "name": "Reject once", "kind": "reject_once"},
 			},
 		})
 		var textToEcho string
 		if err != nil {
 			textToEcho = "permission-error: " + err.Error()
 		} else {
+			// B2 fix: response is now {"outcome": {"outcome": "...", "optionId": "..."}}.
 			var r struct {
-				Outcome  string `json:"outcome"`
-				OptionID string `json:"optionId"`
+				Outcome struct {
+					Outcome  string `json:"outcome"`
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
 			}
 			_ = json.Unmarshal(result, &r)
-			textToEcho = r.Outcome
-			if r.OptionID != "" {
-				textToEcho += ":" + r.OptionID
+			textToEcho = r.Outcome.Outcome
+			if r.Outcome.OptionID != "" {
+				textToEcho += ":" + r.Outcome.OptionID
 			}
 		}
 		ms.sendNotification("session/update", map[string]any{
@@ -832,7 +845,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	}
 
 	// Terminal lifecycle test: create → wait_for_exit → output → release.
-	if params.Prompt == "test-callback-terminal" {
+	if promptText == "test-callback-terminal" {
 		result, err := ms.callbackRequest("terminal/create", map[string]any{
 			"sessionId": sessID,
 			"command":   "echo",
@@ -889,7 +902,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	}
 
 	// Terminal kill test: create → kill → release.
-	if params.Prompt == "test-callback-terminal-kill" {
+	if promptText == "test-callback-terminal-kill" {
 		result, err := ms.callbackRequest("terminal/create", map[string]any{
 			"sessionId": sessID,
 			"command":   "echo",
@@ -927,7 +940,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	}
 
 	// many-updates-prompt: send 64 chunks to exercise the out-of-read-loop dispatch.
-	if params.Prompt == "many-updates-prompt" {
+	if promptText == "many-updates-prompt" {
 		for i := range 64 {
 			ms.sendNotification("session/update", map[string]any{
 				"sessionId": sessID,

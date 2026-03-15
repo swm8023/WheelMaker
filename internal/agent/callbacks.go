@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/swm8023/wheelmaker/internal/agent/acp"
 )
@@ -56,8 +57,25 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 	}
 	a.mu.Lock()
 	h := a.permission
+	// FL2: use per-prompt context so Cancel() unblocks pending permission requests.
+	pCtx := a.promptCtx
 	a.mu.Unlock()
-	return h.RequestPermission(ctx, p)
+	if pCtx == nil {
+		pCtx = ctx
+	}
+
+	result, err := h.RequestPermission(pCtx, p)
+	if err != nil {
+		if pCtx.Err() != nil {
+			// Prompt was cancelled — respond with "cancelled" outcome as required.
+			return acp.PermissionResponse{
+				Outcome: acp.PermissionResult{Outcome: "cancelled"},
+			}, nil
+		}
+		return nil, err
+	}
+	// B2 fix: wrap in PermissionResponse so result JSON is {"outcome":{...}}.
+	return acp.PermissionResponse{Outcome: result}, nil
 }
 
 func (a *Agent) callbackFSRead(params json.RawMessage) (any, error) {
@@ -69,7 +87,30 @@ func (a *Agent) callbackFSRead(params json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fs/read: %w", err)
 	}
-	return acp.FSReadTextFileResult{Content: string(data)}, nil
+	content := string(data)
+	// B7 fix: apply line/limit filtering when requested (1-based line per spec).
+	if p.Line != nil || p.Limit != nil {
+		lines := strings.Split(content, "\n")
+		start := 0
+		if p.Line != nil {
+			start = *p.Line - 1
+			if start < 0 {
+				start = 0
+			}
+			if start > len(lines) {
+				start = len(lines)
+			}
+		}
+		end := len(lines)
+		if p.Limit != nil {
+			end = start + *p.Limit
+			if end > len(lines) {
+				end = len(lines)
+			}
+		}
+		content = strings.Join(lines[start:end], "\n")
+	}
+	return acp.FSReadTextFileResult{Content: content}, nil
 }
 
 func (a *Agent) callbackFSWrite(params json.RawMessage) (any, error) {

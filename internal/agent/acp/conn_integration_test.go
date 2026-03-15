@@ -41,7 +41,7 @@ func TestIntegration_Initialize(t *testing.T) {
 
 	var result acp.InitializeResult
 	if err := c.Send(ctx, "initialize", acp.InitializeParams{
-		ProtocolVersion: "0.1",
+		ProtocolVersion: 1,
 		ClientCapabilities: acp.ClientCapabilities{
 			FS: &acp.FSCapabilities{
 				ReadTextFile:  true,
