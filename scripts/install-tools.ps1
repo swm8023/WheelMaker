@@ -109,28 +109,32 @@ function Install-ClaudeAgentAcp {
         Write-Host "npm install failed: $_"
     }
 
-    # Locate the .cmd wrapper using npm prefix -g (works with scoop, nvm, standard npm).
-    $candidates = @()
+    # Locate dist/index.js using npm prefix -g and generate a wrapper .cmd with absolute path.
+    # We cannot simply copy the npm .cmd because it uses %dp0% (relative to its own dir).
+    $indexJs = $null
     $npmPrefix = & npm prefix -g 2>$null
     if ($npmPrefix) {
-        $candidates += Join-Path $npmPrefix "claude-agent-acp.cmd"
+        $candidate = Join-Path $npmPrefix "node_modules\@zed-industries\claude-agent-acp\dist\index.js"
+        if (Test-Path $candidate) { $indexJs = $candidate }
     }
-    $appData = $env:APPDATA
-    if ($appData) {
-        $candidates += "$appData\npm\claude-agent-acp.cmd"
-    }
-
-    foreach ($c in $candidates) {
-        if (Test-Path $c) {
-            Copy-Item $c $OutFile
-            Write-Host "claude-agent-acp.cmd copied from $c"
-            return
+    if (-not $indexJs) {
+        $appData = $env:APPDATA
+        if ($appData) {
+            $candidate = "$appData\npm\node_modules\@zed-industries\claude-agent-acp\dist\index.js"
+            if (Test-Path $candidate) { $indexJs = $candidate }
         }
     }
 
-    Write-Warning "npm ran but could not locate claude-agent-acp.cmd wrapper."
+    if ($indexJs) {
+        # Generate a .cmd that calls node with the absolute path to dist/index.js.
+        $cmd = "@ECHO off`r`nnode `"$indexJs`" %*`r`n"
+        [System.IO.File]::WriteAllText($OutFile, $cmd, [System.Text.Encoding]::ASCII)
+        Write-Host "claude-agent-acp.cmd generated (pointing to $indexJs)"
+        return
+    }
+
+    Write-Warning "npm ran but could not locate claude-agent-acp dist/index.js."
     Write-Warning "Run: npm install -g @zed-industries/claude-agent-acp"
-    Write-Warning "Then copy the generated .cmd to: $Dest\claude-agent-acp.cmd"
 }
 
 Install-CodexAcp
