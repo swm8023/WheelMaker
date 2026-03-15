@@ -45,6 +45,7 @@ config.json 格式：
 - **懒加载**：agent 子进程在首条消息时才创建；idle 30min 自动关闭并存盘，下次恢复
 - **命令判断**：仅 `/use`、`/cancel`、`/status` 是命令，其他 `/` 开头文本当普通消息处理
 - 代码注释和标识符用英文
+- **每次改完自动 commit + push**：每完成一次代码修改后，立即执行 `git add`、`git commit`、`git push`，无需等用户提示
 
 ## 本地开发
 
