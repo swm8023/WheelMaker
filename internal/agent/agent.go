@@ -2,10 +2,11 @@
 // Session interface (used by client), Agent concrete struct, and SwitchMode.
 //
 // Relationships:
-//   client.Client Ã¢â€ â€™ agent.Session (narrow interface, mockable)
-//   client.Client Ã¢â€ â€™ *agent.Agent  (concrete type, for Switch calls only)
-//   agent.Agent   Ã¢â€ â€™ agent/acp.Conn (low-level transport, owns subprocess)
-//   agent.Agent   Ã¢â€ â€™ provider.Provider (not stored; provided once by client on New/Switch)
+//
+//	client.Client ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ agent.Session (narrow interface, mockable)
+//	client.Client ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ *agent.Agent  (concrete type, for Switch calls only)
+//	agent.Agent   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ agent/acp.Conn (low-level transport, owns subprocess)
+//	agent.Agent   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ provider.Provider (not stored; provided once by client on New/Switch)
 package agent
 
 import (
@@ -14,7 +15,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // Session is the narrow interface used by client.Client for day-to-day operations.
@@ -224,7 +225,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 //
 // savedSessionID, if non-empty, is pre-seeded into the agent so that ensureReady
 // will attempt session/load on the new connection (same as NewWithSessionID).
-// For SwitchWithContext pass "" Ã¢â‚¬â€ a fresh session is created by the bootstrap prompt.
+// For SwitchWithContext pass "" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a fresh session is created by the bootstrap prompt.
 //
 // Concurrency contract: the caller (Client) MUST call Cancel() and drain the
 // current prompt channel before calling Switch. Agent does not wait for in-progress
@@ -253,7 +254,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	a.sessionID = savedSessionID
 	a.lastReply = ""
 	// Reset metadata so the new adapter's own initialize handshake populates it
-	// from scratch Ã¢â‚¬â€ prevents stale metadata from the old adapter being read back.
+	// from scratch ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â prevents stale metadata from the old adapter being read back.
 	a.initMeta = InitMeta{}
 	a.sessionMeta = SessionMeta{}
 	a.mu.Unlock()

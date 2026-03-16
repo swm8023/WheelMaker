@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // managedTerminal holds a running subprocess created by terminal/create.

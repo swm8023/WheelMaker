@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // ensureReady performs the ACP handshake if the agent is not yet ready:
@@ -102,7 +102,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 			log.Printf("[agent] connected: adapter=%s session=%s (resumed)", a.name, savedSessionID)
 			return nil
 		}
-		// session/load failed â€” fall through to session/new.
+		// session/load failed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fall through to session/new.
 	}
 
 	// Step 4: create a new session.

@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // PermissionHandler decides how to respond to the agent's permission requests.

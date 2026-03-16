@@ -1,18 +1,18 @@
 package agent
 
-// callbacks.go handles all Agentâ†’Client requests from the ACP subprocess.
+// callbacks.go handles all AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client requests from the ACP subprocess.
 // These are requests (with an id) sent by the CLI binary to the client;
 // the client must send a JSON-RPC response.
 //
 // Methods handled:
-//   - session/request_permission  â†’ auto allow_once (MVP)
-//   - fs/read_text_file           â†’ os.ReadFile
-//   - fs/write_text_file          â†’ os.WriteFile
-//   - terminal/create             â†’ spawn subprocess, buffer output
-//   - terminal/output             â†’ return buffered output
-//   - terminal/wait_for_exit      â†’ block until subprocess exits
-//   - terminal/kill               â†’ kill subprocess
-//   - terminal/release            â†’ clean up resources
+//   - session/request_permission  ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ auto allow_once (MVP)
+//   - fs/read_text_file           ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ os.ReadFile
+//   - fs/write_text_file          ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ os.WriteFile
+//   - terminal/create             ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ spawn subprocess, buffer output
+//   - terminal/output             ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ return buffered output
+//   - terminal/wait_for_exit      ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ block until subprocess exits
+//   - terminal/kill               ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ kill subprocess
+//   - terminal/release            ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ clean up resources
 
 import (
 	"context"
@@ -22,11 +22,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // handleCallback is registered on conn as the RequestHandler in ensureReady.
-// It dispatches Agentâ†’Client requests to the appropriate implementation.
+// It dispatches AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client requests to the appropriate implementation.
 func (a *Agent) handleCallback(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case "session/request_permission":
@@ -67,7 +67,7 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 	result, err := h.RequestPermission(pCtx, p)
 	if err != nil {
 		if pCtx.Err() != nil {
-			// Prompt was cancelled â€” respond with "cancelled" outcome as required.
+			// Prompt was cancelled ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â respond with "cancelled" outcome as required.
 			return acp.PermissionResponse{
 				Outcome: acp.PermissionResult{Outcome: "cancelled"},
 			}, nil

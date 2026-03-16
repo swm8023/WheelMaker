@@ -4,7 +4,7 @@ package mock
 import (
 	"context"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 const adapterName = "mock"

@@ -1,7 +1,7 @@
 // Package client provides the top-level coordinator for WheelMaker.
 package client
 
-import "github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+import acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 
 // ConnectionConfig captures what this client declared in the initialize request.
 // Persisted for auditability: version mismatches and capability gaps are easier

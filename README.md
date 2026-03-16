@@ -126,7 +126,7 @@ Hub
 | `internal/hub/` | Reads config, manages lifecycle of all project clients |
 | `internal/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
 | `internal/agent/` | ACP session lifecycle, streaming prompts, fs/terminal/permission callbacks |
-| `internal/agent/provider/acp/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
+| `internal/agent/provider/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
 | `internal/agent/provider/codex/` | Stateless connection factory â€” launches codex-acp binary |
 | `internal/im/console/` | Console IM: reads stdin; optionally logs all ACP JSON to stderr |
 | `internal/im/feishu/` | Feishu Bot IM adapter |
@@ -149,6 +149,7 @@ Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatic
 - [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
 - [Feishu Bot Setup](docs/feishu-bot.md)
 - [codex-acp Reference](docs/codex-acp.md)
+
 
 
 

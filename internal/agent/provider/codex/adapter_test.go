@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 	"github.com/swm8023/wheelmaker/internal/agent/provider/codex"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )

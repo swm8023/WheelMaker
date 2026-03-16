@@ -18,8 +18,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/agent/provider"
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
@@ -305,7 +304,7 @@ func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
 
 	// Register a new adapter and switch to it after the prompt completes.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use other"})
@@ -354,7 +353,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 		},
 	}
 	c := newTestClient(slow)
-	c.RegisterProvider("fast", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("fast", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 	msgs := captureReplies(c)
@@ -540,7 +539,7 @@ func TestJSONStore_NewKeysTakePrecedenceOverLegacy(t *testing.T) {
 
 // --- Tests: switch session persistence ---
 
-// minimalMockAdapter is an provider.Provider that connects to the mock ACP server
+// minimalMockAdapter is an acp.Provider that connects to the mock ACP server
 // embedded in the test binary (activated via GO_CLIENT_ACP_MOCK=1).
 type minimalMockAdapter struct{}
 
@@ -554,7 +553,7 @@ func (a *minimalMockAdapter) Connect(_ context.Context) (*acp.Conn, error) {
 }
 func (a *minimalMockAdapter) Close() error { return nil }
 
-var _ provider.Provider = (*minimalMockAdapter)(nil)
+var _ acp.Provider = (*minimalMockAdapter)(nil)
 
 // contextRejectMockAdapter spawns the mock ACP server with GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1,
 // causing it to reject [context] bootstrap prompts with a JSON-RPC error.
@@ -571,9 +570,9 @@ func (a *contextRejectMockAdapter) Connect(_ context.Context) (*acp.Conn, error)
 }
 func (a *contextRejectMockAdapter) Close() error { return nil }
 
-var _ provider.Provider = (*contextRejectMockAdapter)(nil)
+var _ acp.Provider = (*contextRejectMockAdapter)(nil)
 
-// failConnectAdapter is an provider.Provider whose Connect always returns an error.
+// failConnectAdapter is an acp.Provider whose Connect always returns an error.
 // Used to test that Start() is non-fatal when the active adapter cannot connect.
 type failConnectAdapter struct{}
 
@@ -583,7 +582,7 @@ func (a *failConnectAdapter) Connect(_ context.Context) (*acp.Conn, error) {
 }
 func (a *failConnectAdapter) Close() error { return nil }
 
-var _ provider.Provider = (*failConnectAdapter)(nil)
+var _ acp.Provider = (*failConnectAdapter)(nil)
 
 // TestSwitchAdapter_PersistsOutgoingSessionID verifies that the outgoing
 // adapter's session ID is saved to state before the switch completes.
@@ -598,7 +597,7 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 			"codex": {LastSessionID: "outgoing-sess-123"},
 		},
 	})
-	c.RegisterProvider("new-adapter", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("new-adapter", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 
@@ -622,7 +621,7 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 }
 
 // TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch verifies that a plain
-// /use does NOT clear state.SessionIDs for the incoming provider. The saved ID is
+// /use does NOT clear state.SessionIDs for the incoming acp. The saved ID is
 // threaded through to ag.Switch() so ensureReady can attempt session/load on
 // backends that support it.
 func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
@@ -637,7 +636,7 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 			"new-adapter": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
 		},
 	})
-	c.RegisterProvider("new-adapter", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("new-adapter", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 
@@ -666,10 +665,10 @@ func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 		ActiveAdapter: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
-	c.RegisterProvider("other", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 
@@ -713,7 +712,7 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 	}}
 	c := client.New(store, nil, "test", "/tmp")
 	// Register "codex" but NOT "unknown-adapter" (simulating a removed adapter).
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 
@@ -746,13 +745,13 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 // TestStart_ConnectError_NonFatal verifies that Start() succeeds when the active
 // adapter fails to connect, leaving session nil. Subsequent messages get
 // "No active session" rather than causing a hard startup failure.
-// Also verifies that /use <adapter> can recover by connecting a working provider.
+// Also verifies that /use <adapter> can recover by connecting a working acp.
 func TestStart_ConnectError_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
 		return &failConnectAdapter{}
 	})
 
@@ -769,7 +768,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 	}
 
 	// /use with a working adapter should recover and allow prompts.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
@@ -800,14 +799,14 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 
 // TestHandleMessage_Use_Continue_BootstrapsContext verifies that /use <name> --continue
 // calls ag.Switch with SwitchWithContext, which sends a [context] bootstrap prompt to the
-// new provider. Uses a real Client.Start() so c.ag is non-nil and switchAdapter executes
+// new acp. Uses a real Client.Start() so c.ag is non-nil and switchAdapter executes
 // ag.Switch(..., mode).
 func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 
@@ -829,11 +828,11 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	_ = msgs
 
 	// Register "other" with a backend that rejects [context] bootstrap prompts.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
 		return &contextRejectMockAdapter{}
 	})
 
-	// /use other --continue: ag.Switch sends "[context] client-mock-reply" to the new provider.
+	// /use other --continue: ag.Switch sends "[context] client-mock-reply" to the new acp.
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other --continue"})
 
 	// Poll until the async drain goroutine logs the rejection warning (or timeout).
@@ -855,7 +854,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 		ActiveAdapter: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 
@@ -877,7 +876,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 	_ = msgs
 
 	// Register "other" using a context-rejecting backend.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
 		return &contextRejectMockAdapter{}
 	})
 
@@ -901,7 +900,7 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 		ActiveAdapter: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
 		return &minimalMockAdapter{}
 	})
 

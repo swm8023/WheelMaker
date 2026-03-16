@@ -18,7 +18,7 @@ Hub (internal/hub/)          â€” å¤š project ç”Ÿå‘½å‘¨æœŸ
 | `internal/hub/` | è¯» `~/.wheelmaker/config.json`ï¼Œä¸ºæ¯ä¸ª project åˆ›å»º Client + IM |
 | `internal/client/` | å• project åè°ƒï¼šå‘½ä»¤è·¯ç”±ã€lazy agent initã€idle 30min è¶…æ—¶ã€state æŒä¹…åŒ– |
 | `internal/agent/` | ACP ä¼šè¯ç”Ÿå‘½å‘¨æœŸã€prompt æµã€å…¥ç«™å›žè°ƒï¼ˆfs/terminal/permissionï¼‰ |
-| `internal/agent/provider/acp/` | JSON-RPC 2.0 ä¼ è¾“å±‚ï¼Œç®¡ç†å­è¿›ç¨‹ stdio |
+| `internal/agent/provider/` | JSON-RPC 2.0 ä¼ è¾“å±‚ï¼Œç®¡ç†å­è¿›ç¨‹ stdio |
 | `internal/agent/provider/codex/` | å¯åŠ¨ codex-acp äºŒè¿›åˆ¶ï¼Œè¿”å›ž `*acp.Conn` |
 | `internal/im/console/` | Console IMï¼šè¯» stdinï¼Œdebug æ¨¡å¼æ‰“å°æ‰€æœ‰ ACP JSON |
 | `internal/im/feishu/` | é£žä¹¦ Bot IM adapter |
@@ -85,6 +85,7 @@ go build ./cmd/wheelmaker/
 
 - ACP åè®®ï¼š[docs/acp-protocol-full.zh-CN.md](docs/acp-protocol-full.zh-CN.md)
 - é£žä¹¦ Botï¼š[docs/feishu-bot.md](docs/feishu-bot.md)
+
 
 
 

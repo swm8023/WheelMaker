@@ -1,7 +1,7 @@
-// Package acp implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
+// package provider implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
 // This package is an internal detail of the agent layer and is not imported directly
 // by the client or adapter layers; they interact through the agent.Session interface.
-package acp
+package provider
 
 import (
 	"encoding/json"
@@ -354,7 +354,7 @@ type SessionSetConfigOptionParams struct {
 	Value     string `json:"value"`
 }
 
-// --- Agent→Client callback types ---
+// --- AgentÃ¢â€ â€™Client callback types ---
 
 // FSReadTextFileParams is sent by the agent to request a file read.
 type FSReadTextFileParams struct {

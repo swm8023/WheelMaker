@@ -14,7 +14,7 @@
 
 **Files:**
 - Create: `internal/agent/provider/mock/adapter_unit_test.go`
-- Create: `internal/agent/provider/acp/mock_server_test.go`
+- Create: `internal/agent/provider/mock_server_test.go`
 
 - [ ] **Step 1: Write failing tests for adapter name/connect/close**
 - [ ] **Step 2: Write failing tests for scenarios 1/2/3/4 and 10+**
@@ -23,8 +23,8 @@
 ### Task 2: Implement in-memory ACP transport and mock server
 
 **Files:**
-- Modify: `internal/agent/provider/acp/connect.go`
-- Create: `internal/agent/provider/acp/mock_server.go`
+- Modify: `internal/agent/provider/connect.go`
+- Create: `internal/agent/provider/mock_server.go`
 
 - [ ] **Step 1: Add in-memory constructor/start path to Conn**
 - [ ] **Step 2: Implement mock server request router and scenario handlers**
@@ -48,6 +48,7 @@
 - [ ] **Step 1: Run package-level tests for touched packages**
 - [ ] **Step 2: Run `go test ./...`**
 - [ ] **Step 3: Summarize behavior coverage and remaining gaps**
+
 
 
 

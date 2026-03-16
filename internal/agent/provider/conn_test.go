@@ -1,4 +1,4 @@
-package acp_test
+package provider_test
 
 // Unit tests for acp.Conn using a self-referential mock agent.
 //
@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // mockAgentBin is set in TestMain to the current test binary path.
@@ -177,7 +177,7 @@ func TestSubscribe_Notification(t *testing.T) {
 	})
 	defer cancel()
 
-	// Send a prompt â€” the mock sends 3 text chunks then returns.
+	// Send a prompt Ã¢â‚¬â€ the mock sends 3 text chunks then returns.
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
@@ -221,7 +221,7 @@ func TestSubscribe_Cancel(t *testing.T) {
 	})
 	cancelSub() // unsubscribe immediately
 
-	// Send a session/prompt to generate notifications â€” none should be received.
+	// Send a session/prompt to generate notifications Ã¢â‚¬â€ none should be received.
 	var sessResult acp.SessionNewResult
 	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
 	_ = c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
@@ -294,7 +294,7 @@ func TestSend_ProcessExit(t *testing.T) {
 	}
 }
 
-// TestIncomingRequest_Handler verifies that Agentâ†’Client requests are routed
+// TestIncomingRequest_Handler verifies that AgentÃ¢â€ â€™Client requests are routed
 // to the registered RequestHandler and that the response is sent back.
 func TestIncomingRequest_Handler(t *testing.T) {
 	c := newMockConn(t)
@@ -331,7 +331,7 @@ func TestIncomingRequest_Handler(t *testing.T) {
 // sends a -32601 method-not-found error back to the agent.
 func TestIncomingRequest_NoHandler(t *testing.T) {
 	c := newMockConn(t)
-	// No OnRequest registered â€” mock expects a -32601 error back.
+	// No OnRequest registered Ã¢â‚¬â€ mock expects a -32601 error back.
 	err := c.Send(context.Background(), "trigger_incoming_request_no_handler", nil, nil)
 	if err != nil {
 		t.Fatalf("Send: %v", err) // the client-side send itself should succeed
@@ -405,7 +405,7 @@ func runMockAgent() {
 			continue
 		}
 
-		// Notifications have no id â€” ignore them.
+		// Notifications have no id Ã¢â‚¬â€ ignore them.
 		if raw.ID == nil {
 			continue
 		}
@@ -465,7 +465,7 @@ func runMockAgent() {
 			return
 
 		case "trigger_incoming_request":
-			// 1. Send an Agentâ†’Client request (fs/read_text_file) to the client.
+			// 1. Send an AgentÃ¢â€ â€™Client request (fs/read_text_file) to the client.
 			mockIncomingRequest(enc, 9999, "fs/read_text_file", map[string]any{
 				"sessionId": "test-session",
 				"path":      "/mock/path/file.txt",
@@ -532,7 +532,7 @@ func mockError(enc *json.Encoder, id int64, code int, message string) {
 	})
 }
 
-// mockIncomingRequest simulates an Agentâ†’Client request (has both id and method).
+// mockIncomingRequest simulates an AgentÃ¢â€ â€™Client request (has both id and method).
 func mockIncomingRequest(enc *json.Encoder, id int64, method string, params any) {
 	_ = enc.Encode(map[string]any{
 		"jsonrpc": "2.0",
