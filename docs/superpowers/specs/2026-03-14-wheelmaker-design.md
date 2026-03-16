@@ -1,106 +1,106 @@
-# WheelMaker 设计规范
+﻿# WheelMaker è®¾è®¡è§„èŒƒ
 
-> 版本：v0.1
-> 日期：2026-03-14
-> 状态：已批准
+> ç‰ˆæœ¬ï¼šv0.1
+> æ—¥æœŸï¼š2026-03-14
+> çŠ¶æ€ï¼šå·²æ‰¹å‡†
 
-## 1. 项目目标
+## 1. é¡¹ç›®ç›®æ ‡
 
-WheelMaker 是一个 Go 编写的长期驻留守护进程，让开发者通过手机 IM（初期为飞书）远程控制本地 AI 编程 CLI（Codex、Claude、Copilot 等）。
+WheelMaker æ˜¯ä¸€ä¸ª Go ç¼–å†™çš„é•¿æœŸé©»ç•™å®ˆæŠ¤è¿›ç¨‹ï¼Œè®©å¼€å‘è€…é€šè¿‡æ‰‹æœº IMï¼ˆåˆæœŸä¸ºé£žä¹¦ï¼‰è¿œç¨‹æŽ§åˆ¶æœ¬åœ° AI ç¼–ç¨‹ CLIï¼ˆCodexã€Claudeã€Copilot ç­‰ï¼‰ã€‚
 
-**核心问题**：离开电脑后无法与本地 AI 编程助手交互。
-**解决方案**：在本地机器运行一个桥接守护进程，连接 IM 平台与本地 AI CLI 工具。
+**æ ¸å¿ƒé—®é¢˜**ï¼šç¦»å¼€ç”µè„‘åŽæ— æ³•ä¸Žæœ¬åœ° AI ç¼–ç¨‹åŠ©æ‰‹äº¤äº’ã€‚
+**è§£å†³æ–¹æ¡ˆ**ï¼šåœ¨æœ¬åœ°æœºå™¨è¿è¡Œä¸€ä¸ªæ¡¥æŽ¥å®ˆæŠ¤è¿›ç¨‹ï¼Œè¿žæŽ¥ IM å¹³å°ä¸Žæœ¬åœ° AI CLI å·¥å…·ã€‚
 
-## 2. 整体架构
-
-```
-┌─────────────┐    WebSocket      ┌──────────────────────────────────┐
-│  飞书 App    │ ◄───────────────► │          WheelMaker              │
-│  (手机端)    │   (go-lark SDK)   │                                  │
-└─────────────┘                   │  ┌──────────────────────────┐    │
-                                  │  │         Hub              │    │
-                                  │  │  (调度 / 状态 / 持久化)  │    │
-                                  │  └────────────┬─────────────┘    │
-                                  │               │                  │
-                                  │  ┌────────────▼─────────────┐    │
-                                  │  │      Agent Interface      │    │
-                                  │  │  ┌──────────────────────┐ │    │
-                                  │  │  │   Codex Adapter      │ │    │
-                                  │  │  │  (ACP JSON-RPC)      │ │    │
-                                  │  │  └──────────┬───────────┘ │    │
-                                  │  └─────────────┼─────────────┘    │
-                                  │                │ stdin/stdout     │
-                                  │  ┌─────────────▼───────────┐     │
-                                  │  │     codex-acp.exe        │     │
-                                  │  │  (子进程，Rust 编写)     │     │
-                                  │  └─────────────────────────┘     │
-                                  └──────────────────────────────────┘
-```
-
-### 数据流
+## 2. æ•´ä½“æž¶æž„
 
 ```
-1. 飞书消息 → WebSocket → im/feishu Adapter → im.Message
-2. Hub.HandleMessage(msg) → 解析命令 or 转发 Prompt
-3. Agent.Prompt(ctx, text) → acp.Client.Send(session/prompt)
-4. codex-acp.exe → session/update notifications (流式)
-5. Update stream → Hub → im.Adapter.SendText() → 飞书
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”    WebSocket      â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  é£žä¹¦ App    â”‚ â—„â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–º â”‚          WheelMaker              â”‚
+â”‚  (æ‰‹æœºç«¯)    â”‚   (go-lark SDK)   â”‚                                  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜                   â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”    â”‚
+                                  â”‚  â”‚         Hub              â”‚    â”‚
+                                  â”‚  â”‚  (è°ƒåº¦ / çŠ¶æ€ / æŒä¹…åŒ–)  â”‚    â”‚
+                                  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜    â”‚
+                                  â”‚               â”‚                  â”‚
+                                  â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”    â”‚
+                                  â”‚  â”‚      Agent Interface      â”‚    â”‚
+                                  â”‚  â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â” â”‚    â”‚
+                                  â”‚  â”‚  â”‚   Codex Adapter      â”‚ â”‚    â”‚
+                                  â”‚  â”‚  â”‚  (ACP JSON-RPC)      â”‚ â”‚    â”‚
+                                  â”‚  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜ â”‚    â”‚
+                                  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜    â”‚
+                                  â”‚                â”‚ stdin/stdout     â”‚
+                                  â”‚  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”     â”‚
+                                  â”‚  â”‚     codex-acp.exe        â”‚     â”‚
+                                  â”‚  â”‚  (å­è¿›ç¨‹ï¼ŒRust ç¼–å†™)     â”‚     â”‚
+                                  â”‚  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜     â”‚
+                                  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
-## 3. 目录结构
+### æ•°æ®æµ
+
+```
+1. é£žä¹¦æ¶ˆæ¯ â†’ WebSocket â†’ im/feishu Adapter â†’ im.Message
+2. Hub.HandleMessage(msg) â†’ è§£æžå‘½ä»¤ or è½¬å‘ Prompt
+3. Agent.Prompt(ctx, text) â†’ acp.Client.Send(session/prompt)
+4. codex-acp.exe â†’ session/update notifications (æµå¼)
+5. Update stream â†’ Hub â†’ im.provider.SendText() â†’ é£žä¹¦
+```
+
+## 3. ç›®å½•ç»“æž„
 
 ```
 wheelmaker/
-├── cmd/
-│   └── wheelmaker/
-│       └── main.go              # 启动入口
-├── internal/
-│   ├── acp/
-│   │   ├── client.go            # JSON-RPC stdio 传输层
-│   │   └── types.go             # 消息结构体
-│   ├── agent/
-│   │   ├── agent.go             # Agent interface + Update 类型
-│   │   └── codex/
-│   │       └── adapter.go       # Codex ACP 适配器
-│   ├── im/
-│   │   ├── im.go                # IM Adapter interface
-│   │   └── feishu/
-│   │       └── adapter.go       # 飞书 WebSocket 适配
-│   ├── hub/
-│   │   ├── hub.go               # 核心调度器
-│   │   ├── store.go             # Store interface + JSONStore
-│   │   └── state.go             # 持久化状态结构体
-│   └── tools/
-│       └── resolve.go           # 工具二进制路径解析
-├── bin/
-│   ├── windows_amd64/.gitkeep
-│   ├── darwin_arm64/.gitkeep
-│   ├── darwin_amd64/.gitkeep
-│   ├── linux_amd64/.gitkeep
-│   └── linux_arm64/.gitkeep
-├── scripts/
-│   ├── install-tools.sh         # Linux/macOS 安装脚本
-│   └── install-tools.ps1        # Windows 安装脚本
-├── docs/
-│   ├── specs/                   # 设计规范（本文件）
-│   ├── plan/                    # 实现计划
-│   ├── acp-protocol-full.zh-CN.md
-│   ├── feishu-bot.md
-│   └── codex-acp.md
-├── CLAUDE.md
-├── AGENTS.md
-├── go.mod
-└── .gitignore
+â”œâ”€â”€ cmd/
+â”‚   â””â”€â”€ wheelmaker/
+â”‚       â””â”€â”€ main.go              # å¯åŠ¨å…¥å£
+â”œâ”€â”€ internal/
+â”‚   â”œâ”€â”€ acp/
+â”‚   â”‚   â”œâ”€â”€ client.go            # JSON-RPC stdio ä¼ è¾“å±‚
+â”‚   â”‚   â””â”€â”€ types.go             # æ¶ˆæ¯ç»“æž„ä½“
+â”‚   â”œâ”€â”€ agent/
+â”‚   â”‚   â”œâ”€â”€ agent.go             # Agent interface + Update ç±»åž‹
+â”‚   â”‚   â””â”€â”€ codex/
+â”‚   â”‚       â””â”€â”€ provider.go       # Codex ACP é€‚é…å™¨
+â”‚   â”œâ”€â”€ im/
+â”‚   â”‚   â”œâ”€â”€ im.go                # IM Adapter interface
+â”‚   â”‚   â””â”€â”€ feishu/
+â”‚   â”‚       â””â”€â”€ provider.go       # é£žä¹¦ WebSocket é€‚é…
+â”‚   â”œâ”€â”€ hub/
+â”‚   â”‚   â”œâ”€â”€ hub.go               # æ ¸å¿ƒè°ƒåº¦å™¨
+â”‚   â”‚   â”œâ”€â”€ store.go             # Store interface + JSONStore
+â”‚   â”‚   â””â”€â”€ state.go             # æŒä¹…åŒ–çŠ¶æ€ç»“æž„ä½“
+â”‚   â””â”€â”€ tools/
+â”‚       â””â”€â”€ resolve.go           # å·¥å…·äºŒè¿›åˆ¶è·¯å¾„è§£æž
+â”œâ”€â”€ bin/
+â”‚   â”œâ”€â”€ windows_amd64/.gitkeep
+â”‚   â”œâ”€â”€ darwin_arm64/.gitkeep
+â”‚   â”œâ”€â”€ darwin_amd64/.gitkeep
+â”‚   â”œâ”€â”€ linux_amd64/.gitkeep
+â”‚   â””â”€â”€ linux_arm64/.gitkeep
+â”œâ”€â”€ scripts/
+â”‚   â”œâ”€â”€ install-tools.sh         # Linux/macOS å®‰è£…è„šæœ¬
+â”‚   â””â”€â”€ install-tools.ps1        # Windows å®‰è£…è„šæœ¬
+â”œâ”€â”€ docs/
+â”‚   â”œâ”€â”€ specs/                   # è®¾è®¡è§„èŒƒï¼ˆæœ¬æ–‡ä»¶ï¼‰
+â”‚   â”œâ”€â”€ plan/                    # å®žçŽ°è®¡åˆ’
+â”‚   â”œâ”€â”€ acp-protocol-full.zh-CN.md
+â”‚   â”œâ”€â”€ feishu-bot.md
+â”‚   â””â”€â”€ codex-acp.md
+â”œâ”€â”€ CLAUDE.md
+â”œâ”€â”€ AGENTS.md
+â”œâ”€â”€ go.mod
+â””â”€â”€ .gitignore
 ```
 
-## 4. 核心接口定义
+## 4. æ ¸å¿ƒæŽ¥å£å®šä¹‰
 
-### 4.1 Agent 接口
+### 4.1 Agent æŽ¥å£
 
 ```go
 // internal/agent/agent.go
 
-// Update 表示 agent 返回的一个流式更新单元
+// Update è¡¨ç¤º agent è¿”å›žçš„ä¸€ä¸ªæµå¼æ›´æ–°å•å…ƒ
 type Update struct {
     Type    string // "text" | "tool_call" | "thought" | "error"
     Content string
@@ -108,10 +108,10 @@ type Update struct {
     Err     error
 }
 
-// Agent 表示一个可交互的 AI 编程助手
+// Agent è¡¨ç¤ºä¸€ä¸ªå¯äº¤äº’çš„ AI ç¼–ç¨‹åŠ©æ‰‹
 type Agent interface {
     Name() string
-    // Prompt 发送 prompt，返回流式 Update channel，调用方读完 channel 直到 Done=true
+    // Prompt å‘é€ promptï¼Œè¿”å›žæµå¼ Update channelï¼Œè°ƒç”¨æ–¹è¯»å®Œ channel ç›´åˆ° Done=true
     Prompt(ctx context.Context, text string) (<-chan Update, error)
     Cancel() error
     SetMode(modeID string) error
@@ -119,12 +119,12 @@ type Agent interface {
 }
 ```
 
-### 4.2 IM Adapter 接口
+### 4.2 IM Adapter æŽ¥å£
 
 ```go
 // internal/im/im.go
 
-// Message 表示来自 IM 平台的一条消息
+// Message è¡¨ç¤ºæ¥è‡ª IM å¹³å°çš„ä¸€æ¡æ¶ˆæ¯
 type Message struct {
     ChatID    string
     MessageID string
@@ -132,160 +132,161 @@ type Message struct {
     Text      string
 }
 
-// Card 表示富文本消息卡片（飞书交互卡片格式）
+// Card è¡¨ç¤ºå¯Œæ–‡æœ¬æ¶ˆæ¯å¡ç‰‡ï¼ˆé£žä¹¦äº¤äº’å¡ç‰‡æ ¼å¼ï¼‰
 type Card map[string]any
 
-// Adapter 表示一个 IM 平台适配器
+// Adapter è¡¨ç¤ºä¸€ä¸ª IM å¹³å°é€‚é…å™¨
 type Adapter interface {
-    // OnMessage 注册消息处理函数
+    // OnMessage æ³¨å†Œæ¶ˆæ¯å¤„ç†å‡½æ•°
     OnMessage(handler func(Message))
     SendText(chatID, text string) error
     SendCard(chatID string, card Card) error
     SendReaction(messageID, emoji string) error
-    // Run 启动事件循环（阻塞直到 ctx 取消）
+    // Run å¯åŠ¨äº‹ä»¶å¾ªçŽ¯ï¼ˆé˜»å¡žç›´åˆ° ctx å–æ¶ˆï¼‰
     Run(ctx context.Context) error
 }
 ```
 
-### 4.3 Hub 状态与持久化
+### 4.3 Hub çŠ¶æ€ä¸ŽæŒä¹…åŒ–
 
 ```go
 // internal/hub/state.go
 
-// AgentConfig 单个 agent 的配置
+// AgentConfig å•ä¸ª agent çš„é…ç½®
 type AgentConfig struct {
-    ExePath string            // 工具二进制路径（空则由 tools.ResolveBinary 自动解析）
-    Env     map[string]string // 额外环境变量（如 OPENAI_API_KEY）
+    ExePath string            // å·¥å…·äºŒè¿›åˆ¶è·¯å¾„ï¼ˆç©ºåˆ™ç”± tools.ResolveBinary è‡ªåŠ¨è§£æžï¼‰
+    Env     map[string]string // é¢å¤–çŽ¯å¢ƒå˜é‡ï¼ˆå¦‚ OPENAI_API_KEYï¼‰
 }
 
-// State 持久化到磁盘的全局状态
+// State æŒä¹…åŒ–åˆ°ç£ç›˜çš„å…¨å±€çŠ¶æ€
 type State struct {
-    ActiveAgent   string                 // 当前活跃 agent 名称，如 "codex"
-    Agents        map[string]AgentConfig // agent 名 → 配置
-    ACPSessionIDs map[string]string      // agent 名 → ACP sessionId（用于 session/load）
+    ActiveAgent   string                 // å½“å‰æ´»è·ƒ agent åç§°ï¼Œå¦‚ "codex"
+    Agents        map[string]AgentConfig // agent å â†’ é…ç½®
+    ACPSessionIDs map[string]string      // agent å â†’ ACP sessionIdï¼ˆç”¨äºŽ session/loadï¼‰
 }
 
 // internal/hub/store.go
 
-// Store 持久化接口
+// Store æŒä¹…åŒ–æŽ¥å£
 type Store interface {
     Load() (*State, error)
     Save(s *State) error
 }
 
-// JSONStore 将 State 存储到本地 JSON 文件
+// JSONStore å°† State å­˜å‚¨åˆ°æœ¬åœ° JSON æ–‡ä»¶
 type JSONStore struct {
     Path string
 }
 ```
 
-### 4.4 工具二进制解析
+### 4.4 å·¥å…·äºŒè¿›åˆ¶è§£æž
 
 ```go
 // internal/tools/resolve.go
 
-// ResolveBinary 按优先级解析工具二进制路径：
-//   1. configPath 非空时直接使用
-//   2. 查找 bin/{GOOS}_{GOARCH}/{name}[.exe]
-//   3. 查找 PATH
+// ResolveBinary æŒ‰ä¼˜å…ˆçº§è§£æžå·¥å…·äºŒè¿›åˆ¶è·¯å¾„ï¼š
+//   1. configPath éžç©ºæ—¶ç›´æŽ¥ä½¿ç”¨
+//   2. æŸ¥æ‰¾ bin/{GOOS}_{GOARCH}/{name}[.exe]
+//   3. æŸ¥æ‰¾ PATH
 func ResolveBinary(name string, configPath string) (string, error)
 ```
 
-## 5. ACP 传输层设计
+## 5. ACP ä¼ è¾“å±‚è®¾è®¡
 
-### 5.1 通信模型
+### 5.1 é€šä¿¡æ¨¡åž‹
 
-`acp.Client` 启动 codex-acp 子进程，通过 stdin/stdout 进行 JSON-RPC 2.0 通信：
+`acp.Client` å¯åŠ¨ codex-acp å­è¿›ç¨‹ï¼Œé€šè¿‡ stdin/stdout è¿›è¡Œ JSON-RPC 2.0 é€šä¿¡ï¼š
 
-- 每条消息是一行 JSON（`\n` 分隔，消息内不含换行）
-- 请求带 `id`，响应匹配对应 `id`
-- Notification（`session/update`）无 `id`，由订阅者处理
+- æ¯æ¡æ¶ˆæ¯æ˜¯ä¸€è¡Œ JSONï¼ˆ`\n` åˆ†éš”ï¼Œæ¶ˆæ¯å†…ä¸å«æ¢è¡Œï¼‰
+- è¯·æ±‚å¸¦ `id`ï¼Œå“åº”åŒ¹é…å¯¹åº” `id`
+- Notificationï¼ˆ`session/update`ï¼‰æ—  `id`ï¼Œç”±è®¢é˜…è€…å¤„ç†
 
-### 5.2 ACPClient 内部结构
+### 5.2 ACPClient å†…éƒ¨ç»“æž„
 
 ```
 ACPClient
-├── cmd *exec.Cmd              // 子进程
-├── encoder *json.Encoder      // 写 stdin
-├── pending map[int64]chan Response  // 等待中的请求
-├── mu sync.Mutex
-└── goroutine: readLoop()      // 持续读 stdout
-    ├── 有 id → 分发到 pending[id] channel
-    └── 无 id → 广播给所有 subscriber
+â”œâ”€â”€ cmd *exec.Cmd              // å­è¿›ç¨‹
+â”œâ”€â”€ encoder *json.Encoder      // å†™ stdin
+â”œâ”€â”€ pending map[int64]chan Response  // ç­‰å¾…ä¸­çš„è¯·æ±‚
+â”œâ”€â”€ mu sync.Mutex
+â””â”€â”€ goroutine: readLoop()      // æŒç»­è¯» stdout
+    â”œâ”€â”€ æœ‰ id â†’ åˆ†å‘åˆ° pending[id] channel
+    â””â”€â”€ æ—  id â†’ å¹¿æ’­ç»™æ‰€æœ‰ subscriber
 ```
 
-### 5.3 生命周期时序
+### 5.3 ç”Ÿå‘½å‘¨æœŸæ—¶åº
 
 ```
 client.Start()
-  → exec.Command("codex-acp")
-  → readLoop goroutine
+  â†’ exec.Command("codex-acp")
+  â†’ readLoop goroutine
 
 client.Send(initialize)
-  → {"id":1,"method":"initialize","params":{...}}
-  ← {"id":1,"result":{"agentCapabilities":{...}}}
+  â†’ {"id":1,"method":"initialize","params":{...}}
+  â† {"id":1,"result":{"agentCapabilities":{...}}}
 
-client.Send(session/new)  // 或 session/load（若有 sessionId）
-  → {"id":2,"method":"session/new","params":{"cwd":"...","mcpServers":[]}}
-  ← {"id":2,"result":{"sessionId":"abc123"}}
+client.Send(session/new)  // æˆ– session/loadï¼ˆè‹¥æœ‰ sessionIdï¼‰
+  â†’ {"id":2,"method":"session/new","params":{"cwd":"...","mcpServers":[]}}
+  â† {"id":2,"result":{"sessionId":"abc123"}}
 
-client.Send(session/prompt)  // 异步通知流
-  → {"id":3,"method":"session/prompt","params":{"sessionId":"abc123","prompt":"..."}}
-  ← {"method":"session/update","params":{...}}  // 0 到 N 条
-  ← {"id":3,"result":{"stopReason":"end_turn"}}
+client.Send(session/prompt)  // å¼‚æ­¥é€šçŸ¥æµ
+  â†’ {"id":3,"method":"session/prompt","params":{"sessionId":"abc123","prompt":"..."}}
+  â† {"method":"session/update","params":{...}}  // 0 åˆ° N æ¡
+  â† {"id":3,"result":{"stopReason":"end_turn"}}
 
-client.Send(session/cancel)  // 可选，取消进行中的 prompt
+client.Send(session/cancel)  // å¯é€‰ï¼Œå–æ¶ˆè¿›è¡Œä¸­çš„ prompt
 client.Close()
 ```
 
-## 6. Hub 设计
+## 6. Hub è®¾è®¡
 
-### 6.1 职责
+### 6.1 èŒè´£
 
-- **启动时**：从 Store 加载 State，根据 `ActiveAgent` 初始化对应 Agent（懒加载）
-- **消息路由**：解析特殊命令（`/use <agent>`、`/cancel`、`/status`），其余转发给 Agent.Prompt()
-- **流式转发**：将 Agent Update stream 实时推送到 IM（每个 text chunk 拼接后统一发送或分段发送）
-- **关闭时**：保存 ACPSessionID 到 Store 供下次 session/load 使用
+- **å¯åŠ¨æ—¶**ï¼šä»Ž Store åŠ è½½ Stateï¼Œæ ¹æ® `ActiveAgent` åˆå§‹åŒ–å¯¹åº” Agentï¼ˆæ‡’åŠ è½½ï¼‰
+- **æ¶ˆæ¯è·¯ç”±**ï¼šè§£æžç‰¹æ®Šå‘½ä»¤ï¼ˆ`/use <agent>`ã€`/cancel`ã€`/status`ï¼‰ï¼Œå…¶ä½™è½¬å‘ç»™ Agent.Prompt()
+- **æµå¼è½¬å‘**ï¼šå°† Agent Update stream å®žæ—¶æŽ¨é€åˆ° IMï¼ˆæ¯ä¸ª text chunk æ‹¼æŽ¥åŽç»Ÿä¸€å‘é€æˆ–åˆ†æ®µå‘é€ï¼‰
+- **å…³é—­æ—¶**ï¼šä¿å­˜ ACPSessionID åˆ° Store ä¾›ä¸‹æ¬¡ session/load ä½¿ç”¨
 
-### 6.2 特殊命令
+### 6.2 ç‰¹æ®Šå‘½ä»¤
 
-| 命令 | 说明 |
+| å‘½ä»¤ | è¯´æ˜Ž |
 |------|------|
-| `/use <name>` | 切换当前活跃 agent（如 `/use codex`、`/use claude`） |
-| `/cancel` | 取消当前 agent 正在处理的请求 |
-| `/status` | 返回当前状态（活跃 agent、ACP session 状态） |
+| `/use <name>` | åˆ‡æ¢å½“å‰æ´»è·ƒ agentï¼ˆå¦‚ `/use codex`ã€`/use claude`ï¼‰ |
+| `/cancel` | å–æ¶ˆå½“å‰ agent æ­£åœ¨å¤„ç†çš„è¯·æ±‚ |
+| `/status` | è¿”å›žå½“å‰çŠ¶æ€ï¼ˆæ´»è·ƒ agentã€ACP session çŠ¶æ€ï¼‰ |
 
-## 7. 持久化
+## 7. æŒä¹…åŒ–
 
-- 存储位置：`~/.wheelmaker/state.json`（或通过 `--state` 参数指定）
-- 格式：JSON（人类可读，便于调试）
-- 写入时机：session/new 成功后（保存 sessionId）、agent 切换时、进程退出时
+- å­˜å‚¨ä½ç½®ï¼š`~/.wheelmaker/state.json`ï¼ˆæˆ–é€šè¿‡ `--state` å‚æ•°æŒ‡å®šï¼‰
+- æ ¼å¼ï¼šJSONï¼ˆäººç±»å¯è¯»ï¼Œä¾¿äºŽè°ƒè¯•ï¼‰
+- å†™å…¥æ—¶æœºï¼šsession/new æˆåŠŸåŽï¼ˆä¿å­˜ sessionIdï¼‰ã€agent åˆ‡æ¢æ—¶ã€è¿›ç¨‹é€€å‡ºæ—¶
 
-## 8. 多平台工具管理
+## 8. å¤šå¹³å°å·¥å…·ç®¡ç†
 
 ```
 bin/
   {GOOS}_{GOARCH}/
     codex-acp[.exe]
-    # 后续：claude[.exe]、copilot[.exe]
+    # åŽç»­ï¼šclaude[.exe]ã€copilot[.exe]
 ```
 
-- `.gitignore` 忽略实际二进制，保留 `.gitkeep`
-- `scripts/install-tools.sh`：自动下载对应平台的 codex-acp 到 `bin/{platform}/`
-- `scripts/install-tools.ps1`：Windows 版本
+- `.gitignore` å¿½ç•¥å®žé™…äºŒè¿›åˆ¶ï¼Œä¿ç•™ `.gitkeep`
+- `scripts/install-tools.sh`ï¼šè‡ªåŠ¨ä¸‹è½½å¯¹åº”å¹³å°çš„ codex-acp åˆ° `bin/{platform}/`
+- `scripts/install-tools.ps1`ï¼šWindows ç‰ˆæœ¬
 
-## 9. 第二阶段（Feishu 接入）
+## 9. ç¬¬äºŒé˜¶æ®µï¼ˆFeishu æŽ¥å…¥ï¼‰
 
-飞书适配器将在第二阶段实现，使用 go-lark SDK 的 WebSocket 长连接模式：
+é£žä¹¦é€‚é…å™¨å°†åœ¨ç¬¬äºŒé˜¶æ®µå®žçŽ°ï¼Œä½¿ç”¨ go-lark SDK çš„ WebSocket é•¿è¿žæŽ¥æ¨¡å¼ï¼š
 
-- 无需公网 IP
-- SDK 主动连接飞书 WebSocket 网关
-- 事件通过 `EventTypeMessageReceived` 回调接收
-- 发消息通过 `bot.PostText()`、`bot.PostCard()` 等方法
+- æ— éœ€å…¬ç½‘ IP
+- SDK ä¸»åŠ¨è¿žæŽ¥é£žä¹¦ WebSocket ç½‘å…³
+- äº‹ä»¶é€šè¿‡ `EventTypeMessageReceived` å›žè°ƒæŽ¥æ”¶
+- å‘æ¶ˆæ¯é€šè¿‡ `bot.PostText()`ã€`bot.PostCard()` ç­‰æ–¹æ³•
 
-## 10. 错误处理原则
+## 10. é”™è¯¯å¤„ç†åŽŸåˆ™
 
-- 使用 `fmt.Errorf("...: %w", err)` 包装错误，保留调用链
-- 使用 `errors.Is` / `errors.As` 判断错误类型
-- 不使用 `panic`（除非是真正的程序员错误）
-- ACP 通信错误：记录日志，向 IM 返回错误消息，不崩溃
+- ä½¿ç”¨ `fmt.Errorf("...: %w", err)` åŒ…è£…é”™è¯¯ï¼Œä¿ç•™è°ƒç”¨é“¾
+- ä½¿ç”¨ `errors.Is` / `errors.As` åˆ¤æ–­é”™è¯¯ç±»åž‹
+- ä¸ä½¿ç”¨ `panic`ï¼ˆé™¤éžæ˜¯çœŸæ­£çš„ç¨‹åºå‘˜é”™è¯¯ï¼‰
+- ACP é€šä¿¡é”™è¯¯ï¼šè®°å½•æ—¥å¿—ï¼Œå‘ IM è¿”å›žé”™è¯¯æ¶ˆæ¯ï¼Œä¸å´©æºƒ
+

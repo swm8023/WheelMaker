@@ -23,7 +23,7 @@ Provide a built-in mock ACP adapter for WheelMaker to test ACP flows without ext
 ## Architecture
 1. Add an in-memory mode in `internal/agent/acp/conn.go`.
 2. Implement mock ACP server loop in `internal/agent/acp/mock_server.go`.
-3. Add `internal/adapter/mock/adapter.go` using the in-memory conn constructor.
+3. Add `internal/provider/mock/provider.go` using the in-memory conn constructor.
 4. Register `mock` adapter in `internal/hub/hub.go`.
 
 ## Behavior Matrix
@@ -49,3 +49,5 @@ Provide a built-in mock ACP adapter for WheelMaker to test ACP flows without ext
   - config command routing
   - error injection for 10+
 - Verify with `go test` on touched packages, then full `go test ./...`.
+
+

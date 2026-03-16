@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	mockadapter "github.com/swm8023/wheelmaker/internal/adapter/mock"
 	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	mockadapter "github.com/swm8023/wheelmaker/internal/provider/mock"
 )
 
 func TestMockAdapter_Name(t *testing.T) {
