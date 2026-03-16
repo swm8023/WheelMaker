@@ -1,4 +1,4 @@
-﻿// Package codex implements an provider.Provider for the Codex CLI via codex-acp.
+// Package codex implements an provider.Provider for the Codex CLI via codex-acp.
 package codex
 
 import (
@@ -62,6 +62,3 @@ func buildEnv(m map[string]string) []string {
 	}
 	return env
 }
-
-
-

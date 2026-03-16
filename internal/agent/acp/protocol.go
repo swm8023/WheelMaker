@@ -1,7 +1,7 @@
-﻿// package provider implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
+// package acp implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
 // This package is an internal detail of the agent layer and is not imported directly
 // by the client or MockProvider layers; they interact through the agent.Session interface.
-package provider
+package acp
 
 import (
 	"encoding/json"
@@ -434,4 +434,3 @@ type TerminalReleaseParams struct {
 	SessionID  string `json:"sessionId"`
 	TerminalID string `json:"terminalId"`
 }
-
