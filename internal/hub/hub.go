@@ -1,4 +1,4 @@
-﻿package hub
+package hub
 
 import (
 	"context"
@@ -145,4 +145,3 @@ func (h *Hub) Close() error {
 	}
 	return nil
 }
-

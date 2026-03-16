@@ -1,4 +1,4 @@
-﻿// Package mock implements an in-process ACP mock MockProvider for testing.
+// Package mock implements an in-process ACP mock MockProvider for testing.
 package mock
 
 import (
@@ -31,6 +31,3 @@ func (a *MockProvider) Connect(_ context.Context) (*acp.Conn, error) {
 
 // Close is a no-op for the stateless mock provider.
 func (a *MockProvider) Close() error { return nil }
-
-
-

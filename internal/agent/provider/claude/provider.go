@@ -1,4 +1,4 @@
-﻿// Package claude implements an provider.Provider for Claude Code CLI via claude-agent-acp.
+// Package claude implements an provider.Provider for Claude Code CLI via claude-agent-acp.
 package claude
 
 import (
@@ -62,6 +62,3 @@ func buildEnv(m map[string]string) []string {
 	}
 	return env
 }
-
-
-
