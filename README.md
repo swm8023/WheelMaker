@@ -105,8 +105,8 @@ Send in IM or console:
 
 | Command | Description |
 |---------|-------------|
-| `/use <adapter>` | Switch AI backend (e.g. `/use codex`) |
-| `/use <adapter> --continue` | Switch and carry over current context |
+| `/use <provider>` | Switch AI backend (e.g. `/use codex`) |
+| `/use <provider> --continue` | Switch and carry over current context |
 | `/cancel` | Cancel the in-progress request |
 | `/status` | Show current adapter and session ID |
 | anything else | Sent to the AI as a message (including text starting with `/`) |
@@ -149,6 +149,7 @@ Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatic
 - [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
 - [Feishu Bot Setup](docs/feishu-bot.md)
 - [codex-acp Reference](docs/codex-acp.md)
+
 
 
 

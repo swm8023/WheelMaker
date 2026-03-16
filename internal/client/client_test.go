@@ -208,7 +208,7 @@ func TestHandleMessage_Status(t *testing.T) {
 	}
 	reply := (*msgs)[0]
 	if !strings.Contains(reply, "codex") {
-		t.Errorf("status reply %q does not contain adapter name", reply)
+		t.Errorf("status reply %q does not contain provider name", reply)
 	}
 	if !strings.Contains(reply, "sess-abc") {
 		t.Errorf("status reply %q does not contain session ID", reply)
@@ -311,7 +311,7 @@ func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
 
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to adapter") {
+		if strings.Contains(m, "Switched to provider") {
 			found = true
 			break
 		}
@@ -384,7 +384,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to adapter") {
+		if strings.Contains(m, "Switched to provider") {
 			found = true
 			break
 		}
@@ -573,7 +573,7 @@ func (a *contextRejectMockAdapter) Close() error { return nil }
 var _ acp.Provider = (*contextRejectMockAdapter)(nil)
 
 // failConnectAdapter is an acp.Provider whose Connect always returns an error.
-// Used to test that Start() is non-fatal when the active adapter cannot connect.
+// Used to test that Start() is non-fatal when the Active provider cannot connect.
 type failConnectAdapter struct{}
 
 func (a *failConnectAdapter) Name() string { return "fail" }
@@ -657,7 +657,7 @@ func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 }
 
 // TestSwitchAdapter_PersistsTargetSessionIDOnContinue verifies that after
-// /use <adapter> --continue, the new session ID for the target adapter is saved
+// /use <provider> --continue, the new session ID for the target adapter is saved
 // to state immediately (not deferred to Close()), so a crash before shutdown
 // does not lose the bootstrapped session.
 func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
@@ -705,7 +705,7 @@ func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 
 // TestStart_UnregisteredAdapter_NonFatal verifies that Start() succeeds when the
 // persisted activeAdapter was not registered in this build, leaving session nil.
-// The user can issue /use <adapter> to connect a registered adapter and recover.
+// The user can issue /use <provider> to connect a registered adapter and recover.
 func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "unknown-adapter",
@@ -732,7 +732,7 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use codex"})
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to adapter") {
+		if strings.Contains(m, "Switched to provider") {
 			found = true
 			break
 		}
@@ -745,7 +745,7 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 // TestStart_ConnectError_NonFatal verifies that Start() succeeds when the active
 // adapter fails to connect, leaving session nil. Subsequent messages get
 // "No active session" rather than causing a hard startup failure.
-// Also verifies that /use <adapter> can recover by connecting a working acp.
+// Also verifies that /use <provider> can recover by connecting a working acp.
 func TestStart_ConnectError_NonFatal(t *testing.T) {
 	store := &mockStore{state: &client.State{
 		ActiveAdapter: "codex",
@@ -774,7 +774,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to adapter") {
+		if strings.Contains(m, "Switched to provider") {
 			found = true
 			break
 		}

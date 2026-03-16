@@ -1,6 +1,6 @@
-package claude_test
+﻿package claude_test
 
-// adapter_unit_test.go: unit tests for ClaudeAdapter that do not require a real
+// adapter_unit_test.go: unit tests for ClaudeProvider that do not require a real
 // claude-agent-acp binary or network access. No //go:build integration tag.
 
 import (
@@ -13,13 +13,13 @@ import (
 	"github.com/swm8023/wheelmaker/internal/agent/provider/claude"
 )
 
-// TestClaudeAdapter_Connect_NotExecutable verifies that Connect() returns a
+// TestClaudeProvider_Connect_NotExecutable verifies that Connect() returns a
 // descriptive error when the configured path resolves to a non-executable file.
 // We use t.TempDir() as the ExePath: the directory exists on disk (os.Stat
 // succeeds, so tools.ResolveBinary accepts it without PATH fallback), but
 // exec.Command(dir).Start() fails because a directory cannot be executed.
-func TestClaudeAdapter_Connect_NotExecutable(t *testing.T) {
-	a := claude.NewAdapter(claude.Config{
+func TestClaudeProvider_Connect_NotExecutable(t *testing.T) {
+	a := claude.NewProvider(claude.Config{
 		ExePath: t.TempDir(), // exists but not executable
 	})
 
@@ -40,9 +40,9 @@ func TestClaudeAdapter_Connect_NotExecutable(t *testing.T) {
 	}
 }
 
-// TestClaudeAdapter_Connect_BinaryNotFound verifies that Connect() returns the
+// TestClaudeProvider_Connect_BinaryNotFound verifies that Connect() returns the
 // "binary not found" error path when the binary cannot be located.
-func TestClaudeAdapter_Connect_BinaryNotFound(t *testing.T) {
+func TestClaudeProvider_Connect_BinaryNotFound(t *testing.T) {
 	// Clear PATH to prevent exec.LookPath succeeding.
 	t.Setenv("PATH", "")
 	if runtime.GOOS == "windows" {
@@ -50,7 +50,7 @@ func TestClaudeAdapter_Connect_BinaryNotFound(t *testing.T) {
 	}
 
 	// Provide a non-existent ExePath so ResolveBinary skips option 1.
-	a := claude.NewAdapter(claude.Config{
+	a := claude.NewProvider(claude.Config{
 		ExePath: filepath.Join(t.TempDir(), "nonexistent-claude-agent-acp"),
 	})
 
@@ -71,9 +71,9 @@ func TestClaudeAdapter_Connect_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// TestClaudeAdapter_Close_Unit verifies that Close() is a no-op and idempotent.
-func TestClaudeAdapter_Close_Unit(t *testing.T) {
-	a := claude.NewAdapter(claude.Config{})
+// TestClaudeProvider_Close_Unit verifies that Close() is a no-op and idempotent.
+func TestClaudeProvider_Close_Unit(t *testing.T) {
+	a := claude.NewProvider(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("first Close: %v", err)
 	}
@@ -82,10 +82,11 @@ func TestClaudeAdapter_Close_Unit(t *testing.T) {
 	}
 }
 
-// TestClaudeAdapter_Name verifies that Name() returns "claude".
-func TestClaudeAdapter_Name(t *testing.T) {
-	a := claude.NewAdapter(claude.Config{})
+// TestClaudeProvider_Name verifies that Name() returns "claude".
+func TestClaudeProvider_Name(t *testing.T) {
+	a := claude.NewProvider(claude.Config{})
 	if got := a.Name(); got != "claude" {
 		t.Errorf("Name() = %q, want %q", got, "claude")
 	}
 }
+

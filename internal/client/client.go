@@ -23,11 +23,11 @@ type ProviderFactory func(exePath string, env map[string]string) provider.Provid
 
 // Client is the top-level coordinator for a single WheelMaker project.
 // It holds a pool of ProviderFactory functions and two references to the active Agent:
-//   - session agent.Session  Ã¢â‚¬â€ narrow interface for Prompt/Cancel/SetMode, mockable in tests.
-//   - ag      *agent.Agent   Ã¢â‚¬â€ concrete type for Switch (to avoid type assertion on mock).
+//   - session agent.Session  ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â narrow interface for Prompt/Cancel/SetMode, mockable in tests.
+//   - ag      *agent.Agent   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
 //
 // Agent initialization is lazy: the first incoming message triggers ensureAgent(),
-// which connects the active adapter and creates the agent. After 30 minutes of idle
+// which connects the Active provider and creates the agent. After 30 minutes of idle
 // the agent is disconnected (idleClose) and re-created on the next message.
 type Client struct {
 	projectName string
@@ -134,7 +134,7 @@ func (c *Client) Close() error {
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status) are dispatched to handleCommand;
-// everything else Ã¢â‚¬â€ including lines starting with "/" that are not known commands Ã¢â‚¬â€
+// everything else ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â including lines starting with "/" that are not known commands ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
 	text := strings.TrimSpace(msg.Text)
@@ -170,7 +170,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	switch cmd {
 	case "/use":
 		if args == "" {
-			c.reply(msg.ChatID, "Usage: /use <adapter-name> [--continue]  (e.g. /use codex)")
+			c.reply(msg.ChatID, "Usage: /use <provider-name> [--continue]  (e.g. /use codex)")
 			return
 		}
 		parts := strings.Fields(args)
@@ -207,7 +207,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, "No active session.")
 			return
 		}
-		status := fmt.Sprintf("Active adapter: %s", sess.AdapterName())
+		status := fmt.Sprintf("Active provider: %s", sess.AdapterName())
 		if sid := sess.SessionID(); sid != "" {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
@@ -225,7 +225,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Lock()
 	if err := c.ensureAgent(context.Background()); err != nil {
 		c.mu.Unlock()
-		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <adapter> to connect.", err))
+		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <provider> to connect.", err))
 		return
 	}
 	sess := c.session
@@ -274,7 +274,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	}
 }
 
-// ensureAgent connects the active adapter and creates the agent if not already running.
+// ensureAgent connects the Active provider and creates the agent if not already running.
 // Must be called while holding c.mu.
 func (c *Client) ensureAgent(ctx context.Context) error {
 	if c.session != nil {
@@ -289,7 +289,7 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	}
 	fac := c.providerFacs[name]
 	if fac == nil {
-		return fmt.Errorf("no adapter registered for %q", name)
+		return fmt.Errorf("no provider registered for %q", name)
 	}
 	conn, err := fac("", nil).Connect(ctx)
 	if err != nil {
@@ -351,8 +351,8 @@ func (c *Client) idleClose() {
 // promptMu, connects a new adapter binary, and calls ag.Switch() to replace
 // the connection. Always uses c.ag (concrete type) for Switch.
 //
-// Ordering: Cancel() Ã¢â€ â€™ promptMu.Lock() Ã¢â€ â€™ drain Ã¢â€ â€™ ag-refresh Ã¢â€ â€™ outgoing-snapshot Ã¢â€ â€™
-// Connect() Ã¢â€ â€™ ag.Switch() Ã¢â€ â€™ persist Ã¢â€ â€™ resetIdleTimer().
+// Ordering: Cancel() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ promptMu.Lock() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ drain ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag-refresh ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ outgoing-snapshot ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢
+// Connect() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag.Switch() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ persist ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ resetIdleTimer().
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.providerFacs[name]
@@ -360,7 +360,7 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	c.mu.Unlock()
 
 	if fac == nil {
-		return fmt.Errorf("unknown adapter: %q (registered: %v)", name, c.registeredAdapterNames())
+		return fmt.Errorf("unknown provider: %q (registered: %v)", name, c.registeredAdapterNames())
 	}
 
 	// Step 1: signal cancel so any in-progress prompt winds down quickly,
@@ -455,11 +455,11 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		_ = c.store.Save(s)
 	}
 
-	c.reply(chatID, fmt.Sprintf("Switched to adapter: %s", name))
+	c.reply(chatID, fmt.Sprintf("Switched to provider: %s", name))
 	return nil
 }
 
-// registeredAdapterNames returns all registered adapter names (for error messages).
+// registeredAdapterNames returns all registered provider names (for error messages).
 func (c *Client) registeredAdapterNames() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()

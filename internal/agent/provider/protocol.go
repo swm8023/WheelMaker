@@ -1,6 +1,6 @@
-// package provider implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
+﻿// package provider implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
 // This package is an internal detail of the agent layer and is not imported directly
-// by the client or adapter layers; they interact through the agent.Session interface.
+// by the client or MockProvider layers; they interact through the agent.Session interface.
 package provider
 
 import (
@@ -354,7 +354,7 @@ type SessionSetConfigOptionParams struct {
 	Value     string `json:"value"`
 }
 
-// --- AgentÃ¢â€ â€™Client callback types ---
+// --- AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client callback types ---
 
 // FSReadTextFileParams is sent by the agent to request a file read.
 type FSReadTextFileParams struct {
@@ -434,3 +434,4 @@ type TerminalReleaseParams struct {
 	SessionID  string `json:"sessionId"`
 	TerminalID string `json:"terminalId"`
 }
+
