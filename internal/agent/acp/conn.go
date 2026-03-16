@@ -20,6 +20,10 @@ type NotificationHandler func(Notification)
 // The returned result is JSON-encoded and sent back as the response.
 type RequestHandler func(ctx context.Context, method string, params json.RawMessage) (any, error)
 
+// InMemoryServer runs an ACP-compatible JSON-RPC server in-process.
+// It reads request lines from r and writes response/notification lines to w.
+type InMemoryServer func(r io.Reader, w io.Writer)
+
 // Conn manages a single ACP-compatible subprocess and communicates
 // with it over stdin/stdout using JSON-RPC 2.0.
 //
@@ -41,9 +45,9 @@ type Conn struct {
 	nextID  atomic.Int64
 	pending map[int64]chan Response
 
-	subsMu     sync.RWMutex
+	subsMu      sync.RWMutex
 	subscribers map[int64]NotificationHandler
-	nextSubID  atomic.Int64
+	nextSubID   atomic.Int64
 
 	reqMu      sync.RWMutex
 	reqHandler RequestHandler
@@ -57,6 +61,8 @@ type Conn struct {
 	connCancel context.CancelFunc
 
 	done chan struct{}
+
+	inMemoryServer InMemoryServer
 }
 
 // New creates a new Conn for the given binary.
@@ -71,6 +77,19 @@ func New(exePath string, env []string) *Conn {
 		connCtx:     ctx,
 		connCancel:  cancel,
 		done:        make(chan struct{}),
+	}
+}
+
+// NewInMemory creates a connection backed by an in-process ACP server.
+func NewInMemory(server InMemoryServer) *Conn {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Conn{
+		pending:        make(map[int64]chan Response),
+		subscribers:    make(map[int64]NotificationHandler),
+		connCtx:        ctx,
+		connCancel:     cancel,
+		done:           make(chan struct{}),
+		inMemoryServer: server,
 	}
 }
 
@@ -100,6 +119,22 @@ func (c *Conn) OnRequest(h RequestHandler) {
 // Start launches the agent subprocess and begins the read loop.
 // stderr of the subprocess is forwarded to the application log via log.Writer().
 func (c *Conn) Start() error {
+	if c.inMemoryServer != nil {
+		clientToServerR, clientToServerW := io.Pipe()
+		serverToClientR, serverToClientW := io.Pipe()
+
+		c.stdin = clientToServerW
+		c.stdout = serverToClientR
+		c.enc = json.NewEncoder(c.stdin)
+
+		go c.readLoop(c.stdout)
+		go func() {
+			defer serverToClientW.Close()
+			c.inMemoryServer(clientToServerR, serverToClientW)
+		}()
+		return nil
+	}
+
 	cmd := exec.Command(c.exePath)
 	cmd.Env = append(cmd.Environ(), c.env...)
 	cmd.Stderr = log.Writer() // forward subprocess stderr to the application log

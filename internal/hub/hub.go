@@ -11,6 +11,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/adapter"
 	"github.com/swm8023/wheelmaker/internal/adapter/claude"
 	"github.com/swm8023/wheelmaker/internal/adapter/codex"
+	"github.com/swm8023/wheelmaker/internal/adapter/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
@@ -90,6 +91,9 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	})
 	c.RegisterAdapter("claude", func(_ string, _ map[string]string) adapter.Adapter {
 		return claude.NewAdapter(claude.Config{})
+	})
+	c.RegisterAdapter("mock", func(_ string, _ map[string]string) adapter.Adapter {
+		return mock.NewAdapter()
 	})
 
 	if err := c.Start(ctx); err != nil {
