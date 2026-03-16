@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
-	"github.com/swm8023/wheelmaker/internal/provider"
 )
 
 // TestMain intercepts the test binary to act as a minimal ACP mock server when

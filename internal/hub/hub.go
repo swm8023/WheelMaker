@@ -8,13 +8,13 @@ import (
 	"os"
 	"sync"
 
+	"github.com/swm8023/wheelmaker/internal/agent/provider"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/claude"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
-	"github.com/swm8023/wheelmaker/internal/provider"
-	"github.com/swm8023/wheelmaker/internal/provider/claude"
-	"github.com/swm8023/wheelmaker/internal/provider/codex"
-	"github.com/swm8023/wheelmaker/internal/provider/mock"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.

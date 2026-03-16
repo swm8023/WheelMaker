@@ -4,7 +4,7 @@ package provider
 import (
 	"context"
 
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 )
 
 // Provider is a stateless connection factory for an ACP-compatible CLI backend.

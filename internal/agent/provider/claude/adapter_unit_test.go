@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/provider/claude"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/claude"
 )
 
 // TestClaudeAdapter_Connect_NotExecutable verifies that Connect() returns a

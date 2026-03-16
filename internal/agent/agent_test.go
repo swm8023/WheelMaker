@@ -7,15 +7,15 @@ package agent_test
 // pointing acp.New() at os.Args[0] with GO_AGENT_MOCK=1.
 //
 // The mock supports bidirectional communication: during session/prompt handling
-// it can send Agent→Client requests (callbacks) and wait for responses.
+// it can send Agentâ†’Client requests (callbacks) and wait for responses.
 // Prompt text controls mock behavior:
-//   - "no-text-prompt"                  → no text chunks emitted (tests stale-context)
-//   - "test-callback-fs-read:<path>"    → sends fs/read_text_file callback
-//   - "test-callback-fs-write:<p>:<c>"  → sends fs/write_text_file callback
-//   - "test-callback-permission"        → sends session/request_permission callback
-//   - "test-callback-terminal"          → full terminal lifecycle callback
-//   - "test-callback-terminal-kill"     → terminal create+kill lifecycle callback
-//   - any other text                    → 2 text chunks + done
+//   - "no-text-prompt"                  â†’ no text chunks emitted (tests stale-context)
+//   - "test-callback-fs-read:<path>"    â†’ sends fs/read_text_file callback
+//   - "test-callback-fs-write:<p>:<c>"  â†’ sends fs/write_text_file callback
+//   - "test-callback-permission"        â†’ sends session/request_permission callback
+//   - "test-callback-terminal"          â†’ full terminal lifecycle callback
+//   - "test-callback-terminal-kill"     â†’ terminal create+kill lifecycle callback
+//   - any other text                    â†’ 2 text chunks + done
 
 import (
 	"bufio"
@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 )
 
 var mockBin string
@@ -455,7 +455,7 @@ func TestAgent_Callback_Permission(t *testing.T) {
 	}
 }
 
-// TestAgent_Callback_TerminalLifecycle verifies create → wait_for_exit → output → release.
+// TestAgent_Callback_TerminalLifecycle verifies create â†’ wait_for_exit â†’ output â†’ release.
 func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
@@ -474,7 +474,7 @@ func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
 	}
 }
 
-// TestAgent_Callback_TerminalKill verifies create → kill → release lifecycle.
+// TestAgent_Callback_TerminalKill verifies create â†’ kill â†’ release lifecycle.
 func TestAgent_Callback_TerminalKill(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
@@ -504,7 +504,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	ag := newAgent(t, "test")
 	ctx := context.Background()
 
-	// First prompt: normal → sets lastReply = "chunk0 chunk1 ".
+	// First prompt: normal â†’ sets lastReply = "chunk0 chunk1 ".
 	ch, err := ag.Prompt(ctx, "normal")
 	if err != nil {
 		t.Fatalf("first Prompt: %v", err)
@@ -514,7 +514,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 		t.Skip("mock should return text for 'normal'")
 	}
 
-	// Second prompt: no text chunks → lastReply must be cleared to "".
+	// Second prompt: no text chunks â†’ lastReply must be cleared to "".
 	ch, err = ag.Prompt(ctx, "no-text-prompt")
 	if err != nil {
 		t.Fatalf("second Prompt: %v", err)
@@ -599,14 +599,14 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 // --- Mock ACP server (activated when GO_AGENT_MOCK=1) ---
 
 // mockServer handles bidirectional JSON-RPC 2.0 communication.
-// It both responds to client requests and can send Agent→Client callback requests.
+// It both responds to client requests and can send Agentâ†’Client callback requests.
 type mockServer struct {
-	enc    *json.Encoder
-	encMu  sync.Mutex
+	enc   *json.Encoder
+	encMu sync.Mutex
 
-	nextOutboundID atomic.Int64 // IDs for agent→client requests (start at 10000)
+	nextOutboundID atomic.Int64 // IDs for agentâ†’client requests (start at 10000)
 	pendMu         sync.Mutex
-	pending        map[int64]chan json.RawMessage // pending agent→client responses
+	pending        map[int64]chan json.RawMessage // pending agentâ†’client responses
 
 	sessCounter atomic.Int64
 }
@@ -645,7 +645,7 @@ func (ms *mockServer) sendNotification(method string, params any) {
 	ms.encMu.Unlock()
 }
 
-// callbackRequest sends an Agent→Client request and waits for the response.
+// callbackRequest sends an Agentâ†’Client request and waits for the response.
 func (ms *mockServer) callbackRequest(method string, params any) (json.RawMessage, error) {
 	id := ms.nextOutboundID.Add(1)
 	ch := make(chan json.RawMessage, 1)
@@ -681,7 +681,7 @@ func (ms *mockServer) routeResponse(id int64, result json.RawMessage) {
 	}
 }
 
-// handleRequest dispatches a client→mock request in a goroutine.
+// handleRequest dispatches a clientâ†’mock request in a goroutine.
 func (ms *mockServer) handleRequest(id int64, method string, params json.RawMessage) {
 	rejectContext := os.Getenv("GO_AGENT_MOCK_REJECT_CONTEXT") == "1"
 
@@ -736,7 +736,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 
 	// Reject context bootstrap prompts when requested (stale-context test).
 	if rejectContext && strings.HasPrefix(promptText, "[context]") {
-		ms.respondError(id, "mock: unexpected context bootstrap – stale context detected")
+		ms.respondError(id, "mock: unexpected context bootstrap â€“ stale context detected")
 		return
 	}
 
@@ -777,7 +777,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	// FS write callback test.
 	if strings.HasPrefix(promptText, "test-callback-fs-write:") {
 		rest := strings.TrimPrefix(promptText, "test-callback-fs-write:")
-		// Format: "<path>:<content>" — use LAST colon so Windows drive letters work.
+		// Format: "<path>:<content>" â€” use LAST colon so Windows drive letters work.
 		colonIdx := strings.LastIndex(rest, ":")
 		var path, content string
 		if colonIdx >= 0 {
@@ -844,7 +844,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 		return
 	}
 
-	// Terminal lifecycle test: create → wait_for_exit → output → release.
+	// Terminal lifecycle test: create â†’ wait_for_exit â†’ output â†’ release.
 	if promptText == "test-callback-terminal" {
 		result, err := ms.callbackRequest("terminal/create", map[string]any{
 			"sessionId": sessID,
@@ -875,7 +875,9 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 			if outErr != nil {
 				textToEcho = "terminal-output-error: " + outErr.Error()
 			} else {
-				var or struct{ Output string `json:"output"` }
+				var or struct {
+					Output string `json:"output"`
+				}
 				_ = json.Unmarshal(outResult, &or)
 				if strings.Contains(or.Output, "terminal-echo-ok") {
 					textToEcho = "terminal-ok"
@@ -901,7 +903,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 		return
 	}
 
-	// Terminal kill test: create → kill → release.
+	// Terminal kill test: create â†’ kill â†’ release.
 	if promptText == "test-callback-terminal-kill" {
 		result, err := ms.callbackRequest("terminal/create", map[string]any{
 			"sessionId": sessID,
@@ -989,17 +991,17 @@ func runMockAgent() {
 		}
 
 		if raw.ID != nil && raw.Method == "" {
-			// Response to one of our outbound Agent→Client requests.
+			// Response to one of our outbound Agentâ†’Client requests.
 			ms.routeResponse(*raw.ID, raw.Result)
 			continue
 		}
 
 		if raw.ID == nil {
-			// Notification from client (e.g. session/cancel) — ignore.
+			// Notification from client (e.g. session/cancel) â€” ignore.
 			continue
 		}
 
-		// Client→mock request: dispatch synchronously for fast methods,
+		// Clientâ†’mock request: dispatch synchronously for fast methods,
 		// or in a goroutine when the handler may block (e.g. session/prompt).
 		id := *raw.ID
 		method := raw.Method

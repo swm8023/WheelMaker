@@ -1,4 +1,4 @@
-package acp_test
+package mock_test
 
 import (
 	"context"
@@ -8,14 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	mockprovider "github.com/swm8023/wheelmaker/internal/agent/provider/mock"
 )
 
 func newInMemoryMockConn(t *testing.T) *acp.Conn {
 	t.Helper()
-	c := acp.NewInMemoryMock()
-	if err := c.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
+	a := mockprovider.NewAdapter()
+	c, err := a.Connect(context.Background())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
 	return c
@@ -68,13 +70,7 @@ func TestInMemoryMock_PromptCase1_TextAndMetaUpdates(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
-	for _, k := range []string{
-		"agent_message_chunk",
-		"agent_thought_chunk",
-		"plan",
-		"session_info_update",
-		"available_commands_update",
-	} {
+	for _, k := range []string{"agent_message_chunk", "agent_thought_chunk", "plan", "session_info_update", "available_commands_update"} {
 		if !seen[k] {
 			t.Fatalf("missing update type: %s", k)
 		}
@@ -148,9 +144,7 @@ func TestInMemoryMock_CallbackCases(t *testing.T) {
 		case "terminal/release":
 			return map[string]any{}, nil
 		case "session/request_permission":
-			return acp.PermissionResponse{
-				Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"},
-			}, nil
+			return acp.PermissionResponse{Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}}, nil
 		default:
 			return nil, nil
 		}
@@ -185,16 +179,9 @@ func TestInMemoryMock_ErrorInjection(t *testing.T) {
 	for _, tc := range []struct {
 		input string
 		code  string
-	}{
-		{input: "10", code: "-32602"},
-		{input: "11", code: "-32601"},
-		{input: "12", code: "-32603"},
-	} {
+	}{{input: "10", code: "-32602"}, {input: "11", code: "-32601"}, {input: "12", code: "-32603"}} {
 		var result acp.SessionPromptResult
-		err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
-			SessionID: newResult.SessionID,
-			Prompt:    []acp.ContentBlock{{Type: "text", Text: tc.input}},
-		}, &result)
+		err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{SessionID: newResult.SessionID, Prompt: []acp.ContentBlock{{Type: "text", Text: tc.input}}}, &result)
 		if err == nil {
 			t.Fatalf("prompt %s: expected rpc error", tc.input)
 		}

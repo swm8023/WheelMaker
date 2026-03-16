@@ -126,8 +126,8 @@ Hub
 | `internal/hub/` | Reads config, manages lifecycle of all project clients |
 | `internal/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
 | `internal/agent/` | ACP session lifecycle, streaming prompts, fs/terminal/permission callbacks |
-| `internal/agent/acp/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
-| `internal/provider/codex/` | Stateless connection factory â€” launches codex-acp binary |
+| `internal/agent/provider/acp/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
+| `internal/agent/provider/codex/` | Stateless connection factory â€” launches codex-acp binary |
 | `internal/im/console/` | Console IM: reads stdin; optionally logs all ACP JSON to stderr |
 | `internal/im/feishu/` | Feishu Bot IM adapter |
 
@@ -137,7 +137,7 @@ Hub
 go test ./...
 
 # Integration tests (requires real codex-acp binary)
-go test -tags integration ./internal/provider/codex/...
+go test -tags integration ./internal/agent/provider/codex/...
 
 go build ./cmd/wheelmaker/
 ```
@@ -149,5 +149,7 @@ Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatic
 - [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
 - [Feishu Bot Setup](docs/feishu-bot.md)
 - [codex-acp Reference](docs/codex-acp.md)
+
+
 
 

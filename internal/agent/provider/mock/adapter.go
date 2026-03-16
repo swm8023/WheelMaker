@@ -4,7 +4,7 @@ package mock
 import (
 	"context"
 
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 )
 
 const adapterName = "mock"
@@ -22,7 +22,7 @@ func (a *Adapter) Name() string { return adapterName }
 
 // Connect creates and starts a new in-memory mock ACP connection.
 func (a *Adapter) Connect(_ context.Context) (*acp.Conn, error) {
-	conn := acp.NewInMemoryMock()
+	conn := acp.NewInMemory(runInMemoryMockServer)
 	if err := conn.Start(); err != nil {
 		return nil, err
 	}
