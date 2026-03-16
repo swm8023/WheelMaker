@@ -9,22 +9,22 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/adapter"
 	"github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/provider"
 )
 
 const idleTimeout = 30 * time.Minute
 
-// AdapterFactory creates a new Adapter instance.
+// ProviderFactory creates a new Adapter instance.
 // The exePath and env arguments are provided for compatibility; hub-registered
 // factories typically ignore them and use closure-captured config instead.
-type AdapterFactory func(exePath string, env map[string]string) adapter.Adapter
+type ProviderFactory func(exePath string, env map[string]string) provider.Provider
 
 // Client is the top-level coordinator for a single WheelMaker project.
-// It holds a pool of AdapterFactory functions and two references to the active Agent:
-//   - session agent.Session  — narrow interface for Prompt/Cancel/SetMode, mockable in tests.
-//   - ag      *agent.Agent   — concrete type for Switch (to avoid type assertion on mock).
+// It holds a pool of ProviderFactory functions and two references to the active Agent:
+//   - session agent.Session  â€” narrow interface for Prompt/Cancel/SetMode, mockable in tests.
+//   - ag      *agent.Agent   â€” concrete type for Switch (to avoid type assertion on mock).
 //
 // Agent initialization is lazy: the first incoming message triggers ensureAgent(),
 // which connects the active adapter and creates the agent. After 30 minutes of idle
@@ -33,9 +33,9 @@ type Client struct {
 	projectName string
 	cwd         string
 
-	adapterFacs map[string]AdapterFactory
-	session     agent.Session // narrow interface, can be mock in tests
-	ag          *agent.Agent  // concrete type, used for Switch only; nil when mock injected
+	providerFacs map[string]ProviderFactory
+	session      agent.Session // narrow interface, can be mock in tests
+	ag           *agent.Agent  // concrete type, used for Switch only; nil when mock injected
 
 	store Store
 	state *State
@@ -58,11 +58,11 @@ type Client struct {
 //   - cwd: working directory for agent sessions
 func New(store Store, imAdapter im.Adapter, projectName string, cwd string) *Client {
 	return &Client{
-		projectName: projectName,
-		cwd:         cwd,
-		adapterFacs: make(map[string]AdapterFactory),
-		store:       store,
-		imRun:       imAdapter,
+		projectName:  projectName,
+		cwd:          cwd,
+		providerFacs: make(map[string]ProviderFactory),
+		store:        store,
+		imRun:        imAdapter,
 	}
 }
 
@@ -74,10 +74,10 @@ func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Unlock()
 }
 
-// RegisterAdapter registers an AdapterFactory under the given name.
-func (c *Client) RegisterAdapter(name string, factory AdapterFactory) {
+// RegisterProvider registers an ProviderFactory under the given name.
+func (c *Client) RegisterProvider(name string, factory ProviderFactory) {
 	c.mu.Lock()
-	c.adapterFacs[name] = factory
+	c.providerFacs[name] = factory
 	c.mu.Unlock()
 }
 
@@ -134,7 +134,7 @@ func (c *Client) Close() error {
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status) are dispatched to handleCommand;
-// everything else — including lines starting with "/" that are not known commands —
+// everything else â€” including lines starting with "/" that are not known commands â€”
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
 	text := strings.TrimSpace(msg.Text)
@@ -229,7 +229,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		return
 	}
 	sess := c.session
-	ag := c.ag // capture early so error paths can persist the session ID
+	ag := c.ag         // capture early so error paths can persist the session ID
 	c.resetIdleTimer() // refresh timeout before sending prompt
 	c.mu.Unlock()
 
@@ -287,7 +287,7 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	if name == "" {
 		name = "codex"
 	}
-	fac := c.adapterFacs[name]
+	fac := c.providerFacs[name]
 	if fac == nil {
 		return fmt.Errorf("no adapter registered for %q", name)
 	}
@@ -351,11 +351,11 @@ func (c *Client) idleClose() {
 // promptMu, connects a new adapter binary, and calls ag.Switch() to replace
 // the connection. Always uses c.ag (concrete type) for Switch.
 //
-// Ordering: Cancel() → promptMu.Lock() → drain → ag-refresh → outgoing-snapshot →
-// Connect() → ag.Switch() → persist → resetIdleTimer().
+// Ordering: Cancel() â†’ promptMu.Lock() â†’ drain â†’ ag-refresh â†’ outgoing-snapshot â†’
+// Connect() â†’ ag.Switch() â†’ persist â†’ resetIdleTimer().
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
-	fac := c.adapterFacs[name]
+	fac := c.providerFacs[name]
 	sess := c.session
 	c.mu.Unlock()
 
@@ -463,8 +463,8 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 func (c *Client) registeredAdapterNames() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.adapterFacs))
-	for n := range c.adapterFacs {
+	names := make([]string, 0, len(c.providerFacs))
+	for n := range c.providerFacs {
 		names = append(names, n)
 	}
 	return names
@@ -564,7 +564,7 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) bool {
 	return changed
 }
 
-// reply sends a text response to the chat via the IM adapter.
+// reply sends a text response to the chat via the IM provider.
 func (c *Client) reply(chatID, text string) {
 	if c.imRun != nil {
 		_ = c.imRun.SendText(chatID, text)

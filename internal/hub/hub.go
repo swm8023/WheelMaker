@@ -8,13 +8,13 @@ import (
 	"os"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/adapter"
-	"github.com/swm8023/wheelmaker/internal/adapter/claude"
-	"github.com/swm8023/wheelmaker/internal/adapter/codex"
-	"github.com/swm8023/wheelmaker/internal/adapter/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
+	"github.com/swm8023/wheelmaker/internal/provider"
+	"github.com/swm8023/wheelmaker/internal/provider/claude"
+	"github.com/swm8023/wheelmaker/internal/provider/codex"
+	"github.com/swm8023/wheelmaker/internal/provider/mock"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -68,7 +68,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		}
 	}
 
-	// Create IM adapter.
+	// Create IM provider.
 	imAdapter, err := h.buildIM(pc)
 	if err != nil {
 		return nil, err
@@ -86,13 +86,13 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	}
 
 	// Register all known adapter factories so users can switch between them at runtime.
-	c.RegisterAdapter("codex", func(_ string, _ map[string]string) adapter.Adapter {
+	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
 		return codex.NewAdapter(codex.Config{})
 	})
-	c.RegisterAdapter("claude", func(_ string, _ map[string]string) adapter.Adapter {
+	c.RegisterProvider("claude", func(_ string, _ map[string]string) provider.Provider {
 		return claude.NewAdapter(claude.Config{})
 	})
-	c.RegisterAdapter("mock", func(_ string, _ map[string]string) adapter.Adapter {
+	c.RegisterProvider("mock", func(_ string, _ map[string]string) provider.Provider {
 		return mock.NewAdapter()
 	})
 

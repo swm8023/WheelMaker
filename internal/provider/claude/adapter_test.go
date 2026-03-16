@@ -1,11 +1,12 @@
-//go:build integration
+﻿//go:build integration
 
-// Integration test for adapter/claude: verifies that ClaudeAdapter.Connect()
+// Integration test for provider/claude: verifies that ClaudeAdapter.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/adapter/claude/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/provider/claude/... -v -timeout 60s
 // Requires: claude-agent-acp binary at bin/windows_amd64/claude-agent-acp.exe or in PATH,
-//           and ANTHROPIC_API_KEY set in the environment.
+//
+//	and ANTHROPIC_API_KEY set in the environment.
 package claude_test
 
 import (
@@ -14,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/adapter/claude"
 	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/provider/claude"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -107,3 +108,4 @@ func TestClaudeAdapter_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+

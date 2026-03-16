@@ -4,7 +4,7 @@
 
 **Goal:** Add a built-in mock ACP adapter with in-memory ACP transport and scenario-driven responses for integration testing.
 
-**Architecture:** Extend `acp.Conn` with an in-memory startup path and embed a mock ACP server loop in the same process. Implement `adapter/mock` to construct this connection and register it in hub. Keep upper layers unchanged by returning a normal `*acp.Conn`.
+**Architecture:** Extend `acp.Conn` with an in-memory startup path and embed a mock ACP server loop in the same process. Implement `provider/mock` to construct this connection and register it in hub. Keep upper layers unchanged by returning a normal `*acp.Conn`.
 
 **Tech Stack:** Go, existing ACP JSON-RPC transport, go test.
 
@@ -13,7 +13,7 @@
 ### Task 1: Add failing tests for mock adapter and mock scenarios
 
 **Files:**
-- Create: `internal/adapter/mock/adapter_unit_test.go`
+- Create: `internal/provider/mock/adapter_unit_test.go`
 - Create: `internal/agent/acp/mock_server_test.go`
 
 - [ ] **Step 1: Write failing tests for adapter name/connect/close**
@@ -33,10 +33,10 @@
 ### Task 3: Add mock adapter and hub registration
 
 **Files:**
-- Create: `internal/adapter/mock/adapter.go`
+- Create: `internal/provider/mock/provider.go`
 - Modify: `internal/hub/hub.go`
 
-- [ ] **Step 1: Implement adapter.Adapter for mock**
+- [ ] **Step 1: Implement provider.Provider for mock**
 - [ ] **Step 2: Register `mock` in hub**
 - [ ] **Step 3: Run adapter/hub tests and make them pass**
 
@@ -48,3 +48,6 @@
 - [ ] **Step 1: Run package-level tests for touched packages**
 - [ ] **Step 2: Run `go test ./...`**
 - [ ] **Step 3: Summarize behavior coverage and remaining gaps**
+
+
+

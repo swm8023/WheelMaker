@@ -47,7 +47,7 @@ type SessionSummary struct {
 // AgentState holds all persisted metadata for one adapter type.
 // Agent-level fields come from the initialize handshake; Session holds only
 // the most recently used session's state (not all sessions).
-// Sessions is a lazily-populated list of known session summaries per adapter.
+// Sessions is a lazily-populated list of known session summaries per provider.
 type AgentState struct {
 	// LastSessionID is passed to session/load on the next connection attempt.
 	LastSessionID string `json:"lastSessionId,omitempty"`
@@ -62,7 +62,7 @@ type AgentState struct {
 	// Updated on every session/new, session/load, and session/update notification.
 	Session *SessionState `json:"session,omitempty"`
 
-	// Sessions is a lightweight list of known sessions for this adapter.
+	// Sessions is a lightweight list of known sessions for this provider.
 	// Populated on demand (e.g. querying session history), not on every prompt.
 	Sessions []SessionSummary `json:"sessions,omitempty"`
 }

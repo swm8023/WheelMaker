@@ -1,4 +1,4 @@
-// Package claude implements an adapter.Adapter for Claude Code CLI via claude-agent-acp.
+// Package claude implements an provider.Provider for Claude Code CLI via claude-agent-acp.
 package claude
 
 import (

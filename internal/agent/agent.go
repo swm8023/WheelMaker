@@ -2,10 +2,10 @@
 // Session interface (used by client), Agent concrete struct, and SwitchMode.
 //
 // Relationships:
-//   client.Client → agent.Session (narrow interface, mockable)
-//   client.Client → *agent.Agent  (concrete type, for Switch calls only)
-//   agent.Agent   → agent/acp.Conn (low-level transport, owns subprocess)
-//   agent.Agent   → adapter.Adapter (not stored; provided once by client on New/Switch)
+//   client.Client â†’ agent.Session (narrow interface, mockable)
+//   client.Client â†’ *agent.Agent  (concrete type, for Switch calls only)
+//   agent.Agent   â†’ agent/acp.Conn (low-level transport, owns subprocess)
+//   agent.Agent   â†’ provider.Provider (not stored; provided once by client on New/Switch)
 package agent
 
 import (
@@ -107,7 +107,7 @@ type Agent struct {
 }
 
 // New creates an Agent using an already-started *acp.Conn.
-// The caller (Client) is responsible for calling adapter.Connect() first.
+// The caller (Client) is responsible for calling provider.Connect() first.
 func New(name string, conn *acp.Conn, cwd string) *Agent {
 	ag := &Agent{
 		name:       name,
@@ -173,7 +173,7 @@ func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 		map[string]string{"sessionId": sessID, "modeId": modeID}, nil)
 }
 
-// AdapterName returns the name of the current adapter.
+// AdapterName returns the name of the current provider.
 func (a *Agent) AdapterName() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -224,7 +224,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 //
 // savedSessionID, if non-empty, is pre-seeded into the agent so that ensureReady
 // will attempt session/load on the new connection (same as NewWithSessionID).
-// For SwitchWithContext pass "" — a fresh session is created by the bootstrap prompt.
+// For SwitchWithContext pass "" â€” a fresh session is created by the bootstrap prompt.
 //
 // Concurrency contract: the caller (Client) MUST call Cancel() and drain the
 // current prompt channel before calling Switch. Agent does not wait for in-progress
@@ -253,7 +253,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	a.sessionID = savedSessionID
 	a.lastReply = ""
 	// Reset metadata so the new adapter's own initialize handshake populates it
-	// from scratch — prevents stale metadata from the old adapter being read back.
+	// from scratch â€” prevents stale metadata from the old adapter being read back.
 	a.initMeta = InitMeta{}
 	a.sessionMeta = SessionMeta{}
 	a.mu.Unlock()

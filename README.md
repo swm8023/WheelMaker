@@ -1,11 +1,11 @@
-# WheelMaker
-WheelMaker – A Go library that turns your phone into a remote AI coding assistant. 
-Stop reinventing the wheel, start making your own. 🛞
+﻿# WheelMaker
+WheelMaker â€“ A Go library that turns your phone into a remote AI coding assistant. 
+Stop reinventing the wheel, start making your own. ðŸ›ž
 
 A bridge daemon that connects local AI coding CLIs (Codex, Claude, etc.) to IM platforms like Feishu, letting you remotely control your local AI assistant from your phone.
 
 ```
-Feishu (mobile) ──► WheelMaker ──► codex-acp / claude-acp ──► your codebase
+Feishu (mobile) â”€â”€â–º WheelMaker â”€â”€â–º codex-acp / claude-acp â”€â”€â–º your codebase
 ```
 
 ## Features
@@ -56,7 +56,7 @@ export OPENAI_API_KEY=sk-...
 go run ./cmd/wheelmaker/
 ```
 
-A prompt will appear — type messages directly:
+A prompt will appear â€” type messages directly:
 
 ```
 [my-project] > write an HTTP health check endpoint
@@ -115,10 +115,10 @@ Send in IM or console:
 
 ```
 Hub
-└─ client.Client (per project)
-     ├─ im.Adapter        ← Feishu / Console
-     └─ agent.Agent       ← ACP protocol layer
-          └─ adapter.Adapter → acp.Conn → codex-acp binary
+â””â”€ client.Client (per project)
+     â”œâ”€ im.Adapter        â† Feishu / Console
+     â””â”€ agent.Agent       â† ACP protocol layer
+          â””â”€ provider.Provider â†’ acp.Conn â†’ codex-acp binary
 ```
 
 | Package | Responsibility |
@@ -127,7 +127,7 @@ Hub
 | `internal/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
 | `internal/agent/` | ACP session lifecycle, streaming prompts, fs/terminal/permission callbacks |
 | `internal/agent/acp/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
-| `internal/adapter/codex/` | Stateless connection factory — launches codex-acp binary |
+| `internal/provider/codex/` | Stateless connection factory â€” launches codex-acp binary |
 | `internal/im/console/` | Console IM: reads stdin; optionally logs all ACP JSON to stderr |
 | `internal/im/feishu/` | Feishu Bot IM adapter |
 
@@ -137,7 +137,7 @@ Hub
 go test ./...
 
 # Integration tests (requires real codex-acp binary)
-go test -tags integration ./internal/adapter/codex/...
+go test -tags integration ./internal/provider/codex/...
 
 go build ./cmd/wheelmaker/
 ```
@@ -149,3 +149,5 @@ Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatic
 - [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
 - [Feishu Bot Setup](docs/feishu-bot.md)
 - [codex-acp Reference](docs/codex-acp.md)
+
+

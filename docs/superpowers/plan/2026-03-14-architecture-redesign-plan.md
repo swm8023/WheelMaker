@@ -1,290 +1,290 @@
-# WheelMaker 架构重设计
+﻿# WheelMaker æž¶æž„é‡è®¾è®¡
 
-## 目标描述
+## ç›®æ ‡æè¿°
 
-重构现有 WheelMaker 代码库，使包命名与 ACP 协议语义对齐，并引入更清晰的抽象层次。核心变更如下：(1) 将 `internal/acp/` 传输层重命名为 `internal/agent/acp/`，`Client` 改为 `Conn`；(2) 将 `agent.Agent` 接口替换为具体的 `agent.Agent` struct 以及窄接口 `agent.Session`；(3) 引入新的 `internal/adapter/` 层作为无状态连接工厂；(4) 将 `internal/hub/` 重命名为 `internal/client/`，`Hub` 改为 `Client`，Client 同时持有 `session agent.Session`（用于日常操作，可 mock）和 `*agent.Agent`（用于 `Switch` 等）；(5) 迁移状态持久化 JSON key，保持向后兼容；(6) 将 stdin 循环从 `main.go` 移入 `client.Client.Run`。
+é‡æž„çŽ°æœ‰ WheelMaker ä»£ç åº“ï¼Œä½¿åŒ…å‘½åä¸Ž ACP åè®®è¯­ä¹‰å¯¹é½ï¼Œå¹¶å¼•å…¥æ›´æ¸…æ™°çš„æŠ½è±¡å±‚æ¬¡ã€‚æ ¸å¿ƒå˜æ›´å¦‚ä¸‹ï¼š(1) å°† `internal/acp/` ä¼ è¾“å±‚é‡å‘½åä¸º `internal/agent/acp/`ï¼Œ`Client` æ”¹ä¸º `Conn`ï¼›(2) å°† `agent.Agent` æŽ¥å£æ›¿æ¢ä¸ºå…·ä½“çš„ `agent.Agent` struct ä»¥åŠçª„æŽ¥å£ `agent.Session`ï¼›(3) å¼•å…¥æ–°çš„ `internal/provider/` å±‚ä½œä¸ºæ— çŠ¶æ€è¿žæŽ¥å·¥åŽ‚ï¼›(4) å°† `internal/hub/` é‡å‘½åä¸º `internal/client/`ï¼Œ`Hub` æ”¹ä¸º `Client`ï¼ŒClient åŒæ—¶æŒæœ‰ `session agent.Session`ï¼ˆç”¨äºŽæ—¥å¸¸æ“ä½œï¼Œå¯ mockï¼‰å’Œ `*agent.Agent`ï¼ˆç”¨äºŽ `Switch` ç­‰ï¼‰ï¼›(5) è¿ç§»çŠ¶æ€æŒä¹…åŒ– JSON keyï¼Œä¿æŒå‘åŽå…¼å®¹ï¼›(6) å°† stdin å¾ªçŽ¯ä»Ž `main.go` ç§»å…¥ `client.Client.Run`ã€‚
 
-所有现有行为必须保留：ACP JSON-RPC 通信、session 生命周期、fs/terminal/permission 回调、命令解析、状态持久化，以及已有的 16 个 `acp/client` 单元测试（重命名后继续通过）。
+æ‰€æœ‰çŽ°æœ‰è¡Œä¸ºå¿…é¡»ä¿ç•™ï¼šACP JSON-RPC é€šä¿¡ã€session ç”Ÿå‘½å‘¨æœŸã€fs/terminal/permission å›žè°ƒã€å‘½ä»¤è§£æžã€çŠ¶æ€æŒä¹…åŒ–ï¼Œä»¥åŠå·²æœ‰çš„ 16 ä¸ª `acp/client` å•å…ƒæµ‹è¯•ï¼ˆé‡å‘½ååŽç»§ç»­é€šè¿‡ï¼‰ã€‚
 
-## 验收标准
+## éªŒæ”¶æ ‡å‡†
 
-遵循 TDD 理念，每条标准均包含正向测试和负向测试，以便确定性验证。
+éµå¾ª TDD ç†å¿µï¼Œæ¯æ¡æ ‡å‡†å‡åŒ…å«æ­£å‘æµ‹è¯•å’Œè´Ÿå‘æµ‹è¯•ï¼Œä»¥ä¾¿ç¡®å®šæ€§éªŒè¯ã€‚
 
-- AC-1: 包结构与规范一致（§5、§12）：新文件存在，旧文件已删除，Go 构建成功。
-  - 正向测试（期望 PASS）：
-    - `go build ./...` 在重构后无错误完成。
-    - `go vet ./...` 无报告问题。
-    - `internal/agent/acp/conn.go`、`internal/adapter/adapter.go`、`internal/adapter/codex/adapter.go`、`internal/client/client.go` 均存在。
-    - `internal/agent/update.go`、`internal/agent/permission.go`、`internal/agent/terminal.go`、`internal/agent/callbacks.go`、`internal/agent/session.go`、`internal/agent/prompt.go` 均存在。
-  - 负向测试（期望 FAIL）：
-    - 旧目录 `internal/acp/`、`internal/hub/`、`internal/agent/codex/` 不再存在（任何对它们的文件引用均导致构建错误）。
+- AC-1: åŒ…ç»“æž„ä¸Žè§„èŒƒä¸€è‡´ï¼ˆÂ§5ã€Â§12ï¼‰ï¼šæ–°æ–‡ä»¶å­˜åœ¨ï¼Œæ—§æ–‡ä»¶å·²åˆ é™¤ï¼ŒGo æž„å»ºæˆåŠŸã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - `go build ./...` åœ¨é‡æž„åŽæ— é”™è¯¯å®Œæˆã€‚
+    - `go vet ./...` æ— æŠ¥å‘Šé—®é¢˜ã€‚
+    - `internal/agent/acp/conn.go`ã€`internal/provider/provider.go`ã€`internal/provider/codex/provider.go`ã€`internal/client/client.go` å‡å­˜åœ¨ã€‚
+    - `internal/agent/update.go`ã€`internal/agent/permission.go`ã€`internal/agent/terminal.go`ã€`internal/agent/callbacks.go`ã€`internal/agent/session.go`ã€`internal/agent/prompt.go` å‡å­˜åœ¨ã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - æ—§ç›®å½• `internal/acp/`ã€`internal/hub/`ã€`internal/agent/codex/` ä¸å†å­˜åœ¨ï¼ˆä»»ä½•å¯¹å®ƒä»¬çš„æ–‡ä»¶å¼•ç”¨å‡å¯¼è‡´æž„å»ºé”™è¯¯ï¼‰ã€‚
 
-- AC-2: `acp.Conn`（从 `acp.Client` 重命名）通过全部 16 个现有单元测试，迁移至 `internal/agent/acp/conn_test.go`。
-  - 正向测试（期望 PASS）：
-    - `go test ./internal/agent/acp/...` 运行，全部 16 个测试通过。
-    - 自引用 mock 模式（`GO_ACP_MOCK=1`）在重命名后的 `Conn` 类型下正常工作。
-    - 所有已测试行为正常：请求/响应、并发请求、订阅、取消、`OnRequest` 处理器、进程退出时解除阻塞。
-  - 负向测试（期望 FAIL）：
-    - 向已关闭的 `Conn` 发送消息返回 error（不 panic 或挂起）。
+- AC-2: `acp.Conn`ï¼ˆä»Ž `acp.Client` é‡å‘½åï¼‰é€šè¿‡å…¨éƒ¨ 16 ä¸ªçŽ°æœ‰å•å…ƒæµ‹è¯•ï¼Œè¿ç§»è‡³ `internal/agent/acp/conn_test.go`ã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - `go test ./internal/agent/acp/...` è¿è¡Œï¼Œå…¨éƒ¨ 16 ä¸ªæµ‹è¯•é€šè¿‡ã€‚
+    - è‡ªå¼•ç”¨ mock æ¨¡å¼ï¼ˆ`GO_ACP_MOCK=1`ï¼‰åœ¨é‡å‘½ååŽçš„ `Conn` ç±»åž‹ä¸‹æ­£å¸¸å·¥ä½œã€‚
+    - æ‰€æœ‰å·²æµ‹è¯•è¡Œä¸ºæ­£å¸¸ï¼šè¯·æ±‚/å“åº”ã€å¹¶å‘è¯·æ±‚ã€è®¢é˜…ã€å–æ¶ˆã€`OnRequest` å¤„ç†å™¨ã€è¿›ç¨‹é€€å‡ºæ—¶è§£é™¤é˜»å¡žã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - å‘å·²å…³é—­çš„ `Conn` å‘é€æ¶ˆæ¯è¿”å›ž errorï¼ˆä¸ panic æˆ–æŒ‚èµ·ï¼‰ã€‚
 
-- AC-3: `agent.Session` 接口是 `client.Client` 依赖的窄契约；`agent.Agent` struct 实现该接口。
-  - 正向测试（期望 PASS）：
-    - 实现了 `agent.Session` 的 mock struct 可以注入 `client.Client` 而不引发类型断言 panic。
-    - `agent.Agent` struct 作为 `agent.Session` 的实现可编译通过（通过 `var _ agent.Session = (*agent.Agent)(nil)` 验证）。
-    - `agent.Agent.AdapterName()` 和 `agent.Agent.SessionID()` 返回正确的值。
-  - 负向测试（期望 FAIL）：
-    - 缺少六个 `Session` 方法（`Prompt`、`Cancel`、`SetMode`、`AdapterName`、`SessionID`、`Close`）中任意一个的 struct 无法作为 `agent.Session` 编译通过。
+- AC-3: `agent.Session` æŽ¥å£æ˜¯ `client.Client` ä¾èµ–çš„çª„å¥‘çº¦ï¼›`agent.Agent` struct å®žçŽ°è¯¥æŽ¥å£ã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - å®žçŽ°äº† `agent.Session` çš„ mock struct å¯ä»¥æ³¨å…¥ `client.Client` è€Œä¸å¼•å‘ç±»åž‹æ–­è¨€ panicã€‚
+    - `agent.Agent` struct ä½œä¸º `agent.Session` çš„å®žçŽ°å¯ç¼–è¯‘é€šè¿‡ï¼ˆé€šè¿‡ `var _ agent.Session = (*agent.Agent)(nil)` éªŒè¯ï¼‰ã€‚
+    - `agent.Agent.AdapterName()` å’Œ `agent.Agent.SessionID()` è¿”å›žæ­£ç¡®çš„å€¼ã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - ç¼ºå°‘å…­ä¸ª `Session` æ–¹æ³•ï¼ˆ`Prompt`ã€`Cancel`ã€`SetMode`ã€`AdapterName`ã€`SessionID`ã€`Close`ï¼‰ä¸­ä»»æ„ä¸€ä¸ªçš„ struct æ— æ³•ä½œä¸º `agent.Session` ç¼–è¯‘é€šè¿‡ã€‚
 
-- AC-4: `adapter.Adapter` 接口和 `adapter/codex.CodexAdapter` 作为无状态连接工厂正确工作。
-  - 正向测试（期望 PASS）：
-    - `CodexAdapter.Connect(ctx)` 返回的 `*acp.Conn` 子进程已在运行（调用方无需再次调用 `Start()`）。
-    - 两次调用 `CodexAdapter.Connect(ctx)` 产生两个独立的 `*acp.Conn` 实例，各自有独立子进程。
-    - `Connect` 成功后调用 `CodexAdapter.Close()` 是 no-op（不会杀死已转移所有权的子进程）。
-  - 负向测试（期望 FAIL）：
-    - 找不到二进制文件时，`CodexAdapter.Connect(ctx)` 返回 error。
+- AC-4: `provider.Provider` æŽ¥å£å’Œ `provider/codex.CodexAdapter` ä½œä¸ºæ— çŠ¶æ€è¿žæŽ¥å·¥åŽ‚æ­£ç¡®å·¥ä½œã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - `CodexAdapter.Connect(ctx)` è¿”å›žçš„ `*acp.Conn` å­è¿›ç¨‹å·²åœ¨è¿è¡Œï¼ˆè°ƒç”¨æ–¹æ— éœ€å†æ¬¡è°ƒç”¨ `Start()`ï¼‰ã€‚
+    - ä¸¤æ¬¡è°ƒç”¨ `CodexAdapter.Connect(ctx)` äº§ç”Ÿä¸¤ä¸ªç‹¬ç«‹çš„ `*acp.Conn` å®žä¾‹ï¼Œå„è‡ªæœ‰ç‹¬ç«‹å­è¿›ç¨‹ã€‚
+    - `Connect` æˆåŠŸåŽè°ƒç”¨ `CodexAdapter.Close()` æ˜¯ no-opï¼ˆä¸ä¼šæ€æ­»å·²è½¬ç§»æ‰€æœ‰æƒçš„å­è¿›ç¨‹ï¼‰ã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - æ‰¾ä¸åˆ°äºŒè¿›åˆ¶æ–‡ä»¶æ—¶ï¼Œ`CodexAdapter.Connect(ctx)` è¿”å›ž errorã€‚
 
-- AC-5: `client.Client` 以新设计替换 `hub.Hub`；命令路由和流式回复端到端正常工作。
-  - 正向测试（期望 PASS）：
-    - `Client.HandleMessage` 处理 `/use codex` 时触发 `switchAdapter`，调用 `adapter.Connect()` 并替换活跃 session。
-    - `Client.HandleMessage` 处理 `/use codex --continue` 时以 `SwitchWithContext` 模式触发 `switchAdapter`。
-    - `Client.HandleMessage` 处理 `/cancel` 时调用 `session.Cancel()`。
-    - `Client.HandleMessage` 处理 `/status` 时返回包含 adapter 名称和 session ID 的字符串。
-    - `Client.Run(ctx)` 在无 IM adapter 时驱动 stdin 读循环，并将每行转发为 `im.Message`。
-    - `Client.Start(ctx)` 立即调用 `adapter.Connect()`（非惰性），首条 prompt 前子进程已就绪。
-    - `Client.Close()` 将当前 session ID 保存到 store。
-  - 负向测试（期望 FAIL）：
-    - `/use unknown-adapter` 返回指示 adapter 未注册的错误信息。
-    - 注入 `client.Client` 的 mock `agent.Session` 在调用 `switchAdapter` 时不引发类型断言 panic（因为 `Switch` 通过 `c.agent *agent.Agent` 调用，而非 `Session` 接口）。
+- AC-5: `client.Client` ä»¥æ–°è®¾è®¡æ›¿æ¢ `hub.Hub`ï¼›å‘½ä»¤è·¯ç”±å’Œæµå¼å›žå¤ç«¯åˆ°ç«¯æ­£å¸¸å·¥ä½œã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - `Client.HandleMessage` å¤„ç† `/use codex` æ—¶è§¦å‘ `switchAdapter`ï¼Œè°ƒç”¨ `provider.Connect()` å¹¶æ›¿æ¢æ´»è·ƒ sessionã€‚
+    - `Client.HandleMessage` å¤„ç† `/use codex --continue` æ—¶ä»¥ `SwitchWithContext` æ¨¡å¼è§¦å‘ `switchAdapter`ã€‚
+    - `Client.HandleMessage` å¤„ç† `/cancel` æ—¶è°ƒç”¨ `session.Cancel()`ã€‚
+    - `Client.HandleMessage` å¤„ç† `/status` æ—¶è¿”å›žåŒ…å« adapter åç§°å’Œ session ID çš„å­—ç¬¦ä¸²ã€‚
+    - `Client.Run(ctx)` åœ¨æ—  IM adapter æ—¶é©±åŠ¨ stdin è¯»å¾ªçŽ¯ï¼Œå¹¶å°†æ¯è¡Œè½¬å‘ä¸º `im.Message`ã€‚
+    - `Client.Start(ctx)` ç«‹å³è°ƒç”¨ `provider.Connect()`ï¼ˆéžæƒ°æ€§ï¼‰ï¼Œé¦–æ¡ prompt å‰å­è¿›ç¨‹å·²å°±ç»ªã€‚
+    - `Client.Close()` å°†å½“å‰ session ID ä¿å­˜åˆ° storeã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - `/use unknown-adapter` è¿”å›žæŒ‡ç¤º adapter æœªæ³¨å†Œçš„é”™è¯¯ä¿¡æ¯ã€‚
+    - æ³¨å…¥ `client.Client` çš„ mock `agent.Session` åœ¨è°ƒç”¨ `switchAdapter` æ—¶ä¸å¼•å‘ç±»åž‹æ–­è¨€ panicï¼ˆå› ä¸º `Switch` é€šè¿‡ `c.agent *agent.Agent` è°ƒç”¨ï¼Œè€Œéž `Session` æŽ¥å£ï¼‰ã€‚
 
-- AC-6: `agent.Agent.Switch` 实现 §7.4 中规定的并发安全约定。
-  - 正向测试（期望 PASS）：
-    - `switchAdapter`（Client 侧）在调用 `c.agent.Switch(...)` 前先调用 `c.session.Cancel()`，再排干 `c.currentPromptCh`。
-    - `Switch` 后，旧 `*acp.Conn` 已关闭（旧子进程终止），`c.agent` 持有新 `*acp.Conn`。
-    - `SwitchWithContext` 且 `lastReply` 非空时，将其作为引导 prompt 发送至新 session；消费 goroutine 已启动且不泄漏。
-    - `SwitchWithContext` 且 `lastReply` 为空时，静默降级为 `SwitchClean` 行为（不发送 prompt，不返回 error）。
-    - `SwitchWithContext` 中引导 `Prompt` 调用失败时，`Switch` 返回 `nil`（而非 error），并记录 warning。
-  - 负向测试（期望 FAIL）：
-    - `Agent.Switch` 内部不等待飞行中的 `Prompt` 完成——这是调用方的文档化职责，以防死锁。
+- AC-6: `agent.Agent.Switch` å®žçŽ° Â§7.4 ä¸­è§„å®šçš„å¹¶å‘å®‰å…¨çº¦å®šã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - `switchAdapter`ï¼ˆClient ä¾§ï¼‰åœ¨è°ƒç”¨ `c.agent.Switch(...)` å‰å…ˆè°ƒç”¨ `c.session.Cancel()`ï¼Œå†æŽ’å¹² `c.currentPromptCh`ã€‚
+    - `Switch` åŽï¼Œæ—§ `*acp.Conn` å·²å…³é—­ï¼ˆæ—§å­è¿›ç¨‹ç»ˆæ­¢ï¼‰ï¼Œ`c.agent` æŒæœ‰æ–° `*acp.Conn`ã€‚
+    - `SwitchWithContext` ä¸” `lastReply` éžç©ºæ—¶ï¼Œå°†å…¶ä½œä¸ºå¼•å¯¼ prompt å‘é€è‡³æ–° sessionï¼›æ¶ˆè´¹ goroutine å·²å¯åŠ¨ä¸”ä¸æ³„æ¼ã€‚
+    - `SwitchWithContext` ä¸” `lastReply` ä¸ºç©ºæ—¶ï¼Œé™é»˜é™çº§ä¸º `SwitchClean` è¡Œä¸ºï¼ˆä¸å‘é€ promptï¼Œä¸è¿”å›ž errorï¼‰ã€‚
+    - `SwitchWithContext` ä¸­å¼•å¯¼ `Prompt` è°ƒç”¨å¤±è´¥æ—¶ï¼Œ`Switch` è¿”å›ž `nil`ï¼ˆè€Œéž errorï¼‰ï¼Œå¹¶è®°å½• warningã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - `Agent.Switch` å†…éƒ¨ä¸ç­‰å¾…é£žè¡Œä¸­çš„ `Prompt` å®Œæˆâ€”â€”è¿™æ˜¯è°ƒç”¨æ–¹çš„æ–‡æ¡£åŒ–èŒè´£ï¼Œä»¥é˜²æ­»é”ã€‚
 
-- AC-7: 状态持久化透明迁移旧 JSON key。
-  - 正向测试（期望 PASS）：
-    - `client.JSONStore.Load()` 读取含 `"active_agent"` 和 `"acp_session_ids"` 的状态文件时，正确映射到加载后 `State` 的 `ActiveAdapter` 和 `SessionIDs`。
-    - `client.JSONStore.Save()` 仅写入新 key（`"activeAdapter"`、`"session_ids"`），不写旧 key。
-    - 使用旧格式状态文件（仅含旧 key）启动的进程能正确恢复 session ID 和活跃 adapter。
-  - 负向测试（期望 FAIL）：
-    - 仅含旧 key（`active_agent`、`acp_session_ids`）、不含新 key 的状态文件在 `Load()` 后不会导致 `ActiveAdapter` 为空。
+- AC-7: çŠ¶æ€æŒä¹…åŒ–é€æ˜Žè¿ç§»æ—§ JSON keyã€‚
+  - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
+    - `client.JSONStore.Load()` è¯»å–å« `"active_agent"` å’Œ `"acp_session_ids"` çš„çŠ¶æ€æ–‡ä»¶æ—¶ï¼Œæ­£ç¡®æ˜ å°„åˆ°åŠ è½½åŽ `State` çš„ `ActiveAdapter` å’Œ `SessionIDs`ã€‚
+    - `client.JSONStore.Save()` ä»…å†™å…¥æ–° keyï¼ˆ`"activeAdapter"`ã€`"session_ids"`ï¼‰ï¼Œä¸å†™æ—§ keyã€‚
+    - ä½¿ç”¨æ—§æ ¼å¼çŠ¶æ€æ–‡ä»¶ï¼ˆä»…å«æ—§ keyï¼‰å¯åŠ¨çš„è¿›ç¨‹èƒ½æ­£ç¡®æ¢å¤ session ID å’Œæ´»è·ƒ adapterã€‚
+  - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
+    - ä»…å«æ—§ keyï¼ˆ`active_agent`ã€`acp_session_ids`ï¼‰ã€ä¸å«æ–° key çš„çŠ¶æ€æ–‡ä»¶åœ¨ `Load()` åŽä¸ä¼šå¯¼è‡´ `ActiveAdapter` ä¸ºç©ºã€‚
 
-## 路径边界
+## è·¯å¾„è¾¹ç•Œ
 
-路径边界定义了实现质量和选择的可接受范围。
+è·¯å¾„è¾¹ç•Œå®šä¹‰äº†å®žçŽ°è´¨é‡å’Œé€‰æ‹©çš„å¯æŽ¥å—èŒƒå›´ã€‚
 
-### 上界（最大可接受范围）
-实现包含 §12 中所有包重命名/迁移、§6 中所有新接口和具体类型、`agent.Agent` 内部拆分为多文件（session.go、prompt.go、callbacks.go、terminal.go、permission.go、update.go）、`agent.Agent` 单元测试（使用 §11 中的 mock Conn 子进程模式）和 `client.Client` 单元测试（使用 mock `agent.Session`）、`adapter/codex` 的集成测试（`//go:build integration`），以及完整的向后兼容状态迁移。
+### ä¸Šç•Œï¼ˆæœ€å¤§å¯æŽ¥å—èŒƒå›´ï¼‰
+å®žçŽ°åŒ…å« Â§12 ä¸­æ‰€æœ‰åŒ…é‡å‘½å/è¿ç§»ã€Â§6 ä¸­æ‰€æœ‰æ–°æŽ¥å£å’Œå…·ä½“ç±»åž‹ã€`agent.Agent` å†…éƒ¨æ‹†åˆ†ä¸ºå¤šæ–‡ä»¶ï¼ˆsession.goã€prompt.goã€callbacks.goã€terminal.goã€permission.goã€update.goï¼‰ã€`agent.Agent` å•å…ƒæµ‹è¯•ï¼ˆä½¿ç”¨ Â§11 ä¸­çš„ mock Conn å­è¿›ç¨‹æ¨¡å¼ï¼‰å’Œ `client.Client` å•å…ƒæµ‹è¯•ï¼ˆä½¿ç”¨ mock `agent.Session`ï¼‰ã€`provider/codex` çš„é›†æˆæµ‹è¯•ï¼ˆ`//go:build integration`ï¼‰ï¼Œä»¥åŠå®Œæ•´çš„å‘åŽå…¼å®¹çŠ¶æ€è¿ç§»ã€‚
 
-### 下界（最小可接受范围）
-实现完成所有指定的包重命名/迁移，`go build ./...` 通过，全部 16 个迁移后的 `acp/conn` 单元测试通过，stdin 循环端到端可用（`go run ./cmd/wheelmaker/`）。`agent.Agent` 和 `client.Client` 的单元测试可推迟，前提是代码结构具备可测试性（Session 接口可注入 Client）。
+### ä¸‹ç•Œï¼ˆæœ€å°å¯æŽ¥å—èŒƒå›´ï¼‰
+å®žçŽ°å®Œæˆæ‰€æœ‰æŒ‡å®šçš„åŒ…é‡å‘½å/è¿ç§»ï¼Œ`go build ./...` é€šè¿‡ï¼Œå…¨éƒ¨ 16 ä¸ªè¿ç§»åŽçš„ `acp/conn` å•å…ƒæµ‹è¯•é€šè¿‡ï¼Œstdin å¾ªçŽ¯ç«¯åˆ°ç«¯å¯ç”¨ï¼ˆ`go run ./cmd/wheelmaker/`ï¼‰ã€‚`agent.Agent` å’Œ `client.Client` çš„å•å…ƒæµ‹è¯•å¯æŽ¨è¿Ÿï¼Œå‰ææ˜¯ä»£ç ç»“æž„å…·å¤‡å¯æµ‹è¯•æ€§ï¼ˆSession æŽ¥å£å¯æ³¨å…¥ Clientï¼‰ã€‚
 
-### 允许的选择
-> **注意**：这是高度确定性的重构，几乎所有结构性决策均由规范固定。仅剩少量实现层面的选择。
+### å…è®¸çš„é€‰æ‹©
+> **æ³¨æ„**ï¼šè¿™æ˜¯é«˜åº¦ç¡®å®šæ€§çš„é‡æž„ï¼Œå‡ ä¹Žæ‰€æœ‰ç»“æž„æ€§å†³ç­–å‡ç”±è§„èŒƒå›ºå®šã€‚ä»…å‰©å°‘é‡å®žçŽ°å±‚é¢çš„é€‰æ‹©ã€‚
 
-- 可以：在 `internal/agent/` 内部以任意方式拆分文件，只要公共 API 与 §6 完全匹配。
-- 可以：单独创建 `conn_integration_test.go`，或在同一文件中使用 `//go:build integration` 标签。
-- 可以：在 `agent.Agent` 实现文件内使用任意内部辅助命名。
-- 不可以：任何未将 `internal/adapter/` 作为独立包并引入 `Adapter` 接口的架构。
-- 不可以：任何将 `agent.Agent` 保留为接口的架构（必须改为具体 struct；`Session` 才是窄接口）。
-- 不可以：在 `client.Client` 中保留对 `*codex.Agent` 的类型断言以获取 `SessionID()` 或其他字段。
-- 所有公共接口方法签名、struct 字段和 JSON tag 均按 §6 和 §8 固定，不可更改。
+- å¯ä»¥ï¼šåœ¨ `internal/agent/` å†…éƒ¨ä»¥ä»»æ„æ–¹å¼æ‹†åˆ†æ–‡ä»¶ï¼Œåªè¦å…¬å…± API ä¸Ž Â§6 å®Œå…¨åŒ¹é…ã€‚
+- å¯ä»¥ï¼šå•ç‹¬åˆ›å»º `conn_integration_test.go`ï¼Œæˆ–åœ¨åŒä¸€æ–‡ä»¶ä¸­ä½¿ç”¨ `//go:build integration` æ ‡ç­¾ã€‚
+- å¯ä»¥ï¼šåœ¨ `agent.Agent` å®žçŽ°æ–‡ä»¶å†…ä½¿ç”¨ä»»æ„å†…éƒ¨è¾…åŠ©å‘½åã€‚
+- ä¸å¯ä»¥ï¼šä»»ä½•æœªå°† `internal/provider/` ä½œä¸ºç‹¬ç«‹åŒ…å¹¶å¼•å…¥ `Adapter` æŽ¥å£çš„æž¶æž„ã€‚
+- ä¸å¯ä»¥ï¼šä»»ä½•å°† `agent.Agent` ä¿ç•™ä¸ºæŽ¥å£çš„æž¶æž„ï¼ˆå¿…é¡»æ”¹ä¸ºå…·ä½“ structï¼›`Session` æ‰æ˜¯çª„æŽ¥å£ï¼‰ã€‚
+- ä¸å¯ä»¥ï¼šåœ¨ `client.Client` ä¸­ä¿ç•™å¯¹ `*codex.Agent` çš„ç±»åž‹æ–­è¨€ä»¥èŽ·å– `SessionID()` æˆ–å…¶ä»–å­—æ®µã€‚
+- æ‰€æœ‰å…¬å…±æŽ¥å£æ–¹æ³•ç­¾åã€struct å­—æ®µå’Œ JSON tag å‡æŒ‰ Â§6 å’Œ Â§8 å›ºå®šï¼Œä¸å¯æ›´æ”¹ã€‚
 
-## 可行性提示与建议
+## å¯è¡Œæ€§æç¤ºä¸Žå»ºè®®
 
-> **注意**：本节仅供参考理解，这些是概念性建议，不是强制要求。
+> **æ³¨æ„**ï¼šæœ¬èŠ‚ä»…ä¾›å‚è€ƒç†è§£ï¼Œè¿™äº›æ˜¯æ¦‚å¿µæ€§å»ºè®®ï¼Œä¸æ˜¯å¼ºåˆ¶è¦æ±‚ã€‚
 
-### 概念实现路径
+### æ¦‚å¿µå®žçŽ°è·¯å¾„
 
-重构可按依赖顺序进行，确保每一步代码始终可编译：
+é‡æž„å¯æŒ‰ä¾èµ–é¡ºåºè¿›è¡Œï¼Œç¡®ä¿æ¯ä¸€æ­¥ä»£ç å§‹ç»ˆå¯ç¼–è¯‘ï¼š
 
 ```
-传输层迁移：
-  - 将 internal/acp/ 复制到 internal/agent/acp/
-  - 将类型 Client→Conn，更新所有方法接收者
-  - 将 client_test.go 重命名为 conn_test.go，更新类型引用
-  - 保留 internal/acp/ 直到所有依赖方更新完毕
+ä¼ è¾“å±‚è¿ç§»ï¼š
+  - å°† internal/acp/ å¤åˆ¶åˆ° internal/agent/acp/
+  - å°†ç±»åž‹ Clientâ†’Connï¼Œæ›´æ–°æ‰€æœ‰æ–¹æ³•æŽ¥æ”¶è€…
+  - å°† client_test.go é‡å‘½åä¸º conn_test.goï¼Œæ›´æ–°ç±»åž‹å¼•ç”¨
+  - ä¿ç•™ internal/acp/ ç›´åˆ°æ‰€æœ‰ä¾èµ–æ–¹æ›´æ–°å®Œæ¯•
 
-Agent 核心（可与传输层迁移并行）：
-  - update.go:     新的 UpdateType 枚举 + 更丰富的 Update struct
-  - permission.go: PermissionHandler 接口 + AutoAllowHandler（始终 allow_once）
-  - terminal.go:   从 codex/handlers.go 抽取 terminalManager
-  - callbacks.go:  8 个 ACP 回调处理器（fs/terminal/permission）
-  - session.go:    ensureReady（initialize → session/load 或 session/new）
-  - prompt.go:     Prompt goroutine + sessionUpdateHandler channel 映射
-  - agent.go:      Session 接口、SwitchMode、Agent struct、New、Switch
+Agent æ ¸å¿ƒï¼ˆå¯ä¸Žä¼ è¾“å±‚è¿ç§»å¹¶è¡Œï¼‰ï¼š
+  - update.go:     æ–°çš„ UpdateType æžšä¸¾ + æ›´ä¸°å¯Œçš„ Update struct
+  - permission.go: PermissionHandler æŽ¥å£ + AutoAllowHandlerï¼ˆå§‹ç»ˆ allow_onceï¼‰
+  - terminal.go:   ä»Ž codex/handlers.go æŠ½å– terminalManager
+  - callbacks.go:  8 ä¸ª ACP å›žè°ƒå¤„ç†å™¨ï¼ˆfs/terminal/permissionï¼‰
+  - session.go:    ensureReadyï¼ˆinitialize â†’ session/load æˆ– session/newï¼‰
+  - prompt.go:     Prompt goroutine + sessionUpdateHandler channel æ˜ å°„
+  - agent.go:      Session æŽ¥å£ã€SwitchModeã€Agent structã€Newã€Switch
 
-Adapter 层 + Client（依赖以上两部分完成）：
-  - internal/adapter/adapter.go:       Adapter 接口
-  - internal/adapter/codex/adapter.go: CodexAdapter（ResolveBinary + Conn.Start）
-  - internal/client/state.go:          带迁移逻辑的 State（见 Load()）
-  - internal/client/store.go:          包声明从 hub 改为 client（内容不变）
-  - internal/client/client.go:         Client struct + 所有方法
+Adapter å±‚ + Clientï¼ˆä¾èµ–ä»¥ä¸Šä¸¤éƒ¨åˆ†å®Œæˆï¼‰ï¼š
+  - internal/provider/provider.go:       Adapter æŽ¥å£
+  - internal/provider/codex/provider.go: CodexAdapterï¼ˆResolveBinary + Conn.Startï¼‰
+  - internal/client/state.go:          å¸¦è¿ç§»é€»è¾‘çš„ Stateï¼ˆè§ Load()ï¼‰
+  - internal/client/store.go:          åŒ…å£°æ˜Žä»Ž hub æ”¹ä¸º clientï¼ˆå†…å®¹ä¸å˜ï¼‰
+  - internal/client/client.go:         Client struct + æ‰€æœ‰æ–¹æ³•
 
-接线 + 清理：
-  - cmd/wheelmaker/main.go: 使用 client.New、RegisterAdapter、Start、Run
-  - 删除 internal/acp/、internal/hub/、internal/agent/codex/
-  - go build ./... 和 go test ./internal/agent/acp/...
+æŽ¥çº¿ + æ¸…ç†ï¼š
+  - cmd/wheelmaker/main.go: ä½¿ç”¨ client.Newã€RegisterProviderã€Startã€Run
+  - åˆ é™¤ internal/acp/ã€internal/hub/ã€internal/agent/codex/
+  - go build ./... å’Œ go test ./internal/agent/acp/...
 ```
 
-### 相关参考
-- `internal/acp/client.go` — 待迁移的完整 `Conn` 实现（不需要重写，逻辑不变）
-- `internal/acp/client_test.go` — 16 个测试，重命名/迁移至 `conn_test.go`
-- `internal/agent/codex/adapter.go` — `ensureSession`、`Prompt`、`Cancel`、`SetMode` 逻辑，拆分至 `session.go`、`prompt.go`、`agent.go`
-- `internal/agent/codex/handlers.go` — 所有回调处理器 + `terminalManager`，迁移至 `callbacks.go` + `terminal.go`
-- `internal/hub/hub.go` — `HandleMessage`、命令分发、回复流式处理，迁移至 `client.go`
-- `internal/hub/state.go` — `State` struct，需更新并加入迁移逻辑
-- `internal/tools/resolve.go` — `CodexAdapter.Connect` 用于查找二进制路径
+### ç›¸å…³å‚è€ƒ
+- `internal/acp/client.go` â€” å¾…è¿ç§»çš„å®Œæ•´ `Conn` å®žçŽ°ï¼ˆä¸éœ€è¦é‡å†™ï¼Œé€»è¾‘ä¸å˜ï¼‰
+- `internal/acp/client_test.go` â€” 16 ä¸ªæµ‹è¯•ï¼Œé‡å‘½å/è¿ç§»è‡³ `conn_test.go`
+- `internal/agent/codex/provider.go` â€” `ensureSession`ã€`Prompt`ã€`Cancel`ã€`SetMode` é€»è¾‘ï¼Œæ‹†åˆ†è‡³ `session.go`ã€`prompt.go`ã€`agent.go`
+- `internal/agent/codex/handlers.go` â€” æ‰€æœ‰å›žè°ƒå¤„ç†å™¨ + `terminalManager`ï¼Œè¿ç§»è‡³ `callbacks.go` + `terminal.go`
+- `internal/hub/hub.go` â€” `HandleMessage`ã€å‘½ä»¤åˆ†å‘ã€å›žå¤æµå¼å¤„ç†ï¼Œè¿ç§»è‡³ `client.go`
+- `internal/hub/state.go` â€” `State` structï¼Œéœ€æ›´æ–°å¹¶åŠ å…¥è¿ç§»é€»è¾‘
+- `internal/tools/resolve.go` â€” `CodexAdapter.Connect` ç”¨äºŽæŸ¥æ‰¾äºŒè¿›åˆ¶è·¯å¾„
 
-## 依赖与执行顺序
+## ä¾èµ–ä¸Žæ‰§è¡Œé¡ºåº
 
-### 里程碑
+### é‡Œç¨‹ç¢‘
 
-1. **传输层迁移**：迁移并重命名 ACP JSON-RPC 传输层。
-   - 步骤 A：复制 `internal/acp/` 内容，创建 `internal/agent/acp/`。
-   - 步骤 B：将 `Client` 重命名为 `Conn`，更新新包内所有引用。
-   - 步骤 C：更新 `conn_test.go` 使用 `Conn` 类型；验证 `go test ./internal/agent/acp/...` 全部 16 个测试通过。
-   - 步骤 D：保留 `internal/acp/` 直到所有依赖方完成迁移。
+1. **ä¼ è¾“å±‚è¿ç§»**ï¼šè¿ç§»å¹¶é‡å‘½å ACP JSON-RPC ä¼ è¾“å±‚ã€‚
+   - æ­¥éª¤ Aï¼šå¤åˆ¶ `internal/acp/` å†…å®¹ï¼Œåˆ›å»º `internal/agent/acp/`ã€‚
+   - æ­¥éª¤ Bï¼šå°† `Client` é‡å‘½åä¸º `Conn`ï¼Œæ›´æ–°æ–°åŒ…å†…æ‰€æœ‰å¼•ç”¨ã€‚
+   - æ­¥éª¤ Cï¼šæ›´æ–° `conn_test.go` ä½¿ç”¨ `Conn` ç±»åž‹ï¼›éªŒè¯ `go test ./internal/agent/acp/...` å…¨éƒ¨ 16 ä¸ªæµ‹è¯•é€šè¿‡ã€‚
+   - æ­¥éª¤ Dï¼šä¿ç•™ `internal/acp/` ç›´åˆ°æ‰€æœ‰ä¾èµ–æ–¹å®Œæˆè¿ç§»ã€‚
 
-2. **Agent 核心重构**：构建新的 `agent.Agent` 具体 struct 和 `agent.Session` 接口。
-   - 步骤 A：编写 `update.go`，包含更丰富的 `UpdateType` 枚举和 `Update` struct（替换原来的简单 `Update` string 类型）。
-   - 步骤 B：编写 `permission.go` 和 `terminal.go`（从 `codex/handlers.go` 抽取）。
-   - 步骤 C：编写 `callbacks.go`（全部 8 个 ACP 回调处理器，使用 `agent/acp` 的 `acp.Conn`）。
-   - 步骤 D：编写 `session.go`（`ensureReady` 生命周期：initialize → session/load 或 session/new）。
-   - 步骤 E：编写 `prompt.go`（`Prompt` goroutine 和 `sessionUpdateHandler` 更新类型映射）。
-   - 步骤 F：编写 `agent.go`，定义 `Session` 接口、`SwitchMode`、`Agent` struct、`New`、`Switch` 以及六个 `Session` 接口方法实现。
+2. **Agent æ ¸å¿ƒé‡æž„**ï¼šæž„å»ºæ–°çš„ `agent.Agent` å…·ä½“ struct å’Œ `agent.Session` æŽ¥å£ã€‚
+   - æ­¥éª¤ Aï¼šç¼–å†™ `update.go`ï¼ŒåŒ…å«æ›´ä¸°å¯Œçš„ `UpdateType` æžšä¸¾å’Œ `Update` structï¼ˆæ›¿æ¢åŽŸæ¥çš„ç®€å• `Update` string ç±»åž‹ï¼‰ã€‚
+   - æ­¥éª¤ Bï¼šç¼–å†™ `permission.go` å’Œ `terminal.go`ï¼ˆä»Ž `codex/handlers.go` æŠ½å–ï¼‰ã€‚
+   - æ­¥éª¤ Cï¼šç¼–å†™ `callbacks.go`ï¼ˆå…¨éƒ¨ 8 ä¸ª ACP å›žè°ƒå¤„ç†å™¨ï¼Œä½¿ç”¨ `agent/acp` çš„ `acp.Conn`ï¼‰ã€‚
+   - æ­¥éª¤ Dï¼šç¼–å†™ `session.go`ï¼ˆ`ensureReady` ç”Ÿå‘½å‘¨æœŸï¼šinitialize â†’ session/load æˆ– session/newï¼‰ã€‚
+   - æ­¥éª¤ Eï¼šç¼–å†™ `prompt.go`ï¼ˆ`Prompt` goroutine å’Œ `sessionUpdateHandler` æ›´æ–°ç±»åž‹æ˜ å°„ï¼‰ã€‚
+   - æ­¥éª¤ Fï¼šç¼–å†™ `agent.go`ï¼Œå®šä¹‰ `Session` æŽ¥å£ã€`SwitchMode`ã€`Agent` structã€`New`ã€`Switch` ä»¥åŠå…­ä¸ª `Session` æŽ¥å£æ–¹æ³•å®žçŽ°ã€‚
 
-3. **Adapter 层 + Client 重构**：创建 Adapter 抽象，以 Client 替换 Hub。
-   - 步骤 A：创建 `internal/adapter/adapter.go`，包含 `Adapter` 接口。
-   - 步骤 B：创建 `internal/adapter/codex/adapter.go`，包含 `CodexAdapter`（使用 `tools.ResolveBinary`，创建 `acp.Conn`，调用 `Conn.Start()`，返回已启动的 `Conn`）。
-   - 步骤 C：创建 `internal/client/state.go`，包含更新后的 `State` struct 和向后兼容的 `Load()`。
-   - 步骤 D：创建 `internal/client/store.go`（包声明从 `hub` 改为 `client`，内容不变）。
-   - 步骤 E：创建 `internal/client/client.go`，包含 `Client` struct、`RegisterAdapter`、`Start`、`Run`、`HandleMessage`、`switchAdapter`、`Close`。
+3. **Adapter å±‚ + Client é‡æž„**ï¼šåˆ›å»º Adapter æŠ½è±¡ï¼Œä»¥ Client æ›¿æ¢ Hubã€‚
+   - æ­¥éª¤ Aï¼šåˆ›å»º `internal/provider/provider.go`ï¼ŒåŒ…å« `Adapter` æŽ¥å£ã€‚
+   - æ­¥éª¤ Bï¼šåˆ›å»º `internal/provider/codex/provider.go`ï¼ŒåŒ…å« `CodexAdapter`ï¼ˆä½¿ç”¨ `tools.ResolveBinary`ï¼Œåˆ›å»º `acp.Conn`ï¼Œè°ƒç”¨ `Conn.Start()`ï¼Œè¿”å›žå·²å¯åŠ¨çš„ `Conn`ï¼‰ã€‚
+   - æ­¥éª¤ Cï¼šåˆ›å»º `internal/client/state.go`ï¼ŒåŒ…å«æ›´æ–°åŽçš„ `State` struct å’Œå‘åŽå…¼å®¹çš„ `Load()`ã€‚
+   - æ­¥éª¤ Dï¼šåˆ›å»º `internal/client/store.go`ï¼ˆåŒ…å£°æ˜Žä»Ž `hub` æ”¹ä¸º `client`ï¼Œå†…å®¹ä¸å˜ï¼‰ã€‚
+   - æ­¥éª¤ Eï¼šåˆ›å»º `internal/client/client.go`ï¼ŒåŒ…å« `Client` structã€`RegisterProvider`ã€`Start`ã€`Run`ã€`HandleMessage`ã€`switchAdapter`ã€`Close`ã€‚
 
-4. **清理与收尾**：接线 `main.go` 并删除旧包。
-   - 步骤 A：更新 `cmd/wheelmaker/main.go`，使用 `client.New`、`client.RegisterAdapter`、`c.Start`、`c.Run`。
-   - 步骤 B：删除 `internal/acp/` 整个目录。
-   - 步骤 C：删除 `internal/hub/` 整个目录。
-   - 步骤 D：删除 `internal/agent/codex/` 目录及旧的 `internal/agent/agent.go` 接口文件。
-   - 步骤 E：验证 `go build ./...`、`go vet ./...` 和 `go test ./internal/agent/acp/...` 全部通过。
+4. **æ¸…ç†ä¸Žæ”¶å°¾**ï¼šæŽ¥çº¿ `main.go` å¹¶åˆ é™¤æ—§åŒ…ã€‚
+   - æ­¥éª¤ Aï¼šæ›´æ–° `cmd/wheelmaker/main.go`ï¼Œä½¿ç”¨ `client.New`ã€`client.RegisterProvider`ã€`c.Start`ã€`c.Run`ã€‚
+   - æ­¥éª¤ Bï¼šåˆ é™¤ `internal/acp/` æ•´ä¸ªç›®å½•ã€‚
+   - æ­¥éª¤ Cï¼šåˆ é™¤ `internal/hub/` æ•´ä¸ªç›®å½•ã€‚
+   - æ­¥éª¤ Dï¼šåˆ é™¤ `internal/agent/codex/` ç›®å½•åŠæ—§çš„ `internal/agent/agent.go` æŽ¥å£æ–‡ä»¶ã€‚
+   - æ­¥éª¤ Eï¼šéªŒè¯ `go build ./...`ã€`go vet ./...` å’Œ `go test ./internal/agent/acp/...` å…¨éƒ¨é€šè¿‡ã€‚
 
-里程碑 1 和 2 可并行推进（无相互依赖）。里程碑 3 依赖 1 和 2 均完成。里程碑 4 依赖里程碑 3。
+é‡Œç¨‹ç¢‘ 1 å’Œ 2 å¯å¹¶è¡ŒæŽ¨è¿›ï¼ˆæ— ç›¸äº’ä¾èµ–ï¼‰ã€‚é‡Œç¨‹ç¢‘ 3 ä¾èµ– 1 å’Œ 2 å‡å®Œæˆã€‚é‡Œç¨‹ç¢‘ 4 ä¾èµ–é‡Œç¨‹ç¢‘ 3ã€‚
 
-## 实现备注
+## å®žçŽ°å¤‡æ³¨
 
-### 代码风格要求
-- 所有实现代码和注释必须使用英文（项目约定：代码和注释中不得出现中文）。
-- 实现代码和注释中不得包含计划专用术语，如 "AC-"、"里程碑"、"步骤"、"阶段" 或类似的工作流标记。
-- 这些术语仅用于计划文档，不应出现在最终代码库中。
-- 代码中使用描述性、领域相关的命名（如 `ensureReady`、`switchAdapter`、`handleCallback`），而非进度标记。
+### ä»£ç é£Žæ ¼è¦æ±‚
+- æ‰€æœ‰å®žçŽ°ä»£ç å’Œæ³¨é‡Šå¿…é¡»ä½¿ç”¨è‹±æ–‡ï¼ˆé¡¹ç›®çº¦å®šï¼šä»£ç å’Œæ³¨é‡Šä¸­ä¸å¾—å‡ºçŽ°ä¸­æ–‡ï¼‰ã€‚
+- å®žçŽ°ä»£ç å’Œæ³¨é‡Šä¸­ä¸å¾—åŒ…å«è®¡åˆ’ä¸“ç”¨æœ¯è¯­ï¼Œå¦‚ "AC-"ã€"é‡Œç¨‹ç¢‘"ã€"æ­¥éª¤"ã€"é˜¶æ®µ" æˆ–ç±»ä¼¼çš„å·¥ä½œæµæ ‡è®°ã€‚
+- è¿™äº›æœ¯è¯­ä»…ç”¨äºŽè®¡åˆ’æ–‡æ¡£ï¼Œä¸åº”å‡ºçŽ°åœ¨æœ€ç»ˆä»£ç åº“ä¸­ã€‚
+- ä»£ç ä¸­ä½¿ç”¨æè¿°æ€§ã€é¢†åŸŸç›¸å…³çš„å‘½åï¼ˆå¦‚ `ensureReady`ã€`switchAdapter`ã€`handleCallback`ï¼‰ï¼Œè€Œéžè¿›åº¦æ ‡è®°ã€‚
 
-### 规范中的关键实现约束
-- `Adapter.Connect()` 必须在内部调用 `Conn.Start()` 后返回，调用方无需再次调用 `Start()`。
-- `Client.Start()` 必须立即（非惰性）调用 `adapter.Connect()`，确保首条消息到来之前子进程已就绪。
-- `Agent.Switch()` 必须在互斥锁内调用 `killAllTerminals()`，在互斥锁外调用 `oldConn.Close()`（避免 `Close` 阻塞时持锁死锁）。
-- `SwitchWithContext` 引导 prompt 的 goroutine 必须完整消费返回的 channel（`for range ch {}`）；省略此操作会导致 `Prompt` goroutine 泄漏。
-- `Client.switchAdapter()` 必须在调用 `c.agent.Switch()` 前排干 `c.currentPromptCh`（上次 `Prompt` 调用返回的 channel）。
-- `Client` 同时持有 `session agent.Session` 和 `agent *agent.Agent` 指向同一对象。`Switch` 始终通过 `c.agent`（具体类型）调用，而非 `c.session`（接口），以避免 mock 注入时的类型断言 panic。
-- 状态 `Load()` 同时处理旧 key（`active_agent`、`acp_session_ids`）和新 key（`activeAdapter`、`session_ids`）；`Save()` 仅写入新 key。
+### è§„èŒƒä¸­çš„å…³é”®å®žçŽ°çº¦æŸ
+- `provider.Connect()` å¿…é¡»åœ¨å†…éƒ¨è°ƒç”¨ `Conn.Start()` åŽè¿”å›žï¼Œè°ƒç”¨æ–¹æ— éœ€å†æ¬¡è°ƒç”¨ `Start()`ã€‚
+- `Client.Start()` å¿…é¡»ç«‹å³ï¼ˆéžæƒ°æ€§ï¼‰è°ƒç”¨ `provider.Connect()`ï¼Œç¡®ä¿é¦–æ¡æ¶ˆæ¯åˆ°æ¥ä¹‹å‰å­è¿›ç¨‹å·²å°±ç»ªã€‚
+- `Agent.Switch()` å¿…é¡»åœ¨äº’æ–¥é”å†…è°ƒç”¨ `killAllTerminals()`ï¼Œåœ¨äº’æ–¥é”å¤–è°ƒç”¨ `oldConn.Close()`ï¼ˆé¿å… `Close` é˜»å¡žæ—¶æŒé”æ­»é”ï¼‰ã€‚
+- `SwitchWithContext` å¼•å¯¼ prompt çš„ goroutine å¿…é¡»å®Œæ•´æ¶ˆè´¹è¿”å›žçš„ channelï¼ˆ`for range ch {}`ï¼‰ï¼›çœç•¥æ­¤æ“ä½œä¼šå¯¼è‡´ `Prompt` goroutine æ³„æ¼ã€‚
+- `Client.switchAdapter()` å¿…é¡»åœ¨è°ƒç”¨ `c.agent.Switch()` å‰æŽ’å¹² `c.currentPromptCh`ï¼ˆä¸Šæ¬¡ `Prompt` è°ƒç”¨è¿”å›žçš„ channelï¼‰ã€‚
+- `Client` åŒæ—¶æŒæœ‰ `session agent.Session` å’Œ `agent *agent.Agent` æŒ‡å‘åŒä¸€å¯¹è±¡ã€‚`Switch` å§‹ç»ˆé€šè¿‡ `c.agent`ï¼ˆå…·ä½“ç±»åž‹ï¼‰è°ƒç”¨ï¼Œè€Œéž `c.session`ï¼ˆæŽ¥å£ï¼‰ï¼Œä»¥é¿å… mock æ³¨å…¥æ—¶çš„ç±»åž‹æ–­è¨€ panicã€‚
+- çŠ¶æ€ `Load()` åŒæ—¶å¤„ç†æ—§ keyï¼ˆ`active_agent`ã€`acp_session_ids`ï¼‰å’Œæ–° keyï¼ˆ`activeAdapter`ã€`session_ids`ï¼‰ï¼›`Save()` ä»…å†™å…¥æ–° keyã€‚
 
 --- Original Design Draft Start ---
 
-# WheelMaker 架构重设计规范
+# WheelMaker æž¶æž„é‡è®¾è®¡è§„èŒƒ
 
-> 日期：2026-03-14
-> 状态：已批准
+> æ—¥æœŸï¼š2026-03-14
+> çŠ¶æ€ï¼šå·²æ‰¹å‡†
 
-## 1. 背景与问题
+## 1. èƒŒæ™¯ä¸Žé—®é¢˜
 
-当前实现的层次划分和命名存在以下问题：
+å½“å‰å®žçŽ°çš„å±‚æ¬¡åˆ’åˆ†å’Œå‘½åå­˜åœ¨ä»¥ä¸‹é—®é¢˜ï¼š
 
-1. `agent.Agent` 是 interface，`internal/agent/codex/adapter.go` 是其实现——文件名叫 adapter，概念名叫 Agent，层次语义混乱。
-2. `hub` 承担了协调职责，但 "hub" 不是 ACP 协议术语；按 ACP 规范，WheelMaker 整体是 "Client"。
-3. `acp.Client` 是低层 JSON-RPC 传输，但名字 "Client" 和系统级的 "我们是 ACP Client" 产生歧义。
-4. fs/terminal/permission 回调混在 codex 包里，切换 CLI 后端时逻辑无法复用。
-5. 没有明确的 Adapter 抽象，无法干净地支持多 CLI（codex / claude / 未来其他）。
+1. `agent.Agent` æ˜¯ interfaceï¼Œ`internal/agent/codex/provider.go` æ˜¯å…¶å®žçŽ°â€”â€”æ–‡ä»¶åå« adapterï¼Œæ¦‚å¿µåå« Agentï¼Œå±‚æ¬¡è¯­ä¹‰æ··ä¹±ã€‚
+2. `hub` æ‰¿æ‹…äº†åè°ƒèŒè´£ï¼Œä½† "hub" ä¸æ˜¯ ACP åè®®æœ¯è¯­ï¼›æŒ‰ ACP è§„èŒƒï¼ŒWheelMaker æ•´ä½“æ˜¯ "Client"ã€‚
+3. `acp.Client` æ˜¯ä½Žå±‚ JSON-RPC ä¼ è¾“ï¼Œä½†åå­— "Client" å’Œç³»ç»Ÿçº§çš„ "æˆ‘ä»¬æ˜¯ ACP Client" äº§ç”Ÿæ­§ä¹‰ã€‚
+4. fs/terminal/permission å›žè°ƒæ··åœ¨ codex åŒ…é‡Œï¼Œåˆ‡æ¢ CLI åŽç«¯æ—¶é€»è¾‘æ— æ³•å¤ç”¨ã€‚
+5. æ²¡æœ‰æ˜Žç¡®çš„ Adapter æŠ½è±¡ï¼Œæ— æ³•å¹²å‡€åœ°æ”¯æŒå¤š CLIï¼ˆcodex / claude / æœªæ¥å…¶ä»–ï¼‰ã€‚
 
-## 2. 设计目标
+## 2. è®¾è®¡ç›®æ ‡
 
-- 命名与 ACP 协议文档对齐。
-- Agent 是 ACP 协议的具体封装，包含所有出站调用和入站回调处理。
-- Adapter 是纯粹的连接管道抽象，只负责"启动 binary，返回连接"。
-- 支持运行时切换 Adapter（用户选择是否延续上下文）。
-- Permission 策略可注入，MVP auto-allow，Phase 2 路由到 IM。
-- Client 层通过窄接口（Session）依赖 Agent，保持可测试性。
+- å‘½åä¸Ž ACP åè®®æ–‡æ¡£å¯¹é½ã€‚
+- Agent æ˜¯ ACP åè®®çš„å…·ä½“å°è£…ï¼ŒåŒ…å«æ‰€æœ‰å‡ºç«™è°ƒç”¨å’Œå…¥ç«™å›žè°ƒå¤„ç†ã€‚
+- Adapter æ˜¯çº¯ç²¹çš„è¿žæŽ¥ç®¡é“æŠ½è±¡ï¼Œåªè´Ÿè´£"å¯åŠ¨ binaryï¼Œè¿”å›žè¿žæŽ¥"ã€‚
+- æ”¯æŒè¿è¡Œæ—¶åˆ‡æ¢ Adapterï¼ˆç”¨æˆ·é€‰æ‹©æ˜¯å¦å»¶ç»­ä¸Šä¸‹æ–‡ï¼‰ã€‚
+- Permission ç­–ç•¥å¯æ³¨å…¥ï¼ŒMVP auto-allowï¼ŒPhase 2 è·¯ç”±åˆ° IMã€‚
+- Client å±‚é€šè¿‡çª„æŽ¥å£ï¼ˆSessionï¼‰ä¾èµ– Agentï¼Œä¿æŒå¯æµ‹è¯•æ€§ã€‚
 
-## 3. 数据流
+## 3. æ•°æ®æµ
 
 ```
-IM (飞书等)
-    ↓ im.Message
-client.Client          ← 协调层：路由命令、管理 adapter 池、状态持久化
-    ↓ Session interface
-agent.Agent            ← ACP 协议封装：会话、prompt、fs/terminal/permission 回调
-    ↓ adapter.Connect() → *acp.Conn
-adapter.Adapter        ← 连接工厂：启动 binary，返回 Conn（可多次调用）
-    ↓
-agent/acp.Conn         ← 低层传输：JSON-RPC 2.0 over stdio，拥有子进程生命周期
-    ↓
-CLI binary             ← codex-acp / claude-acp / ...
+IM (é£žä¹¦ç­‰)
+    â†“ im.Message
+client.Client          â† åè°ƒå±‚ï¼šè·¯ç”±å‘½ä»¤ã€ç®¡ç† adapter æ± ã€çŠ¶æ€æŒä¹…åŒ–
+    â†“ Session interface
+agent.Agent            â† ACP åè®®å°è£…ï¼šä¼šè¯ã€promptã€fs/terminal/permission å›žè°ƒ
+    â†“ provider.Connect() â†’ *acp.Conn
+provider.Provider        â† è¿žæŽ¥å·¥åŽ‚ï¼šå¯åŠ¨ binaryï¼Œè¿”å›ž Connï¼ˆå¯å¤šæ¬¡è°ƒç”¨ï¼‰
+    â†“
+agent/acp.Conn         â† ä½Žå±‚ä¼ è¾“ï¼šJSON-RPC 2.0 over stdioï¼Œæ‹¥æœ‰å­è¿›ç¨‹ç”Ÿå‘½å‘¨æœŸ
+    â†“
+CLI binary             â† codex-acp / claude-acp / ...
 ```
 
-## 4. 命名变更
+## 4. å‘½åå˜æ›´
 
-| 旧名 | 新名 | 说明 |
+| æ—§å | æ–°å | è¯´æ˜Ž |
 |------|------|------|
-| `internal/hub` | `internal/client` | WheelMaker 是 ACP Client |
-| `hub.Hub` | `client.Client` | 同上 |
-| `internal/acp/` | `internal/agent/acp/` | acp 是 agent 层内部传输细节，移入 agent 子包 |
-| `acp.Client` | `acp.Conn` | 低层传输，名副其实 |
-| `internal/agent/codex/` | `internal/adapter/codex/` | Adapter 归到顶层 adapter 包 |
-| `agent.Agent`（interface） | `agent.Session`（窄接口）+ `agent.Agent`（concrete struct） | Agent 是具体概念；Session 是 Client 用的可测试接口 |
-| `hub.State.ACPSessionIDs` | `State.SessionIDs` | 字段改名，JSON tag 同步更新，**state.json 需迁移** |
+| `internal/hub` | `internal/client` | WheelMaker æ˜¯ ACP Client |
+| `hub.Hub` | `client.Client` | åŒä¸Š |
+| `internal/acp/` | `internal/agent/acp/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
+| `acp.Client` | `acp.Conn` | ä½Žå±‚ä¼ è¾“ï¼Œåå‰¯å…¶å®ž |
+| `internal/agent/codex/` | `internal/provider/codex/` | Adapter å½’åˆ°é¡¶å±‚ adapter åŒ… |
+| `agent.Agent`ï¼ˆinterfaceï¼‰ | `agent.Session`ï¼ˆçª„æŽ¥å£ï¼‰+ `agent.Agent`ï¼ˆconcrete structï¼‰ | Agent æ˜¯å…·ä½“æ¦‚å¿µï¼›Session æ˜¯ Client ç”¨çš„å¯æµ‹è¯•æŽ¥å£ |
+| `hub.State.ACPSessionIDs` | `State.SessionIDs` | å­—æ®µæ”¹åï¼ŒJSON tag åŒæ­¥æ›´æ–°ï¼Œ**state.json éœ€è¿ç§»** |
 
-## 5. 包结构
+## 5. åŒ…ç»“æž„
 
 ```
 internal/
   agent/
-    acp/               ← 低层传输（从 internal/acp/ 移入，是 agent 的内部细节）
-      conn.go          ← Conn struct（原 client.go rename）
-      conn_test.go     ← 原 client_test.go rename
-      types.go         ← 不变
+    acp/               â† ä½Žå±‚ä¼ è¾“ï¼ˆä»Ž internal/acp/ ç§»å…¥ï¼Œæ˜¯ agent çš„å†…éƒ¨ç»†èŠ‚ï¼‰
+      conn.go          â† Conn structï¼ˆåŽŸ client.go renameï¼‰
+      conn_test.go     â† åŽŸ client_test.go rename
+      types.go         â† ä¸å˜
 
-    agent.go           ← Agent struct + Session interface + 对外方法
-    session.go         ← ACP 生命周期（initialize / session/new / session/load）
-    prompt.go          ← session/prompt + session/update → Update channel
-    callbacks.go       ← fs/* / terminal/* / permission 回调
-    terminal.go        ← terminalManager
-    permission.go      ← PermissionHandler interface + AutoAllowHandler
-    update.go          ← Update / UpdateType 类型定义
+    agent.go           â† Agent struct + Session interface + å¯¹å¤–æ–¹æ³•
+    session.go         â† ACP ç”Ÿå‘½å‘¨æœŸï¼ˆinitialize / session/new / session/loadï¼‰
+    prompt.go          â† session/prompt + session/update â†’ Update channel
+    callbacks.go       â† fs/* / terminal/* / permission å›žè°ƒ
+    terminal.go        â† terminalManager
+    permission.go      â† PermissionHandler interface + AutoAllowHandler
+    update.go          â† Update / UpdateType ç±»åž‹å®šä¹‰
 
   adapter/
-    adapter.go         ← Adapter interface（连接工厂，Connect 返回 *acp.Conn）
+    provider.go         â† Adapter interfaceï¼ˆè¿žæŽ¥å·¥åŽ‚ï¼ŒConnect è¿”å›ž *acp.Connï¼‰
     codex/
-      adapter.go       ← CodexAdapter implements Adapter
+      provider.go       â† CodexAdapter implements Adapter
 
   client/
-    client.go          ← Client struct（原 hub.go），依赖 agent.Session 接口
-    store.go           ← 不变
-    state.go           ← State 字段调整（见第 8 节）
+    client.go          â† Client structï¼ˆåŽŸ hub.goï¼‰ï¼Œä¾èµ– agent.Session æŽ¥å£
+    store.go           â† ä¸å˜
+    state.go           â† State å­—æ®µè°ƒæ•´ï¼ˆè§ç¬¬ 8 èŠ‚ï¼‰
 
-  im/                  ← 不变
-  tools/               ← 不变
+  im/                  â† ä¸å˜
+  tools/               â† ä¸å˜
 ```
 
-## 6. 接口定义
+## 6. æŽ¥å£å®šä¹‰
 
-### 6.1 Adapter（连接工厂）
+### 6.1 Adapterï¼ˆè¿žæŽ¥å·¥åŽ‚ï¼‰
 
 ```go
-// adapter/adapter.go
-package adapter
+// adapter/provider.go
+Package provider
 
 import (
     "context"
@@ -293,8 +293,8 @@ import (
 
 // Adapter abstracts an ACP-compatible CLI backend.
 // It is a stateless connection factory: Connect() spawns a new binary subprocess each time and returns its Conn.
-// The subprocess lifecycle is owned by the returned *acp.Conn; Adapter.Close() is only for cleanup on Connect() failure.
-// Calling Adapter.Close() after a successful Connect() is a no-op (subprocess is managed by the Conn).
+// The subprocess lifecycle is owned by the returned *acp.Conn; provider.Close() is only for cleanup on Connect() failure.
+// Calling provider.Close() after a successful Connect() is a no-op (subprocess is managed by the Conn).
 // Connect() calls Conn.Start() internally; the subprocess is running when Connect() returns.
 type Adapter interface {
     Name() string
@@ -303,7 +303,7 @@ type Adapter interface {
 }
 ```
 
-### 6.2 Session（Client 使用的窄接口，保障可测试性）
+### 6.2 Sessionï¼ˆClient ä½¿ç”¨çš„çª„æŽ¥å£ï¼Œä¿éšœå¯æµ‹è¯•æ€§ï¼‰
 
 ```go
 // agent/agent.go
@@ -374,7 +374,7 @@ type Update struct {
 }
 ```
 
-### 6.5 Agent（concrete struct）
+### 6.5 Agentï¼ˆconcrete structï¼‰
 
 ```go
 // agent/agent.go
@@ -433,7 +433,7 @@ const (
 )
 ```
 
-### 6.7 Client（原 Hub）
+### 6.7 Clientï¼ˆåŽŸ Hubï¼‰
 
 ```go
 // client/client.go
@@ -444,11 +444,11 @@ package client
 //   - session agent.Session: narrow interface for Prompt/Cancel/SetMode etc., mockable.
 //   - agent  *agent.Agent:   concrete type pointer for Switch and other extended methods, can be nil in tests.
 // When switching adapters, Client:
-//   1. Calls adapter.Connect() to get a new Conn
+//   1. Calls provider.Connect() to get a new Conn
 //   2. Calls c.agent.Switch(newConn, ...) to replace the connection (via concrete type, not Session interface)
 //   3. The old Adapter's Close() is a no-op (Conn already owns the subprocess lifecycle)
 type Client struct {
-    adapters map[string]adapter.Adapter // "codex" → CodexAdapter (stateless factory)
+    adapters map[string]provider.Provider // "codex" â†’ CodexAdapter (stateless factory)
     session  agent.Session              // current active session (narrow interface, mockable)
     agent    *agent.Agent               // same Agent as concrete type pointer, for Switch and extended methods
     store    Store
@@ -457,7 +457,7 @@ type Client struct {
 }
 
 func New(store Store, im im.Adapter) *Client
-func (c *Client) RegisterAdapter(a adapter.Adapter)
+func (c *Client) RegisterProvider(a provider.Provider)
 // Start loads persisted state, creates the initial Agent, and calls Connect() eagerly (non-lazy, subprocess ready immediately).
 func (c *Client) Start(ctx context.Context) error
 func (c *Client) Run(ctx context.Context) error  // blocking: drives IM event loop or stdin loop
@@ -465,10 +465,10 @@ func (c *Client) HandleMessage(msg im.Message)
 func (c *Client) Close() error
 ```
 
-### 6.8 acp.Conn（原 acp.Client）
+### 6.8 acp.Connï¼ˆåŽŸ acp.Clientï¼‰
 
 ```go
-// agent/acp/conn.go — moved into agent/acp/, renamed, logic unchanged
+// agent/acp/conn.go â€” moved into agent/acp/, renamed, logic unchanged
 package acp
 
 // Conn manages the full lifecycle of an ACP-compatible subprocess (stdio JSON-RPC).
@@ -484,29 +484,29 @@ func (c *Conn) OnRequest(handler RequestHandler)
 func (c *Conn) Close() error
 ```
 
-## 7. Agent 内部职责分区
+## 7. Agent å†…éƒ¨èŒè´£åˆ†åŒº
 
-### 7.1 Session 生命周期（session.go）
+### 7.1 Session ç”Ÿå‘½å‘¨æœŸï¼ˆsession.goï¼‰
 
 ```
 Agent.ensureReady(ctx):
-  1. conn.Send("initialize", InitializeParams{...}) → get caps
+  1. conn.Send("initialize", InitializeParams{...}) â†’ get caps
      InitializeParams declares fs.readTextFile=true, fs.writeTextFile=true, terminal=true
-  2. if caps.LoadSession && sessionID != "" → conn.Send("session/load", ...)
-  3. else → conn.Send("session/new", {cwd, mcpServers}) → store a.sessionID
-  4. conn.OnRequest(a.handleCallback)  ← register all inbound callbacks
+  2. if caps.LoadSession && sessionID != "" â†’ conn.Send("session/load", ...)
+  3. else â†’ conn.Send("session/new", {cwd, mcpServers}) â†’ store a.sessionID
+  4. conn.OnRequest(a.handleCallback)  â† register all inbound callbacks
 ```
 
-### 7.2 Prompt 流（prompt.go）
+### 7.2 Prompt æµï¼ˆprompt.goï¼‰
 
 ```
 Agent.Prompt(ctx, text):
   1. ensureReady(ctx)
-  2. cancel := conn.Subscribe(sessionUpdateHandler)  ← filter by this sessionID
+  2. cancel := conn.Subscribe(sessionUpdateHandler)  â† filter by this sessionID
   3. goroutine:
        conn.Send("session/prompt", {sessionID, text}, &result)
-       → success: send Update{Type: UpdateDone, Content: result.StopReason, Done: true}
-       → failure: send Update{Type: UpdateError, Err: err, Done: true}
+       â†’ success: send Update{Type: UpdateDone, Content: result.StopReason, Done: true}
+       â†’ failure: send Update{Type: UpdateError, Err: err, Done: true}
        defer cancel(); defer close(updates)
   4. sessionUpdateHandler:
        convert session/update subtypes to Update (see table below)
@@ -519,12 +519,12 @@ Agent.Prompt(ctx, text):
 |---|---|---|---|
 | `agent_message_chunk` | `text` | text | nil |
 | `agent_thought_chunk` | `thought` | text | nil |
-| `tool_call` / `tool_call_update` | `tool_call` | — | full update JSON |
-| `plan` | `plan` | — | full update JSON |
-| `current_mode_update` | `mode_change` | — | full update JSON |
-| other known types | raw string | — | full update JSON |
+| `tool_call` / `tool_call_update` | `tool_call` | â€” | full update JSON |
+| `plan` | `plan` | â€” | full update JSON |
+| `current_mode_update` | `mode_change` | â€” | full update JSON |
+| other known types | raw string | â€” | full update JSON |
 
-### 7.3 入站回调（callbacks.go）
+### 7.3 å…¥ç«™å›žè°ƒï¼ˆcallbacks.goï¼‰
 
 `conn.OnRequest(a.handleCallback)` registered inside `ensureReady`.
 Callbacks use `context.Background()` as TODO: future work can pass session-scoped context via `Conn.OnRequest` to support cancellation.
@@ -533,19 +533,19 @@ Callbacks use `context.Background()` as TODO: future work can pass session-scope
 |----------|----------|
 | `fs/read_text_file` | `os.ReadFile(params.Path)` |
 | `fs/write_text_file` | `os.MkdirAll` + `os.WriteFile` |
-| `terminal/create` | `terminalManager.Create(...)` → return `terminalId` |
+| `terminal/create` | `terminalManager.Create(...)` â†’ return `terminalId` |
 | `terminal/output` | `terminalManager.Output(terminalID)` |
 | `terminal/wait_for_exit` | `terminalManager.WaitForExit(terminalID)` |
 | `terminal/kill` | `terminalManager.Kill(terminalID)` |
 | `terminal/release` | `terminalManager.Release(terminalID)` |
 | `session/request_permission` | `a.permission.RequestPermission(ctx, params)` |
 
-### 7.4 Adapter 切换（agent.go）
+### 7.4 Adapter åˆ‡æ¢ï¼ˆagent.goï¼‰
 
 Switching is coordinated by **Client**; Agent only handles connection replacement:
 
 **Concurrency contract**: Before calling `Switch`, the caller (Client) MUST call `Cancel()` and wait for the current Prompt goroutine to finish (i.e., wait for the channel from the last `Prompt` to close), then call `Switch`.
-`Agent` itself does NOT wait for Prompt completion inside `Switch` — that is the caller's responsibility to avoid deadlock (Cancel must send a network message; holding a lock while waiting would deadlock).
+`Agent` itself does NOT wait for Prompt completion inside `Switch` â€” that is the caller's responsibility to avoid deadlock (Cancel must send a network message; holding a lock while waiting would deadlock).
 
 ```
 // Client side (client.go):
@@ -591,7 +591,7 @@ func (a *Agent) Switch(ctx, name, newConn, mode):
 
 > **Note**: `Client` must store a `currentPromptCh <-chan Update` field, updated after each `Prompt` call, used in `switchAdapter` for the drain operation.
 
-## 8. 状态持久化
+## 8. çŠ¶æ€æŒä¹…åŒ–
 
 ```go
 // client/state.go
@@ -602,10 +602,10 @@ type AdapterConfig struct {
 
 // State change notes (two breaking changes; Load() must handle both):
 //
-// 1. Field ACPSessionIDs (json:"acp_session_ids") → SessionIDs (json:"session_ids")
+// 1. Field ACPSessionIDs (json:"acp_session_ids") â†’ SessionIDs (json:"session_ids")
 //    Migration: if "session_ids" is empty but "acp_session_ids" is not, copy old value.
 //
-// 2. Field ActiveAgent (json:"active_agent") → ActiveAdapter (json:"activeAdapter")
+// 2. Field ActiveAgent (json:"active_agent") â†’ ActiveAdapter (json:"activeAdapter")
 //    Migration: if "activeAdapter" is empty but "active_agent" is not, copy old value.
 //    (Omitting this causes ActiveAdapter to be empty on startup, silently losing user's adapter selection)
 //
@@ -613,7 +613,7 @@ type AdapterConfig struct {
 type State struct {
     ActiveAdapter string                   `json:"activeAdapter"`
     Adapters      map[string]AdapterConfig `json:"adapters"`
-    SessionIDs    map[string]string        `json:"session_ids"` // adapter name → ACP sessionId
+    SessionIDs    map[string]string        `json:"session_ids"` // adapter name â†’ ACP sessionId
 }
 
 // Load() migration pseudocode:
@@ -624,7 +624,7 @@ type State struct {
 //       state.SessionIDs = raw["acp_session_ids"]
 ```
 
-## 9. CLI 命令处理
+## 9. CLI å‘½ä»¤å¤„ç†
 
 Client.HandleMessage parses `/`-prefixed commands.
 `/use` now immediately starts a new subprocess (no longer lazy); old subprocess is synchronously closed.
@@ -635,18 +635,18 @@ Client.HandleMessage parses `/`-prefixed commands.
 | `/use <name> --continue` | switchAdapter(name, SwitchWithContext) |
 | `/cancel` | session.Cancel() |
 | `/status` | session.AdapterName() + session.SessionID() |
-| other text | session.Prompt() → streaming reply |
+| other text | session.Prompt() â†’ streaming reply |
 
 > **Behavior change**: Original `/use` only updated `state.ActiveAgent` without starting the subprocess (lazy).
 > New design has `/use` immediately Connect, ensuring the first Prompt after switch is faster, and the old process releases resources immediately.
 
-## 10. cmd/wheelmaker/main.go 变更
+## 10. cmd/wheelmaker/main.go å˜æ›´
 
 ```go
 func run() error {
     store := client.NewJSONStore(statePath)
     c := client.New(store, nil)
-    c.RegisterAdapter(codex.NewAdapter(codex.Config{...}))
+    c.RegisterProvider(codex.NewAdapter(codex.Config{...}))
 
     ctx, stop := signal.NotifyContext(...)
     defer stop()
@@ -659,44 +659,47 @@ func run() error {
 ```
 
 `Client.Run(ctx)` drives the stdin read loop when there is no IM adapter (original `main.go` for loop logic moves here);
-with an IM adapter it calls `im.Adapter.Run(ctx)`.
+with an IM adapter it calls `im.provider.Run(ctx)`.
 
-## 11. 测试策略
+## 11. æµ‹è¯•ç­–ç•¥
 
 | Layer | Approach |
 |----|------|
 | `agent/acp.Conn` | mock agent (test binary acts as subprocess), existing 16 unit tests (file rename only) |
-| `adapter/codex` | integration tests, `//go:build integration`, requires real codex-acp binary |
+| `provider/codex` | integration tests, `//go:build integration`, requires real codex-acp binary |
 | `agent.Agent` | test binary acts as mock Conn subprocess, tests session lifecycle / prompt / switch / callbacks |
 | `client.Client` | inject mock Session (implements agent.Session interface), tests command parsing and routing |
 
-## 12. 变更范围
+## 12. å˜æ›´èŒƒå›´
 
-**新建：**
-- `internal/adapter/adapter.go`（Adapter interface）
-- `internal/adapter/codex/adapter.go`（CodexAdapter，原 codex adapter + handlers 合并，无 ACP 逻辑）
-- `internal/agent/acp/conn.go`（原 `internal/acp/client.go` 移入并重命名）
-- `internal/agent/acp/conn_test.go`（原 `internal/acp/client_test.go` 移入并重命名）
-- `internal/agent/acp/types.go`（原 `internal/acp/types.go` 移入）
-- `internal/agent/session.go`（ACP 生命周期）
-- `internal/agent/prompt.go`（prompt 流）
-- `internal/agent/callbacks.go`（入站回调）
-- `internal/agent/terminal.go`（terminalManager）
-- `internal/agent/permission.go`（PermissionHandler + AutoAllowHandler）
-- `internal/agent/update.go`（Update 类型）
+**æ–°å»ºï¼š**
+- `internal/provider/provider.go`ï¼ˆAdapter interfaceï¼‰
+- `internal/provider/codex/provider.go`ï¼ˆCodexAdapterï¼ŒåŽŸ codex adapter + handlers åˆå¹¶ï¼Œæ—  ACP é€»è¾‘ï¼‰
+- `internal/agent/acp/conn.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/acp/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/acp/types.go`ï¼ˆåŽŸ `internal/acp/types.go` ç§»å…¥ï¼‰
+- `internal/agent/session.go`ï¼ˆACP ç”Ÿå‘½å‘¨æœŸï¼‰
+- `internal/agent/prompt.go`ï¼ˆprompt æµï¼‰
+- `internal/agent/callbacks.go`ï¼ˆå…¥ç«™å›žè°ƒï¼‰
+- `internal/agent/terminal.go`ï¼ˆterminalManagerï¼‰
+- `internal/agent/permission.go`ï¼ˆPermissionHandler + AutoAllowHandlerï¼‰
+- `internal/agent/update.go`ï¼ˆUpdate ç±»åž‹ï¼‰
 
-**重命名/重写：**
-- `internal/hub/` → `internal/client/`（Hub → Client，新增 Session interface 依赖，新增 Run()，新增 currentPromptCh 字段）
-- `internal/agent/agent.go`（删除 Agent interface，改为 concrete struct + Session interface）
+**é‡å‘½å/é‡å†™ï¼š**
+- `internal/hub/` â†’ `internal/client/`ï¼ˆHub â†’ Clientï¼Œæ–°å¢ž Session interface ä¾èµ–ï¼Œæ–°å¢ž Run()ï¼Œæ–°å¢ž currentPromptCh å­—æ®µï¼‰
+- `internal/agent/agent.go`ï¼ˆåˆ é™¤ Agent interfaceï¼Œæ”¹ä¸º concrete struct + Session interfaceï¼‰
 
-**删除：**
-- `internal/acp/`（整个目录，内容已移入 `internal/agent/acp/`）
-- `internal/agent/codex/adapter.go`
+**åˆ é™¤ï¼š**
+- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/acp/`ï¼‰
+- `internal/agent/codex/provider.go`
 - `internal/agent/codex/handlers.go`
 
-**不变：**
+**ä¸å˜ï¼š**
 - `internal/im/im.go`
 - `internal/tools/resolve.go`
-- `internal/client/store.go`（原 hub/store.go，仅移包）
+- `internal/client/store.go`ï¼ˆåŽŸ hub/store.goï¼Œä»…ç§»åŒ…ï¼‰
 
 --- Original Design Draft End ---
+
+
+

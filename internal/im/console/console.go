@@ -47,7 +47,7 @@ func (c *ConsoleIM) SendCard(_ string, card im.Card) error {
 	return nil
 }
 
-// SendReaction is a no-op for the console adapter.
+// SendReaction is a no-op for the console provider.
 func (c *ConsoleIM) SendReaction(_, _ string) error { return nil }
 
 // Run reads lines from os.Stdin until ctx is cancelled or EOF.
