@@ -165,6 +165,109 @@ func TestInMemoryMock_CallbackCases(t *testing.T) {
 	}
 }
 
+func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
+	c := newInMemoryMockConn(t)
+	ctx := context.Background()
+
+	var initResult acp.InitializeResult
+	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	var newResult acp.SessionNewResult
+	if err := c.Send(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+
+	var (
+		mu                sync.Mutex
+		permissionAsked   bool
+		allowOptionSeen   bool
+		rejectOptionSeen  bool
+		finalToolStatus   string
+		finalMessageChunk string
+	)
+
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage) (any, error) {
+		if method != "session/request_permission" {
+			return nil, nil
+		}
+
+		var p acp.PermissionRequestParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			t.Fatalf("unmarshal permission params: %v", err)
+		}
+
+		mu.Lock()
+		permissionAsked = true
+		for _, opt := range p.Options {
+			if opt.OptionID == "allow_once" {
+				allowOptionSeen = true
+			}
+			if opt.OptionID == "reject_once" {
+				rejectOptionSeen = true
+			}
+		}
+		mu.Unlock()
+
+		// Simulate user choosing "Reject once".
+		return acp.PermissionResponse{
+			Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "reject_once"},
+		}, nil
+	})
+
+	cancel := c.Subscribe(func(n agent.Notification) {
+		if n.Method != "session/update" {
+			return
+		}
+		var p acp.SessionUpdateParams
+		if json.Unmarshal(n.Params, &p) != nil {
+			return
+		}
+		if p.Update.SessionUpdate == "tool_call" {
+			mu.Lock()
+			finalToolStatus = p.Update.Status
+			mu.Unlock()
+		}
+		if p.Update.SessionUpdate == "agent_message_chunk" && p.Update.Content != nil {
+			var cb acp.ContentBlock
+			if json.Unmarshal(p.Update.Content, &cb) == nil {
+				mu.Lock()
+				finalMessageChunk = cb.Text
+				mu.Unlock()
+			}
+		}
+	})
+	defer cancel()
+
+	var promptResult acp.SessionPromptResult
+	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+		SessionID: newResult.SessionID,
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "4"}},
+	}, &promptResult); err != nil {
+		t.Fatalf("session/prompt: %v", err)
+	}
+	if promptResult.StopReason != "end_turn" {
+		t.Fatalf("stopReason=%q, want end_turn", promptResult.StopReason)
+	}
+
+	time.Sleep(30 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !permissionAsked {
+		t.Fatalf("expected session/request_permission to be called")
+	}
+	if !allowOptionSeen || !rejectOptionSeen {
+		t.Fatalf("expected permission options to include allow_once and reject_once")
+	}
+	if finalToolStatus != "failed" {
+		t.Fatalf("tool_call final status=%q, want failed", finalToolStatus)
+	}
+	if finalMessageChunk != "permission:rejected" {
+		t.Fatalf("final permission message=%q, want permission:rejected", finalMessageChunk)
+	}
+}
+
 func TestInMemoryMock_ErrorInjection(t *testing.T) {
 	c := newInMemoryMockConn(t)
 	ctx := context.Background()

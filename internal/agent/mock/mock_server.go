@@ -168,7 +168,7 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call_001", "title": "Permission check", "kind": "execute", "status": "in_progress"})
 		permRaw, err := s.callbackRequest("session/request_permission", map[string]any{"sessionId": p.SessionID, "toolCall": map[string]any{"toolCallId": "call_001"}, "options": []map[string]any{{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "reject_once", "name": "Reject once", "kind": "reject_once"}}})
 		status := "completed"
-		msg := "permission:ok"
+		msg := "permission:allowed"
 		if err != nil {
 			status = "failed"
 			msg = "permission:error"
@@ -178,6 +178,9 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 			if pr.Outcome.Outcome == "cancelled" {
 				status = "failed"
 				msg = "permission:cancelled"
+			} else if strings.HasPrefix(pr.Outcome.OptionID, "reject") {
+				status = "failed"
+				msg = "permission:rejected"
 			}
 		}
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call_001", "title": "Permission check", "kind": "execute", "status": status})
