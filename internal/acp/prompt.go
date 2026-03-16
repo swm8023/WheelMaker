@@ -86,10 +86,18 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		if id := p.Update.ToolCallID; id != "" {
 			switch p.Update.SessionUpdate {
 			case "tool_call":
-				a.mu.Lock()
-				a.activeToolCalls[id] = struct{}{}
-				a.mu.Unlock()
+				// tool_call creates the entry; a non-standard terminal status removes it defensively.
+				if s := p.Update.Status; s == "completed" || s == "failed" {
+					a.mu.Lock()
+					delete(a.activeToolCalls, id)
+					a.mu.Unlock()
+				} else {
+					a.mu.Lock()
+					a.activeToolCalls[id] = struct{}{}
+					a.mu.Unlock()
+				}
 			case "tool_call_update":
+				// tool_call_update is the standard path for status transitions (§9.2).
 				if s := p.Update.Status; s == "completed" || s == "failed" {
 					a.mu.Lock()
 					delete(a.activeToolCalls, id)

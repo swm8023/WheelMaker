@@ -223,7 +223,8 @@ func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
 		if json.Unmarshal(n.Params, &p) != nil {
 			return
 		}
-		if p.Update.SessionUpdate == "tool_call" {
+		// tool_call carries the initial pending status; tool_call_update carries transitions (§9.2).
+		if p.Update.SessionUpdate == "tool_call" || p.Update.SessionUpdate == "tool_call_update" {
 			mu.Lock()
 			finalToolStatus = p.Update.Status
 			mu.Unlock()

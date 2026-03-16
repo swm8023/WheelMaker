@@ -369,6 +369,10 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 		result, err := handler(c.connCtx, method, params)
 		if err != nil {
 			resp.Error = &RPCError{Code: -32603, Message: err.Error()}
+		} else if result == nil {
+			// Per JSON-RPC 2.0: result member MUST be present on success.
+			// Use explicit null rather than omitting the field.
+			resp.Result = json.RawMessage("null")
 		} else {
 			resp.Result = result
 		}

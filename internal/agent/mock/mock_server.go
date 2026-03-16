@@ -2,6 +2,7 @@ package mock
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,13 +40,17 @@ type inMemoryMockServer struct {
 
 	pendMu  sync.Mutex
 	pending map[int64]chan rpcMsg
+
+	cancelMu      sync.Mutex
+	promptCancels map[string]context.CancelFunc
 }
 
 func runInMemoryMockServer(r io.Reader, w io.Writer) {
 	s := &inMemoryMockServer{
-		enc:       json.NewEncoder(w),
-		sessState: make(map[string]*mockSessionState),
-		pending:   make(map[int64]chan rpcMsg),
+		enc:           json.NewEncoder(w),
+		sessState:     make(map[string]*mockSessionState),
+		pending:       make(map[int64]chan rpcMsg),
+		promptCancels: make(map[string]context.CancelFunc),
 	}
 	s.nextID.Store(10000)
 
@@ -65,10 +70,32 @@ func runInMemoryMockServer(r io.Reader, w io.Writer) {
 			continue
 		}
 		if raw.ID == nil {
+			if raw.Method != "" {
+				s.handleNotification(raw.Method, raw.Params)
+			}
 			continue
 		}
 		s.handleRequest(*raw.ID, raw.Method, raw.Params)
 	}
+}
+
+// handleNotification handles incoming Client→Agent notifications (no id, no response).
+// Currently only session/cancel is handled; all others are silently ignored per spec §16.2.
+func (s *inMemoryMockServer) handleNotification(method string, params json.RawMessage) {
+	if method != "session/cancel" {
+		return
+	}
+	var p struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil || p.SessionID == "" {
+		return
+	}
+	s.cancelMu.Lock()
+	if cancel, ok := s.promptCancels[p.SessionID]; ok {
+		cancel()
+	}
+	s.cancelMu.Unlock()
 }
 
 func (s *inMemoryMockServer) handleRequest(id int64, method string, params json.RawMessage) {
@@ -120,6 +147,19 @@ func (s *inMemoryMockServer) handleRequest(id int64, method string, params json.
 func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 	var p acp.SessionPromptParams
 	_ = json.Unmarshal(params, &p)
+
+	// Register a cancellable context so session/cancel notifications can interrupt this prompt.
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancelMu.Lock()
+	s.promptCancels[p.SessionID] = cancel
+	s.cancelMu.Unlock()
+	defer func() {
+		cancel()
+		s.cancelMu.Lock()
+		delete(s.promptCancels, p.SessionID)
+		s.cancelMu.Unlock()
+	}()
+
 	if len(p.Prompt) == 0 {
 		s.respond(id, map[string]any{"stopReason": "end_turn"})
 		return
@@ -164,9 +204,12 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "terminal:ok"}})
 		s.respond(id, map[string]any{"stopReason": "end_turn"})
 	case "4":
+		// tool_call: create with pending status (§9.1)
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call_001", "title": "Permission check", "kind": "execute", "status": "pending"})
-		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call_001", "title": "Permission check", "kind": "execute", "status": "in_progress"})
+		// tool_call_update: transition to in_progress (§9.2)
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_001", "status": "in_progress"})
 		permRaw, err := s.callbackRequest("session/request_permission", map[string]any{"sessionId": p.SessionID, "toolCall": map[string]any{"toolCallId": "call_001"}, "options": []map[string]any{{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "reject_once", "name": "Reject once", "kind": "reject_once"}}})
+		cancelled := false
 		status := "completed"
 		msg := "permission:allowed"
 		if err != nil {
@@ -176,6 +219,7 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 			var pr acp.PermissionResponse
 			_ = json.Unmarshal(permRaw.Result, &pr)
 			if pr.Outcome.Outcome == "cancelled" {
+				cancelled = true
 				status = "failed"
 				msg = "permission:cancelled"
 			} else if strings.HasPrefix(pr.Outcome.OptionID, "reject") {
@@ -183,9 +227,15 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 				msg = "permission:rejected"
 			}
 		}
-		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call_001", "title": "Permission check", "kind": "execute", "status": status})
+		// tool_call_update: report final status (§9.2)
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_001", "status": status})
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": msg}})
-		s.respond(id, map[string]any{"stopReason": "end_turn"})
+		// Per spec §7.4: Agent MUST respond with stopReason "cancelled" when prompt was cancelled.
+		if cancelled {
+			s.respond(id, map[string]any{"stopReason": "cancelled"})
+		} else {
+			s.respond(id, map[string]any{"stopReason": "end_turn"})
+		}
 	case "10":
 		s.respondError(id, -32602, "invalid params")
 	case "11":
@@ -195,8 +245,13 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 	case "13":
 		s.respond(id, map[string]any{"stopReason": "cancelled"})
 	case "14":
-		time.Sleep(2 * time.Second)
-		s.respond(id, map[string]any{"stopReason": "end_turn"})
+		// Slow response: supports cancellation via session/cancel (§7.4).
+		select {
+		case <-time.After(2 * time.Second):
+			s.respond(id, map[string]any{"stopReason": "end_turn"})
+		case <-ctx.Done():
+			s.respond(id, map[string]any{"stopReason": "cancelled"})
+		}
 	default:
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "echo:" + text}})
 		s.respond(id, map[string]any{"stopReason": "end_turn"})

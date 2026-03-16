@@ -122,7 +122,7 @@ func (a *Agent) callbackFSWrite(params json.RawMessage) (any, error) {
 	if err := os.WriteFile(p.Path, []byte(p.Content), 0o644); err != nil {
 		return nil, fmt.Errorf("fs/write: %w", err)
 	}
-	return struct{}{}, nil
+	return nil, nil
 }
 
 func (a *Agent) callbackTerminalCreate(params json.RawMessage) (any, error) {
@@ -154,7 +154,7 @@ func (a *Agent) callbackTerminalKill(params json.RawMessage) (any, error) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/kill: unmarshal params: %w", err)
 	}
-	return struct{}{}, a.terminals.Kill(p.TerminalID)
+	return nil, a.terminals.Kill(p.TerminalID)
 }
 
 func (a *Agent) callbackTerminalRelease(params json.RawMessage) (any, error) {
@@ -162,5 +162,5 @@ func (a *Agent) callbackTerminalRelease(params json.RawMessage) (any, error) {
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/release: unmarshal params: %w", err)
 	}
-	return struct{}{}, a.terminals.Release(p.TerminalID)
+	return nil, a.terminals.Release(p.TerminalID)
 }
