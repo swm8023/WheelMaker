@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 	mockadapter "github.com/swm8023/wheelmaker/internal/agent/provider/mock"
 )
 

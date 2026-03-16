@@ -2,7 +2,7 @@
 
 ## ç›®æ ‡æè¿°
 
-é‡æž„çŽ°æœ‰ WheelMaker ä»£ç åº“ï¼Œä½¿åŒ…å‘½åä¸Ž ACP åè®®è¯­ä¹‰å¯¹é½ï¼Œå¹¶å¼•å…¥æ›´æ¸…æ™°çš„æŠ½è±¡å±‚æ¬¡ã€‚æ ¸å¿ƒå˜æ›´å¦‚ä¸‹ï¼š(1) å°† `internal/acp/` ä¼ è¾“å±‚é‡å‘½åä¸º `internal/agent/provider/acp/`ï¼Œ`Client` æ”¹ä¸º `Conn`ï¼›(2) å°† `agent.Agent` æŽ¥å£æ›¿æ¢ä¸ºå…·ä½“çš„ `agent.Agent` struct ä»¥åŠçª„æŽ¥å£ `agent.Session`ï¼›(3) å¼•å…¥æ–°çš„ `internal/agent/provider/` å±‚ä½œä¸ºæ— çŠ¶æ€è¿žæŽ¥å·¥åŽ‚ï¼›(4) å°† `internal/hub/` é‡å‘½åä¸º `internal/client/`ï¼Œ`Hub` æ”¹ä¸º `Client`ï¼ŒClient åŒæ—¶æŒæœ‰ `session agent.Session`ï¼ˆç”¨äºŽæ—¥å¸¸æ“ä½œï¼Œå¯ mockï¼‰å’Œ `*agent.Agent`ï¼ˆç”¨äºŽ `Switch` ç­‰ï¼‰ï¼›(5) è¿ç§»çŠ¶æ€æŒä¹…åŒ– JSON keyï¼Œä¿æŒå‘åŽå…¼å®¹ï¼›(6) å°† stdin å¾ªçŽ¯ä»Ž `main.go` ç§»å…¥ `client.Client.Run`ã€‚
+é‡æž„çŽ°æœ‰ WheelMaker ä»£ç åº“ï¼Œä½¿åŒ…å‘½åä¸Ž ACP åè®®è¯­ä¹‰å¯¹é½ï¼Œå¹¶å¼•å…¥æ›´æ¸…æ™°çš„æŠ½è±¡å±‚æ¬¡ã€‚æ ¸å¿ƒå˜æ›´å¦‚ä¸‹ï¼š(1) å°† `internal/acp/` ä¼ è¾“å±‚é‡å‘½åä¸º `internal/agent/provider/`ï¼Œ`Client` æ”¹ä¸º `Conn`ï¼›(2) å°† `agent.Agent` æŽ¥å£æ›¿æ¢ä¸ºå…·ä½“çš„ `agent.Agent` struct ä»¥åŠçª„æŽ¥å£ `agent.Session`ï¼›(3) å¼•å…¥æ–°çš„ `internal/agent/provider/` å±‚ä½œä¸ºæ— çŠ¶æ€è¿žæŽ¥å·¥åŽ‚ï¼›(4) å°† `internal/hub/` é‡å‘½åä¸º `internal/client/`ï¼Œ`Hub` æ”¹ä¸º `Client`ï¼ŒClient åŒæ—¶æŒæœ‰ `session agent.Session`ï¼ˆç”¨äºŽæ—¥å¸¸æ“ä½œï¼Œå¯ mockï¼‰å’Œ `*agent.Agent`ï¼ˆç”¨äºŽ `Switch` ç­‰ï¼‰ï¼›(5) è¿ç§»çŠ¶æ€æŒä¹…åŒ– JSON keyï¼Œä¿æŒå‘åŽå…¼å®¹ï¼›(6) å°† stdin å¾ªçŽ¯ä»Ž `main.go` ç§»å…¥ `client.Client.Run`ã€‚
 
 æ‰€æœ‰çŽ°æœ‰è¡Œä¸ºå¿…é¡»ä¿ç•™ï¼šACP JSON-RPC é€šä¿¡ã€session ç”Ÿå‘½å‘¨æœŸã€fs/terminal/permission å›žè°ƒã€å‘½ä»¤è§£æžã€çŠ¶æ€æŒä¹…åŒ–ï¼Œä»¥åŠå·²æœ‰çš„ 16 ä¸ª `acp/client` å•å…ƒæµ‹è¯•ï¼ˆé‡å‘½ååŽç»§ç»­é€šè¿‡ï¼‰ã€‚
 
@@ -14,14 +14,14 @@
   - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
     - `go build ./...` åœ¨é‡æž„åŽæ— é”™è¯¯å®Œæˆã€‚
     - `go vet ./...` æ— æŠ¥å‘Šé—®é¢˜ã€‚
-    - `internal/agent/provider/acp/connect.go`ã€`internal/agent/provider/provider.go`ã€`internal/agent/provider/codex/provider.go`ã€`internal/client/client.go` å‡å­˜åœ¨ã€‚
+    - `internal/agent/provider/connect.go`ã€`internal/agent/provider/provider.go`ã€`internal/agent/provider/codex/provider.go`ã€`internal/client/client.go` å‡å­˜åœ¨ã€‚
     - `internal/agent/update.go`ã€`internal/agent/permission.go`ã€`internal/agent/terminal.go`ã€`internal/agent/callbacks.go`ã€`internal/agent/session.go`ã€`internal/agent/prompt.go` å‡å­˜åœ¨ã€‚
   - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
     - æ—§ç›®å½• `internal/acp/`ã€`internal/hub/`ã€`internal/agent/codex/` ä¸å†å­˜åœ¨ï¼ˆä»»ä½•å¯¹å®ƒä»¬çš„æ–‡ä»¶å¼•ç”¨å‡å¯¼è‡´æž„å»ºé”™è¯¯ï¼‰ã€‚
 
-- AC-2: `acp.Conn`ï¼ˆä»Ž `acp.Client` é‡å‘½åï¼‰é€šè¿‡å…¨éƒ¨ 16 ä¸ªçŽ°æœ‰å•å…ƒæµ‹è¯•ï¼Œè¿ç§»è‡³ `internal/agent/provider/acp/conn_test.go`ã€‚
+- AC-2: `acp.Conn`ï¼ˆä»Ž `acp.Client` é‡å‘½åï¼‰é€šè¿‡å…¨éƒ¨ 16 ä¸ªçŽ°æœ‰å•å…ƒæµ‹è¯•ï¼Œè¿ç§»è‡³ `internal/agent/provider/conn_test.go`ã€‚
   - æ­£å‘æµ‹è¯•ï¼ˆæœŸæœ› PASSï¼‰ï¼š
-    - `go test ./internal/agent/provider/acp/...` è¿è¡Œï¼Œå…¨éƒ¨ 16 ä¸ªæµ‹è¯•é€šè¿‡ã€‚
+    - `go test ./internal/agent/provider/...` è¿è¡Œï¼Œå…¨éƒ¨ 16 ä¸ªæµ‹è¯•é€šè¿‡ã€‚
     - è‡ªå¼•ç”¨ mock æ¨¡å¼ï¼ˆ`GO_ACP_MOCK=1`ï¼‰åœ¨é‡å‘½ååŽçš„ `Conn` ç±»åž‹ä¸‹æ­£å¸¸å·¥ä½œã€‚
     - æ‰€æœ‰å·²æµ‹è¯•è¡Œä¸ºæ­£å¸¸ï¼šè¯·æ±‚/å“åº”ã€å¹¶å‘è¯·æ±‚ã€è®¢é˜…ã€å–æ¶ˆã€`OnRequest` å¤„ç†å™¨ã€è¿›ç¨‹é€€å‡ºæ—¶è§£é™¤é˜»å¡žã€‚
   - è´Ÿå‘æµ‹è¯•ï¼ˆæœŸæœ› FAILï¼‰ï¼š
@@ -105,7 +105,7 @@
 
 ```
 ä¼ è¾“å±‚è¿ç§»ï¼š
-  - å°† internal/acp/ å¤åˆ¶åˆ° internal/agent/provider/acp/
+  - å°† internal/acp/ å¤åˆ¶åˆ° internal/agent/provider/
   - å°†ç±»åž‹ Clientâ†’Connï¼Œæ›´æ–°æ‰€æœ‰æ–¹æ³•æŽ¥æ”¶è€…
   - å°† client_test.go é‡å‘½åä¸º conn_test.goï¼Œæ›´æ–°ç±»åž‹å¼•ç”¨
   - ä¿ç•™ internal/acp/ ç›´åˆ°æ‰€æœ‰ä¾èµ–æ–¹æ›´æ–°å®Œæ¯•
@@ -129,7 +129,7 @@ Adapter å±‚ + Clientï¼ˆä¾èµ–ä»¥ä¸Šä¸¤éƒ¨åˆ†å®Œ
 æŽ¥çº¿ + æ¸…ç†ï¼š
   - cmd/wheelmaker/main.go: ä½¿ç”¨ client.Newã€RegisterProviderã€Startã€Run
   - åˆ é™¤ internal/acp/ã€internal/hub/ã€internal/agent/codex/
-  - go build ./... å’Œ go test ./internal/agent/provider/acp/...
+  - go build ./... å’Œ go test ./internal/agent/provider/...
 ```
 
 ### ç›¸å…³å‚è€ƒ
@@ -146,9 +146,9 @@ Adapter å±‚ + Clientï¼ˆä¾èµ–ä»¥ä¸Šä¸¤éƒ¨åˆ†å®Œ
 ### é‡Œç¨‹ç¢‘
 
 1. **ä¼ è¾“å±‚è¿ç§»**ï¼šè¿ç§»å¹¶é‡å‘½å ACP JSON-RPC ä¼ è¾“å±‚ã€‚
-   - æ­¥éª¤ Aï¼šå¤åˆ¶ `internal/acp/` å†…å®¹ï¼Œåˆ›å»º `internal/agent/provider/acp/`ã€‚
+   - æ­¥éª¤ Aï¼šå¤åˆ¶ `internal/acp/` å†…å®¹ï¼Œåˆ›å»º `internal/agent/provider/`ã€‚
    - æ­¥éª¤ Bï¼šå°† `Client` é‡å‘½åä¸º `Conn`ï¼Œæ›´æ–°æ–°åŒ…å†…æ‰€æœ‰å¼•ç”¨ã€‚
-   - æ­¥éª¤ Cï¼šæ›´æ–° `conn_test.go` ä½¿ç”¨ `Conn` ç±»åž‹ï¼›éªŒè¯ `go test ./internal/agent/provider/acp/...` å…¨éƒ¨ 16 ä¸ªæµ‹è¯•é€šè¿‡ã€‚
+   - æ­¥éª¤ Cï¼šæ›´æ–° `conn_test.go` ä½¿ç”¨ `Conn` ç±»åž‹ï¼›éªŒè¯ `go test ./internal/agent/provider/...` å…¨éƒ¨ 16 ä¸ªæµ‹è¯•é€šè¿‡ã€‚
    - æ­¥éª¤ Dï¼šä¿ç•™ `internal/acp/` ç›´åˆ°æ‰€æœ‰ä¾èµ–æ–¹å®Œæˆè¿ç§»ã€‚
 
 2. **Agent æ ¸å¿ƒé‡æž„**ï¼šæž„å»ºæ–°çš„ `agent.Agent` å…·ä½“ struct å’Œ `agent.Session` æŽ¥å£ã€‚
@@ -171,7 +171,7 @@ Adapter å±‚ + Clientï¼ˆä¾èµ–ä»¥ä¸Šä¸¤éƒ¨åˆ†å®Œ
    - æ­¥éª¤ Bï¼šåˆ é™¤ `internal/acp/` æ•´ä¸ªç›®å½•ã€‚
    - æ­¥éª¤ Cï¼šåˆ é™¤ `internal/hub/` æ•´ä¸ªç›®å½•ã€‚
    - æ­¥éª¤ Dï¼šåˆ é™¤ `internal/agent/codex/` ç›®å½•åŠæ—§çš„ `internal/agent/agent.go` æŽ¥å£æ–‡ä»¶ã€‚
-   - æ­¥éª¤ Eï¼šéªŒè¯ `go build ./...`ã€`go vet ./...` å’Œ `go test ./internal/agent/provider/acp/...` å…¨éƒ¨é€šè¿‡ã€‚
+   - æ­¥éª¤ Eï¼šéªŒè¯ `go build ./...`ã€`go vet ./...` å’Œ `go test ./internal/agent/provider/...` å…¨éƒ¨é€šè¿‡ã€‚
 
 é‡Œç¨‹ç¢‘ 1 å’Œ 2 å¯å¹¶è¡ŒæŽ¨è¿›ï¼ˆæ— ç›¸äº’ä¾èµ–ï¼‰ã€‚é‡Œç¨‹ç¢‘ 3 ä¾èµ– 1 å’Œ 2 å‡å®Œæˆã€‚é‡Œç¨‹ç¢‘ 4 ä¾èµ–é‡Œç¨‹ç¢‘ 3ã€‚
 
@@ -240,7 +240,7 @@ CLI binary             â† codex-acp / claude-acp / ...
 |------|------|------|
 | `internal/hub` | `internal/client` | WheelMaker æ˜¯ ACP Client |
 | `hub.Hub` | `client.Client` | åŒä¸Š |
-| `internal/acp/` | `internal/agent/provider/acp/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
+| `internal/acp/` | `internal/agent/provider/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
 | `acp.Client` | `acp.Conn` | ä½Žå±‚ä¼ è¾“ï¼Œåå‰¯å…¶å®ž |
 | `internal/agent/codex/` | `internal/agent/provider/codex/` | Adapter å½’åˆ°é¡¶å±‚ adapter åŒ… |
 | `agent.Agent`ï¼ˆinterfaceï¼‰ | `agent.Session`ï¼ˆçª„æŽ¥å£ï¼‰+ `agent.Agent`ï¼ˆconcrete structï¼‰ | Agent æ˜¯å…·ä½“æ¦‚å¿µï¼›Session æ˜¯ Client ç”¨çš„å¯æµ‹è¯•æŽ¥å£ |
@@ -288,7 +288,7 @@ Package provider
 
 import (
     "context"
-    "github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+    "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // Adapter abstracts an ACP-compatible CLI backend.
@@ -675,9 +675,9 @@ with an IM adapter it calls `im.provider.Run(ctx)`.
 **æ–°å»ºï¼š**
 - `internal/agent/provider/provider.go`ï¼ˆAdapter interfaceï¼‰
 - `internal/agent/provider/codex/provider.go`ï¼ˆCodexAdapterï¼ŒåŽŸ codex adapter + handlers åˆå¹¶ï¼Œæ—  ACP é€»è¾‘ï¼‰
-- `internal/agent/provider/acp/connect.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
-- `internal/agent/provider/acp/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
-- `internal/agent/provider/acp/protocl.go`ï¼ˆåŽŸ `internal/acp/protocl.go` ç§»å…¥ï¼‰
+- `internal/agent/provider/connect.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/provider/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/provider/protocl.go`ï¼ˆåŽŸ `internal/acp/protocl.go` ç§»å…¥ï¼‰
 - `internal/agent/session.go`ï¼ˆACP ç”Ÿå‘½å‘¨æœŸï¼‰
 - `internal/agent/prompt.go`ï¼ˆprompt æµï¼‰
 - `internal/agent/callbacks.go`ï¼ˆå…¥ç«™å›žè°ƒï¼‰
@@ -690,7 +690,7 @@ with an IM adapter it calls `im.provider.Run(ctx)`.
 - `internal/agent/agent.go`ï¼ˆåˆ é™¤ Agent interfaceï¼Œæ”¹ä¸º concrete struct + Session interfaceï¼‰
 
 **åˆ é™¤ï¼š**
-- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/provider/acp/`ï¼‰
+- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/provider/`ï¼‰
 - `internal/agent/codex/provider.go`
 - `internal/agent/codex/handlers.go`
 
@@ -700,6 +700,7 @@ with an IM adapter it calls `im.provider.Run(ctx)`.
 - `internal/client/store.go`ï¼ˆåŽŸ hub/store.goï¼Œä»…ç§»åŒ…ï¼‰
 
 --- Original Design Draft End ---
+
 
 
 

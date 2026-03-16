@@ -38,7 +38,7 @@ Use **Hub as a new top-level package** (`internal/hub/`). Each project gets its 
 | `internal/client/client.go` | Lazy agent init, idle timer, command dispatch fix, accept debug writer |
 | `internal/client/state.go` | State keyed by project name: `map[string]*ProjectState` |
 | `internal/client/store.go` | Migration: old flat state â†’ `projects["default"]` |
-| `internal/agent/provider/acp/connect.go` | Optional debug `io.Writer` for all JSON in/out |
+| `internal/agent/provider/connect.go` | Optional debug `io.Writer` for all JSON in/out |
 | `cmd/wheelmaker/main.go` | Rewrite: load config â†’ create Hub â†’ Start â†’ Run |
 
 ### Unchanged
@@ -201,7 +201,7 @@ func (c *ConsoleIM) Run(ctx context.Context) error        // stdin read loop
 
 ---
 
-## 4. internal/agent/provider/acp/connect.go â€” debug logging
+## 4. internal/agent/provider/connect.go â€” debug logging
 
 ```go
 // Add to Conn struct:
@@ -499,13 +499,14 @@ go test ./internal/hub/...
 ## Implementation Order
 
 1. `internal/hub/config.go` â€” Config types + LoadConfig()
-2. `internal/agent/provider/acp/connect.go` â€” add SetDebugLogger()
+2. `internal/agent/provider/connect.go` â€” add SetDebugLogger()
 3. `internal/im/console/console.go` â€” Console IM adapter
 4. `internal/client/state.go` + `store.go` â€” multi-project state + migration
 5. `internal/client/client.go` â€” lazy init + idle timer + command fix
 6. `internal/hub/hub.go` â€” Hub orchestrator
 7. `cmd/wheelmaker/main.go` â€” rewrite entrypoint
 8. `config.example.json` â€” example config in project root
+
 
 
 

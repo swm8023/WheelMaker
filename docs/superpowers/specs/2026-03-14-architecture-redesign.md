@@ -44,7 +44,7 @@ CLI binary             â† codex-acp / claude-acp / ...
 |------|------|------|
 | `internal/hub` | `internal/client` | WheelMaker æ˜¯ ACP Client |
 | `hub.Hub` | `client.Client` | åŒä¸Š |
-| `internal/acp/` | `internal/agent/provider/acp/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
+| `internal/acp/` | `internal/agent/provider/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
 | `acp.Client` | `acp.Conn` | ä½Žå±‚ä¼ è¾“ï¼Œåå‰¯å…¶å®ž |
 | `internal/agent/codex/` | `internal/agent/provider/codex/` | Adapter å½’åˆ°é¡¶å±‚ adapter åŒ… |
 | `agent.Agent`ï¼ˆinterfaceï¼‰ | `agent.Session`ï¼ˆçª„æŽ¥å£ï¼‰+ `agent.Agent`ï¼ˆconcrete structï¼‰ | Agent æ˜¯å…·ä½“æ¦‚å¿µï¼›Session æ˜¯ Client ç”¨çš„å¯æµ‹è¯•æŽ¥å£ |
@@ -92,7 +92,7 @@ Package provider
 
 import (
     "context"
-    "github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+    "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // Adapter æŠ½è±¡ä¸€ä¸ª ACP å…¼å®¹çš„ CLI åŽç«¯ã€‚
@@ -482,9 +482,9 @@ func run() error {
 **æ–°å»ºï¼š**
 - `internal/agent/provider/provider.go`ï¼ˆAdapter interfaceï¼‰
 - `internal/agent/provider/codex/provider.go`ï¼ˆCodexAdapterï¼ŒåŽŸ codex adapter + handlers åˆå¹¶ï¼Œæ—  ACP é€»è¾‘ï¼‰
-- `internal/agent/provider/acp/connect.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
-- `internal/agent/provider/acp/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
-- `internal/agent/provider/acp/protocl.go`ï¼ˆåŽŸ `internal/acp/protocl.go` ç§»å…¥ï¼‰
+- `internal/agent/provider/connect.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/provider/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/provider/protocl.go`ï¼ˆåŽŸ `internal/acp/protocl.go` ç§»å…¥ï¼‰
 - `internal/agent/session.go`ï¼ˆACP ç”Ÿå‘½å‘¨æœŸï¼‰
 - `internal/agent/prompt.go`ï¼ˆprompt æµï¼‰
 - `internal/agent/callbacks.go`ï¼ˆå…¥ç«™å›žè°ƒï¼‰
@@ -497,7 +497,7 @@ func run() error {
 - `internal/agent/agent.go`ï¼ˆåˆ é™¤ Agent interfaceï¼Œæ”¹ä¸º concrete struct + Session interfaceï¼‰
 
 **åˆ é™¤ï¼š**
-- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/provider/acp/`ï¼‰
+- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/provider/`ï¼‰
 - `internal/agent/codex/provider.go`
 - `internal/agent/codex/handlers.go`
 
@@ -505,6 +505,7 @@ func run() error {
 - `internal/im/im.go`
 - `internal/tools/resolve.go`
 - `internal/client/store.go`ï¼ˆåŽŸ hub/store.goï¼Œä»…ç§»åŒ…ï¼‰
+
 
 
 

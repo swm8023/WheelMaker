@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 	mockprovider "github.com/swm8023/wheelmaker/internal/agent/provider/mock"
 )
 
