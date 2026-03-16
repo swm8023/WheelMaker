@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
 )
 
 type rpcMsg struct {

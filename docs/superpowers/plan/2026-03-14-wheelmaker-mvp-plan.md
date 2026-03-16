@@ -1,43 +1,43 @@
-﻿# WheelMaker MVP å®žçŽ°è®¡åˆ’
+# WheelMaker MVP 实现计划
 
-> ç‰ˆæœ¬ï¼šv0.1
-> æ—¥æœŸï¼š2026-03-14
-> é˜¶æ®µï¼šPhase 1 â€” é¡¹ç›®åŸºç¡€ + ACP å®¢æˆ·ç«¯
+> 版本：v0.1
+> 日期：2026-03-14
+> 阶段：Phase 1 — 项目基础 + ACP 客户端
 
-## MVP ç›®æ ‡
+## MVP 目标
 
-1. å»ºç«‹å®Œæ•´é¡¹ç›®éª¨æž¶ï¼ˆç›®å½•ã€go.modã€CLAUDE.mdã€AGENTS.mdï¼‰
-2. å®žçŽ° ACP å®¢æˆ·ç«¯ï¼ˆGo è°ƒç”¨ codex-acp.exe via stdio JSON-RPCï¼‰
-3. æ•´ç†åè®®æ–‡æ¡£åˆ° docs/ï¼ˆACP + Feishu Bot + codex-acpï¼‰
+1. 建立完整项目骨架（目录、go.mod、CLAUDE.md、AGENTS.md）
+2. 实现 ACP 客户端（Go 调用 codex-acp.exe via stdio JSON-RPC）
+3. 整理协议文档到 docs/（ACP + Feishu Bot + codex-acp）
 
-**ä¸åœ¨ MVP å†…**ï¼šFeishu WebSocket æŽ¥å…¥ï¼ˆPhase 2ï¼‰
+**不在 MVP 内**：Feishu WebSocket 接入（Phase 2）
 
-## å®žçŽ°æ­¥éª¤
+## 实现步骤
 
-### Step 1ï¼šé¡¹ç›®è„šæ‰‹æž¶
+### Step 1：项目脚手架
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
+**目标文件**：
 - `go.mod`
 - `.gitignore`
 - `CLAUDE.md`
 - `AGENTS.md`
-- å…¨éƒ¨ç›®å½•åŠ `.gitkeep` æ–‡ä»¶
+- 全部目录及 `.gitkeep` 文件
 
-**ä»»åŠ¡**ï¼š
+**任务**：
 
-1. åˆå§‹åŒ– Go moduleï¼š
+1. 初始化 Go module：
    ```bash
    cd d:/Code/WheelMaker
    go mod init github.com/swm8023/wheelmaker
    ```
 
-2. åˆ›å»º `.gitignore`ï¼š
+2. 创建 `.gitignore`：
    ```gitignore
-   # å·¥å…·äºŒè¿›åˆ¶ï¼ˆé€šè¿‡ scripts/install-tools.sh ä¸‹è½½ï¼‰
+   # 工具二进制（通过 scripts/install-tools.sh 下载）
    bin/**/*
    !bin/**/.gitkeep
 
-   # çŠ¶æ€æ–‡ä»¶
+   # 状态文件
    .wheelmaker/
 
    # Go
@@ -46,7 +46,7 @@
    /vendor/
    ```
 
-3. åˆ›å»ºç›®å½•éª¨æž¶ï¼ˆå« `.gitkeep`ï¼‰ï¼š
+3. 创建目录骨架（含 `.gitkeep`）：
    ```
    cmd/wheelmaker/
    internal/acp/
@@ -62,27 +62,27 @@
    scripts/
    ```
 
-4. åˆ›å»º `CLAUDE.md` å’Œ `AGENTS.md`ï¼ˆè§ä¸‹æ–¹å†…å®¹è§„åˆ’ï¼‰
+4. 创建 `CLAUDE.md` 和 `AGENTS.md`（见下方内容规划）
 
-5. åˆ›å»º `scripts/install-tools.sh` å’Œ `scripts/install-tools.ps1`
+5. 创建 `scripts/install-tools.sh` 和 `scripts/install-tools.ps1`
 
-### Step 2ï¼šç±»åž‹ä¸ŽæŽ¥å£å®šä¹‰
+### Step 2：类型与接口定义
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
+**目标文件**：
 - `internal/agent/agent.go`
 - `internal/im/im.go`
 - `internal/hub/state.go`
 - `internal/hub/store.go`
 
-çº¯æŽ¥å£å’Œç»“æž„ä½“å®šä¹‰ï¼Œæ— å…·ä½“å®žçŽ°é€»è¾‘ã€‚è¯¦è§è®¾è®¡è§„èŒƒ Â§4ã€‚
+纯接口和结构体定义，无具体实现逻辑。详见设计规范 §4。
 
-### Step 3ï¼šACP ä¼ è¾“å±‚
+### Step 3：ACP 传输层
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
-- `internal/acp/protocl.go` â€” JSON-RPC ç»“æž„ä½“
-- `internal/acp/client.go` â€” ACPClient å®žçŽ°
+**目标文件**：
+- `internal/acp/protocl.go` — JSON-RPC 结构体
+- `internal/acp/client.go` — ACPClient 实现
 
-**å…³é”®å®žçŽ°ç‚¹**ï¼š
+**关键实现点**：
 
 ```go
 // protocl.go
@@ -106,7 +106,7 @@ type Notification struct {
     Params  any    `json:"params,omitempty"`
 }
 
-// client.go æ ¸å¿ƒæ–¹æ³•
+// client.go 核心方法
 type Client struct { ... }
 
 func New(exePath string, env []string) *Client
@@ -116,52 +116,52 @@ func (c *Client) Subscribe(handler func(Notification)) (cancel func())
 func (c *Client) Close() error
 ```
 
-**readLoop å®žçŽ°è¦ç‚¹**ï¼š
-- `bufio.Scanner` é€è¡Œè¯» stdout
-- æŒ‰æ˜¯å¦æœ‰ `id` å­—æ®µåŒºåˆ† Response vs Notification
-- Responseï¼šå†™å…¥ `pending[id]` channel
-- Notificationï¼šå¹¿æ’­ç»™æ‰€æœ‰ subscriberï¼ˆç”¨ goroutine è°ƒç”¨ï¼Œé¿å…é˜»å¡žï¼‰
+**readLoop 实现要点**：
+- `bufio.Scanner` 逐行读 stdout
+- 按是否有 `id` 字段区分 Response vs Notification
+- Response：写入 `pending[id]` channel
+- Notification：广播给所有 subscriber（用 goroutine 调用，避免阻塞）
 
-### Step 4ï¼šCodex Agent é€‚é…å™¨
+### Step 4：Codex Agent 适配器
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
+**目标文件**：
 - `internal/agent/codex/provider.go`
 
 ```go
 type CodexAgent struct {
     name   string
     client *acp.Client
-    sessID string  // ACP sessionIdï¼Œç©ºè¡¨ç¤ºæœªåˆå§‹åŒ–
+    sessID string  // ACP sessionId，空表示未初始化
     mu     sync.Mutex
 }
 
 func New(cfg hub.AgentConfig) *CodexAgent
 
-// æ‡’åˆå§‹åŒ–ï¼šé¦–æ¬¡è°ƒç”¨æ—¶ Start client â†’ initialize â†’ session/new or session/load
+// 懒初始化：首次调用时 Start client → initialize → session/new or session/load
 func (a *CodexAgent) ensureSession(ctx context.Context) error
 
 func (a *CodexAgent) Prompt(ctx context.Context, text string) (<-chan agent.Update, error)
 ```
 
-**Prompt å®žçŽ°è¦ç‚¹**ï¼š
-1. `ensureSession(ctx)` ç¡®ä¿ ACP è¿žæŽ¥å’Œ session å°±ç»ª
-2. è®¢é˜… Notificationï¼ˆ`Subscribe`ï¼‰
-3. å‘é€ `session/prompt`ï¼ˆå¼‚æ­¥ï¼Œä¸ç­‰ resultï¼‰
-4. å°† `session/update` notification è½¬æ¢ä¸º `agent.Update` å¹¶å†™å…¥ channel
-5. æ”¶åˆ° `session/prompt` result åŽï¼Œå†™å…¥ `Update{Done:true}` å…³é—­ channel
-6. å–æ¶ˆè®¢é˜…
+**Prompt 实现要点**：
+1. `ensureSession(ctx)` 确保 ACP 连接和 session 就绪
+2. 订阅 Notification（`Subscribe`）
+3. 发送 `session/prompt`（异步，不等 result）
+4. 将 `session/update` notification 转换为 `agent.Update` 并写入 channel
+5. 收到 `session/prompt` result 后，写入 `Update{Done:true}` 关闭 channel
+6. 取消订阅
 
-### Step 5ï¼šHub
+### Step 5：Hub
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
+**目标文件**：
 - `internal/hub/hub.go`
 
 ```go
 type Hub struct {
     store  Store
     state  *State
-    agents map[string]agent.Agent  // å·²åˆå§‹åŒ–çš„ agent å®žä¾‹
-    im     im.Adapter              // å¯ä¸º nilï¼ˆMVP é˜¶æ®µï¼‰
+    agents map[string]agent.Agent  // 已初始化的 agent 实例
+    im     im.Adapter              // 可为 nil（MVP 阶段）
     mu     sync.Mutex
 }
 
@@ -171,26 +171,26 @@ func (h *Hub) HandleMessage(msg im.Message)
 func (h *Hub) Close() error
 ```
 
-**å‘½ä»¤è§£æž**ï¼š
-- `/use <agent>` â†’ åˆ‡æ¢ `state.ActiveAgent`ï¼Œä¿å­˜ state
-- `/cancel` â†’ è°ƒç”¨å½“å‰ agent.Cancel()
-- `/status` â†’ è¿”å›žçŠ¶æ€å­—ç¬¦ä¸²
-- å…¶ä»– â†’ è½¬å‘ç»™å½“å‰ agent.Prompt()
+**命令解析**：
+- `/use <agent>` → 切换 `state.ActiveAgent`，保存 state
+- `/cancel` → 调用当前 agent.Cancel()
+- `/status` → 返回状态字符串
+- 其他 → 转发给当前 agent.Prompt()
 
-### Step 6ï¼šå·¥å…·è·¯å¾„è§£æž
+### Step 6：工具路径解析
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
+**目标文件**：
 - `internal/tools/resolve.go`
 
 ```go
 func ResolveBinary(name string, configPath string) (string, error) {
-    // 1. ä½¿ç”¨é…ç½®è·¯å¾„
+    // 1. 使用配置路径
     if configPath != "" {
         if _, err := os.Stat(configPath); err == nil {
             return configPath, nil
         }
     }
-    // 2. æŸ¥æ‰¾ bin/{GOOS}_{GOARCH}/
+    // 2. 查找 bin/{GOOS}_{GOARCH}/
     exe := name
     if runtime.GOOS == "windows" {
         exe += ".exe"
@@ -199,26 +199,26 @@ func ResolveBinary(name string, configPath string) (string, error) {
     if _, err := os.Stat(binPath); err == nil {
         return filepath.Abs(binPath)
     }
-    // 3. æŸ¥æ‰¾ PATH
+    // 3. 查找 PATH
     return exec.LookPath(name)
 }
 ```
 
-### Step 7ï¼šå…¥å£
+### Step 7：入口
 
-**ç›®æ ‡æ–‡ä»¶**ï¼š
+**目标文件**：
 - `cmd/wheelmaker/main.go`
 
-MVP é˜¶æ®µæä¾›ç®€å•çš„ stdin æµ‹è¯•æ¨¡å¼ï¼š
+MVP 阶段提供简单的 stdin 测试模式：
 
 ```go
 func main() {
     store := hub.NewJSONStore(".wheelmaker/state.json")
-    h := hub.New(store, nil)  // æš‚æ—  IM
+    h := hub.New(store, nil)  // 暂无 IM
     ctx := context.Background()
     h.Start(ctx)
 
-    // ä»Ž stdin è¯»å–æµ‹è¯•æ¶ˆæ¯
+    // 从 stdin 读取测试消息
     scanner := bufio.NewScanner(os.Stdin)
     for scanner.Scan() {
         h.HandleMessage(im.Message{
@@ -230,18 +230,18 @@ func main() {
 }
 ```
 
-### Step 8ï¼šå®‰è£…è„šæœ¬
+### Step 8：安装脚本
 
-**`scripts/install-tools.sh`**ï¼š
+**`scripts/install-tools.sh`**：
 ```bash
 #!/usr/bin/env bash
-# ä¸‹è½½ codex-acp åˆ° bin/{platform}/
+# 下载 codex-acp 到 bin/{platform}/
 GOOS=$(go env GOOS)
 GOARCH=$(go env GOARCH)
 DEST="bin/${GOOS}_${GOARCH}"
 mkdir -p "$DEST"
-# é€šè¿‡ npx èŽ·å–åŽå¤åˆ¶ï¼Œæˆ–ç›´æŽ¥ä»Ž GitHub releases ä¸‹è½½
-npx --yes @zed-industries/codex-acp --version  # è§¦å‘å®‰è£…
+# 通过 npx 获取后复制，或直接从 GitHub releases 下载
+npx --yes @zed-industries/codex-acp --version  # 触发安装
 NPXBIN=$(npx --yes which codex-acp 2>/dev/null || true)
 if [ -n "$NPXBIN" ]; then
     cp "$NPXBIN" "$DEST/codex-acp"
@@ -249,11 +249,11 @@ if [ -n "$NPXBIN" ]; then
 fi
 ```
 
-**`scripts/install-tools.ps1`**ï¼š
+**`scripts/install-tools.ps1`**：
 ```powershell
 $dest = "bin\windows_amd64"
 New-Item -ItemType Directory -Force -Path $dest
-# é€šè¿‡ npx å®‰è£…åŽèŽ·å–è·¯å¾„
+# 通过 npx 安装后获取路径
 npx --yes @zed-industries/codex-acp --version
 $npxBin = (npx --yes which codex-acp 2>$null)
 if ($npxBin) {
@@ -261,110 +261,110 @@ if ($npxBin) {
 }
 ```
 
-### Step 9ï¼šåè®®æ–‡æ¡£æ•´ç†
+### Step 9：协议文档整理
 
-- `docs/feishu-bot.md`ï¼šé£žä¹¦ Bot åè®®æ‘˜è¦
-- `docs/codex-acp.md`ï¼šcodex-acp ä½¿ç”¨æ‘˜è¦
+- `docs/feishu-bot.md`：飞书 Bot 协议摘要
+- `docs/codex-acp.md`：codex-acp 使用摘要
 
-## æ–‡æ¡£å†…å®¹è§„åˆ’
+## 文档内容规划
 
 ### CLAUDE.md
 
 ```markdown
 # WheelMaker
 
-## é¡¹ç›®ç›®æ ‡
-æœ¬åœ° AI ç¼–ç¨‹ CLIï¼ˆCodex ç­‰ï¼‰çš„è¿œç¨‹æŽ§åˆ¶æ¡¥æŽ¥å™¨ï¼Œé€šè¿‡é£žä¹¦ç­‰ IM è¿œç¨‹æ“ä½œã€‚
+## 项目目标
+本地 AI 编程 CLI（Codex 等）的远程控制桥接器，通过飞书等 IM 远程操作。
 
-## æž¶æž„
-- cmd/wheelmaker/  â€” å…¥å£
-- internal/acp/    â€” ACP JSON-RPC stdio ä¼ è¾“
-- internal/agent/  â€” Agent æŽ¥å£ + å„ CLI é€‚é…å™¨
-- internal/im/     â€” IM æŽ¥å£ + é£žä¹¦é€‚é…å™¨
-- internal/hub/    â€” æ ¸å¿ƒè°ƒåº¦ï¼Œç®¡ç† agent åˆ‡æ¢å’ŒæŒä¹…åŒ–
-- internal/tools/  â€” å·¥å…·äºŒè¿›åˆ¶è·¯å¾„è§£æž
-- bin/{platform}/  â€” ç¬¬ä¸‰æ–¹å·¥å…·äºŒè¿›åˆ¶ï¼ˆ.gitignoredï¼‰
-- scripts/         â€” å®‰è£…è„šæœ¬
+## 架构
+- cmd/wheelmaker/  — 入口
+- internal/acp/    — ACP JSON-RPC stdio 传输
+- internal/agent/  — Agent 接口 + 各 CLI 适配器
+- internal/im/     — IM 接口 + 飞书适配器
+- internal/hub/    — 核心调度，管理 agent 切换和持久化
+- internal/tools/  — 工具二进制路径解析
+- bin/{platform}/  — 第三方工具二进制（.gitignored）
+- scripts/         — 安装脚本
 
-## å¼€å‘çº¦å®š
-- æŽ¥å£ä¼˜å…ˆï¼šæ‰€æœ‰è·¨å±‚ä¾èµ–é€šè¿‡æŽ¥å£
-- ä¸è¿‡åº¦æŠ½è±¡ï¼šå…ˆè®©å®ƒå·¥ä½œï¼Œå†è€ƒè™‘æ‰©å±•
-- ACP åè®®å‚è€ƒï¼šdocs/acp-protocol-full.zh-CN.md
+## 开发约定
+- 接口优先：所有跨层依赖通过接口
+- 不过度抽象：先让它工作，再考虑扩展
+- ACP 协议参考：docs/acp-protocol-full.zh-CN.md
 
-## æœ¬åœ°æµ‹è¯•
-go run ./cmd/wheelmaker/  # ä»Ž stdin è¾“å…¥æµ‹è¯•æ¶ˆæ¯
+## 本地测试
+go run ./cmd/wheelmaker/  # 从 stdin 输入测试消息
 go test ./internal/acp/...
 ```
 
 ### AGENTS.md
 
 ```markdown
-# AI Agent å¼€å‘è§„èŒƒ
+# AI Agent 开发规范
 
-## ä»£ç é£Žæ ¼
-- ä½¿ç”¨ gofmt / goimports
-- å‡½æ•°é•¿åº¦ä¸è¶…è¿‡ 50 è¡Œï¼Œè¶…å‡ºåˆ™æ‹†åˆ†
-- ä¸ä½¿ç”¨ init()
+## 代码风格
+- 使用 gofmt / goimports
+- 函数长度不超过 50 行，超出则拆分
+- 不使用 init()
 
-## åŒ…èŒè´£
-- æ¯ä¸ªåŒ…åªåšä¸€ä»¶äº‹
-- ä¸åœ¨ im/ å±‚å¤„ç† agent é€»è¾‘
-- ä¸åœ¨ agent/ å±‚å¤„ç† IM æ ¼å¼
+## 包职责
+- 每个包只做一件事
+- 不在 im/ 层处理 agent 逻辑
+- 不在 agent/ 层处理 IM 格式
 
-## é”™è¯¯å¤„ç†
-- ä½¿ç”¨ fmt.Errorf("context: %w", err) åŒ…è£…
-- ä¸ä½¿ç”¨ panicï¼ˆé™¤éžæ˜¯ä¸å¯æ¢å¤çš„ç¨‹åºå‘˜é”™è¯¯ï¼‰
-- å‘ä¸Šå±‚æš´éœ²æœ‰æ„ä¹‰çš„é”™è¯¯ä¿¡æ¯
+## 错误处理
+- 使用 fmt.Errorf("context: %w", err) 包装
+- 不使用 panic（除非是不可恢复的程序员错误）
+- 向上层暴露有意义的错误信息
 
-## ç¦æ­¢äº‹é¡¹
-- ä¸ç¡¬ç¼–ç  API key æˆ–è·¯å¾„
-- ä¸åœ¨ä»£ç ä¸­å­˜å‚¨å‡­è¯
-- ä¸ç»•è¿‡ Agent/IM æŽ¥å£ç›´æŽ¥è®¿é—®å®žçŽ°ç»†èŠ‚
+## 禁止事项
+- 不硬编码 API key 或路径
+- 不在代码中存储凭证
+- 不绕过 Agent/IM 接口直接访问实现细节
 ```
 
-## éªŒè¯è®¡åˆ’
+## 验证计划
 
-### ACP è¿žæŽ¥éªŒè¯
+### ACP 连接验证
 
 ```bash
-# 1. å®‰è£… codex-acp
+# 1. 安装 codex-acp
 npm install -g @zed-industries/codex-acp
-# æˆ–é€šè¿‡è„šæœ¬
+# 或通过脚本
 ./scripts/install-tools.sh
 
-# 2. è¿è¡Œå•å…ƒæµ‹è¯•ï¼ˆéœ€è¦ OPENAI_API_KEYï¼‰
+# 2. 运行单元测试（需要 OPENAI_API_KEY）
 export OPENAI_API_KEY=sk-...
 go test ./internal/acp/... -v
 go test ./internal/agent/codex/... -v -run TestPrompt
 
-# 3. ç«¯åˆ°ç«¯æµ‹è¯•ï¼šè¿è¡Œ mainï¼Œé€šè¿‡ stdin è¾“å…¥
+# 3. 端到端测试：运行 main，通过 stdin 输入
 go run ./cmd/wheelmaker/
-# è¾“å…¥: /status
-# è¾“å…¥: è§£é‡Šä¸€ä¸‹ Go çš„ goroutine
+# 输入: /status
+# 输入: 解释一下 Go 的 goroutine
 ```
 
-### éªŒæ”¶æ ‡å‡†
+### 验收标准
 
-- [ ] `go build ./...` æ— é”™è¯¯
-- [ ] `go vet ./...` æ— è­¦å‘Š
-- [ ] ACP client èƒ½æˆåŠŸ spawn codex-acpï¼Œå®Œæˆ initialize + session/new
-- [ ] Prompt å‘é€åŽèƒ½æ”¶åˆ°æµå¼æ–‡æœ¬æ›´æ–°
-- [ ] `/use` å‘½ä»¤èƒ½åˆ‡æ¢ agentï¼ŒçŠ¶æ€æŒä¹…åŒ–åˆ°æ–‡ä»¶
-- [ ] è¿›ç¨‹é‡å¯åŽèƒ½é€šè¿‡ session/load æ¢å¤ session
+- [ ] `go build ./...` 无错误
+- [ ] `go vet ./...` 无警告
+- [ ] ACP client 能成功 spawn codex-acp，完成 initialize + session/new
+- [ ] Prompt 发送后能收到流式文本更新
+- [ ] `/use` 命令能切换 agent，状态持久化到文件
+- [ ] 进程重启后能通过 session/load 恢复 session
 
-## ä¾èµ–
+## 依赖
 
 ```
-go.mod é¢„æœŸä¾èµ–ï¼š
-ï¼ˆæš‚æ— ç¬¬ä¸‰æ–¹ Go ä¾èµ–ï¼Œä»…æ ‡å‡†åº“ï¼‰
+go.mod 预期依赖：
+（暂无第三方 Go 依赖，仅标准库）
 
-Phase 2 æ·»åŠ ï¼š
-github.com/go-lark/lark/v2  # é£žä¹¦ SDK
+Phase 2 添加：
+github.com/go-lark/lark/v2  # 飞书 SDK
 ```
 
-## Phase 2 é¢„è§ˆï¼ˆé£žä¹¦æŽ¥å…¥ï¼‰
+## Phase 2 预览（飞书接入）
 
-Phase 2 å®žçŽ° `internal/im/feishu/provider.go`ï¼š
+Phase 2 实现 `internal/im/feishu/provider.go`：
 
 ```go
 import "github.com/go-lark/lark/v2"
@@ -380,10 +380,11 @@ func New(appID, appSecret string) *FeishuAdapter {
 }
 
 func (a *FeishuAdapter) Run(ctx context.Context) error {
-    // ä½¿ç”¨ WebSocket é•¿è¿žæŽ¥æ¨¡å¼ï¼ˆæ— éœ€å…¬ç½‘ IPï¼‰
-    // æ³¨å†Œ EventTypeMessageReceived äº‹ä»¶å¤„ç†
+    // 使用 WebSocket 长连接模式（无需公网 IP）
+    // 注册 EventTypeMessageReceived 事件处理
     ...
 }
 ```
+
 
 

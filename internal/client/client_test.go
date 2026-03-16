@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent"
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
@@ -40,12 +40,12 @@ type mockSession struct {
 	mu           sync.Mutex
 	promptCalls  []string
 	cancelCalls  int
-	adapterN     string
+	agentN       string
 	sessionN     string
-	promptResult func(text string) (<-chan agent.Update, error)
+	promptResult func(text string) (<-chan acp.Update, error)
 }
 
-func (m *mockSession) Prompt(ctx context.Context, text string) (<-chan agent.Update, error) {
+func (m *mockSession) Prompt(ctx context.Context, text string) (<-chan acp.Update, error) {
 	m.mu.Lock()
 	m.promptCalls = append(m.promptCalls, text)
 	fn := m.promptResult
@@ -54,8 +54,8 @@ func (m *mockSession) Prompt(ctx context.Context, text string) (<-chan agent.Upd
 		return fn(text)
 	}
 	// Default: return single done update.
-	ch := make(chan agent.Update, 1)
-	ch <- agent.Update{Type: agent.UpdateDone, Content: "end_turn", Done: true}
+	ch := make(chan acp.Update, 1)
+	ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
 	close(ch)
 	return ch, nil
 }
@@ -69,10 +69,10 @@ func (m *mockSession) Cancel() error {
 
 func (m *mockSession) SetMode(_ context.Context, _ string) error { return nil }
 
-func (m *mockSession) AdapterName() string {
+func (m *mockSession) AgentName() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.adapterN
+	return m.agentN
 }
 
 func (m *mockSession) SessionID() string {
@@ -83,17 +83,17 @@ func (m *mockSession) SessionID() string {
 
 func (m *mockSession) Close() error { return nil }
 
-var _ agent.Session = (*mockSession)(nil)
+var _ acp.Session = (*mockSession)(nil)
 
 // --- mock Store ---
 
 type mockStore struct {
 	mu    sync.Mutex
-	state *client.State
-	saved []*client.State
+	state *client.ProjectState
+	saved []*client.ProjectState
 }
 
-func (s *mockStore) Load() (*client.State, error) {
+func (s *mockStore) Load() (*client.ProjectState, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state == nil {
@@ -102,7 +102,7 @@ func (s *mockStore) Load() (*client.State, error) {
 	return s.state, nil
 }
 
-func (s *mockStore) Save(st *client.State) error {
+func (s *mockStore) Save(st *client.ProjectState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.saved = append(s.saved, st)
@@ -124,24 +124,24 @@ func newTestClient(mock *mockSession) *client.Client {
 // captureReplies redirects Client replies to a string slice for inspection.
 func captureReplies(c *client.Client) *[]string {
 	messages := &[]string{}
-	c.InjectIMAdapter(&captureAdapter{messages: messages})
+	c.InjectIMProvider(&captureProvider{messages: messages})
 	return messages
 }
 
-type captureAdapter struct {
+type captureProvider struct {
 	messages *[]string
 }
 
-func (a *captureAdapter) OnMessage(_ im.MessageHandler) {}
-func (a *captureAdapter) SendText(_ string, text string) error {
+func (a *captureProvider) OnMessage(_ im.MessageHandler) {}
+func (a *captureProvider) SendText(_ string, text string) error {
 	*a.messages = append(*a.messages, text)
 	return nil
 }
-func (a *captureAdapter) SendCard(_ string, _ im.Card) error { return nil }
-func (a *captureAdapter) SendReaction(_, _ string) error     { return nil }
-func (a *captureAdapter) Run(_ context.Context) error        { return nil }
+func (a *captureProvider) SendCard(_ string, _ im.Card) error { return nil }
+func (a *captureProvider) SendReaction(_, _ string) error     { return nil }
+func (a *captureProvider) Run(_ context.Context) error        { return nil }
 
-var _ im.Adapter = (*captureAdapter)(nil)
+var _ im.Provider = (*captureProvider)(nil)
 
 // testLogWriter is a goroutine-safe log output writer for capturing log output in tests.
 type testLogWriter struct {
@@ -170,7 +170,7 @@ func (w *testLogWriter) String() string {
 // --- Tests: command routing ---
 
 func TestHandleMessage_Cancel(t *testing.T) {
-	mock := &mockSession{adapterN: "codex", sessionN: "sess-1"}
+	mock := &mockSession{agentN: "codex", sessionN: "sess-1"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
@@ -197,7 +197,7 @@ func TestHandleMessage_Cancel_NoSession(t *testing.T) {
 }
 
 func TestHandleMessage_Status(t *testing.T) {
-	mock := &mockSession{adapterN: "codex", sessionN: "sess-abc"}
+	mock := &mockSession{agentN: "codex", sessionN: "sess-abc"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
@@ -208,7 +208,7 @@ func TestHandleMessage_Status(t *testing.T) {
 	}
 	reply := (*msgs)[0]
 	if !strings.Contains(reply, "codex") {
-		t.Errorf("status reply %q does not contain provider name", reply)
+		t.Errorf("status reply %q does not contain agent name", reply)
 	}
 	if !strings.Contains(reply, "sess-abc") {
 		t.Errorf("status reply %q does not contain session ID", reply)
@@ -227,8 +227,8 @@ func TestHandleMessage_Status_NoSession(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_Use_UnknownAdapter(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
+func TestHandleMessage_Use_UnknownAgent(t *testing.T) {
+	mock := &mockSession{agentN: "codex"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
@@ -240,7 +240,7 @@ func TestHandleMessage_Use_UnknownAdapter(t *testing.T) {
 }
 
 func TestHandleMessage_Use_MissingName(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
+	mock := &mockSession{agentN: "codex"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
@@ -252,7 +252,7 @@ func TestHandleMessage_Use_MissingName(t *testing.T) {
 }
 
 func TestHandleMessage_EmptyMessage(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
+	mock := &mockSession{agentN: "codex"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
@@ -267,12 +267,12 @@ func TestHandleMessage_EmptyMessage(t *testing.T) {
 
 func TestHandleMessage_Prompt_TextStreaming(t *testing.T) {
 	mock := &mockSession{
-		adapterN: "codex",
-		promptResult: func(_ string) (<-chan agent.Update, error) {
-			ch := make(chan agent.Update, 4)
-			ch <- agent.Update{Type: agent.UpdateText, Content: "hello "}
-			ch <- agent.Update{Type: agent.UpdateText, Content: "world"}
-			ch <- agent.Update{Type: agent.UpdateDone, Content: "end_turn", Done: true}
+		agentN: "codex",
+		promptResult: func(_ string) (<-chan acp.Update, error) {
+			ch := make(chan acp.Update, 4)
+			ch <- acp.Update{Type: acp.UpdateText, Content: "hello "}
+			ch <- acp.Update{Type: acp.UpdateText, Content: "world"}
+			ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
 			close(ch)
 			return ch, nil
 		},
@@ -296,22 +296,22 @@ func TestHandleMessage_Prompt_TextStreaming(t *testing.T) {
 // TestHandleMessage_Prompt_AllowsSubsequentSwitch verifies that after a prompt
 // completes, a subsequent /use can proceed immediately (promptMu is released).
 func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
-	mock := &mockSession{adapterN: "codex"}
+	mock := &mockSession{agentN: "codex"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
 	// Complete a prompt synchronously.
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
 
-	// Register a new adapter and switch to it after the prompt completes.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	// Register a new agent and switch to it after the prompt completes.
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use other"})
 
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to provider") {
+		if strings.Contains(m, "Switched to agent") {
 			found = true
 			break
 		}
@@ -335,26 +335,26 @@ func TestHandleMessage_Prompt_NoSession(t *testing.T) {
 
 // TestHandlePrompt_ConcurrentSwitch is a regression test for the prompt/switch race:
 // a slow prompt must complete correctly even when /use is issued concurrently.
-// promptMu ensures switchAdapter waits for handlePrompt before calling ag.Switch.
+// promptMu ensures switchAgent waits for handlePrompt before calling ag.Switch.
 func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 	started := make(chan struct{})
 	done := make(chan struct{})
 
 	slow := &mockSession{
-		adapterN: "slow",
+		agentN:   "slow",
 		sessionN: "sess-slow",
-		promptResult: func(_ string) (<-chan agent.Update, error) {
+		promptResult: func(_ string) (<-chan acp.Update, error) {
 			close(started) // signal that Prompt() was entered
 			<-done         // block until test unblocks us
-			ch := make(chan agent.Update, 1)
-			ch <- agent.Update{Type: agent.UpdateDone, Done: true}
+			ch := make(chan acp.Update, 1)
+			ch <- acp.Update{Type: acp.UpdateDone, Done: true}
 			close(ch)
 			return ch, nil
 		},
 	}
 	c := newTestClient(slow)
-	c.RegisterProvider("fast", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("fast", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 	msgs := captureReplies(c)
 
@@ -384,7 +384,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to provider") {
+		if strings.Contains(m, "Switched to agent") {
 			found = true
 			break
 		}
@@ -404,8 +404,8 @@ func TestJSONStore_DefaultState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if state.ActiveAdapter != "codex" {
-		t.Errorf("ActiveAdapter = %q, want codex", state.ActiveAdapter)
+	if state.ActiveAgent != "claude" {
+		t.Errorf("ActiveAgent = %q, want claude", state.ActiveAgent)
 	}
 	if state.Agents == nil {
 		t.Error("Agents should not be nil")
@@ -416,8 +416,8 @@ func TestJSONStore_SaveLoad(t *testing.T) {
 	dir := t.TempDir()
 	store := client.NewJSONStore(filepath.Join(dir, "state.json"))
 
-	original := &client.State{
-		ActiveAdapter: "codex",
+	original := &client.ProjectState{
+		ActiveAgent: "codex",
 		Agents: map[string]*client.AgentState{
 			"codex": {LastSessionID: "session-xyz-123"},
 		},
@@ -431,30 +431,27 @@ func TestJSONStore_SaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.ActiveAdapter != "codex" {
-		t.Errorf("ActiveAdapter = %q, want codex", loaded.ActiveAdapter)
+	if loaded.ActiveAgent != "codex" {
+		t.Errorf("ActiveAgent = %q, want codex", loaded.ActiveAgent)
 	}
 	if loaded.Agents["codex"] == nil || loaded.Agents["codex"].LastSessionID != "session-xyz-123" {
 		t.Errorf("Agents[codex].LastSessionID = %q, want session-xyz-123", loaded.Agents["codex"].LastSessionID)
 	}
 }
 
-func TestJSONStore_MigratesLegacyActiveAgent(t *testing.T) {
+func TestJSONStore_IgnoresFlatStateWithoutProjects(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "state.json")
 
-	legacy := map[string]any{
-		"active_agent": "codex",
+	flat := map[string]any{
+		"activeAgent": "new-codex",
 		"agents": map[string]any{
-			"codex": map[string]any{"exe_path": "/bin/codex"},
-		},
-		"acp_session_ids": map[string]string{
-			"codex": "legacy-session-id",
+			"new-codex": map[string]any{"lastSessionId": "new-sess"},
 		},
 	}
-	data, _ := json.MarshalIndent(legacy, "", "  ")
+	data, _ := json.MarshalIndent(flat, "", "  ")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write legacy file: %v", err)
+		t.Fatalf("write flat file: %v", err)
 	}
 
 	store := client.NewJSONStore(path)
@@ -463,12 +460,11 @@ func TestJSONStore_MigratesLegacyActiveAgent(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if state.ActiveAdapter != "codex" {
-		t.Errorf("ActiveAdapter = %q, want codex (migrated from active_agent)", state.ActiveAdapter)
+	if state.ActiveAgent != "claude" {
+		t.Errorf("ActiveAgent = %q, want claude", state.ActiveAgent)
 	}
-	if state.Agents["codex"] == nil || state.Agents["codex"].LastSessionID != "legacy-session-id" {
-		t.Errorf("Agents[codex].LastSessionID = %q, want legacy-session-id (migrated from acp_session_ids)",
-			state.Agents["codex"].LastSessionID)
+	if len(state.Agents) != 0 {
+		t.Errorf("Agents = %v, want empty default map", state.Agents)
 	}
 }
 
@@ -477,9 +473,9 @@ func TestJSONStore_SaveWritesNewKeys(t *testing.T) {
 	path := filepath.Join(dir, "state.json")
 	store := client.NewJSONStore(path)
 
-	state := &client.State{
-		ActiveAdapter: "myagent",
-		Agents:        map[string]*client.AgentState{"myagent": {LastSessionID: "sess-123"}},
+	state := &client.ProjectState{
+		ActiveAgent: "myagent",
+		Agents:      map[string]*client.AgentState{"myagent": {LastSessionID: "sess-123"}},
 	}
 	if err := store.Save(state); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -494,115 +490,77 @@ func TestJSONStore_SaveWritesNewKeys(t *testing.T) {
 	if _, ok := raw["projects"]; !ok {
 		t.Error("saved file missing top-level 'projects' key")
 	}
-	if _, ok := raw["active_agent"]; ok {
-		t.Error("saved file should not contain legacy 'active_agent' key")
-	}
-	if _, ok := raw["acp_session_ids"]; ok {
-		t.Error("saved file should not contain legacy 'acp_session_ids' key")
-	}
-	if _, ok := raw["activeAdapter"]; ok {
-		t.Error("saved file should not have flat 'activeAdapter' key (must be nested under 'projects')")
-	}
-}
-
-func TestJSONStore_NewKeysTakePrecedenceOverLegacy(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "state.json")
-
-	// Legacy flat format: session_ids takes precedence over acp_session_ids.
-	// Both are migrated into Agents[name].LastSessionID.
-	mixed := map[string]any{
-		"activeAdapter":   "new-codex",
-		"active_agent":    "old-codex",
-		"session_ids":     map[string]string{"new-codex": "new-sess"},
-		"acp_session_ids": map[string]string{"old-codex": "old-sess"},
-	}
-	data, _ := json.MarshalIndent(mixed, "", "  ")
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	store := client.NewJSONStore(path)
-	state, err := store.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	if state.ActiveAdapter != "new-codex" {
-		t.Errorf("ActiveAdapter = %q, want new-codex", state.ActiveAdapter)
-	}
-	// session_ids is used (takes precedence over acp_session_ids) and migrated to Agents.
-	if state.Agents["new-codex"] == nil || state.Agents["new-codex"].LastSessionID != "new-sess" {
-		t.Errorf("Agents[new-codex].LastSessionID = %q, want new-sess", state.Agents["new-codex"].LastSessionID)
+	if _, ok := raw["activeAgent"]; ok {
+		t.Error("saved file should not have flat 'activeAgent' key (must be nested under 'projects')")
 	}
 }
 
 // --- Tests: switch session persistence ---
 
-// minimalMockAdapter is an acp.Provider that connects to the mock ACP server
+// minimalMockAgent is an agent.Agent that connects to the mock ACP server
 // embedded in the test binary (activated via GO_CLIENT_ACP_MOCK=1).
-type minimalMockAdapter struct{}
+type minimalMockAgent struct{}
 
-func (a *minimalMockAdapter) Name() string { return "mock" }
-func (a *minimalMockAdapter) Connect(_ context.Context) (*acp.Conn, error) {
-	conn := acp.New(os.Args[0], []string{"GO_CLIENT_ACP_MOCK=1"})
+func (a *minimalMockAgent) Name() string { return "mock" }
+func (a *minimalMockAgent) Connect(_ context.Context) (*agent.Conn, error) {
+	conn := agent.New(os.Args[0], []string{"GO_CLIENT_ACP_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		return nil, err
 	}
 	return conn, nil
 }
-func (a *minimalMockAdapter) Close() error { return nil }
+func (a *minimalMockAgent) Close() error { return nil }
 
-var _ acp.Provider = (*minimalMockAdapter)(nil)
+var _ agent.Agent = (*minimalMockAgent)(nil)
 
-// contextRejectMockAdapter spawns the mock ACP server with GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1,
+// contextRejectMockAgent spawns the mock ACP server with GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1,
 // causing it to reject [context] bootstrap prompts with a JSON-RPC error.
 // This makes SwitchWithContext observable: the agent's drain goroutine logs a warning.
-type contextRejectMockAdapter struct{}
+type contextRejectMockAgent struct{}
 
-func (a *contextRejectMockAdapter) Name() string { return "mock-reject" }
-func (a *contextRejectMockAdapter) Connect(_ context.Context) (*acp.Conn, error) {
-	conn := acp.New(os.Args[0], []string{"GO_CLIENT_ACP_MOCK=1", "GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"})
+func (a *contextRejectMockAgent) Name() string { return "mock-reject" }
+func (a *contextRejectMockAgent) Connect(_ context.Context) (*agent.Conn, error) {
+	conn := agent.New(os.Args[0], []string{"GO_CLIENT_ACP_MOCK=1", "GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"})
 	if err := conn.Start(); err != nil {
 		return nil, err
 	}
 	return conn, nil
 }
-func (a *contextRejectMockAdapter) Close() error { return nil }
+func (a *contextRejectMockAgent) Close() error { return nil }
 
-var _ acp.Provider = (*contextRejectMockAdapter)(nil)
+var _ agent.Agent = (*contextRejectMockAgent)(nil)
 
-// failConnectAdapter is an acp.Provider whose Connect always returns an error.
-// Used to test that Start() is non-fatal when the Active provider cannot connect.
-type failConnectAdapter struct{}
+// failConnectAgent is an agent.Agent whose Connect always returns an error.
+// Used to test that Start() is non-fatal when the Active agent cannot connect.
+type failConnectAgent struct{}
 
-func (a *failConnectAdapter) Name() string { return "fail" }
-func (a *failConnectAdapter) Connect(_ context.Context) (*acp.Conn, error) {
+func (a *failConnectAgent) Name() string { return "fail" }
+func (a *failConnectAgent) Connect(_ context.Context) (*agent.Conn, error) {
 	return nil, fmt.Errorf("mock: binary not found")
 }
-func (a *failConnectAdapter) Close() error { return nil }
+func (a *failConnectAgent) Close() error { return nil }
 
-var _ acp.Provider = (*failConnectAdapter)(nil)
+var _ agent.Agent = (*failConnectAgent)(nil)
 
-// TestSwitchAdapter_PersistsOutgoingSessionID verifies that the outgoing
-// adapter's session ID is saved to state before the switch completes.
-func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
-	outgoing := &mockSession{adapterN: "codex", sessionN: "outgoing-sess-123"}
+// TestSwitchAgent_PersistsOutgoingSessionID verifies that the outgoing
+// agent's session ID is saved to state before the switch completes.
+func TestSwitchAgent_PersistsOutgoingSessionID(t *testing.T) {
+	outgoing := &mockSession{agentN: "codex", sessionN: "outgoing-sess-123"}
 	store := &mockStore{}
 	c := client.New(store, nil, "test", "/tmp")
 	c.InjectSession(outgoing)
-	c.InjectState(&client.State{
-		ActiveAdapter: "codex",
+	c.InjectState(&client.ProjectState{
+		ActiveAgent: "codex",
 		Agents: map[string]*client.AgentState{
 			"codex": {LastSessionID: "outgoing-sess-123"},
 		},
 	})
-	c.RegisterProvider("new-adapter", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-adapter"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-agent"})
 
 	if len(store.saved) == 0 {
 		t.Fatal("state was not saved after switch")
@@ -612,64 +570,64 @@ func TestSwitchAdapter_PersistsOutgoingSessionID(t *testing.T) {
 	if last.Agents["codex"] == nil || last.Agents["codex"].LastSessionID != "outgoing-sess-123" {
 		t.Errorf("Agents[codex].LastSessionID = %q, want outgoing-sess-123", last.Agents["codex"].LastSessionID)
 	}
-	if last.ActiveAdapter != "new-adapter" {
-		t.Errorf("ActiveAdapter = %q, want new-adapter", last.ActiveAdapter)
+	if last.ActiveAgent != "new-agent" {
+		t.Errorf("ActiveAgent = %q, want new-agent", last.ActiveAgent)
 	}
-	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "new-adapter") {
+	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "new-agent") {
 		t.Errorf("reply = %v, want switch confirmation", *msgs)
 	}
 }
 
-// TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch verifies that a plain
+// TestSwitchAgent_PreservesIncomingSessionIDOnCleanSwitch verifies that a plain
 // /use does NOT clear state.SessionIDs for the incoming acp. The saved ID is
 // threaded through to ag.Switch() so ensureReady can attempt session/load on
 // backends that support it.
-func TestSwitchAdapter_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
-	outgoing := &mockSession{adapterN: "codex", sessionN: "codex-sess-1"}
+func TestSwitchAgent_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
+	outgoing := &mockSession{agentN: "codex", sessionN: "codex-sess-1"}
 	store := &mockStore{}
 	c := client.New(store, nil, "test", "/tmp")
 	c.InjectSession(outgoing)
-	c.InjectState(&client.State{
-		ActiveAdapter: "codex",
+	c.InjectState(&client.ProjectState{
+		ActiveAgent: "codex",
 		Agents: map[string]*client.AgentState{
-			"codex":       {LastSessionID: "codex-sess-1"},
-			"new-adapter": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
+			"codex":     {LastSessionID: "codex-sess-1"},
+			"new-agent": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
 		},
 	})
-	c.RegisterProvider("new-adapter", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-adapter"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-agent"})
 
 	if len(store.saved) == 0 {
 		t.Fatal("state was not saved after switch")
 	}
 	last := store.saved[len(store.saved)-1]
 
-	// The incoming adapter's saved session ID must be preserved (not overwritten by "")
+	// The incoming agent's saved session ID must be preserved (not overwritten by "")
 	// so that a subsequent switch back can pass it to ag.Switch for session/load.
-	if last.Agents["new-adapter"] == nil || last.Agents["new-adapter"].LastSessionID != "old-stale-sess" {
-		t.Errorf("Agents[new-adapter].LastSessionID = %q, want old-stale-sess (preserved for session/load)",
-			last.Agents["new-adapter"].LastSessionID)
+	if last.Agents["new-agent"] == nil || last.Agents["new-agent"].LastSessionID != "old-stale-sess" {
+		t.Errorf("Agents[new-agent].LastSessionID = %q, want old-stale-sess (preserved for session/load)",
+			last.Agents["new-agent"].LastSessionID)
 	}
 }
 
-// TestSwitchAdapter_PersistsTargetSessionIDOnContinue verifies that after
-// /use <provider> --continue, the new session ID for the target adapter is saved
+// TestSwitchAgent_PersistsTargetSessionIDOnContinue verifies that after
+// /use <agent> --continue, the new session ID for the target agent is saved
 // to state immediately (not deferred to Close()), so a crash before shutdown
 // does not lose the bootstrapped session.
-func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "codex",
+func TestSwitchAgent_PersistsTargetSessionIDOnContinue(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
-	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	ctx := context.Background()
@@ -703,22 +661,22 @@ func TestSwitchAdapter_PersistsTargetSessionIDOnContinue(t *testing.T) {
 	}
 }
 
-// TestStart_UnregisteredAdapter_NonFatal verifies that Start() succeeds when the
-// persisted activeAdapter was not registered in this build, leaving session nil.
-// The user can issue /use <provider> to connect a registered adapter and recover.
-func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "unknown-adapter",
+// TestStart_UnregisteredAgent_NonFatal verifies that Start() succeeds when the
+// persisted activeAgent was not registered in this build, leaving session nil.
+// The user can issue /use <agent> to connect a registered agent and recover.
+func TestStart_UnregisteredAgent_NonFatal(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "unknown-agent",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	// Register "codex" but NOT "unknown-adapter" (simulating a removed adapter).
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	// Register "codex" but NOT "unknown-agent" (simulating a removed agent).
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
-		t.Fatalf("Start() returned error %v, want nil (unregistered adapter should be non-fatal)", err)
+		t.Fatalf("Start() returned error %v, want nil (unknown agent should be non-fatal)", err)
 	}
 
 	// With no active session, messages should get "No active session".
@@ -728,11 +686,11 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 		t.Errorf("reply = %v, want 'No active session'", *msgs)
 	}
 
-	// /use with a registered adapter should recover.
+	// /use with a registered agent should recover.
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use codex"})
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to provider") {
+		if strings.Contains(m, "Switched to agent") {
 			found = true
 			break
 		}
@@ -743,16 +701,16 @@ func TestStart_UnregisteredAdapter_NonFatal(t *testing.T) {
 }
 
 // TestStart_ConnectError_NonFatal verifies that Start() succeeds when the active
-// adapter fails to connect, leaving session nil. Subsequent messages get
+// agent fails to connect, leaving session nil. Subsequent messages get
 // "No active session" rather than causing a hard startup failure.
-// Also verifies that /use <provider> can recover by connecting a working acp.
+// Also verifies that /use <agent> can recover by connecting a working acp.
 func TestStart_ConnectError_NonFatal(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "codex",
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
-		return &failConnectAdapter{}
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &failConnectAgent{}
 	})
 
 	ctx := context.Background()
@@ -767,14 +725,14 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 		t.Errorf("reply = %v, want 'No active session'", *msgs)
 	}
 
-	// /use with a working adapter should recover and allow prompts.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	// /use with a working agent should recover and allow prompts.
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Switched to provider") {
+		if strings.Contains(m, "Switched to agent") {
 			found = true
 			break
 		}
@@ -799,15 +757,15 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 
 // TestHandleMessage_Use_Continue_BootstrapsContext verifies that /use <name> --continue
 // calls ag.Switch with SwitchWithContext, which sends a [context] bootstrap prompt to the
-// new acp. Uses a real Client.Start() so c.ag is non-nil and switchAdapter executes
+// new acp. Uses a real Client.Start() so c.ag is non-nil and switchAgent executes
 // ag.Switch(..., mode).
 func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "codex",
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	ctx := context.Background()
@@ -828,8 +786,8 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	_ = msgs
 
 	// Register "other" with a backend that rejects [context] bootstrap prompts.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
-		return &contextRejectMockAdapter{}
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+		return &contextRejectMockAgent{}
 	})
 
 	// /use other --continue: ag.Switch sends "[context] client-mock-reply" to the new acp.
@@ -848,14 +806,14 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 }
 
 // TestHandleMessage_Use_Clean_NoBootstrap verifies that plain /use (SwitchClean) does NOT
-// send a [context] bootstrap prompt to the new adapter, even when lastReply is non-empty.
+// send a [context] bootstrap prompt to the new agent, even when lastReply is non-empty.
 func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "codex",
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	ctx := context.Background()
@@ -876,8 +834,8 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 	_ = msgs
 
 	// Register "other" using a context-rejecting backend.
-	c.RegisterProvider("other", func(_ string, _ map[string]string) acp.Provider {
-		return &contextRejectMockAdapter{}
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+		return &contextRejectMockAgent{}
 	})
 
 	// Plain /use (SwitchClean): should NOT send a bootstrap prompt.
@@ -896,12 +854,12 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 // agent session ID to the store, satisfying AC-5.
 // Uses Start() to create a real agent.Agent so c.ag is non-nil.
 func TestClient_Close_PersistsSessionID(t *testing.T) {
-	store := &mockStore{state: &client.State{
-		ActiveAdapter: "codex",
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) acp.Provider {
-		return &minimalMockAdapter{}
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
 	})
 
 	ctx := context.Background()
@@ -928,7 +886,7 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 }
 
 // runClientMockAgent is a minimal ACP server for client-level tests.
-// Activated when GO_CLIENT_ACP_MOCK=1 is set (used by minimalMockAdapter).
+// Activated when GO_CLIENT_ACP_MOCK=1 is set (used by minimalMockAgent).
 func runClientMockAgent() {
 	enc := json.NewEncoder(os.Stdout)
 	scanner := bufio.NewScanner(os.Stdin)

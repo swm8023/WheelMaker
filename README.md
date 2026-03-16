@@ -1,11 +1,11 @@
-﻿# WheelMaker
-WheelMaker â€“ A Go library that turns your phone into a remote AI coding assistant. 
-Stop reinventing the wheel, start making your own. ðŸ›ž
+# WheelMaker
+WheelMaker – A Go library that turns your phone into a remote AI coding assistant. 
+Stop reinventing the wheel, start making your own. 🛞
 
 A bridge daemon that connects local AI coding CLIs (Codex, Claude, etc.) to IM platforms like Feishu, letting you remotely control your local AI assistant from your phone.
 
 ```
-Feishu (mobile) â”€â”€â–º WheelMaker â”€â”€â–º codex-acp / claude-acp â”€â”€â–º your codebase
+Feishu (mobile) ──► WheelMaker ──► claude-agent-acp / <acp-binary> ──► your codebase
 ```
 
 ## Features
@@ -15,7 +15,7 @@ Feishu (mobile) â”€â”€â–º WheelMaker â”€â”€â–º codex
 - **Console mode**: use stdin instead of Feishu for local testing
 - **Session persistence**: automatically resumes the previous AI session after restart (via `session/load`)
 - **Lazy loading**: AI subprocess starts on the first message; auto-closes after 30 min idle to save resources
-- **Multiple backends**: Adapter abstraction supports codex-acp today, extensible to any ACP-compatible CLI
+- **Multiple backends**: Agent factory abstraction supports ACP-compatible CLIs (e.g. claude-agent-acp)
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ Edit `~/.wheelmaker/config.json`:
     {
       "name": "my-project",
       "im": { "type": "console" },
-      "client": { "adapter": "codex", "path": "/path/to/your/code" }
+      "client": { "agent": "claude", "path": "/path/to/your/code" }
     }
   ]
 }
@@ -56,7 +56,7 @@ export OPENAI_API_KEY=sk-...
 go run ./cmd/wheelmaker/
 ```
 
-A prompt will appear â€” type messages directly:
+A prompt will appear — type messages directly:
 
 ```
 [my-project] > write an HTTP health check endpoint
@@ -87,12 +87,12 @@ Config file: `~/.wheelmaker/config.json`
     {
       "name": "backend",
       "im": { "type": "feishu", "appID": "cli_xxx", "appSecret": "yyy" },
-      "client": { "adapter": "codex", "path": "/home/user/backend" }
+      "client": { "agent": "claude", "path": "/home/user/backend" }
     },
     {
       "name": "frontend",
       "im": { "type": "console" },
-      "client": { "adapter": "codex", "path": "/home/user/frontend" }
+      "client": { "agent": "claude", "path": "/home/user/frontend" }
     }
   ],
   "feishu": { "verificationToken": "your_verification_token" }
@@ -105,20 +105,20 @@ Send in IM or console:
 
 | Command | Description |
 |---------|-------------|
-| `/use <provider>` | Switch AI backend (e.g. `/use codex`) |
-| `/use <provider> --continue` | Switch and carry over current context |
+| `/use <agent>` | Switch AI backend (e.g. `/use claude`) |
+| `/use <agent> --continue` | Switch and carry over current context |
 | `/cancel` | Cancel the in-progress request |
-| `/status` | Show current adapter and session ID |
+| `/status` | Show current agent and session ID |
 | anything else | Sent to the AI as a message (including text starting with `/`) |
 
 ## Architecture
 
 ```
 Hub
-â””â”€ client.Client (per project)
-     â”œâ”€ im.Adapter        â† Feishu / Console
-     â””â”€ agent.Agent       â† ACP protocol layer
-          â””â”€ provider.Provider â†’ acp.Conn â†’ codex-acp binary
+└─ client.Client (per project)
+     ├─ im.Provider       ← Feishu / Console
+     └─ acp.Agent         ← ACP protocol layer
+          └─ acp.Agent → agent.Conn → agent binary
 ```
 
 | Package | Responsibility |
@@ -126,18 +126,18 @@ Hub
 | `internal/hub/` | Reads config, manages lifecycle of all project clients |
 | `internal/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
 | `internal/agent/` | ACP session lifecycle, streaming prompts, fs/terminal/permission callbacks |
-| `internal/agent/provider/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
-| `internal/agent/provider/codex/` | Stateless connection factory â€” launches codex-acp binary |
+| `internal/agent/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
+| `internal/agent/claude/` | Stateless connection factory - launches claude-agent-acp binary |
 | `internal/im/console/` | Console IM: reads stdin; optionally logs all ACP JSON to stderr |
-| `internal/im/feishu/` | Feishu Bot IM adapter |
+| `internal/im/feishu/` | Feishu Bot IM provider |
 
 ## Development
 
 ```bash
 go test ./...
 
-# Integration tests (requires real codex-acp binary)
-go test -tags integration ./internal/agent/provider/codex/...
+# Integration tests (requires real claude-agent-acp binary)
+go test -tags integration ./internal/agent/claude/...
 
 go build ./cmd/wheelmaker/
 ```
@@ -148,7 +148,12 @@ Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatic
 
 - [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
 - [Feishu Bot Setup](docs/feishu-bot.md)
-- [codex-acp Reference](docs/codex-acp.md)
+- [claude-agent-acp Reference](https://docs.anthropic.com/en/docs/claude-code)
+
+
+
+
+
 
 
 

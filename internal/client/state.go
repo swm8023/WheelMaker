@@ -1,7 +1,7 @@
 // Package client provides the top-level coordinator for WheelMaker.
 package client
 
-import acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+import acp "github.com/swm8023/wheelmaker/internal/acp"
 
 // ConnectionConfig captures what this client declared in the initialize request.
 // Persisted for auditability: version mismatches and capability gaps are easier
@@ -14,7 +14,7 @@ type ConnectionConfig struct {
 
 // SessionState holds session-level metadata populated during session/new or session/load,
 // then kept up-to-date by session/update notifications throughout the session lifetime.
-// Only the last session per adapter is retained.
+// Only the last session per agent is retained.
 type SessionState struct {
 	// Modes is from the session/new response or current_mode_update notifications.
 	// Deprecated by configOptions but retained for backward compatibility.
@@ -35,7 +35,7 @@ type SessionState struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
-// SessionSummary is a lightweight entry in the per-adapter session list.
+// SessionSummary is a lightweight entry in the per-agent session list.
 // The list is populated lazily (e.g. when the user queries session history)
 // and is not automatically maintained on every prompt.
 type SessionSummary struct {
@@ -44,10 +44,10 @@ type SessionSummary struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
-// AgentState holds all persisted metadata for one adapter type.
+// AgentState holds all persisted metadata for one agent type.
 // Agent-level fields come from the initialize handshake; Session holds only
 // the most recently used session's state (not all sessions).
-// Sessions is a lazily-populated list of known session summaries per provider.
+// Sessions is a lazily-populated list of known session summaries per agent.
 type AgentState struct {
 	// LastSessionID is passed to session/load on the next connection attempt.
 	LastSessionID string `json:"lastSessionId,omitempty"`
@@ -62,27 +62,23 @@ type AgentState struct {
 	// Updated on every session/new, session/load, and session/update notification.
 	Session *SessionState `json:"session,omitempty"`
 
-	// Sessions is a lightweight list of known sessions for this provider.
+	// Sessions is a lightweight list of known sessions for this agent.
 	// Populated on demand (e.g. querying session history), not on every prompt.
 	Sessions []SessionSummary `json:"sessions,omitempty"`
 }
 
 // ProjectState is the persisted state for a single WheelMaker project.
 type ProjectState struct {
-	// ActiveAdapter is the name of the currently active adapter (e.g. "codex").
-	ActiveAdapter string `json:"activeAdapter,omitempty"`
+	// ActiveAgent is the name of the currently active agent (e.g. "claude").
+	ActiveAgent string `json:"activeAgent,omitempty"`
 
 	// Connection captures what this client sent in the last initialize call.
-	// Common across all adapters since WheelMaker always declares the same capabilities.
+	// Common across all agents since WheelMaker always declares the same capabilities.
 	Connection *ConnectionConfig `json:"connection,omitempty"`
 
-	// Agents maps adapter names to their persisted metadata.
+	// Agents maps agent names to their persisted metadata.
 	Agents map[string]*AgentState `json:"agents,omitempty"`
 }
-
-// State is a backward-compatibility alias for ProjectState.
-// Existing code and tests can continue to use client.State.
-type State = ProjectState
 
 // FileState is the top-level on-disk state format for multi-project setups.
 // It maps project names to their ProjectState.
@@ -93,12 +89,7 @@ type FileState struct {
 // defaultProjectState returns a ProjectState with sensible defaults.
 func defaultProjectState() *ProjectState {
 	return &ProjectState{
-		ActiveAdapter: "codex",
-		Agents:        map[string]*AgentState{},
+		ActiveAgent: "claude",
+		Agents:      map[string]*AgentState{},
 	}
-}
-
-// defaultState is an alias for defaultProjectState, kept for test compatibility.
-func defaultState() *State {
-	return defaultProjectState()
 }

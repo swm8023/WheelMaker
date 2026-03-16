@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration tests for acp.Conn against the real codex-acp binary.
-// Run with: go test -tags integration ./internal/agent/provider/... -v -timeout 60s
+// Integration tests for agent.Conn against the real codex-acp binary.
+// Run with: go test -tags integration ./internal/agent/... -v -timeout 60s
 // Requires: OPENAI_API_KEY set and codex-acp binary available.
-package acp_test
+package agent_test
 
 import (
 	"context"
@@ -12,7 +12,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -30,7 +31,7 @@ func requireCodexAcp(t *testing.T) string {
 
 func TestIntegration_Initialize(t *testing.T) {
 	exePath := requireCodexAcp(t)
-	c := acp.New(exePath, nil)
+	c := agent.New(exePath, nil)
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestIntegration_Initialize(t *testing.T) {
 
 func TestIntegration_SessionNew(t *testing.T) {
 	exePath := requireCodexAcp(t)
-	c := acp.New(exePath, nil)
+	c := agent.New(exePath, nil)
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -99,7 +100,7 @@ func TestIntegration_SessionNew(t *testing.T) {
 
 func TestIntegration_Prompt(t *testing.T) {
 	exePath := requireCodexAcp(t)
-	c := acp.New(exePath, nil)
+	c := agent.New(exePath, nil)
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestIntegration_Prompt(t *testing.T) {
 
 	// Collect updates
 	var updates []acp.SessionUpdateParams
-	cancelSub := c.Subscribe(func(n acp.Notification) {
+	cancelSub := c.Subscribe(func(n agent.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -160,7 +161,7 @@ func TestIntegration_Prompt(t *testing.T) {
 
 func TestIntegration_Cancel(t *testing.T) {
 	exePath := requireCodexAcp(t)
-	c := acp.New(exePath, nil)
+	c := agent.New(exePath, nil)
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

@@ -1,4 +1,4 @@
-package agent
+package acp
 
 // callbacks.go handles all AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client requests from the ACP subprocess.
 // These are requests (with an id) sent by the CLI binary to the client;
@@ -21,8 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // handleCallback is registered on conn as the RequestHandler in ensureReady.
@@ -51,7 +49,7 @@ func (a *Agent) handleCallback(ctx context.Context, method string, params json.R
 }
 
 func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) (any, error) {
-	var p acp.PermissionRequestParams
+	var p PermissionRequestParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("permission: unmarshal params: %w", err)
 	}
@@ -68,18 +66,18 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 	if err != nil {
 		if pCtx.Err() != nil {
 			// Prompt was cancelled ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â respond with "cancelled" outcome as required.
-			return acp.PermissionResponse{
-				Outcome: acp.PermissionResult{Outcome: "cancelled"},
+			return PermissionResponse{
+				Outcome: PermissionResult{Outcome: "cancelled"},
 			}, nil
 		}
 		return nil, err
 	}
 	// B2 fix: wrap in PermissionResponse so result JSON is {"outcome":{...}}.
-	return acp.PermissionResponse{Outcome: result}, nil
+	return PermissionResponse{Outcome: result}, nil
 }
 
 func (a *Agent) callbackFSRead(params json.RawMessage) (any, error) {
-	var p acp.FSReadTextFileParams
+	var p FSReadTextFileParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("fs/read: unmarshal params: %w", err)
 	}
@@ -110,11 +108,11 @@ func (a *Agent) callbackFSRead(params json.RawMessage) (any, error) {
 		}
 		content = strings.Join(lines[start:end], "\n")
 	}
-	return acp.FSReadTextFileResult{Content: content}, nil
+	return FSReadTextFileResult{Content: content}, nil
 }
 
 func (a *Agent) callbackFSWrite(params json.RawMessage) (any, error) {
-	var p acp.FSWriteTextFileParams
+	var p FSWriteTextFileParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("fs/write: unmarshal params: %w", err)
 	}
@@ -128,7 +126,7 @@ func (a *Agent) callbackFSWrite(params json.RawMessage) (any, error) {
 }
 
 func (a *Agent) callbackTerminalCreate(params json.RawMessage) (any, error) {
-	var p acp.TerminalCreateParams
+	var p TerminalCreateParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/create: unmarshal params: %w", err)
 	}
@@ -136,7 +134,7 @@ func (a *Agent) callbackTerminalCreate(params json.RawMessage) (any, error) {
 }
 
 func (a *Agent) callbackTerminalOutput(params json.RawMessage) (any, error) {
-	var p acp.TerminalOutputParams
+	var p TerminalOutputParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/output: unmarshal params: %w", err)
 	}
@@ -144,7 +142,7 @@ func (a *Agent) callbackTerminalOutput(params json.RawMessage) (any, error) {
 }
 
 func (a *Agent) callbackTerminalWaitForExit(params json.RawMessage) (any, error) {
-	var p acp.TerminalWaitForExitParams
+	var p TerminalWaitForExitParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/wait_for_exit: unmarshal params: %w", err)
 	}
@@ -152,7 +150,7 @@ func (a *Agent) callbackTerminalWaitForExit(params json.RawMessage) (any, error)
 }
 
 func (a *Agent) callbackTerminalKill(params json.RawMessage) (any, error) {
-	var p acp.TerminalKillParams
+	var p TerminalKillParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/kill: unmarshal params: %w", err)
 	}
@@ -160,7 +158,7 @@ func (a *Agent) callbackTerminalKill(params json.RawMessage) (any, error) {
 }
 
 func (a *Agent) callbackTerminalRelease(params json.RawMessage) (any, error) {
-	var p acp.TerminalReleaseParams
+	var p TerminalReleaseParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, fmt.Errorf("terminal/release: unmarshal params: %w", err)
 	}

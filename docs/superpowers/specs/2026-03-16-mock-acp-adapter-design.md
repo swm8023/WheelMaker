@@ -1,4 +1,4 @@
-﻿# Mock ACP Adapter Design
+# Mock ACP Adapter Design
 
 Date: 2026-03-16
 
@@ -49,6 +49,7 @@ Provide a built-in mock ACP adapter for WheelMaker to test ACP flows without ext
   - config command routing
   - error injection for 10+
 - Verify with `go test` on touched packages, then full `go test ./...`.
+
 
 
 

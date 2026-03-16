@@ -1,10 +1,10 @@
-package provider_test
+package agent_test
 
-// Unit tests for acp.Conn using a self-referential mock agent.
+// Unit tests for agent.Conn using a self-referential mock agent.
 //
 // Pattern: when GO_ACP_MOCK=1 is set, this test binary acts as the ACP
 // mock server (reading stdin, writing stdout). Otherwise it runs the tests,
-// pointing acp.New() at os.Args[0] with GO_ACP_MOCK=1 in the environment.
+// pointing agent.New() at os.Args[0] with GO_ACP_MOCK=1 in the environment.
 
 import (
 	"bufio"
@@ -17,7 +17,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
 // mockAgentBin is set in TestMain to the current test binary path.
@@ -33,9 +34,9 @@ func TestMain(m *testing.M) {
 }
 
 // newMockConn creates a Conn pointed at the mock agent subprocess.
-func newMockConn(t *testing.T) *acp.Conn {
+func newMockConn(t *testing.T) *agent.Conn {
 	t.Helper()
-	c := acp.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
+	c := agent.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestSubscribe_Notification(t *testing.T) {
 	// Collect session/update notifications.
 	var mu sync.Mutex
 	var notifications []acp.SessionUpdateParams
-	cancel := c.Subscribe(func(n acp.Notification) {
+	cancel := c.Subscribe(func(n agent.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -216,7 +217,7 @@ func TestSubscribe_Cancel(t *testing.T) {
 	c := newMockConn(t)
 
 	var count atomic.Int32
-	cancelSub := c.Subscribe(func(n acp.Notification) {
+	cancelSub := c.Subscribe(func(n agent.Notification) {
 		count.Add(1)
 	})
 	cancelSub() // unsubscribe immediately
@@ -246,7 +247,7 @@ func TestNotify(t *testing.T) {
 
 // TestClose_Idempotent verifies Close can be called multiple times safely.
 func TestClose_Idempotent(t *testing.T) {
-	c := acp.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
+	c := agent.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -260,7 +261,7 @@ func TestClose_Idempotent(t *testing.T) {
 
 // TestSend_AfterClose verifies Send returns error after the conn is closed.
 func TestSend_AfterClose(t *testing.T) {
-	c := acp.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
+	c := agent.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -356,7 +357,7 @@ func TestMultipleSubscribers(t *testing.T) {
 	cancels := make([]func(), nSubs)
 	for i := range nSubs {
 		i := i
-		cancels[i] = c.Subscribe(func(n acp.Notification) {
+		cancels[i] = c.Subscribe(func(n agent.Notification) {
 			counts[i].Add(1)
 		})
 	}

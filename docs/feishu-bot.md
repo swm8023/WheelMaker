@@ -1,47 +1,47 @@
-﻿# é£žä¹¦ Bot åè®®æ‘˜è¦
+# 飞书 Bot 协议摘要
 
-> æ•´ç†æ—¥æœŸï¼š2026-03-14
-> å®˜æ–¹æ–‡æ¡£ï¼šhttps://open.feishu.cn/document/client-docs/bot-v3/bot-overview
-> Go SDKï¼šhttps://github.com/go-lark/lark
+> 整理日期：2026-03-14
+> 官方文档：https://open.feishu.cn/document/client-docs/bot-v3/bot-overview
+> Go SDK：https://github.com/go-lark/lark
 
-## 1. Bot ç±»åž‹
+## 1. Bot 类型
 
-| ç±»åž‹ | è¯´æ˜Ž | é€‚ç”¨åœºæ™¯ |
+| 类型 | 说明 | 适用场景 |
 |------|------|----------|
-| **è‡ªå®šä¹‰åº”ç”¨ Bot** | åœ¨é£žä¹¦å¼€æ”¾å¹³å°åˆ›å»ºåº”ç”¨åŽå…³è”çš„æœºå™¨äºº | WheelMaker ä½¿ç”¨æ­¤ç±»åž‹ |
-| Webhook é€šçŸ¥ Bot | åªèƒ½å‘æ¶ˆæ¯ï¼Œæ— æ³•æŽ¥æ”¶ | å•å‘é€šçŸ¥ |
+| **自定义应用 Bot** | 在飞书开放平台创建应用后关联的机器人 | WheelMaker 使用此类型 |
+| Webhook 通知 Bot | 只能发消息，无法接收 | 单向通知 |
 
-## 2. æŽ¥æ”¶æ¶ˆæ¯çš„ä¸¤ç§æ¨¡å¼
+## 2. 接收消息的两种模式
 
-### 2.1 Webhook äº‹ä»¶è®¢é˜…ï¼ˆä¼ ç»Ÿï¼‰
+### 2.1 Webhook 事件订阅（传统）
 
-- é£žä¹¦æœåŠ¡å™¨ä¸»åŠ¨ POST äº‹ä»¶åˆ°å¼€å‘è€…é…ç½®çš„ URL
-- **éœ€è¦å…¬ç½‘å¯è®¿é—®åœ°å€**ï¼ˆæˆ– ngrok/å†…ç½‘ç©¿é€ï¼‰
-- éœ€è¦å¼€å‘è€…æœåŠ¡å™¨è¿›è¡Œç­¾åæ ¡éªŒ
+- 飞书服务器主动 POST 事件到开发者配置的 URL
+- **需要公网可访问地址**（或 ngrok/内网穿透）
+- 需要开发者服务器进行签名校验
 
-### 2.2 WebSocket é•¿è¿žæŽ¥ï¼ˆæŽ¨èï¼ŒWheelMaker é‡‡ç”¨ï¼‰
+### 2.2 WebSocket 长连接（推荐，WheelMaker 采用）
 
-- **å¼€å‘è€…ä¸»åŠ¨è¿žæŽ¥**é£žä¹¦ WebSocket ç½‘å…³
-- **æ— éœ€å…¬ç½‘ IP**ï¼Œé€‚åˆæœ¬åœ°å¼€å‘æœº
-- é£žä¹¦é€šè¿‡æ­¤ channel æŽ¨é€äº‹ä»¶
-- ä½¿ç”¨ go-lark SDK å¼€ç®±å³ç”¨
+- **开发者主动连接**飞书 WebSocket 网关
+- **无需公网 IP**，适合本地开发机
+- 飞书通过此 channel 推送事件
+- 使用 go-lark SDK 开箱即用
 
-å®˜æ–¹æ–‡æ¡£ï¼šhttps://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode
+官方文档：https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/event-subscription-guide/long-connection-mode
 
-## 3. åº”ç”¨åˆ›å»ºæ­¥éª¤
+## 3. 应用创建步骤
 
-1. è¿›å…¥ [é£žä¹¦å¼€æ”¾å¹³å°](https://open.feishu.cn/)ï¼Œåˆ›å»ºä¼ä¸šè‡ªå»ºåº”ç”¨
-2. åœ¨ã€Œæœºå™¨äººã€åŠŸèƒ½ä¸­å¯ç”¨ Bot
-3. èŽ·å– `App ID` å’Œ `App Secret`
-4. é…ç½®äº‹ä»¶è®¢é˜…ï¼šé€‰æ‹©ã€Œä½¿ç”¨é•¿è¿žæŽ¥æŽ¥æ”¶äº‹ä»¶ã€
-5. è®¢é˜…äº‹ä»¶ï¼š`im.message.receive_v1`ï¼ˆæŽ¥æ”¶æ¶ˆæ¯ï¼‰
-6. é…ç½®æƒé™ï¼š
-   - `im:message` â€” èŽ·å–æ¶ˆæ¯å†…å®¹
-   - `im:message:send_as_bot` â€” å‘é€æ¶ˆæ¯
+1. 进入 [飞书开放平台](https://open.feishu.cn/)，创建企业自建应用
+2. 在「机器人」功能中启用 Bot
+3. 获取 `App ID` 和 `App Secret`
+4. 配置事件订阅：选择「使用长连接接收事件」
+5. 订阅事件：`im.message.receive_v1`（接收消息）
+6. 配置权限：
+   - `im:message` — 获取消息内容
+   - `im:message:send_as_bot` — 发送消息
 
-## 4. æ¶ˆæ¯æ ¼å¼
+## 4. 消息格式
 
-### 4.1 æŽ¥æ”¶æ¶ˆæ¯äº‹ä»¶ï¼ˆim.message.receive_v1ï¼‰
+### 4.1 接收消息事件（im.message.receive_v1）
 
 ```json
 {
@@ -67,9 +67,9 @@
 }
 ```
 
-### 4.2 å‘é€æ¶ˆæ¯
+### 4.2 发送消息
 
-**å‘é€æ–‡æœ¬**ï¼š
+**发送文本**：
 ```
 POST https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id
 
@@ -80,91 +80,92 @@ POST https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id
 }
 ```
 
-**å‘é€å¯Œæ–‡æœ¬å¡ç‰‡**ï¼š
+**发送富文本卡片**：
 ```
 {
   "msg_type": "interactive",
-  "content": "{...é£žä¹¦äº¤äº’å¡ç‰‡ JSON...}"
+  "content": "{...飞书交互卡片 JSON...}"
 }
 ```
 
-## 5. Go SDK ä½¿ç”¨ï¼ˆgo-larkï¼‰
+## 5. Go SDK 使用（go-lark）
 
-### å®‰è£…
+### 安装
 
 ```bash
 go get github.com/go-lark/lark/v2
 ```
 
-### åˆå§‹åŒ– Bot
+### 初始化 Bot
 
 ```go
 import "github.com/go-lark/lark/v2"
 
 bot := lark.NewChatBot("<App ID>", "<App Secret>")
-// å›½é™…ç‰ˆï¼ˆLarkï¼‰ä½¿ç”¨ï¼š
+// 国际版（Lark）使用：
 // bot.SetDomain(lark.DomainLark)
 ```
 
-### WebSocket é•¿è¿žæŽ¥æŽ¥æ”¶æ¶ˆæ¯
+### WebSocket 长连接接收消息
 
 ```go
-// ä½¿ç”¨ WebSocket é•¿è¿žæŽ¥æ¨¡å¼
-// go-lark v2 æ”¯æŒé€šè¿‡ middleware æ³¨å†Œäº‹ä»¶å¤„ç†
-// å…·ä½“ WebSocket æ¨¡å¼å‚è€ƒï¼šhttps://github.com/go-lark/lark/tree/main/examples
+// 使用 WebSocket 长连接模式
+// go-lark v2 支持通过 middleware 注册事件处理
+// 具体 WebSocket 模式参考：https://github.com/go-lark/lark/tree/main/examples
 ```
 
-### å‘é€æ¶ˆæ¯
+### 发送消息
 
 ```go
-// å‘é€æ–‡æœ¬
+// 发送文本
 bot.PostText("Hello World", lark.WithChatID("oc_xxx"))
 
-// å‘é€å›¾ç‰‡/å¡ç‰‡
+// 发送图片/卡片
 bot.PostNotification(
     lark.NewMsgBuffer(lark.MsgText).Text("Hello").Build(),
 )
 ```
 
-### æ·»åŠ æ¶ˆæ¯ Reaction
+### 添加消息 Reaction
 
 ```go
 // POST /open-apis/im/v1/messages/{message_id}/reactions
-// emoji_type: "THUMBSUP", "DONE" ç­‰
+// emoji_type: "THUMBSUP", "DONE" 等
 ```
 
-## 6. æ¶ˆæ¯ç±»åž‹
+## 6. 消息类型
 
-| message_type | è¯´æ˜Ž |
+| message_type | 说明 |
 |-------------|------|
-| `text` | çº¯æ–‡æœ¬ |
-| `post` | å¯Œæ–‡æœ¬ |
-| `image` | å›¾ç‰‡ |
-| `interactive` | äº¤äº’å¡ç‰‡ |
-| `file` | æ–‡ä»¶ |
-| `audio` | è¯­éŸ³ |
+| `text` | 纯文本 |
+| `post` | 富文本 |
+| `image` | 图片 |
+| `interactive` | 交互卡片 |
+| `file` | 文件 |
+| `audio` | 语音 |
 
-## 7. WheelMaker ä¸­çš„ä½¿ç”¨æ–¹å¼
+## 7. WheelMaker 中的使用方式
 
 ```
-é£žä¹¦ç”¨æˆ·å‘æ¶ˆæ¯ â†’ WebSocket é•¿è¿žæŽ¥ â†’ go-lark äº‹ä»¶å›žè°ƒ
-â†’ im/feishu.provider.OnMessage handler
-â†’ im.Message{ChatID, MessageID, UserID, Text}
-â†’ Hub.HandleMessage()
+飞书用户发消息 → WebSocket 长连接 → go-lark 事件回调
+→ im/feishu.provider.OnMessage handler
+→ im.Message{ChatID, MessageID, UserID, Text}
+→ Hub.HandleMessage()
 ```
 
-å›žå¤æ—¶ï¼š
+回复时：
 ```
-Hub â†’ im/feishu.provider.SendText(chatID, text)
-â†’ é£žä¹¦ API POST /im/v1/messages
-â†’ é£žä¹¦ç”¨æˆ·æ”¶åˆ°æ¶ˆæ¯
+Hub → im/feishu.provider.SendText(chatID, text)
+→ 飞书 API POST /im/v1/messages
+→ 飞书用户收到消息
 ```
 
-## 8. æ³¨æ„äº‹é¡¹
+## 8. 注意事项
 
-- **æ¶ˆæ¯åŽ»é‡**ï¼šé£žä¹¦äº‹ä»¶å¯èƒ½é‡å¤æŠ•é€’ï¼Œéœ€é€šè¿‡ `event_id` åŽ»é‡
-- **At Bot**ï¼šç¾¤èŠä¸­ Bot åªå¤„ç† @ äº†è‡ªå·±çš„æ¶ˆæ¯ï¼ˆæˆ– P2P æ¶ˆæ¯ï¼‰
-- **æ¶ˆæ¯é•¿åº¦**ï¼šå•æ¡æ–‡æœ¬æ¶ˆæ¯ä¸Šé™çº¦ 30000 å­—ç¬¦ï¼Œè¶…å‡ºéœ€åˆ†æ®µå‘é€
-- **é¢‘çŽ‡é™åˆ¶**ï¼šå‘æ¶ˆæ¯ API æœ‰é¢‘çŽ‡é™åˆ¶ï¼Œæ³¨æ„æŽ§åˆ¶æµé€Ÿ
-- **Token åˆ·æ–°**ï¼š`tenant_access_token` æœ‰æ•ˆæœŸ 2 å°æ—¶ï¼ŒSDK ä¼šè‡ªåŠ¨åˆ·æ–°
+- **消息去重**：飞书事件可能重复投递，需通过 `event_id` 去重
+- **At Bot**：群聊中 Bot 只处理 @ 了自己的消息（或 P2P 消息）
+- **消息长度**：单条文本消息上限约 30000 字符，超出需分段发送
+- **频率限制**：发消息 API 有频率限制，注意控制流速
+- **Token 刷新**：`tenant_access_token` 有效期 2 小时，SDK 会自动刷新
+
 

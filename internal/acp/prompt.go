@@ -1,4 +1,4 @@
-package agent
+package acp
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
 // Prompt sends a prompt to the agent and returns a channel of streaming updates.
@@ -43,17 +43,17 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	var replyBuf strings.Builder
 
 	// Subscribe to session/update notifications for this session.
-	// The handler runs synchronously inside acp.Conn.dispatch(), which is called
+	// The handler runs synchronously inside agent.Conn.dispatch(), which is called
 	// on the readLoop goroutine. Because dispatch() is synchronous, all notifications
 	// received before a response on the wire are fully processed before conn.Send()
 	// returns ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â so under normal completion the response goroutine closes the channel
 	// only after all prior notifications are handled. Do NOT call conn.Send() from
 	// this handler (would deadlock readLoop).
-	cancelSub := conn.Subscribe(func(n acp.Notification) {
+	cancelSub := conn.Subscribe(func(n agent.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
-		var p acp.SessionUpdateParams
+		var p SessionUpdateParams
 		if err := json.Unmarshal(n.Params, &p); err != nil {
 			return
 		}
@@ -124,11 +124,11 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			promptCancel()
 		}()
 
-		var result acp.SessionPromptResult
+		var result SessionPromptResult
 		// F2 fix: Prompt is []ContentBlock per spec (was plain string).
-		err := conn.Send(ctx, "session/prompt", acp.SessionPromptParams{
+		err := conn.Send(ctx, "session/prompt", SessionPromptParams{
 			SessionID: sessID,
-			Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
+			Prompt:    []ContentBlock{{Type: "text", Text: text}},
 		}, &result)
 
 		// Always update lastReply (even if empty) to clear stale values from previous prompts.
@@ -159,13 +159,13 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 
 // sessionUpdateToUpdate converts an ACP SessionUpdate notification into an agent Update.
 // rawParams is the full notification params JSON, used to populate Raw for structured types.
-func sessionUpdateToUpdate(u acp.SessionUpdate, rawParams json.RawMessage) Update {
+func sessionUpdateToUpdate(u SessionUpdate, rawParams json.RawMessage) Update {
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		text := ""
 		// F4 fix: Content is now json.RawMessage (was *ContentBlock).
 		if u.Content != nil {
-			var cb acp.ContentBlock
+			var cb ContentBlock
 			if err := json.Unmarshal(u.Content, &cb); err == nil && cb.Type == "text" {
 				text = cb.Text
 			}
@@ -175,7 +175,7 @@ func sessionUpdateToUpdate(u acp.SessionUpdate, rawParams json.RawMessage) Updat
 	case "agent_thought_chunk":
 		text := ""
 		if u.Content != nil {
-			var cb acp.ContentBlock
+			var cb ContentBlock
 			if err := json.Unmarshal(u.Content, &cb); err == nil {
 				text = cb.Text
 			}
