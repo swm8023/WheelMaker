@@ -10,6 +10,9 @@ const (
 	UpdateThought UpdateType = "thought"
 	// UpdateToolCall is a tool invocation event (tool_call / tool_call_update).
 	UpdateToolCall UpdateType = "tool_call"
+	// UpdateToolCallCancelled is emitted by Cancel() for each tool call that was
+	// pending or in_progress at the time of cancellation. Content holds the toolCallId.
+	UpdateToolCallCancelled UpdateType = "tool_call_cancelled"
 	// UpdatePlan is a plan update from the agent.
 	UpdatePlan UpdateType = "plan"
 	// UpdateModeChange is a mode switch notification (current_mode_update).

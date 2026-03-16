@@ -2,8 +2,12 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
+
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
 // ensureReady performs the ACP handshake if the agent is not yet ready:
@@ -82,25 +86,49 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 
 	// Step 3: attempt session/load if possible.
 	if savedSessionID != "" && initResult.AgentCapabilities.LoadSession {
+		// Subscribe before sending session/load so that history-replay session/update
+		// notifications (dispatched synchronously by readLoop before the RPC response)
+		// are captured. By the time conn.Send returns, all replayed notifications are
+		// already processed by this handler.
+		var replayMu sync.Mutex
+		var replay []Update
+		cancelReplaySub := conn.Subscribe(func(n agent.Notification) {
+			if n.Method != "session/update" {
+				return
+			}
+			var p SessionUpdateParams
+			if err := json.Unmarshal(n.Params, &p); err != nil || p.SessionID != savedSessionID {
+				return
+			}
+			u := sessionUpdateToUpdate(p.Update, n.Params)
+			replayMu.Lock()
+			replay = append(replay, u)
+			replayMu.Unlock()
+		})
+
 		var loadResult SessionLoadResult
 		err := conn.Send(ctx, "session/load", SessionLoadParams{
 			SessionID:  savedSessionID,
 			CWD:        cwd,
 			MCPServers: mcpServers,
 		}, &loadResult)
+		cancelReplaySub()
+
 		if err == nil {
 			a.mu.Lock()
 			a.caps = initResult.AgentCapabilities
 			a.initMeta = newInitMeta
 			// sessionID is already set (savedSessionID)
+			a.loadHistory = replay
 			a.ready = true
 			a.initializing = false
 			a.mu.Unlock()
 			a.initCond.Broadcast()
-			log.Printf("[agent] connected: agent=%s session=%s (resumed)", a.name, savedSessionID)
+			log.Printf("[agent] connected: agent=%s session=%s (resumed, %d history updates)",
+				a.name, savedSessionID, len(replay))
 			return nil
 		}
-		// session/load failed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fall through to session/new.
+		// session/load failed — fall through to session/new.
 	}
 
 	// Step 4: create a new session.
@@ -119,7 +147,6 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	a.sessionID = newResult.SessionID
 	a.sessionMeta = SessionMeta{
 		Modes:         newResult.Modes,
-		Models:        newResult.Models,
 		ConfigOptions: newResult.ConfigOptions,
 	}
 	a.ready = true
@@ -131,11 +158,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	if newResult.Modes != nil {
 		modeID = newResult.Modes.CurrentModeID
 	}
-	modelID := ""
-	if newResult.Models != nil {
-		modelID = newResult.Models.CurrentModelID
-	}
-	log.Printf("[agent] connected: agent=%s session=%s mode=%s model=%s",
-		a.name, newResult.SessionID, modeID, modelID)
+	log.Printf("[agent] connected: agent=%s session=%s mode=%s",
+		a.name, newResult.SessionID, modeID)
 	return nil
 }
