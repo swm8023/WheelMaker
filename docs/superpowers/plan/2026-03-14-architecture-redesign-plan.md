@@ -646,7 +646,7 @@ Client.HandleMessage parses `/`-prefixed commands.
 func run() error {
     store := client.NewJSONStore(statePath)
     c := client.New(store, nil)
-    c.RegisterProvider(codex.NewAdapter(codex.Config{...}))
+    c.RegisterProvider(codex.NewProvider(codex.Config{...}))
 
     ctx, stop := signal.NotifyContext(...)
     defer stop()
@@ -700,6 +700,7 @@ with an IM adapter it calls `im.provider.Run(ctx)`.
 - `internal/client/store.go`ï¼ˆåŽŸ hub/store.goï¼Œä»…ç§»åŒ…ï¼‰
 
 --- Original Design Draft End ---
+
 
 
 

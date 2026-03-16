@@ -453,7 +453,7 @@ func run() error {
     store := client.NewJSONStore(statePath)
     // æ³¨å†Œæ‰€æœ‰å¯ç”¨ adapter
     c := client.New(store, nil)
-    c.RegisterProvider(codex.NewAdapter(codex.Config{...}))
+    c.RegisterProvider(codex.NewProvider(codex.Config{...}))
 
     ctx, stop := signal.NotifyContext(...)
     defer stop()
@@ -505,6 +505,7 @@ func run() error {
 - `internal/im/im.go`
 - `internal/tools/resolve.go`
 - `internal/client/store.go`ï¼ˆåŽŸ hub/store.goï¼Œä»…ç§»åŒ…ï¼‰
+
 
 
 

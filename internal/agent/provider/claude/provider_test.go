@@ -1,6 +1,6 @@
-//go:build integration
+﻿//go:build integration
 
-// Integration test for provider/claude: verifies that ClaudeAdapter.Connect()
+// Integration test for provider/claude: verifies that ClaudeProvider.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
 // Run with: go test -tags integration ./internal/agent/provider/claude/... -v -timeout 60s
@@ -31,12 +31,12 @@ func requireClaudeBinary(t *testing.T) {
 	}
 }
 
-// TestClaudeAdapter_Connect verifies that Connect() spawns a subprocess and
+// TestClaudeProvider_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestClaudeAdapter_Connect(t *testing.T) {
+func TestClaudeProvider_Connect(t *testing.T) {
 	requireClaudeBinary(t)
 
-	a := claude.NewAdapter(claude.Config{})
+	a := claude.NewProvider(claude.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -68,12 +68,12 @@ func TestClaudeAdapter_Connect(t *testing.T) {
 	t.Logf("connected to claude-agent-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestClaudeAdapter_ConnectMultiple verifies that Connect() is stateless:
+// TestClaudeProvider_ConnectMultiple verifies that Connect() is stateless:
 // calling it twice produces two independent connections.
-func TestClaudeAdapter_ConnectMultiple(t *testing.T) {
+func TestClaudeProvider_ConnectMultiple(t *testing.T) {
 	requireClaudeBinary(t)
 
-	a := claude.NewAdapter(claude.Config{})
+	a := claude.NewProvider(claude.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -98,9 +98,9 @@ func TestClaudeAdapter_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestClaudeAdapter_Close verifies that Close() on the adapter is a no-op.
-func TestClaudeAdapter_Close(t *testing.T) {
-	a := claude.NewAdapter(claude.Config{})
+// TestClaudeProvider_Close verifies that Close() on the MockProvider is a no-op.
+func TestClaudeProvider_Close(t *testing.T) {
+	a := claude.NewProvider(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}
@@ -108,3 +108,5 @@ func TestClaudeAdapter_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
+

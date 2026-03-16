@@ -164,7 +164,7 @@ func (h *Hub) Close() error
 - Per project:
   - Creates `im.Adapter` from config (console or feishu)
   - Creates `client.Client(store, imAdapter, projectName)`
-  - Calls `c.RegisterProvider("codex", codex.NewAdapter(...))`
+  - Calls `c.RegisterProvider("codex", codex.NewProvider(...))`
   - Calls `c.Start(ctx)` (now only loads state, no eager connect)
 
 ---
@@ -416,7 +416,7 @@ main.go
   â†’ hub.Start(ctx)
       â†’ per project: create IM adapter (console/feishu)
       â†’ per project: client.New(store, imAdapter, projectName)
-      â†’ per project: c.RegisterProvider("codex", codex.NewAdapter(...))
+      â†’ per project: c.RegisterProvider("codex", codex.NewProvider(...))
       â†’ per project: c.Start(ctx)   â† only loads state, no connect
   â†’ hub.Run(ctx)
       â†’ errgroup: per project: c.Run(ctx)
@@ -506,6 +506,7 @@ go test ./internal/hub/...
 6. `internal/hub/hub.go` â€” Hub orchestrator
 7. `cmd/wheelmaker/main.go` â€” rewrite entrypoint
 8. `config.example.json` â€” example config in project root
+
 
 
 

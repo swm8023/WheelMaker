@@ -1,4 +1,4 @@
-package mock_test
+﻿package mock_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 func newInMemoryMockConn(t *testing.T) *acp.Conn {
 	t.Helper()
-	a := mockprovider.NewAdapter()
+	a := mockprovider.NewProvider()
 	c, err := a.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -190,3 +190,4 @@ func TestInMemoryMock_ErrorInjection(t *testing.T) {
 		}
 	}
 }
+

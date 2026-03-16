@@ -1,4 +1,4 @@
-package hub
+﻿package hub
 
 import (
 	"context"
@@ -85,15 +85,15 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		c.SetDebugLogger(log.Writer())
 	}
 
-	// Register all known adapter factories so users can switch between them at runtime.
+	// Register all known provider factories so users can switch between them at runtime.
 	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
-		return codex.NewAdapter(codex.Config{})
+		return codex.NewProvider(codex.Config{})
 	})
 	c.RegisterProvider("claude", func(_ string, _ map[string]string) provider.Provider {
-		return claude.NewAdapter(claude.Config{})
+		return claude.NewProvider(claude.Config{})
 	})
 	c.RegisterProvider("mock", func(_ string, _ map[string]string) provider.Provider {
-		return mock.NewAdapter()
+		return mock.NewProvider()
 	})
 
 	if err := c.Start(ctx); err != nil {
@@ -145,3 +145,4 @@ func (h *Hub) Close() error {
 	}
 	return nil
 }
+

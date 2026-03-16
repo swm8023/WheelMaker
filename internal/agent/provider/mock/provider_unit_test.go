@@ -1,4 +1,4 @@
-package mock_test
+﻿package mock_test
 
 import (
 	"context"
@@ -9,14 +9,14 @@ import (
 )
 
 func TestMockAdapter_Name(t *testing.T) {
-	a := mockadapter.NewAdapter()
+	a := mockadapter.NewProvider()
 	if got := a.Name(); got != "mock" {
 		t.Fatalf("Name() = %q, want %q", got, "mock")
 	}
 }
 
 func TestMockAdapter_Connect(t *testing.T) {
-	a := mockadapter.NewAdapter()
+	a := mockadapter.NewProvider()
 	conn, err := a.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -35,7 +35,7 @@ func TestMockAdapter_Connect(t *testing.T) {
 }
 
 func TestMockAdapter_Close(t *testing.T) {
-	a := mockadapter.NewAdapter()
+	a := mockadapter.NewProvider()
 	if err := a.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -43,3 +43,4 @@ func TestMockAdapter_Close(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 }
+

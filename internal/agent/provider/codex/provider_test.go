@@ -1,6 +1,6 @@
-//go:build integration
+﻿//go:build integration
 
-// Integration test for provider/codex: verifies that CodexAdapter.Connect()
+// Integration test for provider/codex: verifies that CodexProvider.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
 // Run with: go test -tags integration ./internal/agent/provider/codex/... -v -timeout 60s
@@ -31,12 +31,12 @@ func requireCodexBinary(t *testing.T) {
 	}
 }
 
-// TestCodexAdapter_Connect verifies that Connect() spawns a subprocess and
+// TestCodexProvider_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestCodexAdapter_Connect(t *testing.T) {
+func TestCodexProvider_Connect(t *testing.T) {
 	requireCodexBinary(t)
 
-	a := codex.NewAdapter(codex.Config{})
+	a := codex.NewProvider(codex.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -69,12 +69,12 @@ func TestCodexAdapter_Connect(t *testing.T) {
 	t.Logf("connected to codex-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestCodexAdapter_ConnectMultiple verifies that Connect() is truly stateless:
+// TestCodexProvider_ConnectMultiple verifies that Connect() is truly stateless:
 // calling it twice produces two independent connections.
-func TestCodexAdapter_ConnectMultiple(t *testing.T) {
+func TestCodexProvider_ConnectMultiple(t *testing.T) {
 	requireCodexBinary(t)
 
-	a := codex.NewAdapter(codex.Config{})
+	a := codex.NewProvider(codex.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -100,9 +100,9 @@ func TestCodexAdapter_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestCodexAdapter_Close verifies that Close() on the adapter is a no-op.
-func TestCodexAdapter_Close(t *testing.T) {
-	a := codex.NewAdapter(codex.Config{})
+// TestCodexProvider_Close verifies that Close() on the MockProvider is a no-op.
+func TestCodexProvider_Close(t *testing.T) {
+	a := codex.NewProvider(codex.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}
@@ -111,3 +111,5 @@ func TestCodexAdapter_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
+

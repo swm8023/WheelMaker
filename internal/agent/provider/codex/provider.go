@@ -1,4 +1,4 @@
-// Package codex implements an provider.Provider for the Codex CLI via codex-acp.
+﻿// Package codex implements an provider.Provider for the Codex CLI via codex-acp.
 package codex
 
 import (
@@ -9,9 +9,9 @@ import (
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
-const adapterName = "codex"
+const providerName = "codex"
 
-// Config holds configuration for the CodexAdapter.
+// Config holds configuration for the CodexProvider.
 type Config struct {
 	// ExePath is the path to the codex-acp binary.
 	// If empty, tools.ResolveBinary("codex-acp", "") is used.
@@ -21,23 +21,23 @@ type Config struct {
 	Env map[string]string
 }
 
-// CodexAdapter is a stateless connection factory for the Codex CLI via codex-acp.
+// CodexProvider is a stateless connection factory for the Codex CLI via codex-acp.
 // Each Call to Connect() spawns a new subprocess.
-type CodexAdapter struct {
+type CodexProvider struct {
 	cfg Config
 }
 
-// NewAdapter creates a CodexAdapter with the given config.
-func NewAdapter(cfg Config) *CodexAdapter {
-	return &CodexAdapter{cfg: cfg}
+// NewProvider creates a CodexProvider with the given config.
+func NewProvider(cfg Config) *CodexProvider {
+	return &CodexProvider{cfg: cfg}
 }
 
-// Name returns the adapter's identifier.
-func (a *CodexAdapter) Name() string { return adapterName }
+// Name returns the provider's identifier.
+func (a *CodexProvider) Name() string { return providerName }
 
 // Connect starts a new codex-acp subprocess and returns an initialized *acp.Conn.
 // Conn.Start() is called internally; the caller must NOT call Start() again.
-func (a *CodexAdapter) Connect(_ context.Context) (*acp.Conn, error) {
+func (a *CodexProvider) Connect(_ context.Context) (*acp.Conn, error) {
 	exePath, err := tools.ResolveBinary("codex-acp", a.cfg.ExePath)
 	if err != nil {
 		return nil, fmt.Errorf("codex: resolve binary: %w", err)
@@ -51,8 +51,8 @@ func (a *CodexAdapter) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 
-// Close is a no-op for CodexAdapter since Connect() transfers subprocess ownership to Conn.
-func (a *CodexAdapter) Close() error { return nil }
+// Close is a no-op for CodexProvider since Connect() transfers subprocess ownership to Conn.
+func (a *CodexProvider) Close() error { return nil }
 
 // buildEnv converts a map of environment variables to "KEY=VALUE" strings.
 func buildEnv(m map[string]string) []string {
@@ -62,3 +62,6 @@ func buildEnv(m map[string]string) []string {
 	}
 	return env
 }
+
+
+
