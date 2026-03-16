@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/provider/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/codex"
 )
 
 // TestCodexAdapter_Connect_NotExecutable verifies that Connect() returns a
@@ -42,7 +42,7 @@ func TestCodexAdapter_Connect_NotExecutable(t *testing.T) {
 }
 
 // TestCodexAdapter_Connect_BinaryNotFound verifies that Connect() returns the
-// "binary not found" error path â€” i.e. tools.ResolveBinary itself fails,
+// "binary not found" error path Ã¢â‚¬â€ i.e. tools.ResolveBinary itself fails,
 // not just conn.Start(). This matches AC-4's negative test:
 // "when the binary cannot be found, Connect() returns error".
 //

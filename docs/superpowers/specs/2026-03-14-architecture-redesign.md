@@ -44,9 +44,9 @@ CLI binary             â† codex-acp / claude-acp / ...
 |------|------|------|
 | `internal/hub` | `internal/client` | WheelMaker æ˜¯ ACP Client |
 | `hub.Hub` | `client.Client` | åŒä¸Š |
-| `internal/acp/` | `internal/agent/acp/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
+| `internal/acp/` | `internal/agent/provider/acp/` | acp æ˜¯ agent å±‚å†…éƒ¨ä¼ è¾“ç»†èŠ‚ï¼Œç§»å…¥ agent å­åŒ… |
 | `acp.Client` | `acp.Conn` | ä½Žå±‚ä¼ è¾“ï¼Œåå‰¯å…¶å®ž |
-| `internal/agent/codex/` | `internal/provider/codex/` | Adapter å½’åˆ°é¡¶å±‚ adapter åŒ… |
+| `internal/agent/codex/` | `internal/agent/provider/codex/` | Adapter å½’åˆ°é¡¶å±‚ adapter åŒ… |
 | `agent.Agent`ï¼ˆinterfaceï¼‰ | `agent.Session`ï¼ˆçª„æŽ¥å£ï¼‰+ `agent.Agent`ï¼ˆconcrete structï¼‰ | Agent æ˜¯å…·ä½“æ¦‚å¿µï¼›Session æ˜¯ Client ç”¨çš„å¯æµ‹è¯•æŽ¥å£ |
 | `hub.State.ACPSessionIDs` | `State.SessionIDs` | å­—æ®µæ”¹åï¼ŒJSON tag åŒæ­¥æ›´æ–°ï¼Œ**state.json éœ€è¿ç§»** |
 
@@ -56,9 +56,9 @@ CLI binary             â† codex-acp / claude-acp / ...
 internal/
   agent/
     acp/               â† ä½Žå±‚ä¼ è¾“ï¼ˆä»Ž internal/acp/ ç§»å…¥ï¼Œæ˜¯ agent çš„å†…éƒ¨ç»†èŠ‚ï¼‰
-      conn.go          â† Conn structï¼ˆåŽŸ client.go renameï¼‰
+      connect.go          â† Conn structï¼ˆåŽŸ client.go renameï¼‰
       conn_test.go     â† åŽŸ client_test.go rename
-      types.go         â† ä¸å˜
+      protocl.go         â† ä¸å˜
 
     agent.go           â† Agent struct + Session interface + å¯¹å¤–æ–¹æ³•
     session.go         â† ACP ç”Ÿå‘½å‘¨æœŸï¼ˆinitialize / session/new / session/loadï¼‰
@@ -92,7 +92,7 @@ Package provider
 
 import (
     "context"
-    "github.com/swm8023/wheelmaker/internal/agent/acp"
+    "github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 )
 
 // Adapter æŠ½è±¡ä¸€ä¸ª ACP å…¼å®¹çš„ CLI åŽç«¯ã€‚
@@ -271,7 +271,7 @@ func (c *Client) Close() error
 ### 6.8 acp.Connï¼ˆåŽŸ acp.Clientï¼‰
 
 ```go
-// agent/acp/conn.go â€” ç§»å…¥ agent/acp/ï¼Œå¹¶é‡å‘½åï¼Œé€»è¾‘ä¸å˜
+// agent/acp/connect.go â€” ç§»å…¥ agent/acp/ï¼Œå¹¶é‡å‘½åï¼Œé€»è¾‘ä¸å˜
 package acp
 
 // Conn ç®¡ç†ä¸€ä¸ª ACP å…¼å®¹å­è¿›ç¨‹çš„å®Œæ•´ç”Ÿå‘½å‘¨æœŸï¼ˆstdio JSON-RPCï¼‰ã€‚
@@ -480,11 +480,11 @@ func run() error {
 ## 12. å˜æ›´èŒƒå›´
 
 **æ–°å»ºï¼š**
-- `internal/provider/provider.go`ï¼ˆAdapter interfaceï¼‰
-- `internal/provider/codex/provider.go`ï¼ˆCodexAdapterï¼ŒåŽŸ codex adapter + handlers åˆå¹¶ï¼Œæ—  ACP é€»è¾‘ï¼‰
-- `internal/agent/acp/conn.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
-- `internal/agent/acp/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
-- `internal/agent/acp/types.go`ï¼ˆåŽŸ `internal/acp/types.go` ç§»å…¥ï¼‰
+- `internal/agent/provider/provider.go`ï¼ˆAdapter interfaceï¼‰
+- `internal/agent/provider/codex/provider.go`ï¼ˆCodexAdapterï¼ŒåŽŸ codex adapter + handlers åˆå¹¶ï¼Œæ—  ACP é€»è¾‘ï¼‰
+- `internal/agent/provider/acp/connect.go`ï¼ˆåŽŸ `internal/acp/client.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/provider/acp/conn_test.go`ï¼ˆåŽŸ `internal/acp/client_test.go` ç§»å…¥å¹¶é‡å‘½åï¼‰
+- `internal/agent/provider/acp/protocl.go`ï¼ˆåŽŸ `internal/acp/protocl.go` ç§»å…¥ï¼‰
 - `internal/agent/session.go`ï¼ˆACP ç”Ÿå‘½å‘¨æœŸï¼‰
 - `internal/agent/prompt.go`ï¼ˆprompt æµï¼‰
 - `internal/agent/callbacks.go`ï¼ˆå…¥ç«™å›žè°ƒï¼‰
@@ -497,7 +497,7 @@ func run() error {
 - `internal/agent/agent.go`ï¼ˆåˆ é™¤ Agent interfaceï¼Œæ”¹ä¸º concrete struct + Session interfaceï¼‰
 
 **åˆ é™¤ï¼š**
-- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/acp/`ï¼‰
+- `internal/acp/`ï¼ˆæ•´ä¸ªç›®å½•ï¼Œå†…å®¹å·²ç§»å…¥ `internal/agent/provider/acp/`ï¼‰
 - `internal/agent/codex/provider.go`
 - `internal/agent/codex/handlers.go`
 
@@ -505,6 +505,9 @@ func run() error {
 - `internal/im/im.go`
 - `internal/tools/resolve.go`
 - `internal/client/store.go`ï¼ˆåŽŸ hub/store.goï¼Œä»…ç§»åŒ…ï¼‰
+
+
+
 
 
 

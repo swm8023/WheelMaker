@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 

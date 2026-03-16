@@ -1,9 +1,9 @@
-﻿//go:build integration
+//go:build integration
 
 // Integration test for provider/codex: verifies that CodexAdapter.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/provider/codex/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/provider/codex/... -v -timeout 60s
 // Requires: codex-acp binary at bin/windows_amd64/codex-acp.exe or in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
-	"github.com/swm8023/wheelmaker/internal/provider/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/codex"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -111,4 +111,3 @@ func TestCodexAdapter_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
-

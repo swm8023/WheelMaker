@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/agent/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/provider/acp"
 )
 
 // Prompt sends a prompt to the agent and returns a channel of streaming updates.
@@ -46,7 +46,7 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	// The handler runs synchronously inside acp.Conn.dispatch(), which is called
 	// on the readLoop goroutine. Because dispatch() is synchronous, all notifications
 	// received before a response on the wire are fully processed before conn.Send()
-	// returns — so under normal completion the response goroutine closes the channel
+	// returns â€” so under normal completion the response goroutine closes the channel
 	// only after all prior notifications are handled. Do NOT call conn.Send() from
 	// this handler (would deadlock readLoop).
 	cancelSub := conn.Subscribe(func(n acp.Notification) {
@@ -88,7 +88,7 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		}
 
 		// Send directly to preserve wire ordering. The channel is buffered (32);
-		// if full, readLoop pauses until the caller drains — no deadlock because
+		// if full, readLoop pauses until the caller drains â€” no deadlock because
 		// the caller drains from a separate goroutine.
 		//
 		// We need to handle two cases where updates may be closed before this

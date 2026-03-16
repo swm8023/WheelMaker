@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
+	"github.com/swm8023/wheelmaker/internal/agent/provider"
 	"github.com/swm8023/wheelmaker/internal/im"
-	"github.com/swm8023/wheelmaker/internal/provider"
 )
 
 const idleTimeout = 30 * time.Minute
@@ -23,8 +23,8 @@ type ProviderFactory func(exePath string, env map[string]string) provider.Provid
 
 // Client is the top-level coordinator for a single WheelMaker project.
 // It holds a pool of ProviderFactory functions and two references to the active Agent:
-//   - session agent.Session  â€” narrow interface for Prompt/Cancel/SetMode, mockable in tests.
-//   - ag      *agent.Agent   â€” concrete type for Switch (to avoid type assertion on mock).
+//   - session agent.Session  Ã¢â‚¬â€ narrow interface for Prompt/Cancel/SetMode, mockable in tests.
+//   - ag      *agent.Agent   Ã¢â‚¬â€ concrete type for Switch (to avoid type assertion on mock).
 //
 // Agent initialization is lazy: the first incoming message triggers ensureAgent(),
 // which connects the active adapter and creates the agent. After 30 minutes of idle
@@ -134,7 +134,7 @@ func (c *Client) Close() error {
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status) are dispatched to handleCommand;
-// everything else â€” including lines starting with "/" that are not known commands â€”
+// everything else Ã¢â‚¬â€ including lines starting with "/" that are not known commands Ã¢â‚¬â€
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
 	text := strings.TrimSpace(msg.Text)
@@ -351,8 +351,8 @@ func (c *Client) idleClose() {
 // promptMu, connects a new adapter binary, and calls ag.Switch() to replace
 // the connection. Always uses c.ag (concrete type) for Switch.
 //
-// Ordering: Cancel() â†’ promptMu.Lock() â†’ drain â†’ ag-refresh â†’ outgoing-snapshot â†’
-// Connect() â†’ ag.Switch() â†’ persist â†’ resetIdleTimer().
+// Ordering: Cancel() Ã¢â€ â€™ promptMu.Lock() Ã¢â€ â€™ drain Ã¢â€ â€™ ag-refresh Ã¢â€ â€™ outgoing-snapshot Ã¢â€ â€™
+// Connect() Ã¢â€ â€™ ag.Switch() Ã¢â€ â€™ persist Ã¢â€ â€™ resetIdleTimer().
 func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
 	c.mu.Lock()
 	fac := c.providerFacs[name]

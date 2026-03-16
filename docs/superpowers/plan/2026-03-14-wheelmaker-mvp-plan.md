@@ -79,13 +79,13 @@
 ### Step 3ï¼šACP ä¼ è¾“å±‚
 
 **ç›®æ ‡æ–‡ä»¶**ï¼š
-- `internal/acp/types.go` â€” JSON-RPC ç»“æž„ä½“
+- `internal/acp/protocl.go` â€” JSON-RPC ç»“æž„ä½“
 - `internal/acp/client.go` â€” ACPClient å®žçŽ°
 
 **å…³é”®å®žçŽ°ç‚¹**ï¼š
 
 ```go
-// types.go
+// protocl.go
 type Request struct {
     JSONRPC string `json:"jsonrpc"`
     ID      int64  `json:"id,omitempty"`
@@ -385,4 +385,5 @@ func (a *FeishuAdapter) Run(ctx context.Context) error {
     ...
 }
 ```
+
 
