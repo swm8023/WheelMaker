@@ -33,6 +33,11 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 
 	updates := make(chan Update, 32)
 
+	// Store the write end of the updates channel so Cancel() can emit tool_call_cancelled updates.
+	a.mu.Lock()
+	a.promptUpdatesCh = updates
+	a.mu.Unlock()
+
 	// promptDone is closed by the response goroutine just before it closes updates.
 	// The notification handler selects on it so it never sends to a closed channel
 	// in the ctx-cancelled case (where conn.Send returns early before the wire response).
@@ -77,6 +82,21 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		if p.Update.SessionUpdate == "session_info_update" {
 			a.setSessionInfo(p.Update.Title, p.Update.UpdatedAt)
 		}
+		// Track active tool calls for Cancel() — protocol §7.4 requires marking them cancelled.
+		if id := p.Update.ToolCallID; id != "" {
+			switch p.Update.SessionUpdate {
+			case "tool_call":
+				a.mu.Lock()
+				a.activeToolCalls[id] = struct{}{}
+				a.mu.Unlock()
+			case "tool_call_update":
+				if s := p.Update.Status; s == "completed" || s == "failed" {
+					a.mu.Lock()
+					delete(a.activeToolCalls, id)
+					a.mu.Unlock()
+				}
+			}
+		}
 
 		u := sessionUpdateToUpdate(p.Update, n.Params)
 
@@ -115,11 +135,14 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		defer cancelSub()
 		defer func() {
 			// FL2: clear per-prompt context when this goroutine exits.
+			// Also clear tool-call tracking and the updates channel write end.
 			a.mu.Lock()
 			if a.promptCancel != nil {
 				a.promptCtx = nil
 				a.promptCancel = nil
 			}
+			a.activeToolCalls = make(map[string]struct{})
+			a.promptUpdatesCh = nil
 			a.mu.Unlock()
 			promptCancel()
 		}()

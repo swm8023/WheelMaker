@@ -149,7 +149,6 @@ type SessionNewParams struct {
 type SessionNewResult struct {
 	SessionID     string         `json:"sessionId"`
 	Modes         *ModeState     `json:"modes,omitempty"`
-	Models        *ModelState    `json:"models,omitempty"`
 	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
 }
 
@@ -227,14 +226,32 @@ type PlanEntry struct {
 	Status   string `json:"status"`
 }
 
-// ContentBlock is a piece of content within a session update or prompt.
-type ContentBlock struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
+// EmbeddedResource is the nested payload for ContentBlock type "resource".
+// Text resources carry Text; blob resources carry Blob (base64-encoded).
+type EmbeddedResource struct {
+	URI      string `json:"uri"`
 	MimeType string `json:"mimeType,omitempty"`
-	Data     string `json:"data,omitempty"`
-	URI      string `json:"uri,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Text     string `json:"text,omitempty"`
+	Blob     string `json:"blob,omitempty"`
+}
+
+// ContentBlock is a piece of content within a session update or prompt.
+//
+// Type-to-field mapping:
+//   - "text"          → Text
+//   - "image"         → Data (base64), MimeType
+//   - "audio"         → Data (base64), MimeType
+//   - "resource"      → Resource (embedded resource with inline text or blob)
+//   - "resource_link" → URI, Name, MimeType, Size
+type ContentBlock struct {
+	Type     string            `json:"type"`
+	Text     string            `json:"text,omitempty"`
+	MimeType string            `json:"mimeType,omitempty"`
+	Data     string            `json:"data,omitempty"`
+	URI      string            `json:"uri,omitempty"`
+	Name     string            `json:"name,omitempty"`
+	Size     int               `json:"size,omitempty"`
+	Resource *EmbeddedResource `json:"resource,omitempty"`
 }
 
 // ToolCallRef is a reference to a tool call, used in permission requests.

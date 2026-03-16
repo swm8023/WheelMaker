@@ -97,6 +97,7 @@ type Agent struct {
 	terminals  *terminalManager
 
 	lastReply    string // most recent complete agent reply, used for SwitchWithContext
+	loadHistory  []Update   // session/update notifications replayed during session/load
 	mu           sync.Mutex
 	ready        bool       // true after initialize + session/new or session/load
 	initCond     *sync.Cond // guards single-flight initialization (associated with mu)
@@ -105,18 +106,27 @@ type Agent struct {
 	// FL2: per-prompt context; cancelled by Cancel() to unblock pending permission requests.
 	promptCtx    context.Context
 	promptCancel context.CancelFunc
+
+	// activeToolCalls tracks tool call IDs that are pending or in_progress during a prompt.
+	// Populated by the session/update notification handler; cleared when the prompt ends.
+	// Used by Cancel() to emit UpdateToolCallCancelled updates for each open tool call.
+	activeToolCalls map[string]struct{}
+	// promptUpdatesCh is the write end of the active prompt's updates channel.
+	// Set by Prompt() and cleared when the prompt goroutine exits.
+	promptUpdatesCh chan<- Update
 }
 
 // New creates an Agent using an already-started *agent.Conn.
 // The caller (Client) is responsible for calling agent.Connect() first.
 func New(name string, conn *agent.Conn, cwd string) *Agent {
 	ag := &Agent{
-		name:       name,
-		conn:       conn,
-		cwd:        cwd,
-		mcpServers: []MCPServer{},
-		permission: &AutoAllowHandler{},
-		terminals:  newTerminalManager(),
+		name:            name,
+		conn:            conn,
+		cwd:             cwd,
+		mcpServers:      []MCPServer{},
+		permission:      &AutoAllowHandler{},
+		terminals:       newTerminalManager(),
+		activeToolCalls: make(map[string]struct{}),
 	}
 	ag.initCond = sync.NewCond(&ag.mu)
 	return ag
@@ -141,17 +151,40 @@ func NewWithSessionID(name string, conn *agent.Conn, cwd string, sessionID strin
 // Cancel sends a session/cancel notification to abort the current prompt.
 // It is a no-op when the agent is not yet ready (handshake not complete),
 // because sessionID seeded by NewWithSessionID must not be used before initialize.
+//
+// Per protocol §7.4, Cancel also emits UpdateToolCallCancelled for each tool call
+// that was pending or in_progress at the time of cancellation.
 func (a *Agent) Cancel() error {
 	a.mu.Lock()
 	sessID := a.sessionID
 	conn := a.conn
 	ready := a.ready
 	cancel := a.promptCancel // FL2
+	ch := a.promptUpdatesCh
+	var cancelIDs []string
+	for id := range a.activeToolCalls {
+		cancelIDs = append(cancelIDs, id)
+	}
 	a.mu.Unlock()
 
 	// FL2: cancel per-prompt context to unblock any pending permission request.
 	if cancel != nil {
 		cancel()
+	}
+
+	// Emit cancelled updates for all open tool calls before sending session/cancel.
+	// Use recover() to handle the case where the prompt channel is already closed.
+	for _, id := range cancelIDs {
+		u := Update{Type: UpdateToolCallCancelled, Content: id}
+		func() {
+			defer func() { recover() }() //nolint:errcheck
+			if ch != nil {
+				select {
+				case ch <- u:
+				default:
+				}
+			}
+		}()
 	}
 
 	if sessID == "" || !ready {
@@ -253,6 +286,9 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mo
 	a.initializing = false // reset any in-progress initialization
 	a.sessionID = savedSessionID
 	a.lastReply = ""
+	a.loadHistory = nil
+	a.activeToolCalls = make(map[string]struct{})
+	a.promptUpdatesCh = nil
 	// Reset metadata so the new agent's initialize handshake repopulates state
 	// from scratch, preventing stale metadata from the old agent being read back.
 	a.initMeta = InitMeta{}
@@ -294,6 +330,15 @@ func (a *Agent) Meta() (InitMeta, SessionMeta) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.initMeta, a.sessionMeta
+}
+
+// LoadHistory returns the session/update notifications that were replayed during
+// session/load. Returns nil when the session was created via session/new (no history).
+// Safe to call after the first Prompt() completes initialization.
+func (a *Agent) LoadHistory() []Update {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.loadHistory
 }
 
 // setAvailableCommands updates the session metadata with the latest command list.
