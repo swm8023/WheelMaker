@@ -85,3 +85,4 @@ func executableDir() (string, error) {
 	}
 	return filepath.Dir(exe), nil
 }
+

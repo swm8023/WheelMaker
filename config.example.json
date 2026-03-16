@@ -7,7 +7,7 @@
         "debug": true
       },
       "client": {
-        "adapter": "codex",
+        "agent": "claude",
         "path": "/path/to/your/project"
       }
     },
@@ -19,7 +19,7 @@
         "appSecret": "yyy"
       },
       "client": {
-        "adapter": "codex",
+        "agent": "claude",
         "path": "/path/to/other/project"
       }
     }
@@ -28,3 +28,6 @@
     "verificationToken": "zzz"
   }
 }
+
+
+

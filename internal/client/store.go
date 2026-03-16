@@ -9,11 +9,11 @@ import (
 
 // Store persists and loads a single project's WheelMaker state.
 type Store interface {
-	Load() (*State, error)
-	Save(s *State) error
+	Load() (*ProjectState, error)
+	Save(s *ProjectState) error
 }
 
-// JSONStore persists State to a local JSON file in the multi-project FileState format.
+// JSONStore persists ProjectState to a local JSON file in the multi-project FileState format.
 // It reads and writes only the entry for its configured projectName, leaving all
 // other projects' data untouched.
 type JSONStore struct {
@@ -34,8 +34,7 @@ func NewProjectJSONStore(path, projectName string) *JSONStore {
 
 // Load reads the state file and returns the ProjectState for this store's project.
 // If the file does not exist, a default ProjectState is returned.
-// Migrates legacy flat-format state files (pre-multi-project) into the "default" project.
-func (s *JSONStore) Load() (*State, error) {
+func (s *JSONStore) Load() (*ProjectState, error) {
 	data, err := os.ReadFile(s.Path)
 	if os.IsNotExist(err) {
 		return defaultProjectState(), nil
@@ -62,53 +61,12 @@ func (s *JSONStore) Load() (*State, error) {
 		return defaultProjectState(), nil
 	}
 
-	// Legacy flat format: migrate to ProjectState.
-	// Only the "default" project inherits the migrated state; other names get empty defaults.
-	if s.projectName != "default" {
-		return defaultProjectState(), nil
-	}
-
-	ps := &ProjectState{}
-
-	if v, ok := raw["activeAdapter"]; ok {
-		_ = json.Unmarshal(v, &ps.ActiveAdapter)
-	}
-	if ps.ActiveAdapter == "" {
-		if v, ok := raw["active_agent"]; ok {
-			_ = json.Unmarshal(v, &ps.ActiveAdapter)
-		}
-	}
-
-	// Migrate legacy session ID maps into Agents[name].LastSessionID.
-	var sessionIDs map[string]string
-	if v, ok := raw["session_ids"]; ok {
-		_ = json.Unmarshal(v, &sessionIDs)
-	}
-	if len(sessionIDs) == 0 {
-		if v, ok := raw["acp_session_ids"]; ok {
-			_ = json.Unmarshal(v, &sessionIDs)
-		}
-	}
-
-	ensureStateMaps(ps)
-	for name, sid := range sessionIDs {
-		if sid == "" {
-			continue
-		}
-		if ps.Agents[name] == nil {
-			ps.Agents[name] = &AgentState{}
-		}
-		if ps.Agents[name].LastSessionID == "" {
-			ps.Agents[name].LastSessionID = sid
-		}
-	}
-
-	return ps, nil
+	return defaultProjectState(), nil
 }
 
 // Save writes the ProjectState for this store's project into the shared FileState file.
 // Other projects in the file are preserved. Always writes the new multi-project format.
-func (s *JSONStore) Save(state *State) error {
+func (s *JSONStore) Save(state *ProjectState) error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return fmt.Errorf("store mkdir: %w", err)
 	}

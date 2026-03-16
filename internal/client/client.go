@@ -9,64 +9,64 @@ import (
 	"sync"
 	"time"
 
+	acp "github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/agent/provider"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 const idleTimeout = 30 * time.Minute
 
-// ProviderFactory creates a new Adapter instance.
+// AgentFactory creates a new agent instance.
 // The exePath and env arguments are provided for compatibility; hub-registered
 // factories typically ignore them and use closure-captured config instead.
-type ProviderFactory func(exePath string, env map[string]string) provider.Provider
+type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
 // Client is the top-level coordinator for a single WheelMaker project.
-// It holds a pool of ProviderFactory functions and two references to the active Agent:
+// It holds a pool of AgentFactory functions and two references to the active Agent:
 //   - session agent.Session  ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â narrow interface for Prompt/Cancel/SetMode, mockable in tests.
 //   - ag      *agent.Agent   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
 //
 // Agent initialization is lazy: the first incoming message triggers ensureAgent(),
-// which connects the Active provider and creates the agent. After 30 minutes of idle
+// which connects the Active agent and creates the agent. After 30 minutes of idle
 // the agent is disconnected (idleClose) and re-created on the next message.
 type Client struct {
 	projectName string
 	cwd         string
 
-	providerFacs map[string]ProviderFactory
-	session      agent.Session // narrow interface, can be mock in tests
-	ag           *agent.Agent  // concrete type, used for Switch only; nil when mock injected
+	agentFacs map[string]AgentFactory
+	session   acp.Session // narrow interface, can be mock in tests
+	ag        *acp.Agent  // concrete type, used for Switch only; nil when mock injected
 
 	store Store
-	state *State
-	imRun im.Adapter // nil when no IM adapter configured
+	state *ProjectState
+	imRun im.Provider // nil when no IM provider configured
 
 	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
 
 	idleTimer *time.Timer // fires idleClose after idleTimeout of inactivity
 
 	mu       sync.Mutex
-	promptMu sync.Mutex // serializes handlePrompt and switchAdapter
+	promptMu sync.Mutex // serializes handlePrompt and switchAgent
 
-	currentPromptCh <-chan agent.Update // tracked for draining during switchAdapter
+	currentPromptCh <-chan acp.Update // tracked for draining during switchAgent
 }
 
 // New creates a Client for the given project.
 //   - store: persistent state store scoped to this project
-//   - imAdapter: IM adapter; nil means Run() returns an error (use Hub with a console project)
+//   - imProvider: IM provider; nil means Run() returns an error (use Hub with a console project)
 //   - projectName: identifier used in logs and state keys
 //   - cwd: working directory for agent sessions
-func New(store Store, imAdapter im.Adapter, projectName string, cwd string) *Client {
+func New(store Store, imProvider im.Provider, projectName string, cwd string) *Client {
 	return &Client{
-		projectName:  projectName,
-		cwd:          cwd,
-		providerFacs: make(map[string]ProviderFactory),
-		store:        store,
-		imRun:        imAdapter,
+		projectName: projectName,
+		cwd:         cwd,
+		agentFacs:   make(map[string]AgentFactory),
+		store:       store,
+		imRun:       imProvider,
 	}
 }
 
-// SetDebugLogger enables ACP JSON debug logging on every subsequent adapter connection.
+// SetDebugLogger enables ACP JSON debug logging on every subsequent agent connection.
 // Pass nil to disable. The writer is injected into acp.Conn at connect time.
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
@@ -74,10 +74,10 @@ func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Unlock()
 }
 
-// RegisterProvider registers an ProviderFactory under the given name.
-func (c *Client) RegisterProvider(name string, factory ProviderFactory) {
+// RegisterAgent registers an AgentFactory under the given name.
+func (c *Client) RegisterAgent(name string, factory AgentFactory) {
 	c.mu.Lock()
-	c.providerFacs[name] = factory
+	c.agentFacs[name] = factory
 	c.mu.Unlock()
 }
 
@@ -98,13 +98,13 @@ func (c *Client) Start(ctx context.Context) error {
 	return nil
 }
 
-// Run blocks until ctx is cancelled, delegating to the IM adapter's Run loop.
-// Returns an error if no IM adapter is configured.
+// Run blocks until ctx is cancelled, delegating to the IM provider's Run loop.
+// Returns an error if no IM provider is configured.
 func (c *Client) Run(ctx context.Context) error {
 	if c.imRun != nil {
 		return c.imRun.Run(ctx)
 	}
-	return errors.New("no IM adapter configured; add a console project to config.json")
+	return errors.New("no IM provider configured; add a console project to config.json")
 }
 
 // Close saves state and shuts down the active agent.
@@ -170,18 +170,18 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	switch cmd {
 	case "/use":
 		if args == "" {
-			c.reply(msg.ChatID, "Usage: /use <provider-name> [--continue]  (e.g. /use codex)")
+			c.reply(msg.ChatID, "Usage: /use <agent-name> [--continue]  (e.g. /use claude)")
 			return
 		}
 		parts := strings.Fields(args)
 		name := strings.ToLower(parts[0])
-		mode := agent.SwitchClean
+		mode := acp.SwitchClean
 		for _, p := range parts[1:] {
 			if p == "--continue" {
-				mode = agent.SwitchWithContext
+				mode = acp.SwitchWithContext
 			}
 		}
-		if err := c.switchAdapter(context.Background(), msg.ChatID, name, mode); err != nil {
+		if err := c.switchAgent(context.Background(), msg.ChatID, name, mode); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Switch error: %v", err))
 		}
 
@@ -207,7 +207,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, "No active session.")
 			return
 		}
-		status := fmt.Sprintf("Active provider: %s", sess.AdapterName())
+		status := fmt.Sprintf("Active agent: %s", sess.AgentName())
 		if sid := sess.SessionID(); sid != "" {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
@@ -216,7 +216,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 }
 
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
-// promptMu is held for the full duration, serializing with switchAdapter.
+// promptMu is held for the full duration, serializing with switchAgent.
 func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
@@ -225,7 +225,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Lock()
 	if err := c.ensureAgent(context.Background()); err != nil {
 		c.mu.Unlock()
-		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <provider> to connect.", err))
+		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 		return
 	}
 	sess := c.session
@@ -253,7 +253,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			c.mu.Unlock()
 			return
 		}
-		if u.Type == agent.UpdateText {
+		if u.Type == acp.UpdateText {
 			buf.WriteString(u.Content)
 		}
 		if u.Done {
@@ -274,7 +274,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	}
 }
 
-// ensureAgent connects the Active provider and creates the agent if not already running.
+// ensureAgent connects the Active agent and creates the agent if not already running.
 // Must be called while holding c.mu.
 func (c *Client) ensureAgent(ctx context.Context) error {
 	if c.session != nil {
@@ -283,13 +283,13 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	if c.state == nil {
 		return errors.New("state not loaded")
 	}
-	name := c.state.ActiveAdapter
+	name := c.state.ActiveAgent
 	if name == "" {
-		name = "codex"
+		name = "claude"
 	}
-	fac := c.providerFacs[name]
+	fac := c.agentFacs[name]
 	if fac == nil {
-		return fmt.Errorf("no provider registered for %q", name)
+		return fmt.Errorf("no agent registered for %q", name)
 	}
 	conn, err := fac("", nil).Connect(ctx)
 	if err != nil {
@@ -302,11 +302,11 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	if as := c.state.Agents[name]; as != nil {
 		savedSID = as.LastSessionID
 	}
-	var ag *agent.Agent
+	var ag *acp.Agent
 	if savedSID != "" {
-		ag = agent.NewWithSessionID(name, conn, c.cwd, savedSID)
+		ag = acp.NewWithSessionID(name, conn, c.cwd, savedSID)
 	} else {
-		ag = agent.New(name, conn, c.cwd)
+		ag = acp.New(name, conn, c.cwd)
 	}
 	c.ag = ag
 	c.session = ag
@@ -347,20 +347,20 @@ func (c *Client) idleClose() {
 	c.mu.Unlock()
 }
 
-// switchAdapter cancels any in-progress prompt, waits for it to finish via
-// promptMu, connects a new adapter binary, and calls ag.Switch() to replace
+// switchAgent cancels any in-progress prompt, waits for it to finish via
+// promptMu, connects a new agent binary, and calls ag.Switch() to replace
 // the connection. Always uses c.ag (concrete type) for Switch.
 //
 // Ordering: Cancel() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ promptMu.Lock() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ drain ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag-refresh ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ outgoing-snapshot ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢
 // Connect() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag.Switch() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ persist ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ resetIdleTimer().
-func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode agent.SwitchMode) error {
+func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.SwitchMode) error {
 	c.mu.Lock()
-	fac := c.providerFacs[name]
+	fac := c.agentFacs[name]
 	sess := c.session
 	c.mu.Unlock()
 
 	if fac == nil {
-		return fmt.Errorf("unknown provider: %q (registered: %v)", name, c.registeredAdapterNames())
+		return fmt.Errorf("unknown agent: %q (registered: %v)", name, c.registeredAgentNames())
 	}
 
 	// Step 1: signal cancel so any in-progress prompt winds down quickly,
@@ -389,10 +389,10 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 	sess = c.session
 	c.mu.Unlock()
 
-	// Outgoing adapter state is captured in step 3 below via persistAgentMeta(ag),
+	// Outgoing agent state is captured in step 3 below via persistAgentMeta(ag),
 	// before ag.Switch() resets initMeta/sessionMeta to zero.
 
-	// Step 2: read saved session ID for the incoming adapter and connect.
+	// Step 2: read saved session ID for the incoming agent and connect.
 	c.mu.Lock()
 	var savedSID string
 	if c.state != nil {
@@ -414,7 +414,7 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		newConn.SetDebugLogger(dw)
 	}
 
-	// Step 3: persist outgoing adapter's full state NOW, while ag still holds its
+	// Step 3: persist outgoing agent's full state NOW, while ag still holds its
 	// name/initMeta/sessionMeta. After ag.Switch() those fields are reset to zero.
 	// This is also where the outgoing LastSessionID is captured.
 	if ag != nil {
@@ -431,11 +431,11 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.persistAgentMeta(ag)
 	} else {
 		// No active agent (lazy init never ran or idleClose fired): create from scratch.
-		var newAg *agent.Agent
+		var newAg *acp.Agent
 		if savedSID != "" {
-			newAg = agent.NewWithSessionID(name, newConn, c.cwd, savedSID)
+			newAg = acp.NewWithSessionID(name, newConn, c.cwd, savedSID)
 		} else {
-			newAg = agent.New(name, newConn, c.cwd)
+			newAg = acp.New(name, newConn, c.cwd)
 		}
 		c.mu.Lock()
 		c.ag = newAg
@@ -443,10 +443,10 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		c.mu.Unlock()
 	}
 
-	// Update ActiveAdapter and trigger a single save for all accumulated mutations.
+	// Update ActiveAgent and trigger a single save for all accumulated mutations.
 	c.mu.Lock()
 	if c.state != nil {
-		c.state.ActiveAdapter = name
+		c.state.ActiveAgent = name
 	}
 	c.resetIdleTimer()
 	s := c.state
@@ -455,16 +455,16 @@ func (c *Client) switchAdapter(ctx context.Context, chatID, name string, mode ag
 		_ = c.store.Save(s)
 	}
 
-	c.reply(chatID, fmt.Sprintf("Switched to provider: %s", name))
+	c.reply(chatID, fmt.Sprintf("Switched to agent: %s", name))
 	return nil
 }
 
-// registeredAdapterNames returns all registered provider names (for error messages).
-func (c *Client) registeredAdapterNames() []string {
+// registeredAgentNames returns all registered agent names (for error messages).
+func (c *Client) registeredAgentNames() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.providerFacs))
-	for n := range c.providerFacs {
+	names := make([]string, 0, len(c.agentFacs))
+	for n := range c.agentFacs {
 		names = append(names, n)
 	}
 	return names
@@ -472,7 +472,7 @@ func (c *Client) registeredAdapterNames() []string {
 
 // saveAgentState updates in-memory state via persistAgentMeta and writes to disk
 // only if anything actually changed. Call this whenever agent state may have changed.
-func (c *Client) saveAgentState(ag *agent.Agent) {
+func (c *Client) saveAgentState(ag *acp.Agent) {
 	if !c.persistAgentMeta(ag) {
 		return
 	}
@@ -490,14 +490,14 @@ func (c *Client) saveAgentState(ag *agent.Agent) {
 // (e.g. right after a clean switch before ensureReady runs) never overwrites
 // previously saved data.
 // Must be called while NOT holding c.mu.
-func (c *Client) persistAgentMeta(ag *agent.Agent) bool {
+func (c *Client) persistAgentMeta(ag *acp.Agent) bool {
 	if ag == nil {
 		return false
 	}
 	initMeta, sessMeta := ag.Meta()
 	sessionID := ag.SessionID()
-	adapterName := ag.AdapterName()
-	if adapterName == "" {
+	agentName := ag.AgentName()
+	if agentName == "" {
 		return false
 	}
 
@@ -510,10 +510,10 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) bool {
 	if c.state.Agents == nil {
 		c.state.Agents = map[string]*AgentState{}
 	}
-	as := c.state.Agents[adapterName]
+	as := c.state.Agents[agentName]
 	if as == nil {
 		as = &AgentState{}
-		c.state.Agents[adapterName] = as
+		c.state.Agents[agentName] = as
 	}
 
 	changed := false
@@ -530,7 +530,7 @@ func (c *Client) persistAgentMeta(ag *agent.Agent) bool {
 		as.AgentCapabilities = initMeta.AgentCapabilities
 		as.AgentInfo = initMeta.AgentInfo
 		as.AuthMethods = initMeta.AuthMethods
-		// Client-side connection params are the same for all adapters.
+		// Client-side connection params are the same for all agents.
 		if c.state.Connection == nil {
 			c.state.Connection = &ConnectionConfig{}
 		}

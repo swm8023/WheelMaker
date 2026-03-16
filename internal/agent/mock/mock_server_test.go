@@ -1,4 +1,4 @@
-﻿package mock_test
+package mock_test
 
 import (
 	"context"
@@ -8,13 +8,14 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
-	mockprovider "github.com/swm8023/wheelmaker/internal/agent/provider/mock"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
+	mockagent "github.com/swm8023/wheelmaker/internal/agent/mock"
 )
 
-func newInMemoryMockConn(t *testing.T) *acp.Conn {
+func newInMemoryMockConn(t *testing.T) *agent.Conn {
 	t.Helper()
-	a := mockprovider.NewProvider()
+	a := mockagent.NewAgent()
 	c, err := a.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -42,7 +43,7 @@ func TestInMemoryMock_PromptCase1_TextAndMetaUpdates(t *testing.T) {
 
 	var mu sync.Mutex
 	seen := map[string]bool{}
-	cancel := c.Subscribe(func(n acp.Notification) {
+	cancel := c.Subscribe(func(n agent.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -90,7 +91,7 @@ func TestInMemoryMock_GlobalConfigCommand(t *testing.T) {
 	}
 
 	var gotConfigUpdate bool
-	cancel := c.Subscribe(func(n acp.Notification) {
+	cancel := c.Subscribe(func(n agent.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -190,4 +191,3 @@ func TestInMemoryMock_ErrorInjection(t *testing.T) {
 		}
 	}
 }
-

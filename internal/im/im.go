@@ -1,4 +1,4 @@
-// Package im defines the interface for instant messaging platform adapters.
+// Package im defines the interface for instant messaging platform providers.
 package im
 
 import "context"
@@ -17,8 +17,8 @@ type Card map[string]any
 // MessageHandler is a callback invoked when a message is received.
 type MessageHandler func(Message)
 
-// Adapter abstracts an IM platform for sending and receiving messages.
-type Adapter interface {
+// Provider abstracts an IM platform for sending and receiving messages.
+type Provider interface {
 	// OnMessage registers the handler to be called for each received message.
 	OnMessage(handler MessageHandler)
 

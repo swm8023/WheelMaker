@@ -1,9 +1,9 @@
-﻿//go:build integration
+//go:build integration
 
-// Integration test for provider/claude: verifies that ClaudeProvider.Connect()
+// Integration test for agent/claude: verifies that ClaudeAgent.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/provider/claude/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/agent/claude/... -v -timeout 60s
 // Requires: claude-agent-acp binary at bin/windows_amd64/claude-agent-acp.exe or in PATH,
 //
 //	and ANTHROPIC_API_KEY set in the environment.
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
-	"github.com/swm8023/wheelmaker/internal/agent/provider/claude"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/claude"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -31,12 +31,12 @@ func requireClaudeBinary(t *testing.T) {
 	}
 }
 
-// TestClaudeProvider_Connect verifies that Connect() spawns a subprocess and
+// TestClaudeAgent_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestClaudeProvider_Connect(t *testing.T) {
+func TestClaudeAgent_Connect(t *testing.T) {
 	requireClaudeBinary(t)
 
-	a := claude.NewProvider(claude.Config{})
+	a := claude.NewAgent(claude.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -68,12 +68,12 @@ func TestClaudeProvider_Connect(t *testing.T) {
 	t.Logf("connected to claude-agent-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestClaudeProvider_ConnectMultiple verifies that Connect() is stateless:
+// TestClaudeAgent_ConnectMultiple verifies that Connect() is stateless:
 // calling it twice produces two independent connections.
-func TestClaudeProvider_ConnectMultiple(t *testing.T) {
+func TestClaudeAgent_ConnectMultiple(t *testing.T) {
 	requireClaudeBinary(t)
 
-	a := claude.NewProvider(claude.Config{})
+	a := claude.NewAgent(claude.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -98,9 +98,9 @@ func TestClaudeProvider_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestClaudeProvider_Close verifies that Close() on the MockProvider is a no-op.
-func TestClaudeProvider_Close(t *testing.T) {
-	a := claude.NewProvider(claude.Config{})
+// TestClaudeAgent_Close verifies that Close() on the MockAgent is a no-op.
+func TestClaudeAgent_Close(t *testing.T) {
+	a := claude.NewAgent(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}
@@ -108,5 +108,3 @@ func TestClaudeProvider_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
-
-

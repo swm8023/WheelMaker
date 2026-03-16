@@ -1,11 +1,9 @@
-package agent
+package acp
 
 import (
 	"context"
 	"fmt"
 	"log"
-
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // ensureReady performs the ACP handshake if the agent is not yet ready:
@@ -52,18 +50,18 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	conn.OnRequest(a.handleCallback)
 
 	// Step 2: initialize handshake.
-	clientCaps := acp.ClientCapabilities{
-		FS: &acp.FSCapabilities{
+	clientCaps := ClientCapabilities{
+		FS: &FSCapabilities{
 			ReadTextFile:  true,
 			WriteTextFile: true,
 		},
 		Terminal: true,
 	}
-	clientInfo := &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
+	clientInfo := &AgentInfo{Name: "wheelmaker", Version: "0.1"}
 	const clientProtocolVersion = 1 // B3 fix: integer per spec (was string "0.1")
 
-	var initResult acp.InitializeResult
-	if err := conn.Send(ctx, "initialize", acp.InitializeParams{
+	var initResult InitializeResult
+	if err := conn.Send(ctx, "initialize", InitializeParams{
 		ProtocolVersion:    clientProtocolVersion,
 		ClientCapabilities: clientCaps,
 		ClientInfo:         clientInfo,
@@ -84,8 +82,8 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 
 	// Step 3: attempt session/load if possible.
 	if savedSessionID != "" && initResult.AgentCapabilities.LoadSession {
-		var loadResult acp.SessionLoadResult
-		err := conn.Send(ctx, "session/load", acp.SessionLoadParams{
+		var loadResult SessionLoadResult
+		err := conn.Send(ctx, "session/load", SessionLoadParams{
 			SessionID:  savedSessionID,
 			CWD:        cwd,
 			MCPServers: mcpServers,
@@ -99,15 +97,15 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 			a.initializing = false
 			a.mu.Unlock()
 			a.initCond.Broadcast()
-			log.Printf("[agent] connected: adapter=%s session=%s (resumed)", a.name, savedSessionID)
+			log.Printf("[agent] connected: agent=%s session=%s (resumed)", a.name, savedSessionID)
 			return nil
 		}
 		// session/load failed ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fall through to session/new.
 	}
 
 	// Step 4: create a new session.
-	var newResult acp.SessionNewResult
-	if err := conn.Send(ctx, "session/new", acp.SessionNewParams{
+	var newResult SessionNewResult
+	if err := conn.Send(ctx, "session/new", SessionNewParams{
 		CWD:        cwd,
 		MCPServers: mcpServers,
 	}, &newResult); err != nil {
@@ -137,7 +135,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	if newResult.Models != nil {
 		modelID = newResult.Models.CurrentModelID
 	}
-	log.Printf("[agent] connected: adapter=%s session=%s mode=%s model=%s",
+	log.Printf("[agent] connected: agent=%s session=%s mode=%s model=%s",
 		a.name, newResult.SessionID, modeID, modelID)
 	return nil
 }

@@ -27,10 +27,10 @@ type IMConfig struct {
 	Debug     bool   `json:"debug,omitempty"`
 }
 
-// ClientConf describes the agent side for a project.
+// ClientConf describes the AI agent side for a project.
 type ClientConf struct {
-	Adapter string `json:"adapter"`
-	Path    string `json:"path"`
+	Agent string `json:"agent,omitempty"`
+	Path  string `json:"path"`
 }
 
 // FeishuConfig holds shared Feishu settings used across all feishu-type projects.

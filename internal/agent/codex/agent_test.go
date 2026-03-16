@@ -1,9 +1,9 @@
-﻿//go:build integration
+//go:build integration
 
-// Integration test for provider/codex: verifies that CodexProvider.Connect()
+// Integration test for agent/codex: verifies that CodexAgent.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/provider/codex/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/agent/codex/... -v -timeout 60s
 // Requires: codex-acp binary at bin/windows_amd64/codex-acp.exe or in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.
@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
-	"github.com/swm8023/wheelmaker/internal/agent/provider/codex"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/agent/codex"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -31,12 +31,12 @@ func requireCodexBinary(t *testing.T) {
 	}
 }
 
-// TestCodexProvider_Connect verifies that Connect() spawns a subprocess and
+// TestCodexAgent_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestCodexProvider_Connect(t *testing.T) {
+func TestCodexAgent_Connect(t *testing.T) {
 	requireCodexBinary(t)
 
-	a := codex.NewProvider(codex.Config{})
+	a := codex.NewAgent(codex.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -69,12 +69,12 @@ func TestCodexProvider_Connect(t *testing.T) {
 	t.Logf("connected to codex-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestCodexProvider_ConnectMultiple verifies that Connect() is truly stateless:
+// TestCodexAgent_ConnectMultiple verifies that Connect() is truly stateless:
 // calling it twice produces two independent connections.
-func TestCodexProvider_ConnectMultiple(t *testing.T) {
+func TestCodexAgent_ConnectMultiple(t *testing.T) {
 	requireCodexBinary(t)
 
-	a := codex.NewProvider(codex.Config{})
+	a := codex.NewAgent(codex.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -100,9 +100,9 @@ func TestCodexProvider_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestCodexProvider_Close verifies that Close() on the MockProvider is a no-op.
-func TestCodexProvider_Close(t *testing.T) {
-	a := codex.NewProvider(codex.Config{})
+// TestCodexAgent_Close verifies that Close() on the MockAgent is a no-op.
+func TestCodexAgent_Close(t *testing.T) {
+	a := codex.NewAgent(codex.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}
@@ -111,5 +111,3 @@ func TestCodexProvider_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
-
-

@@ -1,23 +1,21 @@
-package agent
+package acp
 
 import (
 	"context"
-
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // PermissionHandler decides how to respond to the agent's permission requests.
 // MVP: AutoAllowHandler always selects allow_once.
 // Phase 2: IMPermissionHandler routes to IM for user confirmation.
 type PermissionHandler interface {
-	RequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error)
+	RequestPermission(ctx context.Context, params PermissionRequestParams) (PermissionResult, error)
 }
 
 // AutoAllowHandler is a stateless PermissionHandler that auto-selects allow_once.
 type AutoAllowHandler struct{}
 
 // RequestPermission selects the allow_once option, or the first available option.
-func (h *AutoAllowHandler) RequestPermission(_ context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+func (h *AutoAllowHandler) RequestPermission(_ context.Context, params PermissionRequestParams) (PermissionResult, error) {
 	optionID := ""
 	for _, opt := range params.Options {
 		// B1 fix: field is OptionID (json:"optionId"), was ID (json:"id").
@@ -30,7 +28,7 @@ func (h *AutoAllowHandler) RequestPermission(_ context.Context, params acp.Permi
 	if optionID == "" && len(params.Options) > 0 {
 		optionID = params.Options[0].OptionID
 	}
-	return acp.PermissionResult{
+	return PermissionResult{
 		Outcome:  "selected",
 		OptionID: optionID,
 	}, nil

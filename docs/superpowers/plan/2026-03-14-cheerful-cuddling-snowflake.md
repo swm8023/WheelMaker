@@ -1,8 +1,8 @@
-﻿# WheelMaker Iteration 2 â€” Multi-Project Hub
+# WheelMaker Iteration 2 — Multi-Project Hub
 
 ## Context
 
-After the 2026-03-14 architecture redesign (hubâ†’client rename, adapter/agent layering), the first working version was reviewed and produced 6 improvement items:
+After the 2026-03-14 architecture redesign (hub→client rename, adapter/agent layering), the first working version was reviewed and produced 6 improvement items:
 
 1. config.json with project concept (name, im config, client config)
 2. Hub managing multiple projects simultaneously
@@ -37,9 +37,9 @@ Use **Hub as a new top-level package** (`internal/hub/`). Each project gets its 
 |------|--------|
 | `internal/client/client.go` | Lazy agent init, idle timer, command dispatch fix, accept debug writer |
 | `internal/client/state.go` | State keyed by project name: `map[string]*ProjectState` |
-| `internal/client/store.go` | Migration: old flat state â†’ `projects["default"]` |
+| `internal/client/store.go` | Migration: old flat state → `projects["default"]` |
 | `internal/agent/provider/connect.go` | Optional debug `io.Writer` for all JSON in/out |
-| `cmd/wheelmaker/main.go` | Rewrite: load config â†’ create Hub â†’ Start â†’ Run |
+| `cmd/wheelmaker/main.go` | Rewrite: load config → create Hub → Start → Run |
 
 ### Unchanged
 
@@ -201,7 +201,7 @@ func (c *ConsoleIM) Run(ctx context.Context) error        // stdin read loop
 
 ---
 
-## 4. internal/agent/provider/connect.go â€” debug logging
+## 4. internal/agent/provider/connect.go — debug logging
 
 ```go
 // Add to Conn struct:
@@ -211,15 +211,15 @@ debugLog io.Writer  // nil = no logging; set to os.Stderr for debug mode
 func (c *Conn) SetDebugLogger(w io.Writer)
 
 // In read loop and Send():
-// if c.debugLog != nil { fmt.Fprintf(c.debugLog, "â†’ %s\n", rawJSON) }
-// if c.debugLog != nil { fmt.Fprintf(c.debugLog, "â† %s\n", rawJSON) }
+// if c.debugLog != nil { fmt.Fprintf(c.debugLog, "→ %s\n", rawJSON) }
+// if c.debugLog != nil { fmt.Fprintf(c.debugLog, "← %s\n", rawJSON) }
 ```
 
 The debug writer is injected by `client.Client` after `provider.Connect()` returns the `*acp.Conn`, using the debug flag from the console IM config.
 
 ---
 
-## 5. internal/client/client.go â€” changes
+## 5. internal/client/client.go — changes
 
 ### 5a. Constructor signature change
 
@@ -231,7 +231,7 @@ func New(store Store, im im.Adapter, projectName string, cwd string) *Client
 ```
 
 **Test impact**: `client_test.go` and `export_test.go` must be updated:
-- All `client.New(store, nil)` â†’ `client.New(store, nil, "test", "/tmp")`
+- All `client.New(store, nil)` → `client.New(store, nil, "test", "/tmp")`
 - `export_test.go` helper functions (InjectSession, InjectState, InjectIMAdapter) updated to match new struct fields
 - No semantic change to test logic; purely mechanical signature updates
 
@@ -240,7 +240,7 @@ func New(store Store, im im.Adapter, projectName string, cwd string) *Client
 **Remove** the eager `provider.Connect()` call from `Start()`.
 `Start()` now only calls `loadState()`.
 
-**Also remove** the old stdin loop from `Run()` â€” this moves entirely to `internal/im/console/console.go`. `Run()` with a non-nil `imRun` calls `imRun.Run(ctx)` (unchanged); with nil IM, it now returns an error ("no IM adapter configured, add a console project to config.json").
+**Also remove** the old stdin loop from `Run()` — this moves entirely to `internal/im/console/console.go`. `Run()` with a non-nil `imRun` calls `imRun.Run(ctx)` (unchanged); with nil IM, it now returns an error ("no IM adapter configured, add a console project to config.json").
 
 Add `ensureAgent(ctx context.Context) error` (private):
 ```
@@ -278,7 +278,7 @@ func (c *Client) resetIdleTimer() {
 }
 
 func (c *Client) idleClose() {
-    // Fired from timer goroutine â€” must acquire promptMu first to prevent
+    // Fired from timer goroutine — must acquire promptMu first to prevent
     // closing agent mid-prompt, then mu for state/session cleanup.
     c.promptMu.Lock()
     defer c.promptMu.Unlock()
@@ -295,7 +295,7 @@ func (c *Client) idleClose() {
 ```
 
 `resetIdleTimer()` is called:
-- In `ensureAgent()` after connect (under mu lock â€” safe, AfterFunc goroutine not yet running)
+- In `ensureAgent()` after connect (under mu lock — safe, AfterFunc goroutine not yet running)
 - In `handlePrompt()` before/after prompt send (resets the 30-min countdown)
 - In `switchAdapter()` after successful connect
 
@@ -310,7 +310,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
     case "/use", "/cancel", "/status":
         return parts[0], strings.Join(parts[1:], " "), true
     }
-    return  // not a known command â†’ ok=false â†’ treat as message
+    return  // not a known command → ok=false → treat as message
 }
 ```
 
@@ -318,7 +318,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 
 ---
 
-## 6. internal/client/state.go â€” multi-project state
+## 6. internal/client/state.go — multi-project state
 
 ```go
 // New shape (top-level state file):
@@ -334,19 +334,19 @@ type ProjectState struct {
 
 `client.Client` only reads/writes its own `projectName` entry in `FileState.Projects`.
 
-**Exported type `State`** remains as a type alias or is renamed to `ProjectState` â€” the exported test helper `InjectState` must be updated to accept `*ProjectState`.
+**Exported type `State`** remains as a type alias or is renamed to `ProjectState` — the exported test helper `InjectState` must be updated to accept `*ProjectState`.
 
 ### Migration (store.go)
 
 ```
-Load() â€” detection logic:
+Load() — detection logic:
   raw = readFile() as map[string]json.RawMessage
-  if "projects" key present â†’ new format, unmarshal to FileState
-  else if "activeAdapter" or "active_agent" key present â†’ old flat state, migrate:
+  if "projects" key present → new format, unmarshal to FileState
+  else if "activeAdapter" or "active_agent" key present → old flat state, migrate:
       ps = ProjectState{}
       ps.ActiveAdapter = raw["activeAdapter"] or raw["active_agent"]
       ps.SessionIDs    = raw["session_ids"] or raw["acp_session_ids"]
-      // Note: AdapterConfig (exePath, env) is no longer stored in state â€”
+      // Note: AdapterConfig (exePath, env) is no longer stored in state —
       // adapter binary path is auto-resolved; per-project config is in config.json
       FileState.Projects["default"] = &ps
 
@@ -357,7 +357,7 @@ Save() always writes the new FileState format (never writes old keys).
 
 ---
 
-## 7. cmd/wheelmaker/main.go â€” rewrite
+## 7. cmd/wheelmaker/main.go — rewrite
 
 ```go
 func run() error {
@@ -382,7 +382,7 @@ func run() error {
 }
 ```
 
-**Hub.Run() error handling**: use `errgroup` but with project-level error isolation â€” each project goroutine logs errors and continues; only a ctx cancellation (Ctrl-C) or all-projects-failed terminates Hub.Run(). Individual project errors are logged to stderr with project name prefix.
+**Hub.Run() error handling**: use `errgroup` but with project-level error isolation — each project goroutine logs errors and continues; only a ctx cancellation (Ctrl-C) or all-projects-failed terminates Hub.Run(). Individual project errors are logged to stderr with project name prefix.
 
 **Hub.Close()**: called by `defer` in main after `Run()` returns (from context cancellation). Iterates all clients and calls `c.Close()`.
 
@@ -411,21 +411,21 @@ MessageID: fmt.Sprintf("console-%d", time.Now().UnixNano())
 
 ```
 main.go
-  â†’ hub.LoadConfig(~/.wheelmaker/config.json)
-  â†’ hub.New(cfg, store)
-  â†’ hub.Start(ctx)
-      â†’ per project: create IM adapter (console/feishu)
-      â†’ per project: client.New(store, imAdapter, projectName)
-      â†’ per project: c.RegisterProvider("codex", codex.NewProvider(...))
-      â†’ per project: c.Start(ctx)   â† only loads state, no connect
-  â†’ hub.Run(ctx)
-      â†’ errgroup: per project: c.Run(ctx)
-          â†’ console IM: reads stdin, dispatches messages
-          â†’ feishu IM: webhook/polling loop
-          â†’ c.HandleMessage(msg)
-              â†’ ensureAgent() if no active session  â† lazy
-              â†’ resetIdleTimer()
-              â†’ handleCommand() or handlePrompt()
+  → hub.LoadConfig(~/.wheelmaker/config.json)
+  → hub.New(cfg, store)
+  → hub.Start(ctx)
+      → per project: create IM adapter (console/feishu)
+      → per project: client.New(store, imAdapter, projectName)
+      → per project: c.RegisterProvider("codex", codex.NewProvider(...))
+      → per project: c.Start(ctx)   ← only loads state, no connect
+  → hub.Run(ctx)
+      → errgroup: per project: c.Run(ctx)
+          → console IM: reads stdin, dispatches messages
+          → feishu IM: webhook/polling loop
+          → c.HandleMessage(msg)
+              → ensureAgent() if no active session  ← lazy
+              → resetIdleTimer()
+              → handleCommand() or handlePrompt()
 ```
 
 ---
@@ -455,7 +455,7 @@ main.go
 # 1. Build
 go build ./cmd/wheelmaker/
 
-# 2. No config â†’ clear error message
+# 2. No config → clear error message
 wheelmaker
 # Expected: "cannot load config.json at ~/.wheelmaker/config.json: ..."
 
@@ -473,20 +473,20 @@ cat > ~/.wheelmaker/config.json << 'EOF'
 EOF
 wheelmaker
 # Expected: "[test] > " prompt appears
-# Type: hello world   â†’ agent responds
-# Type: /status       â†’ shows adapter + session ID
-# Type: /cancel       â†’ cancels in-flight prompt
-# Type: /foo bar      â†’ treated as message (not command error)
-# Type: // some code  â†’ treated as message
+# Type: hello world   → agent responds
+# Type: /status       → shows adapter + session ID
+# Type: /cancel       → cancels in-flight prompt
+# Type: /foo bar      → treated as message (not command error)
+# Type: // some code  → treated as message
 
 # 4. Idle timeout (can shorten to 5s for test)
-# Send a message, wait 30m â†’ agent closes; send another â†’ session/load restores
+# Send a message, wait 30m → agent closes; send another → session/load restores
 
 # 5. Debug mode
-# With debug: true â†’ stderr shows all ACP JSON {"jsonrpc":"2.0",...}
+# With debug: true → stderr shows all ACP JSON {"jsonrpc":"2.0",...}
 
 # 6. Multi-project (feishu + console together)
-# Start with 2 projects â†’ both start, console reads stdin, feishu awaits webhook
+# Start with 2 projects → both start, console reads stdin, feishu awaits webhook
 
 # 7. Run existing tests
 go test ./internal/client/...
@@ -498,14 +498,15 @@ go test ./internal/hub/...
 
 ## Implementation Order
 
-1. `internal/hub/config.go` â€” Config types + LoadConfig()
-2. `internal/agent/provider/connect.go` â€” add SetDebugLogger()
-3. `internal/im/console/console.go` â€” Console IM adapter
-4. `internal/client/state.go` + `store.go` â€” multi-project state + migration
-5. `internal/client/client.go` â€” lazy init + idle timer + command fix
-6. `internal/hub/hub.go` â€” Hub orchestrator
-7. `cmd/wheelmaker/main.go` â€” rewrite entrypoint
-8. `config.example.json` â€” example config in project root
+1. `internal/hub/config.go` — Config types + LoadConfig()
+2. `internal/agent/provider/connect.go` — add SetDebugLogger()
+3. `internal/im/console/console.go` — Console IM adapter
+4. `internal/client/state.go` + `store.go` — multi-project state + migration
+5. `internal/client/client.go` — lazy init + idle timer + command fix
+6. `internal/hub/hub.go` — Hub orchestrator
+7. `cmd/wheelmaker/main.go` — rewrite entrypoint
+8. `config.example.json` — example config in project root
+
 
 
 

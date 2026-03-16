@@ -1,13 +1,13 @@
-// Package agent implements the ACP protocol layer:
-// Session interface (used by client), Agent concrete struct, and SwitchMode.
+// Package acp implements the ACP protocol session layer.
+// It defines the Session interface, Agent runtime, and SwitchMode.
 //
 // Relationships:
 //
-//	client.Client ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ agent.Session (narrow interface, mockable)
-//	client.Client ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ *agent.Agent  (concrete type, for Switch calls only)
-//	agent.Agent   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ agent/acp.Conn (low-level transport, owns subprocess)
-//	agent.Agent   ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ provider.Provider (not stored; provided once by client on New/Switch)
-package agent
+//	client.Client -> agent.Session (narrow interface, mockable)
+//	client.Client -> *agent.Agent (concrete type, for Switch calls only)
+//	agent.Agent   -> agent/agent.Conn (low-level transport, owns subprocess)
+//	agent.Agent   -> agent.Agent (not stored; provided once by client on New/Switch)
+package acp
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"log"
 	"sync"
 
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
 // Session is the narrow interface used by client.Client for day-to-day operations.
@@ -31,8 +31,8 @@ type Session interface {
 	// SetMode switches the agent's operating mode.
 	SetMode(ctx context.Context, modeID string) error
 
-	// AdapterName returns the name of the current adapter (e.g. "codex").
-	AdapterName() string
+	// AgentName returns the name of the current agent (e.g. "claude").
+	AgentName() string
 
 	// SessionID returns the current ACP session ID for state persistence.
 	SessionID() string
@@ -41,7 +41,7 @@ type Session interface {
 	Close() error
 }
 
-// SwitchMode controls how an adapter switch affects session context.
+// SwitchMode controls how an agent switch affects session context.
 type SwitchMode int
 
 const (
@@ -58,37 +58,37 @@ const (
 type InitMeta struct {
 	// Agent-side: from initialize response.
 	ProtocolVersion   string
-	AgentCapabilities acp.AgentCapabilities
-	AgentInfo         *acp.AgentInfo
-	AuthMethods       []acp.AuthMethod
+	AgentCapabilities AgentCapabilities
+	AgentInfo         *AgentInfo
+	AuthMethods       []AuthMethod
 
 	// Client-side: what we sent in the initialize request.
 	ClientProtocolVersion int
-	ClientCapabilities    acp.ClientCapabilities
-	ClientInfo            *acp.AgentInfo
+	ClientCapabilities    ClientCapabilities
+	ClientInfo            *AgentInfo
 }
 
 // SessionMeta holds session-level metadata captured from session/new and
 // updated by session/update notifications throughout the session lifetime.
 type SessionMeta struct {
-	Modes             *acp.ModeState
-	Models            *acp.ModelState
-	ConfigOptions     []acp.ConfigOption
-	AvailableCommands []acp.AvailableCommand
+	Modes             *ModeState
+	Models            *ModelState
+	ConfigOptions     []ConfigOption
+	AvailableCommands []AvailableCommand
 	Title             string
 	UpdatedAt         string
 }
 
 // Agent is the complete ACP protocol encapsulation.
-// It owns an active *acp.Conn and handles all outbound ACP calls and inbound callbacks.
-// Adapter is not stored here; after Connect(), the Conn owns the subprocess lifecycle.
+// It owns an active *agent.Conn and handles all outbound ACP calls and inbound callbacks.
+// The factory agent is not stored here; after Connect(), the Conn owns the subprocess lifecycle.
 type Agent struct {
-	name       string                // current adapter name (for identification)
-	conn       *acp.Conn             // active ACP connection (owns the subprocess)
-	caps       acp.AgentCapabilities // capabilities declared during initialize
-	sessionID  string                // active ACP session ID
-	cwd        string                // working directory for session/new
-	mcpServers []acp.MCPServer       // MCP server list for session/new
+	name       string            // current agent name (for identification)
+	conn       *agent.Conn       // active ACP connection (owns the subprocess)
+	caps       AgentCapabilities // capabilities declared during initialize
+	sessionID  string            // active ACP session ID
+	cwd        string            // working directory for session/new
+	mcpServers []MCPServer       // MCP server list for session/new
 
 	initMeta    InitMeta    // metadata from initialize handshake
 	sessionMeta SessionMeta // metadata from session/new
@@ -107,14 +107,14 @@ type Agent struct {
 	promptCancel context.CancelFunc
 }
 
-// New creates an Agent using an already-started *acp.Conn.
-// The caller (Client) is responsible for calling provider.Connect() first.
-func New(name string, conn *acp.Conn, cwd string) *Agent {
+// New creates an Agent using an already-started *agent.Conn.
+// The caller (Client) is responsible for calling agent.Connect() first.
+func New(name string, conn *agent.Conn, cwd string) *Agent {
 	ag := &Agent{
 		name:       name,
 		conn:       conn,
 		cwd:        cwd,
-		mcpServers: []acp.MCPServer{},
+		mcpServers: []MCPServer{},
 		permission: &AutoAllowHandler{},
 		terminals:  newTerminalManager(),
 	}
@@ -130,7 +130,7 @@ func (a *Agent) SetPermissionHandler(h PermissionHandler) {
 }
 
 // NewWithSessionID creates an Agent with a pre-existing session ID to attempt session/load.
-func NewWithSessionID(name string, conn *acp.Conn, cwd string, sessionID string) *Agent {
+func NewWithSessionID(name string, conn *agent.Conn, cwd string, sessionID string) *Agent {
 	ag := New(name, conn, cwd)
 	ag.sessionID = sessionID
 	return ag
@@ -157,7 +157,7 @@ func (a *Agent) Cancel() error {
 	if sessID == "" || !ready {
 		return nil
 	}
-	return conn.Notify("session/cancel", acp.SessionCancelParams{SessionID: sessID})
+	return conn.Notify("session/cancel", SessionCancelParams{SessionID: sessID})
 }
 
 // SetMode sends a session/set_mode request (ACP extension).
@@ -174,8 +174,8 @@ func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 		map[string]string{"sessionId": sessID, "modeId": modeID}, nil)
 }
 
-// AdapterName returns the name of the current provider.
-func (a *Agent) AdapterName() string {
+// AgentName returns the name of the current agent.
+func (a *Agent) AgentName() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.name
@@ -214,7 +214,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 		return fmt.Errorf("agent: no active session")
 	}
 	return conn.Send(ctx, "session/set_config_option",
-		acp.SessionSetConfigOptionParams{
+		SessionSetConfigOptionParams{
 			SessionID: sessID,
 			ConfigID:  configID,
 			Value:     value,
@@ -238,7 +238,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 // For SwitchWithContext, Switch blocks until the bootstrap prompt completes.
 // This preserves the caller's promptMu hold across the full switch + bootstrap,
 // preventing any concurrent user prompt from racing with the hidden bootstrap.
-func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode SwitchMode, savedSessionID string) error {
+func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mode SwitchMode, savedSessionID string) error {
 	a.mu.Lock()
 	var summary string
 	if mode == SwitchWithContext && a.lastReply != "" {
@@ -253,8 +253,8 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 	a.initializing = false // reset any in-progress initialization
 	a.sessionID = savedSessionID
 	a.lastReply = ""
-	// Reset metadata so the new adapter's own initialize handshake populates it
-	// from scratch ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â prevents stale metadata from the old adapter being read back.
+	// Reset metadata so the new agent's initialize handshake repopulates state
+	// from scratch, preventing stale metadata from the old agent being read back.
 	a.initMeta = InitMeta{}
 	a.sessionMeta = SessionMeta{}
 	a.mu.Unlock()
@@ -269,7 +269,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *acp.Conn, mode
 
 	// For SwitchWithContext, bootstrap the new session with the previous reply.
 	// Drain the channel synchronously so that this call blocks until the bootstrap
-	// completes. The caller (Client.switchAdapter) holds promptMu for the duration,
+	// completes. The caller (Client.switchAgent) holds promptMu for the duration,
 	// which prevents any user prompt from running concurrently with the bootstrap.
 	if mode == SwitchWithContext && summary != "" {
 		ch, err := a.Prompt(ctx, "[context] "+summary)
@@ -298,7 +298,7 @@ func (a *Agent) Meta() (InitMeta, SessionMeta) {
 
 // setAvailableCommands updates the session metadata with the latest command list.
 // Called from the prompt subscription handler when an available_commands_update arrives.
-func (a *Agent) setAvailableCommands(cmds []acp.AvailableCommand) {
+func (a *Agent) setAvailableCommands(cmds []AvailableCommand) {
 	a.mu.Lock()
 	a.sessionMeta.AvailableCommands = cmds
 	a.mu.Unlock()
@@ -306,7 +306,7 @@ func (a *Agent) setAvailableCommands(cmds []acp.AvailableCommand) {
 
 // setConfigOptions updates the session metadata with the latest config option list.
 // Called from the prompt subscription handler when a config_option_update arrives.
-func (a *Agent) setConfigOptions(opts []acp.ConfigOption) {
+func (a *Agent) setConfigOptions(opts []ConfigOption) {
 	a.mu.Lock()
 	a.sessionMeta.ConfigOptions = opts
 	a.mu.Unlock()
@@ -317,7 +317,7 @@ func (a *Agent) setConfigOptions(opts []acp.ConfigOption) {
 func (a *Agent) setCurrentMode(modeID string) {
 	a.mu.Lock()
 	if a.sessionMeta.Modes == nil {
-		a.sessionMeta.Modes = &acp.ModeState{}
+		a.sessionMeta.Modes = &ModeState{}
 	}
 	a.sessionMeta.Modes.CurrentModeID = modeID
 	a.mu.Unlock()

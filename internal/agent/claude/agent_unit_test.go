@@ -1,6 +1,6 @@
-﻿package claude_test
+package claude_test
 
-// adapter_unit_test.go: unit tests for ClaudeProvider that do not require a real
+// agent_unit_test.go: unit tests for ClaudeAgent that do not require a real
 // claude-agent-acp binary or network access. No //go:build integration tag.
 
 import (
@@ -10,16 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider/claude"
+	"github.com/swm8023/wheelmaker/internal/agent/claude"
 )
 
-// TestClaudeProvider_Connect_NotExecutable verifies that Connect() returns a
+// TestClaudeAgent_Connect_NotExecutable verifies that Connect() returns a
 // descriptive error when the configured path resolves to a non-executable file.
 // We use t.TempDir() as the ExePath: the directory exists on disk (os.Stat
 // succeeds, so tools.ResolveBinary accepts it without PATH fallback), but
 // exec.Command(dir).Start() fails because a directory cannot be executed.
-func TestClaudeProvider_Connect_NotExecutable(t *testing.T) {
-	a := claude.NewProvider(claude.Config{
+func TestClaudeAgent_Connect_NotExecutable(t *testing.T) {
+	a := claude.NewAgent(claude.Config{
 		ExePath: t.TempDir(), // exists but not executable
 	})
 
@@ -40,9 +40,9 @@ func TestClaudeProvider_Connect_NotExecutable(t *testing.T) {
 	}
 }
 
-// TestClaudeProvider_Connect_BinaryNotFound verifies that Connect() returns the
+// TestClaudeAgent_Connect_BinaryNotFound verifies that Connect() returns the
 // "binary not found" error path when the binary cannot be located.
-func TestClaudeProvider_Connect_BinaryNotFound(t *testing.T) {
+func TestClaudeAgent_Connect_BinaryNotFound(t *testing.T) {
 	// Clear PATH to prevent exec.LookPath succeeding.
 	t.Setenv("PATH", "")
 	if runtime.GOOS == "windows" {
@@ -50,7 +50,7 @@ func TestClaudeProvider_Connect_BinaryNotFound(t *testing.T) {
 	}
 
 	// Provide a non-existent ExePath so ResolveBinary skips option 1.
-	a := claude.NewProvider(claude.Config{
+	a := claude.NewAgent(claude.Config{
 		ExePath: filepath.Join(t.TempDir(), "nonexistent-claude-agent-acp"),
 	})
 
@@ -71,9 +71,9 @@ func TestClaudeProvider_Connect_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// TestClaudeProvider_Close_Unit verifies that Close() is a no-op and idempotent.
-func TestClaudeProvider_Close_Unit(t *testing.T) {
-	a := claude.NewProvider(claude.Config{})
+// TestClaudeAgent_Close_Unit verifies that Close() is a no-op and idempotent.
+func TestClaudeAgent_Close_Unit(t *testing.T) {
+	a := claude.NewAgent(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("first Close: %v", err)
 	}
@@ -82,11 +82,10 @@ func TestClaudeProvider_Close_Unit(t *testing.T) {
 	}
 }
 
-// TestClaudeProvider_Name verifies that Name() returns "claude".
-func TestClaudeProvider_Name(t *testing.T) {
-	a := claude.NewProvider(claude.Config{})
+// TestClaudeAgent_Name verifies that Name() returns "claude".
+func TestClaudeAgent_Name(t *testing.T) {
+	a := claude.NewAgent(claude.Config{})
 	if got := a.Name(); got != "claude" {
 		t.Errorf("Name() = %q, want %q", got, "claude")
 	}
 }
-

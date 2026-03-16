@@ -8,17 +8,17 @@ import (
 	"os"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/agent/provider"
-	"github.com/swm8023/wheelmaker/internal/agent/provider/claude"
-	"github.com/swm8023/wheelmaker/internal/agent/provider/codex"
-	"github.com/swm8023/wheelmaker/internal/agent/provider/mock"
+	"github.com/swm8023/wheelmaker/internal/agent"
+	"github.com/swm8023/wheelmaker/internal/agent/claude"
+	"github.com/swm8023/wheelmaker/internal/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
-// Each project has its own IM adapter, agent session, and state partition.
+// Each project has its own IM provider, agent session, and state partition.
 type Hub struct {
 	cfg       *Config
 	statePath string
@@ -69,7 +69,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	}
 
 	// Create IM provider.
-	imAdapter, err := h.buildIM(pc)
+	imProvider, err := h.buildIM(pc)
 	if err != nil {
 		return nil, err
 	}
@@ -78,22 +78,22 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	store := client.NewProjectJSONStore(h.statePath, pc.Name)
 
 	// Create the client.
-	c := client.New(store, imAdapter, pc.Name, cwd)
+	c := client.New(store, imProvider, pc.Name, cwd)
 
 	// Enable ACP JSON debug logging for console projects with debug=true.
 	if pc.IM.Type == "console" && pc.IM.Debug {
 		c.SetDebugLogger(log.Writer())
 	}
 
-	// Register all known provider factories so users can switch between them at runtime.
-	c.RegisterProvider("codex", func(_ string, _ map[string]string) provider.Provider {
-		return codex.NewProvider(codex.Config{})
+	// Register all known agent factories so users can switch between them at runtime.
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return codex.NewAgent(codex.Config{})
 	})
-	c.RegisterProvider("claude", func(_ string, _ map[string]string) provider.Provider {
-		return claude.NewProvider(claude.Config{})
+	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Agent {
+		return claude.NewAgent(claude.Config{})
 	})
-	c.RegisterProvider("mock", func(_ string, _ map[string]string) provider.Provider {
-		return mock.NewProvider()
+	c.RegisterAgent("mock", func(_ string, _ map[string]string) agent.Agent {
+		return mock.NewAgent()
 	})
 
 	if err := c.Start(ctx); err != nil {
@@ -102,13 +102,13 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	return c, nil
 }
 
-// buildIM creates the im.Adapter for a project's IM config.
-func (h *Hub) buildIM(pc ProjectConfig) (im.Adapter, error) {
+// buildIM creates the im.Provider for a project's IM config.
+func (h *Hub) buildIM(pc ProjectConfig) (im.Provider, error) {
 	switch pc.IM.Type {
 	case "console":
 		return console.New(pc.Name, pc.IM.Debug), nil
 	case "feishu":
-		return nil, fmt.Errorf("feishu IM adapter not yet implemented")
+		return nil, fmt.Errorf("feishu IM provider not yet implemented")
 	default:
 		return nil, fmt.Errorf("unknown im.type %q (supported: console)", pc.IM.Type)
 	}

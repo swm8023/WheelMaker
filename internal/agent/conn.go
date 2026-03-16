@@ -1,4 +1,4 @@
-package provider
+package agent
 
 import (
 	"bufio"
@@ -355,9 +355,9 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	c.reqMu.RUnlock()
 
 	type rpcResp struct {
-		JSONRPC string    `json:"jsonrpc"`
-		ID      int64     `json:"id"`
-		Result  any       `json:"result,omitempty"`
+		JSONRPC string        `json:"jsonrpc"`
+		ID      int64         `json:"id"`
+		Result  any           `json:"result,omitempty"`
 		Error   *RPCError `json:"error,omitempty"`
 	}
 
@@ -403,3 +403,9 @@ func (c *Conn) dispatch(n Notification) {
 		h(n)
 	}
 }
+
+
+
+
+
+

@@ -1,37 +1,8 @@
-// package acp implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
-// This package is an internal detail of the agent layer and is not imported directly
-// by the client or MockProvider layers; they interact through the agent.Session interface.
 package acp
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "encoding/json"
 
-const jsonrpcVersion = "2.0"
-
-// Request is a JSON-RPC 2.0 request message.
-type Request struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int64  `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-// Response is a JSON-RPC 2.0 response message.
-type Response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
-}
-
-// Notification is a JSON-RPC 2.0 notification (no id, no response expected).
-type Notification struct {
-	JSONRPC string          `json:"jsonrpc"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
+// --- ACP-specific param/result types ---
 
 // RPCError is a JSON-RPC 2.0 error object.
 type RPCError struct {
@@ -40,43 +11,16 @@ type RPCError struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
-func (e *RPCError) Error() string {
-	if len(e.Data) > 0 {
-		// Try to extract a nested "message" field from data for a friendlier description.
-		var d struct {
-			Message string `json:"message"`
-		}
-		if json.Unmarshal(e.Data, &d) == nil && d.Message != "" {
-			return d.Message
-		}
-		return fmt.Sprintf("%s: %s", e.Message, e.Data)
-	}
-	return e.Message
-}
-
-// rawMessage is used internally to detect whether an incoming line is a
-// Response (has "id") or a Notification (no "id").
-type rawMessage struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      *int64          `json:"id"`
-	Method  string          `json:"method"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *RPCError       `json:"error,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-// --- ACP-specific param/result types ---
-
 // InitializeParams are sent by the client during the initialize handshake.
 type InitializeParams struct {
-	ProtocolVersion    int                `json:"protocolVersion"` // B3: integer per spec
+	ProtocolVersion    int                `json:"protocolVersion"`
 	ClientCapabilities ClientCapabilities `json:"clientCapabilities"`
 	ClientInfo         *AgentInfo         `json:"clientInfo,omitempty"`
 }
 
 // InitializeResult is returned by the agent during the initialize handshake.
 type InitializeResult struct {
-	ProtocolVersion   json.Number       `json:"protocolVersion"` // may be string or number depending on agent version
+	ProtocolVersion   json.Number       `json:"protocolVersion"`
 	AgentCapabilities AgentCapabilities `json:"agentCapabilities"`
 	AgentInfo         *AgentInfo        `json:"agentInfo,omitempty"`
 	AuthMethods       []AuthMethod      `json:"authMethods,omitempty"`
@@ -217,7 +161,6 @@ type SessionLoadParams struct {
 }
 
 // EnvVariable is a name/value environment variable pair.
-// The protocol uses [{"name":"K","value":"V"}] format, not {"K":"V"}.
 type EnvVariable struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
@@ -231,7 +174,7 @@ type HttpHeader struct {
 
 // MCPServer represents a Model Context Protocol server configuration.
 type MCPServer struct {
-	Type    string        `json:"type,omitempty"` // "stdio" | "http" | "sse"
+	Type    string        `json:"type,omitempty"`
 	Name    string        `json:"name"`
 	Command string        `json:"command,omitempty"`
 	Args    []string      `json:"args,omitempty"`
@@ -248,10 +191,10 @@ type SessionPromptParams struct {
 
 // SessionPromptResult is the final result after a prompt completes.
 type SessionPromptResult struct {
-	StopReason string `json:"stopReason"` // "end_turn" | "cancelled" | "max_tokens" | ...
+	StopReason string `json:"stopReason"`
 }
 
-// SessionCancelParams cancels an in-progress prompt (sent as a notification).
+// SessionCancelParams cancels an in-progress prompt.
 type SessionCancelParams struct {
 	SessionID string `json:"sessionId"`
 }
@@ -263,46 +206,30 @@ type SessionUpdateParams struct {
 }
 
 // SessionUpdate is the body of a single streaming update from the agent.
-// All fields beyond SessionUpdate are optional and depend on the update type.
 type SessionUpdate struct {
-	// SessionUpdate is the update type discriminator.
-	SessionUpdate string `json:"sessionUpdate"`
-
-	// agent_message_chunk / agent_thought_chunk: single ContentBlock as raw JSON.
-	Content json.RawMessage `json:"content,omitempty"`
-
-	// available_commands_update
+	SessionUpdate     string             `json:"sessionUpdate"`
+	Content           json.RawMessage    `json:"content,omitempty"`
 	AvailableCommands []AvailableCommand `json:"availableCommands,omitempty"`
-
-	// tool_call / tool_call_update
-	ToolCallID string `json:"toolCallId,omitempty"`
-	Title      string `json:"title,omitempty"` // also used by session_info_update
-	Kind       string `json:"kind,omitempty"`
-	Status     string `json:"status,omitempty"`
-
-	// plan
-	Entries []PlanEntry `json:"entries,omitempty"`
-
-	// current_mode_update
-	ModeID string `json:"modeId,omitempty"`
-
-	// config_option_update
-	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
-
-	// session_info_update
-	UpdatedAt string `json:"updatedAt,omitempty"`
+	ToolCallID        string             `json:"toolCallId,omitempty"`
+	Title             string             `json:"title,omitempty"`
+	Kind              string             `json:"kind,omitempty"`
+	Status            string             `json:"status,omitempty"`
+	Entries           []PlanEntry        `json:"entries,omitempty"`
+	ModeID            string             `json:"modeId,omitempty"`
+	ConfigOptions     []ConfigOption     `json:"configOptions,omitempty"`
+	UpdatedAt         string             `json:"updatedAt,omitempty"`
 }
 
 // PlanEntry is a single step in an agent execution plan.
 type PlanEntry struct {
 	Content  string `json:"content"`
-	Priority string `json:"priority"` // "high" | "medium" | "low"
-	Status   string `json:"status"`   // "pending" | "in_progress" | "completed"
+	Priority string `json:"priority"`
+	Status   string `json:"status"`
 }
 
 // ContentBlock is a piece of content within a session update or prompt.
 type ContentBlock struct {
-	Type     string `json:"type"` // "text" | "image" | "audio" | "resource_link" | "resource"
+	Type     string `json:"type"`
 	Text     string `json:"text,omitempty"`
 	MimeType string `json:"mimeType,omitempty"`
 	Data     string `json:"data,omitempty"`
@@ -323,29 +250,25 @@ type PermissionRequestParams struct {
 }
 
 // PermissionOption is a choice the client can make for a permission request.
-// B1 fix: field names are optionId/name per ACP spec (was id/label).
 type PermissionOption struct {
 	OptionID string `json:"optionId"`
 	Name     string `json:"name"`
-	Kind     string `json:"kind"` // "allow_once" | "allow_always" | "reject_once" | "reject_always"
+	Kind     string `json:"kind"`
 }
 
 // PermissionResult is the inner permission outcome.
 type PermissionResult struct {
-	Outcome  string `json:"outcome"`            // "selected" | "cancelled"
-	OptionID string `json:"optionId,omitempty"` // set when Outcome == "selected"
+	Outcome  string `json:"outcome"`
+	OptionID string `json:"optionId,omitempty"`
 }
 
 // PermissionResponse is the JSON-RPC result for session/request_permission.
-// B2 fix: protocol requires wrapping: {"outcome": {"outcome":"selected","optionId":"..."}}
 type PermissionResponse struct {
 	Outcome PermissionResult `json:"outcome"`
 }
 
 // SessionLoadResult is the response to session/load.
-// Note: unlike session/new, session/load does NOT return sessionId in the response.
-type SessionLoadResult struct {
-}
+type SessionLoadResult struct{}
 
 // SessionSetConfigOptionParams sets a configuration option on an active session.
 type SessionSetConfigOptionParams struct {
@@ -354,14 +277,12 @@ type SessionSetConfigOptionParams struct {
 	Value     string `json:"value"`
 }
 
-// --- AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client callback types ---
-
 // FSReadTextFileParams is sent by the agent to request a file read.
 type FSReadTextFileParams struct {
 	SessionID string `json:"sessionId"`
 	Path      string `json:"path"`
-	Line      *int   `json:"line,omitempty"`  // 1-based start line (optional)
-	Limit     *int   `json:"limit,omitempty"` // max lines to return (optional)
+	Line      *int   `json:"line,omitempty"`
+	Limit     *int   `json:"limit,omitempty"`
 }
 
 // FSReadTextFileResult is the client's response with the file content.
@@ -398,7 +319,6 @@ type TerminalOutputParams struct {
 }
 
 // TerminalExitStatus is the exit status object returned in TerminalOutputResult.
-// The protocol uses {"exitCode": N, "signal": null}, not a plain integer.
 type TerminalExitStatus struct {
 	ExitCode *int    `json:"exitCode,omitempty"`
 	Signal   *string `json:"signal,omitempty"`
@@ -408,7 +328,7 @@ type TerminalExitStatus struct {
 type TerminalOutputResult struct {
 	Output     string              `json:"output"`
 	Truncated  bool                `json:"truncated"`
-	ExitStatus *TerminalExitStatus `json:"exitStatus,omitempty"` // nil if still running
+	ExitStatus *TerminalExitStatus `json:"exitStatus,omitempty"`
 }
 
 // TerminalWaitForExitParams blocks until the terminal process exits.

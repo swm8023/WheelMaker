@@ -1,10 +1,10 @@
-package agent_test
+﻿package acp_test
 
 // agent_test.go: unit tests for agent.Agent using a self-referential mock ACP server.
 //
 // Pattern: when GO_AGENT_MOCK=1 is set, the test binary acts as the ACP mock
 // server (reading stdin, writing stdout). Otherwise it runs the tests,
-// pointing acp.New() at os.Args[0] with GO_AGENT_MOCK=1.
+// pointing agent.New() at os.Args[0] with GO_AGENT_MOCK=1.
 //
 // The mock supports bidirectional communication: during session/prompt handling
 // it can send AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client requests (callbacks) and wait for responses.
@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent"
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
+	acp "github.com/swm8023/wheelmaker/internal/acp"
+	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
 var mockBin string
@@ -46,25 +46,25 @@ func TestMain(m *testing.M) {
 }
 
 // newAgent creates an Agent backed by a fresh mock ACP subprocess.
-func newAgent(t *testing.T, name string) *agent.Agent {
+func newACPAgent(t *testing.T, name string) *acp.Agent {
 	t.Helper()
-	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := agent.New(name, conn, t.TempDir())
+	ag := acp.New(name, conn, t.TempDir())
 	t.Cleanup(func() { _ = ag.Close() })
 	return ag
 }
 
 // drainUpdates drains an update channel and returns accumulated text and any error.
-func drainUpdates(ch <-chan agent.Update) (text string, err error) {
+func drainUpdates(ch <-chan acp.Update) (text string, err error) {
 	for u := range ch {
 		if u.Err != nil {
 			err = u.Err
 			return
 		}
-		if u.Type == agent.UpdateText {
+		if u.Type == acp.UpdateText {
 			text += u.Content
 		}
 	}
@@ -74,7 +74,7 @@ func drainUpdates(ch <-chan agent.Update) (text string, err error) {
 // --- Tests ---
 
 func TestAgent_SessionID_AfterReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 	ch, err := ag.Prompt(ctx, "hello")
 	if err != nil {
@@ -89,7 +89,7 @@ func TestAgent_SessionID_AfterReady(t *testing.T) {
 }
 
 func TestAgent_Prompt_TextUpdates(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 	ch, err := ag.Prompt(ctx, "hello")
 	if err != nil {
@@ -110,7 +110,7 @@ func TestAgent_Prompt_TextUpdates(t *testing.T) {
 // would block the read loop after 32 items, preventing the session/prompt
 // response from being received and hanging the prompt indefinitely.
 func TestAgent_Prompt_ManyUpdates(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -124,7 +124,7 @@ func TestAgent_Prompt_ManyUpdates(t *testing.T) {
 		if u.Err != nil {
 			t.Fatalf("update error: %v", u.Err)
 		}
-		if u.Type == agent.UpdateText {
+		if u.Type == acp.UpdateText {
 			count++
 		}
 		if u.Done {
@@ -137,7 +137,7 @@ func TestAgent_Prompt_ManyUpdates(t *testing.T) {
 }
 
 func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "first")
@@ -156,24 +156,24 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 		t.Fatalf("second updates error: %v", err)
 	}
 
-	newConn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	newConn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 }
 
 func TestAgent_Cancel_BeforeReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	if err := ag.Cancel(); err != nil {
 		t.Errorf("Cancel before ready: %v", err)
 	}
 }
 
 func TestAgent_Cancel_AfterReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 	ch, err := ag.Prompt(ctx, "setup")
 	if err != nil {
@@ -192,11 +192,11 @@ func TestAgent_Cancel_AfterReady(t *testing.T) {
 // Cancel() must be a no-op in this state (ready==false), not fire a
 // session/cancel RPC on an uninitialized connection.
 func TestAgent_Cancel_SeededSessionID_BeforeReady(t *testing.T) {
-	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := agent.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
+	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
 	t.Cleanup(func() { _ = ag.Close() })
 
 	// No Prompt() called yet; ready==false but sessionID is non-empty.
@@ -206,14 +206,14 @@ func TestAgent_Cancel_SeededSessionID_BeforeReady(t *testing.T) {
 }
 
 func TestAgent_SetMode_BeforeReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	if err := ag.SetMode(context.Background(), "auto"); err == nil {
 		t.Error("expected error from SetMode before ready")
 	}
 }
 
 func TestAgent_SetMode_AfterReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 	ch, err := ag.Prompt(ctx, "setup")
 	if err != nil {
@@ -231,11 +231,11 @@ func TestAgent_SetMode_AfterReady(t *testing.T) {
 // Cancel variant: calling SetMode when sessionID is seeded but ready==false must
 // return an error without sending an RPC on an uninitialized connection.
 func TestAgent_SetMode_SeededSessionID_BeforeReady(t *testing.T) {
-	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := agent.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
+	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
 	t.Cleanup(func() { _ = ag.Close() })
 
 	if err := ag.SetMode(context.Background(), "auto"); err == nil {
@@ -244,14 +244,14 @@ func TestAgent_SetMode_SeededSessionID_BeforeReady(t *testing.T) {
 }
 
 func TestAgent_SetConfigOption_BeforeReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	if err := ag.SetConfigOption(context.Background(), "model", "gpt-4"); err == nil {
 		t.Error("expected error from SetConfigOption before ready")
 	}
 }
 
 func TestAgent_SetConfigOption_AfterReady(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 	ch, err := ag.Prompt(ctx, "setup")
 	if err != nil {
@@ -266,7 +266,7 @@ func TestAgent_SetConfigOption_AfterReady(t *testing.T) {
 }
 
 func TestAgent_Switch_Clean(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "first")
@@ -280,24 +280,24 @@ func TestAgent_Switch_Clean(t *testing.T) {
 		t.Fatal("expected non-empty SessionID before switch")
 	}
 
-	newConn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	newConn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchClean, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchClean, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
 	if ag.SessionID() != "" {
 		t.Errorf("SessionID should be empty after SwitchClean, got %q", ag.SessionID())
 	}
-	if ag.AdapterName() != "test2" {
-		t.Errorf("AdapterName = %q, want test2", ag.AdapterName())
+	if ag.AgentName() != "test2" {
+		t.Errorf("AgentName = %q, want test2", ag.AgentName())
 	}
 }
 
 func TestAgent_Switch_WithContext(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "context-prompt")
@@ -308,16 +308,16 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 		t.Fatalf("updates error: %v", err)
 	}
 
-	newConn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	newConn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, agent.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
-	if ag.AdapterName() != "test2" {
-		t.Errorf("AdapterName = %q, want test2", ag.AdapterName())
+	if ag.AgentName() != "test2" {
+		t.Errorf("AgentName = %q, want test2", ag.AgentName())
 	}
 
 	time.Sleep(200 * time.Millisecond)
@@ -327,7 +327,7 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 }
 
 func TestAgent_EnsureReady_NoDoubleInit(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	const n = 10
@@ -359,11 +359,11 @@ func TestAgent_EnsureReady_NoDoubleInit(t *testing.T) {
 }
 
 func TestAgent_SessionLoad(t *testing.T) {
-	conn := acp.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := agent.NewWithSessionID("test", conn, t.TempDir(), "existing-session-id")
+	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "existing-session-id")
 	t.Cleanup(func() { _ = ag.Close() })
 
 	ctx := context.Background()
@@ -391,7 +391,7 @@ func TestAgent_Callback_FSRead(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "test-callback-fs-read:"+path)
@@ -415,7 +415,7 @@ func TestAgent_Callback_FSWrite(t *testing.T) {
 	path := dir + "/written.txt"
 	content := "callback-write-ok"
 
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "test-callback-fs-write:"+path+":"+content)
@@ -438,7 +438,7 @@ func TestAgent_Callback_FSWrite(t *testing.T) {
 // TestAgent_Callback_Permission verifies the session/request_permission callback.
 // AutoAllowHandler should respond with "selected" + an allow option ID.
 func TestAgent_Callback_Permission(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "test-callback-permission")
@@ -457,7 +457,7 @@ func TestAgent_Callback_Permission(t *testing.T) {
 
 // TestAgent_Callback_TerminalLifecycle verifies create ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ wait_for_exit ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ output ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ release.
 func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "test-callback-terminal")
@@ -476,7 +476,7 @@ func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
 
 // TestAgent_Callback_TerminalKill verifies create ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ kill ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ release lifecycle.
 func TestAgent_Callback_TerminalKill(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	ch, err := ag.Prompt(ctx, "test-callback-terminal-kill")
@@ -501,7 +501,7 @@ func TestAgent_Callback_TerminalKill(t *testing.T) {
 // would reject it, and agent.go would log the warning. Capturing the log output
 // lets the test assert no warning was produced.
 func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	// First prompt: normal ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ sets lastReply = "chunk0 chunk1 ".
@@ -525,7 +525,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	}
 
 	// New conn that rejects any "[context]" bootstrap prompt.
-	conn2 := acp.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
+	conn2 := agent.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
 	if err := conn2.Start(); err != nil {
 		t.Fatalf("conn2.Start: %v", err)
 	}
@@ -536,7 +536,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	log.SetOutput(&logBuf)
 	defer log.SetOutput(os.Stderr)
 
-	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", conn2, acp.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -557,7 +557,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 // conn whose mock rejects "[context]" bootstrap prompts. Switch must return nil,
 // and the log must contain the expected warning.
 func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
-	ag := newAgent(t, "test")
+	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
 	// First prompt to populate lastReply.
@@ -571,7 +571,7 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 	}
 
 	// New conn that rejects any "[context]" bootstrap so the bootstrap Prompt() fails.
-	conn2 := acp.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
+	conn2 := agent.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
 	if err := conn2.Start(); err != nil {
 		t.Fatalf("conn2.Start: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	// Switch must return nil even though bootstrap will fail.
-	if err := ag.Switch(ctx, "test2", conn2, agent.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", conn2, acp.SwitchWithContext, ""); err != nil {
 		t.Fatalf("Switch must return nil on bootstrap failure, got: %v", err)
 	}
 
@@ -1014,3 +1014,12 @@ func runMockAgent() {
 		}
 	}
 }
+
+
+
+
+
+
+
+
+

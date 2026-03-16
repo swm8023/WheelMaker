@@ -1,5 +1,5 @@
 // Command wheelmaker runs the WheelMaker daemon.
-// It reads ~/.wheelmaker/config.json to configure projects and IM adapters.
+// It reads ~/.wheelmaker/config.json to configure projects and IM providers.
 package main
 
 import (

@@ -1,4 +1,4 @@
-package agent
+package acp
 
 import (
 	"bytes"
@@ -8,8 +8,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-
-	acp "github.com/swm8023/wheelmaker/internal/agent/provider"
 )
 
 // managedTerminal holds a running subprocess created by terminal/create.
@@ -37,7 +35,7 @@ func newTerminalManager() *terminalManager {
 }
 
 // Create spawns a subprocess and starts buffering its combined stdout+stderr.
-func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.TerminalCreateResult, error) {
+func (tm *terminalManager) Create(params TerminalCreateParams) (TerminalCreateResult, error) {
 	command := params.Command
 	args := params.Args
 
@@ -74,7 +72,7 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 	t.cmd = cmd
 
 	if err := cmd.Start(); err != nil {
-		return acp.TerminalCreateResult{}, fmt.Errorf("terminal/create: start %q: %w", params.Command, err)
+		return TerminalCreateResult{}, fmt.Errorf("terminal/create: start %q: %w", params.Command, err)
 	}
 
 	id := fmt.Sprintf("term-%d", tm.counter.Add(1))
@@ -102,14 +100,14 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 		close(t.done)
 	}()
 
-	return acp.TerminalCreateResult{TerminalID: id}, nil
+	return TerminalCreateResult{TerminalID: id}, nil
 }
 
 // Output returns the accumulated buffered output (non-blocking).
-func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, error) {
+func (tm *terminalManager) Output(terminalID string) (TerminalOutputResult, error) {
 	t := tm.get(terminalID)
 	if t == nil {
-		return acp.TerminalOutputResult{}, fmt.Errorf("terminal/output: unknown terminalId %q", terminalID)
+		return TerminalOutputResult{}, fmt.Errorf("terminal/output: unknown terminalId %q", terminalID)
 	}
 
 	t.mu.Lock()
@@ -124,13 +122,13 @@ func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, 
 	sig := t.signal
 	t.mu.Unlock()
 
-	result := acp.TerminalOutputResult{
+	result := TerminalOutputResult{
 		Output:    output,
 		Truncated: truncated,
 	}
 	// B6 fix: exitStatus is an object {exitCode, signal}, not a plain integer.
 	if exitCode != nil || sig != nil {
-		result.ExitStatus = &acp.TerminalExitStatus{
+		result.ExitStatus = &TerminalExitStatus{
 			ExitCode: exitCode,
 			Signal:   sig,
 		}
@@ -139,10 +137,10 @@ func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, 
 }
 
 // WaitForExit blocks until the subprocess exits and returns its exit info.
-func (tm *terminalManager) WaitForExit(terminalID string) (acp.TerminalWaitForExitResult, error) {
+func (tm *terminalManager) WaitForExit(terminalID string) (TerminalWaitForExitResult, error) {
 	t := tm.get(terminalID)
 	if t == nil {
-		return acp.TerminalWaitForExitResult{}, fmt.Errorf("terminal/wait_for_exit: unknown terminalId %q", terminalID)
+		return TerminalWaitForExitResult{}, fmt.Errorf("terminal/wait_for_exit: unknown terminalId %q", terminalID)
 	}
 
 	<-t.done
@@ -152,7 +150,7 @@ func (tm *terminalManager) WaitForExit(terminalID string) (acp.TerminalWaitForEx
 	sig := t.signal
 	t.mu.Unlock()
 
-	return acp.TerminalWaitForExitResult{
+	return TerminalWaitForExitResult{
 		ExitCode: exitCode,
 		Signal:   sig,
 	}, nil
