@@ -1,4 +1,4 @@
-// Package mock implements an in-process ACP mock MockAgent for testing.
+// Package mock implements an in-process ACP mock Backend for testing.
 package mock
 
 import (
@@ -11,9 +11,11 @@ import (
 const agentName = "mock"
 
 // MockAgent is a stateless factory for in-memory mock ACP connections.
-type MockAgent struct{}
+type MockAgent struct {
+	acp.DefaultPlugin
+}
 
-// NewAgent creates a mock agent.
+// NewAgent creates a mock backend.
 func NewAgent() *MockAgent {
 	return &MockAgent{}
 }
@@ -30,8 +32,5 @@ func (a *MockAgent) Connect(_ context.Context) (*agent.Conn, error) {
 	return conn, nil
 }
 
-// Close is a no-op for the stateless mock agent.
+// Close is a no-op for the stateless mock backend.
 func (a *MockAgent) Close() error { return nil }
-
-// Plugin returns the default AgentPlugin (no customization needed for tests).
-func (a *MockAgent) Plugin() acp.AgentPlugin { return acp.DefaultPlugin{} }

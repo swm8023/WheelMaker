@@ -1,6 +1,6 @@
 ﻿package acp_test
 
-// agent_test.go: unit tests for agent.Agent using a self-referential mock ACP server.
+// agent_test.go: unit tests for agent.Backend using a self-referential mock ACP server.
 //
 // Pattern: when GO_AGENT_MOCK=1 is set, the test binary acts as the ACP mock
 // server (reading stdin, writing stdout). Otherwise it runs the tests,

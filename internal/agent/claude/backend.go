@@ -1,4 +1,4 @@
-// Package claude implements an agent.Agent and acp.AgentPlugin for Claude Code CLI via claude-agent-acp.
+// Package claude implements an agent.Backend and acp.AgentPlugin for Claude Code CLI via claude-agent-acp.
 package claude
 
 import (

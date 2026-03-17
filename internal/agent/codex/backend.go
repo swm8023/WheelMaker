@@ -1,4 +1,4 @@
-// Package codex implements an agent.Agent and acp.AgentPlugin for the Codex CLI via codex-acp.
+// Package codex implements an agent.Backend and acp.AgentPlugin for the Codex CLI via codex-acp.
 package codex
 
 import (

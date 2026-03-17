@@ -86,13 +86,13 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	}
 
 	// Register all known agent factories so users can switch between them at runtime.
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return codex.New(codex.Config{})
 	})
-	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Backend {
 		return claude.New(claude.Config{})
 	})
-	c.RegisterAgent("mock", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("mock", func(_ string, _ map[string]string) agent.Backend {
 		return mock.NewAgent()
 	})
 
