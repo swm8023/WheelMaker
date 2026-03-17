@@ -92,17 +92,38 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		// already processed by this handler.
 		var replayMu sync.Mutex
 		var replay []Update
+		replayMeta := SessionMeta{}
 		cancelReplaySub := conn.Subscribe(func(n agent.Notification) {
 			if n.Method != "session/update" {
 				return
 			}
+			normalized := a.plugin.NormalizeParams(n.Method, n.Params)
 			var p SessionUpdateParams
-			if err := json.Unmarshal(n.Params, &p); err != nil || p.SessionID != savedSessionID {
+			if err := json.Unmarshal(normalized, &p); err != nil || p.SessionID != savedSessionID {
 				return
 			}
 			u := sessionUpdateToUpdate(p.Update, n.Params)
 			replayMu.Lock()
 			replay = append(replay, u)
+			switch p.Update.SessionUpdate {
+			case "available_commands_update":
+				if len(p.Update.AvailableCommands) > 0 {
+					replayMeta.AvailableCommands = p.Update.AvailableCommands
+				}
+			case "config_option_update":
+				if len(p.Update.ConfigOptions) > 0 {
+					if err := a.plugin.ValidateConfigOptions(p.Update.ConfigOptions); err == nil {
+						replayMeta.ConfigOptions = p.Update.ConfigOptions
+					}
+				}
+			case "session_info_update":
+				if p.Update.Title != "" {
+					replayMeta.Title = p.Update.Title
+				}
+				if p.Update.UpdatedAt != "" {
+					replayMeta.UpdatedAt = p.Update.UpdatedAt
+				}
+			}
 			replayMu.Unlock()
 		})
 
@@ -120,6 +141,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 			a.initMeta = newInitMeta
 			// sessionID is already set (savedSessionID)
 			a.loadHistory = replay
+			a.sessionMeta = replayMeta
 			a.ready = true
 			a.initializing = false
 			a.mu.Unlock()
@@ -140,13 +162,16 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		notifyDone()
 		return fmt.Errorf("ensureReady: session/new: %w", err)
 	}
+	if err := a.plugin.ValidateConfigOptions(newResult.ConfigOptions); err != nil {
+		notifyDone()
+		return fmt.Errorf("ensureReady: invalid configOptions: %w", err)
+	}
 
 	a.mu.Lock()
 	a.caps = initResult.AgentCapabilities
 	a.initMeta = newInitMeta
 	a.sessionID = newResult.SessionID
 	a.sessionMeta = SessionMeta{
-		Modes:         newResult.Modes,
 		ConfigOptions: newResult.ConfigOptions,
 	}
 	a.ready = true
@@ -155,8 +180,11 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	a.initCond.Broadcast()
 
 	modeID := ""
-	if newResult.Modes != nil {
-		modeID = newResult.Modes.CurrentModeID
+	for _, opt := range newResult.ConfigOptions {
+		if opt.ID == "mode" || opt.Category == "mode" {
+			modeID = opt.CurrentValue
+			break
+		}
 	}
 	log.Printf("[agent] connected: agent=%s session=%s mode=%s",
 		a.name, newResult.SessionID, modeID)

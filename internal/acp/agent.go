@@ -11,6 +11,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -71,8 +72,6 @@ type InitMeta struct {
 // SessionMeta holds session-level metadata captured from session/new and
 // updated by session/update notifications throughout the session lifetime.
 type SessionMeta struct {
-	Modes             *ModeState
-	Models            *ModelState
 	ConfigOptions     []ConfigOption
 	AvailableCommands []AvailableCommand
 	Title             string
@@ -93,12 +92,13 @@ type Agent struct {
 	initMeta    InitMeta    // metadata from initialize handshake
 	sessionMeta SessionMeta // metadata from session/new
 
-	permission PermissionHandler // injectable; defaults to AutoAllowHandler
-	terminals  *terminalManager
+	plugin    AgentPlugin
+	terminals *terminalManager
 
-	lastReply    string // most recent complete agent reply, used for SwitchWithContext
-	loadHistory  []Update   // session/update notifications replayed during session/load
+	lastReply    string   // most recent complete agent reply, used for SwitchWithContext
+	loadHistory  []Update // session/update notifications replayed during session/load
 	mu           sync.Mutex
+	configOptsMu sync.Mutex // serializes config option updates from different sources
 	ready        bool       // true after initialize + session/new or session/load
 	initCond     *sync.Cond // guards single-flight initialization (associated with mu)
 	initializing bool       // true while one goroutine is running ensureReady I/O
@@ -117,14 +117,14 @@ type Agent struct {
 }
 
 // New creates an Agent using an already-started *agent.Conn.
-// The caller (Client) is responsible for calling agent.Connect() first.
-func New(name string, conn *agent.Conn, cwd string) *Agent {
+// plugin customizes per-agent behaviour; nil uses DefaultPlugin.
+func New(name string, conn *agent.Conn, cwd string, plugin AgentPlugin) *Agent {
 	ag := &Agent{
 		name:            name,
 		conn:            conn,
 		cwd:             cwd,
 		mcpServers:      []MCPServer{},
-		permission:      &AutoAllowHandler{},
+		plugin:          pluginOrDefault(plugin),
 		terminals:       newTerminalManager(),
 		activeToolCalls: make(map[string]struct{}),
 	}
@@ -132,16 +132,9 @@ func New(name string, conn *agent.Conn, cwd string) *Agent {
 	return ag
 }
 
-// SetPermissionHandler replaces the permission handler (thread-safe).
-func (a *Agent) SetPermissionHandler(h PermissionHandler) {
-	a.mu.Lock()
-	a.permission = h
-	a.mu.Unlock()
-}
-
 // NewWithSessionID creates an Agent with a pre-existing session ID to attempt session/load.
-func NewWithSessionID(name string, conn *agent.Conn, cwd string, sessionID string) *Agent {
-	ag := New(name, conn, cwd)
+func NewWithSessionID(name string, conn *agent.Conn, cwd string, sessionID string, plugin AgentPlugin) *Agent {
+	ag := New(name, conn, cwd, plugin)
 	ag.sessionID = sessionID
 	return ag
 }
@@ -195,6 +188,9 @@ func (a *Agent) Cancel() error {
 
 // SetMode sends a session/set_mode request (ACP extension).
 func (a *Agent) SetMode(ctx context.Context, modeID string) error {
+	if err := a.ensureReady(ctx); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	sessID := a.sessionID
 	conn := a.conn
@@ -203,8 +199,11 @@ func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 	if sessID == "" || !ready {
 		return fmt.Errorf("agent: no active session")
 	}
-	return conn.Send(ctx, "session/set_mode",
-		map[string]string{"sessionId": sessID, "modeId": modeID}, nil)
+	if err := conn.Send(ctx, "session/set_mode",
+		map[string]string{"sessionId": sessID, "modeId": modeID}, nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 // AgentName returns the name of the current agent.
@@ -238,6 +237,9 @@ func (a *Agent) Close() error {
 // SetConfigOption sends a session/set_config_option request to update a config value.
 // This is an extended method; it is not part of the Session interface.
 func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) error {
+	if err := a.ensureReady(ctx); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	sessID := a.sessionID
 	conn := a.conn
@@ -246,12 +248,34 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 	if sessID == "" || !ready {
 		return fmt.Errorf("agent: no active session")
 	}
-	return conn.Send(ctx, "session/set_config_option",
+	var raw json.RawMessage
+	if err := conn.Send(ctx, "session/set_config_option",
 		SessionSetConfigOptionParams{
 			SessionID: sessID,
 			ConfigID:  configID,
 			Value:     value,
-		}, nil)
+		}, &raw); err != nil {
+		return err
+	}
+
+	// Backends may return either:
+	// 1) []ConfigOption
+	// 2) {"configOptions":[...]}
+	var opts []ConfigOption
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &opts); err != nil {
+			var wrapped struct {
+				ConfigOptions []ConfigOption `json:"configOptions"`
+			}
+			if json.Unmarshal(raw, &wrapped) == nil {
+				opts = wrapped.ConfigOptions
+			}
+		}
+	}
+	if len(opts) > 0 {
+		a.setConfigOptions(opts)
+	}
+	return nil
 }
 
 // Switch replaces the underlying conn with a new one, resetting session state.
@@ -271,7 +295,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 // For SwitchWithContext, Switch blocks until the bootstrap prompt completes.
 // This preserves the caller's promptMu hold across the full switch + bootstrap,
 // preventing any concurrent user prompt from racing with the hidden bootstrap.
-func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mode SwitchMode, savedSessionID string) error {
+func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mode SwitchMode, savedSessionID string, plugin AgentPlugin) error {
 	a.mu.Lock()
 	var summary string
 	if mode == SwitchWithContext && a.lastReply != "" {
@@ -293,6 +317,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mo
 	// from scratch, preventing stale metadata from the old agent being read back.
 	a.initMeta = InitMeta{}
 	a.sessionMeta = SessionMeta{}
+	a.plugin = pluginOrDefault(plugin)
 	a.mu.Unlock()
 
 	// Wake up any goroutines waiting in ensureReady so they retry with the new conn.
@@ -332,6 +357,32 @@ func (a *Agent) Meta() (InitMeta, SessionMeta) {
 	return a.initMeta, a.sessionMeta
 }
 
+// SessionConfigSnapshot returns the current mode/model values and whether the
+// agent is ready.
+func (a *Agent) SessionConfigSnapshot() (SessionConfigSnapshot, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.ready {
+		return SessionConfigSnapshot{}, false
+	}
+	return sessionConfigSnapshotFromOptions(a.sessionMeta.ConfigOptions), true
+}
+
+// EnsureReady initializes the ACP session when needed and returns the current
+// mode/model snapshot. initialized is true only when this call observed the
+// transition from not-ready to ready.
+func (a *Agent) EnsureReady(ctx context.Context) (snap SessionConfigSnapshot, initialized bool, err error) {
+	a.mu.Lock()
+	wasReady := a.ready
+	a.mu.Unlock()
+
+	if err := a.ensureReady(ctx); err != nil {
+		return SessionConfigSnapshot{}, false, err
+	}
+	snap, _ = a.SessionConfigSnapshot()
+	return snap, !wasReady, nil
+}
+
 // LoadHistory returns the session/update notifications that were replayed during
 // session/load. Returns nil when the session was created via session/new (no history).
 // Safe to call after the first Prompt() completes initialization.
@@ -352,19 +403,14 @@ func (a *Agent) setAvailableCommands(cmds []AvailableCommand) {
 // setConfigOptions updates the session metadata with the latest config option list.
 // Called from the prompt subscription handler when a config_option_update arrives.
 func (a *Agent) setConfigOptions(opts []ConfigOption) {
+	a.configOptsMu.Lock()
+	defer a.configOptsMu.Unlock()
+	if err := a.plugin.ValidateConfigOptions(opts); err != nil {
+		log.Printf("agent: ignore invalid configOptions update: %v", err)
+		return
+	}
 	a.mu.Lock()
 	a.sessionMeta.ConfigOptions = opts
-	a.mu.Unlock()
-}
-
-// setCurrentMode updates the current mode ID in session metadata.
-// Called from the prompt subscription handler when a current_mode_update arrives.
-func (a *Agent) setCurrentMode(modeID string) {
-	a.mu.Lock()
-	if a.sessionMeta.Modes == nil {
-		a.sessionMeta.Modes = &ModeState{}
-	}
-	a.sessionMeta.Modes.CurrentModeID = modeID
 	a.mu.Unlock()
 }
 

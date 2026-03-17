@@ -58,8 +58,9 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		if n.Method != "session/update" {
 			return
 		}
+		normalized := a.plugin.NormalizeParams(n.Method, n.Params)
 		var p SessionUpdateParams
-		if err := json.Unmarshal(n.Params, &p); err != nil {
+		if err := json.Unmarshal(normalized, &p); err != nil {
 			return
 		}
 		if p.SessionID != sessID {
@@ -73,10 +74,6 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 		// Track config options so the client can persist them.
 		if p.Update.SessionUpdate == "config_option_update" && len(p.Update.ConfigOptions) > 0 {
 			a.setConfigOptions(p.Update.ConfigOptions)
-		}
-		// Track current mode changes.
-		if p.Update.SessionUpdate == "current_mode_update" && p.Update.ModeID != "" {
-			a.setCurrentMode(p.Update.ModeID)
 		}
 		// Track session title and updatedAt.
 		if p.Update.SessionUpdate == "session_info_update" {
@@ -218,6 +215,9 @@ func sessionUpdateToUpdate(u SessionUpdate, rawParams json.RawMessage) Update {
 
 	case "plan":
 		return Update{Type: UpdatePlan, Raw: rawParams}
+
+	case "config_option_update":
+		return Update{Type: UpdateConfigOption, Raw: rawParams}
 
 	case "current_mode_update":
 		return Update{Type: UpdateModeChange, Raw: rawParams}

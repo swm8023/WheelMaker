@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	acp "github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
@@ -53,6 +54,11 @@ func (a *CodexAgent) Connect(_ context.Context) (*agent.Conn, error) {
 
 // Close is a no-op for CodexAgent since Connect() transfers subprocess ownership to Conn.
 func (a *CodexAgent) Close() error { return nil }
+
+// AgentPlugin returns the per-agent plugin for Codex.
+func (a *CodexAgent) AgentPlugin() acp.AgentPlugin {
+	return codexPlugin{}
+}
 
 // buildEnv converts a map of environment variables to "KEY=VALUE" strings.
 func buildEnv(m map[string]string) []string {

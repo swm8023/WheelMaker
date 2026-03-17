@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,10 @@ const idleTimeout = 30 * time.Minute
 // The exePath and env arguments are provided for compatibility; hub-registered
 // factories typically ignore them and use closure-captured config instead.
 type AgentFactory func(exePath string, env map[string]string) agent.Agent
+
+type agentPluginProvider interface {
+	AgentPlugin() acp.AgentPlugin
+}
 
 // Client is the top-level coordinator for a single WheelMaker project.
 // It holds a pool of AgentFactory functions and two references to the active Agent:
@@ -133,7 +139,7 @@ func (c *Client) Close() error {
 }
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
-// Known commands (/use, /cancel, /status) are dispatched to handleCommand;
+// Known commands (/use, /cancel, /status, /mode, /model) are dispatched to handleCommand;
 // everything else ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â including lines starting with "/" that are not known commands ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
@@ -151,7 +157,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 // --- internal ---
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/use, /cancel, /status) are treated as commands;
+// Only exact first-word matches (/use, /cancel, /status, /mode, /model) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -159,7 +165,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status":
+	case "/use", "/cancel", "/status", "/mode", "/model":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return
@@ -212,7 +218,167 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
 		c.reply(msg.ChatID, status)
+
+	case "/mode":
+		if strings.TrimSpace(args) == "" {
+			c.reply(msg.ChatID, "Usage: /mode <mode-id-or-name>")
+			return
+		}
+		c.promptMu.Lock()
+		defer c.promptMu.Unlock()
+
+		c.mu.Lock()
+		if err := c.ensureAgent(context.Background()); err != nil {
+			c.mu.Unlock()
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			return
+		}
+		sess := c.session
+		ag := c.ag
+		agentName := sess.AgentName()
+		var sessionState *SessionState
+		if c.state != nil && c.state.Agents != nil {
+			if as := c.state.Agents[agentName]; as != nil && as.Session != nil {
+				sessionState = as.Session
+			}
+		}
+		c.resetIdleTimer()
+		c.mu.Unlock()
+
+		if ag == nil {
+			c.reply(msg.ChatID, "Mode error: no concrete agent instance available")
+			return
+		}
+		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID, ag); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
+			return
+		}
+		modeConfigID, modeValue, err := resolveModeArg(strings.TrimSpace(args), sessionState)
+		if err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
+			return
+		}
+		if err := ag.SetConfigOption(context.Background(), modeConfigID, modeValue); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
+			return
+		}
+		c.saveAgentState(ag)
+		c.reply(msg.ChatID, fmt.Sprintf("Mode set to: %s", modeValue))
+
+	case "/model":
+		if strings.TrimSpace(args) == "" {
+			c.reply(msg.ChatID, "Usage: /model <model-id-or-name>")
+			return
+		}
+		c.promptMu.Lock()
+		defer c.promptMu.Unlock()
+
+		c.mu.Lock()
+		if err := c.ensureAgent(context.Background()); err != nil {
+			c.mu.Unlock()
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			return
+		}
+		ag := c.ag
+		agentName := ""
+		if c.session != nil {
+			agentName = c.session.AgentName()
+		}
+		var sessionState *SessionState
+		if c.state != nil && c.state.Agents != nil {
+			if as := c.state.Agents[agentName]; as != nil {
+				sessionState = as.Session
+			}
+		}
+		c.resetIdleTimer()
+		c.mu.Unlock()
+
+		if ag == nil {
+			c.reply(msg.ChatID, "Model error: no concrete agent instance available")
+			return
+		}
+		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID, ag); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
+			return
+		}
+		configID, modelValue, err := resolveModelArg(strings.TrimSpace(args), sessionState)
+		if err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
+			return
+		}
+		if err := ag.SetConfigOption(context.Background(), configID, modelValue); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
+			return
+		}
+		c.saveAgentState(ag)
+		c.reply(msg.ChatID, fmt.Sprintf("Model set to: %s", modelValue))
 	}
+}
+
+func resolveModeArg(input string, st *SessionState) (configID, value string, err error) {
+	mode := strings.TrimSpace(input)
+	if mode == "" {
+		return "", "", errors.New("empty mode")
+	}
+	if st != nil {
+		for i := range st.ConfigOptions {
+			opt := &st.ConfigOptions[i]
+			if opt.ID == "mode" || strings.EqualFold(opt.Category, "mode") {
+				if len(opt.Options) == 0 {
+					return opt.ID, mode, nil
+				}
+				for _, v := range opt.Options {
+					if mode == v.Value || strings.EqualFold(mode, v.Name) {
+						return opt.ID, v.Value, nil
+					}
+				}
+				values := make([]string, 0, len(opt.Options))
+				for _, v := range opt.Options {
+					values = append(values, v.Value)
+				}
+				slices.Sort(values)
+				return "", "", fmt.Errorf("unknown mode %q (available: %s)", mode, strings.Join(values, ", "))
+			}
+		}
+	}
+	// configOptions is the only source of truth for mode.
+	return "mode", mode, nil
+}
+
+func resolveModelArg(input string, st *SessionState) (configID, value string, err error) {
+	model := strings.TrimSpace(input)
+	if model == "" {
+		return "", "", errors.New("empty model")
+	}
+	configID = "model"
+
+	var modelOpt *acp.ConfigOption
+	if st != nil {
+		for i := range st.ConfigOptions {
+			opt := &st.ConfigOptions[i]
+			if opt.ID == "model" || strings.EqualFold(opt.Category, "model") {
+				modelOpt = opt
+				configID = opt.ID
+				break
+			}
+		}
+	}
+
+	if modelOpt != nil && len(modelOpt.Options) > 0 {
+		for _, opt := range modelOpt.Options {
+			if model == opt.Value || strings.EqualFold(model, opt.Name) {
+				return configID, opt.Value, nil
+			}
+		}
+		values := make([]string, 0, len(modelOpt.Options))
+		for _, opt := range modelOpt.Options {
+			values = append(values, opt.Value)
+		}
+		slices.Sort(values)
+		return "", "", fmt.Errorf("unknown model %q (available: %s)", model, strings.Join(values, ", "))
+	}
+
+	return configID, model, nil
 }
 
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
@@ -234,6 +400,12 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Unlock()
 
 	ctx := context.Background()
+	if ag != nil {
+		if err := c.ensureReadyAndNotify(ctx, msg.ChatID, ag); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			return
+		}
+	}
 	updates, err := sess.Prompt(ctx, text)
 	if err != nil {
 		c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
@@ -253,6 +425,9 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			c.mu.Unlock()
 			return
 		}
+		if u.Type == acp.UpdateConfigOption {
+			c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
+		}
 		if u.Type == acp.UpdateText {
 			buf.WriteString(u.Content)
 		}
@@ -266,7 +441,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.resetIdleTimer() // reset after prompt completes: 30 min from last activity
 	c.mu.Unlock()
 
-	// Persist after prompt completes: session ID, configOptions, modes etc. may have changed.
+	// Persist after prompt completes: session ID and config metadata may have changed.
 	c.saveAgentState(ag)
 
 	if buf.Len() > 0 {
@@ -291,7 +466,8 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	if fac == nil {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
-	conn, err := fac("", nil).Connect(ctx)
+	backend := fac("", nil)
+	conn, err := backend.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
@@ -302,11 +478,15 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	if as := c.state.Agents[name]; as != nil {
 		savedSID = as.LastSessionID
 	}
+	var plugin acp.AgentPlugin
+	if pp, ok := backend.(agentPluginProvider); ok {
+		plugin = pp.AgentPlugin()
+	}
 	var ag *acp.Agent
 	if savedSID != "" {
-		ag = acp.NewWithSessionID(name, conn, c.cwd, savedSID)
+		ag = acp.NewWithSessionID(name, conn, c.cwd, savedSID, plugin)
 	} else {
-		ag = acp.New(name, conn, c.cwd)
+		ag = acp.New(name, conn, c.cwd, plugin)
 	}
 	c.ag = ag
 	c.session = ag
@@ -402,7 +582,8 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	}
 	c.mu.Unlock()
 
-	newConn, err := fac("", nil).Connect(ctx)
+	newBackend := fac("", nil)
+	newConn, err := newBackend.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
@@ -422,8 +603,12 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	}
 
 	// Step 4: replace the connection via the concrete Agent type.
+	var newPlugin acp.AgentPlugin
+	if pp, ok := newBackend.(agentPluginProvider); ok {
+		newPlugin = pp.AgentPlugin()
+	}
 	if ag != nil {
-		if err := ag.Switch(ctx, name, newConn, mode, savedSID); err != nil {
+		if err := ag.Switch(ctx, name, newConn, mode, savedSID, newPlugin); err != nil {
 			return fmt.Errorf("switch %q: %w", name, err)
 		}
 		// After Switch(), ag.name == name and initMeta/sessionMeta are reset.
@@ -433,9 +618,9 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 		// No active agent (lazy init never ran or idleClose fired): create from scratch.
 		var newAg *acp.Agent
 		if savedSID != "" {
-			newAg = acp.NewWithSessionID(name, newConn, c.cwd, savedSID)
+			newAg = acp.NewWithSessionID(name, newConn, c.cwd, savedSID, newPlugin)
 		} else {
-			newAg = acp.New(name, newConn, c.cwd)
+			newAg = acp.New(name, newConn, c.cwd, newPlugin)
 		}
 		c.mu.Lock()
 		c.ag = newAg
@@ -456,6 +641,11 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	}
 
 	c.reply(chatID, fmt.Sprintf("Switched to agent: %s", name))
+	if ag != nil {
+		if snap, ok := ag.SessionConfigSnapshot(); ok {
+			c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s", renderUnknown(snap.Mode), renderUnknown(snap.Model)))
+		}
+	}
 	return nil
 }
 
@@ -541,15 +731,12 @@ func (c *Client) persistAgentMeta(ag *acp.Agent) bool {
 	}
 
 	// Session-level data: only available after session/new or session/load.
-	hasSessionData := sessMeta.Modes != nil || sessMeta.Models != nil ||
-		len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 ||
+	hasSessionData := len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 ||
 		sessMeta.Title != "" || sessMeta.UpdatedAt != ""
 	if hasSessionData {
 		if as.Session == nil {
 			as.Session = &SessionState{}
 		}
-		as.Session.Modes = sessMeta.Modes
-		as.Session.Models = sessMeta.Models
 		as.Session.ConfigOptions = sessMeta.ConfigOptions
 		as.Session.AvailableCommands = sessMeta.AvailableCommands
 		if sessMeta.Title != "" {
@@ -571,4 +758,47 @@ func (c *Client) reply(chatID, text string) {
 		return
 	}
 	fmt.Println(text)
+}
+
+func (c *Client) ensureReadyAndNotify(ctx context.Context, chatID string, ag *acp.Agent) error {
+	snap, initialized, err := ag.EnsureReady(ctx)
+	if err != nil {
+		return err
+	}
+	if initialized {
+		c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s", renderUnknown(snap.Mode), renderUnknown(snap.Model)))
+		c.saveAgentState(ag)
+	}
+	return nil
+}
+
+func renderUnknown(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "unknown"
+	}
+	return v
+}
+
+func formatConfigOptionUpdateMessage(raw []byte) string {
+	if len(raw) == 0 {
+		return "Config options updated."
+	}
+	var p acp.SessionUpdateParams
+	if err := json.Unmarshal(raw, &p); err != nil || len(p.Update.ConfigOptions) == 0 {
+		return "Config options updated."
+	}
+	mode := ""
+	model := ""
+	for _, opt := range p.Update.ConfigOptions {
+		if mode == "" && (opt.ID == "mode" || strings.EqualFold(opt.Category, "mode")) {
+			mode = strings.TrimSpace(opt.CurrentValue)
+		}
+		if model == "" && (opt.ID == "model" || strings.EqualFold(opt.Category, "model")) {
+			model = strings.TrimSpace(opt.CurrentValue)
+		}
+	}
+	if mode == "" && model == "" {
+		return "Config options updated."
+	}
+	return fmt.Sprintf("Config options updated: mode=%s model=%s", renderUnknown(mode), renderUnknown(model))
 }

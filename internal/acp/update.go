@@ -15,6 +15,8 @@ const (
 	UpdateToolCallCancelled UpdateType = "tool_call_cancelled"
 	// UpdatePlan is a plan update from the agent.
 	UpdatePlan UpdateType = "plan"
+	// UpdateConfigOption is emitted when the agent sends config_option_update.
+	UpdateConfigOption UpdateType = "config_option_update"
 	// UpdateModeChange is a mode switch notification (current_mode_update).
 	UpdateModeChange UpdateType = "mode_change"
 	// UpdateDone signals the end of a prompt; Content holds the stopReason.
@@ -33,7 +35,6 @@ type Update struct {
 	Done    bool
 	Err     error
 }
-
 
 
 

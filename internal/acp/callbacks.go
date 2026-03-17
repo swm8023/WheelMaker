@@ -54,7 +54,7 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 		return nil, fmt.Errorf("permission: unmarshal params: %w", err)
 	}
 	a.mu.Lock()
-	h := a.permission
+	h := a.plugin
 	// FL2: use per-prompt context so Cancel() unblocks pending permission requests.
 	pCtx := a.promptCtx
 	a.mu.Unlock()
@@ -62,7 +62,7 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 		pCtx = ctx
 	}
 
-	result, err := h.RequestPermission(pCtx, p)
+	result, err := h.HandlePermission(pCtx, p)
 	if err != nil {
 		if pCtx.Err() != nil {
 			// Prompt was cancelled ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â respond with "cancelled" outcome as required.
