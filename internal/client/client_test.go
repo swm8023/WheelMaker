@@ -262,7 +262,7 @@ func TestHandleMessage_Mode_SetsMode(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 	if err := c.Start(context.Background()); err != nil {
@@ -302,7 +302,7 @@ func TestHandleMessage_Model_SetsConfigOption(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 	if err := c.Start(context.Background()); err != nil {
@@ -374,7 +374,7 @@ func TestHandleMessage_Prompt_ConfigOptionUpdate_NotifiesIM(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 	if err := c.Start(context.Background()); err != nil {
@@ -407,7 +407,7 @@ func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
 
 	// Register a new agent and switch to it after the prompt completes.
-	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use other"})
@@ -456,7 +456,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 		},
 	}
 	c := newTestClient(slow)
-	c.RegisterAgent("fast", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("fast", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 	msgs := captureReplies(c)
@@ -600,9 +600,9 @@ func TestJSONStore_SaveWritesNewKeys(t *testing.T) {
 
 // --- Tests: switch session persistence ---
 
-// minimalMockAgent is an agent.Agent that connects to the mock ACP server
+// minimalMockAgent is an agent.Backend that connects to the mock ACP server
 // embedded in the test binary (activated via GO_CLIENT_ACP_MOCK=1).
-type minimalMockAgent struct{}
+type minimalMockAgent struct{ acp.DefaultPlugin }
 
 func (a *minimalMockAgent) Name() string { return "mock" }
 func (a *minimalMockAgent) Connect(_ context.Context) (*agent.Conn, error) {
@@ -612,15 +612,14 @@ func (a *minimalMockAgent) Connect(_ context.Context) (*agent.Conn, error) {
 	}
 	return conn, nil
 }
-func (a *minimalMockAgent) Close() error                    { return nil }
-func (a *minimalMockAgent) Plugin() acp.AgentPlugin         { return acp.DefaultPlugin{} }
+func (a *minimalMockAgent) Close() error { return nil }
 
-var _ agent.Agent = (*minimalMockAgent)(nil)
+var _ agent.Backend = (*minimalMockAgent)(nil)
 
 // contextRejectMockAgent spawns the mock ACP server with GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1,
 // causing it to reject [context] bootstrap prompts with a JSON-RPC error.
 // This makes SwitchWithContext observable: the agent's drain goroutine logs a warning.
-type contextRejectMockAgent struct{}
+type contextRejectMockAgent struct{ acp.DefaultPlugin }
 
 func (a *contextRejectMockAgent) Name() string { return "mock-reject" }
 func (a *contextRejectMockAgent) Connect(_ context.Context) (*agent.Conn, error) {
@@ -630,23 +629,21 @@ func (a *contextRejectMockAgent) Connect(_ context.Context) (*agent.Conn, error)
 	}
 	return conn, nil
 }
-func (a *contextRejectMockAgent) Close() error                    { return nil }
-func (a *contextRejectMockAgent) Plugin() acp.AgentPlugin         { return acp.DefaultPlugin{} }
+func (a *contextRejectMockAgent) Close() error { return nil }
 
-var _ agent.Agent = (*contextRejectMockAgent)(nil)
+var _ agent.Backend = (*contextRejectMockAgent)(nil)
 
-// failConnectAgent is an agent.Agent whose Connect always returns an error.
+// failConnectAgent is an agent.Backend whose Connect always returns an error.
 // Used to test that Start() is non-fatal when the Active agent cannot connect.
-type failConnectAgent struct{}
+type failConnectAgent struct{ acp.DefaultPlugin }
 
 func (a *failConnectAgent) Name() string { return "fail" }
 func (a *failConnectAgent) Connect(_ context.Context) (*agent.Conn, error) {
 	return nil, fmt.Errorf("mock: binary not found")
 }
-func (a *failConnectAgent) Close() error                    { return nil }
-func (a *failConnectAgent) Plugin() acp.AgentPlugin         { return acp.DefaultPlugin{} }
+func (a *failConnectAgent) Close() error { return nil }
 
-var _ agent.Agent = (*failConnectAgent)(nil)
+var _ agent.Backend = (*failConnectAgent)(nil)
 
 // TestSwitchAgent_PersistsOutgoingSessionID verifies that the outgoing
 // agent's session ID is saved to state before the switch completes.
@@ -661,7 +658,7 @@ func TestSwitchAgent_PersistsOutgoingSessionID(t *testing.T) {
 			"codex": {LastSessionID: "outgoing-sess-123"},
 		},
 	})
-	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 
@@ -700,7 +697,7 @@ func TestSwitchAgent_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 			"new-agent": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
 		},
 	})
-	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 
@@ -729,10 +726,10 @@ func TestSwitchAgent_PersistsTargetSessionIDOnContinue(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
-	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 
@@ -776,7 +773,7 @@ func TestStart_UnregisteredAgent_NonFatal(t *testing.T) {
 	}}
 	c := client.New(store, nil, "test", "/tmp")
 	// Register "codex" but NOT "unknown-agent" (simulating a removed agent).
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 
@@ -815,7 +812,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &failConnectAgent{}
 	})
 
@@ -832,7 +829,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 	}
 
 	// /use with a working agent should recover and allow prompts.
-	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
@@ -870,7 +867,7 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 
@@ -892,7 +889,7 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	_ = msgs
 
 	// Register "other" with a backend that rejects [context] bootstrap prompts.
-	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Backend {
 		return &contextRejectMockAgent{}
 	})
 
@@ -918,7 +915,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 
@@ -940,7 +937,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 	_ = msgs
 
 	// Register "other" using a context-rejecting backend.
-	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("other", func(_ string, _ map[string]string) agent.Backend {
 		return &contextRejectMockAgent{}
 	})
 
@@ -958,13 +955,13 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 
 // TestClient_Close_PersistsSessionID verifies that Close() saves the current
 // agent session ID to the store, satisfying AC-5.
-// Uses Start() to create a real agent.Agent so c.ag is non-nil.
+// Uses Start() to create a real agent.Backend so c.ag is non-nil.
 func TestClient_Close_PersistsSessionID(t *testing.T) {
 	store := &mockStore{state: &client.ProjectState{
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
 		return &minimalMockAgent{}
 	})
 

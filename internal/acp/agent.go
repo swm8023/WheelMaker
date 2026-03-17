@@ -4,9 +4,9 @@
 // Relationships:
 //
 //	client.Client -> agent.Session (narrow interface, mockable)
-//	client.Client -> *agent.Agent (concrete type, for Switch calls only)
-//	agent.Agent   -> agent/agent.Conn (low-level transport, owns subprocess)
-//	agent.Agent   -> agent.Agent (not stored; provided once by client on New/Switch)
+//	client.Client -> *agent.Backend (concrete type, for Switch calls only)
+//	agent.Backend   -> agent/agent.Conn (low-level transport, owns subprocess)
+//	agent.Backend   -> agent.Backend (not stored; provided once by client on New/Switch)
 package acp
 
 import (
@@ -20,7 +20,7 @@ import (
 )
 
 // Session is the narrow interface used by client.Client for day-to-day operations.
-// agent.Agent implements this interface; tests can inject a mock.
+// agent.Backend implements this interface; tests can inject a mock.
 type Session interface {
 	// Prompt sends a prompt and returns a channel of streaming updates.
 	// The caller must drain the channel until an Update with Done=true is received.

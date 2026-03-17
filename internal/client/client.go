@@ -18,16 +18,16 @@ import (
 
 const idleTimeout = 30 * time.Minute
 
-// AgentFactory creates a new agent instance.
+// BackendFactory creates a new backend instance.
 // The exePath and env arguments are provided for compatibility; hub-registered
 // factories typically ignore them and use closure-captured config instead.
-type AgentFactory func(exePath string, env map[string]string) agent.Agent
+type BackendFactory func(exePath string, env map[string]string) agent.Backend
 
 
 // Client is the top-level coordinator for a single WheelMaker project.
-// It holds a pool of AgentFactory functions and two references to the active Agent:
-//   - session agent.Session  ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â narrow interface for Prompt/Cancel/SetMode, mockable in tests.
-//   - ag      *agent.Agent   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
+// Client is the top-level coordinator for a single WheelMaker project.
+// It holds a pool of BackendFactory functions and two references to the active agent:
+//   - ag      *agent.Backend   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
 //
 // Agent initialization is lazy: the first incoming message triggers ensureAgent(),
 // which connects the Active agent and creates the agent. After 30 minutes of idle
@@ -36,7 +36,7 @@ type Client struct {
 	projectName string
 	cwd         string
 
-	agentFacs map[string]AgentFactory
+	agentFacs map[string]BackendFactory
 	session   acp.Session // narrow interface, can be mock in tests
 	ag        *acp.Agent  // concrete type, used for Switch only; nil when mock injected
 
@@ -63,7 +63,7 @@ func New(store Store, imProvider im.Provider, projectName string, cwd string) *C
 	return &Client{
 		projectName: projectName,
 		cwd:         cwd,
-		agentFacs:   make(map[string]AgentFactory),
+		agentFacs:   make(map[string]BackendFactory),
 		store:       store,
 		imRun:       imProvider,
 	}
@@ -77,8 +77,8 @@ func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Unlock()
 }
 
-// RegisterAgent registers an AgentFactory under the given name.
-func (c *Client) RegisterAgent(name string, factory AgentFactory) {
+// RegisterAgent registers a BackendFactory under the given name.
+func (c *Client) RegisterAgent(name string, factory BackendFactory) {
 	c.mu.Lock()
 	c.agentFacs[name] = factory
 	c.mu.Unlock()
