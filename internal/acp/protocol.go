@@ -337,3 +337,23 @@ type TerminalReleaseParams struct {
 	SessionID  string `json:"sessionId"`
 	TerminalID string `json:"terminalId"`
 }
+
+// SessionListParams requests a paginated list of sessions.
+type SessionListParams struct {
+	CWD    string `json:"cwd,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+}
+
+// SessionInfo is a single entry in a session list.
+type SessionInfo struct {
+	SessionID string `json:"sessionId"`
+	CWD       string `json:"cwd"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+// SessionListResult is the response to session/list.
+type SessionListResult struct {
+	Sessions   []SessionInfo `json:"sessions"`
+	NextCursor string        `json:"nextCursor,omitempty"`
+}
