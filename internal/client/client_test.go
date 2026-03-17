@@ -617,7 +617,7 @@ func (a *minimalMockAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 func (a *minimalMockAgent) Close() error { return nil }
-func (a *minimalMockAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams) (acp.PermissionResult, error) {
+func (a *minimalMockAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
 	return acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}, nil
 }
 func (a *minimalMockAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
@@ -640,7 +640,7 @@ func (a *contextRejectMockAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 func (a *contextRejectMockAgent) Close() error { return nil }
-func (a *contextRejectMockAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams) (acp.PermissionResult, error) {
+func (a *contextRejectMockAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
 	return acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}, nil
 }
 func (a *contextRejectMockAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
@@ -658,7 +658,7 @@ func (a *failConnectAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return nil, fmt.Errorf("mock: binary not found")
 }
 func (a *failConnectAgent) Close() error { return nil }
-func (a *failConnectAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams) (acp.PermissionResult, error) {
+func (a *failConnectAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
 	return acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}, nil
 }
 func (a *failConnectAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {

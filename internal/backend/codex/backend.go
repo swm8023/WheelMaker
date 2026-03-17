@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/tools"
@@ -55,11 +56,23 @@ func (p *Backend) Connect(_ context.Context) (*acp.Conn, error) {
 // Close is a no-op since Connect() transfers subprocess ownership to Conn.
 func (p *Backend) Close() error { return nil }
 
-// HandlePermission auto-selects allow_once (matching former AutoAllowHandler behaviour).
-func (p *Backend) HandlePermission(_ context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+// HandlePermission resolves permission by current mode:
+// - reject/deny/read -> reject_once
+// - ask/manual/user  -> cancelled (explicit user decision required)
+// - others           -> allow_once
+func (p *Backend) HandlePermission(_ context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+	normalizedMode := strings.ToLower(strings.TrimSpace(mode))
+	preferredKind := "allow_once"
+	switch normalizedMode {
+	case "reject", "deny", "read":
+		preferredKind = "reject_once"
+	case "ask", "manual", "user":
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	}
+
 	optionID := ""
 	for _, opt := range params.Options {
-		if opt.Kind == "allow_once" {
+		if opt.Kind == preferredKind {
 			optionID = opt.OptionID
 			break
 		}

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 )
 
@@ -23,7 +24,7 @@ import (
 type backendHooks interface {
 
 	// HandlePermission responds to session/request_permission callbacks.
-	HandlePermission(ctx context.Context, params PermissionRequestParams) (PermissionResult, error)
+	HandlePermission(ctx context.Context, params PermissionRequestParams, mode string) (PermissionResult, error)
 
 	// NormalizeParams is called before acp processes each incoming session/update
 	// notification. Translate legacy protocol fields to modern format here.
@@ -36,10 +37,19 @@ type backendHooks interface {
 // and NormalizeParams passes notifications through unchanged.
 type noopHooks struct{}
 
-func (noopHooks) HandlePermission(_ context.Context, params PermissionRequestParams) (PermissionResult, error) {
+func (noopHooks) HandlePermission(_ context.Context, params PermissionRequestParams, mode string) (PermissionResult, error) {
+	normalizedMode := strings.ToLower(strings.TrimSpace(mode))
+	preferredKind := "allow_once"
+	switch normalizedMode {
+	case "reject", "deny", "read":
+		preferredKind = "reject_once"
+	case "ask", "manual", "user":
+		// "ask/manual/user" means require human decision; no synchronous UI path yet.
+		return PermissionResult{Outcome: "cancelled"}, nil
+	}
 	optionID := ""
 	for _, opt := range params.Options {
-		if opt.Kind == "allow_once" {
+		if opt.Kind == preferredKind {
 			optionID = opt.OptionID
 			break
 		}

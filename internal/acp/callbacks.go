@@ -57,12 +57,13 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 	h := a.hooks
 	// FL2: use per-prompt context so Cancel() unblocks pending permission requests.
 	pCtx := a.promptCtx
+	snap := sessionConfigSnapshotFromOptions(a.sessionMeta.ConfigOptions)
 	a.mu.Unlock()
 	if pCtx == nil {
 		pCtx = ctx
 	}
 
-	result, err := h.HandlePermission(pCtx, p)
+	result, err := h.HandlePermission(pCtx, p, snap.Mode)
 	if err != nil {
 		if pCtx.Err() != nil {
 			// Prompt was cancelled ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â respond with "cancelled" outcome as required.
