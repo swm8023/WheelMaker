@@ -103,7 +103,7 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			}
 		}
 
-		u := sessionUpdateToUpdate(p.Update, n.Params)
+		u := sessionUpdateToUpdate(p.Update, normalized)
 
 		// Accumulate text content for SwitchWithContext.
 		if u.Type == UpdateText && u.Content != "" {
