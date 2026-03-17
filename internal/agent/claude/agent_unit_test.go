@@ -1,6 +1,6 @@
 package claude_test
 
-// agent_unit_test.go: unit tests for ClaudeAgent that do not require a real
+// agent_unit_test.go: unit tests for claude.Plugin that do not require a real
 // claude-agent-acp binary or network access. No //go:build integration tag.
 
 import (
@@ -13,13 +13,13 @@ import (
 	"github.com/swm8023/wheelmaker/internal/agent/claude"
 )
 
-// TestClaudeAgent_Connect_NotExecutable verifies that Connect() returns a
+// TestAgent_Connect_NotExecutable verifies that Connect() returns a
 // descriptive error when the configured path resolves to a non-executable file.
 // We use t.TempDir() as the ExePath: the directory exists on disk (os.Stat
 // succeeds, so tools.ResolveBinary accepts it without PATH fallback), but
 // exec.Command(dir).Start() fails because a directory cannot be executed.
-func TestClaudeAgent_Connect_NotExecutable(t *testing.T) {
-	a := claude.NewAgent(claude.Config{
+func TestAgent_Connect_NotExecutable(t *testing.T) {
+	a := claude.New(claude.Config{
 		ExePath: t.TempDir(), // exists but not executable
 	})
 
@@ -40,9 +40,9 @@ func TestClaudeAgent_Connect_NotExecutable(t *testing.T) {
 	}
 }
 
-// TestClaudeAgent_Connect_BinaryNotFound verifies that Connect() returns the
+// TestAgent_Connect_BinaryNotFound verifies that Connect() returns the
 // "binary not found" error path when the binary cannot be located.
-func TestClaudeAgent_Connect_BinaryNotFound(t *testing.T) {
+func TestAgent_Connect_BinaryNotFound(t *testing.T) {
 	// Clear PATH to prevent exec.LookPath succeeding.
 	t.Setenv("PATH", "")
 	if runtime.GOOS == "windows" {
@@ -50,7 +50,7 @@ func TestClaudeAgent_Connect_BinaryNotFound(t *testing.T) {
 	}
 
 	// Provide a non-existent ExePath so ResolveBinary skips option 1.
-	a := claude.NewAgent(claude.Config{
+	a := claude.New(claude.Config{
 		ExePath: filepath.Join(t.TempDir(), "nonexistent-claude-agent-acp"),
 	})
 
@@ -71,9 +71,9 @@ func TestClaudeAgent_Connect_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// TestClaudeAgent_Close_Unit verifies that Close() is a no-op and idempotent.
-func TestClaudeAgent_Close_Unit(t *testing.T) {
-	a := claude.NewAgent(claude.Config{})
+// TestAgent_Close_Unit verifies that Close() is a no-op and idempotent.
+func TestAgent_Close_Unit(t *testing.T) {
+	a := claude.New(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("first Close: %v", err)
 	}
@@ -82,9 +82,9 @@ func TestClaudeAgent_Close_Unit(t *testing.T) {
 	}
 }
 
-// TestClaudeAgent_Name verifies that Name() returns "claude".
-func TestClaudeAgent_Name(t *testing.T) {
-	a := claude.NewAgent(claude.Config{})
+// TestAgent_Name verifies that Name() returns "claude".
+func TestAgent_Name(t *testing.T) {
+	a := claude.New(claude.Config{})
 	if got := a.Name(); got != "claude" {
 		t.Errorf("Name() = %q, want %q", got, "claude")
 	}

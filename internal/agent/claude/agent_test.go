@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration test for agent/claude: verifies that ClaudeAgent.Connect()
+// Integration test for agent/claude: verifies that claude.Plugin.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/agent/claude/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/claude/... -v -timeout 60s
 // Requires: claude-agent-acp binary at bin/windows_amd64/claude-agent-acp.exe or in PATH,
 //
 //	and ANTHROPIC_API_KEY set in the environment.
@@ -31,12 +31,12 @@ func requireClaudeBinary(t *testing.T) {
 	}
 }
 
-// TestClaudeAgent_Connect verifies that Connect() spawns a subprocess and
+// TestAgent_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestClaudeAgent_Connect(t *testing.T) {
+func TestAgent_Connect(t *testing.T) {
 	requireClaudeBinary(t)
 
-	a := claude.NewAgent(claude.Config{})
+	a := claude.New(claude.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -68,12 +68,12 @@ func TestClaudeAgent_Connect(t *testing.T) {
 	t.Logf("connected to claude-agent-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestClaudeAgent_ConnectMultiple verifies that Connect() is stateless:
+// TestAgent_ConnectMultiple verifies that Connect() is stateless:
 // calling it twice produces two independent connections.
-func TestClaudeAgent_ConnectMultiple(t *testing.T) {
+func TestAgent_ConnectMultiple(t *testing.T) {
 	requireClaudeBinary(t)
 
-	a := claude.NewAgent(claude.Config{})
+	a := claude.New(claude.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -98,9 +98,9 @@ func TestClaudeAgent_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestClaudeAgent_Close verifies that Close() on the MockAgent is a no-op.
-func TestClaudeAgent_Close(t *testing.T) {
-	a := claude.NewAgent(claude.Config{})
+// TestAgent_Close verifies that Close() is a no-op.
+func TestAgent_Close(t *testing.T) {
+	a := claude.New(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}

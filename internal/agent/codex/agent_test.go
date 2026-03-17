@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration test for agent/codex: verifies that CodexAgent.Connect()
+// Integration test for agent/codex: verifies that codex.Plugin.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/agent/codex/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/codex/... -v -timeout 60s
 // Requires: codex-acp binary at bin/windows_amd64/codex-acp.exe or in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.
@@ -31,12 +31,12 @@ func requireCodexBinary(t *testing.T) {
 	}
 }
 
-// TestCodexAgent_Connect verifies that Connect() spawns a subprocess and
+// TestAgent_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestCodexAgent_Connect(t *testing.T) {
+func TestAgent_Connect(t *testing.T) {
 	requireCodexBinary(t)
 
-	a := codex.NewAgent(codex.Config{})
+	a := codex.New(codex.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -69,12 +69,12 @@ func TestCodexAgent_Connect(t *testing.T) {
 	t.Logf("connected to codex-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestCodexAgent_ConnectMultiple verifies that Connect() is truly stateless:
+// TestAgent_ConnectMultiple verifies that Connect() is truly stateless:
 // calling it twice produces two independent connections.
-func TestCodexAgent_ConnectMultiple(t *testing.T) {
+func TestAgent_ConnectMultiple(t *testing.T) {
 	requireCodexBinary(t)
 
-	a := codex.NewAgent(codex.Config{})
+	a := codex.New(codex.Config{})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -100,9 +100,9 @@ func TestCodexAgent_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestCodexAgent_Close verifies that Close() on the MockAgent is a no-op.
-func TestCodexAgent_Close(t *testing.T) {
-	a := codex.NewAgent(codex.Config{})
+// TestAgent_Close verifies that Close() is a no-op.
+func TestAgent_Close(t *testing.T) {
+	a := codex.New(codex.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)
 	}

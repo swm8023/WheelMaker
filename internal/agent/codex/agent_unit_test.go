@@ -1,6 +1,6 @@
 package codex_test
 
-// agent_unit_test.go: unit tests for CodexAgent that do not require a real
+// agent_unit_test.go: unit tests for codex.Plugin that do not require a real
 // codex-acp binary or network access. No //go:build integration tag.
 
 import (
@@ -13,14 +13,14 @@ import (
 	"github.com/swm8023/wheelmaker/internal/agent/codex"
 )
 
-// TestCodexAgent_Connect_NotExecutable verifies that Connect() returns a
+// TestAgent_Connect_NotExecutable verifies that Connect() returns a
 // descriptive error when the configured path resolves to a non-executable file.
 // We use t.TempDir() as the ExePath: the directory exists on disk (os.Stat
 // succeeds, so tools.ResolveBinary accepts it without PATH fallback), but
 // exec.Command(dir).Start() fails because a directory cannot be executed.
 // This is deterministic regardless of what binaries are installed on PATH.
-func TestCodexAgent_Connect_NotExecutable(t *testing.T) {
-	a := codex.NewAgent(codex.Config{
+func TestAgent_Connect_NotExecutable(t *testing.T) {
+	a := codex.New(codex.Config{
 		ExePath: t.TempDir(), // exists but not executable
 	})
 
@@ -41,15 +41,15 @@ func TestCodexAgent_Connect_NotExecutable(t *testing.T) {
 	}
 }
 
-// TestCodexAgent_Connect_BinaryNotFound verifies that Connect() returns the
-// "binary not found" error path Ã¢â‚¬â€ i.e. tools.ResolveBinary itself fails,
+// TestAgent_Connect_BinaryNotFound verifies that Connect() returns the
+// "binary not found" error path — i.e. tools.ResolveBinary itself fails,
 // not just conn.Start(). This matches AC-4's negative test:
 // "when the binary cannot be found, Connect() returns error".
 //
 // Strategy: clear PATH so exec.LookPath cannot find codex-acp, and supply a
 // non-existent ExePath so ResolveBinary skips option 1 (explicit config path)
 // and falls through all lookup steps to the "not found" error.
-func TestCodexAgent_Connect_BinaryNotFound(t *testing.T) {
+func TestAgent_Connect_BinaryNotFound(t *testing.T) {
 	// Clear PATH to prevent exec.LookPath succeeding.
 	t.Setenv("PATH", "")
 	if runtime.GOOS == "windows" {
@@ -58,7 +58,7 @@ func TestCodexAgent_Connect_BinaryNotFound(t *testing.T) {
 	}
 
 	// Provide a non-existent ExePath so option 1 in ResolveBinary is skipped.
-	a := codex.NewAgent(codex.Config{
+	a := codex.New(codex.Config{
 		ExePath: filepath.Join(t.TempDir(), "nonexistent-codex-acp"),
 	})
 
@@ -80,10 +80,10 @@ func TestCodexAgent_Connect_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// TestCodexAgent_Close_Unit verifies that Close() is a no-op and idempotent,
+// TestAgent_Close_Unit verifies that Close() is a no-op and idempotent,
 // regardless of whether Connect() was called.
-func TestCodexAgent_Close_Unit(t *testing.T) {
-	a := codex.NewAgent(codex.Config{})
+func TestAgent_Close_Unit(t *testing.T) {
+	a := codex.New(codex.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("first Close: %v", err)
 	}
