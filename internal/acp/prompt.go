@@ -21,7 +21,6 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	}
 
 	a.mu.Lock()
-	conn := a.conn
 	sessID := a.sessionID
 	// FL2: create per-prompt context so Cancel() can unblock pending permission requests.
 	promptCtx, promptCancel := context.WithCancel(ctx)
@@ -52,11 +51,11 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	// returns — so under normal completion the response goroutine closes the channel
 	// only after all prior notifications are handled. Do NOT call conn.Send() from
 	// this handler (would deadlock readLoop).
-	cancelSub := conn.Subscribe(func(n Notification) {
+	cancelSub := a.forwarder.Subscribe(func(n Notification) {
 		if n.Method != "session/update" {
 			return
 		}
-		normalized := a.hooks.NormalizeParams(n.Method, n.Params)
+		normalized := n.Params
 		var p SessionUpdateParams
 		if err := json.Unmarshal(normalized, &p); err != nil {
 			return
@@ -101,7 +100,7 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			}
 		}
 
-		u := sessionUpdateToUpdate(p.Update, normalized)
+		u := SessionUpdateToUpdate(p.Update, normalized)
 
 		// Accumulate text content for SwitchWithContext.
 		if u.Type == UpdateText && u.Content != "" {
@@ -152,7 +151,7 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 
 		var result SessionPromptResult
 		// F2 fix: Prompt is []ContentBlock per spec (was plain string).
-		err := conn.Send(ctx, "session/prompt", SessionPromptParams{
+		err := a.forwarder.Send(ctx, "session/prompt", SessionPromptParams{
 			SessionID: sessID,
 			Prompt:    []ContentBlock{{Type: "text", Text: text}},
 		}, &result)
@@ -183,9 +182,10 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	return updates, nil
 }
 
-// sessionUpdateToUpdate converts an ACP SessionUpdate notification into an agent Update.
+// SessionUpdateToUpdate converts an ACP SessionUpdate notification into an agent Update.
 // rawParams is the full notification params JSON, used to populate Raw for structured types.
-func sessionUpdateToUpdate(u SessionUpdate, rawParams json.RawMessage) Update {
+// Pass nil for rawParams when the raw bytes are unavailable (e.g. after JSON unmarshal).
+func SessionUpdateToUpdate(u SessionUpdate, rawParams json.RawMessage) Update {
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		text := ""

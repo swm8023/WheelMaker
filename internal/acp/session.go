@@ -48,8 +48,8 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 	}
 
 	// Step 1: register the callback handler before sending initialize so that
-	// any ACP backend that fires requests during startup is handled correctly.
-	conn.OnRequest(a.handleCallback)
+	// any ACP agent that fires requests during startup is handled correctly.
+	a.forwarder.OnRequest(a.handleCallback)
 
 	// Step 2: initialize handshake.
 	clientCaps := ClientCapabilities{
@@ -91,16 +91,16 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		var replayMu sync.Mutex
 		var replay []Update
 		replayMeta := SessionMeta{}
-		cancelReplaySub := conn.Subscribe(func(n Notification) {
+		cancelReplaySub := a.forwarder.Subscribe(func(n Notification) {
 			if n.Method != "session/update" {
 				return
 			}
-			normalized := a.hooks.NormalizeParams(n.Method, n.Params)
+			normalized := n.Params
 			var p SessionUpdateParams
 			if err := json.Unmarshal(normalized, &p); err != nil || p.SessionID != savedSessionID {
 				return
 			}
-			u := sessionUpdateToUpdate(p.Update, normalized)
+			u := SessionUpdateToUpdate(p.Update, normalized)
 			replayMu.Lock()
 			replay = append(replay, u)
 			switch p.Update.SessionUpdate {
@@ -124,7 +124,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		})
 
 		var loadResult SessionLoadResult
-		err := conn.Send(ctx, "session/load", SessionLoadParams{
+		err := a.forwarder.Send(ctx, "session/load", SessionLoadParams{
 			SessionID:  savedSessionID,
 			CWD:        cwd,
 			MCPServers: mcpServers,
@@ -151,7 +151,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 
 	// Step 4: create a new session.
 	var newResult SessionNewResult
-	if err := conn.Send(ctx, "session/new", SessionNewParams{
+	if err := a.forwarder.Send(ctx, "session/new", SessionNewParams{
 		CWD:        cwd,
 		MCPServers: mcpServers,
 	}, &newResult); err != nil {
