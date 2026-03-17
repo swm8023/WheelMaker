@@ -55,8 +55,8 @@ func (a *CodexAgent) Connect(_ context.Context) (*agent.Conn, error) {
 // Close is a no-op for CodexAgent since Connect() transfers subprocess ownership to Conn.
 func (a *CodexAgent) Close() error { return nil }
 
-// AgentPlugin returns the per-agent plugin for Codex.
-func (a *CodexAgent) AgentPlugin() acp.AgentPlugin {
+// Plugin returns the per-agent plugin for Codex.
+func (a *CodexAgent) Plugin() acp.AgentPlugin {
 	return codexPlugin{}
 }
 

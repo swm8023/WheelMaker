@@ -23,8 +23,11 @@ const idleTimeout = 30 * time.Minute
 // factories typically ignore them and use closure-captured config instead.
 type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
+// agentPluginProvider is satisfied by agent backends that expose a Plugin() method.
+// Using a local duck-typed interface avoids an import cycle (internal/agent cannot
+// import internal/acp because internal/acp already imports internal/agent).
 type agentPluginProvider interface {
-	AgentPlugin() acp.AgentPlugin
+	Plugin() acp.AgentPlugin
 }
 
 // Client is the top-level coordinator for a single WheelMaker project.
@@ -427,6 +430,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		}
 		if u.Type == acp.UpdateConfigOption {
 			c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
+			c.saveAgentState(ag) // persist immediately; don't wait for prompt to finish
 		}
 		if u.Type == acp.UpdateText {
 			buf.WriteString(u.Content)
@@ -480,7 +484,7 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 	}
 	var plugin acp.AgentPlugin
 	if pp, ok := backend.(agentPluginProvider); ok {
-		plugin = pp.AgentPlugin()
+		plugin = pp.Plugin()
 	}
 	var ag *acp.Agent
 	if savedSID != "" {
@@ -605,7 +609,7 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	// Step 4: replace the connection via the concrete Agent type.
 	var newPlugin acp.AgentPlugin
 	if pp, ok := newBackend.(agentPluginProvider); ok {
-		newPlugin = pp.AgentPlugin()
+		newPlugin = pp.Plugin()
 	}
 	if ag != nil {
 		if err := ag.Switch(ctx, name, newConn, mode, savedSID, newPlugin); err != nil {

@@ -16,14 +16,8 @@ type ConnectionConfig struct {
 // then kept up-to-date by session/update notifications throughout the session lifetime.
 // Only the last session per agent is retained.
 type SessionState struct {
-	// Modes is from the session/new response or current_mode_update notifications.
-	// Deprecated by configOptions but retained for backward compatibility.
-	Modes *acp.ModeState `json:"modes,omitempty"`
-
-	// Models is from the session/new response (Zed-specific extension).
-	Models *acp.ModelState `json:"models,omitempty"`
-
-	// ConfigOptions is from the session/new response or config_option_update notifications.
+	// ConfigOptions is the canonical config source from session/new
+	// and config_option_update notifications.
 	// Always the full list with current values (not incremental patches).
 	ConfigOptions []acp.ConfigOption `json:"configOptions,omitempty"`
 

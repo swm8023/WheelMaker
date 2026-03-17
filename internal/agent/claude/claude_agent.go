@@ -55,8 +55,8 @@ func (a *ClaudeAgent) Connect(_ context.Context) (*agent.Conn, error) {
 // Close is a no-op for ClaudeAgent since Connect() transfers subprocess ownership to Conn.
 func (a *ClaudeAgent) Close() error { return nil }
 
-// AgentPlugin returns the per-agent plugin for Claude.
-func (a *ClaudeAgent) AgentPlugin() acp.AgentPlugin {
+// Plugin returns the per-agent plugin for Claude.
+func (a *ClaudeAgent) Plugin() acp.AgentPlugin {
 	return claudePlugin{}
 }
 

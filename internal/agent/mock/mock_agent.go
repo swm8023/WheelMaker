@@ -4,6 +4,7 @@ package mock
 import (
 	"context"
 
+	acp "github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/agent"
 )
 
@@ -31,3 +32,6 @@ func (a *MockAgent) Connect(_ context.Context) (*agent.Conn, error) {
 
 // Close is a no-op for the stateless mock agent.
 func (a *MockAgent) Close() error { return nil }
+
+// Plugin returns the default AgentPlugin (no customization needed for tests).
+func (a *MockAgent) Plugin() acp.AgentPlugin { return acp.DefaultPlugin{} }
