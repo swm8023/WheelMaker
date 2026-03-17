@@ -6,7 +6,7 @@ type SessionConfigSnapshot struct {
 	Model string
 }
 
-func sessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
+func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
 	snap := SessionConfigSnapshot{}
 	for _, opt := range opts {
 		if snap.Mode == "" && (opt.ID == "mode" || opt.Category == "mode") {

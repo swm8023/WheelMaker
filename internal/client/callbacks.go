@@ -25,7 +25,7 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		return
 	}
 
-	u := acp.SessionUpdateToUpdate(params.Update, nil)
+	u := sessionUpdateToUpdate(params.Update)
 
 	// Track session metadata updates.
 	switch params.Update.SessionUpdate {
@@ -90,25 +90,13 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 func (c *Client) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	c.mu.Lock()
 	pCtx := c.promptCtx
-	opts := c.sessionMeta.ConfigOptions
+	snap := acp.SessionConfigSnapshotFromOptions(c.sessionMeta.ConfigOptions)
 	ag := c.currentAgent
 	c.mu.Unlock()
 	if pCtx != nil {
 		ctx = pCtx
 	}
-	mode := resolveMode(opts)
-	return c.permRouter.decide(ctx, params, mode, ag)
-}
-
-// resolveMode extracts the current mode value from a slice of ConfigOptions.
-// Returns an empty string if no mode option is found.
-func resolveMode(opts []acp.ConfigOption) string {
-	for _, opt := range opts {
-		if opt.ID == "mode" || opt.Category == "mode" {
-			return opt.CurrentValue
-		}
-	}
-	return ""
+	return c.permRouter.decide(ctx, params, snap.Mode, ag)
 }
 
 // FSRead responds to fs/read_text_file agent requests.

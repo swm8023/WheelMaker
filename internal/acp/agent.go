@@ -6,7 +6,7 @@
 //	client.Client -> acp.Session (narrow interface, mockable)
 //	client.Client -> *acp.Agent  (concrete type, for Switch calls only)
 //	acp.Agent     -> *acp.Conn   (low-level transport, owns subprocess)
-//	acp.Agent     -> backendHooks (per-backend customization hooks)
+//	acp.Agent     -> backendHooks (per-agent customization hooks)
 package acp
 
 import (
@@ -18,8 +18,8 @@ import (
 	"sync"
 )
 
-// backendHooks is the per-backend customization interface for acp.Agent.
-// Implementations are provided by the caller (backend.Backend) and injected
+// backendHooks is the per-agent customization interface for acp.Agent.
+// Implementations are provided by the caller (agent.Agent) and injected
 // via New / NewWithSessionID / Switch.
 type backendHooks interface {
 
@@ -30,6 +30,9 @@ type backendHooks interface {
 	// notification. Translate legacy protocol fields to modern format here.
 	// Return params unchanged for pass-through (default behaviour).
 	NormalizeParams(method string, params json.RawMessage) json.RawMessage
+
+	// Prefilter can inspect/mutate/block ACP messages in either direction.
+	Prefilter(ctx context.Context, msg ForwardMessage) (ForwardMessage, bool, error)
 }
 
 // noopHooks is the default no-op implementation of backendHooks.
@@ -62,6 +65,10 @@ func (noopHooks) HandlePermission(_ context.Context, params PermissionRequestPar
 
 func (noopHooks) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
 
+func (noopHooks) Prefilter(_ context.Context, msg ForwardMessage) (ForwardMessage, bool, error) {
+	return msg, true, nil
+}
+
 // hooksOrDefault returns h if non-nil, otherwise noopHooks{}.
 func hooksOrDefault(h backendHooks) backendHooks {
 	if h == nil {
@@ -83,8 +90,8 @@ type Session interface {
 	// SetConfigOption updates a named session config option.
 	SetConfigOption(ctx context.Context, configID, value string) error
 
-	// BackendName returns the name of the current backend (e.g. "claude").
-	BackendName() string
+	// AgentName returns the name of the current agent (e.g. "claude").
+	AgentName() string
 
 	// SessionID returns the current ACP session ID for state persistence.
 	SessionID() string
@@ -134,6 +141,7 @@ type SessionMeta struct {
 type Agent struct {
 	name       string            // current agent name (for identification)
 	conn       *Conn             // active ACP connection (owns the subprocess)
+	forwarder  *Forwarder        // ACP bridge with optional bidirectional filtering
 	caps       AgentCapabilities // capabilities declared during initialize
 	sessionID  string            // active ACP session ID
 	cwd        string            // working directory for session/new
@@ -167,17 +175,19 @@ type Agent struct {
 }
 
 // New creates an Agent using an already-started *Conn.
-// hooks customizes per-backend behaviour; nil uses noopHooks (auto allow_once).
+// hooks customizes per-agent behaviour; nil uses noopHooks (auto allow_once).
 func New(name string, conn *Conn, cwd string, hooks backendHooks) *Agent {
+	h := hooksOrDefault(hooks)
 	ag := &Agent{
 		name:            name,
 		conn:            conn,
 		cwd:             cwd,
 		mcpServers:      []MCPServer{},
-		hooks:           hooksOrDefault(hooks),
+		hooks:           h,
 		terminals:       newTerminalManager(),
 		activeToolCalls: make(map[string]struct{}),
 	}
+	ag.forwarder = ag.buildForwarder(conn, h)
 	ag.initCond = sync.NewCond(&ag.mu)
 	return ag
 }
@@ -200,7 +210,6 @@ func NewWithSessionID(name string, conn *Conn, cwd string, sessionID string, hoo
 func (a *Agent) Cancel() error {
 	a.mu.Lock()
 	sessID := a.sessionID
-	conn := a.conn
 	ready := a.ready
 	cancel := a.promptCancel // FL2
 	ch := a.promptUpdatesCh
@@ -233,7 +242,7 @@ func (a *Agent) Cancel() error {
 	if sessID == "" || !ready {
 		return nil
 	}
-	return conn.Notify("session/cancel", SessionCancelParams{SessionID: sessID})
+	return a.forwarder.Notify("session/cancel", SessionCancelParams{SessionID: sessID})
 }
 
 // SetMode sends a session/set_mode request (ACP extension).
@@ -244,29 +253,24 @@ func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 	}
 	a.mu.Lock()
 	sessID := a.sessionID
-	conn := a.conn
 	ready := a.ready
 	a.mu.Unlock()
 	if sessID == "" || !ready {
 		return fmt.Errorf("agent: no active session")
 	}
-	if err := conn.Send(ctx, "session/set_mode",
+	if err := a.forwarder.Send(ctx, "session/set_mode",
 		map[string]string{"sessionId": sessID, "modeId": modeID}, nil); err != nil {
 		return err
 	}
 	return nil
 }
 
-// BackendName returns the name of the current backend.
-func (a *Agent) BackendName() string {
+// AgentName returns the name of the current agent.
+func (a *Agent) AgentName() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.name
 }
-
-// AgentName returns the name of the current backend.
-// Deprecated: use BackendName.
-func (a *Agent) AgentName() string { return a.BackendName() }
 
 // SessionID returns the current ACP session ID.
 func (a *Agent) SessionID() string {
@@ -297,14 +301,13 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 	}
 	a.mu.Lock()
 	sessID := a.sessionID
-	conn := a.conn
 	ready := a.ready
 	a.mu.Unlock()
 	if sessID == "" || !ready {
 		return fmt.Errorf("agent: no active session")
 	}
 	var raw json.RawMessage
-	if err := conn.Send(ctx, "session/set_config_option",
+	if err := a.forwarder.Send(ctx, "session/set_config_option",
 		SessionSetConfigOptionParams{
 			SessionID: sessID,
 			ConfigID:  configID,
@@ -313,7 +316,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 		return err
 	}
 
-	// Backends may return either:
+	// Agents may return either:
 	// 1) []ConfigOption
 	// 2) {"configOptions":[...]}
 	var opts []ConfigOption
@@ -373,6 +376,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *Conn, mode Swi
 	a.initMeta = InitMeta{}
 	a.sessionMeta = SessionMeta{}
 	a.hooks = hooksOrDefault(hooks)
+	a.forwarder = a.buildForwarder(newConn, a.hooks)
 	a.mu.Unlock()
 
 	// Wake up any goroutines waiting in ensureReady so they retry with the new conn.
@@ -385,7 +389,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *Conn, mode Swi
 
 	// For SwitchWithContext, bootstrap the new session with the previous reply.
 	// Drain the channel synchronously so that this call blocks until the bootstrap
-	// completes. The caller (Client.switchBackend) holds promptMu for the duration,
+	// completes. The caller (Client.switchAgent) holds promptMu for the duration,
 	// which prevents any user prompt from running concurrently with the bootstrap.
 	if mode == SwitchWithContext && summary != "" {
 		ch, err := a.Prompt(ctx, "[context] "+summary)
@@ -420,7 +424,7 @@ func (a *Agent) SessionConfigSnapshot() (SessionConfigSnapshot, bool) {
 	if !a.ready {
 		return SessionConfigSnapshot{}, false
 	}
-	return sessionConfigSnapshotFromOptions(a.sessionMeta.ConfigOptions), true
+	return SessionConfigSnapshotFromOptions(a.sessionMeta.ConfigOptions), true
 }
 
 // EnsureReady initializes the ACP session when needed and returns the current
@@ -480,3 +484,12 @@ func (a *Agent) setSessionInfo(title, updatedAt string) {
 
 // compile-time check: Agent implements Session.
 var _ Session = (*Agent)(nil)
+
+func (a *Agent) buildForwarder(conn *Conn, hooks backendHooks) *Forwarder {
+	return NewForwarder(conn, func(ctx context.Context, msg ForwardMessage) (ForwardMessage, bool, error) {
+		if msg.Direction == DirectionToClient && msg.Kind == KindNotification && msg.Method == "session/update" {
+			msg.Params = hooks.NormalizeParams(msg.Method, msg.Params)
+		}
+		return hooks.Prefilter(ctx, msg)
+	})
+}
