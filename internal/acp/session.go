@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"log"
 	"sync"
-
-	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
 // ensureReady performs the ACP handshake if the agent is not yet ready:
@@ -93,11 +91,11 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		var replayMu sync.Mutex
 		var replay []Update
 		replayMeta := SessionMeta{}
-		cancelReplaySub := conn.Subscribe(func(n agent.Notification) {
+		cancelReplaySub := conn.Subscribe(func(n Notification) {
 			if n.Method != "session/update" {
 				return
 			}
-			normalized := a.plugin.NormalizeParams(n.Method, n.Params)
+			normalized := a.hooks.NormalizeParams(n.Method, n.Params)
 			var p SessionUpdateParams
 			if err := json.Unmarshal(normalized, &p); err != nil || p.SessionID != savedSessionID {
 				return
@@ -112,9 +110,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 				}
 			case "config_option_update":
 				if len(p.Update.ConfigOptions) > 0 {
-					if err := a.plugin.ValidateConfigOptions(p.Update.ConfigOptions); err == nil {
-						replayMeta.ConfigOptions = p.Update.ConfigOptions
-					}
+					replayMeta.ConfigOptions = p.Update.ConfigOptions
 				}
 			case "session_info_update":
 				if p.Update.Title != "" {
@@ -162,11 +158,6 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 		notifyDone()
 		return fmt.Errorf("ensureReady: session/new: %w", err)
 	}
-	if err := a.plugin.ValidateConfigOptions(newResult.ConfigOptions); err != nil {
-		notifyDone()
-		return fmt.Errorf("ensureReady: invalid configOptions: %w", err)
-	}
-
 	a.mu.Lock()
 	a.caps = initResult.AgentCapabilities
 	a.initMeta = newInitMeta

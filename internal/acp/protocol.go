@@ -4,13 +4,6 @@ import "encoding/json"
 
 // --- ACP-specific param/result types ---
 
-// RPCError is a JSON-RPC 2.0 error object.
-type RPCError struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message"`
-	Data    json.RawMessage `json:"data,omitempty"`
-}
-
 // InitializeParams are sent by the client during the initialize handshake.
 type InitializeParams struct {
 	ProtocolVersion    int                `json:"protocolVersion"`

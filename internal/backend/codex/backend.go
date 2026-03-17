@@ -1,16 +1,16 @@
-// Package codex implements an agent.Backend and acp.AgentPlugin for the Codex CLI via codex-acp.
+// Package codex implements a backend.Backend for the Codex CLI via codex-acp.
 package codex
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent"
+	"github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
-const agentName = "codex"
+const backendName = "codex"
 
 // Config holds configuration for the Backend.
 type Config struct {
@@ -22,10 +22,9 @@ type Config struct {
 	Env map[string]string
 }
 
-// Backend is a stateless connection factory and acp.AgentPlugin for the Codex CLI.
+// Backend is a stateless connection factory for the Codex CLI.
 // Each call to Connect() spawns a new codex-acp subprocess.
 type Backend struct {
-	acp.DefaultPlugin
 	cfg Config
 }
 
@@ -34,19 +33,19 @@ func New(cfg Config) *Backend {
 	return &Backend{cfg: cfg}
 }
 
-// Name returns the agent identifier.
-func (p *Backend) Name() string { return agentName }
+// Name returns the backend identifier.
+func (p *Backend) Name() string { return backendName }
 
-// Connect starts a new codex-acp subprocess and returns an initialized *agent.Conn.
+// Connect starts a new codex-acp subprocess and returns an initialized *acp.Conn.
 // Conn.Start() is called internally; the caller must NOT call Start() again.
-func (p *Backend) Connect(_ context.Context) (*agent.Conn, error) {
+func (p *Backend) Connect(_ context.Context) (*acp.Conn, error) {
 	exePath, err := tools.ResolveBinary("codex-acp", p.cfg.ExePath)
 	if err != nil {
 		return nil, fmt.Errorf("codex: resolve binary: %w", err)
 	}
 
 	env := buildEnv(p.cfg.Env)
-	conn := agent.New(exePath, env)
+	conn := acp.NewConn(exePath, env)
 	if err := conn.Start(); err != nil {
 		return nil, fmt.Errorf("codex: start process: %w", err)
 	}
@@ -56,18 +55,23 @@ func (p *Backend) Connect(_ context.Context) (*agent.Conn, error) {
 // Close is a no-op since Connect() transfers subprocess ownership to Conn.
 func (p *Backend) Close() error { return nil }
 
-// ValidateConfigOptions enforces Codex-specific config requirements.
-func (p *Backend) ValidateConfigOptions(opts []acp.ConfigOption) error {
-	for _, opt := range opts {
-		if (opt.ID == "mode" || opt.Category == "mode") && opt.CurrentValue == "" {
-			return fmt.Errorf("codex: mode currentValue is empty")
-		}
-		if (opt.ID == "model" || opt.Category == "model") && opt.CurrentValue == "" {
-			return fmt.Errorf("codex: model currentValue is empty")
+// HandlePermission auto-selects allow_once (matching former AutoAllowHandler behaviour).
+func (p *Backend) HandlePermission(_ context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+	optionID := ""
+	for _, opt := range params.Options {
+		if opt.Kind == "allow_once" {
+			optionID = opt.OptionID
+			break
 		}
 	}
-	return nil
+	if optionID == "" {
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	}
+	return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
 }
+
+// NormalizeParams passes notifications through unchanged.
+func (p *Backend) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
 
 // buildEnv converts a map of environment variables to "KEY=VALUE" strings.
 func buildEnv(m map[string]string) []string {

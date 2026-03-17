@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/acp"
 )
 
 type rpcMsg struct {
@@ -137,6 +137,21 @@ func (s *inMemoryMockServer) handleRequest(id int64, method string, params json.
 		_ = json.Unmarshal(params, &p)
 		s.applyConfigOption(p.SessionID, p.ConfigID, p.Value)
 		s.respond(id, s.buildConfigOptions(s.getState(p.SessionID)))
+	case "session/set_mode":
+		var p struct {
+			SessionID string `json:"sessionId"`
+			ModeID    string `json:"modeId"`
+		}
+		_ = json.Unmarshal(params, &p)
+		if p.SessionID != "" && p.ModeID != "" {
+			// Keep session/set_mode 1:1 with the "mode" config option.
+			s.applyConfigOption(p.SessionID, "mode", p.ModeID)
+			s.sendUpdate(p.SessionID, map[string]any{
+				"sessionUpdate": "config_option_update",
+				"configOptions": s.buildConfigOptions(s.getState(p.SessionID)),
+			})
+		}
+		s.respond(id, map[string]any{})
 	case "session/prompt":
 		go s.handlePrompt(id, params)
 	default:

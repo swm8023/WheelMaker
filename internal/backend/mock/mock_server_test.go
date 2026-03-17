@@ -9,13 +9,12 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	agent "github.com/swm8023/wheelmaker/internal/agent"
-	mockagent "github.com/swm8023/wheelmaker/internal/agent/mock"
+	backendmock "github.com/swm8023/wheelmaker/internal/backend/mock"
 )
 
-func newInMemoryMockConn(t *testing.T) *agent.Conn {
+func newInMemoryMockConn(t *testing.T) *acp.Conn {
 	t.Helper()
-	a := mockagent.NewAgent()
+	a := backendmock.New()
 	c, err := a.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -43,7 +42,7 @@ func TestInMemoryMock_PromptCase1_TextAndMetaUpdates(t *testing.T) {
 
 	var mu sync.Mutex
 	seen := map[string]bool{}
-	cancel := c.Subscribe(func(n agent.Notification) {
+	cancel := c.Subscribe(func(n acp.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -91,7 +90,7 @@ func TestInMemoryMock_GlobalConfigCommand(t *testing.T) {
 	}
 
 	var gotConfigUpdate bool
-	cancel := c.Subscribe(func(n agent.Notification) {
+	cancel := c.Subscribe(func(n acp.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -215,7 +214,7 @@ func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
 		}, nil
 	})
 
-	cancel := c.Subscribe(func(n agent.Notification) {
+	cancel := c.Subscribe(func(n acp.Notification) {
 		if n.Method != "session/update" {
 			return
 		}

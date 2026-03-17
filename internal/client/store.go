@@ -99,7 +99,7 @@ func (s *JSONStore) Save(state *ProjectState) error {
 
 // ensureStateMaps initialises nil maps in a ProjectState to avoid nil-dereference panics.
 func ensureStateMaps(ps *ProjectState) {
-	if ps.Agents == nil {
-		ps.Agents = map[string]*AgentState{}
+	if ps.Backends == nil {
+		ps.Backends = map[string]*BackendState{}
 	}
 }

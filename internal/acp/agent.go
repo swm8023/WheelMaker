@@ -3,10 +3,10 @@
 //
 // Relationships:
 //
-//	client.Client -> agent.Session (narrow interface, mockable)
-//	client.Client -> *agent.Backend (concrete type, for Switch calls only)
-//	agent.Backend   -> agent/agent.Conn (low-level transport, owns subprocess)
-//	agent.Backend   -> agent.Backend (not stored; provided once by client on New/Switch)
+//	client.Client -> acp.Session (narrow interface, mockable)
+//	client.Client -> *acp.Agent  (concrete type, for Switch calls only)
+//	acp.Agent     -> *acp.Conn   (low-level transport, owns subprocess)
+//	acp.Agent     -> backendHooks (per-backend customization hooks)
 package acp
 
 import (
@@ -15,12 +15,53 @@ import (
 	"fmt"
 	"log"
 	"sync"
-
-	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
+// backendHooks is the per-backend customization interface for acp.Agent.
+// Implementations are provided by the caller (backend.Backend) and injected
+// via New / NewWithSessionID / Switch.
+type backendHooks interface {
+
+	// HandlePermission responds to session/request_permission callbacks.
+	HandlePermission(ctx context.Context, params PermissionRequestParams) (PermissionResult, error)
+
+	// NormalizeParams is called before acp processes each incoming session/update
+	// notification. Translate legacy protocol fields to modern format here.
+	// Return params unchanged for pass-through (default behaviour).
+	NormalizeParams(method string, params json.RawMessage) json.RawMessage
+}
+
+// noopHooks is the default no-op implementation of backendHooks.
+// HandlePermission auto-selects allow_once,
+// and NormalizeParams passes notifications through unchanged.
+type noopHooks struct{}
+
+func (noopHooks) HandlePermission(_ context.Context, params PermissionRequestParams) (PermissionResult, error) {
+	optionID := ""
+	for _, opt := range params.Options {
+		if opt.Kind == "allow_once" {
+			optionID = opt.OptionID
+			break
+		}
+	}
+	if optionID == "" {
+		return PermissionResult{Outcome: "cancelled"}, nil
+	}
+	return PermissionResult{Outcome: "selected", OptionID: optionID}, nil
+}
+
+func (noopHooks) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
+
+// hooksOrDefault returns h if non-nil, otherwise noopHooks{}.
+func hooksOrDefault(h backendHooks) backendHooks {
+	if h == nil {
+		return noopHooks{}
+	}
+	return h
+}
+
 // Session is the narrow interface used by client.Client for day-to-day operations.
-// agent.Backend implements this interface; tests can inject a mock.
+// acp.Agent implements this interface; tests can inject a mock.
 type Session interface {
 	// Prompt sends a prompt and returns a channel of streaming updates.
 	// The caller must drain the channel until an Update with Done=true is received.
@@ -32,7 +73,11 @@ type Session interface {
 	// SetMode switches the agent's operating mode.
 	SetMode(ctx context.Context, modeID string) error
 
-	// AgentName returns the name of the current agent (e.g. "claude").
+	// BackendName returns the name of the current backend (e.g. "claude").
+	BackendName() string
+
+	// AgentName returns the name of the current backend.
+	// Deprecated: use BackendName.
 	AgentName() string
 
 	// SessionID returns the current ACP session ID for state persistence.
@@ -79,11 +124,10 @@ type SessionMeta struct {
 }
 
 // Agent is the complete ACP protocol encapsulation.
-// It owns an active *agent.Conn and handles all outbound ACP calls and inbound callbacks.
-// The factory agent is not stored here; after Connect(), the Conn owns the subprocess lifecycle.
+// It owns an active *Conn and handles all outbound ACP calls and inbound callbacks.
 type Agent struct {
 	name       string            // current agent name (for identification)
-	conn       *agent.Conn       // active ACP connection (owns the subprocess)
+	conn       *Conn             // active ACP connection (owns the subprocess)
 	caps       AgentCapabilities // capabilities declared during initialize
 	sessionID  string            // active ACP session ID
 	cwd        string            // working directory for session/new
@@ -92,7 +136,7 @@ type Agent struct {
 	initMeta    InitMeta    // metadata from initialize handshake
 	sessionMeta SessionMeta // metadata from session/new
 
-	plugin    AgentPlugin
+	hooks     backendHooks
 	terminals *terminalManager
 
 	lastReply    string   // most recent complete agent reply, used for SwitchWithContext
@@ -116,15 +160,15 @@ type Agent struct {
 	promptUpdatesCh chan<- Update
 }
 
-// New creates an Agent using an already-started *agent.Conn.
-// plugin customizes per-agent behaviour; nil uses DefaultPlugin.
-func New(name string, conn *agent.Conn, cwd string, plugin AgentPlugin) *Agent {
+// New creates an Agent using an already-started *Conn.
+// hooks customizes per-backend behaviour; nil uses noopHooks (auto allow_once).
+func New(name string, conn *Conn, cwd string, hooks backendHooks) *Agent {
 	ag := &Agent{
 		name:            name,
 		conn:            conn,
 		cwd:             cwd,
 		mcpServers:      []MCPServer{},
-		plugin:          pluginOrDefault(plugin),
+		hooks:           hooksOrDefault(hooks),
 		terminals:       newTerminalManager(),
 		activeToolCalls: make(map[string]struct{}),
 	}
@@ -133,8 +177,8 @@ func New(name string, conn *agent.Conn, cwd string, plugin AgentPlugin) *Agent {
 }
 
 // NewWithSessionID creates an Agent with a pre-existing session ID to attempt session/load.
-func NewWithSessionID(name string, conn *agent.Conn, cwd string, sessionID string, plugin AgentPlugin) *Agent {
-	ag := New(name, conn, cwd, plugin)
+func NewWithSessionID(name string, conn *Conn, cwd string, sessionID string, hooks backendHooks) *Agent {
+	ag := New(name, conn, cwd, hooks)
 	ag.sessionID = sessionID
 	return ag
 }
@@ -206,12 +250,16 @@ func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 	return nil
 }
 
-// AgentName returns the name of the current agent.
-func (a *Agent) AgentName() string {
+// BackendName returns the name of the current backend.
+func (a *Agent) BackendName() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.name
 }
+
+// AgentName returns the name of the current backend.
+// Deprecated: use BackendName.
+func (a *Agent) AgentName() string { return a.BackendName() }
 
 // SessionID returns the current ACP session ID.
 func (a *Agent) SessionID() string {
@@ -282,7 +330,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 //
 // savedSessionID, if non-empty, is pre-seeded into the agent so that ensureReady
 // will attempt session/load on the new connection (same as NewWithSessionID).
-// For SwitchWithContext pass "" ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â a fresh session is created by the bootstrap prompt.
+// For SwitchWithContext pass "" — a fresh session is created by the bootstrap prompt.
 //
 // Concurrency contract: the caller (Client) MUST call Cancel() and drain the
 // current prompt channel before calling Switch. Agent does not wait for in-progress
@@ -295,7 +343,7 @@ func (a *Agent) SetConfigOption(ctx context.Context, configID, value string) err
 // For SwitchWithContext, Switch blocks until the bootstrap prompt completes.
 // This preserves the caller's promptMu hold across the full switch + bootstrap,
 // preventing any concurrent user prompt from racing with the hidden bootstrap.
-func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mode SwitchMode, savedSessionID string, plugin AgentPlugin) error {
+func (a *Agent) Switch(ctx context.Context, name string, newConn *Conn, mode SwitchMode, savedSessionID string, hooks backendHooks) error {
 	a.mu.Lock()
 	var summary string
 	if mode == SwitchWithContext && a.lastReply != "" {
@@ -317,7 +365,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mo
 	// from scratch, preventing stale metadata from the old agent being read back.
 	a.initMeta = InitMeta{}
 	a.sessionMeta = SessionMeta{}
-	a.plugin = pluginOrDefault(plugin)
+	a.hooks = hooksOrDefault(hooks)
 	a.mu.Unlock()
 
 	// Wake up any goroutines waiting in ensureReady so they retry with the new conn.
@@ -330,7 +378,7 @@ func (a *Agent) Switch(ctx context.Context, name string, newConn *agent.Conn, mo
 
 	// For SwitchWithContext, bootstrap the new session with the previous reply.
 	// Drain the channel synchronously so that this call blocks until the bootstrap
-	// completes. The caller (Client.switchAgent) holds promptMu for the duration,
+	// completes. The caller (Client.switchBackend) holds promptMu for the duration,
 	// which prevents any user prompt from running concurrently with the bootstrap.
 	if mode == SwitchWithContext && summary != "" {
 		ch, err := a.Prompt(ctx, "[context] "+summary)
@@ -405,10 +453,6 @@ func (a *Agent) setAvailableCommands(cmds []AvailableCommand) {
 func (a *Agent) setConfigOptions(opts []ConfigOption) {
 	a.configOptsMu.Lock()
 	defer a.configOptsMu.Unlock()
-	if err := a.plugin.ValidateConfigOptions(opts); err != nil {
-		log.Printf("agent: ignore invalid configOptions update: %v", err)
-		return
-	}
 	a.mu.Lock()
 	a.sessionMeta.ConfigOptions = opts
 	a.mu.Unlock()
