@@ -1,6 +1,6 @@
 package claude_test
 
-// agent_unit_test.go: unit tests for claude.Plugin that do not require a real
+// agent_unit_test.go: unit tests for claude.Backend that do not require a real
 // claude-agent-acp binary or network access. No //go:build integration tag.
 
 import (

@@ -1,6 +1,6 @@
 //go:build integration
 
-// Integration test for agent/claude: verifies that claude.Plugin.Connect()
+// Integration test for agent/claude: verifies that claude.Backend.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
 // Run with: go test -tags integration ./internal/agent/claude/... -v -timeout 60s
