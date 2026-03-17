@@ -40,6 +40,7 @@ type mockSession struct {
 	mu           sync.Mutex
 	promptCalls  []string
 	cancelCalls  int
+	modeCalls    []string
 	agentN       string
 	sessionN     string
 	promptResult func(text string) (<-chan acp.Update, error)
@@ -67,7 +68,12 @@ func (m *mockSession) Cancel() error {
 	return nil
 }
 
-func (m *mockSession) SetMode(_ context.Context, _ string) error { return nil }
+func (m *mockSession) SetMode(_ context.Context, modeID string) error {
+	m.mu.Lock()
+	m.modeCalls = append(m.modeCalls, modeID)
+	m.mu.Unlock()
+	return nil
+}
 
 func (m *mockSession) AgentName() string {
 	m.mu.Lock()
@@ -251,6 +257,76 @@ func TestHandleMessage_Use_MissingName(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_Mode_SetsMode(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+	msgs := captureReplies(c)
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/mode code"})
+
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Mode set to: code") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("reply = %v, want mode confirmation", *msgs)
+	}
+}
+
+func TestHandleMessage_Mode_MissingName(t *testing.T) {
+	mock := &mockSession{agentN: "codex", sessionN: "sess-1"}
+	c := newTestClient(mock)
+	msgs := captureReplies(c)
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/mode"})
+
+	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Usage: /mode") {
+		t.Fatalf("reply = %v, want /mode usage", *msgs)
+	}
+}
+
+func TestHandleMessage_Model_SetsConfigOption(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	msgs := captureReplies(c)
+	// Prime the session so model updates can be applied on an active ACP session.
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/model gpt-4.1-mini"})
+
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Model set to: gpt-4.1-mini") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("messages = %v, want model confirmation", *msgs)
+	}
+}
+
 func TestHandleMessage_EmptyMessage(t *testing.T) {
 	mock := &mockSession{agentN: "codex"}
 	c := newTestClient(mock)
@@ -290,6 +366,33 @@ func TestHandleMessage_Prompt_TextStreaming(t *testing.T) {
 	}
 	if (*msgs)[0] != "hello world" {
 		t.Errorf("reply = %q, want 'hello world'", (*msgs)[0])
+	}
+}
+
+func TestHandleMessage_Prompt_ConfigOptionUpdate_NotifiesIM(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	msgs := captureReplies(c)
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "emit-config-update"})
+
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Config options updated:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("messages = %v, want config update notification", *msgs)
 	}
 }
 
@@ -509,7 +612,8 @@ func (a *minimalMockAgent) Connect(_ context.Context) (*agent.Conn, error) {
 	}
 	return conn, nil
 }
-func (a *minimalMockAgent) Close() error { return nil }
+func (a *minimalMockAgent) Close() error                    { return nil }
+func (a *minimalMockAgent) Plugin() acp.AgentPlugin         { return acp.DefaultPlugin{} }
 
 var _ agent.Agent = (*minimalMockAgent)(nil)
 
@@ -526,7 +630,8 @@ func (a *contextRejectMockAgent) Connect(_ context.Context) (*agent.Conn, error)
 	}
 	return conn, nil
 }
-func (a *contextRejectMockAgent) Close() error { return nil }
+func (a *contextRejectMockAgent) Close() error                    { return nil }
+func (a *contextRejectMockAgent) Plugin() acp.AgentPlugin         { return acp.DefaultPlugin{} }
 
 var _ agent.Agent = (*contextRejectMockAgent)(nil)
 
@@ -538,7 +643,8 @@ func (a *failConnectAgent) Name() string { return "fail" }
 func (a *failConnectAgent) Connect(_ context.Context) (*agent.Conn, error) {
 	return nil, fmt.Errorf("mock: binary not found")
 }
-func (a *failConnectAgent) Close() error { return nil }
+func (a *failConnectAgent) Close() error                    { return nil }
+func (a *failConnectAgent) Plugin() acp.AgentPlugin         { return acp.DefaultPlugin{} }
 
 var _ agent.Agent = (*failConnectAgent)(nil)
 
@@ -947,6 +1053,22 @@ func runClientMockAgent() {
 					"error":   map[string]any{"code": -32603, "message": "mock: context bootstrap rejected"},
 				})
 			} else {
+				if promptText == "emit-config-update" {
+					_ = enc.Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"method":  "session/update",
+						"params": map[string]any{
+							"sessionId": params.SessionID,
+							"update": map[string]any{
+								"sessionUpdate": "config_option_update",
+								"configOptions": []map[string]any{
+									{"id": "mode", "category": "mode", "currentValue": "code"},
+									{"id": "model", "category": "model", "currentValue": "gpt-4.1-mini"},
+								},
+							},
+						},
+					})
+				}
 				// Send a text notification so lastReply is populated for SwitchWithContext.
 				_ = enc.Encode(map[string]any{
 					"jsonrpc": "2.0",
