@@ -80,15 +80,11 @@ type Session interface {
 	// Cancel aborts any in-progress prompt.
 	Cancel() error
 
-	// SetMode switches the agent's operating mode.
-	SetMode(ctx context.Context, modeID string) error
+	// SetConfigOption updates a named session config option.
+	SetConfigOption(ctx context.Context, configID, value string) error
 
 	// BackendName returns the name of the current backend (e.g. "claude").
 	BackendName() string
-
-	// AgentName returns the name of the current backend.
-	// Deprecated: use BackendName.
-	AgentName() string
 
 	// SessionID returns the current ACP session ID for state persistence.
 	SessionID() string
@@ -241,6 +237,7 @@ func (a *Agent) Cancel() error {
 }
 
 // SetMode sends a session/set_mode request (ACP extension).
+// Deprecated: use SetConfigOption(ctx, "mode", value) instead.
 func (a *Agent) SetMode(ctx context.Context, modeID string) error {
 	if err := a.ensureReady(ctx); err != nil {
 		return err

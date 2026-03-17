@@ -76,6 +76,13 @@ func (m *mockSession) SetMode(_ context.Context, modeID string) error {
 	return nil
 }
 
+func (m *mockSession) SetConfigOption(_ context.Context, configID, value string) error {
+	m.mu.Lock()
+	m.modeCalls = append(m.modeCalls, configID+"="+value)
+	m.mu.Unlock()
+	return nil
+}
+
 func (m *mockSession) AgentName() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
