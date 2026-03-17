@@ -50,6 +50,8 @@ type Client struct {
 	promptMu sync.Mutex // serializes handlePrompt and switchBackend
 
 	currentPromptCh <-chan acp.Update // tracked for draining during switchBackend
+
+	permRouter *permissionRouter
 }
 
 // New creates a Client for the given project.
@@ -58,13 +60,15 @@ type Client struct {
 //   - projectName: identifier used in logs and state keys
 //   - cwd: working directory for backend sessions
 func New(store Store, imProvider im.Provider, projectName string, cwd string) *Client {
-	return &Client{
+	c := &Client{
 		projectName: projectName,
 		cwd:         cwd,
 		backendFacs: make(map[string]BackendFactory),
 		store:       store,
 		imRun:       imProvider,
 	}
+	c.permRouter = newPermissionRouter(c)
+	return c
 }
 
 // SetDebugLogger enables ACP JSON debug logging on every subsequent backend connection.
@@ -144,6 +148,9 @@ func (c *Client) HandleMessage(msg im.Message) {
 	}
 	if cmd, args, ok := parseCommand(text); ok {
 		c.handleCommand(msg, cmd, args)
+		return
+	}
+	if c.permRouter != nil && c.permRouter.resolveIncomingReply(msg.ChatID, text) {
 		return
 	}
 	c.handlePrompt(msg, text)
@@ -381,6 +388,10 @@ func resolveModelArg(input string, st *SessionState) (configID, value string, er
 func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
+	if c.permRouter != nil {
+		c.permRouter.setLastChatID(msg.ChatID)
+		defer c.permRouter.clearLastChatID(msg.ChatID)
+	}
 
 	// Lazily initialize the backend if no session exists yet.
 	c.mu.Lock()
@@ -462,7 +473,8 @@ func (c *Client) ensureBackend(ctx context.Context) error {
 	if fac == nil {
 		return fmt.Errorf("no backend registered for %q", name)
 	}
-	backend := fac("", nil)
+	baseBackend := fac("", nil)
+	backend := &interactiveBackend{base: baseBackend, router: c.permRouter}
 	conn, err := backend.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
@@ -574,7 +586,8 @@ func (c *Client) switchBackend(ctx context.Context, chatID, name string, mode ac
 	}
 	c.mu.Unlock()
 
-	newBackend := fac("", nil)
+	baseBackend := fac("", nil)
+	newBackend := &interactiveBackend{base: baseBackend, router: c.permRouter}
 	newConn, err := newBackend.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)

@@ -19,6 +19,7 @@ import (
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/backend"
+	backendmock "github.com/swm8023/wheelmaker/internal/backend/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
@@ -1007,6 +1008,55 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 	last := store.saved[len(store.saved)-1]
 	if last.Backends["codex"] == nil || last.Backends["codex"].LastSessionID == "" {
 		t.Errorf("Close did not persist codex session ID; Backends = %v", last.Backends)
+	}
+}
+
+func TestHandleMessage_PermissionReply_ViaIM(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveBackend: "codex",
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	c.RegisterBackend("codex", func(_ string, _ map[string]string) backend.Backend {
+		return backendmock.New()
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+	msgs := captureReplies(c)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.HandleMessage(im.Message{ChatID: "c1", Text: "4"})
+	}()
+
+	// Wait until the permission prompt is emitted, then reply via IM.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		found := false
+		for _, m := range *msgs {
+			if strings.Contains(m, "Permission request") {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "allow"})
+	wg.Wait()
+
+	joined := strings.Join(*msgs, "\n")
+	if !strings.Contains(joined, "Permission request") {
+		t.Fatalf("missing permission prompt in replies: %v", *msgs)
+	}
+	if !strings.Contains(joined, "permission:allowed") {
+		t.Fatalf("missing permission allowed result in replies: %v", *msgs)
 	}
 }
 
