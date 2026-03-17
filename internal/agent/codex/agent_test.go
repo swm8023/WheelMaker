@@ -1,6 +1,6 @@
 //go:build integration
 
-// Integration test for agent/codex: verifies that codex.Plugin.Connect()
+// Integration test for agent/codex: verifies that codex.Backend.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
 // Run with: go test -tags integration ./internal/agent/codex/... -v -timeout 60s

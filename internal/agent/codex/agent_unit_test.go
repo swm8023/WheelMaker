@@ -1,6 +1,6 @@
 package codex_test
 
-// agent_unit_test.go: unit tests for codex.Plugin that do not require a real
+// agent_unit_test.go: unit tests for codex.Backend that do not require a real
 // codex-acp binary or network access. No //go:build integration tag.
 
 import (
