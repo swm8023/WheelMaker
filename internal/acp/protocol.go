@@ -88,32 +88,6 @@ type AuthMethod struct {
 	Vars        []AuthMethodVar `json:"vars,omitempty"`
 }
 
-// Mode is an agent operating mode (e.g. "read-only", "auto", "full-access").
-type Mode struct {
-	ID          string `json:"id"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-// ModeState describes the current and available modes for a session.
-type ModeState struct {
-	CurrentModeID  string `json:"currentModeId,omitempty"`
-	AvailableModes []Mode `json:"availableModes,omitempty"`
-}
-
-// Model is an available AI model for a session.
-type Model struct {
-	ModelID     string `json:"modelId"`
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-// ModelState describes the current and available models for a session.
-type ModelState struct {
-	CurrentModelID  string  `json:"currentModelId,omitempty"`
-	AvailableModels []Model `json:"availableModels,omitempty"`
-}
-
 // ConfigOptionValue is a selectable value for a config option.
 type ConfigOptionValue struct {
 	Value       string `json:"value"`
@@ -148,7 +122,6 @@ type SessionNewParams struct {
 // SessionNewResult is returned after a successful session/new.
 type SessionNewResult struct {
 	SessionID     string         `json:"sessionId"`
-	Modes         *ModeState     `json:"modes,omitempty"`
 	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
 }
 

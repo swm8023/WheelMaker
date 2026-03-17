@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	acp "github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
@@ -53,6 +54,11 @@ func (a *ClaudeAgent) Connect(_ context.Context) (*agent.Conn, error) {
 
 // Close is a no-op for ClaudeAgent since Connect() transfers subprocess ownership to Conn.
 func (a *ClaudeAgent) Close() error { return nil }
+
+// AgentPlugin returns the per-agent plugin for Claude.
+func (a *ClaudeAgent) AgentPlugin() acp.AgentPlugin {
+	return claudePlugin{}
+}
 
 // buildEnv converts a map of environment variables to "KEY=VALUE" strings.
 func buildEnv(m map[string]string) []string {

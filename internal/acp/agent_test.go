@@ -52,7 +52,7 @@ func newACPAgent(t *testing.T, name string) *acp.Agent {
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := acp.New(name, conn, t.TempDir())
+	ag := acp.New(name, conn, t.TempDir(), nil)
 	t.Cleanup(func() { _ = ag.Close() })
 	return ag
 }
@@ -160,7 +160,7 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchWithContext, "", nil); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 }
@@ -196,7 +196,7 @@ func TestAgent_Cancel_SeededSessionID_BeforeReady(t *testing.T) {
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
+	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id", nil)
 	t.Cleanup(func() { _ = ag.Close() })
 
 	// No Prompt() called yet; ready==false but sessionID is non-empty.
@@ -207,8 +207,8 @@ func TestAgent_Cancel_SeededSessionID_BeforeReady(t *testing.T) {
 
 func TestAgent_SetMode_BeforeReady(t *testing.T) {
 	ag := newACPAgent(t, "test")
-	if err := ag.SetMode(context.Background(), "auto"); err == nil {
-		t.Error("expected error from SetMode before ready")
+	if err := ag.SetMode(context.Background(), "auto"); err != nil {
+		t.Errorf("SetMode before ready (auto-init): %v", err)
 	}
 }
 
@@ -227,26 +227,25 @@ func TestAgent_SetMode_AfterReady(t *testing.T) {
 	}
 }
 
-// TestAgent_SetMode_SeededSessionID_BeforeReady covers the same regression as the
-// Cancel variant: calling SetMode when sessionID is seeded but ready==false must
-// return an error without sending an RPC on an uninitialized connection.
+// TestAgent_SetMode_SeededSessionID_BeforeReady verifies SetMode auto-initializes
+// from a pre-seeded session ID and succeeds.
 func TestAgent_SetMode_SeededSessionID_BeforeReady(t *testing.T) {
 	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id")
+	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "seeded-session-id", nil)
 	t.Cleanup(func() { _ = ag.Close() })
 
-	if err := ag.SetMode(context.Background(), "auto"); err == nil {
-		t.Error("expected error from SetMode with seeded session ID before ready")
+	if err := ag.SetMode(context.Background(), "auto"); err != nil {
+		t.Errorf("SetMode with seeded session ID before ready (auto-init): %v", err)
 	}
 }
 
 func TestAgent_SetConfigOption_BeforeReady(t *testing.T) {
 	ag := newACPAgent(t, "test")
-	if err := ag.SetConfigOption(context.Background(), "model", "gpt-4"); err == nil {
-		t.Error("expected error from SetConfigOption before ready")
+	if err := ag.SetConfigOption(context.Background(), "model", "gpt-4"); err != nil {
+		t.Errorf("SetConfigOption before ready (auto-init): %v", err)
 	}
 }
 
@@ -284,7 +283,7 @@ func TestAgent_Switch_Clean(t *testing.T) {
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchClean, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchClean, "", nil); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -312,7 +311,7 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
-	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", newConn, acp.SwitchWithContext, "", nil); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -363,7 +362,7 @@ func TestAgent_SessionLoad(t *testing.T) {
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
-	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "existing-session-id")
+	ag := acp.NewWithSessionID("test", conn, t.TempDir(), "existing-session-id", nil)
 	t.Cleanup(func() { _ = ag.Close() })
 
 	ctx := context.Background()
@@ -536,7 +535,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	log.SetOutput(&logBuf)
 	defer log.SetOutput(os.Stderr)
 
-	if err := ag.Switch(ctx, "test2", conn2, acp.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", conn2, acp.SwitchWithContext, "", nil); err != nil {
 		t.Fatalf("Switch: %v", err)
 	}
 
@@ -583,7 +582,7 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 	defer log.SetOutput(os.Stderr)
 
 	// Switch must return nil even though bootstrap will fail.
-	if err := ag.Switch(ctx, "test2", conn2, acp.SwitchWithContext, ""); err != nil {
+	if err := ag.Switch(ctx, "test2", conn2, acp.SwitchWithContext, "", nil); err != nil {
 		t.Fatalf("Switch must return nil on bootstrap failure, got: %v", err)
 	}
 
