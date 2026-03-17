@@ -28,7 +28,8 @@ type Backend interface {
 	Close() error
 
 	// HandlePermission responds to session/request_permission callbacks.
-	HandlePermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error)
+	// mode is the current session mode resolved from configOptions.
+	HandlePermission(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error)
 
 	// NormalizeParams is called before acp processes each incoming session/update
 	// notification. Translate legacy protocol fields to modern format here.
