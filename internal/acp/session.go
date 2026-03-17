@@ -100,7 +100,7 @@ func (a *Agent) ensureReady(ctx context.Context) error {
 			if err := json.Unmarshal(normalized, &p); err != nil || p.SessionID != savedSessionID {
 				return
 			}
-			u := SessionUpdateToUpdate(p.Update, normalized)
+			u := sessionUpdateToUpdate(p.Update, normalized)
 			replayMu.Lock()
 			replay = append(replay, u)
 			switch p.Update.SessionUpdate {

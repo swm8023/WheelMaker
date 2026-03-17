@@ -57,7 +57,7 @@ func (a *Agent) callbackPermission(ctx context.Context, params json.RawMessage) 
 	h := a.hooks
 	// FL2: use per-prompt context so Cancel() unblocks pending permission requests.
 	pCtx := a.promptCtx
-	snap := sessionConfigSnapshotFromOptions(a.sessionMeta.ConfigOptions)
+	snap := SessionConfigSnapshotFromOptions(a.sessionMeta.ConfigOptions)
 	a.mu.Unlock()
 	if pCtx == nil {
 		pCtx = ctx

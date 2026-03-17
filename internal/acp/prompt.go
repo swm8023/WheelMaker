@@ -100,7 +100,7 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 			}
 		}
 
-		u := SessionUpdateToUpdate(p.Update, normalized)
+		u := sessionUpdateToUpdate(p.Update, normalized)
 
 		// Accumulate text content for SwitchWithContext.
 		if u.Type == UpdateText && u.Content != "" {
@@ -182,10 +182,10 @@ func (a *Agent) Prompt(ctx context.Context, text string) (<-chan Update, error) 
 	return updates, nil
 }
 
-// SessionUpdateToUpdate converts an ACP SessionUpdate notification into an agent Update.
+// sessionUpdateToUpdate converts an ACP SessionUpdate notification into an agent Update.
 // rawParams is the full notification params JSON, used to populate Raw for structured types.
 // Pass nil for rawParams when the raw bytes are unavailable (e.g. after JSON unmarshal).
-func SessionUpdateToUpdate(u SessionUpdate, rawParams json.RawMessage) Update {
+func sessionUpdateToUpdate(u SessionUpdate, rawParams json.RawMessage) Update {
 	switch u.SessionUpdate {
 	case "agent_message_chunk":
 		text := ""
