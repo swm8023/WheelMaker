@@ -1,6 +1,6 @@
 package claude_test
 
-// agent_unit_test.go: unit tests for claude.Backend that do not require a real
+// backend_test.go: unit tests for claude.Backend that do not require a real
 // claude-agent-acp binary or network access. No //go:build integration tag.
 
 import (
@@ -10,15 +10,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/agent/claude"
+	"github.com/swm8023/wheelmaker/internal/backend/claude"
 )
 
-// TestAgent_Connect_NotExecutable verifies that Connect() returns a
+// TestBackend_Connect_NotExecutable verifies that Connect() returns a
 // descriptive error when the configured path resolves to a non-executable file.
 // We use t.TempDir() as the ExePath: the directory exists on disk (os.Stat
 // succeeds, so tools.ResolveBinary accepts it without PATH fallback), but
 // exec.Command(dir).Start() fails because a directory cannot be executed.
-func TestAgent_Connect_NotExecutable(t *testing.T) {
+func TestBackend_Connect_NotExecutable(t *testing.T) {
 	a := claude.New(claude.Config{
 		ExePath: t.TempDir(), // exists but not executable
 	})
@@ -40,9 +40,9 @@ func TestAgent_Connect_NotExecutable(t *testing.T) {
 	}
 }
 
-// TestAgent_Connect_BinaryNotFound verifies that Connect() returns the
+// TestBackend_Connect_BinaryNotFound verifies that Connect() returns the
 // "binary not found" error path when the binary cannot be located.
-func TestAgent_Connect_BinaryNotFound(t *testing.T) {
+func TestBackend_Connect_BinaryNotFound(t *testing.T) {
 	// Clear PATH to prevent exec.LookPath succeeding.
 	t.Setenv("PATH", "")
 	if runtime.GOOS == "windows" {
@@ -71,8 +71,8 @@ func TestAgent_Connect_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// TestAgent_Close_Unit verifies that Close() is a no-op and idempotent.
-func TestAgent_Close_Unit(t *testing.T) {
+// TestBackend_Close_Unit verifies that Close() is a no-op and idempotent.
+func TestBackend_Close_Unit(t *testing.T) {
 	a := claude.New(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("first Close: %v", err)
@@ -82,8 +82,8 @@ func TestAgent_Close_Unit(t *testing.T) {
 	}
 }
 
-// TestAgent_Name verifies that Name() returns "claude".
-func TestAgent_Name(t *testing.T) {
+// TestBackend_Name verifies that Name() returns "claude".
+func TestBackend_Name(t *testing.T) {
 	a := claude.New(claude.Config{})
 	if got := a.Name(); got != "claude" {
 		t.Errorf("Name() = %q, want %q", got, "claude")

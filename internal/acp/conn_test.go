@@ -1,10 +1,10 @@
-package agent_test
+package acp_test
 
-// Unit tests for agent.Conn using a self-referential mock agent.
+// Unit tests for acp.Conn using a self-referential mock agent.
 //
 // Pattern: when GO_ACP_MOCK=1 is set, this test binary acts as the ACP
 // mock server (reading stdin, writing stdout). Otherwise it runs the tests,
-// pointing agent.New() at os.Args[0] with GO_ACP_MOCK=1 in the environment.
+// pointing acp.NewConn() at os.Args[0] with GO_ACP_MOCK=1 in the environment.
 
 import (
 	"bufio"
@@ -18,25 +18,15 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
-// mockAgentBin is set in TestMain to the current test binary path.
+// mockAgentBin is set in TestMain (in agent_test.go) to the current test binary path.
 var mockAgentBin string
 
-func TestMain(m *testing.M) {
-	if os.Getenv("GO_ACP_MOCK") == "1" {
-		runMockAgent()
-		os.Exit(0)
-	}
-	mockAgentBin = os.Args[0]
-	os.Exit(m.Run())
-}
-
 // newMockConn creates a Conn pointed at the mock agent subprocess.
-func newMockConn(t *testing.T) *agent.Conn {
+func newMockConn(t *testing.T) *acp.Conn {
 	t.Helper()
-	c := agent.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
+	c := acp.NewConn(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
@@ -164,7 +154,7 @@ func TestSubscribe_Notification(t *testing.T) {
 	// Collect session/update notifications.
 	var mu sync.Mutex
 	var notifications []acp.SessionUpdateParams
-	cancel := c.Subscribe(func(n agent.Notification) {
+	cancel := c.Subscribe(func(n acp.Notification) {
 		if n.Method != "session/update" {
 			return
 		}
@@ -178,7 +168,7 @@ func TestSubscribe_Notification(t *testing.T) {
 	})
 	defer cancel()
 
-	// Send a prompt Ã¢â‚¬â€ the mock sends 3 text chunks then returns.
+	// Send a prompt — the mock sends 3 text chunks then returns.
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
@@ -217,12 +207,12 @@ func TestSubscribe_Cancel(t *testing.T) {
 	c := newMockConn(t)
 
 	var count atomic.Int32
-	cancelSub := c.Subscribe(func(n agent.Notification) {
+	cancelSub := c.Subscribe(func(n acp.Notification) {
 		count.Add(1)
 	})
 	cancelSub() // unsubscribe immediately
 
-	// Send a session/prompt to generate notifications Ã¢â‚¬â€ none should be received.
+	// Send a session/prompt to generate notifications — none should be received.
 	var sessResult acp.SessionNewResult
 	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
 	_ = c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
@@ -247,7 +237,7 @@ func TestNotify(t *testing.T) {
 
 // TestClose_Idempotent verifies Close can be called multiple times safely.
 func TestClose_Idempotent(t *testing.T) {
-	c := agent.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
+	c := acp.NewConn(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -261,7 +251,7 @@ func TestClose_Idempotent(t *testing.T) {
 
 // TestSend_AfterClose verifies Send returns error after the conn is closed.
 func TestSend_AfterClose(t *testing.T) {
-	c := agent.New(mockAgentBin, []string{"GO_ACP_MOCK=1"})
+	c := acp.NewConn(mockAgentBin, []string{"GO_ACP_MOCK=1"})
 	if err := c.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -295,7 +285,7 @@ func TestSend_ProcessExit(t *testing.T) {
 	}
 }
 
-// TestIncomingRequest_Handler verifies that AgentÃ¢â€ â€™Client requests are routed
+// TestIncomingRequest_Handler verifies that Agent→Client requests are routed
 // to the registered RequestHandler and that the response is sent back.
 func TestIncomingRequest_Handler(t *testing.T) {
 	c := newMockConn(t)
@@ -332,7 +322,7 @@ func TestIncomingRequest_Handler(t *testing.T) {
 // sends a -32601 method-not-found error back to the agent.
 func TestIncomingRequest_NoHandler(t *testing.T) {
 	c := newMockConn(t)
-	// No OnRequest registered Ã¢â‚¬â€ mock expects a -32601 error back.
+	// No OnRequest registered — mock expects a -32601 error back.
 	err := c.Send(context.Background(), "trigger_incoming_request_no_handler", nil, nil)
 	if err != nil {
 		t.Fatalf("Send: %v", err) // the client-side send itself should succeed
@@ -357,7 +347,7 @@ func TestMultipleSubscribers(t *testing.T) {
 	cancels := make([]func(), nSubs)
 	for i := range nSubs {
 		i := i
-		cancels[i] = c.Subscribe(func(n agent.Notification) {
+		cancels[i] = c.Subscribe(func(n acp.Notification) {
 			counts[i].Add(1)
 		})
 	}
@@ -385,7 +375,7 @@ func TestMultipleSubscribers(t *testing.T) {
 
 // --- Mock agent (runs when GO_ACP_MOCK=1) ---
 
-func runMockAgent() {
+func runConnMockAgent() {
 	enc := json.NewEncoder(os.Stdout)
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
@@ -406,7 +396,7 @@ func runMockAgent() {
 			continue
 		}
 
-		// Notifications have no id Ã¢â‚¬â€ ignore them.
+		// Notifications have no id — ignore them.
 		if raw.ID == nil {
 			continue
 		}
@@ -466,7 +456,7 @@ func runMockAgent() {
 			return
 
 		case "trigger_incoming_request":
-			// 1. Send an AgentÃ¢â€ â€™Client request (fs/read_text_file) to the client.
+			// 1. Send an Agent→Client request (fs/read_text_file) to the client.
 			mockIncomingRequest(enc, 9999, "fs/read_text_file", map[string]any{
 				"sessionId": "test-session",
 				"path":      "/mock/path/file.txt",
@@ -533,7 +523,7 @@ func mockError(enc *json.Encoder, id int64, code int, message string) {
 	})
 }
 
-// mockIncomingRequest simulates an AgentÃ¢â€ â€™Client request (has both id and method).
+// mockIncomingRequest simulates an Agent→Client request (has both id and method).
 func mockIncomingRequest(enc *json.Encoder, id int64, method string, params any) {
 	_ = enc.Encode(map[string]any{
 		"jsonrpc": "2.0",

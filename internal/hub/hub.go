@@ -8,17 +8,17 @@ import (
 	"os"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/agent/claude"
-	"github.com/swm8023/wheelmaker/internal/agent/codex"
-	"github.com/swm8023/wheelmaker/internal/agent/mock"
+	"github.com/swm8023/wheelmaker/internal/backend"
+	"github.com/swm8023/wheelmaker/internal/backend/claude"
+	"github.com/swm8023/wheelmaker/internal/backend/codex"
+	"github.com/swm8023/wheelmaker/internal/backend/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
-// Each project has its own IM provider, agent session, and state partition.
+// Each project has its own IM provider, backend session, and state partition.
 type Hub struct {
 	cfg       *Config
 	statePath string
@@ -85,15 +85,15 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		c.SetDebugLogger(log.Writer())
 	}
 
-	// Register all known agent factories so users can switch between them at runtime.
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Backend {
+	// Register all known backend factories so users can switch between them at runtime.
+	c.RegisterBackend("codex", func(_ string, _ map[string]string) backend.Backend {
 		return codex.New(codex.Config{})
 	})
-	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Backend {
+	c.RegisterBackend("claude", func(_ string, _ map[string]string) backend.Backend {
 		return claude.New(claude.Config{})
 	})
-	c.RegisterAgent("mock", func(_ string, _ map[string]string) agent.Backend {
-		return mock.NewAgent()
+	c.RegisterBackend("mock", func(_ string, _ map[string]string) backend.Backend {
+		return mock.New()
 	})
 
 	if err := c.Start(ctx); err != nil {

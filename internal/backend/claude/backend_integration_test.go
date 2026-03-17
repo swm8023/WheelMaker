@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration test for agent/claude: verifies that claude.Backend.Connect()
+// Integration test for backend/claude: verifies that claude.Backend.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/claude/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/backend/claude/... -v -timeout 60s
 // Requires: claude-agent-acp binary at bin/windows_amd64/claude-agent-acp.exe or in PATH,
 //
 //	and ANTHROPIC_API_KEY set in the environment.
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent/claude"
+	"github.com/swm8023/wheelmaker/internal/backend/claude"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -31,9 +31,9 @@ func requireClaudeBinary(t *testing.T) {
 	}
 }
 
-// TestAgent_Connect verifies that Connect() spawns a subprocess and
+// TestBackend_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestAgent_Connect(t *testing.T) {
+func TestBackend_Connect(t *testing.T) {
 	requireClaudeBinary(t)
 
 	a := claude.New(claude.Config{})
@@ -68,9 +68,9 @@ func TestAgent_Connect(t *testing.T) {
 	t.Logf("connected to claude-agent-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestAgent_ConnectMultiple verifies that Connect() is stateless:
+// TestBackend_ConnectMultiple verifies that Connect() is stateless:
 // calling it twice produces two independent connections.
-func TestAgent_ConnectMultiple(t *testing.T) {
+func TestBackend_ConnectMultiple(t *testing.T) {
 	requireClaudeBinary(t)
 
 	a := claude.New(claude.Config{})
@@ -98,8 +98,8 @@ func TestAgent_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestAgent_Close verifies that Close() is a no-op.
-func TestAgent_Close(t *testing.T) {
+// TestBackend_Close verifies that Close() is a no-op.
+func TestBackend_Close(t *testing.T) {
 	a := claude.New(claude.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)

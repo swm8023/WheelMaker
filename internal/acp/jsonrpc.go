@@ -1,6 +1,5 @@
-// package agent implements the Agent Client Protocol JSON-RPC 2.0 stdio transport.
-// This package is the backend factory + transport layer used by the ACP session layer.
-package agent
+// Package acp implements the ACP protocol: session layer and JSON-RPC 2.0 stdio transport.
+package acp
 
 import (
 	"encoding/json"

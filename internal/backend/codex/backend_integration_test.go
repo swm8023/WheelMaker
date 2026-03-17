@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration test for agent/codex: verifies that codex.Backend.Connect()
+// Integration test for backend/codex: verifies that codex.Backend.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/codex/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/backend/codex/... -v -timeout 60s
 // Requires: codex-acp binary at bin/windows_amd64/codex-acp.exe or in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/backend/codex"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
@@ -31,9 +31,9 @@ func requireCodexBinary(t *testing.T) {
 	}
 }
 
-// TestAgent_Connect verifies that Connect() spawns a subprocess and
+// TestBackend_Connect verifies that Connect() spawns a subprocess and
 // returns a Conn that can successfully complete the ACP initialize handshake.
-func TestAgent_Connect(t *testing.T) {
+func TestBackend_Connect(t *testing.T) {
 	requireCodexBinary(t)
 
 	a := codex.New(codex.Config{})
@@ -69,9 +69,9 @@ func TestAgent_Connect(t *testing.T) {
 	t.Logf("connected to codex-acp: agentInfo=%+v protocol=%s", result.AgentInfo, result.ProtocolVersion)
 }
 
-// TestAgent_ConnectMultiple verifies that Connect() is truly stateless:
+// TestBackend_ConnectMultiple verifies that Connect() is truly stateless:
 // calling it twice produces two independent connections.
-func TestAgent_ConnectMultiple(t *testing.T) {
+func TestBackend_ConnectMultiple(t *testing.T) {
 	requireCodexBinary(t)
 
 	a := codex.New(codex.Config{})
@@ -100,8 +100,8 @@ func TestAgent_ConnectMultiple(t *testing.T) {
 	}
 }
 
-// TestAgent_Close verifies that Close() is a no-op.
-func TestAgent_Close(t *testing.T) {
+// TestBackend_Close verifies that Close() is a no-op.
+func TestBackend_Close(t *testing.T) {
 	a := codex.New(codex.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("Close: %v", err)

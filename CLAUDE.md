@@ -6,9 +6,9 @@
 
 ```
 Hub (internal/hub/)          — 多 project 生命周期管理，读 config.json
-  └─ client.Client           — 单 project 协调：命令路由、agent 懒加载、idle 超时、状态持久化
+  └─ client.Client           — 单 project 协调：命令路由、backend 懒加载、idle 超时、状态持久化
        └─ acp.Agent          — ACP 协议封装：会话、prompt 流、fs/terminal/permission 回调
-            └─ acp.Agent → agent.Conn  — 连接工厂 → JSON-RPC 2.0 over stdio → CLI binary
+            └─ acp.Agent → acp.Conn  — 连接工厂 → JSON-RPC 2.0 over stdio → CLI binary
 ```
 
 ## 包职责
@@ -16,25 +16,25 @@ Hub (internal/hub/)          — 多 project 生命周期管理，读 config.jso
 | 包 | 职责 |
 |----|------|
 | `internal/hub/` | 读 `~/.wheelmaker/config.json`，为每个 project 创建 Client + IM |
-| `internal/client/` | 单 project 协调：命令路由、lazy agent init、idle 30min 超时、state 持久化 |
-| `internal/agent/` | ACP 会话生命周期、prompt 流、入站回调（fs/terminal/permission） |
-| `internal/agent/` | JSON-RPC 2.0 传输层，管理子进程 stdio |
-| `internal/agent/claude/` | 启动 claude-agent-acp 二进制，返回 `*agent.Conn` |
+| `internal/client/` | 单 project 协调：命令路由、lazy backend init、idle 30min 超时、state 持久化 |
+| `internal/acp/` | ACP 会话生命周期、prompt 流、入站回调（fs/terminal/permission） |
+| `internal/acp/` | JSON-RPC 2.0 传输层，管理子进程 stdio |
+| `internal/backend/claude/` | 启动 claude-agent-acp 二进制，返回 `*acp.Conn` |
 | `internal/im/console/` | Console IM：读 stdin，debug 模式打印所有 ACP JSON |
 | `internal/im/feishu/` | 飞书 Bot IM provider |
 | `internal/tools/` | 工具二进制路径解析（`bin/{GOOS}_{GOARCH}/`） |
 
 ## 配置文件
 
-- `~/.wheelmaker/config.json` — 项目配置（IM 类型、agent、工作目录）
-- `~/.wheelmaker/state.json` — 运行时状态持久化（session ID、agent 元数据、session 状态）
+- `~/.wheelmaker/config.json` — 项目配置（IM 类型、backend、工作目录）
+- `~/.wheelmaker/state.json` — 运行时状态持久化（session ID、backend 元数据、session 状态）
 
 config.json 格式：
 ```json
 {
   "projects": [
     { "name": "local", "im": { "type": "console", "debug": true },
-      "client": { "agent": "claude", "path": "/your/project" } }
+      "client": { "backend": "claude", "path": "/your/project" } }
   ]
 }
 ```
@@ -42,32 +42,32 @@ config.json 格式：
 ## state.go 设计
 
 `internal/client/state.go` 定义序列化结构，用于：
-1. 跨进程持久化运行时状态（sessionID、agent 元数据、最近 session 状态）
+1. 跨进程持久化运行时状态（sessionID、backend 元数据、最近 session 状态）
 2. 启动时恢复上次连接（session/load）
 
 ```
 FileState
   └─ Projects map[name]*ProjectState
-       ├─ ActiveAgent string               — 当前激活的 agent 名称
+       ├─ ActiveBackend string               — 当前激活的 backend 名称
        ├─ Connection *ConnectionConfig    — 最近一次 initialize 时发送的客户端参数
-       └─ Agents map[name]*AgentState     — 每个 agent 的持久化元数据
+       └─ Backends map[name]*BackendState     — 每个 backend 的持久化元数据
             ├─ LastSessionID              — 下次启动时传给 session/load
             ├─ ProtocolVersion / AgentCapabilities / AgentInfo / AuthMethods
-            │                             — initialize 响应的 agent 级别数据
+            │                             — initialize 响应的 backend 级别数据
             ├─ Session *SessionState      — 最后使用的 session 状态（非全量）
             │    └─ Modes / Models / ConfigOptions / AvailableCommands / Title / UpdatedAt
             └─ Sessions []SessionSummary  — 已知 session 的轻量列表（按需填充，不自动维护）
 ```
 
 **设计原则：**
-- 每个 agent 只存最后一次使用的 session 状态；切换 session 时会同步更新
+- 每个 backend 只存最后一次使用的 session 状态；切换 session 时会同步更新
 - `Sessions` 列表是懒加载的：仅在用户查询历史时写入，不随每次 prompt 自动更新
-- `Connection` 在 initialize 握手完成后由 `persistAgentMeta` 写入，所有 agent 共用同一份客户端参数
+- `Connection` 在 initialize 握手完成后由 `persistBackendMeta` 写入，所有 backend 共用同一份客户端参数
 
 ## 开发约定
 
-- **接口优先**：跨层依赖通过接口（`acp.Session`、`agent.Agent`、`im.Provider`）
-- **懒加载**：agent 子进程在首条消息时才创建；idle 30min 自动关闭并存盘，下次恢复
+- **接口优先**：跨层依赖通过接口（`acp.Session`、`backend.Backend`、`im.Provider`）
+- **懒加载**：backend 子进程在首条消息时才创建；idle 30min 自动关闭并存盘，下次恢复
 - **命令判断**：仅 `/use`、`/cancel`、`/status` 是命令，其他 `/` 开头文本当普通消息处理
 - 代码注释和标识符用英文
 - **每次改完自动 commit + push**：每完成一次代码修改后，立即执行 `git add`、`git commit`、`git push`，无需等用户提示
@@ -85,6 +85,13 @@ go build ./cmd/wheelmaker/
 
 - ACP 协议：[docs/acp-protocol-full.zh-CN.md](docs/acp-protocol-full.zh-CN.md)
 - 飞书 Bot：[docs/feishu-bot.md](docs/feishu-bot.md)
+
+
+
+
+
+
+
 
 
 

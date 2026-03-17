@@ -12,7 +12,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent"
+	"github.com/swm8023/wheelmaker/internal/backend"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
 
@@ -21,24 +21,22 @@ const idleTimeout = 30 * time.Minute
 // BackendFactory creates a new backend instance.
 // The exePath and env arguments are provided for compatibility; hub-registered
 // factories typically ignore them and use closure-captured config instead.
-type BackendFactory func(exePath string, env map[string]string) agent.Backend
-
+type BackendFactory func(exePath string, env map[string]string) backend.Backend
 
 // Client is the top-level coordinator for a single WheelMaker project.
-// Client is the top-level coordinator for a single WheelMaker project.
-// It holds a pool of BackendFactory functions and two references to the active agent:
-//   - ag      *agent.Backend   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
+// It holds a pool of BackendFactory functions and two references to the active backend:
+//   - ag      *backend.Backend   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
 //
-// Agent initialization is lazy: the first incoming message triggers ensureAgent(),
-// which connects the Active agent and creates the agent. After 30 minutes of idle
-// the agent is disconnected (idleClose) and re-created on the next message.
+// Backend initialization is lazy: the first incoming message triggers ensureBackend(),
+// which connects the active backend and creates the ACP session wrapper. After 30 minutes of idle
+// the backend is disconnected (idleClose) and re-created on the next message.
 type Client struct {
 	projectName string
 	cwd         string
 
-	agentFacs map[string]BackendFactory
-	session   acp.Session // narrow interface, can be mock in tests
-	ag        *acp.Agent  // concrete type, used for Switch only; nil when mock injected
+	backendFacs map[string]BackendFactory
+	session     acp.Session // narrow interface, can be mock in tests
+	ag          *acp.Agent  // concrete type, used for Switch only; nil when mock injected
 
 	store Store
 	state *ProjectState
@@ -49,27 +47,27 @@ type Client struct {
 	idleTimer *time.Timer // fires idleClose after idleTimeout of inactivity
 
 	mu       sync.Mutex
-	promptMu sync.Mutex // serializes handlePrompt and switchAgent
+	promptMu sync.Mutex // serializes handlePrompt and switchBackend
 
-	currentPromptCh <-chan acp.Update // tracked for draining during switchAgent
+	currentPromptCh <-chan acp.Update // tracked for draining during switchBackend
 }
 
 // New creates a Client for the given project.
 //   - store: persistent state store scoped to this project
 //   - imProvider: IM provider; nil means Run() returns an error (use Hub with a console project)
 //   - projectName: identifier used in logs and state keys
-//   - cwd: working directory for agent sessions
+//   - cwd: working directory for backend sessions
 func New(store Store, imProvider im.Provider, projectName string, cwd string) *Client {
 	return &Client{
 		projectName: projectName,
 		cwd:         cwd,
-		agentFacs:   make(map[string]BackendFactory),
+		backendFacs: make(map[string]BackendFactory),
 		store:       store,
 		imRun:       imProvider,
 	}
 }
 
-// SetDebugLogger enables ACP JSON debug logging on every subsequent agent connection.
+// SetDebugLogger enables ACP JSON debug logging on every subsequent backend connection.
 // Pass nil to disable. The writer is injected into acp.Conn at connect time.
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
@@ -77,15 +75,15 @@ func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Unlock()
 }
 
-// RegisterAgent registers a BackendFactory under the given name.
-func (c *Client) RegisterAgent(name string, factory BackendFactory) {
+// RegisterBackend registers a BackendFactory under the given name.
+func (c *Client) RegisterBackend(name string, factory BackendFactory) {
 	c.mu.Lock()
-	c.agentFacs[name] = factory
+	c.backendFacs[name] = factory
 	c.mu.Unlock()
 }
 
 // Start loads persisted state and registers the IM message callback.
-// Agent initialization is deferred until the first incoming message (lazy init).
+// Backend initialization is deferred until the first incoming message (lazy init).
 func (c *Client) Start(ctx context.Context) error {
 	state, err := c.store.Load()
 	if err != nil {
@@ -110,7 +108,7 @@ func (c *Client) Run(ctx context.Context) error {
 	return errors.New("no IM provider configured; add a console project to config.json")
 }
 
-// Close saves state and shuts down the active agent.
+// Close saves state and shuts down the active backend.
 // Stops the idle timer to prevent double-close races.
 func (c *Client) Close() error {
 	c.mu.Lock()
@@ -122,7 +120,7 @@ func (c *Client) Close() error {
 	c.mu.Unlock()
 
 	if ag != nil {
-		c.saveAgentState(ag)
+		c.saveBackendState(ag)
 		_ = ag.Close()
 	}
 
@@ -138,7 +136,7 @@ func (c *Client) Close() error {
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status, /mode, /model) are dispatched to handleCommand;
 // everything else ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â including lines starting with "/" that are not known commands ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
-// is forwarded to the agent as a prompt.
+// is forwarded to the backend as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
@@ -155,7 +153,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 
 // parseCommand checks whether text is a recognized WheelMaker command.
 // Only exact first-word matches (/use, /cancel, /status, /mode, /model) are treated as commands;
-// all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
+// all other "/" lines fall through to the backend (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
@@ -173,7 +171,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	switch cmd {
 	case "/use":
 		if args == "" {
-			c.reply(msg.ChatID, "Usage: /use <agent-name> [--continue]  (e.g. /use claude)")
+			c.reply(msg.ChatID, "Usage: /use <backend-name> [--continue]  (e.g. /use claude)")
 			return
 		}
 		parts := strings.Fields(args)
@@ -184,7 +182,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 				mode = acp.SwitchWithContext
 			}
 		}
-		if err := c.switchAgent(context.Background(), msg.ChatID, name, mode); err != nil {
+		if err := c.switchBackend(context.Background(), msg.ChatID, name, mode); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Switch error: %v", err))
 		}
 
@@ -210,7 +208,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, "No active session.")
 			return
 		}
-		status := fmt.Sprintf("Active agent: %s", sess.AgentName())
+		status := fmt.Sprintf("Active backend: %s", sess.BackendName())
 		if sid := sess.SessionID(); sid != "" {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
@@ -225,17 +223,17 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		defer c.promptMu.Unlock()
 
 		c.mu.Lock()
-		if err := c.ensureAgent(context.Background()); err != nil {
+		if err := c.ensureBackend(context.Background()); err != nil {
 			c.mu.Unlock()
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <backend> to connect.", err))
 			return
 		}
 		sess := c.session
 		ag := c.ag
-		agentName := sess.AgentName()
+		backendName := sess.BackendName()
 		var sessionState *SessionState
-		if c.state != nil && c.state.Agents != nil {
-			if as := c.state.Agents[agentName]; as != nil && as.Session != nil {
+		if c.state != nil && c.state.Backends != nil {
+			if as := c.state.Backends[backendName]; as != nil && as.Session != nil {
 				sessionState = as.Session
 			}
 		}
@@ -243,7 +241,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		c.mu.Unlock()
 
 		if ag == nil {
-			c.reply(msg.ChatID, "Mode error: no concrete agent instance available")
+			c.reply(msg.ChatID, "Mode error: no concrete backend instance available")
 			return
 		}
 		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID, ag); err != nil {
@@ -259,7 +257,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
 			return
 		}
-		c.saveAgentState(ag)
+		c.saveBackendState(ag)
 		c.reply(msg.ChatID, fmt.Sprintf("Mode set to: %s", modeValue))
 
 	case "/model":
@@ -271,19 +269,19 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		defer c.promptMu.Unlock()
 
 		c.mu.Lock()
-		if err := c.ensureAgent(context.Background()); err != nil {
+		if err := c.ensureBackend(context.Background()); err != nil {
 			c.mu.Unlock()
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <backend> to connect.", err))
 			return
 		}
 		ag := c.ag
-		agentName := ""
+		backendName := ""
 		if c.session != nil {
-			agentName = c.session.AgentName()
+			backendName = c.session.BackendName()
 		}
 		var sessionState *SessionState
-		if c.state != nil && c.state.Agents != nil {
-			if as := c.state.Agents[agentName]; as != nil {
+		if c.state != nil && c.state.Backends != nil {
+			if as := c.state.Backends[backendName]; as != nil {
 				sessionState = as.Session
 			}
 		}
@@ -291,7 +289,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		c.mu.Unlock()
 
 		if ag == nil {
-			c.reply(msg.ChatID, "Model error: no concrete agent instance available")
+			c.reply(msg.ChatID, "Model error: no concrete backend instance available")
 			return
 		}
 		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID, ag); err != nil {
@@ -307,7 +305,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
 			return
 		}
-		c.saveAgentState(ag)
+		c.saveBackendState(ag)
 		c.reply(msg.ChatID, fmt.Sprintf("Model set to: %s", modelValue))
 	}
 }
@@ -379,16 +377,16 @@ func resolveModelArg(input string, st *SessionState) (configID, value string, er
 }
 
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
-// promptMu is held for the full duration, serializing with switchAgent.
+// promptMu is held for the full duration, serializing with switchBackend.
 func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
 
-	// Lazily initialize the agent if no session exists yet.
+	// Lazily initialize the backend if no session exists yet.
 	c.mu.Lock()
-	if err := c.ensureAgent(context.Background()); err != nil {
+	if err := c.ensureBackend(context.Background()); err != nil {
 		c.mu.Unlock()
-		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <backend> to connect.", err))
 		return
 	}
 	sess := c.session
@@ -399,7 +397,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	ctx := context.Background()
 	if ag != nil {
 		if err := c.ensureReadyAndNotify(ctx, msg.ChatID, ag); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <backend> to connect.", err))
 			return
 		}
 	}
@@ -416,7 +414,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	var buf strings.Builder
 	for u := range updates {
 		if u.Err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
+			c.reply(msg.ChatID, fmt.Sprintf("Backend error: %v", u.Err))
 			c.mu.Lock()
 			c.currentPromptCh = nil
 			c.mu.Unlock()
@@ -424,7 +422,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		}
 		if u.Type == acp.UpdateConfigOption {
 			c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
-			c.saveAgentState(ag) // persist immediately; don't wait for prompt to finish
+			c.saveBackendState(ag) // persist immediately; don't wait for prompt to finish
 		}
 		if u.Type == acp.UpdateText {
 			buf.WriteString(u.Content)
@@ -440,29 +438,29 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Unlock()
 
 	// Persist after prompt completes: session ID and config metadata may have changed.
-	c.saveAgentState(ag)
+	c.saveBackendState(ag)
 
 	if buf.Len() > 0 {
 		c.reply(msg.ChatID, buf.String())
 	}
 }
 
-// ensureAgent connects the Active agent and creates the agent if not already running.
+// ensureBackend connects the active backend and creates the ACP session wrapper if not already running.
 // Must be called while holding c.mu.
-func (c *Client) ensureAgent(ctx context.Context) error {
+func (c *Client) ensureBackend(ctx context.Context) error {
 	if c.session != nil {
 		return nil
 	}
 	if c.state == nil {
 		return errors.New("state not loaded")
 	}
-	name := c.state.ActiveAgent
+	name := c.state.ActiveBackend
 	if name == "" {
 		name = "claude"
 	}
-	fac := c.agentFacs[name]
+	fac := c.backendFacs[name]
 	if fac == nil {
-		return fmt.Errorf("no agent registered for %q", name)
+		return fmt.Errorf("no backend registered for %q", name)
 	}
 	backend := fac("", nil)
 	conn, err := backend.Connect(ctx)
@@ -473,18 +471,14 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 		conn.SetDebugLogger(c.debugLog)
 	}
 	savedSID := ""
-	if as := c.state.Agents[name]; as != nil {
+	if as := c.state.Backends[name]; as != nil {
 		savedSID = as.LastSessionID
-	}
-	var plugin acp.AgentPlugin
-	if pp, ok := backend.(acp.AgentPlugin); ok {
-		plugin = pp
 	}
 	var ag *acp.Agent
 	if savedSID != "" {
-		ag = acp.NewWithSessionID(name, conn, c.cwd, savedSID, plugin)
+		ag = acp.NewWithSessionID(name, conn, c.cwd, savedSID, backend)
 	} else {
-		ag = acp.New(name, conn, c.cwd, plugin)
+		ag = acp.New(name, conn, c.cwd, backend)
 	}
 	c.ag = ag
 	c.session = ag
@@ -503,7 +497,7 @@ func (c *Client) resetIdleTimer() {
 
 // idleClose is called by the idle timer when no activity has occurred for idleTimeout.
 // It acquires promptMu (to wait for any in-progress prompt) then saves state and closes
-// the agent subprocess.
+// the backend subprocess.
 func (c *Client) idleClose() {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
@@ -516,7 +510,7 @@ func (c *Client) idleClose() {
 	ag := c.ag
 	c.mu.Unlock()
 
-	c.saveAgentState(ag) // persist + save outside lock (file I/O should not hold c.mu)
+	c.saveBackendState(ag) // persist + save outside lock (file I/O should not hold c.mu)
 
 	c.mu.Lock()
 	_ = ag.Close()
@@ -525,20 +519,20 @@ func (c *Client) idleClose() {
 	c.mu.Unlock()
 }
 
-// switchAgent cancels any in-progress prompt, waits for it to finish via
-// promptMu, connects a new agent binary, and calls ag.Switch() to replace
+// switchBackend cancels any in-progress prompt, waits for it to finish via
+// promptMu, connects a new backend binary, and calls ag.Switch() to replace
 // the connection. Always uses c.ag (concrete type) for Switch.
 //
 // Ordering: Cancel() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ promptMu.Lock() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ drain ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag-refresh ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ outgoing-snapshot ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢
 // Connect() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag.Switch() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ persist ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ resetIdleTimer().
-func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.SwitchMode) error {
+func (c *Client) switchBackend(ctx context.Context, chatID, name string, mode acp.SwitchMode) error {
 	c.mu.Lock()
-	fac := c.agentFacs[name]
+	fac := c.backendFacs[name]
 	sess := c.session
 	c.mu.Unlock()
 
 	if fac == nil {
-		return fmt.Errorf("unknown agent: %q (registered: %v)", name, c.registeredAgentNames())
+		return fmt.Errorf("unknown backend: %q (registered: %v)", name, c.registeredBackendNames())
 	}
 
 	// Step 1: signal cancel so any in-progress prompt winds down quickly,
@@ -561,20 +555,20 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	}
 
 	// Re-read c.ag/c.session after acquiring promptMu: a concurrent switch that completed
-	// while we were waiting may have installed a new agent (nil-ag creation path).
+	// while we were waiting may have installed a new backend (nil-ag creation path).
 	c.mu.Lock()
 	ag := c.ag
 	sess = c.session
 	c.mu.Unlock()
 
-	// Outgoing agent state is captured in step 3 below via persistAgentMeta(ag),
+	// Outgoing backend state is captured in step 3 below via persistBackendMeta(ag),
 	// before ag.Switch() resets initMeta/sessionMeta to zero.
 
-	// Step 2: read saved session ID for the incoming agent and connect.
+	// Step 2: read saved session ID for the incoming backend and connect.
 	c.mu.Lock()
 	var savedSID string
 	if c.state != nil {
-		if as := c.state.Agents[name]; as != nil {
+		if as := c.state.Backends[name]; as != nil {
 			savedSID = as.LastSessionID
 		}
 	}
@@ -593,32 +587,28 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 		newConn.SetDebugLogger(dw)
 	}
 
-	// Step 3: persist outgoing agent's full state NOW, while ag still holds its
+	// Step 3: persist outgoing backend's full state NOW, while ag still holds its
 	// name/initMeta/sessionMeta. After ag.Switch() those fields are reset to zero.
 	// This is also where the outgoing LastSessionID is captured.
 	if ag != nil {
-		c.persistAgentMeta(ag)
+		c.persistBackendMeta(ag)
 	}
 
 	// Step 4: replace the connection via the concrete Agent type.
-	var newPlugin acp.AgentPlugin
-	if pp, ok := newBackend.(acp.AgentPlugin); ok {
-		newPlugin = pp
-	}
 	if ag != nil {
-		if err := ag.Switch(ctx, name, newConn, mode, savedSID, newPlugin); err != nil {
+		if err := ag.Switch(ctx, name, newConn, mode, savedSID, newBackend); err != nil {
 			return fmt.Errorf("switch %q: %w", name, err)
 		}
 		// After Switch(), ag.name == name and initMeta/sessionMeta are reset.
 		// For SwitchWithContext the bootstrap prompt ran; capture the new session data.
-		c.persistAgentMeta(ag)
+		c.persistBackendMeta(ag)
 	} else {
-		// No active agent (lazy init never ran or idleClose fired): create from scratch.
+		// No active backend (lazy init never ran or idleClose fired): create from scratch.
 		var newAg *acp.Agent
 		if savedSID != "" {
-			newAg = acp.NewWithSessionID(name, newConn, c.cwd, savedSID, newPlugin)
+			newAg = acp.NewWithSessionID(name, newConn, c.cwd, savedSID, newBackend)
 		} else {
-			newAg = acp.New(name, newConn, c.cwd, newPlugin)
+			newAg = acp.New(name, newConn, c.cwd, newBackend)
 		}
 		c.mu.Lock()
 		c.ag = newAg
@@ -626,10 +616,10 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 		c.mu.Unlock()
 	}
 
-	// Update ActiveAgent and trigger a single save for all accumulated mutations.
+	// Update ActiveBackend and trigger a single save for all accumulated mutations.
 	c.mu.Lock()
 	if c.state != nil {
-		c.state.ActiveAgent = name
+		c.state.ActiveBackend = name
 	}
 	c.resetIdleTimer()
 	s := c.state
@@ -638,7 +628,7 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 		_ = c.store.Save(s)
 	}
 
-	c.reply(chatID, fmt.Sprintf("Switched to agent: %s", name))
+	c.reply(chatID, fmt.Sprintf("Switched to backend: %s", name))
 	if ag != nil {
 		if snap, ok := ag.SessionConfigSnapshot(); ok {
 			c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s", renderUnknown(snap.Mode), renderUnknown(snap.Model)))
@@ -647,21 +637,21 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	return nil
 }
 
-// registeredAgentNames returns all registered agent names (for error messages).
-func (c *Client) registeredAgentNames() []string {
+// registeredBackendNames returns all registered backend names (for error messages).
+func (c *Client) registeredBackendNames() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.agentFacs))
-	for n := range c.agentFacs {
+	names := make([]string, 0, len(c.backendFacs))
+	for n := range c.backendFacs {
 		names = append(names, n)
 	}
 	return names
 }
 
-// saveAgentState updates in-memory state via persistAgentMeta and writes to disk
-// only if anything actually changed. Call this whenever agent state may have changed.
-func (c *Client) saveAgentState(ag *acp.Agent) {
-	if !c.persistAgentMeta(ag) {
+// saveBackendState updates in-memory state via persistBackendMeta and writes to disk
+// only if anything actually changed. Call this whenever backend state may have changed.
+func (c *Client) saveBackendState(ag *acp.Agent) {
+	if !c.persistBackendMeta(ag) {
 		return
 	}
 	c.mu.Lock()
@@ -672,20 +662,20 @@ func (c *Client) saveAgentState(ag *acp.Agent) {
 	}
 }
 
-// persistAgentMeta snapshots current agent metadata into in-memory state.
+// persistBackendMeta snapshots current backend metadata into in-memory state.
 // Returns true if anything changed (caller should then call store.Save).
-// Only fields with non-zero values are written, so an uninitialized agent
+// Only fields with non-zero values are written, so an uninitialized backend
 // (e.g. right after a clean switch before ensureReady runs) never overwrites
 // previously saved data.
 // Must be called while NOT holding c.mu.
-func (c *Client) persistAgentMeta(ag *acp.Agent) bool {
+func (c *Client) persistBackendMeta(ag *acp.Agent) bool {
 	if ag == nil {
 		return false
 	}
 	initMeta, sessMeta := ag.Meta()
 	sessionID := ag.SessionID()
-	agentName := ag.AgentName()
-	if agentName == "" {
+	backendName := ag.BackendName()
+	if backendName == "" {
 		return false
 	}
 
@@ -695,13 +685,13 @@ func (c *Client) persistAgentMeta(ag *acp.Agent) bool {
 	if c.state == nil {
 		return false
 	}
-	if c.state.Agents == nil {
-		c.state.Agents = map[string]*AgentState{}
+	if c.state.Backends == nil {
+		c.state.Backends = map[string]*BackendState{}
 	}
-	as := c.state.Agents[agentName]
+	as := c.state.Backends[backendName]
 	if as == nil {
-		as = &AgentState{}
-		c.state.Agents[agentName] = as
+		as = &BackendState{}
+		c.state.Backends[backendName] = as
 	}
 
 	changed := false
@@ -718,7 +708,7 @@ func (c *Client) persistAgentMeta(ag *acp.Agent) bool {
 		as.AgentCapabilities = initMeta.AgentCapabilities
 		as.AgentInfo = initMeta.AgentInfo
 		as.AuthMethods = initMeta.AuthMethods
-		// Client-side connection params are the same for all agents.
+		// Client-side connection params are the same for all Backends.
 		if c.state.Connection == nil {
 			c.state.Connection = &ConnectionConfig{}
 		}
@@ -765,7 +755,7 @@ func (c *Client) ensureReadyAndNotify(ctx context.Context, chatID string, ag *ac
 	}
 	if initialized {
 		c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s", renderUnknown(snap.Mode), renderUnknown(snap.Model)))
-		c.saveAgentState(ag)
+		c.saveBackendState(ag)
 	}
 	return nil
 }

@@ -1,21 +1,24 @@
-﻿package acp_test
+package acp_test
 
-// agent_test.go: unit tests for agent.Backend using a self-referential mock ACP server.
+// agent_test.go: unit tests for acp.Agent using a self-referential mock ACP server.
 //
 // Pattern: when GO_AGENT_MOCK=1 is set, the test binary acts as the ACP mock
 // server (reading stdin, writing stdout). Otherwise it runs the tests,
-// pointing agent.New() at os.Args[0] with GO_AGENT_MOCK=1.
+// pointing acp.NewConn() at os.Args[0] with GO_AGENT_MOCK=1.
+//
+// TestMain is defined here and handles both GO_AGENT_MOCK=1 (for Agent tests)
+// and GO_ACP_MOCK=1 (for Conn tests defined in conn_test.go).
 //
 // The mock supports bidirectional communication: during session/prompt handling
-// it can send AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client requests (callbacks) and wait for responses.
+// it can send Agent→Client requests (callbacks) and wait for responses.
 // Prompt text controls mock behavior:
-//   - "no-text-prompt"                  ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ no text chunks emitted (tests stale-context)
-//   - "test-callback-fs-read:<path>"    ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ sends fs/read_text_file callback
-//   - "test-callback-fs-write:<p>:<c>"  ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ sends fs/write_text_file callback
-//   - "test-callback-permission"        ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ sends session/request_permission callback
-//   - "test-callback-terminal"          ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ full terminal lifecycle callback
-//   - "test-callback-terminal-kill"     ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ terminal create+kill lifecycle callback
-//   - any other text                    ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ 2 text chunks + done
+//   - "no-text-prompt"                  → no text chunks emitted (tests stale-context)
+//   - "test-callback-fs-read:<path>"    → sends fs/read_text_file callback
+//   - "test-callback-fs-write:<p>:<c>"  → sends fs/write_text_file callback
+//   - "test-callback-permission"        → sends session/request_permission callback
+//   - "test-callback-terminal"          → full terminal lifecycle callback
+//   - "test-callback-terminal-kill"     → terminal create+kill lifecycle callback
+//   - any other text                    → 2 text chunks + done
 
 import (
 	"bufio"
@@ -31,24 +34,29 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	agent "github.com/swm8023/wheelmaker/internal/agent"
 )
 
+// mockBin is the path to this test binary, used to spawn sub-processes.
 var mockBin string
 
 func TestMain(m *testing.M) {
 	if os.Getenv("GO_AGENT_MOCK") == "1" {
-		runMockAgent()
+		runAgentMockAgent()
+		os.Exit(0)
+	}
+	if os.Getenv("GO_ACP_MOCK") == "1" {
+		runConnMockAgent()
 		os.Exit(0)
 	}
 	mockBin = os.Args[0]
+	mockAgentBin = os.Args[0]
 	os.Exit(m.Run())
 }
 
-// newAgent creates an Agent backed by a fresh mock ACP subprocess.
+// newACPAgent creates an Agent backed by a fresh mock ACP subprocess.
 func newACPAgent(t *testing.T, name string) *acp.Agent {
 	t.Helper()
-	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
@@ -156,7 +164,7 @@ func TestAgent_Prompt_ClearsLastReply(t *testing.T) {
 		t.Fatalf("second updates error: %v", err)
 	}
 
-	newConn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	newConn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
@@ -192,7 +200,7 @@ func TestAgent_Cancel_AfterReady(t *testing.T) {
 // Cancel() must be a no-op in this state (ready==false), not fire a
 // session/cancel RPC on an uninitialized connection.
 func TestAgent_Cancel_SeededSessionID_BeforeReady(t *testing.T) {
-	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
@@ -230,7 +238,7 @@ func TestAgent_SetMode_AfterReady(t *testing.T) {
 // TestAgent_SetMode_SeededSessionID_BeforeReady verifies SetMode auto-initializes
 // from a pre-seeded session ID and succeeds.
 func TestAgent_SetMode_SeededSessionID_BeforeReady(t *testing.T) {
-	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
@@ -279,7 +287,7 @@ func TestAgent_Switch_Clean(t *testing.T) {
 		t.Fatal("expected non-empty SessionID before switch")
 	}
 
-	newConn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	newConn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
@@ -307,7 +315,7 @@ func TestAgent_Switch_WithContext(t *testing.T) {
 		t.Fatalf("updates error: %v", err)
 	}
 
-	newConn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	newConn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := newConn.Start(); err != nil {
 		t.Fatalf("newConn.Start: %v", err)
 	}
@@ -358,7 +366,7 @@ func TestAgent_EnsureReady_NoDoubleInit(t *testing.T) {
 }
 
 func TestAgent_SessionLoad(t *testing.T) {
-	conn := agent.New(mockBin, []string{"GO_AGENT_MOCK=1"})
+	conn := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1"})
 	if err := conn.Start(); err != nil {
 		t.Fatalf("conn.Start: %v", err)
 	}
@@ -435,7 +443,7 @@ func TestAgent_Callback_FSWrite(t *testing.T) {
 }
 
 // TestAgent_Callback_Permission verifies the session/request_permission callback.
-// AutoAllowHandler should respond with "selected" + an allow option ID.
+// noopHooks should respond with "selected" + an allow option ID.
 func TestAgent_Callback_Permission(t *testing.T) {
 	ag := newACPAgent(t, "test")
 	ctx := context.Background()
@@ -454,7 +462,7 @@ func TestAgent_Callback_Permission(t *testing.T) {
 	}
 }
 
-// TestAgent_Callback_TerminalLifecycle verifies create ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ wait_for_exit ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ output ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ release.
+// TestAgent_Callback_TerminalLifecycle verifies create → wait_for_exit → output → release.
 func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
 	ag := newACPAgent(t, "test")
 	ctx := context.Background()
@@ -473,7 +481,7 @@ func TestAgent_Callback_TerminalLifecycle(t *testing.T) {
 	}
 }
 
-// TestAgent_Callback_TerminalKill verifies create ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ kill ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ release lifecycle.
+// TestAgent_Callback_TerminalKill verifies create → kill → release lifecycle.
 func TestAgent_Callback_TerminalKill(t *testing.T) {
 	ag := newACPAgent(t, "test")
 	ctx := context.Background()
@@ -494,16 +502,11 @@ func TestAgent_Callback_TerminalKill(t *testing.T) {
 // TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt is the stale-context
 // prevention test. It verifies that when a prompt produces no text (lastReply=""),
 // a subsequent SwitchWithContext does NOT reuse the reply from a prior prompt.
-//
-// Strategy: the new conn's mock rejects any "[context]" bootstrap prompt with an
-// error. If stale context were reused, Switch would send the bootstrap, the mock
-// would reject it, and agent.go would log the warning. Capturing the log output
-// lets the test assert no warning was produced.
 func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	ag := newACPAgent(t, "test")
 	ctx := context.Background()
 
-	// First prompt: normal ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ sets lastReply = "chunk0 chunk1 ".
+	// First prompt: normal — sets lastReply = "chunk0 chunk1 ".
 	ch, err := ag.Prompt(ctx, "normal")
 	if err != nil {
 		t.Fatalf("first Prompt: %v", err)
@@ -513,7 +516,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 		t.Skip("mock should return text for 'normal'")
 	}
 
-	// Second prompt: no text chunks ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ lastReply must be cleared to "".
+	// Second prompt: no text chunks — lastReply must be cleared to "".
 	ch, err = ag.Prompt(ctx, "no-text-prompt")
 	if err != nil {
 		t.Fatalf("second Prompt: %v", err)
@@ -524,7 +527,7 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 	}
 
 	// New conn that rejects any "[context]" bootstrap prompt.
-	conn2 := agent.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
+	conn2 := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
 	if err := conn2.Start(); err != nil {
 		t.Fatalf("conn2.Start: %v", err)
 	}
@@ -551,10 +554,6 @@ func TestAgent_SwitchWithContext_NoStaleContextAfterEmptyPrompt(t *testing.T) {
 // TestAgent_SwitchWithContext_WarningOnBootstrapFailure verifies AC-6's requirement
 // that when SwitchWithContext bootstrap Prompt() fails, Switch returns nil (not error)
 // and logs a warning. This is the "warning-only" path.
-//
-// Strategy: do a normal prompt (sets lastReply = non-empty), then switch with a new
-// conn whose mock rejects "[context]" bootstrap prompts. Switch must return nil,
-// and the log must contain the expected warning.
 func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 	ag := newACPAgent(t, "test")
 	ctx := context.Background()
@@ -570,7 +569,7 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 	}
 
 	// New conn that rejects any "[context]" bootstrap so the bootstrap Prompt() fails.
-	conn2 := agent.New(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
+	conn2 := acp.NewConn(mockBin, []string{"GO_AGENT_MOCK=1", "GO_AGENT_MOCK_REJECT_CONTEXT=1"})
 	if err := conn2.Start(); err != nil {
 		t.Fatalf("conn2.Start: %v", err)
 	}
@@ -598,14 +597,14 @@ func TestAgent_SwitchWithContext_WarningOnBootstrapFailure(t *testing.T) {
 // --- Mock ACP server (activated when GO_AGENT_MOCK=1) ---
 
 // mockServer handles bidirectional JSON-RPC 2.0 communication.
-// It both responds to client requests and can send AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client callback requests.
+// It both responds to client requests and can send Agent→Client callback requests.
 type mockServer struct {
 	enc   *json.Encoder
 	encMu sync.Mutex
 
-	nextOutboundID atomic.Int64 // IDs for agentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢client requests (start at 10000)
+	nextOutboundID atomic.Int64 // IDs for agent→client requests (start at 10000)
 	pendMu         sync.Mutex
-	pending        map[int64]chan json.RawMessage // pending agentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢client responses
+	pending        map[int64]chan json.RawMessage // pending agent→client responses
 
 	sessCounter atomic.Int64
 }
@@ -644,7 +643,7 @@ func (ms *mockServer) sendNotification(method string, params any) {
 	ms.encMu.Unlock()
 }
 
-// callbackRequest sends an AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client request and waits for the response.
+// callbackRequest sends an Agent→Client request and waits for the response.
 func (ms *mockServer) callbackRequest(method string, params any) (json.RawMessage, error) {
 	id := ms.nextOutboundID.Add(1)
 	ch := make(chan json.RawMessage, 1)
@@ -680,7 +679,7 @@ func (ms *mockServer) routeResponse(id int64, result json.RawMessage) {
 	}
 }
 
-// handleRequest dispatches a clientÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢mock request in a goroutine.
+// handleRequest dispatches a client→mock request in a goroutine.
 func (ms *mockServer) handleRequest(id int64, method string, params json.RawMessage) {
 	rejectContext := os.Getenv("GO_AGENT_MOCK_REJECT_CONTEXT") == "1"
 
@@ -735,7 +734,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 
 	// Reject context bootstrap prompts when requested (stale-context test).
 	if rejectContext && strings.HasPrefix(promptText, "[context]") {
-		ms.respondError(id, "mock: unexpected context bootstrap ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“ stale context detected")
+		ms.respondError(id, "mock: unexpected context bootstrap — stale context detected")
 		return
 	}
 
@@ -776,7 +775,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	// FS write callback test.
 	if strings.HasPrefix(promptText, "test-callback-fs-write:") {
 		rest := strings.TrimPrefix(promptText, "test-callback-fs-write:")
-		// Format: "<path>:<content>" ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â use LAST colon so Windows drive letters work.
+		// Format: "<path>:<content>" — use LAST colon so Windows drive letters work.
 		colonIdx := strings.LastIndex(rest, ":")
 		var path, content string
 		if colonIdx >= 0 {
@@ -843,7 +842,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 		return
 	}
 
-	// Terminal lifecycle test: create ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ wait_for_exit ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ output ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ release.
+	// Terminal lifecycle test: create → wait_for_exit → output → release.
 	if promptText == "test-callback-terminal" {
 		result, err := ms.callbackRequest("terminal/create", map[string]any{
 			"sessionId": sessID,
@@ -902,7 +901,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 		return
 	}
 
-	// Terminal kill test: create ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ kill ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ release.
+	// Terminal kill test: create → kill → release.
 	if promptText == "test-callback-terminal-kill" {
 		result, err := ms.callbackRequest("terminal/create", map[string]any{
 			"sessionId": sessID,
@@ -968,7 +967,7 @@ func (ms *mockServer) handlePrompt(id int64, rawParams json.RawMessage, rejectCo
 	ms.respond(id, map[string]any{"stopReason": "end_turn"})
 }
 
-func runMockAgent() {
+func runAgentMockAgent() {
 	ms := newMockServer()
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1<<20), 1<<20)
@@ -990,17 +989,17 @@ func runMockAgent() {
 		}
 
 		if raw.ID != nil && raw.Method == "" {
-			// Response to one of our outbound AgentÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢Client requests.
+			// Response to one of our outbound Agent→Client requests.
 			ms.routeResponse(*raw.ID, raw.Result)
 			continue
 		}
 
 		if raw.ID == nil {
-			// Notification from client (e.g. session/cancel) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ignore.
+			// Notification from client (e.g. session/cancel) — ignore.
 			continue
 		}
 
-		// ClientÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢mock request: dispatch synchronously for fast methods,
+		// Client→mock request: dispatch synchronously for fast methods,
 		// or in a goroutine when the handler may block (e.g. session/prompt).
 		id := *raw.ID
 		method := raw.Method
@@ -1013,12 +1012,3 @@ func runMockAgent() {
 		}
 	}
 }
-
-
-
-
-
-
-
-
-

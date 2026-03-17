@@ -1,6 +1,6 @@
 package codex_test
 
-// agent_unit_test.go: unit tests for codex.Backend that do not require a real
+// backend_test.go: unit tests for codex.Backend that do not require a real
 // codex-acp binary or network access. No //go:build integration tag.
 
 import (
@@ -10,16 +10,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/backend/codex"
 )
 
-// TestAgent_Connect_NotExecutable verifies that Connect() returns a
+// TestBackend_Connect_NotExecutable verifies that Connect() returns a
 // descriptive error when the configured path resolves to a non-executable file.
 // We use t.TempDir() as the ExePath: the directory exists on disk (os.Stat
 // succeeds, so tools.ResolveBinary accepts it without PATH fallback), but
 // exec.Command(dir).Start() fails because a directory cannot be executed.
 // This is deterministic regardless of what binaries are installed on PATH.
-func TestAgent_Connect_NotExecutable(t *testing.T) {
+func TestBackend_Connect_NotExecutable(t *testing.T) {
 	a := codex.New(codex.Config{
 		ExePath: t.TempDir(), // exists but not executable
 	})
@@ -41,7 +41,7 @@ func TestAgent_Connect_NotExecutable(t *testing.T) {
 	}
 }
 
-// TestAgent_Connect_BinaryNotFound verifies that Connect() returns the
+// TestBackend_Connect_BinaryNotFound verifies that Connect() returns the
 // "binary not found" error path — i.e. tools.ResolveBinary itself fails,
 // not just conn.Start(). This matches AC-4's negative test:
 // "when the binary cannot be found, Connect() returns error".
@@ -49,7 +49,7 @@ func TestAgent_Connect_NotExecutable(t *testing.T) {
 // Strategy: clear PATH so exec.LookPath cannot find codex-acp, and supply a
 // non-existent ExePath so ResolveBinary skips option 1 (explicit config path)
 // and falls through all lookup steps to the "not found" error.
-func TestAgent_Connect_BinaryNotFound(t *testing.T) {
+func TestBackend_Connect_BinaryNotFound(t *testing.T) {
 	// Clear PATH to prevent exec.LookPath succeeding.
 	t.Setenv("PATH", "")
 	if runtime.GOOS == "windows" {
@@ -80,9 +80,9 @@ func TestAgent_Connect_BinaryNotFound(t *testing.T) {
 	}
 }
 
-// TestAgent_Close_Unit verifies that Close() is a no-op and idempotent,
+// TestBackend_Close_Unit verifies that Close() is a no-op and idempotent,
 // regardless of whether Connect() was called.
-func TestAgent_Close_Unit(t *testing.T) {
+func TestBackend_Close_Unit(t *testing.T) {
 	a := codex.New(codex.Config{})
 	if err := a.Close(); err != nil {
 		t.Errorf("first Close: %v", err)

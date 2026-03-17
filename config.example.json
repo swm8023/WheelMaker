@@ -7,7 +7,7 @@
         "debug": true
       },
       "client": {
-        "agent": "claude",
+        "backend": "claude",
         "path": "/path/to/your/project"
       }
     },
@@ -19,7 +19,7 @@
         "appSecret": "yyy"
       },
       "client": {
-        "agent": "claude",
+        "backend": "claude",
         "path": "/path/to/other/project"
       }
     }
@@ -28,6 +28,7 @@
     "verificationToken": "zzz"
   }
 }
+
 
 
 
