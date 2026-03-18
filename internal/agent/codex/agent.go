@@ -1,4 +1,4 @@
-// Package codex implements a backend.Backend for the Codex CLI via codex-acp.
+// Package codex implements a agent.Agent for the Codex CLI via codex-acp.
 package codex
 
 import (
@@ -11,9 +11,9 @@ import (
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 
-const backendName = "codex"
+const agentName = "codex"
 
-// Config holds configuration for the Backend.
+// Config holds configuration for the agent.
 type Config struct {
 	// ExePath is the path to the codex-acp binary.
 	// If empty, tools.ResolveBinary("codex-acp", "") is used.
@@ -23,23 +23,23 @@ type Config struct {
 	Env map[string]string
 }
 
-// Backend is a stateless connection factory for the Codex CLI.
+// Agent is a stateless connection factory for the Codex CLI.
 // Each call to Connect() spawns a new codex-acp subprocess.
-type Backend struct {
+type Agent struct {
 	cfg Config
 }
 
-// New creates a Backend with the given config.
-func New(cfg Config) *Backend {
-	return &Backend{cfg: cfg}
+// New creates an Agent with the given config.
+func New(cfg Config) *Agent {
+	return &Agent{cfg: cfg}
 }
 
-// Name returns the backend identifier.
-func (p *Backend) Name() string { return backendName }
+// Name returns the agent identifier.
+func (p *Agent) Name() string { return agentName }
 
 // Connect starts a new codex-acp subprocess and returns an initialized *acp.Conn.
 // Conn.Start() is called internally; the caller must NOT call Start() again.
-func (p *Backend) Connect(_ context.Context) (*acp.Conn, error) {
+func (p *Agent) Connect(_ context.Context) (*acp.Conn, error) {
 	exePath, err := tools.ResolveBinary("codex-acp", p.cfg.ExePath)
 	if err != nil {
 		return nil, fmt.Errorf("codex: resolve binary: %w", err)
@@ -54,13 +54,13 @@ func (p *Backend) Connect(_ context.Context) (*acp.Conn, error) {
 }
 
 // Close is a no-op since Connect() transfers subprocess ownership to Conn.
-func (p *Backend) Close() error { return nil }
+func (p *Agent) Close() error { return nil }
 
 // HandlePermission resolves permission by current mode:
 // - reject/deny/read -> reject_once
 // - ask/manual/user  -> cancelled (explicit user decision required)
 // - others           -> allow_once
-func (p *Backend) HandlePermission(_ context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+func (p *Agent) HandlePermission(_ context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
 	normalizedMode := strings.ToLower(strings.TrimSpace(mode))
 	preferredKind := "allow_once"
 	switch normalizedMode {
@@ -84,7 +84,7 @@ func (p *Backend) HandlePermission(_ context.Context, params acp.PermissionReque
 }
 
 // NormalizeParams passes notifications through unchanged.
-func (p *Backend) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
+func (p *Agent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
 
 // buildEnv converts a map of environment variables to "KEY=VALUE" strings.
 func buildEnv(m map[string]string) []string {

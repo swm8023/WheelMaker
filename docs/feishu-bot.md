@@ -606,14 +606,14 @@ if errors.Is(err, lark.ErrBotTypeError) { ... }
   → 飞书 WebSocket 网关
   → larkws.Client (larksuite/oapi-sdk-go/v3)
   → dispatcher.OnP2MessageReceiveV1 callback
-  → im/feishu.provider.onMessage handler
+  → im/feishu.channel.onMessage handler
   → im.Message{ChatID, MessageID, UserID, Text}
   → client.Client.HandleMessage()
 ```
 
 回复时：
 ```
-client.Client → im/feishu.provider.SendText(chatID, text)
+client.Client → im/feishu.channel.SendText(chatID, text)
   → lark.NewMsgBuffer(MsgText).BindChatID(chatID).Text(text).Build()
   → bot.PostMessage(msg)
   → 飞书 POST /open-apis/im/v1/messages
@@ -631,3 +631,5 @@ client.Client → im/feishu.provider.SendText(chatID, text)
 - **Token 刷新**：`tenant_access_token` 有效期 2 小时，`bot.StartHeartbeat()` 自动续期
 - **WebSocket 重连**：官方 SDK 默认自动重连，错误码 403/514 不重连（应立即报警）
 - **连接数限制**：单应用 WebSocket 连接数有上限，超出会收到 514 ExceedConnLimit
+
+

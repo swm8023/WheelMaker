@@ -9,7 +9,7 @@ import (
 
 // ConnectionConfig captures what this client declared in the initialize request.
 // Persisted for auditability: version mismatches and capability gaps are easier
-// to diagnose when the exact params used are recorded alongside the backend response.
+// to diagnose when the exact params used are recorded alongside the agent response.
 type ConnectionConfig struct {
 	ProtocolVersion    int                    `json:"protocolVersion"`
 	ClientCapabilities acp.ClientCapabilities `json:"clientCapabilities"`
@@ -18,7 +18,7 @@ type ConnectionConfig struct {
 
 // SessionState holds session-level metadata populated during session/new or session/load,
 // then kept up-to-date by session/update notifications throughout the session lifetime.
-// Only the last session per backend is retained.
+// Only the last session per agent is retained.
 type SessionState struct {
 	// ConfigOptions is the canonical config source from session/new
 	// and config_option_update notifications.
@@ -33,7 +33,7 @@ type SessionState struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
-// SessionSummary is a lightweight entry in the per-backend session list.
+// SessionSummary is a lightweight entry in the per-agent session list.
 // The list is populated lazily (e.g. when the user queries session history)
 // and is not automatically maintained on every prompt.
 type SessionSummary struct {
@@ -42,11 +42,11 @@ type SessionSummary struct {
 	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
-// BackendState holds all persisted metadata for one backend type.
+// AgentState holds all persisted metadata for one agent type.
 // ACP agent-level fields come from the initialize handshake; Session holds only
 // the most recently used session's state (not all sessions).
-// Sessions is a lazily-populated list of known session summaries per backend.
-type BackendState struct {
+// Sessions is a lazily-populated list of known session summaries per agent.
+type AgentState struct {
 	// LastSessionID is passed to session/load on the next connection attempt.
 	LastSessionID string `json:"lastSessionId,omitempty"`
 
@@ -60,47 +60,47 @@ type BackendState struct {
 	// Updated on every session/new, session/load, and session/update notification.
 	Session *SessionState `json:"session,omitempty"`
 
-	// Sessions is a lightweight list of known sessions for this backend.
+	// Sessions is a lightweight list of known sessions for this agent.
 	// Populated on demand (e.g. querying session history), not on every prompt.
 	Sessions []SessionSummary `json:"sessions,omitempty"`
 }
 
 // ProjectState is the persisted state for a single WheelMaker project.
 type ProjectState struct {
-	// ActiveBackend is the name of the currently active backend (e.g. "claude").
-	ActiveBackend string `json:"activeBackend,omitempty"`
+	// ActiveAgent is the name of the currently active agent (e.g. "claude").
+	ActiveAgent string `json:"activeAgent,omitempty"`
 
 	// Connection captures what this client sent in the last initialize call.
-	// Common across all backends since WheelMaker always declares the same capabilities.
+	// Common across all agents since WheelMaker always declares the same capabilities.
 	Connection *ConnectionConfig `json:"connection,omitempty"`
 
-	// Backends maps backend names to their persisted metadata.
-	Backends map[string]*BackendState `json:"backends,omitempty"`
+	// Agents maps agent names to their persisted metadata.
+	Agents map[string]*AgentState `json:"agents,omitempty"`
 }
 
-// UnmarshalJSON supports both current keys (activeBackend/backends) and
-// legacy keys (activeAgent/agents) for backward compatibility.
+// UnmarshalJSON supports current keys (activeAgent/agents) and
+// legacy keys (activeBackend/backends) for backward compatibility.
 func (s *ProjectState) UnmarshalJSON(data []byte) error {
 	type rawProjectState struct {
-		ActiveBackend string                   `json:"activeBackend,omitempty"`
-		Backends      map[string]*BackendState `json:"backends,omitempty"`
-		ActiveAgent   string                   `json:"activeAgent,omitempty"`
-		Agents        map[string]*BackendState `json:"agents,omitempty"`
-		Connection    *ConnectionConfig        `json:"connection,omitempty"`
+		ActiveAgent       string                 `json:"activeAgent,omitempty"`
+		Agents            map[string]*AgentState `json:"agents,omitempty"`
+		LegacyActiveAgent string                 `json:"activeBackend,omitempty"`
+		LegacyAgents      map[string]*AgentState `json:"backends,omitempty"`
+		Connection        *ConnectionConfig      `json:"connection,omitempty"`
 	}
 	var raw rawProjectState
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 
-	s.ActiveBackend = raw.ActiveBackend
-	if s.ActiveBackend == "" {
-		s.ActiveBackend = raw.ActiveAgent
+	s.ActiveAgent = raw.ActiveAgent
+	if s.ActiveAgent == "" {
+		s.ActiveAgent = raw.LegacyActiveAgent
 	}
 
-	s.Backends = raw.Backends
-	if s.Backends == nil {
-		s.Backends = raw.Agents
+	s.Agents = raw.Agents
+	if s.Agents == nil {
+		s.Agents = raw.LegacyAgents
 	}
 	s.Connection = raw.Connection
 	return nil
@@ -115,7 +115,7 @@ type FileState struct {
 // defaultProjectState returns a ProjectState with sensible defaults.
 func defaultProjectState() *ProjectState {
 	return &ProjectState{
-		ActiveBackend: "claude",
-		Backends:      map[string]*BackendState{},
+		ActiveAgent: "claude",
+		Agents:      map[string]*AgentState{},
 	}
 }

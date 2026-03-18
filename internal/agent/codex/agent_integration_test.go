@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration test for backend/codex: verifies that codex.Backend.Connect()
+// Integration test for agent/codex: verifies that codex.Agent.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/backend/codex/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/codex/... -v -timeout 60s
 // Requires: codex-acp binary at bin/windows_amd64/codex-acp.exe or in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/backend/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/codex"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 

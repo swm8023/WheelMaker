@@ -9,12 +9,12 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	backendmock "github.com/swm8023/wheelmaker/internal/backend/mock"
+	agentmock "github.com/swm8023/wheelmaker/internal/agent/mock"
 )
 
 func newInMemoryMockConn(t *testing.T) *acp.Conn {
 	t.Helper()
-	a := backendmock.New()
+	a := agentmock.New()
 	c, err := a.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)

@@ -8,17 +8,17 @@ import (
 	"os"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/backend"
-	"github.com/swm8023/wheelmaker/internal/backend/claude"
-	"github.com/swm8023/wheelmaker/internal/backend/codex"
-	"github.com/swm8023/wheelmaker/internal/backend/mock"
+	"github.com/swm8023/wheelmaker/internal/agent"
+	"github.com/swm8023/wheelmaker/internal/agent/claude"
+	"github.com/swm8023/wheelmaker/internal/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
-// Each project has its own IM provider, backend session, and state partition.
+// Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
 	cfg       *Config
 	statePath string
@@ -68,7 +68,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		}
 	}
 
-	// Create IM provider.
+	// Create IM channel.
 	imProvider, err := h.buildIM(pc)
 	if err != nil {
 		return nil, err
@@ -85,14 +85,14 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		c.SetDebugLogger(log.Writer())
 	}
 
-	// Register all known backend factories so users can switch between them at runtime.
-	c.RegisterBackend("codex", func(_ string, _ map[string]string) backend.Backend {
+	// Register all known agent factories so users can switch between them at runtime.
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
 		return codex.New(codex.Config{})
 	})
-	c.RegisterBackend("claude", func(_ string, _ map[string]string) backend.Backend {
+	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Agent {
 		return claude.New(claude.Config{})
 	})
-	c.RegisterBackend("mock", func(_ string, _ map[string]string) backend.Backend {
+	c.RegisterAgent("mock", func(_ string, _ map[string]string) agent.Agent {
 		return mock.New()
 	})
 
@@ -102,13 +102,13 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	return c, nil
 }
 
-// buildIM creates the im.Provider for a project's IM config.
-func (h *Hub) buildIM(pc ProjectConfig) (im.Provider, error) {
+// buildIM creates the im.Channel for a project's IM config.
+func (h *Hub) buildIM(pc ProjectConfig) (im.Channel, error) {
 	switch pc.IM.Type {
 	case "console":
 		return console.New(pc.Name, pc.IM.Debug), nil
 	case "feishu":
-		return nil, fmt.Errorf("feishu IM provider not yet implemented")
+		return nil, fmt.Errorf("feishu IM channel not yet implemented")
 	default:
 		return nil, fmt.Errorf("unknown im.type %q (supported: console)", pc.IM.Type)
 	}

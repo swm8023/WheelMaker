@@ -5,18 +5,18 @@ import (
 	"testing"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	backendmock "github.com/swm8023/wheelmaker/internal/backend/mock"
+	agentmock "github.com/swm8023/wheelmaker/internal/agent/mock"
 )
 
 func TestMockBackend_Name(t *testing.T) {
-	a := backendmock.New()
+	a := agentmock.New()
 	if got := a.Name(); got != "mock" {
 		t.Fatalf("Name() = %q, want %q", got, "mock")
 	}
 }
 
 func TestMockBackend_Connect(t *testing.T) {
-	a := backendmock.New()
+	a := agentmock.New()
 	conn, err := a.Connect(context.Background())
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
@@ -35,7 +35,7 @@ func TestMockBackend_Connect(t *testing.T) {
 }
 
 func TestMockBackend_Close(t *testing.T) {
-	a := backendmock.New()
+	a := agentmock.New()
 	if err := a.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
