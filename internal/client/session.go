@@ -353,6 +353,13 @@ func (c *Client) cancelPrompt() error {
 	if sessID == "" || !ready {
 		return nil
 	}
+	// Skip forwarder call when running under injected mock (test path).
+	c.mu.Lock()
+	injected := c.injectedPromptFn
+	c.mu.Unlock()
+	if injected != nil {
+		return nil
+	}
 	return c.forwarder.SessionCancel(sessID)
 }
 
@@ -360,10 +367,7 @@ func (c *Client) cancelPrompt() error {
 // Returns true if anything changed. Must be called while NOT holding c.mu.
 func (c *Client) persistMeta() bool {
 	c.mu.Lock()
-	agentName := ""
-	if c.currentAgent != nil {
-		agentName = c.currentAgent.Name()
-	}
+	agentName := c.currentAgentName
 	sessionID := c.sessionID
 	initMeta := c.initMeta
 	sessMeta := c.sessionMeta
