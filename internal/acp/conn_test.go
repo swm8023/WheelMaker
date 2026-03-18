@@ -137,8 +137,8 @@ func TestSend_Concurrent(t *testing.T) {
 	}
 }
 
-// TestSubscribe_Notification verifies that subscribers receive incoming notifications.
-func TestSubscribe_Notification(t *testing.T) {
+// TestOnRequest_Notification verifies that the OnRequest handler receives incoming notifications.
+func TestOnRequest_Notification(t *testing.T) {
 	c := newMockConn(t)
 
 	// Initialize and create a session first.
@@ -151,22 +151,24 @@ func TestSubscribe_Notification(t *testing.T) {
 		t.Fatalf("session/new: %v", err)
 	}
 
-	// Collect session/update notifications.
+	// Collect session/update notifications via unified OnRequest handler.
 	var mu sync.Mutex
 	var notifications []acp.SessionUpdateParams
-	cancel := c.Subscribe(func(n acp.Notification) {
-		if n.Method != "session/update" {
-			return
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		if noResponse && method == "session/update" {
+			var p acp.SessionUpdateParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, nil
+			}
+			mu.Lock()
+			notifications = append(notifications, p)
+			mu.Unlock()
 		}
-		var p acp.SessionUpdateParams
-		if err := json.Unmarshal(n.Params, &p); err != nil {
-			return
+		if !noResponse {
+			return nil, fmt.Errorf("unsupported method: %s", method)
 		}
-		mu.Lock()
-		notifications = append(notifications, p)
-		mu.Unlock()
+		return nil, nil
 	})
-	defer cancel()
 
 	// Send a prompt — the mock sends 3 text chunks then returns.
 	var promptResult acp.SessionPromptResult
@@ -179,9 +181,6 @@ func TestSubscribe_Notification(t *testing.T) {
 	if promptResult.StopReason != "end_turn" {
 		t.Errorf("stopReason = %q, want end_turn", promptResult.StopReason)
 	}
-
-	// Give dispatcher goroutines time to deliver.
-	time.Sleep(20 * time.Millisecond)
 
 	mu.Lock()
 	count := len(notifications)
@@ -202,27 +201,20 @@ func TestSubscribe_Notification(t *testing.T) {
 	}
 }
 
-// TestSubscribe_Cancel verifies that a cancelled subscription stops receiving notifications.
-func TestSubscribe_Cancel(t *testing.T) {
+// TestOnRequest_NilHandler verifies that notifications are silently dropped and
+// Send still succeeds when no OnRequest handler is registered.
+func TestOnRequest_NilHandler(t *testing.T) {
 	c := newMockConn(t)
 
-	var count atomic.Int32
-	cancelSub := c.Subscribe(func(n acp.Notification) {
-		count.Add(1)
-	})
-	cancelSub() // unsubscribe immediately
-
-	// Send a session/prompt to generate notifications — none should be received.
+	// No OnRequest handler registered — notifications should be silently dropped.
 	var sessResult acp.SessionNewResult
 	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
-	_ = c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
+	err := c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "test"}},
 	}, nil)
-
-	time.Sleep(30 * time.Millisecond)
-	if n := count.Load(); n != 0 {
-		t.Errorf("cancelled subscriber received %d notifications, want 0", n)
+	if err != nil {
+		t.Fatalf("session/prompt with nil handler: %v", err)
 	}
 }
 

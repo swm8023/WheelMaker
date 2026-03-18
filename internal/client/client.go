@@ -66,6 +66,8 @@ type Client struct {
 
 	currentPromptCh <-chan acp.Update // tracked for draining during switchAgent
 
+	replayHandler func(acp.SessionUpdateParams) // set temporarily during session/load
+
 	terminals *terminalManager
 
 	permRouter *permissionRouter

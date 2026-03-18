@@ -19,7 +19,12 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 	c.mu.Lock()
 	sessID := c.sessionID
 	ch := c.promptUpdatesCh
+	replayH := c.replayHandler
 	c.mu.Unlock()
+
+	if replayH != nil {
+		replayH(params)
+	}
 
 	if params.SessionID != sessID || ch == nil {
 		return

@@ -12,13 +12,10 @@ import (
 	"sync/atomic"
 )
 
-// NotificationHandler is called for each incoming notification from the agent.
-type NotificationHandler func(Notification)
-
-// RequestHandler is called when the agent sends an Agent→Conn request.
-// It must return (result, nil) on success or (nil, error) on failure.
-// The returned result is JSON-encoded and sent back as the response.
-type RequestHandler func(ctx context.Context, method string, params json.RawMessage) (any, error)
+// RequestHandler is called for each inbound message from the agent.
+// noResponse is true for notifications (no JSON-RPC id); return values are ignored in that case.
+// For requests (noResponse=false), the result is JSON-encoded and sent as the response.
+type RequestHandler func(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error)
 
 // InMemoryServer runs an ACP-compatible JSON-RPC server in-process.
 // It reads request lines from r and writes response/notification lines to w.
@@ -45,10 +42,6 @@ type Conn struct {
 	nextID  atomic.Int64
 	pending map[int64]chan Response
 
-	subsMu      sync.RWMutex
-	subscribers map[int64]NotificationHandler
-	nextSubID   atomic.Int64
-
 	reqMu      sync.RWMutex
 	reqHandler RequestHandler
 
@@ -73,7 +66,6 @@ func NewConn(exePath string, env []string) *Conn {
 		exePath:     exePath,
 		env:         env,
 		pending:     make(map[int64]chan Response),
-		subscribers: make(map[int64]NotificationHandler),
 		connCtx:     ctx,
 		connCancel:  cancel,
 		done:        make(chan struct{}),
@@ -85,7 +77,6 @@ func NewInMemoryConn(server InMemoryServer) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
 		pending:        make(map[int64]chan Response),
-		subscribers:    make(map[int64]NotificationHandler),
 		connCtx:        ctx,
 		connCancel:     cancel,
 		done:           make(chan struct{}),
@@ -237,21 +228,6 @@ func (c *Conn) Notify(method string, params any) error {
 	return nil
 }
 
-// Subscribe registers a handler to receive all incoming notifications.
-// Returns a cancel function to deregister the handler.
-func (c *Conn) Subscribe(handler NotificationHandler) (cancel func()) {
-	id := c.nextSubID.Add(1)
-	c.subsMu.Lock()
-	c.subscribers[id] = handler
-	c.subsMu.Unlock()
-
-	return func() {
-		c.subsMu.Lock()
-		delete(c.subscribers, id)
-		c.subsMu.Unlock()
-	}
-}
-
 // Close shuts down the connection: cancels in-flight callbacks, kills the subprocess,
 // and waits for it to exit.
 func (c *Conn) Close() error {
@@ -328,13 +304,14 @@ func (c *Conn) readLoop(r io.Reader) {
 			}
 
 		case raw.Method != "":
-			// Notification (no id, no response expected).
-			n := Notification{
-				JSONRPC: raw.JSONRPC,
-				Method:  raw.Method,
-				Params:  raw.Params,
+			// Notification (no id, no response expected). Deliver synchronously so that
+			// all notifications preceding a response are processed before conn.Send returns.
+			c.reqMu.RLock()
+			h := c.reqHandler
+			c.reqMu.RUnlock()
+			if h != nil {
+				h(c.connCtx, raw.Method, raw.Params, true) // noResponse=true; return values ignored
 			}
-			c.dispatch(n)
 		}
 	}
 
@@ -366,7 +343,7 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	if handler == nil {
 		resp.Error = &RPCError{Code: -32601, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
-		result, err := handler(c.connCtx, method, params)
+		result, err := handler(c.connCtx, method, params, false)
 		if err != nil {
 			resp.Error = &RPCError{Code: -32603, Message: err.Error()}
 		} else if result == nil {
@@ -383,27 +360,4 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	c.mu.Unlock()
 }
 
-// dispatch calls all registered notification handlers synchronously on the readLoop goroutine.
-//
-// Synchronous dispatch guarantees that all notification handlers for messages received before
-// a given response have completed before that response unblocks conn.Send(). This prevents
-// the race where a session/update notification and the session/prompt response are adjacent on
-// the wire: without synchronous dispatch, the notification goroutine can lose the race to the
-// prompt goroutine that closes the update channel.
-//
-// Handlers MUST NOT call conn.Send() — this would deadlock the readLoop waiting for a
-// response that can never arrive because the readLoop is blocked in the handler.
-// Handlers may safely send to buffered channels, acquire local mutexes, or do other
-// non-blocking work.
-func (c *Conn) dispatch(n Notification) {
-	c.subsMu.RLock()
-	handlers := make([]NotificationHandler, 0, len(c.subscribers))
-	for _, h := range c.subscribers {
-		handlers = append(handlers, h)
-	}
-	c.subsMu.RUnlock()
 
-	for _, h := range handlers {
-		h(n)
-	}
-}
