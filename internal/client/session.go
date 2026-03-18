@@ -353,13 +353,6 @@ func (c *Client) cancelPrompt() error {
 	if sessID == "" || !ready {
 		return nil
 	}
-	// Skip forwarder call when running under injected mock (test path).
-	c.mu.Lock()
-	injected := c.injectedPromptFn
-	c.mu.Unlock()
-	if injected != nil {
-		return nil
-	}
 	return c.forwarder.SessionCancel(sessID)
 }
 
