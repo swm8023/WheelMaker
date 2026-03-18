@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"slices"
 	"strings"
 	"sync"
@@ -24,19 +25,14 @@ const idleTimeout = 30 * time.Minute
 type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
 // Client is the top-level coordinator for a single WheelMaker project.
-// It holds a pool of AgentFactory functions and two references to the active agent:
-//   - ag      *agent.Agent   ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â concrete type for Switch (to avoid type assertion on mock).
-//
-// Agent initialization is lazy: the first incoming message triggers ensureAgent(),
-// which connects the active agent and creates the ACP session wrapper. After 30 minutes of idle
+// Agent initialization is lazy: the first incoming message triggers ensureForwarder(),
+// which connects the active agent and creates the ACP forwarder. After 30 minutes of idle
 // the agent is disconnected (idleClose) and re-created on the next message.
 type Client struct {
 	projectName string
 	cwd         string
 
 	agentFacs map[string]AgentFactory
-	session   acp.Session // narrow interface, can be mock in tests
-	ag        *acp.Agent  // concrete type, used for Switch only; nil when mock injected
 
 	store Store
 	state *ProjectState
@@ -49,9 +45,33 @@ type Client struct {
 	mu       sync.Mutex
 	promptMu sync.Mutex // serializes handlePrompt and switchAgent
 
+	// active connection
+	currentAgent     agent.Agent    // active agent factory; nil until ensureForwarder
+	currentAgentName string         // registered name (key in agentFacs/state.Agents)
+	forwarder        *acp.Forwarder // active transport; nil until first connection
+
+	// session state (all owned by client)
+	sessionID       string
+	ready           bool
+	initializing    bool
+	initCond        *sync.Cond
+	initMeta        clientInitMeta
+	sessionMeta     clientSessionMeta
+	lastReply       string
+	loadHistory     []acp.Update
+	activeToolCalls map[string]struct{}
+	promptCtx       context.Context
+	promptCancel    context.CancelFunc
+	promptUpdatesCh chan<- acp.Update
+
 	currentPromptCh <-chan acp.Update // tracked for draining during switchAgent
 
+	terminals *terminalManager
+
 	permRouter *permissionRouter
+
+	// injectedPromptFn overrides promptStream when set (used by tests via export_test.go).
+	injectedPromptFn func(ctx context.Context, text string) (<-chan acp.Update, error)
 }
 
 // New creates a Client for the given project.
@@ -61,12 +81,15 @@ type Client struct {
 //   - cwd: working directory for agent sessions
 func New(store Store, imProvider im.Channel, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName: projectName,
-		cwd:         cwd,
-		agentFacs:   make(map[string]AgentFactory),
-		store:       store,
-		imRun:       imProvider,
+		projectName:     projectName,
+		cwd:             cwd,
+		agentFacs:       make(map[string]AgentFactory),
+		store:           store,
+		imRun:           imProvider,
+		activeToolCalls: make(map[string]struct{}),
 	}
+	c.initCond = sync.NewCond(&c.mu)
+	c.terminals = newTerminalManager()
 	c.permRouter = newPermissionRouter(c)
 	return c
 }
@@ -120,12 +143,14 @@ func (c *Client) Close() error {
 		c.idleTimer.Stop()
 		c.idleTimer = nil
 	}
-	ag := c.ag
 	c.mu.Unlock()
 
-	if ag != nil {
-		c.saveAgentState(ag)
-		_ = ag.Close()
+	c.mu.Lock()
+	fwd := c.forwarder
+	c.mu.Unlock()
+	if fwd != nil {
+		c.saveSessionState()
+		_ = fwd.Close()
 	}
 
 	c.mu.Lock()
@@ -139,7 +164,7 @@ func (c *Client) Close() error {
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status, /mode, /model) are dispatched to handleCommand;
-// everything else ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â including lines starting with "/" that are not known commands ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+// everything else — including lines starting with "/" that are not known commands —
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
 	text := strings.TrimSpace(msg.Text)
@@ -183,10 +208,10 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		}
 		parts := strings.Fields(args)
 		name := strings.ToLower(parts[0])
-		mode := acp.SwitchClean
+		mode := SwitchClean
 		for _, p := range parts[1:] {
 			if p == "--continue" {
-				mode = acp.SwitchWithContext
+				mode = SwitchWithContext
 			}
 		}
 		if err := c.switchAgent(context.Background(), msg.ChatID, name, mode); err != nil {
@@ -195,13 +220,13 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 
 	case "/cancel":
 		c.mu.Lock()
-		sess := c.session
+		active := c.currentAgent != nil
 		c.mu.Unlock()
-		if sess == nil {
+		if !active {
 			c.reply(msg.ChatID, "No active session.")
 			return
 		}
-		if err := sess.Cancel(); err != nil {
+		if err := c.cancelPrompt(); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Cancel error: %v", err))
 			return
 		}
@@ -209,14 +234,19 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 
 	case "/status":
 		c.mu.Lock()
-		sess := c.session
+		agentName := ""
+		if c.currentAgent != nil {
+			agentName = c.currentAgent.Name()
+		}
+		sid := c.sessionID
+		active := c.currentAgent != nil
 		c.mu.Unlock()
-		if sess == nil {
+		if !active {
 			c.reply(msg.ChatID, "No active session.")
 			return
 		}
-		status := fmt.Sprintf("Active agent: %s", sess.AgentName())
-		if sid := sess.SessionID(); sid != "" {
+		status := fmt.Sprintf("Active agent: %s", agentName)
+		if sid != "" {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
 		c.reply(msg.ChatID, status)
@@ -230,14 +260,15 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		defer c.promptMu.Unlock()
 
 		c.mu.Lock()
-		if err := c.ensureAgent(context.Background()); err != nil {
+		if err := c.ensureForwarder(context.Background()); err != nil {
 			c.mu.Unlock()
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
-		sess := c.session
-		ag := c.ag
-		agentName := sess.AgentName()
+		agentName := ""
+		if c.currentAgent != nil {
+			agentName = c.currentAgent.Name()
+		}
 		var sessionState *SessionState
 		if c.state != nil && c.state.Agents != nil {
 			if as := c.state.Agents[agentName]; as != nil && as.Session != nil {
@@ -247,10 +278,6 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		c.resetIdleTimer()
 		c.mu.Unlock()
 
-		if ag == nil {
-			c.reply(msg.ChatID, "Mode error: no concrete agent instance available")
-			return
-		}
 		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
 			return
@@ -260,11 +287,23 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
 			return
 		}
-		if err := ag.SetConfigOption(context.Background(), modeConfigID, modeValue); err != nil {
+		c.mu.Lock()
+		fwd := c.forwarder
+		sid := c.sessionID
+		c.mu.Unlock()
+		if fwd == nil {
+			c.reply(msg.ChatID, "Mode error: no active forwarder")
+			return
+		}
+		if _, err := fwd.SessionSetConfigOption(context.Background(), acp.SessionSetConfigOptionParams{
+			SessionID: sid,
+			ConfigID:  modeConfigID,
+			Value:     modeValue,
+		}); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
 			return
 		}
-		c.saveAgentState(ag)
+		c.saveSessionState()
 		c.reply(msg.ChatID, fmt.Sprintf("Mode set to: %s", modeValue))
 
 	case "/model":
@@ -276,15 +315,14 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		defer c.promptMu.Unlock()
 
 		c.mu.Lock()
-		if err := c.ensureAgent(context.Background()); err != nil {
+		if err := c.ensureForwarder(context.Background()); err != nil {
 			c.mu.Unlock()
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
-		ag := c.ag
 		agentName := ""
-		if c.session != nil {
-			agentName = c.session.AgentName()
+		if c.currentAgent != nil {
+			agentName = c.currentAgent.Name()
 		}
 		var sessionState *SessionState
 		if c.state != nil && c.state.Agents != nil {
@@ -295,10 +333,6 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		c.resetIdleTimer()
 		c.mu.Unlock()
 
-		if ag == nil {
-			c.reply(msg.ChatID, "Model error: no concrete agent instance available")
-			return
-		}
 		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
 			return
@@ -308,11 +342,23 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
 			return
 		}
-		if err := ag.SetConfigOption(context.Background(), configID, modelValue); err != nil {
+		c.mu.Lock()
+		fwd := c.forwarder
+		sid := c.sessionID
+		c.mu.Unlock()
+		if fwd == nil {
+			c.reply(msg.ChatID, "Model error: no active forwarder")
+			return
+		}
+		if _, err := fwd.SessionSetConfigOption(context.Background(), acp.SessionSetConfigOptionParams{
+			SessionID: sid,
+			ConfigID:  configID,
+			Value:     modelValue,
+		}); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
 			return
 		}
-		c.saveAgentState(ag)
+		c.saveSessionState()
 		c.reply(msg.ChatID, fmt.Sprintf("Model set to: %s", modelValue))
 	}
 }
@@ -393,26 +439,34 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		defer c.permRouter.clearLastChatID(msg.ChatID)
 	}
 
-	// Lazily initialize the agent if no session exists yet.
+	ctx := context.Background()
+
+	// Check for injected prompt function first (test path — bypasses real forwarder).
 	c.mu.Lock()
-	if err := c.ensureAgent(context.Background()); err != nil {
-		c.mu.Unlock()
-		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-		return
-	}
-	sess := c.session
-	ag := c.ag         // capture early so error paths can persist the session ID
-	c.resetIdleTimer() // refresh timeout before sending prompt
+	injected := c.injectedPromptFn
 	c.mu.Unlock()
 
-	ctx := context.Background()
-	if ag != nil {
-		if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
+	var updates <-chan acp.Update
+	var err error
+	if injected != nil {
+		updates, err = injected(ctx, text)
+	} else {
+		// Lazily initialize the agent if no forwarder exists yet.
+		c.mu.Lock()
+		if err = c.ensureForwarder(ctx); err != nil {
+			c.mu.Unlock()
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
+		c.resetIdleTimer() // refresh timeout before sending prompt
+		c.mu.Unlock()
+
+		if err = c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			return
+		}
+		updates, err = c.promptStream(ctx, text)
 	}
-	updates, err := sess.Prompt(ctx, text)
 	if err != nil {
 		c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
 		return
@@ -433,7 +487,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		}
 		if u.Type == acp.UpdateConfigOption {
 			c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
-			c.saveAgentState(ag) // persist immediately; don't wait for prompt to finish
+			c.saveSessionState() // persist immediately; don't wait for prompt to finish
 		}
 		if u.Type == acp.UpdateText {
 			buf.WriteString(u.Content)
@@ -449,17 +503,17 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Unlock()
 
 	// Persist after prompt completes: session ID and config metadata may have changed.
-	c.saveAgentState(ag)
+	c.saveSessionState()
 
 	if buf.Len() > 0 {
 		c.reply(msg.ChatID, buf.String())
 	}
 }
 
-// ensureAgent connects the active agent and creates the ACP session wrapper if not already running.
+// ensureForwarder connects the active agent and sets up the Forwarder if not already running.
 // Must be called while holding c.mu.
-func (c *Client) ensureAgent(ctx context.Context) error {
-	if c.session != nil {
+func (c *Client) ensureForwarder(ctx context.Context) error {
+	if c.forwarder != nil {
 		return nil
 	}
 	if c.state == nil {
@@ -474,28 +528,38 @@ func (c *Client) ensureAgent(ctx context.Context) error {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
 	baseAgent := fac("", nil)
-	agent := &interactiveAgent{base: baseAgent, router: c.permRouter}
-	conn, err := agent.Connect(ctx)
+	conn, err := baseAgent.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
 	if c.debugLog != nil {
 		conn.SetDebugLogger(c.debugLog)
 	}
-	savedSID := ""
-	if as := c.state.Agents[name]; as != nil {
-		savedSID = as.LastSessionID
+	fwd := acp.NewForwarder(conn, makePrefilter(baseAgent))
+	fwd.SetCallbacks(c)
+	c.forwarder = fwd
+	c.currentAgent = baseAgent
+	c.currentAgentName = name
+	c.ready = false
+	// Restore saved session ID if present.
+	if c.state.Agents != nil {
+		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
+			c.sessionID = as.LastSessionID
+		}
 	}
-	var ag *acp.Agent
-	if savedSID != "" {
-		ag = acp.NewWithSessionID(name, conn, c.cwd, savedSID, agent)
-	} else {
-		ag = acp.New(name, conn, c.cwd, agent)
-	}
-	c.ag = ag
-	c.session = ag
 	c.resetIdleTimer()
 	return nil
+}
+
+// makePrefilter returns a Forwarder prefilter that applies ag.NormalizeParams
+// to every incoming notification, ensuring the client receives standard ACP.
+func makePrefilter(ag agent.Agent) acp.Prefilter {
+	return func(ctx context.Context, msg acp.ForwardMessage) (acp.ForwardMessage, bool, error) {
+		if msg.Direction == acp.DirectionToClient && msg.Kind == acp.KindNotification {
+			msg.Params = ag.NormalizeParams(msg.Method, msg.Params)
+		}
+		return msg, true, nil
+	}
 }
 
 // resetIdleTimer restarts the 30-minute idle timer.
@@ -515,46 +579,45 @@ func (c *Client) idleClose() {
 	defer c.promptMu.Unlock()
 
 	c.mu.Lock()
-	if c.session == nil {
+	if c.forwarder == nil {
 		c.mu.Unlock()
 		return
 	}
-	ag := c.ag
 	c.mu.Unlock()
 
-	c.saveAgentState(ag) // persist + save outside lock (file I/O should not hold c.mu)
+	c.saveSessionState()
+	c.terminals.KillAll()
 
 	c.mu.Lock()
-	_ = ag.Close()
-	c.session = nil
-	c.ag = nil
+	fwd := c.forwarder
+	if fwd != nil {
+		_ = fwd.Close()
+	}
+	c.forwarder = nil
+	c.currentAgent = nil
+	c.currentAgentName = ""
+	c.ready = false
+	c.sessionID = ""
+	c.initMeta = clientInitMeta{}
+	c.sessionMeta = clientSessionMeta{}
 	c.mu.Unlock()
 }
 
 // switchAgent cancels any in-progress prompt, waits for it to finish via
-// promptMu, connects a new agent binary, and calls ag.Switch() to replace
-// the connection. Always uses c.ag (concrete type) for Switch.
-//
-// Ordering: Cancel() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ promptMu.Lock() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ drain ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag-refresh ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ outgoing-snapshot ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢
-// Connect() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ ag.Switch() ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ persist ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ resetIdleTimer().
-func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.SwitchMode) error {
+// promptMu, connects a new agent binary, and replaces the forwarder.
+func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode SwitchMode) error {
 	c.mu.Lock()
 	fac := c.agentFacs[name]
-	sess := c.session
 	c.mu.Unlock()
-
 	if fac == nil {
 		return fmt.Errorf("unknown agent: %q (registered: %v)", name, c.registeredAgentNames())
 	}
 
-	// Step 1: signal cancel so any in-progress prompt winds down quickly,
-	// then wait for handlePrompt to release promptMu (covering ensureReady).
-	if sess != nil {
-		_ = sess.Cancel()
-	}
+	// Cancel in-progress prompt, wait for handlePrompt to release promptMu.
+	_ = c.cancelPrompt()
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
-	// Belt-and-suspenders: drain any channel published between Cancel and promptMu.Lock.
+	// Belt-and-suspenders: drain any channel published between cancelPrompt and promptMu.Lock.
 	c.mu.Lock()
 	promptCh := c.currentPromptCh
 	c.mu.Unlock()
@@ -566,70 +629,74 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 		c.mu.Unlock()
 	}
 
-	// Re-read c.ag/c.session after acquiring promptMu: a concurrent switch that completed
-	// while we were waiting may have installed a new agent (nil-ag creation path).
+	// Capture outgoing state.
 	c.mu.Lock()
-	ag := c.ag
-	sess = c.session
+	oldFwd := c.forwarder
+	savedLastReply := c.lastReply
 	c.mu.Unlock()
+	c.persistMeta() // save outgoing agent state before reset
 
-	// Outgoing agent state is captured in step 3 below via persistAgentMeta(ag),
-	// before ag.Switch() resets initMeta/sessionMeta to zero.
-
-	// Step 2: read saved session ID for the incoming agent and connect.
+	// Read saved session ID for incoming agent.
 	c.mu.Lock()
 	var savedSID string
-	if c.state != nil {
+	if c.state != nil && c.state.Agents != nil {
 		if as := c.state.Agents[name]; as != nil {
 			savedSID = as.LastSessionID
 		}
 	}
+	dw := c.debugLog
 	c.mu.Unlock()
 
+	// Connect new agent.
 	baseAgent := fac("", nil)
-	newAgent := &interactiveAgent{base: baseAgent, router: c.permRouter}
-	newConn, err := newAgent.Connect(ctx)
+	newConn, err := baseAgent.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-
-	c.mu.Lock()
-	dw := c.debugLog
-	c.mu.Unlock()
 	if dw != nil {
 		newConn.SetDebugLogger(dw)
 	}
+	newFwd := acp.NewForwarder(newConn, makePrefilter(baseAgent))
+	newFwd.SetCallbacks(c)
 
-	// Step 3: persist outgoing agent's full state NOW, while ag still holds its
-	// name/initMeta/sessionMeta. After ag.Switch() those fields are reset to zero.
-	// This is also where the outgoing LastSessionID is captured.
-	if ag != nil {
-		c.persistAgentMeta(ag)
+	// Replace forwarder atomically; kill terminals; close old conn.
+	c.mu.Lock()
+	c.terminals.KillAll()
+	c.forwarder = newFwd
+	c.currentAgent = baseAgent
+	c.currentAgentName = name
+	c.ready = false
+	c.initializing = false
+	c.sessionID = savedSID
+	c.lastReply = ""
+	c.loadHistory = nil
+	c.activeToolCalls = make(map[string]struct{})
+	c.promptUpdatesCh = nil
+	c.initMeta = clientInitMeta{}
+	c.sessionMeta = clientSessionMeta{}
+	c.mu.Unlock()
+	c.initCond.Broadcast()
+
+	if oldFwd != nil {
+		_ = oldFwd.Close()
 	}
 
-	// Step 4: replace the connection via the concrete Agent type.
-	if ag != nil {
-		if err := ag.Switch(ctx, name, newConn, mode, savedSID, newAgent); err != nil {
-			return fmt.Errorf("switch %q: %w", name, err)
-		}
-		// After Switch(), ag.name == name and initMeta/sessionMeta are reset.
-		// For SwitchWithContext the bootstrap prompt ran; capture the new session data.
-		c.persistAgentMeta(ag)
-	} else {
-		// No active agent (lazy init never ran or idleClose fired): create from scratch.
-		var newAg *acp.Agent
-		if savedSID != "" {
-			newAg = acp.NewWithSessionID(name, newConn, c.cwd, savedSID, newAgent)
+	// SwitchWithContext — bootstrap new session with previous reply.
+	if mode == SwitchWithContext && savedLastReply != "" {
+		ch, err := c.promptStream(ctx, "[context] "+savedLastReply)
+		if err != nil {
+			log.Printf("client: SwitchWithContext bootstrap prompt failed: %v", err)
 		} else {
-			newAg = acp.New(name, newConn, c.cwd, newAgent)
+			for u := range ch {
+				if u.Err != nil {
+					log.Printf("client: SwitchWithContext bootstrap prompt failed: %v", u.Err)
+				}
+			}
 		}
-		c.mu.Lock()
-		c.ag = newAg
-		c.session = newAg
-		c.mu.Unlock()
+		c.persistMeta()
 	}
 
-	// Update ActiveAgent and trigger a single save for all accumulated mutations.
+	// Update ActiveAgent, save, reset timer.
 	c.mu.Lock()
 	if c.state != nil {
 		c.state.ActiveAgent = name
@@ -642,10 +709,10 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode acp.
 	}
 
 	c.reply(chatID, fmt.Sprintf("Switched to agent: %s", name))
-	if ag != nil {
-		if snap, ok := ag.SessionConfigSnapshot(); ok {
-			c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s", renderUnknown(snap.Mode), renderUnknown(snap.Model)))
-		}
+	snap := c.sessionConfigSnapshot()
+	if snap.Mode != "" || snap.Model != "" {
+		c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s",
+			renderUnknown(snap.Mode), renderUnknown(snap.Model)))
 	}
 	return nil
 }
@@ -661,97 +728,6 @@ func (c *Client) registeredAgentNames() []string {
 	return names
 }
 
-// saveAgentState updates in-memory state via persistAgentMeta and writes to disk
-// only if anything actually changed. Call this whenever agent state may have changed.
-func (c *Client) saveAgentState(ag *acp.Agent) {
-	if !c.persistAgentMeta(ag) {
-		return
-	}
-	c.mu.Lock()
-	s := c.state
-	c.mu.Unlock()
-	if s != nil {
-		_ = c.store.Save(s)
-	}
-}
-
-// persistAgentMeta snapshots current agent metadata into in-memory state.
-// Returns true if anything changed (caller should then call store.Save).
-// Only fields with non-zero values are written, so an uninitialized agent
-// (e.g. right after a clean switch before ensureReady runs) never overwrites
-// previously saved data.
-// Must be called while NOT holding c.mu.
-func (c *Client) persistAgentMeta(ag *acp.Agent) bool {
-	if ag == nil {
-		return false
-	}
-	initMeta, sessMeta := ag.Meta()
-	sessionID := ag.SessionID()
-	agentName := ag.AgentName()
-	if agentName == "" {
-		return false
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.state == nil {
-		return false
-	}
-	if c.state.Agents == nil {
-		c.state.Agents = map[string]*AgentState{}
-	}
-	as := c.state.Agents[agentName]
-	if as == nil {
-		as = &AgentState{}
-		c.state.Agents[agentName] = as
-	}
-
-	changed := false
-
-	// Session ID: only update when a real value is available.
-	if sessionID != "" && as.LastSessionID != sessionID {
-		as.LastSessionID = sessionID
-		changed = true
-	}
-
-	// Agent-level data: only available after initialize handshake completes.
-	if initMeta.ProtocolVersion != "" {
-		as.ProtocolVersion = initMeta.ProtocolVersion
-		as.AgentCapabilities = initMeta.AgentCapabilities
-		as.AgentInfo = initMeta.AgentInfo
-		as.AuthMethods = initMeta.AuthMethods
-		// Client-side connection params are the same for all Agents.
-		if c.state.Connection == nil {
-			c.state.Connection = &ConnectionConfig{}
-		}
-		c.state.Connection.ProtocolVersion = initMeta.ClientProtocolVersion
-		c.state.Connection.ClientCapabilities = initMeta.ClientCapabilities
-		c.state.Connection.ClientInfo = initMeta.ClientInfo
-		changed = true
-	}
-
-	// Session-level data: only available after session/new or session/load.
-	hasSessionData := len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 ||
-		sessMeta.Title != "" || sessMeta.UpdatedAt != ""
-	if hasSessionData {
-		if as.Session == nil {
-			as.Session = &SessionState{}
-		}
-		as.Session.ConfigOptions = sessMeta.ConfigOptions
-		as.Session.AvailableCommands = sessMeta.AvailableCommands
-		if sessMeta.Title != "" {
-			as.Session.Title = sessMeta.Title
-		}
-		if sessMeta.UpdatedAt != "" {
-			as.Session.UpdatedAt = sessMeta.UpdatedAt
-		}
-		changed = true
-	}
-
-	return changed
-}
-
 // reply sends a text response to the chat via the IM channel.
 func (c *Client) reply(chatID, text string) {
 	if c.imRun != nil {
@@ -760,7 +736,6 @@ func (c *Client) reply(chatID, text string) {
 	}
 	fmt.Println(text)
 }
-
 
 func renderUnknown(v string) string {
 	if strings.TrimSpace(v) == "" {
@@ -773,13 +748,24 @@ func formatConfigOptionUpdateMessage(raw []byte) string {
 	if len(raw) == 0 {
 		return "Config options updated."
 	}
-	var p acp.SessionUpdateParams
-	if err := json.Unmarshal(raw, &p); err != nil || len(p.Update.ConfigOptions) == 0 {
+	// Raw may be a SessionUpdate (marshaled directly) or a SessionUpdateParams wrapper.
+	// Try SessionUpdate first (the common case from sessionUpdateToUpdate).
+	var opts []acp.ConfigOption
+	var u acp.SessionUpdate
+	if err := json.Unmarshal(raw, &u); err == nil && len(u.ConfigOptions) > 0 {
+		opts = u.ConfigOptions
+	} else {
+		var p acp.SessionUpdateParams
+		if err := json.Unmarshal(raw, &p); err == nil {
+			opts = p.Update.ConfigOptions
+		}
+	}
+	if len(opts) == 0 {
 		return "Config options updated."
 	}
 	mode := ""
 	model := ""
-	for _, opt := range p.Update.ConfigOptions {
+	for _, opt := range opts {
 		if mode == "" && (opt.ID == "mode" || strings.EqualFold(opt.Category, "mode")) {
 			mode = strings.TrimSpace(opt.CurrentValue)
 		}
