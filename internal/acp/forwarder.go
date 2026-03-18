@@ -98,77 +98,36 @@ func (f *Forwarder) Notify(method string, params any) error {
 	return f.conn.Notify(msg.Method, msg.Params)
 }
 
-// OnRequest registers a request handler and applies filter first.
-func (f *Forwarder) OnRequest(h RequestHandler) {
-	f.conn.OnRequest(func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		msg, allow, err := f.filter(ctx, ForwardMessage{
-			Direction: DirectionToClient,
-			Kind:      KindRequest,
-			Method:    method,
-			Params:    params,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if !allow {
-			return nil, fmt.Errorf("acp forwarder: inbound request blocked: %s", method)
-		}
-		return h(ctx, msg.Method, msg.Params)
-	})
-}
-
-// Subscribe registers a notification subscriber and applies filter first.
-func (f *Forwarder) Subscribe(handler NotificationHandler) (cancel func()) {
-	return f.conn.Subscribe(func(n Notification) {
-		msg, allow, err := f.filter(context.Background(), ForwardMessage{
-			Direction: DirectionToClient,
-			Kind:      KindNotification,
-			Method:    n.Method,
-			Params:    n.Params,
-		})
-		if err != nil || !allow {
-			return
-		}
-		handler(Notification{
-			JSONRPC: n.JSONRPC,
-			Method:  msg.Method,
-			Params:  msg.Params,
-		})
-	})
-}
-
 // Close closes the underlying Conn.
 func (f *Forwarder) Close() error { return f.conn.Close() }
 
 // SetCallbacks registers h as the handler for all agent->client requests and
-// session/update notifications. It wires up both conn.OnRequest (for requests)
-// and conn.Subscribe (for notifications) internally so the client never deals
-// with raw JSON dispatch.
+// session/update notifications. It wires a single conn.OnRequest handler that
+// routes both inbound requests (noResponse=false) and notifications
+// (noResponse=true) to the appropriate ClientCallbacks method.
 //
 // SetCallbacks must be called before the first prompt; it is not safe to call
 // concurrently with active requests.
 func (f *Forwarder) SetCallbacks(h ClientCallbacks) {
-	// Wire inbound request dispatch.
-	f.conn.OnRequest(func(ctx context.Context, method string, params json.RawMessage) (any, error) {
-		return dispatchClientRequest(ctx, method, params, h)
-	})
-	// Wire session/update notification dispatch.
-	f.conn.Subscribe(func(n Notification) {
-		if n.Method != "session/update" {
-			return
-		}
-		var p SessionUpdateParams
-		if err := json.Unmarshal(n.Params, &p); err != nil {
-			return
-		}
-		h.SessionUpdate(p)
+	f.conn.OnRequest(func(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		return dispatchClientMessage(ctx, method, params, noResponse, h)
 	})
 }
 
-// dispatchClientRequest maps an agent->client JSON-RPC method to the typed
-// ClientCallbacks method. Returns the result or an error; Forwarder's
-// OnRequest handler serialises the return value to JSON automatically.
-func dispatchClientRequest(ctx context.Context, method string, params json.RawMessage, h ClientCallbacks) (any, error) {
+// dispatchClientMessage routes an inbound agent→client message to the typed
+// ClientCallbacks method. noResponse is true for notifications (session/update);
+// in that case all return values are discarded by the caller.
+func dispatchClientMessage(ctx context.Context, method string, params json.RawMessage, noResponse bool, h ClientCallbacks) (any, error) {
+	if noResponse {
+		if method == "session/update" {
+			var p SessionUpdateParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, nil
+			}
+			h.SessionUpdate(p)
+		}
+		return nil, nil
+	}
 	switch method {
 	case "session/request_permission":
 		var p PermissionRequestParams

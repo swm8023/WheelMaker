@@ -8,6 +8,7 @@ package acp_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -121,22 +122,24 @@ func TestIntegration_Prompt(t *testing.T) {
 		t.Fatalf("session/new: %v", err)
 	}
 
-	// Collect updates
+	// Collect updates via unified OnRequest handler.
 	var updates []acp.SessionUpdateParams
-	cancelSub := c.Subscribe(func(n acp.Notification) {
-		if n.Method != "session/update" {
-			return
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		if noResponse && method == "session/update" {
+			var p acp.SessionUpdateParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, nil
+			}
+			if p.SessionID == sessResult.SessionID {
+				updates = append(updates, p)
+				t.Logf("update: %s", p.Update.SessionUpdate)
+			}
 		}
-		var p acp.SessionUpdateParams
-		if err := json.Unmarshal(n.Params, &p); err != nil {
-			return
+		if !noResponse {
+			return nil, fmt.Errorf("method not found: %s", method)
 		}
-		if p.SessionID == sessResult.SessionID {
-			updates = append(updates, p)
-			t.Logf("update: %s", p.Update.SessionUpdate)
-		}
+		return nil, nil
 	})
-	defer cancelSub()
 
 	// Simple prompt that doesn't require tool use
 	var promptResult acp.SessionPromptResult

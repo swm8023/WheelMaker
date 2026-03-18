@@ -121,12 +121,9 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		var replay []acp.Update
 		replayMeta := clientSessionMeta{}
 
-		cancelReplaySub := fwd.Subscribe(func(n acp.Notification) {
-			if n.Method != "session/update" {
-				return
-			}
-			var p acp.SessionUpdateParams
-			if err := json.Unmarshal(n.Params, &p); err != nil || p.SessionID != savedSID {
+		c.mu.Lock()
+		c.replayHandler = func(p acp.SessionUpdateParams) {
+			if p.SessionID != savedSID {
 				return
 			}
 			u := sessionUpdateToUpdate(p.Update)
@@ -150,7 +147,8 @@ func (c *Client) ensureReady(ctx context.Context) error {
 				}
 			}
 			replayMu.Unlock()
-		})
+		}
+		c.mu.Unlock()
 
 		loadErr := func() error {
 			_, err := fwd.SessionLoad(ctx, acp.SessionLoadParams{
@@ -160,7 +158,9 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			})
 			return err
 		}()
-		cancelReplaySub()
+		c.mu.Lock()
+		c.replayHandler = nil
+		c.mu.Unlock()
 
 		if loadErr == nil {
 			replayMu.Lock()
