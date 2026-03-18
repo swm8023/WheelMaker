@@ -70,8 +70,9 @@ type Client struct {
 
 	permRouter *permissionRouter
 
-	// injectedPromptFn overrides promptStream when set (used by tests via export_test.go).
-	injectedPromptFn func(ctx context.Context, text string) (<-chan acp.Update, error)
+	// sessionOverride is set only in tests (via InjectSession in export_test.go).
+	// When non-nil, promptStream and cancelPrompt delegate to it instead of the forwarder.
+	sessionOverride Session
 }
 
 // New creates a Client for the given project.
@@ -441,19 +442,15 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 	ctx := context.Background()
 
-	// Check for injected prompt function first (test path — bypasses real forwarder).
+	// When a session override is injected (test-only), skip forwarder initialization.
 	c.mu.Lock()
-	injected := c.injectedPromptFn
+	hasOverride := c.sessionOverride != nil
 	c.mu.Unlock()
 
-	var updates <-chan acp.Update
-	var err error
-	if injected != nil {
-		updates, err = injected(ctx, text)
-	} else {
+	if !hasOverride {
 		// Lazily initialize the agent if no forwarder exists yet.
 		c.mu.Lock()
-		if err = c.ensureForwarder(ctx); err != nil {
+		if err := c.ensureForwarder(ctx); err != nil {
 			c.mu.Unlock()
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
@@ -461,12 +458,13 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		c.resetIdleTimer() // refresh timeout before sending prompt
 		c.mu.Unlock()
 
-		if err = c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
+		if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
-		updates, err = c.promptStream(ctx, text)
 	}
+
+	updates, err := c.promptStream(ctx, text)
 	if err != nil {
 		c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
 		return

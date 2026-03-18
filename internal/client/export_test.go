@@ -4,6 +4,9 @@ package client
 // This file is compiled only during `go test`, keeping production code clean.
 
 import (
+	"context"
+	"encoding/json"
+
 	"github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/im"
 )
@@ -21,6 +24,37 @@ func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
 	}
 	c.mu.Unlock()
 }
+
+// InjectSession installs a Session override so tests can inject a mock that
+// intercepts Prompt and Cancel without spawning a real ACP subprocess.
+// It also marks the client as having an active agent so command routing works.
+func (c *Client) InjectSession(s Session) {
+	c.mu.Lock()
+	c.sessionOverride = s
+	// Populate agent fields so /cancel, /status, and other commands see an active session.
+	if c.state == nil {
+		c.state = defaultProjectState()
+	}
+	c.sessionID = s.SessionID()
+	c.ready = true
+	// Use a stub agent.Agent to satisfy currentAgent != nil checks.
+	c.currentAgent = &stubAgent{name: s.AgentName()}
+	c.currentAgentName = s.AgentName()
+	c.mu.Unlock()
+}
+
+// stubAgent is a minimal agent.Agent used by InjectSession.
+type stubAgent struct{ name string }
+
+func (a *stubAgent) Name() string { return a.name }
+func (a *stubAgent) Connect(_ context.Context) (*acp.Conn, error) {
+	return nil, nil
+}
+func (a *stubAgent) Close() error { return nil }
+func (a *stubAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
+	return acp.PermissionResult{}, nil
+}
+func (a *stubAgent) NormalizeParams(_ string, p json.RawMessage) json.RawMessage { return p }
 
 // InjectState replaces the persisted state.
 func (c *Client) InjectState(st *ProjectState) {

@@ -11,6 +11,21 @@ import (
 	"github.com/swm8023/wheelmaker/internal/acp"
 )
 
+// Session is the interface for a live ACP session as seen by the client.
+// Tests may inject a mock implementation via InjectSession (export_test.go).
+type Session interface {
+	// Prompt sends text and returns a channel of streaming updates.
+	Prompt(ctx context.Context, text string) (<-chan acp.Update, error)
+	// Cancel aborts any in-progress prompt.
+	Cancel() error
+	// AgentName returns the name of the backing agent.
+	AgentName() string
+	// SessionID returns the current ACP session ID.
+	SessionID() string
+	// Close shuts down the session and its underlying transport.
+	Close() error
+}
+
 // SwitchMode controls how an agent switch affects session context.
 type SwitchMode int
 
@@ -231,6 +246,14 @@ func (c *Client) sessionConfigSnapshot() acp.SessionConfigSnapshot {
 // promptStream sends a prompt and returns a channel of streaming updates.
 // The caller must drain the channel until a Done update is received.
 func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Update, error) {
+	// Test-only: delegate to injected session if present.
+	c.mu.Lock()
+	override := c.sessionOverride
+	c.mu.Unlock()
+	if override != nil {
+		return override.Prompt(ctx, text)
+	}
+
 	c.mu.Lock()
 	c.lastReply = ""
 	c.mu.Unlock()
@@ -322,6 +345,14 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
 func (c *Client) cancelPrompt() error {
+	// Test-only: delegate to injected session if present.
+	c.mu.Lock()
+	override := c.sessionOverride
+	c.mu.Unlock()
+	if override != nil {
+		return override.Cancel()
+	}
+
 	c.mu.Lock()
 	sessID := c.sessionID
 	ready := c.ready
