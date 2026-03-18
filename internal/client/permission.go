@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,7 +9,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/backend"
+	"github.com/swm8023/wheelmaker/internal/agent"
 )
 
 type pendingPermission struct {
@@ -69,7 +68,7 @@ func (r *permissionRouter) resolveIncomingReply(chatID, text string) bool {
 	return true
 }
 
-func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string, fallback backend.Backend) (acp.PermissionResult, error) {
+func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string, fallback agent.Agent) (acp.PermissionResult, error) {
 	normalized := strings.ToLower(strings.TrimSpace(mode))
 	switch normalized {
 	case "ask", "manual", "user":
@@ -182,26 +181,3 @@ func permissionResultLabel(r acp.PermissionResult) string {
 	}
 	return "selected:" + r.OptionID
 }
-
-type interactiveBackend struct {
-	base   backend.Backend
-	router *permissionRouter
-}
-
-func (b *interactiveBackend) Name() string { return b.base.Name() }
-
-func (b *interactiveBackend) Connect(ctx context.Context) (*acp.Conn, error) {
-	return b.base.Connect(ctx)
-}
-
-func (b *interactiveBackend) Close() error { return b.base.Close() }
-
-func (b *interactiveBackend) HandlePermission(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
-	return b.router.decide(ctx, params, mode, b.base)
-}
-
-func (b *interactiveBackend) NormalizeParams(method string, params json.RawMessage) json.RawMessage {
-	return b.base.NormalizeParams(method, params)
-}
-
-var _ backend.Backend = (*interactiveBackend)(nil)
