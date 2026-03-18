@@ -1,9 +1,9 @@
 //go:build integration
 
-// Integration test for backend/claude: verifies that claude.Backend.Connect()
+// Integration test for agent/claude: verifies that claude.Agent.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/backend/claude/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/agent/claude/... -v -timeout 60s
 // Requires: claude-agent-acp binary at bin/windows_amd64/claude-agent-acp.exe or in PATH,
 //
 //	and ANTHROPIC_API_KEY set in the environment.
@@ -16,7 +16,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/backend/claude"
+	"github.com/swm8023/wheelmaker/internal/agent/claude"
 	"github.com/swm8023/wheelmaker/internal/tools"
 )
 

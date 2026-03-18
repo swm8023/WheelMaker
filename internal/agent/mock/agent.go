@@ -1,4 +1,4 @@
-// Package mock implements an in-process ACP mock Backend for testing.
+// Package mock implements an in-process ACP mock agent for testing.
 package mock
 
 import (
@@ -9,25 +9,25 @@ import (
 	"github.com/swm8023/wheelmaker/internal/acp"
 )
 
-const backendName = "mock"
+const agentName = "mock"
 
-// Backend is a stateless factory for in-memory mock ACP connections.
-type Backend struct{}
+// Agent is a stateless factory for in-memory mock ACP connections.
+type Agent struct{}
 
 // Mock is kept as a compatibility alias.
-// Deprecated: use Backend.
-type Mock = Backend
+// Deprecated: use Agent.
+type Mock = Agent
 
-// New creates a mock backend.
-func New() *Backend {
-	return &Backend{}
+// New creates a mock agent.
+func New() *Agent {
+	return &Agent{}
 }
 
 // Name returns the Mock identifier.
-func (a *Backend) Name() string { return backendName }
+func (a *Agent) Name() string { return agentName }
 
 // Connect creates and starts a new in-memory mock ACP connection.
-func (a *Backend) Connect(_ context.Context) (*acp.Conn, error) {
+func (a *Agent) Connect(_ context.Context) (*acp.Conn, error) {
 	conn := acp.NewInMemoryConn(runInMemoryMockServer)
 	if err := conn.Start(); err != nil {
 		return nil, err
@@ -35,14 +35,14 @@ func (a *Backend) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 
-// Close is a no-op for the stateless mock backend.
-func (a *Backend) Close() error { return nil }
+// Close is a no-op for the stateless mock agent.
+func (a *Agent) Close() error { return nil }
 
 // HandlePermission resolves permission by current mode:
 // - reject/deny/read -> reject_once
 // - ask/manual/user  -> cancelled (explicit user decision required)
 // - others           -> allow_once
-func (a *Backend) HandlePermission(_ context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+func (a *Agent) HandlePermission(_ context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
 	normalizedMode := strings.ToLower(strings.TrimSpace(mode))
 	preferredKind := "allow_once"
 	switch normalizedMode {
@@ -67,4 +67,4 @@ func (a *Backend) HandlePermission(_ context.Context, params acp.PermissionReque
 }
 
 // NormalizeParams passes notifications through unchanged.
-func (a *Backend) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
+func (a *Agent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }

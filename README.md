@@ -10,12 +10,12 @@ Feishu (mobile) ──► WheelMaker ──► claude-agent-acp / <acp-binary> �
 
 ## Features
 
-- **Multi-project**: manage multiple projects in one process, each with its own IM and AI backend
+- **Multi-project**: manage multiple projects in one process, each with its own IM and AI agent
 - **Feishu integration**: send and receive messages via Feishu Bot, with rich card support
 - **Console mode**: use stdin instead of Feishu for local testing
 - **Session persistence**: automatically resumes the previous AI session after restart (via `session/load`)
 - **Lazy loading**: AI subprocess starts on the first message; auto-closes after 30 min idle to save resources
-- **Multiple backends**: Backend factory abstraction supports ACP-compatible CLIs (e.g. claude-agent-acp)
+- **Multiple agents**: Agent factory abstraction supports ACP-compatible CLIs (e.g. claude-agent-acp)
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ Edit `~/.wheelmaker/config.json`:
     {
       "name": "my-project",
       "im": { "type": "console" },
-      "client": { "backend": "claude", "path": "/path/to/your/code" }
+      "client": { "agent": "claude", "path": "/path/to/your/code" }
     }
   ]
 }
@@ -85,14 +85,14 @@ Config file: `~/.wheelmaker/config.json`
 {
   "projects": [
     {
-      "name": "backend",
+      "name": "agent",
       "im": { "type": "feishu", "appID": "cli_xxx", "appSecret": "yyy" },
-      "client": { "backend": "claude", "path": "/home/user/backend" }
+      "client": { "agent": "claude", "path": "/home/user/agent" }
     },
     {
       "name": "frontend",
       "im": { "type": "console" },
-      "client": { "backend": "claude", "path": "/home/user/frontend" }
+      "client": { "agent": "claude", "path": "/home/user/frontend" }
     }
   ],
   "feishu": { "verificationToken": "your_verification_token" }
@@ -105,10 +105,10 @@ Send in IM or console:
 
 | Command | Description |
 |---------|-------------|
-| `/use <backend>` | Switch AI backend (e.g. `/use claude`) |
-| `/use <backend> --continue` | Switch backend and carry over current context |
+| `/use <agent>` | Switch AI agent (e.g. `/use claude`) |
+| `/use <agent> --continue` | Switch agent and carry over current context |
 | `/cancel` | Cancel the in-progress request |
-| `/status` | Show current backend and session ID |
+| `/status` | Show current agent and session ID |
 | anything else | Sent to the AI as a message (including text starting with `/`) |
 
 ## Architecture
@@ -116,20 +116,20 @@ Send in IM or console:
 ```
 Hub
 └─ client.Client (per project)
-     ├─ im.Provider       ← Feishu / Console
+     ├─ im.Channel       ← Feishu / Console
      └─ acp.Agent         ← ACP protocol layer
-          └─ acp.Agent → acp.Conn → backend binary
+          └─ acp.Agent → acp.Conn → agent binary
 ```
 
 | Package | Responsibility |
 |---------|----------------|
 | `internal/hub/` | Reads config, manages lifecycle of all project clients |
-| `internal/client/` | Per-project coordination: routing, lazy backend init, idle timeout, state persistence |
+| `internal/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
 | `internal/acp/` | ACP session lifecycle, streaming prompts, fs/terminal/permission callbacks |
 | `internal/acp/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
-| `internal/backend/claude/` | Stateless connection factory - launches claude-agent-acp binary |
+| `internal/agent/claude/` | Stateless connection factory - launches claude-agent-acp binary |
 | `internal/im/console/` | Console IM: reads stdin; optionally logs all ACP JSON to stderr |
-| `internal/im/feishu/` | Feishu Bot IM provider |
+| `internal/im/feishu/` | Feishu Bot IM channel |
 
 ## Development
 
@@ -137,7 +137,7 @@ Hub
 go test ./...
 
 # Integration tests (requires real claude-agent-acp binary)
-go test -tags integration ./internal/backend/claude/...
+go test -tags integration ./internal/agent/claude/...
 
 go build ./cmd/wheelmaker/
 ```
@@ -149,6 +149,8 @@ Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatic
 - [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
 - [Feishu Bot Setup](docs/feishu-bot.md)
 - [claude-agent-acp Reference](https://docs.anthropic.com/en/docs/claude-code)
+
+
 
 
 

@@ -1,5 +1,8 @@
-// Package backend defines the Backend interface for ACP-compatible CLI backends.
-package backend
+// Package agent defines the Agent interface for ACP-compatible CLI agents.
+// An Agent is a stateless subprocess factory: Connect() starts a new binary
+// and returns its acp.Conn. Per-agent protocol hooks (NormalizeParams,
+// HandlePermission) are also provided through this interface.
+package agent
 
 import (
 	"context"
@@ -8,22 +11,22 @@ import (
 	"github.com/swm8023/wheelmaker/internal/acp"
 )
 
-// Backend is a stateless connection factory for an ACP-compatible CLI backend.
+// Agent is a stateless connection factory for an ACP-compatible CLI agent.
 // Connect() starts a new binary subprocess on each call and returns its acp.Conn.
-// The subprocess lifecycle is owned by the returned *acp.Conn; Backend.Close()
+// The subprocess lifecycle is owned by the returned *acp.Conn; Agent.Close()
 // is only used for cleanup if Connect() fails.
 // After a successful Connect(), calling Close() is a no-op.
 //
 // Connect() calls Conn.Start() internally; callers must NOT call Start() again.
-type Backend interface {
-	// Name returns the identifier for this backend (e.g. "claude").
+type Agent interface {
+	// Name returns the identifier for this agent (e.g. "claude").
 	Name() string
 
 	// Connect starts a new subprocess and returns an initialized *acp.Conn.
 	// The conn is started (subprocess running) when Connect returns.
 	Connect(ctx context.Context) (*acp.Conn, error)
 
-	// Close cleans up any resources held by the backend.
+	// Close cleans up any resources held by the agent.
 	// No-op after a successful Connect().
 	Close() error
 

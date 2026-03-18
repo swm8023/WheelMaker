@@ -1,4 +1,7 @@
-// Package acp implements the ACP protocol: session layer and JSON-RPC 2.0 stdio transport.
+// Package acp implements the ACP (Agent Client Protocol) transport layer.
+// It provides Conn (JSON-RPC 2.0 over subprocess stdio), Forwarder (bidirectional
+// message filter with typed outbound methods and ClientCallbacks dispatch),
+// and all ACP protocol types.
 package acp
 
 import (

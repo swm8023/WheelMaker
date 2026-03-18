@@ -170,3 +170,4 @@ cmd.Start()
 - 工具调用需要 Client 实现 `fs/read_text_file`、`fs/write_text_file`、`terminal/*` 方法响应
   - WheelMaker MVP 阶段可以默认允许并在本地执行这些操作
 
+

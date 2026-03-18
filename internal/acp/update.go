@@ -1,4 +1,4 @@
-﻿package acp
+package acp
 
 // UpdateType identifies the kind of streaming update from the agent.
 type UpdateType string
@@ -35,7 +35,3 @@ type Update struct {
 	Done    bool
 	Err     error
 }
-
-
-
-
