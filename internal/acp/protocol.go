@@ -166,8 +166,9 @@ type SessionCancelParams struct {
 
 // SessionUpdateParams is the payload of a session/update notification.
 type SessionUpdateParams struct {
-	SessionID string        `json:"sessionId"`
-	Update    SessionUpdate `json:"update"`
+	SessionID string                `json:"sessionId"`
+	Update    SessionUpdate         `json:"update"`
+	Derived   *SessionUpdateDerived `json:"-"`
 }
 
 // SessionUpdate is the body of a single streaming update from the agent.

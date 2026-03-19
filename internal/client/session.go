@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -126,25 +125,27 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			if p.SessionID != savedSID {
 				return
 			}
-			u := sessionUpdateToUpdate(p.Update)
+			derived := p.Derived
+			if derived == nil {
+				acp.ParseSessionUpdateParams(&p)
+				derived = p.Derived
+			}
+			if derived == nil {
+				return
+			}
 			replayMu.Lock()
-			replay = append(replay, u)
-			switch p.Update.SessionUpdate {
-			case "available_commands_update":
-				if len(p.Update.AvailableCommands) > 0 {
-					replayMeta.AvailableCommands = p.Update.AvailableCommands
-				}
-			case "config_option_update":
-				if len(p.Update.ConfigOptions) > 0 {
-					replayMeta.ConfigOptions = p.Update.ConfigOptions
-				}
-			case "session_info_update":
-				if p.Update.Title != "" {
-					replayMeta.Title = p.Update.Title
-				}
-				if p.Update.UpdatedAt != "" {
-					replayMeta.UpdatedAt = p.Update.UpdatedAt
-				}
+			replay = append(replay, derived.Update)
+			if len(derived.AvailableCommands) > 0 {
+				replayMeta.AvailableCommands = derived.AvailableCommands
+			}
+			if len(derived.ConfigOptions) > 0 {
+				replayMeta.ConfigOptions = derived.ConfigOptions
+			}
+			if derived.Title != "" {
+				replayMeta.Title = derived.Title
+			}
+			if derived.UpdatedAt != "" {
+				replayMeta.UpdatedAt = derived.UpdatedAt
 			}
 			replayMu.Unlock()
 		}
@@ -467,50 +468,5 @@ func (c *Client) saveSessionState() {
 	c.mu.Unlock()
 	if s != nil {
 		_ = c.store.Save(s)
-	}
-}
-
-// sessionUpdateToUpdate converts an ACP SessionUpdate notification into a client Update.
-func sessionUpdateToUpdate(u acp.SessionUpdate) acp.Update {
-	switch u.SessionUpdate {
-	case "agent_message_chunk":
-		text := ""
-		if u.Content != nil {
-			var cb acp.ContentBlock
-			if err := json.Unmarshal(u.Content, &cb); err == nil && cb.Type == "text" {
-				text = cb.Text
-			}
-		}
-		return acp.Update{Type: acp.UpdateText, Content: text}
-
-	case "agent_thought_chunk":
-		text := ""
-		if u.Content != nil {
-			var cb acp.ContentBlock
-			if err := json.Unmarshal(u.Content, &cb); err == nil {
-				text = cb.Text
-			}
-		}
-		return acp.Update{Type: acp.UpdateThought, Content: text}
-
-	case "tool_call", "tool_call_update":
-		raw, _ := json.Marshal(u)
-		return acp.Update{Type: acp.UpdateToolCall, Raw: raw}
-
-	case "plan":
-		raw, _ := json.Marshal(u)
-		return acp.Update{Type: acp.UpdatePlan, Raw: raw}
-
-	case "config_option_update":
-		raw, _ := json.Marshal(u)
-		return acp.Update{Type: acp.UpdateConfigOption, Raw: raw}
-
-	case "current_mode_update":
-		raw, _ := json.Marshal(u)
-		return acp.Update{Type: acp.UpdateModeChange, Raw: raw}
-
-	default:
-		raw, _ := json.Marshal(u)
-		return acp.Update{Type: acp.UpdateType(u.SessionUpdate), Raw: raw}
 	}
 }

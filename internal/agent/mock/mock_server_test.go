@@ -42,19 +42,19 @@ func TestInMemoryMock_PromptCase1_TextAndMetaUpdates(t *testing.T) {
 
 	var mu sync.Mutex
 	seen := map[string]bool{}
-	cancel := c.Subscribe(func(n acp.Notification) {
-		if n.Method != "session/update" {
-			return
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		if !noResponse || method != "session/update" {
+			return nil, nil
 		}
 		var p acp.SessionUpdateParams
-		if json.Unmarshal(n.Params, &p) != nil {
-			return
+		if json.Unmarshal(params, &p) != nil {
+			return nil, nil
 		}
 		mu.Lock()
 		seen[p.Update.SessionUpdate] = true
 		mu.Unlock()
+		return nil, nil
 	})
-	defer cancel()
 
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
@@ -90,19 +90,19 @@ func TestInMemoryMock_GlobalConfigCommand(t *testing.T) {
 	}
 
 	var gotConfigUpdate bool
-	cancel := c.Subscribe(func(n acp.Notification) {
-		if n.Method != "session/update" {
-			return
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		if !noResponse || method != "session/update" {
+			return nil, nil
 		}
 		var p acp.SessionUpdateParams
-		if json.Unmarshal(n.Params, &p) != nil {
-			return
+		if json.Unmarshal(params, &p) != nil {
+			return nil, nil
 		}
 		if p.Update.SessionUpdate == "config_option_update" && len(p.Update.ConfigOptions) > 0 {
 			gotConfigUpdate = true
 		}
+		return nil, nil
 	})
-	defer cancel()
 
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
@@ -128,7 +128,10 @@ func TestInMemoryMock_CallbackCases(t *testing.T) {
 		t.Fatalf("session/new: %v", err)
 	}
 
-	c.OnRequest(func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+	c.OnRequest(func(_ context.Context, method string, _ json.RawMessage, noResponse bool) (any, error) {
+		if noResponse {
+			return nil, nil
+		}
 		switch method {
 		case "fs/read_text_file":
 			return acp.FSReadTextFileResult{Content: "fs-ok"}, nil
@@ -186,7 +189,31 @@ func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
 		finalMessageChunk string
 	)
 
-	c.OnRequest(func(_ context.Context, method string, params json.RawMessage) (any, error) {
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		if noResponse {
+			if method != "session/update" {
+				return nil, nil
+			}
+			var p acp.SessionUpdateParams
+			if json.Unmarshal(params, &p) != nil {
+				return nil, nil
+			}
+			if p.Update.SessionUpdate == "tool_call" || p.Update.SessionUpdate == "tool_call_update" {
+				mu.Lock()
+				finalToolStatus = p.Update.Status
+				mu.Unlock()
+			}
+			if p.Update.SessionUpdate == "agent_message_chunk" && p.Update.Content != nil {
+				var cb acp.ContentBlock
+				if json.Unmarshal(p.Update.Content, &cb) == nil {
+					mu.Lock()
+					finalMessageChunk = cb.Text
+					mu.Unlock()
+				}
+			}
+			return nil, nil
+		}
+
 		if method != "session/request_permission" {
 			return nil, nil
 		}
@@ -208,36 +235,10 @@ func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
 		}
 		mu.Unlock()
 
-		// Simulate user choosing "Reject once".
 		return acp.PermissionResponse{
 			Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "reject_once"},
 		}, nil
 	})
-
-	cancel := c.Subscribe(func(n acp.Notification) {
-		if n.Method != "session/update" {
-			return
-		}
-		var p acp.SessionUpdateParams
-		if json.Unmarshal(n.Params, &p) != nil {
-			return
-		}
-		// tool_call carries the initial pending status; tool_call_update carries transitions (§9.2).
-		if p.Update.SessionUpdate == "tool_call" || p.Update.SessionUpdate == "tool_call_update" {
-			mu.Lock()
-			finalToolStatus = p.Update.Status
-			mu.Unlock()
-		}
-		if p.Update.SessionUpdate == "agent_message_chunk" && p.Update.Content != nil {
-			var cb acp.ContentBlock
-			if json.Unmarshal(p.Update.Content, &cb) == nil {
-				mu.Lock()
-				finalMessageChunk = cb.Text
-				mu.Unlock()
-			}
-		}
-	})
-	defer cancel()
 
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{

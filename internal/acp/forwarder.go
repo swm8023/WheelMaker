@@ -124,6 +124,7 @@ func dispatchClientMessage(ctx context.Context, method string, params json.RawMe
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, nil
 			}
+			ParseSessionUpdateParams(&p)
 			h.SessionUpdate(p)
 		}
 		return nil, nil

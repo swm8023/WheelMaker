@@ -30,53 +30,42 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		return
 	}
 
-	u := sessionUpdateToUpdate(params.Update)
+	derived := params.Derived
+	if derived == nil {
+		// Defensive fallback for direct callers that bypass Forwarder.
+		acp.ParseSessionUpdateParams(&params)
+		derived = params.Derived
+	}
+	if derived == nil {
+		return
+	}
 
-	// Track session metadata updates.
-	switch params.Update.SessionUpdate {
-	case "available_commands_update":
-		if len(params.Update.AvailableCommands) > 0 {
-			c.mu.Lock()
-			c.sessionMeta.AvailableCommands = params.Update.AvailableCommands
-			c.mu.Unlock()
-		}
-	case "config_option_update":
-		if len(params.Update.ConfigOptions) > 0 {
-			c.mu.Lock()
-			c.sessionMeta.ConfigOptions = params.Update.ConfigOptions
-			c.mu.Unlock()
-		}
-	case "session_info_update":
+	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
 		c.mu.Lock()
-		if params.Update.Title != "" {
-			c.sessionMeta.Title = params.Update.Title
+		if len(derived.AvailableCommands) > 0 {
+			c.sessionMeta.AvailableCommands = derived.AvailableCommands
 		}
-		if params.Update.UpdatedAt != "" {
-			c.sessionMeta.UpdatedAt = params.Update.UpdatedAt
+		if len(derived.ConfigOptions) > 0 {
+			c.sessionMeta.ConfigOptions = derived.ConfigOptions
+		}
+		if derived.Title != "" {
+			c.sessionMeta.Title = derived.Title
+		}
+		if derived.UpdatedAt != "" {
+			c.sessionMeta.UpdatedAt = derived.UpdatedAt
 		}
 		c.mu.Unlock()
 	}
 
-	// Track active tool calls for cancelPrompt.
-	if id := params.Update.ToolCallID; id != "" {
-		switch params.Update.SessionUpdate {
-		case "tool_call":
-			if s := params.Update.Status; s == "completed" || s == "failed" {
-				c.mu.Lock()
-				delete(c.activeToolCalls, id)
-				c.mu.Unlock()
-			} else {
-				c.mu.Lock()
-				c.activeToolCalls[id] = struct{}{}
-				c.mu.Unlock()
-			}
-		case "tool_call_update":
-			if s := params.Update.Status; s == "completed" || s == "failed" {
-				c.mu.Lock()
-				delete(c.activeToolCalls, id)
-				c.mu.Unlock()
-			}
+	if derived.TrackAddToolCall != "" || derived.TrackDoneToolCall != "" {
+		c.mu.Lock()
+		if derived.TrackAddToolCall != "" {
+			c.activeToolCalls[derived.TrackAddToolCall] = struct{}{}
 		}
+		if derived.TrackDoneToolCall != "" {
+			delete(c.activeToolCalls, derived.TrackDoneToolCall)
+		}
+		c.mu.Unlock()
 	}
 
 	// Send update to the active prompt channel. Use recover() to handle the
@@ -84,7 +73,7 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 	func() {
 		defer func() { recover() }() //nolint:errcheck
 		select {
-		case ch <- u:
+		case ch <- derived.Update:
 		default:
 		}
 	}()
@@ -96,12 +85,11 @@ func (c *Client) SessionRequestPermission(ctx context.Context, params acp.Permis
 	c.mu.Lock()
 	pCtx := c.promptCtx
 	snap := acp.SessionConfigSnapshotFromOptions(c.sessionMeta.ConfigOptions)
-	ag := c.currentAgent
 	c.mu.Unlock()
 	if pCtx != nil {
 		ctx = pCtx
 	}
-	return c.permRouter.decide(ctx, params, snap.Mode, ag)
+	return c.permRouter.decide(ctx, params, snap.Mode)
 }
 
 // FSRead responds to fs/read_text_file agent requests.
