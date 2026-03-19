@@ -125,6 +125,9 @@ func (c *Client) Start(ctx context.Context) error {
 
 	if c.imRun != nil {
 		c.imRun.OnMessage(c.HandleMessage)
+		if hs, ok := c.imRun.(im.HelpResolverSetter); ok {
+			hs.SetHelpResolver(c.resolveHelpModel)
+		}
 	}
 	return nil
 }
@@ -477,7 +480,23 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.mu.Unlock()
 
 	var buf strings.Builder
+	c.mu.Lock()
+	emitter, hasEmitter := c.imRun.(im.UpdateEmitter)
+	sid := c.sessionID
+	c.mu.Unlock()
 	for u := range updates {
+		if hasEmitter {
+			emitErr := emitter.Emit(ctx, im.IMUpdate{
+				ChatID:     msg.ChatID,
+				SessionID:  sid,
+				UpdateType: string(u.Type),
+				Text:       u.Content,
+				Raw:        u.Raw,
+			})
+			if emitErr != nil {
+				c.reply(msg.ChatID, fmt.Sprintf("IM emit error: %v", emitErr))
+			}
+		}
 		if u.Err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
 			c.mu.Lock()
@@ -490,7 +509,9 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			c.saveSessionState() // persist immediately; don't wait for prompt to finish
 		}
 		if u.Type == acp.UpdateText {
-			buf.WriteString(u.Content)
+			if !hasEmitter {
+				buf.WriteString(u.Content)
+			}
 		}
 		if u.Done {
 			break
@@ -505,7 +526,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	// Persist after prompt completes: session ID and config metadata may have changed.
 	c.saveSessionState()
 
-	if buf.Len() > 0 {
+	if !hasEmitter && buf.Len() > 0 {
 		c.reply(msg.ChatID, buf.String())
 	}
 }
@@ -777,4 +798,83 @@ func formatConfigOptionUpdateMessage(raw []byte) string {
 		return "Config options updated."
 	}
 	return fmt.Sprintf("Config options updated: mode=%s model=%s", renderUnknown(mode), renderUnknown(model))
+}
+
+func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {
+	c.mu.Lock()
+	hasForwarder := c.forwarder != nil
+	c.mu.Unlock()
+	if !hasForwarder {
+		c.mu.Lock()
+		_ = c.ensureForwarder(ctx)
+		c.mu.Unlock()
+	}
+	_ = c.ensureReady(ctx)
+
+	c.mu.Lock()
+	opts := append([]acp.ConfigOption(nil), c.sessionMeta.ConfigOptions...)
+	commands := append([]acp.AvailableCommand(nil), c.sessionMeta.AvailableCommands...)
+	c.mu.Unlock()
+
+	model := im.HelpModel{
+		Title: "WheelMaker Help",
+		Body:  "Choose a quick action below. Advanced commands can still be typed manually.",
+	}
+	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Cancel", Command: "/cancel"})
+	c.mu.Lock()
+	agentNames := make([]string, 0, len(c.agentFacs))
+	for name := range c.agentFacs {
+		agentNames = append(agentNames, name)
+	}
+	c.mu.Unlock()
+	for _, name := range agentNames {
+		model.Options = append(model.Options, im.HelpOption{
+			Label:   "Agent: " + name,
+			Command: "/use",
+			Value:   name,
+		})
+	}
+
+	for _, opt := range opts {
+		switch opt.ID {
+		case "mode":
+			for _, v := range opt.Options {
+				model.Options = append(model.Options, im.HelpOption{
+					Label:   "Mode: " + firstNonEmpty(v.Name, v.Value),
+					Command: "/mode",
+					Value:   v.Value,
+				})
+			}
+		case "model":
+			for _, v := range opt.Options {
+				model.Options = append(model.Options, im.HelpOption{
+					Label:   "Model: " + firstNonEmpty(v.Name, v.Value),
+					Command: "/model",
+					Value:   v.Value,
+				})
+			}
+		}
+	}
+	if len(commands) > 0 {
+		names := make([]string, 0, len(commands))
+		for _, cmd := range commands {
+			if strings.TrimSpace(cmd.Name) != "" {
+				names = append(names, cmd.Name)
+			}
+		}
+		if len(names) > 0 {
+			model.Body += "\nAvailable slash commands: " + strings.Join(names, ", ")
+		}
+	}
+	return model, nil
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }

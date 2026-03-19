@@ -79,6 +79,11 @@ Config file: `~/.wheelmaker/config.json`
 { "type": "feishu", "appID": "cli_xxxxxxxx", "appSecret": "your_app_secret" }
 ```
 
+Top-level `feishu` shared config:
+```json
+{ "feishu": { "verificationToken": "your_verification_token", "encryptKey": "" } }
+```
+
 ### Multi-project example
 
 ```json
@@ -95,7 +100,7 @@ Config file: `~/.wheelmaker/config.json`
       "client": { "agent": "claude", "path": "/home/user/frontend" }
     }
   ],
-  "feishu": { "verificationToken": "your_verification_token" }
+  "feishu": { "verificationToken": "your_verification_token", "encryptKey": "" }
 }
 ```
 

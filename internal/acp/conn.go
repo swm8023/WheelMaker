@@ -63,12 +63,12 @@ type Conn struct {
 func NewConn(exePath string, env []string) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
-		exePath:     exePath,
-		env:         env,
-		pending:     make(map[int64]chan Response),
-		connCtx:     ctx,
-		connCancel:  cancel,
-		done:        make(chan struct{}),
+		exePath:    exePath,
+		env:        env,
+		pending:    make(map[int64]chan Response),
+		connCtx:    ctx,
+		connCancel: cancel,
+		done:       make(chan struct{}),
 	}
 }
 
@@ -359,5 +359,3 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	_ = c.enc.Encode(resp)
 	c.mu.Unlock()
 }
-
-

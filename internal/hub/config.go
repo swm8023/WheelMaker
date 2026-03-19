@@ -36,6 +36,7 @@ type ClientConf struct {
 // FeishuConfig holds shared Feishu settings used across all feishu-type projects.
 type FeishuConfig struct {
 	VerificationToken string `json:"verificationToken,omitempty"`
+	EncryptKey        string `json:"encryptKey,omitempty"`
 }
 
 // LoadConfig reads and parses the config file at path.
