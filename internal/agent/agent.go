@@ -1,7 +1,7 @@
 // Package agent defines the Agent interface for ACP-compatible CLI agents.
 // An Agent is a stateless subprocess factory: Connect() starts a new binary
-// and returns its acp.Conn. Per-agent protocol hooks (NormalizeParams,
-// HandlePermission) are also provided through this interface.
+// and returns its acp.Conn. Per-agent protocol hooks (NormalizeParams)
+// are also provided through this interface.
 package agent
 
 import (
@@ -29,10 +29,6 @@ type Agent interface {
 	// Close cleans up any resources held by the agent.
 	// No-op after a successful Connect().
 	Close() error
-
-	// HandlePermission responds to session/request_permission callbacks.
-	// mode is the current session mode resolved from configOptions.
-	HandlePermission(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error)
 
 	// NormalizeParams is called before acp processes each incoming session/update
 	// notification. Translate legacy protocol fields to modern format here.

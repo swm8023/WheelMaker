@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent"
 )
 
 type pendingPermission struct {
@@ -68,14 +67,8 @@ func (r *permissionRouter) resolveIncomingReply(chatID, text string) bool {
 	return true
 }
 
-func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string, fallback agent.Agent) (acp.PermissionResult, error) {
-	normalized := strings.ToLower(strings.TrimSpace(mode))
-	switch normalized {
-	case "ask", "manual", "user":
-		return r.waitForUser(ctx, params, mode)
-	default:
-		return fallback.HandlePermission(ctx, params, mode)
-	}
+func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+	return r.waitForUser(ctx, params, mode)
 }
 
 func (r *permissionRouter) waitForUser(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {

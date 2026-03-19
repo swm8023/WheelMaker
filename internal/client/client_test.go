@@ -621,9 +621,6 @@ func (a *minimalMockAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 func (a *minimalMockAgent) Close() error { return nil }
-func (a *minimalMockAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
-	return acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}, nil
-}
 func (a *minimalMockAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
 	return params
 }
@@ -644,9 +641,6 @@ func (a *contextRejectMockAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 func (a *contextRejectMockAgent) Close() error { return nil }
-func (a *contextRejectMockAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
-	return acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}, nil
-}
 func (a *contextRejectMockAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
 	return params
 }
@@ -662,9 +656,6 @@ func (a *failConnectAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return nil, fmt.Errorf("mock: binary not found")
 }
 func (a *failConnectAgent) Close() error { return nil }
-func (a *failConnectAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
-	return acp.PermissionResult{Outcome: "selected", OptionID: "allow_once"}, nil
-}
 func (a *failConnectAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
 	return params
 }
@@ -1035,7 +1026,6 @@ func TestHandleMessage_PermissionReply_ViaIM(t *testing.T) {
 		c.HandleMessage(im.Message{ChatID: "c1", Text: "4"})
 	}()
 
-	// Wait until the permission prompt is emitted, then reply via IM.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		found := false

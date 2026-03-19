@@ -284,7 +284,10 @@ func TestIncomingRequest_Handler(t *testing.T) {
 
 	var receivedMethod string
 	var receivedParams json.RawMessage
-	c.OnRequest(func(_ context.Context, method string, params json.RawMessage) (any, error) {
+	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		if noResponse {
+			return nil, nil
+		}
 		receivedMethod = method
 		receivedParams = params
 		return map[string]string{"content": "file content"}, nil
@@ -330,24 +333,17 @@ func TestSend_NilResult(t *testing.T) {
 	}
 }
 
-// TestMultipleSubscribers verifies all subscribers receive notifications.
-func TestMultipleSubscribers(t *testing.T) {
+// TestNotificationHandling verifies OnRequest receives session/update notifications.
+func TestNotificationHandling(t *testing.T) {
 	c := newMockConn(t)
 
-	const nSubs = 5
-	counts := make([]atomic.Int32, nSubs)
-	cancels := make([]func(), nSubs)
-	for i := range nSubs {
-		i := i
-		cancels[i] = c.Subscribe(func(n acp.Notification) {
-			counts[i].Add(1)
-		})
-	}
-	defer func() {
-		for _, cancel := range cancels {
-			cancel()
+	var count atomic.Int32
+	c.OnRequest(func(_ context.Context, method string, _ json.RawMessage, noResponse bool) (any, error) {
+		if noResponse && method == "session/update" {
+			count.Add(1)
 		}
-	}()
+		return nil, nil
+	})
 
 	// Generate 3 notifications via session/prompt.
 	var sessResult acp.SessionNewResult
@@ -358,10 +354,8 @@ func TestMultipleSubscribers(t *testing.T) {
 	}, nil)
 
 	time.Sleep(30 * time.Millisecond)
-	for i := range nSubs {
-		if n := counts[i].Load(); n != 3 {
-			t.Errorf("subscriber %d received %d notifications, want 3", i, n)
-		}
+	if n := count.Load(); n != 3 {
+		t.Errorf("notification count = %d, want 3", n)
 	}
 }
 

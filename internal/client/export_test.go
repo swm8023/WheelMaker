@@ -50,10 +50,7 @@ func (a *stubAgent) Name() string { return a.name }
 func (a *stubAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return nil, nil
 }
-func (a *stubAgent) Close() error { return nil }
-func (a *stubAgent) HandlePermission(_ context.Context, _ acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
-	return acp.PermissionResult{}, nil
-}
+func (a *stubAgent) Close() error                                                { return nil }
 func (a *stubAgent) NormalizeParams(_ string, p json.RawMessage) json.RawMessage { return p }
 
 // InjectState replaces the persisted state.
