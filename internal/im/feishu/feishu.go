@@ -87,6 +87,55 @@ func (f *IM) SendCard(chatID string, card im.Card) error {
 	return err
 }
 
+// SendOptions renders decision options. Feishu presents them as interactive buttons.
+func (f *IM) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
+	elements := make([]map[string]any, 0, 2)
+	if strings.TrimSpace(body) != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": strings.TrimSpace(body),
+		})
+	}
+	if len(options) > 0 {
+		actions := make([]map[string]any, 0, len(options))
+		for _, opt := range options {
+			value := map[string]any{
+				"kind":      "decision",
+				"chat_id":   chatID,
+				"option_id": opt.ID,
+				"value":     opt.Value,
+			}
+			for k, v := range meta {
+				if strings.TrimSpace(k) == "" {
+					continue
+				}
+				value[k] = v
+			}
+			actions = append(actions, map[string]any{
+				"tag":   "button",
+				"text":  map[string]any{"tag": "plain_text", "content": opt.Label},
+				"type":  "default",
+				"value": value,
+			})
+		}
+		elements = append(elements, map[string]any{
+			"tag":     "action",
+			"actions": actions,
+		})
+	}
+	card := im.Card{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": firstNonEmpty(title, "Decision required"),
+			},
+		},
+		"elements": elements,
+	}
+	return f.SendCard(chatID, card)
+}
+
 // SendReaction adds an emoji reaction.
 func (f *IM) SendReaction(messageID, emoji string) error {
 	bot, err := f.ensureBot()
@@ -257,3 +306,4 @@ func firstNonEmpty(v ...string) string {
 
 var _ im.Channel = (*IM)(nil)
 var _ im.CardActionSubscriber = (*IM)(nil)
+var _ im.OptionSender = (*IM)(nil)

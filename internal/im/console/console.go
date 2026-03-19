@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -45,6 +46,29 @@ func (c *ConsoleIM) SendCard(_ string, card im.Card) error {
 	data, _ := json.Marshal(card)
 	fmt.Printf("[%s] card: %s\n", c.projectName, string(data))
 	return nil
+}
+
+// SendOptions renders options as plain text in console.
+func (c *ConsoleIM) SendOptions(_ string, title, body string, options []im.DecisionOption, _ map[string]string) error {
+	var b strings.Builder
+	if strings.TrimSpace(title) != "" {
+		b.WriteString(strings.TrimSpace(title))
+	}
+	if strings.TrimSpace(body) != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(strings.TrimSpace(body))
+	}
+	if len(options) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		for i, opt := range options {
+			b.WriteString(fmt.Sprintf("%d. %s (id=%s)\n", i+1, opt.Label, opt.ID))
+		}
+	}
+	return c.SendText(c.projectName, strings.TrimSpace(b.String()))
 }
 
 // SendReaction is a no-op for the console IM.
@@ -88,3 +112,4 @@ func (c *ConsoleIM) Run(ctx context.Context) error {
 }
 
 var _ im.Channel = (*ConsoleIM)(nil)
+var _ im.OptionSender = (*ConsoleIM)(nil)

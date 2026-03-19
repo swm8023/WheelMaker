@@ -11,8 +11,8 @@ import (
 
 // ResolveBinary locates a tool binary using the following priority:
 //  1. configPath, if non-empty and the file exists
-//  2. bin/{GOOS}_{GOARCH}/{name}[.exe] relative to the executable's directory
-//  3. PATH lookup
+//  2. PATH lookup
+//  3. bin/{GOOS}_{GOARCH}/{name}[.exe] relative to the executable's directory
 //
 // Returns an error if the binary cannot be found by any method.
 func ResolveBinary(name, configPath string) (string, error) {
@@ -27,7 +27,13 @@ func ResolveBinary(name, configPath string) (string, error) {
 		}
 	}
 
-	// 2. bin/{GOOS}_{GOARCH}/ relative to the executable.
+	// 2. PATH.
+	path, err := exec.LookPath(name)
+	if err == nil {
+		return path, nil
+	}
+
+	// Fallback: bin/{GOOS}_{GOARCH}/ relative to the executable.
 	exeDir, err := executableDir()
 	if err == nil {
 		for _, n := range binaryNames(name) {
@@ -49,16 +55,11 @@ func ResolveBinary(name, configPath string) (string, error) {
 		}
 	}
 
-	// 3. PATH.
-	path, err := exec.LookPath(name)
-	if err == nil {
-		return path, nil
-	}
-
 	return "", fmt.Errorf(
-		"tools: %q not found (tried config path, bin/%s/, and PATH); "+
-			"run scripts/install-tools.sh to download it",
+		"tools: %q not found (tried config path, PATH, and bin/%s/); "+
+			"install with npm: npm install -g @zed-industries/%s",
 		name, platformDir(),
+		name,
 	)
 }
 
