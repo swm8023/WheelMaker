@@ -15,12 +15,33 @@ import (
 // managedTerminal holds a running subprocess created by terminal/create.
 type managedTerminal struct {
 	mu       sync.Mutex
-	buf      bytes.Buffer
+	output   syncOutputBuffer
 	cmd      *exec.Cmd
 	done     chan struct{}
 	exitCode *int    // set when process exits
 	signal   *string // set when process is killed by signal
 	limit    int     // output byte limit; 0 = no limit
+}
+
+// syncOutputBuffer serializes process output writes and snapshot reads.
+type syncOutputBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncOutputBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncOutputBuffer) Snapshot() []byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	raw := b.buf.Bytes()
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out
 }
 
 // terminalManager tracks subprocesses spawned by terminal/create callbacks.
@@ -69,8 +90,8 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 		done:  make(chan struct{}),
 		limit: limit,
 	}
-	cmd.Stdout = &t.buf
-	cmd.Stderr = &t.buf
+	cmd.Stdout = &t.output
+	cmd.Stderr = &t.output
 	t.cmd = cmd
 
 	if err := cmd.Start(); err != nil {
@@ -113,7 +134,7 @@ func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, 
 	}
 
 	t.mu.Lock()
-	raw := t.buf.Bytes()
+	raw := t.output.Snapshot()
 	truncated := false
 	if t.limit > 0 && len(raw) > t.limit {
 		raw = raw[len(raw)-t.limit:]

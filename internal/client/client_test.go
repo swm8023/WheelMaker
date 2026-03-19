@@ -1005,7 +1005,7 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_PermissionReply_ViaIM(t *testing.T) {
+func TestHandleMessage_PermissionDecision_ButtonsOnly(t *testing.T) {
 	store := &mockStore{state: &client.ProjectState{
 		ActiveAgent: "codex",
 	}}
@@ -1019,37 +1019,14 @@ func TestHandleMessage_PermissionReply_ViaIM(t *testing.T) {
 	defer c.Close()
 	msgs := captureReplies(c)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		c.HandleMessage(im.Message{ChatID: "c1", Text: "4"})
-	}()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		found := false
-		for _, m := range *msgs {
-			if strings.Contains(m, "Permission request") {
-				found = true
-				break
-			}
-		}
-		if found {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "allow"})
-	wg.Wait()
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "4"})
 
 	joined := strings.Join(*msgs, "\n")
-	if !strings.Contains(joined, "Permission request") {
-		t.Fatalf("missing permission prompt in replies: %v", *msgs)
+	if strings.Contains(joined, "Permission request") {
+		t.Fatalf("unexpected text permission prompt in replies: %v", *msgs)
 	}
-	if !strings.Contains(joined, "permission:allowed") {
-		t.Fatalf("missing permission allowed result in replies: %v", *msgs)
+	if !strings.Contains(joined, "permission:cancelled") {
+		t.Fatalf("missing permission cancelled result in replies: %v", *msgs)
 	}
 }
 
