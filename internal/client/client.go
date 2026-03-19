@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"slices"
 	"strings"
 	"sync"
@@ -169,7 +170,7 @@ func (c *Client) Close() error {
 }
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
-// Known commands (/use, /cancel, /status, /mode, /model) are dispatched to handleCommand;
+// Known commands (/use, /cancel, /status, /mode, /model, /list, /new, /load) are dispatched to handleCommand;
 // everything else — including lines starting with "/" that are not known commands —
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
@@ -190,7 +191,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 // --- internal ---
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/use, /cancel, /status, /mode, /model) are treated as commands;
+// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /list, /new, /load) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -198,7 +199,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model":
+	case "/use", "/cancel", "/status", "/mode", "/model", "/list", "/new", "/load":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return
@@ -256,6 +257,46 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
 		c.reply(msg.ChatID, status)
+
+	case "/list":
+		c.promptMu.Lock()
+		defer c.promptMu.Unlock()
+		lines, err := c.listSessions(context.Background())
+		if err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("List error: %v", err))
+			return
+		}
+		c.reply(msg.ChatID, strings.Join(lines, "\n"))
+
+	case "/new":
+		c.promptMu.Lock()
+		defer c.promptMu.Unlock()
+		sid, err := c.createNewSession(context.Background())
+		if err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("New error: %v", err))
+			return
+		}
+		c.reply(msg.ChatID, fmt.Sprintf("Created new session: %s", sid))
+
+	case "/load":
+		idxStr := strings.TrimSpace(args)
+		if idxStr == "" {
+			c.reply(msg.ChatID, "Usage: /load <index>  (see /list)")
+			return
+		}
+		idx, err := strconv.Atoi(idxStr)
+		if err != nil || idx <= 0 {
+			c.reply(msg.ChatID, "Load error: index must be a positive integer")
+			return
+		}
+		c.promptMu.Lock()
+		defer c.promptMu.Unlock()
+		sid, err := c.loadSessionByIndex(context.Background(), idx)
+		if err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Load error: %v", err))
+			return
+		}
+		c.reply(msg.ChatID, fmt.Sprintf("Loaded session: %s", sid))
 
 	case "/mode":
 		if strings.TrimSpace(args) == "" {
@@ -433,6 +474,193 @@ func resolveModelArg(input string, st *SessionState) (configID, value string, er
 	}
 
 	return configID, model, nil
+}
+
+func (c *Client) listSessions(ctx context.Context) ([]string, error) {
+	c.mu.Lock()
+	if err := c.ensureForwarder(ctx); err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
+	c.resetIdleTimer()
+	c.mu.Unlock()
+
+	if err := c.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	fwd := c.forwarder
+	cwd := c.cwd
+	curSID := c.sessionID
+	agentName := c.currentAgentName
+	caps := c.initMeta.AgentCapabilities
+	c.mu.Unlock()
+
+	if fwd == nil {
+		return nil, errors.New("no active forwarder")
+	}
+	if caps.SessionCapabilities == nil || caps.SessionCapabilities.List == nil {
+		return nil, errors.New("agent does not support session/list")
+	}
+
+	all := make([]acp.SessionInfo, 0, 16)
+	cursor := ""
+	for page := 0; page < 20; page++ {
+		res, err := fwd.SessionList(ctx, acp.SessionListParams{
+			CWD:    cwd,
+			Cursor: cursor,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, res.Sessions...)
+		if strings.TrimSpace(res.NextCursor) == "" || res.NextCursor == cursor {
+			break
+		}
+		cursor = res.NextCursor
+	}
+
+	summaries := make([]SessionSummary, 0, len(all))
+	lines := make([]string, 0, len(all)+1)
+	lines = append(lines, fmt.Sprintf("Sessions (%d):", len(all)))
+	for i, s := range all {
+		summaries = append(summaries, SessionSummary{
+			ID:        s.SessionID,
+			Title:     s.Title,
+			UpdatedAt: s.UpdatedAt,
+		})
+		marker := " "
+		if s.SessionID == curSID {
+			marker = "*"
+		}
+		title := strings.TrimSpace(s.Title)
+		if title == "" {
+			title = "(no title)"
+		}
+		lines = append(lines, fmt.Sprintf("%s %d. %s  %s", marker, i+1, s.SessionID, title))
+	}
+
+	c.persistSessionSummaries(agentName, summaries)
+	return lines, nil
+}
+
+func (c *Client) createNewSession(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	if err := c.ensureForwarder(ctx); err != nil {
+		c.mu.Unlock()
+		return "", err
+	}
+	fwd := c.forwarder
+	cwd := c.cwd
+	c.mu.Unlock()
+	if fwd == nil {
+		return "", errors.New("no active forwarder")
+	}
+	if err := c.ensureReady(ctx); err != nil {
+		return "", err
+	}
+
+	res, err := fwd.SessionNew(ctx, acp.SessionNewParams{
+		CWD:        cwd,
+		MCPServers: []acp.MCPServer{},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	c.mu.Lock()
+	c.sessionID = res.SessionID
+	c.ready = true
+	c.lastReply = ""
+	c.loadHistory = nil
+	c.activeToolCalls = make(map[string]struct{})
+	c.sessionMeta = clientSessionMeta{
+		ConfigOptions: res.ConfigOptions,
+	}
+	c.resetIdleTimer()
+	c.mu.Unlock()
+	c.saveSessionState()
+	return res.SessionID, nil
+}
+
+func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, error) {
+	lines, err := c.listSessions(ctx)
+	if err != nil {
+		return "", err
+	}
+	_ = lines // listSessions already refreshes and persists state
+
+	c.mu.Lock()
+	agentName := c.currentAgentName
+	fwd := c.forwarder
+	cwd := c.cwd
+	loadCap := c.initMeta.AgentCapabilities.LoadSession
+	var sessions []SessionSummary
+	if c.state != nil && c.state.Agents != nil {
+		if as := c.state.Agents[agentName]; as != nil {
+			sessions = append(sessions, as.Sessions...)
+		}
+	}
+	c.mu.Unlock()
+
+	if !loadCap {
+		return "", errors.New("agent does not support session/load")
+	}
+	if fwd == nil {
+		return "", errors.New("no active forwarder")
+	}
+	if index < 1 || index > len(sessions) {
+		return "", fmt.Errorf("index out of range (1-%d)", len(sessions))
+	}
+	target := sessions[index-1].ID
+	if strings.TrimSpace(target) == "" {
+		return "", errors.New("invalid session id")
+	}
+
+	_, err = fwd.SessionLoad(ctx, acp.SessionLoadParams{
+		SessionID:  target,
+		CWD:        cwd,
+		MCPServers: []acp.MCPServer{},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	c.mu.Lock()
+	c.sessionID = target
+	c.ready = true
+	c.lastReply = ""
+	c.loadHistory = nil
+	c.activeToolCalls = make(map[string]struct{})
+	c.sessionMeta = clientSessionMeta{}
+	c.resetIdleTimer()
+	c.mu.Unlock()
+	c.saveSessionState()
+	return target, nil
+}
+
+func (c *Client) persistSessionSummaries(agentName string, sessions []SessionSummary) {
+	if strings.TrimSpace(agentName) == "" {
+		return
+	}
+	c.mu.Lock()
+	if c.state == nil {
+		c.mu.Unlock()
+		return
+	}
+	if c.state.Agents == nil {
+		c.state.Agents = map[string]*AgentState{}
+	}
+	as := c.state.Agents[agentName]
+	if as == nil {
+		as = &AgentState{}
+		c.state.Agents[agentName] = as
+	}
+	as.Sessions = sessions
+	s := c.state
+	c.mu.Unlock()
+	_ = c.store.Save(s)
 }
 
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
@@ -822,6 +1050,8 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	}
 	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
 	model.Options = append(model.Options, im.HelpOption{Label: "Cancel", Command: "/cancel"})
+	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
+	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
 	c.mu.Lock()
 	agentNames := make([]string, 0, len(c.agentFacs))
 	for name := range c.agentFacs {
