@@ -15,6 +15,8 @@ import (
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
+	"github.com/swm8023/wheelmaker/internal/im/feishu"
+	"github.com/swm8023/wheelmaker/internal/im/forwarder"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -106,9 +108,15 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 func (h *Hub) buildIM(pc ProjectConfig) (im.Channel, error) {
 	switch pc.IM.Type {
 	case "console":
-		return console.New(pc.Name, pc.IM.Debug), nil
+		return forwarder.New(console.New(pc.Name, pc.IM.Debug)), nil
 	case "feishu":
-		return nil, fmt.Errorf("feishu IM channel not yet implemented")
+		return forwarder.New(feishu.New(feishu.Config{
+			AppID:             pc.IM.AppID,
+			AppSecret:         pc.IM.AppSecret,
+			VerificationToken: h.cfg.Feishu.VerificationToken,
+			EncryptKey:        h.cfg.Feishu.EncryptKey,
+			Debug:             pc.IM.Debug,
+		})), nil
 	default:
 		return nil, fmt.Errorf("unknown im.type %q (supported: console)", pc.IM.Type)
 	}

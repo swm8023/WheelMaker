@@ -25,7 +25,8 @@
     }
   ],
   "feishu": {
-    "verificationToken": "zzz"
+    "verificationToken": "zzz",
+    "encryptKey": ""
   }
 }
 

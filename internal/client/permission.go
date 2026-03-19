@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 type pendingPermission struct {
@@ -68,6 +69,38 @@ func (r *permissionRouter) resolveIncomingReply(chatID, text string) bool {
 }
 
 func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+	r.client.mu.Lock()
+	decisioner, ok := r.client.imRun.(im.DecisionRequester)
+	chatID := r.lastChatID
+	r.client.mu.Unlock()
+	if ok {
+		if strings.TrimSpace(chatID) == "" {
+			chatID = r.client.projectName
+		}
+		req := im.DecisionRequest{
+			Kind:   im.DecisionPermission,
+			ChatID: chatID,
+			Title:  "Permission request",
+			Body:   fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
+			Hint:   map[string]string{"timeoutSec": "120"},
+		}
+		req.Options = make([]im.DecisionOption, 0, len(params.Options))
+		for _, o := range params.Options {
+			req.Options = append(req.Options, im.DecisionOption{
+				ID:    o.OptionID,
+				Label: o.Name,
+				Value: o.Kind,
+			})
+		}
+		res, err := decisioner.RequestDecision(ctx, req)
+		if err != nil {
+			return acp.PermissionResult{Outcome: "cancelled"}, nil
+		}
+		if res.Outcome == "selected" && strings.TrimSpace(res.OptionID) != "" {
+			return acp.PermissionResult{Outcome: "selected", OptionID: res.OptionID}, nil
+		}
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	}
 	return r.waitForUser(ctx, params, mode)
 }
 
