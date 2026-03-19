@@ -223,13 +223,19 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call", "toolCallId": "call_001", "title": "Permission check", "kind": "execute", "status": "pending"})
 		// tool_call_update: transition to in_progress (§9.2)
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_001", "status": "in_progress"})
-		permRaw, err := s.callbackRequest("session/request_permission", map[string]any{"sessionId": p.SessionID, "toolCall": map[string]any{"toolCallId": "call_001"}, "options": []map[string]any{{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "reject_once", "name": "Reject once", "kind": "reject_once"}}})
+		permRaw, err := s.callbackRequestWait(ctx, "session/request_permission", map[string]any{"sessionId": p.SessionID, "toolCall": map[string]any{"toolCallId": "call_001"}, "options": []map[string]any{{"optionId": "allow_once", "name": "Allow once", "kind": "allow_once"}, {"optionId": "reject_once", "name": "Reject once", "kind": "reject_once"}}})
 		cancelled := false
 		status := "completed"
 		msg := "permission:allowed"
 		if err != nil {
-			status = "failed"
-			msg = "permission:error"
+			if ctx.Err() != nil {
+				cancelled = true
+				status = "failed"
+				msg = "permission:cancelled"
+			} else {
+				status = "failed"
+				msg = "permission:error"
+			}
 		} else {
 			var pr acp.PermissionResponse
 			_ = json.Unmarshal(permRaw.Result, &pr)
@@ -351,6 +357,31 @@ func (s *inMemoryMockServer) callbackRequest(method string, params any) (rpcMsg,
 		delete(s.pending, id)
 		s.pendMu.Unlock()
 		return rpcMsg{}, fmt.Errorf("timeout waiting callback %s", method)
+	}
+}
+
+func (s *inMemoryMockServer) callbackRequestWait(ctx context.Context, method string, params any) (rpcMsg, error) {
+	id := s.nextID.Add(1)
+	respCh := make(chan rpcMsg, 1)
+	s.pendMu.Lock()
+	s.pending[id] = respCh
+	s.pendMu.Unlock()
+
+	s.encMu.Lock()
+	_ = s.enc.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+	s.encMu.Unlock()
+
+	select {
+	case resp := <-respCh:
+		if resp.Error != nil {
+			return rpcMsg{}, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
+		}
+		return resp, nil
+	case <-ctx.Done():
+		s.pendMu.Lock()
+		delete(s.pending, id)
+		s.pendMu.Unlock()
+		return rpcMsg{}, ctx.Err()
 	}
 }
 

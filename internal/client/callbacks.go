@@ -68,15 +68,11 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		c.mu.Unlock()
 	}
 
-	// Send update to the active prompt channel. Use recover() to handle the
-	// case where the channel is already closed (ctx cancelled race).
-	func() {
-		defer func() { recover() }() //nolint:errcheck
-		select {
-		case ch <- derived.Update:
-		default:
-		}
-	}()
+	// Non-blocking publish; prompt channel lifecycle is managed by promptStream.
+	select {
+	case ch <- derived.Update:
+	default:
+	}
 }
 
 // SessionRequestPermission responds to session/request_permission agent requests.

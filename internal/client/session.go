@@ -289,7 +289,6 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 			c.promptUpdatesCh = nil
 			c.mu.Unlock()
 			promptCancel()
-			close(interceptCh)
 		}()
 
 		result, err := c.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
@@ -371,15 +370,12 @@ func (c *Client) cancelPrompt() error {
 
 	for _, id := range cancelIDs {
 		u := acp.Update{Type: acp.UpdateToolCallCancelled, Content: id}
-		func() {
-			defer func() { recover() }() //nolint:errcheck
-			if ch != nil {
-				select {
-				case ch <- u:
-				default:
-				}
+		if ch != nil {
+			select {
+			case ch <- u:
+			default:
 			}
-		}()
+		}
 	}
 
 	if sessID == "" || !ready {

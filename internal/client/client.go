@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strconv"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,17 +18,16 @@ import (
 	"github.com/swm8023/wheelmaker/internal/im"
 )
 
-const idleTimeout = 30 * time.Minute
-
 // AgentFactory creates a new agent instance.
 // The exePath and env arguments are provided for compatibility; hub-registered
 // factories typically ignore them and use closure-captured config instead.
 type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
+const commandTimeout = 30 * time.Second
+
 // Client is the top-level coordinator for a single WheelMaker project.
 // Agent initialization is lazy: the first incoming message triggers ensureForwarder(),
-// which connects the active agent and creates the ACP forwarder. After 30 minutes of idle
-// the agent is disconnected (idleClose) and re-created on the next message.
+// which connects the active agent and creates the ACP forwarder.
 type Client struct {
 	projectName string
 	cwd         string
@@ -40,8 +39,6 @@ type Client struct {
 	imRun im.Channel // nil when no IM channel configured
 
 	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
-
-	idleTimer *time.Timer // fires idleClose after idleTimeout of inactivity
 
 	mu       sync.Mutex
 	promptMu sync.Mutex // serializes handlePrompt and switchAgent
@@ -143,15 +140,7 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 // Close saves state and shuts down the active agent.
-// Stops the idle timer to prevent double-close races.
 func (c *Client) Close() error {
-	c.mu.Lock()
-	if c.idleTimer != nil {
-		c.idleTimer.Stop()
-		c.idleTimer = nil
-	}
-	c.mu.Unlock()
-
 	c.mu.Lock()
 	fwd := c.forwarder
 	c.mu.Unlock()
@@ -182,9 +171,6 @@ func (c *Client) HandleMessage(msg im.Message) {
 		c.handleCommand(msg, cmd, args)
 		return
 	}
-	if c.permRouter != nil && c.permRouter.resolveIncomingReply(msg.ChatID, text) {
-		return
-	}
 	c.handlePrompt(msg, text)
 }
 
@@ -207,6 +193,9 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 
 // handleCommand processes recognized "/" commands.
 func (c *Client) handleCommand(msg im.Message, cmd, args string) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
 	switch cmd {
 	case "/use":
 		if args == "" {
@@ -221,7 +210,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 				mode = SwitchWithContext
 			}
 		}
-		if err := c.switchAgent(context.Background(), msg.ChatID, name, mode); err != nil {
+		if err := c.switchAgent(ctx, msg.ChatID, name, mode); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Switch error: %v", err))
 		}
 
@@ -261,7 +250,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	case "/list":
 		c.promptMu.Lock()
 		defer c.promptMu.Unlock()
-		lines, err := c.listSessions(context.Background())
+		lines, err := c.listSessions(ctx)
 		if err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("List error: %v", err))
 			return
@@ -271,7 +260,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	case "/new":
 		c.promptMu.Lock()
 		defer c.promptMu.Unlock()
-		sid, err := c.createNewSession(context.Background())
+		sid, err := c.createNewSession(ctx)
 		if err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("New error: %v", err))
 			return
@@ -291,7 +280,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		}
 		c.promptMu.Lock()
 		defer c.promptMu.Unlock()
-		sid, err := c.loadSessionByIndex(context.Background(), idx)
+		sid, err := c.loadSessionByIndex(ctx, idx)
 		if err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Load error: %v", err))
 			return
@@ -299,191 +288,129 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		c.reply(msg.ChatID, fmt.Sprintf("Loaded session: %s", sid))
 
 	case "/mode":
-		if strings.TrimSpace(args) == "" {
-			c.reply(msg.ChatID, "Usage: /mode <mode-id-or-name>")
-			return
-		}
-		c.promptMu.Lock()
-		defer c.promptMu.Unlock()
-
-		c.mu.Lock()
-		if err := c.ensureForwarder(context.Background()); err != nil {
-			c.mu.Unlock()
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-			return
-		}
-		agentName := ""
-		if c.currentAgent != nil {
-			agentName = c.currentAgent.Name()
-		}
-		var sessionState *SessionState
-		if c.state != nil && c.state.Agents != nil {
-			if as := c.state.Agents[agentName]; as != nil && as.Session != nil {
-				sessionState = as.Session
-			}
-		}
-		c.resetIdleTimer()
-		c.mu.Unlock()
-
-		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
-			return
-		}
-		modeConfigID, modeValue, err := resolveModeArg(strings.TrimSpace(args), sessionState)
-		if err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
-			return
-		}
-		c.mu.Lock()
-		fwd := c.forwarder
-		sid := c.sessionID
-		c.mu.Unlock()
-		if fwd == nil {
-			c.reply(msg.ChatID, "Mode error: no active forwarder")
-			return
-		}
-		if _, err := fwd.SessionSetConfigOption(context.Background(), acp.SessionSetConfigOptionParams{
-			SessionID: sid,
-			ConfigID:  modeConfigID,
-			Value:     modeValue,
-		}); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Mode error: %v", err))
-			return
-		}
-		c.saveSessionState()
-		c.reply(msg.ChatID, fmt.Sprintf("Mode set to: %s", modeValue))
+		c.handleConfigCommand(ctx, msg.ChatID, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
 
 	case "/model":
-		if strings.TrimSpace(args) == "" {
-			c.reply(msg.ChatID, "Usage: /model <model-id-or-name>")
-			return
-		}
-		c.promptMu.Lock()
-		defer c.promptMu.Unlock()
-
-		c.mu.Lock()
-		if err := c.ensureForwarder(context.Background()); err != nil {
-			c.mu.Unlock()
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-			return
-		}
-		agentName := ""
-		if c.currentAgent != nil {
-			agentName = c.currentAgent.Name()
-		}
-		var sessionState *SessionState
-		if c.state != nil && c.state.Agents != nil {
-			if as := c.state.Agents[agentName]; as != nil {
-				sessionState = as.Session
-			}
-		}
-		c.resetIdleTimer()
-		c.mu.Unlock()
-
-		if err := c.ensureReadyAndNotify(context.Background(), msg.ChatID); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
-			return
-		}
-		configID, modelValue, err := resolveModelArg(strings.TrimSpace(args), sessionState)
-		if err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
-			return
-		}
-		c.mu.Lock()
-		fwd := c.forwarder
-		sid := c.sessionID
-		c.mu.Unlock()
-		if fwd == nil {
-			c.reply(msg.ChatID, "Model error: no active forwarder")
-			return
-		}
-		if _, err := fwd.SessionSetConfigOption(context.Background(), acp.SessionSetConfigOptionParams{
-			SessionID: sid,
-			ConfigID:  configID,
-			Value:     modelValue,
-		}); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Model error: %v", err))
-			return
-		}
-		c.saveSessionState()
-		c.reply(msg.ChatID, fmt.Sprintf("Model set to: %s", modelValue))
+		c.handleConfigCommand(ctx, msg.ChatID, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
 	}
+}
+
+func (c *Client) handleConfigCommand(
+	ctx context.Context,
+	chatID string,
+	args string,
+	usage string,
+	label string,
+	resolve func(input string, st *SessionState) (configID, value string, err error),
+) {
+	input := strings.TrimSpace(args)
+	if input == "" {
+		c.reply(chatID, usage)
+		return
+	}
+
+	c.promptMu.Lock()
+	defer c.promptMu.Unlock()
+
+	if err := c.ensureForwarder(ctx); err != nil {
+		c.reply(chatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		return
+	}
+
+	c.mu.Lock()
+	agentName := ""
+	if c.currentAgent != nil {
+		agentName = c.currentAgent.Name()
+	}
+	var sessionState *SessionState
+	if c.state != nil && c.state.Agents != nil {
+		if as := c.state.Agents[agentName]; as != nil {
+			sessionState = as.Session
+		}
+	}
+	c.mu.Unlock()
+
+	if err := c.ensureReadyAndNotify(ctx, chatID); err != nil {
+		c.reply(chatID, fmt.Sprintf("%s error: %v", label, err))
+		return
+	}
+
+	configID, value, err := resolve(input, sessionState)
+	if err != nil {
+		c.reply(chatID, fmt.Sprintf("%s error: %v", label, err))
+		return
+	}
+
+	c.mu.Lock()
+	fwd := c.forwarder
+	sid := c.sessionID
+	c.mu.Unlock()
+	if fwd == nil {
+		c.reply(chatID, fmt.Sprintf("%s error: no active forwarder", label))
+		return
+	}
+
+	if _, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+		SessionID: sid,
+		ConfigID:  configID,
+		Value:     value,
+	}); err != nil {
+		c.reply(chatID, fmt.Sprintf("%s error: %v", label, err))
+		return
+	}
+
+	c.saveSessionState()
+	c.reply(chatID, fmt.Sprintf("%s set to: %s", label, value))
 }
 
 func resolveModeArg(input string, st *SessionState) (configID, value string, err error) {
-	mode := strings.TrimSpace(input)
-	if mode == "" {
-		return "", "", errors.New("empty mode")
-	}
-	if st != nil {
-		for i := range st.ConfigOptions {
-			opt := &st.ConfigOptions[i]
-			if opt.ID == "mode" || strings.EqualFold(opt.Category, "mode") {
-				if len(opt.Options) == 0 {
-					return opt.ID, mode, nil
-				}
-				for _, v := range opt.Options {
-					if mode == v.Value || strings.EqualFold(mode, v.Name) {
-						return opt.ID, v.Value, nil
-					}
-				}
-				values := make([]string, 0, len(opt.Options))
-				for _, v := range opt.Options {
-					values = append(values, v.Value)
-				}
-				slices.Sort(values)
-				return "", "", fmt.Errorf("unknown mode %q (available: %s)", mode, strings.Join(values, ", "))
-			}
-		}
-	}
-	// configOptions is the only source of truth for mode.
-	return "mode", mode, nil
+	return resolveConfigSelectArg("mode", "mode", input, st)
 }
 
 func resolveModelArg(input string, st *SessionState) (configID, value string, err error) {
-	model := strings.TrimSpace(input)
-	if model == "" {
-		return "", "", errors.New("empty model")
-	}
-	configID = "model"
+	return resolveConfigSelectArg("model", "model", input, st)
+}
 
-	var modelOpt *acp.ConfigOption
+func resolveConfigSelectArg(kind string, defaultConfigID string, input string, st *SessionState) (configID, value string, err error) {
+	v := strings.TrimSpace(input)
+	if v == "" {
+		return "", "", fmt.Errorf("empty %s", kind)
+	}
+
+	configID = defaultConfigID
+	var targetOpt *acp.ConfigOption
 	if st != nil {
 		for i := range st.ConfigOptions {
 			opt := &st.ConfigOptions[i]
-			if opt.ID == "model" || strings.EqualFold(opt.Category, "model") {
-				modelOpt = opt
+			if opt.ID == defaultConfigID || strings.EqualFold(opt.Category, kind) {
+				targetOpt = opt
 				configID = opt.ID
 				break
 			}
 		}
 	}
 
-	if modelOpt != nil && len(modelOpt.Options) > 0 {
-		for _, opt := range modelOpt.Options {
-			if model == opt.Value || strings.EqualFold(model, opt.Name) {
+	if targetOpt != nil && len(targetOpt.Options) > 0 {
+		for _, opt := range targetOpt.Options {
+			if v == opt.Value || strings.EqualFold(v, opt.Name) {
 				return configID, opt.Value, nil
 			}
 		}
-		values := make([]string, 0, len(modelOpt.Options))
-		for _, opt := range modelOpt.Options {
+		values := make([]string, 0, len(targetOpt.Options))
+		for _, opt := range targetOpt.Options {
 			values = append(values, opt.Value)
 		}
 		slices.Sort(values)
-		return "", "", fmt.Errorf("unknown model %q (available: %s)", model, strings.Join(values, ", "))
+		return "", "", fmt.Errorf("unknown %s %q (available: %s)", kind, v, strings.Join(values, ", "))
 	}
 
-	return configID, model, nil
+	return configID, v, nil
 }
 
 func (c *Client) listSessions(ctx context.Context) ([]string, error) {
-	c.mu.Lock()
 	if err := c.ensureForwarder(ctx); err != nil {
-		c.mu.Unlock()
 		return nil, err
 	}
-	c.resetIdleTimer()
-	c.mu.Unlock()
 
 	if err := c.ensureReady(ctx); err != nil {
 		return nil, err
@@ -546,11 +473,10 @@ func (c *Client) listSessions(ctx context.Context) ([]string, error) {
 }
 
 func (c *Client) createNewSession(ctx context.Context) (string, error) {
-	c.mu.Lock()
 	if err := c.ensureForwarder(ctx); err != nil {
-		c.mu.Unlock()
 		return "", err
 	}
+	c.mu.Lock()
 	fwd := c.forwarder
 	cwd := c.cwd
 	c.mu.Unlock()
@@ -578,7 +504,6 @@ func (c *Client) createNewSession(ctx context.Context) (string, error) {
 	c.sessionMeta = clientSessionMeta{
 		ConfigOptions: res.ConfigOptions,
 	}
-	c.resetIdleTimer()
 	c.mu.Unlock()
 	c.saveSessionState()
 	return res.SessionID, nil
@@ -634,7 +559,6 @@ func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, err
 	c.loadHistory = nil
 	c.activeToolCalls = make(map[string]struct{})
 	c.sessionMeta = clientSessionMeta{}
-	c.resetIdleTimer()
 	c.mu.Unlock()
 	c.saveSessionState()
 	return target, nil
@@ -682,14 +606,10 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 	if !hasOverride {
 		// Lazily initialize the agent if no forwarder exists yet.
-		c.mu.Lock()
 		if err := c.ensureForwarder(ctx); err != nil {
-			c.mu.Unlock()
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
-		c.resetIdleTimer() // refresh timeout before sending prompt
-		c.mu.Unlock()
 
 		if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
@@ -748,7 +668,6 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 	c.mu.Lock()
 	c.currentPromptCh = nil
-	c.resetIdleTimer() // reset after prompt completes: 30 min from last activity
 	c.mu.Unlock()
 
 	// Persist after prompt completes: session ID and config metadata may have changed.
@@ -760,12 +679,15 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 }
 
 // ensureForwarder connects the active agent and sets up the Forwarder if not already running.
-// Must be called while holding c.mu.
+// Connect() is intentionally executed outside c.mu to avoid blocking unrelated operations.
 func (c *Client) ensureForwarder(ctx context.Context) error {
+	c.mu.Lock()
 	if c.forwarder != nil {
+		c.mu.Unlock()
 		return nil
 	}
 	if c.state == nil {
+		c.mu.Unlock()
 		return errors.New("state not loaded")
 	}
 	name := c.state.ActiveAgent
@@ -774,29 +696,41 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	}
 	fac := c.agentFacs[name]
 	if fac == nil {
+		c.mu.Unlock()
 		return fmt.Errorf("no agent registered for %q", name)
 	}
+	dw := c.debugLog
+	savedSID := ""
+	if c.state.Agents != nil {
+		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
+			savedSID = as.LastSessionID
+		}
+	}
+	c.mu.Unlock()
+
 	baseAgent := fac("", nil)
 	conn, err := baseAgent.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if c.debugLog != nil {
-		conn.SetDebugLogger(c.debugLog)
+	if dw != nil {
+		conn.SetDebugLogger(dw)
 	}
 	fwd := acp.NewForwarder(conn, makePrefilter(baseAgent))
 	fwd.SetCallbacks(c)
+
+	c.mu.Lock()
+	if c.forwarder != nil {
+		c.mu.Unlock()
+		_ = fwd.Close()
+		return nil
+	}
 	c.forwarder = fwd
 	c.currentAgent = baseAgent
 	c.currentAgentName = name
 	c.ready = false
-	// Restore saved session ID if present.
-	if c.state.Agents != nil {
-		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
-			c.sessionID = as.LastSessionID
-		}
-	}
-	c.resetIdleTimer()
+	c.sessionID = savedSID
+	c.mu.Unlock()
 	return nil
 }
 
@@ -809,47 +743,6 @@ func makePrefilter(ag agent.Agent) acp.Prefilter {
 		}
 		return msg, true, nil
 	}
-}
-
-// resetIdleTimer restarts the 30-minute idle timer.
-// Must be called while holding c.mu.
-func (c *Client) resetIdleTimer() {
-	if c.idleTimer != nil {
-		c.idleTimer.Stop()
-	}
-	c.idleTimer = time.AfterFunc(idleTimeout, c.idleClose)
-}
-
-// idleClose is called by the idle timer when no activity has occurred for idleTimeout.
-// It acquires promptMu (to wait for any in-progress prompt) then saves state and closes
-// the agent subprocess.
-func (c *Client) idleClose() {
-	c.promptMu.Lock()
-	defer c.promptMu.Unlock()
-
-	c.mu.Lock()
-	if c.forwarder == nil {
-		c.mu.Unlock()
-		return
-	}
-	c.mu.Unlock()
-
-	c.saveSessionState()
-	c.terminals.KillAll()
-
-	c.mu.Lock()
-	fwd := c.forwarder
-	if fwd != nil {
-		_ = fwd.Close()
-	}
-	c.forwarder = nil
-	c.currentAgent = nil
-	c.currentAgentName = ""
-	c.ready = false
-	c.sessionID = ""
-	c.initMeta = clientInitMeta{}
-	c.sessionMeta = clientSessionMeta{}
-	c.mu.Unlock()
 }
 
 // switchAgent cancels any in-progress prompt, waits for it to finish via
@@ -945,12 +838,11 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 		c.persistMeta()
 	}
 
-	// Update ActiveAgent, save, reset timer.
+	// Update ActiveAgent and save.
 	c.mu.Lock()
 	if c.state != nil {
 		c.state.ActiveAgent = name
 	}
-	c.resetIdleTimer()
 	s := c.state
 	c.mu.Unlock()
 	if s != nil {
@@ -1033,9 +925,7 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	hasForwarder := c.forwarder != nil
 	c.mu.Unlock()
 	if !hasForwarder {
-		c.mu.Lock()
 		_ = c.ensureForwarder(ctx)
-		c.mu.Unlock()
 	}
 	_ = c.ensureReady(ctx)
 
