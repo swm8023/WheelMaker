@@ -4,7 +4,7 @@
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
 // Run with: go test -tags integration ./internal/agent/codex/... -v -timeout 60s
-// Requires: codex-acp binary at bin/windows_amd64/codex-acp.exe or in PATH,
+// Requires: codex-acp installed (for example via npm -g) and available in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.
 package codex_test

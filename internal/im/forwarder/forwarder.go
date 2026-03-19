@@ -177,7 +177,15 @@ func (f *Forwarder) RequestDecision(ctx context.Context, req im.DecisionRequest)
 	f.decisionByID[decisionID] = pd
 	f.mu.Unlock()
 
-	if err := f.sendDecisionCard(pd); err != nil {
+	meta := map[string]string{
+		"decision_id": pd.id,
+		"chat_id":     pd.chatID,
+	}
+	if sender, ok := f.adapter.(im.OptionSender); ok {
+		if err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta); err != nil {
+			_ = f.adapter.SendText(chatID, renderDecisionPrompt(req))
+		}
+	} else {
 		_ = f.adapter.SendText(chatID, renderDecisionPrompt(req))
 	}
 
@@ -222,49 +230,6 @@ func renderDecisionPrompt(req im.DecisionRequest) string {
 		}
 	}
 	return b.String()
-}
-
-func (f *Forwarder) sendDecisionCard(pd pendingDecision) error {
-	// Generic minimal card payload with button actions.
-	elements := make([]map[string]any, 0, len(pd.req.Options)+1)
-	if body := strings.TrimSpace(pd.req.Body); body != "" {
-		elements = append(elements, map[string]any{
-			"tag":     "markdown",
-			"content": body,
-		})
-	}
-	actions := make([]map[string]any, 0, len(pd.req.Options))
-	for _, opt := range pd.req.Options {
-		actions = append(actions, map[string]any{
-			"tag":  "button",
-			"text": map[string]any{"tag": "plain_text", "content": opt.Label},
-			"type": "default",
-			"value": map[string]any{
-				"kind":        "decision",
-				"decision_id": pd.id,
-				"chat_id":     pd.chatID,
-				"option_id":   opt.ID,
-				"value":       opt.Value,
-			},
-		})
-	}
-	if len(actions) > 0 {
-		elements = append(elements, map[string]any{
-			"tag":     "action",
-			"actions": actions,
-		})
-	}
-	card := im.Card{
-		"config": map[string]any{"update_multi": true},
-		"header": map[string]any{
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": strings.TrimSpace(pd.req.Title),
-			},
-		},
-		"elements": elements,
-	}
-	return f.adapter.SendCard(pd.chatID, card)
 }
 
 func (f *Forwarder) tryHandleHelp(m im.Message) bool {

@@ -30,6 +30,7 @@ type InMemoryServer func(r io.Reader, w io.Writer)
 //   - Notifications (either direction, no response): Subscribe() / Notify().
 type Conn struct {
 	exePath string
+	exeArgs []string
 	env     []string // additional environment variables
 
 	cmd    *exec.Cmd
@@ -60,10 +61,11 @@ type Conn struct {
 
 // NewConn creates a new Conn for the given binary.
 // env is a list of "KEY=VALUE" strings appended to the process environment.
-func NewConn(exePath string, env []string) *Conn {
+func NewConn(exePath string, env []string, args ...string) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
 		exePath:    exePath,
+		exeArgs:    append([]string(nil), args...),
 		env:        env,
 		pending:    make(map[int64]chan Response),
 		connCtx:    ctx,
@@ -126,7 +128,7 @@ func (c *Conn) Start() error {
 		return nil
 	}
 
-	cmd := exec.Command(c.exePath)
+	cmd := exec.Command(c.exePath, c.exeArgs...)
 	cmd.Env = append(cmd.Environ(), c.env...)
 	cmd.Stderr = log.Writer() // forward subprocess stderr to the application log
 

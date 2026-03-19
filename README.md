@@ -19,13 +19,18 @@ Feishu (mobile) ──► WheelMaker ──► claude-agent-acp / <acp-binary> �
 
 ## Quick Start
 
-### 1. Install tool binaries
+### 1. Install ACP tools (npm)
+
+```bash
+npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
+```
+
+Or run helper scripts:
 
 ```bash
 # Linux/macOS
 ./scripts/install-tools.sh
-
-# Windows
+# Windows (PowerShell)
 ./scripts/install-tools.ps1
 ```
 
@@ -141,7 +146,7 @@ Hub
 ```bash
 go test ./...
 
-# Integration tests (requires real claude-agent-acp binary)
+# Integration tests (requires real npm-installed ACP CLI)
 go test -tags integration ./internal/agent/claude/...
 
 go build ./cmd/wheelmaker/

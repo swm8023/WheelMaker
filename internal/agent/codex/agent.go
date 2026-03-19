@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/tools"
@@ -39,13 +40,12 @@ func (p *Agent) Name() string { return agentName }
 // Connect starts a new codex-acp subprocess and returns an initialized *acp.Conn.
 // Conn.Start() is called internally; the caller must NOT call Start() again.
 func (p *Agent) Connect(_ context.Context) (*acp.Conn, error) {
-	exePath, err := tools.ResolveBinary("codex-acp", p.cfg.ExePath)
+	exePath, args, err := resolveCommand(p.cfg.ExePath)
 	if err != nil {
-		return nil, fmt.Errorf("codex: resolve binary: %w", err)
+		return nil, err
 	}
-
 	env := buildEnv(p.cfg.Env)
-	conn := acp.NewConn(exePath, env)
+	conn := acp.NewConn(exePath, env, args...)
 	if err := conn.Start(); err != nil {
 		return nil, fmt.Errorf("codex: start process: %w", err)
 	}
@@ -65,4 +65,19 @@ func buildEnv(m map[string]string) []string {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+func resolveCommand(configPath string) (string, []string, error) {
+	exePath, err := tools.ResolveBinary("codex-acp", configPath)
+	if err == nil {
+		return exePath, nil, nil
+	}
+	if configPath != "" {
+		return "", nil, fmt.Errorf("codex: resolve binary: %w", err)
+	}
+	npxPath, npxErr := exec.LookPath("npx")
+	if npxErr != nil {
+		return "", nil, fmt.Errorf("codex: resolve binary: %w", err)
+	}
+	return npxPath, []string{"--yes", "@zed-industries/codex-acp"}, nil
 }

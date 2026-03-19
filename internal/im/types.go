@@ -62,6 +62,12 @@ type DecisionRequester interface {
 	RequestDecision(ctx context.Context, req DecisionRequest) (DecisionResult, error)
 }
 
+// OptionSender renders a list of options for user selection.
+// How to present options (card/buttons/text) is adapter-specific.
+type OptionSender interface {
+	SendOptions(chatID, title, body string, options []DecisionOption, meta map[string]string) error
+}
+
 // CardActionEvent is a normalized interactive-card callback.
 type CardActionEvent struct {
 	ChatID    string
