@@ -716,7 +716,7 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	if dw != nil {
 		conn.SetDebugLogger(dw)
 	}
-	fwd := acp.NewForwarder(conn, makePrefilter(baseAgent))
+	fwd := acp.NewForwarder(conn, nil)
 	fwd.SetCallbacks(c)
 
 	c.mu.Lock()
@@ -732,17 +732,6 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	c.sessionID = savedSID
 	c.mu.Unlock()
 	return nil
-}
-
-// makePrefilter returns a Forwarder prefilter that applies ag.NormalizeParams
-// to every incoming notification, ensuring the client receives standard ACP.
-func makePrefilter(ag agent.Agent) acp.Prefilter {
-	return func(ctx context.Context, msg acp.ForwardMessage) (acp.ForwardMessage, bool, error) {
-		if msg.Direction == acp.DirectionToClient && msg.Kind == acp.KindNotification {
-			msg.Params = ag.NormalizeParams(msg.Method, msg.Params)
-		}
-		return msg, true, nil
-	}
 }
 
 // switchAgent cancels any in-progress prompt, waits for it to finish via
@@ -798,7 +787,7 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	if dw != nil {
 		newConn.SetDebugLogger(dw)
 	}
-	newFwd := acp.NewForwarder(newConn, makePrefilter(baseAgent))
+	newFwd := acp.NewForwarder(newConn, nil)
 	newFwd.SetCallbacks(c)
 
 	// Replace forwarder atomically; kill terminals; close old conn.

@@ -120,11 +120,11 @@ func (f *Forwarder) SetCallbacks(h ClientCallbacks) {
 func dispatchClientMessage(ctx context.Context, method string, params json.RawMessage, noResponse bool, h ClientCallbacks) (any, error) {
 	if noResponse {
 		if method == "session/update" {
+			params = NormalizeNotificationParams(method, params)
 			var p SessionUpdateParams
 			if err := json.Unmarshal(params, &p); err != nil {
 				return nil, nil
 			}
-			ParseSessionUpdateParams(&p)
 			h.SessionUpdate(p)
 		}
 		return nil, nil

@@ -1,12 +1,10 @@
 // Package agent defines the Agent interface for ACP-compatible CLI agents.
 // An Agent is a stateless subprocess factory: Connect() starts a new binary
-// and returns its acp.Conn. Per-agent protocol hooks (NormalizeParams)
-// are also provided through this interface.
+// and returns its acp.Conn.
 package agent
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
 )
@@ -30,8 +28,4 @@ type Agent interface {
 	// No-op after a successful Connect().
 	Close() error
 
-	// NormalizeParams is called before acp processes each incoming session/update
-	// notification. Translate legacy protocol fields to modern format here.
-	// Return params unchanged for pass-through (default behaviour).
-	NormalizeParams(method string, params json.RawMessage) json.RawMessage
 }

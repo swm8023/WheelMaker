@@ -19,7 +19,8 @@ const (
 	UpdatePlan UpdateType = "plan"
 	// UpdateConfigOption is emitted when the agent sends config_option_update.
 	UpdateConfigOption UpdateType = "config_option_update"
-	// UpdateModeChange is a mode switch notification (current_mode_update).
+	// UpdateModeChange is a legacy mode switch notification
+	// (current_mode_update). New integrations should use UpdateConfigOption.
 	UpdateModeChange UpdateType = "mode_change"
 	// UpdateDone signals the end of a prompt; Content holds the stopReason.
 	UpdateDone UpdateType = "done"
@@ -39,7 +40,6 @@ type Update struct {
 }
 
 // SessionUpdateDerived is a parsed, client-ready view of SessionUpdate.
-// It is populated by ParseSessionUpdateParams in the transport layer.
 type SessionUpdateDerived struct {
 	Update            Update
 	ConfigOptions     []ConfigOption
@@ -52,12 +52,8 @@ type SessionUpdateDerived struct {
 
 // ParseSessionUpdateParams parses protocol-level session/update details into a
 // derived structure so upper layers can consume normalized fields only.
-func ParseSessionUpdateParams(p *SessionUpdateParams) {
-	if p == nil {
-		return
-	}
-	d := parseSessionUpdate(p.Update)
-	p.Derived = &d
+func ParseSessionUpdateParams(p SessionUpdateParams) SessionUpdateDerived {
+	return parseSessionUpdate(p.Update)
 }
 
 func parseSessionUpdate(u SessionUpdate) SessionUpdateDerived {
@@ -131,6 +127,8 @@ func sessionUpdateToUpdate(u SessionUpdate) Update {
 		return Update{Type: UpdateConfigOption, Raw: raw}
 
 	case "current_mode_update":
+		// Legacy path: normalize layer should map this into config_option_update
+		// before parse for regular message handling.
 		raw, _ := json.Marshal(u)
 		return Update{Type: UpdateModeChange, Raw: raw}
 
