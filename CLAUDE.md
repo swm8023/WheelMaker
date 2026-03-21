@@ -36,7 +36,7 @@ config.json 格式：
 ```json
 {
   "projects": [
-    { "name": "local", "im": { "type": "console", "debug": true },
+    { "name": "local", "debug": true, "im": { "type": "console" },
       "client": { "agent": "claude", "path": "/your/project" } }
   ]
 }

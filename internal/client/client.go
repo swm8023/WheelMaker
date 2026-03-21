@@ -715,12 +715,7 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 			savedSID = as.LastSessionID
 		}
 	}
-	debugEnabled := false
-	if c.state.Agents != nil {
-		if as := c.state.Agents[name]; as != nil {
-			debugEnabled = as.DebugIM
-		}
-	}
+	debugEnabled := c.state.DebugIM
 	c.mu.Unlock()
 
 	baseAgent := fac("", nil)
@@ -792,10 +787,8 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	}
 	dw := c.debugLog
 	debugEnabled := false
-	if c.state != nil && c.state.Agents != nil {
-		if as := c.state.Agents[name]; as != nil {
-			debugEnabled = as.DebugIM
-		}
+	if c.state != nil {
+		debugEnabled = c.state.DebugIM
 	}
 	c.mu.Unlock()
 
@@ -952,9 +945,9 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	model.Options = append(model.Options, im.HelpOption{Label: "Cancel", Command: "/cancel"})
 	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
 	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Debug Status", Command: "/debug"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Debug On", Command: "/debug", Value: "on"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Debug Off", Command: "/debug", Value: "off"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug On", Command: "/debug", Value: "on"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Off", Command: "/debug", Value: "off"})
 	c.mu.Lock()
 	agentNames := make([]string, 0, len(c.agentFacs))
 	for name := range c.agentFacs {

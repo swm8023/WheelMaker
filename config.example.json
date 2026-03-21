@@ -2,9 +2,9 @@
   "projects": [
     {
       "name": "local-dev",
+      "debug": true,
       "im": {
-        "type": "console",
-        "debug": true
+        "type": "console"
       },
       "client": {
         "agent": "claude",
@@ -13,6 +13,7 @@
     },
     {
       "name": "feishu-prod",
+      "debug": false,
       "im": {
         "type": "feishu",
         "appID": "cli_xxx",

@@ -274,7 +274,7 @@ func TestHandleMessage_Debug_EnableCurrentAgent(t *testing.T) {
 
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Debug enabled for agent: mock") {
+		if strings.Contains(m, "Debug enabled for project") {
 			found = true
 			break
 		}
@@ -413,7 +413,7 @@ func TestHandleMessage_Prompt_DebugForwardsACPJSONToIM(t *testing.T) {
 	defer c.Close()
 
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug codex on"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug on"})
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
 
 	found := false

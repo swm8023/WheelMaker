@@ -82,8 +82,8 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	// Create the client.
 	c := client.New(store, imProvider, pc.Name, cwd)
 
-	// Enable ACP JSON debug logging for console projects with debug=true.
-	if pc.IM.Type == "console" && pc.IM.Debug {
+	// Enable ACP JSON debug logging for projects with debug=true.
+	if pc.Debug {
 		c.SetDebugLogger(log.Writer())
 	}
 
@@ -108,14 +108,14 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 func (h *Hub) buildIM(pc ProjectConfig) (im.Channel, error) {
 	switch pc.IM.Type {
 	case "console":
-		return forwarder.New(console.New(pc.Name, pc.IM.Debug)), nil
+		return forwarder.New(console.New(pc.Name, pc.Debug)), nil
 	case "feishu":
 		return forwarder.New(feishu.New(feishu.Config{
 			AppID:             pc.IM.AppID,
 			AppSecret:         pc.IM.AppSecret,
 			VerificationToken: h.cfg.Feishu.VerificationToken,
 			EncryptKey:        h.cfg.Feishu.EncryptKey,
-			Debug:             pc.IM.Debug,
+			Debug:             pc.Debug,
 		})), nil
 	default:
 		return nil, fmt.Errorf("unknown im.type %q (supported: console)", pc.IM.Type)

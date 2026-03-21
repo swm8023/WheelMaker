@@ -18,10 +18,10 @@ func TestResolveHelpModel_IncludesDebugQuickActions(t *testing.T) {
 	hasDebugOn := false
 	hasDebugOff := false
 	for _, opt := range model.Options {
-		if opt.Label == "Debug On" && opt.Command == "/debug" && opt.Value == "on" {
+		if opt.Label == "Project Debug On" && opt.Command == "/debug" && opt.Value == "on" {
 			hasDebugOn = true
 		}
-		if opt.Label == "Debug Off" && opt.Command == "/debug" && opt.Value == "off" {
+		if opt.Label == "Project Debug Off" && opt.Command == "/debug" && opt.Value == "off" {
 			hasDebugOff = true
 		}
 	}

@@ -27,6 +27,8 @@ type mockSessionState struct {
 	mode    string
 	model   string
 	thought string
+	cwd     string
+	title   string
 }
 
 type inMemoryMockServer struct {
@@ -111,16 +113,18 @@ func (s *inMemoryMockServer) handleRequest(id int64, method string, params json.
 			"authMethods": []any{},
 		})
 	case "session/new":
+		var np acp.SessionNewParams
+		_ = json.Unmarshal(params, &np)
 		n := s.sessSeq.Add(1)
 		sid := fmt.Sprintf("mock-session-%d", n)
 		s.sessMu.Lock()
-		s.sessState[sid] = &mockSessionState{mode: "ask", model: "gpt-4.1", thought: "medium"}
+		s.sessState[sid] = &mockSessionState{mode: "ask", model: "gpt-4.1", thought: "medium", cwd: np.CWD}
 		state := s.sessState[sid]
 		s.sessMu.Unlock()
 		s.respond(id, map[string]any{
-			"sessionId":     sid,
-			"modes":         map[string]any{"currentModeId": "ask", "availableModes": []map[string]any{{"id": "ask", "name": "Ask"}, {"id": "code", "name": "Code"}}},
-			"models":        map[string]any{"currentModelId": "gpt-4.1", "availableModels": []map[string]any{{"modelId": "gpt-4.1", "name": "GPT-4.1"}, {"modelId": "gpt-4.1-mini", "name": "GPT-4.1 Mini"}}},
+			"sessionId": sid,
+			// modes is deprecated (§A.1) but kept for backward compatibility; configOptions is authoritative
+			"modes":         map[string]any{"currentModeId": "ask", "availableModes": []map[string]any{{"id": "ask", "name": "Ask", "description": "Request permission before changes"}, {"id": "code", "name": "Code", "description": "Full tool access"}}},
 			"configOptions": s.buildConfigOptions(state),
 		})
 	case "session/load":
@@ -128,10 +132,29 @@ func (s *inMemoryMockServer) handleRequest(id int64, method string, params json.
 		_ = json.Unmarshal(params, &p)
 		s.sessMu.Lock()
 		if _, ok := s.sessState[p.SessionID]; !ok {
-			s.sessState[p.SessionID] = &mockSessionState{mode: "ask", model: "gpt-4.1", thought: "medium"}
+			s.sessState[p.SessionID] = &mockSessionState{mode: "ask", model: "gpt-4.1", thought: "medium", cwd: p.CWD}
+		} else if p.CWD != "" {
+			s.sessState[p.SessionID].cwd = p.CWD
 		}
 		s.sessMu.Unlock()
-		s.respond(id, map[string]any{})
+		// §4.3: Agent MUST replay history via session/update before responding null.
+		state := s.getState(p.SessionID)
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "config_option_update",
+			"configOptions": s.buildConfigOptions(state),
+		})
+		if state.title != "" {
+			s.sendUpdate(p.SessionID, map[string]any{
+				"sessionUpdate": "session_info_update",
+				"title":         state.title,
+				"updatedAt":     time.Now().UTC().Format(time.RFC3339),
+			})
+		}
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "agent_message_chunk",
+			"content":       map[string]any{"type": "text", "text": "[history replay]"},
+		})
+		s.respond(id, nil) // §4.3: respond null after history replay
 	case "session/set_config_option":
 		var p acp.SessionSetConfigOptionParams
 		_ = json.Unmarshal(params, &p)
@@ -152,6 +175,28 @@ func (s *inMemoryMockServer) handleRequest(id int64, method string, params json.
 			})
 		}
 		s.respond(id, map[string]any{})
+	case "session/list":
+		var lp acp.SessionListParams
+		_ = json.Unmarshal(params, &lp)
+		s.sessMu.Lock()
+		sessions := make([]map[string]any, 0, len(s.sessState))
+		for sid, st := range s.sessState {
+			// Optional CWD filter per §4.4.
+			if lp.CWD != "" && st.cwd != lp.CWD {
+				continue
+			}
+			entry := map[string]any{
+				"sessionId": sid,
+				"cwd":       st.cwd,
+				"updatedAt": time.Now().UTC().Format(time.RFC3339),
+			}
+			if st.title != "" {
+				entry["title"] = st.title
+			}
+			sessions = append(sessions, entry)
+		}
+		s.sessMu.Unlock()
+		s.respond(id, map[string]any{"sessions": sessions})
 	case "session/prompt":
 		go s.handlePrompt(id, params)
 	default:
@@ -191,6 +236,12 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "plan", "entries": []map[string]any{{"content": "step1", "priority": "high", "status": "pending"}, {"content": "step2", "priority": "medium", "status": "in_progress"}}})
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "session_info_update", "title": "Mock Session", "updatedAt": time.Now().UTC().Format(time.RFC3339)})
 		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "available_commands_update", "availableCommands": []map[string]any{{"name": "plan", "description": "Create a plan"}, {"name": "test", "description": "Run tests"}}})
+		// Persist title so session/load history replay can include it.
+		s.sessMu.Lock()
+		if st, ok := s.sessState[p.SessionID]; ok {
+			st.title = "Mock Session"
+		}
+		s.sessMu.Unlock()
 		s.respond(id, map[string]any{"stopReason": "end_turn"})
 	case "2":
 		readRaw, readErr := s.callbackRequest("fs/read_text_file", map[string]any{"sessionId": p.SessionID, "path": "/mock/file.txt"})
@@ -257,6 +308,114 @@ func (s *inMemoryMockServer) handlePrompt(id int64, params json.RawMessage) {
 		} else {
 			s.respond(id, map[string]any{"stopReason": "end_turn"})
 		}
+	case "5":
+		// Tool call with diff content: full lifecycle pending→in_progress→completed (§7.1-7.3).
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call_diff_001",
+			"title":         "Edit file",
+			"kind":          "write",
+			"status":        "pending",
+		})
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "call_diff_001",
+			"status":        "in_progress",
+		})
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "call_diff_001",
+			"status":        "completed",
+			// §7.3: diff type ToolCallContent; field is "content" per protocol spec
+			"content": []map[string]any{
+				{"type": "diff", "path": "/mock/file.go", "oldText": "old content\n", "newText": "new content\n"},
+			},
+			"locations": []map[string]any{
+				{"path": "/mock/file.go", "line": 1},
+			},
+		})
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "diff:ok"}})
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
+	case "6":
+		// Tool call with terminal content embedded in tool_call_update (§7.3, §9).
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call_term_001",
+			"title":         "Run command",
+			"kind":          "execute",
+			"status":        "pending",
+		})
+		createRaw6, err6 := s.callbackRequest("terminal/create", map[string]any{
+			"sessionId": p.SessionID, "command": "echo", "args": []string{"hello"},
+		})
+		if err6 != nil {
+			s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_term_001", "status": "failed"})
+			s.respondError(id, -32603, "terminal/create failed")
+			return
+		}
+		var cr6 acp.TerminalCreateResult
+		_ = json.Unmarshal(createRaw6.Result, &cr6)
+		// in_progress with terminal content so client can render live output (§9)
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "call_term_001",
+			"status":        "in_progress",
+			"content":       []map[string]any{{"type": "terminal", "terminalId": cr6.TerminalID}},
+		})
+		_, _ = s.callbackRequest("terminal/wait_for_exit", map[string]any{"sessionId": p.SessionID, "terminalId": cr6.TerminalID})
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_term_001", "status": "completed"})
+		_, _ = s.callbackRequest("terminal/release", map[string]any{"sessionId": p.SessionID, "terminalId": cr6.TerminalID})
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "terminal-content:ok"}})
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
+	case "7":
+		// Terminal kill flow: simulate timeout pattern (create→in_progress→kill→output→release) (§9).
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call",
+			"toolCallId":    "call_kill_001",
+			"title":         "Run long command",
+			"kind":          "execute",
+			"status":        "pending",
+		})
+		createRaw7, err7 := s.callbackRequest("terminal/create", map[string]any{
+			"sessionId": p.SessionID, "command": "sleep", "args": []string{"60"},
+		})
+		if err7 != nil {
+			s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_kill_001", "status": "failed"})
+			s.respondError(id, -32603, "terminal/create failed")
+			return
+		}
+		var cr7 acp.TerminalCreateResult
+		_ = json.Unmarshal(createRaw7.Result, &cr7)
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "tool_call_update",
+			"toolCallId":    "call_kill_001",
+			"status":        "in_progress",
+			"content":       []map[string]any{{"type": "terminal", "terminalId": cr7.TerminalID}},
+		})
+		// Simulate timeout: kill without waiting for exit (§9 timeout pattern).
+		_, _ = s.callbackRequest("terminal/kill", map[string]any{"sessionId": p.SessionID, "terminalId": cr7.TerminalID})
+		// Get final output after kill.
+		_, _ = s.callbackRequest("terminal/output", map[string]any{"sessionId": p.SessionID, "terminalId": cr7.TerminalID})
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "call_kill_001", "status": "completed"})
+		// Release: required even after kill (§9).
+		_, _ = s.callbackRequest("terminal/release", map[string]any{"sessionId": p.SessionID, "terminalId": cr7.TerminalID})
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "terminal-kill:ok"}})
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
+	case "8":
+		// max_tokens stopReason: agent ran out of tokens partway through (§5.4).
+		s.sendUpdate(p.SessionID, map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": "partial response..."}})
+		s.respond(id, map[string]any{"stopReason": "max_tokens"})
+	case "9":
+		// Agent reply with resource_link content block: all agents must support this (§6).
+		s.sendUpdate(p.SessionID, map[string]any{
+			"sessionUpdate": "agent_message_chunk",
+			"content": map[string]any{
+				"type": "resource_link",
+				"uri":  "file:///mock/result.go",
+				"name": "result.go",
+			},
+		})
+		s.respond(id, map[string]any{"stopReason": "end_turn"})
 	case "10":
 		s.respondError(id, -32602, "invalid params")
 	case "11":
@@ -324,7 +483,7 @@ func (s *inMemoryMockServer) getState(sessionID string) *mockSessionState {
 		state = &mockSessionState{mode: "ask", model: "gpt-4.1", thought: "medium"}
 		s.sessState[sessionID] = state
 	}
-	return &mockSessionState{mode: state.mode, model: state.model, thought: state.thought}
+	return &mockSessionState{mode: state.mode, model: state.model, thought: state.thought, cwd: state.cwd, title: state.title}
 }
 
 func (s *inMemoryMockServer) buildConfigOptions(state *mockSessionState) []map[string]any {

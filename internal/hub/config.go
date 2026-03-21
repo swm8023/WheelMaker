@@ -15,6 +15,7 @@ type Config struct {
 // ProjectConfig describes one WheelMaker project.
 type ProjectConfig struct {
 	Name   string     `json:"name"`
+	Debug  bool       `json:"debug,omitempty"`
 	IM     IMConfig   `json:"im"`
 	Client ClientConf `json:"client"`
 }
@@ -24,7 +25,6 @@ type IMConfig struct {
 	Type      string `json:"type"`
 	AppID     string `json:"appID,omitempty"`
 	AppSecret string `json:"appSecret,omitempty"`
-	Debug     bool   `json:"debug,omitempty"`
 }
 
 // ClientConf describes the AI agent side for a project.

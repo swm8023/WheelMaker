@@ -47,6 +47,7 @@ Edit `~/.wheelmaker/config.json`:
   "projects": [
     {
       "name": "my-project",
+      "debug": false,
       "im": { "type": "console" },
       "client": { "agent": "claude", "path": "/path/to/your/code" }
     }
@@ -71,13 +72,20 @@ A prompt will appear — type messages directly:
 
 Config file: `~/.wheelmaker/config.json`
 
+### Project debug
+
+Per-project `debug` controls protocol-level logging and IM SDK debug logging:
+```json
+{ "name": "my-project", "debug": true, "im": { "type": "console" }, "client": { "agent": "claude", "path": "/path/to/your/code" } }
+```
+`debug: true` enables ACP JSON debug output and IM-layer debug logs for that project.
+
 ### IM types
 
 **console** (local testing):
 ```json
-{ "type": "console", "debug": true }
+{ "type": "console" }
 ```
-`debug: true` prints all ACP JSON to stderr for protocol-level debugging.
 
 **feishu** (production):
 ```json
@@ -96,11 +104,13 @@ Top-level `feishu` shared config:
   "projects": [
     {
       "name": "agent",
+      "debug": false,
       "im": { "type": "feishu", "appID": "cli_xxx", "appSecret": "yyy" },
       "client": { "agent": "claude", "path": "/home/user/agent" }
     },
     {
       "name": "frontend",
+      "debug": true,
       "im": { "type": "console" },
       "client": { "agent": "claude", "path": "/home/user/frontend" }
     }
@@ -119,6 +129,8 @@ Send in IM or console:
 | `/use <agent> --continue` | Switch agent and carry over current context |
 | `/cancel` | Cancel the in-progress request |
 | `/status` | Show current agent and session ID |
+| `/debug` | Show project debug status |
+| `/debug <on\|off>` | Toggle project-level debug logging |
 | anything else | Sent to the AI as a message (including text starting with `/`) |
 
 ## Architecture
