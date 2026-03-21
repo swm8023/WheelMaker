@@ -105,3 +105,5 @@ go build ./cmd/wheelmaker/
 
 
 
+
+- Rule (2026-03-21): After every code change, automatically run git add and git commit without waiting for user reminder.
