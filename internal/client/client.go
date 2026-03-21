@@ -69,6 +69,7 @@ type Client struct {
 	terminals *terminalManager
 
 	permRouter *permissionRouter
+	debugSink  *agentDebugSink
 
 	// sessionOverride is set only in tests (via InjectSession in export_test.go).
 	// When non-nil, promptStream and cancelPrompt delegate to it instead of the forwarder.
@@ -92,6 +93,7 @@ func New(store Store, imProvider im.Channel, projectName string, cwd string) *Cl
 	c.initCond = sync.NewCond(&c.mu)
 	c.terminals = newTerminalManager()
 	c.permRouter = newPermissionRouter(c)
+	c.debugSink = newAgentDebugSink(c)
 	return c
 }
 
@@ -163,6 +165,8 @@ func (c *Client) Close() error {
 // everything else — including lines starting with "/" that are not known commands —
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
+	c.bindDebugChat(c.resolveCurrentAgentName(), msg.ChatID)
+
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return
@@ -177,7 +181,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 // --- internal ---
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /list, /new, /load) are treated as commands;
+// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /list, /new, /load, /debug) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -185,7 +189,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model", "/list", "/new", "/load":
+	case "/use", "/cancel", "/status", "/mode", "/model", "/list", "/new", "/load", "/debug":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return
@@ -292,6 +296,11 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 
 	case "/model":
 		c.handleConfigCommand(ctx, msg.ChatID, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
+
+	case "/debug":
+		if err := c.handleDebugCommand(msg.ChatID, args); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Debug error: %v", err))
+		}
 	}
 }
 
@@ -706,6 +715,12 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 			savedSID = as.LastSessionID
 		}
 	}
+	debugEnabled := false
+	if c.state.Agents != nil {
+		if as := c.state.Agents[name]; as != nil {
+			debugEnabled = as.DebugIM
+		}
+	}
 	c.mu.Unlock()
 
 	baseAgent := fac("", nil)
@@ -713,8 +728,8 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if dw != nil {
-		conn.SetDebugLogger(dw)
+	if debugWriter := c.composeDebugWriter(name, dw, debugEnabled); debugWriter != nil {
+		conn.SetDebugLogger(debugWriter)
 	}
 	fwd := acp.NewForwarder(conn, nil)
 	fwd.SetCallbacks(c)
@@ -776,6 +791,12 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 		}
 	}
 	dw := c.debugLog
+	debugEnabled := false
+	if c.state != nil && c.state.Agents != nil {
+		if as := c.state.Agents[name]; as != nil {
+			debugEnabled = as.DebugIM
+		}
+	}
 	c.mu.Unlock()
 
 	// Connect new agent.
@@ -784,8 +805,8 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if dw != nil {
-		newConn.SetDebugLogger(dw)
+	if debugWriter := c.composeDebugWriter(name, dw, debugEnabled); debugWriter != nil {
+		newConn.SetDebugLogger(debugWriter)
 	}
 	newFwd := acp.NewForwarder(newConn, nil)
 	newFwd.SetCallbacks(c)
@@ -931,6 +952,7 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	model.Options = append(model.Options, im.HelpOption{Label: "Cancel", Command: "/cancel"})
 	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
 	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Debug Status", Command: "/debug"})
 	c.mu.Lock()
 	agentNames := make([]string, 0, len(c.agentFacs))
 	for name := range c.agentFacs {

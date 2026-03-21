@@ -227,6 +227,15 @@ func (c *Conn) Notify(method string, params any) error {
 	if err := c.enc.Encode(n); err != nil {
 		return fmt.Errorf("acp: encode notification: %w", err)
 	}
+
+	c.debugMu.RLock()
+	dw := c.debugLog
+	c.debugMu.RUnlock()
+	if dw != nil {
+		if raw, e := json.Marshal(n); e == nil {
+			fmt.Fprintf(dw, "→ %s\n", raw)
+		}
+	}
 	return nil
 }
 

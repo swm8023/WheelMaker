@@ -8,10 +8,13 @@ package acp_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -224,6 +227,29 @@ func TestNotify(t *testing.T) {
 	err := c.Notify("session/cancel", acp.SessionCancelParams{SessionID: "some-id"})
 	if err != nil {
 		t.Fatalf("Notify: %v", err)
+	}
+}
+
+func TestNotify_DebugLogger(t *testing.T) {
+	var dbg bytes.Buffer
+	c := acp.NewInMemoryConn(func(r io.Reader, _ io.Writer) {
+		scanner := bufio.NewScanner(r)
+		if scanner.Scan() {
+			return
+		}
+	})
+	c.SetDebugLogger(&dbg)
+	if err := c.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	if err := c.Notify("session/cancel", acp.SessionCancelParams{SessionID: "sess-1"}); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	got := dbg.String()
+	if !strings.Contains(got, "session/cancel") || !strings.Contains(got, "\"jsonrpc\"") {
+		t.Fatalf("debug log = %q, want JSON notify line", got)
 	}
 }
 

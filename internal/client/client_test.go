@@ -265,6 +265,25 @@ func TestHandleMessage_Use_MissingName(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_Debug_EnableCurrentAgent(t *testing.T) {
+	mock := &mockSession{agentN: "mock", sessionN: "sess-1"}
+	c := newTestClient(mock)
+	msgs := captureReplies(c)
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug on"})
+
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "Debug enabled for agent: mock") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("messages = %v, want debug enabled confirmation", *msgs)
+	}
+}
+
 func TestHandleMessage_Mode_SetsMode(t *testing.T) {
 	store := &mockStore{state: &client.ProjectState{
 		ActiveAgent: "codex",
@@ -374,6 +393,38 @@ func TestHandleMessage_Prompt_TextStreaming(t *testing.T) {
 	}
 	if (*msgs)[0] != "hello world" {
 		t.Errorf("reply = %q, want 'hello world'", (*msgs)[0])
+	}
+}
+
+func TestHandleMessage_Prompt_DebugForwardsACPJSONToIM(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+		Agents: map[string]*client.AgentState{
+			"codex": {},
+		},
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+
+	msgs := captureReplies(c)
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug codex on"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
+
+	found := false
+	for _, m := range *msgs {
+		if strings.Contains(m, "[debug][codex]") && strings.Contains(m, "\"jsonrpc\"") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("messages = %v, want debug ACP json forwarded to IM", *msgs)
 	}
 }
 

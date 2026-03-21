@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 )
 
 // MessageDirection indicates message flow across ACP forwarder.
@@ -100,6 +101,11 @@ func (f *Forwarder) Notify(method string, params any) error {
 
 // Close closes the underlying Conn.
 func (f *Forwarder) Close() error { return f.conn.Close() }
+
+// SetDebugLogger forwards raw ACP JSON logs from the underlying connection.
+func (f *Forwarder) SetDebugLogger(w io.Writer) {
+	f.conn.SetDebugLogger(w)
+}
 
 // SetCallbacks registers h as the handler for all agent->client requests and
 // session/update notifications. It wires a single conn.OnRequest handler that
