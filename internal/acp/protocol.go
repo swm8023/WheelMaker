@@ -9,7 +9,7 @@ const (
 	MethodInitialize      = "initialize"
 	MethodSessionNew      = "session/new"
 	MethodSessionPrompt   = "session/prompt"
-	MethodSessionCancel   = "session/cancel"   // notification
+	MethodSessionCancel   = "session/cancel" // notification
 	MethodSessionLoad     = "session/load"
 	MethodSessionList     = "session/list"
 	MethodSetConfigOption = "session/set_config_option"
@@ -213,9 +213,9 @@ type SessionUpdate struct {
 	// ModeID is legacy Session Modes payload ("current_mode_update").
 	// Prefer ConfigOptions via "config_option_update"; this field is retained
 	// only for backward-compatible input parsing.
-	ModeID            string             `json:"modeId,omitempty"`
-	ConfigOptions     []ConfigOption     `json:"configOptions,omitempty"`
-	UpdatedAt         string             `json:"updatedAt,omitempty"`
+	ModeID        string         `json:"modeId,omitempty"`
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+	UpdatedAt     string         `json:"updatedAt,omitempty"`
 }
 
 // PlanEntry is a single step in an agent execution plan.
