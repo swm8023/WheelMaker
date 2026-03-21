@@ -3,7 +3,6 @@ package mock
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
 )
@@ -36,6 +35,3 @@ func (a *Agent) Connect(_ context.Context) (*acp.Conn, error) {
 
 // Close is a no-op for the stateless mock agent.
 func (a *Agent) Close() error { return nil }
-
-// NormalizeParams passes notifications through unchanged.
-func (a *Agent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }

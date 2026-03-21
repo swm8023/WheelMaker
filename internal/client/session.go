@@ -125,14 +125,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			if p.SessionID != savedSID {
 				return
 			}
-			derived := p.Derived
-			if derived == nil {
-				acp.ParseSessionUpdateParams(&p)
-				derived = p.Derived
-			}
-			if derived == nil {
-				return
-			}
+			derived := acp.ParseSessionUpdateParams(p)
 			replayMu.Lock()
 			replay = append(replay, derived.Update)
 			if len(derived.AvailableCommands) > 0 {

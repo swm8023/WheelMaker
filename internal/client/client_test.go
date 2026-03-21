@@ -621,9 +621,6 @@ func (a *minimalMockAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 func (a *minimalMockAgent) Close() error { return nil }
-func (a *minimalMockAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
-	return params
-}
 
 var _ agent.Agent = (*minimalMockAgent)(nil)
 
@@ -641,9 +638,6 @@ func (a *contextRejectMockAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return conn, nil
 }
 func (a *contextRejectMockAgent) Close() error { return nil }
-func (a *contextRejectMockAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
-	return params
-}
 
 var _ agent.Agent = (*contextRejectMockAgent)(nil)
 
@@ -656,9 +650,6 @@ func (a *failConnectAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return nil, fmt.Errorf("mock: binary not found")
 }
 func (a *failConnectAgent) Close() error { return nil }
-func (a *failConnectAgent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage {
-	return params
-}
 
 var _ agent.Agent = (*failConnectAgent)(nil)
 

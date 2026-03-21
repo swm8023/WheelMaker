@@ -5,7 +5,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -50,8 +49,7 @@ func (a *stubAgent) Name() string { return a.name }
 func (a *stubAgent) Connect(_ context.Context) (*acp.Conn, error) {
 	return nil, nil
 }
-func (a *stubAgent) Close() error                                                { return nil }
-func (a *stubAgent) NormalizeParams(_ string, p json.RawMessage) json.RawMessage { return p }
+func (a *stubAgent) Close() error { return nil }
 
 // InjectState replaces the persisted state.
 func (c *Client) InjectState(st *ProjectState) {

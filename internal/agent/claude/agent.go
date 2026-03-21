@@ -3,7 +3,6 @@ package claude
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 
@@ -54,9 +53,6 @@ func (p *Agent) Connect(_ context.Context) (*acp.Conn, error) {
 
 // Close is a no-op since Connect() transfers subprocess ownership to Conn.
 func (p *Agent) Close() error { return nil }
-
-// NormalizeParams passes notifications through unchanged.
-func (p *Agent) NormalizeParams(_ string, params json.RawMessage) json.RawMessage { return params }
 
 // buildEnv converts a map of environment variables to "KEY=VALUE" strings.
 func buildEnv(m map[string]string) []string {

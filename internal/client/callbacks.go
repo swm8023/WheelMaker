@@ -30,15 +30,7 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		return
 	}
 
-	derived := params.Derived
-	if derived == nil {
-		// Defensive fallback for direct callers that bypass Forwarder.
-		acp.ParseSessionUpdateParams(&params)
-		derived = params.Derived
-	}
-	if derived == nil {
-		return
-	}
+	derived := acp.ParseSessionUpdateParams(params)
 
 	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
 		c.mu.Lock()

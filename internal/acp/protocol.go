@@ -166,9 +166,8 @@ type SessionCancelParams struct {
 
 // SessionUpdateParams is the payload of a session/update notification.
 type SessionUpdateParams struct {
-	SessionID string                `json:"sessionId"`
-	Update    SessionUpdate         `json:"update"`
-	Derived   *SessionUpdateDerived `json:"-"`
+	SessionID string        `json:"sessionId"`
+	Update    SessionUpdate `json:"update"`
 }
 
 // SessionUpdate is the body of a single streaming update from the agent.
@@ -181,6 +180,9 @@ type SessionUpdate struct {
 	Kind              string             `json:"kind,omitempty"`
 	Status            string             `json:"status,omitempty"`
 	Entries           []PlanEntry        `json:"entries,omitempty"`
+	// ModeID is legacy Session Modes payload ("current_mode_update").
+	// Prefer ConfigOptions via "config_option_update"; this field is retained
+	// only for backward-compatible input parsing.
 	ModeID            string             `json:"modeId,omitempty"`
 	ConfigOptions     []ConfigOption     `json:"configOptions,omitempty"`
 	UpdatedAt         string             `json:"updatedAt,omitempty"`
