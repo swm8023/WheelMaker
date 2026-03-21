@@ -59,6 +59,70 @@ type Conn struct {
 	inMemoryServer InMemoryServer
 }
 
+func (c *Conn) debugWriter() io.Writer {
+	c.debugMu.RLock()
+	dw := c.debugLog
+	c.debugMu.RUnlock()
+	return dw
+}
+
+func (c *Conn) writeDebugJSON(prefix string, payload any) {
+	dw := c.debugWriter()
+	if dw == nil {
+		return
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	fmt.Fprintf(dw, "%s %s\n", prefix, raw)
+}
+
+func (c *Conn) writeDebugRaw(prefix string, raw []byte) {
+	dw := c.debugWriter()
+	if dw == nil || len(raw) == 0 {
+		return
+	}
+	fmt.Fprintf(dw, "%s %s\n", prefix, raw)
+}
+
+func (c *Conn) setPending(id int64, ch chan Response) {
+	c.mu.Lock()
+	c.pending[id] = ch
+	c.mu.Unlock()
+}
+
+func (c *Conn) removePending(id int64) {
+	c.mu.Lock()
+	delete(c.pending, id)
+	c.mu.Unlock()
+}
+
+func (c *Conn) popPending(id int64) (chan Response, bool) {
+	c.mu.Lock()
+	ch, ok := c.pending[id]
+	if ok {
+		delete(c.pending, id)
+	}
+	c.mu.Unlock()
+	return ch, ok
+}
+
+func (c *Conn) encodeLocked(v any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.enc.Encode(v)
+}
+
+func (c *Conn) failAllPending(err *RPCError) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for id, ch := range c.pending {
+		ch <- Response{ID: id, Error: err}
+		delete(c.pending, id)
+	}
+}
+
 // NewConn creates a new Conn for the given binary.
 // env is a list of "KEY=VALUE" strings appended to the process environment.
 func NewConn(exePath string, env []string, args ...string) *Conn {
@@ -113,21 +177,28 @@ func (c *Conn) OnRequest(h RequestHandler) {
 // stderr of the subprocess is forwarded to the application log via log.Writer().
 func (c *Conn) Start() error {
 	if c.inMemoryServer != nil {
-		clientToServerR, clientToServerW := io.Pipe()
-		serverToClientR, serverToClientW := io.Pipe()
-
-		c.stdin = clientToServerW
-		c.stdout = serverToClientR
-		c.enc = json.NewEncoder(c.stdin)
-
-		go c.readLoop(c.stdout)
-		go func() {
-			defer serverToClientW.Close()
-			c.inMemoryServer(clientToServerR, serverToClientW)
-		}()
-		return nil
+		return c.startInMemory()
 	}
+	return c.startProcess()
+}
 
+func (c *Conn) startInMemory() error {
+	clientToServerR, clientToServerW := io.Pipe()
+	serverToClientR, serverToClientW := io.Pipe()
+
+	c.stdin = clientToServerW
+	c.stdout = serverToClientR
+	c.enc = json.NewEncoder(c.stdin)
+
+	go c.readLoop(c.stdout)
+	go func() {
+		defer serverToClientW.Close()
+		c.inMemoryServer(clientToServerR, serverToClientW)
+	}()
+	return nil
+}
+
+func (c *Conn) startProcess() error {
 	cmd := exec.Command(c.exePath, c.exeArgs...)
 	cmd.Env = append(cmd.Environ(), c.env...)
 	cmd.Stderr = log.Writer() // forward subprocess stderr to the application log
@@ -160,9 +231,7 @@ func (c *Conn) SendAgent(ctx context.Context, method string, params any, result 
 	id := c.nextID.Add(1)
 
 	ch := make(chan Response, 1)
-	c.mu.Lock()
-	c.pending[id] = ch
-	c.mu.Unlock()
+	c.setPending(id, ch)
 
 	req := Request{
 		JSONRPC: jsonrpcVersion,
@@ -171,30 +240,16 @@ func (c *Conn) SendAgent(ctx context.Context, method string, params any, result 
 		Params:  params,
 	}
 
-	c.mu.Lock()
-	err := c.enc.Encode(req)
-	c.mu.Unlock()
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+	if err := c.encodeLocked(req); err != nil {
+		c.removePending(id)
 		return fmt.Errorf("acp: encode request: %w", err)
 	}
 
-	c.debugMu.RLock()
-	dw := c.debugLog
-	c.debugMu.RUnlock()
-	if dw != nil {
-		if raw, e := json.Marshal(req); e == nil {
-			fmt.Fprintf(dw, "→ %s\n", raw)
-		}
-	}
+	c.writeDebugJSON("->", req)
 
 	select {
 	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
+		c.removePending(id)
 		return ctx.Err()
 	case resp := <-ch:
 		if resp.Error != nil {
@@ -222,20 +277,11 @@ func (c *Conn) NotifyAgent(method string, params any) error {
 		Method:  method,
 		Params:  params,
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.enc.Encode(n); err != nil {
+	if err := c.encodeLocked(n); err != nil {
 		return fmt.Errorf("acp: encode notification: %w", err)
 	}
 
-	c.debugMu.RLock()
-	dw := c.debugLog
-	c.debugMu.RUnlock()
-	if dw != nil {
-		if raw, e := json.Marshal(n); e == nil {
-			fmt.Fprintf(dw, "→ %s\n", raw)
-		}
-	}
+	c.writeDebugJSON("->", n)
 	return nil
 }
 
@@ -279,12 +325,7 @@ func (c *Conn) readLoop(r io.Reader) {
 			continue
 		}
 
-		c.debugMu.RLock()
-		dw := c.debugLog
-		c.debugMu.RUnlock()
-		if dw != nil {
-			fmt.Fprintf(dw, "← %s\n", line)
-		}
+		c.writeDebugRaw("<-", line)
 
 		var raw rawMessage
 		if err := json.Unmarshal(line, &raw); err != nil {
@@ -304,12 +345,7 @@ func (c *Conn) readLoop(r io.Reader) {
 				Result:  raw.Result,
 				Error:   raw.Error,
 			}
-			c.mu.Lock()
-			ch, ok := c.pending[resp.ID]
-			if ok {
-				delete(c.pending, resp.ID)
-			}
-			c.mu.Unlock()
+			ch, ok := c.popPending(resp.ID)
 			if ok {
 				ch <- resp
 			}
@@ -327,12 +363,7 @@ func (c *Conn) readLoop(r io.Reader) {
 	}
 
 	// stdout closed — unblock all pending requests.
-	c.mu.Lock()
-	for id, ch := range c.pending {
-		ch <- Response{ID: id, Error: &RPCError{Code: -1, Message: "agent process exited"}}
-		delete(c.pending, id)
-	}
-	c.mu.Unlock()
+	c.failAllPending(&RPCError{Code: -1, Message: "agent process exited"})
 }
 
 // handleIncomingRequest processes an Agent→Conn request and sends the response.
@@ -366,7 +397,5 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 		}
 	}
 
-	c.mu.Lock()
-	_ = c.enc.Encode(resp)
-	c.mu.Unlock()
+	_ = c.encodeLocked(resp)
 }

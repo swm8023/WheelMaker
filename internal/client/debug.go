@@ -107,9 +107,6 @@ func (c *Client) composeDebugWriter(agentName string, base io.Writer, debugEnabl
 
 func (c *Client) handleDebugCommand(chatID, args string) error {
 	parts := strings.Fields(strings.TrimSpace(args))
-	current := c.resolveCurrentAgentName()
-
-	var target string
 	var mode *bool
 
 	switch len(parts) {
@@ -118,31 +115,16 @@ func (c *Client) handleDebugCommand(chatID, args string) error {
 		return nil
 	case 1:
 		if v, ok := parseDebugOnOff(parts[0]); ok {
-			target = current
 			mode = &v
 		} else {
-			target = parts[0]
-			c.reply(chatID, c.renderAgentDebugStatus(target))
-			return nil
+			return fmt.Errorf("usage: /debug <on|off>")
 		}
-	case 2:
-		target = parts[0]
-		v, ok := parseDebugOnOff(parts[1])
-		if !ok {
-			return fmt.Errorf("usage: /debug [agent] <on|off>")
-		}
-		mode = &v
 	default:
-		return fmt.Errorf("usage: /debug [agent] <on|off>")
+		return fmt.Errorf("usage: /debug <on|off>")
 	}
 
-	target = strings.TrimSpace(target)
-	if target == "" {
-		return fmt.Errorf("usage: /debug [agent] <on|off>")
-	}
-
-	c.bindDebugChat(target, chatID)
-	changed := c.setAgentDebugSetting(target, *mode)
+	c.bindDebugChat(c.resolveCurrentAgentName(), chatID)
+	changed := c.setProjectDebugSetting(*mode)
 	c.refreshActiveDebugLogger()
 
 	word := "enabled"
@@ -150,10 +132,10 @@ func (c *Client) handleDebugCommand(chatID, args string) error {
 		word = "disabled"
 	}
 	if changed {
-		c.reply(chatID, fmt.Sprintf("Debug %s for agent: %s", word, target))
+		c.reply(chatID, fmt.Sprintf("Debug %s for project", word))
 		return nil
 	}
-	c.reply(chatID, fmt.Sprintf("Debug already %s for agent: %s", word, target))
+	c.reply(chatID, fmt.Sprintf("Debug already %s for project", word))
 	return nil
 }
 
@@ -171,49 +153,22 @@ func parseDebugOnOff(v string) (bool, bool) {
 func (c *Client) renderDebugStatus() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.state == nil || len(c.state.Agents) == 0 {
-		return "Debug status: no known agents"
+	if c.state == nil {
+		return "Debug status: off"
 	}
-	lines := []string{"Debug status:"}
-	for name, as := range c.state.Agents {
-		flag := "off"
-		if as != nil && as.DebugIM {
-			flag = "on"
-		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", name, flag))
+	if c.state.DebugIM {
+		return "Debug status: on (project)"
 	}
-	return strings.Join(lines, "\n")
+	return "Debug status: off (project)"
 }
 
-func (c *Client) renderAgentDebugStatus(agentName string) string {
-	agentName = strings.TrimSpace(agentName)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.state == nil || c.state.Agents == nil {
-		return fmt.Sprintf("Debug status for %s: off", agentName)
-	}
-	as := c.state.Agents[agentName]
-	if as != nil && as.DebugIM {
-		return fmt.Sprintf("Debug status for %s: on", agentName)
-	}
-	return fmt.Sprintf("Debug status for %s: off", agentName)
-}
-
-func (c *Client) setAgentDebugSetting(agentName string, enabled bool) bool {
+func (c *Client) setProjectDebugSetting(enabled bool) bool {
 	c.mu.Lock()
 	if c.state == nil {
 		c.state = defaultProjectState()
 	}
-	if c.state.Agents == nil {
-		c.state.Agents = map[string]*AgentState{}
-	}
-	as := c.state.Agents[agentName]
-	if as == nil {
-		as = &AgentState{}
-		c.state.Agents[agentName] = as
-	}
-	changed := as.DebugIM != enabled
-	as.DebugIM = enabled
+	changed := c.state.DebugIM != enabled
+	c.state.DebugIM = enabled
 	s := c.state
 	c.mu.Unlock()
 
@@ -229,10 +184,8 @@ func (c *Client) refreshActiveDebugLogger() {
 	fwd := c.forwarder
 	base := c.debugLog
 	enabled := false
-	if c.state != nil && c.state.Agents != nil {
-		if as := c.state.Agents[name]; as != nil {
-			enabled = as.DebugIM
-		}
+	if c.state != nil {
+		enabled = c.state.DebugIM
 	}
 	c.mu.Unlock()
 
