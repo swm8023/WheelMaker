@@ -25,9 +25,9 @@ type InMemoryServer func(r io.Reader, w io.Writer)
 // with it over stdin/stdout using JSON-RPC 2.0.
 //
 // The ACP protocol is bidirectional:
-//   - Conn→Agent requests: Send() — we initiate, agent responds.
+//   - Conn→Agent requests: SendAgent() — we initiate, agent responds.
 //   - Agent→Conn requests: OnRequest() handler — agent initiates, we respond.
-//   - Notifications (either direction, no response): Subscribe() / Notify().
+//   - Notifications (either direction, no response): Subscribe() / NotifyAgent().
 type Conn struct {
 	exePath string
 	exeArgs []string
@@ -154,9 +154,9 @@ func (c *Conn) Start() error {
 	return nil
 }
 
-// Send sends a JSON-RPC request and waits for the matching response.
+// SendAgent sends a JSON-RPC request to the agent and waits for the matching response.
 // result must be a pointer; on success it is populated by json.Unmarshal.
-func (c *Conn) Send(ctx context.Context, method string, params any, result any) error {
+func (c *Conn) SendAgent(ctx context.Context, method string, params any, result any) error {
 	id := c.nextID.Add(1)
 
 	ch := make(chan Response, 1)
@@ -211,8 +211,8 @@ func (c *Conn) Send(ctx context.Context, method string, params any, result any) 
 	}
 }
 
-// Notify sends a JSON-RPC notification (no id, no response expected).
-func (c *Conn) Notify(method string, params any) error {
+// NotifyAgent sends a JSON-RPC notification to the agent (no id, no response expected).
+func (c *Conn) NotifyAgent(method string, params any) error {
 	n := struct {
 		JSONRPC string `json:"jsonrpc"`
 		Method  string `json:"method"`
@@ -316,7 +316,7 @@ func (c *Conn) readLoop(r io.Reader) {
 
 		case raw.Method != "":
 			// Notification (no id, no response expected). Deliver synchronously so that
-			// all notifications preceding a response are processed before conn.Send returns.
+			// all notifications preceding a response are processed before conn.SendAgent returns.
 			c.reqMu.RLock()
 			h := c.reqHandler
 			c.reqMu.RUnlock()

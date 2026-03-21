@@ -41,7 +41,7 @@ func TestIntegration_Initialize(t *testing.T) {
 	defer cancel()
 
 	var result acp.InitializeResult
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{
 		ProtocolVersion: 1,
 		ClientCapabilities: acp.ClientCapabilities{
 			FS: &acp.FSCapabilities{
@@ -76,7 +76,7 @@ func TestIntegration_SessionNew(t *testing.T) {
 	defer cancel()
 
 	// Handshake
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{
 		ProtocolVersion: "0.1",
 	}, nil); err != nil {
 		t.Fatalf("initialize: %v", err)
@@ -85,7 +85,7 @@ func TestIntegration_SessionNew(t *testing.T) {
 	// Create session
 	wd, _ := os.Getwd()
 	var sessResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{
 		CWD:        wd,
 		MCPServers: []acp.MCPServer{},
 	}, &sessResult); err != nil {
@@ -110,12 +110,12 @@ func TestIntegration_Prompt(t *testing.T) {
 	defer cancel()
 
 	// Handshake + session
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: "0.1"}, nil); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: "0.1"}, nil); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	wd, _ := os.Getwd()
 	var sessResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{
 		CWD:        wd,
 		MCPServers: []acp.MCPServer{},
 	}, &sessResult); err != nil {
@@ -143,7 +143,7 @@ func TestIntegration_Prompt(t *testing.T) {
 
 	// Simple prompt that doesn't require tool use
 	var promptResult acp.SessionPromptResult
-	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+	if err := c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "Reply with exactly: PONG"}},
 	}, &promptResult); err != nil {
@@ -172,12 +172,12 @@ func TestIntegration_Cancel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: "0.1"}, nil); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: "0.1"}, nil); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	wd, _ := os.Getwd()
 	var sessResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{
 		CWD:        wd,
 		MCPServers: []acp.MCPServer{},
 	}, &sessResult); err != nil {
@@ -187,7 +187,7 @@ func TestIntegration_Cancel(t *testing.T) {
 	// Start a prompt in the background, then cancel it.
 	promptDone := make(chan error, 1)
 	go func() {
-		promptDone <- c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+		promptDone <- c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{
 			SessionID: sessResult.SessionID,
 			Prompt:    []acp.ContentBlock{{Type: "text", Text: "Count from 1 to 1000 slowly with explanations for each number."}},
 		}, nil)
@@ -195,7 +195,7 @@ func TestIntegration_Cancel(t *testing.T) {
 
 	// Give the agent a moment to start, then cancel.
 	time.Sleep(500 * time.Millisecond)
-	if err := c.Notify("session/cancel", acp.SessionCancelParams{
+	if err := c.NotifyAgent("session/cancel", acp.SessionCancelParams{
 		SessionID: sessResult.SessionID,
 	}); err != nil {
 		t.Fatalf("notify session/cancel: %v", err)
@@ -209,3 +209,4 @@ func TestIntegration_Cancel(t *testing.T) {
 		t.Error("prompt did not complete after cancel within 15s")
 	}
 }
+

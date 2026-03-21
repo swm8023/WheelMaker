@@ -48,7 +48,7 @@ func TestBackend_Connect(t *testing.T) {
 	defer conn.Close()
 
 	var result acp.InitializeResult
-	if err := conn.Send(ctx, "initialize", acp.InitializeParams{
+	if err := conn.SendAgent(ctx, "initialize", acp.InitializeParams{
 		ProtocolVersion: 1,
 		ClientCapabilities: acp.ClientCapabilities{
 			FS: &acp.FSCapabilities{
@@ -92,7 +92,7 @@ func TestBackend_ConnectMultiple(t *testing.T) {
 
 	for i, conn := range []*acp.Conn{conn1, conn2} {
 		var result acp.InitializeResult
-		if err := conn.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &result); err != nil {
+		if err := conn.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &result); err != nil {
 			t.Errorf("conn %d initialize: %v", i+1, err)
 		}
 	}
@@ -108,3 +108,4 @@ func TestBackend_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
