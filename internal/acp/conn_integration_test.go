@@ -145,7 +145,7 @@ func TestIntegration_Prompt(t *testing.T) {
 	var promptResult acp.SessionPromptResult
 	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
-		Prompt:    "Reply with exactly: PONG",
+		Prompt:    []acp.ContentBlock{{Type: "text", Text: "Reply with exactly: PONG"}},
 	}, &promptResult); err != nil {
 		t.Fatalf("session/prompt: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestIntegration_Cancel(t *testing.T) {
 	go func() {
 		promptDone <- c.Send(ctx, "session/prompt", acp.SessionPromptParams{
 			SessionID: sessResult.SessionID,
-			Prompt:    "Count from 1 to 1000 slowly with explanations for each number.",
+			Prompt:    []acp.ContentBlock{{Type: "text", Text: "Count from 1 to 1000 slowly with explanations for each number."}},
 		}, nil)
 	}()
 

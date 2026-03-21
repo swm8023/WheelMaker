@@ -5,7 +5,7 @@ import "encoding/json"
 // NormalizeNotificationParams applies protocol compatibility transforms for
 // inbound agent->client notifications. Unknown payloads are passed through.
 func NormalizeNotificationParams(method string, params json.RawMessage) json.RawMessage {
-	if method != "session/update" || len(params) == 0 {
+	if method != MethodSessionUpdate || len(params) == 0 {
 		return params
 	}
 

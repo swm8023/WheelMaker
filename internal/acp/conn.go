@@ -271,7 +271,7 @@ func (c *Conn) Close() error {
 func (c *Conn) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	// Increase buffer for large messages (e.g. file contents in tool calls).
-	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	scanner.Buffer(make([]byte, maxScannerBuf), maxScannerBuf)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -352,11 +352,11 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	resp := rpcResp{JSONRPC: jsonrpcVersion, ID: id}
 
 	if handler == nil {
-		resp.Error = &RPCError{Code: -32601, Message: fmt.Sprintf("method not found: %s", method)}
+		resp.Error = &RPCError{Code: CodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
 		result, err := handler(c.connCtx, method, params, false)
 		if err != nil {
-			resp.Error = &RPCError{Code: -32603, Message: err.Error()}
+			resp.Error = &RPCError{Code: CodeInternalError, Message: err.Error()}
 		} else if result == nil {
 			// Per JSON-RPC 2.0: result member MUST be present on success.
 			// Use explicit null rather than omitting the field.

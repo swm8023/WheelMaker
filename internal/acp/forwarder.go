@@ -39,6 +39,27 @@ type ForwardMessage struct {
 // Returning allow=false drops the message.
 type Prefilter func(ctx context.Context, msg ForwardMessage) (filtered ForwardMessage, allow bool, err error)
 
+// ClientCallbacks is the interface client.Client must implement.
+// Forwarder dispatches inbound agent→client requests and notifications
+// to these methods after JSON unmarshal — client code never sees raw JSON.
+type ClientCallbacks interface {
+	// SessionUpdate is called for each incoming session/update notification.
+	// Notifications require no response. The client routes updates to the
+	// active prompt channel by matching the session ID.
+	SessionUpdate(params SessionUpdateParams)
+
+	// SessionRequestPermission responds to session/request_permission requests.
+	SessionRequestPermission(ctx context.Context, params PermissionRequestParams) (PermissionResult, error)
+
+	FSRead(params FSReadTextFileParams) (FSReadTextFileResult, error)
+	FSWrite(params FSWriteTextFileParams) error
+	TerminalCreate(params TerminalCreateParams) (TerminalCreateResult, error)
+	TerminalOutput(params TerminalOutputParams) (TerminalOutputResult, error)
+	TerminalWaitForExit(params TerminalWaitForExitParams) (TerminalWaitForExitResult, error)
+	TerminalKill(params TerminalKillParams) error
+	TerminalRelease(params TerminalReleaseParams) error
+}
+
 // Forwarder wraps Conn and applies a bidirectional prefilter.
 type Forwarder struct {
 	conn      *Conn
@@ -78,8 +99,8 @@ func (f *Forwarder) Send(ctx context.Context, method string, params any, result 
 	return f.conn.Send(ctx, msg.Method, msg.Params, result)
 }
 
-// Notify forwards a notification to agent after filtering.
-func (f *Forwarder) Notify(method string, params any) error {
+// notifyAgent forwards a notification to the agent after filtering.
+func (f *Forwarder) notifyAgent(method string, params any) error {
 	raw, err := marshalParams(params)
 	if err != nil {
 		return err
@@ -125,7 +146,7 @@ func (f *Forwarder) SetCallbacks(h ClientCallbacks) {
 // in that case all return values are discarded by the caller.
 func dispatchClientMessage(ctx context.Context, method string, params json.RawMessage, noResponse bool, h ClientCallbacks) (any, error) {
 	if noResponse {
-		if method == "session/update" {
+		if method == MethodSessionUpdate {
 			params = NormalizeNotificationParams(method, params)
 			var p SessionUpdateParams
 			if err := json.Unmarshal(params, &p); err != nil {
@@ -136,10 +157,10 @@ func dispatchClientMessage(ctx context.Context, method string, params json.RawMe
 		return nil, nil
 	}
 	switch method {
-	case "session/request_permission":
+	case MethodRequestPermission:
 		var p PermissionRequestParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("permission: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		result, err := h.SessionRequestPermission(ctx, p)
 		if err != nil {
@@ -147,52 +168,52 @@ func dispatchClientMessage(ctx context.Context, method string, params json.RawMe
 		}
 		return PermissionResponse{Outcome: result}, nil
 
-	case "fs/read_text_file":
+	case MethodFSRead:
 		var p FSReadTextFileParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("fs/read: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return h.FSRead(p)
 
-	case "fs/write_text_file":
+	case MethodFSWrite:
 		var p FSWriteTextFileParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("fs/write: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return nil, h.FSWrite(p)
 
-	case "terminal/create":
+	case MethodTerminalCreate:
 		var p TerminalCreateParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("terminal/create: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return h.TerminalCreate(p)
 
-	case "terminal/output":
+	case MethodTerminalOutput:
 		var p TerminalOutputParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("terminal/output: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return h.TerminalOutput(p)
 
-	case "terminal/wait_for_exit":
+	case MethodTerminalWaitExit:
 		var p TerminalWaitForExitParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("terminal/wait_for_exit: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return h.TerminalWaitForExit(p)
 
-	case "terminal/kill":
+	case MethodTerminalKill:
 		var p TerminalKillParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("terminal/kill: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return nil, h.TerminalKill(p)
 
-	case "terminal/release":
+	case MethodTerminalRelease:
 		var p TerminalReleaseParams
 		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("terminal/release: unmarshal: %w", err)
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
 		}
 		return nil, h.TerminalRelease(p)
 
@@ -202,9 +223,10 @@ func dispatchClientMessage(ctx context.Context, method string, params json.RawMe
 }
 
 // Initialize sends the ACP initialize handshake (client->agent).
+// Per §3, this must complete before any session/* method.
 func (f *Forwarder) Initialize(ctx context.Context, params InitializeParams) (InitializeResult, error) {
 	var result InitializeResult
-	if err := f.conn.Send(ctx, "initialize", params, &result); err != nil {
+	if err := f.conn.Send(ctx, MethodInitialize, params, &result); err != nil {
 		return InitializeResult{}, err
 	}
 	return result, nil
@@ -213,7 +235,7 @@ func (f *Forwarder) Initialize(ctx context.Context, params InitializeParams) (In
 // SessionNew creates a new ACP session (client->agent).
 func (f *Forwarder) SessionNew(ctx context.Context, params SessionNewParams) (SessionNewResult, error) {
 	var result SessionNewResult
-	if err := f.Send(ctx, "session/new", params, &result); err != nil {
+	if err := f.Send(ctx, MethodSessionNew, params, &result); err != nil {
 		return SessionNewResult{}, err
 	}
 	return result, nil
@@ -222,7 +244,7 @@ func (f *Forwarder) SessionNew(ctx context.Context, params SessionNewParams) (Se
 // SessionLoad resumes an existing ACP session (client->agent).
 func (f *Forwarder) SessionLoad(ctx context.Context, params SessionLoadParams) (SessionLoadResult, error) {
 	var result SessionLoadResult
-	if err := f.Send(ctx, "session/load", params, &result); err != nil {
+	if err := f.Send(ctx, MethodSessionLoad, params, &result); err != nil {
 		return SessionLoadResult{}, err
 	}
 	return result, nil
@@ -231,7 +253,7 @@ func (f *Forwarder) SessionLoad(ctx context.Context, params SessionLoadParams) (
 // SessionList returns a paginated list of available sessions (client->agent).
 func (f *Forwarder) SessionList(ctx context.Context, params SessionListParams) (SessionListResult, error) {
 	var result SessionListResult
-	if err := f.Send(ctx, "session/list", params, &result); err != nil {
+	if err := f.Send(ctx, MethodSessionList, params, &result); err != nil {
 		return SessionListResult{}, err
 	}
 	return result, nil
@@ -242,15 +264,15 @@ func (f *Forwarder) SessionList(ctx context.Context, params SessionListParams) (
 // notifications are delivered concurrently via the SessionUpdate callback.
 func (f *Forwarder) SessionPrompt(ctx context.Context, params SessionPromptParams) (SessionPromptResult, error) {
 	var result SessionPromptResult
-	if err := f.Send(ctx, "session/prompt", params, &result); err != nil {
+	if err := f.Send(ctx, MethodSessionPrompt, params, &result); err != nil {
 		return SessionPromptResult{}, err
 	}
 	return result, nil
 }
 
-// SessionCancel sends session/cancel to abort an in-progress prompt.
+// SessionCancel sends session/cancel notification to abort an in-progress prompt.
 func (f *Forwarder) SessionCancel(sessionID string) error {
-	return f.Notify("session/cancel", SessionCancelParams{SessionID: sessionID})
+	return f.notifyAgent(MethodSessionCancel, SessionCancelParams{SessionID: sessionID})
 }
 
 // SessionSetConfigOption sets a named config option on the active session and
@@ -258,7 +280,7 @@ func (f *Forwarder) SessionCancel(sessionID string) error {
 // []ConfigOption and {"configOptions":[...]}.
 func (f *Forwarder) SessionSetConfigOption(ctx context.Context, params SessionSetConfigOptionParams) ([]ConfigOption, error) {
 	var raw json.RawMessage
-	if err := f.Send(ctx, "session/set_config_option", params, &raw); err != nil {
+	if err := f.Send(ctx, MethodSetConfigOption, params, &raw); err != nil {
 		return nil, err
 	}
 	var opts []ConfigOption
