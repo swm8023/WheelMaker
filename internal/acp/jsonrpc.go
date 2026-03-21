@@ -11,6 +11,21 @@ import (
 
 const jsonrpcVersion = "2.0"
 
+// JSON-RPC 2.0 standard error codes (§15 of ACP protocol).
+const (
+	CodeParseError     = -32700 // Parse error
+	CodeInvalidRequest = -32600 // Invalid request
+	CodeMethodNotFound = -32601 // Method not found
+	CodeInvalidParams  = -32602 // Invalid params
+	CodeInternalError  = -32603 // Internal error
+	CodeAuthRequired   = -32000 // Authentication required
+	CodeNotFound       = -32002 // Resource not found
+)
+
+// maxScannerBuf is the read buffer size for the JSON-RPC newline-delimited
+// scanner. Must be large enough for big tool-call payloads (e.g. file contents).
+const maxScannerBuf = 1 << 20 // 1 MiB
+
 // Request is a JSON-RPC 2.0 request message.
 type Request struct {
 	JSONRPC string `json:"jsonrpc"`

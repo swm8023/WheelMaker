@@ -2,6 +2,32 @@ package acp
 
 import "encoding/json"
 
+// --- ACP method names ---
+
+// Client → Agent methods.
+const (
+	MethodInitialize      = "initialize"
+	MethodSessionNew      = "session/new"
+	MethodSessionPrompt   = "session/prompt"
+	MethodSessionCancel   = "session/cancel"   // notification
+	MethodSessionLoad     = "session/load"
+	MethodSessionList     = "session/list"
+	MethodSetConfigOption = "session/set_config_option"
+)
+
+// Agent → Client methods.
+const (
+	MethodRequestPermission = "session/request_permission"
+	MethodFSRead            = "fs/read_text_file"
+	MethodFSWrite           = "fs/write_text_file"
+	MethodTerminalCreate    = "terminal/create"
+	MethodTerminalOutput    = "terminal/output"
+	MethodTerminalWaitExit  = "terminal/wait_for_exit"
+	MethodTerminalKill      = "terminal/kill"
+	MethodTerminalRelease   = "terminal/release"
+	MethodSessionUpdate     = "session/update" // notification
+)
+
 // --- ACP-specific param/result types ---
 
 // InitializeParams are sent by the client during the initialize handshake.
@@ -180,6 +206,10 @@ type SessionUpdate struct {
 	Kind              string             `json:"kind,omitempty"`
 	Status            string             `json:"status,omitempty"`
 	Entries           []PlanEntry        `json:"entries,omitempty"`
+	Locations         []ToolCallLocation `json:"locations,omitempty"`
+	RawInput          json.RawMessage    `json:"rawInput,omitempty"`
+	RawOutput         json.RawMessage    `json:"rawOutput,omitempty"`
+	ToolCallContent   []ToolCallContent  `json:"toolCallContent,omitempty"`
 	// ModeID is legacy Session Modes payload ("current_mode_update").
 	// Prefer ConfigOptions via "config_option_update"; this field is retained
 	// only for backward-compatible input parsing.
@@ -193,6 +223,23 @@ type PlanEntry struct {
 	Content  string `json:"content"`
 	Priority string `json:"priority"`
 	Status   string `json:"status"`
+}
+
+// ToolCallLocation is a file location affected by a tool call.
+type ToolCallLocation struct {
+	Path string `json:"path"`
+	Line *int   `json:"line,omitempty"`
+}
+
+// ToolCallContent is a content entry within a tool call (§7.3).
+// Type is one of "content", "diff", "terminal".
+type ToolCallContent struct {
+	Type       string        `json:"type"`
+	Content    *ContentBlock `json:"content,omitempty"`    // type="content"
+	Path       string        `json:"path,omitempty"`       // type="diff"
+	OldText    *string       `json:"oldText,omitempty"`    // type="diff" (null = new file)
+	NewText    string        `json:"newText,omitempty"`    // type="diff"
+	TerminalID string        `json:"terminalId,omitempty"` // type="terminal"
 }
 
 // EmbeddedResource is the nested payload for ContentBlock type "resource".
@@ -211,21 +258,29 @@ type EmbeddedResource struct {
 //   - "image"         → Data (base64), MimeType
 //   - "audio"         → Data (base64), MimeType
 //   - "resource"      → Resource (embedded resource with inline text or blob)
-//   - "resource_link" → URI, Name, MimeType, Size
+//   - "resource_link" → URI, Name, MimeType, Size, Title, Description
 type ContentBlock struct {
-	Type     string            `json:"type"`
-	Text     string            `json:"text,omitempty"`
-	MimeType string            `json:"mimeType,omitempty"`
-	Data     string            `json:"data,omitempty"`
-	URI      string            `json:"uri,omitempty"`
-	Name     string            `json:"name,omitempty"`
-	Size     int               `json:"size,omitempty"`
-	Resource *EmbeddedResource `json:"resource,omitempty"`
+	Type        string            `json:"type"`
+	Text        string            `json:"text,omitempty"`
+	MimeType    string            `json:"mimeType,omitempty"`
+	Data        string            `json:"data,omitempty"`
+	URI         string            `json:"uri,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Size        int               `json:"size,omitempty"`
+	Resource    *EmbeddedResource `json:"resource,omitempty"`
+	Annotations json.RawMessage   `json:"annotations,omitempty"`
 }
 
-// ToolCallRef is a reference to a tool call, used in permission requests.
+// ToolCallRef is the tool call object sent with permission requests.
+// Per ACP §5.5, includes identifying fields beyond the ID so the client
+// can render a meaningful permission dialog.
 type ToolCallRef struct {
 	ToolCallID string `json:"toolCallId"`
+	Title      string `json:"title,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Kind       string `json:"kind,omitempty"`
 }
 
 // PermissionRequestParams is sent by the agent when it needs permission to use a tool.
@@ -359,4 +414,26 @@ type SessionInfo struct {
 type SessionListResult struct {
 	Sessions   []SessionInfo `json:"sessions"`
 	NextCursor string        `json:"nextCursor,omitempty"`
+}
+
+// --- Session config helpers ---
+
+// SessionConfigSnapshot is a compact view of session-level mode/model values.
+type SessionConfigSnapshot struct {
+	Mode  string
+	Model string
+}
+
+// SessionConfigSnapshotFromOptions extracts mode/model from a ConfigOption list.
+func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
+	snap := SessionConfigSnapshot{}
+	for _, opt := range opts {
+		if snap.Mode == "" && (opt.ID == "mode" || opt.Category == "mode") {
+			snap.Mode = opt.CurrentValue
+		}
+		if snap.Model == "" && (opt.ID == "model" || opt.Category == "model") {
+			snap.Model = opt.CurrentValue
+		}
+	}
+	return snap
 }
