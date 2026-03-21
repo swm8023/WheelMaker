@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-lark/lark"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -34,11 +35,23 @@ type IM struct {
 	handler im.MessageHandler
 	action  func(im.CardActionEvent)
 	bot     *lark.Bot
+
+	debugMu      sync.Mutex
+	debugStreams map[string]*debugStream
+}
+
+type debugStream struct {
+	messageID string
+	lines     []string
+	flushing  bool
 }
 
 // New creates a Feishu IM adapter.
 func New(cfg Config) *IM {
-	return &IM{cfg: cfg}
+	return &IM{
+		cfg:          cfg,
+		debugStreams: map[string]*debugStream{},
+	}
 }
 
 // OnMessage registers the inbound message handler.
@@ -146,9 +159,100 @@ func (f *IM) SendReaction(messageID, emoji string) error {
 	return err
 }
 
-// SendDebug sends debug text to Feishu. Current strategy is plain text with a marker.
+// SendDebug appends debug text to a per-chat stream card and flushes every 2 seconds.
 func (f *IM) SendDebug(chatID, text string) error {
-	return f.SendText(chatID, "[debug] "+strings.TrimSpace(text))
+	chatID = strings.TrimSpace(chatID)
+	line := strings.TrimSpace(text)
+	if chatID == "" || line == "" {
+		return nil
+	}
+	f.debugMu.Lock()
+	ds := f.debugStreams[chatID]
+	if ds == nil {
+		ds = &debugStream{}
+		f.debugStreams[chatID] = ds
+	}
+	ds.lines = append(ds.lines, line)
+	if len(ds.lines) > 200 {
+		ds.lines = ds.lines[len(ds.lines)-200:]
+	}
+	if !ds.flushing {
+		ds.flushing = true
+		time.AfterFunc(2*time.Second, func() { f.flushDebug(chatID) })
+	}
+	f.debugMu.Unlock()
+	return nil
+}
+
+func (f *IM) flushDebug(chatID string) {
+	f.debugMu.Lock()
+	ds := f.debugStreams[chatID]
+	if ds == nil {
+		f.debugMu.Unlock()
+		return
+	}
+	lines := append([]string(nil), ds.lines...)
+	messageID := ds.messageID
+	ds.flushing = false
+	f.debugMu.Unlock()
+
+	if len(lines) == 0 {
+		return
+	}
+	card := buildDebugCard(lines)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return
+	}
+
+	bot, err := f.ensureBot()
+	if err != nil {
+		return
+	}
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+
+	if strings.TrimSpace(messageID) == "" {
+		msg := buf.BindChatID(chatID).Build()
+		resp, postErr := bot.PostMessage(msg)
+		if postErr != nil {
+			return
+		}
+		if resp != nil {
+			f.debugMu.Lock()
+			if cur := f.debugStreams[chatID]; cur != nil {
+				cur.messageID = strings.TrimSpace(resp.Data.MessageID)
+			}
+			f.debugMu.Unlock()
+		}
+		return
+	}
+	msg := buf.Build()
+	_, _ = bot.UpdateMessage(messageID, msg)
+}
+
+func buildDebugCard(lines []string) im.Card {
+	if len(lines) > 120 {
+		lines = lines[len(lines)-120:]
+	}
+	var b strings.Builder
+	b.WriteString("```text\n")
+	for _, line := range lines {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	b.WriteString("```")
+	return im.Card{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "Debug Stream",
+			},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": b.String()},
+		},
+	}
 }
 
 // Run starts Feishu WS event loop and blocks until ctx is done.

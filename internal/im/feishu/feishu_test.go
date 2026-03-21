@@ -1,6 +1,10 @@
 package feishu
 
-import "testing"
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestParseMessageText_Text(t *testing.T) {
 	mt := "text"
@@ -26,5 +30,33 @@ func TestParseMessageText_InvalidJSON(t *testing.T) {
 	got := parseMessageText(&mt, &content)
 	if got != "" {
 		t.Fatalf("parseMessageText()=%q, want empty", got)
+	}
+}
+
+func TestBuildDebugCard_ContainsLines(t *testing.T) {
+	card := buildDebugCard([]string{"line-1", "line-2"})
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "line-1") || !strings.Contains(content, "line-2") {
+		t.Fatalf("debug card content missing lines: %q", content)
+	}
+}
+
+func TestBuildDebugCard_TruncatesToLast120Lines(t *testing.T) {
+	lines := make([]string, 0, 140)
+	for i := 0; i < 140; i++ {
+		lines = append(lines, "line-"+strconv.Itoa(i))
+	}
+	card := buildDebugCard(lines)
+	elements, _ := card["elements"].([]map[string]any)
+	content, _ := elements[0]["content"].(string)
+	if strings.Contains(content, "line-0") {
+		t.Fatalf("old lines should be truncated, got content=%q", content)
+	}
+	if !strings.Contains(content, "line-139") {
+		t.Fatalf("latest lines should be kept, got content=%q", content)
 	}
 }
