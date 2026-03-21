@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestResolveHelpModel_IncludesDebugQuickActions(t *testing.T) {
+func TestResolveHelpModel_IncludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.RegisterAgent("codex", nil)
 	c.ready = true
@@ -15,18 +15,14 @@ func TestResolveHelpModel_IncludesDebugQuickActions(t *testing.T) {
 		t.Fatalf("resolveHelpModel error: %v", err)
 	}
 
-	hasDebugOn := false
-	hasDebugOff := false
+	hasDebugStatus := false
 	for _, opt := range model.Options {
-		if opt.Label == "Project Debug On" && opt.Command == "/debug" && opt.Value == "on" {
-			hasDebugOn = true
-		}
-		if opt.Label == "Project Debug Off" && opt.Command == "/debug" && opt.Value == "off" {
-			hasDebugOff = true
+		if opt.Label == "Project Debug Status" && opt.Command == "/debug" && opt.Value == "" {
+			hasDebugStatus = true
 		}
 	}
-	if !hasDebugOn || !hasDebugOff {
-		t.Fatalf("help options missing debug quick actions: %+v", model.Options)
+	if !hasDebugStatus {
+		t.Fatalf("help options missing debug status action: %+v", model.Options)
 	}
 }
 

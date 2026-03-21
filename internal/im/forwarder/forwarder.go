@@ -75,6 +75,13 @@ func (f *Forwarder) SendReaction(messageID, emoji string) error {
 	return f.adapter.SendReaction(messageID, emoji)
 }
 
+func (f *Forwarder) SendDebug(chatID, text string) error {
+	if sender, ok := f.adapter.(im.DebugSender); ok {
+		return sender.SendDebug(chatID, text)
+	}
+	return f.adapter.SendText(chatID, text)
+}
+
 func (f *Forwarder) Run(ctx context.Context) error {
 	return f.adapter.Run(ctx)
 }
@@ -560,6 +567,7 @@ func parseIndex(v string) int {
 }
 
 var _ im.Channel = (*Forwarder)(nil)
+var _ im.DebugSender = (*Forwarder)(nil)
 var _ im.UpdateEmitter = (*Forwarder)(nil)
 var _ im.DecisionRequester = (*Forwarder)(nil)
 var _ im.HelpResolverSetter = (*Forwarder)(nil)

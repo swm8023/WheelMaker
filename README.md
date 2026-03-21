@@ -130,7 +130,6 @@ Send in IM or console:
 | `/cancel` | Cancel the in-progress request |
 | `/status` | Show current agent and session ID |
 | `/debug` | Show project debug status |
-| `/debug <on\|off>` | Toggle project-level debug logging |
 | anything else | Sent to the AI as a message (including text starting with `/`) |
 
 ## Architecture

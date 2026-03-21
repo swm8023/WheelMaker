@@ -74,6 +74,11 @@ func (c *ConsoleIM) SendOptions(_ string, title, body string, options []im.Decis
 // SendReaction is a no-op for the console IM.
 func (c *ConsoleIM) SendReaction(_, _ string) error { return nil }
 
+// SendDebug prints debug text to stdout with a debug marker.
+func (c *ConsoleIM) SendDebug(chatID, text string) error {
+	return c.SendText(chatID, "[debug] "+strings.TrimSpace(text))
+}
+
 // Run reads lines from os.Stdin until ctx is cancelled or EOF.
 // Each non-empty line is dispatched as an im.Message to the registered handler.
 func (c *ConsoleIM) Run(ctx context.Context) error {
@@ -112,4 +117,5 @@ func (c *ConsoleIM) Run(ctx context.Context) error {
 }
 
 var _ im.Channel = (*ConsoleIM)(nil)
+var _ im.DebugSender = (*ConsoleIM)(nil)
 var _ im.OptionSender = (*ConsoleIM)(nil)

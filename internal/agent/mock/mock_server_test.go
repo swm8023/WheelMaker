@@ -832,4 +832,3 @@ func TestInMemoryMock_SetConfigOption(t *testing.T) {
 		t.Fatalf("model currentValue=%q, want gpt-4.1-mini", modelOpt.CurrentValue)
 	}
 }
-

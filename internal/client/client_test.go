@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -142,12 +143,28 @@ func captureReplies(c *client.Client) *[]string {
 	return messages
 }
 
+func captureRepliesWithDebug(c *client.Client) (*[]string, *[]string) {
+	messages := &[]string{}
+	debugMessages := &[]string{}
+	c.InjectIMChannel(&captureChannel{messages: messages, debugMessages: debugMessages})
+	return messages, debugMessages
+}
+
 type captureChannel struct {
-	messages *[]string
+	messages      *[]string
+	debugMessages *[]string
 }
 
 func (a *captureChannel) OnMessage(_ im.MessageHandler) {}
 func (a *captureChannel) SendText(_ string, text string) error {
+	*a.messages = append(*a.messages, text)
+	return nil
+}
+func (a *captureChannel) SendDebug(_ string, text string) error {
+	if a.debugMessages != nil {
+		*a.debugMessages = append(*a.debugMessages, text)
+		return nil
+	}
 	*a.messages = append(*a.messages, text)
 	return nil
 }
@@ -156,6 +173,7 @@ func (a *captureChannel) SendReaction(_, _ string) error     { return nil }
 func (a *captureChannel) Run(_ context.Context) error        { return nil }
 
 var _ im.Channel = (*captureChannel)(nil)
+var _ im.DebugSender = (*captureChannel)(nil)
 
 // testLogWriter is a goroutine-safe log output writer for capturing log output in tests.
 type testLogWriter struct {
@@ -265,22 +283,22 @@ func TestHandleMessage_Use_MissingName(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_Debug_EnableCurrentAgent(t *testing.T) {
+func TestHandleMessage_Debug_Status(t *testing.T) {
 	mock := &mockSession{agentN: "mock", sessionN: "sess-1"}
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug on"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug"})
 
 	found := false
 	for _, m := range *msgs {
-		if strings.Contains(m, "Debug enabled for project") {
+		if strings.Contains(m, "Debug status: off (project)") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("messages = %v, want debug enabled confirmation", *msgs)
+		t.Fatalf("messages = %v, want debug status", *msgs)
 	}
 }
 
@@ -407,24 +425,24 @@ func TestHandleMessage_Prompt_DebugForwardsACPJSONToIM(t *testing.T) {
 	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
 		return &minimalMockAgent{}
 	})
+	c.SetDebugLogger(io.Discard)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	defer c.Close()
 
-	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug on"})
+	_, debugMsgs := captureRepliesWithDebug(c)
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
 
 	found := false
-	for _, m := range *msgs {
+	for _, m := range *debugMsgs {
 		if strings.Contains(m, "[debug][codex]") && strings.Contains(m, "\"jsonrpc\"") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("messages = %v, want debug ACP json forwarded to IM", *msgs)
+		t.Fatalf("debug messages = %v, want debug ACP json forwarded to IM debug channel", *debugMsgs)
 	}
 }
 

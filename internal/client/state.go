@@ -70,9 +70,6 @@ type ProjectState struct {
 	// ActiveAgent is the name of the currently active agent (e.g. "claude").
 	ActiveAgent string `json:"activeAgent,omitempty"`
 
-	// DebugIM enables ACP raw JSON forwarding to IM for this project.
-	DebugIM bool `json:"debugIm,omitempty"`
-
 	// Connection captures what this client sent in the last initialize call.
 	// Common across all agents since WheelMaker always declares the same capabilities.
 	Connection *ConnectionConfig `json:"connection,omitempty"`
@@ -86,7 +83,6 @@ type ProjectState struct {
 func (s *ProjectState) UnmarshalJSON(data []byte) error {
 	type rawProjectState struct {
 		ActiveAgent       string                 `json:"activeAgent,omitempty"`
-		DebugIM           bool                   `json:"debugIm,omitempty"`
 		Agents            map[string]*AgentState `json:"agents,omitempty"`
 		LegacyActiveAgent string                 `json:"activeBackend,omitempty"`
 		LegacyAgents      map[string]*AgentState `json:"backends,omitempty"`
@@ -106,7 +102,6 @@ func (s *ProjectState) UnmarshalJSON(data []byte) error {
 	if s.Agents == nil {
 		s.Agents = raw.LegacyAgents
 	}
-	s.DebugIM = raw.DebugIM
 	s.Connection = raw.Connection
 	return nil
 }

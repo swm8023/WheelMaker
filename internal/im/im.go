@@ -34,3 +34,9 @@ type Channel interface {
 	// Run starts the event loop. It blocks until ctx is cancelled.
 	Run(ctx context.Context) error
 }
+
+// DebugSender can send debug messages through IM-specific debug channel behavior.
+// Implementations may format or route differently from normal text messages.
+type DebugSender interface {
+	SendDebug(chatID, text string) error
+}

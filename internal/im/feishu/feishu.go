@@ -146,6 +146,11 @@ func (f *IM) SendReaction(messageID, emoji string) error {
 	return err
 }
 
+// SendDebug sends debug text to Feishu. Current strategy is plain text with a marker.
+func (f *IM) SendDebug(chatID, text string) error {
+	return f.SendText(chatID, "[debug] "+strings.TrimSpace(text))
+}
+
 // Run starts Feishu WS event loop and blocks until ctx is done.
 func (f *IM) Run(ctx context.Context) error {
 	bot, err := f.ensureBot()
@@ -305,5 +310,6 @@ func firstNonEmpty(v ...string) string {
 }
 
 var _ im.Channel = (*IM)(nil)
+var _ im.DebugSender = (*IM)(nil)
 var _ im.CardActionSubscriber = (*IM)(nil)
 var _ im.OptionSender = (*IM)(nil)

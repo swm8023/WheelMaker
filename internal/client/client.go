@@ -38,7 +38,8 @@ type Client struct {
 	state *ProjectState
 	imRun im.Channel // nil when no IM channel configured
 
-	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
+	debugLog     io.Writer // optional ACP JSON debug logger sink
+	debugEnabled bool      // project-level debug toggle from config
 
 	mu       sync.Mutex
 	promptMu sync.Mutex // serializes handlePrompt and switchAgent
@@ -102,6 +103,7 @@ func New(store Store, imProvider im.Channel, projectName string, cwd string) *Cl
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
 	c.debugLog = w
+	c.debugEnabled = w != nil
 	c.mu.Unlock()
 }
 
@@ -709,13 +711,13 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
 	dw := c.debugLog
+	debugEnabled := c.debugEnabled
 	savedSID := ""
 	if c.state.Agents != nil {
 		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
 			savedSID = as.LastSessionID
 		}
 	}
-	debugEnabled := c.state.DebugIM
 	c.mu.Unlock()
 
 	baseAgent := fac("", nil)
@@ -786,10 +788,7 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 		}
 	}
 	dw := c.debugLog
-	debugEnabled := false
-	if c.state != nil {
-		debugEnabled = c.state.DebugIM
-	}
+	debugEnabled := c.debugEnabled
 	c.mu.Unlock()
 
 	// Connect new agent.
@@ -881,6 +880,19 @@ func (c *Client) reply(chatID, text string) {
 	fmt.Println(text)
 }
 
+// replyDebug sends debug text via IM debug channel when available.
+func (c *Client) replyDebug(chatID, text string) {
+	if c.imRun != nil {
+		if dbg, ok := c.imRun.(im.DebugSender); ok {
+			_ = dbg.SendDebug(chatID, text)
+			return
+		}
+		_ = c.imRun.SendText(chatID, text)
+		return
+	}
+	fmt.Println(text)
+}
+
 func renderUnknown(v string) string {
 	if strings.TrimSpace(v) == "" {
 		return "unknown"
@@ -946,8 +958,6 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
 	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
 	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug On", Command: "/debug", Value: "on"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Off", Command: "/debug", Value: "off"})
 	c.mu.Lock()
 	agentNames := make([]string, 0, len(c.agentFacs))
 	for name := range c.agentFacs {
