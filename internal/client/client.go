@@ -953,6 +953,8 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
 	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
 	model.Options = append(model.Options, im.HelpOption{Label: "Debug Status", Command: "/debug"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Debug On", Command: "/debug", Value: "on"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Debug Off", Command: "/debug", Value: "off"})
 	c.mu.Lock()
 	agentNames := make([]string, 0, len(c.agentFacs))
 	for name := range c.agentFacs {
