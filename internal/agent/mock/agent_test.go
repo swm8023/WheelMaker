@@ -24,7 +24,7 @@ func TestMockBackend_Connect(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	var initResult acp.InitializeResult
-	if err := conn.Send(context.Background(), "initialize", acp.InitializeParams{
+	if err := conn.SendAgent(context.Background(), "initialize", acp.InitializeParams{
 		ProtocolVersion: 1,
 	}, &initResult); err != nil {
 		t.Fatalf("initialize: %v", err)
@@ -43,3 +43,4 @@ func TestMockBackend_Close(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 }
+

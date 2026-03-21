@@ -78,8 +78,8 @@ func (f *Forwarder) filter(ctx context.Context, msg ForwardMessage) (ForwardMess
 	return f.prefilter(ctx, msg)
 }
 
-// Send forwards a request to agent after filtering.
-func (f *Forwarder) Send(ctx context.Context, method string, params any, result any) error {
+// SendAgent forwards a request to agent after filtering.
+func (f *Forwarder) SendAgent(ctx context.Context, method string, params any, result any) error {
 	raw, err := marshalParams(params)
 	if err != nil {
 		return err
@@ -96,11 +96,11 @@ func (f *Forwarder) Send(ctx context.Context, method string, params any, result 
 	if !allow {
 		return fmt.Errorf("acp forwarder: request blocked: %s", method)
 	}
-	return f.conn.Send(ctx, msg.Method, msg.Params, result)
+	return f.conn.SendAgent(ctx, msg.Method, msg.Params, result)
 }
 
-// notifyAgent forwards a notification to the agent after filtering.
-func (f *Forwarder) notifyAgent(method string, params any) error {
+// NotifyAgent forwards a notification to the agent after filtering.
+func (f *Forwarder) NotifyAgent(method string, params any) error {
 	raw, err := marshalParams(params)
 	if err != nil {
 		return err
@@ -117,7 +117,7 @@ func (f *Forwarder) notifyAgent(method string, params any) error {
 	if !allow {
 		return nil
 	}
-	return f.conn.Notify(msg.Method, msg.Params)
+	return f.conn.NotifyAgent(msg.Method, msg.Params)
 }
 
 // Close closes the underlying Conn.
@@ -137,14 +137,14 @@ func (f *Forwarder) SetDebugLogger(w io.Writer) {
 // concurrently with active requests.
 func (f *Forwarder) SetCallbacks(h ClientCallbacks) {
 	f.conn.OnRequest(func(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
-		return dispatchClientMessage(ctx, method, params, noResponse, h)
+		return dispatchAgentToClientMessage(ctx, method, params, noResponse, h)
 	})
 }
 
-// dispatchClientMessage routes an inbound agent→client message to the typed
+// dispatchAgentToClientMessage routes an inbound agent→client message to the typed
 // ClientCallbacks method. noResponse is true for notifications (session/update);
 // in that case all return values are discarded by the caller.
-func dispatchClientMessage(ctx context.Context, method string, params json.RawMessage, noResponse bool, h ClientCallbacks) (any, error) {
+func dispatchAgentToClientMessage(ctx context.Context, method string, params json.RawMessage, noResponse bool, h ClientCallbacks) (any, error) {
 	if noResponse {
 		if method == MethodSessionUpdate {
 			params = NormalizeNotificationParams(method, params)
@@ -226,7 +226,7 @@ func dispatchClientMessage(ctx context.Context, method string, params json.RawMe
 // Per §3, this must complete before any session/* method.
 func (f *Forwarder) Initialize(ctx context.Context, params InitializeParams) (InitializeResult, error) {
 	var result InitializeResult
-	if err := f.conn.Send(ctx, MethodInitialize, params, &result); err != nil {
+	if err := f.conn.SendAgent(ctx, MethodInitialize, params, &result); err != nil {
 		return InitializeResult{}, err
 	}
 	return result, nil
@@ -235,7 +235,7 @@ func (f *Forwarder) Initialize(ctx context.Context, params InitializeParams) (In
 // SessionNew creates a new ACP session (client->agent).
 func (f *Forwarder) SessionNew(ctx context.Context, params SessionNewParams) (SessionNewResult, error) {
 	var result SessionNewResult
-	if err := f.Send(ctx, MethodSessionNew, params, &result); err != nil {
+	if err := f.SendAgent(ctx, MethodSessionNew, params, &result); err != nil {
 		return SessionNewResult{}, err
 	}
 	return result, nil
@@ -244,7 +244,7 @@ func (f *Forwarder) SessionNew(ctx context.Context, params SessionNewParams) (Se
 // SessionLoad resumes an existing ACP session (client->agent).
 func (f *Forwarder) SessionLoad(ctx context.Context, params SessionLoadParams) (SessionLoadResult, error) {
 	var result SessionLoadResult
-	if err := f.Send(ctx, MethodSessionLoad, params, &result); err != nil {
+	if err := f.SendAgent(ctx, MethodSessionLoad, params, &result); err != nil {
 		return SessionLoadResult{}, err
 	}
 	return result, nil
@@ -253,7 +253,7 @@ func (f *Forwarder) SessionLoad(ctx context.Context, params SessionLoadParams) (
 // SessionList returns a paginated list of available sessions (client->agent).
 func (f *Forwarder) SessionList(ctx context.Context, params SessionListParams) (SessionListResult, error) {
 	var result SessionListResult
-	if err := f.Send(ctx, MethodSessionList, params, &result); err != nil {
+	if err := f.SendAgent(ctx, MethodSessionList, params, &result); err != nil {
 		return SessionListResult{}, err
 	}
 	return result, nil
@@ -264,7 +264,7 @@ func (f *Forwarder) SessionList(ctx context.Context, params SessionListParams) (
 // notifications are delivered concurrently via the SessionUpdate callback.
 func (f *Forwarder) SessionPrompt(ctx context.Context, params SessionPromptParams) (SessionPromptResult, error) {
 	var result SessionPromptResult
-	if err := f.Send(ctx, MethodSessionPrompt, params, &result); err != nil {
+	if err := f.SendAgent(ctx, MethodSessionPrompt, params, &result); err != nil {
 		return SessionPromptResult{}, err
 	}
 	return result, nil
@@ -272,7 +272,7 @@ func (f *Forwarder) SessionPrompt(ctx context.Context, params SessionPromptParam
 
 // SessionCancel sends session/cancel notification to abort an in-progress prompt.
 func (f *Forwarder) SessionCancel(sessionID string) error {
-	return f.notifyAgent(MethodSessionCancel, SessionCancelParams{SessionID: sessionID})
+	return f.NotifyAgent(MethodSessionCancel, SessionCancelParams{SessionID: sessionID})
 }
 
 // SessionSetConfigOption sets a named config option on the active session and
@@ -280,7 +280,7 @@ func (f *Forwarder) SessionCancel(sessionID string) error {
 // []ConfigOption and {"configOptions":[...]}.
 func (f *Forwarder) SessionSetConfigOption(ctx context.Context, params SessionSetConfigOptionParams) ([]ConfigOption, error) {
 	var raw json.RawMessage
-	if err := f.Send(ctx, MethodSetConfigOption, params, &raw); err != nil {
+	if err := f.SendAgent(ctx, MethodSetConfigOption, params, &raw); err != nil {
 		return nil, err
 	}
 	var opts []ConfigOption

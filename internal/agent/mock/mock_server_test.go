@@ -28,12 +28,12 @@ func TestInMemoryMock_PromptCase1_TextAndMetaUpdates(t *testing.T) {
 	ctx := context.Background()
 
 	var initResult acp.InitializeResult
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 
 	var newResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 	if len(newResult.ConfigOptions) == 0 {
@@ -57,7 +57,7 @@ func TestInMemoryMock_PromptCase1_TextAndMetaUpdates(t *testing.T) {
 	})
 
 	var promptResult acp.SessionPromptResult
-	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+	if err := c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{
 		SessionID: newResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "1"}},
 	}, &promptResult); err != nil {
@@ -81,11 +81,11 @@ func TestInMemoryMock_GlobalConfigCommand(t *testing.T) {
 	c := newInMemoryMockConn(t)
 	ctx := context.Background()
 	var _init acp.InitializeResult
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &_init); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &_init); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	var newResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 
@@ -105,7 +105,7 @@ func TestInMemoryMock_GlobalConfigCommand(t *testing.T) {
 	})
 
 	var promptResult acp.SessionPromptResult
-	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+	if err := c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{
 		SessionID: newResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "/model gpt-4.1-mini"}},
 	}, &promptResult); err != nil {
@@ -120,11 +120,11 @@ func TestInMemoryMock_CallbackCases(t *testing.T) {
 	c := newInMemoryMockConn(t)
 	ctx := context.Background()
 	var _init acp.InitializeResult
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &_init); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &_init); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	var newResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 
@@ -155,7 +155,7 @@ func TestInMemoryMock_CallbackCases(t *testing.T) {
 
 	for _, prompt := range []string{"2", "3", "4"} {
 		var result acp.SessionPromptResult
-		if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+		if err := c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{
 			SessionID: newResult.SessionID,
 			Prompt:    []acp.ContentBlock{{Type: "text", Text: prompt}},
 		}, &result); err != nil {
@@ -172,11 +172,11 @@ func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
 	ctx := context.Background()
 
 	var initResult acp.InitializeResult
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	var newResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestInMemoryMock_PermissionRequestsUserChoice(t *testing.T) {
 	})
 
 	var promptResult acp.SessionPromptResult
-	if err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{
+	if err := c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{
 		SessionID: newResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "4"}},
 	}, &promptResult); err != nil {
@@ -273,11 +273,11 @@ func TestInMemoryMock_ErrorInjection(t *testing.T) {
 	c := newInMemoryMockConn(t)
 	ctx := context.Background()
 	var _init acp.InitializeResult
-	if err := c.Send(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &_init); err != nil {
+	if err := c.SendAgent(ctx, "initialize", acp.InitializeParams{ProtocolVersion: 1}, &_init); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	var newResult acp.SessionNewResult
-	if err := c.Send(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
+	if err := c.SendAgent(ctx, "session/new", acp.SessionNewParams{CWD: t.TempDir()}, &newResult); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestInMemoryMock_ErrorInjection(t *testing.T) {
 		code  string
 	}{{input: "10", code: "-32602"}, {input: "11", code: "-32601"}, {input: "12", code: "-32603"}} {
 		var result acp.SessionPromptResult
-		err := c.Send(ctx, "session/prompt", acp.SessionPromptParams{SessionID: newResult.SessionID, Prompt: []acp.ContentBlock{{Type: "text", Text: tc.input}}}, &result)
+		err := c.SendAgent(ctx, "session/prompt", acp.SessionPromptParams{SessionID: newResult.SessionID, Prompt: []acp.ContentBlock{{Type: "text", Text: tc.input}}}, &result)
 		if err == nil {
 			t.Fatalf("prompt %s: expected rpc error", tc.input)
 		}
@@ -295,3 +295,4 @@ func TestInMemoryMock_ErrorInjection(t *testing.T) {
 		}
 	}
 }
+

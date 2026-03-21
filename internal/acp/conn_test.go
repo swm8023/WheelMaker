@@ -43,7 +43,7 @@ func newMockConn(t *testing.T) *acp.Conn {
 func TestSend_Initialize(t *testing.T) {
 	c := newMockConn(t)
 	var result acp.InitializeResult
-	err := c.Send(context.Background(), "initialize", acp.InitializeParams{
+	err := c.SendAgent(context.Background(), "initialize", acp.InitializeParams{
 		ProtocolVersion: 1,
 		ClientInfo:      &acp.AgentInfo{Name: "test", Version: "0"},
 	}, &result)
@@ -65,7 +65,7 @@ func TestSend_Initialize(t *testing.T) {
 func TestSend_SessionNew(t *testing.T) {
 	c := newMockConn(t)
 	var result acp.SessionNewResult
-	err := c.Send(context.Background(), "session/new", acp.SessionNewParams{
+	err := c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{
 		CWD:        "/tmp",
 		MCPServers: []acp.MCPServer{},
 	}, &result)
@@ -80,7 +80,7 @@ func TestSend_SessionNew(t *testing.T) {
 // TestSend_RPCError verifies JSON-RPC error responses are returned as errors.
 func TestSend_RPCError(t *testing.T) {
 	c := newMockConn(t)
-	err := c.Send(context.Background(), "error_test", nil, nil)
+	err := c.SendAgent(context.Background(), "error_test", nil, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -92,7 +92,7 @@ func TestSend_ContextCancel(t *testing.T) {
 	c := newMockConn(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
-	err := c.Send(ctx, "slow_response", nil, nil)
+	err := c.SendAgent(ctx, "slow_response", nil, nil)
 	if err == nil {
 		t.Fatal("expected error from cancelled context, got nil")
 	}
@@ -105,7 +105,7 @@ func TestSend_ContextTimeout(t *testing.T) {
 	// slow_response waits 200ms in mock; set a 50ms timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	err := c.Send(ctx, "slow_response", nil, nil)
+	err := c.SendAgent(ctx, "slow_response", nil, nil)
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -123,7 +123,7 @@ func TestSend_Concurrent(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			var result acp.SessionNewResult
-			if err := c.Send(context.Background(), "session/new", acp.SessionNewParams{
+			if err := c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{
 				CWD: fmt.Sprintf("/tmp/session-%d", i),
 			}, &result); err != nil {
 				t.Errorf("goroutine %d: %v", i, err)
@@ -146,11 +146,11 @@ func TestOnRequest_Notification(t *testing.T) {
 
 	// Initialize and create a session first.
 	var initResult acp.InitializeResult
-	if err := c.Send(context.Background(), "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
+	if err := c.SendAgent(context.Background(), "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	var sessResult acp.SessionNewResult
-	if err := c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult); err != nil {
+	if err := c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult); err != nil {
 		t.Fatalf("session/new: %v", err)
 	}
 
@@ -175,7 +175,7 @@ func TestOnRequest_Notification(t *testing.T) {
 
 	// Send a prompt — the mock sends 3 text chunks then returns.
 	var promptResult acp.SessionPromptResult
-	if err := c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
+	if err := c.SendAgent(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "hello"}},
 	}, &promptResult); err != nil {
@@ -211,8 +211,8 @@ func TestOnRequest_NilHandler(t *testing.T) {
 
 	// No OnRequest handler registered — notifications should be silently dropped.
 	var sessResult acp.SessionNewResult
-	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
-	err := c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
+	_ = c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
+	err := c.SendAgent(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "test"}},
 	}, nil)
@@ -224,7 +224,7 @@ func TestOnRequest_NilHandler(t *testing.T) {
 // TestNotify verifies fire-and-forget notifications don't block or error.
 func TestNotify(t *testing.T) {
 	c := newMockConn(t)
-	err := c.Notify("session/cancel", acp.SessionCancelParams{SessionID: "some-id"})
+	err := c.NotifyAgent("session/cancel", acp.SessionCancelParams{SessionID: "some-id"})
 	if err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestNotify_DebugLogger(t *testing.T) {
 	}
 	defer c.Close()
 
-	if err := c.Notify("session/cancel", acp.SessionCancelParams{SessionID: "sess-1"}); err != nil {
+	if err := c.NotifyAgent("session/cancel", acp.SessionCancelParams{SessionID: "sess-1"}); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	got := dbg.String()
@@ -276,7 +276,7 @@ func TestSend_AfterClose(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	err := c.Send(context.Background(), "initialize", nil, nil)
+	err := c.SendAgent(context.Background(), "initialize", nil, nil)
 	if err == nil {
 		t.Fatal("expected error sending after close, got nil")
 	}
@@ -290,7 +290,7 @@ func TestSend_ProcessExit(t *testing.T) {
 	// The conn's readLoop should unblock all pending requests.
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- c.Send(context.Background(), "exit_now", nil, nil)
+		errCh <- c.SendAgent(context.Background(), "exit_now", nil, nil)
 	}()
 	select {
 	case err := <-errCh:
@@ -324,7 +324,7 @@ func TestIncomingRequest_Handler(t *testing.T) {
 	var result struct {
 		ReceivedContent string `json:"receivedContent"`
 	}
-	if err := c.Send(context.Background(), "trigger_incoming_request", nil, &result); err != nil {
+	if err := c.SendAgent(context.Background(), "trigger_incoming_request", nil, &result); err != nil {
 		t.Fatalf("Send trigger_incoming_request: %v", err)
 	}
 
@@ -344,7 +344,7 @@ func TestIncomingRequest_Handler(t *testing.T) {
 func TestIncomingRequest_NoHandler(t *testing.T) {
 	c := newMockConn(t)
 	// No OnRequest registered — mock expects a -32601 error back.
-	err := c.Send(context.Background(), "trigger_incoming_request_no_handler", nil, nil)
+	err := c.SendAgent(context.Background(), "trigger_incoming_request_no_handler", nil, nil)
 	if err != nil {
 		t.Fatalf("Send: %v", err) // the client-side send itself should succeed
 	}
@@ -353,7 +353,7 @@ func TestIncomingRequest_NoHandler(t *testing.T) {
 // TestSend_NilResult verifies that Send with nil result doesn't panic.
 func TestSend_NilResult(t *testing.T) {
 	c := newMockConn(t)
-	err := c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, nil)
+	err := c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, nil)
 	if err != nil {
 		t.Fatalf("Send with nil result: %v", err)
 	}
@@ -373,8 +373,8 @@ func TestNotificationHandling(t *testing.T) {
 
 	// Generate 3 notifications via session/prompt.
 	var sessResult acp.SessionNewResult
-	_ = c.Send(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
-	_ = c.Send(context.Background(), "session/prompt", acp.SessionPromptParams{
+	_ = c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
+	_ = c.SendAgent(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
 		Prompt:    []acp.ContentBlock{{Type: "text", Text: "multi"}},
 	}, nil)
@@ -552,3 +552,4 @@ func mockNotify(enc *json.Encoder, method string, params any) {
 		"params":  params,
 	})
 }
+
