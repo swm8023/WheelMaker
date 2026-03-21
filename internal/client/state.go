@@ -50,6 +50,9 @@ type AgentState struct {
 	// LastSessionID is passed to session/load on the next connection attempt.
 	LastSessionID string `json:"lastSessionId,omitempty"`
 
+	// DebugIM enables ACP raw JSON forwarding to IM for this agent.
+	DebugIM bool `json:"debugIm,omitempty"`
+
 	// ACP agent-level data from the initialize response.
 	ProtocolVersion   string                `json:"protocolVersion,omitempty"`
 	AgentCapabilities acp.AgentCapabilities `json:"agentCapabilities,omitempty"`
