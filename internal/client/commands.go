@@ -316,7 +316,7 @@ func (c *Client) createNewSession(ctx context.Context) (string, error) {
 
 	res, err := fwd.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        cwd,
-		MCPServers: []acp.MCPServer{},
+		MCPServers: emptyMCPServers(),
 	})
 	if err != nil {
 		return "", err
@@ -373,7 +373,7 @@ func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, err
 	_, err = fwd.SessionLoad(ctx, acp.SessionLoadParams{
 		SessionID:  target,
 		CWD:        cwd,
-		MCPServers: []acp.MCPServer{},
+		MCPServers: emptyMCPServers(),
 	})
 	if err != nil {
 		return "", err
