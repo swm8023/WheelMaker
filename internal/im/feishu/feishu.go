@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-lark/lark"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
-	larkevent "github.com/larksuite/oapi-sdk-go/v3/event"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
+	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
@@ -267,7 +267,7 @@ func (f *IM) Run(ctx context.Context) error {
 	eventHandler := dispatcher.
 		NewEventDispatcher(f.cfg.VerificationToken, f.cfg.EncryptKey).
 		OnP2MessageReceiveV1(f.handleP2MessageReceive).
-		OnCustomizedEvent("card.action.trigger", f.handleCardAction)
+		OnP2CardActionTrigger(f.handleCardAction)
 
 	logLevel := larkcore.LogLevelInfo
 	if f.cfg.Debug {
@@ -341,33 +341,13 @@ func (f *IM) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageRe
 	return nil
 }
 
-func (f *IM) handleCardAction(_ context.Context, event *larkevent.EventReq) error {
-	if event == nil || len(event.Body) == 0 {
-		return nil
+func (f *IM) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
+	if event == nil || event.Event == nil || event.Event.Action == nil {
+		return &callback.CardActionTriggerResponse{}, nil
 	}
-	var payload struct {
-		Event struct {
-			Operator struct {
-				OperatorID struct {
-					OpenID string `json:"open_id"`
-				} `json:"operator_id"`
-			} `json:"operator"`
-			Context struct {
-				OpenMessageID string `json:"open_message_id"`
-				OpenChatID    string `json:"open_chat_id"`
-			} `json:"context"`
-			Action struct {
-				Tag    string                 `json:"tag"`
-				Option string                 `json:"option"`
-				Value  map[string]interface{} `json:"value"`
-			} `json:"action"`
-		} `json:"event"`
-	}
-	if err := json.Unmarshal(event.Body, &payload); err != nil {
-		return nil
-	}
+	payload := event.Event
 	value := map[string]string{}
-	for k, v := range payload.Event.Action.Value {
+	for k, v := range payload.Action.Value {
 		value[k] = fmt.Sprint(v)
 	}
 
@@ -376,17 +356,17 @@ func (f *IM) handleCardAction(_ context.Context, event *larkevent.EventReq) erro
 	f.mu.RUnlock()
 	if h != nil {
 		evt := im.CardActionEvent{
-			ChatID:    firstNonEmpty(value["chat_id"], payload.Event.Context.OpenChatID),
-			MessageID: payload.Event.Context.OpenMessageID,
-			UserID:    payload.Event.Operator.OperatorID.OpenID,
-			Tag:       payload.Event.Action.Tag,
-			Option:    payload.Event.Action.Option,
+			ChatID:    firstNonEmpty(value["chat_id"], payload.Context.OpenChatID),
+			MessageID: payload.Context.OpenMessageID,
+			UserID:    payload.Operator.OpenID,
+			Tag:       payload.Action.Tag,
+			Option:    payload.Action.Option,
 			Value:     value,
 		}
 		// ACK callback quickly; do not block Feishu callback thread on command execution.
 		go h(evt)
 	}
-	return nil
+	return &callback.CardActionTriggerResponse{}, nil
 }
 
 func parseMessageText(msgType *string, content *string) string {
