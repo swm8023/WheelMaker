@@ -19,8 +19,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ── Locate dirs ────────────────────────────────────────────────────────────────
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$appDir   = Join-Path $repoRoot "app"
+$appDir  = Split-Path -Parent $PSScriptRoot   # app/scripts/ → app/
+$repoRoot = Split-Path -Parent $appDir        # app/ → repo root
 
 Write-Host "==> WheelMaker mobile app setup" -ForegroundColor Cyan
 Write-Host "    repo : $repoRoot"

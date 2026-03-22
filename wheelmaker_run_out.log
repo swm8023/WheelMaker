@@ -1,3 +1,0 @@
-[Info] 2026/03/22 07:41:53.677652 connected to wss://msg-frontier.feishu.cn/ws/v2?fpid=493&aid=552564&device_id=7619858258862394321&access_key=bf03642f248c748fd6c589f8dac4b5a3&service_id=33554678&ticket=117faee3-d75f-44a5-8873-f69fb2981ece [conn_id=7619858258862394321]
-[Debug] 2026/03/22 07:41:53.684514 ping success [conn_id=7619858258862394321]
-[Debug] 2026/03/22 07:41:53.732593 receive pong [conn_id=7619858258862394321]

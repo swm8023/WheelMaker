@@ -34,8 +34,8 @@ type mobileConn struct {
 // IM implements im.Channel, im.OptionSender, im.DebugSender, and im.CardActionSubscriber
 // using an HTTP/WebSocket server. Each connected mobile client is assigned a unique chatID.
 type IM struct {
-	cfg              Config
-	handler          im.MessageHandler
+	cfg               Config
+	handler           im.MessageHandler
 	cardActionHandler func(im.CardActionEvent)
 
 	mu     sync.RWMutex

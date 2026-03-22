@@ -1,6 +1,6 @@
-# 工具二进制（通过 scripts/install-tools.sh 下载）
-bin/**/*
-!bin/**/.gitkeep
+# 工具二进制（通过 server/scripts/install-tools.sh 下载）
+server/bin/**/*
+!server/bin/**/.gitkeep
 
 # 运行时状态
 .wheelmaker/
@@ -12,6 +12,9 @@ bin/**/*
 /vendor/
 .gocache/
 .gomodcache/
+
+# Runtime log files
+wheelmaker_*.log
 
 # IDE
 .vscode/
