@@ -12,7 +12,7 @@ import (
 // Connect() is intentionally executed outside c.mu to avoid blocking unrelated operations.
 func (c *Client) ensureForwarder(ctx context.Context) error {
 	c.mu.Lock()
-	if c.forwarder != nil {
+	if c.conn != nil && c.conn.forwarder != nil {
 		c.mu.Unlock()
 		return nil
 	}
@@ -24,13 +24,7 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	if name == "" {
 		name = defaultAgentName
 	}
-	fac := c.agentFacs[name]
-	if fac == nil {
-		c.mu.Unlock()
-		return fmt.Errorf("no agent registered for %q", name)
-	}
 	dw := c.debugLog
-	debugEnabled := c.debugEnabled
 	savedSID := ""
 	if c.state.Agents != nil {
 		if as := c.state.Agents[name]; as != nil && as.LastSessionID != "" {
@@ -39,26 +33,29 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	}
 	c.mu.Unlock()
 
+	fac := c.registry.get(name)
+	if fac == nil {
+		return fmt.Errorf("no agent registered for %q", name)
+	}
+
 	baseAgent := fac("", nil)
 	conn, err := baseAgent.Connect(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if debugWriter := c.composeDebugWriter(name, dw, debugEnabled); debugWriter != nil {
+	if debugWriter := c.composeDebugWriter(name, dw); debugWriter != nil {
 		conn.SetDebugLogger(debugWriter)
 	}
 	fwd := acp.NewForwarder(conn, nil)
 	fwd.SetCallbacks(c)
 
 	c.mu.Lock()
-	if c.forwarder != nil {
+	if c.conn != nil && c.conn.forwarder != nil {
 		c.mu.Unlock()
 		_ = fwd.Close()
 		return nil
 	}
-	c.forwarder = fwd
-	c.currentAgent = baseAgent
-	c.currentAgentName = name
+	c.conn = &agentConn{name: name, agent: baseAgent, forwarder: fwd}
 	c.ready = false
 	c.sessionID = savedSID
 	c.mu.Unlock()
@@ -68,11 +65,9 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 // switchAgent cancels any in-progress prompt, waits for it to finish via
 // promptMu, connects a new agent binary, and replaces the forwarder.
 func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode SwitchMode) error {
-	c.mu.Lock()
-	fac := c.agentFacs[name]
-	c.mu.Unlock()
+	fac := c.registry.get(name)
 	if fac == nil {
-		return fmt.Errorf("unknown agent: %q (registered: %v)", name, c.registeredAgentNames())
+		return fmt.Errorf("unknown agent: %q (registered: %v)", name, c.registry.names())
 	}
 
 	// Cancel in-progress prompt, wait for handlePrompt to release promptMu.
@@ -93,8 +88,9 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 
 	// Capture outgoing state.
 	c.mu.Lock()
-	oldFwd := c.forwarder
+	oldConn := c.conn
 	savedLastReply := c.lastReply
+	dw := c.debugLog
 	c.mu.Unlock()
 	c.persistMeta() // save outgoing agent state before reset
 
@@ -106,8 +102,6 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 			savedSID = as.LastSessionID
 		}
 	}
-	dw := c.debugLog
-	debugEnabled := c.debugEnabled
 	c.mu.Unlock()
 
 	// Connect new agent.
@@ -116,18 +110,16 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if debugWriter := c.composeDebugWriter(name, dw, debugEnabled); debugWriter != nil {
+	if debugWriter := c.composeDebugWriter(name, dw); debugWriter != nil {
 		newConn.SetDebugLogger(debugWriter)
 	}
 	newFwd := acp.NewForwarder(newConn, nil)
 	newFwd.SetCallbacks(c)
 
-	// Replace forwarder atomically; kill terminals; close old conn.
+	// Replace connection atomically; kill terminals; close old conn.
 	c.mu.Lock()
 	c.terminals.KillAll()
-	c.forwarder = newFwd
-	c.currentAgent = baseAgent
-	c.currentAgentName = name
+	c.conn = &agentConn{name: name, agent: baseAgent, forwarder: newFwd}
 	c.initializing = false
 	c.promptUpdatesCh = nil
 	c.initMeta = clientInitMeta{}
@@ -136,8 +128,8 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	c.mu.Unlock()
 	c.initCond.Broadcast() // MUST be outside c.mu — never inside the lock
 
-	if oldFwd != nil {
-		_ = oldFwd.Close()
+	if oldConn != nil {
+		_ = oldConn.close()
 	}
 
 	// SwitchWithContext — bootstrap new session with previous reply.
@@ -173,15 +165,4 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 			renderUnknown(snap.Mode), renderUnknown(snap.Model)))
 	}
 	return nil
-}
-
-// registeredAgentNames returns all registered agent names (for error messages).
-func (c *Client) registeredAgentNames() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	names := make([]string, 0, len(c.agentFacs))
-	for n := range c.agentFacs {
-		names = append(names, n)
-	}
-	return names
 }

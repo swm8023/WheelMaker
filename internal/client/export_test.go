@@ -15,7 +15,7 @@ import (
 // testing with a mock agent.
 func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
 	c.mu.Lock()
-	c.forwarder = f
+	c.conn = &agentConn{forwarder: f}
 	c.sessionID = sessionID
 	c.ready = true
 	if c.state == nil {
@@ -36,9 +36,8 @@ func (c *Client) InjectSession(s Session) {
 	}
 	c.sessionID = s.SessionID()
 	c.ready = true
-	// Use a stub agent.Agent to satisfy currentAgent != nil checks.
-	c.currentAgent = &stubAgent{name: s.AgentName()}
-	c.currentAgentName = s.AgentName()
+	// Use a stub agentConn to satisfy c.conn != nil checks.
+	c.conn = &agentConn{name: s.AgentName(), agent: &stubAgent{name: s.AgentName()}}
 	c.mu.Unlock()
 }
 
@@ -58,9 +57,9 @@ func (c *Client) InjectState(st *ProjectState) {
 	c.mu.Unlock()
 }
 
-// InjectIMChannel sets the IM channel and registers the HandleMessage callback.
+// InjectIMChannel sets the IM bridge over the provided IM channel.
 func (c *Client) InjectIMChannel(p im.Channel) {
-	c.imRun = p
+	c.imBridge = im.NewBridge(p)
 }
 
 // DefaultState returns a freshly initialised default state.

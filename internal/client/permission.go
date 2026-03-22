@@ -37,9 +37,9 @@ func (r *permissionRouter) clearLastChatID(chatID string) {
 
 func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
 	r.client.mu.Lock()
-	decisioner, ok := r.client.imRun.(im.DecisionRequester)
+	bridge := r.client.imBridge
 	r.client.mu.Unlock()
-	if !ok {
+	if bridge == nil || !bridge.CanHandleDecision() {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
@@ -65,7 +65,7 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		})
 	}
 
-	res, err := decisioner.RequestDecision(ctx, req)
+	res, err := bridge.RequestDecision(ctx, req)
 	if err != nil {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}

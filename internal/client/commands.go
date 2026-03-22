@@ -38,7 +38,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 
 	case "/cancel":
 		c.mu.Lock()
-		active := c.currentAgent != nil
+		active := c.conn != nil
 		c.mu.Unlock()
 		if !active {
 			c.reply(msg.ChatID, "No active session.")
@@ -53,11 +53,11 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	case "/status":
 		c.mu.Lock()
 		agentName := ""
-		if c.currentAgent != nil {
-			agentName = c.currentAgent.Name()
+		if c.conn != nil {
+			agentName = c.conn.name
 		}
 		sid := c.sessionID
-		active := c.currentAgent != nil
+		active := c.conn != nil
 		c.mu.Unlock()
 		if !active {
 			c.reply(msg.ChatID, "No active session.")
@@ -147,8 +147,8 @@ func (c *Client) handleConfigCommand(
 	// Lock section 1: read agentName and sessionState for config resolution.
 	c.mu.Lock()
 	agentName := ""
-	if c.currentAgent != nil {
-		agentName = c.currentAgent.Name()
+	if c.conn != nil {
+		agentName = c.conn.name
 	}
 	var sessionState *SessionState
 	if c.state != nil && c.state.Agents != nil {
@@ -171,7 +171,7 @@ func (c *Client) handleConfigCommand(
 
 	// Lock section 2: read fwd and sid after ensureReady has set c.sessionID.
 	c.mu.Lock()
-	fwd := c.forwarder
+	fwd := c.conn.forwarder
 	sid := c.sessionID
 	c.mu.Unlock()
 
@@ -242,10 +242,10 @@ func (c *Client) listSessions(ctx context.Context) ([]string, error) {
 	}
 
 	c.mu.Lock()
-	fwd := c.forwarder
+	fwd := c.conn.forwarder
 	cwd := c.cwd
 	curSID := c.sessionID
-	agentName := c.currentAgentName
+	agentName := c.conn.name
 	caps := c.initMeta.AgentCapabilities
 	c.mu.Unlock()
 
@@ -302,7 +302,7 @@ func (c *Client) createNewSession(ctx context.Context) (string, error) {
 		return "", err
 	}
 	c.mu.Lock()
-	fwd := c.forwarder
+	fwd := c.conn.forwarder
 	cwd := c.cwd
 	c.mu.Unlock()
 	if fwd == nil {
@@ -335,8 +335,8 @@ func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, err
 	_ = lines // listSessions already refreshes and persists state
 
 	c.mu.Lock()
-	agentName := c.currentAgentName
-	fwd := c.forwarder
+	agentName := c.conn.name
+	fwd := c.conn.forwarder
 	cwd := c.cwd
 	loadCap := c.initMeta.AgentCapabilities.LoadSession
 	var sessions []SessionSummary
@@ -402,7 +402,7 @@ func (c *Client) persistSessionSummaries(agentName string, sessions []SessionSum
 
 func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {
 	c.mu.Lock()
-	hasForwarder := c.forwarder != nil
+	hasForwarder := c.conn != nil && c.conn.forwarder != nil
 	c.mu.Unlock()
 	if !hasForwarder {
 		_ = c.ensureForwarder(ctx)
@@ -423,12 +423,7 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
 	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
 	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
-	c.mu.Lock()
-	agentNames := make([]string, 0, len(c.agentFacs))
-	for name := range c.agentFacs {
-		agentNames = append(agentNames, name)
-	}
-	c.mu.Unlock()
+	agentNames := c.registry.names()
 	for _, name := range agentNames {
 		model.Options = append(model.Options, im.HelpOption{
 			Label:   "Agent: " + name,

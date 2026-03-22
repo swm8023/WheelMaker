@@ -72,8 +72,8 @@ func (w *agentDebugWriter) Write(p []byte) (int, error) {
 func (c *Client) resolveCurrentAgentName() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if strings.TrimSpace(c.currentAgentName) != "" {
-		return c.currentAgentName
+	if c.conn != nil && strings.TrimSpace(c.conn.name) != "" {
+		return c.conn.name
 	}
 	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" {
 		return c.state.ActiveAgent
@@ -88,13 +88,13 @@ func (c *Client) bindDebugChat(agentName, chatID string) {
 	c.debugSink.bindChat(agentName, chatID)
 }
 
-func (c *Client) composeDebugWriter(agentName string, base io.Writer, debugEnabled bool) io.Writer {
+func (c *Client) composeDebugWriter(agentName string, base io.Writer) io.Writer {
 	var ws []io.Writer
 	if base != nil {
 		ws = append(ws, base)
-	}
-	if debugEnabled && c.debugSink != nil {
-		ws = append(ws, c.debugSink.writer(agentName))
+		if c.debugSink != nil {
+			ws = append(ws, c.debugSink.writer(agentName))
+		}
 	}
 	if len(ws) == 0 {
 		return nil
@@ -116,7 +116,7 @@ func (c *Client) handleDebugCommand(chatID, args string) error {
 func (c *Client) renderDebugStatus() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.debugEnabled {
+	if c.debugLog != nil {
 		return "Debug status: on (project)"
 	}
 	return "Debug status: off (project)"

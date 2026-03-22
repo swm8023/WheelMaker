@@ -77,7 +77,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		return nil
 	}
 	c.initializing = true
-	fwd := c.forwarder
+	fwd := c.conn.forwarder
 	savedSID := c.sessionID
 	cwd := c.cwd
 	c.mu.Unlock()
@@ -174,7 +174,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			c.mu.Unlock()
 			c.initCond.Broadcast()
 			log.Printf("[client] connected: agent=%s session=%s (resumed, %d history updates)",
-				c.currentAgent.Name(), savedSID, len(replayUpdates))
+				c.conn.name, savedSID, len(replayUpdates))
 			return nil
 		}
 		// session/load failed — fall through to session/new.
@@ -209,7 +209,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		}
 	}
 	log.Printf("[client] connected: agent=%s session=%s mode=%s",
-		c.currentAgent.Name(), newResult.SessionID, modeID)
+		c.conn.name, newResult.SessionID, modeID)
 	return nil
 }
 
@@ -287,7 +287,7 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 			promptCancel()
 		}()
 
-		result, err := c.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
+		result, err := c.conn.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
 			SessionID: sessID,
 			Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
 		})
@@ -377,7 +377,7 @@ func (c *Client) cancelPrompt() error {
 	if sessID == "" || !ready {
 		return nil
 	}
-	return c.forwarder.SessionCancel(sessID)
+	return c.conn.forwarder.SessionCancel(sessID)
 }
 
 // persistMeta snapshots current session metadata into in-memory state and
@@ -396,7 +396,11 @@ func (c *Client) cancelPrompt() error {
 // stalling ACP callback goroutines during disk writes.
 func (c *Client) persistMeta() bool {
 	c.mu.Lock()
-	agentName := c.currentAgentName
+	if c.conn == nil {
+		c.mu.Unlock()
+		return false
+	}
+	agentName := c.conn.name
 	sessionID := c.sessionID
 	initMeta := c.initMeta
 	sessMeta := c.sessionMeta

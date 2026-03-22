@@ -19,6 +19,55 @@ import (
 // factories typically ignore them and use closure-captured config instead.
 type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
+// agentConn bundles an active agent subprocess with its ACP forwarder.
+// Client holds at most one agentConn at a time; nil means no connection yet.
+type agentConn struct {
+	name      string         // registered name (key in state.Agents)
+	agent     agent.Agent    // backing agent (owns the subprocess)
+	forwarder *acp.Forwarder // ACP transport; nil only in test injection
+}
+
+func (ac *agentConn) close() error {
+	if ac.forwarder == nil {
+		return nil
+	}
+	return ac.forwarder.Close()
+}
+
+// agentRegistry maps agent names to their factories.
+// It carries its own mutex so Client.mu need not protect registration.
+type agentRegistry struct {
+	mu   sync.Mutex
+	facs map[string]AgentFactory
+}
+
+func newAgentRegistry() *agentRegistry {
+	return &agentRegistry{facs: make(map[string]AgentFactory)}
+}
+
+func (r *agentRegistry) register(name string, f AgentFactory) {
+	r.mu.Lock()
+	r.facs[name] = f
+	r.mu.Unlock()
+}
+
+func (r *agentRegistry) get(name string) AgentFactory {
+	r.mu.Lock()
+	f := r.facs[name]
+	r.mu.Unlock()
+	return f
+}
+
+func (r *agentRegistry) names() []string {
+	r.mu.Lock()
+	ns := make([]string, 0, len(r.facs))
+	for n := range r.facs {
+		ns = append(ns, n)
+	}
+	r.mu.Unlock()
+	return ns
+}
+
 const commandTimeout = 30 * time.Second
 
 const defaultAgentName = "claude"
@@ -34,22 +83,19 @@ type Client struct {
 	projectName string
 	cwd         string
 
-	agentFacs map[string]AgentFactory
+	registry *agentRegistry
 
-	store Store
-	state *ProjectState
-	imRun im.Channel // nil when no IM channel configured
+	store    Store
+	state    *ProjectState
+	imBridge *im.Bridge // nil when no IM channel configured
 
-	debugLog     io.Writer // optional ACP JSON debug logger sink
-	debugEnabled bool      // project-level debug toggle from config
+	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
 
 	mu       sync.Mutex
 	promptMu sync.Mutex // serializes handlePrompt and switchAgent
 
-	// active connection
-	currentAgent     agent.Agent    // active agent factory; nil until ensureForwarder
-	currentAgentName string         // registered name (key in agentFacs/state.Agents)
-	forwarder        *acp.Forwarder // active transport; nil until first connection
+	// active connection; nil until first ensureForwarder
+	conn *agentConn
 
 	// session state (all owned by client)
 	sessionID       string
@@ -81,16 +127,16 @@ type Client struct {
 
 // New creates a Client for the given project.
 //   - store: persistent state store scoped to this project
-//   - imProvider: IM channel; nil means Run() returns an error (use Hub with a console project)
+//   - imProvider: IM bridge; nil means Run() returns an error (use Hub with a console project)
 //   - projectName: identifier used in logs and state keys
 //   - cwd: working directory for agent sessions
-func New(store Store, imProvider im.Channel, projectName string, cwd string) *Client {
+func New(store Store, imProvider *im.Bridge, projectName string, cwd string) *Client {
 	c := &Client{
 		projectName:     projectName,
 		cwd:             cwd,
-		agentFacs:       make(map[string]AgentFactory),
+		registry:        newAgentRegistry(),
 		store:           store,
-		imRun:           imProvider,
+		imBridge:        imProvider,
 		activeToolCalls: make(map[string]struct{}),
 	}
 	c.initCond = sync.NewCond(&c.mu)
@@ -105,15 +151,12 @@ func New(store Store, imProvider im.Channel, projectName string, cwd string) *Cl
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
 	c.debugLog = w
-	c.debugEnabled = w != nil
 	c.mu.Unlock()
 }
 
-// RegisterAgent registers a AgentFactory under the given name.
+// RegisterAgent registers an AgentFactory under the given name.
 func (c *Client) RegisterAgent(name string, factory AgentFactory) {
-	c.mu.Lock()
-	c.agentFacs[name] = factory
-	c.mu.Unlock()
+	c.registry.register(name, factory)
 }
 
 // Start loads persisted state and registers the IM message callback.
@@ -127,11 +170,9 @@ func (c *Client) Start(ctx context.Context) error {
 	c.state = state
 	c.mu.Unlock()
 
-	if c.imRun != nil {
-		c.imRun.OnMessage(c.HandleMessage)
-		if hs, ok := c.imRun.(im.HelpResolverSetter); ok {
-			hs.SetHelpResolver(c.resolveHelpModel)
-		}
+	if c.imBridge != nil {
+		c.imBridge.OnMessage(c.HandleMessage)
+		c.imBridge.SetHelpResolver(c.resolveHelpModel)
 	}
 	return nil
 }
@@ -139,8 +180,8 @@ func (c *Client) Start(ctx context.Context) error {
 // Run blocks until ctx is cancelled, delegating to the IM channel's Run loop.
 // Returns an error if no IM channel is configured.
 func (c *Client) Run(ctx context.Context) error {
-	if c.imRun != nil {
-		return c.imRun.Run(ctx)
+	if c.imBridge != nil {
+		return c.imBridge.Run(ctx)
 	}
 	return errors.New("no IM channel configured; add a console project to config.json")
 }
@@ -148,11 +189,11 @@ func (c *Client) Run(ctx context.Context) error {
 // Close saves state and shuts down the active agent.
 func (c *Client) Close() error {
 	c.mu.Lock()
-	fwd := c.forwarder
+	ac := c.conn
 	c.mu.Unlock()
-	if fwd != nil {
+	if ac != nil {
 		c.saveSessionState()
-		_ = fwd.Close()
+		_ = ac.close()
 	}
 
 	c.mu.Lock()
@@ -199,7 +240,6 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 	return
 }
 
-
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
 // promptMu is held for the full duration, serializing with switchAgent.
 func (c *Client) handlePrompt(msg im.Message, text string) {
@@ -242,7 +282,8 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 	var buf strings.Builder
 	c.mu.Lock()
-	emitter, hasEmitter := c.imRun.(im.UpdateEmitter)
+	emitter := c.imBridge
+	hasEmitter := emitter != nil
 	sid := c.sessionID
 	c.mu.Unlock()
 	for u := range updates {
@@ -293,8 +334,8 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 // reply sends a text response to the chat via the IM channel.
 func (c *Client) reply(chatID, text string) {
-	if c.imRun != nil {
-		_ = c.imRun.SendText(chatID, text)
+	if c.imBridge != nil {
+		_ = c.imBridge.SendText(chatID, text)
 		return
 	}
 	fmt.Println(text)
@@ -302,12 +343,8 @@ func (c *Client) reply(chatID, text string) {
 
 // replyDebug sends debug text via IM debug channel when available.
 func (c *Client) replyDebug(chatID, text string) {
-	if c.imRun != nil {
-		if dbg, ok := c.imRun.(im.DebugSender); ok {
-			_ = dbg.SendDebug(chatID, text)
-			return
-		}
-		_ = c.imRun.SendText(chatID, text)
+	if c.imBridge != nil {
+		_ = c.imBridge.SendDebug(chatID, text)
 		return
 	}
 	fmt.Println(text)
@@ -319,4 +356,3 @@ func renderUnknown(v string) string {
 	}
 	return v
 }
-
