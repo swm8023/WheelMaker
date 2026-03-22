@@ -22,9 +22,19 @@ type ProjectConfig struct {
 
 // IMConfig describes the IM transport for a project.
 type IMConfig struct {
-	Type      string `json:"type"`
-	AppID     string `json:"appID,omitempty"`
-	AppSecret string `json:"appSecret,omitempty"`
+	Type      string       `json:"type"`
+	AppID     string       `json:"appID,omitempty"`
+	AppSecret string       `json:"appSecret,omitempty"`
+	Mobile    MobileConfig `json:"mobile,omitempty"`
+}
+
+// MobileConfig holds settings for the mobile WebSocket IM adapter.
+type MobileConfig struct {
+	// Port is the TCP port to listen on. Default: 9527.
+	Port int `json:"port,omitempty"`
+	// Token is the shared secret required from connecting clients.
+	// Empty string disables authentication (useful for local dev).
+	Token string `json:"token,omitempty"`
 }
 
 // ClientConf describes the AI agent side for a project.

@@ -16,6 +16,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
 	"github.com/swm8023/wheelmaker/internal/im/feishu"
+	"github.com/swm8023/wheelmaker/internal/im/mobile"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -116,8 +117,17 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.Bridge, error) {
 			EncryptKey:        h.cfg.Feishu.EncryptKey,
 			Debug:             pc.Debug,
 		})), nil
+	case "mobile":
+		addr := fmt.Sprintf(":%d", pc.IM.Mobile.Port)
+		if pc.IM.Mobile.Port == 0 {
+			addr = ":9527"
+		}
+		return im.New(mobile.New(mobile.Config{
+			Addr:  addr,
+			Token: pc.IM.Mobile.Token,
+		})), nil
 	default:
-		return nil, fmt.Errorf("unknown im.type %q (supported: console)", pc.IM.Type)
+		return nil, fmt.Errorf("unknown im.type %q (supported: console, feishu, mobile)", pc.IM.Type)
 	}
 }
 

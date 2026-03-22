@@ -23,6 +23,21 @@
         "agent": "claude",
         "path": "/path/to/other/project"
       }
+    },
+    {
+      "name": "mobile",
+      "debug": false,
+      "im": {
+        "type": "mobile",
+        "mobile": {
+          "port": 9527,
+          "token": "change-me-to-a-strong-secret"
+        }
+      },
+      "client": {
+        "agent": "claude",
+        "path": "/path/to/your/project"
+      }
     }
   ],
   "feishu": {
