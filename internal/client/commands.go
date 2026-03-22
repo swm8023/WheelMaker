@@ -323,14 +323,7 @@ func (c *Client) createNewSession(ctx context.Context) (string, error) {
 	}
 
 	c.mu.Lock()
-	c.sessionID = res.SessionID
-	c.ready = true
-	c.lastReply = ""
-	c.loadHistory = nil
-	c.activeToolCalls = make(map[string]struct{})
-	c.sessionMeta = clientSessionMeta{
-		ConfigOptions: res.ConfigOptions,
-	}
+	c.resetSessionFields(res.SessionID, res.ConfigOptions)
 	c.mu.Unlock()
 	c.saveSessionState()
 	return res.SessionID, nil
@@ -380,12 +373,7 @@ func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, err
 	}
 
 	c.mu.Lock()
-	c.sessionID = target
-	c.ready = true
-	c.lastReply = ""
-	c.loadHistory = nil
-	c.activeToolCalls = make(map[string]struct{})
-	c.sessionMeta = clientSessionMeta{}
+	c.resetSessionFields(target, nil)
 	c.mu.Unlock()
 	c.saveSessionState()
 	return target, nil

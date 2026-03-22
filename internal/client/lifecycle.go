@@ -128,17 +128,13 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	c.forwarder = newFwd
 	c.currentAgent = baseAgent
 	c.currentAgentName = name
-	c.ready = false
 	c.initializing = false
-	c.sessionID = savedSID
-	c.lastReply = ""
-	c.loadHistory = nil
-	c.activeToolCalls = make(map[string]struct{})
 	c.promptUpdatesCh = nil
 	c.initMeta = clientInitMeta{}
-	c.sessionMeta = clientSessionMeta{}
+	c.resetSessionFields(savedSID, nil) // sets ready=true — override below:
+	c.ready = false
 	c.mu.Unlock()
-	c.initCond.Broadcast()
+	c.initCond.Broadcast() // MUST be outside c.mu — never inside the lock
 
 	if oldFwd != nil {
 		_ = oldFwd.Close()

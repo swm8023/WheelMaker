@@ -462,6 +462,17 @@ func (c *Client) persistMeta() bool {
 	return changed
 }
 
+// resetSessionFields resets the 6 session-level fields common to session/new,
+// session/load, and agent-switch operations. Callers MUST hold c.mu.
+func (c *Client) resetSessionFields(sid string, configOpts []acp.ConfigOption) {
+	c.sessionID = sid
+	c.ready = true
+	c.lastReply = ""
+	c.loadHistory = nil
+	c.activeToolCalls = make(map[string]struct{})
+	c.sessionMeta = clientSessionMeta{ConfigOptions: configOpts}
+}
+
 // saveSessionState calls persistMeta and writes to disk if changed.
 func (c *Client) saveSessionState() {
 	if !c.persistMeta() {
