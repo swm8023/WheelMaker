@@ -144,6 +144,7 @@ func (c *Client) handleConfigCommand(
 		return
 	}
 
+	// Lock section 1: read agentName and sessionState for config resolution.
 	c.mu.Lock()
 	agentName := ""
 	if c.currentAgent != nil {
@@ -168,14 +169,11 @@ func (c *Client) handleConfigCommand(
 		return
 	}
 
+	// Lock section 2: read fwd and sid after ensureReady has set c.sessionID.
 	c.mu.Lock()
 	fwd := c.forwarder
 	sid := c.sessionID
 	c.mu.Unlock()
-	if fwd == nil {
-		c.reply(chatID, fmt.Sprintf("%s error: no active forwarder", label))
-		return
-	}
 
 	if _, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
 		SessionID: sid,
