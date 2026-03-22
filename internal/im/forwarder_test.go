@@ -1,36 +1,34 @@
-package forwarder
+package im
 
 import (
 	"context"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 type stubAdapter struct {
-	onMsg      im.MessageHandler
-	onAction   func(im.CardActionEvent)
+	onMsg      MessageHandler
+	onAction   func(CardActionEvent)
 	lastChatID string
 	lastText   string
 	cardSent   bool
 	runCalled  bool
 }
 
-func (s *stubAdapter) OnMessage(h im.MessageHandler) { s.onMsg = h }
+func (s *stubAdapter) OnMessage(h MessageHandler) { s.onMsg = h }
 func (s *stubAdapter) SendText(chatID, text string) error {
 	s.lastChatID = chatID
 	s.lastText = text
 	return nil
 }
-func (s *stubAdapter) SendCard(_ string, _ im.Card) error { return nil }
+func (s *stubAdapter) SendCard(_ string, _ Card) error { return nil }
 func (s *stubAdapter) SendReaction(_, _ string) error     { return nil }
 func (s *stubAdapter) Run(_ context.Context) error {
 	s.runCalled = true
 	return nil
 }
-func (s *stubAdapter) OnCardAction(h func(im.CardActionEvent)) { s.onAction = h }
+func (s *stubAdapter) OnCardAction(h func(CardActionEvent)) { s.onAction = h }
 
 func TestForwarder_SendTextPassThrough(t *testing.T) {
 	ad := &stubAdapter{}
@@ -48,8 +46,8 @@ func TestForwarder_OnMessageBridge(t *testing.T) {
 	f := New(ad)
 
 	got := ""
-	f.OnMessage(func(m im.Message) { got = m.Text })
-	ad.onMsg(im.Message{Text: "ping"})
+	f.OnMessage(func(m Message) { got = m.Text })
+	ad.onMsg(Message{Text: "ping"})
 
 	if got != "ping" {
 		t.Fatalf("bridged text %q, want %q", got, "ping")
@@ -59,15 +57,15 @@ func TestForwarder_OnMessageBridge(t *testing.T) {
 func TestForwarder_RequestDecision_TextReply(t *testing.T) {
 	ad := &stubAdapter{}
 	f := New(ad)
-	f.OnMessage(func(_ im.Message) {})
+	f.OnMessage(func(_ Message) {})
 
-	done := make(chan im.DecisionResult, 1)
+	done := make(chan DecisionResult, 1)
 	go func() {
-		res, _ := f.RequestDecision(context.Background(), im.DecisionRequest{
-			Kind:   im.DecisionSingle,
+		res, _ := f.RequestDecision(context.Background(), DecisionRequest{
+			Kind:   DecisionSingle,
 			ChatID: "chat-1",
 			Title:  "pick one",
-			Options: []im.DecisionOption{
+			Options: []DecisionOption{
 				{ID: "allow", Label: "Allow"},
 				{ID: "reject", Label: "Reject"},
 			},
@@ -76,7 +74,7 @@ func TestForwarder_RequestDecision_TextReply(t *testing.T) {
 	}()
 
 	time.Sleep(20 * time.Millisecond)
-	ad.onMsg(im.Message{ChatID: "chat-1", Text: "1"})
+	ad.onMsg(Message{ChatID: "chat-1", Text: "1"})
 
 	res := <-done
 	if res.Outcome != "selected" || res.OptionID != "allow" {
@@ -87,13 +85,13 @@ func TestForwarder_RequestDecision_TextReply(t *testing.T) {
 func TestForwarder_EmitFlushOnDone(t *testing.T) {
 	ad := &stubAdapter{}
 	f := New(ad)
-	if err := f.Emit(context.Background(), im.IMUpdate{ChatID: "chat-1", UpdateType: "text", Text: "hel"}); err != nil {
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "text", Text: "hel"}); err != nil {
 		t.Fatalf("emit text: %v", err)
 	}
-	if err := f.Emit(context.Background(), im.IMUpdate{ChatID: "chat-1", UpdateType: "text", Text: "lo"}); err != nil {
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "text", Text: "lo"}); err != nil {
 		t.Fatalf("emit text: %v", err)
 	}
-	if err := f.Emit(context.Background(), im.IMUpdate{ChatID: "chat-1", UpdateType: "done"}); err != nil {
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "done"}); err != nil {
 		t.Fatalf("emit done: %v", err)
 	}
 	if ad.lastText != "hello" {
@@ -106,18 +104,18 @@ func TestForwarder_HelpCardActionInjectsCommand(t *testing.T) {
 	f := New(ad)
 
 	got := ""
-	f.SetHelpResolver(func(_ context.Context, _ string) (im.HelpModel, error) {
-		return im.HelpModel{
+	f.SetHelpResolver(func(_ context.Context, _ string) (HelpModel, error) {
+		return HelpModel{
 			Title: "help",
 			Body:  "select",
-			Options: []im.HelpOption{
+			Options: []HelpOption{
 				{Label: "Mode Plan", Command: "/mode", Value: "plan"},
 			},
 		}, nil
 	})
-	f.OnMessage(func(m im.Message) { got = m.Text })
+	f.OnMessage(func(m Message) { got = m.Text })
 
-	ad.onMsg(im.Message{ChatID: "chat-1", Text: "/help"})
+	ad.onMsg(Message{ChatID: "chat-1", Text: "/help"})
 	if got != "" {
 		t.Fatalf("help should be intercepted")
 	}
@@ -125,7 +123,7 @@ func TestForwarder_HelpCardActionInjectsCommand(t *testing.T) {
 	if ad.onAction == nil {
 		t.Fatalf("expected card action handler to be registered")
 	}
-	ad.onAction(im.CardActionEvent{
+	ad.onAction(CardActionEvent{
 		Value: map[string]string{
 			"kind":    "help_option",
 			"chat_id": "chat-1",
@@ -166,3 +164,4 @@ func containsAll(s string, terms ...string) bool {
 	}
 	return true
 }
+

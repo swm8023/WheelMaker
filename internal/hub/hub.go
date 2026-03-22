@@ -16,7 +16,6 @@ import (
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
 	"github.com/swm8023/wheelmaker/internal/im/feishu"
-	"github.com/swm8023/wheelmaker/internal/im/forwarder"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -108,9 +107,9 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 func (h *Hub) buildIM(pc ProjectConfig) (im.Channel, error) {
 	switch pc.IM.Type {
 	case "console":
-		return forwarder.New(console.New(pc.Name, pc.Debug)), nil
+		return im.New(console.New(pc.Name, pc.Debug)), nil
 	case "feishu":
-		return forwarder.New(feishu.New(feishu.Config{
+		return im.New(feishu.New(feishu.Config{
 			AppID:             pc.IM.AppID,
 			AppSecret:         pc.IM.AppSecret,
 			VerificationToken: h.cfg.Feishu.VerificationToken,

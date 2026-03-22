@@ -1,4 +1,4 @@
-package forwarder
+package im
 
 import (
 	"context"
@@ -9,27 +9,25 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 // Adapter is the low-level IM execution layer.
 // Forwarder owns strategy and delegates transport/platform operations to Adapter.
 type Adapter interface {
-	im.Channel
+	Channel
 }
 
 // Forwarder is the strategy layer between client and concrete IM adapter.
 // Current MVP behavior is transparent pass-through; strategy logic is added iteratively.
 type Forwarder struct {
 	adapter Adapter
-	handler im.MessageHandler
+	handler MessageHandler
 
 	mu           sync.Mutex
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
 	decisions    map[string]pendingDecision  // chatID -> pending (text fallback)
 	decisionByID map[string]pendingDecision  // decisionID -> pending (card action)
-	helpResolver func(ctx context.Context, chatID string) (im.HelpModel, error)
+	helpResolver func(ctx context.Context, chatID string) (HelpModel, error)
 	nextID       atomic.Int64
 }
 
@@ -41,16 +39,16 @@ func New(adapter Adapter) *Forwarder {
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
 	}
-	if sub, ok := adapter.(im.CardActionSubscriber); ok {
+	if sub, ok := adapter.(CardActionSubscriber); ok {
 		sub.OnCardAction(f.handleCardAction)
 	}
 	return f
 }
 
 // OnMessage registers user-message handler and bridges adapter inbound events.
-func (f *Forwarder) OnMessage(handler im.MessageHandler) {
+func (f *Forwarder) OnMessage(handler MessageHandler) {
 	f.handler = handler
-	f.adapter.OnMessage(func(m im.Message) {
+	f.adapter.OnMessage(func(m Message) {
 		if strings.TrimSpace(m.Text) == "/help" && f.tryHandleHelp(m) {
 			return
 		}
@@ -67,7 +65,7 @@ func (f *Forwarder) SendText(chatID, text string) error {
 	return f.adapter.SendText(chatID, text)
 }
 
-func (f *Forwarder) SendCard(chatID string, card im.Card) error {
+func (f *Forwarder) SendCard(chatID string, card Card) error {
 	return f.adapter.SendCard(chatID, card)
 }
 
@@ -76,7 +74,7 @@ func (f *Forwarder) SendReaction(messageID, emoji string) error {
 }
 
 func (f *Forwarder) SendDebug(chatID, text string) error {
-	if sender, ok := f.adapter.(im.DebugSender); ok {
+	if sender, ok := f.adapter.(DebugSender); ok {
 		return sender.SendDebug(chatID, text)
 	}
 	return f.adapter.SendText(chatID, text)
@@ -87,14 +85,14 @@ func (f *Forwarder) Run(ctx context.Context) error {
 }
 
 // SetHelpResolver injects realtime help payload provider from client.
-func (f *Forwarder) SetHelpResolver(resolver func(ctx context.Context, chatID string) (im.HelpModel, error)) {
+func (f *Forwarder) SetHelpResolver(resolver func(ctx context.Context, chatID string) (HelpModel, error)) {
 	f.mu.Lock()
 	f.helpResolver = resolver
 	f.mu.Unlock()
 }
 
 // Emit renders semantic updates. Current policy: buffer text chunks and flush on done.
-func (f *Forwarder) Emit(_ context.Context, u im.IMUpdate) error {
+func (f *Forwarder) Emit(_ context.Context, u IMUpdate) error {
 	chatID := strings.TrimSpace(u.ChatID)
 	if chatID == "" {
 		return nil
@@ -147,20 +145,20 @@ type pendingDecision struct {
 	id     string
 	chatID string
 	req    DecisionRequestWithDeadline
-	ch     chan im.DecisionResult
+	ch     chan DecisionResult
 }
 
 type DecisionRequestWithDeadline struct {
-	im.DecisionRequest
+	DecisionRequest
 	deadline time.Time
 }
 
 // RequestDecision sends a textual decision prompt and waits for reply.
 // Card-interaction support will be added on top of the same state machine.
-func (f *Forwarder) RequestDecision(ctx context.Context, req im.DecisionRequest) (im.DecisionResult, error) {
+func (f *Forwarder) RequestDecision(ctx context.Context, req DecisionRequest) (DecisionResult, error) {
 	chatID := strings.TrimSpace(req.ChatID)
 	if chatID == "" {
-		return im.DecisionResult{Outcome: "invalid"}, fmt.Errorf("decision: empty chat id")
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("decision: empty chat id")
 	}
 	timeout := 2 * time.Minute
 	if v := strings.TrimSpace(req.Hint["timeoutSec"]); v != "" {
@@ -169,7 +167,7 @@ func (f *Forwarder) RequestDecision(ctx context.Context, req im.DecisionRequest)
 		}
 	}
 	decisionID := fmt.Sprintf("dec-%d", f.nextID.Add(1))
-	ch := make(chan im.DecisionResult, 1)
+	ch := make(chan DecisionResult, 1)
 	pd := pendingDecision{
 		id:     decisionID,
 		chatID: chatID,
@@ -188,7 +186,7 @@ func (f *Forwarder) RequestDecision(ctx context.Context, req im.DecisionRequest)
 		"decision_id": pd.id,
 		"chat_id":     pd.chatID,
 	}
-	if sender, ok := f.adapter.(im.OptionSender); ok {
+	if sender, ok := f.adapter.(OptionSender); ok {
 		if err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta); err != nil {
 			_ = f.adapter.SendText(chatID, renderDecisionPrompt(req))
 		}
@@ -201,14 +199,14 @@ func (f *Forwarder) RequestDecision(ctx context.Context, req im.DecisionRequest)
 		return r, nil
 	case <-ctx.Done():
 		f.clearDecision(chatID, decisionID, ch)
-		return im.DecisionResult{Outcome: "cancelled", Source: "default_policy"}, nil
+		return DecisionResult{Outcome: "cancelled", Source: "default_policy"}, nil
 	case <-time.After(timeout):
 		f.clearDecision(chatID, decisionID, ch)
-		return im.DecisionResult{Outcome: "timeout", Source: "default_policy"}, nil
+		return DecisionResult{Outcome: "timeout", Source: "default_policy"}, nil
 	}
 }
 
-func (f *Forwarder) clearDecision(chatID, decisionID string, ch chan im.DecisionResult) {
+func (f *Forwarder) clearDecision(chatID, decisionID string, ch chan DecisionResult) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if pd, ok := f.decisions[chatID]; ok && pd.ch == ch {
@@ -219,7 +217,7 @@ func (f *Forwarder) clearDecision(chatID, decisionID string, ch chan im.Decision
 	}
 }
 
-func renderDecisionPrompt(req im.DecisionRequest) string {
+func renderDecisionPrompt(req DecisionRequest) string {
 	var b strings.Builder
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
@@ -239,7 +237,7 @@ func renderDecisionPrompt(req im.DecisionRequest) string {
 	return b.String()
 }
 
-func (f *Forwarder) tryHandleHelp(m im.Message) bool {
+func (f *Forwarder) tryHandleHelp(m Message) bool {
 	f.mu.Lock()
 	resolver := f.helpResolver
 	f.mu.Unlock()
@@ -264,7 +262,7 @@ func renderDefault(v, d string) string {
 	return strings.TrimSpace(v)
 }
 
-func (f *Forwarder) handleCardAction(evt im.CardActionEvent) {
+func (f *Forwarder) handleCardAction(evt CardActionEvent) {
 	kind := strings.TrimSpace(evt.Value["kind"])
 	switch kind {
 	case "decision":
@@ -282,7 +280,7 @@ func (f *Forwarder) handleCardAction(evt im.CardActionEvent) {
 		if !ok {
 			return
 		}
-		res := im.DecisionResult{
+		res := DecisionResult{
 			Outcome:  "selected",
 			OptionID: strings.TrimSpace(evt.Value["option_id"]),
 			Value:    strings.TrimSpace(evt.Value["value"]),
@@ -307,7 +305,7 @@ func (f *Forwarder) handleCardAction(evt im.CardActionEvent) {
 		if val != "" {
 			text = cmd + " " + val
 		}
-		go f.handler(im.Message{
+		go f.handler(Message{
 			ChatID: chatID,
 			UserID: evt.UserID,
 			Text:   text,
@@ -337,7 +335,7 @@ func (f *Forwarder) handleCardAction(evt im.CardActionEvent) {
 	}
 }
 
-func (f *Forwarder) sendHelpPage(chatID string, model im.HelpModel, page int) error {
+func (f *Forwarder) sendHelpPage(chatID string, model HelpModel, page int) error {
 	if len(model.Options) == 0 {
 		return f.adapter.SendText(chatID, strings.TrimSpace(model.Body))
 	}
@@ -345,7 +343,7 @@ func (f *Forwarder) sendHelpPage(chatID string, model im.HelpModel, page int) er
 	return f.adapter.SendCard(chatID, card)
 }
 
-func buildHelpCard(chatID string, model im.HelpModel, page int) im.Card {
+func buildHelpCard(chatID string, model HelpModel, page int) Card {
 	const pageSize = 8
 	if page < 0 {
 		page = 0
@@ -414,7 +412,7 @@ func buildHelpCard(chatID string, model im.HelpModel, page int) im.Card {
 		}
 	}
 
-	return im.Card{
+	return Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -426,7 +424,7 @@ func buildHelpCard(chatID string, model im.HelpModel, page int) im.Card {
 	}
 }
 
-func (f *Forwarder) resolveDecision(m im.Message) bool {
+func (f *Forwarder) resolveDecision(m Message) bool {
 	chatID := strings.TrimSpace(m.ChatID)
 	if chatID == "" {
 		return false
@@ -449,24 +447,24 @@ func (f *Forwarder) resolveDecision(m im.Message) bool {
 	return true
 }
 
-func parseDecisionReply(input string, opts []im.DecisionOption) im.DecisionResult {
+func parseDecisionReply(input string, opts []DecisionOption) DecisionResult {
 	v := strings.ToLower(strings.TrimSpace(input))
 	if v == "" {
-		return im.DecisionResult{Outcome: "invalid", Source: "text_reply"}
+		return DecisionResult{Outcome: "invalid", Source: "text_reply"}
 	}
 	if v == "cancel" {
-		return im.DecisionResult{Outcome: "cancelled", Source: "text_reply"}
+		return DecisionResult{Outcome: "cancelled", Source: "text_reply"}
 	}
 	if i := parseIndex(v); i >= 1 && i <= len(opts) {
 		o := opts[i-1]
-		return im.DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
+		return DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
 	}
 	for _, o := range opts {
 		if strings.EqualFold(v, o.ID) || strings.EqualFold(v, o.Label) {
-			return im.DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
+			return DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
 		}
 	}
-	return im.DecisionResult{Outcome: "invalid", Source: "text_reply"}
+	return DecisionResult{Outcome: "invalid", Source: "text_reply"}
 }
 
 func renderToolCallUpdate(raw []byte) string {
@@ -566,8 +564,9 @@ func parseIndex(v string) int {
 	return n
 }
 
-var _ im.Channel = (*Forwarder)(nil)
-var _ im.DebugSender = (*Forwarder)(nil)
-var _ im.UpdateEmitter = (*Forwarder)(nil)
-var _ im.DecisionRequester = (*Forwarder)(nil)
-var _ im.HelpResolverSetter = (*Forwarder)(nil)
+var _ Channel = (*Forwarder)(nil)
+var _ DebugSender = (*Forwarder)(nil)
+var _ UpdateEmitter = (*Forwarder)(nil)
+var _ DecisionRequester = (*Forwarder)(nil)
+var _ HelpResolverSetter = (*Forwarder)(nil)
+
