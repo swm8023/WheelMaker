@@ -10,6 +10,12 @@ import (
 	"github.com/swm8023/wheelmaker/internal/acp"
 )
 
+// emptyMCPServers returns an empty MCP server list for session/new and session/load calls.
+// Replace this helper when MCP config support is added.
+func emptyMCPServers() []acp.MCPServer {
+	return []acp.MCPServer{}
+}
+
 // Session is the interface for a live ACP session as seen by the client.
 // Tests may inject a mock implementation via InjectSession (export_test.go).
 type Session interface {
@@ -145,7 +151,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			_, err := fwd.SessionLoad(ctx, acp.SessionLoadParams{
 				SessionID:  savedSID,
 				CWD:        cwd,
-				MCPServers: []acp.MCPServer{},
+				MCPServers: emptyMCPServers(),
 			})
 			return err
 		}()
@@ -177,7 +183,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 	// Step 3: create a new session.
 	newResult, err := fwd.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        cwd,
-		MCPServers: []acp.MCPServer{},
+		MCPServers: emptyMCPServers(),
 	})
 	if err != nil {
 		notifyDone()
@@ -374,8 +380,20 @@ func (c *Client) cancelPrompt() error {
 	return c.forwarder.SessionCancel(sessID)
 }
 
-// persistMeta snapshots current session metadata into in-memory state.
-// Returns true if anything changed. Must be called while NOT holding c.mu.
+// persistMeta snapshots current session metadata into in-memory state and
+// returns true if anything changed. Must be called while NOT holding c.mu.
+//
+// Concurrency safety: this function acquires c.mu twice (once to read, once
+// to write). This looks like a TOCTOU window but is safe in practice because
+// every caller is serialized by promptMu:
+//   - saveSessionState is called only from handlePrompt, ensureReadyAndNotify,
+//     switchAgent, createNewSession, and loadSessionByIndex — all under promptMu.
+//   - Close is a known exception: it calls saveSessionState during shutdown
+//     without promptMu, which is acceptable because Close is not concurrent
+//     with prompt operations by contract.
+//
+// c.store.Save (file I/O) is intentionally kept outside c.mu to avoid
+// stalling ACP callback goroutines during disk writes.
 func (c *Client) persistMeta() bool {
 	c.mu.Lock()
 	agentName := c.currentAgentName
