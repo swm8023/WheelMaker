@@ -21,6 +21,12 @@ type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
 const commandTimeout = 30 * time.Second
 
+const defaultAgentName = "claude"
+
+const acpClientProtocolVersion = 1
+
+var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
+
 // Client is the top-level coordinator for a single WheelMaker project.
 // Agent initialization is lazy: the first incoming message triggers ensureForwarder(),
 // which connects the active agent and creates the ACP forwarder.

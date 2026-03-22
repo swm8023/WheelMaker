@@ -78,7 +78,7 @@ func (c *Client) resolveCurrentAgentName() string {
 	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" {
 		return c.state.ActiveAgent
 	}
-	return "claude"
+	return defaultAgentName
 }
 
 func (c *Client) bindDebugChat(agentName, chatID string) {

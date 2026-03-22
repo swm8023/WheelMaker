@@ -22,7 +22,7 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	}
 	name := c.state.ActiveAgent
 	if name == "" {
-		name = "claude"
+		name = defaultAgentName
 	}
 	fac := c.agentFacs[name]
 	if fac == nil {

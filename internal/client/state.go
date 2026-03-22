@@ -115,7 +115,7 @@ type FileState struct {
 // defaultProjectState returns a ProjectState with sensible defaults.
 func defaultProjectState() *ProjectState {
 	return &ProjectState{
-		ActiveAgent: "claude",
+		ActiveAgent: defaultAgentName,
 		Agents:      map[string]*AgentState{},
 	}
 }

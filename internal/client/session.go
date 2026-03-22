@@ -91,13 +91,10 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		},
 		Terminal: true,
 	}
-	clientInfo := &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
-	const clientProtocolVersion = 1
-
 	initResult, err := fwd.Initialize(ctx, acp.InitializeParams{
-		ProtocolVersion:    clientProtocolVersion,
+		ProtocolVersion:    acpClientProtocolVersion,
 		ClientCapabilities: clientCaps,
-		ClientInfo:         clientInfo,
+		ClientInfo:         acpClientInfo,
 	})
 	if err != nil {
 		notifyDone()
@@ -109,9 +106,9 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		AgentCapabilities:     initResult.AgentCapabilities,
 		AgentInfo:             initResult.AgentInfo,
 		AuthMethods:           initResult.AuthMethods,
-		ClientProtocolVersion: clientProtocolVersion,
+		ClientProtocolVersion: acpClientProtocolVersion,
 		ClientCapabilities:    clientCaps,
-		ClientInfo:            clientInfo,
+		ClientInfo:            acpClientInfo,
 	}
 
 	// Step 2: attempt session/load if possible.
