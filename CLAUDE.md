@@ -88,3 +88,7 @@ go build ./cmd/wheelmaker/
 
 - ACP 协议：[docs/acp-protocol-full.zh-CN.md](docs/acp-protocol-full.zh-CN.md)
 - 飞书 Bot：[docs/feishu-bot.md](docs/feishu-bot.md)
+
+## Process Rule
+- After each code change: kill all existing wheelmaker processes, then restart with go run ./cmd/wheelmaker/, and verify only one wheelmaker process remains running.
+
