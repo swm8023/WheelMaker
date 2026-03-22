@@ -60,3 +60,12 @@ func TestBuildDebugCard_TruncatesToLast120Lines(t *testing.T) {
 		t.Fatalf("latest lines should be kept, got content=%q", content)
 	}
 }
+
+func TestResetDebugStream(t *testing.T) {
+	f := New(Config{})
+	f.debugStreams["chat-1"] = &debugStream{messageID: "m1", lines: []string{"a"}}
+	f.resetDebugStream("chat-1")
+	if _, ok := f.debugStreams["chat-1"]; ok {
+		t.Fatalf("debug stream should be removed")
+	}
+}

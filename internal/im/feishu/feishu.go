@@ -184,6 +184,16 @@ func (f *IM) SendDebug(chatID, text string) error {
 	return nil
 }
 
+func (f *IM) resetDebugStream(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.debugMu.Lock()
+	delete(f.debugStreams, chatID)
+	f.debugMu.Unlock()
+}
+
 func (f *IM) flushDebug(chatID string) {
 	f.debugMu.Lock()
 	ds := f.debugStreams[chatID]
@@ -331,6 +341,8 @@ func (f *IM) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageRe
 	h := f.handler
 	f.mu.RUnlock()
 	if h != nil {
+		// Start a new debug stream card for each new user message in the chat.
+		f.resetDebugStream(*msg.ChatId)
 		h(im.Message{
 			ChatID:    *msg.ChatId,
 			MessageID: *msg.MessageId,
