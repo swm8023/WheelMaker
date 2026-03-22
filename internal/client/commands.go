@@ -486,17 +486,10 @@ func formatConfigOptionUpdateMessage(raw []byte) string {
 	if len(raw) == 0 {
 		return "Config options updated."
 	}
-	// Raw may be a SessionUpdate (marshaled directly) or a SessionUpdateParams wrapper.
-	// Try SessionUpdate first (the common case from sessionUpdateToUpdate).
-	var opts []acp.ConfigOption
 	var u acp.SessionUpdate
-	if err := json.Unmarshal(raw, &u); err == nil && len(u.ConfigOptions) > 0 {
+	var opts []acp.ConfigOption
+	if err := json.Unmarshal(raw, &u); err == nil {
 		opts = u.ConfigOptions
-	} else {
-		var p acp.SessionUpdateParams
-		if err := json.Unmarshal(raw, &p); err == nil {
-			opts = p.Update.ConfigOptions
-		}
 	}
 	if len(opts) == 0 {
 		return "Config options updated."
