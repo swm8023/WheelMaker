@@ -133,6 +133,10 @@ func TestForwarder_HelpCardActionInjectsCommand(t *testing.T) {
 			"value":   "plan",
 		},
 	})
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) && got != "/mode plan" {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if got != "/mode plan" {
 		t.Fatalf("injected command = %q, want %q", got, "/mode plan")
 	}

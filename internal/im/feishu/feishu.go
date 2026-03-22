@@ -375,14 +375,16 @@ func (f *IM) handleCardAction(_ context.Context, event *larkevent.EventReq) erro
 	h := f.action
 	f.mu.RUnlock()
 	if h != nil {
-		h(im.CardActionEvent{
+		evt := im.CardActionEvent{
 			ChatID:    firstNonEmpty(value["chat_id"], payload.Event.Context.OpenChatID),
 			MessageID: payload.Event.Context.OpenMessageID,
 			UserID:    payload.Event.Operator.OperatorID.OpenID,
 			Tag:       payload.Event.Action.Tag,
 			Option:    payload.Event.Action.Option,
 			Value:     value,
-		})
+		}
+		// ACK callback quickly; do not block Feishu callback thread on command execution.
+		go h(evt)
 	}
 	return nil
 }

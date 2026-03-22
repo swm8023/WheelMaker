@@ -307,7 +307,7 @@ func (f *Forwarder) handleCardAction(evt im.CardActionEvent) {
 		if val != "" {
 			text = cmd + " " + val
 		}
-		f.handler(im.Message{
+		go f.handler(im.Message{
 			ChatID: chatID,
 			UserID: evt.UserID,
 			Text:   text,
