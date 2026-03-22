@@ -91,7 +91,7 @@ var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
   - `persistMeta` has a comment documenting the `promptMu` serialization invariant.
   - `resetSessionFields` (or equivalent) is the sole location for the 6-field common session reset; `switchAgent`'s agent-switch-specific resets remain at its call site.
   - `formatConfigOptionUpdateMessage` contains exactly one `json.Unmarshal` into `acp.SessionUpdate`.
-  - `handleConfigCommand` acquires `c.mu` exactly once after `ensureForwarder` returns.
+  - `handleConfigCommand` acquires `c.mu` at most twice after `ensureForwarder` returns (once before `ensureReadyAndNotify` for `agentName`/`sessionState`, once after for `fwd`/`sid`); the unreachable `fwd == nil` guard is removed.
 
 ---
 
