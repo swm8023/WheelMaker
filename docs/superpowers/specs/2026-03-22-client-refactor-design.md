@@ -52,15 +52,19 @@ const acpClientProtocolVersion = 1
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 ```
 
-### Fix 4: Race window in `persistMeta`
+### Fix 4: Apparent race window in `persistMeta`
 
-**Problem:** `persistMeta` unlocks `c.mu` after reading fields, then re-acquires it to write — a goroutine can mutate `c.state` or agent fields between the two lock sections (TOCTOU).
-**Fix:** Hold `c.mu` for the entire read+write sequence. Remove the intermediate unlock; snapshot only what is needed before a single locked write block.
+**Problem:** `persistMeta` currently acquires `c.mu` twice (read then write), which looks like a TOCTOU. However, every caller of `persistMeta` is serialized by `promptMu`: `saveSessionState` is only called from inside `promptMu`-held paths (`handlePrompt`, `switchAgent`, `createNewSession`, `loadSessionByIndex`), and `switchAgent` holds `promptMu` for its entire body.
+
+**Fix:** No lock restructuring. Instead, add an explicit comment at the top of `persistMeta` documenting the `promptMu` serialization invariant so future readers understand why the two-acquisition pattern is safe. Do **not** collapse into a single lock: `c.store.Save` performs file I/O and must never run while holding `c.mu` (would stall ACP callback goroutines).
 
 ### Fix 5: Duplicate session state reset
 
 **Problem:** The same 6-field reset block (`sessionID`, `ready`, `lastReply`, `loadHistory`, `activeToolCalls`, `sessionMeta`) is copy-pasted in `createNewSession`, `loadSessionByIndex`, and `switchAgent`.
-**Fix:** Extract private method `c.applySessionSwitch(sid string, configOpts []acp.ConfigOption)` that resets all 6 fields and applies the new session ID + config options. All three callers use it (must hold `c.mu` before calling or method acquires internally — prefer caller holds lock for consistency with surrounding patterns).
+
+**Fix:** Extract private method `c.resetSessionFields(sid string, configOpts []acp.ConfigOption)` that resets exactly these 6 fields. **Callers must hold `c.mu` before calling** (consistent with surrounding lock patterns at all three call sites).
+
+`switchAgent` also resets additional agent-switch-specific fields (`initializing`, `promptUpdatesCh`, `initMeta`, `currentAgent`, `currentAgentName`, `forwarder`) and calls `c.initCond.Broadcast()` **after** releasing `c.mu` — these remain at the `switchAgent` call site and are not moved into the helper. The helper is responsible only for the 6 common fields listed above.
 
 ### Fix 6: Double-unmarshal in `formatConfigOptionUpdateMessage`
 
@@ -77,12 +81,17 @@ var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 ## Acceptance Criteria
 
 - `go build ./...` passes with no errors.
-- `go test ./internal/client/...` passes (all existing tests green).
+- `go test -race ./internal/client/...` passes (all existing tests green, no data races).
 - `go vet ./...` reports no issues.
 - Step 1 commit contains zero logic changes (verifiable by inspection).
-- Step 2 commit addresses all 7 fixes; no new hardcoded agent names or empty MCP slice literals outside the designated helper.
-- `persistMeta` holds `c.mu` for both read and write in a single critical section.
-- `applySessionSwitch` (or equivalent) is the sole location for 6-field session reset.
+- Step 2 commit addresses all 7 fixes:
+  - No hardcoded agent name strings outside `defaultAgentName` constant.
+  - No inline `[]acp.MCPServer{}` literals at session/new or session/load call sites.
+  - `acpClientProtocolVersion` and `acpClientInfo` are package-level, not local to `ensureReady`.
+  - `persistMeta` has a comment documenting the `promptMu` serialization invariant.
+  - `resetSessionFields` (or equivalent) is the sole location for the 6-field common session reset; `switchAgent`'s agent-switch-specific resets remain at its call site.
+  - `formatConfigOptionUpdateMessage` contains exactly one `json.Unmarshal` into `acp.SessionUpdate`.
+  - `handleConfigCommand` acquires `c.mu` exactly once after `ensureForwarder` returns.
 
 ---
 
