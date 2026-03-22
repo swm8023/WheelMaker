@@ -47,6 +47,8 @@ type inMemoryMockServer struct {
 	promptCancels map[string]context.CancelFunc
 }
 
+const callbackRequestTimeout = 30 * time.Second
+
 func runInMemoryMockServer(r io.Reader, w io.Writer) {
 	s := &inMemoryMockServer{
 		enc:           json.NewEncoder(w),
@@ -511,7 +513,7 @@ func (s *inMemoryMockServer) callbackRequest(method string, params any) (rpcMsg,
 			return rpcMsg{}, fmt.Errorf("rpc error %d: %s", resp.Error.Code, resp.Error.Message)
 		}
 		return resp, nil
-	case <-time.After(3 * time.Second):
+	case <-time.After(callbackRequestTimeout):
 		s.pendMu.Lock()
 		delete(s.pending, id)
 		s.pendMu.Unlock()
