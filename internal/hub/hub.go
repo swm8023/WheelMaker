@@ -103,8 +103,8 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	return c, nil
 }
 
-// buildIM creates the im.Channel for a project's IM config.
-func (h *Hub) buildIM(pc ProjectConfig) (im.Channel, error) {
+// buildIM creates the im.Bridge for a project's IM config.
+func (h *Hub) buildIM(pc ProjectConfig) (*im.Bridge, error) {
 	switch pc.IM.Type {
 	case "console":
 		return im.New(console.New(pc.Name, pc.Debug)), nil

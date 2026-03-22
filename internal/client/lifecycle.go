@@ -56,8 +56,8 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 		return nil
 	}
 	c.conn = &agentConn{name: name, agent: baseAgent, forwarder: fwd}
-	c.ready = false
-	c.sessionID = savedSID
+	c.session.ready = false
+	c.session.id = savedSID
 	c.mu.Unlock()
 	return nil
 }
@@ -76,20 +76,20 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	defer c.promptMu.Unlock()
 	// Belt-and-suspenders: drain any channel published between cancelPrompt and promptMu.Lock.
 	c.mu.Lock()
-	promptCh := c.currentPromptCh
+	promptCh := c.prompt.currentCh
 	c.mu.Unlock()
 	if promptCh != nil {
 		for range promptCh {
 		}
 		c.mu.Lock()
-		c.currentPromptCh = nil
+		c.prompt.currentCh = nil
 		c.mu.Unlock()
 	}
 
 	// Capture outgoing state.
 	c.mu.Lock()
 	oldConn := c.conn
-	savedLastReply := c.lastReply
+	savedLastReply := c.session.lastReply
 	dw := c.debugLog
 	c.mu.Unlock()
 	c.persistMeta() // save outgoing agent state before reset
@@ -120,11 +120,11 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	c.mu.Lock()
 	c.terminals.KillAll()
 	c.conn = &agentConn{name: name, agent: baseAgent, forwarder: newFwd}
-	c.initializing = false
-	c.promptUpdatesCh = nil
+	c.session.initializing = false
+	c.prompt.updatesCh = nil
 	c.initMeta = clientInitMeta{}
 	c.resetSessionFields(savedSID, nil) // sets ready=true — override below:
-	c.ready = false
+	c.session.ready = false
 	c.mu.Unlock()
 	c.initCond.Broadcast() // MUST be outside c.mu — never inside the lock
 

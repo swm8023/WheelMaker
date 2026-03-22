@@ -16,21 +16,6 @@ func emptyMCPServers() []acp.MCPServer {
 	return []acp.MCPServer{}
 }
 
-// Session is the interface for a live ACP session as seen by the client.
-// Tests may inject a mock implementation via InjectSession (export_test.go).
-type Session interface {
-	// Prompt sends text and returns a channel of streaming updates.
-	Prompt(ctx context.Context, text string) (<-chan acp.Update, error)
-	// Cancel aborts any in-progress prompt.
-	Cancel() error
-	// AgentName returns the name of the backing agent.
-	AgentName() string
-	// SessionID returns the current ACP session ID.
-	SessionID() string
-	// Close shuts down the session and its underlying transport.
-	Close() error
-}
-
 // SwitchMode controls how an agent switch affects session context.
 type SwitchMode int
 
@@ -69,22 +54,22 @@ type clientSessionMeta struct {
 // others wait on c.initCond and return once ready is set.
 func (c *Client) ensureReady(ctx context.Context) error {
 	c.mu.Lock()
-	for c.initializing {
+	for c.session.initializing {
 		c.initCond.Wait()
 	}
-	if c.ready {
+	if c.session.ready {
 		c.mu.Unlock()
 		return nil
 	}
-	c.initializing = true
+	c.session.initializing = true
 	fwd := c.conn.forwarder
-	savedSID := c.sessionID
+	savedSID := c.session.id
 	cwd := c.cwd
 	c.mu.Unlock()
 
 	notifyDone := func() {
 		c.mu.Lock()
-		c.initializing = false
+		c.session.initializing = false
 		c.mu.Unlock()
 		c.initCond.Broadcast()
 	}
@@ -124,7 +109,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		replayMeta := clientSessionMeta{}
 
 		c.mu.Lock()
-		c.replayHandler = func(p acp.SessionUpdateParams) {
+		c.session.replayH = func(p acp.SessionUpdateParams) {
 			if p.SessionID != savedSID {
 				return
 			}
@@ -156,7 +141,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			return err
 		}()
 		c.mu.Lock()
-		c.replayHandler = nil
+		c.session.replayH = nil
 		c.mu.Unlock()
 
 		if loadErr == nil {
@@ -168,9 +153,8 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			c.mu.Lock()
 			c.initMeta = newInitMeta
 			c.sessionMeta = meta
-			c.loadHistory = replayUpdates
-			c.ready = true
-			c.initializing = false
+			c.session.ready = true
+			c.session.initializing = false
 			c.mu.Unlock()
 			c.initCond.Broadcast()
 			log.Printf("[client] connected: agent=%s session=%s (resumed, %d history updates)",
@@ -192,12 +176,12 @@ func (c *Client) ensureReady(ctx context.Context) error {
 
 	c.mu.Lock()
 	c.initMeta = newInitMeta
-	c.sessionID = newResult.SessionID
+	c.session.id = newResult.SessionID
 	c.sessionMeta = clientSessionMeta{
 		ConfigOptions: newResult.ConfigOptions,
 	}
-	c.ready = true
-	c.initializing = false
+	c.session.ready = true
+	c.session.initializing = false
 	c.mu.Unlock()
 	c.initCond.Broadcast()
 
@@ -217,7 +201,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 // to chatID when this call is the one that first transitions to ready.
 func (c *Client) ensureReadyAndNotify(ctx context.Context, chatID string) error {
 	c.mu.Lock()
-	wasReady := c.ready
+	wasReady := c.session.ready
 	c.mu.Unlock()
 
 	if err := c.ensureReady(ctx); err != nil {
@@ -243,16 +227,8 @@ func (c *Client) sessionConfigSnapshot() acp.SessionConfigSnapshot {
 // promptStream sends a prompt and returns a channel of streaming updates.
 // The caller must drain the channel until a Done update is received.
 func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Update, error) {
-	// Test-only: delegate to injected session if present.
 	c.mu.Lock()
-	override := c.sessionOverride
-	c.mu.Unlock()
-	if override != nil {
-		return override.Prompt(ctx, text)
-	}
-
-	c.mu.Lock()
-	c.lastReply = ""
+	c.session.lastReply = ""
 	c.mu.Unlock()
 
 	if err := c.ensureReady(ctx); err != nil {
@@ -260,17 +236,17 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 	}
 
 	c.mu.Lock()
-	sessID := c.sessionID
+	sessID := c.session.id
 	promptCtx, promptCancel := context.WithCancel(ctx)
-	c.promptCtx = promptCtx
-	c.promptCancel = promptCancel
+	c.prompt.ctx = promptCtx
+	c.prompt.cancel = promptCancel
 	c.mu.Unlock()
 
 	updates := make(chan acp.Update, 32)
 	interceptCh := make(chan acp.Update, 32)
 
 	c.mu.Lock()
-	c.promptUpdatesCh = interceptCh
+	c.prompt.updatesCh = interceptCh
 	c.mu.Unlock()
 
 	var replyMu sync.Mutex
@@ -279,10 +255,10 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 	go func() {
 		defer func() {
 			c.mu.Lock()
-			c.promptCtx = nil
-			c.promptCancel = nil
-			c.activeToolCalls = make(map[string]struct{})
-			c.promptUpdatesCh = nil
+			c.prompt.ctx = nil
+			c.prompt.cancel = nil
+			c.prompt.activeTCs = make(map[string]struct{})
+			c.prompt.updatesCh = nil
 			c.mu.Unlock()
 			promptCancel()
 		}()
@@ -320,7 +296,7 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 		reply := replyBuf.String()
 		replyMu.Unlock()
 		c.mu.Lock()
-		c.lastReply = reply
+		c.session.lastReply = reply
 		c.mu.Unlock()
 
 		var finalUpdate acp.Update
@@ -341,21 +317,13 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
 func (c *Client) cancelPrompt() error {
-	// Test-only: delegate to injected session if present.
 	c.mu.Lock()
-	override := c.sessionOverride
-	c.mu.Unlock()
-	if override != nil {
-		return override.Cancel()
-	}
-
-	c.mu.Lock()
-	sessID := c.sessionID
-	ready := c.ready
-	cancel := c.promptCancel
-	ch := c.promptUpdatesCh
+	sessID := c.session.id
+	ready := c.session.ready
+	cancel := c.prompt.cancel
+	ch := c.prompt.updatesCh
 	var cancelIDs []string
-	for id := range c.activeToolCalls {
+	for id := range c.prompt.activeTCs {
 		cancelIDs = append(cancelIDs, id)
 	}
 	c.mu.Unlock()
@@ -401,7 +369,7 @@ func (c *Client) persistMeta() bool {
 		return false
 	}
 	agentName := c.conn.name
-	sessionID := c.sessionID
+	sessionID := c.session.id
 	initMeta := c.initMeta
 	sessMeta := c.sessionMeta
 	c.mu.Unlock()
@@ -469,11 +437,10 @@ func (c *Client) persistMeta() bool {
 // resetSessionFields resets the 6 session-level fields common to session/new,
 // session/load, and agent-switch operations. Callers MUST hold c.mu.
 func (c *Client) resetSessionFields(sid string, configOpts []acp.ConfigOption) {
-	c.sessionID = sid
-	c.ready = true
-	c.lastReply = ""
-	c.loadHistory = nil
-	c.activeToolCalls = make(map[string]struct{})
+	c.session.id = sid
+	c.session.ready = true
+	c.session.lastReply = ""
+	c.prompt.activeTCs = make(map[string]struct{})
 	c.sessionMeta = clientSessionMeta{ConfigOptions: configOpts}
 }
 

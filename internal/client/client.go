@@ -76,6 +76,22 @@ const acpClientProtocolVersion = 1
 
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 
+type sessionState struct {
+	id           string
+	ready        bool
+	initializing bool
+	lastReply    string
+	replayH      func(acp.SessionUpdateParams)
+}
+
+type promptState struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	updatesCh chan<- acp.Update
+	currentCh <-chan acp.Update // tracked for draining during switchAgent
+	activeTCs map[string]struct{}
+}
+
 // Client is the top-level coordinator for a single WheelMaker project.
 // Agent initialization is lazy: the first incoming message triggers ensureForwarder(),
 // which connects the active agent and creates the ACP forwarder.
@@ -97,32 +113,17 @@ type Client struct {
 	// active connection; nil until first ensureForwarder
 	conn *agentConn
 
-	// session state (all owned by client)
-	sessionID       string
-	ready           bool
-	initializing    bool
-	initCond        *sync.Cond
-	initMeta        clientInitMeta
-	sessionMeta     clientSessionMeta
-	lastReply       string
-	loadHistory     []acp.Update
-	activeToolCalls map[string]struct{}
-	promptCtx       context.Context
-	promptCancel    context.CancelFunc
-	promptUpdatesCh chan<- acp.Update
-
-	currentPromptCh <-chan acp.Update // tracked for draining during switchAgent
-
-	replayHandler func(acp.SessionUpdateParams) // set temporarily during session/load
+	initCond *sync.Cond
+	session  sessionState
+	prompt   promptState
+	initMeta clientInitMeta
+	// sessionMeta tracks runtime session snapshot from session/update.
+	sessionMeta clientSessionMeta
 
 	terminals *terminalManager
 
 	permRouter *permissionRouter
 	debugSink  *agentDebugSink
-
-	// sessionOverride is set only in tests (via InjectSession in export_test.go).
-	// When non-nil, promptStream and cancelPrompt delegate to it instead of the forwarder.
-	sessionOverride Session
 }
 
 // New creates a Client for the given project.
@@ -132,12 +133,14 @@ type Client struct {
 //   - cwd: working directory for agent sessions
 func New(store Store, imProvider *im.Bridge, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName:     projectName,
-		cwd:             cwd,
-		registry:        newAgentRegistry(),
-		store:           store,
-		imBridge:        imProvider,
-		activeToolCalls: make(map[string]struct{}),
+		projectName: projectName,
+		cwd:         cwd,
+		registry:    newAgentRegistry(),
+		store:       store,
+		imBridge:    imProvider,
+		prompt: promptState{
+			activeTCs: make(map[string]struct{}),
+		},
 	}
 	c.initCond = sync.NewCond(&c.mu)
 	c.terminals = newTerminalManager()
@@ -245,29 +248,20 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
-	if c.permRouter != nil {
-		c.permRouter.setLastChatID(msg.ChatID)
-		defer c.permRouter.clearLastChatID(msg.ChatID)
-	}
+	c.permRouter.setLastChatID(msg.ChatID)
+	defer c.permRouter.clearLastChatID(msg.ChatID)
 
 	ctx := context.Background()
 
-	// When a session override is injected (test-only), skip forwarder initialization.
-	c.mu.Lock()
-	hasOverride := c.sessionOverride != nil
-	c.mu.Unlock()
+	// Lazily initialize the agent if no forwarder exists yet.
+	if err := c.ensureForwarder(ctx); err != nil {
+		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		return
+	}
 
-	if !hasOverride {
-		// Lazily initialize the agent if no forwarder exists yet.
-		if err := c.ensureForwarder(ctx); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-			return
-		}
-
-		if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-			return
-		}
+	if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
+		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		return
 	}
 
 	updates, err := c.promptStream(ctx, text)
@@ -277,14 +271,14 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	}
 
 	c.mu.Lock()
-	c.currentPromptCh = updates
+	c.prompt.currentCh = updates
 	c.mu.Unlock()
 
 	var buf strings.Builder
 	c.mu.Lock()
 	emitter := c.imBridge
 	hasEmitter := emitter != nil
-	sid := c.sessionID
+	sid := c.session.id
 	c.mu.Unlock()
 	for u := range updates {
 		if hasEmitter {
@@ -302,7 +296,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		if u.Err != nil {
 			c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
 			c.mu.Lock()
-			c.currentPromptCh = nil
+			c.prompt.currentCh = nil
 			c.mu.Unlock()
 			return
 		}
@@ -321,7 +315,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	}
 
 	c.mu.Lock()
-	c.currentPromptCh = nil
+	c.prompt.currentCh = nil
 	c.mu.Unlock()
 
 	// Persist after prompt completes: session ID and config metadata may have changed.

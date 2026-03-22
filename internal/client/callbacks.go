@@ -17,9 +17,9 @@ var _ acp.ClientCallbacks = (*Client)(nil)
 // Routes the update to the active promptUpdatesCh if the session ID matches.
 func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 	c.mu.Lock()
-	sessID := c.sessionID
-	ch := c.promptUpdatesCh
-	replayH := c.replayHandler
+	sessID := c.session.id
+	ch := c.prompt.updatesCh
+	replayH := c.session.replayH
 	c.mu.Unlock()
 
 	if replayH != nil {
@@ -52,10 +52,10 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 	if derived.TrackAddToolCall != "" || derived.TrackDoneToolCall != "" {
 		c.mu.Lock()
 		if derived.TrackAddToolCall != "" {
-			c.activeToolCalls[derived.TrackAddToolCall] = struct{}{}
+			c.prompt.activeTCs[derived.TrackAddToolCall] = struct{}{}
 		}
 		if derived.TrackDoneToolCall != "" {
-			delete(c.activeToolCalls, derived.TrackDoneToolCall)
+			delete(c.prompt.activeTCs, derived.TrackDoneToolCall)
 		}
 		c.mu.Unlock()
 	}
@@ -71,7 +71,7 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 // Substitutes promptCtx so that Cancel() unblocks pending permission dialogs.
 func (c *Client) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	c.mu.Lock()
-	pCtx := c.promptCtx
+	pCtx := c.prompt.ctx
 	snap := acp.SessionConfigSnapshotFromOptions(c.sessionMeta.ConfigOptions)
 	c.mu.Unlock()
 	if pCtx != nil {

@@ -56,7 +56,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		if c.conn != nil {
 			agentName = c.conn.name
 		}
-		sid := c.sessionID
+		sid := c.session.id
 		active := c.conn != nil
 		c.mu.Unlock()
 		if !active {
@@ -169,10 +169,10 @@ func (c *Client) handleConfigCommand(
 		return
 	}
 
-	// Lock section 2: read fwd and sid after ensureReady has set c.sessionID.
+	// Lock section 2: read fwd and sid after ensureReady has set c.session.id.
 	c.mu.Lock()
 	fwd := c.conn.forwarder
-	sid := c.sessionID
+	sid := c.session.id
 	c.mu.Unlock()
 
 	if _, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
@@ -244,7 +244,7 @@ func (c *Client) listSessions(ctx context.Context) ([]string, error) {
 	c.mu.Lock()
 	fwd := c.conn.forwarder
 	cwd := c.cwd
-	curSID := c.sessionID
+	curSID := c.session.id
 	agentName := c.conn.name
 	caps := c.initMeta.AgentCapabilities
 	c.mu.Unlock()

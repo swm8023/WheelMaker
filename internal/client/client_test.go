@@ -42,7 +42,6 @@ type mockSession struct {
 	mu           sync.Mutex
 	promptCalls  []string
 	cancelCalls  int
-	modeCalls    []string
 	agentN       string
 	sessionN     string
 	promptResult func(text string) (<-chan acp.Update, error)
@@ -70,20 +69,6 @@ func (m *mockSession) Cancel() error {
 	return nil
 }
 
-func (m *mockSession) SetMode(_ context.Context, modeID string) error {
-	m.mu.Lock()
-	m.modeCalls = append(m.modeCalls, modeID)
-	m.mu.Unlock()
-	return nil
-}
-
-func (m *mockSession) SetConfigOption(_ context.Context, configID, value string) error {
-	m.mu.Lock()
-	m.modeCalls = append(m.modeCalls, configID+"="+value)
-	m.mu.Unlock()
-	return nil
-}
-
 func (m *mockSession) AgentName() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -95,10 +80,6 @@ func (m *mockSession) SessionID() string {
 	defer m.mu.Unlock()
 	return m.sessionN
 }
-
-func (m *mockSession) Close() error { return nil }
-
-var _ client.Session = (*mockSession)(nil)
 
 // --- mock Store ---
 
@@ -132,8 +113,155 @@ var _ client.Store = (*mockStore)(nil)
 func newTestClient(mock *mockSession) *client.Client {
 	store := &mockStore{}
 	c := client.New(store, nil, "test", "/tmp")
-	c.InjectSession(mock)
+	agentName := strings.TrimSpace(mock.AgentName())
+	if agentName == "" {
+		agentName = "codex"
+	}
+	sid := strings.TrimSpace(mock.SessionID())
+	if sid == "" {
+		sid = "sess-1"
+	}
+	c.InjectState(&client.ProjectState{
+		ActiveAgent: agentName,
+		Agents: map[string]*client.AgentState{
+			agentName: {LastSessionID: sid},
+		},
+	})
+	c.InjectForwarder(newMockForwarder(mock), sid)
 	return c
+}
+
+func newMockForwarder(mock *mockSession) *acp.Forwarder {
+	server := func(r io.Reader, w io.Writer) {
+		enc := json.NewEncoder(w)
+		scanner := bufio.NewScanner(r)
+		scanner.Buffer(make([]byte, 1<<20), 1<<20)
+		sessionID := strings.TrimSpace(mock.SessionID())
+		if sessionID == "" {
+			sessionID = "sess-1"
+		}
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if len(line) == 0 {
+				continue
+			}
+			var raw struct {
+				ID     *int64          `json:"id"`
+				Method string          `json:"method"`
+				Params json.RawMessage `json:"params,omitempty"`
+			}
+			if err := json.Unmarshal(line, &raw); err != nil {
+				continue
+			}
+			switch raw.Method {
+			case acp.MethodSessionCancel:
+				_ = mock.Cancel()
+				continue
+			case acp.MethodInitialize:
+				if raw.ID == nil {
+					continue
+				}
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      *raw.ID,
+					"result": map[string]any{
+						"protocolVersion":   "0.1",
+						"agentCapabilities": map[string]any{"loadSession": false},
+						"agentInfo":         map[string]any{"name": "test-mock-agent"},
+					},
+				})
+			case acp.MethodSessionNew:
+				if raw.ID == nil {
+					continue
+				}
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      *raw.ID,
+					"result":  map[string]any{"sessionId": sessionID},
+				})
+			case acp.MethodSessionPrompt:
+				if raw.ID == nil {
+					continue
+				}
+				var p struct {
+					SessionID string `json:"sessionId"`
+					Prompt    []struct {
+						Type string `json:"type"`
+						Text string `json:"text"`
+					} `json:"prompt"`
+				}
+				_ = json.Unmarshal(raw.Params, &p)
+				text := ""
+				if len(p.Prompt) > 0 {
+					text = p.Prompt[0].Text
+				}
+				ch, err := mock.Prompt(context.Background(), text)
+				if err != nil {
+					_ = enc.Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"id":      *raw.ID,
+						"error":   map[string]any{"code": -32603, "message": err.Error()},
+					})
+					continue
+				}
+				stopReason := "end_turn"
+				hasErr := false
+				for u := range ch {
+					if u.Err != nil {
+						_ = enc.Encode(map[string]any{
+							"jsonrpc": "2.0",
+							"id":      *raw.ID,
+							"error":   map[string]any{"code": -32603, "message": u.Err.Error()},
+						})
+						hasErr = true
+						break
+					}
+					if u.Type == acp.UpdateText && strings.TrimSpace(u.Content) != "" {
+						_ = enc.Encode(map[string]any{
+							"jsonrpc": "2.0",
+							"method":  acp.MethodSessionUpdate,
+							"params": map[string]any{
+								"sessionId": p.SessionID,
+								"update": map[string]any{
+									"sessionUpdate": "agent_message_chunk",
+									"content":       map[string]any{"type": "text", "text": u.Content},
+								},
+							},
+						})
+					}
+					if u.Done {
+						if strings.TrimSpace(u.Content) != "" {
+							stopReason = strings.TrimSpace(u.Content)
+						}
+						break
+					}
+				}
+				if hasErr {
+					continue
+				}
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      *raw.ID,
+					"result":  map[string]any{"stopReason": stopReason},
+				})
+			default:
+				if raw.ID == nil {
+					continue
+				}
+				_ = enc.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      *raw.ID,
+					"result":  map[string]any{},
+				})
+			}
+		}
+	}
+
+	conn := acp.NewInMemoryConn(server)
+	if err := conn.Start(); err != nil {
+		panic(err)
+	}
+	return acp.NewForwarder(conn, nil)
 }
 
 // captureReplies redirects Client replies to a string slice for inspection.
@@ -728,13 +856,13 @@ func TestSwitchBackend_PersistsOutgoingSessionID(t *testing.T) {
 	outgoing := &mockSession{agentN: "codex", sessionN: "outgoing-sess-123"}
 	store := &mockStore{}
 	c := client.New(store, nil, "test", "/tmp")
-	c.InjectSession(outgoing)
 	c.InjectState(&client.ProjectState{
 		ActiveAgent: "codex",
 		Agents: map[string]*client.AgentState{
 			"codex": {LastSessionID: "outgoing-sess-123"},
 		},
 	})
+	c.InjectForwarder(newMockForwarder(outgoing), outgoing.sessionN)
 	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Agent {
 		return &minimalMockAgent{}
 	})
@@ -766,7 +894,6 @@ func TestSwitchBackend_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	outgoing := &mockSession{agentN: "codex", sessionN: "codex-sess-1"}
 	store := &mockStore{}
 	c := client.New(store, nil, "test", "/tmp")
-	c.InjectSession(outgoing)
 	c.InjectState(&client.ProjectState{
 		ActiveAgent: "codex",
 		Agents: map[string]*client.AgentState{
@@ -774,6 +901,7 @@ func TestSwitchBackend_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 			"new-agent": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
 		},
 	})
+	c.InjectForwarder(newMockForwarder(outgoing), outgoing.sessionN)
 	c.RegisterAgent("new-agent", func(_ string, _ map[string]string) agent.Agent {
 		return &minimalMockAgent{}
 	})

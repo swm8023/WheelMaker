@@ -97,7 +97,7 @@ type HelpModel struct {
 	Options []HelpOption
 }
 
-// HelpResolverSetter allows client to inject realtime help resolver into IM forwarder.
+// HelpResolverSetter allows client to inject realtime help resolver into IM bridge.
 type HelpResolverSetter interface {
 	SetHelpResolver(func(ctx context.Context, chatID string) (HelpModel, error))
 }

@@ -8,7 +8,7 @@ import (
 func TestResolveHelpModel_IncludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.RegisterAgent("codex", nil)
-	c.ready = true
+	c.session.ready = true
 
 	model, err := c.resolveHelpModel(context.Background(), "chat-1")
 	if err != nil {

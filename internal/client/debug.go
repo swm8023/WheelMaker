@@ -82,9 +82,6 @@ func (c *Client) resolveCurrentAgentName() string {
 }
 
 func (c *Client) bindDebugChat(agentName, chatID string) {
-	if c.debugSink == nil {
-		return
-	}
 	c.debugSink.bindChat(agentName, chatID)
 }
 
@@ -92,9 +89,7 @@ func (c *Client) composeDebugWriter(agentName string, base io.Writer) io.Writer 
 	var ws []io.Writer
 	if base != nil {
 		ws = append(ws, base)
-		if c.debugSink != nil {
-			ws = append(ws, c.debugSink.writer(agentName))
-		}
+		ws = append(ws, c.debugSink.writer(agentName))
 	}
 	if len(ws) == 0 {
 		return nil

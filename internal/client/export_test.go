@@ -4,7 +4,7 @@ package client
 // This file is compiled only during `go test`, keeping production code clean.
 
 import (
-	"context"
+	"strings"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -15,40 +15,19 @@ import (
 // testing with a mock agent.
 func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
 	c.mu.Lock()
-	c.conn = &agentConn{forwarder: f}
-	c.sessionID = sessionID
-	c.ready = true
+	name := defaultAgentName
+	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" {
+		name = c.state.ActiveAgent
+	}
+	c.conn = &agentConn{name: name, forwarder: f}
+	c.session.id = sessionID
+	c.session.ready = true
 	if c.state == nil {
 		c.state = defaultProjectState()
 	}
 	c.mu.Unlock()
+	f.SetCallbacks(c)
 }
-
-// InjectSession installs a Session override so tests can inject a mock that
-// intercepts Prompt and Cancel without spawning a real ACP subprocess.
-// It also marks the client as having an active agent so command routing works.
-func (c *Client) InjectSession(s Session) {
-	c.mu.Lock()
-	c.sessionOverride = s
-	// Populate agent fields so /cancel, /status, and other commands see an active session.
-	if c.state == nil {
-		c.state = defaultProjectState()
-	}
-	c.sessionID = s.SessionID()
-	c.ready = true
-	// Use a stub agentConn to satisfy c.conn != nil checks.
-	c.conn = &agentConn{name: s.AgentName(), agent: &stubAgent{name: s.AgentName()}}
-	c.mu.Unlock()
-}
-
-// stubAgent is a minimal agent.Agent used by InjectSession.
-type stubAgent struct{ name string }
-
-func (a *stubAgent) Name() string { return a.name }
-func (a *stubAgent) Connect(_ context.Context) (*acp.Conn, error) {
-	return nil, nil
-}
-func (a *stubAgent) Close() error { return nil }
 
 // InjectState replaces the persisted state.
 func (c *Client) InjectState(st *ProjectState) {
