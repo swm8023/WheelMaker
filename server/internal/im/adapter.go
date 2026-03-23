@@ -149,13 +149,13 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		if msg == "" {
 			msg = "Agent request failed."
 		}
-		return f.adapter.SendText(chatID, msg)
+		return f.SendText(chatID, msg)
 	case "thought":
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(u.Text) != "" {
-			return f.adapter.SendText(chatID, "?? "+strings.TrimSpace(u.Text))
+			return f.SendText(chatID, "[thought] "+strings.TrimSpace(u.Text))
 		}
 	case "tool_call":
 		if err := f.flushTextNow(chatID); err != nil {
@@ -167,14 +167,14 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 			return err
 		}
 		if msg := renderPlanUpdate(u.Raw); msg != "" {
-			return f.adapter.SendText(chatID, msg)
+			return f.SendText(chatID, msg)
 		}
 	case "config_option_update":
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		if msg := renderConfigOptionUpdate(u.Raw); msg != "" {
-			return f.adapter.SendText(chatID, msg)
+			return f.SendText(chatID, msg)
 		}
 	}
 	return nil
@@ -222,7 +222,7 @@ func (f *ImAdapter) flushTextNow(chatID string) error {
 	if buf == nil || buf.Len() == 0 {
 		return nil
 	}
-	return f.adapter.SendText(chatID, buf.String())
+	return f.SendText(chatID, buf.String())
 }
 
 func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {
@@ -235,11 +235,13 @@ func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {
 	}
 	if f.ability.Has(AbilitySendToolCards) {
 		if sender, ok := any(f.adapter).(ToolCallSender); ok {
-			return sender.SendToolCall(chatID, upd)
+			err := sender.SendToolCall(chatID, upd)
+			f.logOutgoingToolCall(chatID, upd, err)
+			return err
 		}
 	}
 	if msg := renderToolCallMessage(upd); msg != "" {
-		return f.adapter.SendText(chatID, msg)
+		return f.SendText(chatID, msg)
 	}
 	return nil
 }
@@ -309,11 +311,13 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 	}
 	if f.ability.Has(AbilitySendOptions) {
 		sender := any(f.adapter).(OptionSender)
-		if err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta); err != nil {
-			_ = f.adapter.SendText(chatID, renderDecisionPrompt(req))
+		err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta)
+		f.logOutgoingOptions(chatID, req, err)
+		if err != nil {
+			_ = f.SendText(chatID, renderDecisionPrompt(req))
 		}
 	} else {
-		_ = f.adapter.SendText(chatID, renderDecisionPrompt(req))
+		_ = f.SendText(chatID, renderDecisionPrompt(req))
 	}
 
 	select {
@@ -368,11 +372,11 @@ func (f *ImAdapter) tryHandleHelp(m Message) bool {
 	}
 	model, err := resolver(context.Background(), m.ChatID)
 	if err != nil {
-		_ = f.adapter.SendText(m.ChatID, fmt.Sprintf("help load error: %v", err))
+		_ = f.SendText(m.ChatID, fmt.Sprintf("help load error: %v", err))
 		return true
 	}
 	if err := f.sendHelpPage(m.ChatID, model, 0); err != nil {
-		_ = f.adapter.SendText(m.ChatID, strings.TrimSpace(model.Body))
+		_ = f.SendText(m.ChatID, strings.TrimSpace(model.Body))
 	}
 	return true
 }
@@ -450,7 +454,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 		}
 		model, err := resolver(context.Background(), chatID)
 		if err != nil {
-			_ = f.adapter.SendText(chatID, fmt.Sprintf("help load error: %v", err))
+			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}
 		_ = f.sendHelpPage(chatID, model, page)
@@ -459,10 +463,10 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 
 func (f *ImAdapter) sendHelpPage(chatID string, model HelpModel, page int) error {
 	if len(model.Options) == 0 {
-		return f.adapter.SendText(chatID, strings.TrimSpace(model.Body))
+		return f.SendText(chatID, strings.TrimSpace(model.Body))
 	}
 	card := buildHelpCard(chatID, model, page)
-	return f.adapter.SendCard(chatID, card)
+	return f.SendCard(chatID, card)
 }
 
 func buildHelpCard(chatID string, model HelpModel, page int) Card {
@@ -841,4 +845,24 @@ func (f *ImAdapter) logOutgoingDebug(chatID, text string, err error) {
 	}
 	// Do not log successful debug sends here to avoid duplicate lines:
 	// ACP payload already exists in -[acp] debug logs.
+}
+
+func (f *ImAdapter) logOutgoingOptions(chatID string, req DecisionRequest, err error) {
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("event=send_options status=error chat=%q title=%q kind=%q options=%d err=%q",
+			chatID, previewText(req.Title, 120), string(req.Kind), len(req.Options), err.Error()))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("event=send_options status=ok chat=%q title=%q kind=%q options=%d",
+		chatID, previewText(req.Title, 120), string(req.Kind), len(req.Options)))
+}
+
+func (f *ImAdapter) logOutgoingToolCall(chatID string, upd ToolCallUpdate, err error) {
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("event=send_tool_call status=error chat=%q id=%q title=%q tool_status=%q err=%q",
+			chatID, upd.ToolCallID, previewText(upd.Title, 120), upd.Status, err.Error()))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("event=send_tool_call status=ok chat=%q id=%q title=%q tool_status=%q",
+		chatID, upd.ToolCallID, previewText(upd.Title, 120), upd.Status))
 }
