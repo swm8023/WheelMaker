@@ -62,6 +62,11 @@ func New(cfg Config) *Channel {
 
 func (m *Channel) OnMessage(handler im.MessageHandler) { m.handler = handler }
 
+// Abilities reports optional mobile channel features.
+func (m *Channel) Abilities() im.Ability {
+	return im.AbilitySendDebug | im.AbilitySendOptions | im.AbilityCardActions
+}
+
 func (m *Channel) SendText(chatID, text string) error {
 	return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: text})
 }

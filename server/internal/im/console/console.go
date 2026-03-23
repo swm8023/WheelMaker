@@ -30,6 +30,11 @@ func New(projectName string, debug bool) *Channel {
 // Debug returns whether debug logging is enabled.
 func (c *Channel) Debug() bool { return c.debug }
 
+// Abilities reports optional console channel features.
+func (c *Channel) Abilities() im.Ability {
+	return im.AbilitySendDebug | im.AbilitySendOptions
+}
+
 // OnMessage registers the handler called for each received message.
 func (c *Channel) OnMessage(handler im.MessageHandler) {
 	c.handler = handler

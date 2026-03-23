@@ -23,6 +23,7 @@ type Adapter interface {
 // Current MVP behavior is transparent pass-through; strategy logic is added iteratively.
 type ImAdapter struct {
 	adapter Adapter
+	ability Ability
 	handler MessageHandler
 
 	mu           sync.Mutex
@@ -39,12 +40,14 @@ type ImAdapter struct {
 func New(adapter Adapter) *ImAdapter {
 	f := &ImAdapter{
 		adapter:      adapter,
+		ability:      DetectAbilities(adapter),
 		textBuf:      map[string]*strings.Builder{},
 		toolCalls:    map[string]map[string]string{},
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
 	}
-	if sub, ok := adapter.(CardActionSubscriber); ok {
+	if f.ability.Has(AbilityCardActions) {
+		sub := any(adapter).(CardActionSubscriber)
 		sub.OnCardAction(f.handleCardAction)
 	}
 	return f
@@ -92,7 +95,8 @@ func (f *ImAdapter) SendReaction(messageID, emoji string) error {
 
 func (f *ImAdapter) SendDebug(chatID, text string) error {
 	var err error
-	if sender, ok := f.adapter.(DebugSender); ok {
+	if f.ability.Has(AbilitySendDebug) {
+		sender := any(f.adapter).(DebugSender)
 		err = sender.SendDebug(chatID, text)
 		f.logOutgoingDebug(chatID, text, err)
 		return err
@@ -216,7 +220,8 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 		"decision_id": pd.id,
 		"chat_id":     pd.chatID,
 	}
-	if sender, ok := f.adapter.(OptionSender); ok {
+	if f.ability.Has(AbilitySendOptions) {
+		sender := any(f.adapter).(OptionSender)
 		if err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta); err != nil {
 			_ = f.adapter.SendText(chatID, renderDecisionPrompt(req))
 		}
@@ -634,8 +639,7 @@ func parseIndex(v string) int {
 // decision UI (i.e. implements OptionSender). When false, callers should treat
 // any decision as immediately cancelled rather than sending a blocking prompt.
 func (f *ImAdapter) CanHandleDecision() bool {
-	_, ok := f.adapter.(OptionSender)
-	return ok
+	return f.ability.Has(AbilitySendOptions)
 }
 
 var _ Channel = (*ImAdapter)(nil)

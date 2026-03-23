@@ -72,6 +72,11 @@ func (f *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 	f.mu.Unlock()
 }
 
+// Abilities reports optional Feishu channel features.
+func (f *Channel) Abilities() im.Ability {
+	return im.AbilitySendDebug | im.AbilitySendOptions | im.AbilityCardActions
+}
+
 // SendText posts a plain text message to a Feishu chat.
 func (f *Channel) SendText(chatID, text string) error {
 	bot, err := f.ensureBot()
