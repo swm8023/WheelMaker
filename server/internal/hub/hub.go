@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"sync"
@@ -25,6 +26,10 @@ type Hub struct {
 	cfg       *Config
 	statePath string
 	clients   []*client.Client
+
+	debugMu     sync.Mutex
+	debugFile   *os.File
+	debugWriter io.Writer
 }
 
 // New creates a Hub from the given config and state file path.
@@ -84,7 +89,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 
 	// Enable ACP JSON debug logging for projects with debug=true.
 	if pc.Debug {
-		c.SetDebugLogger(log.Writer())
+		c.SetDebugLogger(h.getDebugWriter())
 	}
 
 	// Register all known agent factories so users can switch between them at runtime.
@@ -157,8 +162,36 @@ func (h *Hub) Close() error {
 			errs = append(errs, err)
 		}
 	}
+	h.debugMu.Lock()
+	if h.debugFile != nil {
+		if err := h.debugFile.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		h.debugFile = nil
+		h.debugWriter = nil
+	}
+	h.debugMu.Unlock()
 	if len(errs) > 0 {
 		return fmt.Errorf("hub close errors: %v", errs)
 	}
 	return nil
+}
+
+func (h *Hub) getDebugWriter() io.Writer {
+	h.debugMu.Lock()
+	defer h.debugMu.Unlock()
+	if h.debugWriter != nil {
+		return h.debugWriter
+	}
+
+	f, err := os.OpenFile("debug.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		log.Printf("hub: open debug.log failed: %v", err)
+		h.debugWriter = log.Writer()
+		return h.debugWriter
+	}
+	h.debugFile = f
+	h.debugWriter = io.MultiWriter(log.Writer(), f)
+	log.Printf("hub: debug log enabled at debug.log")
+	return h.debugWriter
 }

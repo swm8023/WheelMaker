@@ -15,6 +15,7 @@ server/bin/**/*
 
 # Runtime log files
 wheelmaker_*.log
+debug.log
 
 # IDE
 .vscode/
