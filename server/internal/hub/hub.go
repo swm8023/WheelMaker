@@ -192,7 +192,8 @@ func (h *Hub) getDebugWriter() io.Writer {
 		return h.debugWriter
 	}
 	logPath := filepath.Join(logDir, "debug.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	// Truncate on process start so each run starts with a fresh debug log.
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("hub: open debug.log failed: %v", err)
 		h.debugWriter = log.Writer()
