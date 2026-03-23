@@ -12,7 +12,7 @@
 // Protocol-trace output (ACP JSON, IM bridge) uses DebugWriter():
 //
 //	w := logger.DebugWriter() // nil when level > Debug
-//	debuglog.New(w).Log("->", "acp", raw)
+//	if w != nil { fmt.Fprintf(w, "->[acp] %s\n", raw) }
 //
 // When Level == LevelDebug and LogFile is set, protocol trace is written to
 // <logdir>/wheelmaker.debug.log (truncated on each startup) instead of the main log.

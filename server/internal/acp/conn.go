@@ -8,10 +8,9 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
-
-	"github.com/swm8023/wheelmaker/internal/debuglog"
 )
 
 // RequestHandler is called for each inbound message from the agent.
@@ -77,7 +76,7 @@ func (c *Conn) writeDebugJSON(prefix string, payload any) {
 	if err != nil {
 		return
 	}
-	debuglog.New(dw).Log(prefix, "acp", string(raw))
+	writeDebugLine(dw, prefix, raw)
 }
 
 func (c *Conn) writeDebugRaw(prefix string, raw []byte) {
@@ -85,7 +84,13 @@ func (c *Conn) writeDebugRaw(prefix string, raw []byte) {
 	if dw == nil || len(raw) == 0 {
 		return
 	}
-	debuglog.New(dw).Log(prefix, "acp", string(raw))
+	writeDebugLine(dw, prefix, raw)
+}
+
+func writeDebugLine(w io.Writer, prefix string, raw []byte) {
+	if p := strings.TrimSpace(prefix); p != "" {
+		_, _ = fmt.Fprintf(w, "%s[acp] %s\n", p, strings.TrimSpace(string(raw)))
+	}
 }
 
 func (c *Conn) setPending(id int64, ch chan Response) {

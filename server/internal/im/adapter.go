@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/debuglog"
 )
 
 // Adapter is the low-level IM execution layer.
@@ -650,20 +649,20 @@ func (f *ImAdapter) writeDebugLine(line string) {
 	f.mu.Lock()
 	w := f.debugWriter
 	f.mu.Unlock()
-	if w == nil {
+	if w == nil || strings.TrimSpace(line) == "" {
 		return
 	}
-	debuglog.New(w).Log("->", "im", line)
+	_, _ = fmt.Fprintf(w, "->[im] %s\n", strings.TrimSpace(line))
 }
 
 func (f *ImAdapter) writeDebugInbound(line string) {
 	f.mu.Lock()
 	w := f.debugWriter
 	f.mu.Unlock()
-	if w == nil {
+	if w == nil || strings.TrimSpace(line) == "" {
 		return
 	}
-	debuglog.New(w).Log("<-", "im", line)
+	_, _ = fmt.Fprintf(w, "<-[im] %s\n", strings.TrimSpace(line))
 }
 
 func previewText(s string, maxRunes int) string {
