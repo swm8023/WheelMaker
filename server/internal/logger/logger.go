@@ -124,6 +124,23 @@ type inst struct {
 	debugFile *os.File
 }
 
+// syncedFileWriter serializes writes and fsyncs after each write so trace logs
+// are visible on disk immediately for tail/debug workflows.
+type syncedFileWriter struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+func (w *syncedFileWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.f.Write(p)
+	if syncErr := w.f.Sync(); err == nil && syncErr != nil {
+		err = syncErr
+	}
+	return n, err
+}
+
 var levelTag = [4]string{"DEBUG", "INFO ", "WARN ", "ERROR"}
 
 func (l *inst) emit(lvl Level, format string, args ...any) {
@@ -174,7 +191,7 @@ func (l *inst) setup(cfg Config) error {
 				_ = l.debugFile.Close()
 			}
 			l.debugFile = f
-			l.debugOut = f
+			l.debugOut = &syncedFileWriter{f: f}
 		} else {
 			// No log file configured — trace goes to the same output as operational logs.
 			l.debugOut = l.out
