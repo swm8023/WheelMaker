@@ -38,6 +38,8 @@ type Channel struct {
 
 	debugMu      sync.Mutex
 	debugStreams map[string]*debugStream
+	textMu       sync.Mutex
+	textStreams  map[string]*textStream
 	toolMu       sync.Mutex
 	toolCards    map[string]map[string]string // chatID -> toolCallID -> messageID
 
@@ -51,11 +53,18 @@ type debugStream struct {
 	flushing  bool
 }
 
+type textStream struct {
+	messageID string
+	content   strings.Builder
+	flushing  bool
+}
+
 // New creates a Feishu IM adapter.
 func New(cfg Config) *Channel {
 	return &Channel{
 		cfg:           cfg,
 		debugStreams:  map[string]*debugStream{},
+		textStreams:   map[string]*textStream{},
 		seenMessageID: map[string]time.Time{},
 		toolCards:     map[string]map[string]string{},
 	}
@@ -82,24 +91,79 @@ func (f *Channel) Abilities() im.Ability {
 
 // SendText posts a plain text message to a Feishu chat.
 func (f *Channel) SendText(chatID, text string) error {
-	bot, err := f.ensureBot()
-	if err != nil {
-		return err
-	}
-	parts := splitTextForFeishu(text, 3000)
-	if len(parts) == 0 {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" || text == "" {
 		return nil
 	}
-	for _, part := range parts {
-		msg := lark.NewMsgBuffer(lark.MsgText).
-			BindChatID(chatID).
-			Text(part).
-			Build()
-		if _, err = bot.PostMessage(msg); err != nil {
-			return err
-		}
+	f.textMu.Lock()
+	ts := f.textStreams[chatID]
+	if ts == nil {
+		ts = &textStream{}
+		f.textStreams[chatID] = ts
 	}
+	ts.content.WriteString(text)
+	if !ts.flushing {
+		ts.flushing = true
+		time.AfterFunc(250*time.Millisecond, func() { f.flushText(chatID) })
+	}
+	f.textMu.Unlock()
 	return nil
+}
+
+func (f *Channel) flushText(chatID string) {
+	f.textMu.Lock()
+	ts := f.textStreams[chatID]
+	if ts == nil {
+		f.textMu.Unlock()
+		return
+	}
+	content := ts.content.String()
+	messageID := strings.TrimSpace(ts.messageID)
+	ts.flushing = false
+	f.textMu.Unlock()
+
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	card := buildTextStreamCard(content)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return
+	}
+	bot, err := f.ensureBot()
+	if err != nil {
+		return
+	}
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+	if messageID == "" {
+		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+		if postErr != nil {
+			return
+		}
+		if resp != nil {
+			mid := strings.TrimSpace(resp.Data.MessageID)
+			if mid != "" {
+				f.textMu.Lock()
+				if cur := f.textStreams[chatID]; cur != nil {
+					cur.messageID = mid
+				}
+				f.textMu.Unlock()
+			}
+		}
+		return
+	}
+	_, _ = bot.UpdateMessage(messageID, buf.Build())
+}
+
+func (f *Channel) resetTextStream(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.textMu.Lock()
+	delete(f.textStreams, chatID)
+	f.textMu.Unlock()
 }
 
 // SendCard posts an interactive card to a Feishu chat.
@@ -281,6 +345,21 @@ func buildDebugCard(lines []string) im.Card {
 		},
 		"elements": []map[string]any{
 			{"tag": "markdown", "content": b.String()},
+		},
+	}
+}
+
+func buildTextStreamCard(content string) im.Card {
+	return im.Card{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "Assistant",
+			},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": content},
 		},
 	}
 }
@@ -526,6 +605,7 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 	if h != nil {
 		// Start a new debug stream card for each new user message in the chat.
 		f.resetDebugStream(*msg.ChatId)
+		f.resetTextStream(*msg.ChatId)
 		h(im.Message{
 			ChatID:    *msg.ChatId,
 			MessageID: *msg.MessageId,
