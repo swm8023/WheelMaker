@@ -50,11 +50,21 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		chatID = r.client.projectName
 	}
 
+	title := strings.TrimSpace(params.ToolCall.Title)
+	if title == "" {
+		title = "Permission request"
+	}
+
 	req := im.DecisionRequest{
 		Kind:   im.DecisionPermission,
 		ChatID: chatID,
-		Title:  "Permission request",
+		Title:  title,
 		Body:   fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
+		Meta: map[string]string{
+			"tool_call_id": params.ToolCall.ToolCallID,
+			"tool_title":   params.ToolCall.Title,
+			"tool_kind":    params.ToolCall.Kind,
+		},
 	}
 	req.Options = make([]im.DecisionOption, 0, len(params.Options))
 	for _, o := range params.Options {

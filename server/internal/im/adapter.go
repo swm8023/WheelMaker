@@ -309,6 +309,13 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 		"decision_id": pd.id,
 		"chat_id":     pd.chatID,
 	}
+	for k, v := range req.Meta {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		meta[k] = strings.TrimSpace(v)
+	}
 	if f.ability.Has(AbilitySendOptions) {
 		sender := any(f.adapter).(OptionSender)
 		err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta)

@@ -41,7 +41,7 @@ type Channel struct {
 	textMu       sync.Mutex
 	textStreams  map[string]*textStream
 	toolMu       sync.Mutex
-	toolCards    map[string]map[string]string // chatID -> toolCallID -> messageID
+	toolCards    map[string]map[string]*toolCardState // chatID -> toolCallID -> state
 
 	seenMu        sync.Mutex
 	seenMessageID map[string]time.Time
@@ -58,6 +58,20 @@ type textStream struct {
 	content   strings.Builder
 }
 
+type toolCardState struct {
+	messageID string
+	update    im.ToolCallUpdate
+	perm      *toolPermissionState
+}
+
+type toolPermissionState struct {
+	decisionID    string
+	options       []im.DecisionOption
+	active        bool
+	selectedID    string
+	selectedLabel string
+}
+
 // New creates a Feishu IM adapter.
 func New(cfg Config) *Channel {
 	return &Channel{
@@ -65,7 +79,7 @@ func New(cfg Config) *Channel {
 		debugStreams:  map[string]*debugStream{},
 		textStreams:   map[string]*textStream{},
 		seenMessageID: map[string]time.Time{},
-		toolCards:     map[string]map[string]string{},
+		toolCards:     map[string]map[string]*toolCardState{},
 	}
 }
 
@@ -178,6 +192,12 @@ func (f *Channel) SendCard(chatID string, card im.Card) error {
 
 // SendOptions renders decision options. Feishu presents them as interactive buttons.
 func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
+	toolCallID := strings.TrimSpace(meta["tool_call_id"])
+	decisionID := strings.TrimSpace(meta["decision_id"])
+	if toolCallID != "" && decisionID != "" {
+		return f.attachPermissionOptionsToToolCard(chatID, toolCallID, title, options, meta)
+	}
+
 	elements := make([]map[string]any, 0, 2)
 	if strings.TrimSpace(body) != "" {
 		elements = append(elements, map[string]any{
@@ -189,10 +209,11 @@ func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 		actions := make([]map[string]any, 0, len(options))
 		for _, opt := range options {
 			value := map[string]any{
-				"kind":      "decision",
-				"chat_id":   chatID,
-				"option_id": opt.ID,
-				"value":     opt.Value,
+				"kind":         "decision",
+				"chat_id":      chatID,
+				"option_id":    opt.ID,
+				"option_label": opt.Label,
+				"value":        opt.Value,
 			}
 			for k, v := range meta {
 				if strings.TrimSpace(k) == "" {
@@ -223,6 +244,65 @@ func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 		"elements": elements,
 	}
 	return f.SendCard(chatID, card)
+}
+
+func (f *Channel) attachPermissionOptionsToToolCard(chatID, toolCallID, title string, options []im.DecisionOption, meta map[string]string) error {
+	chatID = strings.TrimSpace(chatID)
+	toolCallID = strings.TrimSpace(toolCallID)
+	if chatID == "" || toolCallID == "" {
+		return nil
+	}
+	decisionID := strings.TrimSpace(meta["decision_id"])
+	toolTitle := strings.TrimSpace(meta["tool_title"])
+	toolKind := strings.TrimSpace(meta["tool_kind"])
+	if toolTitle == "" {
+		toolTitle = strings.TrimSpace(title)
+	}
+	if toolTitle == "" {
+		toolTitle = "Tool Call"
+	}
+
+	f.textMu.Lock()
+	delete(f.textStreams, chatID)
+	f.textMu.Unlock()
+
+	f.toolMu.Lock()
+	chatCards := f.toolCards[chatID]
+	if chatCards == nil {
+		chatCards = map[string]*toolCardState{}
+		f.toolCards[chatID] = chatCards
+	}
+	st := chatCards[toolCallID]
+	if st == nil {
+		st = &toolCardState{
+			update: im.ToolCallUpdate{
+				ToolCallID: toolCallID,
+				Title:      toolTitle,
+				Kind:       toolKind,
+				Status:     "pending",
+			},
+		}
+		chatCards[toolCallID] = st
+	}
+	if strings.TrimSpace(st.update.Title) == "" {
+		st.update.Title = toolTitle
+	}
+	if strings.TrimSpace(st.update.Kind) == "" {
+		st.update.Kind = toolKind
+	}
+	st.perm = &toolPermissionState{
+		decisionID: decisionID,
+		options:    append([]im.DecisionOption(nil), options...),
+		active:     true,
+	}
+	stCopy := *st
+	if st.perm != nil {
+		permCopy := *st.perm
+		stCopy.perm = &permCopy
+	}
+	f.toolMu.Unlock()
+
+	return f.upsertToolCard(chatID, toolCallID, &stCopy, true)
 }
 
 // SendReaction adds an emoji reaction.
@@ -364,7 +444,53 @@ func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
 		return nil
 	}
 
-	card := buildToolCallCard(update)
+	// Tool updates interrupt the current assistant text stream card.
+	f.textMu.Lock()
+	delete(f.textStreams, chatID)
+	f.textMu.Unlock()
+
+	f.toolMu.Lock()
+	chatCards := f.toolCards[chatID]
+	if chatCards == nil {
+		chatCards = map[string]*toolCardState{}
+		f.toolCards[chatID] = chatCards
+	}
+	st := chatCards[toolCallID]
+	if st == nil {
+		st = &toolCardState{}
+		chatCards[toolCallID] = st
+	}
+	if strings.TrimSpace(update.Status) == "" && strings.TrimSpace(st.update.Status) != "" {
+		update.Status = st.update.Status
+	}
+	if strings.TrimSpace(update.Status) == "" {
+		update.Status = "pending"
+	}
+	if strings.TrimSpace(update.Title) == "" {
+		update.Title = st.update.Title
+	}
+	if strings.TrimSpace(update.Kind) == "" {
+		update.Kind = st.update.Kind
+	}
+	st.update = update
+	if isToolCallTerminalStatus(update.Status) && st.perm != nil {
+		st.perm.active = false
+	}
+	stCopy := *st
+	if st.perm != nil {
+		permCopy := *st.perm
+		stCopy.perm = &permCopy
+	}
+	f.toolMu.Unlock()
+
+	return f.upsertToolCard(chatID, toolCallID, &stCopy, false)
+}
+
+func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _ bool) error {
+	if st == nil {
+		return nil
+	}
+	card := buildToolCallCard(chatID, st.update, st.perm)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal tool card: %w", err)
@@ -374,39 +500,46 @@ func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
 		return err
 	}
 	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-
-	f.toolMu.Lock()
-	chatCards := f.toolCards[chatID]
-	if chatCards == nil {
-		chatCards = map[string]string{}
-		f.toolCards[chatID] = chatCards
-	}
-	messageID := strings.TrimSpace(chatCards[toolCallID])
-	f.toolMu.Unlock()
-
+	messageID := strings.TrimSpace(st.messageID)
 	if messageID == "" {
-		msg := buf.BindChatID(chatID).Build()
-		resp, err := bot.PostMessage(msg)
-		if err != nil {
-			return err
+		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+		if postErr != nil {
+			return postErr
 		}
 		if resp != nil {
-			mid := strings.TrimSpace(resp.Data.MessageID)
-			if mid != "" {
-				f.toolMu.Lock()
-				if cc := f.toolCards[chatID]; cc != nil {
-					cc[toolCallID] = mid
-				}
-				f.toolMu.Unlock()
+			messageID = strings.TrimSpace(resp.Data.MessageID)
+		}
+	} else if _, err := bot.UpdateMessage(messageID, buf.Build()); err != nil {
+		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+		if postErr != nil {
+			return postErr
+		}
+		if resp != nil {
+			messageID = strings.TrimSpace(resp.Data.MessageID)
+		}
+	}
+	if messageID != "" {
+		f.toolMu.Lock()
+		if chatCards := f.toolCards[chatID]; chatCards != nil {
+			if cur := chatCards[toolCallID]; cur != nil {
+				cur.messageID = messageID
 			}
 		}
-		return nil
+		f.toolMu.Unlock()
 	}
-	_, err = bot.UpdateMessage(messageID, buf.Build())
-	return err
+	return nil
 }
 
-func buildToolCallCard(update im.ToolCallUpdate) im.Card {
+func isToolCallTerminalStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermissionState) im.Card {
 	status := strings.ToLower(strings.TrimSpace(update.Status))
 	if status == "" {
 		status = "pending"
@@ -415,50 +548,51 @@ func buildToolCallCard(update im.ToolCallUpdate) im.Card {
 	if title == "" {
 		title = "Tool Call"
 	}
-	icon := "🔧"
-	statusText := status
-	switch status {
-	case "pending":
-		icon = "🟡"
-		statusText = "pending"
-	case "in_progress":
-		icon = "⏳"
-		statusText = "running"
-	case "completed":
-		icon = "✅"
-		statusText = "completed"
-	case "failed":
-		icon = "❌"
-		statusText = "failed"
-	case "cancelled":
-		icon = "⛔"
-		statusText = "cancelled"
-	}
 
 	elements := []map[string]any{
 		{
-			"tag": "markdown",
-			"content": fmt.Sprintf("**Status:** %s %s\n**Tool ID:** `%s`",
-				icon, statusText, strings.TrimSpace(update.ToolCallID)),
+			"tag":     "markdown",
+			"content": fmt.Sprintf("**Status:** %s", status),
 		},
 	}
-	if strings.TrimSpace(update.Kind) != "" {
+	if cmd := toolCallCommandSummary(update); cmd != "" {
 		elements = append(elements, map[string]any{
 			"tag":     "markdown",
-			"content": fmt.Sprintf("**Kind:** `%s`", strings.TrimSpace(update.Kind)),
+			"content": fmt.Sprintf("`%s`", cmd),
 		})
 	}
-	if status == "pending" {
+	if status == "pending" && (perm == nil || !perm.active) {
 		elements = append(elements, map[string]any{
 			"tag":     "markdown",
-			"content": "⚠️ Waiting for confirmation or permission.",
+			"content": "Waiting for confirmation",
 		})
 	}
-	if out := toolCallOutputSummary(update); out != "" {
-		elements = append(elements, map[string]any{
-			"tag":     "markdown",
-			"content": "```text\n" + out + "\n```",
-		})
+	if perm != nil {
+		if perm.active && len(perm.options) > 0 {
+			actions := make([]map[string]any, 0, len(perm.options))
+			for _, opt := range perm.options {
+				actions = append(actions, map[string]any{
+					"tag":  "button",
+					"text": map[string]any{"tag": "plain_text", "content": opt.Label},
+					"type": "default",
+					"value": map[string]any{
+						"kind":         "decision",
+						"chat_id":      chatID,
+						"decision_id":  perm.decisionID,
+						"option_id":    opt.ID,
+						"value":        opt.Value,
+						"option_label": opt.Label,
+						"tool_call_id": update.ToolCallID,
+					},
+				})
+			}
+			elements = append(elements, map[string]any{"tag": "action", "actions": actions})
+		} else if strings.TrimSpace(perm.selectedLabel) != "" {
+			elements = append(elements, map[string]any{
+				"tag":     "markdown",
+				"content": fmt.Sprintf("Permission: %s", strings.TrimSpace(perm.selectedLabel)),
+			})
+		}
 	}
 
 	return im.Card{
@@ -466,18 +600,15 @@ func buildToolCallCard(update im.ToolCallUpdate) im.Card {
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": fmt.Sprintf("%s %s", icon, title),
+				"content": title,
 			},
 		},
 		"elements": elements,
 	}
 }
 
-func toolCallOutputSummary(update im.ToolCallUpdate) string {
+func toolCallCommandSummary(update im.ToolCallUpdate) string {
 	parts := []string{}
-	if text := decodeRawText(update.RawOutput); text != "" {
-		parts = append(parts, text)
-	}
 	if text := decodeRawText(update.RawInput); text != "" {
 		parts = append(parts, text)
 	}
@@ -489,13 +620,36 @@ func toolCallOutputSummary(update im.ToolCallUpdate) string {
 			parts = append(parts, strings.TrimSpace(c.NewText))
 		}
 	}
-	out := strings.TrimSpace(strings.Join(parts, "\n"))
-	if len(out) > 1600 {
-		out = out[:1600] + "..."
+	if len(parts) == 0 {
+		if text := decodeRawText(update.RawOutput); text != "" {
+			parts = append(parts, text)
+		}
 	}
-	return out
+	out := strings.TrimSpace(strings.Join(parts, "\n"))
+	if out == "" {
+		if strings.TrimSpace(update.Kind) != "" {
+			out = update.Kind
+		} else {
+			out = update.ToolCallID
+		}
+	}
+	return previewLine(out, 160)
 }
 
+func previewLine(s string, maxRunes int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r", ""))
+	if s == "" {
+		return ""
+	}
+	if idx := strings.Index(s, "\n"); idx >= 0 {
+		s = strings.TrimSpace(s[:idx])
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "..."
+}
 func decodeRawText(raw json.RawMessage) string {
 	raw = json.RawMessage(strings.TrimSpace(string(raw)))
 	if len(raw) == 0 || string(raw) == "null" {
@@ -656,7 +810,35 @@ func (f *Channel) handleCardAction(_ context.Context, event *callback.CardAction
 	for k, v := range payload.Action.Value {
 		value[k] = fmt.Sprint(v)
 	}
+	if strings.TrimSpace(value["kind"]) == "decision" {
+		chatID := firstNonEmpty(value["chat_id"], payload.Context.OpenChatID)
+		toolCallID := strings.TrimSpace(value["tool_call_id"])
+		decisionID := strings.TrimSpace(value["decision_id"])
+		selectedID := strings.TrimSpace(value["option_id"])
+		selectedLabel := strings.TrimSpace(value["option_label"])
+		if chatID != "" && toolCallID != "" && decisionID != "" {
+			f.toolMu.Lock()
+			if chatCards := f.toolCards[chatID]; chatCards != nil {
+				if st := chatCards[toolCallID]; st != nil && st.perm != nil && st.perm.decisionID == decisionID {
+					st.perm.active = false
+					st.perm.selectedID = selectedID
+					if selectedLabel == "" {
+						selectedLabel = selectedID
+					}
+					st.perm.selectedLabel = selectedLabel
+					stCopy := *st
+					permCopy := *st.perm
+					stCopy.perm = &permCopy
+					f.toolMu.Unlock()
+					_ = f.upsertToolCard(chatID, toolCallID, &stCopy, false)
+					goto forward
+				}
+			}
+			f.toolMu.Unlock()
+		}
+	}
 
+forward:
 	f.mu.RLock()
 	h := f.action
 	f.mu.RUnlock()

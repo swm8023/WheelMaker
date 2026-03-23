@@ -116,18 +116,25 @@ func TestSplitTextForFeishu_PreservesBoundaryWhitespace(t *testing.T) {
 }
 
 func TestBuildToolCallCard(t *testing.T) {
-	card := buildToolCallCard(im.ToolCallUpdate{
+	card := buildToolCallCard("chat-1", im.ToolCallUpdate{
 		ToolCallID: "call-1",
 		Title:      "Run tests",
 		Status:     "failed",
 		RawOutput:  []byte(`"permission denied"`),
-	})
+	}, nil)
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) == 0 {
 		t.Fatalf("elements missing in card: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "call-1") || !strings.Contains(content, "failed") {
-		t.Fatalf("tool card content missing id/status: %q", content)
+	if !strings.Contains(content, "failed") {
+		t.Fatalf("tool card content missing status: %q", content)
+	}
+	if len(elements) < 2 {
+		t.Fatalf("tool card should include command line, elements=%d", len(elements))
+	}
+	commandLine, _ := elements[1]["content"].(string)
+	if strings.TrimSpace(commandLine) == "" {
+		t.Fatalf("tool card command line is empty")
 	}
 }
