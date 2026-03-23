@@ -100,7 +100,8 @@ bash scripts/install-tools.sh    # macOS / Linux
 
 ## Process Rule
 
-每次代码变更后：终止所有已有 wheelmaker 进程，用 `go run ./cmd/wheelmaker/` 重启，确认只有一个进程运行。
+每次代码变更后：终止所有已有 wheelmaker 进程，用 `go run ./cmd/wheelmaker/` 重启，确认只有一个进程运行。  
+若处于实时联调阶段，先向用户发送本轮最终结果，再延迟数秒执行重启，避免打断当前交互。
 
 ## 关键协议文档
 

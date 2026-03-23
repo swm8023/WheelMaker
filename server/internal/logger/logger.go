@@ -15,7 +15,7 @@
 //	if w != nil { fmt.Fprintf(w, "->[acp] %s\n", raw) }
 //
 // When Level == LevelDebug and LogFile is set, protocol trace is written to
-// <logdir>/debug.log (truncated on each startup) instead of the main log.
+// <logdir>/wheelmaker.debug.log (truncated on each startup) instead of the main log.
 package logger
 
 import (
@@ -67,7 +67,7 @@ type Config struct {
 
 	// LogFile, if non-empty, appends operational logs to this file in addition
 	// to stderr. When Level == LevelDebug, protocol-trace output is written to
-	// <dir>/debug.log (truncated each startup) in the same directory.
+	// <dir>/wheelmaker.debug.log (truncated each startup) in the same directory.
 	LogFile string
 }
 
@@ -180,8 +180,8 @@ func (l *inst) setup(cfg Config) error {
 	// Protocol-trace debug writer (only active when level == Debug).
 	if cfg.Level <= LevelDebug {
 		if cfg.LogFile != "" {
-			// Write trace to debug.log in the same directory as the main log.
-			dbgPath := filepath.Join(filepath.Dir(cfg.LogFile), "debug.log")
+			// Write trace to wheelmaker.debug.log in the same directory as the main log.
+			dbgPath := filepath.Join(filepath.Dir(cfg.LogFile), "wheelmaker.debug.log")
 			// Truncated each startup so one run's trace doesn't bleed into the next.
 			f, err := os.OpenFile(dbgPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 			if err != nil {
