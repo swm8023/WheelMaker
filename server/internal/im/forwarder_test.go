@@ -12,6 +12,7 @@ type stubAdapter struct {
 	onAction   func(CardActionEvent)
 	lastChatID string
 	lastText   string
+	textCount  int
 	cardSent   bool
 	runCalled  bool
 }
@@ -20,6 +21,7 @@ func (s *stubAdapter) OnMessage(h MessageHandler) { s.onMsg = h }
 func (s *stubAdapter) SendText(chatID, text string) error {
 	s.lastChatID = chatID
 	s.lastText = text
+	s.textCount++
 	return nil
 }
 func (s *stubAdapter) SendCard(_ string, _ Card) error { return nil }
@@ -153,6 +155,21 @@ func TestRenderConfigOptionUpdate(t *testing.T) {
 	got := renderConfigOptionUpdate(raw)
 	if !containsAll(got, "mode=plan", "model=gpt-5") {
 		t.Fatalf("renderConfigOptionUpdate()=%q", got)
+	}
+}
+
+func TestForwarder_EmitToolCall_DedupByStatus(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	raw := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress"}`)
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw}); err != nil {
+		t.Fatalf("emit tool_call: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw}); err != nil {
+		t.Fatalf("emit duplicate tool_call: %v", err)
+	}
+	if ad.textCount != 1 {
+		t.Fatalf("tool call message count=%d, want 1", ad.textCount)
 	}
 }
 

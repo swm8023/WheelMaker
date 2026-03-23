@@ -25,6 +25,7 @@ type Bridge struct {
 
 	mu           sync.Mutex
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
+	toolCalls    map[string]map[string]string
 	decisions    map[string]pendingDecision  // chatID -> pending (text fallback)
 	decisionByID map[string]pendingDecision  // decisionID -> pending (card action)
 	helpResolver func(ctx context.Context, chatID string) (HelpModel, error)
@@ -36,6 +37,7 @@ func New(adapter Adapter) *Bridge {
 	f := &Bridge{
 		adapter:      adapter,
 		textBuf:      map[string]*strings.Builder{},
+		toolCalls:    map[string]map[string]string{},
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
 	}
@@ -116,6 +118,7 @@ func (f *Bridge) Emit(_ context.Context, u IMUpdate) error {
 		f.mu.Lock()
 		buf := f.textBuf[chatID]
 		delete(f.textBuf, chatID)
+		delete(f.toolCalls, chatID)
 		f.mu.Unlock()
 		if buf != nil && strings.TrimSpace(buf.String()) != "" {
 			return f.adapter.SendText(chatID, buf.String())
@@ -131,7 +134,7 @@ func (f *Bridge) Emit(_ context.Context, u IMUpdate) error {
 			return f.adapter.SendText(chatID, "🤔 "+strings.TrimSpace(u.Text))
 		}
 	case "tool_call":
-		if msg := renderToolCallUpdate(u.Raw); msg != "" {
+		if msg, ok := f.renderToolCallUpdate(chatID, u.Raw); ok && msg != "" {
 			return f.adapter.SendText(chatID, msg)
 		}
 	case "plan":
@@ -497,6 +500,42 @@ func renderToolCallUpdate(raw []byte) string {
 		return fmt.Sprintf("🔧 %s [%s] (%s)", title, status, u.ToolCallID)
 	}
 	return fmt.Sprintf("🔧 %s [%s]", title, status)
+}
+
+func (f *Bridge) renderToolCallUpdate(chatID string, raw []byte) (string, bool) {
+	msg := renderToolCallUpdate(raw)
+	if msg == "" {
+		return "", false
+	}
+
+	var u struct {
+		ToolCallID string `json:"toolCallId"`
+		Status     string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		return msg, true
+	}
+	toolCallID := strings.TrimSpace(u.ToolCallID)
+	if toolCallID == "" {
+		return msg, true
+	}
+	status := strings.TrimSpace(u.Status)
+	if status == "" {
+		status = "pending"
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	chatCalls := f.toolCalls[chatID]
+	if chatCalls == nil {
+		chatCalls = map[string]string{}
+		f.toolCalls[chatID] = chatCalls
+	}
+	if prev, ok := chatCalls[toolCallID]; ok && prev == status {
+		return "", false
+	}
+	chatCalls[toolCallID] = status
+	return msg, true
 }
 
 func renderPlanUpdate(raw []byte) string {
