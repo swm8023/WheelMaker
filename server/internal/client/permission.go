@@ -15,10 +15,16 @@ type permissionRouter struct {
 
 	mu         sync.Mutex
 	lastChatID string
+	decisionCh chan struct{}
 }
 
 func newPermissionRouter(c *Client) *permissionRouter {
-	return &permissionRouter{client: c}
+	r := &permissionRouter{
+		client:     c,
+		decisionCh: make(chan struct{}, 1),
+	}
+	r.decisionCh <- struct{}{}
+	return r
 }
 
 func (r *permissionRouter) setLastChatID(chatID string) {
@@ -36,6 +42,11 @@ func (r *permissionRouter) clearLastChatID(chatID string) {
 }
 
 func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+	if !r.acquireDecisionSlot(ctx) {
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	}
+	defer r.releaseDecisionSlot()
+
 	r.client.mu.Lock()
 	bridge := r.client.imBridge
 	r.client.mu.Unlock()
@@ -88,4 +99,20 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "selected", OptionID: res.OptionID}, nil
 	}
 	return acp.PermissionResult{Outcome: "cancelled"}, nil
+}
+
+func (r *permissionRouter) acquireDecisionSlot(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-r.decisionCh:
+		return true
+	}
+}
+
+func (r *permissionRouter) releaseDecisionSlot() {
+	select {
+	case r.decisionCh <- struct{}{}:
+	default:
+	}
 }
