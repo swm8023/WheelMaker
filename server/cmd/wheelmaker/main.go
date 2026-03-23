@@ -36,9 +36,8 @@ func run() error {
 	}
 
 	if err := logger.Setup(logger.Config{
-		Level:    logger.ParseLevel(cfg.Log.Level),
-		LogFile:  filepath.Join(home, ".wheelmaker", "wheelmaker.log"),
-		DebugDir: cfg.Log.DebugDir,
+		Level:   logger.ParseLevel(cfg.Log.Level),
+		LogFile: filepath.Join(home, ".wheelmaker", "wheelmaker.log"),
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}

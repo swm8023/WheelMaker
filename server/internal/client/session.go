@@ -164,7 +164,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			c.session.initializing = false
 			c.mu.Unlock()
 			c.initCond.Broadcast()
-			logger.Debug("[client] connected: agent=%s session=%s (resumed, %d history updates)",
+			logger.Info("[client] connected: agent=%s session=%s (resumed, %d history updates)",
 				c.conn.name, savedSID, len(replayUpdates))
 			return nil
 		}
@@ -199,7 +199,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			break
 		}
 	}
-	logger.Debug("[client] connected: agent=%s session=%s mode=%s",
+	logger.Info("[client] connected: agent=%s session=%s mode=%s",
 		c.conn.name, newResult.SessionID, modeID)
 	return nil
 }

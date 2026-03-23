@@ -78,7 +78,7 @@ func (m *IM) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", m.handleWS)
 	srv := &http.Server{Addr: m.cfg.Addr, Handler: mux}
-	logger.Debug("[mobile] WebSocket server listening on %s", m.cfg.Addr)
+	logger.Info("[mobile] WebSocket server listening on %s", m.cfg.Addr)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -154,10 +154,10 @@ func (m *IM) handleWS(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
 		delete(m.conns, chatID)
 		m.mu.Unlock()
-		logger.Debug("[mobile] disconnected: %s", chatID)
+		logger.Info("[mobile] disconnected: %s", chatID)
 	}()
 
-	logger.Debug("[mobile] connected: %s from %s", chatID, r.RemoteAddr)
+	logger.Info("[mobile] connected: %s from %s", chatID, r.RemoteAddr)
 
 	// Tell client whether auth is needed.
 	if m.cfg.Token != "" {

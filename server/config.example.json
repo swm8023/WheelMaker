@@ -45,8 +45,7 @@
     "encryptKey": ""
   },
   "log": {
-    "level": "warn",
-    "debugDir": ""
+    "level": "warn"
   }
 }
 

@@ -5,14 +5,17 @@
 //	logger.Setup(logger.Config{Level: logger.LevelWarn, LogFile: "/path/to/wheelmaker.log"})
 //	defer logger.Close()
 //
-//	logger.Debug("acp: connected to %s", agentName)
+//	logger.Info("[mobile] listening on %s", addr)
 //	logger.Warn("client: idle timeout: %v", err)
 //	logger.Error("hub: project run error: %v", err)
 //
 // Protocol-trace output (ACP JSON, IM bridge) uses DebugWriter():
 //
-//	w := logger.DebugWriter() // nil when level > Debug or debug dir not set
+//	w := logger.DebugWriter() // nil when level > Debug
 //	debuglog.New(w).Log("->", "acp", raw)
+//
+// When Level == LevelDebug and LogFile is set, protocol trace is written to
+// <logdir>/wheelmaker.debug.log (truncated on each startup) instead of the main log.
 package logger
 
 import (
@@ -30,6 +33,8 @@ type Level int
 const (
 	// LevelDebug emits all messages including verbose protocol trace.
 	LevelDebug Level = iota
+	// LevelInfo emits informational, warning, and error messages.
+	LevelInfo
 	// LevelWarn emits warnings and errors (default).
 	LevelWarn
 	// LevelError emits errors only.
@@ -39,12 +44,15 @@ const (
 // ParseLevel converts a string to Level. Unknown values default to LevelWarn.
 //
 //	"debug"          → LevelDebug
+//	"info"           → LevelInfo
 //	"warn"/"warning" → LevelWarn
 //	"error"          → LevelError
 func ParseLevel(s string) Level {
 	switch s {
 	case "debug":
 		return LevelDebug
+	case "info":
+		return LevelInfo
 	case "error":
 		return LevelError
 	default:
@@ -57,14 +65,10 @@ type Config struct {
 	// Level is the minimum severity to emit. Default LevelWarn.
 	Level Level
 
-	// LogFile, if non-empty, appends operational logs (Warn + Error, and Debug
-	// when Level == LevelDebug) to this file in addition to stderr.
+	// LogFile, if non-empty, appends operational logs to this file in addition
+	// to stderr. When Level == LevelDebug, protocol-trace output is written to
+	// <dir>/wheelmaker.debug.log (truncated each startup) in the same directory.
 	LogFile string
-
-	// DebugDir, if non-empty and Level == LevelDebug, writes protocol-trace
-	// debug output to <DebugDir>/debug.log (truncated on each startup).
-	// When empty, debug trace is written to the same destination as operational logs.
-	DebugDir string
 }
 
 // global is the process-wide logger instance.
@@ -100,6 +104,9 @@ func SetOutput(w io.Writer) {
 // Debug emits a message at debug level.
 func Debug(format string, args ...any) { global.emit(LevelDebug, format, args...) }
 
+// Info emits a message at info level.
+func Info(format string, args ...any) { global.emit(LevelInfo, format, args...) }
+
 // Warn emits a message at warn level.
 func Warn(format string, args ...any) { global.emit(LevelWarn, format, args...) }
 
@@ -117,7 +124,7 @@ type inst struct {
 	debugFile *os.File
 }
 
-var levelTag = [3]string{"DEBUG", "WARN ", "ERROR"}
+var levelTag = [4]string{"DEBUG", "INFO ", "WARN ", "ERROR"}
 
 func (l *inst) emit(lvl Level, format string, args ...any) {
 	l.mu.Lock()
@@ -155,11 +162,9 @@ func (l *inst) setup(cfg Config) error {
 
 	// Protocol-trace debug writer (only active when level == Debug).
 	if cfg.Level <= LevelDebug {
-		if cfg.DebugDir != "" {
-			if err := os.MkdirAll(cfg.DebugDir, 0o755); err != nil {
-				return fmt.Errorf("logger: mkdir debugDir %q: %w", cfg.DebugDir, err)
-			}
-			dbgPath := filepath.Join(cfg.DebugDir, "debug.log")
+		if cfg.LogFile != "" {
+			// Write trace to wheelmaker.debug.log in the same directory as the main log.
+			dbgPath := filepath.Join(filepath.Dir(cfg.LogFile), "wheelmaker.debug.log")
 			// Truncated each startup so one run's trace doesn't bleed into the next.
 			f, err := os.OpenFile(dbgPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 			if err != nil {
@@ -171,7 +176,7 @@ func (l *inst) setup(cfg Config) error {
 			l.debugFile = f
 			l.debugOut = f
 		} else {
-			// No separate file — trace goes to the same output as operational logs.
+			// No log file configured — trace goes to the same output as operational logs.
 			l.debugOut = l.out
 		}
 	} else {

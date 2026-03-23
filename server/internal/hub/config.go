@@ -15,11 +15,8 @@ type Config struct {
 
 // LogConfig controls the operational log system.
 type LogConfig struct {
-	// Level is the minimum log level to emit: "debug", "warn" (default), "error".
+	// Level is the minimum log level to emit: "debug", "info", "warn" (default), "error".
 	Level string `json:"level,omitempty"`
-	// DebugDir, if non-empty and level is "debug", writes protocol-trace logs
-	// (ACP JSON, IM bridge) to <DebugDir>/debug.log (truncated each startup).
-	DebugDir string `json:"debugDir,omitempty"`
 }
 
 // ProjectConfig describes one WheelMaker project.
