@@ -210,8 +210,12 @@ func (c *Client) ensureReadyAndNotify(ctx context.Context, chatID string) error 
 
 	if !wasReady {
 		snap := c.sessionConfigSnapshot()
-		c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s",
-			renderUnknown(snap.Mode), renderUnknown(snap.Model)))
+		if snap.Mode != "" || snap.Model != "" {
+			c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s",
+				renderUnknown(snap.Mode), renderUnknown(snap.Model)))
+		} else {
+			c.reply(chatID, "Session ready.")
+		}
 		c.saveSessionState()
 	}
 	return nil

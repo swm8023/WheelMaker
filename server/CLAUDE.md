@@ -87,9 +87,11 @@ FileState
 ```bash
 # 在 server/ 目录下执行
 export OPENAI_API_KEY=sk-...
-go run ./cmd/wheelmaker/   # 需先创建 ~/.wheelmaker/config.json
+go run ./cmd/wheelmaker/                                    # 需先创建 ~/.wheelmaker/config.json
 go test ./...
-go build ./cmd/wheelmaker/
+go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/   # Windows
+GOOS=linux  GOARCH=amd64 go build -o bin/linux_amd64/wheelmaker  ./cmd/wheelmaker/
+GOOS=darwin GOARCH=arm64 go build -o bin/darwin_arm64/wheelmaker  ./cmd/wheelmaker/
 
 # ACP 工具安装（首次）
 pwsh scripts/install-tools.ps1   # Windows
