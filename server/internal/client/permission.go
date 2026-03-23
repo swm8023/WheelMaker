@@ -65,6 +65,11 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 			"tool_title":   params.ToolCall.Title,
 			"tool_kind":    params.ToolCall.Kind,
 		},
+		Hint: map[string]string{
+			// Permission decisions may require explicit human confirmation delay.
+			// Keep them valid longer to avoid stale-button failures.
+			"timeoutSec": "1800",
+		},
 	}
 	req.Options = make([]im.DecisionOption, 0, len(params.Options))
 	for _, o := range params.Options {

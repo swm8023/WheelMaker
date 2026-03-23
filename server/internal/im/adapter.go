@@ -304,6 +304,8 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 	f.decisions[chatID] = pd
 	f.decisionByID[decisionID] = pd
 	f.mu.Unlock()
+	f.writeDebugLine(fmt.Sprintf("event=decision_open id=%q chat=%q kind=%q timeout_sec=%d options=%d",
+		decisionID, chatID, string(req.Kind), int(timeout/time.Second), len(req.Options)))
 
 	meta := map[string]string{
 		"decision_id": pd.id,
@@ -329,12 +331,16 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 
 	select {
 	case r := <-ch:
+		f.writeDebugLine(fmt.Sprintf("event=decision_resolved id=%q chat=%q outcome=%q source=%q option_id=%q",
+			decisionID, chatID, r.Outcome, r.Source, r.OptionID))
 		return r, nil
 	case <-ctx.Done():
 		f.clearDecision(chatID, decisionID, ch)
+		f.writeDebugLine(fmt.Sprintf("event=decision_expire id=%q chat=%q reason=%q", decisionID, chatID, "context_done"))
 		return DecisionResult{Outcome: "cancelled", Source: "default_policy"}, nil
 	case <-time.After(timeout):
 		f.clearDecision(chatID, decisionID, ch)
+		f.writeDebugLine(fmt.Sprintf("event=decision_expire id=%q chat=%q reason=%q", decisionID, chatID, "timeout"))
 		return DecisionResult{Outcome: "timeout", Source: "default_policy"}, nil
 	}
 }
@@ -401,6 +407,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 	case "decision":
 		decisionID := strings.TrimSpace(evt.Value["decision_id"])
 		if decisionID == "" {
+			f.writeDebugLine("event=card_action_drop reason=\"missing_decision_id\"")
 			return
 		}
 		f.mu.Lock()
@@ -411,6 +418,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 		}
 		f.mu.Unlock()
 		if !ok {
+			f.writeDebugLine(fmt.Sprintf("event=card_action_drop reason=%q decision_id=%q", "decision_not_found", decisionID))
 			return
 		}
 		res := DecisionResult{
@@ -420,6 +428,8 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			ActorID:  evt.UserID,
 			Source:   "card_action",
 		}
+		f.writeDebugLine(fmt.Sprintf("event=card_action_accept decision_id=%q option_id=%q actor=%q",
+			decisionID, res.OptionID, evt.UserID))
 		select {
 		case pd.ch <- res:
 		default:
