@@ -38,6 +38,9 @@ type IM struct {
 
 	debugMu      sync.Mutex
 	debugStreams map[string]*debugStream
+
+	seenMu        sync.Mutex
+	seenMessageID map[string]time.Time
 }
 
 type debugStream struct {
@@ -51,6 +54,7 @@ func New(cfg Config) *IM {
 	return &IM{
 		cfg:          cfg,
 		debugStreams: map[string]*debugStream{},
+		seenMessageID: map[string]time.Time{},
 	}
 }
 
@@ -325,6 +329,9 @@ func (f *IM) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageRe
 	if msg.ChatId == nil || msg.MessageId == nil {
 		return nil
 	}
+	if !f.shouldHandleMessage(*msg.MessageId) {
+		return nil
+	}
 	text := parseMessageText(msg.MessageType, msg.Content)
 	if strings.TrimSpace(text) == "" {
 		return nil
@@ -351,6 +358,45 @@ func (f *IM) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageRe
 		})
 	}
 	return nil
+}
+
+func (f *IM) shouldHandleMessage(messageID string) bool {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return true
+	}
+	const dedupTTL = 30 * time.Minute
+	const maxTracked = 4096
+	now := time.Now()
+	cutoff := now.Add(-dedupTTL)
+
+	f.seenMu.Lock()
+	defer f.seenMu.Unlock()
+
+	for id, ts := range f.seenMessageID {
+		if ts.Before(cutoff) {
+			delete(f.seenMessageID, id)
+		}
+	}
+	if _, exists := f.seenMessageID[messageID]; exists {
+		return false
+	}
+	if len(f.seenMessageID) >= maxTracked {
+		// Keep memory bounded by dropping stale entries first, then oldest-ish fallback.
+		for id, ts := range f.seenMessageID {
+			if ts.Before(now.Add(-5 * time.Minute)) {
+				delete(f.seenMessageID, id)
+			}
+		}
+		if len(f.seenMessageID) >= maxTracked {
+			for id := range f.seenMessageID {
+				delete(f.seenMessageID, id)
+				break
+			}
+		}
+	}
+	f.seenMessageID[messageID] = now
+	return true
 }
 
 func (f *IM) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {

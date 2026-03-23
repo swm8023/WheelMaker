@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseMessageText_Text(t *testing.T) {
@@ -67,5 +68,26 @@ func TestResetDebugStream(t *testing.T) {
 	f.resetDebugStream("chat-1")
 	if _, ok := f.debugStreams["chat-1"]; ok {
 		t.Fatalf("debug stream should be removed")
+	}
+}
+
+func TestShouldHandleMessage_DeduplicatesByMessageID(t *testing.T) {
+	f := New(Config{})
+	if !f.shouldHandleMessage("m-1") {
+		t.Fatalf("first message should pass")
+	}
+	if f.shouldHandleMessage("m-1") {
+		t.Fatalf("duplicate message should be dropped")
+	}
+	if !f.shouldHandleMessage("m-2") {
+		t.Fatalf("different message id should pass")
+	}
+}
+
+func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
+	f := New(Config{})
+	f.seenMessageID["old"] = time.Now().Add(-31 * time.Minute)
+	if !f.shouldHandleMessage("old") {
+		t.Fatalf("expired message id should be accepted again")
 	}
 }
