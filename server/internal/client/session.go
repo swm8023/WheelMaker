@@ -132,12 +132,16 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		}
 		c.mu.Unlock()
 
+		var loadResult acp.SessionLoadResult
 		loadErr := func() error {
-			_, err := fwd.SessionLoad(ctx, acp.SessionLoadParams{
+			res, err := fwd.SessionLoad(ctx, acp.SessionLoadParams{
 				SessionID:  savedSID,
 				CWD:        cwd,
 				MCPServers: emptyMCPServers(),
 			})
+			if err == nil {
+				loadResult = res
+			}
 			return err
 		}()
 		c.mu.Lock()
@@ -149,6 +153,9 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			replayUpdates := replay
 			meta := replayMeta
 			replayMu.Unlock()
+			if len(meta.ConfigOptions) == 0 && len(loadResult.ConfigOptions) > 0 {
+				meta.ConfigOptions = loadResult.ConfigOptions
+			}
 
 			c.mu.Lock()
 			c.initMeta = newInitMeta

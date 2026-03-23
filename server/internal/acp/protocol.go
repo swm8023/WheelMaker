@@ -309,7 +309,9 @@ type PermissionResponse struct {
 }
 
 // SessionLoadResult is the response to session/load.
-type SessionLoadResult struct{}
+type SessionLoadResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+}
 
 // SessionSetConfigOptionParams sets a configuration option on an active session.
 type SessionSetConfigOptionParams struct {
