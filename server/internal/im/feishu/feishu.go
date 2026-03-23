@@ -27,8 +27,8 @@ type Config struct {
 	Debug             bool
 }
 
-// IM implements im.Channel using Feishu WS (inbound) + go-lark (outbound).
-type IM struct {
+// Channel implements im.Channel using Feishu WS (inbound) + go-lark (outbound).
+type Channel struct {
 	cfg Config
 
 	mu      sync.RWMutex
@@ -50,8 +50,8 @@ type debugStream struct {
 }
 
 // New creates a Feishu IM adapter.
-func New(cfg Config) *IM {
-	return &IM{
+func New(cfg Config) *Channel {
+	return &Channel{
 		cfg:          cfg,
 		debugStreams: map[string]*debugStream{},
 		seenMessageID: map[string]time.Time{},
@@ -59,21 +59,21 @@ func New(cfg Config) *IM {
 }
 
 // OnMessage registers the inbound message handler.
-func (f *IM) OnMessage(handler im.MessageHandler) {
+func (f *Channel) OnMessage(handler im.MessageHandler) {
 	f.mu.Lock()
 	f.handler = handler
 	f.mu.Unlock()
 }
 
 // OnCardAction registers card interaction callback.
-func (f *IM) OnCardAction(handler func(im.CardActionEvent)) {
+func (f *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 	f.mu.Lock()
 	f.action = handler
 	f.mu.Unlock()
 }
 
 // SendText posts a plain text message to a Feishu chat.
-func (f *IM) SendText(chatID, text string) error {
+func (f *Channel) SendText(chatID, text string) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func (f *IM) SendText(chatID, text string) error {
 }
 
 // SendCard posts an interactive card to a Feishu chat.
-func (f *IM) SendCard(chatID string, card im.Card) error {
+func (f *Channel) SendCard(chatID string, card im.Card) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func (f *IM) SendCard(chatID string, card im.Card) error {
 }
 
 // SendOptions renders decision options. Feishu presents them as interactive buttons.
-func (f *IM) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
+func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
 	elements := make([]map[string]any, 0, 2)
 	if strings.TrimSpace(body) != "" {
 		elements = append(elements, map[string]any{
@@ -159,7 +159,7 @@ func (f *IM) SendOptions(chatID, title, body string, options []im.DecisionOption
 }
 
 // SendReaction adds an emoji reaction.
-func (f *IM) SendReaction(messageID, emoji string) error {
+func (f *Channel) SendReaction(messageID, emoji string) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func (f *IM) SendReaction(messageID, emoji string) error {
 }
 
 // SendDebug appends debug text to a per-chat stream card and flushes every 2 seconds.
-func (f *IM) SendDebug(chatID, text string) error {
+func (f *Channel) SendDebug(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	line := strings.TrimSpace(text)
 	if chatID == "" || line == "" {
@@ -193,7 +193,7 @@ func (f *IM) SendDebug(chatID, text string) error {
 	return nil
 }
 
-func (f *IM) resetDebugStream(chatID string) {
+func (f *Channel) resetDebugStream(chatID string) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return
@@ -203,7 +203,7 @@ func (f *IM) resetDebugStream(chatID string) {
 	f.debugMu.Unlock()
 }
 
-func (f *IM) flushDebug(chatID string) {
+func (f *Channel) flushDebug(chatID string) {
 	f.debugMu.Lock()
 	ds := f.debugStreams[chatID]
 	if ds == nil {
@@ -275,7 +275,7 @@ func buildDebugCard(lines []string) im.Card {
 }
 
 // Run starts Feishu WS event loop and blocks until ctx is done.
-func (f *IM) Run(ctx context.Context) error {
+func (f *Channel) Run(ctx context.Context) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -306,7 +306,7 @@ func (f *IM) Run(ctx context.Context) error {
 	return nil
 }
 
-func (f *IM) ensureBot() (*lark.Bot, error) {
+func (f *Channel) ensureBot() (*lark.Bot, error) {
 	f.mu.RLock()
 	if f.bot != nil {
 		b := f.bot
@@ -326,7 +326,7 @@ func (f *IM) ensureBot() (*lark.Bot, error) {
 	return bot, nil
 }
 
-func (f *IM) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageReceiveV1) error {
+func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageReceiveV1) error {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		return nil
 	}
@@ -365,7 +365,7 @@ func (f *IM) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageRe
 	return nil
 }
 
-func (f *IM) shouldHandleMessage(messageID string) bool {
+func (f *Channel) shouldHandleMessage(messageID string) bool {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
 		return true
@@ -404,7 +404,7 @@ func (f *IM) shouldHandleMessage(messageID string) bool {
 	return true
 }
 
-func (f *IM) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
+func (f *Channel) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 	if event == nil || event.Event == nil || event.Event.Action == nil {
 		return &callback.CardActionTriggerResponse{}, nil
 	}
@@ -484,7 +484,7 @@ func splitTextForFeishu(text string, maxRunes int) []string {
 	return parts
 }
 
-var _ im.Channel = (*IM)(nil)
-var _ im.DebugSender = (*IM)(nil)
-var _ im.CardActionSubscriber = (*IM)(nil)
-var _ im.OptionSender = (*IM)(nil)
+var _ im.Channel = (*Channel)(nil)
+var _ im.DebugSender = (*Channel)(nil)
+var _ im.CardActionSubscriber = (*Channel)(nil)
+var _ im.OptionSender = (*Channel)(nil)

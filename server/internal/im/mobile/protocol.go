@@ -32,9 +32,9 @@ type outboundOption struct {
 	Label string `json:"label"`
 }
 
-// Compile-time checks that IM satisfies the optional IM interfaces.
+// Compile-time checks that Channel satisfies the optional Channel interfaces.
 var (
-	_ im.OptionSender         = (*IM)(nil)
-	_ im.DebugSender          = (*IM)(nil)
-	_ im.CardActionSubscriber = (*IM)(nil)
+	_ im.OptionSender         = (*Channel)(nil)
+	_ im.DebugSender          = (*Channel)(nil)
+	_ im.CardActionSubscriber = (*Channel)(nil)
 )

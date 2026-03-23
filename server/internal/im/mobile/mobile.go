@@ -31,9 +31,9 @@ type mobileConn struct {
 	authed bool
 }
 
-// IM implements im.Channel, im.OptionSender, im.DebugSender, and im.CardActionSubscriber
+// Channel implements im.Channel, im.OptionSender, im.DebugSender, and im.CardActionSubscriber
 // using an HTTP/WebSocket server. Each connected mobile client is assigned a unique chatID.
-type IM struct {
+type Channel struct {
 	cfg               Config
 	handler           im.MessageHandler
 	cardActionHandler func(im.CardActionEvent)
@@ -48,11 +48,11 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 // New creates a mobile WebSocket IM adapter.
-func New(cfg Config) *IM {
+func New(cfg Config) *Channel {
 	if cfg.Addr == "" {
 		cfg.Addr = ":9527"
 	}
-	return &IM{
+	return &Channel{
 		cfg:   cfg,
 		conns: make(map[string]*mobileConn),
 	}
@@ -60,21 +60,21 @@ func New(cfg Config) *IM {
 
 // --- im.Channel ---
 
-func (m *IM) OnMessage(handler im.MessageHandler) { m.handler = handler }
+func (m *Channel) OnMessage(handler im.MessageHandler) { m.handler = handler }
 
-func (m *IM) SendText(chatID, text string) error {
+func (m *Channel) SendText(chatID, text string) error {
 	return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: text})
 }
 
-func (m *IM) SendCard(chatID string, card im.Card) error {
+func (m *Channel) SendCard(chatID string, card im.Card) error {
 	return m.send(chatID, outboundMsg{Type: "card", ChatID: chatID, Card: card})
 }
 
 // SendReaction is a no-op; mobile clients don't have message reaction UX.
-func (m *IM) SendReaction(_, _ string) error { return nil }
+func (m *Channel) SendReaction(_, _ string) error { return nil }
 
 // Run starts the WebSocket HTTP server and blocks until ctx is cancelled.
-func (m *IM) Run(ctx context.Context) error {
+func (m *Channel) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", m.handleWS)
 	srv := &http.Server{Addr: m.cfg.Addr, Handler: mux}
@@ -97,7 +97,7 @@ func (m *IM) Run(ctx context.Context) error {
 
 // --- im.DebugSender ---
 
-func (m *IM) SendDebug(chatID, text string) error {
+func (m *Channel) SendDebug(chatID, text string) error {
 	return m.send(chatID, outboundMsg{Type: "debug", ChatID: chatID, Text: text})
 }
 
@@ -105,7 +105,7 @@ func (m *IM) SendDebug(chatID, text string) error {
 
 // SendOptions sends a structured option prompt (decision request) to the client.
 // meta["decision_id"] is forwarded so the client can include it in its reply.
-func (m *IM) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
+func (m *Channel) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
 	opts := make([]outboundOption, len(options))
 	for i, o := range options {
 		opts[i] = outboundOption{ID: o.ID, Label: o.Label}
@@ -126,7 +126,7 @@ func (m *IM) SendOptions(chatID, title, body string, options []im.DecisionOption
 
 // --- im.CardActionSubscriber ---
 
-func (m *IM) OnCardAction(handler func(im.CardActionEvent)) {
+func (m *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 	m.mu.Lock()
 	m.cardActionHandler = handler
 	m.mu.Unlock()
@@ -134,7 +134,7 @@ func (m *IM) OnCardAction(handler func(im.CardActionEvent)) {
 
 // --- WebSocket internals ---
 
-func (m *IM) handleWS(w http.ResponseWriter, r *http.Request) {
+func (m *Channel) handleWS(w http.ResponseWriter, r *http.Request) {
 	ws, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Warn("[mobile] upgrade: %v", err)
@@ -232,7 +232,7 @@ func (m *IM) handleWS(w http.ResponseWriter, r *http.Request) {
 
 // send marshals and writes msg to the given chatID's WebSocket connection.
 // Silently drops if the client is no longer connected.
-func (m *IM) send(chatID string, msg outboundMsg) error {
+func (m *Channel) send(chatID string, msg outboundMsg) error {
 	m.mu.RLock()
 	c, ok := m.conns[chatID]
 	m.mu.RUnlock()

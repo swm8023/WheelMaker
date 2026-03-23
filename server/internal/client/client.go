@@ -103,7 +103,7 @@ type Client struct {
 
 	store    Store
 	state    *ProjectState
-	imBridge *im.Bridge // nil when no IM channel configured
+	imBridge *im.ImAdapter // nil when no IM channel configured
 
 	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
 
@@ -131,7 +131,7 @@ type Client struct {
 //   - imProvider: IM bridge; nil means Run() returns an error (use Hub with a console project)
 //   - projectName: identifier used in logs and state keys
 //   - cwd: working directory for agent sessions
-func New(store Store, imProvider *im.Bridge, projectName string, cwd string) *Client {
+func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) *Client {
 	c := &Client{
 		projectName: projectName,
 		cwd:         cwd,

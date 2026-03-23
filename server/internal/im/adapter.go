@@ -15,14 +15,14 @@ import (
 )
 
 // Adapter is the low-level IM execution layer.
-// Bridge owns strategy and delegates transport/platform operations to Adapter.
+// ImAdapter owns strategy and delegates transport/platform operations to Adapter.
 type Adapter interface {
 	Channel
 }
 
-// Bridge is the strategy layer between client and concrete IM adapter.
+// ImAdapter is the strategy layer between client and concrete IM adapter.
 // Current MVP behavior is transparent pass-through; strategy logic is added iteratively.
-type Bridge struct {
+type ImAdapter struct {
 	adapter Adapter
 	handler MessageHandler
 
@@ -37,8 +37,8 @@ type Bridge struct {
 }
 
 // New creates a pass-through bridge over adapter.
-func New(adapter Adapter) *Bridge {
-	f := &Bridge{
+func New(adapter Adapter) *ImAdapter {
+	f := &ImAdapter{
 		adapter:      adapter,
 		textBuf:      map[string]*strings.Builder{},
 		toolCalls:    map[string]map[string]string{},
@@ -52,12 +52,12 @@ func New(adapter Adapter) *Bridge {
 }
 
 // NewBridge creates a pass-through bridge over adapter.
-func NewBridge(adapter Adapter) *Bridge {
+func NewBridge(adapter Adapter) *ImAdapter {
 	return New(adapter)
 }
 
 // OnMessage registers user-message handler and bridges adapter inbound events.
-func (f *Bridge) OnMessage(handler MessageHandler) {
+func (f *ImAdapter) OnMessage(handler MessageHandler) {
 	f.handler = handler
 	f.adapter.OnMessage(func(m Message) {
 		f.logIncomingMessage(m)
@@ -73,25 +73,25 @@ func (f *Bridge) OnMessage(handler MessageHandler) {
 	})
 }
 
-func (f *Bridge) SendText(chatID, text string) error {
+func (f *ImAdapter) SendText(chatID, text string) error {
 	err := f.adapter.SendText(chatID, text)
 	f.logOutgoingText(chatID, text, err)
 	return err
 }
 
-func (f *Bridge) SendCard(chatID string, card Card) error {
+func (f *ImAdapter) SendCard(chatID string, card Card) error {
 	err := f.adapter.SendCard(chatID, card)
 	f.logOutgoingCard(chatID, card, err)
 	return err
 }
 
-func (f *Bridge) SendReaction(messageID, emoji string) error {
+func (f *ImAdapter) SendReaction(messageID, emoji string) error {
 	err := f.adapter.SendReaction(messageID, emoji)
 	f.logOutgoingReaction(messageID, emoji, err)
 	return err
 }
 
-func (f *Bridge) SendDebug(chatID, text string) error {
+func (f *ImAdapter) SendDebug(chatID, text string) error {
 	var err error
 	if sender, ok := f.adapter.(DebugSender); ok {
 		err = sender.SendDebug(chatID, text)
@@ -103,26 +103,26 @@ func (f *Bridge) SendDebug(chatID, text string) error {
 	return err
 }
 
-func (f *Bridge) Run(ctx context.Context) error {
+func (f *ImAdapter) Run(ctx context.Context) error {
 	return f.adapter.Run(ctx)
 }
 
 // SetHelpResolver injects realtime help payload provider from client.
-func (f *Bridge) SetHelpResolver(resolver func(ctx context.Context, chatID string) (HelpModel, error)) {
+func (f *ImAdapter) SetHelpResolver(resolver func(ctx context.Context, chatID string) (HelpModel, error)) {
 	f.mu.Lock()
 	f.helpResolver = resolver
 	f.mu.Unlock()
 }
 
 // SetDebugLogger sets optional IM-level debug logging writer.
-func (f *Bridge) SetDebugLogger(w io.Writer) {
+func (f *ImAdapter) SetDebugLogger(w io.Writer) {
 	f.mu.Lock()
 	f.debugWriter = w
 	f.mu.Unlock()
 }
 
 // Emit renders semantic updates. Current policy: buffer text chunks and flush on done.
-func (f *Bridge) Emit(_ context.Context, u IMUpdate) error {
+func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	chatID := strings.TrimSpace(u.ChatID)
 	if chatID == "" {
 		return nil
@@ -186,7 +186,7 @@ type DecisionRequestWithDeadline struct {
 
 // RequestDecision sends a textual decision prompt and waits for reply.
 // Card-interaction support will be added on top of the same state machine.
-func (f *Bridge) RequestDecision(ctx context.Context, req DecisionRequest) (DecisionResult, error) {
+func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (DecisionResult, error) {
 	chatID := strings.TrimSpace(req.ChatID)
 	if chatID == "" {
 		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("decision: empty chat id")
@@ -237,7 +237,7 @@ func (f *Bridge) RequestDecision(ctx context.Context, req DecisionRequest) (Deci
 	}
 }
 
-func (f *Bridge) clearDecision(chatID, decisionID string, ch chan DecisionResult) {
+func (f *ImAdapter) clearDecision(chatID, decisionID string, ch chan DecisionResult) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if pd, ok := f.decisions[chatID]; ok && pd.ch == ch {
@@ -268,7 +268,7 @@ func renderDecisionPrompt(req DecisionRequest) string {
 	return b.String()
 }
 
-func (f *Bridge) tryHandleHelp(m Message) bool {
+func (f *ImAdapter) tryHandleHelp(m Message) bool {
 	f.mu.Lock()
 	resolver := f.helpResolver
 	f.mu.Unlock()
@@ -293,7 +293,7 @@ func renderDefault(v, d string) string {
 	return strings.TrimSpace(v)
 }
 
-func (f *Bridge) handleCardAction(evt CardActionEvent) {
+func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 	kind := strings.TrimSpace(evt.Value["kind"])
 	switch kind {
 	case "decision":
@@ -366,7 +366,7 @@ func (f *Bridge) handleCardAction(evt CardActionEvent) {
 	}
 }
 
-func (f *Bridge) sendHelpPage(chatID string, model HelpModel, page int) error {
+func (f *ImAdapter) sendHelpPage(chatID string, model HelpModel, page int) error {
 	if len(model.Options) == 0 {
 		return f.adapter.SendText(chatID, strings.TrimSpace(model.Body))
 	}
@@ -455,7 +455,7 @@ func buildHelpCard(chatID string, model HelpModel, page int) Card {
 	}
 }
 
-func (f *Bridge) resolveDecision(m Message) bool {
+func (f *ImAdapter) resolveDecision(m Message) bool {
 	chatID := strings.TrimSpace(m.ChatID)
 	if chatID == "" {
 		return false
@@ -525,7 +525,7 @@ func renderToolCallUpdate(raw []byte) string {
 	return fmt.Sprintf("🔧 %s [%s]", title, status)
 }
 
-func (f *Bridge) renderToolCallUpdate(chatID string, raw []byte) (string, bool) {
+func (f *ImAdapter) renderToolCallUpdate(chatID string, raw []byte) (string, bool) {
 	msg := renderToolCallUpdate(raw)
 	if msg == "" {
 		return "", false
@@ -634,19 +634,19 @@ func parseIndex(v string) int {
 // CanHandleDecision reports whether the underlying adapter supports interactive
 // decision UI (i.e. implements OptionSender). When false, callers should treat
 // any decision as immediately cancelled rather than sending a blocking prompt.
-func (f *Bridge) CanHandleDecision() bool {
+func (f *ImAdapter) CanHandleDecision() bool {
 	_, ok := f.adapter.(OptionSender)
 	return ok
 }
 
-var _ Channel = (*Bridge)(nil)
-var _ DebugSender = (*Bridge)(nil)
-var _ UpdateEmitter = (*Bridge)(nil)
-var _ DecisionRequester = (*Bridge)(nil)
-var _ HelpResolverSetter = (*Bridge)(nil)
-var _ DebugLoggerSetter = (*Bridge)(nil)
+var _ Channel = (*ImAdapter)(nil)
+var _ DebugSender = (*ImAdapter)(nil)
+var _ UpdateEmitter = (*ImAdapter)(nil)
+var _ DecisionRequester = (*ImAdapter)(nil)
+var _ HelpResolverSetter = (*ImAdapter)(nil)
+var _ DebugLoggerSetter = (*ImAdapter)(nil)
 
-func (f *Bridge) writeDebugLine(line string) {
+func (f *ImAdapter) writeDebugLine(line string) {
 	f.mu.Lock()
 	w := f.debugWriter
 	f.mu.Unlock()
@@ -656,7 +656,7 @@ func (f *Bridge) writeDebugLine(line string) {
 	debuglog.New(w).Log("->", "im", line)
 }
 
-func (f *Bridge) writeDebugInbound(line string) {
+func (f *ImAdapter) writeDebugInbound(line string) {
 	f.mu.Lock()
 	w := f.debugWriter
 	f.mu.Unlock()
@@ -678,12 +678,12 @@ func previewText(s string, maxRunes int) string {
 	return string(r[:maxRunes]) + "..."
 }
 
-func (f *Bridge) logIncomingMessage(m Message) {
+func (f *ImAdapter) logIncomingMessage(m Message) {
 	f.writeDebugInbound(fmt.Sprintf("event=message chat=%q msg=%q user=%q text=%q",
 		m.ChatID, m.MessageID, m.UserID, previewText(m.Text, 300)))
 }
 
-func (f *Bridge) logOutgoingText(chatID, text string, err error) {
+func (f *ImAdapter) logOutgoingText(chatID, text string, err error) {
 	if err != nil {
 		f.writeDebugLine(fmt.Sprintf("event=send_text status=error chat=%q err=%q text=%q",
 			chatID, err.Error(), previewText(text, 300)))
@@ -693,7 +693,7 @@ func (f *Bridge) logOutgoingText(chatID, text string, err error) {
 		chatID, len([]rune(text)), previewText(text, 300)))
 }
 
-func (f *Bridge) logOutgoingCard(chatID string, card Card, err error) {
+func (f *ImAdapter) logOutgoingCard(chatID string, card Card, err error) {
 	raw, _ := json.Marshal(card)
 	preview := previewText(string(raw), 400)
 	if err != nil {
@@ -704,7 +704,7 @@ func (f *Bridge) logOutgoingCard(chatID string, card Card, err error) {
 	f.writeDebugLine(fmt.Sprintf("event=send_card status=ok chat=%q card=%q", chatID, preview))
 }
 
-func (f *Bridge) logOutgoingReaction(messageID, emoji string, err error) {
+func (f *ImAdapter) logOutgoingReaction(messageID, emoji string, err error) {
 	if err != nil {
 		f.writeDebugLine(fmt.Sprintf("event=send_reaction status=error msg=%q emoji=%q err=%q",
 			messageID, emoji, err.Error()))
@@ -713,7 +713,7 @@ func (f *Bridge) logOutgoingReaction(messageID, emoji string, err error) {
 	f.writeDebugLine(fmt.Sprintf("event=send_reaction status=ok msg=%q emoji=%q", messageID, emoji))
 }
 
-func (f *Bridge) logOutgoingDebug(chatID, text string, err error) {
+func (f *ImAdapter) logOutgoingDebug(chatID, text string, err error) {
 	if err != nil {
 		f.writeDebugLine(fmt.Sprintf("event=send_debug status=error chat=%q err=%q text=%q",
 			chatID, err.Error(), previewText(text, 300)))
