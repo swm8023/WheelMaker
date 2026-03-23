@@ -601,7 +601,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 			"template": template,
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": fmt.Sprintf("🛠️ %s %s %s", statusEmoji, permEmoji, previewLine(title, 80)),
+				"content": fmt.Sprintf("🛠️ %s %s %s", statusEmoji, permEmoji, previewLine(title, 28)),
 			},
 		},
 		"elements": elements,
@@ -623,35 +623,33 @@ func toolCallCommandSummary(update im.ToolCallUpdate) string {
 func toolStatusStyle(status string) (emoji string, template string) {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "completed":
-		return "✅", "green"
+		return "\U00002705", "green"
 	case "failed":
-		return "❌", "red"
+		return "\U0000274C", "red"
 	case "cancelled":
-		return "⛔", "grey"
+		return "\U000026D4", "grey"
 	case "in_progress":
-		return "⏳", "blue"
+		return "\U000023F3", "blue"
 	default:
-		return "🟡", "orange"
+		return "\U0001F7E1", "orange"
 	}
 }
-
 func toolPermissionEmoji(perm *toolPermissionState) string {
 	if perm == nil {
-		return "⚪"
+		return "\U000026AA"
 	}
 	if perm.active {
-		return "🟡"
+		return "\U0001F7E1"
 	}
 	v := strings.ToLower(strings.TrimSpace(perm.selectedID + " " + perm.selectedLabel))
 	if strings.Contains(v, "allow") || strings.Contains(v, "approve") || strings.Contains(v, "yes") {
-		return "✅"
+		return "\U0001F7E2"
 	}
 	if strings.Contains(v, "reject") || strings.Contains(v, "abort") || strings.Contains(v, "no") || strings.Contains(v, "cancel") {
-		return "❌"
+		return "\U0001F534"
 	}
-	return "⚪"
+	return "\U000026AA"
 }
-
 func toolCallDetailBlock(update im.ToolCallUpdate) string {
 	cmd := strings.TrimSpace(toolCallCommandLine(update))
 	if cmd == "" {
@@ -669,6 +667,9 @@ func toolCallCommandLine(update im.ToolCallUpdate) string {
 	if cmd := commandFromRawInput(update.RawInput); cmd != "" {
 		return cmd
 	}
+	if cmd := commandFromRawOutput(update.RawOutput); cmd != "" {
+		return cmd
+	}
 	if text := decodeRawText(update.RawInput); text != "" {
 		return text
 	}
@@ -679,7 +680,6 @@ func toolCallCommandLine(update im.ToolCallUpdate) string {
 	}
 	return ""
 }
-
 func commandFromRawInput(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
@@ -696,6 +696,21 @@ func commandFromRawInput(raw json.RawMessage) string {
 	return strings.TrimSpace(strings.Join(payload.Command, " "))
 }
 
+func commandFromRawOutput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload struct {
+		Command []string `json:"command"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if len(payload.Command) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(payload.Command, " "))
+}
 func toolCallOutputText(update im.ToolCallUpdate) string {
 	if text := outputFromRawOutput(update.RawOutput); text != "" {
 		return text
