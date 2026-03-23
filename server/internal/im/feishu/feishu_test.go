@@ -122,19 +122,28 @@ func TestBuildToolCallCard(t *testing.T) {
 		Status:     "failed",
 		RawOutput:  []byte(`"permission denied"`),
 	}, nil)
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("header missing in card: %+v", card)
+	}
+	if got, _ := header["template"].(string); got != "red" {
+		t.Fatalf("header template=%q, want red", got)
+	}
+	titleMap, ok := header["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("header title missing in card: %+v", card)
+	}
+	title, _ := titleMap["content"].(string)
+	if !strings.Contains(title, "Run tests") || !strings.Contains(title, "❌") {
+		t.Fatalf("tool header missing status/name: %q", title)
+	}
+
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) == 0 {
 		t.Fatalf("elements missing in card: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "failed") {
-		t.Fatalf("tool card content missing status: %q", content)
-	}
-	if len(elements) < 2 {
-		t.Fatalf("tool card should include command line, elements=%d", len(elements))
-	}
-	commandLine, _ := elements[1]["content"].(string)
-	if strings.TrimSpace(commandLine) == "" {
-		t.Fatalf("tool card command line is empty")
+	if !strings.Contains(content, "permission denied") {
+		t.Fatalf("tool card content missing output: %q", content)
 	}
 }

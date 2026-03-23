@@ -41,6 +41,7 @@ type Channel struct {
 	textMu       sync.Mutex
 	textStreams  map[string]*textStream
 	toolMu       sync.Mutex
+	toolRenderMu sync.Mutex
 	toolCards    map[string]map[string]*toolCardState // chatID -> toolCallID -> state
 
 	seenMu        sync.Mutex
@@ -490,7 +491,28 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 	if st == nil {
 		return nil
 	}
-	card := buildToolCallCard(chatID, st.update, st.perm)
+	f.toolRenderMu.Lock()
+	defer f.toolRenderMu.Unlock()
+
+	f.toolMu.Lock()
+	chatCards := f.toolCards[chatID]
+	if chatCards == nil {
+		chatCards = map[string]*toolCardState{}
+		f.toolCards[chatID] = chatCards
+	}
+	cur := chatCards[toolCallID]
+	if cur == nil {
+		cur = &toolCardState{}
+		chatCards[toolCallID] = cur
+	}
+	cur.update = st.update
+	cur.perm = st.perm
+	messageID := strings.TrimSpace(cur.messageID)
+	update := cur.update
+	perm := cur.perm
+	f.toolMu.Unlock()
+
+	card := buildToolCallCard(chatID, update, perm)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal tool card: %w", err)
@@ -500,7 +522,6 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 		return err
 	}
 	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-	messageID := strings.TrimSpace(st.messageID)
 	if messageID == "" {
 		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
 		if postErr != nil {
@@ -516,9 +537,9 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 	}
 	if messageID != "" {
 		f.toolMu.Lock()
-		if chatCards := f.toolCards[chatID]; chatCards != nil {
-			if cur := chatCards[toolCallID]; cur != nil {
-				cur.messageID = messageID
+		if cards := f.toolCards[chatID]; cards != nil {
+			if curState := cards[toolCallID]; curState != nil {
+				curState.messageID = messageID
 			}
 		}
 		f.toolMu.Unlock()
@@ -542,26 +563,14 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 	}
 	title := strings.TrimSpace(update.Title)
 	if title == "" {
-		title = "Tool Call"
+		title = "tool_call"
 	}
+	statusEmoji, template := toolStatusStyle(status)
+	permEmoji := toolPermissionEmoji(perm)
 
+	content := toolCallDetailBlock(update)
 	elements := []map[string]any{
-		{
-			"tag":     "markdown",
-			"content": fmt.Sprintf("**Status:** %s", status),
-		},
-	}
-	if cmd := toolCallCommandSummary(update); cmd != "" {
-		elements = append(elements, map[string]any{
-			"tag":     "markdown",
-			"content": fmt.Sprintf("`%s`", cmd),
-		})
-	}
-	if status == "pending" && (perm == nil || !perm.active) {
-		elements = append(elements, map[string]any{
-			"tag":     "markdown",
-			"content": "Waiting for confirmation",
-		})
+		{"tag": "markdown", "content": "```text\n" + content + "\n```"},
 	}
 	if perm != nil {
 		if perm.active && len(perm.options) > 0 {
@@ -583,20 +592,16 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 				})
 			}
 			elements = append(elements, map[string]any{"tag": "action", "actions": actions})
-		} else if strings.TrimSpace(perm.selectedLabel) != "" {
-			elements = append(elements, map[string]any{
-				"tag":     "markdown",
-				"content": fmt.Sprintf("Permission: %s", strings.TrimSpace(perm.selectedLabel)),
-			})
 		}
 	}
 
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
+			"template": template,
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": title,
+				"content": fmt.Sprintf("🛠️ %s %s %s", statusEmoji, permEmoji, previewLine(title, 80)),
 			},
 		},
 		"elements": elements,
@@ -604,24 +609,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 }
 
 func toolCallCommandSummary(update im.ToolCallUpdate) string {
-	parts := []string{}
-	if text := decodeRawText(update.RawInput); text != "" {
-		parts = append(parts, text)
-	}
-	for _, c := range update.ToolCallContent {
-		if text := decodeRawText(c.Content); text != "" {
-			parts = append(parts, text)
-		}
-		if strings.TrimSpace(c.NewText) != "" {
-			parts = append(parts, strings.TrimSpace(c.NewText))
-		}
-	}
-	if len(parts) == 0 {
-		if text := decodeRawText(update.RawOutput); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	out := strings.TrimSpace(strings.Join(parts, "\n"))
+	out := toolCallCommandLine(update)
 	if out == "" {
 		if strings.TrimSpace(update.Kind) != "" {
 			out = update.Kind
@@ -632,6 +620,128 @@ func toolCallCommandSummary(update im.ToolCallUpdate) string {
 	return previewLine(out, 160)
 }
 
+func toolStatusStyle(status string) (emoji string, template string) {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed":
+		return "✅", "green"
+	case "failed":
+		return "❌", "red"
+	case "cancelled":
+		return "⛔", "grey"
+	case "in_progress":
+		return "⏳", "blue"
+	default:
+		return "🟡", "orange"
+	}
+}
+
+func toolPermissionEmoji(perm *toolPermissionState) string {
+	if perm == nil {
+		return "⚪"
+	}
+	if perm.active {
+		return "🟡"
+	}
+	v := strings.ToLower(strings.TrimSpace(perm.selectedID + " " + perm.selectedLabel))
+	if strings.Contains(v, "allow") || strings.Contains(v, "approve") || strings.Contains(v, "yes") {
+		return "✅"
+	}
+	if strings.Contains(v, "reject") || strings.Contains(v, "abort") || strings.Contains(v, "no") || strings.Contains(v, "cancel") {
+		return "❌"
+	}
+	return "⚪"
+}
+
+func toolCallDetailBlock(update im.ToolCallUpdate) string {
+	cmd := strings.TrimSpace(toolCallCommandLine(update))
+	if cmd == "" {
+		cmd = "<unknown command>"
+	}
+	out := strings.TrimSpace(toolCallOutputText(update))
+	if out == "" {
+		out = "<no output>"
+	}
+	block := fmt.Sprintf("$ %s\n\n%s", cmd, out)
+	return previewBlock(block, 3200)
+}
+
+func toolCallCommandLine(update im.ToolCallUpdate) string {
+	if cmd := commandFromRawInput(update.RawInput); cmd != "" {
+		return cmd
+	}
+	if text := decodeRawText(update.RawInput); text != "" {
+		return text
+	}
+	for _, c := range update.ToolCallContent {
+		if text := decodeRawText(c.Content); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func commandFromRawInput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload struct {
+		Command []string `json:"command"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	if len(payload.Command) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(strings.Join(payload.Command, " "))
+}
+
+func toolCallOutputText(update im.ToolCallUpdate) string {
+	if text := outputFromRawOutput(update.RawOutput); text != "" {
+		return text
+	}
+	for _, c := range update.ToolCallContent {
+		if text := decodeRawText(c.Content); text != "" {
+			return text
+		}
+		if strings.TrimSpace(c.NewText) != "" {
+			return strings.TrimSpace(c.NewText)
+		}
+	}
+	return ""
+}
+
+func outputFromRawOutput(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload struct {
+		Output string `json:"output"`
+		Stdout string `json:"stdout"`
+		Stderr string `json:"stderr"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &payload); err == nil {
+		lines := []string{}
+		if strings.TrimSpace(payload.Output) != "" {
+			lines = append(lines, strings.TrimSpace(payload.Output))
+		}
+		if strings.TrimSpace(payload.Stdout) != "" {
+			lines = append(lines, strings.TrimSpace(payload.Stdout))
+		}
+		if strings.TrimSpace(payload.Stderr) != "" {
+			lines = append(lines, "stderr: "+strings.TrimSpace(payload.Stderr))
+		}
+		if strings.TrimSpace(payload.Error) != "" {
+			lines = append(lines, "error: "+strings.TrimSpace(payload.Error))
+		}
+		if len(lines) > 0 {
+			return strings.Join(lines, "\n")
+		}
+	}
+	return decodeRawText(raw)
+}
+
 func previewLine(s string, maxRunes int) string {
 	s = strings.TrimSpace(strings.ReplaceAll(s, "\r", ""))
 	if s == "" {
@@ -639,6 +749,18 @@ func previewLine(s string, maxRunes int) string {
 	}
 	if idx := strings.Index(s, "\n"); idx >= 0 {
 		s = strings.TrimSpace(s[:idx])
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "..."
+}
+
+func previewBlock(s string, maxRunes int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r", ""))
+	if s == "" {
+		return ""
 	}
 	r := []rune(s)
 	if len(r) <= maxRunes {

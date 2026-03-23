@@ -662,11 +662,15 @@ func parseToolCallUpdate(raw []byte) (ToolCallUpdate, string, bool) {
 	}
 	u.Title = strings.TrimSpace(u.Title)
 	u.Status = strings.TrimSpace(u.Status)
-	if u.Status == "" {
-		u.Status = "pending"
-	}
+	u.Kind = strings.TrimSpace(u.Kind)
 
 	normalizedOutput := normalizeToolCallOutput(u)
+	// Some agents emit heartbeat-like tool_call_update packets with no status/title/output.
+	// Ignore those to avoid spurious "pending" regressions and duplicate card churn.
+	if u.SessionUpdate == "tool_call_update" && u.Status == "" && u.Title == "" && u.Kind == "" && normalizedOutput == "" {
+		return ToolCallUpdate{}, "", false
+	}
+
 	signature := strings.Join([]string{
 		u.SessionUpdate,
 		u.ToolCallID,
