@@ -92,7 +92,9 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	if pc.Debug {
 		dw := h.getDebugWriter()
 		c.SetDebugLogger(dw)
-		imProvider.SetDebugLogger(dw)
+		if setter, ok := any(imProvider).(im.DebugLoggerSetter); ok {
+			setter.SetDebugLogger(dw)
+		}
 	}
 
 	// Register all known agent factories so users can switch between them at runtime.

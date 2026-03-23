@@ -1,7 +1,10 @@
 // Package im defines the interface for instant messaging channels.
 package im
 
-import "context"
+import (
+	"context"
+	"io"
+)
 
 // Message represents an incoming message from an IM platform.
 type Message struct {
@@ -39,4 +42,9 @@ type Channel interface {
 // Implementations may format or route differently from normal text messages.
 type DebugSender interface {
 	SendDebug(chatID, text string) error
+}
+
+// DebugLoggerSetter installs an optional writer for unified debug logs.
+type DebugLoggerSetter interface {
+	SetDebugLogger(w io.Writer)
 }

@@ -187,7 +187,7 @@ func TestForwarder_DebugLogger_LogsInAndOut(t *testing.T) {
 	}
 
 	logs := buf.String()
-	if !containsAll(logs, "[im][in]", "chat-1", "hello", "[im][out][text]", "world") {
+	if !containsAll(logs, "<-[im]", "event=message", "chat-1", "hello", "->[im]", "event=send_text", "world") {
 		t.Fatalf("unexpected logs: %q", logs)
 	}
 }

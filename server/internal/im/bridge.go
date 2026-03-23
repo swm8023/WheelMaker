@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/swm8023/wheelmaker/internal/debuglog"
 )
 
 // Adapter is the low-level IM execution layer.
@@ -642,6 +644,7 @@ var _ DebugSender = (*Bridge)(nil)
 var _ UpdateEmitter = (*Bridge)(nil)
 var _ DecisionRequester = (*Bridge)(nil)
 var _ HelpResolverSetter = (*Bridge)(nil)
+var _ DebugLoggerSetter = (*Bridge)(nil)
 
 func (f *Bridge) writeDebugLine(line string) {
 	f.mu.Lock()
@@ -650,7 +653,17 @@ func (f *Bridge) writeDebugLine(line string) {
 	if w == nil {
 		return
 	}
-	_, _ = io.WriteString(w, line+"\n")
+	debuglog.New(w).Log("->", "im", line)
+}
+
+func (f *Bridge) writeDebugInbound(line string) {
+	f.mu.Lock()
+	w := f.debugWriter
+	f.mu.Unlock()
+	if w == nil {
+		return
+	}
+	debuglog.New(w).Log("<-", "im", line)
 }
 
 func previewText(s string, maxRunes int) string {
@@ -666,17 +679,17 @@ func previewText(s string, maxRunes int) string {
 }
 
 func (f *Bridge) logIncomingMessage(m Message) {
-	f.writeDebugLine(fmt.Sprintf("[im][in] chat=%q msg=%q user=%q text=%q",
+	f.writeDebugInbound(fmt.Sprintf("event=message chat=%q msg=%q user=%q text=%q",
 		m.ChatID, m.MessageID, m.UserID, previewText(m.Text, 300)))
 }
 
 func (f *Bridge) logOutgoingText(chatID, text string, err error) {
 	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("[im][out][text][err] chat=%q err=%q text=%q",
+		f.writeDebugLine(fmt.Sprintf("event=send_text status=error chat=%q err=%q text=%q",
 			chatID, err.Error(), previewText(text, 300)))
 		return
 	}
-	f.writeDebugLine(fmt.Sprintf("[im][out][text] chat=%q len=%d text=%q",
+	f.writeDebugLine(fmt.Sprintf("event=send_text status=ok chat=%q len=%d text=%q",
 		chatID, len([]rune(text)), previewText(text, 300)))
 }
 
@@ -684,27 +697,27 @@ func (f *Bridge) logOutgoingCard(chatID string, card Card, err error) {
 	raw, _ := json.Marshal(card)
 	preview := previewText(string(raw), 400)
 	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("[im][out][card][err] chat=%q err=%q card=%q",
+		f.writeDebugLine(fmt.Sprintf("event=send_card status=error chat=%q err=%q card=%q",
 			chatID, err.Error(), preview))
 		return
 	}
-	f.writeDebugLine(fmt.Sprintf("[im][out][card] chat=%q card=%q", chatID, preview))
+	f.writeDebugLine(fmt.Sprintf("event=send_card status=ok chat=%q card=%q", chatID, preview))
 }
 
 func (f *Bridge) logOutgoingReaction(messageID, emoji string, err error) {
 	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("[im][out][reaction][err] msg=%q emoji=%q err=%q",
+		f.writeDebugLine(fmt.Sprintf("event=send_reaction status=error msg=%q emoji=%q err=%q",
 			messageID, emoji, err.Error()))
 		return
 	}
-	f.writeDebugLine(fmt.Sprintf("[im][out][reaction] msg=%q emoji=%q", messageID, emoji))
+	f.writeDebugLine(fmt.Sprintf("event=send_reaction status=ok msg=%q emoji=%q", messageID, emoji))
 }
 
 func (f *Bridge) logOutgoingDebug(chatID, text string, err error) {
 	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("[im][out][debug][err] chat=%q err=%q text=%q",
+		f.writeDebugLine(fmt.Sprintf("event=send_debug status=error chat=%q err=%q text=%q",
 			chatID, err.Error(), previewText(text, 300)))
-		return
 	}
-	f.writeDebugLine(fmt.Sprintf("[im][out][debug] chat=%q text=%q", chatID, previewText(text, 300)))
+	// Do not log successful debug sends here to avoid duplicate lines:
+	// ACP payload already exists in -[acp] debug logs.
 }
