@@ -510,13 +510,9 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 			messageID = strings.TrimSpace(resp.Data.MessageID)
 		}
 	} else if _, err := bot.UpdateMessage(messageID, buf.Build()); err != nil {
-		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
-		if postErr != nil {
-			return postErr
-		}
-		if resp != nil {
-			messageID = strings.TrimSpace(resp.Data.MessageID)
-		}
+		// Do not fallback to posting a new card on update failure: that creates
+		// duplicate cards for a single tool call. Surface the error for logging/retry.
+		return err
 	}
 	if messageID != "" {
 		f.toolMu.Lock()

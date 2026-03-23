@@ -665,9 +665,6 @@ func parseToolCallUpdate(raw []byte) (ToolCallUpdate, string, bool) {
 	if u.Status == "" {
 		u.Status = "pending"
 	}
-	if u.Title == "" {
-		u.Title = "tool"
-	}
 
 	normalizedOutput := normalizeToolCallOutput(u)
 	signature := strings.Join([]string{
@@ -732,7 +729,11 @@ func renderToolCallMessage(u ToolCallUpdate) string {
 	case "pending":
 		icon = "??"
 	}
-	msg := fmt.Sprintf("%s %s [%s] (%s)", icon, u.Title, u.Status, u.ToolCallID)
+	title := strings.TrimSpace(u.Title)
+	if title == "" {
+		title = "tool"
+	}
+	msg := fmt.Sprintf("%s %s [%s] (%s)", icon, title, u.Status, u.ToolCallID)
 	if strings.EqualFold(u.Status, "pending") {
 		msg += "\nWaiting for confirmation."
 	}
