@@ -17,6 +17,21 @@ type IMUpdate struct {
 	ReplyTo     string
 }
 
+// IMUpdateType constants mirror acp.UpdateType values for use inside the im package,
+// avoiding a direct import and keeping im/adapter free of hardcoded strings.
+const (
+	IMUpdateText              = "text"
+	IMUpdateThought           = "thought"
+	IMUpdateToolCall          = "tool_call"
+	IMUpdateToolCallCancel    = "tool_call_cancelled"
+	IMUpdatePlan              = "plan"
+	IMUpdateConfigOption      = "config_option_update"
+	IMUpdateAvailableCommands = "available_commands_update"
+	IMUpdateUserChunk         = "user_message_chunk"
+	IMUpdateDone              = "done"
+	IMUpdateError             = "error"
+)
+
 // ToolCallContent is a normalized content entry attached to a tool call update.
 type ToolCallContent struct {
 	Type       string          `json:"type"`

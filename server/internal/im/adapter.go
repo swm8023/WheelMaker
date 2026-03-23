@@ -132,16 +132,16 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		return nil
 	}
 	switch u.UpdateType {
-	case "text":
+	case IMUpdateText:
 		f.enqueueTextChunk(chatID, u.Text)
-	case "done":
+	case IMUpdateDone:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		f.mu.Lock()
 		delete(f.toolCalls, chatID)
 		f.mu.Unlock()
-	case "error":
+	case IMUpdateError:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
@@ -150,26 +150,26 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 			msg = "Agent request failed."
 		}
 		return f.SendText(chatID, msg)
-	case "thought":
+	case IMUpdateThought:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		if strings.TrimSpace(u.Text) != "" {
 			return f.SendText(chatID, "[thought] "+strings.TrimSpace(u.Text))
 		}
-	case "tool_call":
+	case IMUpdateToolCall:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		return f.emitToolCall(chatID, u.Raw)
-	case "plan":
+	case IMUpdatePlan:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		if msg := renderPlanUpdate(u.Raw); msg != "" {
 			return f.SendText(chatID, msg)
 		}
-	case "config_option_update":
+	case IMUpdateConfigOption:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}

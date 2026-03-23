@@ -19,6 +19,13 @@ const (
 	UpdatePlan UpdateType = "plan"
 	// UpdateConfigOption is emitted when the agent sends config_option_update.
 	UpdateConfigOption UpdateType = "config_option_update"
+	// UpdateAvailableCommands is emitted when the agent sends available_commands_update.
+	UpdateAvailableCommands UpdateType = "available_commands_update"
+	// UpdateSessionInfo is emitted when the agent sends session_info_update.
+	UpdateSessionInfo UpdateType = "session_info_update"
+	// UpdateUserChunk is a user message reflection chunk (user_message_chunk).
+	// Most integrations can ignore this; it is exposed for completeness.
+	UpdateUserChunk UpdateType = "user_message_chunk"
 	// UpdateModeChange is a legacy mode switch notification
 	// (current_mode_update). New integrations should use UpdateConfigOption.
 	UpdateModeChange UpdateType = "mode_change"
@@ -103,6 +110,11 @@ func sessionUpdateToUpdate(u SessionUpdate) Update {
 			}
 		}
 		return Update{Type: UpdateText, Content: text}
+
+	case "user_message_chunk":
+		// User message reflection — expose as its own type so callers can ignore it
+		// without hitting the default branch. No caller today renders this.
+		return Update{Type: UpdateUserChunk}
 
 	case "agent_thought_chunk":
 		text := ""

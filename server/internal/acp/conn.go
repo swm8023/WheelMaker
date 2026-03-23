@@ -84,7 +84,108 @@ func (c *Conn) writeDebugRaw(prefix string, raw []byte) {
 	if dw == nil || len(raw) == 0 {
 		return
 	}
-	writeDebugLine(dw, prefix, raw)
+	writeDebugLine(dw, prefix, trimDebugPayload(raw))
+}
+
+// trimDebugPayload returns a shorter representation of ACP messages for debug logs.
+// session/update messages are reformatted to a single-line summary; all other messages
+// are passed through unchanged.
+func trimDebugPayload(raw []byte) []byte {
+	// Only reformat inbound session/update notifications to avoid log spam.
+	// Use a minimal parse: check method field cheaply before full unmarshal.
+	var msg struct {
+		Method string          `json:"method"`
+		ID     *int64          `json:"id"`
+		Params json.RawMessage `json:"params,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return raw
+	}
+	if msg.ID != nil || msg.Method != "session/update" {
+		return raw // requests/responses pass through unchanged
+	}
+
+	var params struct {
+		SessionID string `json:"sessionId"`
+		Update    struct {
+			SessionUpdate string          `json:"sessionUpdate"`
+			ToolCallID    string          `json:"toolCallId,omitempty"`
+			Title         string          `json:"title,omitempty"`
+			Status        string          `json:"status,omitempty"`
+			Content       json.RawMessage `json:"content,omitempty"`
+			RawOutput     json.RawMessage `json:"rawOutput,omitempty"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return raw
+	}
+
+	u := params.Update
+	var summary string
+	switch u.SessionUpdate {
+	case "agent_message_chunk":
+		text := extractTextFromContent(u.Content)
+		summary = fmt.Sprintf("agent_message_chunk: %s", previewStr(text, 80))
+	case "user_message_chunk":
+		text := extractTextFromContent(u.Content)
+		summary = fmt.Sprintf("user_message_chunk: %s", previewStr(text, 80))
+	case "tool_call":
+		summary = fmt.Sprintf("tool_call id=%s title=%s status=%s", u.ToolCallID, previewStr(u.Title, 60), u.Status)
+	case "tool_call_update":
+		out := previewStr(strings.TrimSpace(rawToString(u.RawOutput)), 100)
+		summary = fmt.Sprintf("tool_call_update id=%s status=%s output=%s", u.ToolCallID, u.Status, out)
+	default:
+		// For less-common updates, keep a compact form.
+		compact, err := json.Marshal(params.Update)
+		if err != nil {
+			return raw
+		}
+		summary = string(compact)
+		if len(summary) > 200 {
+			summary = summary[:200] + "…"
+		}
+	}
+
+	sidShort := params.SessionID
+	if len(sidShort) > 8 {
+		sidShort = sidShort[:8]
+	}
+	out := fmt.Sprintf(`{"method":"session/update","sid":"%s","update":%q}`, sidShort, summary)
+	return []byte(out)
+}
+
+func extractTextFromContent(content json.RawMessage) string {
+	if len(content) == 0 {
+		return ""
+	}
+	var cb struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(content, &cb); err == nil && cb.Type == "text" {
+		return cb.Text
+	}
+	return string(content)
+}
+
+func rawToString(r json.RawMessage) string {
+	if len(r) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(r, &s); err == nil {
+		return s
+	}
+	return string(r)
+}
+
+func previewStr(s string, max int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
 }
 
 func writeDebugLine(w io.Writer, prefix string, raw []byte) {

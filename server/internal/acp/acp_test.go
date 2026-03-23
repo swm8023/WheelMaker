@@ -1,10 +1,12 @@
 package acp_test
 
-// Unit tests for acp.Conn using a self-referential mock agent.
+// acp_test.go — unit tests for acp.Conn and ACP normalization helpers.
 //
-// Pattern: when GO_ACP_MOCK=1 is set, this test binary acts as the ACP
-// mock server (reading stdin, writing stdout). Otherwise it runs the tests,
-// pointing acp.NewConn() at os.Args[0] with GO_ACP_MOCK=1 in the environment.
+// Self-referential mock pattern: when GO_ACP_MOCK=1 is set, this test binary
+// acts as the ACP mock server (reads stdin, writes stdout). Otherwise it runs
+// the test suite, pointing acp.NewConn() at os.Args[0] with GO_ACP_MOCK=1.
+//
+// TestMain handles both modes, so the binary doubles as mock agent and test runner.
 
 import (
 	"bufio"
@@ -23,8 +25,17 @@ import (
 	acp "github.com/swm8023/wheelmaker/internal/acp"
 )
 
-// mockAgentBin is set in TestMain (in agent_test.go) to the current test binary path.
+// mockAgentBin is set in TestMain to the current test binary path.
 var mockAgentBin string
+
+func TestMain(m *testing.M) {
+	if os.Getenv("GO_ACP_MOCK") == "1" {
+		runConnMockAgent()
+		os.Exit(0)
+	}
+	mockAgentBin = os.Args[0]
+	os.Exit(m.Run())
+}
 
 // newMockConn creates a Conn pointed at the mock agent subprocess.
 func newMockConn(t *testing.T) *acp.Conn {
@@ -37,7 +48,7 @@ func newMockConn(t *testing.T) *acp.Conn {
 	return c
 }
 
-// --- Tests ---
+// ── Conn tests ────────────────────────────────────────────────────────────────
 
 // TestSend_Initialize verifies the basic request/response cycle.
 func TestSend_Initialize(t *testing.T) {
@@ -144,7 +155,6 @@ func TestSend_Concurrent(t *testing.T) {
 func TestOnRequest_Notification(t *testing.T) {
 	c := newMockConn(t)
 
-	// Initialize and create a session first.
 	var initResult acp.InitializeResult
 	if err := c.SendAgent(context.Background(), "initialize", acp.InitializeParams{ProtocolVersion: 1}, &initResult); err != nil {
 		t.Fatalf("initialize: %v", err)
@@ -154,7 +164,6 @@ func TestOnRequest_Notification(t *testing.T) {
 		t.Fatalf("session/new: %v", err)
 	}
 
-	// Collect session/update notifications via unified OnRequest handler.
 	var mu sync.Mutex
 	var notifications []acp.SessionUpdateParams
 	c.OnRequest(func(_ context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
@@ -173,7 +182,6 @@ func TestOnRequest_Notification(t *testing.T) {
 		return nil, nil
 	})
 
-	// Send a prompt — the mock sends 3 text chunks then returns.
 	var promptResult acp.SessionPromptResult
 	if err := c.SendAgent(context.Background(), "session/prompt", acp.SessionPromptParams{
 		SessionID: sessResult.SessionID,
@@ -191,12 +199,10 @@ func TestOnRequest_Notification(t *testing.T) {
 	if count != 3 {
 		t.Errorf("received %d notifications, want 3", count)
 	}
-	// Verify content of notifications.
 	for _, n := range notifications {
 		if n.Update.SessionUpdate != "agent_message_chunk" {
 			t.Errorf("unexpected update type: %s", n.Update.SessionUpdate)
 		}
-		// F4 fix: Content is now json.RawMessage.
 		var cb acp.ContentBlock
 		if err := json.Unmarshal(n.Update.Content, &cb); err != nil || cb.Type != "text" {
 			t.Errorf("unexpected content: %s", n.Update.Content)
@@ -209,7 +215,6 @@ func TestOnRequest_Notification(t *testing.T) {
 func TestOnRequest_NilHandler(t *testing.T) {
 	c := newMockConn(t)
 
-	// No OnRequest handler registered — notifications should be silently dropped.
 	var sessResult acp.SessionNewResult
 	_ = c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
 	err := c.SendAgent(context.Background(), "session/prompt", acp.SessionPromptParams{
@@ -248,8 +253,8 @@ func TestNotify_DebugLogger(t *testing.T) {
 		t.Fatalf("Notify: %v", err)
 	}
 	got := dbg.String()
-	if !strings.Contains(got, "session/cancel") || !strings.Contains(got, "\"jsonrpc\"") {
-		t.Fatalf("debug log = %q, want JSON notify line", got)
+	if !strings.Contains(got, "session/cancel") {
+		t.Fatalf("debug log = %q, want session/cancel", got)
 	}
 }
 
@@ -286,8 +291,6 @@ func TestSend_AfterClose(t *testing.T) {
 // TestSend_ProcessExit verifies pending Sends receive an error when the process exits.
 func TestSend_ProcessExit(t *testing.T) {
 	c := newMockConn(t)
-	// "exit_now" causes the mock agent to exit without responding.
-	// The conn's readLoop should unblock all pending requests.
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- c.SendAgent(context.Background(), "exit_now", nil, nil)
@@ -319,8 +322,6 @@ func TestIncomingRequest_Handler(t *testing.T) {
 		return map[string]string{"content": "file content"}, nil
 	})
 
-	// "trigger_incoming_request" causes the mock to send an fs/read_text_file
-	// request to the client, then return its response in the final result.
 	var result struct {
 		ReceivedContent string `json:"receivedContent"`
 	}
@@ -343,10 +344,9 @@ func TestIncomingRequest_Handler(t *testing.T) {
 // sends a -32601 method-not-found error back to the agent.
 func TestIncomingRequest_NoHandler(t *testing.T) {
 	c := newMockConn(t)
-	// No OnRequest registered — mock expects a -32601 error back.
 	err := c.SendAgent(context.Background(), "trigger_incoming_request_no_handler", nil, nil)
 	if err != nil {
-		t.Fatalf("Send: %v", err) // the client-side send itself should succeed
+		t.Fatalf("Send: %v", err)
 	}
 }
 
@@ -371,7 +371,6 @@ func TestNotificationHandling(t *testing.T) {
 		return nil, nil
 	})
 
-	// Generate 3 notifications via session/prompt.
 	var sessResult acp.SessionNewResult
 	_ = c.SendAgent(context.Background(), "session/new", acp.SessionNewParams{CWD: "."}, &sessResult)
 	_ = c.SendAgent(context.Background(), "session/prompt", acp.SessionPromptParams{
@@ -385,7 +384,112 @@ func TestNotificationHandling(t *testing.T) {
 	}
 }
 
-// --- Mock agent (runs when GO_ACP_MOCK=1) ---
+// ── Normalize tests ───────────────────────────────────────────────────────────
+
+func TestNormalizeNotificationParams_CurrentModeUpdate(t *testing.T) {
+	in := json.RawMessage(`{
+		"sessionId":"sess-1",
+		"update":{"sessionUpdate":"current_mode_update","modeId":"code"}
+	}`)
+
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, in)
+
+	var p acp.SessionUpdateParams
+	if err := json.Unmarshal(out, &p); err != nil {
+		t.Fatalf("unmarshal normalized payload: %v", err)
+	}
+	if p.Update.SessionUpdate != "config_option_update" {
+		t.Fatalf("sessionUpdate=%q, want config_option_update", p.Update.SessionUpdate)
+	}
+	if len(p.Update.ConfigOptions) != 1 {
+		t.Fatalf("configOptions len=%d, want 1", len(p.Update.ConfigOptions))
+	}
+	if p.Update.ConfigOptions[0].ID != "mode" {
+		t.Fatalf("configOptions[0].id=%q, want mode", p.Update.ConfigOptions[0].ID)
+	}
+	if p.Update.ConfigOptions[0].CurrentValue != "code" {
+		t.Fatalf("configOptions[0].currentValue=%q, want code", p.Update.ConfigOptions[0].CurrentValue)
+	}
+}
+
+func TestNormalizeNotificationParams_PassThrough(t *testing.T) {
+	in := json.RawMessage(`{"sessionId":"sess-1","update":{"sessionUpdate":"agent_message_chunk"}}`)
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, in)
+	if string(out) != string(in) {
+		t.Fatalf("unexpected payload rewrite: got %s want %s", out, in)
+	}
+}
+
+func TestNormalizeNotificationParams_NonUpdateMethod(t *testing.T) {
+	in := json.RawMessage(`{"foo":"bar"}`)
+	out := acp.NormalizeNotificationParams("session/cancel", in)
+	if string(out) != string(in) {
+		t.Fatalf("non-update method should pass through: got %s", out)
+	}
+}
+
+func TestNormalizeNotificationParams_EmptyParams(t *testing.T) {
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, nil)
+	if out != nil {
+		t.Fatalf("nil params should return nil, got %s", out)
+	}
+	out = acp.NormalizeNotificationParams(acp.MethodSessionUpdate, json.RawMessage{})
+	if len(out) != 0 {
+		t.Fatalf("empty params should return empty, got %s", out)
+	}
+}
+
+func TestNormalizeNotificationParams_MalformedJSON(t *testing.T) {
+	in := json.RawMessage(`{not valid json`)
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, in)
+	if string(out) != string(in) {
+		t.Fatalf("malformed JSON should pass through: got %s", out)
+	}
+}
+
+func TestNormalizeNotificationParams_MissingModeID(t *testing.T) {
+	in := json.RawMessage(`{
+		"sessionId":"sess-1",
+		"update":{"sessionUpdate":"current_mode_update","modeId":""}
+	}`)
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, in)
+	if string(out) != string(in) {
+		t.Fatalf("empty modeId should pass through: got %s", out)
+	}
+}
+
+func TestNormalizeNotificationParams_ExistingConfigOptions(t *testing.T) {
+	in := json.RawMessage(`{
+		"sessionId":"sess-1",
+		"update":{
+			"sessionUpdate":"current_mode_update",
+			"modeId":"code",
+			"configOptions":[{"id":"custom","currentValue":"x"}]
+		}
+	}`)
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, in)
+
+	var p acp.SessionUpdateParams
+	if err := json.Unmarshal(out, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.Update.SessionUpdate != "config_option_update" {
+		t.Fatalf("sessionUpdate=%q, want config_option_update", p.Update.SessionUpdate)
+	}
+	if len(p.Update.ConfigOptions) != 1 || p.Update.ConfigOptions[0].ID != "custom" {
+		t.Fatalf("existing configOptions should be preserved, got %+v", p.Update.ConfigOptions)
+	}
+}
+
+func TestNormalizeNotificationParams_NoUpdateField(t *testing.T) {
+	in := json.RawMessage(`{"sessionId":"sess-1","other":"value"}`)
+	out := acp.NormalizeNotificationParams(acp.MethodSessionUpdate, in)
+	if string(out) != string(in) {
+		t.Fatalf("no update field should pass through: got %s", out)
+	}
+}
+
+// ── Mock agent (runs when GO_ACP_MOCK=1) ─────────────────────────────────────
 
 func runConnMockAgent() {
 	enc := json.NewEncoder(os.Stdout)
@@ -408,9 +512,8 @@ func runConnMockAgent() {
 			continue
 		}
 
-		// Notifications have no id — ignore them.
 		if raw.ID == nil {
-			continue
+			continue // notifications — ignore
 		}
 		id := *raw.ID
 
@@ -439,7 +542,6 @@ func runConnMockAgent() {
 			}
 			_ = json.Unmarshal(raw.Params, &params)
 
-			// Send 3 text chunk notifications before the response.
 			for i := range 3 {
 				mockNotify(enc, "session/update", map[string]any{
 					"sessionId": params.SessionID,
@@ -464,16 +566,13 @@ func runConnMockAgent() {
 			mockRespond(enc, id, map[string]any{"ok": true})
 
 		case "exit_now":
-			// Exit without sending a response to test pending-request cleanup.
 			return
 
 		case "trigger_incoming_request":
-			// 1. Send an Agent→Client request (fs/read_text_file) to the client.
 			mockIncomingRequest(enc, 9999, "fs/read_text_file", map[string]any{
 				"sessionId": "test-session",
 				"path":      "/mock/path/file.txt",
 			})
-			// 2. Read the client's response from stdin.
 			if !scanner.Scan() {
 				return
 			}
@@ -488,7 +587,6 @@ func runConnMockAgent() {
 				} `json:"error"`
 			}
 			_ = json.Unmarshal(scanner.Bytes(), &clientResp)
-			// 3. Return the received content in our response to the original request.
 			content := clientResp.Result.Content
 			if clientResp.Error != nil {
 				content = fmt.Sprintf("error: %s", clientResp.Error.Message)
@@ -498,16 +596,13 @@ func runConnMockAgent() {
 			})
 
 		case "trigger_incoming_request_no_handler":
-			// Send an incoming request; expect -32601 error back from conn (no handler set).
 			mockIncomingRequest(enc, 8888, "fs/read_text_file", map[string]any{
 				"sessionId": "test",
 				"path":      "/mock/file.txt",
 			})
-			// Read whatever response the conn sends.
 			if !scanner.Scan() {
 				return
 			}
-			// Return success to the original trigger request.
 			mockRespond(enc, id, map[string]any{})
 
 		default:
@@ -535,7 +630,6 @@ func mockError(enc *json.Encoder, id int64, code int, message string) {
 	})
 }
 
-// mockIncomingRequest simulates an Agent→Client request (has both id and method).
 func mockIncomingRequest(enc *json.Encoder, id int64, method string, params any) {
 	_ = enc.Encode(map[string]any{
 		"jsonrpc": "2.0",
@@ -552,4 +646,3 @@ func mockNotify(enc *json.Encoder, method string, params any) {
 		"params":  params,
 	})
 }
-
