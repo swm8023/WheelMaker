@@ -78,12 +78,17 @@ func (f *IM) SendText(chatID, text string) error {
 	if err != nil {
 		return err
 	}
-	msg := lark.NewMsgBuffer(lark.MsgText).
-		BindChatID(chatID).
-		Text(text).
-		Build()
-	_, err = bot.PostMessage(msg)
-	return err
+	parts := splitTextForFeishu(text, 3000)
+	for _, part := range parts {
+		msg := lark.NewMsgBuffer(lark.MsgText).
+			BindChatID(chatID).
+			Text(part).
+			Build()
+		if _, err = bot.PostMessage(msg); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SendCard posts an interactive card to a Feishu chat.
@@ -451,6 +456,32 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+func splitTextForFeishu(text string, maxRunes int) []string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	if maxRunes <= 0 {
+		maxRunes = 3000
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return []string{text}
+	}
+	parts := make([]string, 0, (len(runes)/maxRunes)+1)
+	for start := 0; start < len(runes); start += maxRunes {
+		end := start + maxRunes
+		if end > len(runes) {
+			end = len(runes)
+		}
+		chunk := strings.TrimSpace(string(runes[start:end]))
+		if chunk != "" {
+			parts = append(parts, chunk)
+		}
+	}
+	return parts
 }
 
 var _ im.Channel = (*IM)(nil)

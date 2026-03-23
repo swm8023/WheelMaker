@@ -91,3 +91,17 @@ func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 		t.Fatalf("expired message id should be accepted again")
 	}
 }
+
+func TestSplitTextForFeishu(t *testing.T) {
+	parts := splitTextForFeishu("abcdef", 2)
+	if len(parts) != 3 || parts[0] != "ab" || parts[1] != "cd" || parts[2] != "ef" {
+		t.Fatalf("unexpected chunks: %#v", parts)
+	}
+}
+
+func TestSplitTextForFeishu_Empty(t *testing.T) {
+	parts := splitTextForFeishu("   ", 2)
+	if len(parts) != 0 {
+		t.Fatalf("expected empty chunks, got %#v", parts)
+	}
+}
