@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
@@ -184,7 +185,14 @@ func (h *Hub) getDebugWriter() io.Writer {
 		return h.debugWriter
 	}
 
-	f, err := os.OpenFile("debug.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logDir := filepath.Dir(h.statePath)
+	if mkErr := os.MkdirAll(logDir, 0o755); mkErr != nil {
+		log.Printf("hub: create debug log dir failed: %v", mkErr)
+		h.debugWriter = log.Writer()
+		return h.debugWriter
+	}
+	logPath := filepath.Join(logDir, "debug.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		log.Printf("hub: open debug.log failed: %v", err)
 		h.debugWriter = log.Writer()
@@ -192,6 +200,6 @@ func (h *Hub) getDebugWriter() io.Writer {
 	}
 	h.debugFile = f
 	h.debugWriter = io.MultiWriter(log.Writer(), f)
-	log.Printf("hub: debug log enabled at debug.log")
+	log.Printf("hub: debug log enabled at %s", logPath)
 	return h.debugWriter
 }
