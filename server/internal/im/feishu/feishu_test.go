@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 func TestParseMessageText_Text(t *testing.T) {
@@ -101,7 +103,31 @@ func TestSplitTextForFeishu(t *testing.T) {
 
 func TestSplitTextForFeishu_Empty(t *testing.T) {
 	parts := splitTextForFeishu("   ", 2)
-	if len(parts) != 0 {
-		t.Fatalf("expected empty chunks, got %#v", parts)
+	if len(parts) != 2 || parts[0] != "  " || parts[1] != " " {
+		t.Fatalf("expected whitespace-preserving chunks, got %#v", parts)
+	}
+}
+
+func TestSplitTextForFeishu_PreservesBoundaryWhitespace(t *testing.T) {
+	parts := splitTextForFeishu("a b", 2)
+	if len(parts) != 2 || parts[0] != "a " || parts[1] != "b" {
+		t.Fatalf("unexpected chunks: %#v", parts)
+	}
+}
+
+func TestBuildToolCallCard(t *testing.T) {
+	card := buildToolCallCard(im.ToolCallUpdate{
+		ToolCallID: "call-1",
+		Title:      "Run tests",
+		Status:     "failed",
+		RawOutput:  []byte(`"permission denied"`),
+	})
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "call-1") || !strings.Contains(content, "failed") {
+		t.Fatalf("tool card content missing id/status: %q", content)
 	}
 }

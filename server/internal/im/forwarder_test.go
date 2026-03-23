@@ -18,6 +18,16 @@ type stubAdapter struct {
 	runCalled  bool
 }
 
+type toolCardStub struct {
+	stubAdapter
+	toolCalls []ToolCallUpdate
+}
+
+func (s *toolCardStub) SendToolCall(_ string, update ToolCallUpdate) error {
+	s.toolCalls = append(s.toolCalls, update)
+	return nil
+}
+
 func (s *stubAdapter) OnMessage(h MessageHandler) { s.onMsg = h }
 func (s *stubAdapter) SendText(chatID, text string) error {
 	s.lastChatID = chatID
@@ -26,7 +36,7 @@ func (s *stubAdapter) SendText(chatID, text string) error {
 	return nil
 }
 func (s *stubAdapter) SendCard(_ string, _ Card) error { return nil }
-func (s *stubAdapter) SendReaction(_, _ string) error     { return nil }
+func (s *stubAdapter) SendReaction(_, _ string) error  { return nil }
 func (s *stubAdapter) Run(_ context.Context) error {
 	s.runCalled = true
 	return nil
@@ -143,11 +153,18 @@ func TestForwarder_HelpCardActionInjectsCommand(t *testing.T) {
 	}
 }
 
-func TestRenderToolCallUpdate(t *testing.T) {
-	raw := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress"}`)
-	got := renderToolCallUpdate(raw)
-	if got == "" || !containsAll(got, "Run tests", "in_progress", "call_1") {
-		t.Fatalf("renderToolCallUpdate()=%q", got)
+func TestParseToolCallUpdate(t *testing.T) {
+	raw := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"ok"}`)
+	upd, sig, ok := parseToolCallUpdate(raw)
+	if !ok {
+		t.Fatalf("parseToolCallUpdate returned not ok")
+	}
+	if sig == "" || upd.ToolCallID != "call_1" || upd.Title != "Run tests" {
+		t.Fatalf("unexpected update=%+v signature=%q", upd, sig)
+	}
+	msg := renderToolCallMessage(upd)
+	if !containsAll(msg, "Run tests", "in_progress", "call_1") {
+		t.Fatalf("renderToolCallMessage()=%q", msg)
 	}
 }
 
@@ -171,6 +188,25 @@ func TestForwarder_EmitToolCall_DedupByStatus(t *testing.T) {
 	}
 	if ad.textCount != 1 {
 		t.Fatalf("tool call message count=%d, want 1", ad.textCount)
+	}
+}
+
+func TestForwarder_EmitToolCall_SameStatusNewOutputStillStreams(t *testing.T) {
+	ad := &toolCardStub{}
+	f := New(ad)
+	raw1 := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"step1"}`)
+	raw2 := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"step2"}`)
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw1}); err != nil {
+		t.Fatalf("emit tool_call #1: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw2}); err != nil {
+		t.Fatalf("emit tool_call #2: %v", err)
+	}
+	if len(ad.toolCalls) != 2 {
+		t.Fatalf("tool card update count=%d, want 2", len(ad.toolCalls))
+	}
+	if ad.textCount != 0 {
+		t.Fatalf("text fallback should not be used when tool cards are supported")
 	}
 }
 
@@ -200,4 +236,3 @@ func containsAll(s string, terms ...string) bool {
 	}
 	return true
 }
-

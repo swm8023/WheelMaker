@@ -27,6 +27,7 @@ type ImAdapter struct {
 
 	mu           sync.Mutex
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
+	textFlush    map[string]*time.Timer      // chatID -> delayed text flush timer
 	toolCalls    map[string]map[string]string
 	decisions    map[string]pendingDecision // chatID -> pending (text fallback)
 	decisionByID map[string]pendingDecision // decisionID -> pending (card action)
@@ -41,6 +42,7 @@ func New(adapter Adapter) *ImAdapter {
 		adapter:      adapter,
 		ability:      DetectAbilities(adapter),
 		textBuf:      map[string]*strings.Builder{},
+		textFlush:    map[string]*time.Timer{},
 		toolCalls:    map[string]map[string]string{},
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
@@ -123,7 +125,7 @@ func (f *ImAdapter) SetDebugLogger(w io.Writer) {
 	f.mu.Unlock()
 }
 
-// Emit renders semantic updates. Current policy: buffer text chunks and flush on done.
+// Emit renders semantic updates with incremental text flushing and tool-call streaming.
 func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	chatID := strings.TrimSpace(u.ChatID)
 	if chatID == "" {
@@ -131,47 +133,133 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	}
 	switch u.UpdateType {
 	case "text":
-		f.mu.Lock()
-		buf := f.textBuf[chatID]
-		if buf == nil {
-			buf = &strings.Builder{}
-			f.textBuf[chatID] = buf
-		}
-		buf.WriteString(u.Text)
-		f.mu.Unlock()
+		f.enqueueTextChunk(chatID, u.Text)
 	case "done":
+		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
 		f.mu.Lock()
-		buf := f.textBuf[chatID]
-		delete(f.textBuf, chatID)
 		delete(f.toolCalls, chatID)
 		f.mu.Unlock()
-		if buf != nil && strings.TrimSpace(buf.String()) != "" {
-			return f.adapter.SendText(chatID, buf.String())
-		}
 	case "error":
+		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
 		msg := strings.TrimSpace(u.Text)
 		if msg == "" {
 			msg = "Agent request failed."
 		}
 		return f.adapter.SendText(chatID, msg)
 	case "thought":
+		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
 		if strings.TrimSpace(u.Text) != "" {
-			return f.adapter.SendText(chatID, "🤔 "+strings.TrimSpace(u.Text))
+			return f.adapter.SendText(chatID, "?? "+strings.TrimSpace(u.Text))
 		}
 	case "tool_call":
-		if msg, ok := f.renderToolCallUpdate(chatID, u.Raw); ok && msg != "" {
-			return f.adapter.SendText(chatID, msg)
+		if err := f.flushTextNow(chatID); err != nil {
+			return err
 		}
+		return f.emitToolCall(chatID, u.Raw)
 	case "plan":
+		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
 		if msg := renderPlanUpdate(u.Raw); msg != "" {
 			return f.adapter.SendText(chatID, msg)
 		}
 	case "config_option_update":
+		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
 		if msg := renderConfigOptionUpdate(u.Raw); msg != "" {
 			return f.adapter.SendText(chatID, msg)
 		}
 	}
 	return nil
+}
+
+const textFlushDelay = 300 * time.Millisecond
+
+func (f *ImAdapter) enqueueTextChunk(chatID, chunk string) {
+	if chunk == "" {
+		return
+	}
+	f.mu.Lock()
+	buf := f.textBuf[chatID]
+	if buf == nil {
+		buf = &strings.Builder{}
+		f.textBuf[chatID] = buf
+	}
+	buf.WriteString(chunk)
+	timer := f.textFlush[chatID]
+	if timer == nil {
+		f.textFlush[chatID] = time.AfterFunc(textFlushDelay, func() {
+			_ = f.flushTextNow(chatID)
+		})
+	} else {
+		timer.Reset(textFlushDelay)
+	}
+	flushNow := strings.Contains(chunk, "\n") || buf.Len() >= 320
+	f.mu.Unlock()
+
+	if flushNow {
+		_ = f.flushTextNow(chatID)
+	}
+}
+
+func (f *ImAdapter) flushTextNow(chatID string) error {
+	f.mu.Lock()
+	buf := f.textBuf[chatID]
+	delete(f.textBuf, chatID)
+	if timer := f.textFlush[chatID]; timer != nil {
+		timer.Stop()
+		delete(f.textFlush, chatID)
+	}
+	f.mu.Unlock()
+
+	if buf == nil || buf.Len() == 0 {
+		return nil
+	}
+	return f.adapter.SendText(chatID, buf.String())
+}
+
+func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {
+	upd, signature, ok := parseToolCallUpdate(raw)
+	if !ok {
+		return nil
+	}
+	if !f.shouldEmitToolCall(chatID, upd.ToolCallID, signature) {
+		return nil
+	}
+	if f.ability.Has(AbilitySendToolCards) {
+		if sender, ok := any(f.adapter).(ToolCallSender); ok {
+			return sender.SendToolCall(chatID, upd)
+		}
+	}
+	if msg := renderToolCallMessage(upd); msg != "" {
+		return f.adapter.SendText(chatID, msg)
+	}
+	return nil
+}
+
+func (f *ImAdapter) shouldEmitToolCall(chatID, toolCallID, signature string) bool {
+	if strings.TrimSpace(toolCallID) == "" {
+		return true
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	chatCalls := f.toolCalls[chatID]
+	if chatCalls == nil {
+		chatCalls = map[string]string{}
+		f.toolCalls[chatID] = chatCalls
+	}
+	if prev, ok := chatCalls[toolCallID]; ok && prev == signature {
+		return false
+	}
+	chatCalls[toolCallID] = signature
+	return true
 }
 
 type pendingDecision struct {
@@ -501,69 +589,100 @@ func parseDecisionReply(input string, opts []DecisionOption) DecisionResult {
 	return DecisionResult{Outcome: "invalid", Source: "text_reply"}
 }
 
-func renderToolCallUpdate(raw []byte) string {
+func parseToolCallUpdate(raw []byte) (ToolCallUpdate, string, bool) {
 	if len(raw) == 0 {
-		return ""
+		return ToolCallUpdate{}, "", false
 	}
-	var u struct {
-		SessionUpdate string `json:"sessionUpdate"`
-		ToolCallID    string `json:"toolCallId"`
-		Title         string `json:"title"`
-		Status        string `json:"status"`
-	}
+	var u ToolCallUpdate
 	if err := json.Unmarshal(raw, &u); err != nil {
-		return ""
+		return ToolCallUpdate{}, "", false
 	}
-	title := strings.TrimSpace(u.Title)
-	if title == "" {
-		title = "tool"
+	u.ToolCallID = strings.TrimSpace(u.ToolCallID)
+	if u.ToolCallID == "" {
+		return ToolCallUpdate{}, "", false
 	}
-	status := strings.TrimSpace(u.Status)
-	if status == "" {
-		status = "pending"
+	u.Title = strings.TrimSpace(u.Title)
+	u.Status = strings.TrimSpace(u.Status)
+	if u.Status == "" {
+		u.Status = "pending"
 	}
-	if u.ToolCallID != "" {
-		return fmt.Sprintf("🔧 %s [%s] (%s)", title, status, u.ToolCallID)
+	if u.Title == "" {
+		u.Title = "tool"
 	}
-	return fmt.Sprintf("🔧 %s [%s]", title, status)
+
+	normalizedOutput := normalizeToolCallOutput(u)
+	signature := strings.Join([]string{
+		u.SessionUpdate,
+		u.ToolCallID,
+		u.Title,
+		u.Kind,
+		u.Status,
+		normalizedOutput,
+	}, "|")
+	return u, signature, true
 }
 
-func (f *ImAdapter) renderToolCallUpdate(chatID string, raw []byte) (string, bool) {
-	msg := renderToolCallUpdate(raw)
-	if msg == "" {
-		return "", false
+func normalizeToolCallOutput(u ToolCallUpdate) string {
+	var parts []string
+	if txt := decodeRawText(u.RawOutput); txt != "" {
+		parts = append(parts, txt)
 	}
-
-	var u struct {
-		ToolCallID string `json:"toolCallId"`
-		Status     string `json:"status"`
+	if txt := decodeRawText(u.RawInput); txt != "" {
+		parts = append(parts, txt)
 	}
-	if err := json.Unmarshal(raw, &u); err != nil {
-		return msg, true
+	for _, c := range u.ToolCallContent {
+		if t := decodeRawText(c.Content); t != "" {
+			parts = append(parts, t)
+		}
+		if strings.TrimSpace(c.NewText) != "" {
+			parts = append(parts, c.NewText)
+		}
 	}
-	toolCallID := strings.TrimSpace(u.ToolCallID)
-	if toolCallID == "" {
-		return msg, true
-	}
-	status := strings.TrimSpace(u.Status)
-	if status == "" {
-		status = "pending"
-	}
-
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	chatCalls := f.toolCalls[chatID]
-	if chatCalls == nil {
-		chatCalls = map[string]string{}
-		f.toolCalls[chatID] = chatCalls
-	}
-	if prev, ok := chatCalls[toolCallID]; ok && prev == status {
-		return "", false
-	}
-	chatCalls[toolCallID] = status
-	return msg, true
+	return previewText(strings.Join(parts, "\n"), 1200)
 }
 
+func decodeRawText(raw json.RawMessage) string {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	var anyVal any
+	if err := json.Unmarshal(raw, &anyVal); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	b, err := json.Marshal(anyVal)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func renderToolCallMessage(u ToolCallUpdate) string {
+	icon := "??"
+	switch strings.ToLower(strings.TrimSpace(u.Status)) {
+	case "completed":
+		icon = "?"
+	case "failed":
+		icon = "?"
+	case "in_progress":
+		icon = "?"
+	case "pending":
+		icon = "??"
+	}
+	msg := fmt.Sprintf("%s %s [%s] (%s)", icon, u.Title, u.Status, u.ToolCallID)
+	if strings.EqualFold(u.Status, "pending") {
+		msg += "\nWaiting for confirmation."
+	}
+	out := normalizeToolCallOutput(u)
+	if out != "" {
+		msg += "\n" + out
+	}
+	return msg
+}
 func renderPlanUpdate(raw []byte) string {
 	if len(raw) == 0 {
 		return ""

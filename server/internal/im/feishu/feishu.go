@@ -38,6 +38,8 @@ type Channel struct {
 
 	debugMu      sync.Mutex
 	debugStreams map[string]*debugStream
+	toolMu       sync.Mutex
+	toolCards    map[string]map[string]string // chatID -> toolCallID -> messageID
 
 	seenMu        sync.Mutex
 	seenMessageID map[string]time.Time
@@ -52,9 +54,10 @@ type debugStream struct {
 // New creates a Feishu IM adapter.
 func New(cfg Config) *Channel {
 	return &Channel{
-		cfg:          cfg,
-		debugStreams: map[string]*debugStream{},
+		cfg:           cfg,
+		debugStreams:  map[string]*debugStream{},
 		seenMessageID: map[string]time.Time{},
+		toolCards:     map[string]map[string]string{},
 	}
 }
 
@@ -74,7 +77,7 @@ func (f *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 
 // Abilities reports optional Feishu channel features.
 func (f *Channel) Abilities() im.Ability {
-	return im.AbilitySendDebug | im.AbilitySendOptions | im.AbilityCardActions
+	return im.AbilitySendDebug | im.AbilitySendOptions | im.AbilityCardActions | im.AbilitySendToolCards
 }
 
 // SendText posts a plain text message to a Feishu chat.
@@ -84,6 +87,9 @@ func (f *Channel) SendText(chatID, text string) error {
 		return err
 	}
 	parts := splitTextForFeishu(text, 3000)
+	if len(parts) == 0 {
+		return nil
+	}
 	for _, part := range parts {
 		msg := lark.NewMsgBuffer(lark.MsgText).
 			BindChatID(chatID).
@@ -279,6 +285,166 @@ func buildDebugCard(lines []string) im.Card {
 	}
 }
 
+// SendToolCall renders one streaming card per toolCallId and updates it in place.
+func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
+	chatID = strings.TrimSpace(chatID)
+	toolCallID := strings.TrimSpace(update.ToolCallID)
+	if chatID == "" || toolCallID == "" {
+		return nil
+	}
+
+	card := buildToolCallCard(update)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: marshal tool card: %w", err)
+	}
+	bot, err := f.ensureBot()
+	if err != nil {
+		return err
+	}
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+
+	f.toolMu.Lock()
+	chatCards := f.toolCards[chatID]
+	if chatCards == nil {
+		chatCards = map[string]string{}
+		f.toolCards[chatID] = chatCards
+	}
+	messageID := strings.TrimSpace(chatCards[toolCallID])
+	f.toolMu.Unlock()
+
+	if messageID == "" {
+		msg := buf.BindChatID(chatID).Build()
+		resp, err := bot.PostMessage(msg)
+		if err != nil {
+			return err
+		}
+		if resp != nil {
+			mid := strings.TrimSpace(resp.Data.MessageID)
+			if mid != "" {
+				f.toolMu.Lock()
+				if cc := f.toolCards[chatID]; cc != nil {
+					cc[toolCallID] = mid
+				}
+				f.toolMu.Unlock()
+			}
+		}
+		return nil
+	}
+	_, err = bot.UpdateMessage(messageID, buf.Build())
+	return err
+}
+
+func buildToolCallCard(update im.ToolCallUpdate) im.Card {
+	status := strings.ToLower(strings.TrimSpace(update.Status))
+	if status == "" {
+		status = "pending"
+	}
+	title := strings.TrimSpace(update.Title)
+	if title == "" {
+		title = "Tool Call"
+	}
+	icon := "🔧"
+	statusText := status
+	switch status {
+	case "pending":
+		icon = "🟡"
+		statusText = "pending"
+	case "in_progress":
+		icon = "⏳"
+		statusText = "running"
+	case "completed":
+		icon = "✅"
+		statusText = "completed"
+	case "failed":
+		icon = "❌"
+		statusText = "failed"
+	case "cancelled":
+		icon = "⛔"
+		statusText = "cancelled"
+	}
+
+	elements := []map[string]any{
+		{
+			"tag": "markdown",
+			"content": fmt.Sprintf("**Status:** %s %s\n**Tool ID:** `%s`",
+				icon, statusText, strings.TrimSpace(update.ToolCallID)),
+		},
+	}
+	if strings.TrimSpace(update.Kind) != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": fmt.Sprintf("**Kind:** `%s`", strings.TrimSpace(update.Kind)),
+		})
+	}
+	if status == "pending" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": "⚠️ Waiting for confirmation or permission.",
+		})
+	}
+	if out := toolCallOutputSummary(update); out != "" {
+		elements = append(elements, map[string]any{
+			"tag":     "markdown",
+			"content": "```text\n" + out + "\n```",
+		})
+	}
+
+	return im.Card{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": fmt.Sprintf("%s %s", icon, title),
+			},
+		},
+		"elements": elements,
+	}
+}
+
+func toolCallOutputSummary(update im.ToolCallUpdate) string {
+	parts := []string{}
+	if text := decodeRawText(update.RawOutput); text != "" {
+		parts = append(parts, text)
+	}
+	if text := decodeRawText(update.RawInput); text != "" {
+		parts = append(parts, text)
+	}
+	for _, c := range update.ToolCallContent {
+		if text := decodeRawText(c.Content); text != "" {
+			parts = append(parts, text)
+		}
+		if strings.TrimSpace(c.NewText) != "" {
+			parts = append(parts, strings.TrimSpace(c.NewText))
+		}
+	}
+	out := strings.TrimSpace(strings.Join(parts, "\n"))
+	if len(out) > 1600 {
+		out = out[:1600] + "..."
+	}
+	return out
+}
+
+func decodeRawText(raw json.RawMessage) string {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 // Run starts Feishu WS event loop and blocks until ctx is done.
 func (f *Channel) Run(ctx context.Context) error {
 	bot, err := f.ensureBot()
@@ -464,7 +630,6 @@ func firstNonEmpty(v ...string) string {
 }
 
 func splitTextForFeishu(text string, maxRunes int) []string {
-	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
@@ -481,10 +646,7 @@ func splitTextForFeishu(text string, maxRunes int) []string {
 		if end > len(runes) {
 			end = len(runes)
 		}
-		chunk := strings.TrimSpace(string(runes[start:end]))
-		if chunk != "" {
-			parts = append(parts, chunk)
-		}
+		parts = append(parts, string(runes[start:end]))
 	}
 	return parts
 }
@@ -493,3 +655,4 @@ var _ im.Channel = (*Channel)(nil)
 var _ im.DebugSender = (*Channel)(nil)
 var _ im.CardActionSubscriber = (*Channel)(nil)
 var _ im.OptionSender = (*Channel)(nil)
+var _ im.ToolCallSender = (*Channel)(nil)

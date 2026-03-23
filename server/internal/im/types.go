@@ -1,6 +1,9 @@
 package im
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // IMUpdate is a semantic outbound update emitted by client.
 // UpdateType usually comes from ACP update types.
@@ -12,6 +15,27 @@ type IMUpdate struct {
 	Raw         []byte
 	Correlation string
 	ReplyTo     string
+}
+
+// ToolCallContent is a normalized content entry attached to a tool call update.
+type ToolCallContent struct {
+	Type       string          `json:"type"`
+	Content    json.RawMessage `json:"content,omitempty"`
+	TerminalID string          `json:"terminalId,omitempty"`
+	Path       string          `json:"path,omitempty"`
+	NewText    string          `json:"newText,omitempty"`
+}
+
+// ToolCallUpdate is a normalized tool-call stream update for IM rendering.
+type ToolCallUpdate struct {
+	SessionUpdate   string            `json:"sessionUpdate"`
+	ToolCallID      string            `json:"toolCallId"`
+	Title           string            `json:"title,omitempty"`
+	Kind            string            `json:"kind,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	RawInput        json.RawMessage   `json:"rawInput,omitempty"`
+	RawOutput       json.RawMessage   `json:"rawOutput,omitempty"`
+	ToolCallContent []ToolCallContent `json:"toolCallContent,omitempty"`
 }
 
 // DecisionKind identifies the decision use case.

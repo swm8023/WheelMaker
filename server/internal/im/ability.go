@@ -7,6 +7,7 @@ const (
 	AbilitySendDebug Ability = 1 << iota
 	AbilitySendOptions
 	AbilityCardActions
+	AbilitySendToolCards
 )
 
 // AbilityProvider reports supported channel abilities.
@@ -35,6 +36,9 @@ func DetectAbilities(ch any) Ability {
 	}
 	if _, ok := ch.(CardActionSubscriber); ok {
 		out |= AbilityCardActions
+	}
+	if _, ok := ch.(ToolCallSender); ok {
+		out |= AbilitySendToolCards
 	}
 	return out
 }

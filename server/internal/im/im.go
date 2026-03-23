@@ -48,3 +48,8 @@ type DebugSender interface {
 type DebugLoggerSetter interface {
 	SetDebugLogger(w io.Writer)
 }
+
+// ToolCallSender can render per-tool-call streaming cards/messages.
+type ToolCallSender interface {
+	SendToolCall(chatID string, update ToolCallUpdate) error
+}
