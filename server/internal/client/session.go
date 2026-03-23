@@ -3,11 +3,11 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
 // emptyMCPServers returns an empty MCP server list for session/new and session/load calls.
@@ -164,7 +164,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			c.session.initializing = false
 			c.mu.Unlock()
 			c.initCond.Broadcast()
-			log.Printf("[client] connected: agent=%s session=%s (resumed, %d history updates)",
+			logger.Debug("[client] connected: agent=%s session=%s (resumed, %d history updates)",
 				c.conn.name, savedSID, len(replayUpdates))
 			return nil
 		}
@@ -199,7 +199,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			break
 		}
 	}
-	log.Printf("[client] connected: agent=%s session=%s mode=%s",
+	logger.Debug("[client] connected: agent=%s session=%s mode=%s",
 		c.conn.name, newResult.SessionID, modeID)
 	return nil
 }

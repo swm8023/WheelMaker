@@ -3,9 +3,9 @@ package client
 import (
 	"context"
 	"fmt"
-	"log"
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
 // ensureForwarder connects the active agent and sets up the Forwarder if not already running.
@@ -136,11 +136,11 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 	if mode == SwitchWithContext && savedLastReply != "" {
 		ch, err := c.promptStream(ctx, "[context] "+savedLastReply)
 		if err != nil {
-			log.Printf("client: SwitchWithContext bootstrap prompt failed: %v", err)
+			logger.Warn("client: SwitchWithContext bootstrap prompt failed: %v", err)
 		} else {
 			for u := range ch {
 				if u.Err != nil {
-					log.Printf("client: SwitchWithContext bootstrap prompt failed: %v", u.Err)
+					logger.Warn("client: SwitchWithContext bootstrap prompt failed: %v", u.Err)
 				}
 			}
 		}

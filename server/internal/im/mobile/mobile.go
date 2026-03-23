@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
 // Config configures the mobile WebSocket IM adapter.
@@ -78,7 +78,7 @@ func (m *IM) Run(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", m.handleWS)
 	srv := &http.Server{Addr: m.cfg.Addr, Handler: mux}
-	log.Printf("[mobile] WebSocket server listening on %s", m.cfg.Addr)
+	logger.Debug("[mobile] WebSocket server listening on %s", m.cfg.Addr)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -137,7 +137,7 @@ func (m *IM) OnCardAction(handler func(im.CardActionEvent)) {
 func (m *IM) handleWS(w http.ResponseWriter, r *http.Request) {
 	ws, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[mobile] upgrade: %v", err)
+		logger.Warn("[mobile] upgrade: %v", err)
 		return
 	}
 
@@ -154,10 +154,10 @@ func (m *IM) handleWS(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
 		delete(m.conns, chatID)
 		m.mu.Unlock()
-		log.Printf("[mobile] disconnected: %s", chatID)
+		logger.Debug("[mobile] disconnected: %s", chatID)
 	}()
 
-	log.Printf("[mobile] connected: %s from %s", chatID, r.RemoteAddr)
+	logger.Debug("[mobile] connected: %s from %s", chatID, r.RemoteAddr)
 
 	// Tell client whether auth is needed.
 	if m.cfg.Token != "" {

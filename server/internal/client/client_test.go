@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +22,7 @@ import (
 	backendmock "github.com/swm8023/wheelmaker/internal/agent/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
 // TestMain intercepts the test binary to act as a minimal ACP mock server when
@@ -1084,9 +1084,8 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 
 	// Redirect the default logger so we can observe the bootstrap warning.
 	lw := &testLogWriter{}
-	origOutput := log.Writer()
-	log.SetOutput(lw)
-	defer log.SetOutput(origOutput)
+	logger.SetOutput(lw)
+	defer logger.SetOutput(os.Stderr)
 
 	// Prime lastReply: the mock sends "client-mock-reply" text notification for session/prompt.
 	msgs := captureReplies(c)
@@ -1132,9 +1131,8 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 
 	// Redirect the default logger; no bootstrap warning should appear.
 	lw := &testLogWriter{}
-	origOutput := log.Writer()
-	log.SetOutput(lw)
-	defer log.SetOutput(origOutput)
+	logger.SetOutput(lw)
+	defer logger.SetOutput(os.Stderr)
 
 	// Prime lastReply so that if SwitchWithContext were used, it would have content.
 	msgs := captureReplies(c)

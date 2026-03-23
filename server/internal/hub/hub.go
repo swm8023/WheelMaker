@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"log"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
@@ -19,6 +16,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/im/console"
 	"github.com/swm8023/wheelmaker/internal/im/feishu"
 	"github.com/swm8023/wheelmaker/internal/im/mobile"
+	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -27,10 +25,6 @@ type Hub struct {
 	cfg       *Config
 	statePath string
 	clients   []*client.Client
-
-	debugMu     sync.Mutex
-	debugFile   *os.File
-	debugWriter io.Writer
 }
 
 // New creates a Hub from the given config and state file path.
@@ -90,10 +84,11 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 
 	// Enable ACP JSON debug logging for projects with debug=true.
 	if pc.Debug {
-		dw := h.getDebugWriter()
-		c.SetDebugLogger(dw)
-		if setter, ok := any(imProvider).(im.DebugLoggerSetter); ok {
-			setter.SetDebugLogger(dw)
+		if dw := logger.DebugWriter(); dw != nil {
+			c.SetDebugLogger(dw)
+			if setter, ok := any(imProvider).(im.DebugLoggerSetter); ok {
+				setter.SetDebugLogger(dw)
+			}
 		}
 	}
 
@@ -151,7 +146,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		go func(c *client.Client) {
 			defer wg.Done()
 			if err := c.Run(ctx); err != nil && ctx.Err() == nil {
-				log.Printf("wheelmaker: project run error: %v", err)
+				logger.Error("wheelmaker: project run error: %v", err)
 			}
 		}(c)
 	}
@@ -167,44 +162,8 @@ func (h *Hub) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	h.debugMu.Lock()
-	if h.debugFile != nil {
-		if err := h.debugFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		h.debugFile = nil
-		h.debugWriter = nil
-	}
-	h.debugMu.Unlock()
 	if len(errs) > 0 {
 		return fmt.Errorf("hub close errors: %v", errs)
 	}
 	return nil
-}
-
-func (h *Hub) getDebugWriter() io.Writer {
-	h.debugMu.Lock()
-	defer h.debugMu.Unlock()
-	if h.debugWriter != nil {
-		return h.debugWriter
-	}
-
-	logDir := filepath.Dir(h.statePath)
-	if mkErr := os.MkdirAll(logDir, 0o755); mkErr != nil {
-		log.Printf("hub: create debug log dir failed: %v", mkErr)
-		h.debugWriter = log.Writer()
-		return h.debugWriter
-	}
-	logPath := filepath.Join(logDir, "debug.log")
-	// Truncate on process start so each run starts with a fresh debug log.
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
-	if err != nil {
-		log.Printf("hub: open debug.log failed: %v", err)
-		h.debugWriter = log.Writer()
-		return h.debugWriter
-	}
-	h.debugFile = f
-	h.debugWriter = io.MultiWriter(log.Writer(), f)
-	log.Printf("hub: debug log enabled at %s", logPath)
-	return h.debugWriter
 }

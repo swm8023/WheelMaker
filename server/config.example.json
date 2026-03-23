@@ -43,6 +43,10 @@
   "feishu": {
     "verificationToken": "zzz",
     "encryptKey": ""
+  },
+  "log": {
+    "level": "warn",
+    "debugDir": ""
   }
 }
 

@@ -5,13 +5,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
 	"github.com/swm8023/wheelmaker/internal/hub"
+	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
 func main() {
@@ -27,15 +27,6 @@ func run() error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 
-	logPath := filepath.Join(home, ".wheelmaker", "wheelmaker.log")
-	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open log file %s: %w", logPath, err)
-	}
-	defer logFile.Close()
-	log.SetOutput(logFile)
-	log.SetFlags(log.LstdFlags)
-
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
 	statePath := filepath.Join(home, ".wheelmaker", "state.json")
 
@@ -43,6 +34,15 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
+
+	if err := logger.Setup(logger.Config{
+		Level:    logger.ParseLevel(cfg.Log.Level),
+		LogFile:  filepath.Join(home, ".wheelmaker", "wheelmaker.log"),
+		DebugDir: cfg.Log.DebugDir,
+	}); err != nil {
+		return fmt.Errorf("logger setup: %w", err)
+	}
+	defer logger.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
