@@ -36,13 +36,14 @@ type Channel struct {
 	action  func(im.CardActionEvent)
 	bot     *lark.Bot
 
-	debugMu      sync.Mutex
-	debugStreams map[string]*debugStream
-	textMu       sync.Mutex
-	textStreams  map[string]*textStream
-	toolMu       sync.Mutex
-	toolRenderMu sync.Mutex
-	toolCards    map[string]map[string]*toolCardState // chatID -> toolCallID -> state
+	debugMu       sync.Mutex
+	debugStreams  map[string]*debugStream
+	textMu        sync.Mutex
+	textStreams   map[string]*textStream
+	systemStreams map[string]*textStream
+	toolMu        sync.Mutex
+	toolRenderMu  sync.Mutex
+	toolCards     map[string]map[string]*toolCardState // chatID -> toolCallID -> state
 
 	seenMu        sync.Mutex
 	seenMessageID map[string]time.Time
@@ -79,6 +80,7 @@ func New(cfg Config) *Channel {
 		cfg:           cfg,
 		debugStreams:  map[string]*debugStream{},
 		textStreams:   map[string]*textStream{},
+		systemStreams: map[string]*textStream{},
 		seenMessageID: map[string]time.Time{},
 		toolCards:     map[string]map[string]*toolCardState{},
 	}
@@ -163,6 +165,67 @@ func (f *Channel) SendText(chatID, text string) error {
 	return nil
 }
 
+// SendSystem posts a system stream card to a Feishu chat.
+// System and ACP streams are intentionally isolated into different cards.
+func (f *Channel) SendSystem(chatID, text string) error {
+	chatID = strings.TrimSpace(chatID)
+	text = strings.TrimSpace(text)
+	if chatID == "" || text == "" {
+		return nil
+	}
+	f.textMu.Lock()
+	defer f.textMu.Unlock()
+
+	ts := f.systemStreams[chatID]
+	if ts == nil {
+		ts = &textStream{}
+		f.systemStreams[chatID] = ts
+	}
+	ts.content.WriteString(text)
+	content := ts.content.String()
+	if content == "" {
+		return nil
+	}
+
+	card := buildSystemStreamCard(content)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: marshal system stream card: %w", err)
+	}
+	bot, err := f.ensureBot()
+	if err != nil {
+		return err
+	}
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+	messageID := strings.TrimSpace(ts.messageID)
+	if messageID == "" {
+		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+		if postErr != nil {
+			return postErr
+		}
+		if resp != nil {
+			mid := strings.TrimSpace(resp.Data.MessageID)
+			if mid != "" {
+				ts.messageID = mid
+			}
+		}
+		return nil
+	}
+	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
+		return nil
+	}
+	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+	if postErr != nil {
+		return postErr
+	}
+	if resp != nil {
+		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
+			ts.messageID = mid
+		}
+	}
+	return nil
+}
+
 func (f *Channel) resetTextStream(chatID string) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
@@ -170,6 +233,16 @@ func (f *Channel) resetTextStream(chatID string) {
 	}
 	f.textMu.Lock()
 	delete(f.textStreams, chatID)
+	f.textMu.Unlock()
+}
+
+func (f *Channel) resetSystemStream(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.textMu.Lock()
+	delete(f.systemStreams, chatID)
 	f.textMu.Unlock()
 }
 
@@ -449,10 +522,19 @@ func buildDebugCard(lines []string) im.Card {
 func buildTextStreamCard(content string) im.Card {
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": content},
+		},
+	}
+}
+
+func buildSystemStreamCard(content string) im.Card {
+	return im.Card{
+		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": "Assistant",
+				"content": "📣 System Message",
 			},
 		},
 		"elements": []map[string]any{
@@ -909,6 +991,7 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 		// Start a new debug stream card for each new user message in the chat.
 		f.resetDebugStream(*msg.ChatId)
 		f.resetTextStream(*msg.ChatId)
+		f.resetSystemStream(*msg.ChatId)
 		h(im.Message{
 			ChatID:    *msg.ChatId,
 			MessageID: *msg.MessageId,
@@ -1064,6 +1147,7 @@ func splitTextForFeishu(text string, maxRunes int) []string {
 
 var _ im.Channel = (*Channel)(nil)
 var _ im.DebugSender = (*Channel)(nil)
+var _ im.SystemSender = (*Channel)(nil)
 var _ im.CardActionSubscriber = (*Channel)(nil)
 var _ im.OptionSender = (*Channel)(nil)
 var _ im.ToolCallSender = (*Channel)(nil)

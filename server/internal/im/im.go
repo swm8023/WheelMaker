@@ -44,6 +44,12 @@ type DebugSender interface {
 	SendDebug(chatID, text string) error
 }
 
+// SystemSender can send system-level messages through a dedicated rendering path
+// when the platform supports distinguishing system vs agent text streams.
+type SystemSender interface {
+	SendSystem(chatID, text string) error
+}
+
 // DebugLoggerSetter installs an optional writer for unified debug logs.
 type DebugLoggerSetter interface {
 	SetDebugLogger(w io.Writer)

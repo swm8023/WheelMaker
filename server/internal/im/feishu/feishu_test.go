@@ -64,12 +64,55 @@ func TestBuildDebugCard_TruncatesToLast120Lines(t *testing.T) {
 	}
 }
 
+func TestBuildTextStreamCard_NoHeader(t *testing.T) {
+	card := buildTextStreamCard("hello")
+	if _, ok := card["header"]; ok {
+		t.Fatalf("acp text stream card should not have header: %+v", card)
+	}
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if content != "hello" {
+		t.Fatalf("content=%q, want %q", content, "hello")
+	}
+}
+
+func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
+	card := buildSystemStreamCard("status ok")
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("header missing in system card: %+v", card)
+	}
+	titleMap, ok := header["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("header title missing in system card: %+v", card)
+	}
+	title, _ := titleMap["content"].(string)
+	if !strings.Contains(title, "📣") {
+		t.Fatalf("system title should contain emoji, got %q", title)
+	}
+	if !strings.Contains(title, "System Message") {
+		t.Fatalf("system title mismatch, got %q", title)
+	}
+}
+
 func TestResetDebugStream(t *testing.T) {
 	f := New(Config{})
 	f.debugStreams["chat-1"] = &debugStream{messageID: "m1", lines: []string{"a"}}
 	f.resetDebugStream("chat-1")
 	if _, ok := f.debugStreams["chat-1"]; ok {
 		t.Fatalf("debug stream should be removed")
+	}
+}
+
+func TestResetSystemStream(t *testing.T) {
+	f := New(Config{})
+	f.systemStreams["chat-1"] = &textStream{messageID: "m1"}
+	f.resetSystemStream("chat-1")
+	if _, ok := f.systemStreams["chat-1"]; ok {
+		t.Fatalf("system stream should be removed")
 	}
 }
 

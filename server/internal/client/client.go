@@ -329,6 +329,10 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 // reply sends a text response to the chat via the IM channel.
 func (c *Client) reply(chatID, text string) {
 	if c.imBridge != nil {
+		if sender, ok := any(c.imBridge).(im.SystemSender); ok {
+			_ = sender.SendSystem(chatID, text)
+			return
+		}
 		_ = c.imBridge.SendText(chatID, text)
 		return
 	}

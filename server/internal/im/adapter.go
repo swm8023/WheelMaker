@@ -109,6 +109,18 @@ func (f *ImAdapter) SendDebug(chatID, text string) error {
 	return err
 }
 
+func (f *ImAdapter) SendSystem(chatID, text string) error {
+	var err error
+	if sender, ok := any(f.adapter).(SystemSender); ok {
+		err = sender.SendSystem(chatID, text)
+		f.logOutgoingSystem(chatID, text, err)
+		return err
+	}
+	err = f.adapter.SendText(chatID, text)
+	f.logOutgoingSystem(chatID, text, err)
+	return err
+}
+
 func (f *ImAdapter) Run(ctx context.Context) error {
 	return f.adapter.Run(ctx)
 }
@@ -826,6 +838,7 @@ func (f *ImAdapter) CanHandleDecision() bool {
 
 var _ Channel = (*ImAdapter)(nil)
 var _ DebugSender = (*ImAdapter)(nil)
+var _ SystemSender = (*ImAdapter)(nil)
 var _ UpdateEmitter = (*ImAdapter)(nil)
 var _ DecisionRequester = (*ImAdapter)(nil)
 var _ HelpResolverSetter = (*ImAdapter)(nil)
@@ -905,6 +918,16 @@ func (f *ImAdapter) logOutgoingDebug(chatID, text string, err error) {
 	}
 	// Do not log successful debug sends here to avoid duplicate lines:
 	// ACP payload already exists in -[acp] debug logs.
+}
+
+func (f *ImAdapter) logOutgoingSystem(chatID, text string, err error) {
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("event=send_system status=error chat=%q err=%q text=%q",
+			chatID, err.Error(), previewText(text, 300)))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("event=send_system status=ok chat=%q len=%d text=%q",
+		chatID, len([]rune(text)), previewText(text, 300)))
 }
 
 func (f *ImAdapter) logOutgoingOptions(chatID string, req DecisionRequest, err error) {
