@@ -79,10 +79,15 @@ class _ConnectScreenState extends State<ConnectScreen> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: 48),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              // Limit form width on tablet / desktop for readability.
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 48),
               Icon(Icons.terminal_rounded, size: 64, color: cs.primary),
               const SizedBox(height: 16),
               Text(
@@ -137,7 +142,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     : const Icon(Icons.link),
                 label: Text(_connecting ? 'Connecting…' : 'Connect'),
               ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

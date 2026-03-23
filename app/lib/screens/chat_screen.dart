@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+import 'dart:math' show min;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -29,12 +32,27 @@ class _ChatScreenState extends State<ChatScreen> {
   WsState _wsState = WsState.connecting;
   bool _isWaiting = false; // true while waiting for agent response
 
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+
   @override
   void initState() {
     super.initState();
     _wsState = widget.service.state;
     _msgSub = widget.service.messages.listen(_onMessage);
     _stateSub = widget.service.stateStream.listen(_onStateChange);
+    // On desktop: Enter sends, Shift+Enter inserts newline.
+    if (_isDesktop) {
+      _focusNode.onKeyEvent = (_, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.enter &&
+            !HardwareKeyboard.instance.isShiftPressed) {
+          _send();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      };
+    }
   }
 
   @override
@@ -144,21 +162,32 @@ class _ChatScreenState extends State<ChatScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              controller: _scrollCtrl,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              itemCount: _messages.length + (_isWaiting ? 1 : 0),
-              itemBuilder: (ctx, i) {
-                if (i == _messages.length) return const _TypingIndicator();
-                return _buildMessage(ctx, _messages[i]);
-              },
+      // LayoutBuilder lets us center content on wide screens (tablet/desktop)
+      // while keeping full-width layout on phones.
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final double hPad =
+              constraints.maxWidth > 900 ? (constraints.maxWidth - 900) / 2 : 0.0;
+          return Padding(
+            padding: EdgeInsets.symmetric(horizontal: hPad),
+            child: Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    controller: _scrollCtrl,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    itemCount: _messages.length + (_isWaiting ? 1 : 0),
+                    itemBuilder: (ctx, i) {
+                      if (i == _messages.length) return const _TypingIndicator();
+                      return _buildMessage(ctx, _messages[i]);
+                    },
+                  ),
+                ),
+                _buildInputBar(),
+              ],
             ),
-          ),
-          _buildInputBar(),
-        ],
+          );
+        },
       ),
     );
   }
@@ -251,7 +280,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Widget _buildInputBar() {
-    final bottom = MediaQuery.of(context).padding.bottom;
+    // No safe-area bottom padding needed on desktop.
+    final bottom = _isDesktop ? 0.0 : MediaQuery.of(context).padding.bottom;
     return Container(
       padding: EdgeInsets.fromLTRB(12, 8, 8, 8 + bottom),
       decoration: BoxDecoration(
@@ -340,7 +370,8 @@ class _Bubble extends StatelessWidget {
           margin: const EdgeInsets.symmetric(vertical: 3),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.78,
+            // Cap bubble width so it stays readable on wide screens.
+            maxWidth: min(MediaQuery.of(context).size.width * 0.78, 600),
           ),
           decoration: BoxDecoration(color: bgColor, borderRadius: radius),
           child: SelectableText(text),

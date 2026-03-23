@@ -40,11 +40,11 @@ Write-Host "    flutter: $flutterVersion" -ForegroundColor Green
 
 # ── Generate platform scaffolding (won't overwrite existing files) ──────────────
 Write-Host ""
-Write-Host "==> Generating Android/iOS platform files..." -ForegroundColor Cyan
+Write-Host "==> Generating Android/iOS/Desktop platform files..." -ForegroundColor Cyan
 flutter create `
     --project-name wheelmaker `
     --org com.wheelmaker `
-    --platforms android,ios `
+    --platforms android,ios,windows,macos,linux `
     $appDir
 
 # ── Install Dart dependencies ──────────────────────────────────────────────────
