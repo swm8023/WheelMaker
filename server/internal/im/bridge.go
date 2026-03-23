@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ type Bridge struct {
 	decisionByID map[string]pendingDecision  // decisionID -> pending (card action)
 	helpResolver func(ctx context.Context, chatID string) (HelpModel, error)
 	nextID       atomic.Int64
+	debugWriter  io.Writer
 }
 
 // New creates a pass-through bridge over adapter.
@@ -56,6 +58,7 @@ func NewBridge(adapter Adapter) *Bridge {
 func (f *Bridge) OnMessage(handler MessageHandler) {
 	f.handler = handler
 	f.adapter.OnMessage(func(m Message) {
+		f.logIncomingMessage(m)
 		if strings.TrimSpace(m.Text) == "/help" && f.tryHandleHelp(m) {
 			return
 		}
@@ -69,22 +72,33 @@ func (f *Bridge) OnMessage(handler MessageHandler) {
 }
 
 func (f *Bridge) SendText(chatID, text string) error {
-	return f.adapter.SendText(chatID, text)
+	err := f.adapter.SendText(chatID, text)
+	f.logOutgoingText(chatID, text, err)
+	return err
 }
 
 func (f *Bridge) SendCard(chatID string, card Card) error {
-	return f.adapter.SendCard(chatID, card)
+	err := f.adapter.SendCard(chatID, card)
+	f.logOutgoingCard(chatID, card, err)
+	return err
 }
 
 func (f *Bridge) SendReaction(messageID, emoji string) error {
-	return f.adapter.SendReaction(messageID, emoji)
+	err := f.adapter.SendReaction(messageID, emoji)
+	f.logOutgoingReaction(messageID, emoji, err)
+	return err
 }
 
 func (f *Bridge) SendDebug(chatID, text string) error {
+	var err error
 	if sender, ok := f.adapter.(DebugSender); ok {
-		return sender.SendDebug(chatID, text)
+		err = sender.SendDebug(chatID, text)
+		f.logOutgoingDebug(chatID, text, err)
+		return err
 	}
-	return f.adapter.SendText(chatID, text)
+	err = f.adapter.SendText(chatID, text)
+	f.logOutgoingDebug(chatID, text, err)
+	return err
 }
 
 func (f *Bridge) Run(ctx context.Context) error {
@@ -95,6 +109,13 @@ func (f *Bridge) Run(ctx context.Context) error {
 func (f *Bridge) SetHelpResolver(resolver func(ctx context.Context, chatID string) (HelpModel, error)) {
 	f.mu.Lock()
 	f.helpResolver = resolver
+	f.mu.Unlock()
+}
+
+// SetDebugLogger sets optional IM-level debug logging writer.
+func (f *Bridge) SetDebugLogger(w io.Writer) {
+	f.mu.Lock()
+	f.debugWriter = w
 	f.mu.Unlock()
 }
 
@@ -621,3 +642,69 @@ var _ DebugSender = (*Bridge)(nil)
 var _ UpdateEmitter = (*Bridge)(nil)
 var _ DecisionRequester = (*Bridge)(nil)
 var _ HelpResolverSetter = (*Bridge)(nil)
+
+func (f *Bridge) writeDebugLine(line string) {
+	f.mu.Lock()
+	w := f.debugWriter
+	f.mu.Unlock()
+	if w == nil {
+		return
+	}
+	_, _ = io.WriteString(w, line+"\n")
+}
+
+func previewText(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "..."
+}
+
+func (f *Bridge) logIncomingMessage(m Message) {
+	f.writeDebugLine(fmt.Sprintf("[im][in] chat=%q msg=%q user=%q text=%q",
+		m.ChatID, m.MessageID, m.UserID, previewText(m.Text, 300)))
+}
+
+func (f *Bridge) logOutgoingText(chatID, text string, err error) {
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("[im][out][text][err] chat=%q err=%q text=%q",
+			chatID, err.Error(), previewText(text, 300)))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("[im][out][text] chat=%q len=%d text=%q",
+		chatID, len([]rune(text)), previewText(text, 300)))
+}
+
+func (f *Bridge) logOutgoingCard(chatID string, card Card, err error) {
+	raw, _ := json.Marshal(card)
+	preview := previewText(string(raw), 400)
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("[im][out][card][err] chat=%q err=%q card=%q",
+			chatID, err.Error(), preview))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("[im][out][card] chat=%q card=%q", chatID, preview))
+}
+
+func (f *Bridge) logOutgoingReaction(messageID, emoji string, err error) {
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("[im][out][reaction][err] msg=%q emoji=%q err=%q",
+			messageID, emoji, err.Error()))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("[im][out][reaction] msg=%q emoji=%q", messageID, emoji))
+}
+
+func (f *Bridge) logOutgoingDebug(chatID, text string, err error) {
+	if err != nil {
+		f.writeDebugLine(fmt.Sprintf("[im][out][debug][err] chat=%q err=%q text=%q",
+			chatID, err.Error(), previewText(text, 300)))
+		return
+	}
+	f.writeDebugLine(fmt.Sprintf("[im][out][debug] chat=%q text=%q", chatID, previewText(text, 300)))
+}

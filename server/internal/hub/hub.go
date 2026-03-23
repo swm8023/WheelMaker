@@ -90,7 +90,9 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 
 	// Enable ACP JSON debug logging for projects with debug=true.
 	if pc.Debug {
-		c.SetDebugLogger(h.getDebugWriter())
+		dw := h.getDebugWriter()
+		c.SetDebugLogger(dw)
+		imProvider.SetDebugLogger(dw)
 	}
 
 	// Register all known agent factories so users can switch between them at runtime.

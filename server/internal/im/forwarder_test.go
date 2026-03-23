@@ -1,6 +1,7 @@
 package im
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -170,6 +171,24 @@ func TestForwarder_EmitToolCall_DedupByStatus(t *testing.T) {
 	}
 	if ad.textCount != 1 {
 		t.Fatalf("tool call message count=%d, want 1", ad.textCount)
+	}
+}
+
+func TestForwarder_DebugLogger_LogsInAndOut(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	var buf bytes.Buffer
+	f.SetDebugLogger(&buf)
+
+	f.OnMessage(func(_ Message) {})
+	ad.onMsg(Message{ChatID: "chat-1", MessageID: "m-1", UserID: "u-1", Text: "hello"})
+	if err := f.SendText("chat-1", "world"); err != nil {
+		t.Fatalf("send text: %v", err)
+	}
+
+	logs := buf.String()
+	if !containsAll(logs, "[im][in]", "chat-1", "hello", "[im][out][text]", "world") {
+		t.Fatalf("unexpected logs: %q", logs)
 	}
 }
 
