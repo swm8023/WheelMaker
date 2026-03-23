@@ -10,7 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
 )
 
 // Adapter is the low-level IM execution layer.
@@ -29,8 +28,8 @@ type ImAdapter struct {
 	mu           sync.Mutex
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
 	toolCalls    map[string]map[string]string
-	decisions    map[string]pendingDecision  // chatID -> pending (text fallback)
-	decisionByID map[string]pendingDecision  // decisionID -> pending (card action)
+	decisions    map[string]pendingDecision // chatID -> pending (text fallback)
+	decisionByID map[string]pendingDecision // decisionID -> pending (card action)
 	helpResolver func(ctx context.Context, chatID string) (HelpModel, error)
 	nextID       atomic.Int64
 	debugWriter  io.Writer
