@@ -134,8 +134,8 @@ func TestBuildToolCallCard(t *testing.T) {
 		t.Fatalf("header title missing in card: %+v", card)
 	}
 	title, _ := titleMap["content"].(string)
-	if !strings.Contains(title, "Run tests") || !strings.Contains(title, "❌") {
-		t.Fatalf("tool header missing status/name: %q", title)
+	if !strings.Contains(title, "Run tests") || !strings.Contains(title, "⚪") {
+		t.Fatalf("tool header missing name/permission marker: %q", title)
 	}
 
 	elements, ok := card["elements"].([]map[string]any)
@@ -145,5 +145,13 @@ func TestBuildToolCallCard(t *testing.T) {
 	content, _ := elements[0]["content"].(string)
 	if !strings.Contains(content, "permission denied") {
 		t.Fatalf("tool card content missing output: %q", content)
+	}
+}
+
+func TestSanitizeDebugStreamLine_StripsPrefixes(t *testing.T) {
+	in := "[debug][codex] <-[acp] {\"jsonrpc\":\"2.0\"}"
+	got := sanitizeDebugStreamLine(in)
+	if got != "{\"jsonrpc\":\"2.0\"}" {
+		t.Fatalf("sanitizeDebugStreamLine()=%q", got)
 	}
 }

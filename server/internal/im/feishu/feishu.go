@@ -319,7 +319,7 @@ func (f *Channel) SendReaction(messageID, emoji string) error {
 // SendDebug appends debug text to a per-chat stream card and flushes every 2 seconds.
 func (f *Channel) SendDebug(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
-	line := strings.TrimSpace(text)
+	line := sanitizeDebugStreamLine(text)
 	if chatID == "" || line == "" {
 		return nil
 	}
@@ -339,6 +339,30 @@ func (f *Channel) SendDebug(chatID, text string) error {
 	}
 	f.debugMu.Unlock()
 	return nil
+}
+
+func sanitizeDebugStreamLine(text string) string {
+	line := strings.TrimSpace(text)
+	// Strip agent debug wrapper prefix, e.g. "[debug][codex] ..."
+	if strings.HasPrefix(line, "[debug][") {
+		if idx := strings.Index(line, "] "); idx >= 0 && idx+2 < len(line) {
+			line = strings.TrimSpace(line[idx+2:])
+		}
+	}
+	// Strip transport direction prefixes to reduce card noise.
+	for {
+		switched := false
+		for _, p := range []string{"->[acp]", "<-[acp]", "->[im]", "<-[im]"} {
+			if strings.HasPrefix(line, p) {
+				line = strings.TrimSpace(strings.TrimPrefix(line, p))
+				switched = true
+			}
+		}
+		if !switched {
+			break
+		}
+	}
+	return line
 }
 
 func (f *Channel) resetDebugStream(chatID string) {
@@ -565,7 +589,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 	if title == "" {
 		title = "tool_call"
 	}
-	statusEmoji, template := toolStatusStyle(status)
+	_, template := toolStatusStyle(status)
 	permEmoji := toolPermissionEmoji(perm)
 
 	content := toolCallDetailBlock(update)
@@ -601,7 +625,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 			"template": template,
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": fmt.Sprintf("🛠️ %s %s %s", statusEmoji, permEmoji, previewLine(title, 28)),
+				"content": fmt.Sprintf("🛠️ %s %s", permEmoji, previewLine(title, 22)),
 			},
 		},
 		"elements": elements,
