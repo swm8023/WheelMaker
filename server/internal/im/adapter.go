@@ -31,6 +31,7 @@ type ImAdapter struct {
 	toolCalls    map[string]map[string]string
 	decisions    map[string]pendingDecision // chatID -> pending (text fallback)
 	decisionByID map[string]pendingDecision // decisionID -> pending (card action)
+	closedDecide map[string]time.Time       // decisionID -> recently closed timestamp
 	helpResolver func(ctx context.Context, chatID string) (HelpModel, error)
 	nextID       atomic.Int64
 	debugWriter  io.Writer
@@ -46,6 +47,7 @@ func New(adapter Adapter) *ImAdapter {
 		toolCalls:    map[string]map[string]string{},
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
+		closedDecide: map[string]time.Time{},
 	}
 	if f.ability.Has(AbilityCardActions) {
 		sub := any(adapter).(CardActionSubscriber)
@@ -354,6 +356,7 @@ func (f *ImAdapter) clearDecision(chatID, decisionID string, ch chan DecisionRes
 	if pd, ok := f.decisionByID[decisionID]; ok && pd.ch == ch {
 		delete(f.decisionByID, decisionID)
 	}
+	f.markDecisionClosedLocked(decisionID)
 }
 
 func renderDecisionPrompt(req DecisionRequest) string {
@@ -415,9 +418,14 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 		if ok {
 			delete(f.decisionByID, decisionID)
 			delete(f.decisions, pd.chatID)
+			f.markDecisionClosedLocked(decisionID)
 		}
 		f.mu.Unlock()
 		if !ok {
+			if f.wasDecisionClosedRecently(decisionID) {
+				f.writeDebugLine(fmt.Sprintf("event=card_action_ignore reason=%q decision_id=%q", "decision_already_closed", decisionID))
+				return
+			}
 			f.writeDebugLine(fmt.Sprintf("event=card_action_drop reason=%q decision_id=%q", "decision_not_found", decisionID))
 			return
 		}
@@ -476,6 +484,36 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 		}
 		_ = f.sendHelpPage(chatID, model, page)
 	}
+}
+
+func (f *ImAdapter) markDecisionClosedLocked(decisionID string) {
+	decisionID = strings.TrimSpace(decisionID)
+	if decisionID == "" {
+		return
+	}
+	now := time.Now()
+	const keepTTL = 2 * time.Hour
+	cutoff := now.Add(-keepTTL)
+	for id, ts := range f.closedDecide {
+		if ts.Before(cutoff) {
+			delete(f.closedDecide, id)
+		}
+	}
+	f.closedDecide[decisionID] = now
+}
+
+func (f *ImAdapter) wasDecisionClosedRecently(decisionID string) bool {
+	decisionID = strings.TrimSpace(decisionID)
+	if decisionID == "" {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ts, ok := f.closedDecide[decisionID]
+	if !ok {
+		return false
+	}
+	return time.Since(ts) <= 2*time.Hour
 }
 
 func (f *ImAdapter) sendHelpPage(chatID string, model HelpModel, page int) error {

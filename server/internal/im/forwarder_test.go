@@ -95,6 +95,63 @@ func TestForwarder_RequestDecision_TextReply(t *testing.T) {
 	}
 }
 
+func TestForwarder_RequestDecision_DuplicateCardActionIsIgnored(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	var buf bytes.Buffer
+	f.SetDebugLogger(&buf)
+
+	done := make(chan DecisionResult, 1)
+	go func() {
+		res, _ := f.RequestDecision(context.Background(), DecisionRequest{
+			Kind:   DecisionPermission,
+			ChatID: "chat-1",
+			Title:  "Permission request",
+			Options: []DecisionOption{
+				{ID: "allow", Label: "Allow"},
+				{ID: "reject", Label: "Reject"},
+			},
+		})
+		done <- res
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	ad.onAction(CardActionEvent{
+		UserID: "u-1",
+		Value: map[string]string{
+			"kind":        "decision",
+			"decision_id": "dec-1",
+			"option_id":   "allow",
+			"value":       "allow_once",
+		},
+	})
+
+	res := <-done
+	if res.Outcome != "selected" || res.OptionID != "allow" {
+		t.Fatalf("decision result = %#v, want selected allow", res)
+	}
+
+	// Simulate Feishu duplicate callback delivery for the same decision click.
+	ad.onAction(CardActionEvent{
+		UserID: "u-1",
+		Value: map[string]string{
+			"kind":        "decision",
+			"decision_id": "dec-1",
+			"option_id":   "allow",
+			"value":       "allow_once",
+		},
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	logs := buf.String()
+	if !containsAll(logs, "event=card_action_accept", "decision_id=\"dec-1\"") {
+		t.Fatalf("missing card_action_accept logs: %q", logs)
+	}
+	if !containsAll(logs, "event=card_action_ignore", "decision_already_closed") {
+		t.Fatalf("missing duplicate-ignore logs: %q", logs)
+	}
+}
+
 func TestForwarder_EmitFlushOnDone(t *testing.T) {
 	ad := &stubAdapter{}
 	f := New(ad)
