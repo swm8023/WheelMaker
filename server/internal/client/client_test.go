@@ -542,6 +542,29 @@ func TestHandleMessage_Prompt_TextStreaming(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_Prompt_BurstStreaming_NoLoss(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
+		return &minimalMockAgent{}
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer c.Close()
+	msgs := captureReplies(c)
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "burst-chunks"})
+
+	want := strings.Repeat("x", 200)
+	joined := strings.Join(*msgs, "\n")
+	if !strings.Contains(joined, want) {
+		t.Fatalf("burst stream lost chunks: got=%q want_contains=%q", joined, want)
+	}
+}
+
 func TestHandleMessage_Prompt_DebugForwardsACPJSONToIM(t *testing.T) {
 	store := &mockStore{state: &client.ProjectState{
 		ActiveAgent: "codex",
@@ -1278,6 +1301,27 @@ func runClientMockAgent() {
 					"error":   map[string]any{"code": -32603, "message": "mock: context bootstrap rejected"},
 				})
 			} else {
+				if promptText == "burst-chunks" {
+					for i := 0; i < 200; i++ {
+						_ = enc.Encode(map[string]any{
+							"jsonrpc": "2.0",
+							"method":  "session/update",
+							"params": map[string]any{
+								"sessionId": params.SessionID,
+								"update": map[string]any{
+									"sessionUpdate": "agent_message_chunk",
+									"content":       map[string]any{"type": "text", "text": "x"},
+								},
+							},
+						})
+					}
+					_ = enc.Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"id":      id,
+						"result":  map[string]any{"stopReason": "end_turn"},
+					})
+					continue
+				}
 				if promptText == "emit-config-update" {
 					_ = enc.Encode(map[string]any{
 						"jsonrpc": "2.0",

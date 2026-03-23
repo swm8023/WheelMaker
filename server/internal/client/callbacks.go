@@ -19,6 +19,7 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 	c.mu.Lock()
 	sessID := c.session.id
 	ch := c.prompt.updatesCh
+	promptCtx := c.prompt.ctx
 	replayH := c.session.replayH
 	c.mu.Unlock()
 
@@ -60,10 +61,15 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		c.mu.Unlock()
 	}
 
-	// Non-blocking publish; prompt channel lifecycle is managed by promptStream.
+	// Preserve update ordering and avoid lossy drops under high-frequency streams.
+	// If prompt is already cancelled, skip blocking send.
+	if promptCtx == nil {
+		ch <- derived.Update
+		return
+	}
 	select {
 	case ch <- derived.Update:
-	default:
+	case <-promptCtx.Done():
 	}
 }
 

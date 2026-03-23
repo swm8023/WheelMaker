@@ -274,34 +274,64 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 			promptCancel()
 		}()
 
-		result, err := c.conn.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
-			SessionID: sessID,
-			Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
-		})
+		type promptResult struct {
+			result acp.SessionPromptResult
+			err    error
+		}
+		resultCh := make(chan promptResult, 1)
+		go func() {
+			res, err := c.conn.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
+				SessionID: sessID,
+				Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
+			})
+			resultCh <- promptResult{result: res, err: err}
+		}()
 
-		// Drain interceptCh into updates, accumulating text as we go.
-		draining := true
-		for draining {
+		drain := func(u acp.Update) bool {
+			if u.Type == acp.UpdateText {
+				replyMu.Lock()
+				replyBuf.WriteString(u.Content)
+				replyMu.Unlock()
+			}
 			select {
-			case u, ok := <-interceptCh:
-				if !ok {
-					draining = false
-					break
-				}
-				if u.Type == acp.UpdateText {
-					replyMu.Lock()
-					replyBuf.WriteString(u.Content)
-					replyMu.Unlock()
-				}
-				select {
-				case updates <- u:
-				case <-ctx.Done():
-					draining = false
-				}
-			default:
-				draining = false
+			case updates <- u:
+				return true
+			case <-ctx.Done():
+				return false
 			}
 		}
+
+		pr := promptResult{}
+		for {
+			select {
+			case u := <-interceptCh:
+				if !drain(u) {
+					return
+				}
+			case pr = <-resultCh:
+				// Stop receiving new callback updates, then drain buffered tail.
+				c.mu.Lock()
+				if c.prompt.updatesCh == interceptCh {
+					c.prompt.updatesCh = nil
+				}
+				c.mu.Unlock()
+				for {
+					select {
+					case u := <-interceptCh:
+						if !drain(u) {
+							return
+						}
+					default:
+						goto drained
+					}
+				}
+			drained:
+				goto done
+			}
+		}
+
+	done:
+		result, err := pr.result, pr.err
 
 		replyMu.Lock()
 		reply := replyBuf.String()

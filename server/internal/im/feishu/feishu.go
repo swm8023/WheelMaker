@@ -56,7 +56,6 @@ type debugStream struct {
 type textStream struct {
 	messageID string
 	content   strings.Builder
-	flushing  bool
 }
 
 // New creates a Feishu IM adapter.
@@ -92,68 +91,61 @@ func (f *Channel) Abilities() im.Ability {
 // SendText posts a plain text message to a Feishu chat.
 func (f *Channel) SendText(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
+	text = strings.TrimSpace(text)
 	if chatID == "" || text == "" {
 		return nil
 	}
 	f.textMu.Lock()
+	defer f.textMu.Unlock()
+
 	ts := f.textStreams[chatID]
 	if ts == nil {
 		ts = &textStream{}
 		f.textStreams[chatID] = ts
 	}
 	ts.content.WriteString(text)
-	if !ts.flushing {
-		ts.flushing = true
-		time.AfterFunc(250*time.Millisecond, func() { f.flushText(chatID) })
-	}
-	f.textMu.Unlock()
-	return nil
-}
-
-func (f *Channel) flushText(chatID string) {
-	f.textMu.Lock()
-	ts := f.textStreams[chatID]
-	if ts == nil {
-		f.textMu.Unlock()
-		return
-	}
 	content := ts.content.String()
-	messageID := strings.TrimSpace(ts.messageID)
-	ts.flushing = false
-	f.textMu.Unlock()
-
-	if strings.TrimSpace(content) == "" {
-		return
+	if content == "" {
+		return nil
 	}
 
 	card := buildTextStreamCard(content)
 	raw, err := json.Marshal(card)
 	if err != nil {
-		return
+		return fmt.Errorf("feishu: marshal text stream card: %w", err)
 	}
 	bot, err := f.ensureBot()
 	if err != nil {
-		return
+		return err
 	}
 	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+	messageID := strings.TrimSpace(ts.messageID)
 	if messageID == "" {
 		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
 		if postErr != nil {
-			return
+			return postErr
 		}
 		if resp != nil {
 			mid := strings.TrimSpace(resp.Data.MessageID)
 			if mid != "" {
-				f.textMu.Lock()
-				if cur := f.textStreams[chatID]; cur != nil {
-					cur.messageID = mid
-				}
-				f.textMu.Unlock()
+				ts.messageID = mid
 			}
 		}
-		return
+		return nil
 	}
-	_, _ = bot.UpdateMessage(messageID, buf.Build())
+	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
+		return nil
+	}
+	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+	if postErr != nil {
+		return postErr
+	}
+	if resp != nil {
+		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
+			ts.messageID = mid
+		}
+	}
+	return nil
 }
 
 func (f *Channel) resetTextStream(chatID string) {
