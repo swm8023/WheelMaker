@@ -131,9 +131,20 @@ func TestShouldHandleMessage_DeduplicatesByMessageID(t *testing.T) {
 
 func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 	f := New(Config{})
-	f.seenMessageID["old"] = time.Now().Add(-31 * time.Minute)
+	f.seenMessageID["old"] = time.Now().Add(-25 * time.Hour)
 	if !f.shouldHandleMessage("old") {
 		t.Fatalf("expired message id should be accepted again")
+	}
+}
+
+func TestIsFeishuMessageStale(t *testing.T) {
+	old := strconv.FormatInt(time.Now().Add(-16*time.Minute).UnixMilli(), 10)
+	if !isFeishuMessageStale(&old) {
+		t.Fatalf("expected stale message to be dropped")
+	}
+	fresh := strconv.FormatInt(time.Now().Add(-2*time.Minute).UnixMilli(), 10)
+	if isFeishuMessageStale(&fresh) {
+		t.Fatalf("fresh message should be accepted")
 	}
 }
 

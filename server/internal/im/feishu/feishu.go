@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1213,6 +1214,9 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 	if msg.ChatId == nil || msg.MessageId == nil {
 		return nil
 	}
+	if isFeishuMessageStale(msg.CreateTime) {
+		return nil
+	}
 	if !f.shouldHandleMessage(*msg.MessageId) {
 		return nil
 	}
@@ -1251,7 +1255,7 @@ func (f *Channel) shouldHandleMessage(messageID string) bool {
 	if messageID == "" {
 		return true
 	}
-	const dedupTTL = 30 * time.Minute
+	const dedupTTL = 24 * time.Hour
 	const maxTracked = 4096
 	now := time.Now()
 	cutoff := now.Add(-dedupTTL)
@@ -1283,6 +1287,33 @@ func (f *Channel) shouldHandleMessage(messageID string) bool {
 	}
 	f.seenMessageID[messageID] = now
 	return true
+}
+
+func isFeishuMessageStale(createTime *string) bool {
+	if createTime == nil {
+		return false
+	}
+	raw := strings.TrimSpace(*createTime)
+	if raw == "" {
+		return false
+	}
+	ms, err := parseEpochMillis(raw)
+	if err != nil {
+		return false
+	}
+	msgAt := time.UnixMilli(ms)
+	if msgAt.IsZero() {
+		return false
+	}
+	// Drop very old retries so a historic user message cannot trigger a fresh prompt.
+	// Keep this window conservative to avoid discarding near-real-time delivery jitter.
+	const maxMessageAge = 15 * time.Minute
+	return time.Since(msgAt) > maxMessageAge
+}
+
+func parseEpochMillis(raw string) (int64, error) {
+	// Feishu create_time is usually epoch millis as string.
+	return strconv.ParseInt(raw, 10, 64)
 }
 
 func (f *Channel) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
