@@ -23,6 +23,8 @@ type LogConfig struct {
 type ProjectConfig struct {
 	Name   string     `json:"name"`
 	Debug  bool       `json:"debug,omitempty"`
+	Path   string     `json:"path"`
+	YOLO   bool       `json:"yolo,omitempty"`
 	IM     IMConfig   `json:"im"`
 	Client ClientConf `json:"client"`
 }
@@ -47,8 +49,6 @@ type MobileConfig struct {
 // ClientConf describes the AI agent side for a project.
 type ClientConf struct {
 	Agent string `json:"agent,omitempty"`
-	Path  string `json:"path"`
-	YOLO  bool   `json:"yolo,omitempty"`
 }
 
 // FeishuConfig holds shared Feishu settings used across all feishu-type projects.

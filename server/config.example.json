@@ -3,32 +3,32 @@
     {
       "name": "local-dev",
       "debug": true,
+      "path": "/path/to/your/project",
+      "yolo": true,
       "im": {
         "type": "console"
       },
       "client": {
-        "agent": "claude",
-        "path": "/path/to/your/project",
-        "yolo": false
+        "agent": "claude"
       }
     },
     {
       "name": "feishu-prod",
-      "debug": false,
+      "path": "/path/to/other/project",
+      "yolo": false,
       "im": {
         "type": "feishu",
         "appID": "cli_xxx",
         "appSecret": "yyy"
       },
       "client": {
-        "agent": "claude",
-        "path": "/path/to/other/project",
-        "yolo": false
+        "agent": "claude"
       }
     },
     {
       "name": "mobile",
-      "debug": false,
+      "path": "/path/to/your/project",
+      "yolo": false,
       "im": {
         "type": "mobile",
         "mobile": {
@@ -37,9 +37,7 @@
         }
       },
       "client": {
-        "agent": "claude",
-        "path": "/path/to/your/project",
-        "yolo": false
+        "agent": "claude"
       }
     }
   ],

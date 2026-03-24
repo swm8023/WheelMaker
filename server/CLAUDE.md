@@ -37,10 +37,11 @@ config.json 格式：
 ```json
 {
   "projects": [
-    { "name": "local", "debug": true, "im": { "type": "console" },
-      "client": { "agent": "claude", "path": "/your/project" } },
-    { "name": "mobile", "im": { "type": "mobile", "mobile": { "port": 9527, "token": "change-me" } },
-      "client": { "agent": "claude", "path": "/your/project" } }
+    { "name": "local", "debug": true, "path": "/your/project", "yolo": true,
+      "im": { "type": "console" }, "client": { "agent": "claude" } },
+    { "name": "mobile", "path": "/your/project", "yolo": false,
+      "im": { "type": "mobile", "mobile": { "port": 9527, "token": "change-me" } },
+      "client": { "agent": "claude" } }
   ]
 }
 ```

@@ -61,7 +61,7 @@ func (h *Hub) Start(ctx context.Context) error {
 // buildClient creates, configures, and starts a client.Client for one project.
 func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client, error) {
 	// Resolve working directory.
-	cwd := pc.Client.Path
+	cwd := pc.Path
 	if cwd == "" {
 		var err error
 		cwd, err = os.Getwd()
@@ -81,7 +81,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 
 	// Create the client.
 	c := client.New(store, imProvider, pc.Name, cwd)
-	c.SetYOLO(pc.Client.YOLO)
+	c.SetYOLO(pc.YOLO)
 
 	// Enable ACP JSON debug logging for projects with debug=true.
 	if pc.Debug {
@@ -122,7 +122,7 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
 			VerificationToken: h.cfg.Feishu.VerificationToken,
 			EncryptKey:        h.cfg.Feishu.EncryptKey,
 			Debug:             pc.Debug,
-			YOLO:              pc.Client.YOLO,
+			YOLO:              pc.YOLO,
 		})), nil
 	case "mobile":
 		addr := fmt.Sprintf(":%d", pc.IM.Mobile.Port)
