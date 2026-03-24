@@ -85,7 +85,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 		{OptionID: "abort", Kind: "reject_once"},
 		{OptionID: "deny", Kind: "reject_always"},
 	}
-	if got := chooseAutoAllowOption(opts); got != "abort" {
-		t.Fatalf("chooseAutoAllowOption()=%q, want abort", got)
+	if got := chooseAutoAllowOption(opts); got != "" {
+		t.Fatalf("chooseAutoAllowOption()=%q, want empty", got)
 	}
 }

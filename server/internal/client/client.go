@@ -290,8 +290,22 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 
 	updates, err := c.promptStream(ctx, text)
 	if err != nil {
-		c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
-		return
+		// Keepalive: recover dead agent subprocess and retry current prompt once.
+		if c.resetDeadConnection(err) {
+			if recErr := c.ensureForwarder(ctx); recErr == nil {
+				if recErr = c.ensureReadyAndNotify(ctx, msg.ChatID); recErr == nil {
+					updates, err = c.promptStream(ctx, text)
+				} else {
+					err = recErr
+				}
+			} else {
+				err = recErr
+			}
+		}
+		if err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
+			return
+		}
 	}
 
 	c.mu.Lock()
@@ -318,6 +332,12 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			}
 		}
 		if u.Err != nil {
+			if c.resetDeadConnection(u.Err) {
+				// Warm reconnect so the next user message can continue immediately.
+				if recErr := c.ensureForwarder(ctx); recErr == nil {
+					_ = c.ensureReadyAndNotify(ctx, msg.ChatID)
+				}
+			}
 			c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
 			c.mu.Lock()
 			c.prompt.currentCh = nil
@@ -377,4 +397,41 @@ func renderUnknown(v string) string {
 		return "unknown"
 	}
 	return v
+}
+
+func isAgentExitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(strings.TrimSpace(err.Error()))
+	if s == "" {
+		return false
+	}
+	return strings.Contains(s, "agent process exited") ||
+		strings.Contains(s, "broken pipe") ||
+		strings.Contains(s, "connection reset") ||
+		strings.Contains(s, "eof")
+}
+
+// resetDeadConnection clears the current agent connection when it is known-dead.
+// Returns true when a reset happened.
+func (c *Client) resetDeadConnection(err error) bool {
+	if !isAgentExitError(err) {
+		return false
+	}
+	c.mu.Lock()
+	old := c.conn
+	c.conn = nil
+	c.session.ready = false
+	c.session.initializing = false
+	c.prompt.ctx = nil
+	c.prompt.cancel = nil
+	c.prompt.updatesCh = nil
+	c.prompt.currentCh = nil
+	c.prompt.activeTCs = make(map[string]struct{})
+	c.mu.Unlock()
+	if old != nil {
+		_ = old.close()
+	}
+	return true
 }
