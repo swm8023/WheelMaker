@@ -23,16 +23,17 @@ function Resolve-SourceExe {
     return (Resolve-Path $HintSource).Path
   }
   $defaultExe = Join-Path -Path $RepoRoot -ChildPath "bin\\windows_amd64\\wheelmaker.exe"
-  if (-not (Test-Path $defaultExe)) {
-    if ($SkipBuild) {
+  if ($SkipBuild) {
+    if (-not (Test-Path $defaultExe)) {
       throw "source binary not found: $defaultExe (build disabled by -NoBuild)"
     }
-    Write-Step "build wheelmaker binary"
-    New-Item -ItemType Directory -Path (Split-Path $defaultExe -Parent) -Force | Out-Null
-    & go build -o $defaultExe ./cmd/wheelmaker/
-    if ($LASTEXITCODE -ne 0) {
-      throw "go build failed (exit=$LASTEXITCODE)"
-    }
+    return (Resolve-Path $defaultExe).Path
+  }
+  Write-Step "build wheelmaker binary"
+  New-Item -ItemType Directory -Path (Split-Path $defaultExe -Parent) -Force | Out-Null
+  & go build -o $defaultExe ./cmd/wheelmaker/
+  if ($LASTEXITCODE -ne 0) {
+    throw "go build failed (exit=$LASTEXITCODE)"
   }
   return (Resolve-Path $defaultExe).Path
 }
