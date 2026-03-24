@@ -137,15 +137,11 @@ func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 	}
 }
 
-func TestBuildTextStreamCard_ShowsStreamingMarker(t *testing.T) {
+func TestBuildTextStreamCard_NoStreamingMarker(t *testing.T) {
 	card := buildTextStreamCard("hello", true)
 	elements, ok := card["elements"].([]map[string]any)
-	if !ok || len(elements) != 2 {
+	if !ok || len(elements) != 1 {
 		t.Fatalf("elements mismatch in streaming card: %+v", card)
-	}
-	marker, _ := elements[1]["content"].(string)
-	if marker != "..." {
-		t.Fatalf("streaming marker=%q, want %q", marker, "...")
 	}
 }
 
@@ -390,19 +386,15 @@ func TestBuildCompactToolCard_TitleFallsBackToTextOnly(t *testing.T) {
 	}
 }
 
-func TestBuildCompactToolCard_ShowsStreamingMarker(t *testing.T) {
+func TestBuildCompactToolCard_NoStreamingMarker(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"⏳ go test ./..."},
 		"$ go test ./...",
 		true,
 	)
 	elements, ok := card["elements"].([]map[string]any)
-	if !ok || len(elements) != 2 {
+	if !ok || len(elements) != 1 {
 		t.Fatalf("elements mismatch in compact streaming card: %+v", card)
-	}
-	marker, _ := elements[1]["content"].(string)
-	if marker != "..." {
-		t.Fatalf("streaming marker=%q, want %q", marker, "...")
 	}
 }
 

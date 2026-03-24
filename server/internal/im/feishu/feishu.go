@@ -43,8 +43,6 @@ type Channel struct {
 	textMu        sync.Mutex
 	textStreams   map[string]*textStream
 	systemStreams map[string]*textStream
-	streamMu      sync.Mutex
-	streaming     map[string]bool
 	toolMu        sync.Mutex
 	toolRenderMu  sync.Mutex
 	toolCards     map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -109,7 +107,6 @@ func New(cfg Config) *Channel {
 		debugStreams:  map[string]*debugStream{},
 		textStreams:   map[string]*textStream{},
 		systemStreams: map[string]*textStream{},
-		streaming:     map[string]bool{},
 		seenMessageID: map[string]time.Time{},
 		toolCards:     map[string]map[string]*toolCardState{},
 		toolCompact:   map[string]*compactToolStream{},
@@ -159,7 +156,7 @@ func (f *Channel) SendText(chatID, text string) error {
 		return nil
 	}
 
-	card := buildTextStreamCard(content, f.isStreaming(chatID))
+	card := buildTextStreamCard(content, false)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal text stream card: %w", err)
@@ -473,25 +470,12 @@ func (f *Channel) SendReaction(messageID, emoji string) error {
 	return err
 }
 
-// SetStreaming toggles a per-chat in-progress marker shown at the bottom of cards.
+// SetStreaming is intentionally a no-op for Feishu cards.
+// We no longer render trailing "..." markers under cards.
 func (f *Channel) SetStreaming(chatID string, active bool) error {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return nil
-	}
-	f.streamMu.Lock()
-	prev := f.streaming[chatID]
-	changed := prev != active
-	if active {
-		f.streaming[chatID] = true
-	} else {
-		delete(f.streaming, chatID)
-	}
-	f.streamMu.Unlock()
-	if !changed {
-		return nil
-	}
-	return f.refreshStreamMarker(chatID)
+	_ = chatID
+	_ = active
+	return nil
 }
 
 // MarkDone adds DONE reaction to the last outbound message in this chat.
@@ -505,57 +489,6 @@ func (f *Channel) MarkDone(chatID string) error {
 		return nil
 	}
 	return f.SendReaction(messageID, "DONE")
-}
-
-func (f *Channel) isStreaming(chatID string) bool {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return false
-	}
-	f.streamMu.Lock()
-	defer f.streamMu.Unlock()
-	return f.streaming[chatID]
-}
-
-func (f *Channel) refreshStreamMarker(chatID string) error {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return nil
-	}
-	// Re-render current text stream card if present.
-	f.textMu.Lock()
-	ts := f.textStreams[chatID]
-	f.textMu.Unlock()
-	if ts != nil && strings.TrimSpace(ts.messageID) != "" {
-		content := ts.content.String()
-		if content != "" {
-			card := buildTextStreamCard(content, f.isStreaming(chatID))
-			raw, err := json.Marshal(card)
-			if err == nil {
-				if bot, botErr := f.ensureBot(); botErr == nil {
-					_, _ = bot.UpdateMessage(strings.TrimSpace(ts.messageID), lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw)).Build())
-				}
-			}
-		}
-	}
-	// Re-render compact tool stream card in YOLO mode if present.
-	if f.cfg.YOLO {
-		f.toolMu.Lock()
-		stream := f.toolCompact[chatID]
-		f.toolMu.Unlock()
-		if stream != nil && strings.TrimSpace(stream.messageID) != "" {
-			lines := compactToolLines(stream)
-			transcript := compactToolTranscript(stream)
-			card := buildCompactToolCard(lines, transcript, f.isStreaming(chatID))
-			raw, err := json.Marshal(card)
-			if err == nil {
-				if bot, botErr := f.ensureBot(); botErr == nil {
-					_, _ = bot.UpdateMessage(strings.TrimSpace(stream.messageID), lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw)).Build())
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func (f *Channel) addReceiveAck(chatID, messageID string) {
@@ -757,11 +690,9 @@ func buildDebugCard(lines []string) im.Card {
 }
 
 func buildTextStreamCard(content string, streaming bool) im.Card {
+	_ = streaming
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
-	}
-	if streaming {
-		elements = append(elements, map[string]any{"tag": "markdown", "content": "..."})
 	}
 	return im.Card{
 		"config":   map[string]any{"update_multi": true},
@@ -870,7 +801,7 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 	perm := cur.perm
 	f.toolMu.Unlock()
 
-	card := buildToolCallCard(chatID, update, perm, f.isStreaming(chatID))
+	card := buildToolCallCard(chatID, update, perm, false)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal tool card: %w", err)
@@ -976,7 +907,7 @@ func (f *Channel) sendToolCallCompact(chatID string, update im.ToolCallUpdate) e
 	transcript := compactToolTranscript(stream)
 	f.toolMu.Unlock()
 
-	card := buildCompactToolCard(lines, transcript, f.isStreaming(chatID))
+	card := buildCompactToolCard(lines, transcript, false)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal compact tool card: %w", err)
@@ -1047,6 +978,7 @@ func compactStatusEmoji(status string) string {
 }
 
 func buildCompactToolCard(lines []string, transcript string, streaming bool) im.Card {
+	_ = streaming
 	title := compactToolIconTitle(lines)
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
@@ -1054,9 +986,6 @@ func buildCompactToolCard(lines []string, transcript string, streaming bool) im.
 	content := "```text\n" + transcript + "\n```"
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
-	}
-	if streaming {
-		elements = append(elements, map[string]any{"tag": "markdown", "content": "..."})
 	}
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
@@ -1142,6 +1071,7 @@ func isToolCallTerminalStatus(status string) bool {
 }
 
 func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermissionState, streaming bool) im.Card {
+	_ = streaming
 	status := strings.ToLower(strings.TrimSpace(update.Status))
 	if status == "" {
 		status = "pending"
@@ -1179,10 +1109,6 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 			elements = append(elements, map[string]any{"tag": "action", "actions": actions})
 		}
 	}
-	if streaming {
-		elements = append(elements, map[string]any{"tag": "markdown", "content": "..."})
-	}
-
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
