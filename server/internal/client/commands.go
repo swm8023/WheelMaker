@@ -115,6 +115,9 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	case "/model":
 		c.handleConfigCommand(ctx, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
 
+	case "/config":
+		c.handleConfigCommand(ctx, args, "Usage: /config <config-id> <value>", "Config", resolveConfigArg)
+
 	case "/debug":
 		if err := c.handleDebugCommand(args); err != nil {
 			c.reply(fmt.Sprintf("Debug error: %v", err))
@@ -193,6 +196,44 @@ func resolveModeArg(input string, st *SessionState) (configID, value string, err
 
 func resolveModelArg(input string, st *SessionState) (configID, value string, err error) {
 	return resolveConfigSelectArg("model", "model", input, st)
+}
+
+func resolveConfigArg(input string, st *SessionState) (configID, value string, err error) {
+	parts := strings.Fields(strings.TrimSpace(input))
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("usage: /config <config-id> <value>")
+	}
+	configID = strings.TrimSpace(parts[0])
+	if configID == "" {
+		return "", "", fmt.Errorf("empty config id")
+	}
+	value = strings.TrimSpace(strings.Join(parts[1:], " "))
+	if value == "" {
+		return "", "", fmt.Errorf("empty config value")
+	}
+	if st == nil {
+		return configID, value, nil
+	}
+	for _, opt := range st.ConfigOptions {
+		if !strings.EqualFold(opt.ID, configID) {
+			continue
+		}
+		if len(opt.Options) == 0 {
+			return opt.ID, value, nil
+		}
+		for _, candidate := range opt.Options {
+			if value == candidate.Value || strings.EqualFold(value, candidate.Name) {
+				return opt.ID, candidate.Value, nil
+			}
+		}
+		values := make([]string, 0, len(opt.Options))
+		for _, candidate := range opt.Options {
+			values = append(values, candidate.Value)
+		}
+		slices.Sort(values)
+		return "", "", fmt.Errorf("unknown config value %q for %q (available: %s)", value, opt.ID, strings.Join(values, ", "))
+	}
+	return configID, value, nil
 }
 
 func resolveConfigSelectArg(kind string, defaultConfigID string, input string, st *SessionState) (configID, value string, err error) {
@@ -414,42 +455,71 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	c.mu.Unlock()
 
 	model := im.HelpModel{
-		Title: "WheelMaker Help",
-		Body:  "Choose a quick action below. Advanced commands can still be typed manually.",
+		Title:    "WheelMaker Help",
+		Body:     "Choose a quick action below. Advanced commands can still be typed manually.",
+		RootMenu: "root",
+		Menus:    map[string]im.HelpMenu{},
 	}
 	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
 	model.Options = append(model.Options, im.HelpOption{Label: "Cancel", Command: "/cancel"})
 	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
 	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
 	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
+
+	agentMenuID := "menu:agents"
+	model.Options = append(model.Options, im.HelpOption{
+		Label:  "Agent Switch",
+		MenuID: agentMenuID,
+	})
+	agentMenu := im.HelpMenu{
+		Title:  "Agent Switch",
+		Body:   "Choose an agent to switch to.",
+		Parent: model.RootMenu,
+	}
 	agentNames := c.registry.names()
 	for _, name := range agentNames {
-		model.Options = append(model.Options, im.HelpOption{
+		agentMenu.Options = append(agentMenu.Options, im.HelpOption{
 			Label:   "Agent: " + name,
 			Command: "/use",
 			Value:   name,
 		})
 	}
+	model.Menus[agentMenuID] = agentMenu
 
 	for _, opt := range opts {
-		switch opt.ID {
-		case "mode":
-			for _, v := range opt.Options {
-				model.Options = append(model.Options, im.HelpOption{
-					Label:   "Mode: " + firstNonEmpty(v.Name, v.Value),
-					Command: "/mode",
-					Value:   v.Value,
-				})
-			}
-		case "model":
-			for _, v := range opt.Options {
-				model.Options = append(model.Options, im.HelpOption{
-					Label:   "Model: " + firstNonEmpty(v.Name, v.Value),
-					Command: "/model",
-					Value:   v.Value,
-				})
-			}
+		cfgID := strings.TrimSpace(opt.ID)
+		if cfgID == "" {
+			continue
 		}
+		label := "Config: " + cfgID
+		if cur := strings.TrimSpace(opt.CurrentValue); cur != "" {
+			label += " (" + cur + ")"
+		}
+		menuID := "menu:config:" + cfgID
+		model.Options = append(model.Options, im.HelpOption{
+			Label:  label,
+			MenuID: menuID,
+		})
+		cfgMenu := im.HelpMenu{
+			Title:  "Config: " + cfgID,
+			Body:   "Select a value.",
+			Parent: model.RootMenu,
+		}
+		for _, v := range opt.Options {
+			display := firstNonEmpty(v.Name, v.Value)
+			if display == "" {
+				continue
+			}
+			cfgMenu.Options = append(cfgMenu.Options, im.HelpOption{
+				Label:   display,
+				Command: "/config",
+				Value:   cfgID + " " + v.Value,
+			})
+		}
+		if len(cfgMenu.Options) == 0 {
+			cfgMenu.Body = "No predefined values. Use /config " + cfgID + " <value> manually."
+		}
+		model.Menus[menuID] = cfgMenu
 	}
 	if len(commands) > 0 {
 		names := make([]string, 0, len(commands))

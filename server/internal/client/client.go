@@ -234,7 +234,7 @@ func (c *Client) notifyLifecycle(text string) {
 }
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
-// Known commands (/use, /cancel, /status, /mode, /model, /list, /new, /load) are dispatched to handleCommand;
+// Known commands (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are dispatched to handleCommand;
 // everything else — including lines starting with "/" that are not known commands —
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
@@ -263,7 +263,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 // --- internal ---
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /list, /new, /load, /debug) are treated as commands;
+// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load, /debug) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -271,7 +271,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model", "/list", "/new", "/load", "/debug":
+	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/debug":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return

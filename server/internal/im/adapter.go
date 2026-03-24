@@ -495,7 +495,7 @@ func (f *ImAdapter) tryHandleHelp(m Message) bool {
 		_ = f.SendText(m.ChatID, fmt.Sprintf("help load error: %v", err))
 		return true
 	}
-	if err := f.sendHelpPage(m.ChatID, model, 0); err != nil {
+	if err := f.sendHelpPage(m.ChatID, model, model.RootMenu, 0); err != nil {
 		_ = f.SendText(m.ChatID, strings.TrimSpace(model.Body))
 	}
 	return true
@@ -565,11 +565,33 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			UserID: evt.UserID,
 			Text:   text,
 		})
+	case "help_menu":
+		chatID := strings.TrimSpace(evt.Value["chat_id"])
+		if chatID == "" {
+			chatID = evt.ChatID
+		}
+		menuID := strings.TrimSpace(evt.Value["menu_id"])
+		if chatID == "" {
+			return
+		}
+		f.mu.Lock()
+		resolver := f.helpResolver
+		f.mu.Unlock()
+		if resolver == nil {
+			return
+		}
+		model, err := resolver(context.Background(), chatID)
+		if err != nil {
+			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
+			return
+		}
+		_ = f.sendHelpPage(chatID, model, menuID, 0)
 	case "help_page":
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
 			chatID = evt.ChatID
 		}
+		menuID := strings.TrimSpace(evt.Value["menu_id"])
 		pageStr := strings.TrimSpace(evt.Value["page"])
 		page := 0
 		if v, err := strconv.Atoi(pageStr); err == nil && v >= 0 {
@@ -586,7 +608,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}
-		_ = f.sendHelpPage(chatID, model, page)
+		_ = f.sendHelpPage(chatID, model, menuID, page)
 	}
 }
 
@@ -620,23 +642,24 @@ func (f *ImAdapter) wasDecisionClosedRecently(decisionID string) bool {
 	return time.Since(ts) <= 2*time.Hour
 }
 
-func (f *ImAdapter) sendHelpPage(chatID string, model HelpModel, page int) error {
-	if len(model.Options) == 0 {
-		return f.SendText(chatID, strings.TrimSpace(model.Body))
-	}
-	card := buildHelpCard(chatID, model, page)
+func (f *ImAdapter) sendHelpPage(chatID string, model HelpModel, menuID string, page int) error {
+	card := buildHelpCard(chatID, model, menuID, page)
 	return f.SendCard(chatID, card)
 }
 
-func buildHelpCard(chatID string, model HelpModel, page int) Card {
+func buildHelpCard(chatID string, model HelpModel, menuID string, page int) Card {
 	const pageSize = 8
+	title, body, options, parent := resolveHelpMenu(model, menuID)
 	if page < 0 {
 		page = 0
 	}
-	total := len(model.Options)
-	maxPage := (total - 1) / pageSize
-	if page > maxPage {
-		page = maxPage
+	total := len(options)
+	maxPage := 0
+	if total > 0 {
+		maxPage = (total - 1) / pageSize
+		if page > maxPage {
+			page = maxPage
+		}
 	}
 	start := page * pageSize
 	end := start + pageSize
@@ -645,7 +668,23 @@ func buildHelpCard(chatID string, model HelpModel, page int) Card {
 	}
 
 	actions := make([]map[string]any, 0, end-start)
-	for _, opt := range model.Options[start:end] {
+	for _, opt := range options[start:end] {
+		if strings.TrimSpace(opt.MenuID) != "" {
+			actions = append(actions, map[string]any{
+				"tag": "button",
+				"text": map[string]any{
+					"tag":     "plain_text",
+					"content": opt.Label,
+				},
+				"type": "default",
+				"value": map[string]any{
+					"kind":    "help_menu",
+					"chat_id": chatID,
+					"menu_id": opt.MenuID,
+				},
+			})
+			continue
+		}
 		actions = append(actions, map[string]any{
 			"tag": "button",
 			"text": map[string]any{
@@ -663,8 +702,10 @@ func buildHelpCard(chatID string, model HelpModel, page int) Card {
 	}
 
 	elements := []map[string]any{
-		{"tag": "markdown", "content": strings.TrimSpace(model.Body)},
-		{"tag": "action", "actions": actions},
+		{"tag": "markdown", "content": strings.TrimSpace(body)},
+	}
+	if len(actions) > 0 {
+		elements = append(elements, map[string]any{"tag": "action", "actions": actions})
 	}
 	if maxPage > 0 {
 		nav := make([]map[string]any, 0, 2)
@@ -676,6 +717,7 @@ func buildHelpCard(chatID string, model HelpModel, page int) Card {
 				"value": map[string]any{
 					"kind":    "help_page",
 					"chat_id": chatID,
+					"menu_id": menuID,
 					"page":    strconv.Itoa(page - 1),
 				},
 			})
@@ -688,6 +730,7 @@ func buildHelpCard(chatID string, model HelpModel, page int) Card {
 				"value": map[string]any{
 					"kind":    "help_page",
 					"chat_id": chatID,
+					"menu_id": menuID,
 					"page":    strconv.Itoa(page + 1),
 				},
 			})
@@ -696,17 +739,48 @@ func buildHelpCard(chatID string, model HelpModel, page int) Card {
 			elements = append(elements, map[string]any{"tag": "action", "actions": nav})
 		}
 	}
+	if strings.TrimSpace(parent) != "" {
+		elements = append(elements, map[string]any{
+			"tag": "action",
+			"actions": []map[string]any{
+				{
+					"tag":  "button",
+					"text": map[string]any{"tag": "plain_text", "content": "Back"},
+					"type": "default",
+					"value": map[string]any{
+						"kind":    "help_menu",
+						"chat_id": chatID,
+						"menu_id": parent,
+					},
+				},
+			},
+		})
+	}
 
 	return Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": fmt.Sprintf("%s (%d/%d)", renderDefault(model.Title, "Help"), page+1, maxPage+1),
+				"content": fmt.Sprintf("%s (%d/%d)", renderDefault(title, "Help"), page+1, maxPage+1),
 			},
 		},
 		"elements": elements,
 	}
+}
+
+func resolveHelpMenu(model HelpModel, menuID string) (title, body string, options []HelpOption, parent string) {
+	rootID := strings.TrimSpace(model.RootMenu)
+	if rootID == "" {
+		rootID = "root"
+	}
+	if strings.TrimSpace(menuID) == "" || menuID == rootID {
+		return renderDefault(model.Title, "Help"), strings.TrimSpace(model.Body), model.Options, ""
+	}
+	if menu, ok := model.Menus[menuID]; ok {
+		return renderDefault(menu.Title, renderDefault(model.Title, "Help")), strings.TrimSpace(menu.Body), menu.Options, strings.TrimSpace(menu.Parent)
+	}
+	return renderDefault(model.Title, "Help"), strings.TrimSpace(model.Body), model.Options, ""
 }
 
 func (f *ImAdapter) resolveDecision(m Message) bool {

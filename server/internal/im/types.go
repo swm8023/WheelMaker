@@ -127,13 +127,24 @@ type HelpOption struct {
 	Label   string
 	Command string
 	Value   string
+	MenuID  string
+}
+
+// HelpMenu is one navigable help menu page.
+type HelpMenu struct {
+	Title   string
+	Body    string
+	Options []HelpOption
+	Parent  string
 }
 
 // HelpModel is the runtime help payload resolved from client.
 type HelpModel struct {
-	Title   string
-	Body    string
-	Options []HelpOption
+	Title    string
+	Body     string
+	Options  []HelpOption
+	RootMenu string
+	Menus    map[string]HelpMenu
 }
 
 // HelpResolverSetter allows client to inject realtime help resolver into IM bridge.

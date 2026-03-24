@@ -13,6 +13,7 @@ type stubAdapter struct {
 	onAction   func(CardActionEvent)
 	lastChatID string
 	lastText   string
+	lastCard   Card
 	textCount  int
 	cardSent   bool
 	runCalled  bool
@@ -39,7 +40,12 @@ func (s *stubAdapter) SendText(chatID, text string) error {
 	s.textCount++
 	return nil
 }
-func (s *stubAdapter) SendCard(_ string, _ Card) error { return nil }
+func (s *stubAdapter) SendCard(chatID string, card Card) error {
+	s.lastChatID = chatID
+	s.lastCard = card
+	s.cardSent = true
+	return nil
+}
 func (s *stubAdapter) SendReaction(_, _ string) error  { return nil }
 func (s *stubAdapter) SetStreaming(chatID string, active bool) error {
 	s.streamChat = append(s.streamChat, chatID)
@@ -241,6 +247,70 @@ func TestForwarder_HelpCardActionInjectsCommand(t *testing.T) {
 	}
 	if got != "/mode plan" {
 		t.Fatalf("injected command = %q, want %q", got, "/mode plan")
+	}
+}
+
+func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
+	model := HelpModel{
+		Title:    "WheelMaker Help",
+		Body:     "root body",
+		RootMenu: "root",
+		Options: []HelpOption{
+			{Label: "Agent Switch", MenuID: "menu:agents"},
+		},
+		Menus: map[string]HelpMenu{
+			"menu:agents": {
+				Title:  "Agent Switch",
+				Body:   "Choose",
+				Parent: "root",
+				Options: []HelpOption{
+					{Label: "Agent: codex", Command: "/use", Value: "codex"},
+				},
+			},
+		},
+	}
+	card := buildHelpCard("chat-1", model, "menu:agents", 0)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("help card elements missing: %#v", card["elements"])
+	}
+	last := elements[len(elements)-1]
+	actions, ok := last["actions"].([]map[string]any)
+	if !ok || len(actions) != 1 {
+		t.Fatalf("back action block missing: %#v", last)
+	}
+	btn := actions[0]
+	text, _ := btn["text"].(map[string]any)
+	if text["content"] != "Back" {
+		t.Fatalf("back button label = %#v, want Back", text["content"])
+	}
+	value, _ := btn["value"].(map[string]any)
+	if value["kind"] != "help_menu" || value["menu_id"] != "root" {
+		t.Fatalf("back button value = %#v", value)
+	}
+}
+
+func TestBuildHelpCard_RootMenuEntryNavigatesSubmenu(t *testing.T) {
+	model := HelpModel{
+		Title:    "WheelMaker Help",
+		Body:     "root body",
+		RootMenu: "root",
+		Options: []HelpOption{
+			{Label: "Config: mode", MenuID: "menu:config:mode"},
+		},
+	}
+	card := buildHelpCard("chat-1", model, "root", 0)
+	elements, _ := card["elements"].([]map[string]any)
+	if len(elements) < 2 {
+		t.Fatalf("unexpected elements: %#v", elements)
+	}
+	actions, _ := elements[1]["actions"].([]map[string]any)
+	if len(actions) != 1 {
+		t.Fatalf("unexpected action count: %#v", actions)
+	}
+	value, _ := actions[0]["value"].(map[string]any)
+	if value["kind"] != "help_menu" || value["menu_id"] != "menu:config:mode" {
+		t.Fatalf("root menu entry should navigate submenu, got: %#v", value)
 	}
 }
 
