@@ -307,6 +307,10 @@ func (a *captureChannel) Run(_ context.Context) error        { return nil }
 var _ im.Channel = (*captureChannel)(nil)
 var _ im.DebugSender = (*captureChannel)(nil)
 
+type localTestErr string
+
+func (e localTestErr) Error() string { return string(e) }
+
 func TestStart_SendsLifecycleStartNotice(t *testing.T) {
 	store := &mockStore{}
 	c := client.New(store, nil, "test-project", "/tmp")
@@ -461,6 +465,31 @@ func TestHandleMessage_Status_NoSession(t *testing.T) {
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want no active session message", *msgs)
+	}
+}
+
+func TestHandleMessage_PromptError_NoDuplicateFailureMessage(t *testing.T) {
+	mock := &mockSession{agentN: "codex", sessionN: "sess-1"}
+	mock.promptResult = func(_ string) (<-chan acp.Update, error) {
+		ch := make(chan acp.Update, 1)
+		ch <- acp.Update{Err: localTestErr("boom")}
+		close(ch)
+		return ch, nil
+	}
+	c := newTestClient(mock)
+	msgs := captureReplies(c)
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
+
+	if len(*msgs) == 0 {
+		t.Fatalf("expected error reply, got no messages")
+	}
+	joined := strings.Join(*msgs, "\n")
+	if strings.Contains(joined, "Agent request failed.") {
+		t.Fatalf("unexpected generic failure message: %v", *msgs)
+	}
+	if !strings.Contains(joined, "Agent error:") || !strings.Contains(joined, "boom") {
+		t.Fatalf("unexpected error output: %v", *msgs)
 	}
 }
 

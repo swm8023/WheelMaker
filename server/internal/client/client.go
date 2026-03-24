@@ -321,7 +321,35 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		sawSandboxRefresh := false
 		sawText := false
 
+		retryStream := false
 		for u := range updates {
+			if u.Err != nil {
+				// Avoid duplicate failure messages:
+				// do not emit generic UpdateError to IM before handling concrete error.
+				if attempt == 1 && !sawText && (isAgentExitError(u.Err) || isSandboxRefreshErr(u.Err)) {
+					c.reply("Agent disconnected during stream, reconnecting and retrying once...")
+					c.forceReconnect()
+					retryStream = true
+					break
+				}
+				recovered := false
+				if c.resetDeadConnection(u.Err) {
+					// Warm reconnect so the next user message can continue immediately.
+					if recErr := c.ensureForwarder(ctx); recErr == nil {
+						_ = c.ensureReadyAndNotify(ctx)
+						recovered = true
+					}
+				}
+				if recovered {
+					c.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
+				} else {
+					c.reply(fmt.Sprintf("Agent error: %v", u.Err))
+				}
+				c.mu.Lock()
+				c.prompt.currentCh = nil
+				c.mu.Unlock()
+				return
+			}
 			if hasEmitter {
 				emitErr := emitter.Emit(ctx, im.IMUpdate{
 					SessionID:  sid,
@@ -339,19 +367,6 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			if u.Type == acp.UpdateText && strings.TrimSpace(u.Content) != "" {
 				sawText = true
 			}
-			if u.Err != nil {
-				if c.resetDeadConnection(u.Err) {
-					// Warm reconnect so the next user message can continue immediately.
-					if recErr := c.ensureForwarder(ctx); recErr == nil {
-						_ = c.ensureReadyAndNotify(ctx)
-					}
-				}
-				c.reply(fmt.Sprintf("Agent error: %v", u.Err))
-				c.mu.Lock()
-				c.prompt.currentCh = nil
-				c.mu.Unlock()
-				return
-			}
 			if u.Type == acp.UpdateConfigOption {
 				c.reply(formatConfigOptionUpdateMessage(u.Raw))
 				c.saveSessionState() // persist immediately; don't wait for prompt to finish
@@ -364,6 +379,9 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			if u.Done {
 				break
 			}
+		}
+		if retryStream {
+			continue
 		}
 
 		c.mu.Lock()
@@ -480,4 +498,11 @@ func (c *Client) forceReconnect() {
 func hasSandboxRefreshError(u acp.Update) bool {
 	s := strings.ToLower(u.Content + " " + string(u.Raw))
 	return strings.Contains(s, "windows sandbox: spawn setup refresh")
+}
+
+func isSandboxRefreshErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "windows sandbox: spawn setup refresh")
 }
