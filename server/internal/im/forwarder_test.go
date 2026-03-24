@@ -267,6 +267,36 @@ func TestForwarder_EmitToolCall_SameStatusNewOutputStillStreams(t *testing.T) {
 	}
 }
 
+func TestRenderToolCallMessage_StripsCodeFences(t *testing.T) {
+	raw := []byte("{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":\"call_1\",\"title\":\"Run skill\",\"status\":\"in_progress\",\"toolCallContent\":[{\"type\":\"content\",\"content\":{\"type\":\"text\",\"text\":\"```sh\\necho hi\\n```\"}}]}")
+	upd, _, ok := parseToolCallUpdate(raw)
+	if !ok {
+		t.Fatalf("parseToolCallUpdate returned not ok")
+	}
+	msg := renderToolCallMessage(upd)
+	if strings.Contains(msg, "```") {
+		t.Fatalf("renderToolCallMessage should strip code fences, got: %q", msg)
+	}
+	if !containsAll(msg, "echo hi") {
+		t.Fatalf("renderToolCallMessage()=%q", msg)
+	}
+}
+
+func TestRenderToolCallMessage_UsesLatestToolCallContent(t *testing.T) {
+	raw := []byte("{\"sessionUpdate\":\"tool_call_update\",\"toolCallId\":\"call_1\",\"title\":\"Run skill\",\"status\":\"in_progress\",\"toolCallContent\":[{\"type\":\"content\",\"content\":{\"type\":\"text\",\"text\":\"old chunk\"}},{\"type\":\"content\",\"content\":{\"type\":\"text\",\"text\":\"new chunk\"}}]}")
+	upd, _, ok := parseToolCallUpdate(raw)
+	if !ok {
+		t.Fatalf("parseToolCallUpdate returned not ok")
+	}
+	msg := renderToolCallMessage(upd)
+	if strings.Contains(msg, "old chunk") {
+		t.Fatalf("renderToolCallMessage should prefer latest content, got: %q", msg)
+	}
+	if !containsAll(msg, "new chunk") {
+		t.Fatalf("renderToolCallMessage()=%q", msg)
+	}
+}
+
 func TestForwarder_DebugLogger_LogsInAndOut(t *testing.T) {
 	ad := &stubAdapter{}
 	f := New(ad)

@@ -695,22 +695,62 @@ func parseToolCallUpdate(raw []byte) (ToolCallUpdate, string, bool) {
 }
 
 func normalizeToolCallOutput(u ToolCallUpdate) string {
-	var parts []string
-	if txt := decodeRawText(u.RawOutput); txt != "" {
-		parts = append(parts, txt)
+	// Prefer one latest output snapshot instead of concatenating every field;
+	// concatenation can create repeated code blocks and truncated mixed fragments.
+	switch {
+	case decodeRawText(u.RawOutput) != "":
+		return previewText(stripCodeFenceLines(decodeRawText(u.RawOutput)), 1200)
+	case latestToolCallContentText(u) != "":
+		return previewText(stripCodeFenceLines(latestToolCallContentText(u)), 1200)
+	case decodeRawText(u.RawInput) != "":
+		return previewText(stripCodeFenceLines(decodeRawText(u.RawInput)), 1200)
+	default:
+		return ""
 	}
-	if txt := decodeRawText(u.RawInput); txt != "" {
-		parts = append(parts, txt)
-	}
-	for _, c := range u.ToolCallContent {
-		if t := decodeRawText(c.Content); t != "" {
-			parts = append(parts, t)
+}
+
+func latestToolCallContentText(u ToolCallUpdate) string {
+	for i := len(u.ToolCallContent) - 1; i >= 0; i-- {
+		c := u.ToolCallContent[i]
+		if t := strings.TrimSpace(c.NewText); t != "" {
+			return t
 		}
-		if strings.TrimSpace(c.NewText) != "" {
-			parts = append(parts, c.NewText)
+		if t := decodeToolCallContentText(c.Content); t != "" {
+			return t
 		}
 	}
-	return previewText(strings.Join(parts, "\n"), 1200)
+	return ""
+}
+
+func decodeToolCallContentText(raw json.RawMessage) string {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var c struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &c); err == nil && strings.TrimSpace(c.Text) != "" {
+		return strings.TrimSpace(c.Text)
+	}
+	return decodeRawText(raw)
+}
+
+func stripCodeFenceLines(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\r", ""))
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 func decodeRawText(raw json.RawMessage) string {
