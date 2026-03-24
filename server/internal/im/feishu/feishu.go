@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -829,6 +830,7 @@ func buildCompactToolCard(lines []string, transcript string) im.Card {
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
 	}
+	transcript = formatCompactTranscript(transcript)
 	content := summary + "\n```text\n" + transcript + "\n```"
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
@@ -843,6 +845,16 @@ func buildCompactToolCard(lines []string, transcript string) im.Card {
 			{"tag": "markdown", "content": content},
 		},
 	}
+}
+
+var inlineNumberedListPattern = regexp.MustCompile(`\s+(\d{1,2}[.)、]\s+)`)
+
+func formatCompactTranscript(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	if strings.TrimSpace(s) == "" {
+		return ""
+	}
+	return inlineNumberedListPattern.ReplaceAllString(s, "\n$1")
 }
 
 func compactToolTranscript(stream *compactToolStream) string {

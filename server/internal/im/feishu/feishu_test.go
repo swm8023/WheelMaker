@@ -253,3 +253,18 @@ func TestBuildCompactToolCard(t *testing.T) {
 	}
 }
 
+func TestBuildCompactToolCard_FormatsInlineNumberedTranscript(t *testing.T) {
+	card := buildCompactToolCard(
+		[]string{"RUN plan"},
+		"1. collect context 2. update tests 3. ship",
+	)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) != 1 {
+		t.Fatalf("elements mismatch: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "```text\n1. collect context\n2. update tests\n3. ship\n```") {
+		t.Fatalf("inline numbered transcript should be split into lines, got: %q", content)
+	}
+}
+
