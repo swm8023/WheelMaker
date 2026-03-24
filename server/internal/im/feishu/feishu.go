@@ -584,19 +584,8 @@ func sanitizeDebugStreamLine(text string) string {
 			line = strings.TrimSpace(line[idx+2:])
 		}
 	}
-	// Strip transport direction prefixes to reduce card noise.
-	for {
-		switched := false
-		for _, p := range []string{"->[acp]", "<-[acp]", "->[im]", "<-[im]"} {
-			if strings.HasPrefix(line, p) {
-				line = strings.TrimSpace(strings.TrimPrefix(line, p))
-				switched = true
-			}
-		}
-		if !switched {
-			break
-		}
-	}
+	// Keep transport direction prefixes (e.g. "<-[acp]", "->[im]") so
+	// debug stream retains request/response flow context.
 	return line
 }
 
