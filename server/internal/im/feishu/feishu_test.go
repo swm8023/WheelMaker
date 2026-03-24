@@ -292,6 +292,21 @@ func TestBuildCompactToolCard_FormatsNumberedVariants(t *testing.T) {
 	}
 }
 
+func TestBuildCompactToolCard_FormatsInlineHyphenBullets(t *testing.T) {
+	card := buildCompactToolCard(
+		[]string{"RUN plan"},
+		"- collect context - update tests - ship",
+	)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) != 1 {
+		t.Fatalf("elements mismatch: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "```text\n- collect context\n- update tests\n- ship\n```") {
+		t.Fatalf("inline hyphen bullets should be split into lines, got: %q", content)
+	}
+}
+
 func TestBuildCompactToolCard_TitleIconsLimited(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{

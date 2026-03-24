@@ -870,6 +870,7 @@ func compactToolIconTitle(lines []string) string {
 }
 
 var inlineNumberedListPattern = regexp.MustCompile(`[ \t]+(\d{1,2}[.)、][ \t]*)`)
+var inlineHyphenBulletPattern = regexp.MustCompile(`[ \t]+-[ \t]+`)
 
 func formatCompactTranscript(s string) string {
 	s = strings.ReplaceAll(s, "\r", "")
@@ -877,7 +878,11 @@ func formatCompactTranscript(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return ""
 	}
-	return strings.TrimSpace(inlineNumberedListPattern.ReplaceAllString(s, "\n$1"))
+	s = strings.TrimSpace(inlineNumberedListPattern.ReplaceAllString(s, "\n$1"))
+	if strings.HasPrefix(strings.TrimSpace(s), "-") {
+		s = inlineHyphenBulletPattern.ReplaceAllString(s, "\n- ")
+	}
+	return strings.TrimSpace(s)
 }
 
 func compactToolTranscript(stream *compactToolStream) string {
