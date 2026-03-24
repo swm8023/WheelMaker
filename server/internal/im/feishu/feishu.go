@@ -86,6 +86,7 @@ type compactToolEntry struct {
 	ToolCallID string
 	Title      string
 	Command    string
+	Output     string
 	Status     string
 }
 
@@ -717,10 +718,20 @@ func (f *Channel) sendToolCallCompact(chatID string, update im.ToolCallUpdate) e
 	if _, ok := stream.entries[toolCallID]; !ok {
 		stream.order = append(stream.order, toolCallID)
 	}
+	prev := stream.entries[toolCallID]
+	command := strings.TrimSpace(toolCallCommandSummary(update))
+	if command == "" {
+		command = strings.TrimSpace(prev.Command)
+	}
+	output := strings.TrimSpace(toolCallOutputText(update))
+	if output == "" {
+		output = strings.TrimSpace(prev.Output)
+	}
 	stream.entries[toolCallID] = compactToolEntry{
 		ToolCallID: toolCallID,
 		Title:      strings.TrimSpace(update.Title),
-		Command:    toolCallCommandSummary(update),
+		Command:    command,
+		Output:     output,
 		Status:     strings.TrimSpace(update.Status),
 	}
 	const maxLines = 30
@@ -733,9 +744,10 @@ func (f *Channel) sendToolCallCompact(chatID string, update im.ToolCallUpdate) e
 	}
 	messageID := strings.TrimSpace(stream.messageID)
 	lines := compactToolLines(stream)
+	transcript := compactToolTranscript(stream)
 	f.toolMu.Unlock()
 
-	card := buildCompactToolCard(lines)
+	card := buildCompactToolCard(lines, transcript)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal compact tool card: %w", err)
@@ -804,11 +816,24 @@ func compactStatusEmoji(status string) string {
 	}
 }
 
-func buildCompactToolCard(lines []string) im.Card {
-	body := "_No tool calls_"
+func buildCompactToolCard(lines []string, transcript string) im.Card {
+	summary := "_No tool calls_"
 	if len(lines) > 0 {
-		body = strings.Join(lines, "\n")
+		items := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			items = append(items, "- "+line)
+		}
+		if len(items) > 0 {
+			summary = "### Summary\n" + strings.Join(items, "\n")
+		}
 	}
+	if strings.TrimSpace(transcript) == "" {
+		transcript = "<no output>"
+	}
+	terminal := "### Terminal\n```text\n" + transcript + "\n```"
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
@@ -819,9 +844,41 @@ func buildCompactToolCard(lines []string) im.Card {
 			},
 		},
 		"elements": []map[string]any{
-			{"tag": "markdown", "content": body},
+			{"tag": "markdown", "content": summary},
+			{"tag": "markdown", "content": terminal},
 		},
 	}
+}
+
+func compactToolTranscript(stream *compactToolStream) string {
+	if stream == nil || len(stream.order) == 0 {
+		return ""
+	}
+	blocks := make([]string, 0, len(stream.order))
+	for _, id := range stream.order {
+		e, ok := stream.entries[id]
+		if !ok {
+			continue
+		}
+		cmd := strings.TrimSpace(e.Command)
+		if cmd == "" {
+			cmd = strings.TrimSpace(e.Title)
+		}
+		if cmd == "" {
+			cmd = e.ToolCallID
+		}
+		status := strings.TrimSpace(e.Status)
+		if status == "" {
+			status = "pending"
+		}
+		out := strings.TrimSpace(e.Output)
+		if out == "" {
+			out = "<no output>"
+		}
+		block := fmt.Sprintf("$ %s\n[%s]\n%s", cmd, status, previewBlock(out, 600))
+		blocks = append(blocks, block)
+	}
+	return previewBlock(strings.Join(blocks, "\n\n"), 3200)
 }
 
 func isToolCallTerminalStatus(status string) bool {

@@ -212,7 +212,10 @@ func TestCompactStatusEmoji(t *testing.T) {
 }
 
 func TestBuildCompactToolCard(t *testing.T) {
-	card := buildCompactToolCard([]string{"✅ go test ./...", "⏳ rg -n tool"})
+	card := buildCompactToolCard(
+		[]string{"DONE go test ./...", "RUN rg -n tool"},
+		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/im/feishu/feishu.go",
+	)
 	header, ok := card["header"].(map[string]any)
 	if !ok {
 		t.Fatalf("header missing in compact tool card: %+v", card)
@@ -229,8 +232,21 @@ func TestBuildCompactToolCard(t *testing.T) {
 	if !ok || len(elements) == 0 {
 		t.Fatalf("elements missing in compact tool card: %+v", card)
 	}
-	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "✅ go test ./...") || !strings.Contains(content, "⏳ rg -n tool") {
-		t.Fatalf("compact tool card content mismatch: %q", content)
+	if len(elements) < 2 {
+		t.Fatalf("expected summary and terminal sections, got: %+v", elements)
+	}
+	summary, _ := elements[0]["content"].(string)
+	if !strings.Contains(summary, "### Summary") ||
+		!strings.Contains(summary, "DONE go test ./...") ||
+		!strings.Contains(summary, "RUN rg -n tool") {
+		t.Fatalf("compact summary mismatch: %q", summary)
+	}
+	terminal, _ := elements[1]["content"].(string)
+	if !strings.Contains(terminal, "### Terminal") ||
+		!strings.Contains(terminal, "```text") ||
+		!strings.Contains(terminal, "$ go test ./...") ||
+		!strings.Contains(terminal, "PASS") {
+		t.Fatalf("compact terminal mismatch: %q", terminal)
 	}
 }
+
