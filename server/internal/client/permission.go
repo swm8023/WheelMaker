@@ -41,6 +41,16 @@ func (r *permissionRouter) clearLastChatID(chatID string) {
 	r.mu.Unlock()
 }
 
+func (r *permissionRouter) currentChatIDOrFallback() string {
+	r.mu.Lock()
+	chatID := strings.TrimSpace(r.lastChatID)
+	r.mu.Unlock()
+	if chatID == "" {
+		chatID = r.client.projectName
+	}
+	return chatID
+}
+
 func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
 	if !r.acquireDecisionSlot(ctx) {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
@@ -64,12 +74,7 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	r.mu.Lock()
-	chatID := r.lastChatID
-	r.mu.Unlock()
-	if strings.TrimSpace(chatID) == "" {
-		chatID = r.client.projectName
-	}
+	chatID := r.currentChatIDOrFallback()
 
 	title := strings.TrimSpace(params.ToolCall.Title)
 	if title == "" {

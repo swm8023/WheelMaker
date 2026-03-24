@@ -303,6 +303,42 @@ func (a *captureChannel) Run(_ context.Context) error        { return nil }
 var _ im.Channel = (*captureChannel)(nil)
 var _ im.DebugSender = (*captureChannel)(nil)
 
+func TestStart_SendsLifecycleStartNotice(t *testing.T) {
+	store := &mockStore{}
+	c := client.New(store, nil, "test-project", "/tmp")
+	msgs := captureReplies(c)
+
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	if len(*msgs) == 0 {
+		t.Fatalf("expected lifecycle start notice, got no messages")
+	}
+	if !strings.Contains((*msgs)[0], "server started") {
+		t.Fatalf("unexpected start notice: %q", (*msgs)[0])
+	}
+}
+
+func TestClose_SendsLifecycleShutdownNoticeBeforeClose(t *testing.T) {
+	store := &mockStore{}
+	c := client.New(store, nil, "test-project", "/tmp")
+	msgs := captureReplies(c)
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	*msgs = (*msgs)[:0]
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+	if len(*msgs) == 0 {
+		t.Fatalf("expected lifecycle shutdown notice, got no messages")
+	}
+	if !strings.Contains((*msgs)[0], "server stopping") {
+		t.Fatalf("unexpected shutdown notice: %q", (*msgs)[0])
+	}
+}
+
 // testLogWriter is a goroutine-safe log output writer for capturing log output in tests.
 type testLogWriter struct {
 	mu  sync.Mutex

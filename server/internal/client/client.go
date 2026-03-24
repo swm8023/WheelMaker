@@ -74,6 +74,11 @@ const defaultAgentName = "claude"
 
 const acpClientProtocolVersion = 1
 
+const (
+	lifecycleStartNotice    = "WheelMaker server started."
+	lifecycleShutdownNotice = "WheelMaker server stopping."
+)
+
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 
 type sessionState struct {
@@ -184,6 +189,7 @@ func (c *Client) Start(ctx context.Context) error {
 	if c.imBridge != nil {
 		c.imBridge.OnMessage(c.HandleMessage)
 		c.imBridge.SetHelpResolver(c.resolveHelpModel)
+		c.notifyLifecycle(lifecycleStartNotice)
 	}
 	return nil
 }
@@ -199,6 +205,8 @@ func (c *Client) Run(ctx context.Context) error {
 
 // Close saves state and shuts down the active agent.
 func (c *Client) Close() error {
+	c.notifyLifecycle(lifecycleShutdownNotice)
+
 	c.mu.Lock()
 	ac := c.conn
 	c.mu.Unlock()
@@ -214,6 +222,14 @@ func (c *Client) Close() error {
 		return c.store.Save(s)
 	}
 	return nil
+}
+
+func (c *Client) notifyLifecycle(text string) {
+	chatID := c.permRouter.currentChatIDOrFallback()
+	if strings.TrimSpace(chatID) == "" {
+		return
+	}
+	c.reply(chatID, text)
 }
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
