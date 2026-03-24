@@ -103,6 +103,17 @@ bash scripts/install-tools.sh    # macOS / Linux
 每次代码变更后：终止所有已有 wheelmaker 进程，用 `go run ./cmd/wheelmaker/` 重启，确认只有一个进程运行。  
 若处于实时联调阶段，先向用户发送本轮最终结果，再延迟数秒执行重启，避免打断当前交互。
 
+## Key Invariants (do not break)
+
+| # | Invariant |
+|---|-----------|
+| 1 | `acp.Conn` is pure transport — no business logic inside |
+| 2 | `client.Client` is the single owner of session state; IM adapters never mutate it directly |
+| 3 | Agent subprocess is created lazily — never at startup |
+| 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im.Channel`) |
+| 5 | `state.json` is the single source of truth for runtime state; never cache project state in memory only |
+| 6 | Decision (option) messages carry a `decisionId`; mobile adapter resolves them via pending-decision map |
+
 ## 关键协议文档
 
 - ACP 协议：[../docs/acp-protocol-full.zh-CN.md](../docs/acp-protocol-full.zh-CN.md)

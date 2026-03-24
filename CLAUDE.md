@@ -1,5 +1,7 @@
 # WheelMaker
 
+> **Quick context:** Go daemon that proxies between local AI CLIs (Codex / Claude via ACP over stdio) and remote IM channels (Feishu / mobile WebSocket). The Flutter app is a thin chat client connecting over WebSocket.
+
 本地 AI 编程 CLI（Codex、Claude 等）的远程控制桥接守护进程，通过飞书等 IM 让开发者在手机上远程操控本地 AI 助手。
 
 ## 仓库结构

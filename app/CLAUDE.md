@@ -73,6 +73,16 @@ flutter build apk --debug          # 调试 APK
 flutter build apk --release        # 发布 APK
 ```
 
+## Key Invariants (do not break)
+
+| # | Invariant |
+|---|-----------|
+| 1 | `WsService` is the single WebSocket owner — screens never open raw connections |
+| 2 | Screen widgets are stateless consumers of `WsService.messages` / `stateStream` |
+| 3 | Auth handshake sequence: `auth_required` → send `auth` → wait for `ready` before any message |
+| 4 | `options` messages carry `decisionId`; always echo it back in `option` response |
+| 5 | Platform dirs (`android/`, `ios/`) are generated — never manually edited or committed |
+
 ## 关键协议文档
 
 - Mobile WebSocket 协议详见：[../server/CLAUDE.md](../server/CLAUDE.md)（Mobile WebSocket 协议章节）
