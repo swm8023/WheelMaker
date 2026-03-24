@@ -15,7 +15,7 @@ const agentName = "codex"
 // Config holds configuration for the agent.
 type Config struct {
 	// ExePath is the path to the codex-acp binary.
-	// If empty, tools.ResolveBinary("codex-acp", "") is used.
+	// If empty, npx @zed-industries/codex-acp is used.
 	ExePath string
 
 	// Env is extra environment variables for the subprocess (e.g. OPENAI_API_KEY).
@@ -64,16 +64,16 @@ func buildEnv(m map[string]string) []string {
 }
 
 func resolveCommand(configPath string) (string, []string, error) {
-	exePath, err := tools.ResolveBinary("codex-acp", configPath)
-	if err == nil {
-		return exePath, nil, nil
-	}
 	if configPath != "" {
+		exePath, err := tools.ResolveBinary("codex-acp", configPath)
+		if err == nil {
+			return exePath, nil, nil
+		}
 		return "", nil, fmt.Errorf("codex: resolve binary: %w", err)
 	}
 	npxPath, npxErr := exec.LookPath("npx")
 	if npxErr != nil {
-		return "", nil, fmt.Errorf("codex: resolve binary: %w", err)
+		return "", nil, fmt.Errorf("codex: npx not found: %w", npxErr)
 	}
 	return npxPath, []string{"--yes", "@zed-industries/codex-acp"}, nil
 }

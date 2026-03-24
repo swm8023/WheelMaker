@@ -15,7 +15,7 @@ const agentName = "claude"
 // Config holds configuration for the agent.
 type Config struct {
 	// ExePath is the path to the claude-agent-acp binary.
-	// If empty, tools.ResolveBinary("claude-agent-acp", "") is used.
+	// If empty, npx @zed-industries/claude-agent-acp is used.
 	ExePath string
 
 	// Env is extra environment variables for the subprocess (e.g. ANTHROPIC_API_KEY).
@@ -64,16 +64,16 @@ func buildEnv(m map[string]string) []string {
 }
 
 func resolveCommand(configPath string) (string, []string, error) {
-	exePath, err := tools.ResolveBinary("claude-agent-acp", configPath)
-	if err == nil {
-		return exePath, nil, nil
-	}
 	if configPath != "" {
+		exePath, err := tools.ResolveBinary("claude-agent-acp", configPath)
+		if err == nil {
+			return exePath, nil, nil
+		}
 		return "", nil, fmt.Errorf("claude: resolve binary: %w", err)
 	}
 	npxPath, npxErr := exec.LookPath("npx")
 	if npxErr != nil {
-		return "", nil, fmt.Errorf("claude: resolve binary: %w", err)
+		return "", nil, fmt.Errorf("claude: npx not found: %w", npxErr)
 	}
 	return npxPath, []string{"--yes", "@zed-industries/claude-agent-acp"}, nil
 }
