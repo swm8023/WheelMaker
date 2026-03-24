@@ -12,17 +12,10 @@ import (
 	"time"
 )
 
-// Adapter is the low-level IM execution layer.
-// ImAdapter owns strategy and delegates transport/platform operations to Adapter.
-type Adapter interface {
-	Channel
-}
-
 // ImAdapter is the strategy layer between client and concrete IM adapter.
 // Current MVP behavior is transparent pass-through; strategy logic is added iteratively.
 type ImAdapter struct {
-	adapter Adapter
-	ability Ability
+	adapter Channel
 	handler MessageHandler
 
 	mu           sync.Mutex
@@ -39,10 +32,9 @@ type ImAdapter struct {
 }
 
 // New creates a pass-through bridge over adapter.
-func New(adapter Adapter) *ImAdapter {
+func New(adapter Channel) *ImAdapter {
 	f := &ImAdapter{
 		adapter:      adapter,
-		ability:      DetectAbilities(adapter),
 		textBuf:      map[string]*strings.Builder{},
 		textFlush:    map[string]*time.Timer{},
 		toolCalls:    map[string]map[string]string{},
@@ -50,15 +42,12 @@ func New(adapter Adapter) *ImAdapter {
 		decisionByID: map[string]pendingDecision{},
 		closedDecide: map[string]time.Time{},
 	}
-	if f.ability.Has(AbilityCardActions) {
-		sub := any(adapter).(CardActionSubscriber)
-		sub.OnCardAction(f.handleCardAction)
-	}
+	adapter.OnCardAction(f.handleCardAction)
 	return f
 }
 
 // NewBridge creates a pass-through bridge over adapter.
-func NewBridge(adapter Adapter) *ImAdapter {
+func NewBridge(adapter Channel) *ImAdapter {
 	return New(adapter)
 }
 
@@ -98,26 +87,13 @@ func (f *ImAdapter) SendReaction(messageID, emoji string) error {
 }
 
 func (f *ImAdapter) SendDebug(chatID, text string) error {
-	var err error
-	if f.ability.Has(AbilitySendDebug) {
-		sender := any(f.adapter).(DebugSender)
-		err = sender.SendDebug(chatID, text)
-		f.logOutgoingDebug(chatID, text, err)
-		return err
-	}
-	err = f.adapter.SendText(chatID, text)
+	err := f.adapter.SendDebug(chatID, text)
 	f.logOutgoingDebug(chatID, text, err)
 	return err
 }
 
 func (f *ImAdapter) SendSystem(chatID, text string) error {
-	var err error
-	if sender, ok := any(f.adapter).(SystemSender); ok {
-		err = sender.SendSystem(chatID, text)
-		f.logOutgoingSystem(chatID, text, err)
-		return err
-	}
-	err = f.adapter.SendText(chatID, text)
+	err := f.adapter.SendSystem(chatID, text)
 	f.logOutgoingSystem(chatID, text, err)
 	return err
 }
@@ -205,9 +181,7 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		f.mu.Lock()
 		delete(f.toolCalls, chatID)
 		f.mu.Unlock()
-		if marker, ok := f.adapter.(DoneMarker); ok {
-			return marker.MarkDone(chatID)
-		}
+		return f.adapter.MarkDone(chatID)
 	case IMUpdateError:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
@@ -300,17 +274,9 @@ func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {
 	if !f.shouldEmitToolCall(chatID, upd.ToolCallID, signature) {
 		return nil
 	}
-	if f.ability.Has(AbilitySendToolCards) {
-		if sender, ok := any(f.adapter).(ToolCallSender); ok {
-			err := sender.SendToolCall(chatID, upd)
-			f.logOutgoingToolCall(chatID, upd, err)
-			return err
-		}
-	}
-	if msg := renderToolCallMessage(upd); msg != "" {
-		return f.SendText(chatID, msg)
-	}
-	return nil
+	err := f.adapter.SendToolCall(chatID, upd)
+	f.logOutgoingToolCall(chatID, upd, err)
+	return err
 }
 
 func (f *ImAdapter) shouldEmitToolCall(chatID, toolCallID, signature string) bool {
@@ -388,16 +354,8 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 		}
 		meta[k] = strings.TrimSpace(v)
 	}
-	if f.ability.Has(AbilitySendOptions) {
-		sender := any(f.adapter).(OptionSender)
-		err := sender.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta)
-		f.logOutgoingOptions(chatID, req, err)
-		if err != nil {
-			_ = f.SendText(chatID, renderDecisionPrompt(req))
-		}
-	} else {
-		_ = f.SendText(chatID, renderDecisionPrompt(req))
-	}
+	_ = f.adapter.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta)
+	f.logOutgoingOptions(chatID, req, nil)
 
 	select {
 	case r := <-ch:
@@ -608,8 +566,8 @@ func (f *ImAdapter) wasDecisionClosedRecently(decisionID string) bool {
 
 func (f *ImAdapter) sendHelpPage(chatID, messageID string, model HelpModel, menuID string, page int) error {
 	card := buildHelpCard(chatID, model, menuID, page)
-	if updater, ok := any(f.adapter).(CardUpdater); ok && strings.TrimSpace(messageID) != "" {
-		return updater.UpdateCard(chatID, strings.TrimSpace(messageID), card)
+	if strings.TrimSpace(messageID) != "" {
+		return f.adapter.UpdateCard(chatID, strings.TrimSpace(messageID), card)
 	}
 	return f.SendCard(chatID, card)
 }
@@ -906,6 +864,13 @@ func decodeRawText(raw json.RawMessage) string {
 	return strings.TrimSpace(string(b))
 }
 
+// RenderToolCallMessage renders a ToolCallUpdate as a plain-text message.
+// Channel implementations that don't support rich tool-call cards can use this
+// to produce a text fallback inside their SendToolCall method.
+func RenderToolCallMessage(u ToolCallUpdate) string {
+	return renderToolCallMessage(u)
+}
+
 func renderToolCallMessage(u ToolCallUpdate) string {
 	icon := "??"
 	switch strings.ToLower(strings.TrimSpace(u.Status)) {
@@ -1002,16 +967,12 @@ func parseIndex(v string) int {
 	return n
 }
 
-// CanHandleDecision reports whether the underlying adapter supports interactive
-// decision UI (i.e. implements OptionSender). When false, callers should treat
-// any decision as immediately cancelled rather than sending a blocking prompt.
+// CanHandleDecision always returns true because all Channel implementations
+// are required to support SendOptions.
 func (f *ImAdapter) CanHandleDecision() bool {
-	return f.ability.Has(AbilitySendOptions)
+	return true
 }
 
-var _ Channel = (*ImAdapter)(nil)
-var _ DebugSender = (*ImAdapter)(nil)
-var _ SystemSender = (*ImAdapter)(nil)
 var _ UpdateEmitter = (*ImAdapter)(nil)
 var _ DecisionRequester = (*ImAdapter)(nil)
 var _ HelpResolverSetter = (*ImAdapter)(nil)

@@ -56,6 +56,21 @@ func (s *stubAdapter) UpdateCard(chatID, messageID string, card Card) error {
 	return nil
 }
 func (s *stubAdapter) SendReaction(_, _ string) error { return nil }
+func (s *stubAdapter) SendDebug(chatID, text string) error {
+	return s.SendText(chatID, text)
+}
+func (s *stubAdapter) SendSystem(chatID, text string) error {
+	return s.SendText(chatID, text)
+}
+func (s *stubAdapter) SendOptions(chatID, _, _ string, _ []DecisionOption, _ map[string]string) error {
+	return s.SendText(chatID, "options")
+}
+func (s *stubAdapter) SendToolCall(chatID string, update ToolCallUpdate) error {
+	if msg := RenderToolCallMessage(update); msg != "" {
+		return s.SendText(chatID, msg)
+	}
+	return nil
+}
 func (s *stubAdapter) MarkDone(chatID string) error {
 	s.doneChatID = chatID
 	s.doneCount++

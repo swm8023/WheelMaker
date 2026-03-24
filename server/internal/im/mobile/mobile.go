@@ -31,8 +31,8 @@ type mobileConn struct {
 	authed bool
 }
 
-// Channel implements im.Channel, im.OptionSender, im.DebugSender, and im.CardActionSubscriber
-// using an HTTP/WebSocket server. Each connected mobile client is assigned a unique chatID.
+// Channel implements im.Channel using an HTTP/WebSocket server.
+// Each connected mobile client is assigned a unique chatID.
 type Channel struct {
 	cfg               Config
 	handler           im.MessageHandler
@@ -61,11 +61,6 @@ func New(cfg Config) *Channel {
 // --- im.Channel ---
 
 func (m *Channel) OnMessage(handler im.MessageHandler) { m.handler = handler }
-
-// Abilities reports optional mobile channel features.
-func (m *Channel) Abilities() im.Ability {
-	return im.AbilitySendDebug | im.AbilitySendOptions | im.AbilityCardActions
-}
 
 func (m *Channel) SendText(chatID, text string) error {
 	return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: text})
@@ -106,7 +101,26 @@ func (m *Channel) SendDebug(chatID, text string) error {
 	return m.send(chatID, outboundMsg{Type: "debug", ChatID: chatID, Text: text})
 }
 
-// --- im.OptionSender ---
+// SendSystem sends a system message; mobile renders it the same as text.
+func (m *Channel) SendSystem(chatID, text string) error {
+	return m.SendText(chatID, text)
+}
+
+// SendToolCall renders a tool-call update as plain text for mobile clients.
+func (m *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
+	if msg := im.RenderToolCallMessage(update); msg != "" {
+		return m.SendText(chatID, msg)
+	}
+	return nil
+}
+
+// MarkDone is a no-op for mobile; the client drives its own "done" state.
+func (m *Channel) MarkDone(_ string) error { return nil }
+
+// UpdateCard is a no-op for mobile; in-place card update is not supported.
+func (m *Channel) UpdateCard(chatID, _ string, card im.Card) error {
+	return m.SendCard(chatID, card)
+}
 
 // SendOptions sends a structured option prompt (decision request) to the client.
 // meta["decision_id"] is forwarded so the client can include it in its reply.
@@ -128,8 +142,6 @@ func (m *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 		DecisionID: decisionID,
 	})
 }
-
-// --- im.CardActionSubscriber ---
 
 func (m *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 	m.mu.Lock()
@@ -252,3 +264,5 @@ func (m *Channel) send(chatID string, msg outboundMsg) error {
 	defer c.mu.Unlock()
 	return c.ws.WriteMessage(websocket.TextMessage, data)
 }
+
+var _ im.Channel = (*Channel)(nil)

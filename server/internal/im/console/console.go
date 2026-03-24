@@ -30,11 +30,6 @@ func New(projectName string, debug bool) *Channel {
 // Debug returns whether debug logging is enabled.
 func (c *Channel) Debug() bool { return c.debug }
 
-// Abilities reports optional console channel features.
-func (c *Channel) Abilities() im.Ability {
-	return im.AbilitySendDebug | im.AbilitySendOptions
-}
-
 // OnMessage registers the handler called for each received message.
 func (c *Channel) OnMessage(handler im.MessageHandler) {
 	c.handler = handler
@@ -121,6 +116,28 @@ func (c *Channel) Run(ctx context.Context) error {
 	}
 }
 
+// OnCardAction is a no-op for the console; it has no interactive card UI.
+func (c *Channel) OnCardAction(_ func(im.CardActionEvent)) {}
+
+// SendSystem prints system text to stdout (same rendering as SendText for console).
+func (c *Channel) SendSystem(chatID, text string) error {
+	return c.SendText(chatID, text)
+}
+
+// SendToolCall renders the tool-call update as plain text.
+func (c *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
+	if msg := im.RenderToolCallMessage(update); msg != "" {
+		return c.SendText(chatID, msg)
+	}
+	return nil
+}
+
+// MarkDone is a no-op for the console.
+func (c *Channel) MarkDone(_ string) error { return nil }
+
+// UpdateCard sends a new card (console has no in-place update support).
+func (c *Channel) UpdateCard(chatID, _ string, card im.Card) error {
+	return c.SendCard(chatID, card)
+}
+
 var _ im.Channel = (*Channel)(nil)
-var _ im.DebugSender = (*Channel)(nil)
-var _ im.OptionSender = (*Channel)(nil)

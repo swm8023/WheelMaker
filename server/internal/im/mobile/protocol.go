@@ -32,9 +32,4 @@ type outboundOption struct {
 	Label string `json:"label"`
 }
 
-// Compile-time checks that Channel satisfies the optional Channel interfaces.
-var (
-	_ im.OptionSender         = (*Channel)(nil)
-	_ im.DebugSender          = (*Channel)(nil)
-	_ im.CardActionSubscriber = (*Channel)(nil)
-)
+var _ im.Channel = (*Channel)(nil)
