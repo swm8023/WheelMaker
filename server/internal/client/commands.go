@@ -21,7 +21,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	switch cmd {
 	case "/use":
 		if args == "" {
-			c.reply(msg.ChatID, "Usage: /use <agent-name> [--continue]  (e.g. /use claude)")
+			c.reply("Usage: /use <agent-name> [--continue]  (e.g. /use claude)")
 			return
 		}
 		parts := strings.Fields(args)
@@ -32,8 +32,8 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 				mode = SwitchWithContext
 			}
 		}
-		if err := c.switchAgent(ctx, msg.ChatID, name, mode); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Switch error: %v", err))
+		if err := c.switchAgent(ctx, name, mode); err != nil {
+			c.reply(fmt.Sprintf("Switch error: %v", err))
 		}
 
 	case "/cancel":
@@ -41,14 +41,14 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		active := c.conn != nil
 		c.mu.Unlock()
 		if !active {
-			c.reply(msg.ChatID, "No active session.")
+			c.reply("No active session.")
 			return
 		}
 		if err := c.cancelPrompt(); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Cancel error: %v", err))
+			c.reply(fmt.Sprintf("Cancel error: %v", err))
 			return
 		}
-		c.reply(msg.ChatID, "Cancelled.")
+		c.reply("Cancelled.")
 
 	case "/status":
 		c.mu.Lock()
@@ -60,71 +60,70 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 		active := c.conn != nil
 		c.mu.Unlock()
 		if !active {
-			c.reply(msg.ChatID, "No active session.")
+			c.reply("No active session.")
 			return
 		}
 		status := fmt.Sprintf("Active agent: %s", agentName)
 		if sid != "" {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
-		c.reply(msg.ChatID, status)
+		c.reply(status)
 
 	case "/list":
 		c.promptMu.Lock()
 		defer c.promptMu.Unlock()
 		lines, err := c.listSessions(ctx)
 		if err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("List error: %v", err))
+			c.reply(fmt.Sprintf("List error: %v", err))
 			return
 		}
-		c.reply(msg.ChatID, strings.Join(lines, "\n"))
+		c.reply(strings.Join(lines, "\n"))
 
 	case "/new":
 		c.promptMu.Lock()
 		defer c.promptMu.Unlock()
 		sid, err := c.createNewSession(ctx)
 		if err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("New error: %v", err))
+			c.reply(fmt.Sprintf("New error: %v", err))
 			return
 		}
-		c.reply(msg.ChatID, fmt.Sprintf("Created new session: %s", sid))
+		c.reply(fmt.Sprintf("Created new session: %s", sid))
 
 	case "/load":
 		idxStr := strings.TrimSpace(args)
 		if idxStr == "" {
-			c.reply(msg.ChatID, "Usage: /load <index>  (see /list)")
+			c.reply("Usage: /load <index>  (see /list)")
 			return
 		}
 		idx, err := strconv.Atoi(idxStr)
 		if err != nil || idx <= 0 {
-			c.reply(msg.ChatID, "Load error: index must be a positive integer")
+			c.reply("Load error: index must be a positive integer")
 			return
 		}
 		c.promptMu.Lock()
 		defer c.promptMu.Unlock()
 		sid, err := c.loadSessionByIndex(ctx, idx)
 		if err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Load error: %v", err))
+			c.reply(fmt.Sprintf("Load error: %v", err))
 			return
 		}
-		c.reply(msg.ChatID, fmt.Sprintf("Loaded session: %s", sid))
+		c.reply(fmt.Sprintf("Loaded session: %s", sid))
 
 	case "/mode":
-		c.handleConfigCommand(ctx, msg.ChatID, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
+		c.handleConfigCommand(ctx, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
 
 	case "/model":
-		c.handleConfigCommand(ctx, msg.ChatID, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
+		c.handleConfigCommand(ctx, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
 
 	case "/debug":
-		if err := c.handleDebugCommand(msg.ChatID, args); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("Debug error: %v", err))
+		if err := c.handleDebugCommand(args); err != nil {
+			c.reply(fmt.Sprintf("Debug error: %v", err))
 		}
 	}
 }
 
 func (c *Client) handleConfigCommand(
 	ctx context.Context,
-	chatID string,
 	args string,
 	usage string,
 	label string,
@@ -132,7 +131,7 @@ func (c *Client) handleConfigCommand(
 ) {
 	input := strings.TrimSpace(args)
 	if input == "" {
-		c.reply(chatID, usage)
+		c.reply(usage)
 		return
 	}
 
@@ -140,7 +139,7 @@ func (c *Client) handleConfigCommand(
 	defer c.promptMu.Unlock()
 
 	if err := c.ensureForwarder(ctx); err != nil {
-		c.reply(chatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		c.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 		return
 	}
 
@@ -158,14 +157,14 @@ func (c *Client) handleConfigCommand(
 	}
 	c.mu.Unlock()
 
-	if err := c.ensureReadyAndNotify(ctx, chatID); err != nil {
-		c.reply(chatID, fmt.Sprintf("%s error: %v", label, err))
+	if err := c.ensureReadyAndNotify(ctx); err != nil {
+		c.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
 	}
 
 	configID, value, err := resolve(input, sessionState)
 	if err != nil {
-		c.reply(chatID, fmt.Sprintf("%s error: %v", label, err))
+		c.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
 	}
 
@@ -180,12 +179,12 @@ func (c *Client) handleConfigCommand(
 		ConfigID:  configID,
 		Value:     value,
 	}); err != nil {
-		c.reply(chatID, fmt.Sprintf("%s error: %v", label, err))
+		c.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
 	}
 
 	c.saveSessionState()
-	c.reply(chatID, fmt.Sprintf("%s set to: %s", label, value))
+	c.reply(fmt.Sprintf("%s set to: %s", label, value))
 }
 
 func resolveModeArg(input string, st *SessionState) (configID, value string, err error) {

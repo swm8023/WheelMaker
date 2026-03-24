@@ -4,42 +4,16 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 )
 
+// agentDebugSink routes ACP JSON debug output to the IM debug channel.
+// It no longer tracks per-agent chatIDs; routing uses imBridge.activeChatID.
 type agentDebugSink struct {
 	client *Client
-
-	mu          sync.Mutex
-	chatByAgent map[string]string
 }
 
 func newAgentDebugSink(c *Client) *agentDebugSink {
-	return &agentDebugSink{
-		client:      c,
-		chatByAgent: map[string]string{},
-	}
-}
-
-func (s *agentDebugSink) bindChat(agentName, chatID string) {
-	agentName = strings.TrimSpace(agentName)
-	chatID = strings.TrimSpace(chatID)
-	if agentName == "" || chatID == "" {
-		return
-	}
-	s.mu.Lock()
-	s.chatByAgent[agentName] = chatID
-	s.mu.Unlock()
-}
-
-func (s *agentDebugSink) resolveChat(agentName string) string {
-	s.mu.Lock()
-	chatID := s.chatByAgent[agentName]
-	s.mu.Unlock()
-	if strings.TrimSpace(chatID) != "" {
-		return chatID
-	}
-	return s.client.projectName
+	return &agentDebugSink{client: c}
 }
 
 func (s *agentDebugSink) writer(agentName string) io.Writer {
@@ -63,8 +37,7 @@ func (w *agentDebugWriter) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		chatID := w.sink.resolveChat(w.agentName)
-		w.sink.client.replyDebug(chatID, fmt.Sprintf("[debug][%s] %s", w.agentName, line))
+		w.sink.client.replyDebug(fmt.Sprintf("[debug][%s] %s", w.agentName, line))
 	}
 	return len(p), nil
 }
@@ -79,10 +52,6 @@ func (c *Client) resolveCurrentAgentName() string {
 		return c.state.ActiveAgent
 	}
 	return defaultAgentName
-}
-
-func (c *Client) bindDebugChat(agentName, chatID string) {
-	c.debugSink.bindChat(agentName, chatID)
 }
 
 func (c *Client) composeDebugWriter(agentName string, base io.Writer) io.Writer {
@@ -100,11 +69,11 @@ func (c *Client) composeDebugWriter(agentName string, base io.Writer) io.Writer 
 	return io.MultiWriter(ws...)
 }
 
-func (c *Client) handleDebugCommand(chatID, args string) error {
+func (c *Client) handleDebugCommand(args string) error {
 	if strings.TrimSpace(args) != "" {
 		return fmt.Errorf("usage: /debug")
 	}
-	c.reply(chatID, c.renderDebugStatus())
+	c.reply(c.renderDebugStatus())
 	return nil
 }
 

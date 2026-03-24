@@ -14,7 +14,6 @@ type permissionRouter struct {
 	client *Client
 
 	mu         sync.Mutex
-	lastChatID string
 	decisionCh chan struct{}
 }
 
@@ -25,28 +24,6 @@ func newPermissionRouter(c *Client) *permissionRouter {
 	}
 	r.decisionCh <- struct{}{}
 	return r
-}
-
-func (r *permissionRouter) setLastChatID(chatID string) {
-	r.mu.Lock()
-	r.lastChatID = chatID
-	r.mu.Unlock()
-	// Persist to state so that the chat ID survives server restarts.
-	r.client.mu.Lock()
-	if r.client.state != nil {
-		r.client.state.LastChatID = chatID
-	}
-	r.client.mu.Unlock()
-}
-
-func (r *permissionRouter) currentChatIDOrFallback() string {
-	r.mu.Lock()
-	chatID := strings.TrimSpace(r.lastChatID)
-	r.mu.Unlock()
-	if chatID == "" {
-		chatID = r.client.projectName
-	}
-	return chatID
 }
 
 func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
@@ -72,18 +49,16 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	chatID := r.currentChatIDOrFallback()
-
 	title := strings.TrimSpace(params.ToolCall.Title)
 	if title == "" {
 		title = "Permission request"
 	}
 
+	// ChatID is left empty; RequestDecision will use imBridge.activeChatID.
 	req := im.DecisionRequest{
-		Kind:   im.DecisionPermission,
-		ChatID: chatID,
-		Title:  title,
-		Body:   fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
+		Kind:  im.DecisionPermission,
+		Title: title,
+		Body:  fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
 		Meta: map[string]string{
 			"tool_call_id": params.ToolCall.ToolCallID,
 			"tool_title":   params.ToolCall.Title,

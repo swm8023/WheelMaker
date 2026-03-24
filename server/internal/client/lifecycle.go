@@ -64,7 +64,7 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 
 // switchAgent cancels any in-progress prompt, waits for it to finish via
 // promptMu, connects a new agent binary, and replaces the forwarder.
-func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode SwitchMode) error {
+func (c *Client) switchAgent(ctx context.Context, name string, mode SwitchMode) error {
 	fac := c.registry.get(name)
 	if fac == nil {
 		return fmt.Errorf("unknown agent: %q (registered: %v)", name, c.registry.names())
@@ -158,10 +158,10 @@ func (c *Client) switchAgent(ctx context.Context, chatID, name string, mode Swit
 		_ = c.store.Save(s)
 	}
 
-	c.reply(chatID, fmt.Sprintf("Switched to agent: %s", name))
+	c.reply(fmt.Sprintf("Switched to agent: %s", name))
 	snap := c.sessionConfigSnapshot()
 	if snap.Mode != "" || snap.Model != "" {
-		c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s",
+		c.reply(fmt.Sprintf("Session ready: mode=%s model=%s",
 			renderUnknown(snap.Mode), renderUnknown(snap.Model)))
 	}
 	return nil

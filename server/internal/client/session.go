@@ -205,8 +205,8 @@ func (c *Client) ensureReady(ctx context.Context) error {
 }
 
 // ensureReadyAndNotify calls ensureReady and sends a "Session ready" message
-// to chatID when this call is the one that first transitions to ready.
-func (c *Client) ensureReadyAndNotify(ctx context.Context, chatID string) error {
+// when this call is the one that first transitions to ready.
+func (c *Client) ensureReadyAndNotify(ctx context.Context) error {
 	c.mu.Lock()
 	wasReady := c.session.ready
 	c.mu.Unlock()
@@ -218,10 +218,10 @@ func (c *Client) ensureReadyAndNotify(ctx context.Context, chatID string) error 
 	if !wasReady {
 		snap := c.sessionConfigSnapshot()
 		if snap.Mode != "" || snap.Model != "" {
-			c.reply(chatID, fmt.Sprintf("Session ready: mode=%s model=%s",
+			c.reply(fmt.Sprintf("Session ready: mode=%s model=%s",
 				renderUnknown(snap.Mode), renderUnknown(snap.Model)))
 		} else {
-			c.reply(chatID, "Session ready.")
+			c.reply("Session ready.")
 		}
 		c.saveSessionState()
 	}

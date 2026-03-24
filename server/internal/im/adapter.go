@@ -26,6 +26,7 @@ type ImAdapter struct {
 	handler MessageHandler
 
 	mu           sync.Mutex
+	activeChatID string                      // most recent chat that sent a message
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
 	textFlush    map[string]*time.Timer      // chatID -> delayed text flush timer
 	toolCalls    map[string]map[string]string
@@ -125,6 +126,51 @@ func (f *ImAdapter) Run(ctx context.Context) error {
 	return f.adapter.Run(ctx)
 }
 
+// SetActiveChatID records the most recent chat to be addressed.
+// Client calls this on every incoming message so that Reply* and Emit
+// can route outbound messages without the caller specifying a chatID.
+func (f *ImAdapter) SetActiveChatID(id string) {
+	id = strings.TrimSpace(id)
+	f.mu.Lock()
+	f.activeChatID = id
+	f.mu.Unlock()
+}
+
+// ActiveChatID returns the most recently set active chat ID.
+func (f *ImAdapter) ActiveChatID() string {
+	f.mu.Lock()
+	id := f.activeChatID
+	f.mu.Unlock()
+	return id
+}
+
+// ReplySystem sends a system-level text to the active chat.
+func (f *ImAdapter) ReplySystem(text string) error {
+	chatID := f.ActiveChatID()
+	if chatID == "" {
+		return nil
+	}
+	return f.SendSystem(chatID, text)
+}
+
+// ReplyText sends a plain text message to the active chat.
+func (f *ImAdapter) ReplyText(text string) error {
+	chatID := f.ActiveChatID()
+	if chatID == "" {
+		return nil
+	}
+	return f.SendText(chatID, text)
+}
+
+// ReplyDebug sends a debug message to the active chat.
+func (f *ImAdapter) ReplyDebug(text string) error {
+	chatID := f.ActiveChatID()
+	if chatID == "" {
+		return nil
+	}
+	return f.SendDebug(chatID, text)
+}
+
 // SetHelpResolver injects realtime help payload provider from client.
 func (f *ImAdapter) SetHelpResolver(resolver func(ctx context.Context, chatID string) (HelpModel, error)) {
 	f.mu.Lock()
@@ -140,8 +186,12 @@ func (f *ImAdapter) SetDebugLogger(w io.Writer) {
 }
 
 // Emit renders semantic updates with incremental text flushing and tool-call streaming.
+// If u.ChatID is empty, the current activeChatID is used.
 func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	chatID := strings.TrimSpace(u.ChatID)
+	if chatID == "" {
+		chatID = f.ActiveChatID()
+	}
 	if chatID == "" {
 		return nil
 	}
@@ -295,7 +345,10 @@ type DecisionRequestWithDeadline struct {
 func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (DecisionResult, error) {
 	chatID := strings.TrimSpace(req.ChatID)
 	if chatID == "" {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("decision: empty chat id")
+		chatID = f.ActiveChatID()
+	}
+	if chatID == "" {
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("decision: no active chat id")
 	}
 	timeout := 2 * time.Minute
 	if v := strings.TrimSpace(req.Hint["timeoutSec"]); v != "" {

@@ -189,10 +189,10 @@ func (c *Client) Start(ctx context.Context) error {
 	if c.imBridge != nil {
 		c.imBridge.OnMessage(c.HandleMessage)
 		c.imBridge.SetHelpResolver(c.resolveHelpModel)
-		// Restore the last known chat ID so lifecycle notices go to the correct chat
+		// Restore the last known chat ID so lifecycle notices reach the correct chat
 		// after a server restart.
 		if state.LastChatID != "" {
-			c.permRouter.setLastChatID(state.LastChatID)
+			c.imBridge.SetActiveChatID(state.LastChatID)
 		}
 		c.notifyLifecycle(lifecycleStartNotice)
 	}
@@ -230,11 +230,7 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) notifyLifecycle(text string) {
-	chatID := c.permRouter.currentChatIDOrFallback()
-	if strings.TrimSpace(chatID) == "" {
-		return
-	}
-	c.reply(chatID, text)
+	c.reply(text)
 }
 
 // HandleMessage routes an incoming IM message to the appropriate handler.
@@ -242,8 +238,16 @@ func (c *Client) notifyLifecycle(text string) {
 // everything else — including lines starting with "/" that are not known commands —
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
-	c.permRouter.setLastChatID(msg.ChatID)
-	c.bindDebugChat(c.resolveCurrentAgentName(), msg.ChatID)
+	// Update the active chat ID so all outbound messages route to the correct chat.
+	if c.imBridge != nil && strings.TrimSpace(msg.ChatID) != "" {
+		c.imBridge.SetActiveChatID(msg.ChatID)
+		// Persist so that lifecycle notices survive a server restart.
+		c.mu.Lock()
+		if c.state != nil {
+			c.state.LastChatID = msg.ChatID
+		}
+		c.mu.Unlock()
+	}
 
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
@@ -283,12 +287,12 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	for attempt := 1; attempt <= 2; attempt++ {
 		// Lazily initialize the agent if no forwarder exists yet.
 		if err := c.ensureForwarder(ctx); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			c.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
 
-		if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
-			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		if err := c.ensureReadyAndNotify(ctx); err != nil {
+			c.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
 
@@ -296,10 +300,10 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		if err != nil {
 			// Keepalive: recover dead agent subprocess and retry current prompt once.
 			if c.resetDeadConnection(err) && attempt == 1 {
-				c.reply(msg.ChatID, "Agent disconnected, reconnecting and retrying once...")
+				c.reply("Agent disconnected, reconnecting and retrying once...")
 				continue
 			}
-			c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
+			c.reply(fmt.Sprintf("Prompt error: %v", err))
 			return
 		}
 
@@ -320,14 +324,13 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		for u := range updates {
 			if hasEmitter {
 				emitErr := emitter.Emit(ctx, im.IMUpdate{
-					ChatID:     msg.ChatID,
 					SessionID:  sid,
 					UpdateType: string(u.Type),
 					Text:       u.Content,
 					Raw:        u.Raw,
 				})
 				if emitErr != nil {
-					c.reply(msg.ChatID, fmt.Sprintf("IM emit error: %v", emitErr))
+					c.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 				}
 			}
 			if hasSandboxRefreshError(u) {
@@ -340,17 +343,17 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 				if c.resetDeadConnection(u.Err) {
 					// Warm reconnect so the next user message can continue immediately.
 					if recErr := c.ensureForwarder(ctx); recErr == nil {
-						_ = c.ensureReadyAndNotify(ctx, msg.ChatID)
+						_ = c.ensureReadyAndNotify(ctx)
 					}
 				}
-				c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
+				c.reply(fmt.Sprintf("Agent error: %v", u.Err))
 				c.mu.Lock()
 				c.prompt.currentCh = nil
 				c.mu.Unlock()
 				return
 			}
 			if u.Type == acp.UpdateConfigOption {
-				c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
+				c.reply(formatConfigOptionUpdateMessage(u.Raw))
 				c.saveSessionState() // persist immediately; don't wait for prompt to finish
 			}
 			if u.Type == acp.UpdateText {
@@ -371,13 +374,13 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		c.saveSessionState()
 
 		if !hasEmitter && buf.Len() > 0 {
-			c.reply(msg.ChatID, buf.String())
+			c.reply(buf.String())
 		}
 
 		// Auto-degrade: retry once after reconnect when sandbox setup refresh occurs
 		// and no meaningful text answer was produced.
 		if attempt == 1 && sawSandboxRefresh && !sawText {
-			c.reply(msg.ChatID, "Detected sandbox refresh failure, reconnecting and retrying once...")
+			c.reply("Detected sandbox refresh failure, reconnecting and retrying once...")
 			c.forceReconnect()
 			continue
 		}
@@ -385,22 +388,28 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	}
 }
 
-// reply sends a text response to the chat via the IM channel.
-func (c *Client) reply(chatID, text string) {
+// reply sends a text response to the active chat via the IM channel.
+// Falls back to projectName as chatID when no chat has been established yet
+// (e.g., lifecycle notices before the first user message).
+func (c *Client) reply(text string) {
 	if c.imBridge != nil {
-		if sender, ok := any(c.imBridge).(im.SystemSender); ok {
-			_ = sender.SendSystem(chatID, text)
-			return
+		chatID := c.imBridge.ActiveChatID()
+		if chatID == "" {
+			chatID = c.projectName
 		}
-		_ = c.imBridge.SendText(chatID, text)
+		_ = c.imBridge.SendSystem(chatID, text)
 		return
 	}
 	fmt.Println(text)
 }
 
 // replyDebug sends debug text via IM debug channel when available.
-func (c *Client) replyDebug(chatID, text string) {
+func (c *Client) replyDebug(text string) {
 	if c.imBridge != nil {
+		chatID := c.imBridge.ActiveChatID()
+		if chatID == "" {
+			chatID = c.projectName
+		}
 		_ = c.imBridge.SendDebug(chatID, text)
 		return
 	}
