@@ -128,14 +128,21 @@ func (r *permissionRouter) releaseDecisionSlot() {
 }
 
 func chooseAutoAllowOption(options []acp.PermissionOption) string {
+	// Prefer allow_always so yolo mode permanently grants the permission.
+	// Fall back to any allow_* option if allow_always is not offered.
+	fallback := ""
 	for _, o := range options {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(o.Kind)), "allow") &&
-			strings.TrimSpace(o.OptionID) != "" {
-			return strings.TrimSpace(o.OptionID)
+		kind := strings.ToLower(strings.TrimSpace(o.Kind))
+		id := strings.TrimSpace(o.OptionID)
+		if id == "" {
+			continue
+		}
+		if kind == "allow_always" {
+			return id
+		}
+		if fallback == "" && strings.HasPrefix(kind, "allow") {
+			fallback = id
 		}
 	}
-	if len(options) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(options[0].OptionID)
+	return fallback
 }
