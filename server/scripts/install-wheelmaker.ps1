@@ -1,7 +1,7 @@
 param(
   [string]$InstallDir = (Join-Path -Path $HOME -ChildPath ".wheelmaker\\bin"),
   [string]$SourceExe = "",
-  [switch]$NoBuild,
+  [switch]$Build,
   [switch]$WhatIf
 )
 
@@ -17,23 +17,23 @@ function Resolve-SourceExe {
   param(
     [string]$RepoRoot,
     [string]$HintSource,
-    [switch]$SkipBuild
+    [switch]$BuildBinary
   )
   if (-not [string]::IsNullOrWhiteSpace($HintSource)) {
     return (Resolve-Path $HintSource).Path
   }
   $defaultExe = Join-Path -Path $RepoRoot -ChildPath "bin\\windows_amd64\\wheelmaker.exe"
-  if ($SkipBuild) {
-    if (-not (Test-Path $defaultExe)) {
-      throw "source binary not found: $defaultExe (build disabled by -NoBuild)"
+  if ($BuildBinary) {
+    Write-Step "build wheelmaker binary"
+    New-Item -ItemType Directory -Path (Split-Path $defaultExe -Parent) -Force | Out-Null
+    & go build -o $defaultExe ./cmd/wheelmaker/
+    if ($LASTEXITCODE -ne 0) {
+      throw "go build failed (exit=$LASTEXITCODE)"
     }
     return (Resolve-Path $defaultExe).Path
   }
-  Write-Step "build wheelmaker binary"
-  New-Item -ItemType Directory -Path (Split-Path $defaultExe -Parent) -Force | Out-Null
-  & go build -o $defaultExe ./cmd/wheelmaker/
-  if ($LASTEXITCODE -ne 0) {
-    throw "go build failed (exit=$LASTEXITCODE)"
+  if (-not (Test-Path $defaultExe)) {
+    throw "source binary not found: $defaultExe (pass -Build to compile first)"
   }
   return (Resolve-Path $defaultExe).Path
 }
@@ -100,7 +100,7 @@ function Stop-WheelmakerProcesses {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$source = Resolve-SourceExe -RepoRoot $repoRoot -HintSource $SourceExe -SkipBuild:$NoBuild
+$source = Resolve-SourceExe -RepoRoot $repoRoot -HintSource $SourceExe -BuildBinary:$Build
 $targetDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
 $targetExe = Join-Path -Path $targetDir -ChildPath "wheelmaker.exe"
 

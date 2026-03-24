@@ -37,7 +37,7 @@ if (-not (Test-Path $installScript)) {
   exit 1
 }
 
-powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -InstallDir $InstallDir
+powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -InstallDir $InstallDir -Build
 if ($LASTEXITCODE -ne 0) {
   Add-Content -Path $logPath -Value ("[{0}] install failed exit={1}" -f (Get-Date -Format o), $LASTEXITCODE)
   exit $LASTEXITCODE
