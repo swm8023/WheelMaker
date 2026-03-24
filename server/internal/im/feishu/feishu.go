@@ -577,11 +577,27 @@ func (f *Channel) sendDebug(chatID, text string) error {
 }
 
 func sanitizeDebugStreamLine(text string) string {
-	line := strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
-	if strings.TrimSpace(line) == "" {
+	line := strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if line == "" {
 		return ""
 	}
-	// Keep debug stream content aligned with raw log lines.
+	if strings.HasPrefix(line, "[debug][") {
+		if idx := strings.Index(line, "] "); idx >= 0 && idx+2 < len(line) {
+			line = strings.TrimSpace(line[idx+2:])
+		}
+	}
+	for {
+		switched := false
+		for _, p := range []string{"->[acp]", "<-[acp]", "->[im]", "<-[im]"} {
+			if strings.HasPrefix(line, p) {
+				line = strings.TrimSpace(strings.TrimPrefix(line, p))
+				switched = true
+			}
+		}
+		if !switched {
+			break
+		}
+	}
 	return line
 }
 

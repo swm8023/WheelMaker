@@ -230,10 +230,10 @@ func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
 	}
 }
 
-func TestSanitizeDebugStreamLine_KeepsRawLogContent(t *testing.T) {
+func TestSanitizeDebugStreamLine_StripsPrefixes(t *testing.T) {
 	in := "[debug][codex] <-[acp] {\"jsonrpc\":\"2.0\"}"
 	got := sanitizeDebugStreamLine(in)
-	if got != in {
+	if got != "{\"jsonrpc\":\"2.0\"}" {
 		t.Fatalf("sanitizeDebugStreamLine()=%q", got)
 	}
 }
