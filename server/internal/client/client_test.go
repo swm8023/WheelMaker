@@ -623,7 +623,8 @@ func TestHandleMessage_Prompt_DebugForwardsACPJSONToIM(t *testing.T) {
 
 	found := false
 	for _, m := range *debugMsgs {
-		if strings.Contains(m, "[debug][codex]") && strings.Contains(m, "\"jsonrpc\"") {
+		if strings.Contains(m, "[debug][codex]") && strings.Contains(m, "[acp]") &&
+			(strings.Contains(m, "\"method\":\"initialize\"") || strings.Contains(m, "\"method\":\"session/prompt\"")) {
 			found = true
 			break
 		}

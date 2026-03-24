@@ -276,97 +276,108 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 	defer c.permRouter.clearLastChatID(msg.ChatID)
 
 	ctx := context.Background()
-
-	// Lazily initialize the agent if no forwarder exists yet.
-	if err := c.ensureForwarder(ctx); err != nil {
-		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-		return
-	}
-
-	if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
-		c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
-		return
-	}
-
-	updates, err := c.promptStream(ctx, text)
-	if err != nil {
-		// Keepalive: recover dead agent subprocess and retry current prompt once.
-		if c.resetDeadConnection(err) {
-			if recErr := c.ensureForwarder(ctx); recErr == nil {
-				if recErr = c.ensureReadyAndNotify(ctx, msg.ChatID); recErr == nil {
-					updates, err = c.promptStream(ctx, text)
-				} else {
-					err = recErr
-				}
-			} else {
-				err = recErr
-			}
+	for attempt := 1; attempt <= 2; attempt++ {
+		// Lazily initialize the agent if no forwarder exists yet.
+		if err := c.ensureForwarder(ctx); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			return
 		}
+
+		if err := c.ensureReadyAndNotify(ctx, msg.ChatID); err != nil {
+			c.reply(msg.ChatID, fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			return
+		}
+
+		updates, err := c.promptStream(ctx, text)
 		if err != nil {
+			// Keepalive: recover dead agent subprocess and retry current prompt once.
+			if c.resetDeadConnection(err) && attempt == 1 {
+				c.reply(msg.ChatID, "Agent disconnected, reconnecting and retrying once...")
+				continue
+			}
 			c.reply(msg.ChatID, fmt.Sprintf("Prompt error: %v", err))
 			return
 		}
-	}
 
-	c.mu.Lock()
-	c.prompt.currentCh = updates
-	c.mu.Unlock()
+		c.mu.Lock()
+		c.prompt.currentCh = updates
+		c.mu.Unlock()
 
-	var buf strings.Builder
-	c.mu.Lock()
-	emitter := c.imBridge
-	hasEmitter := emitter != nil
-	sid := c.session.id
-	c.mu.Unlock()
-	for u := range updates {
-		if hasEmitter {
-			emitErr := emitter.Emit(ctx, im.IMUpdate{
-				ChatID:     msg.ChatID,
-				SessionID:  sid,
-				UpdateType: string(u.Type),
-				Text:       u.Content,
-				Raw:        u.Raw,
-			})
-			if emitErr != nil {
-				c.reply(msg.ChatID, fmt.Sprintf("IM emit error: %v", emitErr))
-			}
-		}
-		if u.Err != nil {
-			if c.resetDeadConnection(u.Err) {
-				// Warm reconnect so the next user message can continue immediately.
-				if recErr := c.ensureForwarder(ctx); recErr == nil {
-					_ = c.ensureReadyAndNotify(ctx, msg.ChatID)
+		var buf strings.Builder
+		c.mu.Lock()
+		emitter := c.imBridge
+		hasEmitter := emitter != nil
+		sid := c.session.id
+		c.mu.Unlock()
+
+		sawSandboxRefresh := false
+		sawText := false
+
+		for u := range updates {
+			if hasEmitter {
+				emitErr := emitter.Emit(ctx, im.IMUpdate{
+					ChatID:     msg.ChatID,
+					SessionID:  sid,
+					UpdateType: string(u.Type),
+					Text:       u.Content,
+					Raw:        u.Raw,
+				})
+				if emitErr != nil {
+					c.reply(msg.ChatID, fmt.Sprintf("IM emit error: %v", emitErr))
 				}
 			}
-			c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
-			c.mu.Lock()
-			c.prompt.currentCh = nil
-			c.mu.Unlock()
-			return
-		}
-		if u.Type == acp.UpdateConfigOption {
-			c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
-			c.saveSessionState() // persist immediately; don't wait for prompt to finish
-		}
-		if u.Type == acp.UpdateText {
-			if !hasEmitter {
-				buf.WriteString(u.Content)
+			if hasSandboxRefreshError(u) {
+				sawSandboxRefresh = true
+			}
+			if u.Type == acp.UpdateText && strings.TrimSpace(u.Content) != "" {
+				sawText = true
+			}
+			if u.Err != nil {
+				if c.resetDeadConnection(u.Err) {
+					// Warm reconnect so the next user message can continue immediately.
+					if recErr := c.ensureForwarder(ctx); recErr == nil {
+						_ = c.ensureReadyAndNotify(ctx, msg.ChatID)
+					}
+				}
+				c.reply(msg.ChatID, fmt.Sprintf("Agent error: %v", u.Err))
+				c.mu.Lock()
+				c.prompt.currentCh = nil
+				c.mu.Unlock()
+				return
+			}
+			if u.Type == acp.UpdateConfigOption {
+				c.reply(msg.ChatID, formatConfigOptionUpdateMessage(u.Raw))
+				c.saveSessionState() // persist immediately; don't wait for prompt to finish
+			}
+			if u.Type == acp.UpdateText {
+				if !hasEmitter {
+					buf.WriteString(u.Content)
+				}
+			}
+			if u.Done {
+				break
 			}
 		}
-		if u.Done {
-			break
+
+		c.mu.Lock()
+		c.prompt.currentCh = nil
+		c.mu.Unlock()
+
+		// Persist after prompt completes: session ID and config metadata may have changed.
+		c.saveSessionState()
+
+		if !hasEmitter && buf.Len() > 0 {
+			c.reply(msg.ChatID, buf.String())
 		}
-	}
 
-	c.mu.Lock()
-	c.prompt.currentCh = nil
-	c.mu.Unlock()
-
-	// Persist after prompt completes: session ID and config metadata may have changed.
-	c.saveSessionState()
-
-	if !hasEmitter && buf.Len() > 0 {
-		c.reply(msg.ChatID, buf.String())
+		// Auto-degrade: retry once after reconnect when sandbox setup refresh occurs
+		// and no meaningful text answer was produced.
+		if attempt == 1 && sawSandboxRefresh && !sawText {
+			c.reply(msg.ChatID, "Detected sandbox refresh failure, reconnecting and retrying once...")
+			c.forceReconnect()
+			continue
+		}
+		return
 	}
 }
 
@@ -434,4 +445,26 @@ func (c *Client) resetDeadConnection(err error) bool {
 		_ = old.close()
 	}
 	return true
+}
+
+func (c *Client) forceReconnect() {
+	c.mu.Lock()
+	old := c.conn
+	c.conn = nil
+	c.session.ready = false
+	c.session.initializing = false
+	c.prompt.ctx = nil
+	c.prompt.cancel = nil
+	c.prompt.updatesCh = nil
+	c.prompt.currentCh = nil
+	c.prompt.activeTCs = make(map[string]struct{})
+	c.mu.Unlock()
+	if old != nil {
+		_ = old.close()
+	}
+}
+
+func hasSandboxRefreshError(u acp.Update) bool {
+	s := strings.ToLower(u.Content + " " + string(u.Raw))
+	return strings.Contains(s, "windows sandbox: spawn setup refresh")
 }
