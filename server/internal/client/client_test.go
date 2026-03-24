@@ -376,6 +376,38 @@ func TestClose_UsesLastChatIDForLifecycleShutdownNotice(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_ReplaysLifecycleStartNoticeOnChatIDChangeAfterRestart(t *testing.T) {
+	st := client.DefaultState()
+	st.LastChatID = "mobile-1"
+	store := &mockStore{state: st}
+	c := client.New(store, nil, "test-project", "/tmp")
+	msgs := []string{}
+	chats := []string{}
+	c.InjectIMChannel(&captureChannel{messages: &msgs, chatIDs: &chats})
+
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	msgs = msgs[:0]
+	chats = chats[:0]
+
+	c.HandleMessage(im.Message{ChatID: "mobile-2", Text: "/status"})
+
+	found := false
+	for i := range msgs {
+		if strings.Contains(msgs[i], "server started") {
+			if chats[i] != "mobile-2" {
+				t.Fatalf("replayed start notice sent to %q, want %q", chats[i], "mobile-2")
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected replayed lifecycle start notice after chat id changed; msgs=%v chats=%v", msgs, chats)
+	}
+}
+
 func firstOrEmpty(v []string) string {
 	if len(v) == 0 {
 		return ""

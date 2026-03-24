@@ -130,6 +130,9 @@ type Client struct {
 
 	permRouter *permissionRouter
 	debugSink  *agentDebugSink
+
+	startNoticeSentChatID   string
+	startNoticeReplayQueued bool
 }
 
 // New creates a Client for the given project.
@@ -194,7 +197,7 @@ func (c *Client) Start(ctx context.Context) error {
 		if state.LastChatID != "" {
 			c.imBridge.SetActiveChatID(state.LastChatID)
 		}
-		c.notifyLifecycle(lifecycleStartNotice)
+		c.notifyLifecycleStart()
 	}
 	return nil
 }
@@ -233,6 +236,43 @@ func (c *Client) notifyLifecycle(text string) {
 	c.reply(text)
 }
 
+func (c *Client) notifyLifecycleStart() {
+	if c.imBridge == nil {
+		fmt.Println(lifecycleStartNotice)
+		return
+	}
+	chatID := c.imBridge.ActiveChatID()
+	if chatID == "" {
+		chatID = c.projectName
+	}
+	c.mu.Lock()
+	c.startNoticeSentChatID = strings.TrimSpace(chatID)
+	c.startNoticeReplayQueued = true
+	c.mu.Unlock()
+	_ = c.imBridge.SendSystem(chatID, lifecycleStartNotice)
+}
+
+func (c *Client) maybeReplayLifecycleStart(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	c.mu.Lock()
+	if !c.startNoticeReplayQueued {
+		c.mu.Unlock()
+		return
+	}
+	sentTo := strings.TrimSpace(c.startNoticeSentChatID)
+	if sentTo == "" || sentTo == chatID {
+		c.startNoticeReplayQueued = false
+		c.mu.Unlock()
+		return
+	}
+	c.startNoticeReplayQueued = false
+	c.mu.Unlock()
+	c.reply(lifecycleStartNotice)
+}
+
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are dispatched to handleCommand;
 // everything else — including lines starting with "/" that are not known commands —
@@ -248,6 +288,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 		}
 		c.mu.Unlock()
 	}
+	c.maybeReplayLifecycleStart(msg.ChatID)
 
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
