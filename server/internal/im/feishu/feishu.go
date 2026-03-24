@@ -577,15 +577,11 @@ func (f *Channel) sendDebug(chatID, text string) error {
 }
 
 func sanitizeDebugStreamLine(text string) string {
-	line := strings.TrimSpace(text)
-	// Strip agent debug wrapper prefix, e.g. "[debug][codex] ..."
-	if strings.HasPrefix(line, "[debug][") {
-		if idx := strings.Index(line, "] "); idx >= 0 && idx+2 < len(line) {
-			line = strings.TrimSpace(line[idx+2:])
-		}
+	line := strings.TrimRight(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	if strings.TrimSpace(line) == "" {
+		return ""
 	}
-	// Keep transport direction prefixes (e.g. "<-[acp]", "->[im]") so
-	// debug stream retains request/response flow context.
+	// Keep debug stream content aligned with raw log lines.
 	return line
 }
 
