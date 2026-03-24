@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -14,6 +15,8 @@ import (
 	"github.com/swm8023/wheelmaker/internal/logger"
 )
 
+const daemonWorkerArg = "--daemon-worker"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "wheelmaker: %v\n", err)
@@ -22,6 +25,24 @@ func main() {
 }
 
 func run() error {
+	fs := flag.NewFlagSet("wheelmaker", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	daemonMode := fs.Bool("d", false, "run guardian mode (checks service every 30 seconds)")
+	daemonWorker := fs.Bool("daemon-worker", false, "internal: worker mode for guardian")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return err
+	}
+	switch {
+	case *daemonWorker:
+		return runService()
+	case *daemonMode:
+		return runGuardian(fs.Args())
+	default:
+		return runService()
+	}
+}
+
+func runService() error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
