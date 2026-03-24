@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -188,9 +189,20 @@ func previewStr(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+var rexUUID = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+
+func sanitizeDebugJSON(raw []byte) string {
+	s := strings.TrimSpace(string(raw))
+	// Remove "jsonrpc":"2.0" field (always the first field in our messages)
+	s = strings.Replace(s, `"jsonrpc":"2.0",`, "", 1)
+	// Shorten full UUIDs to their first 8 characters
+	s = rexUUID.ReplaceAllStringFunc(s, func(m string) string { return m[:8] })
+	return s
+}
+
 func writeDebugLine(w io.Writer, prefix string, raw []byte) {
 	if p := strings.TrimSpace(prefix); p != "" {
-		_, _ = fmt.Fprintf(w, "%s[acp] %s\n", p, strings.TrimSpace(string(raw)))
+		_, _ = fmt.Fprintf(w, "%s[acp] %s\n", p, sanitizeDebugJSON(raw))
 	}
 }
 
