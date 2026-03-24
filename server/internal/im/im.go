@@ -59,3 +59,8 @@ type DebugLoggerSetter interface {
 type ToolCallSender interface {
 	SendToolCall(chatID string, update ToolCallUpdate) error
 }
+
+// DoneMarker can mark the final outbound message when a prompt stops.
+type DoneMarker interface {
+	MarkDone(chatID string) error
+}

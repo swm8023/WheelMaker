@@ -52,6 +52,8 @@ type Channel struct {
 	seenMessageID map[string]time.Time
 	ackMu         sync.Mutex
 	pendingAck    map[string]pendingAckReaction // chatID -> latest inbound reaction to clear on first reply
+	lastMu        sync.Mutex
+	lastOutbound  map[string]string // chatID -> last outbound message ID
 }
 
 type debugStream struct {
@@ -109,6 +111,7 @@ func New(cfg Config) *Channel {
 		toolCards:     map[string]map[string]*toolCardState{},
 		toolCompact:   map[string]*compactToolStream{},
 		pendingAck:    map[string]pendingAckReaction{},
+		lastOutbound:  map[string]string{},
 	}
 }
 
@@ -173,12 +176,14 @@ func (f *Channel) SendText(chatID, text string) error {
 			mid := strings.TrimSpace(resp.Data.MessageID)
 			if mid != "" {
 				ts.messageID = mid
+				f.setLastOutbound(chatID, mid)
 			}
 		}
 		f.clearReceiveAck(chatID)
 		return nil
 	}
 	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
+		f.setLastOutbound(chatID, messageID)
 		f.clearReceiveAck(chatID)
 		return nil
 	}
@@ -189,6 +194,7 @@ func (f *Channel) SendText(chatID, text string) error {
 	if resp != nil {
 		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
 			ts.messageID = mid
+			f.setLastOutbound(chatID, mid)
 		}
 	}
 	f.clearReceiveAck(chatID)
@@ -239,12 +245,14 @@ func (f *Channel) SendSystem(chatID, text string) error {
 			mid := strings.TrimSpace(resp.Data.MessageID)
 			if mid != "" {
 				ts.messageID = mid
+				f.setLastOutbound(chatID, mid)
 			}
 		}
 		f.clearReceiveAck(chatID)
 		return nil
 	}
 	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
+		f.setLastOutbound(chatID, messageID)
 		f.clearReceiveAck(chatID)
 		return nil
 	}
@@ -255,6 +263,7 @@ func (f *Channel) SendSystem(chatID, text string) error {
 	if resp != nil {
 		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
 			ts.messageID = mid
+			f.setLastOutbound(chatID, mid)
 		}
 	}
 	f.clearReceiveAck(chatID)
@@ -295,8 +304,11 @@ func (f *Channel) SendCard(chatID string, card im.Card) error {
 		BindChatID(chatID).
 		Card(string(raw)).
 		Build()
-	_, err = bot.PostMessage(msg)
+	resp, err := bot.PostMessage(msg)
 	if err == nil {
+		if resp != nil {
+			f.setLastOutbound(chatID, strings.TrimSpace(resp.Data.MessageID))
+		}
 		f.clearReceiveAck(chatID)
 	}
 	return err
@@ -435,6 +447,19 @@ func (f *Channel) SendReaction(messageID, emoji string) error {
 	return err
 }
 
+// MarkDone adds DONE reaction to the last outbound message in this chat.
+func (f *Channel) MarkDone(chatID string) error {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	messageID := f.getLastOutbound(chatID)
+	if messageID == "" {
+		return nil
+	}
+	return f.SendReaction(messageID, "DONE")
+}
+
 func (f *Channel) addReceiveAck(chatID, messageID string) {
 	chatID = strings.TrimSpace(chatID)
 	messageID = strings.TrimSpace(messageID)
@@ -480,6 +505,27 @@ func (f *Channel) clearReceiveAck(chatID string) (pendingAckReaction, bool) {
 	}
 	// Keep GET reaction as a durable "processed" marker; only consume pending state.
 	return ack, true
+}
+
+func (f *Channel) setLastOutbound(chatID, messageID string) {
+	chatID = strings.TrimSpace(chatID)
+	messageID = strings.TrimSpace(messageID)
+	if chatID == "" || messageID == "" {
+		return
+	}
+	f.lastMu.Lock()
+	f.lastOutbound[chatID] = messageID
+	f.lastMu.Unlock()
+}
+
+func (f *Channel) getLastOutbound(chatID string) string {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return ""
+	}
+	f.lastMu.Lock()
+	defer f.lastMu.Unlock()
+	return strings.TrimSpace(f.lastOutbound[chatID])
 }
 
 // SendDebug appends debug text to a per-chat stream card and flushes every 2 seconds.
@@ -746,6 +792,7 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 		return err
 	}
 	if messageID != "" {
+		f.setLastOutbound(chatID, messageID)
 		f.toolMu.Lock()
 		if cards := f.toolCards[chatID]; cards != nil {
 			if curState := cards[toolCallID]; curState != nil {
@@ -850,6 +897,7 @@ func (f *Channel) sendToolCallCompact(chatID string, update im.ToolCallUpdate) e
 	}
 
 	if messageID != "" {
+		f.setLastOutbound(chatID, messageID)
 		f.toolMu.Lock()
 		if st := f.toolCompact[chatID]; st != nil {
 			st.messageID = messageID

@@ -16,6 +16,8 @@ type stubAdapter struct {
 	textCount  int
 	cardSent   bool
 	runCalled  bool
+	doneChatID string
+	doneCount  int
 }
 
 type toolCardStub struct {
@@ -37,6 +39,11 @@ func (s *stubAdapter) SendText(chatID, text string) error {
 }
 func (s *stubAdapter) SendCard(_ string, _ Card) error { return nil }
 func (s *stubAdapter) SendReaction(_, _ string) error  { return nil }
+func (s *stubAdapter) MarkDone(chatID string) error {
+	s.doneChatID = chatID
+	s.doneCount++
+	return nil
+}
 func (s *stubAdapter) Run(_ context.Context) error {
 	s.runCalled = true
 	return nil
@@ -166,6 +173,9 @@ func TestForwarder_EmitFlushOnDone(t *testing.T) {
 	}
 	if ad.lastText != "hello" {
 		t.Fatalf("flushed text %q, want %q", ad.lastText, "hello")
+	}
+	if ad.doneCount != 1 || ad.doneChatID != "chat-1" {
+		t.Fatalf("done marker (%d,%q), want (1,%q)", ad.doneCount, ad.doneChatID, "chat-1")
 	}
 }
 

@@ -365,3 +365,11 @@ func TestBuildCompactToolCard_TitleFallsBackToTextOnly(t *testing.T) {
 	}
 }
 
+func TestLastOutboundState(t *testing.T) {
+	ch := New(Config{})
+	ch.setLastOutbound("chat-1", "msg-1")
+	if got := ch.getLastOutbound("chat-1"); got != "msg-1" {
+		t.Fatalf("last outbound=%q, want %q", got, "msg-1")
+	}
+}
+

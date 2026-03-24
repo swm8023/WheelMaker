@@ -205,6 +205,9 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		f.mu.Lock()
 		delete(f.toolCalls, chatID)
 		f.mu.Unlock()
+		if marker, ok := f.adapter.(DoneMarker); ok {
+			return marker.MarkDone(chatID)
+		}
 	case IMUpdateError:
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
