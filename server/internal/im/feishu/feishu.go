@@ -869,14 +869,15 @@ func compactToolIconTitle(lines []string) string {
 	return "🛠️ " + strings.Join(icons, " ")
 }
 
-var inlineNumberedListPattern = regexp.MustCompile(`\s+(\d{1,2}[.)、]\s+)`)
+var inlineNumberedListPattern = regexp.MustCompile(`[ \t]+(\d{1,2}[.)、][ \t]*)`)
 
 func formatCompactTranscript(s string) string {
 	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\u3000", " ")
 	if strings.TrimSpace(s) == "" {
 		return ""
 	}
-	return inlineNumberedListPattern.ReplaceAllString(s, "\n$1")
+	return strings.TrimSpace(inlineNumberedListPattern.ReplaceAllString(s, "\n$1"))
 }
 
 func compactToolTranscript(stream *compactToolStream) string {

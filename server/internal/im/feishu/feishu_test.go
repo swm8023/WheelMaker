@@ -264,6 +264,34 @@ func TestBuildCompactToolCard_FormatsInlineNumberedTranscript(t *testing.T) {
 	}
 }
 
+func TestBuildCompactToolCard_FormatsNumberedVariants(t *testing.T) {
+	card := buildCompactToolCard(
+		[]string{"RUN plan"},
+		"1)collect context 2)update tests 3)ship",
+	)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) != 1 {
+		t.Fatalf("elements mismatch: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "```text\n1)collect context\n2)update tests\n3)ship\n```") {
+		t.Fatalf("numbered variant with ) should be split, got: %q", content)
+	}
+
+	card2 := buildCompactToolCard(
+		[]string{"RUN plan"},
+		"1、准备\u30002、验证\u30003、发布",
+	)
+	elements2, ok := card2["elements"].([]map[string]any)
+	if !ok || len(elements2) != 1 {
+		t.Fatalf("elements mismatch: %+v", card2)
+	}
+	content2, _ := elements2[0]["content"].(string)
+	if !strings.Contains(content2, "```text\n1、准备\n2、验证\n3、发布\n```") {
+		t.Fatalf("numbered variant with full-width spaces should be split, got: %q", content2)
+	}
+}
+
 func TestBuildCompactToolCard_TitleIconsLimited(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{
