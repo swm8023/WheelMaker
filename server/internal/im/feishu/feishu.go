@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -177,15 +178,11 @@ func (f *Channel) SendText(chatID, text string) error {
 				postMessageID = mid
 			}
 		}
-		if f.clearReceiveAck(chatID) {
-			f.addDoneReaction(postMessageID)
-		}
+		f.markDoneAfterAck(chatID, postMessageID)
 		return nil
 	}
 	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
-		if f.clearReceiveAck(chatID) {
-			f.addDoneReaction(messageID)
-		}
+		f.markDoneAfterAck(chatID, messageID)
 		return nil
 	}
 	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
@@ -199,9 +196,7 @@ func (f *Channel) SendText(chatID, text string) error {
 			postMessageID = mid
 		}
 	}
-	if f.clearReceiveAck(chatID) {
-		f.addDoneReaction(postMessageID)
-	}
+	f.markDoneAfterAck(chatID, postMessageID)
 	return nil
 }
 
@@ -253,15 +248,11 @@ func (f *Channel) SendSystem(chatID, text string) error {
 				postMessageID = mid
 			}
 		}
-		if f.clearReceiveAck(chatID) {
-			f.addDoneReaction(postMessageID)
-		}
+		f.markDoneAfterAck(chatID, postMessageID)
 		return nil
 	}
 	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
-		if f.clearReceiveAck(chatID) {
-			f.addDoneReaction(messageID)
-		}
+		f.markDoneAfterAck(chatID, messageID)
 		return nil
 	}
 	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
@@ -275,9 +266,7 @@ func (f *Channel) SendSystem(chatID, text string) error {
 			postMessageID = mid
 		}
 	}
-	if f.clearReceiveAck(chatID) {
-		f.addDoneReaction(postMessageID)
-	}
+	f.markDoneAfterAck(chatID, postMessageID)
 	return nil
 }
 
@@ -316,8 +305,8 @@ func (f *Channel) SendCard(chatID string, card im.Card) error {
 		Card(string(raw)).
 		Build()
 	resp, err := bot.PostMessage(msg)
-	if err == nil && f.clearReceiveAck(chatID) && resp != nil {
-		f.addDoneReaction(strings.TrimSpace(resp.Data.MessageID))
+	if err == nil && resp != nil {
+		f.markDoneAfterAck(chatID, strings.TrimSpace(resp.Data.MessageID))
 	}
 	return err
 }
@@ -328,7 +317,7 @@ func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 	decisionID := strings.TrimSpace(meta["decision_id"])
 	if toolCallID != "" && decisionID != "" {
 		err := f.attachPermissionOptionsToToolCard(chatID, toolCallID, title, options, meta)
-		if err == nil && f.clearReceiveAck(chatID) {
+		if err == nil {
 			f.toolMu.Lock()
 			messageID := ""
 			if cards := f.toolCards[chatID]; cards != nil {
@@ -337,7 +326,7 @@ func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 				}
 			}
 			f.toolMu.Unlock()
-			f.addDoneReaction(messageID)
+			f.markDoneAfterAck(chatID, messageID)
 		}
 		return err
 	}
@@ -497,26 +486,42 @@ func (f *Channel) popPendingAck(chatID string) (pendingAckReaction, bool) {
 	return ack, true
 }
 
-func (f *Channel) clearReceiveAck(chatID string) bool {
+func (f *Channel) clearReceiveAck(chatID string) (pendingAckReaction, bool) {
 	ack, ok := f.popPendingAck(chatID)
 	if !ok {
-		return false
+		return pendingAckReaction{}, false
 	}
 	// Keep GET reaction as a durable "processed" marker; only consume pending state.
-	_ = ack
-	return true
+	return ack, true
 }
 
-func (f *Channel) addDoneReaction(messageID string) {
+func (f *Channel) addDoneReaction(messageID string) bool {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
-		return
+		return false
 	}
 	bot, err := f.ensureBot()
 	if err != nil {
+		return false
+	}
+	if _, err := bot.AddReaction(messageID, lark.EmojiTypeDONE); err != nil {
+		if f.cfg.Debug {
+			log.Printf("[feishu-reaction] add DONE failed message=%s err=%v", messageID, err)
+		}
+		return false
+	}
+	return true
+}
+
+func (f *Channel) markDoneAfterAck(chatID, replyMessageID string) {
+	ack, ok := f.clearReceiveAck(chatID)
+	if !ok {
 		return
 	}
-	_, _ = bot.AddReaction(messageID, lark.EmojiTypeDONE)
+	if f.addDoneReaction(replyMessageID) {
+		return
+	}
+	_ = f.addDoneReaction(ack.messageID)
 }
 
 // SendDebug appends debug text to a per-chat stream card and flushes every 2 seconds.
@@ -682,14 +687,14 @@ func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
 	}
 	if f.cfg.YOLO {
 		err := f.sendToolCallCompact(chatID, update)
-		if err == nil && f.clearReceiveAck(chatID) {
+		if err == nil {
 			f.toolMu.Lock()
 			messageID := ""
 			if st := f.toolCompact[chatID]; st != nil {
 				messageID = strings.TrimSpace(st.messageID)
 			}
 			f.toolMu.Unlock()
-			f.addDoneReaction(messageID)
+			f.markDoneAfterAck(chatID, messageID)
 		}
 		return err
 	}
@@ -734,7 +739,7 @@ func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
 	f.toolMu.Unlock()
 
 	err := f.upsertToolCard(chatID, toolCallID, &stCopy, false)
-	if err == nil && f.clearReceiveAck(chatID) {
+	if err == nil {
 		f.toolMu.Lock()
 		messageID := ""
 		if cards := f.toolCards[chatID]; cards != nil {
@@ -743,7 +748,7 @@ func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
 			}
 		}
 		f.toolMu.Unlock()
-		f.addDoneReaction(messageID)
+		f.markDoneAfterAck(chatID, messageID)
 	}
 	return err
 }
