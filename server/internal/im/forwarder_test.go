@@ -18,6 +18,8 @@ type stubAdapter struct {
 	runCalled  bool
 	doneChatID string
 	doneCount  int
+	streamOps  []bool
+	streamChat []string
 }
 
 type toolCardStub struct {
@@ -39,6 +41,11 @@ func (s *stubAdapter) SendText(chatID, text string) error {
 }
 func (s *stubAdapter) SendCard(_ string, _ Card) error { return nil }
 func (s *stubAdapter) SendReaction(_, _ string) error  { return nil }
+func (s *stubAdapter) SetStreaming(chatID string, active bool) error {
+	s.streamChat = append(s.streamChat, chatID)
+	s.streamOps = append(s.streamOps, active)
+	return nil
+}
 func (s *stubAdapter) MarkDone(chatID string) error {
 	s.doneChatID = chatID
 	s.doneCount++
@@ -176,6 +183,23 @@ func TestForwarder_EmitFlushOnDone(t *testing.T) {
 	}
 	if ad.doneCount != 1 || ad.doneChatID != "chat-1" {
 		t.Fatalf("done marker (%d,%q), want (1,%q)", ad.doneCount, ad.doneChatID, "chat-1")
+	}
+}
+
+func TestForwarder_EmitStreamingMarkerLifecycle(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: IMUpdateText, Text: "hello"}); err != nil {
+		t.Fatalf("emit text: %v", err)
+	}
+	if len(ad.streamOps) != 1 || !ad.streamOps[0] || ad.streamChat[0] != "chat-1" {
+		t.Fatalf("stream start = (%v,%v), want ([true],[chat-1])", ad.streamOps, ad.streamChat)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: IMUpdateDone}); err != nil {
+		t.Fatalf("emit done: %v", err)
+	}
+	if len(ad.streamOps) < 2 || ad.streamOps[len(ad.streamOps)-1] {
+		t.Fatalf("stream end ops=%v, want trailing false", ad.streamOps)
 	}
 }
 

@@ -29,6 +29,7 @@ type ImAdapter struct {
 	activeChatID string                      // most recent chat that sent a message
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
 	textFlush    map[string]*time.Timer      // chatID -> delayed text flush timer
+	streamState  map[string]bool             // chatID -> streaming marker active
 	toolCalls    map[string]map[string]string
 	decisions    map[string]pendingDecision // chatID -> pending (text fallback)
 	decisionByID map[string]pendingDecision // decisionID -> pending (card action)
@@ -45,6 +46,7 @@ func New(adapter Adapter) *ImAdapter {
 		ability:      DetectAbilities(adapter),
 		textBuf:      map[string]*strings.Builder{},
 		textFlush:    map[string]*time.Timer{},
+		streamState:  map[string]bool{},
 		toolCalls:    map[string]map[string]string{},
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
@@ -197,9 +199,15 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	}
 	switch u.UpdateType {
 	case IMUpdateText:
+		if err := f.setStreaming(chatID, true); err != nil {
+			return err
+		}
 		f.enqueueTextChunk(chatID, u.Text)
 	case IMUpdateDone:
 		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
+		if err := f.setStreaming(chatID, false); err != nil {
 			return err
 		}
 		f.mu.Lock()
@@ -210,6 +218,9 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		}
 	case IMUpdateError:
 		if err := f.flushTextNow(chatID); err != nil {
+			return err
+		}
+		if err := f.setStreaming(chatID, false); err != nil {
 			return err
 		}
 		msg := strings.TrimSpace(u.Text)
@@ -225,6 +236,9 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 			return f.SendText(chatID, "[thought] "+strings.TrimSpace(u.Text))
 		}
 	case IMUpdateToolCall:
+		if err := f.setStreaming(chatID, true); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
@@ -290,6 +304,28 @@ func (f *ImAdapter) flushTextNow(chatID string) error {
 		return nil
 	}
 	return f.SendText(chatID, buf.String())
+}
+
+func (f *ImAdapter) setStreaming(chatID string, active bool) error {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	f.mu.Lock()
+	prev, ok := f.streamState[chatID]
+	if active {
+		f.streamState[chatID] = true
+	} else {
+		delete(f.streamState, chatID)
+	}
+	f.mu.Unlock()
+	if ok && prev == active {
+		return nil
+	}
+	if marker, ok := f.adapter.(StreamingMarker); ok {
+		return marker.SetStreaming(chatID, active)
+	}
+	return nil
 }
 
 func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {

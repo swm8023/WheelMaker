@@ -65,7 +65,7 @@ func TestBuildDebugCard_TruncatesToLast120Lines(t *testing.T) {
 }
 
 func TestBuildTextStreamCard_NoHeader(t *testing.T) {
-	card := buildTextStreamCard("hello")
+	card := buildTextStreamCard("hello", false)
 	if _, ok := card["header"]; ok {
 		t.Fatalf("acp text stream card should not have header: %+v", card)
 	}
@@ -137,6 +137,18 @@ func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 	}
 }
 
+func TestBuildTextStreamCard_ShowsStreamingMarker(t *testing.T) {
+	card := buildTextStreamCard("hello", true)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) != 2 {
+		t.Fatalf("elements mismatch in streaming card: %+v", card)
+	}
+	marker, _ := elements[1]["content"].(string)
+	if marker != "..." {
+		t.Fatalf("streaming marker=%q, want %q", marker, "...")
+	}
+}
+
 func TestIsFeishuMessageStale(t *testing.T) {
 	old := strconv.FormatInt(time.Now().Add(-16*time.Minute).UnixMilli(), 10)
 	if !isFeishuMessageStale(&old) {
@@ -175,7 +187,7 @@ func TestBuildToolCallCard(t *testing.T) {
 		Title:      "Run tests",
 		Status:     "failed",
 		RawOutput:  []byte(`"permission denied"`),
-	}, nil)
+	}, nil, false)
 	header, ok := card["header"].(map[string]any)
 	if !ok {
 		t.Fatalf("header missing in card: %+v", card)
@@ -208,7 +220,7 @@ func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
 		Title:      "Run tests",
 		Status:     "completed",
 		RawOutput:  []byte(`"- step one - step two - step three"`),
-	}, nil)
+	}, nil, false)
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) == 0 {
 		t.Fatalf("elements missing in card: %+v", card)
@@ -246,6 +258,8 @@ func TestBuildCompactToolCard(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"✅ go test ./...", "⏳ rg -n tool", "❌ go vet ./..."},
 		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/im/feishu/feishu.go",
+
+		false,
 	)
 	header, ok := card["header"].(map[string]any)
 	if !ok {
@@ -284,6 +298,8 @@ func TestBuildCompactToolCard_DoesNotFormatInlineNumberedTranscript(t *testing.T
 	card := buildCompactToolCard(
 		[]string{"RUN plan"},
 		"1. collect context 2. update tests 3. ship",
+
+		false,
 	)
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) != 1 {
@@ -299,6 +315,7 @@ func TestBuildCompactToolCard_DoesNotFormatNumberedVariants(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"RUN plan"},
 		"1)collect context 2)update tests 3)ship",
+		false,
 	)
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) != 1 {
@@ -312,6 +329,8 @@ func TestBuildCompactToolCard_DoesNotFormatNumberedVariants(t *testing.T) {
 	card2 := buildCompactToolCard(
 		[]string{"RUN plan"},
 		"1、准备\u30002、验证\u30003、发布",
+
+		false,
 	)
 	elements2, ok := card2["elements"].([]map[string]any)
 	if !ok || len(elements2) != 1 {
@@ -327,6 +346,8 @@ func TestBuildCompactToolCard_DoesNotFormatInlineHyphenBullets(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"RUN plan"},
 		"- collect context - update tests - ship",
+
+		false,
 	)
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) != 1 {
@@ -344,6 +365,8 @@ func TestBuildCompactToolCard_TitleIconsLimited(t *testing.T) {
 			"✅ a", "⏳ b", "❌ c", "✅ d", "⛔ e", "⏳ f", "✅ g", "❌ h", "✅ i",
 		},
 		"ok",
+
+		false,
 	)
 	header := card["header"].(map[string]any)
 	title := header["title"].(map[string]any)["content"].(string)
@@ -357,11 +380,29 @@ func TestBuildCompactToolCard_TitleFallsBackToTextOnly(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"RUN go test ./..."},
 		"ok",
+
+		false,
 	)
 	header := card["header"].(map[string]any)
 	title := header["title"].(map[string]any)["content"].(string)
 	if title != "Tools" {
 		t.Fatalf("title=%q, want %q", title, "Tools")
+	}
+}
+
+func TestBuildCompactToolCard_ShowsStreamingMarker(t *testing.T) {
+	card := buildCompactToolCard(
+		[]string{"⏳ go test ./..."},
+		"$ go test ./...",
+		true,
+	)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) != 2 {
+		t.Fatalf("elements mismatch in compact streaming card: %+v", card)
+	}
+	marker, _ := elements[1]["content"].(string)
+	if marker != "..." {
+		t.Fatalf("streaming marker=%q, want %q", marker, "...")
 	}
 }
 
@@ -372,4 +413,3 @@ func TestLastOutboundState(t *testing.T) {
 		t.Fatalf("last outbound=%q, want %q", got, "msg-1")
 	}
 }
-
