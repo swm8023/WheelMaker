@@ -470,14 +470,6 @@ func (f *Channel) SendReaction(messageID, emoji string) error {
 	return err
 }
 
-// SetStreaming is intentionally a no-op for Feishu cards.
-// We no longer render trailing "..." markers under cards.
-func (f *Channel) SetStreaming(chatID string, active bool) error {
-	_ = chatID
-	_ = active
-	return nil
-}
-
 // MarkDone adds DONE reaction to the last outbound message in this chat.
 func (f *Channel) MarkDone(chatID string) error {
 	chatID = strings.TrimSpace(chatID)

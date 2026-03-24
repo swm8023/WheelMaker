@@ -70,8 +70,3 @@ type ToolCallSender interface {
 type DoneMarker interface {
 	MarkDone(chatID string) error
 }
-
-// StreamingMarker toggles a per-chat "streaming in progress" UI marker.
-type StreamingMarker interface {
-	SetStreaming(chatID string, active bool) error
-}
