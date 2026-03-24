@@ -213,7 +213,7 @@ func TestCompactStatusEmoji(t *testing.T) {
 
 func TestBuildCompactToolCard(t *testing.T) {
 	card := buildCompactToolCard(
-		[]string{"DONE go test ./...", "RUN rg -n tool"},
+		[]string{"✅ go test ./...", "⏳ rg -n tool", "❌ go vet ./..."},
 		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/im/feishu/feishu.go",
 	)
 	header, ok := card["header"].(map[string]any)
@@ -225,7 +225,7 @@ func TestBuildCompactToolCard(t *testing.T) {
 		t.Fatalf("title missing in compact tool card: %+v", card)
 	}
 	title, _ := titleMap["content"].(string)
-	if !strings.Contains(title, "Tool Stream") {
+	if !strings.Contains(title, "🛠️ ✅ ⏳ ❌") {
 		t.Fatalf("unexpected compact card title: %q", title)
 	}
 	elements, ok := card["elements"].([]map[string]any)
@@ -239,14 +239,10 @@ func TestBuildCompactToolCard(t *testing.T) {
 	if strings.Contains(content, "### Summary") || strings.Contains(content, "### Terminal") {
 		t.Fatalf("compact headings should be removed: %q", content)
 	}
-	firstLine := strings.Split(content, "\n")[0]
-	if firstLine != "DONE go test ./..." {
-		t.Fatalf("compact summary should be one line from first entry, got: %q", firstLine)
+	if strings.Contains(content, "go test ./...") && !strings.Contains(content, "$ go test ./...") {
+		t.Fatalf("summary text should not be rendered above transcript: %q", content)
 	}
-	if strings.Contains(firstLine, "RUN rg -n tool") {
-		t.Fatalf("compact summary should not include second entry: %q", firstLine)
-	}
-	if !strings.Contains(content, "```text") ||
+	if !strings.HasPrefix(content, "```text\n") ||
 		!strings.Contains(content, "$ go test ./...") ||
 		!strings.Contains(content, "PASS") {
 		t.Fatalf("compact transcript mismatch: %q", content)
@@ -265,6 +261,21 @@ func TestBuildCompactToolCard_FormatsInlineNumberedTranscript(t *testing.T) {
 	content, _ := elements[0]["content"].(string)
 	if !strings.Contains(content, "```text\n1. collect context\n2. update tests\n3. ship\n```") {
 		t.Fatalf("inline numbered transcript should be split into lines, got: %q", content)
+	}
+}
+
+func TestBuildCompactToolCard_TitleIconsLimited(t *testing.T) {
+	card := buildCompactToolCard(
+		[]string{
+			"✅ a", "⏳ b", "❌ c", "✅ d", "⛔ e", "⏳ f", "✅ g", "❌ h", "✅ i",
+		},
+		"ok",
+	)
+	header := card["header"].(map[string]any)
+	title := header["title"].(map[string]any)["content"].(string)
+	const want = "🛠️ ✅ ⏳ ❌ ✅ ⛔ ⏳ ✅ ❌"
+	if title != want {
+		t.Fatalf("title=%q, want %q", title, want)
 	}
 }
 

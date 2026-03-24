@@ -818,33 +818,55 @@ func compactStatusEmoji(status string) string {
 }
 
 func buildCompactToolCard(lines []string, transcript string) im.Card {
-	summary := "_No tool calls_"
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		summary = previewLine(line, 120)
-		break
-	}
+	title := compactToolIconTitle(lines)
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
 	}
 	transcript = formatCompactTranscript(transcript)
-	content := summary + "\n```text\n" + transcript + "\n```"
+	content := "```text\n" + transcript + "\n```"
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"template": "blue",
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": "🛠️ Tool Stream",
+				"content": title,
 			},
 		},
 		"elements": []map[string]any{
 			{"tag": "markdown", "content": content},
 		},
 	}
+}
+
+func compactToolIconTitle(lines []string) string {
+	const maxIcons = 8
+	icons := make([]string, 0, maxIcons)
+	allowed := map[string]struct{}{
+		compactStatusEmoji("completed"):   {},
+		compactStatusEmoji("failed"):      {},
+		compactStatusEmoji("cancelled"):   {},
+		compactStatusEmoji("in_progress"): {},
+		compactStatusEmoji("pending"):     {},
+	}
+	for _, line := range lines {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) == 0 {
+			continue
+		}
+		icon := fields[0]
+		if _, ok := allowed[icon]; !ok {
+			continue
+		}
+		icons = append(icons, icon)
+		if len(icons) >= maxIcons {
+			break
+		}
+	}
+	if len(icons) == 0 {
+		return "🛠️"
+	}
+	return "🛠️ " + strings.Join(icons, " ")
 }
 
 var inlineNumberedListPattern = regexp.MustCompile(`\s+(\d{1,2}[.)、]\s+)`)
