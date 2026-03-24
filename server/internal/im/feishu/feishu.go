@@ -502,14 +502,8 @@ func (f *Channel) clearReceiveAck(chatID string) bool {
 	if !ok {
 		return false
 	}
-	if strings.TrimSpace(ack.messageID) == "" || strings.TrimSpace(ack.reactionID) == "" {
-		return true
-	}
-	bot, err := f.ensureBot()
-	if err != nil {
-		return true
-	}
-	_, _ = bot.DeleteReaction(ack.messageID, ack.reactionID)
+	// Keep GET reaction as a durable "processed" marker; only consume pending state.
+	_ = ack
 	return true
 }
 
