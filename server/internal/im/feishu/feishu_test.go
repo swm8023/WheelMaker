@@ -131,7 +131,7 @@ func TestShouldHandleMessage_DeduplicatesByMessageID(t *testing.T) {
 
 func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 	f := New(Config{})
-	f.seenMessageID["old"] = time.Now().Add(-25 * time.Hour)
+	f.seenMessageID["old"] = time.Now().Add(-3 * time.Hour)
 	if !f.shouldHandleMessage("old") {
 		t.Fatalf("expired message id should be accepted again")
 	}

@@ -1255,7 +1255,7 @@ func (f *Channel) shouldHandleMessage(messageID string) bool {
 	if messageID == "" {
 		return true
 	}
-	const dedupTTL = 24 * time.Hour
+	const dedupTTL = 2 * time.Hour
 	const maxTracked = 4096
 	now := time.Now()
 	cutoff := now.Add(-dedupTTL)
