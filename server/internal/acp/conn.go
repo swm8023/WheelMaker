@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"os/exec"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -189,15 +188,53 @@ func previewStr(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-var rexUUID = regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-
 func sanitizeDebugJSON(raw []byte) string {
 	s := strings.TrimSpace(string(raw))
 	// Remove "jsonrpc":"2.0" field (always the first field in our messages)
 	s = strings.Replace(s, `"jsonrpc":"2.0",`, "", 1)
-	// Shorten full UUIDs to their first 8 characters
-	s = rexUUID.ReplaceAllStringFunc(s, func(m string) string { return m[:8] })
-	return s
+	// Shorten full UUIDs (8-4-4-4-12 lowercase hex) to their first 8 characters
+	return shortenUUIDs(s)
+}
+
+// shortenUUIDs replaces every lowercase UUID in s with just its first 8 hex chars.
+// UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (36 bytes, all lowercase hex)
+func shortenUUIDs(s string) string {
+	const uuidLen = 36
+	if len(s) < uuidLen {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	i := 0
+	for i <= len(s)-uuidLen {
+		if looksLikeUUID(s[i : i+uuidLen]) {
+			b.WriteString(s[i : i+8])
+			i += uuidLen
+		} else {
+			b.WriteByte(s[i])
+			i++
+		}
+	}
+	b.WriteString(s[i:])
+	return b.String()
+}
+
+func looksLikeUUID(s string) bool {
+	if s[8] != '-' || s[13] != '-' || s[18] != '-' || s[23] != '-' {
+		return false
+	}
+	return isHexSegment(s[:8]) && isHexSegment(s[9:13]) &&
+		isHexSegment(s[14:18]) && isHexSegment(s[19:23]) && isHexSegment(s[24:])
+}
+
+func isHexSegment(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func writeDebugLine(w io.Writer, prefix string, raw []byte) {
