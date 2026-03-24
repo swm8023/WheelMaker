@@ -33,14 +33,6 @@ func (r *permissionRouter) setLastChatID(chatID string) {
 	r.mu.Unlock()
 }
 
-func (r *permissionRouter) clearLastChatID(chatID string) {
-	r.mu.Lock()
-	if r.lastChatID == chatID {
-		r.lastChatID = ""
-	}
-	r.mu.Unlock()
-}
-
 func (r *permissionRouter) currentChatIDOrFallback() string {
 	r.mu.Lock()
 	chatID := strings.TrimSpace(r.lastChatID)

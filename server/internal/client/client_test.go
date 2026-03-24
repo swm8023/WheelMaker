@@ -281,11 +281,15 @@ func captureRepliesWithDebug(c *client.Client) (*[]string, *[]string) {
 type captureChannel struct {
 	messages      *[]string
 	debugMessages *[]string
+	chatIDs       *[]string
 }
 
 func (a *captureChannel) OnMessage(_ im.MessageHandler) {}
-func (a *captureChannel) SendText(_ string, text string) error {
+func (a *captureChannel) SendText(chatID string, text string) error {
 	*a.messages = append(*a.messages, text)
+	if a.chatIDs != nil {
+		*a.chatIDs = append(*a.chatIDs, chatID)
+	}
 	return nil
 }
 func (a *captureChannel) SendDebug(_ string, text string) error {
@@ -337,6 +341,43 @@ func TestClose_SendsLifecycleShutdownNoticeBeforeClose(t *testing.T) {
 	if !strings.Contains((*msgs)[0], "server stopping") {
 		t.Fatalf("unexpected shutdown notice: %q", (*msgs)[0])
 	}
+}
+
+func TestClose_UsesLastChatIDForLifecycleShutdownNotice(t *testing.T) {
+	store := &mockStore{}
+	c := client.New(store, nil, "test-project", "/tmp")
+	msgs := []string{}
+	chats := []string{}
+	c.InjectIMChannel(&captureChannel{messages: &msgs, chatIDs: &chats})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	msgs = msgs[:0]
+	chats = chats[:0]
+
+	c.HandleMessage(im.Message{ChatID: "chat-1", Text: "/status"})
+	msgs = msgs[:0]
+	chats = chats[:0]
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+	if len(msgs) == 0 {
+		t.Fatalf("expected lifecycle shutdown notice, got no messages")
+	}
+	if len(chats) == 0 || chats[0] != "chat-1" {
+		t.Fatalf("shutdown notice sent to %q, want %q", firstOrEmpty(chats), "chat-1")
+	}
+	if !strings.Contains(msgs[0], "server stopping") {
+		t.Fatalf("unexpected shutdown notice: %q", msgs[0])
+	}
+}
+
+func firstOrEmpty(v []string) string {
+	if len(v) == 0 {
+		return ""
+	}
+	return v[0]
 }
 
 // testLogWriter is a goroutine-safe log output writer for capturing log output in tests.

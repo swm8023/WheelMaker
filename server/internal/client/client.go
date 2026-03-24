@@ -237,6 +237,7 @@ func (c *Client) notifyLifecycle(text string) {
 // everything else — including lines starting with "/" that are not known commands —
 // is forwarded to the agent as a prompt.
 func (c *Client) HandleMessage(msg im.Message) {
+	c.permRouter.setLastChatID(msg.ChatID)
 	c.bindDebugChat(c.resolveCurrentAgentName(), msg.ChatID)
 
 	text := strings.TrimSpace(msg.Text)
@@ -272,8 +273,6 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 func (c *Client) handlePrompt(msg im.Message, text string) {
 	c.promptMu.Lock()
 	defer c.promptMu.Unlock()
-	c.permRouter.setLastChatID(msg.ChatID)
-	defer c.permRouter.clearLastChatID(msg.ChatID)
 
 	ctx := context.Background()
 	for attempt := 1; attempt <= 2; attempt++ {
