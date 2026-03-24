@@ -1,39 +1,35 @@
-﻿# WheelMaker â€” Server
+﻿# WheelMaker — Server
 
-Go å®ˆæŠ¤è¿›ç¨‹ï¼šè¿žæŽ¥æœ¬åœ° AI CLIï¼ˆCodexã€Claude ç­‰ï¼‰ä¸Žè¿œç«¯ IMï¼ˆé£žä¹¦ã€ç§»åŠ¨ App ç­‰ï¼‰ã€‚
+Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, mobile WebSocket, console).
 
-## æž¶æž„å±‚æ¬¡
+## Architecture
 
 ```
-Hub (internal/hub/)             â€” å¤š project ç”Ÿå‘½å‘¨æœŸç®¡ç†ï¼Œè¯» config.json
-  â”œâ”€ im/forwarder.Forwarder     â€” IM åŒ…è£…å±‚ï¼šæ¶ˆæ¯è·¯ç”±ã€å†³ç­–è¯·æ±‚ç®¡ç†ã€HelpResolver
-  â”‚    â””â”€ console / feishu / mobile  â€” åº•å±‚ IM é€‚é…å™¨
-  â””â”€ client.Client              â€” å• project ä¸»æŽ§ï¼šå‘½ä»¤è·¯ç”±ã€ä¼šè¯ç®¡ç†ã€çŠ¶æ€æŒä¹…åŒ–
-       â””â”€ acp.Forwarder         â€” ACP åè®®å°è£…ï¼šç±»åž‹åŒ–å‡ºç«™æ–¹æ³•ã€ClientCallbacks åˆ†å‘
-            â””â”€ acp.Conn         â€” JSON-RPC 2.0 over stdio â†’ CLI binary
+Hub
+ ├─ im/forwarder.Forwarder ── console | feishu | mobile   (IM layer)
+ └─ client.Client ── acp.Forwarder ── acp.Conn ── CLI subprocess  (agent layer)
 ```
 
-## åŒ…èŒè´£
+## Package Map
 
-| åŒ… | èŒè´£ |
-|----|------|
-| `internal/hub/` | è¯» `~/.wheelmaker/config.json`ï¼Œä¸ºæ¯ä¸ª project åˆ›å»º Client + IM |
-| `internal/client/` | ä¸»æŽ§ï¼šå‘½ä»¤è·¯ç”±ã€ä¼šè¯ç”Ÿå‘½å‘¨æœŸï¼ˆensureReady/promptStream/switchAgentï¼‰ã€terminal ç®¡ç†ã€å®žçŽ° acp.ClientCallbacks |
-| `internal/acp/` | çº¯ä¼ è¾“å±‚ï¼šConnï¼ˆå­è¿›ç¨‹ stdioï¼‰ã€Forwarderï¼ˆç±»åž‹åŒ– ACP æ–¹æ³• + ClientCallbacks åˆ†å‘ï¼‰ã€åè®®ç±»åž‹ |
-| `internal/agent/claude/` | å¯åŠ¨ claude-agent-acp å­è¿›ç¨‹ï¼Œè¿”å›ž `*acp.Conn`ï¼›NormalizeParams/HandlePermission é’©å­ |
-| `internal/agent/codex/` | å¯åŠ¨ codex-acp å­è¿›ç¨‹ï¼Œè¿”å›ž `*acp.Conn`ï¼›åŒä¸Š |
-| `internal/im/forwarder/` | IM åŒ…è£…å±‚ï¼šæ¶ˆæ¯åŽ»é‡/è¿‡æ»¤ã€å†³ç­–è¯·æ±‚ï¼ˆpending decisionsï¼‰ã€HelpResolver æ³¨å…¥ |
-| `internal/im/console/` | Console IM é€‚é…å™¨ï¼šè¯» stdinï¼Œdebug æ¨¡å¼æ‰“å°æ‰€æœ‰ ACP JSON |
-| `internal/im/feishu/` | é£žä¹¦ Bot IM é€‚é…å™¨ |
-| `internal/im/mobile/` | WebSocket IM é€‚é…å™¨ï¼ˆä¾›ç§»åŠ¨ç«¯ App è¿žæŽ¥ï¼‰ |
-| `internal/tools/` | å·¥å…·äºŒè¿›åˆ¶è·¯å¾„è§£æžï¼ˆ`bin/{GOOS}_{GOARCH}/`ï¼‰ |
+| Package | Role |
+|---------|------|
+| `internal/hub/` | Reads config, spawns Client + IM per project |
+| `internal/client/` | Command routing, session lifecycle, state persistence |
+| `internal/acp/` | JSON-RPC 2.0 transport over stdio |
+| `internal/agent/claude/` | Launches claude-agent-acp subprocess |
+| `internal/agent/codex/` | Launches codex-acp subprocess |
+| `internal/im/forwarder/` | Message dedup/filter, pending decisions, HelpResolver |
+| `internal/im/console/` | Console IM adapter (reads stdin) |
+| `internal/im/feishu/` | Feishu Bot IM adapter |
+| `internal/im/mobile/` | WebSocket IM adapter for mobile app |
+| `internal/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
 
-## é…ç½®æ–‡ä»¶
+## Config Files
 
-- `~/.wheelmaker/config.json` â€” é¡¹ç›®é…ç½®ï¼ˆIM ç±»åž‹ã€agentã€å·¥ä½œç›®å½•ï¼‰
-- `~/.wheelmaker/state.json` â€” è¿è¡Œæ—¶çŠ¶æ€æŒä¹…åŒ–ï¼ˆsession IDã€agent å…ƒæ•°æ®ã€session çŠ¶æ€ï¼‰
+- `~/.wheelmaker/config.json` — project config (IM type, agent, working dir, yolo)
+- `~/.wheelmaker/state.json` — runtime state (session IDs, agent metadata)
 
-config.json æ ¼å¼ï¼š
 ```json
 {
   "projects": [
@@ -46,78 +42,76 @@ config.json æ ¼å¼ï¼š
 }
 ```
 
-## Mobile WebSocket åè®®
+## Mobile WebSocket Protocol
 
-App é€šè¿‡ WebSocket è¿žæŽ¥åˆ° `ws://<host>:<port>/ws`ï¼Œæ¡æ‰‹æµç¨‹ï¼š
+Connect to `ws://<host>:<port>/ws`:
 
 ```
-Server â†’ { "type": "auth_required" }          (è‹¥é…ç½®äº† token)
-Client â†’ { "type": "auth", "token": "..." }
-Server â†’ { "type": "ready", "chatId": "..." }
+Server → { "type": "auth_required" }
+Client → { "type": "auth", "token": "..." }
+Server → { "type": "ready", "chatId": "..." }
 ```
 
-å…¥ç«™æ¶ˆæ¯ç±»åž‹ï¼š`auth` / `message` / `option` / `ping`  
-å‡ºç«™æ¶ˆæ¯ç±»åž‹ï¼š`text` / `card` / `options` / `debug` / `pong` / `error` / `ready` / `auth_required`
+Inbound: `auth` / `message` / `option` / `ping`
+Outbound: `text` / `card` / `options` / `debug` / `pong` / `error` / `ready` / `auth_required`
 
-å†³ç­–æµï¼š`options` æºå¸¦ `decisionId` â†’ App é€‰æ‹©åŽå‘ `{type:"option", decisionId, optionId}` â†’ Bridge è§£æž
+Decision flow: `options` carries `decisionId` → client sends `{type:"option", decisionId, optionId}`
 
-## state.go è®¾è®¡
+## state.go Design
 
 ```
 FileState
-  â””â”€ Projects map[name]*ProjectState
-       â”œâ”€ ActiveAgent string
-       â”œâ”€ Connection *ConnectionConfig
-       â””â”€ Agents map[name]*AgentState
-            â”œâ”€ LastSessionID
-            â”œâ”€ ProtocolVersion / AgentCapabilities / AgentInfo / AuthMethods
-            â”œâ”€ Session *SessionState  (Modes/Models/ConfigOptions/AvailableCommands/Title/UpdatedAt)
-            â””â”€ Sessions []SessionSummary  (æ‡’åŠ è½½)
+  └─ Projects map[name]*ProjectState
+       ├─ ActiveAgent string
+       ├─ Connection *ConnectionConfig
+       └─ Agents map[name]*AgentState
+            ├─ LastSessionID
+            ├─ ProtocolVersion / AgentCapabilities / AgentInfo / AuthMethods
+            ├─ Session *SessionState
+            └─ Sessions []SessionSummary
 ```
 
-## å¼€å‘çº¦å®š
+## Dev Conventions
 
-- **æŽ¥å£ä¼˜å…ˆ**ï¼šè·¨å±‚ä¾èµ–é€šè¿‡æŽ¥å£ï¼ˆ`acp.Session`ã€`agent.Agent`ã€`im.Channel`ï¼‰
-- **æ‡’åŠ è½½**ï¼šagent å­è¿›ç¨‹åœ¨é¦–æ¡æ¶ˆæ¯æ—¶æ‰åˆ›å»ºï¼ˆ`ensureForwarder`ï¼‰
-- **æ”¯æŒçš„å‘½ä»¤**ï¼š`/use`ã€`/cancel`ã€`/status`ã€`/mode`ã€`/model`ã€`/list`ã€`/new`ã€`/load`ã€`/debug`ï¼›å…¶ä»– `/` å¼€å¤´æ–‡æœ¬å½“æ™®é€šæ¶ˆæ¯å¤„ç†
-- ä»£ç æ³¨é‡Šå’Œæ ‡è¯†ç¬¦ç”¨è‹±æ–‡
-- **æ¯æ¬¡æ”¹å®Œè‡ªåŠ¨ commit + push**
+- Interfaces first: `acp.Session`, `agent.Agent`, `im.Channel`
+- Agent subprocess is lazy: created on first message (`ensureForwarder`)
+- Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/debug`
+- Code comments and identifiers: **English only**
+- **After every change: `git add` → `git commit` → `git push`**
 
-## æœ¬åœ°å¼€å‘
+## Local Dev
 
 ```bash
-# åœ¨ server/ ç›®å½•ä¸‹æ‰§è¡Œ
-export OPENAI_API_KEY=sk-...
-go run ./cmd/wheelmaker/                                    # éœ€å…ˆåˆ›å»º ~/.wheelmaker/config.json
+# in server/
+go run ./cmd/wheelmaker/            # requires ~/.wheelmaker/config.json
 go test ./...
-go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/   # Windows
+go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/
 GOOS=linux  GOARCH=amd64 go build -o bin/linux_amd64/wheelmaker  ./cmd/wheelmaker/
-GOOS=darwin GOARCH=arm64 go build -o bin/darwin_arm64/wheelmaker  ./cmd/wheelmaker/
+GOOS=darwin GOARCH=arm64 go build -o bin/darwin_arm64/wheelmaker ./cmd/wheelmaker/
 
-# ACP å·¥å…·å®‰è£…ï¼ˆé¦–æ¬¡ï¼‰
+# Install ACP tools (first time)
 pwsh scripts/install-tools.ps1   # Windows
 bash scripts/install-tools.sh    # macOS / Linux
 ```
 
 ## Process Rule
 
-Every code change must restart wheelmaker: stop existing `wheelmaker` processes, run `go run ./cmd/wheelmaker/`, and ensure only one process remains.
-During live debugging, send the final user-facing reply first, then trigger delayed restart script `server/scripts/delayed-restart.ps1` (kill + `go run` after 30s) in background so the current chat is not interrupted. Calling that script counts as completion for this turn.
-Windows command (returns immediately): `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
+After every code change: stop existing wheelmaker processes, run `go run ./cmd/wheelmaker/`, confirm only one process is running.
+During live debugging: send user-facing reply first, then trigger `server/scripts/delayed-restart.ps1` in background (kills + restarts after 30s).
+Windows: `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
 
 ## Key Invariants (do not break)
+
 | # | Invariant |
 |---|-----------|
-| 1 | `acp.Conn` is pure transport â€” no business logic inside |
+| 1 | `acp.Conn` is pure transport — no business logic inside |
 | 2 | `client.Client` is the single owner of session state; IM adapters never mutate it directly |
-| 3 | Agent subprocess is created lazily â€” never at startup |
+| 3 | Agent subprocess is created lazily — never at startup |
 | 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im.Channel`) |
-| 5 | `state.json` is the single source of truth for runtime state; never cache project state in memory only |
-| 6 | Decision (option) messages carry a `decisionId`; mobile adapter resolves them via pending-decision map |
+| 5 | `state.json` is the source of truth for runtime state |
+| 6 | Decision messages carry a `decisionId`; mobile adapter resolves via pending-decision map |
 
-## å…³é”®åè®®æ–‡æ¡£
+## Key Protocol Docs
 
-- ACP åè®®ï¼š[../docs/acp-protocol-full.zh-CN.md](../docs/acp-protocol-full.zh-CN.md)
-- é£žä¹¦ Botï¼š[../docs/feishu-bot.md](../docs/feishu-bot.md)
-
-
+- ACP protocol: [../docs/acp-protocol-full.zh-CN.md](../docs/acp-protocol-full.zh-CN.md)
+- Feishu Bot: [../docs/feishu-bot.md](../docs/feishu-bot.md)
