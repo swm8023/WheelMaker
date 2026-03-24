@@ -78,6 +78,11 @@ FileState
 - Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/debug`
 - Code comments and identifiers: **English only**
 - **After every change: `git add` → `git commit` → `git push`**
+- **Task completion is blocked until deploy actions are done:**
+  - `git add` → `git commit` → `git push`
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
+  - Verify exactly one `wheelmaker` process is running
+  - Do not send a "done/completed" reply before all steps above succeed
 
 ## Local Dev
 
@@ -99,6 +104,18 @@ bash scripts/install-tools.sh    # macOS / Linux
 After every code change: stop existing wheelmaker processes, run `go run ./cmd/wheelmaker/`, confirm only one process is running.
 During live debugging: send user-facing reply first, then trigger `server/scripts/delayed-restart.ps1` in background (kills + restarts after 30s).
 Windows: `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
+
+## Completion Gate (Highest Priority)
+
+Before the final user-facing completion message in any implementation task, execute this exact tail sequence:
+
+1. `git add -A`
+2. `git commit -m "<message>"`
+3. `git push origin <branch>`
+4. `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
+5. Check process count and confirm only one `wheelmaker` process remains
+
+If any step fails, report failure and keep working until resolved. Do not claim completion early.
 
 ## Key Invariants (do not break)
 
