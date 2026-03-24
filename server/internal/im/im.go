@@ -3,7 +3,6 @@ package im
 
 import (
 	"context"
-	"io"
 )
 
 // Message represents an incoming message from an IM platform.
@@ -14,15 +13,50 @@ type Message struct {
 	Text      string
 }
 
-// Card represents a rich interactive message card (platform-specific format).
-type Card map[string]any
+// Card is the sealed sum type for all card payloads sent via Channel.SendCard.
+// Use the concrete variant types (RawCard, OptionsCard, ToolCallCard) to construct values.
+type Card interface{ isCard() }
+
+// RawCard is a platform-native card built directly as a key-value map.
+// Use for pre-built card JSON such as help pages and stream cards.
+type RawCard map[string]any
+
+func (RawCard) isCard() {}
+
+// OptionsCard presents a decision prompt with selectable options.
+// Channel implementations render it according to their UI capabilities.
+type OptionsCard struct {
+	Title   string
+	Body    string
+	Options []DecisionOption
+	Meta    map[string]string
+}
+
+func (OptionsCard) isCard() {}
+
+// ToolCallCard conveys a tool-call stream update.
+// Channel implementations may render a rich interactive card or a plain-text fallback.
+type ToolCallCard struct {
+	Update ToolCallUpdate
+}
+
+func (ToolCallCard) isCard() {}
 
 // MessageHandler is a callback invoked when a message is received.
 type MessageHandler func(Message)
 
+// TextKind distinguishes the rendering path for outbound text messages.
+type TextKind uint8
+
+const (
+	TextNormal TextKind = iota // regular agent reply
+	TextDebug                  // debug channel (collapsible, smaller font, etc.)
+	TextSystem                 // system/lifecycle notice (visually distinct from agent text)
+)
+
 // Channel abstracts an IM platform for sending and receiving messages.
 // All methods are required; implementations that don't support a feature
-// should provide a no-op or text-fallback implementation.
+// should provide a no-op or fallback to SendText/Send.
 type Channel interface {
 	// OnMessage registers the handler to be called for each received message.
 	OnMessage(handler MessageHandler)
@@ -31,32 +65,17 @@ type Channel interface {
 	// Implementations that don't support card actions should provide a no-op.
 	OnCardAction(func(CardActionEvent))
 
-	// SendText sends a plain text message to the given chat.
-	SendText(chatID, text string) error
+	// Send sends a text message. kind controls the rendering path.
+	Send(chatID, text string, kind TextKind) error
 
-	// SendCard sends a rich interactive card to the given chat.
-	SendCard(chatID string, card Card) error
-
-	// UpdateCard updates an existing card message in place.
-	// Implementations that don't support in-place updates should send a new card.
-	UpdateCard(chatID, messageID string, card Card) error
+	// SendCard sends (or updates) a card. If messageID is empty a new card is
+	// posted; otherwise the card identified by messageID is updated in place.
+	// Implementations that don't support in-place update should post a new card.
+	// card must be one of: RawCard, OptionsCard, ToolCallCard.
+	SendCard(chatID, messageID string, card Card) error
 
 	// SendReaction adds an emoji reaction to a message.
 	SendReaction(messageID, emoji string) error
-
-	// SendDebug sends a debug-channel message. Implementations may render it
-	// differently from normal text (e.g. smaller font, different colour).
-	SendDebug(chatID, text string) error
-
-	// SendSystem sends a system-level message through a dedicated rendering path.
-	// Implementations that don't distinguish system vs agent text may call SendText.
-	SendSystem(chatID, text string) error
-
-	// SendOptions sends a structured decision prompt (title, body, selectable options).
-	SendOptions(chatID, title, body string, options []DecisionOption, meta map[string]string) error
-
-	// SendToolCall renders a tool-call stream update (card or text fallback).
-	SendToolCall(chatID string, update ToolCallUpdate) error
 
 	// MarkDone marks the final outbound message when a prompt stops.
 	// Implementations that have no such concept should return nil.
@@ -64,10 +83,4 @@ type Channel interface {
 
 	// Run starts the event loop. It blocks until ctx is cancelled.
 	Run(ctx context.Context) error
-}
-
-// DebugLoggerSetter installs an optional writer for unified debug logs.
-// Implemented by ImAdapter; not required on Channel implementations.
-type DebugLoggerSetter interface {
-	SetDebugLogger(w io.Writer)
 }

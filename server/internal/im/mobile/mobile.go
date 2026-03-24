@@ -62,12 +62,50 @@ func New(cfg Config) *Channel {
 
 func (m *Channel) OnMessage(handler im.MessageHandler) { m.handler = handler }
 
+// Send dispatches a text message to the connected client.
 func (m *Channel) SendText(chatID, text string) error {
 	return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: text})
 }
 
-func (m *Channel) SendCard(chatID string, card im.Card) error {
-	return m.send(chatID, outboundMsg{Type: "card", ChatID: chatID, Card: card})
+func (m *Channel) Send(chatID, text string, kind im.TextKind) error {
+	switch kind {
+	case im.TextDebug:
+		return m.send(chatID, outboundMsg{Type: "debug", ChatID: chatID, Text: text})
+	case im.TextSystem:
+		return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: text})
+	default:
+		return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: text})
+	}
+}
+
+// SendCard sends or renders a card payload to the client.
+func (m *Channel) SendCard(chatID, _ string, card im.Card) error {
+	switch c := card.(type) {
+	case im.OptionsCard:
+		opts := make([]outboundOption, len(c.Options))
+		for i, o := range c.Options {
+			opts[i] = outboundOption{ID: o.ID, Label: o.Label}
+		}
+		decisionID := ""
+		if c.Meta != nil {
+			decisionID = c.Meta["decision_id"]
+		}
+		return m.send(chatID, outboundMsg{
+			Type:       "options",
+			ChatID:     chatID,
+			Title:      c.Title,
+			Body:       c.Body,
+			Options:    opts,
+			DecisionID: decisionID,
+		})
+	case im.ToolCallCard:
+		if msg := im.RenderToolCallMessage(c.Update); msg != "" {
+			return m.send(chatID, outboundMsg{Type: "text", ChatID: chatID, Text: msg})
+		}
+		return nil
+	default:
+		return m.send(chatID, outboundMsg{Type: "card", ChatID: chatID, Card: card})
+	}
 }
 
 // SendReaction is a no-op; mobile clients don't have message reaction UX.
@@ -95,53 +133,8 @@ func (m *Channel) Run(ctx context.Context) error {
 	}
 }
 
-// --- im.DebugSender ---
-
-func (m *Channel) SendDebug(chatID, text string) error {
-	return m.send(chatID, outboundMsg{Type: "debug", ChatID: chatID, Text: text})
-}
-
-// SendSystem sends a system message; mobile renders it the same as text.
-func (m *Channel) SendSystem(chatID, text string) error {
-	return m.SendText(chatID, text)
-}
-
-// SendToolCall renders a tool-call update as plain text for mobile clients.
-func (m *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
-	if msg := im.RenderToolCallMessage(update); msg != "" {
-		return m.SendText(chatID, msg)
-	}
-	return nil
-}
-
 // MarkDone is a no-op for mobile; the client drives its own "done" state.
 func (m *Channel) MarkDone(_ string) error { return nil }
-
-// UpdateCard is a no-op for mobile; in-place card update is not supported.
-func (m *Channel) UpdateCard(chatID, _ string, card im.Card) error {
-	return m.SendCard(chatID, card)
-}
-
-// SendOptions sends a structured option prompt (decision request) to the client.
-// meta["decision_id"] is forwarded so the client can include it in its reply.
-func (m *Channel) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
-	opts := make([]outboundOption, len(options))
-	for i, o := range options {
-		opts[i] = outboundOption{ID: o.ID, Label: o.Label}
-	}
-	decisionID := ""
-	if meta != nil {
-		decisionID = meta["decision_id"]
-	}
-	return m.send(chatID, outboundMsg{
-		Type:       "options",
-		ChatID:     chatID,
-		Title:      title,
-		Body:       body,
-		Options:    opts,
-		DecisionID: decisionID,
-	})
-}
 
 func (m *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 	m.mu.Lock()

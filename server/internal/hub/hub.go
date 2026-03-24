@@ -87,9 +87,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	if pc.Debug {
 		if dw := logger.DebugWriter(); dw != nil {
 			c.SetDebugLogger(dw)
-			if setter, ok := any(imProvider).(im.DebugLoggerSetter); ok {
-				setter.SetDebugLogger(dw)
-			}
+			imProvider.SetDebugLogger(dw)
 		}
 	}
 

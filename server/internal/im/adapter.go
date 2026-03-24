@@ -69,14 +69,14 @@ func (f *ImAdapter) OnMessage(handler MessageHandler) {
 }
 
 func (f *ImAdapter) SendText(chatID, text string) error {
-	err := f.adapter.SendText(chatID, text)
-	f.logOutgoingText(chatID, text, err)
+	err := f.adapter.Send(chatID, text, TextNormal)
+	f.logOutgoingSend(chatID, text, TextNormal, err)
 	return err
 }
 
 func (f *ImAdapter) SendCard(chatID string, card Card) error {
-	err := f.adapter.SendCard(chatID, card)
-	f.logOutgoingCard(chatID, card, err)
+	err := f.adapter.SendCard(chatID, "", card)
+	f.logOutgoingCard(chatID, "", card, err)
 	return err
 }
 
@@ -87,14 +87,14 @@ func (f *ImAdapter) SendReaction(messageID, emoji string) error {
 }
 
 func (f *ImAdapter) SendDebug(chatID, text string) error {
-	err := f.adapter.SendDebug(chatID, text)
-	f.logOutgoingDebug(chatID, text, err)
+	err := f.adapter.Send(chatID, text, TextDebug)
+	f.logOutgoingSend(chatID, text, TextDebug, err)
 	return err
 }
 
 func (f *ImAdapter) SendSystem(chatID, text string) error {
-	err := f.adapter.SendSystem(chatID, text)
-	f.logOutgoingSystem(chatID, text, err)
+	err := f.adapter.Send(chatID, text, TextSystem)
+	f.logOutgoingSend(chatID, text, TextSystem, err)
 	return err
 }
 
@@ -274,7 +274,7 @@ func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {
 	if !f.shouldEmitToolCall(chatID, upd.ToolCallID, signature) {
 		return nil
 	}
-	err := f.adapter.SendToolCall(chatID, upd)
+	err := f.adapter.SendCard(chatID, "", ToolCallCard{Update: upd})
 	f.logOutgoingToolCall(chatID, upd, err)
 	return err
 }
@@ -354,7 +354,7 @@ func (f *ImAdapter) RequestDecision(ctx context.Context, req DecisionRequest) (D
 		}
 		meta[k] = strings.TrimSpace(v)
 	}
-	_ = f.adapter.SendOptions(pd.chatID, req.Title, req.Body, req.Options, meta)
+	_ = f.adapter.SendCard(pd.chatID, "", OptionsCard{Title: req.Title, Body: req.Body, Options: req.Options, Meta: meta})
 	f.logOutgoingOptions(chatID, req, nil)
 
 	select {
@@ -566,13 +566,13 @@ func (f *ImAdapter) wasDecisionClosedRecently(decisionID string) bool {
 
 func (f *ImAdapter) sendHelpPage(chatID, messageID string, model HelpModel, menuID string, page int) error {
 	card := buildHelpCard(chatID, model, menuID, page)
-	if strings.TrimSpace(messageID) != "" {
-		return f.adapter.UpdateCard(chatID, strings.TrimSpace(messageID), card)
-	}
-	return f.SendCard(chatID, card)
+	mid := strings.TrimSpace(messageID)
+	err := f.adapter.SendCard(chatID, mid, card)
+	f.logOutgoingCard(chatID, mid, card, err)
+	return err
 }
 
-func buildHelpCard(chatID string, model HelpModel, menuID string, page int) Card {
+func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawCard {
 	const pageSize = 8
 	title, body, options, parent := resolveHelpMenu(model, menuID)
 	if page < 0 {
@@ -682,7 +682,7 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) Card
 		})
 	}
 
-	return Card{
+	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -976,7 +976,6 @@ func (f *ImAdapter) CanHandleDecision() bool {
 var _ UpdateEmitter = (*ImAdapter)(nil)
 var _ DecisionRequester = (*ImAdapter)(nil)
 var _ HelpResolverSetter = (*ImAdapter)(nil)
-var _ DebugLoggerSetter = (*ImAdapter)(nil)
 
 func (f *ImAdapter) writeDebugLine(line string) {
 	f.mu.Lock()
@@ -1015,25 +1014,40 @@ func (f *ImAdapter) logIncomingMessage(m Message) {
 		m.ChatID, m.MessageID, m.UserID, previewText(m.Text, 300)))
 }
 
-func (f *ImAdapter) logOutgoingText(chatID, text string, err error) {
+func (f *ImAdapter) logOutgoingSend(chatID, text string, kind TextKind, err error) {
+	kindStr := "send_text"
+	switch kind {
+	case TextDebug:
+		if err != nil {
+			f.writeDebugLine(fmt.Sprintf("event=send_debug status=error chat=%q err=%q text=%q",
+				chatID, err.Error(), previewText(text, 300)))
+		}
+		return // suppress successful debug log to avoid duplicate noise
+	case TextSystem:
+		kindStr = "send_system"
+	}
 	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("event=send_text status=error chat=%q err=%q text=%q",
-			chatID, err.Error(), previewText(text, 300)))
+		f.writeDebugLine(fmt.Sprintf("event=%s status=error chat=%q err=%q text=%q",
+			kindStr, chatID, err.Error(), previewText(text, 300)))
 		return
 	}
-	f.writeDebugLine(fmt.Sprintf("event=send_text status=ok chat=%q len=%d text=%q",
-		chatID, len([]rune(text)), previewText(text, 300)))
+	f.writeDebugLine(fmt.Sprintf("event=%s status=ok chat=%q len=%d text=%q",
+		kindStr, chatID, len([]rune(text)), previewText(text, 300)))
 }
 
-func (f *ImAdapter) logOutgoingCard(chatID string, card Card, err error) {
+func (f *ImAdapter) logOutgoingCard(chatID, messageID string, card Card, err error) {
 	raw, _ := json.Marshal(card)
 	preview := previewText(string(raw), 400)
+	event := "send_card"
+	if messageID != "" {
+		event = "update_card"
+	}
 	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("event=send_card status=error chat=%q err=%q card=%q",
-			chatID, err.Error(), preview))
+		f.writeDebugLine(fmt.Sprintf("event=%s status=error chat=%q msg=%q err=%q card=%q",
+			event, chatID, messageID, err.Error(), preview))
 		return
 	}
-	f.writeDebugLine(fmt.Sprintf("event=send_card status=ok chat=%q card=%q", chatID, preview))
+	f.writeDebugLine(fmt.Sprintf("event=%s status=ok chat=%q msg=%q card=%q", event, chatID, messageID, preview))
 }
 
 func (f *ImAdapter) logOutgoingReaction(messageID, emoji string, err error) {
@@ -1043,25 +1057,6 @@ func (f *ImAdapter) logOutgoingReaction(messageID, emoji string, err error) {
 		return
 	}
 	f.writeDebugLine(fmt.Sprintf("event=send_reaction status=ok msg=%q emoji=%q", messageID, emoji))
-}
-
-func (f *ImAdapter) logOutgoingDebug(chatID, text string, err error) {
-	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("event=send_debug status=error chat=%q err=%q text=%q",
-			chatID, err.Error(), previewText(text, 300)))
-	}
-	// Do not log successful debug sends here to avoid duplicate lines:
-	// ACP payload already exists in -[acp] debug logs.
-}
-
-func (f *ImAdapter) logOutgoingSystem(chatID, text string, err error) {
-	if err != nil {
-		f.writeDebugLine(fmt.Sprintf("event=send_system status=error chat=%q err=%q text=%q",
-			chatID, err.Error(), previewText(text, 300)))
-		return
-	}
-	f.writeDebugLine(fmt.Sprintf("event=send_system status=ok chat=%q len=%d text=%q",
-		chatID, len([]rune(text)), previewText(text, 300)))
 }
 
 func (f *ImAdapter) logOutgoingOptions(chatID string, req DecisionRequest, err error) {

@@ -129,8 +129,19 @@ func (f *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 	f.mu.Unlock()
 }
 
-// SendText posts a plain text message to a Feishu chat.
-func (f *Channel) SendText(chatID, text string) error {
+// Send dispatches a text message by kind to the appropriate stream.
+func (f *Channel) Send(chatID, text string, kind im.TextKind) error {
+	switch kind {
+	case im.TextDebug:
+		return f.sendDebug(chatID, text)
+	case im.TextSystem:
+		return f.sendSystem(chatID, text)
+	default:
+		return f.sendText(chatID, text)
+	}
+}
+
+func (f *Channel) sendText(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" || text == "" {
 		return nil
@@ -196,9 +207,7 @@ func (f *Channel) SendText(chatID, text string) error {
 	return nil
 }
 
-// SendSystem posts a system stream card to a Feishu chat.
-// System and ACP streams are intentionally isolated into different cards.
-func (f *Channel) SendSystem(chatID, text string) error {
+func (f *Channel) sendSystem(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	text = strings.TrimSpace(text)
 	if chatID == "" || text == "" {
@@ -285,8 +294,22 @@ func (f *Channel) resetSystemStream(chatID string) {
 	f.textMu.Unlock()
 }
 
-// SendCard posts an interactive card to a Feishu chat.
-func (f *Channel) SendCard(chatID string, card im.Card) error {
+// SendCard dispatches a card payload to the appropriate renderer.
+func (f *Channel) SendCard(chatID, messageID string, card im.Card) error {
+	switch c := card.(type) {
+	case im.RawCard:
+		return f.sendRawCard(chatID, messageID, c)
+	case im.OptionsCard:
+		return f.sendOptions(chatID, c)
+	case im.ToolCallCard:
+		return f.sendToolCall(chatID, c)
+	default:
+		return fmt.Errorf("feishu: unsupported card type %T", card)
+	}
+}
+
+// sendRawCard posts a new card or updates an existing one in place.
+func (f *Channel) sendRawCard(chatID, messageID string, card im.RawCard) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -295,11 +318,16 @@ func (f *Channel) SendCard(chatID string, card im.Card) error {
 	if err != nil {
 		return fmt.Errorf("feishu: marshal card: %w", err)
 	}
-	msg := lark.NewMsgBuffer(lark.MsgInteractive).
-		BindChatID(chatID).
-		Card(string(raw)).
-		Build()
-	resp, err := bot.PostMessage(msg)
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+	if messageID = strings.TrimSpace(messageID); messageID != "" {
+		_, err = bot.UpdateMessage(messageID, buf.Build())
+		if err == nil {
+			f.setLastOutbound(chatID, messageID)
+			f.clearReceiveAck(chatID)
+		}
+		return err
+	}
+	resp, err := bot.PostMessage(buf.BindChatID(chatID).Build())
 	if err == nil {
 		if resp != nil {
 			f.setLastOutbound(chatID, strings.TrimSpace(resp.Data.MessageID))
@@ -309,31 +337,9 @@ func (f *Channel) SendCard(chatID string, card im.Card) error {
 	return err
 }
 
-// UpdateCard updates an existing interactive card message in place.
-func (f *Channel) UpdateCard(chatID, messageID string, card im.Card) error {
-	chatID = strings.TrimSpace(chatID)
-	messageID = strings.TrimSpace(messageID)
-	if chatID == "" || messageID == "" {
-		return fmt.Errorf("feishu: chat id and message id required for update")
-	}
-	bot, err := f.ensureBot()
-	if err != nil {
-		return err
-	}
-	raw, err := json.Marshal(card)
-	if err != nil {
-		return fmt.Errorf("feishu: marshal card: %w", err)
-	}
-	_, err = bot.UpdateMessage(messageID, lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw)).Build())
-	if err == nil {
-		f.setLastOutbound(chatID, messageID)
-		f.clearReceiveAck(chatID)
-	}
-	return err
-}
-
-// SendOptions renders decision options. Feishu presents them as interactive buttons.
-func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
+// sendOptions renders decision options as interactive buttons.
+func (f *Channel) sendOptions(chatID string, oc im.OptionsCard) error {
+	title, body, options, meta := oc.Title, oc.Body, oc.Options, oc.Meta
 	toolCallID := strings.TrimSpace(meta["tool_call_id"])
 	decisionID := strings.TrimSpace(meta["decision_id"])
 	if toolCallID != "" && decisionID != "" {
@@ -383,7 +389,7 @@ func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 			"actions": actions,
 		})
 	}
-	card := im.Card{
+	rawCard := im.RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -393,7 +399,7 @@ func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionO
 		},
 		"elements": elements,
 	}
-	return f.SendCard(chatID, card)
+	return f.sendRawCard(chatID, "", rawCard)
 }
 
 func (f *Channel) attachPermissionOptionsToToolCard(chatID, toolCallID, title string, options []im.DecisionOption, meta map[string]string) error {
@@ -546,8 +552,7 @@ func (f *Channel) getLastOutbound(chatID string) string {
 	return strings.TrimSpace(f.lastOutbound[chatID])
 }
 
-// SendDebug appends debug text to a per-chat stream card and flushes every 2 seconds.
-func (f *Channel) SendDebug(chatID, text string) error {
+func (f *Channel) sendDebug(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	line := sanitizeDebugStreamLine(text)
 	if chatID == "" || line == "" {
@@ -651,7 +656,7 @@ func (f *Channel) flushDebug(chatID string) {
 	_, _ = bot.UpdateMessage(messageID, msg)
 }
 
-func buildDebugCard(lines []string) im.Card {
+func buildDebugCard(lines []string) im.RawCard {
 	if len(lines) > 120 {
 		lines = lines[len(lines)-120:]
 	}
@@ -662,7 +667,7 @@ func buildDebugCard(lines []string) im.Card {
 		b.WriteString("\n")
 	}
 	b.WriteString("```")
-	return im.Card{
+	return im.RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -676,19 +681,19 @@ func buildDebugCard(lines []string) im.Card {
 	}
 }
 
-func buildTextStreamCard(content string, streaming bool) im.Card {
+func buildTextStreamCard(content string, streaming bool) im.RawCard {
 	_ = streaming
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
 	}
-	return im.Card{
+	return im.RawCard{
 		"config":   map[string]any{"update_multi": true},
 		"elements": elements,
 	}
 }
 
-func buildSystemStreamCard(content string) im.Card {
-	return im.Card{
+func buildSystemStreamCard(content string) im.RawCard {
+	return im.RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -703,7 +708,8 @@ func buildSystemStreamCard(content string) im.Card {
 }
 
 // SendToolCall renders one streaming card per toolCallId and updates it in place.
-func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
+func (f *Channel) sendToolCall(chatID string, tc im.ToolCallCard) error {
+	update := tc.Update
 	chatID = strings.TrimSpace(chatID)
 	toolCallID := strings.TrimSpace(update.ToolCallID)
 	if chatID == "" || toolCallID == "" {
@@ -964,7 +970,7 @@ func compactStatusEmoji(status string) string {
 	}
 }
 
-func buildCompactToolCard(lines []string, transcript string, streaming bool) im.Card {
+func buildCompactToolCard(lines []string, transcript string, streaming bool) im.RawCard {
 	_ = streaming
 	title := compactToolIconTitle(lines)
 	if strings.TrimSpace(transcript) == "" {
@@ -974,7 +980,7 @@ func buildCompactToolCard(lines []string, transcript string, streaming bool) im.
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
 	}
-	return im.Card{
+	return im.RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"template": "blue",
@@ -1057,7 +1063,7 @@ func isToolCallTerminalStatus(status string) bool {
 	}
 }
 
-func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermissionState, streaming bool) im.Card {
+func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermissionState, streaming bool) im.RawCard {
 	_ = streaming
 	status := strings.ToLower(strings.TrimSpace(update.Status))
 	if status == "" {
@@ -1096,7 +1102,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 			elements = append(elements, map[string]any{"tag": "action", "actions": actions})
 		}
 	}
-	return im.Card{
+	return im.RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"template": template,

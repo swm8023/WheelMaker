@@ -285,34 +285,24 @@ type captureChannel struct {
 }
 
 func (a *captureChannel) OnMessage(_ im.MessageHandler) {}
-func (a *captureChannel) SendText(chatID string, text string) error {
+func (a *captureChannel) Send(chatID string, text string, kind im.TextKind) error {
+	if kind == im.TextDebug {
+		if a.debugMessages != nil {
+			*a.debugMessages = append(*a.debugMessages, text)
+			return nil
+		}
+	}
 	*a.messages = append(*a.messages, text)
 	if a.chatIDs != nil {
 		*a.chatIDs = append(*a.chatIDs, chatID)
 	}
 	return nil
 }
-func (a *captureChannel) SendDebug(_ string, text string) error {
-	if a.debugMessages != nil {
-		*a.debugMessages = append(*a.debugMessages, text)
-		return nil
-	}
-	*a.messages = append(*a.messages, text)
-	return nil
-}
-func (a *captureChannel) SendCard(_ string, _ im.Card) error             { return nil }
-func (a *captureChannel) UpdateCard(_ string, _ string, _ im.Card) error { return nil }
-func (a *captureChannel) SendReaction(_, _ string) error                 { return nil }
-func (a *captureChannel) SendSystem(chatID string, text string) error {
-	return a.SendText(chatID, text)
-}
-func (a *captureChannel) SendOptions(_, _, _ string, _ []im.DecisionOption, _ map[string]string) error {
-	return nil
-}
-func (a *captureChannel) SendToolCall(_ string, _ im.ToolCallUpdate) error { return nil }
-func (a *captureChannel) MarkDone(_ string) error                          { return nil }
-func (a *captureChannel) OnCardAction(_ func(im.CardActionEvent))          {}
-func (a *captureChannel) Run(_ context.Context) error                      { return nil }
+func (a *captureChannel) SendCard(_ string, _ string, _ im.Card) error { return nil }
+func (a *captureChannel) SendReaction(_, _ string) error               { return nil }
+func (a *captureChannel) MarkDone(_ string) error                      { return nil }
+func (a *captureChannel) OnCardAction(_ func(im.CardActionEvent))      {}
+func (a *captureChannel) Run(_ context.Context) error                  { return nil }
 
 var _ im.Channel = (*captureChannel)(nil)
 

@@ -35,49 +35,53 @@ func (c *Channel) OnMessage(handler im.MessageHandler) {
 	c.handler = handler
 }
 
-// SendText prints a plain text reply to stdout with a project-name prefix.
-func (c *Channel) SendText(_ string, text string) error {
-	fmt.Printf("[%s] %s\n", c.projectName, text)
+// Send prints a text message to stdout; kind is indicated by a prefix for debug/system.
+func (c *Channel) Send(_ string, text string, kind im.TextKind) error {
+	switch kind {
+	case im.TextDebug:
+		fmt.Printf("[%s][debug] %s\n", c.projectName, strings.TrimSpace(text))
+	case im.TextSystem:
+		fmt.Printf("[%s][system] %s\n", c.projectName, text)
+	default:
+		fmt.Printf("[%s] %s\n", c.projectName, text)
+	}
 	return nil
 }
 
-// SendCard prints the card as JSON to stdout.
-func (c *Channel) SendCard(_ string, card im.Card) error {
-	data, _ := json.Marshal(card)
-	fmt.Printf("[%s] card: %s\n", c.projectName, string(data))
-	return nil
-}
-
-// SendOptions renders options as plain text in console.
-func (c *Channel) SendOptions(_ string, title, body string, options []im.DecisionOption, _ map[string]string) error {
-	var b strings.Builder
-	if strings.TrimSpace(title) != "" {
-		b.WriteString(strings.TrimSpace(title))
-	}
-	if strings.TrimSpace(body) != "" {
-		if b.Len() > 0 {
-			b.WriteString("\n")
+// SendCard prints the card payload to stdout. Dispatches by card type.
+func (c *Channel) SendCard(_ string, _ string, card im.Card) error {
+	switch cd := card.(type) {
+	case im.OptionsCard:
+		var b strings.Builder
+		if strings.TrimSpace(cd.Title) != "" {
+			b.WriteString(strings.TrimSpace(cd.Title))
 		}
-		b.WriteString(strings.TrimSpace(body))
-	}
-	if len(options) > 0 {
-		if b.Len() > 0 {
-			b.WriteString("\n")
+		if strings.TrimSpace(cd.Body) != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			b.WriteString(strings.TrimSpace(cd.Body))
 		}
-		for i, opt := range options {
+		for i, opt := range cd.Options {
+			if b.Len() > 0 && i == 0 {
+				b.WriteString("\n")
+			}
 			b.WriteString(fmt.Sprintf("%d. %s (id=%s)\n", i+1, opt.Label, opt.ID))
 		}
+		fmt.Printf("[%s] %s\n", c.projectName, strings.TrimSpace(b.String()))
+	case im.ToolCallCard:
+		if msg := im.RenderToolCallMessage(cd.Update); msg != "" {
+			fmt.Printf("[%s] %s\n", c.projectName, msg)
+		}
+	default:
+		data, _ := json.Marshal(card)
+		fmt.Printf("[%s] card: %s\n", c.projectName, string(data))
 	}
-	return c.SendText(c.projectName, strings.TrimSpace(b.String()))
+	return nil
 }
 
 // SendReaction is a no-op for the console IM.
 func (c *Channel) SendReaction(_, _ string) error { return nil }
-
-// SendDebug prints debug text to stdout.
-func (c *Channel) SendDebug(chatID, text string) error {
-	return c.SendText(chatID, strings.TrimSpace(text))
-}
 
 // Run reads lines from os.Stdin until ctx is cancelled or EOF.
 // Each non-empty line is dispatched as an im.Message to the registered handler.
@@ -119,25 +123,7 @@ func (c *Channel) Run(ctx context.Context) error {
 // OnCardAction is a no-op for the console; it has no interactive card UI.
 func (c *Channel) OnCardAction(_ func(im.CardActionEvent)) {}
 
-// SendSystem prints system text to stdout (same rendering as SendText for console).
-func (c *Channel) SendSystem(chatID, text string) error {
-	return c.SendText(chatID, text)
-}
-
-// SendToolCall renders the tool-call update as plain text.
-func (c *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
-	if msg := im.RenderToolCallMessage(update); msg != "" {
-		return c.SendText(chatID, msg)
-	}
-	return nil
-}
-
 // MarkDone is a no-op for the console.
 func (c *Channel) MarkDone(_ string) error { return nil }
-
-// UpdateCard sends a new card (console has no in-place update support).
-func (c *Channel) UpdateCard(chatID, _ string, card im.Card) error {
-	return c.SendCard(chatID, card)
-}
 
 var _ im.Channel = (*Channel)(nil)
