@@ -864,9 +864,9 @@ func compactToolIconTitle(lines []string) string {
 		}
 	}
 	if len(icons) == 0 {
-		return "🛠️"
+		return "Tools"
 	}
-	return "🛠️ " + strings.Join(icons, " ")
+	return "Tools " + strings.Join(icons, " ")
 }
 
 var inlineNumberedListPattern = regexp.MustCompile(`[ \t]+(\d{1,2}[.)、][ \t]*)`)

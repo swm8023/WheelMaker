@@ -225,7 +225,7 @@ func TestBuildCompactToolCard(t *testing.T) {
 		t.Fatalf("title missing in compact tool card: %+v", card)
 	}
 	title, _ := titleMap["content"].(string)
-	if !strings.Contains(title, "🛠️ ✅ ⏳ ❌") {
+	if !strings.Contains(title, "Tools ✅ ⏳ ❌") {
 		t.Fatalf("unexpected compact card title: %q", title)
 	}
 	elements, ok := card["elements"].([]map[string]any)
@@ -301,9 +301,21 @@ func TestBuildCompactToolCard_TitleIconsLimited(t *testing.T) {
 	)
 	header := card["header"].(map[string]any)
 	title := header["title"].(map[string]any)["content"].(string)
-	const want = "🛠️ ✅ ⏳ ❌ ✅ ⛔ ⏳ ✅ ❌"
+	const want = "Tools ✅ ⏳ ❌ ✅ ⛔ ⏳ ✅ ❌"
 	if title != want {
 		t.Fatalf("title=%q, want %q", title, want)
+	}
+}
+
+func TestBuildCompactToolCard_TitleFallsBackToTextOnly(t *testing.T) {
+	card := buildCompactToolCard(
+		[]string{"RUN go test ./..."},
+		"ok",
+	)
+	header := card["header"].(map[string]any)
+	title := header["title"].(map[string]any)["content"].(string)
+	if title != "Tools" {
+		t.Fatalf("title=%q, want %q", title, "Tools")
 	}
 }
 
