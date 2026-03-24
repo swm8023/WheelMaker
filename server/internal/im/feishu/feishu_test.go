@@ -232,21 +232,24 @@ func TestBuildCompactToolCard(t *testing.T) {
 	if !ok || len(elements) == 0 {
 		t.Fatalf("elements missing in compact tool card: %+v", card)
 	}
-	if len(elements) < 2 {
-		t.Fatalf("expected summary and terminal sections, got: %+v", elements)
+	if len(elements) != 1 {
+		t.Fatalf("expected single compact section, got: %+v", elements)
 	}
-	summary, _ := elements[0]["content"].(string)
-	if !strings.Contains(summary, "### Summary") ||
-		!strings.Contains(summary, "DONE go test ./...") ||
-		!strings.Contains(summary, "RUN rg -n tool") {
-		t.Fatalf("compact summary mismatch: %q", summary)
+	content, _ := elements[0]["content"].(string)
+	if strings.Contains(content, "### Summary") || strings.Contains(content, "### Terminal") {
+		t.Fatalf("compact headings should be removed: %q", content)
 	}
-	terminal, _ := elements[1]["content"].(string)
-	if !strings.Contains(terminal, "### Terminal") ||
-		!strings.Contains(terminal, "```text") ||
-		!strings.Contains(terminal, "$ go test ./...") ||
-		!strings.Contains(terminal, "PASS") {
-		t.Fatalf("compact terminal mismatch: %q", terminal)
+	firstLine := strings.Split(content, "\n")[0]
+	if firstLine != "DONE go test ./..." {
+		t.Fatalf("compact summary should be one line from first entry, got: %q", firstLine)
+	}
+	if strings.Contains(firstLine, "RUN rg -n tool") {
+		t.Fatalf("compact summary should not include second entry: %q", firstLine)
+	}
+	if !strings.Contains(content, "```text") ||
+		!strings.Contains(content, "$ go test ./...") ||
+		!strings.Contains(content, "PASS") {
+		t.Fatalf("compact transcript mismatch: %q", content)
 	}
 }
 

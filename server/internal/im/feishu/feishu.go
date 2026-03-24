@@ -818,22 +818,18 @@ func compactStatusEmoji(status string) string {
 
 func buildCompactToolCard(lines []string, transcript string) im.Card {
 	summary := "_No tool calls_"
-	if len(lines) > 0 {
-		items := make([]string, 0, len(lines))
-		for _, line := range lines {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			items = append(items, "- "+line)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		if len(items) > 0 {
-			summary = "### Summary\n" + strings.Join(items, "\n")
-		}
+		summary = previewLine(line, 120)
+		break
 	}
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
 	}
-	terminal := "### Terminal\n```text\n" + transcript + "\n```"
+	content := summary + "\n```text\n" + transcript + "\n```"
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
@@ -844,8 +840,7 @@ func buildCompactToolCard(lines []string, transcript string) im.Card {
 			},
 		},
 		"elements": []map[string]any{
-			{"tag": "markdown", "content": summary},
-			{"tag": "markdown", "content": terminal},
+			{"tag": "markdown", "content": content},
 		},
 	}
 }
