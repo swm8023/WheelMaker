@@ -317,6 +317,29 @@ func (f *Channel) SendCard(chatID string, card im.Card) error {
 	return err
 }
 
+// UpdateCard updates an existing interactive card message in place.
+func (f *Channel) UpdateCard(chatID, messageID string, card im.Card) error {
+	chatID = strings.TrimSpace(chatID)
+	messageID = strings.TrimSpace(messageID)
+	if chatID == "" || messageID == "" {
+		return fmt.Errorf("feishu: chat id and message id required for update")
+	}
+	bot, err := f.ensureBot()
+	if err != nil {
+		return err
+	}
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: marshal card: %w", err)
+	}
+	_, err = bot.UpdateMessage(messageID, lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw)).Build())
+	if err == nil {
+		f.setLastOutbound(chatID, messageID)
+		f.clearReceiveAck(chatID)
+	}
+	return err
+}
+
 // SendOptions renders decision options. Feishu presents them as interactive buttons.
 func (f *Channel) SendOptions(chatID, title, body string, options []im.DecisionOption, meta map[string]string) error {
 	toolCallID := strings.TrimSpace(meta["tool_call_id"])
@@ -1636,6 +1659,7 @@ func splitTextForFeishu(text string, maxRunes int) []string {
 }
 
 var _ im.Channel = (*Channel)(nil)
+var _ im.CardUpdater = (*Channel)(nil)
 var _ im.DebugSender = (*Channel)(nil)
 var _ im.SystemSender = (*Channel)(nil)
 var _ im.CardActionSubscriber = (*Channel)(nil)

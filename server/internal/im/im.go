@@ -38,6 +38,12 @@ type Channel interface {
 	Run(ctx context.Context) error
 }
 
+// CardUpdater can update an existing card message in place.
+// Implementations should mutate the message identified by messageID instead of posting a new one.
+type CardUpdater interface {
+	UpdateCard(chatID, messageID string, card Card) error
+}
+
 // DebugSender can send debug messages through IM-specific debug channel behavior.
 // Implementations may format or route differently from normal text messages.
 type DebugSender interface {

@@ -495,7 +495,7 @@ func (f *ImAdapter) tryHandleHelp(m Message) bool {
 		_ = f.SendText(m.ChatID, fmt.Sprintf("help load error: %v", err))
 		return true
 	}
-	if err := f.sendHelpPage(m.ChatID, model, model.RootMenu, 0); err != nil {
+	if err := f.sendHelpPage(m.ChatID, "", model, model.RootMenu, 0); err != nil {
 		_ = f.SendText(m.ChatID, strings.TrimSpace(model.Body))
 	}
 	return true
@@ -585,7 +585,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}
-		_ = f.sendHelpPage(chatID, model, menuID, 0)
+		_ = f.sendHelpPage(chatID, evt.MessageID, model, menuID, 0)
 	case "help_page":
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
@@ -608,7 +608,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}
-		_ = f.sendHelpPage(chatID, model, menuID, page)
+		_ = f.sendHelpPage(chatID, evt.MessageID, model, menuID, page)
 	}
 }
 
@@ -642,8 +642,11 @@ func (f *ImAdapter) wasDecisionClosedRecently(decisionID string) bool {
 	return time.Since(ts) <= 2*time.Hour
 }
 
-func (f *ImAdapter) sendHelpPage(chatID string, model HelpModel, menuID string, page int) error {
+func (f *ImAdapter) sendHelpPage(chatID, messageID string, model HelpModel, menuID string, page int) error {
 	card := buildHelpCard(chatID, model, menuID, page)
+	if updater, ok := any(f.adapter).(CardUpdater); ok && strings.TrimSpace(messageID) != "" {
+		return updater.UpdateCard(chatID, strings.TrimSpace(messageID), card)
+	}
 	return f.SendCard(chatID, card)
 }
 

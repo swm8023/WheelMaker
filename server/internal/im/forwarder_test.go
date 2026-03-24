@@ -14,8 +14,11 @@ type stubAdapter struct {
 	lastChatID string
 	lastText   string
 	lastCard   Card
+	lastUpdatedMessageID string
 	textCount  int
 	cardSent   bool
+	cardUpdateCount int
+	cardSendCount int
 	runCalled  bool
 	doneChatID string
 	doneCount  int
@@ -44,6 +47,14 @@ func (s *stubAdapter) SendCard(chatID string, card Card) error {
 	s.lastChatID = chatID
 	s.lastCard = card
 	s.cardSent = true
+	s.cardSendCount++
+	return nil
+}
+func (s *stubAdapter) UpdateCard(chatID, messageID string, card Card) error {
+	s.lastChatID = chatID
+	s.lastUpdatedMessageID = messageID
+	s.lastCard = card
+	s.cardUpdateCount++
 	return nil
 }
 func (s *stubAdapter) SendReaction(_, _ string) error  { return nil }
@@ -311,6 +322,46 @@ func TestBuildHelpCard_RootMenuEntryNavigatesSubmenu(t *testing.T) {
 	value, _ := actions[0]["value"].(map[string]any)
 	if value["kind"] != "help_menu" || value["menu_id"] != "menu:config:mode" {
 		t.Fatalf("root menu entry should navigate submenu, got: %#v", value)
+	}
+}
+
+func TestForwarder_HelpPageCardAction_UpdatesOriginalCard(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	f.SetHelpResolver(func(_ context.Context, _ string) (HelpModel, error) {
+		opts := make([]HelpOption, 0, 10)
+		for i := 0; i < 10; i++ {
+			opts = append(opts, HelpOption{Label: "Opt", Command: "/status"})
+		}
+		return HelpModel{
+			Title:   "help",
+			Body:    "select",
+			Options: opts,
+		}, nil
+	})
+	f.OnMessage(func(_ Message) {})
+
+	ad.onMsg(Message{ChatID: "chat-1", Text: "/help"})
+	if ad.cardSendCount != 1 {
+		t.Fatalf("initial /help should send one card, got %d", ad.cardSendCount)
+	}
+	ad.onAction(CardActionEvent{
+		ChatID:    "chat-1",
+		MessageID: "msg-help-1",
+		Value: map[string]string{
+			"kind":    "help_page",
+			"chat_id": "chat-1",
+			"page":    "1",
+		},
+	})
+	if ad.cardUpdateCount != 1 {
+		t.Fatalf("help page action should update existing card, update_count=%d", ad.cardUpdateCount)
+	}
+	if ad.lastUpdatedMessageID != "msg-help-1" {
+		t.Fatalf("updated message id = %q, want %q", ad.lastUpdatedMessageID, "msg-help-1")
+	}
+	if ad.cardSendCount != 1 {
+		t.Fatalf("help page action should not create new card, send_count=%d", ad.cardSendCount)
 	}
 }
 
