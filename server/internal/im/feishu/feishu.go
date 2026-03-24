@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -126,7 +125,6 @@ func (f *Channel) Abilities() im.Ability {
 // SendText posts a plain text message to a Feishu chat.
 func (f *Channel) SendText(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
-	text = strings.TrimSpace(text)
 	if chatID == "" || text == "" {
 		return nil
 	}
@@ -822,7 +820,6 @@ func buildCompactToolCard(lines []string, transcript string) im.Card {
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
 	}
-	transcript = formatCompactTranscript(transcript)
 	content := "```text\n" + transcript + "\n```"
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
@@ -867,22 +864,6 @@ func compactToolIconTitle(lines []string) string {
 		return "Tools"
 	}
 	return "Tools " + strings.Join(icons, " ")
-}
-
-var inlineNumberedListPattern = regexp.MustCompile(`[ \t]+(\d{1,2}[.)、][ \t]*)`)
-var inlineHyphenBulletPattern = regexp.MustCompile(`[ \t]+-[ \t]+`)
-
-func formatCompactTranscript(s string) string {
-	s = strings.ReplaceAll(s, "\r", "")
-	s = strings.ReplaceAll(s, "\u3000", " ")
-	if strings.TrimSpace(s) == "" {
-		return ""
-	}
-	s = strings.TrimSpace(inlineNumberedListPattern.ReplaceAllString(s, "\n$1"))
-	if strings.HasPrefix(strings.TrimSpace(s), "-") {
-		s = inlineHyphenBulletPattern.ReplaceAllString(s, "\n- ")
-	}
-	return strings.TrimSpace(s)
 }
 
 func compactToolTranscript(stream *compactToolStream) string {
@@ -1028,7 +1009,6 @@ func toolCallDetailBlock(update im.ToolCallUpdate) string {
 	if out == "" {
 		out = "<no output>"
 	}
-	out = formatCompactTranscript(out)
 	block := fmt.Sprintf("$ %s\n\n%s", cmd, out)
 	return previewBlock(block, 3200)
 }
