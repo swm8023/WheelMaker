@@ -25,6 +25,7 @@ type Config struct {
 	VerificationToken string
 	EncryptKey        string
 	Debug             bool
+	YOLO              bool
 }
 
 // Channel implements im.Channel using Feishu WS (inbound) + go-lark (outbound).
@@ -44,6 +45,7 @@ type Channel struct {
 	toolMu        sync.Mutex
 	toolRenderMu  sync.Mutex
 	toolCards     map[string]map[string]*toolCardState // chatID -> toolCallID -> state
+	toolCompact   map[string]*compactToolStream        // chatID -> compact stream state
 
 	seenMu        sync.Mutex
 	seenMessageID map[string]time.Time
@@ -74,6 +76,19 @@ type toolPermissionState struct {
 	selectedLabel string
 }
 
+type compactToolStream struct {
+	messageID string
+	order     []string
+	entries   map[string]compactToolEntry
+}
+
+type compactToolEntry struct {
+	ToolCallID string
+	Title      string
+	Command    string
+	Status     string
+}
+
 // New creates a Feishu IM adapter.
 func New(cfg Config) *Channel {
 	return &Channel{
@@ -83,6 +98,7 @@ func New(cfg Config) *Channel {
 		systemStreams: map[string]*textStream{},
 		seenMessageID: map[string]time.Time{},
 		toolCards:     map[string]map[string]*toolCardState{},
+		toolCompact:   map[string]*compactToolStream{},
 	}
 }
 
@@ -112,6 +128,8 @@ func (f *Channel) SendText(chatID, text string) error {
 	if chatID == "" || text == "" {
 		return nil
 	}
+	// Non-tool text breaks the contiguous tool segment in YOLO mode.
+	f.resetCompactToolStream(chatID)
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
 
@@ -173,6 +191,8 @@ func (f *Channel) SendSystem(chatID, text string) error {
 	if chatID == "" || text == "" {
 		return nil
 	}
+	// System text also breaks contiguous tool segment.
+	f.resetCompactToolStream(chatID)
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
 
@@ -550,6 +570,9 @@ func (f *Channel) SendToolCall(chatID string, update im.ToolCallUpdate) error {
 	if chatID == "" || toolCallID == "" {
 		return nil
 	}
+	if f.cfg.YOLO {
+		return f.sendToolCallCompact(chatID, update)
+	}
 
 	// Tool updates interrupt the current assistant text stream card.
 	f.textMu.Lock()
@@ -651,6 +674,154 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 		f.toolMu.Unlock()
 	}
 	return nil
+}
+
+func (f *Channel) resetCompactToolStream(chatID string) {
+	if !f.cfg.YOLO {
+		return
+	}
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.toolMu.Lock()
+	delete(f.toolCompact, chatID)
+	f.toolMu.Unlock()
+}
+
+func (f *Channel) sendToolCallCompact(chatID string, update im.ToolCallUpdate) error {
+	toolCallID := strings.TrimSpace(update.ToolCallID)
+	if toolCallID == "" {
+		return nil
+	}
+	if strings.TrimSpace(update.Status) == "" {
+		update.Status = "pending"
+	}
+	if strings.TrimSpace(update.Title) == "" {
+		update.Title = "tool_call"
+	}
+
+	// Tool updates interrupt assistant text card.
+	f.textMu.Lock()
+	delete(f.textStreams, chatID)
+	f.textMu.Unlock()
+
+	f.toolMu.Lock()
+	stream := f.toolCompact[chatID]
+	if stream == nil {
+		stream = &compactToolStream{
+			entries: map[string]compactToolEntry{},
+		}
+		f.toolCompact[chatID] = stream
+	}
+	if _, ok := stream.entries[toolCallID]; !ok {
+		stream.order = append(stream.order, toolCallID)
+	}
+	stream.entries[toolCallID] = compactToolEntry{
+		ToolCallID: toolCallID,
+		Title:      strings.TrimSpace(update.Title),
+		Command:    toolCallCommandSummary(update),
+		Status:     strings.TrimSpace(update.Status),
+	}
+	const maxLines = 30
+	if len(stream.order) > maxLines {
+		drop := stream.order[:len(stream.order)-maxLines]
+		for _, id := range drop {
+			delete(stream.entries, id)
+		}
+		stream.order = stream.order[len(stream.order)-maxLines:]
+	}
+	messageID := strings.TrimSpace(stream.messageID)
+	lines := compactToolLines(stream)
+	f.toolMu.Unlock()
+
+	card := buildCompactToolCard(lines)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: marshal compact tool card: %w", err)
+	}
+	bot, err := f.ensureBot()
+	if err != nil {
+		return err
+	}
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+	if messageID == "" {
+		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+		if postErr != nil {
+			return postErr
+		}
+		if resp != nil {
+			messageID = strings.TrimSpace(resp.Data.MessageID)
+		}
+	} else if _, err := bot.UpdateMessage(messageID, buf.Build()); err != nil {
+		return err
+	}
+
+	if messageID != "" {
+		f.toolMu.Lock()
+		if st := f.toolCompact[chatID]; st != nil {
+			st.messageID = messageID
+		}
+		f.toolMu.Unlock()
+	}
+	return nil
+}
+
+func compactToolLines(stream *compactToolStream) []string {
+	if stream == nil || len(stream.order) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(stream.order))
+	for _, id := range stream.order {
+		e, ok := stream.entries[id]
+		if !ok {
+			continue
+		}
+		cmd := strings.TrimSpace(e.Command)
+		if cmd == "" {
+			cmd = strings.TrimSpace(e.Title)
+		}
+		if cmd == "" {
+			cmd = e.ToolCallID
+		}
+		lines = append(lines, fmt.Sprintf("%s %s", compactStatusEmoji(e.Status), previewLine(cmd, 90)))
+	}
+	return lines
+}
+
+func compactStatusEmoji(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed":
+		return "✅"
+	case "failed":
+		return "❌"
+	case "cancelled":
+		return "⛔"
+	case "in_progress":
+		return "⏳"
+	default:
+		return "🟡"
+	}
+}
+
+func buildCompactToolCard(lines []string) im.Card {
+	body := "_No tool calls_"
+	if len(lines) > 0 {
+		body = strings.Join(lines, "\n")
+	}
+	return im.Card{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"template": "blue",
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "🛠️ Tool Stream",
+			},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": body},
+		},
+	}
 }
 
 func isToolCallTerminalStatus(status string) bool {

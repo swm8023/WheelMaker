@@ -8,7 +8,8 @@
       },
       "client": {
         "agent": "claude",
-        "path": "/path/to/your/project"
+        "path": "/path/to/your/project",
+        "yolo": false
       }
     },
     {
@@ -21,7 +22,8 @@
       },
       "client": {
         "agent": "claude",
-        "path": "/path/to/other/project"
+        "path": "/path/to/other/project",
+        "yolo": false
       }
     },
     {
@@ -36,7 +38,8 @@
       },
       "client": {
         "agent": "claude",
-        "path": "/path/to/your/project"
+        "path": "/path/to/your/project",
+        "yolo": false
       }
     }
   ],
@@ -48,7 +51,6 @@
     "level": "warn"
   }
 }
-
 
 
 

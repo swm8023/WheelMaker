@@ -48,6 +48,16 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 	defer r.releaseDecisionSlot()
 
 	r.client.mu.Lock()
+	yolo := r.client.yolo
+	r.client.mu.Unlock()
+	if yolo {
+		if optionID := chooseAutoAllowOption(params.Options); optionID != "" {
+			return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
+		}
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	}
+
+	r.client.mu.Lock()
 	bridge := r.client.imBridge
 	r.client.mu.Unlock()
 	if bridge == nil || !bridge.CanHandleDecision() {
@@ -115,4 +125,17 @@ func (r *permissionRouter) releaseDecisionSlot() {
 	case r.decisionCh <- struct{}{}:
 	default:
 	}
+}
+
+func chooseAutoAllowOption(options []acp.PermissionOption) string {
+	for _, o := range options {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(o.Kind)), "allow") &&
+			strings.TrimSpace(o.OptionID) != "" {
+			return strings.TrimSpace(o.OptionID)
+		}
+	}
+	if len(options) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(options[0].OptionID)
 }

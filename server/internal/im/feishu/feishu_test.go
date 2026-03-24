@@ -198,3 +198,39 @@ func TestSanitizeDebugStreamLine_StripsPrefixes(t *testing.T) {
 		t.Fatalf("sanitizeDebugStreamLine()=%q", got)
 	}
 }
+
+func TestCompactStatusEmoji(t *testing.T) {
+	if got := compactStatusEmoji("completed"); got != "✅" {
+		t.Fatalf("completed emoji=%q", got)
+	}
+	if got := compactStatusEmoji("failed"); got != "❌" {
+		t.Fatalf("failed emoji=%q", got)
+	}
+	if got := compactStatusEmoji("in_progress"); got != "⏳" {
+		t.Fatalf("in_progress emoji=%q", got)
+	}
+}
+
+func TestBuildCompactToolCard(t *testing.T) {
+	card := buildCompactToolCard([]string{"✅ go test ./...", "⏳ rg -n tool"})
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("header missing in compact tool card: %+v", card)
+	}
+	titleMap, ok := header["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("title missing in compact tool card: %+v", card)
+	}
+	title, _ := titleMap["content"].(string)
+	if !strings.Contains(title, "Tool Stream") {
+		t.Fatalf("unexpected compact card title: %q", title)
+	}
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in compact tool card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "✅ go test ./...") || !strings.Contains(content, "⏳ rg -n tool") {
+		t.Fatalf("compact tool card content mismatch: %q", content)
+	}
+}

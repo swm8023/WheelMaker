@@ -81,6 +81,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 
 	// Create the client.
 	c := client.New(store, imProvider, pc.Name, cwd)
+	c.SetYOLO(pc.Client.YOLO)
 
 	// Enable ACP JSON debug logging for projects with debug=true.
 	if pc.Debug {
@@ -121,6 +122,7 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
 			VerificationToken: h.cfg.Feishu.VerificationToken,
 			EncryptKey:        h.cfg.Feishu.EncryptKey,
 			Debug:             pc.Debug,
+			YOLO:              pc.Client.YOLO,
 		})), nil
 	case "mobile":
 		addr := fmt.Sprintf(":%d", pc.IM.Mobile.Port)

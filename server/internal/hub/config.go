@@ -48,6 +48,7 @@ type MobileConfig struct {
 type ClientConf struct {
 	Agent string `json:"agent,omitempty"`
 	Path  string `json:"path"`
+	YOLO  bool   `json:"yolo,omitempty"`
 }
 
 // FeishuConfig holds shared Feishu settings used across all feishu-type projects.

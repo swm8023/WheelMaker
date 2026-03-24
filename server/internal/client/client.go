@@ -98,6 +98,7 @@ type promptState struct {
 type Client struct {
 	projectName string
 	cwd         string
+	yolo        bool
 
 	registry *agentRegistry
 
@@ -147,6 +148,13 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 	c.permRouter = newPermissionRouter(c)
 	c.debugSink = newAgentDebugSink(c)
 	return c
+}
+
+// SetYOLO enables/disables always-approve permission mode for this project.
+func (c *Client) SetYOLO(enabled bool) {
+	c.mu.Lock()
+	c.yolo = enabled
+	c.mu.Unlock()
 }
 
 // SetDebugLogger enables ACP JSON debug logging on every subsequent agent connection.

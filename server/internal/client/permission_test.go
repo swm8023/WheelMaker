@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/swm8023/wheelmaker/internal/acp"
 )
 
 func TestPermissionRouterDecisionSlotSerializes(t *testing.T) {
@@ -65,5 +67,25 @@ func TestPermissionRouterDecisionSlotRespectsContextCancel(t *testing.T) {
 	}
 	if time.Since(start) < 80*time.Millisecond {
 		t.Fatal("acquire returned too early; expected to wait for context cancellation")
+	}
+}
+
+func TestChooseAutoAllowOption(t *testing.T) {
+	opts := []acp.PermissionOption{
+		{OptionID: "reject", Kind: "reject_once"},
+		{OptionID: "allow", Kind: "allow_once"},
+	}
+	if got := chooseAutoAllowOption(opts); got != "allow" {
+		t.Fatalf("chooseAutoAllowOption()=%q, want allow", got)
+	}
+}
+
+func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
+	opts := []acp.PermissionOption{
+		{OptionID: "abort", Kind: "reject_once"},
+		{OptionID: "deny", Kind: "reject_always"},
+	}
+	if got := chooseAutoAllowOption(opts); got != "abort" {
+		t.Fatalf("chooseAutoAllowOption()=%q, want abort", got)
 	}
 }
