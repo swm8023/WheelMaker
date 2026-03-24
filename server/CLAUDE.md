@@ -103,7 +103,7 @@ bash scripts/install-tools.sh    # macOS / Linux
 
 Every code change must restart wheelmaker: stop existing `wheelmaker` processes, run `go run ./cmd/wheelmaker/`, and ensure only one process remains.
 During live debugging, send the final user-facing reply first, then trigger delayed restart script `server/scripts/delayed-restart.ps1` (kill + `go run` after 30s) in background so the current chat is not interrupted. Calling that script counts as completion for this turn.
-Windows background command (returns immediately): `Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','server\\scripts\\delayed-restart.ps1' -WindowStyle Hidden`
+Windows command (returns immediately): `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
 
 ## Key Invariants (do not break)
 | # | Invariant |
