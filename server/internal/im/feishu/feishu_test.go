@@ -242,7 +242,7 @@ func TestBuildCompactToolCard(t *testing.T) {
 	if strings.Contains(content, "go test ./...") && !strings.Contains(content, "$ go test ./...") {
 		t.Fatalf("summary text should not be rendered above transcript: %q", content)
 	}
-	if strings.Contains(content, "```text") ||
+	if !strings.Contains(content, "```text") ||
 		!strings.Contains(content, "$ go test ./...") ||
 		!strings.Contains(content, "PASS") {
 		t.Fatalf("compact transcript mismatch: %q", content)
@@ -259,7 +259,7 @@ func TestBuildCompactToolCard_FormatsInlineNumberedTranscript(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if strings.Contains(content, "```text") || !strings.Contains(content, "1. collect context\n2. update tests\n3. ship") {
+	if !strings.Contains(content, "```text\n1. collect context\n2. update tests\n3. ship\n```") {
 		t.Fatalf("inline numbered transcript should be split into lines, got: %q", content)
 	}
 }
@@ -274,7 +274,7 @@ func TestBuildCompactToolCard_FormatsNumberedVariants(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if strings.Contains(content, "```text") || !strings.Contains(content, "1)collect context\n2)update tests\n3)ship") {
+	if !strings.Contains(content, "```text\n1)collect context\n2)update tests\n3)ship\n```") {
 		t.Fatalf("numbered variant with ) should be split, got: %q", content)
 	}
 
@@ -287,7 +287,7 @@ func TestBuildCompactToolCard_FormatsNumberedVariants(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card2)
 	}
 	content2, _ := elements2[0]["content"].(string)
-	if strings.Contains(content2, "```text") || !strings.Contains(content2, "1、准备\n2、验证\n3、发布") {
+	if !strings.Contains(content2, "```text\n1、准备\n2、验证\n3、发布\n```") {
 		t.Fatalf("numbered variant with full-width spaces should be split, got: %q", content2)
 	}
 }
@@ -302,7 +302,7 @@ func TestBuildCompactToolCard_FormatsInlineHyphenBullets(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if strings.Contains(content, "```text") || !strings.Contains(content, "- collect context\n- update tests\n- ship") {
+	if !strings.Contains(content, "```text\n- collect context\n- update tests\n- ship\n```") {
 		t.Fatalf("inline hyphen bullets should be split into lines, got: %q", content)
 	}
 }

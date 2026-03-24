@@ -823,7 +823,7 @@ func buildCompactToolCard(lines []string, transcript string) im.Card {
 		transcript = "<no output>"
 	}
 	transcript = formatCompactTranscript(transcript)
-	content := transcript
+	content := "```text\n" + transcript + "\n```"
 	return im.Card{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
