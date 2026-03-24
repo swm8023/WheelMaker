@@ -586,18 +586,6 @@ func sanitizeDebugStreamLine(text string) string {
 			line = strings.TrimSpace(line[idx+2:])
 		}
 	}
-	for {
-		switched := false
-		for _, p := range []string{"->[acp]", "<-[acp]", "->[im]", "<-[im]"} {
-			if strings.HasPrefix(line, p) {
-				line = strings.TrimSpace(strings.TrimPrefix(line, p))
-				switched = true
-			}
-		}
-		if !switched {
-			break
-		}
-	}
 	return line
 }
 
