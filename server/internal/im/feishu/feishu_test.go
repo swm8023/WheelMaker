@@ -191,6 +191,26 @@ func TestBuildToolCallCard(t *testing.T) {
 	}
 }
 
+func TestBuildToolCallCard_FormatsInlineBullets(t *testing.T) {
+	card := buildToolCallCard("chat-1", im.ToolCallUpdate{
+		ToolCallID: "call-1",
+		Title:      "Run tests",
+		Status:     "completed",
+		RawOutput:  []byte(`"- step one - step two - step three"`),
+	}, nil)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "```text\n") {
+		t.Fatalf("tool card should use code block: %q", content)
+	}
+	if !strings.Contains(content, "- step one\n- step two\n- step three") {
+		t.Fatalf("inline bullets should be split in tool card: %q", content)
+	}
+}
+
 func TestSanitizeDebugStreamLine_StripsPrefixes(t *testing.T) {
 	in := "[debug][codex] <-[acp] {\"jsonrpc\":\"2.0\"}"
 	got := sanitizeDebugStreamLine(in)

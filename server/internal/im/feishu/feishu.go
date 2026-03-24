@@ -1028,6 +1028,7 @@ func toolCallDetailBlock(update im.ToolCallUpdate) string {
 	if out == "" {
 		out = "<no output>"
 	}
+	out = formatCompactTranscript(out)
 	block := fmt.Sprintf("$ %s\n\n%s", cmd, out)
 	return previewBlock(block, 3200)
 }
