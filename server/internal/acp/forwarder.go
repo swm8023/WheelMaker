@@ -167,59 +167,41 @@ func dispatchAgentToClientMessage(ctx context.Context, method string, params jso
 			return nil, err
 		}
 		return PermissionResponse{Outcome: result}, nil
-
 	case MethodFSRead:
-		var p FSReadTextFileParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return h.FSRead(p)
-
+		return acpCall(method, params, h.FSRead)
 	case MethodFSWrite:
-		var p FSWriteTextFileParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return nil, h.FSWrite(p)
-
+		return acpCallVoid(method, params, h.FSWrite)
 	case MethodTerminalCreate:
-		var p TerminalCreateParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return h.TerminalCreate(p)
-
+		return acpCall(method, params, h.TerminalCreate)
 	case MethodTerminalOutput:
-		var p TerminalOutputParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return h.TerminalOutput(p)
-
+		return acpCall(method, params, h.TerminalOutput)
 	case MethodTerminalWaitExit:
-		var p TerminalWaitForExitParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return h.TerminalWaitForExit(p)
-
+		return acpCall(method, params, h.TerminalWaitForExit)
 	case MethodTerminalKill:
-		var p TerminalKillParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return nil, h.TerminalKill(p)
-
+		return acpCallVoid(method, params, h.TerminalKill)
 	case MethodTerminalRelease:
-		var p TerminalReleaseParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		return nil, h.TerminalRelease(p)
-
+		return acpCallVoid(method, params, h.TerminalRelease)
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
+}
+
+// acpCall unmarshals params into P, calls fn, and returns the result as any.
+func acpCall[P any, R any](method string, params json.RawMessage, fn func(P) (R, error)) (any, error) {
+	var p P
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+	}
+	return fn(p)
+}
+
+// acpCallVoid unmarshals params into P, calls fn, and returns (nil, error).
+func acpCallVoid[P any](method string, params json.RawMessage, fn func(P) error) (any, error) {
+	var p P
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+	}
+	return nil, fn(p)
 }
 
 // Initialize sends the ACP initialize handshake (client->agent).
