@@ -31,6 +31,12 @@ func (r *permissionRouter) setLastChatID(chatID string) {
 	r.mu.Lock()
 	r.lastChatID = chatID
 	r.mu.Unlock()
+	// Persist to state so that the chat ID survives server restarts.
+	r.client.mu.Lock()
+	if r.client.state != nil {
+		r.client.state.LastChatID = chatID
+	}
+	r.client.mu.Unlock()
 }
 
 func (r *permissionRouter) currentChatIDOrFallback() string {

@@ -189,6 +189,11 @@ func (c *Client) Start(ctx context.Context) error {
 	if c.imBridge != nil {
 		c.imBridge.OnMessage(c.HandleMessage)
 		c.imBridge.SetHelpResolver(c.resolveHelpModel)
+		// Restore the last known chat ID so lifecycle notices go to the correct chat
+		// after a server restart.
+		if state.LastChatID != "" {
+			c.permRouter.setLastChatID(state.LastChatID)
+		}
 		c.notifyLifecycle(lifecycleStartNotice)
 	}
 	return nil
