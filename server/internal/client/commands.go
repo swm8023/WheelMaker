@@ -177,13 +177,20 @@ func (c *Client) handleConfigCommand(
 	sid := c.session.id
 	c.mu.Unlock()
 
-	if _, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+	updatedOpts, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
 		SessionID: sid,
 		ConfigID:  configID,
 		Value:     value,
-	}); err != nil {
+	})
+	if err != nil {
 		c.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
+	}
+	// Apply returned config options immediately so the help menu reflects the new value.
+	if len(updatedOpts) > 0 {
+		c.mu.Lock()
+		c.sessionMeta.ConfigOptions = updatedOpts
+		c.mu.Unlock()
 	}
 
 	c.saveSessionState()

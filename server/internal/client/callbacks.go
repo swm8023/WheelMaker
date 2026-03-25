@@ -27,12 +27,14 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		replayH(params)
 	}
 
-	if params.SessionID != sessID || ch == nil {
+	if params.SessionID != sessID {
 		return
 	}
 
 	derived := acp.ParseSessionUpdateParams(params)
 
+	// Always update sessionMeta for matching session (even outside an active prompt).
+	// This ensures config_option_update from set_config_option is captured correctly.
 	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
 		c.mu.Lock()
 		if len(derived.AvailableCommands) > 0 {
@@ -61,6 +63,10 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 		c.mu.Unlock()
 	}
 
+	// Route update to the active prompt channel if one exists.
+	if ch == nil {
+		return
+	}
 	// Preserve update ordering and avoid lossy drops under high-frequency streams.
 	// If prompt is already cancelled, skip blocking send.
 	if promptCtx == nil {

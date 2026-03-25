@@ -664,38 +664,34 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 			elements = append(elements, map[string]any{"tag": "action", "actions": nav})
 		}
 	}
-	if strings.TrimSpace(parent) != "" {
-		elements = append(elements, map[string]any{
-			"tag": "action",
-			"actions": []map[string]any{
-				{
-					"tag":  "button",
-					"text": map[string]any{"tag": "plain_text", "content": "Back"},
-					"type": "default",
-					"value": map[string]any{
-						"kind":    "help_menu",
-						"chat_id": chatID,
-						"menu_id": parent,
-					},
-				},
-			},
-		})
-	}
-
 	headerTitle := renderDefault(title, "Help")
 	if maxPage > 0 {
 		headerTitle = fmt.Sprintf("%s (%d/%d)", headerTitle, page+1, maxPage+1)
 	}
 
-	return RawCard{
-		"config": map[string]any{"update_multi": true},
-		"header": map[string]any{
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": headerTitle,
-			},
-			"template": "green",
+	header := map[string]any{
+		"title": map[string]any{
+			"tag":     "plain_text",
+			"content": headerTitle,
 		},
+		"template": "green",
+	}
+	if strings.TrimSpace(parent) != "" {
+		header["extra"] = map[string]any{
+			"tag":  "button",
+			"text": map[string]any{"tag": "plain_text", "content": "←"},
+			"type": "default",
+			"value": map[string]any{
+				"kind":    "help_menu",
+				"chat_id": chatID,
+				"menu_id": parent,
+			},
+		}
+	}
+
+	return RawCard{
+		"config":   map[string]any{"update_multi": true},
+		"header":   header,
 		"elements": elements,
 	}
 }
