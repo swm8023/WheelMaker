@@ -482,11 +482,23 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 		if val != "" {
 			text = cmd + " " + val
 		}
-		go f.handler(Message{
+		f.handler(Message{
 			ChatID: chatID,
 			UserID: evt.UserID,
 			Text:   text,
 		})
+		f.mu.Lock()
+		resolver := f.helpResolver
+		f.mu.Unlock()
+		if resolver == nil {
+			return
+		}
+		model, err := resolver(context.Background(), chatID)
+		if err != nil {
+			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
+			return
+		}
+		_ = f.sendHelpPage(chatID, evt.MessageID, model, model.RootMenu, 0)
 	case "help_menu":
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
@@ -687,6 +699,22 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 				"menu_id": parent,
 			},
 		}
+		// Compatibility fallback: some clients may not render header.extra button.
+		elements = append(elements, map[string]any{
+			"tag": "action",
+			"actions": []map[string]any{
+				{
+					"tag":  "button",
+					"text": map[string]any{"tag": "plain_text", "content": "Back"},
+					"type": "default",
+					"value": map[string]any{
+						"kind":    "help_menu",
+						"chat_id": chatID,
+						"menu_id": parent,
+					},
+				},
+			},
+		})
 	}
 
 	return RawCard{

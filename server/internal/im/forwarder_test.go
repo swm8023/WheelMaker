@@ -288,6 +288,21 @@ func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
 	if !ok || len(elements) == 0 {
 		t.Fatalf("help card elements missing: %#v", card["elements"])
 	}
+	hasBackInElements := false
+	for _, el := range elements {
+		actions, _ := el["actions"].([]map[string]any)
+		for _, act := range actions {
+			textMap, _ := act["text"].(map[string]any)
+			valueMap, _ := act["value"].(map[string]any)
+			if textMap["content"] == "Back" && valueMap["kind"] == "help_menu" && valueMap["menu_id"] == "root" {
+				hasBackInElements = true
+				break
+			}
+		}
+	}
+	if !hasBackInElements {
+		t.Fatalf("expected fallback back button in elements, got: %#v", elements)
+	}
 }
 
 func TestBuildHelpCard_RootMenuEntryNavigatesSubmenu(t *testing.T) {
@@ -351,6 +366,76 @@ func TestForwarder_HelpPageCardAction_UpdatesOriginalCard(t *testing.T) {
 	}
 	if ad.cardSendCount != 1 {
 		t.Fatalf("help page action should not create new card, send_count=%d", ad.cardSendCount)
+	}
+}
+
+func TestForwarder_HelpOptionCardAction_RefreshesRootWithLatestState(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	currentAgent := "claude"
+	f.SetHelpResolver(func(_ context.Context, _ string) (HelpModel, error) {
+		return HelpModel{
+			Title:    "help",
+			Body:     "root",
+			RootMenu: "root",
+			Options: []HelpOption{
+				{Label: "Agent: " + currentAgent, MenuID: "menu:agents"},
+			},
+			Menus: map[string]HelpMenu{
+				"menu:agents": {
+					Title:  "Agent Switch",
+					Body:   "Choose",
+					Parent: "root",
+					Options: []HelpOption{
+						{Label: "Agent: codex", Command: "/use", Value: "codex"},
+					},
+				},
+			},
+		}, nil
+	})
+	f.OnMessage(func(m Message) {
+		if strings.TrimSpace(m.Text) == "/use codex" {
+			currentAgent = "codex"
+		}
+	})
+
+	ad.onMsg(Message{ChatID: "chat-1", Text: "/help"})
+	if ad.cardSendCount != 1 {
+		t.Fatalf("initial /help should send one card, got %d", ad.cardSendCount)
+	}
+
+	ad.onAction(CardActionEvent{
+		ChatID:    "chat-1",
+		MessageID: "msg-help-1",
+		Value: map[string]string{
+			"kind":    "help_option",
+			"chat_id": "chat-1",
+			"command": "/use",
+			"value":   "codex",
+		},
+	})
+
+	if ad.cardUpdateCount != 1 {
+		t.Fatalf("help option action should update existing card, update_count=%d", ad.cardUpdateCount)
+	}
+	if ad.lastUpdatedMessageID != "msg-help-1" {
+		t.Fatalf("updated message id = %q, want %q", ad.lastUpdatedMessageID, "msg-help-1")
+	}
+	card, ok := ad.lastCard.(RawCard)
+	if !ok {
+		t.Fatalf("updated card type=%T, want RawCard", ad.lastCard)
+	}
+	elements, _ := card["elements"].([]map[string]any)
+	if len(elements) < 2 {
+		t.Fatalf("unexpected root card elements: %#v", elements)
+	}
+	actions, _ := elements[1]["actions"].([]map[string]any)
+	if len(actions) == 0 {
+		t.Fatalf("root actions missing after refresh: %#v", elements[1])
+	}
+	textMap, _ := actions[0]["text"].(map[string]any)
+	if textMap["content"] != "Agent: codex" {
+		t.Fatalf("root did not refresh latest agent label, got=%#v", textMap["content"])
 	}
 }
 
