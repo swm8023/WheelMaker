@@ -19,7 +19,6 @@ import (
 
 	acp "github.com/swm8023/wheelmaker/internal/acp"
 	"github.com/swm8023/wheelmaker/internal/agent"
-	backendmock "github.com/swm8023/wheelmaker/internal/agent/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/logger"
@@ -1358,7 +1357,7 @@ func TestHandleMessage_PermissionDecision_ButtonsOnly(t *testing.T) {
 	}}
 	c := client.New(store, nil, "test", "/tmp")
 	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
-		return backendmock.New()
+		return &minimalMockAgent{}
 	})
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -1453,6 +1452,25 @@ func runClientMockAgent() {
 							},
 						})
 					}
+					_ = enc.Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"id":      id,
+						"result":  map[string]any{"stopReason": "end_turn"},
+					})
+					continue
+				}
+				if promptText == "4" {
+					_ = enc.Encode(map[string]any{
+						"jsonrpc": "2.0",
+						"method":  "session/update",
+						"params": map[string]any{
+							"sessionId": params.SessionID,
+							"update": map[string]any{
+								"sessionUpdate": "agent_message_chunk",
+								"content":       map[string]any{"type": "text", "text": "permission:cancelled"},
+							},
+						},
+					})
 					_ = enc.Encode(map[string]any{
 						"jsonrpc": "2.0",
 						"id":      id,
