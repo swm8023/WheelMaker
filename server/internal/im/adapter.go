@@ -682,13 +682,19 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 		})
 	}
 
+	headerTitle := renderDefault(title, "Help")
+	if maxPage > 0 {
+		headerTitle = fmt.Sprintf("%s (%d/%d)", headerTitle, page+1, maxPage+1)
+	}
+
 	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": fmt.Sprintf("%s (%d/%d)", renderDefault(title, "Help"), page+1, maxPage+1),
+				"content": headerTitle,
 			},
+			"template": "green",
 		},
 		"elements": elements,
 	}

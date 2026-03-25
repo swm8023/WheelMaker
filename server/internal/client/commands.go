@@ -451,24 +451,33 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 
 	c.mu.Lock()
 	opts := append([]acp.ConfigOption(nil), c.sessionMeta.ConfigOptions...)
-	commands := append([]acp.AvailableCommand(nil), c.sessionMeta.AvailableCommands...)
+	currentAgent := ""
+	if c.conn != nil {
+		currentAgent = c.conn.name
+	}
+	var cachedSessions []SessionSummary
+	if c.state != nil && c.state.Agents != nil && currentAgent != "" {
+		if as := c.state.Agents[currentAgent]; as != nil {
+			cachedSessions = append([]SessionSummary(nil), as.Sessions...)
+		}
+	}
 	c.mu.Unlock()
 
 	model := im.HelpModel{
-		Title:    "WheelMaker Help",
-		Body:     "Choose a quick action below. Advanced commands can still be typed manually.",
+		Title:    "WheelMaker",
+		Body:     "",
 		RootMenu: "root",
 		Menus:    map[string]im.HelpMenu{},
 	}
-	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Cancel", Command: "/cancel"})
-	model.Options = append(model.Options, im.HelpOption{Label: "List Sessions", Command: "/list"})
-	model.Options = append(model.Options, im.HelpOption{Label: "New Session", Command: "/new"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
 
+	// 1. Agent switch (show current agent in label)
+	agentLabel := "Agent Switch"
+	if currentAgent != "" {
+		agentLabel = "Agent: " + currentAgent
+	}
 	agentMenuID := "menu:agents"
 	model.Options = append(model.Options, im.HelpOption{
-		Label:  "Agent Switch",
+		Label:  agentLabel,
 		MenuID: agentMenuID,
 	})
 	agentMenu := im.HelpMenu{
@@ -486,6 +495,7 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 	}
 	model.Menus[agentMenuID] = agentMenu
 
+	// 2. Config options
 	for _, opt := range opts {
 		cfgID := strings.TrimSpace(opt.ID)
 		if cfgID == "" {
@@ -521,17 +531,38 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 		}
 		model.Menus[menuID] = cfgMenu
 	}
-	if len(commands) > 0 {
-		names := make([]string, 0, len(commands))
-		for _, cmd := range commands {
-			if strings.TrimSpace(cmd.Name) != "" {
-				names = append(names, cmd.Name)
-			}
-		}
-		if len(names) > 0 {
-			model.Body += "\nAvailable slash commands: " + strings.Join(names, ", ")
-		}
+
+	// 3. Session List — submenu from cached sessions, clicking loads the session
+	sessionMenuID := "menu:sessions"
+	model.Options = append(model.Options, im.HelpOption{
+		Label:  "Session List",
+		MenuID: sessionMenuID,
+	})
+	sessionMenu := im.HelpMenu{
+		Title:  "Sessions",
+		Body:   "Select a session to load.",
+		Parent: model.RootMenu,
 	}
+	for i, s := range cachedSessions {
+		title := strings.TrimSpace(s.Title)
+		if title == "" {
+			title = "(no title)"
+		}
+		label := fmt.Sprintf("%d. %s", i+1, title)
+		sessionMenu.Options = append(sessionMenu.Options, im.HelpOption{
+			Label:   label,
+			Command: "/load",
+			Value:   strconv.Itoa(i + 1),
+		})
+	}
+	if len(sessionMenu.Options) == 0 {
+		sessionMenu.Body = "No cached sessions. Send a message first to populate the list."
+	}
+	model.Menus[sessionMenuID] = sessionMenu
+
+	// 4. Status
+	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
+
 	return model, nil
 }
 
