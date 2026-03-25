@@ -10,6 +10,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/agent/claude"
 	"github.com/swm8023/wheelmaker/internal/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/agent/copilot"
 	"github.com/swm8023/wheelmaker/internal/agent/mock"
 	"github.com/swm8023/wheelmaker/internal/client"
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -97,6 +98,17 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 	})
 	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Agent {
 		return claude.New(claude.Config{})
+	})
+	c.RegisterAgent("copilot", func(_ string, _ map[string]string) agent.Agent {
+		mode := copilot.ModeStdio
+		if pc.Client.Copilot.Mode == "tcp" {
+			mode = copilot.ModeTCP
+		}
+		return copilot.New(copilot.Config{
+			Mode:    mode,
+			Port:    pc.Client.Copilot.Port,
+			ExePath: pc.Client.Copilot.ExePath,
+		})
 	})
 	c.RegisterAgent("mock", func(_ string, _ map[string]string) agent.Agent {
 		return mock.New()
