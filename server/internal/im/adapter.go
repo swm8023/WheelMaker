@@ -478,6 +478,17 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 		if cmd == "" || f.handler == nil || chatID == "" {
 			return
 		}
+		f.mu.Lock()
+		resolver := f.helpResolver
+		f.mu.Unlock()
+		var modelBefore HelpModel
+		hasModelBefore := false
+		if resolver != nil {
+			if model, err := resolver(context.Background(), chatID); err == nil {
+				modelBefore = model
+				hasModelBefore = true
+			}
+		}
 		text := cmd
 		if val != "" {
 			text = cmd + " " + val
@@ -487,14 +498,15 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			UserID: evt.UserID,
 			Text:   text,
 		})
-		f.mu.Lock()
-		resolver := f.helpResolver
-		f.mu.Unlock()
 		if resolver == nil {
 			return
 		}
 		model, err := resolver(context.Background(), chatID)
 		if err != nil {
+			if hasModelBefore {
+				_ = f.sendHelpPage(chatID, evt.MessageID, modelBefore, modelBefore.RootMenu, 0)
+				return
+			}
 			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}

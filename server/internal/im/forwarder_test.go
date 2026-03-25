@@ -441,6 +441,71 @@ func TestForwarder_HelpOptionCardAction_RefreshesRootWithLatestState(t *testing.
 	}
 }
 
+func TestForwarder_HelpOptionCardAction_FallbacksToRootWhenPostResolveFails(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	resolveCalls := 0
+	f.SetHelpResolver(func(_ context.Context, _ string) (HelpModel, error) {
+		resolveCalls++
+		model := HelpModel{
+			Title:    "help",
+			Body:     "root",
+			RootMenu: "root",
+			Options: []HelpOption{
+				{Label: "Agent: claude", MenuID: "menu:agents"},
+			},
+			Menus: map[string]HelpMenu{
+				"menu:agents": {
+					Title:  "Agent Switch",
+					Body:   "Choose",
+					Parent: "root",
+					Options: []HelpOption{
+						{Label: "Agent: copilot", Command: "/use", Value: "copilot"},
+					},
+				},
+			},
+		}
+		if resolveCalls >= 3 {
+			return HelpModel{}, context.DeadlineExceeded
+		}
+		return model, nil
+	})
+	f.OnMessage(func(_ Message) {})
+
+	ad.onMsg(Message{ChatID: "chat-1", Text: "/help"})
+	if ad.cardSendCount != 1 {
+		t.Fatalf("initial /help should send one card, got %d", ad.cardSendCount)
+	}
+
+	ad.onAction(CardActionEvent{
+		ChatID:    "chat-1",
+		MessageID: "msg-help-1",
+		Value: map[string]string{
+			"kind":    "help_option",
+			"chat_id": "chat-1",
+			"menu_id": "menu:agents",
+			"command": "/use",
+			"value":   "copilot",
+		},
+	})
+
+	if ad.cardUpdateCount != 1 {
+		t.Fatalf("help option action should still update card to root fallback, update_count=%d", ad.cardUpdateCount)
+	}
+	if ad.lastUpdatedMessageID != "msg-help-1" {
+		t.Fatalf("updated message id = %q, want %q", ad.lastUpdatedMessageID, "msg-help-1")
+	}
+	card, ok := ad.lastCard.(RawCard)
+	if !ok {
+		t.Fatalf("updated card type=%T, want RawCard", ad.lastCard)
+	}
+	header, _ := card["header"].(map[string]any)
+	title, _ := header["title"].(map[string]any)
+	if title["content"] != "help" {
+		t.Fatalf("fallback should navigate to root help title, got=%#v", title["content"])
+	}
+}
+
 func TestParseToolCallUpdate(t *testing.T) {
 	raw := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"ok"}`)
 	upd, sig, ok := parseToolCallUpdate(raw)
