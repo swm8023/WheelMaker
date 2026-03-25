@@ -10,13 +10,13 @@ enum WsState { disconnected, connecting, authenticating, ready, error }
 
 /// Service that manages the WebSocket connection to the WheelMaker daemon.
 ///
-/// Protocol (App → Daemon):
+/// Protocol (App -> Daemon):
 ///   { "type": "auth",    "token": "..." }
 ///   { "type": "message", "text": "..." }
 ///   { "type": "option",  "decisionId": "...", "optionId": "..." }
 ///   { "type": "ping" }
 ///
-/// Protocol (Daemon → App):
+/// Protocol (Daemon -> App):
 ///   { "type": "auth_required" }
 ///   { "type": "ready" }
 ///   { "type": "text",    "text": "..." }
@@ -88,29 +88,34 @@ class WsService {
         if (_token != null) {
           _send({'type': 'auth', 'token': _token});
         } else {
-          // No token configured — server may reject.
+          // No token configured; server may reject.
           _send({'type': 'auth', 'token': ''});
         }
+        break;
 
       case 'ready':
         _setState(WsState.ready);
-        _messageCtrl.add(ChatMessage.system('Connected ✓'));
+        _messageCtrl.add(ChatMessage.system('Connected'));
+        break;
 
       case 'text':
         final text = (msg['text'] as String?) ?? '';
         if (text.isNotEmpty) {
           _messageCtrl.add(ChatMessage.agent(text));
         }
+        break;
 
       case 'card':
         // Render card as formatted JSON for now; rich card UI in a future iteration.
         _messageCtrl.add(ChatMessage.agent('[Card]\n${const JsonEncoder.withIndent('  ').convert(msg['card'])}'));
+        break;
 
       case 'debug':
         final text = (msg['text'] as String?) ?? '';
         if (text.isNotEmpty) {
           _messageCtrl.add(ChatMessage.debug(text));
         }
+        break;
 
       case 'options':
         final rawOpts = (msg['options'] as List<dynamic>?) ?? [];
@@ -126,13 +131,15 @@ class WsService {
           options: opts,
           onSelected: (optionId) => selectOption(decisionId, optionId),
         ));
+        break;
 
       case 'error':
         _setState(WsState.error);
         _messageCtrl.add(ChatMessage.system('Error: ${msg['message'] ?? 'unknown'}'));
+        break;
 
       case 'pong':
-        break; // heartbeat ack — nothing to do
+        break; // heartbeat ack; nothing to do
     }
   }
 
