@@ -1,0 +1,10 @@
+{
+  "name": "WheelMaker",
+  "short_name": "WheelMaker",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#6750A4",
+  "description": "WheelMaker web client",
+  "icons": []
+}

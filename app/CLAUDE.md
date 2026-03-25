@@ -69,8 +69,10 @@ pwsh app/scripts/init-app.ps1
 cd app
 flutter pub get
 flutter run                        # 连接设备调试
+flutter run -d chrome              # 浏览器调试（Web）
 flutter build apk --debug          # 调试 APK
 flutter build apk --release        # 发布 APK
+flutter build web --release        # 发布 Web 静态资源
 ```
 
 ## Key Invariants (do not break)

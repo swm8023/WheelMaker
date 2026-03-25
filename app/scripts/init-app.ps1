@@ -5,7 +5,7 @@
 #
 # What it does:
 #   1. Verifies Flutter is installed.
-#   2. Runs `flutter create` inside app/ to generate the Android/iOS platform files.
+#   2. Runs `flutter create` inside app/ to generate the Android/iOS/Web/Desktop platform files.
 #      Our existing lib/ sources and pubspec.yaml are NOT overwritten.
 #   3. Runs `flutter pub get` to fetch Dart dependencies.
 #
@@ -40,11 +40,11 @@ Write-Host "    flutter: $flutterVersion" -ForegroundColor Green
 
 # ── Generate platform scaffolding (won't overwrite existing files) ──────────────
 Write-Host ""
-Write-Host "==> Generating Android/iOS/Desktop platform files..." -ForegroundColor Cyan
+Write-Host "==> Generating Android/iOS/Web/Desktop platform files..." -ForegroundColor Cyan
 flutter create `
     --project-name wheelmaker `
     --org com.wheelmaker `
-    --platforms android,ios,windows,macos,linux `
+    --platforms web,android,ios,windows,macos,linux `
     $appDir
 
 # ── Install Dart dependencies ──────────────────────────────────────────────────

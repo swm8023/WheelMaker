@@ -4,6 +4,7 @@ WheelMaker/
   server/   — Go 守护进程（ACP 桥接、IM 适配器）
   app/      — Flutter 移动端 App（iOS / Android）
   docs/     — 共享协议与设计文档
+  scripts/  — 脚本
 ```
 
 **根据工作区跳转到对应文档：**
@@ -21,8 +22,4 @@ Before the final user-facing completion message in any implementation task, exec
 4. If files under `server/` changed: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/delay_restart_server.ps1`
 
 If any step fails, report failure and keep working until resolved. Do not claim completion early.
-
-## 关键协议文档
-- ACP 协议：[docs/acp-protocol-full.zh-CN.md](docs/acp-protocol-full.zh-CN.md)
-- 飞书 Bot：[docs/feishu-bot.md](docs/feishu-bot.md)
 
