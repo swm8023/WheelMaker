@@ -679,7 +679,7 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 	if strings.TrimSpace(parent) != "" {
 		header["extra"] = map[string]any{
 			"tag":  "button",
-			"text": map[string]any{"tag": "plain_text", "content": "←"},
+			"text": map[string]any{"tag": "plain_text", "content": "Back"},
 			"type": "default",
 			"value": map[string]any{
 				"kind":    "help_menu",

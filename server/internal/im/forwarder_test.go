@@ -267,23 +267,26 @@ func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
 		},
 	}
 	card := buildHelpCard("chat-1", model, "menu:agents", 0)
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("help card header missing: %#v", card["header"])
+	}
+	extra, ok := header["extra"].(map[string]any)
+	if !ok {
+		t.Fatalf("header extra button missing: %#v", header)
+	}
+	text, _ := extra["text"].(map[string]any)
+	if text["content"] != "Back" {
+		t.Fatalf("header back button label = %#v, want Back", text["content"])
+	}
+	value, _ := extra["value"].(map[string]any)
+	if value["kind"] != "help_menu" || value["menu_id"] != "root" {
+		t.Fatalf("header back button value = %#v", value)
+	}
+
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) == 0 {
 		t.Fatalf("help card elements missing: %#v", card["elements"])
-	}
-	last := elements[len(elements)-1]
-	actions, ok := last["actions"].([]map[string]any)
-	if !ok || len(actions) != 1 {
-		t.Fatalf("back action block missing: %#v", last)
-	}
-	btn := actions[0]
-	text, _ := btn["text"].(map[string]any)
-	if text["content"] != "Back" {
-		t.Fatalf("back button label = %#v, want Back", text["content"])
-	}
-	value, _ := btn["value"].(map[string]any)
-	if value["kind"] != "help_menu" || value["menu_id"] != "root" {
-		t.Fatalf("back button value = %#v", value)
 	}
 }
 
