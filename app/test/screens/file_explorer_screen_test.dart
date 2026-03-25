@@ -4,6 +4,9 @@ import 'package:wheelmaker/screens/file_explorer_screen.dart';
 
 void main() {
   testWidgets('updates active file path when selecting a file', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
     await tester.pumpWidget(
       const MaterialApp(
         home: FileExplorerScreen(),

@@ -237,13 +237,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             height: 1.45,
             color: Color(0xFFD4D4D4),
           ),
-          lineNumbers: true,
-          lineNumberStyle: const TextStyle(
-            color: Color(0xFF858585),
-            fontFamily: 'Consolas',
-            fontSize: 13,
-            height: 1.45,
-          ),
           padding: EdgeInsets.zero,
         ),
       );
