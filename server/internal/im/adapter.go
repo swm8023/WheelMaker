@@ -471,7 +471,6 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 	case "help_option":
 		cmd := strings.TrimSpace(evt.Value["command"])
 		val := strings.TrimSpace(evt.Value["value"])
-		menuID := strings.TrimSpace(evt.Value["menu_id"])
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
 			chatID = evt.ChatID
@@ -499,10 +498,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}
-		if menuID == "" {
-			menuID = model.RootMenu
-		}
-		_ = f.sendHelpPage(chatID, evt.MessageID, model, menuID, 0)
+		_ = f.sendHelpPage(chatID, evt.MessageID, model, model.RootMenu, 0)
 	case "help_menu":
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
@@ -646,23 +642,6 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 	elements := []map[string]any{
 		{"tag": "markdown", "content": strings.TrimSpace(body)},
 	}
-	if strings.TrimSpace(parent) != "" {
-		elements = append(elements, map[string]any{
-			"tag": "action",
-			"actions": []map[string]any{
-				{
-					"tag":  "button",
-					"text": map[string]any{"tag": "plain_text", "content": "Back"},
-					"type": "primary",
-					"value": map[string]any{
-						"kind":    "help_menu",
-						"chat_id": chatID,
-						"menu_id": parent,
-					},
-				},
-			},
-		})
-	}
 	if len(actions) > 0 {
 		elements = append(elements, map[string]any{"tag": "action", "actions": actions})
 	}
@@ -697,6 +676,23 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 		if len(nav) > 0 {
 			elements = append(elements, map[string]any{"tag": "action", "actions": nav})
 		}
+	}
+	if strings.TrimSpace(parent) != "" {
+		elements = append(elements, map[string]any{
+			"tag": "action",
+			"actions": []map[string]any{
+				{
+					"tag":  "button",
+					"text": map[string]any{"tag": "plain_text", "content": "Back"},
+					"type": "primary",
+					"value": map[string]any{
+						"kind":    "help_menu",
+						"chat_id": chatID,
+						"menu_id": parent,
+					},
+				},
+			},
+		})
 	}
 	headerTitle := renderDefault(title, "Help")
 	if maxPage > 0 {

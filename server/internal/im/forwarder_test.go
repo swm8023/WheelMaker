@@ -280,6 +280,7 @@ func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
 		t.Fatalf("help card elements missing: %#v", card["elements"])
 	}
 	hasBackInElements := false
+	lastIsBack := false
 	for _, el := range elements {
 		actions, _ := el["actions"].([]map[string]any)
 		for _, act := range actions {
@@ -287,12 +288,21 @@ func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
 			valueMap, _ := act["value"].(map[string]any)
 			if textMap["content"] == "Back" && valueMap["kind"] == "help_menu" && valueMap["menu_id"] == "root" && act["type"] == "primary" {
 				hasBackInElements = true
-				break
 			}
 		}
 	}
 	if !hasBackInElements {
 		t.Fatalf("expected fallback back button in elements, got: %#v", elements)
+	}
+	if len(elements) > 0 {
+		if actions, ok := elements[len(elements)-1]["actions"].([]map[string]any); ok && len(actions) == 1 {
+			textMap, _ := actions[0]["text"].(map[string]any)
+			valueMap, _ := actions[0]["value"].(map[string]any)
+			lastIsBack = textMap["content"] == "Back" && valueMap["kind"] == "help_menu" && valueMap["menu_id"] == "root"
+		}
+	}
+	if !lastIsBack {
+		t.Fatalf("back button should be in the bottom action row, got: %#v", elements[len(elements)-1])
 	}
 }
 
@@ -401,6 +411,7 @@ func TestForwarder_HelpOptionCardAction_RefreshesRootWithLatestState(t *testing.
 		Value: map[string]string{
 			"kind":    "help_option",
 			"chat_id": "chat-1",
+			"menu_id": "menu:agents",
 			"command": "/use",
 			"value":   "codex",
 		},
