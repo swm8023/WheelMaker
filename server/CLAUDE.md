@@ -99,12 +99,6 @@ pwsh scripts/install-tools.ps1   # Windows
 bash scripts/install-tools.sh    # macOS / Linux
 ```
 
-## Process Rule
-
-After every code change: stop existing wheelmaker processes, run `go run ./cmd/wheelmaker/`, confirm only one process is running.
-During live debugging: send user-facing reply first, then trigger `server/scripts/delayed-restart.ps1` in background (kills + restarts after 30s).
-Windows: `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
-
 ## Completion Gate (Highest Priority)
 
 Before the final user-facing completion message in any implementation task, execute this exact tail sequence:
