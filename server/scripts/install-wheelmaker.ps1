@@ -26,9 +26,15 @@ function Resolve-SourceExe {
   if ($BuildBinary) {
     Write-Step "build wheelmaker binary"
     New-Item -ItemType Directory -Path (Split-Path $defaultExe -Parent) -Force | Out-Null
-    & go build -o $defaultExe ./cmd/wheelmaker/
-    if ($LASTEXITCODE -ne 0) {
-      throw "go build failed (exit=$LASTEXITCODE)"
+    Push-Location $RepoRoot
+    try {
+      & go build -o $defaultExe ./cmd/wheelmaker/
+      if ($LASTEXITCODE -ne 0) {
+        throw "go build failed (exit=$LASTEXITCODE)"
+      }
+    }
+    finally {
+      Pop-Location
     }
     return (Resolve-Path $defaultExe).Path
   }
