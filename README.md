@@ -25,14 +25,7 @@ Feishu (mobile) ──► WheelMaker ──► claude-agent-acp / <acp-binary> �
 npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
 ```
 
-Or run helper scripts:
-
-```bash
-# Linux/macOS
-./scripts/install-tools.sh
-# Windows (PowerShell)
-./scripts/install-tools.ps1
-```
+`install_server.ps1` can auto-install missing ACP dependencies (`codex-acp`, `claude-agent-acp`) by default.
 
 ### 2. Create a config file
 

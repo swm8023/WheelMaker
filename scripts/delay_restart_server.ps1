@@ -6,11 +6,14 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $baseDir = Join-Path -Path $HOME -ChildPath ".wheelmaker"
-$logPath = Join-Path -Path $baseDir -ChildPath "delayed-restart.log"
+$logPath = Join-Path -Path $baseDir -ChildPath "delay_restart_server.log"
 $stdout = Join-Path -Path $baseDir -ChildPath "wheelmaker-stdout.log"
 $stderr = Join-Path -Path $baseDir -ChildPath "wheelmaker-stderr.log"
-$installScript = Join-Path -Path $PSScriptRoot -ChildPath "install-wheelmaker.ps1"
+$buildScript = Join-Path -Path $PSScriptRoot -ChildPath "build_server.ps1"
+$installScript = Join-Path -Path $PSScriptRoot -ChildPath "install_server.ps1"
 
 if (-not (Test-Path $baseDir)) {
   New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
@@ -26,18 +29,28 @@ if (-not $Worker) {
     "-InstallDir", $InstallDir
   ) -WindowStyle Hidden | Out-Null
   Add-Content -Path $logPath -Value ("[{0}] scheduled restart worker delay={1}s" -f (Get-Date -Format o), $DelaySeconds)
-  return
+  exit 0
 }
 
 Add-Content -Path $logPath -Value ("[{0}] restart job begin delay={1}s" -f (Get-Date -Format o), $DelaySeconds)
 Start-Sleep -Seconds $DelaySeconds
 
+if (-not (Test-Path $buildScript)) {
+  Add-Content -Path $logPath -Value ("[{0}] build script missing: {1}" -f (Get-Date -Format o), $buildScript)
+  exit 1
+}
 if (-not (Test-Path $installScript)) {
   Add-Content -Path $logPath -Value ("[{0}] install script missing: {1}" -f (Get-Date -Format o), $installScript)
   exit 1
 }
 
-powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -InstallDir $InstallDir -Build
+powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript
+if ($LASTEXITCODE -ne 0) {
+  Add-Content -Path $logPath -Value ("[{0}] build failed exit={1}" -f (Get-Date -Format o), $LASTEXITCODE)
+  exit $LASTEXITCODE
+}
+
+powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -InstallDir $InstallDir -SkipDeps
 if ($LASTEXITCODE -ne 0) {
   Add-Content -Path $logPath -Value ("[{0}] install failed exit={1}" -f (Get-Date -Format o), $LASTEXITCODE)
   exit $LASTEXITCODE
@@ -50,7 +63,7 @@ if (-not (Test-Path $installedExe)) {
   exit 1
 }
 
-$p = Start-Process -FilePath $installedExe -ArgumentList "-d" -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+$p = Start-Process -WorkingDirectory $repoRoot -FilePath $installedExe -ArgumentList "-d" -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
 Add-Content -Path $logPath -Value ("[{0}] started guardian pid={1} path={2}" -f (Get-Date -Format o), $p.Id, $installedExe)
 
 Start-Sleep -Seconds 4

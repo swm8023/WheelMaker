@@ -78,11 +78,7 @@ FileState
 - Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/debug`
 - Code comments and identifiers: **English only**
 - **After every change: `git add` → `git commit` → `git push`**
-- **Task completion is blocked until deploy actions are done:**
-  - `git add` → `git commit` → `git push`
-  - `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
-  - Verify exactly one `wheelmaker` process is running
-  - Do not send a "done/completed" reply before all steps above succeed
+- Completion gate is defined in repo root `CLAUDE.md`
 
 ## Local Dev
 
@@ -94,22 +90,11 @@ go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/
 GOOS=linux  GOARCH=amd64 go build -o bin/linux_amd64/wheelmaker  ./cmd/wheelmaker/
 GOOS=darwin GOARCH=arm64 go build -o bin/darwin_arm64/wheelmaker ./cmd/wheelmaker/
 
-# Install ACP tools (first time)
-pwsh scripts/install-tools.ps1   # Windows
-bash scripts/install-tools.sh    # macOS / Linux
+# Root-level helper scripts
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_server.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/install_server.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1
 ```
-
-## Completion Gate (Highest Priority)
-
-Before the final user-facing completion message in any implementation task, execute this exact tail sequence:
-
-1. `git add -A`
-2. `git commit -m "<message>"`
-3. `git push origin <branch>`
-4. `powershell -NoProfile -ExecutionPolicy Bypass -File server/scripts/delayed-restart.ps1`
-5. Check process count and confirm only one `wheelmaker` process remains
-
-If any step fails, report failure and keep working until resolved. Do not claim completion early.
 
 ## Key Invariants (do not break)
 

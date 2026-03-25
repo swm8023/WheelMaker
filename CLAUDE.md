@@ -25,9 +25,20 @@ WheelMaker/
 - **每次改完自动 commit + push**：每完成一次代码修改后，立即执行 `git add`、`git commit`、`git push`，无需等用户提示
 - `docs/` 下的协议文档两端共享，修改需同时评估对 server 和 app 的影响
 
+## Completion Gate (Highest Priority)
+
+Before the final user-facing completion message in any implementation task, execute this exact tail sequence:
+
+1. `git add -A`
+2. `git commit -m "<message>"`
+3. `git push origin <branch>`
+4. If files under `server/` changed: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/delay_restart_server.ps1`
+5. If step 4 ran: check process count and confirm only one `wheelmaker` process remains
+
+If any step fails, report failure and keep working until resolved. Do not claim completion early.
+
 ## 关键协议文档
 
 - ACP 协议：[docs/acp-protocol-full.zh-CN.md](docs/acp-protocol-full.zh-CN.md)
 - 飞书 Bot：[docs/feishu-bot.md](docs/feishu-bot.md)
-
 
