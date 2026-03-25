@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_highlight/flutter_highlight.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../data/mock_wheelmaker_fs.dart';
 import '../models/file_tree_node.dart';
@@ -245,18 +246,18 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     final content = file.content ?? '';
     final language = languageFromPath(file.path);
     try {
+      final editorFont = GoogleFonts.jetBrainsMono(
+        fontSize: 13,
+        height: 1.45,
+        color: const Color(0xFFD4D4D4),
+      );
       return SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: HighlightView(
           content,
           language: language,
           theme: _vscodeTheme,
-          textStyle: const TextStyle(
-            fontFamily: 'Consolas',
-            fontSize: 13,
-            height: 1.45,
-            color: Color(0xFFD4D4D4),
-          ),
+          textStyle: editorFont,
           padding: EdgeInsets.zero,
         ),
       );
@@ -265,11 +266,10 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         padding: const EdgeInsets.all(16),
         child: SelectableText(
           content,
-          style: const TextStyle(
-            fontFamily: 'Consolas',
+          style: GoogleFonts.jetBrainsMono(
             fontSize: 13,
             height: 1.45,
-            color: Color(0xFFD4D4D4),
+            color: const Color(0xFFD4D4D4),
           ),
         ),
       );
@@ -304,6 +304,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     final lower = path.toLowerCase();
     if (lower.endsWith('.dart')) return Icons.flutter_dash;
     if (lower.endsWith('.go')) return Icons.memory_outlined;
+    if (_isCppFile(lower)) return Icons.code;
     if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return Icons.settings_applications_outlined;
     if (lower.endsWith('.json')) return Icons.data_object;
     if (lower.endsWith('.md')) return Icons.article_outlined;
@@ -315,10 +316,22 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     final lower = path.toLowerCase();
     if (lower.endsWith('.dart')) return const Color(0xFF42A5F5);
     if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (_isCppFile(lower)) return const Color(0xFF649AD2);
     if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return const Color(0xFFCB9B41);
     if (lower.endsWith('.json')) return const Color(0xFFF1D04B);
     if (lower.endsWith('.md')) return const Color(0xFF519ABA);
     if (lower.endsWith('.ps1')) return const Color(0xFF4EC9B0);
     return const Color(0xFFCCCCCC);
+  }
+
+  bool _isCppFile(String lowerPath) {
+    return lowerPath.endsWith('.cpp') ||
+        lowerPath.endsWith('.cc') ||
+        lowerPath.endsWith('.cxx') ||
+        lowerPath.endsWith('.c') ||
+        lowerPath.endsWith('.hpp') ||
+        lowerPath.endsWith('.hh') ||
+        lowerPath.endsWith('.hxx') ||
+        lowerPath.endsWith('.h');
   }
 }
