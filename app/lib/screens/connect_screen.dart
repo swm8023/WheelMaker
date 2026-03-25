@@ -33,7 +33,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _addrCtrl.text = prefs.getString('wm_addr') ?? 'ws://192.168.1.100:9527/ws';
+      _addrCtrl.text = prefs.getString('wm_addr') ?? 'ws://127.0.0.1:9527/ws';
       _tokenCtrl.text = prefs.getString('wm_token') ?? '';
     });
   }
