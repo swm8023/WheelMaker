@@ -40,14 +40,42 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           body: useSplit
               ? Row(
                   children: [
+                    _buildActivityBar(),
                     SizedBox(width: 320, child: _buildTreePane()),
                     const VerticalDivider(width: 1),
                     Expanded(child: _buildEditorPane()),
                   ],
                 )
-              : _buildEditorPane(),
+              : Row(
+                  children: [
+                    _buildActivityBar(),
+                    Expanded(child: _buildEditorPane()),
+                  ],
+                ),
         );
       },
+    );
+  }
+
+  Widget _buildActivityBar() {
+    return Container(
+      width: 48,
+      color: const Color(0xFF333333),
+      child: Column(
+        children: const [
+          SizedBox(height: 6),
+          _ActivityIcon(
+            icon: Icons.folder_copy_outlined,
+            active: true,
+          ),
+          _ActivityIcon(icon: Icons.search_outlined),
+          _ActivityIcon(icon: Icons.account_tree_outlined),
+          _ActivityIcon(icon: Icons.play_arrow_outlined),
+          Spacer(),
+          _ActivityIcon(icon: Icons.settings_outlined),
+          SizedBox(height: 6),
+        ],
+      ),
     );
   }
 
@@ -56,15 +84,35 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       color: const Color(0xFF252526),
       child: ListView(
         children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
+            child: const Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'EXPLORER',
+                    style: TextStyle(
+                      color: Color(0xFFBBBBBB),
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.1,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+                Icon(Icons.more_horiz, color: Color(0xFF9DA0A6), size: 16),
+                SizedBox(width: 8),
+                Icon(Icons.create_new_folder_outlined, color: Color(0xFF9DA0A6), size: 16),
+              ],
+            ),
+          ),
           const Padding(
-            padding: EdgeInsets.fromLTRB(12, 12, 12, 8),
+            padding: EdgeInsets.fromLTRB(12, 2, 12, 6),
             child: Text(
-              'EXPLORER',
+              'WHEELMAKER',
               style: TextStyle(
-                color: Color(0xFFBBBBBB),
+                color: Color(0xFFD4D4D4),
                 fontWeight: FontWeight.w600,
-                letterSpacing: 1.1,
-                fontSize: 12,
+                fontSize: 11,
               ),
             ),
           ),
@@ -93,11 +141,14 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             onTap: () => setState(() => _activeFile = node),
             child: Container(
               color: rowColor,
-              padding: pad.add(const EdgeInsets.symmetric(vertical: 6)),
+              padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
               child: Row(
                 children: [
-                  const Icon(Icons.description_outlined,
-                      size: 16, color: Color(0xFFCCCCCC)),
+                  Icon(
+                    _fileIcon(node.path),
+                    size: 16,
+                    color: _fileColor(node.path),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -133,7 +184,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           },
           child: Container(
             color: hovered ? const Color(0xFF2A2D2E) : Colors.transparent,
-            padding: pad.add(const EdgeInsets.symmetric(vertical: 6)),
+            padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
             child: Row(
               children: [
                 Icon(
@@ -186,6 +237,39 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Container(
+            color: const Color(0xFF252526),
+            height: 36,
+            alignment: Alignment.bottomLeft,
+            child: Row(
+              children: [
+                Container(
+                  constraints: const BoxConstraints(minWidth: 180, maxWidth: 380),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF1E1E1E),
+                    border: Border(
+                      top: BorderSide(color: Color(0xFF3794FF), width: 1.5),
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Row(
+                    children: [
+                      Icon(_fileIcon(file.path), size: 14, color: _fileColor(file.path)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          file.name,
+                          style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const Icon(Icons.close, size: 14, color: Color(0xFF8C8C8C)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
           Container(
             color: const Color(0xFF2D2D2D),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -279,4 +363,58 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     'emphasis': const TextStyle(fontStyle: FontStyle.italic),
     'strong': const TextStyle(fontWeight: FontWeight.w700),
   };
+
+  IconData _fileIcon(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.dart')) return Icons.flutter_dash;
+    if (lower.endsWith('.go')) return Icons.memory_outlined;
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return Icons.settings_applications_outlined;
+    if (lower.endsWith('.json')) return Icons.data_object;
+    if (lower.endsWith('.md')) return Icons.article_outlined;
+    if (lower.endsWith('.ps1')) return Icons.terminal_outlined;
+    return Icons.description_outlined;
+  }
+
+  Color _fileColor(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.dart')) return const Color(0xFF42A5F5);
+    if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return const Color(0xFFCB9B41);
+    if (lower.endsWith('.json')) return const Color(0xFFF1D04B);
+    if (lower.endsWith('.md')) return const Color(0xFF519ABA);
+    if (lower.endsWith('.ps1')) return const Color(0xFF4EC9B0);
+    return const Color(0xFFCCCCCC);
+  }
+}
+
+class _ActivityIcon extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+
+  const _ActivityIcon({
+    required this.icon,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 48,
+      height: 46,
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            color: active ? const Color(0xFF3794FF) : Colors.transparent,
+            width: 2,
+          ),
+        ),
+      ),
+      alignment: Alignment.center,
+      child: Icon(
+        icon,
+        size: 22,
+        color: active ? const Color(0xFFE7E7E7) : const Color(0xFF8C8C8C),
+      ),
+    );
+  }
 }
