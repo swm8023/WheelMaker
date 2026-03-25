@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../models/chat_message.dart';
 import '../services/ws_service.dart';
 import 'connect_screen.dart';
+import 'file_explorer_screen.dart';
 
 /// Main chat screen — shows message history, handles input, option buttons,
 /// and connection-state indicator.
@@ -163,6 +164,16 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: const Text('WheelMaker'),
         actions: [
+          IconButton(
+            tooltip: 'Debug Explorer',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FileExplorerScreen()),
+              );
+            },
+            icon: const Icon(Icons.bug_report_outlined),
+          ),
           _StatusDot(color: _stateColor(), label: _stateLabel()),
           const SizedBox(width: 8),
         ],

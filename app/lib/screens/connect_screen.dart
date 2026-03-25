@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/ws_service.dart';
 import 'chat_screen.dart';
+import 'file_explorer_screen.dart';
 
 /// Entry screen: lets the user configure server address and optional auth token.
 class ConnectScreen extends StatefulWidget {
@@ -132,6 +133,17 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       )
                     : const Icon(Icons.link),
                 label: Text(_connecting ? 'Connecting...' : 'Connect'),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const FileExplorerScreen()),
+                  );
+                },
+                icon: const Icon(Icons.bug_report_outlined),
+                label: const Text('Debug: Explorer'),
               ),
                 ],
               ),
