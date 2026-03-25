@@ -40,42 +40,14 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           body: useSplit
               ? Row(
                   children: [
-                    _buildActivityBar(),
                     SizedBox(width: 320, child: _buildTreePane()),
                     const VerticalDivider(width: 1),
                     Expanded(child: _buildEditorPane()),
                   ],
                 )
-              : Row(
-                  children: [
-                    _buildActivityBar(),
-                    Expanded(child: _buildEditorPane()),
-                  ],
-                ),
+              : _buildEditorPane(),
         );
       },
-    );
-  }
-
-  Widget _buildActivityBar() {
-    return Container(
-      width: 48,
-      color: const Color(0xFF333333),
-      child: Column(
-        children: const [
-          SizedBox(height: 6),
-          _ActivityIcon(
-            icon: Icons.folder_copy_outlined,
-            active: true,
-          ),
-          _ActivityIcon(icon: Icons.search_outlined),
-          _ActivityIcon(icon: Icons.account_tree_outlined),
-          _ActivityIcon(icon: Icons.play_arrow_outlined),
-          Spacer(),
-          _ActivityIcon(icon: Icons.settings_outlined),
-          SizedBox(height: 6),
-        ],
-      ),
     );
   }
 
@@ -238,39 +210,6 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            color: const Color(0xFF252526),
-            height: 36,
-            alignment: Alignment.bottomLeft,
-            child: Row(
-              children: [
-                Container(
-                  constraints: const BoxConstraints(minWidth: 180, maxWidth: 380),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1E1E1E),
-                    border: Border(
-                      top: BorderSide(color: Color(0xFF3794FF), width: 1.5),
-                    ),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Row(
-                    children: [
-                      Icon(_fileIcon(file.path), size: 14, color: _fileColor(file.path)),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          file.name,
-                          style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const Icon(Icons.close, size: 14, color: Color(0xFF8C8C8C)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
             color: const Color(0xFF2D2D2D),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
@@ -384,37 +323,5 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (lower.endsWith('.md')) return const Color(0xFF519ABA);
     if (lower.endsWith('.ps1')) return const Color(0xFF4EC9B0);
     return const Color(0xFFCCCCCC);
-  }
-}
-
-class _ActivityIcon extends StatelessWidget {
-  final IconData icon;
-  final bool active;
-
-  const _ActivityIcon({
-    required this.icon,
-    this.active = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 48,
-      height: 46,
-      decoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            color: active ? const Color(0xFF3794FF) : Colors.transparent,
-            width: 2,
-          ),
-        ),
-      ),
-      alignment: Alignment.center,
-      child: Icon(
-        icon,
-        size: 22,
-        color: active ? const Color(0xFFE7E7E7) : const Color(0xFF8C8C8C),
-      ),
-    );
   }
 }
