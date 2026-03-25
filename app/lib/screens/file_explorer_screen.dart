@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_highlight/flutter_highlight.dart';
 
 import '../data/mock_wheelmaker_fs.dart';
 import '../models/file_tree_node.dart';
+import 'code_language.dart';
 
 class FileExplorerScreen extends StatefulWidget {
   const FileExplorerScreen({super.key});
@@ -13,6 +15,7 @@ class FileExplorerScreen extends StatefulWidget {
 class _FileExplorerScreenState extends State<FileExplorerScreen> {
   final Set<String> _expanded = {'/WheelMaker', '/WheelMaker/app'};
   FileTreeNode? _activeFile;
+  String? _hoveredPath;
 
   @override
   void initState() {
@@ -75,25 +78,36 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     final pad = EdgeInsets.only(left: 10 + depth * 14, right: 8);
     if (!node.isDirectory) {
       final selected = _activeFile?.path == node.path;
+      final hovered = _hoveredPath == node.path;
+      final rowColor = selected
+          ? const Color(0xFF37373D)
+          : hovered
+              ? const Color(0xFF2A2D2E)
+              : Colors.transparent;
       return [
-        InkWell(
-          onTap: () => setState(() => _activeFile = node),
-          child: Container(
-            color: selected ? const Color(0xFF37373D) : Colors.transparent,
-            padding: pad.add(const EdgeInsets.symmetric(vertical: 6)),
-            child: Row(
-              children: [
-                const Icon(Icons.description_outlined,
-                    size: 16, color: Color(0xFFCCCCCC)),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    node.name,
-                    style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
-                    overflow: TextOverflow.ellipsis,
+        MouseRegion(
+          onEnter: (_) => setState(() => _hoveredPath = node.path),
+          onExit: (_) => setState(() => _hoveredPath = null),
+          child: InkWell(
+            key: ValueKey('file-row-${node.path}'),
+            onTap: () => setState(() => _activeFile = node),
+            child: Container(
+              color: rowColor,
+              padding: pad.add(const EdgeInsets.symmetric(vertical: 6)),
+              child: Row(
+                children: [
+                  const Icon(Icons.description_outlined,
+                      size: 16, color: Color(0xFFCCCCCC)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      node.name,
+                      style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -101,44 +115,51 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     }
 
     final isOpen = _expanded.contains(node.path);
+    final hovered = _hoveredPath == node.path;
     final widgets = <Widget>[
-      InkWell(
-        onTap: () {
-          setState(() {
-            if (isOpen) {
-              _expanded.remove(node.path);
-            } else {
-              _expanded.add(node.path);
-            }
-          });
-        },
-        child: Container(
-          padding: pad.add(const EdgeInsets.symmetric(vertical: 6)),
-          child: Row(
-            children: [
-              Icon(
-                isOpen ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                size: 16,
-                color: const Color(0xFFCCCCCC),
-              ),
-              Icon(
-                isOpen ? Icons.folder_open : Icons.folder,
-                size: 16,
-                color: const Color(0xFFE8AB53),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  node.name,
-                  style: const TextStyle(
-                    color: Color(0xFFD4D4D4),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+      MouseRegion(
+        onEnter: (_) => setState(() => _hoveredPath = node.path),
+        onExit: (_) => setState(() => _hoveredPath = null),
+        child: InkWell(
+          key: ValueKey('folder-row-${node.path}'),
+          onTap: () {
+            setState(() {
+              if (isOpen) {
+                _expanded.remove(node.path);
+              } else {
+                _expanded.add(node.path);
+              }
+            });
+          },
+          child: Container(
+            color: hovered ? const Color(0xFF2A2D2E) : Colors.transparent,
+            padding: pad.add(const EdgeInsets.symmetric(vertical: 6)),
+            child: Row(
+              children: [
+                Icon(
+                  isOpen ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                  size: 16,
+                  color: const Color(0xFFCCCCCC),
                 ),
-              ),
-            ],
+                Icon(
+                  isOpen ? Icons.folder_open : Icons.folder,
+                  size: 16,
+                  color: const Color(0xFFE8AB53),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    node.name,
+                    style: const TextStyle(
+                      color: Color(0xFFD4D4D4),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -184,23 +205,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
             ),
           ),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: SelectableText.rich(
-                TextSpan(
-                  style: const TextStyle(
-                    fontFamily: 'Consolas',
-                    fontSize: 13,
-                    height: 1.45,
-                    color: Color(0xFFD4D4D4),
-                  ),
-                  children: _buildCodeSpans(
-                    file.content ?? '',
-                    _languageFromPath(file.path),
-                  ),
-                ),
-              ),
-            ),
+            child: _buildCodeView(file),
           ),
         ],
       ),
@@ -216,137 +221,69 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     return null;
   }
 
-  String _languageFromPath(String path) {
-    if (path.endsWith('.dart')) return 'dart';
-    if (path.endsWith('.go')) return 'go';
-    if (path.endsWith('.json')) return 'json';
-    if (path.endsWith('.yaml') || path.endsWith('.yml')) return 'yaml';
-    if (path.endsWith('.md')) return 'markdown';
-    if (path.endsWith('.ps1')) return 'powershell';
-    return 'plaintext';
-  }
-
-  List<InlineSpan> _buildCodeSpans(String content, String language) {
-    final keywords = _keywordsByLanguage(language);
-    final lines = content.split('\n');
-    final spans = <InlineSpan>[];
-    final numberStyle = const TextStyle(color: Color(0xFF858585));
-    final normalStyle = const TextStyle(color: Color(0xFFD4D4D4));
-    final keywordStyle = const TextStyle(color: Color(0xFF569CD6));
-    final stringStyle = const TextStyle(color: Color(0xFFCE9178));
-    final commentStyle = const TextStyle(color: Color(0xFF6A9955));
-    final symbolStyle = const TextStyle(color: Color(0xFFDCDCAA));
-
-    for (var i = 0; i < lines.length; i++) {
-      final line = lines[i];
-      spans.add(TextSpan(text: '${(i + 1).toString().padLeft(3)}  ', style: numberStyle));
-
-      final commentIndex = _commentStartIndex(line, language);
-      final codePart = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
-      final commentPart = commentIndex >= 0 ? line.substring(commentIndex) : '';
-
-      final tokens = RegExp("(\".*?\"|'.*?'|[A-Za-z_][A-Za-z0-9_]*|[{}()[\\].,:;=+\\-*/<>])")
-          .allMatches(codePart);
-
-      var cursor = 0;
-      for (final m in tokens) {
-        if (m.start > cursor) {
-          spans.add(TextSpan(text: codePart.substring(cursor, m.start), style: normalStyle));
-        }
-        final token = m.group(0) ?? '';
-        if (_isStringToken(token)) {
-          spans.add(TextSpan(text: token, style: stringStyle));
-        } else if (keywords.contains(token)) {
-          spans.add(TextSpan(text: token, style: keywordStyle));
-        } else if (_isSymbolToken(token)) {
-          spans.add(TextSpan(text: token, style: symbolStyle));
-        } else {
-          spans.add(TextSpan(text: token, style: normalStyle));
-        }
-        cursor = m.end;
-      }
-      if (cursor < codePart.length) {
-        spans.add(TextSpan(text: codePart.substring(cursor), style: normalStyle));
-      }
-      if (commentPart.isNotEmpty) {
-        spans.add(TextSpan(text: commentPart, style: commentStyle));
-      }
-      if (i < lines.length - 1) {
-        spans.add(const TextSpan(text: '\n'));
-      }
-    }
-    return spans;
-  }
-
-  Set<String> _keywordsByLanguage(String language) {
-    switch (language) {
-      case 'dart':
-        return {
-          'import',
-          'class',
-          'const',
-          'final',
-          'var',
-          'void',
-          'return',
-          'if',
-          'else',
-          'for',
-          'while',
-          'switch',
-          'case',
-          'break',
-          'new',
-          'true',
-          'false',
-          'null',
-          'extends',
-          'with',
-          'override',
-        };
-      case 'go':
-        return {
-          'package',
-          'import',
-          'func',
-          'type',
-          'struct',
-          'interface',
-          'var',
-          'const',
-          'return',
-          'if',
-          'else',
-          'for',
-          'range',
-          'switch',
-          'case',
-          'break',
-          'go',
-          'defer',
-        };
-      case 'yaml':
-      case 'json':
-      case 'markdown':
-      case 'powershell':
-      default:
-        return {'true', 'false', 'null'};
+  Widget _buildCodeView(FileTreeNode file) {
+    final content = file.content ?? '';
+    final language = languageFromPath(file.path);
+    try {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: HighlightView(
+          content,
+          language: language,
+          theme: _vscodeTheme,
+          textStyle: const TextStyle(
+            fontFamily: 'Consolas',
+            fontSize: 13,
+            height: 1.45,
+            color: Color(0xFFD4D4D4),
+          ),
+          lineNumbers: true,
+          lineNumberStyle: const TextStyle(
+            color: Color(0xFF858585),
+            fontFamily: 'Consolas',
+            fontSize: 13,
+            height: 1.45,
+          ),
+          padding: EdgeInsets.zero,
+        ),
+      );
+    } catch (_) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: SelectableText(
+          content,
+          style: const TextStyle(
+            fontFamily: 'Consolas',
+            fontSize: 13,
+            height: 1.45,
+            color: Color(0xFFD4D4D4),
+          ),
+        ),
+      );
     }
   }
 
-  int _commentStartIndex(String line, String language) {
-    if (language == 'dart' || language == 'go') return line.indexOf('//');
-    if (language == 'powershell') return line.indexOf('#');
-    if (language == 'yaml') return line.indexOf('#');
-    return -1;
-  }
-
-  bool _isStringToken(String token) {
-    return (token.startsWith('"') && token.endsWith('"')) ||
-        (token.startsWith("'") && token.endsWith("'"));
-  }
-
-  bool _isSymbolToken(String token) {
-    return RegExp(r'^[{}()[\].,:;=+\-*/<>]$').hasMatch(token);
-  }
+  static final Map<String, TextStyle> _vscodeTheme = {
+    'root': const TextStyle(color: Color(0xFFD4D4D4), backgroundColor: Color(0xFF1E1E1E)),
+    'keyword': const TextStyle(color: Color(0xFF569CD6)),
+    'built_in': const TextStyle(color: Color(0xFF4EC9B0)),
+    'type': const TextStyle(color: Color(0xFF4EC9B0)),
+    'literal': const TextStyle(color: Color(0xFF569CD6)),
+    'number': const TextStyle(color: Color(0xFFB5CEA8)),
+    'string': const TextStyle(color: Color(0xFFCE9178)),
+    'subst': const TextStyle(color: Color(0xFFD4D4D4)),
+    'comment': const TextStyle(color: Color(0xFF6A9955)),
+    'title': const TextStyle(color: Color(0xFFDCDCAA)),
+    'section': const TextStyle(color: Color(0xFFDCDCAA)),
+    'attribute': const TextStyle(color: Color(0xFF9CDCFE)),
+    'meta': const TextStyle(color: Color(0xFF9CDCFE)),
+    'selector-tag': const TextStyle(color: Color(0xFF569CD6)),
+    'selector-id': const TextStyle(color: Color(0xFFD7BA7D)),
+    'selector-class': const TextStyle(color: Color(0xFFD7BA7D)),
+    'symbol': const TextStyle(color: Color(0xFFB5CEA8)),
+    'bullet': const TextStyle(color: Color(0xFFB5CEA8)),
+    'link': const TextStyle(color: Color(0xFF3794FF)),
+    'emphasis': const TextStyle(fontStyle: FontStyle.italic),
+    'strong': const TextStyle(fontWeight: FontWeight.w700),
+  };
 }
