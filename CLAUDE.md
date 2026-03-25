@@ -23,3 +23,6 @@ Before the final user-facing completion message in any implementation task, exec
 
 If any step fails, report failure and keep working until resolved. Do not claim completion early.
 
+## App Refresh Rule
+- If files under `app/` changed during development, run:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_flutter_web.ps1`
