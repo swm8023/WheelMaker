@@ -39,6 +39,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _wsState = widget.service.state;
+    _messages.addAll(widget.service.initialMessages);
     _msgSub = widget.service.messages.listen(_onMessage);
     _stateSub = widget.service.stateStream.listen(_onStateChange);
     // On desktop: Enter sends, Shift+Enter inserts newline.

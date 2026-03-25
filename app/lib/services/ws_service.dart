@@ -29,18 +29,38 @@ class WsService {
   WebSocketChannel? _channel;
   WsState _state = WsState.disconnected;
   String? _token;
+  final bool _localPreview;
+  final List<ChatMessage> _initialMessages;
 
   final _messageCtrl = StreamController<ChatMessage>.broadcast();
   final _stateCtrl = StreamController<WsState>.broadcast();
 
+  WsService()
+      : _localPreview = false,
+        _initialMessages = const [];
+
+  WsService.localPreview()
+      : _localPreview = true,
+        _initialMessages = [
+          ChatMessage.system('Local preview mode'),
+          ChatMessage.agent('Welcome to WheelMaker UI preview.'),
+          ChatMessage.debug('source=local_mock latency=0ms'),
+        ] {
+    _setState(WsState.ready);
+  }
+
   Stream<ChatMessage> get messages => _messageCtrl.stream;
   Stream<WsState> get stateStream => _stateCtrl.stream;
   WsState get state => _state;
+  List<ChatMessage> get initialMessages => List.unmodifiable(_initialMessages);
 
   /// Connect to [addr] (e.g. "ws://192.168.1.x:9527/ws").
   /// Returns once the underlying WebSocket handshake succeeds (or fails).
   /// Authentication happens asynchronously; observe [stateStream] for [WsState.ready].
   Future<void> connect(String addr, String token) async {
+    if (_localPreview) {
+      return;
+    }
     _token = token.isEmpty ? null : token;
     _setState(WsState.connecting);
 
@@ -118,11 +138,21 @@ class WsService {
 
   /// Send a plain text message to the daemon.
   void sendMessage(String text) {
+    if (_localPreview) {
+      Future<void>.delayed(const Duration(milliseconds: 250), () {
+        _messageCtrl.add(ChatMessage.agent('Mock reply: $text'));
+      });
+      return;
+    }
     _send({'type': 'message', 'text': text});
   }
 
   /// Resolve a pending decision by selecting [optionId].
   void selectOption(String decisionId, String optionId) {
+    if (_localPreview) {
+      _messageCtrl.add(ChatMessage.system('Selected option: $optionId'));
+      return;
+    }
     _send({'type': 'option', 'decisionId': decisionId, 'optionId': optionId});
   }
 
@@ -136,6 +166,10 @@ class WsService {
   }
 
   void disconnect() {
+    if (_localPreview) {
+      _setState(WsState.disconnected);
+      return;
+    }
     _channel?.sink.close();
     _setState(WsState.disconnected);
   }

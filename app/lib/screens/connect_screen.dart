@@ -49,22 +49,13 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
     setState(() => _connecting = true);
 
-    final svc = WsService();
-    await svc.connect(addr, token);
+    final svc = WsService.localPreview();
 
     if (!mounted) {
       svc.dispose();
       return;
     }
     setState(() => _connecting = false);
-
-    if (svc.state == WsState.error || svc.state == WsState.disconnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Connection failed — check address and token')),
-      );
-      svc.dispose();
-      return;
-    }
 
     Navigator.pushReplacement(
       context,
@@ -140,7 +131,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.link),
-                label: Text(_connecting ? 'Connecting…' : 'Connect'),
+                label: Text(_connecting ? 'Connecting...' : 'Connect'),
               ),
                 ],
               ),
@@ -151,3 +142,4 @@ class _ConnectScreenState extends State<ConnectScreen> {
     );
   }
 }
+
