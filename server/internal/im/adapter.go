@@ -196,7 +196,7 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 			return err
 		}
 		if strings.TrimSpace(u.Text) != "" {
-			return f.SendText(chatID, "[thought] "+strings.TrimSpace(u.Text))
+			return f.SendText(chatID, strings.TrimSpace(u.Text))
 		}
 	case IMUpdateToolCall:
 		if err := f.flushTextNow(chatID); err != nil {
@@ -471,6 +471,7 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 	case "help_option":
 		cmd := strings.TrimSpace(evt.Value["command"])
 		val := strings.TrimSpace(evt.Value["value"])
+		menuID := strings.TrimSpace(evt.Value["menu_id"])
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
 			chatID = evt.ChatID
@@ -498,7 +499,10 @@ func (f *ImAdapter) handleCardAction(evt CardActionEvent) {
 			_ = f.SendText(chatID, fmt.Sprintf("help load error: %v", err))
 			return
 		}
-		_ = f.sendHelpPage(chatID, evt.MessageID, model, model.RootMenu, 0)
+		if menuID == "" {
+			menuID = model.RootMenu
+		}
+		_ = f.sendHelpPage(chatID, evt.MessageID, model, menuID, 0)
 	case "help_menu":
 		chatID := strings.TrimSpace(evt.Value["chat_id"])
 		if chatID == "" {
@@ -632,6 +636,7 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 			"value": map[string]any{
 				"kind":    "help_option",
 				"chat_id": chatID,
+				"menu_id": menuID,
 				"command": opt.Command,
 				"value":   opt.Value,
 			},
@@ -640,6 +645,23 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 
 	elements := []map[string]any{
 		{"tag": "markdown", "content": strings.TrimSpace(body)},
+	}
+	if strings.TrimSpace(parent) != "" {
+		elements = append(elements, map[string]any{
+			"tag": "action",
+			"actions": []map[string]any{
+				{
+					"tag":  "button",
+					"text": map[string]any{"tag": "plain_text", "content": "Back"},
+					"type": "primary",
+					"value": map[string]any{
+						"kind":    "help_menu",
+						"chat_id": chatID,
+						"menu_id": parent,
+					},
+				},
+			},
+		})
 	}
 	if len(actions) > 0 {
 		elements = append(elements, map[string]any{"tag": "action", "actions": actions})
@@ -688,35 +710,6 @@ func buildHelpCard(chatID string, model HelpModel, menuID string, page int) RawC
 		},
 		"template": "green",
 	}
-	if strings.TrimSpace(parent) != "" {
-		header["extra"] = map[string]any{
-			"tag":  "button",
-			"text": map[string]any{"tag": "plain_text", "content": "Back"},
-			"type": "default",
-			"value": map[string]any{
-				"kind":    "help_menu",
-				"chat_id": chatID,
-				"menu_id": parent,
-			},
-		}
-		// Compatibility fallback: some clients may not render header.extra button.
-		elements = append(elements, map[string]any{
-			"tag": "action",
-			"actions": []map[string]any{
-				{
-					"tag":  "button",
-					"text": map[string]any{"tag": "plain_text", "content": "Back"},
-					"type": "default",
-					"value": map[string]any{
-						"kind":    "help_menu",
-						"chat_id": chatID,
-						"menu_id": parent,
-					},
-				},
-			},
-		})
-	}
-
 	return RawCard{
 		"config":   map[string]any{"update_multi": true},
 		"header":   header,

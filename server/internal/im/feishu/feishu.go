@@ -213,23 +213,10 @@ func (f *Channel) sendSystem(chatID, text string) error {
 	if chatID == "" || text == "" {
 		return nil
 	}
-	// System text also breaks contiguous tool segment.
+	// System text also breaks contiguous tool segment and is rendered as
+	// independent cards (no streaming merge).
 	f.resetCompactToolStream(chatID)
-	f.textMu.Lock()
-	defer f.textMu.Unlock()
-
-	ts := f.systemStreams[chatID]
-	if ts == nil {
-		ts = &textStream{}
-		f.systemStreams[chatID] = ts
-	}
-	ts.content.WriteString(text)
-	content := ts.content.String()
-	if content == "" {
-		return nil
-	}
-
-	card := buildSystemStreamCard(content)
+	card := buildSystemStreamCard(text)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal system stream card: %w", err)
@@ -239,38 +226,17 @@ func (f *Channel) sendSystem(chatID, text string) error {
 		return err
 	}
 	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-	messageID := strings.TrimSpace(ts.messageID)
-	if messageID == "" {
-		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
-		if postErr != nil {
-			return postErr
-		}
-		if resp != nil {
-			mid := strings.TrimSpace(resp.Data.MessageID)
-			if mid != "" {
-				ts.messageID = mid
-				f.setLastOutbound(chatID, mid)
-			}
-		}
-		f.clearReceiveAck(chatID)
-		return nil
-	}
-	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
-		f.setLastOutbound(chatID, messageID)
-		f.clearReceiveAck(chatID)
-		return nil
-	}
 	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
 	if postErr != nil {
 		return postErr
 	}
 	if resp != nil {
 		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
-			ts.messageID = mid
 			f.setLastOutbound(chatID, mid)
 		}
 	}
 	f.clearReceiveAck(chatID)
+	f.resetSystemStream(chatID)
 	return nil
 }
 

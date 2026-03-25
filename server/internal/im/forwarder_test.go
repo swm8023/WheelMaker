@@ -271,17 +271,8 @@ func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
 	if !ok {
 		t.Fatalf("help card header missing: %#v", card["header"])
 	}
-	extra, ok := header["extra"].(map[string]any)
-	if !ok {
-		t.Fatalf("header extra button missing: %#v", header)
-	}
-	text, _ := extra["text"].(map[string]any)
-	if text["content"] != "Back" {
-		t.Fatalf("header back button label = %#v, want Back", text["content"])
-	}
-	value, _ := extra["value"].(map[string]any)
-	if value["kind"] != "help_menu" || value["menu_id"] != "root" {
-		t.Fatalf("header back button value = %#v", value)
+	if _, ok := header["extra"]; ok {
+		t.Fatalf("header extra should be removed, got: %#v", header["extra"])
 	}
 
 	elements, ok := card["elements"].([]map[string]any)
@@ -294,7 +285,7 @@ func TestBuildHelpCard_SubmenuHasBackButton(t *testing.T) {
 		for _, act := range actions {
 			textMap, _ := act["text"].(map[string]any)
 			valueMap, _ := act["value"].(map[string]any)
-			if textMap["content"] == "Back" && valueMap["kind"] == "help_menu" && valueMap["menu_id"] == "root" {
+			if textMap["content"] == "Back" && valueMap["kind"] == "help_menu" && valueMap["menu_id"] == "root" && act["type"] == "primary" {
 				hasBackInElements = true
 				break
 			}
