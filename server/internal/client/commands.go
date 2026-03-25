@@ -21,7 +21,7 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	switch cmd {
 	case "/use":
 		if args == "" {
-			c.reply("Usage: /use <agent-name> [--continue]  (e.g. /use claude)")
+			c.reply("Usage: /use <agent-name> [--continue]  (e.g. /use claude, /use copilot)")
 			return
 		}
 		parts := strings.Fields(args)
