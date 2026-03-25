@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_highlight/flutter_highlight.dart';
-import 'package:flutter_highlight/themes/vs2015.dart';
 
 import '../data/mock_wheelmaker_fs.dart';
 import '../models/file_tree_node.dart';
@@ -188,14 +186,18 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
-              child: HighlightView(
-                file.content ?? '',
-                language: _languageFromPath(file.path),
-                theme: vs2015Theme,
-                textStyle: const TextStyle(
-                  fontFamily: 'Consolas',
-                  fontSize: 13,
-                  height: 1.45,
+              child: SelectableText.rich(
+                TextSpan(
+                  style: const TextStyle(
+                    fontFamily: 'Consolas',
+                    fontSize: 13,
+                    height: 1.45,
+                    color: Color(0xFFD4D4D4),
+                  ),
+                  children: _buildCodeSpans(
+                    file.content ?? '',
+                    _languageFromPath(file.path),
+                  ),
                 ),
               ),
             ),
@@ -222,5 +224,129 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
     if (path.endsWith('.md')) return 'markdown';
     if (path.endsWith('.ps1')) return 'powershell';
     return 'plaintext';
+  }
+
+  List<InlineSpan> _buildCodeSpans(String content, String language) {
+    final keywords = _keywordsByLanguage(language);
+    final lines = content.split('\n');
+    final spans = <InlineSpan>[];
+    final numberStyle = const TextStyle(color: Color(0xFF858585));
+    final normalStyle = const TextStyle(color: Color(0xFFD4D4D4));
+    final keywordStyle = const TextStyle(color: Color(0xFF569CD6));
+    final stringStyle = const TextStyle(color: Color(0xFFCE9178));
+    final commentStyle = const TextStyle(color: Color(0xFF6A9955));
+    final symbolStyle = const TextStyle(color: Color(0xFFDCDCAA));
+
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      spans.add(TextSpan(text: '${(i + 1).toString().padLeft(3)}  ', style: numberStyle));
+
+      final commentIndex = _commentStartIndex(line, language);
+      final codePart = commentIndex >= 0 ? line.substring(0, commentIndex) : line;
+      final commentPart = commentIndex >= 0 ? line.substring(commentIndex) : '';
+
+      final tokens = RegExp("(\".*?\"|'.*?'|[A-Za-z_][A-Za-z0-9_]*|[{}()[\\].,:;=+\\-*/<>])")
+          .allMatches(codePart);
+
+      var cursor = 0;
+      for (final m in tokens) {
+        if (m.start > cursor) {
+          spans.add(TextSpan(text: codePart.substring(cursor, m.start), style: normalStyle));
+        }
+        final token = m.group(0) ?? '';
+        if (_isStringToken(token)) {
+          spans.add(TextSpan(text: token, style: stringStyle));
+        } else if (keywords.contains(token)) {
+          spans.add(TextSpan(text: token, style: keywordStyle));
+        } else if (_isSymbolToken(token)) {
+          spans.add(TextSpan(text: token, style: symbolStyle));
+        } else {
+          spans.add(TextSpan(text: token, style: normalStyle));
+        }
+        cursor = m.end;
+      }
+      if (cursor < codePart.length) {
+        spans.add(TextSpan(text: codePart.substring(cursor), style: normalStyle));
+      }
+      if (commentPart.isNotEmpty) {
+        spans.add(TextSpan(text: commentPart, style: commentStyle));
+      }
+      if (i < lines.length - 1) {
+        spans.add(const TextSpan(text: '\n'));
+      }
+    }
+    return spans;
+  }
+
+  Set<String> _keywordsByLanguage(String language) {
+    switch (language) {
+      case 'dart':
+        return {
+          'import',
+          'class',
+          'const',
+          'final',
+          'var',
+          'void',
+          'return',
+          'if',
+          'else',
+          'for',
+          'while',
+          'switch',
+          'case',
+          'break',
+          'new',
+          'true',
+          'false',
+          'null',
+          'extends',
+          'with',
+          'override',
+        };
+      case 'go':
+        return {
+          'package',
+          'import',
+          'func',
+          'type',
+          'struct',
+          'interface',
+          'var',
+          'const',
+          'return',
+          'if',
+          'else',
+          'for',
+          'range',
+          'switch',
+          'case',
+          'break',
+          'go',
+          'defer',
+        };
+      case 'yaml':
+      case 'json':
+      case 'markdown':
+      case 'powershell':
+      default:
+        return {'true', 'false', 'null'};
+    }
+  }
+
+  int _commentStartIndex(String line, String language) {
+    if (language == 'dart' || language == 'go') return line.indexOf('//');
+    if (language == 'powershell') return line.indexOf('#');
+    if (language == 'yaml') return line.indexOf('#');
+    return -1;
+  }
+
+  bool _isStringToken(String token) {
+    return (token.startsWith('"') && token.endsWith('"')) ||
+        (token.startsWith("'") && token.endsWith("'"));
+  }
+
+  bool _isSymbolToken(String token) {
+    return RegExp(r'^[{}()[\].,:;=+\-*/<>]$').hasMatch(token);
   }
 }

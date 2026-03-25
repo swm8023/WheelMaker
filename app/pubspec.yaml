@@ -12,8 +12,6 @@ dependencies:
   web_socket_channel: ^3.0.1
   # Persist server address and token across restarts
   shared_preferences: ^2.3.0
-  # VSCode-like syntax highlight preview
-  flutter_highlight: ^0.7.0
 
 dev_dependencies:
   flutter_test:

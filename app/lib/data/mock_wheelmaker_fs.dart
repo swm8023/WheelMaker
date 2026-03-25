@@ -115,7 +115,7 @@ require (
         FileTreeNode.file(
           name: 'refresh_flutter_web.ps1',
           path: '/WheelMaker/scripts/refresh_flutter_web.ps1',
-          content: '''
+          content: r'''
 param(
   [string]$Device = "edge"
 )
