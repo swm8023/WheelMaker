@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:math' show min;
 
-import 'package:flutter/foundation.dart' show TargetPlatform, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -34,10 +35,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool get _isDesktop {
     if (kIsWeb) return true;
-    final platform = Theme.of(context).platform;
-    return platform == TargetPlatform.windows ||
-        platform == TargetPlatform.macOS ||
-        platform == TargetPlatform.linux;
+    return defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux;
   }
 
   @override
