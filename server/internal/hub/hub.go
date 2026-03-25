@@ -100,13 +100,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		return claude.New(claude.Config{})
 	})
 	c.RegisterAgent("copilot", func(_ string, _ map[string]string) agent.Agent {
-		mode := copilot.ModeStdio
-		if pc.Client.Copilot.Mode == "tcp" {
-			mode = copilot.ModeTCP
-		}
 		return copilot.New(copilot.Config{
-			Mode:    mode,
-			Port:    pc.Client.Copilot.Port,
 			ExePath: pc.Client.Copilot.ExePath,
 		})
 	})

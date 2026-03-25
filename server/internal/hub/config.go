@@ -54,10 +54,6 @@ type ClientConf struct {
 
 // CopilotConf holds per-project settings for the GitHub Copilot CLI agent.
 type CopilotConf struct {
-	// Mode selects the ACP transport: "stdio" (default) or "tcp".
-	Mode string `json:"mode,omitempty"`
-	// Port is the TCP port for tcp mode. 0 = auto-select a free port.
-	Port int `json:"port,omitempty"`
 	// ExePath is the path to the copilot binary. Empty = search PATH.
 	ExePath string `json:"exePath,omitempty"`
 }

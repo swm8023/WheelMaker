@@ -58,10 +58,6 @@ type Conn struct {
 	done chan struct{}
 
 	inMemoryServer InMemoryServer
-
-	// transport is set when the connection is backed by an io.ReadWriteCloser
-	// (e.g. a TCP net.Conn) instead of a subprocess's stdio.
-	transport io.ReadWriteCloser
 }
 
 func (c *Conn) debugWriter() io.Writer {
@@ -299,22 +295,6 @@ func NewConn(exePath string, env []string, args ...string) *Conn {
 	}
 }
 
-// NewConnWithTransport creates a Conn backed by an io.ReadWriteCloser transport
-// (e.g. a TCP net.Conn) instead of a subprocess's stdio.
-// If cmd is non-nil, its process is killed when Close() is called.
-// Start() must be called before using the conn.
-func NewConnWithTransport(cmd *exec.Cmd, transport io.ReadWriteCloser) *Conn {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &Conn{
-		cmd:        cmd,
-		transport:  transport,
-		pending:    make(map[int64]chan Response),
-		connCtx:    ctx,
-		connCancel: cancel,
-		done:       make(chan struct{}),
-	}
-}
-
 // NewInMemoryConn creates a connection backed by an in-process ACP server.
 func NewInMemoryConn(server InMemoryServer) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -350,25 +330,13 @@ func (c *Conn) OnRequest(h RequestHandler) {
 	c.reqMu.Unlock()
 }
 
-// Start launches the agent subprocess (or activates the transport) and begins the read loop.
+// Start launches the agent subprocess and begins the read loop.
 // stderr of the subprocess is forwarded to the application log via log.Writer().
 func (c *Conn) Start() error {
-	if c.transport != nil {
-		return c.startTransport()
-	}
 	if c.inMemoryServer != nil {
 		return c.startInMemory()
 	}
 	return c.startProcess()
-}
-
-func (c *Conn) startTransport() error {
-	// io.ReadWriteCloser satisfies both io.WriteCloser and io.ReadCloser.
-	c.stdin = c.transport
-	c.stdout = c.transport
-	c.enc = json.NewEncoder(c.transport)
-	go c.readLoop(c.transport)
-	return nil
 }
 
 func (c *Conn) startInMemory() error {
