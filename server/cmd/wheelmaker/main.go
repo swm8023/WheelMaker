@@ -13,6 +13,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub"
 	"github.com/swm8023/wheelmaker/internal/logger"
+	"github.com/swm8023/wheelmaker/internal/observe"
 )
 
 const daemonWorkerArg = "--daemon-worker"
@@ -29,10 +30,15 @@ func run() error {
 	fs.SetOutput(os.Stderr)
 	daemonMode := fs.Bool("d", false, "run guardian mode (checks service every 30 seconds)")
 	daemonWorker := fs.Bool("daemon-worker", false, "internal: worker mode for guardian")
+	observeServer := fs.Bool("observe-server", false, "run remote-observe websocket server mode")
+	observeAddr := fs.String("observe-addr", ":9630", "remote-observe websocket listen address")
+	observeToken := fs.String("observe-token", "", "remote-observe shared token (optional)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	switch {
+	case *observeServer:
+		return runObserveServer(*observeAddr, *observeToken)
 	case *daemonWorker:
 		return runService()
 	case *daemonMode:
@@ -40,6 +46,17 @@ func run() error {
 	default:
 		return runService()
 	}
+}
+
+func runObserveServer(addr, token string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	s := observe.New(observe.Config{
+		Addr:  addr,
+		Token: token,
+	})
+	return s.Run(ctx)
 }
 
 func runService() error {
