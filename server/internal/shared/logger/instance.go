@@ -1,4 +1,3 @@
-// Package logger provides unified leveled logging and separated debug trace sinks.
 package logger
 
 import (
@@ -9,83 +8,6 @@ import (
 	"sync"
 	"time"
 )
-
-// Level represents minimum log severity.
-type Level int
-
-const (
-	// LevelDebug enables debug sink and all operational levels.
-	LevelDebug Level = iota
-	// LevelInfo emits informational, warning, and error messages.
-	LevelInfo
-	// LevelWarn emits warnings and errors (default).
-	LevelWarn
-	// LevelError emits errors only.
-	LevelError
-)
-
-// ParseLevel converts a string to Level. Unknown values default to LevelWarn.
-func ParseLevel(s string) Level {
-	switch s {
-	case "debug":
-		return LevelDebug
-	case "info":
-		return LevelInfo
-	case "error":
-		return LevelError
-	default:
-		return LevelWarn
-	}
-}
-
-// Config holds logger setup parameters.
-type Config struct {
-	// Level is the minimum severity to emit. Default LevelWarn.
-	Level Level
-	// LogFile appends operational logs (Info/Warn/Error) in addition to stderr.
-	LogFile string
-	// DebugLogFile stores Debug and protocol-trace output.
-	// It is truncated at startup when debug is enabled.
-	DebugLogFile string
-}
-
-// global is the process-wide logger instance.
-var global = &inst{
-	level: LevelWarn,
-	out:   os.Stderr,
-}
-
-// Setup configures the global logger.
-func Setup(cfg Config) error { return global.setup(cfg) }
-
-// Close releases open file resources.
-func Close() { global.close() }
-
-// DebugWriter returns protocol trace writer, nil unless level is debug.
-func DebugWriter() io.Writer {
-	global.mu.Lock()
-	defer global.mu.Unlock()
-	return global.debugOut
-}
-
-// SetOutput overrides operational output writer. Primarily for tests.
-func SetOutput(w io.Writer) {
-	global.mu.Lock()
-	defer global.mu.Unlock()
-	global.out = w
-}
-
-// Debug emits a debug-level message to debug sink only.
-func Debug(format string, args ...any) { global.emit(LevelDebug, format, args...) }
-
-// Info emits info-level message.
-func Info(format string, args ...any) { global.emit(LevelInfo, format, args...) }
-
-// Warn emits warning-level message.
-func Warn(format string, args ...any) { global.emit(LevelWarn, format, args...) }
-
-// Error emits error-level message.
-func Error(format string, args ...any) { global.emit(LevelError, format, args...) }
 
 type inst struct {
 	mu        sync.Mutex
