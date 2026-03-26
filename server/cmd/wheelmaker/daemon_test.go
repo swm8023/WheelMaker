@@ -3,7 +3,7 @@ package main
 import "testing"
 
 func TestSanitizeWorkerArgs(t *testing.T) {
-	in := []string{"-d", "--daemon-worker", "--foo", "bar"}
+	in := []string{"-d", "--daemon-worker", "--hub-worker", "--registry-worker", "--foo", "bar"}
 	got := sanitizeWorkerArgs(in)
 	if len(got) != 2 || got[0] != "--foo" || got[1] != "bar" {
 		t.Fatalf("sanitizeWorkerArgs()=%v", got)

@@ -32,7 +32,6 @@ type Hub struct {
 	cfg       *Config
 	statePath string
 	clients   []*client.Client
-	regServer *registry.Server
 	regSync   *registry.Reporter
 }
 
@@ -141,15 +140,6 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
 // only ctx cancellation terminates the run.
 func (h *Hub) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
-	if h.regServer != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := h.regServer.Run(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("wheelmaker: registry server error: %v", err)
-			}
-		}()
-	}
 	if h.regSync != nil {
 		wg.Add(1)
 		go func() {
@@ -199,12 +189,6 @@ func (h *Hub) setupRegistrySync() {
 	host := strings.TrimSpace(cfg.Server)
 	if host == "" {
 		host = "127.0.0.1"
-	}
-	if cfg.Listen {
-		h.regServer = registry.New(registry.Config{
-			Addr:  fmt.Sprintf("%s:%d", host, port),
-			Token: cfg.Token,
-		})
 	}
 
 	hubID := strings.TrimSpace(cfg.HubID)
