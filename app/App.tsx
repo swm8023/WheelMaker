@@ -1,4 +1,5 @@
 ﻿import React, {useEffect, useRef, useState} from 'react';
+import {StyleSheet, View} from 'react-native';
 
 import type {RegistryFsEntry, RegistryProject} from './src/types/observe';
 import {
@@ -19,6 +20,7 @@ function App() {
   const [session, setSession] = useState<SessionState | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const theme = resolveTheme(themeMode);
+  const rootStyle = [styles.root, {backgroundColor: theme.colors.background}];
 
   useEffect(() => {
     return () => {
@@ -75,22 +77,34 @@ function App() {
   };
 
   if (!session) {
-    return <ConnectScreen onConnect={connect} theme={theme} />;
+    return (
+      <View style={rootStyle}>
+        <ConnectScreen onConnect={connect} theme={theme} />
+      </View>
+    );
   }
 
   return (
-    <WorkspaceScreen
-      projects={session.projects}
-      selectedProjectId={session.selectedProjectId}
-      fileEntries={session.fileEntries}
-      onSelectProject={selectProject}
-      onListDirectory={listDirectory}
-      onReadFile={readFile}
-      onLogout={logout}
-      themeMode={themeMode}
-      onThemeModeChange={setThemeMode}
-    />
+    <View style={rootStyle}>
+      <WorkspaceScreen
+        projects={session.projects}
+        selectedProjectId={session.selectedProjectId}
+        fileEntries={session.fileEntries}
+        onSelectProject={selectProject}
+        onListDirectory={listDirectory}
+        onReadFile={readFile}
+        onLogout={logout}
+        themeMode={themeMode}
+        onThemeModeChange={setThemeMode}
+      />
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+});
 
 export default App;
