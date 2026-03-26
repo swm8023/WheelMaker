@@ -255,6 +255,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   List<Widget> _buildFileTreeNodes(FileTreeNode node, int depth, bool closeOnSelect) {
     final pad = EdgeInsets.only(left: 10 + depth * 14, right: 8);
     if (!node.isDirectory) {
+      final selected = node.path == _selectedFilePath;
       return [
         InkWell(
           key: ValueKey('workspace-file-row-${node.path}'),
@@ -265,6 +266,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
             }
           },
           child: Container(
+            color: selected ? const Color(0xFF37373D) : Colors.transparent,
             padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
             child: Row(
               children: [

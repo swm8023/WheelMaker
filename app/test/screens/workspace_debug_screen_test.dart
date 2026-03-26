@@ -55,6 +55,32 @@ void main() {
     expect(find.byKey(const ValueKey('workspace-sidebar-diff')), findsOneWidget);
   });
 
+  testWidgets('wide mode sidebar selection links files and diff content', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: WorkspaceDebugScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Files'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('workspace-file-row-/WheelMaker/app/pubspec.yaml')).first);
+    await tester.pumpAndSettle();
+    expect(find.text('/WheelMaker/app/pubspec.yaml'), findsOneWidget);
+
+    await tester.tap(find.text('Diff'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('workspace-commit-row-d15a271')).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('workspace-diff-file-row-app/lib/screens/file_explorer_screen.dart')).first);
+    await tester.pumpAndSettle();
+    expect(find.text('app/lib/screens/file_explorer_screen.dart'), findsWidgets);
+  });
+
   testWidgets('narrow mode drawer selections link chat/files/diff content', (tester) async {
     await tester.binding.setSurfaceSize(const Size(600, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
