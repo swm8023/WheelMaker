@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -19,9 +19,33 @@
       body {
         overflow: hidden;
       }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: #5f5f5f #252526;
+      }
+
+      *::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+
+      *::-webkit-scrollbar-track {
+        background: #252526;
+      }
+
+      *::-webkit-scrollbar-thumb {
+        background: #5f5f5f;
+        border-radius: 6px;
+        border: 2px solid #252526;
+      }
+
+      *::-webkit-scrollbar-thumb:hover {
+        background: #757575;
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
   </body>
 </html>
+

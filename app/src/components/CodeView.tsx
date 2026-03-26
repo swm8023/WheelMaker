@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import SyntaxHighlighter from 'react-native-syntax-highlighter';
 import {vs2015, vs} from 'react-syntax-highlighter/styles/hljs';
@@ -32,8 +32,10 @@ export function CodeView({path, code, theme}: CodeViewProps) {
 
 const styles = StyleSheet.create({
   wrap: {
+    width: '100%',
     minHeight: 160,
     borderRadius: 6,
     overflow: 'hidden',
   },
 });
+

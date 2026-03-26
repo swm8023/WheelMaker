@@ -429,7 +429,7 @@ export function WorkspaceScreen({
         </View>
 
         {!isWide ? (
-          <Modal visible={drawerOpen} animationType="slide" transparent>
+          <Modal visible={drawerOpen} animationType="fade" transparent>
             <Pressable style={styles.drawerMask} onPress={() => setDrawerOpen(false)}>
               <View
                 style={[
@@ -774,6 +774,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     minHeight: 0,
+    minWidth: 0,
   },
   sidebar: {
     width: 320,
@@ -785,6 +786,8 @@ const styles = StyleSheet.create({
   mainPane: {
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
+    alignSelf: 'stretch',
   },
   sideContainer: {
     flex: 1,
@@ -804,6 +807,7 @@ const styles = StyleSheet.create({
   mainBlock: {
     flex: 1,
     minHeight: 0,
+    minWidth: 0,
   },
   blockTitle: {
     paddingHorizontal: 12,
@@ -814,6 +818,8 @@ const styles = StyleSheet.create({
   scrollArea: {
     flex: 1,
     minHeight: 0,
+    width: '100%',
+    alignSelf: 'stretch',
   },
   scrollPad: {
     padding: 12,
@@ -851,6 +857,7 @@ const styles = StyleSheet.create({
   drawer: {
     height: '100%',
     minHeight: 0,
+    alignSelf: 'flex-start',
   },
   drawerInner: {
     flex: 1,
@@ -892,4 +899,6 @@ const styles = StyleSheet.create({
     height: 1,
   },
 });
+
+
 
