@@ -15,12 +15,26 @@ type CodeViewProps = {
 export function CodeView({path, code, theme}: CodeViewProps) {
   const language = languageFromPath(path);
   const style = theme.mode === 'dark' ? vs2015 : vs;
+  const webSyntaxStyle = {
+    margin: 0,
+    minHeight: '100%',
+    overflowX: 'visible',
+    overflowY: 'visible',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  } as unknown as Record<string, unknown>;
+  const webCodeTagStyle = {
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  } as unknown as Record<string, unknown>;
 
   return (
     <View style={[styles.wrap, {backgroundColor: theme.colors.codeBackground}]}>
       <SyntaxHighlighter
         language={language}
         style={style}
+        customStyle={webSyntaxStyle}
+        codeTagProps={{style: webCodeTagStyle}}
         highlighter="hljs"
         wrapLongLines
         fontFamily={theme.font.code}
