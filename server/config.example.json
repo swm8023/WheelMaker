@@ -24,23 +24,15 @@
       "client": {
         "agent": "claude"
       }
-    },
-    {
-      "name": "mobile",
-      "path": "/path/to/your/project",
-      "yolo": false,
-      "im": {
-        "type": "mobile",
-        "mobile": {
-          "port": 9527,
-          "token": "change-me-to-a-strong-secret"
-        }
-      },
-      "client": {
-        "agent": "claude"
-      }
     }
   ],
+  "registry": {
+    "listen": true,
+    "port": 9630,
+    "server": "127.0.0.1",
+    "token": "",
+    "hubId": "dev-hub"
+  },
   "feishu": {
     "verificationToken": "zzz",
     "encryptKey": ""

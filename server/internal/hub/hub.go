@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/swm8023/wheelmaker/internal/agent"
 	"github.com/swm8023/wheelmaker/internal/agent/claude"
@@ -15,8 +17,8 @@ import (
 	"github.com/swm8023/wheelmaker/internal/im"
 	"github.com/swm8023/wheelmaker/internal/im/console"
 	"github.com/swm8023/wheelmaker/internal/im/feishu"
-	"github.com/swm8023/wheelmaker/internal/im/mobile"
 	"github.com/swm8023/wheelmaker/internal/logger"
+	"github.com/swm8023/wheelmaker/internal/registry"
 )
 
 // Hub orchestrates one or more WheelMaker project clients.
@@ -25,6 +27,8 @@ type Hub struct {
 	cfg       *Config
 	statePath string
 	clients   []*client.Client
+	regServer *registry.Server
+	regSync   *registry.Reporter
 }
 
 // New creates a Hub from the given config and state file path.
@@ -55,6 +59,7 @@ func (h *Hub) Start(ctx context.Context) error {
 		}
 		h.clients = append(h.clients, c)
 	}
+	h.setupRegistrySync()
 	return nil
 }
 
@@ -123,17 +128,8 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
 			Debug:             pc.Debug,
 			YOLO:              pc.YOLO,
 		})), nil
-	case "mobile":
-		addr := fmt.Sprintf(":%d", pc.IM.Mobile.Port)
-		if pc.IM.Mobile.Port == 0 {
-			addr = ":9527"
-		}
-		return im.New(mobile.New(mobile.Config{
-			Addr:  addr,
-			Token: pc.IM.Mobile.Token,
-		})), nil
 	default:
-		return nil, fmt.Errorf("unknown im.type %q (supported: console, feishu, mobile)", pc.IM.Type)
+		return nil, fmt.Errorf("unknown im.type %q (supported: console, feishu)", pc.IM.Type)
 	}
 }
 
@@ -142,6 +138,24 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
 // only ctx cancellation terminates the run.
 func (h *Hub) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
+	if h.regServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := h.regServer.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("wheelmaker: registry server error: %v", err)
+			}
+		}()
+	}
+	if h.regSync != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := h.regSync.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("wheelmaker: registry sync error: %v", err)
+			}
+		}()
+	}
 	for _, c := range h.clients {
 		wg.Add(1)
 		go func(c *client.Client) {
@@ -167,4 +181,54 @@ func (h *Hub) Close() error {
 		return fmt.Errorf("hub close errors: %v", errs)
 	}
 	return nil
+}
+
+func (h *Hub) setupRegistrySync() {
+	cfg := h.cfg.Registry
+	if !cfg.Listen && strings.TrimSpace(cfg.Server) == "" && cfg.Port == 0 {
+		return
+	}
+
+	port := cfg.Port
+	if port == 0 {
+		port = 9630
+	}
+	host := strings.TrimSpace(cfg.Server)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if cfg.Listen {
+		h.regServer = registry.New(registry.Config{
+			Addr:  fmt.Sprintf("%s:%d", host, port),
+			Token: cfg.Token,
+		})
+	}
+
+	hubID := strings.TrimSpace(cfg.HubID)
+	if hubID == "" {
+		if hn, err := os.Hostname(); err == nil && strings.TrimSpace(hn) != "" {
+			hubID = hn
+		} else {
+			hubID = "wheelmaker-hub"
+		}
+	}
+
+	projects := make([]registry.ProjectInfo, 0, len(h.cfg.Projects))
+	for _, p := range h.cfg.Projects {
+		projects = append(projects, registry.ProjectInfo{
+			ID:     p.Name,
+			Name:   p.Name,
+			Path:   p.Path,
+			Agent:  p.Client.Agent,
+			IMType: p.IM.Type,
+		})
+	}
+
+	h.regSync = registry.NewReporter(registry.ReporterConfig{
+		Server:   host,
+		Port:     port,
+		Token:    cfg.Token,
+		HubID:    hubID,
+		Interval: 15 * time.Second,
+	}, projects)
 }
