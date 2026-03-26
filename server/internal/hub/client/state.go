@@ -4,7 +4,7 @@ package client
 import (
 	"encoding/json"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 )
 
 // ConnectionConfig captures what this client declared in the initialize request.

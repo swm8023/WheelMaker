@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
 func TestParseMessageText_Text(t *testing.T) {

@@ -6,7 +6,7 @@ package agent
 import (
 	"context"
 
-	"github.com/swm8023/wheelmaker/internal/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/acp"
 )
 
 // Agent is a stateless connection factory for an ACP-compatible CLI agent.
@@ -27,5 +27,4 @@ type Agent interface {
 	// Close cleans up any resources held by the agent.
 	// No-op after a successful Connect().
 	Close() error
-
 }

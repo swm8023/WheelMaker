@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent/claude"
-	"github.com/swm8023/wheelmaker/internal/tools"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/agent/claude"
+	"github.com/swm8023/wheelmaker/internal/hub/tools"
 )
 
 // requireClaudeBinary skips the test if the claude-agent-acp binary is not available.
@@ -108,4 +108,3 @@ func TestBackend_Close(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
-

@@ -9,16 +9,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/agent/claude"
-	"github.com/swm8023/wheelmaker/internal/agent/codex"
-	"github.com/swm8023/wheelmaker/internal/agent/copilot"
-	"github.com/swm8023/wheelmaker/internal/client"
-	"github.com/swm8023/wheelmaker/internal/im"
-	"github.com/swm8023/wheelmaker/internal/im/console"
-	"github.com/swm8023/wheelmaker/internal/im/feishu"
-	"github.com/swm8023/wheelmaker/internal/logger"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
+	"github.com/swm8023/wheelmaker/internal/hub/agent/claude"
+	"github.com/swm8023/wheelmaker/internal/hub/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/hub/agent/copilot"
+	"github.com/swm8023/wheelmaker/internal/hub/client"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/hub/im/console"
+	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
 	"github.com/swm8023/wheelmaker/internal/registry"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 const (

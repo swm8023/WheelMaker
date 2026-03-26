@@ -1,4 +1,4 @@
-package hub
+package config
 
 import (
 	"encoding/json"

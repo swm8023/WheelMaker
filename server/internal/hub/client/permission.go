@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
 type permissionRouter struct {

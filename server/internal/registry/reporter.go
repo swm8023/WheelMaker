@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/swm8023/wheelmaker/internal/logger"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 // ReporterConfig controls hub->registry connection behavior.

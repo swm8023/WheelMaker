@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/logger"
+	"github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 // emptyMCPServers returns an empty MCP server list for session/new and session/load calls.

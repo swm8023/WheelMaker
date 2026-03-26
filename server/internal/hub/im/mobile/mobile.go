@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 
 	"github.com/gorilla/websocket"
-	"github.com/swm8023/wheelmaker/internal/im"
-	"github.com/swm8023/wheelmaker/internal/logger"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 // Config configures the mobile WebSocket IM adapter.
