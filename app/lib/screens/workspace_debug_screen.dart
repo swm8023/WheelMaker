@@ -21,6 +21,7 @@ class WorkspaceDebugScreen extends StatefulWidget {
 
 class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
+  static const double _splitBreakpoint = 980;
   late final WsService _previewService;
   WorkspaceTab _selected = WorkspaceTab.chat;
   int _selectedChatIndex = 0;
@@ -38,6 +39,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
+    final isSplit = width >= _splitBreakpoint;
     final compact = width < 760;
     return Scaffold(
       key: _scaffoldKey,
@@ -83,14 +85,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _selected.index,
-        children: [
-          ChatScreen(service: _previewService, showAppBar: false),
-          const FileExplorerScreen(showAppBar: false),
-          const GitDiffDebugScreen(showAppBar: false),
-        ],
-      ),
+      body: _buildCurrentBody(isSplit),
     );
   }
 
@@ -123,7 +118,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   Widget _buildDrawerContent() {
     switch (_selected) {
       case WorkspaceTab.chat:
-        return _buildChatList();
+        return _buildChatList(closeOnSelect: true);
       case WorkspaceTab.files:
         return _buildFileDrawerTree();
       case WorkspaceTab.diff:
@@ -131,7 +126,27 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     }
   }
 
-  Widget _buildChatList() {
+  Widget _buildCurrentBody(bool isSplit) {
+    switch (_selected) {
+      case WorkspaceTab.chat:
+        if (!isSplit) {
+          return ChatScreen(service: _previewService, showAppBar: false);
+        }
+        return Row(
+          children: [
+            SizedBox(width: 320, child: _buildChatList(closeOnSelect: false)),
+            const VerticalDivider(width: 1),
+            Expanded(child: ChatScreen(service: _previewService, showAppBar: false)),
+          ],
+        );
+      case WorkspaceTab.files:
+        return const FileExplorerScreen(showAppBar: false);
+      case WorkspaceTab.diff:
+        return const GitDiffDebugScreen(showAppBar: false);
+    }
+  }
+
+  Widget _buildChatList({required bool closeOnSelect}) {
     const chats = [
       'General',
       'WheelMaker App',
@@ -151,7 +166,9 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 return InkWell(
                   onTap: () {
                     setState(() => _selectedChatIndex = index);
-                    Navigator.pop(context);
+                    if (closeOnSelect && Navigator.of(context).canPop()) {
+                      Navigator.pop(context);
+                    }
                   },
                   child: Container(
                     color: selected ? const Color(0xFF37373D) : Colors.transparent,
