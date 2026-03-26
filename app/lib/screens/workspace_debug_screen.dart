@@ -26,27 +26,23 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final compact = width < 760;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Workspace (Debug)'),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: SegmentedButton<WorkspaceTab>(
-              segments: const [
-                ButtonSegment(value: WorkspaceTab.chat, label: Text('Chat')),
-                ButtonSegment(value: WorkspaceTab.files, label: Text('Files')),
-                ButtonSegment(value: WorkspaceTab.diff, label: Text('Diff')),
-              ],
-              selected: {_selected},
-              showSelectedIcon: false,
-              onSelectionChanged: (selected) {
-                if (selected.isEmpty) return;
-                setState(() => _selected = selected.first);
-              },
+        titleSpacing: 12,
+        title: Row(
+          children: [
+            Text(compact ? 'Workspace' : 'Workspace (Debug)'),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: _buildSwitcher(compact: compact),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       body: IndexedStack(
         index: _selected.index,
@@ -56,6 +52,32 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
           const GitDiffDebugScreen(showAppBar: false),
         ],
       ),
+    );
+  }
+
+  Widget _buildSwitcher({required bool compact}) {
+    return SegmentedButton<WorkspaceTab>(
+      segments: compact
+          ? const [
+              ButtonSegment(value: WorkspaceTab.chat, label: Text('C')),
+              ButtonSegment(value: WorkspaceTab.files, label: Text('F')),
+              ButtonSegment(value: WorkspaceTab.diff, label: Text('D')),
+            ]
+          : const [
+              ButtonSegment(value: WorkspaceTab.chat, label: Text('Chat')),
+              ButtonSegment(value: WorkspaceTab.files, label: Text('Files')),
+              ButtonSegment(value: WorkspaceTab.diff, label: Text('Diff')),
+            ],
+      selected: {_selected},
+      showSelectedIcon: false,
+      style: ButtonStyle(
+        visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onSelectionChanged: (selected) {
+        if (selected.isEmpty) return;
+        setState(() => _selected = selected.first);
+      },
     );
   }
 }
