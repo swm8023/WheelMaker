@@ -1,4 +1,4 @@
-package logger
+package shared
 
 import (
 	"fmt"
@@ -9,7 +9,63 @@ import (
 	"time"
 )
 
-type inst struct {
+// Level represents minimum log severity.
+type Level int
+
+const (
+	LevelDebug Level = iota
+	LevelInfo
+	LevelWarn
+	LevelError
+)
+
+// ParseLevel converts a string to Level. Unknown values default to LevelWarn.
+func ParseLevel(s string) Level {
+	switch s {
+	case "debug":
+		return LevelDebug
+	case "info":
+		return LevelInfo
+	case "error":
+		return LevelError
+	default:
+		return LevelWarn
+	}
+}
+
+// LoggerConfig holds logger setup parameters.
+type LoggerConfig struct {
+	Level        Level
+	LogFile      string
+	DebugLogFile string
+}
+
+var global = &loggerInst{
+	level: LevelWarn,
+	out:   os.Stderr,
+}
+
+func Setup(cfg LoggerConfig) error { return global.setup(cfg) }
+func Close()                       { global.close() }
+
+func DebugWriter() io.Writer {
+	global.mu.Lock()
+	defer global.mu.Unlock()
+	return global.debugOut
+}
+
+func SetOutput(w io.Writer) {
+	global.mu.Lock()
+	defer global.mu.Unlock()
+	global.out = w
+}
+
+func Debug(format string, args ...any) { global.emit(LevelDebug, format, args...) }
+func Info(format string, args ...any)  { global.emit(LevelInfo, format, args...) }
+func Warn(format string, args ...any)  { global.emit(LevelWarn, format, args...) }
+func Error(format string, args ...any) { global.emit(LevelError, format, args...) }
+
+type loggerInst struct {
 	mu        sync.Mutex
 	level     Level
 	out       io.Writer
@@ -35,7 +91,7 @@ func (w *syncedFileWriter) Write(p []byte) (int, error) {
 
 var levelTag = [4]string{"DEBUG", "INFO ", "WARN ", "ERROR"}
 
-func (l *inst) emit(lvl Level, format string, args ...any) {
+func (l *loggerInst) emit(lvl Level, format string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -55,7 +111,7 @@ func (l *inst) emit(lvl Level, format string, args ...any) {
 	_, _ = io.WriteString(l.out, line)
 }
 
-func (l *inst) setup(cfg Config) error {
+func (l *loggerInst) setup(cfg LoggerConfig) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -105,7 +161,7 @@ func (l *inst) setup(cfg Config) error {
 	return nil
 }
 
-func (l *inst) close() {
+func (l *loggerInst) close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.debugFile != nil {

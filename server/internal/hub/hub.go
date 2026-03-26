@@ -17,8 +17,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/hub/im/console"
 	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
-	sharedcfg "github.com/swm8023/wheelmaker/internal/shared/config"
-	"github.com/swm8023/wheelmaker/internal/shared/logger"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
@@ -29,7 +28,7 @@ const (
 // Hub orchestrates one or more WheelMaker project clients.
 // Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
-	cfg       *sharedcfg.Config
+	cfg       *shared.AppConfig
 	statePath string
 	clients   []*client.Client
 	regSync   *Reporter
@@ -37,7 +36,7 @@ type Hub struct {
 
 // New creates a Hub from the given config and state file path.
 // hub.Start() must be called before hub.Run().
-func New(cfg *sharedcfg.Config, statePath string) *Hub {
+func New(cfg *shared.AppConfig, statePath string) *Hub {
 	return &Hub{cfg: cfg, statePath: statePath}
 }
 
@@ -68,7 +67,7 @@ func (h *Hub) Start(ctx context.Context) error {
 }
 
 // buildClient creates, configures, and starts a client.Client for one project.
-func (h *Hub) buildClient(ctx context.Context, pc sharedcfg.ProjectConfig) (*client.Client, error) {
+func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client.Client, error) {
 	// Resolve working directory.
 	cwd := pc.Path
 	if cwd == "" {
@@ -94,7 +93,7 @@ func (h *Hub) buildClient(ctx context.Context, pc sharedcfg.ProjectConfig) (*cli
 
 	// Enable ACP JSON debug logging for projects with debug=true.
 	if pc.Debug {
-		if dw := logger.DebugWriter(); dw != nil {
+		if dw := shared.DebugWriter(); dw != nil {
 			c.SetDebugLogger(dw)
 			imProvider.SetDebugLogger(dw)
 		}
@@ -117,7 +116,7 @@ func (h *Hub) buildClient(ctx context.Context, pc sharedcfg.ProjectConfig) (*cli
 }
 
 // buildIM creates the im.ImAdapter for a project's IM config.
-func (h *Hub) buildIM(pc sharedcfg.ProjectConfig) (*im.ImAdapter, error) {
+func (h *Hub) buildIM(pc shared.ProjectConfig) (*im.ImAdapter, error) {
 	switch pc.IM.Type {
 	case "console":
 		return im.New(console.New(pc.Name, pc.Debug)), nil
@@ -145,7 +144,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			if err := h.regSync.Run(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("wheelmaker: registry sync error: %v", err)
+				shared.Error("wheelmaker: registry sync error: %v", err)
 			}
 		}()
 	}
@@ -154,7 +153,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		go func(c *client.Client) {
 			defer wg.Done()
 			if err := c.Run(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("wheelmaker: project run error: %v", err)
+				shared.Error("wheelmaker: project run error: %v", err)
 			}
 		}(c)
 	}

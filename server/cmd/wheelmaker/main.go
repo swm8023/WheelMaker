@@ -12,8 +12,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub"
 	"github.com/swm8023/wheelmaker/internal/registry"
-	sharedcfg "github.com/swm8023/wheelmaker/internal/shared/config"
-	"github.com/swm8023/wheelmaker/internal/shared/logger"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const daemonWorkerArg = "--daemon-worker"
@@ -76,19 +75,19 @@ func runHubWorker() error {
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
 	statePath := filepath.Join(home, ".wheelmaker", "state.json")
 
-	cfg, err := sharedcfg.LoadConfig(cfgPath)
+	cfg, err := shared.LoadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
 
-	if err := logger.Setup(logger.Config{
-		Level:        logger.ParseLevel(cfg.Log.Level),
+	if err := shared.Setup(shared.LoggerConfig{
+		Level:        shared.ParseLevel(cfg.Log.Level),
 		LogFile:      filepath.Join(home, ".wheelmaker", "hub.log"),
 		DebugLogFile: filepath.Join(home, ".wheelmaker", "hub.debug.log"),
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
-	defer logger.Close()
+	defer shared.Close()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -108,19 +107,19 @@ func runRegistryWorker() error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
-	cfg, err := sharedcfg.LoadConfig(cfgPath)
+	cfg, err := shared.LoadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
 
-	if err := logger.Setup(logger.Config{
-		Level:        logger.ParseLevel(cfg.Log.Level),
+	if err := shared.Setup(shared.LoggerConfig{
+		Level:        shared.ParseLevel(cfg.Log.Level),
 		LogFile:      filepath.Join(home, ".wheelmaker", "registry.log"),
 		DebugLogFile: filepath.Join(home, ".wheelmaker", "registry.debug.log"),
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
-	defer logger.Close()
+	defer shared.Close()
 
 	host := cfg.Registry.Server
 	if host == "" {

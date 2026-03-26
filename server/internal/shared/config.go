@@ -1,7 +1,13 @@
-package config
+package shared
 
-// Config is the top-level config.json structure.
-type Config struct {
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+// AppConfig is the top-level config.json structure.
+type AppConfig struct {
 	Projects []ProjectConfig `json:"projects"`
 	Registry RegistryConfig  `json:"registry,omitempty"`
 	Log      LogConfig       `json:"log,omitempty"`
@@ -37,17 +43,25 @@ type ClientConf struct {
 
 // RegistryConfig configures registry sync independent of IM mode.
 type RegistryConfig struct {
-	// Port is the TCP port used by local listen or remote connect target.
-	Port int `json:"port,omitempty"`
-	// Listen controls mode:
-	// true = start local registry server and report to it;
-	// false = connect to remote registry server.
-	Listen bool `json:"listen,omitempty"`
-	// Server is host/address for listen or connect.
-	// In listen mode default is 127.0.0.1 when empty.
+	Port   int    `json:"port,omitempty"`
+	Listen bool   `json:"listen,omitempty"`
 	Server string `json:"server,omitempty"`
-	// Token is optional shared secret for registry auth.
-	Token string `json:"token,omitempty"`
-	// HubID is optional stable hub identity. Empty falls back to hostname.
-	HubID string `json:"hubId,omitempty"`
+	Token  string `json:"token,omitempty"`
+	HubID  string `json:"hubId,omitempty"`
+}
+
+// LoadConfig reads and parses the config file at path.
+func LoadConfig(path string) (*AppConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("config file not found at %s", path)
+		}
+		return nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	return &cfg, nil
 }

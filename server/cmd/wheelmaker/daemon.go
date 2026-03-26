@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/shared/logger"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const guardianInterval = 30 * time.Second

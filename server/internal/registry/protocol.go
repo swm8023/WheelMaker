@@ -1,6 +1,6 @@
 package registry
 
-import rp "github.com/swm8023/wheelmaker/internal/shared/registryproto"
+import rp "github.com/swm8023/wheelmaker/internal/shared"
 
 const (
 	codeUnauthorized    = rp.CodeUnauthorized

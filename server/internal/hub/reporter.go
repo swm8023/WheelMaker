@@ -13,21 +13,20 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/swm8023/wheelmaker/internal/shared/logger"
-	rp "github.com/swm8023/wheelmaker/internal/shared/registryproto"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
-	defaultProtocolVersion = rp.DefaultProtocolVersion
-	codeInvalidArgument    = rp.CodeInvalidArgument
-	codeNotFound           = rp.CodeNotFound
-	codeInternal           = rp.CodeInternal
+	defaultProtocolVersion = shared.DefaultProtocolVersion
+	codeInvalidArgument    = shared.CodeInvalidArgument
+	codeNotFound           = shared.CodeNotFound
+	codeInternal           = shared.CodeInternal
 )
 
-type ProjectInfo = rp.ProjectInfo
-type envelope = rp.Envelope
-type protocolError = rp.ProtocolError
-type errorEnvelope = rp.ErrorEnvelope
+type ProjectInfo = shared.ProjectInfo
+type envelope = shared.Envelope
+type protocolError = shared.ProtocolError
+type errorEnvelope = shared.ErrorEnvelope
 
 // ReporterConfig controls hub->registry connection behavior.
 type ReporterConfig struct {
@@ -75,7 +74,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 func (r *Reporter) Run(ctx context.Context) error {
 	for {
 		if err := r.runSession(ctx); err != nil && ctx.Err() == nil {
-			logger.Warn("registry reporter: session ended: %v", err)
+			shared.Warn("registry reporter: session ended: %v", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -142,7 +141,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		Version: defaultProtocolVersion,
 		Type:    "request",
 		Method:  "hello",
-		Payload: rp.MustRaw(map[string]any{
+		Payload: shared.MustRaw(map[string]any{
 			"clientName":      "wheelmaker-hub",
 			"clientVersion":   "0.1.0",
 			"protocolVersion": defaultProtocolVersion,
@@ -159,7 +158,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 			Version: defaultProtocolVersion,
 			Type:    "request",
 			Method:  "auth",
-			Payload: rp.MustRaw(map[string]any{"token": r.cfg.Token}),
+			Payload: shared.MustRaw(map[string]any{"token": r.cfg.Token}),
 		}); err != nil {
 			return err
 		}
@@ -172,7 +171,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		Version: defaultProtocolVersion,
 		Type:    "request",
 		Method:  "registry.reportProjects",
-		Payload: rp.MustRaw(map[string]any{
+		Payload: shared.MustRaw(map[string]any{
 			"hubId":    r.cfg.HubID,
 			"projects": r.projects,
 		}),
@@ -254,7 +253,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: rp.MustRaw(map[string]any{
+		Payload: shared.MustRaw(map[string]any{
 			"path":       rel,
 			"entries":    outEntries,
 			"nextCursor": "",
@@ -315,7 +314,7 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: rp.MustRaw(map[string]any{
+		Payload: shared.MustRaw(map[string]any{
 			"path":       rel,
 			"content":    string(buf[:n]),
 			"encoding":   "utf-8",
