@@ -162,6 +162,38 @@ func TestBuildWSURLAbsoluteURL(t *testing.T) {
 	}
 }
 
+func TestReporterDebugEnvelope_OneLineWithDirection(t *testing.T) {
+	var sb strings.Builder
+	r := NewReporter(ReporterConfig{}, nil)
+	r.SetDebugLogger(&sb)
+
+	r.writeDebugEnvelope("->", envelope{
+		Version:   "1.0",
+		RequestID: "req-1",
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload:   []byte(`{"hubId":"hub-1","note":"hello\nworld"}`),
+	})
+	r.writeDebugEnvelope("<-", envelope{
+		Version:   "1.0",
+		RequestID: "req-1",
+		Type:      "response",
+		Method:    "registry.reportProjects",
+		Payload:   []byte(`{"ok":true}`),
+	})
+
+	lines := strings.Split(strings.TrimSpace(sb.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("line count=%d, want 2; logs=%q", len(lines), sb.String())
+	}
+	if !strings.HasPrefix(lines[0], "->[registry] ") {
+		t.Fatalf("first line prefix=%q", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "<-[registry] ") {
+		t.Fatalf("second line prefix=%q", lines[1])
+	}
+}
+
 func newRegistryServer(t *testing.T, h http.Handler) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
