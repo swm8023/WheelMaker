@@ -13,7 +13,7 @@ import {
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
 import {CodeView, MarkdownView} from '../components';
-import {nextThemeMode, resolveTheme, type ThemeMode} from '../theme';
+import {resolveTheme, type ThemeMode} from '../theme';
 import type {RegistryFsEntry, RegistryProject} from '../types/observe';
 import {isMarkdownPath} from '../utils/codeLanguage';
 import {iconForPath} from '../utils/fileIcon';
@@ -68,6 +68,7 @@ type WorkspaceScreenProps = {
   fileEntries: RegistryFsEntry[];
   onSelectProject: (projectId: string) => Promise<void>;
   onReadFile: (path: string) => Promise<string>;
+  onLogout: () => void;
 };
 
 export function WorkspaceScreen({
@@ -76,6 +77,7 @@ export function WorkspaceScreen({
   fileEntries,
   onSelectProject,
   onReadFile,
+  onLogout,
 }: WorkspaceScreenProps) {
   const {width} = useWindowDimensions();
   const isWide = width >= 900;
@@ -87,6 +89,8 @@ export function WorkspaceScreen({
   const [tab, setTab] = useState<WorkspaceTab>('chat');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatSessionIndex] = useState(0);
   const [chatInput, setChatInput] = useState('');
   const [selectedCommitIndex, setSelectedCommitIndex] = useState(0);
@@ -139,6 +143,8 @@ export function WorkspaceScreen({
   const selectedDiffFile = selectedCommit.files.find(
     file => file.path === selectedDiffFilePath,
   );
+  const selectedProject =
+    projects.find(item => item.projectId === selectedProjectId) ?? projects[0];
 
   const fileTree = useMemo(() => {
     const project = projects.find(item => item.projectId === selectedProjectId);
@@ -152,19 +158,6 @@ export function WorkspaceScreen({
   const leftPanel = renderSidebar({
     theme,
     tab,
-    projects,
-    selectedProjectId,
-    onProjectSelect: async projectId => {
-      setLoadingProject(true);
-      try {
-        await onSelectProject(projectId);
-      } finally {
-        setLoadingProject(false);
-      }
-      if (!isWide) {
-        setDrawerOpen(false);
-      }
-    },
     expandedPaths,
     selectedFilePath,
     onFileSelect: async path => {
@@ -197,6 +190,19 @@ export function WorkspaceScreen({
     fileTree,
   });
 
+  const switchProject = async (projectId: string) => {
+    setLoadingProject(true);
+    try {
+      await onSelectProject(projectId);
+      setProjectMenuOpen(false);
+    } finally {
+      setLoadingProject(false);
+    }
+    if (!isWide) {
+      setDrawerOpen(false);
+    }
+  };
+
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'} />
@@ -213,21 +219,27 @@ export function WorkspaceScreen({
             style={[styles.headerButton, {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary}]}> 
             <Text style={{color: theme.colors.text}}>{isWide ? (sidebarCollapsed ? '>' : '<') : '='}</Text>
           </Pressable>
-          <Text style={[styles.headerTitle, {color: theme.colors.text}]} numberOfLines={1}>
-            WheelMaker Project
-          </Text>
           <Pressable
-            onPress={() => setThemeMode(mode => nextThemeMode(mode))}
-            style={[styles.themeButton, {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary}]}> 
-            <Text style={{color: theme.colors.text}}>{themeMode === 'dark' ? 'Dark' : 'Light'}</Text>
+            onPress={() => setProjectMenuOpen(value => !value)}
+            style={[
+              styles.projectButton,
+              {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+            ]}>
+            <Text style={[styles.projectArrow, {color: theme.colors.text}]}>v</Text>
+            <Text style={{color: theme.colors.text}} numberOfLines={1}>
+              {selectedProject?.name ?? 'Project'}
+              {loadingProject ? ' ...' : ''}
+            </Text>
           </Pressable>
+          <View style={styles.headerSpacer} />
           <View style={[styles.segmentWrap, {borderColor: theme.colors.border}]}> 
-            {(['chat', 'file', 'git'] as WorkspaceTab[]).map(item => (
+            {(['chat', 'file', 'git'] as WorkspaceTab[]).map((item, index, arr) => (
               <Pressable
                 key={item}
                 style={[
                   styles.segmentItem,
                   {borderColor: theme.colors.border},
+                  index === arr.length - 1 && styles.segmentItemLast,
                   tab === item && {backgroundColor: theme.colors.rowSelected},
                 ]}
                 onPress={() => setTab(item)}>
@@ -235,7 +247,39 @@ export function WorkspaceScreen({
               </Pressable>
             ))}
           </View>
+          <Pressable
+            onPress={() => setSettingsOpen(true)}
+            style={[
+              styles.headerButton,
+              styles.settingsButton,
+              {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+            ]}>
+            <Text style={{color: theme.colors.text}}>[]</Text>
+          </Pressable>
         </View>
+        {projectMenuOpen ? (
+          <View
+            style={[
+              styles.projectMenu,
+              {borderColor: theme.colors.border, backgroundColor: theme.colors.panel},
+            ]}>
+            {projects.map(project => (
+              <Pressable
+                key={project.projectId}
+                style={[
+                  styles.projectMenuItem,
+                  project.projectId === selectedProjectId && {
+                    backgroundColor: theme.colors.rowSelected,
+                  },
+                ]}
+                onPress={() => {
+                  switchProject(project.projectId).catch(() => undefined);
+                }}>
+                <Text style={{color: theme.colors.text}}>{project.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
 
         <View style={styles.container}>
           {isWide && !sidebarCollapsed ? (
@@ -338,6 +382,48 @@ export function WorkspaceScreen({
             </Pressable>
           </Modal>
         ) : null}
+        <Modal visible={settingsOpen} animationType="slide">
+          <SafeAreaView style={[styles.safeArea, {backgroundColor: theme.colors.background}]}>
+            <View style={[styles.settingsHeader, {borderColor: theme.colors.border}]}>
+              <Text style={[styles.settingsTitle, {color: theme.colors.text}]}>Settings</Text>
+              <Pressable
+                style={[
+                  styles.headerButton,
+                  {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                ]}
+                onPress={() => setSettingsOpen(false)}>
+                <Text style={{color: theme.colors.text}}>X</Text>
+              </Pressable>
+            </View>
+            <View style={styles.settingsSection}>
+              <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>THEME</Text>
+              {(['dark', 'light'] as ThemeMode[]).map(mode => (
+                <Pressable
+                  key={mode}
+                  style={[
+                    styles.settingsItem,
+                    {
+                      borderColor: theme.colors.border,
+                      backgroundColor:
+                        themeMode === mode ? theme.colors.rowSelected : theme.colors.panelSecondary,
+                    },
+                  ]}
+                  onPress={() => setThemeMode(mode)}>
+                  <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
+                </Pressable>
+              ))}
+              <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>SESSION</Text>
+              <Pressable
+                style={[
+                  styles.settingsItem,
+                  {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                ]}
+                onPress={onLogout}>
+                <Text style={{color: theme.colors.text}}>Back To Login</Text>
+              </Pressable>
+            </View>
+          </SafeAreaView>
+        </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -346,9 +432,6 @@ export function WorkspaceScreen({
 function renderSidebar(args: {
   theme: ReturnType<typeof resolveTheme>;
   tab: WorkspaceTab;
-  projects: RegistryProject[];
-  selectedProjectId: string;
-  onProjectSelect: (projectId: string) => void;
   expandedPaths: Set<string>;
   selectedFilePath: string | null;
   onFileSelect: (path: string) => void;
@@ -361,20 +444,6 @@ function renderSidebar(args: {
   if (args.tab === 'chat') {
     return (
       <View style={styles.sideContainer}>
-        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>PROJECTS</Text>
-        {args.projects.map(project => (
-          <Pressable
-            key={project.projectId}
-            style={[
-              styles.sideRow,
-              args.selectedProjectId === project.projectId && {
-                backgroundColor: args.theme.colors.rowSelected,
-              },
-            ]}
-            onPress={() => args.onProjectSelect(project.projectId)}>
-            <Text style={{color: args.theme.colors.text}}>{project.name}</Text>
-          </Pressable>
-        ))}
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHAT LIST</Text>
         {CHAT_SESSIONS.map(item => (
           <View key={item} style={styles.sideRow}>
@@ -388,20 +457,6 @@ function renderSidebar(args: {
   if (args.tab === 'file') {
     return (
       <ScrollView style={styles.sideContainer}>
-        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>PROJECTS</Text>
-        {args.projects.map(project => (
-          <Pressable
-            key={project.projectId}
-            style={[
-              styles.sideRow,
-              args.selectedProjectId === project.projectId && {
-                backgroundColor: args.theme.colors.rowSelected,
-              },
-            ]}
-            onPress={() => args.onProjectSelect(project.projectId)}>
-            <Text style={{color: args.theme.colors.text}}>{project.name}</Text>
-          </Pressable>
-        ))}
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>EXPLORER</Text>
         {renderFileTree({
           node: args.fileTree,
@@ -563,21 +618,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 4,
   },
-  themeButton: {
-    minWidth: 56,
+  projectButton: {
     height: 32,
+    maxWidth: 260,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderRadius: 4,
-    marginRight: 8,
-    paddingHorizontal: 8,
-  },
-  headerTitle: {
-    flex: 1,
+    borderRadius: 6,
     marginLeft: 8,
-    marginRight: 8,
-    fontSize: 14,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+  },
+  headerSpacer: {
+    flex: 1,
+  },
+  settingsButton: {
+    marginLeft: 8,
+  },
+  projectArrow: {
+    marginRight: 6,
   },
   segmentWrap: {
     flexDirection: 'row',
@@ -589,6 +648,22 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRightWidth: 1,
+  },
+  segmentItemLast: {
+    borderRightWidth: 0,
+  },
+  projectMenu: {
+    position: 'absolute',
+    top: 52,
+    left: 48,
+    width: 260,
+    borderWidth: 1,
+    zIndex: 20,
+  },
+  projectMenuItem: {
+    minHeight: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
   container: {
     flex: 1,
@@ -666,6 +741,30 @@ const styles = StyleSheet.create({
   },
   drawerInner: {
     flex: 1,
+  },
+  settingsHeader: {
+    height: 52,
+    borderBottomWidth: 1,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexDirection: 'row',
+  },
+  settingsSection: {
+    paddingHorizontal: 12,
+    paddingTop: 12,
+  },
+  settingsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  settingsItem: {
+    borderWidth: 1,
+    borderRadius: 6,
+    minHeight: 40,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 8,
   },
   flexOne: {
     flex: 1,

@@ -66,6 +66,12 @@ function App() {
     });
   };
 
+  const logout = (): void => {
+    repositoryRef.current?.close();
+    repositoryRef.current = null;
+    setSession(null);
+  };
+
   if (!session) {
     return <ConnectScreen onConnect={connect} />;
   }
@@ -77,6 +83,7 @@ function App() {
       fileEntries={session.fileEntries}
       onSelectProject={selectProject}
       onReadFile={readFile}
+      onLogout={logout}
     />
   );
 }
