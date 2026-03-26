@@ -1,4 +1,4 @@
-package observe
+package registry
 
 import "encoding/json"
 

@@ -13,7 +13,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub"
 	"github.com/swm8023/wheelmaker/internal/logger"
-	"github.com/swm8023/wheelmaker/internal/observe"
+	"github.com/swm8023/wheelmaker/internal/registry"
 )
 
 const daemonWorkerArg = "--daemon-worker"
@@ -30,15 +30,15 @@ func run() error {
 	fs.SetOutput(os.Stderr)
 	daemonMode := fs.Bool("d", false, "run guardian mode (checks service every 30 seconds)")
 	daemonWorker := fs.Bool("daemon-worker", false, "internal: worker mode for guardian")
-	observeServer := fs.Bool("observe-server", false, "run remote-observe websocket server mode")
-	observeAddr := fs.String("observe-addr", ":9630", "remote-observe websocket listen address")
-	observeToken := fs.String("observe-token", "", "remote-observe shared token (optional)")
+	registryServer := fs.Bool("registry-server", false, "run registry websocket server mode")
+	registryAddr := fs.String("registry-addr", ":9630", "registry websocket listen address")
+	registryToken := fs.String("registry-token", "", "registry shared token (optional)")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
 	switch {
-	case *observeServer:
-		return runObserveServer(*observeAddr, *observeToken)
+	case *registryServer:
+		return runRegistryServer(*registryAddr, *registryToken)
 	case *daemonWorker:
 		return runService()
 	case *daemonMode:
@@ -48,11 +48,11 @@ func run() error {
 	}
 }
 
-func runObserveServer(addr, token string) error {
+func runRegistryServer(addr, token string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	s := observe.New(observe.Config{
+	s := registry.New(registry.Config{
 		Addr:  addr,
 		Token: token,
 	})

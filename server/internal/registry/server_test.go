@@ -1,4 +1,4 @@
-package observe
+package registry
 
 import (
 	"net/http/httptest"
@@ -49,7 +49,7 @@ func TestHello(t *testing.T) {
 	}
 }
 
-func TestHubReportProjectsThenProjectList(t *testing.T) {
+func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 	s := New(Config{})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -61,7 +61,7 @@ func TestHubReportProjectsThenProjectList(t *testing.T) {
 		Version:   "1.0",
 		RequestID: "r1",
 		Type:      "request",
-		Method:    "hub.reportProjects",
+		Method:    "registry.reportProjects",
 		Payload: map[string]any{
 			"hubId": "hub-a",
 			"projects": []map[string]any{
@@ -72,7 +72,7 @@ func TestHubReportProjectsThenProjectList(t *testing.T) {
 	})
 
 	reportResp := mustReadEnvelope(t, ws)
-	if reportResp.Type != "response" || reportResp.Method != "hub.reportProjects" {
+	if reportResp.Type != "response" || reportResp.Method != "registry.reportProjects" {
 		t.Fatalf("unexpected report response: %#v", reportResp)
 	}
 
@@ -80,11 +80,11 @@ func TestHubReportProjectsThenProjectList(t *testing.T) {
 		Version:   "1.0",
 		RequestID: "r2",
 		Type:      "request",
-		Method:    "project.list",
+		Method:    "registry.listProjects",
 		Payload:   map[string]any{},
 	})
 	listResp := mustReadEnvelope(t, ws)
-	if listResp.Type != "response" || listResp.Method != "project.list" {
+	if listResp.Type != "response" || listResp.Method != "registry.listProjects" {
 		t.Fatalf("unexpected list response: %#v", listResp)
 	}
 
@@ -106,7 +106,7 @@ func TestAuthRequired(t *testing.T) {
 		Version:   "1.0",
 		RequestID: "r1",
 		Type:      "request",
-		Method:    "hub.reportProjects",
+		Method:    "registry.reportProjects",
 		Payload: map[string]any{
 			"hubId":    "hub-a",
 			"projects": []map[string]any{},
@@ -138,7 +138,7 @@ func TestAuthRequired(t *testing.T) {
 		Version:   "1.0",
 		RequestID: "r3",
 		Type:      "request",
-		Method:    "hub.reportProjects",
+		Method:    "registry.reportProjects",
 		Payload: map[string]any{
 			"hubId": "hub-a",
 			"projects": []map[string]any{
@@ -147,7 +147,7 @@ func TestAuthRequired(t *testing.T) {
 		},
 	})
 	reportResp := mustReadEnvelope(t, ws)
-	if reportResp.Type != "response" || reportResp.Method != "hub.reportProjects" {
+	if reportResp.Type != "response" || reportResp.Method != "registry.reportProjects" {
 		t.Fatalf("unexpected report response after auth: %#v", reportResp)
 	}
 }
