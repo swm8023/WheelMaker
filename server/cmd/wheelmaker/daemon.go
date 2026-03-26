@@ -131,12 +131,34 @@ func chooseKeepPID(workers []daemonProcess, preferredPID int) int {
 
 func startWorker(exePath string, workerArgs []string) (int, error) {
 	cmd := exec.Command(exePath, workerArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	restoreIO, err := configureWorkerCommandIO(cmd)
+	if err != nil {
+		return 0, err
+	}
 	if err := cmd.Start(); err != nil {
+		restoreIO()
 		return 0, fmt.Errorf("start worker: %w", err)
 	}
+	restoreIO()
 	return cmd.Process.Pid, nil
+}
+
+func configureWorkerCommandIO(cmd *exec.Cmd) (func(), error) {
+	stdoutSink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open stdout sink: %w", err)
+	}
+	stderrSink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		_ = stdoutSink.Close()
+		return nil, fmt.Errorf("open stderr sink: %w", err)
+	}
+	cmd.Stdout = stdoutSink
+	cmd.Stderr = stderrSink
+	return func() {
+		_ = stdoutSink.Close()
+		_ = stderrSink.Close()
+	}, nil
 }
 
 func killProcess(pid int) error {
