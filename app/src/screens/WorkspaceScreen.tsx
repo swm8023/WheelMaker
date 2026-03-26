@@ -18,7 +18,7 @@ import {CodeView, MarkdownView} from '../components';
 import {resolveTheme, type ThemeMode} from '../theme';
 import type {RegistryFsEntry, RegistryProject} from '../types/observe';
 import {isMarkdownPath} from '../utils/codeLanguage';
-import {iconForPath} from '../utils/fileIcon';
+import {iconForPath, type FileIcon} from '../utils/fileIcon';
 
 type WorkspaceTab = 'chat' | 'file' | 'git';
 
@@ -603,7 +603,7 @@ function Sidebar(args: {
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHANGED FILES</Text>
         <ScrollView style={styles.flexOne}>
           {GIT_COMMITS[args.selectedCommitIndex].files.map(file => {
-            const icon = iconForPath(file.path);
+            const icon = iconForPath(file.path, {mode: args.theme.mode});
             return (
               <Pressable
                 key={file.path}
@@ -615,7 +615,7 @@ function Sidebar(args: {
                 ]}
                 onPress={() => args.onDiffFileSelect(file.path)}>
                 <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
-                  <VsIcon name={icon.name} color={icon.color} /><Text> </Text>
+                  <VsIcon icon={icon} /><Text> </Text>
                   {file.path}
                 </Text>
               </Pressable>
@@ -638,10 +638,10 @@ function renderFileTree(args: {
   onFileSelect: (path: string) => void;
 }): React.ReactNode {
   const indent = {paddingLeft: args.depth * 14 + 8};
-  const icon = iconForPath(args.node.path);
   const titleProps = Platform.OS === 'web' ? ({title: args.node.name} as object) : {};
 
   if (!args.node.isDir) {
+    const icon = iconForPath(args.node.path, {mode: args.theme.mode});
     return (
       <Pressable
         {...(titleProps as any)}
@@ -655,7 +655,7 @@ function renderFileTree(args: {
         ]}
         onPress={() => args.onFileSelect(args.node.path)}>
         <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.treeText, {color: args.theme.colors.text}]}>
-          <VsIcon name={icon.name} color={icon.color} /><Text> </Text>
+          <VsIcon icon={icon} /><Text> </Text>
           {args.node.name}
         </Text>
       </Pressable>
@@ -665,6 +665,11 @@ function renderFileTree(args: {
   const isOpen = args.expandedPaths.has(args.node.path);
   const isLoading = args.loadingDirs.has(args.node.path);
   const sortedChildren = [...args.node.children].sort(sortFileNode);
+  const icon = iconForPath(args.node.path, {
+    isDir: true,
+    expanded: isOpen,
+    mode: args.theme.mode,
+  });
 
   return (
     <View key={args.node.path}>
@@ -676,7 +681,7 @@ function renderFileTree(args: {
         }}>
         <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.treeText, {color: args.theme.colors.text}]}>
           {isOpen ? 'v ' : '> '}
-          <VsIcon name={icon.name} color={icon.color} /><Text> </Text>
+          <VsIcon icon={icon} /><Text> </Text>
           {args.node.name}
           {isLoading ? ' ...' : ''}
         </Text>
@@ -746,19 +751,18 @@ function findFirstFile(root: FileNode): FileNode | null {
   }
   return null;
 }
-function VsIcon({name, color}: {name: string; color: string}) {
-  const webIconStyle = {color, ...styles.webCodicon} as const;
+function VsIcon({icon}: {icon: FileIcon}) {
+  const webIconStyle = {
+    color: icon.color,
+    ...styles.webCodicon,
+    fontFamily: icon.fontFamily,
+  } as const;
 
   if (Platform.OS === 'web') {
-    return (
-      <span
-        className={`codicon codicon-${name}`}
-        style={webIconStyle}
-      />
-    );
+    return <span style={webIconStyle}>{icon.glyph}</span>;
   }
 
-  return <Text style={{color}}>•</Text>;
+  return <Text style={{color: icon.color, fontFamily: icon.fontFamily}}>{icon.glyph}</Text>;
 }
 const styles = StyleSheet.create({
   safeArea: {
@@ -979,6 +983,7 @@ const styles = StyleSheet.create({
     verticalAlign: 'middle',
   },
 });
+
 
 
 

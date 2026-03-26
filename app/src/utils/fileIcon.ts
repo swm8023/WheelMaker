@@ -1,61 +1,110 @@
+type ThemeMode = 'dark' | 'light';
+
 type FileIcon = {
-  name: string;
+  glyph: string;
   color: string;
+  fontFamily: 'vscode-seti';
 };
 
-const color = {
-  folder: '#dcb67a',
-  ts: '#519aba',
-  js: '#cbcb41',
-  json: '#cbcb41',
-  md: '#519aba',
-  go: '#519aba',
-  shell: '#89e051',
-  default: '#c5c5c5',
+type IconThemeSection = {
+  file?: string;
+  folder?: string;
+  folderExpanded?: string;
+  fileNames?: Record<string, string>;
+  fileExtensions?: Record<string, string>;
 };
 
-const extensionIconMap: Record<string, FileIcon> = {
-  ts: {name: 'file-code', color: color.ts},
-  tsx: {name: 'file-code', color: color.ts},
-  js: {name: 'file-code', color: color.js},
-  jsx: {name: 'file-code', color: color.js},
-  json: {name: 'json', color: color.json},
-  md: {name: 'book', color: color.md},
-  markdown: {name: 'book', color: color.md},
-  go: {name: 'symbol-namespace', color: color.go},
-  sh: {name: 'terminal', color: color.shell},
-  ps1: {name: 'terminal', color: color.shell},
-  yml: {name: 'settings', color: color.default},
-  yaml: {name: 'settings', color: color.default},
+type IconDefinition = {
+  fontCharacter?: string;
+  fontColor?: string;
 };
 
-const nameIconMap: Record<string, FileIcon> = {
-  dockerfile: {name: 'package', color: color.default},
-  makefile: {name: 'tools', color: color.default},
-  'package.json': {name: 'json', color: color.json},
-  'readme.md': {name: 'book', color: color.md},
+type SetiThemeJson = IconThemeSection & {
+  iconDefinitions: Record<string, IconDefinition>;
+  light?: IconThemeSection;
 };
 
-const folderIcon: FileIcon = {name: 'folder', color: color.folder};
-const fileIcon: FileIcon = {name: 'file', color: color.default};
+const setiTheme = require('./vscode-seti-theme.json') as SetiThemeJson;
 
-export function iconForPath(path: string): FileIcon {
-  const normalized = path.toLowerCase().trim();
-  if (!normalized) {
-    return fileIcon;
-  }
+const fallbackIcon: FileIcon = {
+  glyph: '•',
+  color: '#c5c5c5',
+  fontFamily: 'vscode-seti',
+};
 
-  const base = normalized.split('/').pop() ?? normalized;
-  if (!base.includes('.')) {
-    return folderIcon;
-  }
-
-  if (nameIconMap[base]) {
-    return nameIconMap[base];
-  }
-
-  const ext = base.slice(base.lastIndexOf('.') + 1);
-  return extensionIconMap[ext] ?? fileIcon;
+function toSetiGlyph(fontCharacter?: string): string {
+  if (!fontCharacter) return fallbackIcon.glyph;
+  const normalized = fontCharacter.replace(/^\\/, '');
+  const codePoint = Number.parseInt(normalized, 16);
+  if (Number.isNaN(codePoint)) return fallbackIcon.glyph;
+  return String.fromCharCode(codePoint);
 }
 
-export type {FileIcon};
+function resolveIconFromDefinition(defKey?: string): FileIcon {
+  if (!defKey) return fallbackIcon;
+  const definition = setiTheme.iconDefinitions?.[defKey];
+  if (!definition) return fallbackIcon;
+  return {
+    glyph: toSetiGlyph(definition.fontCharacter),
+    color: definition.fontColor ?? fallbackIcon.color,
+    fontFamily: 'vscode-seti',
+  };
+}
+
+function sectionForMode(mode: ThemeMode): Required<IconThemeSection> {
+  const light = mode === 'light' ? setiTheme.light ?? {} : {};
+  return {
+    file: light.file ?? setiTheme.file ?? '',
+    folder: light.folder ?? setiTheme.folder ?? '',
+    folderExpanded: light.folderExpanded ?? setiTheme.folderExpanded ?? '',
+    fileNames: {...(setiTheme.fileNames ?? {}), ...(light.fileNames ?? {})},
+    fileExtensions: {
+      ...(setiTheme.fileExtensions ?? {}),
+      ...(light.fileExtensions ?? {}),
+    },
+  };
+}
+
+function extensionCandidates(base: string): string[] {
+  const parts = base.split('.');
+  if (parts.length <= 1) return [];
+  const candidates: string[] = [];
+  for (let i = 1; i < parts.length; i += 1) {
+    candidates.push(parts.slice(i).join('.'));
+  }
+  return candidates;
+}
+
+function fileDefKey(path: string, mode: ThemeMode): string {
+  const section = sectionForMode(mode);
+  const base = (path.split('/').pop() ?? path).toLowerCase();
+
+  const byName = section.fileNames[base];
+  if (byName) return byName;
+
+  for (const ext of extensionCandidates(base)) {
+    const byExt = section.fileExtensions[ext];
+    if (byExt) return byExt;
+  }
+
+  return section.file;
+}
+
+type IconOptions = {
+  isDir?: boolean;
+  expanded?: boolean;
+  mode?: ThemeMode;
+};
+
+export function iconForPath(path: string, options: IconOptions = {}): FileIcon {
+  const mode = options.mode ?? 'dark';
+  const section = sectionForMode(mode);
+
+  if (options.isDir) {
+    return resolveIconFromDefinition(options.expanded ? section.folderExpanded : section.folder);
+  }
+
+  return resolveIconFromDefinition(fileDefKey(path, mode));
+}
+
+export type {FileIcon, ThemeMode};

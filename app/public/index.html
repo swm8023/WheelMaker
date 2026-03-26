@@ -4,11 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WheelMakerRN</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.36/dist/codicon.css"
-    />
     <style>
+      @font-face {
+        font-family: 'vscode-seti';
+        src: url('/assets/seti.woff') format('woff');
+        font-weight: normal;
+        font-style: normal;
+      }
+
       html,
       body,
       #root,
@@ -24,6 +27,24 @@
         overflow: hidden;
         font-family: 'Segoe WPC', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue',
           sans-serif;
+      }
+
+      @media (max-width: 639px) {
+        body {
+          font-size: 13px;
+        }
+      }
+
+      @media (min-width: 640px) and (max-width: 1023px) {
+        body {
+          font-size: 15px;
+        }
+      }
+
+      @media (min-width: 1024px) {
+        body {
+          font-size: 14px;
+        }
       }
       * {
         scrollbar-width: thin;
