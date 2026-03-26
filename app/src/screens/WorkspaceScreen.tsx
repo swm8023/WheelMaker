@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+﻿import React, {useEffect, useMemo, useState} from 'react';
 import {
   Modal,
   Pressable,
@@ -14,7 +14,7 @@ import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
 import {CodeView, MarkdownView} from '../components';
 import {nextThemeMode, resolveTheme, type ThemeMode} from '../theme';
-import type {ObserveFsEntry, ObserveProject} from '../types/observe';
+import type {RegistryFsEntry, RegistryProject} from '../types/observe';
 import {isMarkdownPath} from '../utils/codeLanguage';
 import {iconForPath} from '../utils/fileIcon';
 
@@ -41,31 +41,31 @@ type GitCommit = {
 
 const CHAT_SESSIONS = ['General', 'WheelMaker App', 'Go Service', 'Review'];
 const CHAT_MESSAGES = [
-  {role: 'system', text: 'Connected to observe workspace.'},
+  {role: 'system', text: 'Connected to registry workspace.'},
   {role: 'agent', text: 'Workspace theme now supports VS Code style modes.'},
 ];
 
 const GIT_COMMITS: GitCommit[] = [
   {
     hash: '14b16e2',
-    message: 'feat(app): implement observe connect, project list, and files',
+    message: 'feat(app): implement registry connect, project list, and files',
     files: [
       {
-        path: 'app/lib/services/observe_ws_client.dart',
-        diff: '@@ -1,3 +1,4 @@\n+class ObserveWsClient { ... }',
+        path: 'app/lib/services/registry_ws_client.dart',
+        diff: '@@ -1,3 +1,4 @@\n+class RegistryWsClient { ... }',
       },
       {
         path: 'app/lib/screens/connect_screen.dart',
-        diff: '@@ -40,2 +75,20 @@\n+Future<void> _openObserveWorkspace() async { ... }',
+        diff: '@@ -40,2 +75,20 @@\n+Future<void> _openRegistryWorkspace() async { ... }',
       },
     ],
   },
 ];
 
 type WorkspaceScreenProps = {
-  projects: ObserveProject[];
+  projects: RegistryProject[];
   selectedProjectId: string;
-  fileEntries: ObserveFsEntry[];
+  fileEntries: RegistryFsEntry[];
   onSelectProject: (projectId: string) => Promise<void>;
   onReadFile: (path: string) => Promise<string>;
 };
@@ -87,7 +87,7 @@ export function WorkspaceScreen({
   const [tab, setTab] = useState<WorkspaceTab>('chat');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [chatSessionIndex, setChatSessionIndex] = useState(0);
+  const [chatSessionIndex] = useState(0);
   const [chatInput, setChatInput] = useState('');
   const [selectedCommitIndex, setSelectedCommitIndex] = useState(0);
   const [selectedDiffFilePath, setSelectedDiffFilePath] = useState(
@@ -128,7 +128,7 @@ export function WorkspaceScreen({
         }
       }
     };
-    void load();
+    load().catch(() => undefined);
 
     return () => {
       cancelled = true;
@@ -346,7 +346,7 @@ export function WorkspaceScreen({
 function renderSidebar(args: {
   theme: ReturnType<typeof resolveTheme>;
   tab: WorkspaceTab;
-  projects: ObserveProject[];
+  projects: RegistryProject[];
   selectedProjectId: string;
   onProjectSelect: (projectId: string) => void;
   expandedPaths: Set<string>;
@@ -527,8 +527,8 @@ function sortFileNode(a: FileNode, b: FileNode): number {
 }
 
 function buildFileTree(
-  project: ObserveProject | undefined,
-  entries: ObserveFsEntry[],
+  project: RegistryProject | undefined,
+  entries: RegistryFsEntry[],
 ): FileNode {
   const projectName = project?.name || 'Project';
   const projectPath = project?.projectId || 'project';
@@ -671,3 +671,4 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+
