@@ -203,7 +203,11 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
             padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
             child: Row(
               children: [
-                const Icon(Icons.description_outlined, size: 16, color: Color(0xFFCCCCCC)),
+                Icon(
+                  _fileIcon(node.path),
+                  size: 16,
+                  color: _fileColor(node.path),
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -378,6 +382,45 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
       ),
     );
+  }
+
+  IconData _fileIcon(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.dart')) return Icons.flutter_dash;
+    if (lower.endsWith('.go')) return Icons.memory_outlined;
+    if (_isCppFile(lower)) return Icons.code;
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) {
+      return Icons.settings_applications_outlined;
+    }
+    if (lower.endsWith('.json')) return Icons.data_object;
+    if (lower.endsWith('.md')) return Icons.article_outlined;
+    if (lower.endsWith('.ps1')) return Icons.terminal_outlined;
+    return Icons.description_outlined;
+  }
+
+  Color _fileColor(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.dart')) return const Color(0xFF42A5F5);
+    if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (_isCppFile(lower)) return const Color(0xFF649AD2);
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) {
+      return const Color(0xFFCB9B41);
+    }
+    if (lower.endsWith('.json')) return const Color(0xFFF1D04B);
+    if (lower.endsWith('.md')) return const Color(0xFF519ABA);
+    if (lower.endsWith('.ps1')) return const Color(0xFF4EC9B0);
+    return const Color(0xFFCCCCCC);
+  }
+
+  bool _isCppFile(String lowerPath) {
+    return lowerPath.endsWith('.cpp') ||
+        lowerPath.endsWith('.cc') ||
+        lowerPath.endsWith('.cxx') ||
+        lowerPath.endsWith('.c') ||
+        lowerPath.endsWith('.hpp') ||
+        lowerPath.endsWith('.hh') ||
+        lowerPath.endsWith('.hxx') ||
+        lowerPath.endsWith('.h');
   }
 }
 
