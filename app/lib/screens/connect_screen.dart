@@ -4,7 +4,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../data/observe_project_data_source.dart';
 import '../services/ws_service.dart';
 import '../services/observe_ws_client.dart';
-import 'chat_screen.dart';
 import 'workspace_debug_screen.dart';
 
 /// Entry screen: lets the user configure server address and optional auth token.
@@ -51,55 +50,67 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await prefs.setString('wm_token', token);
 
     setState(() => _connecting = true);
-
-    final svc = WsService.localPreview();
-
-    if (!mounted) {
-      svc.dispose();
-      return;
-    }
-    setState(() => _connecting = false);
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => ChatScreen(service: svc)),
-    );
-  }
-
-  Future<void> _openObserveWorkspace() async {
-    final addr = _addrCtrl.text.trim();
-    final token = _tokenCtrl.text.trim();
-    if (addr.isEmpty) return;
-    setState(() => _connecting = true);
+    WsService? chatService;
     try {
+      chatService = WsService();
+      await chatService.connect(addr, token);
+      await _waitChatReady(chatService);
+
       final client = await ObserveWsClient.connect(
         address: addr,
         token: token,
       );
       await client.hello();
       final projects = await client.projectList();
+      if (projects.isEmpty) {
+        throw Exception('No projects found on server');
+      }
       final dataSource = ObserveProjectDataSource(
         client: client,
         projects: projects,
       );
       if (!mounted) {
+        chatService.dispose();
         dataSource.dispose();
         return;
       }
       setState(() => _connecting = false);
-      Navigator.push(
+      Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => WorkspaceDebugScreen(dataSource: dataSource),
+          builder: (_) => WorkspaceDebugScreen(
+            dataSource: dataSource,
+            chatService: chatService,
+          ),
         ),
       );
     } catch (e) {
+      chatService?.dispose();
       if (mounted) {
         setState(() => _connecting = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Observe connect failed: $e')),
+          SnackBar(content: Text('Login failed: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _waitChatReady(WsService chatService) async {
+    if (chatService.state == WsState.ready) return;
+    if (chatService.state == WsState.error ||
+        chatService.state == WsState.disconnected) {
+      throw Exception('Unable to connect chat service');
+    }
+    final state = await chatService.stateStream
+        .firstWhere(
+          (it) =>
+              it == WsState.ready ||
+              it == WsState.error ||
+              it == WsState.disconnected,
+        )
+        .timeout(const Duration(seconds: 8));
+    if (state != WsState.ready) {
+      throw Exception('Chat service authentication failed');
     }
   }
 
@@ -171,13 +182,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.link),
-                    label: Text(_connecting ? 'Connecting...' : 'Connect'),
-                  ),
-                  const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: _connecting ? null : _openObserveWorkspace,
-                    icon: const Icon(Icons.view_carousel_outlined),
-                    label: const Text('Open Observe Workspace'),
+                    label: Text(_connecting ? 'Connecting...' : 'Login'),
                   ),
                 ],
               ),

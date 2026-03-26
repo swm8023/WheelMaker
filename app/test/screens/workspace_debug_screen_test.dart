@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wheelmaker/screens/workspace_debug_screen.dart';
+import 'package:wheelmaker/services/ws_service.dart';
 
 void main() {
   testWidgets('switches among chat, files and diff tabs', (tester) async {
@@ -8,8 +9,8 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(
-        home: WorkspaceDebugScreen(),
+      MaterialApp(
+        home: WorkspaceDebugScreen(chatService: WsService.localPreview()),
       ),
     );
     await tester.pumpAndSettle();
@@ -31,8 +32,8 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(
-        home: WorkspaceDebugScreen(),
+      MaterialApp(
+        home: WorkspaceDebugScreen(chatService: WsService.localPreview()),
       ),
     );
     await tester.pumpAndSettle();
@@ -60,8 +61,8 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(
-        home: WorkspaceDebugScreen(),
+      MaterialApp(
+        home: WorkspaceDebugScreen(chatService: WsService.localPreview()),
       ),
     );
     await tester.pumpAndSettle();
@@ -86,8 +87,8 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
     await tester.pumpWidget(
-      const MaterialApp(
-        home: WorkspaceDebugScreen(),
+      MaterialApp(
+        home: WorkspaceDebugScreen(chatService: WsService.localPreview()),
       ),
     );
     await tester.pumpAndSettle();

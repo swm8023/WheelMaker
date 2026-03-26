@@ -12,12 +12,16 @@ import '../stores/project_workspace_store.dart';
 import '../theme/app_theme_controller.dart';
 import 'chat_screen.dart';
 import 'connect_screen.dart';
-import 'git_diff_debug_screen.dart';
 
 class WorkspaceDebugScreen extends StatefulWidget {
   final ProjectDataSource? dataSource;
+  final WsService chatService;
 
-  const WorkspaceDebugScreen({super.key, this.dataSource});
+  const WorkspaceDebugScreen({
+    super.key,
+    this.dataSource,
+    required this.chatService,
+  });
 
   @override
   State<WorkspaceDebugScreen> createState() => _WorkspaceDebugScreenState();
@@ -41,6 +45,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
 
   @override
   void dispose() {
+    widget.chatService.dispose();
     _store
       ..removeListener(_onStoreChanged)
       ..dispose();
@@ -239,21 +244,15 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     switch (state.ui.selectedTab) {
       case WorkspaceTab.chat:
         return ChatScreen(
-          service: WsService.localPreview(),
+          service: widget.chatService,
+          ownsService: false,
           showAppBar: false,
           sessionName: state.chat.selectedSession,
         );
       case WorkspaceTab.files:
         return _buildFileContentPane(state.files);
       case WorkspaceTab.diff:
-        return GitDiffDebugScreen(
-          showAppBar: false,
-          showSidebar: false,
-          selectedCommitIndex: state.diff.selectedCommitIndex,
-          selectedFilePath: state.diff.selectedFilePath,
-          onCommitSelected: _store.selectDiffCommit,
-          onFileSelected: _store.selectDiffFile,
-        );
+        return _buildDiffContentPane(state.diff);
     }
   }
 
@@ -542,6 +541,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
             Text('Select a file', style: TextStyle(color: Color(0xFF9DA0A6))),
       );
     }
+    final activeFile = selectedFile;
     return Container(
       color: const Color(0xFF1E1E1E),
       child: Column(
@@ -580,6 +580,123 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                       ),
                     ),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiffContentPane(DiffPaneState diff) {
+    if (diff.commits.isEmpty) {
+      return const Center(
+        child: Text('No commits', style: TextStyle(color: Color(0xFF9DA0A6))),
+      );
+    }
+    final commit = diff.commits[diff.selectedCommitIndex];
+    GitChangedFile? selectedFile;
+    if (diff.selectedFilePath != null) {
+      for (final file in commit.files) {
+        if (file.path == diff.selectedFilePath) {
+          selectedFile = file;
+          break;
+        }
+      }
+    }
+    selectedFile ??= commit.files.isNotEmpty ? commit.files.first : null;
+    if (selectedFile == null) {
+      return const Center(
+        child: Text(
+          'Select a changed file',
+          style: TextStyle(color: Color(0xFF9DA0A6)),
+        ),
+      );
+    }
+    return Container(
+      color: const Color(0xFF1E1E1E),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            color: const Color(0xFF2D2D2D),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                _statusBadge(activeFile.status),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    activeFile.path,
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              itemCount: activeFile.lines.length,
+              itemBuilder: (context, index) {
+                final line = activeFile.lines[index];
+                final bg = switch (line.type) {
+                  GitDiffLineType.added => const Color(0x332EA043),
+                  GitDiffLineType.removed => const Color(0x33F85149),
+                  GitDiffLineType.context => Colors.transparent,
+                };
+                final prefix = switch (line.type) {
+                  GitDiffLineType.added => '+',
+                  GitDiffLineType.removed => '-',
+                  GitDiffLineType.context => ' ',
+                };
+                return Container(
+                  color: bg,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 46,
+                        child: Text(
+                          line.oldLine?.toString() ?? '',
+                          textAlign: TextAlign.right,
+                          style:
+                              const TextStyle(color: Color(0xFF6E7681), fontSize: 11),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 46,
+                        child: Text(
+                          line.newLine?.toString() ?? '',
+                          textAlign: TextAlign.right,
+                          style:
+                              const TextStyle(color: Color(0xFF6E7681), fontSize: 11),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        prefix,
+                        style:
+                            const TextStyle(color: Color(0xFF9DA0A6), fontSize: 12),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          line.text,
+                          key: ValueKey('workspace-diff-line-$index-${line.text}'),
+                          style: GoogleFonts.jetBrainsMono(
+                            color: const Color(0xFFD4D4D4),
+                            fontSize: 12,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -680,7 +797,7 @@ class _WorkspaceSettingsScreen extends StatelessWidget {
         children: [
           const ListTile(
             title: Text('Workspace Settings'),
-            subtitle: Text('Debug settings and session actions'),
+            subtitle: Text('Session and display settings'),
           ),
           const Divider(height: 1),
           ListTile(
