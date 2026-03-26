@@ -89,11 +89,13 @@ func (r *Reporter) runSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	shared.Info("hub registry: connecting to %s", wsURL)
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("dial registry %s: %w", wsURL, err)
 	}
 	defer conn.Close()
+	shared.Info("hub registry: connected to %s", wsURL)
 	stop := make(chan struct{})
 	go func() {
 		select {
@@ -152,6 +154,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	if _, err := readAck(conn); err != nil {
 		return fmt.Errorf("hello failed: %w", err)
 	}
+	shared.Info("hub registry: hello ok")
 
 	if r.cfg.Token != "" {
 		if err := conn.WriteJSON(envelope{
@@ -165,6 +168,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		if _, err := readAck(conn); err != nil {
 			return fmt.Errorf("auth failed: %w", err)
 		}
+		shared.Info("hub registry: auth ok")
 	}
 
 	if err := conn.WriteJSON(envelope{
@@ -181,6 +185,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	if _, err := readAck(conn); err != nil {
 		return fmt.Errorf("registry.reportProjects failed: %w", err)
 	}
+	shared.Info("hub registry: reportProjects ok hubId=%s projects=%d", r.cfg.HubID, len(r.projects))
 	return nil
 }
 

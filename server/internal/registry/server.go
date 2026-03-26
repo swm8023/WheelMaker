@@ -141,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 
 // Run starts HTTP server and blocks until context cancellation.
 func (s *Server) Run(ctx context.Context) error {
+	rp.Info("registry: listening on %s", s.cfg.Addr)
 	srv := &http.Server{
 		Addr:    s.cfg.Addr,
 		Handler: s.Handler(),
@@ -172,6 +173,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		authed: s.cfg.Token == "",
 		peer:   newPeerConn(ws),
 	}
+	rp.Info("registry: ws connected id=%s remote=%s authed=%t", state.id, r.RemoteAddr, state.authed)
+	defer rp.Info("registry: ws disconnected id=%s hub=%s remote=%s", state.id, state.hubID, r.RemoteAddr)
 	defer s.unregisterHub(state)
 	defer state.peer.dropAllPending()
 
@@ -220,6 +223,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHello(peer *peerConn, in envelope) {
+	rp.Info("registry: hello request requestId=%s", in.RequestID)
 	payload := map[string]any{
 		"serverVersion":   s.cfg.ServerVersion,
 		"protocolVersion": s.cfg.ProtocolVersion,
@@ -242,10 +246,12 @@ func (s *Server) handleAuth(peer *peerConn, state *connectionState, in envelope)
 	}
 	if s.cfg.Token != "" && payload.Token != s.cfg.Token {
 		state.authed = false
+		rp.Warn("registry: auth failed id=%s requestId=%s", state.id, in.RequestID)
 		_ = s.writeError(peer, in.RequestID, codeUnauthorized, "invalid token", nil)
 		return
 	}
 	state.authed = true
+	rp.Info("registry: auth ok id=%s requestId=%s", state.id, in.RequestID)
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 }
 
@@ -285,6 +291,15 @@ func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 	s.mu.Unlock()
+	rp.Info("registry: reportProjects hub=%s count=%d", payload.HubID, len(payload.Projects))
+	for _, p := range payload.Projects {
+		pid := strings.TrimSpace(p.ID)
+		if pid == "" {
+			pid = strings.TrimSpace(p.Name)
+		}
+		rp.Info("registry: project hub=%s id=%s name=%s path=%s agent=%s im=%s",
+			payload.HubID, pid, p.Name, p.Path, p.Agent, p.IMType)
+	}
 
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
 		"hubId":        payload.HubID,
