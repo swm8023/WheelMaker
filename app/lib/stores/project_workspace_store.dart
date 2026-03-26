@@ -39,9 +39,18 @@ class ProjectWorkspaceStore extends ChangeNotifier {
 
   Future<void> switchProject(String projectId) async {
     if (projectId == _activeProjectId) return;
+    final previousTab = activeState?.ui.selectedTab;
     _activeProjectId = projectId;
     notifyListeners();
     await _ensureLoaded(projectId);
+    if (previousTab != null) {
+      final target = _projects[projectId];
+      if (target != null && target.ui.selectedTab != previousTab) {
+        _projects[projectId] = target.copyWith(
+          ui: target.ui.copyWith(selectedTab: previousTab),
+        );
+      }
+    }
     notifyListeners();
     unawaited(refreshProject(projectId));
   }

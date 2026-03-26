@@ -58,6 +58,11 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     }
 
     final state = _store.activeState!;
+    if (isSplit && (_scaffoldKey.currentState?.isDrawerOpen ?? false)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scaffoldKey.currentState?.closeDrawer();
+      });
+    }
 
     return Scaffold(
       key: _scaffoldKey,
@@ -74,8 +79,8 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
               icon: Icon(
                 isSplit
                     ? (state.ui.sidebarCollapsed
-                          ? Icons.keyboard_double_arrow_right
-                          : Icons.keyboard_double_arrow_left)
+                        ? Icons.keyboard_double_arrow_right
+                        : Icons.keyboard_double_arrow_left)
                     : Icons.menu,
               ),
               onPressed: () {
@@ -134,6 +139,8 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(
           children: [
+            const Icon(Icons.keyboard_arrow_down, size: 18),
+            const SizedBox(width: 6),
             Expanded(
               child: Text(
                 compact
@@ -145,8 +152,6 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 style: const TextStyle(fontSize: 15),
               ),
             ),
-            const SizedBox(width: 4),
-            const Icon(Icons.keyboard_arrow_down, size: 18),
           ],
         ),
       ),
@@ -264,9 +269,8 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                     }
                   },
                   child: Container(
-                    color: selected
-                        ? const Color(0xFF37373D)
-                        : Colors.transparent,
+                    color:
+                        selected ? const Color(0xFF37373D) : Colors.transparent,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 10,
@@ -444,9 +448,8 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 final selected = index == state.diff.selectedCommitIndex;
                 return ListTile(
                   key: ValueKey('workspace-commit-row-${item.hash}'),
-                  tileColor: selected
-                      ? const Color(0xFF37373D)
-                      : Colors.transparent,
+                  tileColor:
+                      selected ? const Color(0xFF37373D) : Colors.transparent,
                   dense: true,
                   title: Text(
                     '${item.hash.substring(0, 7)} ${item.message}',
@@ -487,9 +490,8 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                     }
                   },
                   child: Container(
-                    color: selected
-                        ? const Color(0xFF37373D)
-                        : Colors.transparent,
+                    color:
+                        selected ? const Color(0xFF37373D) : Colors.transparent,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 9,
