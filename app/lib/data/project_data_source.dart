@@ -22,19 +22,48 @@ abstract class ProjectDataSource {
   void dispose() {}
 
   Future<ProjectWorkspaceState> buildInitialState(String projectId) async {
-    final sessions = await fetchChatSessions(projectId);
-    final root = await fetchFileTree(projectId);
-    final commits = await fetchDiffCommits(projectId);
+    List<String> sessions;
+    try {
+      sessions = await fetchChatSessions(projectId);
+    } catch (_) {
+      sessions = const ['General'];
+    }
+
+    FileTreeNode root;
+    try {
+      root = await fetchFileTree(projectId);
+    } catch (_) {
+      root = FileTreeNode.dir(
+        name: projectId,
+        path: '/$projectId',
+        children: const [],
+      );
+    }
+
+    List<GitCommitItem> commits;
+    try {
+      commits = await fetchDiffCommits(projectId);
+    } catch (_) {
+      commits = const [];
+    }
+
     final firstFile = _firstFilePath(root);
+    String initialContent = '';
+    if (firstFile != null) {
+      try {
+        initialContent = await fetchFileContent(projectId, firstFile);
+      } catch (_) {
+        initialContent = '';
+      }
+    }
+
     return ProjectWorkspaceState(
       chat: ChatPaneState(sessions: sessions, selectedSessionIndex: 0),
       files: FilePaneState(
         root: root,
         expandedPaths: {root.path, '${root.path}/app'},
         selectedFilePath: firstFile,
-        selectedFileContent: firstFile == null
-            ? ''
-            : await fetchFileContent(projectId, firstFile),
+        selectedFileContent: initialContent,
         contentLoading: false,
       ),
       diff: DiffPaneState(
