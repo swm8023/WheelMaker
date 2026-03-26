@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
 // Channel implements im.Channel for local testing via stdin/stdout.

@@ -11,8 +11,8 @@ import (
 	"syscall"
 
 	"github.com/swm8023/wheelmaker/internal/hub"
-	"github.com/swm8023/wheelmaker/internal/logger"
 	"github.com/swm8023/wheelmaker/internal/registry"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 const daemonWorkerArg = "--daemon-worker"

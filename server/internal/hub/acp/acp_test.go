@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 )
 
 // mockAgentBin is set in TestMain to the current test binary path.

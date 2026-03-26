@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/im"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
 // ---------------------------------------------------------------------------

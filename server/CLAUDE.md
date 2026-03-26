@@ -15,16 +15,16 @@ Hub
 
 | Package | Role |
 |---------|------|
-| `internal/hub/` | Reads config, spawns Client + IM per project |
-| `internal/client/` | Command routing, session lifecycle, state persistence |
-| `internal/acp/` | JSON-RPC 2.0 transport over stdio |
-| `internal/agent/claude/` | Launches claude-agent-acp subprocess |
-| `internal/agent/codex/` | Launches codex-acp subprocess |
-| `internal/im/forwarder/` | Message dedup/filter, pending decisions, HelpResolver |
-| `internal/im/console/` | Console IM adapter (reads stdin) |
-| `internal/im/feishu/` | Feishu Bot IM adapter |
+| `internal/hub/` | Hub process domain (orchestration + per-project runtime) |
+| `internal/hub/client/` | Command routing, session lifecycle, state persistence |
+| `internal/hub/acp/` | JSON-RPC 2.0 transport over stdio |
+| `internal/hub/agent/claude/` | Launches claude-agent-acp subprocess |
+| `internal/hub/agent/codex/` | Launches codex-acp subprocess |
+| `internal/hub/im/` | IM adapters and forwarder |
 | `internal/registry/` | Registry server and hub reporter |
-| `internal/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
+| `internal/hub/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
+| `internal/shared/logger/` | Shared logging for hub/registry processes |
+| `internal/shared/config/` | Shared config schema and loader |
 
 ## Config Files
 

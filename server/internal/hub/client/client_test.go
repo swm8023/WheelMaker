@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/agent"
-	"github.com/swm8023/wheelmaker/internal/client"
-	"github.com/swm8023/wheelmaker/internal/im"
-	"github.com/swm8023/wheelmaker/internal/logger"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
+	"github.com/swm8023/wheelmaker/internal/hub/client"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 // TestMain intercepts the test binary to act as a minimal ACP mock server when

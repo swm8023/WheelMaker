@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/tools"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/tools"
 )
 
 func requireCodexAcp(t *testing.T) string {
@@ -209,4 +209,3 @@ func TestIntegration_Cancel(t *testing.T) {
 		t.Error("prompt did not complete after cancel within 15s")
 	}
 }
-

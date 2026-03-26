@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	acp "github.com/swm8023/wheelmaker/internal/acp"
-	"github.com/swm8023/wheelmaker/internal/logger"
+	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
 // ensureForwarder connects the active agent and sets up the Forwarder if not already running.

@@ -2,7 +2,7 @@
 // Mobile clients (iOS/Android) connect over WebSocket and exchange JSON messages.
 package mobile
 
-import "github.com/swm8023/wheelmaker/internal/im"
+import "github.com/swm8023/wheelmaker/internal/hub/im"
 
 // inboundMsg is an App→Daemon WebSocket message.
 type inboundMsg struct {

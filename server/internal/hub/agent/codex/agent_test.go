@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/agent/codex"
+	"github.com/swm8023/wheelmaker/internal/hub/agent/codex"
 )
 
 // TestBackend_Connect_NotExecutable verifies that Connect() returns a

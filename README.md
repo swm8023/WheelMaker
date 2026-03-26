@@ -131,13 +131,14 @@ Hub
 
 | Package | Responsibility |
 |---------|----------------|
-| `internal/hub/` | Reads config, manages lifecycle of all project clients |
-| `internal/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
-| `internal/acp/` | ACP session lifecycle, streaming prompts, fs/terminal/permission callbacks |
-| `internal/acp/` | JSON-RPC 2.0 over stdio; owns subprocess lifetime |
-| `internal/agent/claude/` | Stateless connection factory - launches claude-agent-acp binary |
-| `internal/im/console/` | Console IM: reads stdin; optionally logs all ACP JSON to stderr |
-| `internal/im/feishu/` | Feishu Bot IM channel |
+| `internal/hub/` | Hub process domain and orchestration |
+| `internal/hub/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
+| `internal/hub/acp/` | ACP session lifecycle and JSON-RPC stdio transport |
+| `internal/hub/agent/claude/` | Stateless connection factory - launches claude-agent-acp binary |
+| `internal/hub/im/` | IM adapters and forwarder |
+| `internal/registry/` | Registry server + hub long-connection responder |
+| `internal/shared/logger/` | Shared logger for hub/registry processes |
+| `internal/shared/config/` | Shared config schema/loader |
 
 ## Development
 
@@ -145,7 +146,7 @@ Hub
 go test ./...
 
 # Integration tests (requires real npm-installed ACP CLI)
-go test -tags integration ./internal/agent/claude/...
+go test -tags integration ./internal/hub/agent/claude/...
 
 go build ./cmd/wheelmaker/
 ```

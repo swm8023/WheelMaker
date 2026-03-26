@@ -16,7 +16,7 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
-	"github.com/swm8023/wheelmaker/internal/im"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
 // Config configures the Feishu IM adapter.
