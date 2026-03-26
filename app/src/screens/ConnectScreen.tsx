@@ -1,8 +1,10 @@
 import React, {useMemo, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
+import type {AppTheme} from '../theme';
 
 type ConnectScreenProps = {
   onConnect: (ipOrAddress: string, token: string) => Promise<void>;
+  theme: AppTheme;
 };
 
 function toRegistryWsUrl(ipOrAddress: string): string {
@@ -23,7 +25,7 @@ function toRegistryWsUrl(ipOrAddress: string): string {
   return `ws://${host}/ws`;
 }
 
-export function ConnectScreen({onConnect}: ConnectScreenProps) {
+export function ConnectScreen({onConnect, theme}: ConnectScreenProps) {
   const [ipOrAddress, setIpOrAddress] = useState('127.0.0.1');
   const [token, setToken] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -49,35 +51,55 @@ export function ConnectScreen({onConnect}: ConnectScreenProps) {
   };
 
   return (
-    <View style={styles.page}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Connect to WheelMaker</Text>
-        <Text style={styles.hint}>Input server IP/Host and optional token.</Text>
+    <View style={[styles.page, {backgroundColor: theme.colors.background}]}>
+      <View style={[styles.card, {borderColor: theme.colors.border, backgroundColor: theme.colors.panel}]}>
+        <Text style={[styles.title, {color: theme.colors.text}]}>Connect to WheelMaker</Text>
+        <Text style={[styles.hint, {color: theme.colors.textMuted}]}>Input server IP/Host and optional token.</Text>
 
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.inputBackground,
+              color: theme.colors.text,
+            },
+          ]}
           value={ipOrAddress}
           onChangeText={setIpOrAddress}
           placeholder="127.0.0.1 or ws://127.0.0.1:9630/ws"
+          placeholderTextColor={theme.colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
         />
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            {
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.inputBackground,
+              color: theme.colors.text,
+            },
+          ]}
           value={token}
           onChangeText={setToken}
           placeholder="Token (optional)"
+          placeholderTextColor={theme.colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
         />
 
-        {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+        {errorMessage ? <Text style={[styles.errorText, {color: theme.colors.error}]}>{errorMessage}</Text> : null}
 
         <Pressable
-          style={[styles.button, disabled && styles.buttonDisabled]}
+          style={[
+            styles.button,
+            {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+            disabled && styles.buttonDisabled,
+          ]}
           onPress={submit}
           disabled={disabled}>
-          <Text>{submitting ? 'Connecting...' : 'Connect'}</Text>
+          <Text style={{color: theme.colors.text}}>{submitting ? 'Connecting...' : 'Connect'}</Text>
         </Pressable>
       </View>
     </View>
@@ -87,7 +109,6 @@ export function ConnectScreen({onConnect}: ConnectScreenProps) {
 const styles = StyleSheet.create({
   page: {
     flex: 1,
-    backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
@@ -96,7 +117,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 420,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 10,
     padding: 16,
   },
@@ -106,24 +126,20 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   hint: {
-    color: '#666',
     marginBottom: 12,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 10,
     marginBottom: 10,
   },
   errorText: {
-    color: '#b11',
     marginBottom: 10,
   },
   button: {
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 8,
     minHeight: 40,
     alignItems: 'center',

@@ -6,6 +6,7 @@ import {
   type RegistryRepository,
 } from './src/services/observeRepository';
 import {ConnectScreen, WorkspaceScreen} from './src/screens';
+import {resolveTheme, type ThemeMode} from './src/theme';
 
 type SessionState = {
   projects: RegistryProject[];
@@ -16,6 +17,8 @@ type SessionState = {
 function App() {
   const repositoryRef = useRef<RegistryRepository | null>(null);
   const [session, setSession] = useState<SessionState | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
+  const theme = resolveTheme(themeMode);
 
   useEffect(() => {
     return () => {
@@ -36,11 +39,7 @@ function App() {
       const fileEntries = await repository.listFiles(selectedProjectId, '.');
       repositoryRef.current?.close();
       repositoryRef.current = repository;
-      setSession({
-        projects,
-        selectedProjectId,
-        fileEntries,
-      });
+      setSession({projects, selectedProjectId, fileEntries});
     } catch (error) {
       repository.close();
       throw error;
@@ -59,11 +58,7 @@ function App() {
       return;
     }
     const fileEntries = await repositoryRef.current.listFiles(projectId, '.');
-    setSession({
-      ...session,
-      selectedProjectId: projectId,
-      fileEntries,
-    });
+    setSession({...session, selectedProjectId: projectId, fileEntries});
   };
 
   const logout = (): void => {
@@ -73,7 +68,7 @@ function App() {
   };
 
   if (!session) {
-    return <ConnectScreen onConnect={connect} />;
+    return <ConnectScreen onConnect={connect} theme={theme} />;
   }
 
   return (
@@ -84,6 +79,8 @@ function App() {
       onSelectProject={selectProject}
       onReadFile={readFile}
       onLogout={logout}
+      themeMode={themeMode}
+      onThemeModeChange={setThemeMode}
     />
   );
 }

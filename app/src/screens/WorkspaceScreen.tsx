@@ -69,6 +69,8 @@ type WorkspaceScreenProps = {
   onSelectProject: (projectId: string) => Promise<void>;
   onReadFile: (path: string) => Promise<string>;
   onLogout: () => void;
+  themeMode: ThemeMode;
+  onThemeModeChange: (mode: ThemeMode) => void;
 };
 
 export function WorkspaceScreen({
@@ -78,12 +80,13 @@ export function WorkspaceScreen({
   onSelectProject,
   onReadFile,
   onLogout,
+  themeMode,
+  onThemeModeChange,
 }: WorkspaceScreenProps) {
   const {width} = useWindowDimensions();
   const isWide = width >= 900;
   const compact = width < 560;
 
-  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const theme = resolveTheme(themeMode);
 
   const [tab, setTab] = useState<WorkspaceTab>('chat');
@@ -408,7 +411,7 @@ export function WorkspaceScreen({
                         themeMode === mode ? theme.colors.rowSelected : theme.colors.panelSecondary,
                     },
                   ]}
-                  onPress={() => setThemeMode(mode)}>
+                  onPress={() => onThemeModeChange(mode)}>
                   <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
                 </Pressable>
               ))}
