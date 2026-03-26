@@ -49,7 +49,7 @@
 
 - 最小必要数据：只返回当前 UI 需要的数据。
 - 分页优先：提交记录和大目录必须支持分页/游标。
-- 显式上下文：每个请求必须带 `projectId`（除握手阶段）。
+- 显式上下文：除全局发现类接口（如 `project.list`、`project.listFull`）和握手阶段外，每个请求必须带 `projectId`。
 - 只读语义：V1 不提供写操作。
 - 可演进：所有消息包含 `version`，接口可向后兼容扩展字段。
 
@@ -123,6 +123,88 @@
 
 - V1 可先支持匿名/单 token 模式。
 - 后续扩展 mTLS / OAuth2 / 短期签名 token。
+
+### 5.3 项目发现协议
+
+### 5.3.1 项目列表：`project.list`
+
+请求：
+
+```json
+{
+  "type": "request",
+  "method": "project.list",
+  "payload": {}
+}
+```
+
+响应：
+
+```json
+{
+  "type": "response",
+  "method": "project.list",
+  "payload": {
+    "projects": [
+      { "projectId": "server", "name": "server", "online": true },
+      { "projectId": "app", "name": "app", "online": true }
+    ]
+  }
+}
+```
+
+### 5.3.2 申请所有 project 完整信息：`project.listFull`
+
+用于一次性拉取所有 project 的基础元信息和能力信息，便于客户端初始化项目选择器与能力缓存。
+
+请求：
+
+```json
+{
+  "type": "request",
+  "method": "project.listFull",
+  "payload": {
+    "includeStats": true
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "type": "response",
+  "method": "project.listFull",
+  "payload": {
+    "projects": [
+      {
+        "projectId": "server",
+        "name": "server",
+        "cwd": "D:/Code/WheelMaker/server",
+        "online": true,
+        "capabilities": { "fs": true, "git": true },
+        "git": { "currentBranch": "main" },
+        "stats": { "lastActiveAt": "2026-03-26T09:20:00Z" }
+      },
+      {
+        "projectId": "app",
+        "name": "app",
+        "cwd": "D:/Code/WheelMaker/app",
+        "online": true,
+        "capabilities": { "fs": true, "git": true },
+        "git": { "currentBranch": "main" },
+        "stats": { "lastActiveAt": "2026-03-26T09:10:00Z" }
+      }
+    ]
+  }
+}
+```
+
+说明：
+
+- `project.listFull` 为全局接口，请求中不需要 `projectId`。
+- `includeStats` 可选，默认 `false`；为 `true` 时允许返回轻量统计字段（如 `lastActiveAt`）。
+- 响应中的 `cwd` 可按权限策略脱敏或隐藏。
 
 ## 6. 文件浏览协议（只读）
 
@@ -375,7 +457,7 @@
 ## 11. V1 实施顺序建议
 
 1. 传输层：WebSocket + `hello` + 基础错误模型
-2. 项目发现：`project.list`（可选，但建议加）
+2. 项目发现：`project.list` + `project.listFull`
 3. 文件只读：`fs.list`、`fs.read`
 4. Git只读：`git.branches`、`git.log`、`git.commit.files`、`git.commit.fileDiff`
 5. 安全最小集：token + root 限制 + 审计日志
