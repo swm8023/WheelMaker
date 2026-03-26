@@ -161,6 +161,31 @@ func configureWorkerCommandIO(cmd *exec.Cmd) (func(), error) {
 	}, nil
 }
 
+func redirectProcessStdioToDevNull() (func(), error) {
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+
+	stdoutSink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open process stdout sink: %w", err)
+	}
+	stderrSink, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		_ = stdoutSink.Close()
+		return nil, fmt.Errorf("open process stderr sink: %w", err)
+	}
+
+	os.Stdout = stdoutSink
+	os.Stderr = stderrSink
+
+	return func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+		_ = stdoutSink.Close()
+		_ = stderrSink.Close()
+	}, nil
+}
+
 func killProcess(pid int) error {
 	p, err := os.FindProcess(pid)
 	if err != nil {

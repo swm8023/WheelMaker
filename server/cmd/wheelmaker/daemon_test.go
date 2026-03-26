@@ -47,3 +47,33 @@ func TestConfigureWorkerCommandIOToDevNull(t *testing.T) {
 		t.Fatalf("stderr sink = %q, want %q", stderrFile.Name(), os.DevNull)
 	}
 }
+
+func TestRedirectProcessStdioToDevNull(t *testing.T) {
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+
+	restore, err := redirectProcessStdioToDevNull()
+	if err != nil {
+		t.Fatalf("redirectProcessStdioToDevNull() error = %v", err)
+	}
+	if os.Stdout == oldStdout {
+		t.Fatalf("stdout file was not replaced")
+	}
+	if os.Stderr == oldStderr {
+		t.Fatalf("stderr file was not replaced")
+	}
+	if os.Stdout.Name() != os.DevNull {
+		t.Fatalf("stdout sink = %q, want %q", os.Stdout.Name(), os.DevNull)
+	}
+	if os.Stderr.Name() != os.DevNull {
+		t.Fatalf("stderr sink = %q, want %q", os.Stderr.Name(), os.DevNull)
+	}
+
+	restore()
+	if os.Stdout != oldStdout {
+		t.Fatalf("stdout not restored")
+	}
+	if os.Stderr != oldStderr {
+		t.Fatalf("stderr not restored")
+	}
+}

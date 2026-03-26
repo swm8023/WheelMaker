@@ -49,6 +49,11 @@ func run() error {
 	case *daemonWorker:
 		return runHubWorker()
 	case *daemonMode:
+		restoreStdio, err := redirectProcessStdioToDevNull()
+		if err != nil {
+			return err
+		}
+		defer restoreStdio()
 		return runGuardian(fs.Args())
 	default:
 		return runHubWorker()
