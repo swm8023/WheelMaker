@@ -80,7 +80,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
         MaterialPageRoute(
           builder: (_) => WorkspaceDebugScreen(
             dataSource: dataSource,
-            chatService: chatService,
+            chatService: chatService!,
           ),
         ),
       );

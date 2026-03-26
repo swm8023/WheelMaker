@@ -8,6 +8,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('WheelMaker'), findsOneWidget);
-    expect(find.text('Connect'), findsOneWidget);
+    expect(find.text('Login'), findsOneWidget);
   });
 }

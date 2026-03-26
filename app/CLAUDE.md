@@ -75,6 +75,18 @@ flutter build apk --release        # 发布 APK
 flutter build web --release        # 发布 Web 静态资源
 ```
 
+## Flutter 命令约定（Windows + Scoop）
+
+- 当前环境 Flutter 由 Scoop 安装，固定路径：
+  - `C:\Users\swm\scoop\apps\flutter\current\bin\flutter.bat`
+- 若终端里 `flutter` 不在 PATH，统一改用绝对路径执行，例如：
+
+```powershell
+& "$HOME\scoop\apps\flutter\current\bin\flutter.bat" --version
+& "$HOME\scoop\apps\flutter\current\bin\flutter.bat" pub get
+& "$HOME\scoop\apps\flutter\current\bin\flutter.bat" test
+```
+
 ## Key Invariants (do not break)
 
 | # | Invariant |

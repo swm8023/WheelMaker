@@ -541,7 +541,6 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
             Text('Select a file', style: TextStyle(color: Color(0xFF9DA0A6))),
       );
     }
-    final activeFile = selectedFile;
     return Container(
       color: const Color(0xFF1E1E1E),
       child: Column(
@@ -611,6 +610,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         ),
       );
     }
+    final activeFile = selectedFile;
     return Container(
       color: const Color(0xFF1E1E1E),
       child: Column(
