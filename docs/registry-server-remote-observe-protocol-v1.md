@@ -27,7 +27,7 @@
 
 ### 2.1 组件
 
-- `Registry Server (Remote Observe Mode)`
+- `WheelMaker (Registry Server thread, Remote Observe Mode)`
   - 独立进程启动
   - 监听 TCP 端口（建议支持 TLS）
   - 暴露只读查询协议
@@ -466,3 +466,4 @@
 ---
 
 本稿为协议草案 V1，适合先做后端能力与协议稳定，再接入 App/Web 客户端。
+
