@@ -8,6 +8,7 @@ import '../models/git_diff_models.dart';
 import '../models/project_workspace_state.dart';
 import '../services/ws_service.dart';
 import '../stores/project_workspace_store.dart';
+import '../theme/app_theme_controller.dart';
 import 'chat_screen.dart';
 import 'connect_screen.dart';
 import 'file_explorer_screen.dart';
@@ -139,8 +140,21 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: Row(
           children: [
-            const Icon(Icons.keyboard_arrow_down, size: 18),
-            const SizedBox(width: 6),
+            Container(
+              width: 20,
+              height: 20,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              ),
+              child: Icon(
+                Icons.expand_more,
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 compact
@@ -617,6 +631,65 @@ class _WorkspaceSettingsScreen extends StatelessWidget {
           const ListTile(
             title: Text('Workspace Settings'),
             subtitle: Text('Debug settings and session actions'),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.contrast_outlined),
+            title: const Text('UI Theme'),
+            subtitle: DropdownButtonHideUnderline(
+              child: DropdownButton<UiThemeMode>(
+                value: AppThemeScope.of(context).uiMode,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(
+                    value: UiThemeMode.system,
+                    child: Text('System'),
+                  ),
+                  DropdownMenuItem(
+                    value: UiThemeMode.light,
+                    child: Text('Light'),
+                  ),
+                  DropdownMenuItem(
+                    value: UiThemeMode.dark,
+                    child: Text('Dark'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    AppThemeScope.of(context).setUiMode(value);
+                  }
+                },
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.code_outlined),
+            title: const Text('Editor Theme'),
+            subtitle: DropdownButtonHideUnderline(
+              child: DropdownButton<EditorThemePreset>(
+                value: AppThemeScope.of(context).editorTheme,
+                isExpanded: true,
+                items: const [
+                  DropdownMenuItem(
+                    value: EditorThemePreset.vscodeDark,
+                    child: Text('VS Code Modern Dark'),
+                  ),
+                  DropdownMenuItem(
+                    value: EditorThemePreset.vscodeLight,
+                    child: Text('VS Code Light+'),
+                  ),
+                  DropdownMenuItem(
+                    value: EditorThemePreset.vscodeHighContrast,
+                    child: Text('VS Code High Contrast'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    AppThemeScope.of(context).setEditorTheme(value);
+                  }
+                },
+              ),
+            ),
           ),
           const Divider(height: 1),
           ListTile(

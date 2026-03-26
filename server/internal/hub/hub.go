@@ -17,7 +17,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/hub/im/console"
 	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
-	"github.com/swm8023/wheelmaker/internal/registry"
+	sharedcfg "github.com/swm8023/wheelmaker/internal/shared/config"
 	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
@@ -29,15 +29,15 @@ const (
 // Hub orchestrates one or more WheelMaker project clients.
 // Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
-	cfg       *Config
+	cfg       *sharedcfg.Config
 	statePath string
 	clients   []*client.Client
-	regSync   *registry.Reporter
+	regSync   *Reporter
 }
 
 // New creates a Hub from the given config and state file path.
 // hub.Start() must be called before hub.Run().
-func New(cfg *Config, statePath string) *Hub {
+func New(cfg *sharedcfg.Config, statePath string) *Hub {
 	return &Hub{cfg: cfg, statePath: statePath}
 }
 
@@ -68,7 +68,7 @@ func (h *Hub) Start(ctx context.Context) error {
 }
 
 // buildClient creates, configures, and starts a client.Client for one project.
-func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client, error) {
+func (h *Hub) buildClient(ctx context.Context, pc sharedcfg.ProjectConfig) (*client.Client, error) {
 	// Resolve working directory.
 	cwd := pc.Path
 	if cwd == "" {
@@ -117,7 +117,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 }
 
 // buildIM creates the im.ImAdapter for a project's IM config.
-func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
+func (h *Hub) buildIM(pc sharedcfg.ProjectConfig) (*im.ImAdapter, error) {
 	switch pc.IM.Type {
 	case "console":
 		return im.New(console.New(pc.Name, pc.Debug)), nil
@@ -200,9 +200,9 @@ func (h *Hub) setupRegistrySync() {
 		}
 	}
 
-	projects := make([]registry.ProjectInfo, 0, len(h.cfg.Projects))
+	projects := make([]ProjectInfo, 0, len(h.cfg.Projects))
 	for _, p := range h.cfg.Projects {
-		projects = append(projects, registry.ProjectInfo{
+		projects = append(projects, ProjectInfo{
 			ID:     p.Name,
 			Name:   p.Name,
 			Path:   p.Path,
@@ -211,7 +211,7 @@ func (h *Hub) setupRegistrySync() {
 		})
 	}
 
-	h.regSync = registry.NewReporter(registry.ReporterConfig{
+	h.regSync = NewReporter(ReporterConfig{
 		Server:            host,
 		Port:              port,
 		Token:             cfg.Token,

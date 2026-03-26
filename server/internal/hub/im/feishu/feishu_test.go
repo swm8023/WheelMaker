@@ -253,7 +253,7 @@ func TestCompactStatusEmoji(t *testing.T) {
 func TestBuildCompactToolCard(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"✅ go test ./...", "⏳ rg -n tool", "❌ go vet ./..."},
-		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/im/feishu/feishu.go",
+		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/hub/im/feishu/feishu.go",
 
 		false,
 	)

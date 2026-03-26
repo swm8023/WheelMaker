@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration tests for acp.Conn against the real codex-acp binary.
-// Run with: go test -tags integration ./internal/acp/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/hub/acp/... -v -timeout 60s
 // Requires: OPENAI_API_KEY set and codex-acp binary available.
 package acp_test
 

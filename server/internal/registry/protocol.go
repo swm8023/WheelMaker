@@ -1,43 +1,21 @@
 package registry
 
-import "encoding/json"
+import rp "github.com/swm8023/wheelmaker/internal/shared/registryproto"
 
 const (
-	codeUnauthorized    = "UNAUTHORIZED"
-	codeInvalidArgument = "INVALID_ARGUMENT"
-	codeNotFound        = "NOT_FOUND"
-	codeInternal        = "INTERNAL"
-	codeTimeout         = "TIMEOUT"
+	codeUnauthorized    = rp.CodeUnauthorized
+	codeInvalidArgument = rp.CodeInvalidArgument
+	codeNotFound        = rp.CodeNotFound
+	codeInternal        = rp.CodeInternal
+	codeTimeout         = rp.CodeTimeout
 )
 
-type envelope struct {
-	Version   string          `json:"version,omitempty"`
-	RequestID string          `json:"requestId,omitempty"`
-	Type      string          `json:"type"`
-	Method    string          `json:"method,omitempty"`
-	ProjectID string          `json:"projectId,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	Error     *protocolError  `json:"error,omitempty"`
-}
+type envelope = rp.Envelope
 
-type protocolError struct {
-	Code    string         `json:"code"`
-	Message string         `json:"message"`
-	Details map[string]any `json:"details,omitempty"`
-}
+type protocolError = rp.ProtocolError
 
-type errorEnvelope struct {
-	Version   string        `json:"version,omitempty"`
-	RequestID string        `json:"requestId,omitempty"`
-	Type      string        `json:"type"`
-	Error     protocolError `json:"error"`
-}
+type errorEnvelope = rp.ErrorEnvelope
 
-type authPayload struct {
-	Token string `json:"token,omitempty"`
-}
+type authPayload = rp.AuthPayload
 
-type hubReportProjectsPayload struct {
-	HubID    string        `json:"hubId,omitempty"`
-	Projects []ProjectInfo `json:"projects"`
-}
+type hubReportProjectsPayload = rp.HubReportProjectsPayload
