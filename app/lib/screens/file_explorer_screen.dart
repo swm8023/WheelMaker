@@ -9,18 +9,22 @@ import 'code_language.dart';
 class FileExplorerScreen extends StatefulWidget {
   final bool showAppBar;
   final bool showSidebar;
+  final String? selectedPath;
+  final ValueChanged<String>? onFileSelected;
 
   const FileExplorerScreen({
     super.key,
     this.showAppBar = true,
     this.showSidebar = true,
+    this.selectedPath,
+    this.onFileSelected,
   });
 
   @override
-  State<FileExplorerScreen> createState() => _FileExplorerScreenState();
+  State<FileExplorerScreen> createState() => FileExplorerScreenState();
 }
 
-class _FileExplorerScreenState extends State<FileExplorerScreen> {
+class FileExplorerScreenState extends State<FileExplorerScreen> {
   final Set<String> _expanded = {'/WheelMaker', '/WheelMaker/app'};
   FileTreeNode? _activeFile;
   String? _hoveredPath;
@@ -28,7 +32,21 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
   @override
   void initState() {
     super.initState();
-    _activeFile = _firstFile(mockWheelMakerRoot);
+    _activeFile = widget.selectedPath == null
+        ? _firstFile(mockWheelMakerRoot)
+        : _findByPath(mockWheelMakerRoot, widget.selectedPath!);
+    _activeFile ??= _firstFile(mockWheelMakerRoot);
+  }
+
+  @override
+  void didUpdateWidget(covariant FileExplorerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedPath != null && widget.selectedPath != oldWidget.selectedPath) {
+      final found = _findByPath(mockWheelMakerRoot, widget.selectedPath!);
+      if (found != null && _activeFile?.path != found.path) {
+        setState(() => _activeFile = found);
+      }
+    }
   }
 
   @override
@@ -113,7 +131,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
           onExit: (_) => setState(() => _hoveredPath = null),
           child: InkWell(
             key: ValueKey('file-row-${node.path}'),
-            onTap: () => setState(() => _activeFile = node),
+            onTap: () => _setActiveFile(node, notify: true),
             child: Container(
               color: rowColor,
               padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
@@ -245,6 +263,24 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       if (found != null) return found;
     }
     return null;
+  }
+
+  FileTreeNode? _findByPath(FileTreeNode node, String path) {
+    if (!node.isDirectory) {
+      return node.path == path ? node : null;
+    }
+    for (final child in node.children) {
+      final found = _findByPath(child, path);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  void _setActiveFile(FileTreeNode file, {required bool notify}) {
+    setState(() => _activeFile = file);
+    if (notify) {
+      widget.onFileSelected?.call(file.path);
+    }
   }
 
   Widget _buildCodeView(FileTreeNode file) {

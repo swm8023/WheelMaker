@@ -16,11 +16,13 @@ import 'file_explorer_screen.dart';
 class ChatScreen extends StatefulWidget {
   final WsService service;
   final bool showAppBar;
+  final String? sessionName;
 
   const ChatScreen({
     super.key,
     required this.service,
     this.showAppBar = true,
+    this.sessionName,
   });
 
   @override
@@ -196,6 +198,25 @@ class _ChatScreenState extends State<ChatScreen> {
             padding: EdgeInsets.symmetric(horizontal: hPad),
             child: Column(
               children: [
+                if (widget.sessionName != null && widget.sessionName!.isNotEmpty)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Theme.of(context).dividerColor),
+                      ),
+                    ),
+                    child: Text(
+                      widget.sessionName!,
+                      key: const ValueKey('chat-session-label'),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollCtrl,

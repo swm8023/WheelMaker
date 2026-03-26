@@ -7,11 +7,19 @@ import '../models/git_diff_models.dart';
 class GitDiffDebugScreen extends StatefulWidget {
   final bool showAppBar;
   final bool showSidebar;
+  final int? selectedCommitIndex;
+  final String? selectedFilePath;
+  final ValueChanged<int>? onCommitSelected;
+  final ValueChanged<String>? onFileSelected;
 
   const GitDiffDebugScreen({
     super.key,
     this.showAppBar = true,
     this.showSidebar = true,
+    this.selectedCommitIndex,
+    this.selectedFilePath,
+    this.onCommitSelected,
+    this.onFileSelected,
   });
 
   @override
@@ -25,7 +33,27 @@ class _GitDiffDebugScreenState extends State<GitDiffDebugScreen> {
   @override
   void initState() {
     super.initState();
-    _selectedFilePath = mockGitCommits.first.files.first.path;
+    _selectedCommitIndex = widget.selectedCommitIndex ?? 0;
+    final commit = mockGitCommits[_selectedCommitIndex];
+    _selectedFilePath = widget.selectedFilePath ?? (commit.files.isNotEmpty ? commit.files.first.path : null);
+  }
+
+  @override
+  void didUpdateWidget(covariant GitDiffDebugScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.selectedCommitIndex != null &&
+        widget.selectedCommitIndex != oldWidget.selectedCommitIndex &&
+        widget.selectedCommitIndex != _selectedCommitIndex) {
+      _selectedCommitIndex = widget.selectedCommitIndex!;
+      final commit = mockGitCommits[_selectedCommitIndex];
+      _selectedFilePath = commit.files.isNotEmpty ? commit.files.first.path : null;
+    }
+
+    if (widget.selectedFilePath != null &&
+        widget.selectedFilePath != oldWidget.selectedFilePath &&
+        widget.selectedFilePath != _selectedFilePath) {
+      _selectedFilePath = widget.selectedFilePath;
+    }
   }
 
   @override
@@ -71,6 +99,10 @@ class _GitDiffDebugScreenState extends State<GitDiffDebugScreen> {
                       _selectedCommitIndex = index;
                       _selectedFilePath = item.files.isNotEmpty ? item.files.first.path : null;
                     });
+                    widget.onCommitSelected?.call(index);
+                    if (_selectedFilePath != null) {
+                      widget.onFileSelected?.call(_selectedFilePath!);
+                    }
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -107,7 +139,10 @@ class _GitDiffDebugScreenState extends State<GitDiffDebugScreen> {
                 final selected = file.path == _selectedFilePath;
                 return InkWell(
                   key: ValueKey('changed-file-row-${file.path}'),
-                  onTap: () => setState(() => _selectedFilePath = file.path),
+                  onTap: () {
+                    setState(() => _selectedFilePath = file.path);
+                    widget.onFileSelected?.call(file.path);
+                  },
                   child: Container(
                     color: selected ? const Color(0xFF37373D) : Colors.transparent,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),

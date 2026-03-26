@@ -25,9 +25,16 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   static const double _sidebarWidth = 320;
   late final WsService _previewService;
   WorkspaceTab _selected = WorkspaceTab.chat;
+  static const List<String> _chatSessions = [
+    'General',
+    'WheelMaker App',
+    'Go Service',
+    'Review Notes',
+  ];
   int _selectedChatIndex = 0;
   bool _sidebarCollapsed = false;
   final Set<String> _fileDrawerExpanded = {'/WheelMaker', '/WheelMaker/app'};
+  String? _selectedFilePath;
   int _diffDrawerCommitIndex = 0;
   String? _diffDrawerFilePath;
 
@@ -35,6 +42,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   void initState() {
     super.initState();
     _previewService = WsService.localPreview();
+    _selectedFilePath = _firstFilePath(mockWheelMakerRoot);
     _diffDrawerFilePath = mockGitCommits.first.files.first.path;
   }
 
@@ -42,7 +50,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final isSplit = width >= _splitBreakpoint;
-    final compact = width < 760;
+    final compact = width < 560;
     return Scaffold(
       key: _scaffoldKey,
       drawer: Drawer(
@@ -80,7 +88,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
             ),
             const SizedBox(width: 8),
             ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: compact ? 180 : 320),
+              constraints: BoxConstraints(maxWidth: compact ? 180 : 240),
               child: _buildSwitcher(compact: compact),
             ),
           ],
@@ -159,21 +167,31 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   Widget _buildCurrentMainContent() {
     switch (_selected) {
       case WorkspaceTab.chat:
-        return ChatScreen(service: _previewService, showAppBar: false);
+        return ChatScreen(
+          service: _previewService,
+          showAppBar: false,
+          sessionName: _chatSessions[_selectedChatIndex],
+        );
       case WorkspaceTab.files:
-        return const FileExplorerScreen(showAppBar: false, showSidebar: false);
+        return FileExplorerScreen(
+          showAppBar: false,
+          showSidebar: false,
+          selectedPath: _selectedFilePath,
+          onFileSelected: (path) => setState(() => _selectedFilePath = path),
+        );
       case WorkspaceTab.diff:
-        return const GitDiffDebugScreen(showAppBar: false, showSidebar: false);
+        return GitDiffDebugScreen(
+          showAppBar: false,
+          showSidebar: false,
+          selectedCommitIndex: _diffDrawerCommitIndex,
+          selectedFilePath: _diffDrawerFilePath,
+          onCommitSelected: (index) => setState(() => _diffDrawerCommitIndex = index),
+          onFileSelected: (path) => setState(() => _diffDrawerFilePath = path),
+        );
     }
   }
 
   Widget _buildChatList({required bool closeOnSelect}) {
-    const chats = [
-      'General',
-      'WheelMaker App',
-      'Go Service',
-      'Review Notes',
-    ];
     return Container(
       key: const ValueKey('workspace-sidebar-chat'),
       color: const Color(0xFF252526),
@@ -182,10 +200,11 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
           _drawerTitle('CHAT LIST'),
           Expanded(
             child: ListView.builder(
-              itemCount: chats.length,
+              itemCount: _chatSessions.length,
               itemBuilder: (context, index) {
                 final selected = index == _selectedChatIndex;
                 return InkWell(
+                  key: ValueKey('workspace-chat-row-$index'),
                   onTap: () {
                     setState(() => _selectedChatIndex = index);
                     if (closeOnSelect && Navigator.of(context).canPop()) {
@@ -196,7 +215,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                     color: selected ? const Color(0xFF37373D) : Colors.transparent,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     child: Text(
-                      chats[index],
+                      _chatSessions[index],
                       style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
                     ),
                   ),
@@ -238,7 +257,9 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     if (!node.isDirectory) {
       return [
         InkWell(
+          key: ValueKey('workspace-file-row-${node.path}'),
           onTap: () {
+            setState(() => _selectedFilePath = node.path);
             if (closeOnSelect && Navigator.of(context).canPop()) {
               Navigator.pop(context);
             }
@@ -270,6 +291,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     final isOpen = _fileDrawerExpanded.contains(node.path);
     final rows = <Widget>[
       InkWell(
+        key: ValueKey('workspace-folder-row-${node.path}'),
         onTap: () {
           setState(() {
             if (isOpen) {
@@ -327,6 +349,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 final commit = mockGitCommits[index];
                 final selected = index == _diffDrawerCommitIndex;
                 return ListTile(
+                  key: ValueKey('workspace-commit-row-${commit.hash}'),
                   tileColor: selected ? const Color(0xFF37373D) : Colors.transparent,
                   dense: true,
                   title: Text(
@@ -360,6 +383,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 final file = commit.files[index];
                 final selected = file.path == _diffDrawerFilePath;
                 return InkWell(
+                  key: ValueKey('workspace-diff-file-row-${file.path}'),
                   onTap: () {
                     setState(() => _diffDrawerFilePath = file.path);
                     if (closeOnSelect && Navigator.of(context).canPop()) {
@@ -468,6 +492,15 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         lowerPath.endsWith('.hh') ||
         lowerPath.endsWith('.hxx') ||
         lowerPath.endsWith('.h');
+  }
+
+  String? _firstFilePath(FileTreeNode node) {
+    if (!node.isDirectory) return node.path;
+    for (final child in node.children) {
+      final found = _firstFilePath(child);
+      if (found != null) return found;
+    }
+    return null;
   }
 }
 
