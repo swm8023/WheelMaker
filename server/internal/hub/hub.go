@@ -228,10 +228,10 @@ func (h *Hub) setupRegistrySync() {
 	}
 
 	h.regSync = registry.NewReporter(registry.ReporterConfig{
-		Server:   host,
-		Port:     port,
-		Token:    cfg.Token,
-		HubID:    hubID,
-		Interval: 15 * time.Second,
+		Server:            host,
+		Port:              port,
+		Token:             cfg.Token,
+		HubID:             hubID,
+		ReconnectInterval: 2 * time.Second,
 	}, projects)
 }

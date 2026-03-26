@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,7 @@ import (
 const (
 	defaultProtocolVersion = "1.0"
 	defaultServerVersion   = "0.1.0"
+	defaultRequestTimeout  = 10 * time.Second
 )
 
 // Config configures the project registry server.
@@ -42,12 +44,75 @@ type HubSnapshot struct {
 	UpdatedAt string        `json:"updatedAt"`
 }
 
-// Server accepts hub connections and stores reported project metadata.
+type peerConn struct {
+	ws websocketWriter
+
+	writeMu sync.Mutex
+
+	pendingMu sync.Mutex
+	pending   map[string]chan envelope
+}
+
+func newPeerConn(ws websocketWriter) *peerConn {
+	return &peerConn{
+		ws:      ws,
+		pending: make(map[string]chan envelope),
+	}
+}
+
+func (p *peerConn) write(v any) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	return p.ws.WriteJSON(v)
+}
+
+func (p *peerConn) registerPending(id string) chan envelope {
+	ch := make(chan envelope, 1)
+	p.pendingMu.Lock()
+	p.pending[id] = ch
+	p.pendingMu.Unlock()
+	return ch
+}
+
+func (p *peerConn) resolvePending(id string, msg envelope) bool {
+	p.pendingMu.Lock()
+	ch, ok := p.pending[id]
+	if ok {
+		delete(p.pending, id)
+	}
+	p.pendingMu.Unlock()
+	if ok {
+		ch <- msg
+		close(ch)
+	}
+	return ok
+}
+
+func (p *peerConn) dropAllPending() {
+	p.pendingMu.Lock()
+	for id, ch := range p.pending {
+		delete(p.pending, id)
+		close(ch)
+	}
+	p.pendingMu.Unlock()
+}
+
+type websocketWriter interface {
+	WriteJSON(v any) error
+}
+
+type websocketReader interface {
+	ReadJSON(v any) error
+}
+
+// Server accepts app/hub connections and routes app requests to hub responders.
 type Server struct {
 	cfg Config
 
-	mu   sync.RWMutex
-	hubs map[string]HubSnapshot
+	mu           sync.RWMutex
+	hubs         map[string]HubSnapshot
+	projectToHub map[string]string
+	hubPeers     map[string]*peerConn
 
 	nextID atomic.Int64
 }
@@ -55,6 +120,8 @@ type Server struct {
 type connectionState struct {
 	id     string
 	authed bool
+	hubID  string
+	peer   *peerConn
 }
 
 var upgrader = websocket.Upgrader{
@@ -73,8 +140,10 @@ func New(cfg Config) *Server {
 		cfg.ServerVersion = defaultServerVersion
 	}
 	return &Server{
-		cfg:  cfg,
-		hubs: make(map[string]HubSnapshot),
+		cfg:          cfg,
+		hubs:         make(map[string]HubSnapshot),
+		projectToHub: make(map[string]string),
+		hubPeers:     make(map[string]*peerConn),
 	}
 }
 
@@ -114,77 +183,91 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer ws.Close()
 
 	state := &connectionState{
-		id:     fmt.Sprintf("hub-conn-%d", s.nextID.Add(1)),
+		id:     fmt.Sprintf("conn-%d", s.nextID.Add(1)),
 		authed: s.cfg.Token == "",
+		peer:   newPeerConn(ws),
 	}
+	defer s.unregisterHub(state)
+	defer state.peer.dropAllPending()
 
 	for {
 		var in envelope
 		if err := ws.ReadJSON(&in); err != nil {
 			return
 		}
+		if in.Type == "response" || in.Type == "error" {
+			if state.peer.resolvePending(in.RequestID, in) {
+				continue
+			}
+		}
 		if in.Type != "request" {
-			_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "type must be request", nil)
+			_ = s.writeError(state.peer, in.RequestID, codeInvalidArgument, "type must be request", nil)
 			continue
 		}
 
 		switch in.Method {
 		case "hello":
-			s.handleHello(ws, in)
+			s.handleHello(state.peer, in)
 		case "auth":
-			s.handleAuth(ws, state, in)
+			s.handleAuth(state.peer, state, in)
 		case "registry.reportProjects":
 			if !state.authed {
-				_ = s.writeError(ws, in.RequestID, codeUnauthorized, "not authenticated", nil)
+				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
 				continue
 			}
-			s.handleHubReportProjects(ws, state, in)
+			s.handleHubReportProjects(state.peer, state, in)
 		case "registry.listProjects":
 			if !state.authed {
-				_ = s.writeError(ws, in.RequestID, codeUnauthorized, "not authenticated", nil)
+				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
 				continue
 			}
-			s.handleRegistryListProjects(ws, in)
+			s.handleRegistryListProjects(state.peer, in)
+		case "fs.list", "fs.read", "git.branches", "git.log", "git.commit.files", "git.commit.fileDiff":
+			if !state.authed {
+				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
+				continue
+			}
+			s.handleForwardRequest(state.peer, in)
 		default:
-			_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
+			_ = s.writeError(state.peer, in.RequestID, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
 		}
 	}
 }
 
-func (s *Server) handleHello(ws *websocket.Conn, in envelope) {
+func (s *Server) handleHello(peer *peerConn, in envelope) {
 	payload := map[string]any{
 		"serverVersion":   s.cfg.ServerVersion,
 		"protocolVersion": s.cfg.ProtocolVersion,
 		"features": map[string]bool{
-			"fs":                   false,
-			"git":                  false,
+			"fs":                   true,
+			"git":                  true,
 			"push":                 false,
 			"registryReport":       true,
 			"registryListProjects": true,
 		},
 	}
-	_ = s.writeResponse(ws, in.RequestID, in.Method, payload)
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", payload)
 }
 
-func (s *Server) handleAuth(ws *websocket.Conn, state *connectionState, in envelope) {
+func (s *Server) handleAuth(peer *peerConn, state *connectionState, in envelope) {
 	var payload authPayload
 	if err := json.Unmarshal(in.Payload, &payload); err != nil {
-		_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "invalid auth payload", nil)
+		_ = s.writeError(peer, in.RequestID, codeInvalidArgument, "invalid auth payload", nil)
 		return
 	}
 	if s.cfg.Token != "" && payload.Token != s.cfg.Token {
 		state.authed = false
-		_ = s.writeError(ws, in.RequestID, codeUnauthorized, "invalid token", nil)
+		_ = s.writeError(peer, in.RequestID, codeUnauthorized, "invalid token", nil)
 		return
 	}
 	state.authed = true
-	_ = s.writeResponse(ws, in.RequestID, in.Method, map[string]any{"ok": true})
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 }
 
-func (s *Server) handleHubReportProjects(ws *websocket.Conn, state *connectionState, in envelope) {
+func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState, in envelope) {
 	var payload hubReportProjectsPayload
 	if err := json.Unmarshal(in.Payload, &payload); err != nil {
-		_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "invalid registry.reportProjects payload", nil)
+		_ = s.writeError(peer, in.RequestID, codeInvalidArgument, "invalid registry.reportProjects payload", nil)
 		return
 	}
 	if payload.HubID == "" {
@@ -195,6 +278,22 @@ func (s *Server) handleHubReportProjects(ws *websocket.Conn, state *connectionSt
 	})
 
 	s.mu.Lock()
+	state.hubID = payload.HubID
+	s.hubPeers[payload.HubID] = peer
+	for projectID, hubID := range s.projectToHub {
+		if hubID == payload.HubID {
+			delete(s.projectToHub, projectID)
+		}
+	}
+	for _, p := range payload.Projects {
+		id := strings.TrimSpace(p.ID)
+		if id == "" {
+			id = strings.TrimSpace(p.Name)
+		}
+		if id != "" {
+			s.projectToHub[id] = payload.HubID
+		}
+	}
 	s.hubs[payload.HubID] = HubSnapshot{
 		HubID:     payload.HubID,
 		Projects:  payload.Projects,
@@ -202,13 +301,13 @@ func (s *Server) handleHubReportProjects(ws *websocket.Conn, state *connectionSt
 	}
 	s.mu.Unlock()
 
-	_ = s.writeResponse(ws, in.RequestID, in.Method, map[string]any{
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
 		"hubId":        payload.HubID,
 		"projectCount": len(payload.Projects),
 	})
 }
 
-func (s *Server) handleRegistryListProjects(ws *websocket.Conn, in envelope) {
+func (s *Server) handleRegistryListProjects(peer *peerConn, in envelope) {
 	s.mu.RLock()
 	hubs := make([]HubSnapshot, 0, len(s.hubs))
 	for _, h := range s.hubs {
@@ -218,21 +317,84 @@ func (s *Server) handleRegistryListProjects(ws *websocket.Conn, in envelope) {
 	sort.Slice(hubs, func(i, j int) bool {
 		return hubs[i].HubID < hubs[j].HubID
 	})
-	_ = s.writeResponse(ws, in.RequestID, in.Method, map[string]any{"hubs": hubs})
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"hubs": hubs})
 }
 
-func (s *Server) writeResponse(ws *websocket.Conn, requestID, method string, payload any) error {
-	return ws.WriteJSON(envelope{
+func (s *Server) handleForwardRequest(appPeer *peerConn, in envelope) {
+	projectID := strings.TrimSpace(in.ProjectID)
+	if projectID == "" {
+		_ = s.writeError(appPeer, in.RequestID, codeInvalidArgument, "projectId is required", nil)
+		return
+	}
+
+	s.mu.RLock()
+	hubID := s.projectToHub[projectID]
+	hubPeer := s.hubPeers[hubID]
+	s.mu.RUnlock()
+	if hubID == "" || hubPeer == nil {
+		_ = s.writeError(appPeer, in.RequestID, codeNotFound, "project not found or hub offline", map[string]any{"projectId": projectID})
+		return
+	}
+
+	forwardID := fmt.Sprintf("fwd-%d", s.nextID.Add(1))
+	waitCh := hubPeer.registerPending(forwardID)
+
+	err := hubPeer.write(envelope{
+		Version:   s.cfg.ProtocolVersion,
+		RequestID: forwardID,
+		Type:      "request",
+		Method:    in.Method,
+		ProjectID: projectID,
+		Payload:   in.Payload,
+	})
+	if err != nil {
+		hubPeer.resolvePending(forwardID, envelope{})
+		_ = s.writeError(appPeer, in.RequestID, codeInternal, "forward request write failed", nil)
+		return
+	}
+
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			_ = s.writeError(appPeer, in.RequestID, codeInternal, "hub disconnected", nil)
+			return
+		}
+		resp.RequestID = in.RequestID
+		resp.ProjectID = projectID
+		_ = appPeer.write(resp)
+	case <-time.After(defaultRequestTimeout):
+		hubPeer.resolvePending(forwardID, envelope{})
+		_ = s.writeError(appPeer, in.RequestID, codeTimeout, "hub response timeout", nil)
+	}
+}
+
+func (s *Server) unregisterHub(state *connectionState) {
+	if strings.TrimSpace(state.hubID) == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.hubPeers, state.hubID)
+	for projectID, hubID := range s.projectToHub {
+		if hubID == state.hubID {
+			delete(s.projectToHub, projectID)
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) writeResponse(peer *peerConn, requestID, method, projectID string, payload any) error {
+	return peer.write(envelope{
 		Version:   s.cfg.ProtocolVersion,
 		RequestID: requestID,
 		Type:      "response",
 		Method:    method,
+		ProjectID: projectID,
 		Payload:   mustRaw(payload),
 	})
 }
 
-func (s *Server) writeError(ws *websocket.Conn, requestID, code, message string, details map[string]any) error {
-	return ws.WriteJSON(errorEnvelope{
+func (s *Server) writeError(peer *peerConn, requestID, code, message string, details map[string]any) error {
+	return peer.write(errorEnvelope{
 		Version:   s.cfg.ProtocolVersion,
 		RequestID: requestID,
 		Type:      "error",
