@@ -84,8 +84,19 @@ class ProjectWorkspaceStore extends ChangeNotifier {
     if (root != null) {
       final selected =
           _resolveFileSelection(root, current.files.selectedFilePath);
+      final content = selected == null
+          ? ''
+          : await _safeFetch<String>(
+                () => _dataSource.fetchFileContent(projectId, selected),
+              ) ??
+              '';
       next = next.copyWith(
-        files: current.files.copyWith(root: root, selectedFilePath: selected),
+        files: current.files.copyWith(
+          root: root,
+          selectedFilePath: selected,
+          selectedFileContent: content,
+          contentLoading: false,
+        ),
       );
     }
 
@@ -144,10 +155,15 @@ class ProjectWorkspaceStore extends ChangeNotifier {
   void selectFile(String path) {
     final state = activeState;
     if (state == null) return;
+    if (state.files.selectedFilePath == path) return;
     _projects[_activeProjectId] = state.copyWith(
-      files: state.files.copyWith(selectedFilePath: path),
+      files: state.files.copyWith(
+        selectedFilePath: path,
+        contentLoading: true,
+      ),
     );
     notifyListeners();
+    unawaited(_loadSelectedFileContent(_activeProjectId, path));
   }
 
   void selectDiffCommit(int index) {
@@ -177,6 +193,24 @@ class ProjectWorkspaceStore extends ChangeNotifier {
   Future<void> _ensureLoaded(String projectId) async {
     if (_projects.containsKey(projectId)) return;
     _projects[projectId] = await _dataSource.buildInitialState(projectId);
+  }
+
+  Future<void> _loadSelectedFileContent(String projectId, String path) async {
+    final state = _projects[projectId];
+    if (state == null) return;
+    final content = await _safeFetch<String>(
+          () => _dataSource.fetchFileContent(projectId, path),
+        ) ??
+        '';
+    final latest = _projects[projectId];
+    if (latest == null || latest.files.selectedFilePath != path) return;
+    _projects[projectId] = latest.copyWith(
+      files: latest.files.copyWith(
+        selectedFileContent: content,
+        contentLoading: false,
+      ),
+    );
+    notifyListeners();
   }
 
   Future<T?> _safeFetch<T>(Future<T> Function() load) async {
@@ -241,5 +275,11 @@ class ProjectWorkspaceStore extends ChangeNotifier {
       selectedCommitIndex: nextCommitIndex,
       selectedFilePath: nextFilePath,
     );
+  }
+
+  @override
+  void dispose() {
+    _dataSource.dispose();
+    super.dispose();
   }
 }

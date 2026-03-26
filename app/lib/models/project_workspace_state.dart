@@ -32,22 +32,30 @@ class FilePaneState {
   final FileTreeNode root;
   final Set<String> expandedPaths;
   final String? selectedFilePath;
+  final String selectedFileContent;
+  final bool contentLoading;
 
   const FilePaneState({
     required this.root,
     required this.expandedPaths,
     required this.selectedFilePath,
+    required this.selectedFileContent,
+    required this.contentLoading,
   });
 
   FilePaneState copyWith({
     FileTreeNode? root,
     Set<String>? expandedPaths,
     String? selectedFilePath,
+    String? selectedFileContent,
+    bool? contentLoading,
   }) {
     return FilePaneState(
       root: root ?? this.root,
       expandedPaths: expandedPaths ?? this.expandedPaths,
       selectedFilePath: selectedFilePath ?? this.selectedFilePath,
+      selectedFileContent: selectedFileContent ?? this.selectedFileContent,
+      contentLoading: contentLoading ?? this.contentLoading,
     );
   }
 }

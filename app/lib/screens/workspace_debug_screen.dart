@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../data/project_data_source.dart';
 import '../models/file_tree_node.dart';
@@ -11,11 +12,12 @@ import '../stores/project_workspace_store.dart';
 import '../theme/app_theme_controller.dart';
 import 'chat_screen.dart';
 import 'connect_screen.dart';
-import 'file_explorer_screen.dart';
 import 'git_diff_debug_screen.dart';
 
 class WorkspaceDebugScreen extends StatefulWidget {
-  const WorkspaceDebugScreen({super.key});
+  final ProjectDataSource? dataSource;
+
+  const WorkspaceDebugScreen({super.key, this.dataSource});
 
   @override
   State<WorkspaceDebugScreen> createState() => _WorkspaceDebugScreenState();
@@ -31,8 +33,9 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   @override
   void initState() {
     super.initState();
-    _store = ProjectWorkspaceStore(dataSource: MockProjectDataSource())
-      ..addListener(_onStoreChanged);
+    _store = ProjectWorkspaceStore(
+      dataSource: widget.dataSource ?? MockProjectDataSource(),
+    )..addListener(_onStoreChanged);
     unawaited(_store.initialize());
   }
 
@@ -241,12 +244,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
           sessionName: state.chat.selectedSession,
         );
       case WorkspaceTab.files:
-        return FileExplorerScreen(
-          showAppBar: false,
-          showSidebar: false,
-          selectedPath: state.files.selectedFilePath,
-          onFileSelected: _store.selectFile,
-        );
+        return _buildFileContentPane(state.files);
       case WorkspaceTab.diff:
         return GitDiffDebugScreen(
           showAppBar: false,
@@ -530,6 +528,58 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFileContentPane(FilePaneState files) {
+    final path = files.selectedFilePath;
+    if (path == null) {
+      return const Center(
+        child:
+            Text('Select a file', style: TextStyle(color: Color(0xFF9DA0A6))),
+      );
+    }
+    return Container(
+      color: const Color(0xFF1E1E1E),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            color: const Color(0xFF2D2D2D),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                const Icon(Icons.insert_drive_file_outlined,
+                    size: 16, color: Color(0xFFD4D4D4)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    path,
+                    style:
+                        const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: files.contentLoading
+                ? const Center(child: CircularProgressIndicator())
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: SelectableText(
+                      files.selectedFileContent,
+                      style: GoogleFonts.jetBrainsMono(
+                        color: const Color(0xFFD4D4D4),
+                        fontSize: 13,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
           ),
         ],
       ),

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/observe_project_data_source.dart';
 import '../services/ws_service.dart';
+import '../services/observe_ws_client.dart';
 import 'chat_screen.dart';
 import 'workspace_debug_screen.dart';
 
@@ -64,6 +66,43 @@ class _ConnectScreenState extends State<ConnectScreen> {
     );
   }
 
+  Future<void> _openObserveWorkspace() async {
+    final addr = _addrCtrl.text.trim();
+    final token = _tokenCtrl.text.trim();
+    if (addr.isEmpty) return;
+    setState(() => _connecting = true);
+    try {
+      final client = await ObserveWsClient.connect(
+        address: addr,
+        token: token,
+      );
+      await client.hello();
+      final projects = await client.projectList();
+      final dataSource = ObserveProjectDataSource(
+        client: client,
+        projects: projects,
+      );
+      if (!mounted) {
+        dataSource.dispose();
+        return;
+      }
+      setState(() => _connecting = false);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WorkspaceDebugScreen(dataSource: dataSource),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _connecting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Observe connect failed: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -85,7 +124,10 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   Text(
                     'WheelMaker',
                     textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(fontWeight: FontWeight.bold),
+                    style: Theme.of(context)
+                        .textTheme
+                        .headlineLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -133,14 +175,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const WorkspaceDebugScreen()),
-                      );
-                    },
+                    onPressed: _connecting ? null : _openObserveWorkspace,
                     icon: const Icon(Icons.view_carousel_outlined),
-                    label: const Text('Debug: Workspace'),
+                    label: const Text('Open Observe Workspace'),
                   ),
                 ],
               ),
@@ -151,4 +188,3 @@ class _ConnectScreenState extends State<ConnectScreen> {
     );
   }
 }
-

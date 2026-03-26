@@ -17,18 +17,25 @@ abstract class ProjectDataSource {
 
   Future<List<String>> fetchChatSessions(String projectId);
   Future<FileTreeNode> fetchFileTree(String projectId);
+  Future<String> fetchFileContent(String projectId, String path);
   Future<List<GitCommitItem>> fetchDiffCommits(String projectId);
+  void dispose() {}
 
   Future<ProjectWorkspaceState> buildInitialState(String projectId) async {
     final sessions = await fetchChatSessions(projectId);
     final root = await fetchFileTree(projectId);
     final commits = await fetchDiffCommits(projectId);
+    final firstFile = _firstFilePath(root);
     return ProjectWorkspaceState(
       chat: ChatPaneState(sessions: sessions, selectedSessionIndex: 0),
       files: FilePaneState(
         root: root,
         expandedPaths: {root.path, '${root.path}/app'},
-        selectedFilePath: _firstFilePath(root),
+        selectedFilePath: firstFile,
+        selectedFileContent: firstFile == null
+            ? ''
+            : await fetchFileContent(projectId, firstFile),
+        contentLoading: false,
       ),
       diff: DiffPaneState(
         commits: commits,
@@ -103,6 +110,14 @@ class MockProjectDataSource extends ProjectDataSource {
     return mockWheelMakerRoot;
   }
 
+  @override
+  Future<String> fetchFileContent(String projectId, String path) async {
+    final root = await fetchFileTree(projectId);
+    final node = _findByPath(root, path);
+    if (node == null || node.isDirectory) return '';
+    return node.content ?? '';
+  }
+
   FileTreeNode _cloneTree(
     FileTreeNode node, {
     required String replaceRootName,
@@ -137,6 +152,17 @@ String? _firstFilePath(FileTreeNode node) {
   if (!node.isDirectory) return node.path;
   for (final child in node.children) {
     final found = _firstFilePath(child);
+    if (found != null) return found;
+  }
+  return null;
+}
+
+FileTreeNode? _findByPath(FileTreeNode node, String path) {
+  if (!node.isDirectory) {
+    return node.path == path ? node : null;
+  }
+  for (final child in node.children) {
+    final found = _findByPath(child, path);
     if (found != null) return found;
   }
   return null;
