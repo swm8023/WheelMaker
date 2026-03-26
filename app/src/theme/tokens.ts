@@ -30,6 +30,11 @@ const codeFont = Platform.select({
   default: 'monospace',
 });
 
+const uiFont = Platform.select({
+  web: "'Segoe WPC','Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif",
+  default: undefined,
+});
+
 export const vscodeModernDarkTheme: AppTheme = {
   mode: 'dark',
   colors: {
@@ -48,7 +53,7 @@ export const vscodeModernDarkTheme: AppTheme = {
     markdownBackground: '#1e1e1e',
   },
   font: {
-    ui: undefined,
+    ui: uiFont,
     code: codeFont,
   },
 };
@@ -71,7 +76,7 @@ export const vscodeModernLightTheme: AppTheme = {
     markdownBackground: '#ffffff',
   },
   font: {
-    ui: undefined,
+    ui: uiFont,
     code: codeFont,
   },
 };

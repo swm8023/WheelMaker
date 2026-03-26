@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  Platform,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -638,10 +639,12 @@ function renderFileTree(args: {
 }): React.ReactNode {
   const indent = {paddingLeft: args.depth * 14 + 8};
   const icon = iconForPath(args.node.path);
+  const titleProps = Platform.OS === 'web' ? ({title: args.node.name} as object) : {};
 
   if (!args.node.isDir) {
     return (
       <Pressable
+        {...(titleProps as any)}
         key={args.node.path}
         style={[
           styles.sideRow,
@@ -651,7 +654,7 @@ function renderFileTree(args: {
           },
         ]}
         onPress={() => args.onFileSelect(args.node.path)}>
-        <Text style={{color: args.theme.colors.text}}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.treeText, {color: args.theme.colors.text}]}>
           <Text style={{color: icon.color}}>{icon.glyph} </Text>
           {args.node.name}
         </Text>
@@ -666,11 +669,12 @@ function renderFileTree(args: {
   return (
     <View key={args.node.path}>
       <Pressable
+        {...(titleProps as any)}
         style={[styles.sideRow, indent]}
         onPress={() => {
           args.onToggleDirectory(args.node.path).catch(() => undefined);
         }}>
-        <Text style={{color: args.theme.colors.text}}>
+        <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.treeText, {color: args.theme.colors.text}]}>
           {isOpen ? 'v ' : '> '}
           <Text style={{color: icon.color}}>{icon.glyph} </Text>
           {args.node.name}
@@ -838,12 +842,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11,
+    lineHeight: 16,
   },
   sideRow: {
-    minHeight: 32,
+    minHeight: 22,
     justifyContent: 'center',
     paddingHorizontal: 10,
+  },
+  treeText: {
+    fontSize: 13,
+    lineHeight: 20,
   },
   mainBlock: {
     flex: 1,
