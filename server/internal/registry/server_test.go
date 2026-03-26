@@ -13,6 +13,7 @@ type testEnvelope struct {
 	RequestID string         `json:"requestId,omitempty"`
 	Type      string         `json:"type"`
 	Method    string         `json:"method,omitempty"`
+	ProjectID string         `json:"projectId,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
 	Error     map[string]any `json:"error,omitempty"`
 }

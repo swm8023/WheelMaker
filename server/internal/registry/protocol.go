@@ -5,6 +5,9 @@ import "encoding/json"
 const (
 	codeUnauthorized    = "UNAUTHORIZED"
 	codeInvalidArgument = "INVALID_ARGUMENT"
+	codeNotFound        = "NOT_FOUND"
+	codeInternal        = "INTERNAL"
+	codeTimeout         = "TIMEOUT"
 )
 
 type envelope struct {
