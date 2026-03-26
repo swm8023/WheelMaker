@@ -1,6 +1,16 @@
-package registryproto
+package shared
 
 import "encoding/json"
+
+const (
+	DefaultProtocolVersion = "1.0"
+
+	CodeUnauthorized    = "UNAUTHORIZED"
+	CodeInvalidArgument = "INVALID_ARGUMENT"
+	CodeNotFound        = "NOT_FOUND"
+	CodeInternal        = "INTERNAL"
+	CodeTimeout         = "TIMEOUT"
+)
 
 type ProjectInfo struct {
 	ID     string `json:"id,omitempty"`
@@ -46,4 +56,9 @@ type AuthPayload struct {
 type HubReportProjectsPayload struct {
 	HubID    string        `json:"hubId,omitempty"`
 	Projects []ProjectInfo `json:"projects"`
+}
+
+func MustRaw(v any) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return b
 }

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	rp "github.com/swm8023/wheelmaker/internal/shared/registryproto"
+	rp "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (

@@ -23,8 +23,7 @@ Hub
 | `internal/hub/im/` | IM adapters and forwarder |
 | `internal/registry/` | Registry server and hub reporter |
 | `internal/hub/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
-| `internal/shared/logger/` | Shared logging for hub/registry processes |
-| `internal/shared/config/` | Shared config schema and loader |
+| `internal/shared/` | Shared config, logging, and registry protocol helpers |
 
 ## Config Files
 

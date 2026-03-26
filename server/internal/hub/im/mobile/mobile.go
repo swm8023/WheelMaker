@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
-	"github.com/swm8023/wheelmaker/internal/shared/logger"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // Config configures the mobile WebSocket IM adapter.
