@@ -81,17 +81,41 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 		Version:   "1.0",
 		RequestID: "r2",
 		Type:      "request",
-		Method:    "registry.listProjects",
+		Method:    "project.list",
 		Payload:   map[string]any{},
 	})
 	listResp := mustReadEnvelope(t, ws)
-	if listResp.Type != "response" || listResp.Method != "registry.listProjects" {
-		t.Fatalf("unexpected list response: %#v", listResp)
+	if listResp.Type != "response" || listResp.Method != "project.list" {
+		t.Fatalf("unexpected project.list response: %#v", listResp)
+	}
+	projects, ok := listResp.Payload["projects"].([]any)
+	if !ok || len(projects) != 2 {
+		t.Fatalf("projects=%v, want 2 items", listResp.Payload["projects"])
 	}
 
-	hubs, ok := listResp.Payload["hubs"].([]any)
-	if !ok || len(hubs) != 1 {
-		t.Fatalf("hubs=%v, want 1 item", listResp.Payload["hubs"])
+	mustWriteJSON(t, ws, testEnvelope{
+		Version:   "1.0",
+		RequestID: "r3",
+		Type:      "request",
+		Method:    "project.listFull",
+		Payload: map[string]any{
+			"includeStats": true,
+		},
+	})
+	fullResp := mustReadEnvelope(t, ws)
+	if fullResp.Type != "response" || fullResp.Method != "project.listFull" {
+		t.Fatalf("unexpected project.listFull response: %#v", fullResp)
+	}
+	fullProjects, ok := fullResp.Payload["projects"].([]any)
+	if !ok || len(fullProjects) != 2 {
+		t.Fatalf("projects=%v, want 2 items", fullResp.Payload["projects"])
+	}
+	first, ok := fullProjects[0].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected first project type: %T", fullProjects[0])
+	}
+	if _, ok := first["capabilities"].(map[string]any); !ok {
+		t.Fatalf("project.capabilities missing: %v", first)
 	}
 }
 

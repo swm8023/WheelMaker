@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -28,9 +29,12 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
 
 	root := t.TempDir()
+	initGitRepo(t, root)
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello registry"), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
+	runGitCmd(t, root, "add", ".")
+	runGitCmd(t, root, "commit", "-m", "init")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -83,6 +87,23 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	}
 	if readResp.Payload["content"] != "hello registry" {
 		t.Fatalf("content=%v, want hello registry", readResp.Payload["content"])
+	}
+
+	mustWriteJSON(t, app, testEnvelope{
+		Version:   "1.0",
+		RequestID: "req-git-branches",
+		Type:      "request",
+		Method:    "git.branches",
+		ProjectID: "p1",
+		Payload:   map[string]any{},
+	})
+	branchesResp := mustReadEnvelope(t, app)
+	if branchesResp.Type != "response" || branchesResp.Method != "git.branches" {
+		t.Fatalf("unexpected git.branches response: %#v", branchesResp)
+	}
+	branches, ok := branchesResp.Payload["branches"].([]any)
+	if !ok || len(branches) < 1 {
+		t.Fatalf("branches=%v, want at least 1 branch", branchesResp.Payload["branches"])
 	}
 }
 
@@ -169,34 +190,42 @@ func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 			_ = mustReadEnvelope(t, ws)
 		}
 		mustWriteJSON(t, ws, testEnvelope{
-			Version: "1.0", RequestID: "wait-list", Type: "request", Method: "registry.listProjects", Payload: map[string]any{},
+			Version: "1.0", RequestID: "wait-list", Type: "request", Method: "project.list", Payload: map[string]any{},
 		})
 		resp := mustReadEnvelope(t, ws)
 		_ = ws.Close()
-		hubs, ok := resp.Payload["hubs"].([]any)
+		projects, ok := resp.Payload["projects"].([]any)
 		if ok {
-			for _, raw := range hubs {
-				hub, ok := raw.(map[string]any)
+			for _, pRaw := range projects {
+				p, ok := pRaw.(map[string]any)
 				if !ok {
 					continue
 				}
-				projects, ok := hub["projects"].([]any)
-				if !ok {
-					continue
-				}
-				for _, pRaw := range projects {
-					p, ok := pRaw.(map[string]any)
-					if ok {
-						if id, _ := p["id"].(string); id == projectID {
-							return
-						}
-					}
+				if id, _ := p["projectId"].(string); id == projectID {
+					return
 				}
 			}
 		}
 		time.Sleep(40 * time.Millisecond)
 	}
 	t.Fatalf("project %q not online before timeout", projectID)
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	runGitCmd(t, dir, "init")
+	runGitCmd(t, dir, "config", "user.email", "test@example.com")
+	runGitCmd(t, dir, "config", "user.name", "Test User")
+}
+
+func runGitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, string(out))
+	}
 }
 
 func dialWS(t *testing.T, rawURL string) *websocket.Conn {

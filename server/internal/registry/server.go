@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -210,6 +211,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.handleRegistryListProjects(state.peer, in)
+		case "project.list":
+			if !state.authed {
+				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
+				continue
+			}
+			s.handleProjectList(state.peer, in)
+		case "project.listFull":
+			if !state.authed {
+				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
+				continue
+			}
+			s.handleProjectListFull(state.peer, in)
 		case "fs.list", "fs.read", "git.branches", "git.log", "git.commit.files", "git.commit.fileDiff":
 			if !state.authed {
 				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
@@ -318,6 +331,134 @@ func (s *Server) handleRegistryListProjects(peer *peerConn, in envelope) {
 		return hubs[i].HubID < hubs[j].HubID
 	})
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"hubs": hubs})
+}
+
+func (s *Server) handleProjectList(peer *peerConn, in envelope) {
+	type projectListItem struct {
+		ProjectID string `json:"projectId"`
+		Name      string `json:"name"`
+		Online    bool   `json:"online"`
+	}
+	items := make([]projectListItem, 0)
+	for _, p := range s.snapshotProjects() {
+		items = append(items, projectListItem{
+			ProjectID: p.ID,
+			Name:      p.Name,
+			Online:    true,
+		})
+	}
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
+		"projects": items,
+	})
+}
+
+func (s *Server) handleProjectListFull(peer *peerConn, in envelope) {
+	type listFullPayload struct {
+		IncludeStats bool `json:"includeStats,omitempty"`
+	}
+	type listFullItem struct {
+		ProjectID    string         `json:"projectId"`
+		Name         string         `json:"name"`
+		CWD          string         `json:"cwd,omitempty"`
+		Online       bool           `json:"online"`
+		Capabilities map[string]any `json:"capabilities"`
+		Git          map[string]any `json:"git,omitempty"`
+		Stats        map[string]any `json:"stats,omitempty"`
+	}
+	var payload listFullPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = s.writeError(peer, in.RequestID, codeInvalidArgument, "invalid project.listFull payload", nil)
+		return
+	}
+
+	items := make([]listFullItem, 0)
+	for _, p := range s.snapshotProjects() {
+		item := listFullItem{
+			ProjectID: p.ID,
+			Name:      p.Name,
+			CWD:       p.Path,
+			Online:    true,
+			Capabilities: map[string]any{
+				"fs":  true,
+				"git": true,
+			},
+		}
+		if branch := gitCurrentBranch(strings.TrimSpace(p.Path)); branch != "" {
+			item.Git = map[string]any{"currentBranch": branch}
+		}
+		if payload.IncludeStats && strings.TrimSpace(p.UpdatedAt) != "" {
+			item.Stats = map[string]any{"lastActiveAt": p.UpdatedAt}
+		}
+		items = append(items, item)
+	}
+
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
+		"projects": items,
+	})
+}
+
+type projectSnapshot struct {
+	ID        string
+	Name      string
+	Path      string
+	UpdatedAt string
+}
+
+func (s *Server) snapshotProjects() []projectSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]projectSnapshot, 0, len(s.projectToHub))
+	for projectID, hubID := range s.projectToHub {
+		hub := s.hubs[hubID]
+		for _, p := range hub.Projects {
+			id := strings.TrimSpace(p.ID)
+			if id == "" {
+				id = strings.TrimSpace(p.Name)
+			}
+			if id != projectID {
+				continue
+			}
+			items = append(items, projectSnapshot{
+				ID:        projectID,
+				Name:      strings.TrimSpace(p.Name),
+				Path:      strings.TrimSpace(p.Path),
+				UpdatedAt: strings.TrimSpace(hub.UpdatedAt),
+			})
+			break
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ID < items[j].ID
+	})
+	return items
+}
+
+func gitCurrentBranch(repoPath string) string {
+	if repoPath == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(out))
+	if branch == "" || branch == "HEAD" {
+		return ""
+	}
+	return branch
+}
+
+func decodePayload(raw []byte, out any) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return nil
+	}
+	return json.Unmarshal(raw, out)
 }
 
 func (s *Server) handleForwardRequest(appPeer *peerConn, in envelope) {

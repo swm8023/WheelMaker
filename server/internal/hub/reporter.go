@@ -7,8 +7,10 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -123,6 +125,14 @@ func (r *Reporter) runSession(ctx context.Context) error {
 			r.replyFSList(conn, in)
 		case "fs.read":
 			r.replyFSRead(conn, in)
+		case "git.branches":
+			r.replyGitBranches(conn, in)
+		case "git.log":
+			r.replyGitLog(conn, in)
+		case "git.commit.files":
+			r.replyGitCommitFiles(conn, in)
+		case "git.commit.fileDiff":
+			r.replyGitCommitFileDiff(conn, in)
 		default:
 			_ = conn.WriteJSON(errorEnvelope{
 				Version:   defaultProtocolVersion,
@@ -329,6 +339,220 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 	})
 }
 
+func (r *Reporter) replyGitBranches(conn *websocket.Conn, req envelope) {
+	root, err := r.projectRoot(req.ProjectID)
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
+		return
+	}
+	current, _ := runGit(root, "rev-parse", "--abbrev-ref", "HEAD")
+	branchesRaw, err := runGit(root, "branch", "--format=%(refname:short)")
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	branches := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(branchesRaw), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			branches = append(branches, line)
+		}
+	}
+	_ = conn.WriteJSON(envelope{
+		Version:   defaultProtocolVersion,
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		ProjectID: req.ProjectID,
+		Payload: shared.MustRaw(map[string]any{
+			"current":  strings.TrimSpace(current),
+			"branches": branches,
+		}),
+	})
+}
+
+func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
+	type gitLogPayload struct {
+		Ref    string `json:"ref,omitempty"`
+		Cursor string `json:"cursor,omitempty"`
+		Limit  int    `json:"limit,omitempty"`
+	}
+	var payload gitLogPayload
+	if err := decodePayload(req.Payload, &payload); err != nil {
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.log payload")
+		return
+	}
+	root, err := r.projectRoot(req.ProjectID)
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
+		return
+	}
+	ref := strings.TrimSpace(payload.Ref)
+	if ref == "" {
+		ref = "HEAD"
+	}
+	limit := payload.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	offset := 0
+	if payload.Cursor != "" {
+		if v, err := strconv.Atoi(payload.Cursor); err == nil && v >= 0 {
+			offset = v
+		}
+	}
+	raw, err := runGit(root, "log", ref, "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s")
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	lines := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	if offset > len(lines) {
+		offset = len(lines)
+	}
+	end := offset + limit
+	if end > len(lines) {
+		end = len(lines)
+	}
+	commits := make([]map[string]any, 0, end-offset)
+	for _, line := range lines[offset:end] {
+		parts := strings.Split(line, "\x1f")
+		if len(parts) < 5 {
+			continue
+		}
+		commits = append(commits, map[string]any{
+			"sha":    parts[0],
+			"author": parts[1],
+			"email":  parts[2],
+			"time":   parts[3],
+			"title":  parts[4],
+		})
+	}
+	nextCursor := ""
+	if end < len(lines) {
+		nextCursor = strconv.Itoa(end)
+	}
+	_ = conn.WriteJSON(envelope{
+		Version:   defaultProtocolVersion,
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		ProjectID: req.ProjectID,
+		Payload: shared.MustRaw(map[string]any{
+			"ref":        ref,
+			"commits":    commits,
+			"nextCursor": nextCursor,
+		}),
+	})
+}
+
+func (r *Reporter) replyGitCommitFiles(conn *websocket.Conn, req envelope) {
+	type payload struct {
+		SHA string `json:"sha"`
+	}
+	var p payload
+	if err := decodePayload(req.Payload, &p); err != nil || strings.TrimSpace(p.SHA) == "" {
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.commit.files payload")
+		return
+	}
+	root, err := r.projectRoot(req.ProjectID)
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
+		return
+	}
+	numstatRaw, err := runGit(root, "show", "--numstat", "--format=", p.SHA)
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	statusRaw, _ := runGit(root, "diff-tree", "--no-commit-id", "--name-status", "-r", p.SHA)
+	statusMap := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(statusRaw), "\n") {
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
+			statusMap[strings.TrimSpace(parts[1])] = strings.TrimSpace(parts[0])
+		}
+	}
+	files := make([]map[string]any, 0)
+	for _, line := range strings.Split(strings.TrimSpace(numstatRaw), "\n") {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		path := strings.TrimSpace(parts[2])
+		additions, _ := strconv.Atoi(strings.ReplaceAll(parts[0], "-", "0"))
+		deletions, _ := strconv.Atoi(strings.ReplaceAll(parts[1], "-", "0"))
+		status := statusMap[path]
+		if status == "" {
+			status = "M"
+		}
+		files = append(files, map[string]any{
+			"path":      path,
+			"status":    status,
+			"additions": additions,
+			"deletions": deletions,
+		})
+	}
+	_ = conn.WriteJSON(envelope{
+		Version:   defaultProtocolVersion,
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		ProjectID: req.ProjectID,
+		Payload: shared.MustRaw(map[string]any{
+			"sha":   p.SHA,
+			"files": files,
+		}),
+	})
+}
+
+func (r *Reporter) replyGitCommitFileDiff(conn *websocket.Conn, req envelope) {
+	type payload struct {
+		SHA          string `json:"sha"`
+		Path         string `json:"path"`
+		ContextLines int    `json:"contextLines,omitempty"`
+	}
+	var p payload
+	if err := decodePayload(req.Payload, &p); err != nil || strings.TrimSpace(p.SHA) == "" || strings.TrimSpace(p.Path) == "" {
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.commit.fileDiff payload")
+		return
+	}
+	root, err := r.projectRoot(req.ProjectID)
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
+		return
+	}
+	contextLines := p.ContextLines
+	if contextLines < 0 || contextLines > 20 {
+		contextLines = 3
+	}
+	diff, err := runGit(root, "show", "--no-color", fmt.Sprintf("--unified=%d", contextLines), p.SHA, "--", p.Path)
+	if err != nil {
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	isBinary := strings.Contains(diff, "Binary files")
+	_ = conn.WriteJSON(envelope{
+		Version:   defaultProtocolVersion,
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		ProjectID: req.ProjectID,
+		Payload: shared.MustRaw(map[string]any{
+			"sha":       p.SHA,
+			"path":      p.Path,
+			"isBinary":  isBinary,
+			"diff":      diff,
+			"truncated": false,
+		}),
+	})
+}
+
 func (r *Reporter) projectRoot(projectID string) (string, error) {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {
@@ -430,4 +654,13 @@ func buildWSURL(server string, port int) (string, error) {
 		host = fmt.Sprintf("%s:%d", base, port)
 	}
 	return "ws://" + host + "/ws", nil
+}
+
+func runGit(root string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
 }
