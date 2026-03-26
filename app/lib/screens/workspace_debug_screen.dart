@@ -1,18 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
-import '../data/project_data_source.dart';
+import '../data/mock_git_diff_data.dart';
+import '../data/mock_wheelmaker_fs.dart';
 import '../models/file_tree_node.dart';
 import '../models/git_diff_models.dart';
-import '../models/project_workspace_state.dart';
 import '../services/ws_service.dart';
-import '../stores/project_workspace_store.dart';
-import '../theme/app_theme_controller.dart';
 import 'chat_screen.dart';
 import 'connect_screen.dart';
 import 'file_explorer_screen.dart';
 import 'git_diff_debug_screen.dart';
+
+enum WorkspaceTab { chat, files, diff }
 
 class WorkspaceDebugScreen extends StatefulWidget {
   const WorkspaceDebugScreen({super.key});
@@ -25,27 +23,27 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   static const double _splitBreakpoint = 700;
   static const double _sidebarWidth = 320;
-
-  late final ProjectWorkspaceStore _store;
+  late final WsService _previewService;
+  WorkspaceTab _selected = WorkspaceTab.chat;
+  static const List<String> _chatSessions = [
+    'General',
+    'WheelMaker App',
+    'Go Service',
+    'Review Notes',
+  ];
+  int _selectedChatIndex = 0;
+  bool _sidebarCollapsed = false;
+  final Set<String> _fileDrawerExpanded = {'/WheelMaker', '/WheelMaker/app'};
+  String? _selectedFilePath;
+  int _diffDrawerCommitIndex = 0;
+  String? _diffDrawerFilePath;
 
   @override
   void initState() {
     super.initState();
-    _store = ProjectWorkspaceStore(dataSource: MockProjectDataSource())
-      ..addListener(_onStoreChanged);
-    unawaited(_store.initialize());
-  }
-
-  @override
-  void dispose() {
-    _store
-      ..removeListener(_onStoreChanged)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _onStoreChanged() {
-    if (mounted) setState(() {});
+    _previewService = WsService.localPreview();
+    _selectedFilePath = _firstFilePath(mockWheelMakerRoot);
+    _diffDrawerFilePath = mockGitCommits.first.files.first.path;
   }
 
   @override
@@ -53,54 +51,45 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     final width = MediaQuery.sizeOf(context).width;
     final isSplit = width >= _splitBreakpoint;
     final compact = width < 560;
-
-    if (!_store.isReady || _store.activeState == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-
-    final state = _store.activeState!;
-    if (isSplit && (_scaffoldKey.currentState?.isDrawerOpen ?? false)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _scaffoldKey.currentState?.closeDrawer();
-      });
-    }
-
     return Scaffold(
       key: _scaffoldKey,
       drawer: Drawer(
-        child: SafeArea(child: _buildDrawerContent(state, closeOnSelect: true)),
+        child: SafeArea(child: _buildDrawerContent(closeOnSelect: true)),
       ),
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        titleSpacing: 8,
+        titleSpacing: 12,
         title: Row(
           children: [
             IconButton(
               key: const ValueKey('workspace-sidebar-toggle'),
               icon: Icon(
                 isSplit
-                    ? (state.ui.sidebarCollapsed
-                        ? Icons.keyboard_double_arrow_right
-                        : Icons.keyboard_double_arrow_left)
+                    ? (_sidebarCollapsed ? Icons.chevron_right : Icons.chevron_left)
                     : Icons.menu,
               ),
               onPressed: () {
                 if (isSplit) {
-                  _store.toggleSidebarCollapsed();
+                  setState(() => _sidebarCollapsed = !_sidebarCollapsed);
                 } else {
                   _scaffoldKey.currentState?.openDrawer();
                 }
               },
               tooltip: isSplit ? 'Toggle sidebar' : 'Open list',
             ),
-            Expanded(child: _buildProjectSelector(compact: compact)),
+            Expanded(
+              child: Text(
+                compact ? 'WheelMaker Project' : 'WheelMaker Project Workspace',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.fade,
+                style: const TextStyle(fontSize: 15),
+              ),
+            ),
             const SizedBox(width: 8),
             ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: compact ? 176 : 240),
-              child: _buildSwitcher(
-                compact: compact,
-                selected: state.ui.selectedTab,
-              ),
+              constraints: BoxConstraints(maxWidth: compact ? 180 : 240),
+              child: _buildSwitcher(compact: compact),
             ),
           ],
         ),
@@ -111,71 +100,17 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const _WorkspaceSettingsScreen(),
-                ),
+                MaterialPageRoute(builder: (_) => const _WorkspaceSettingsScreen()),
               );
             },
           ),
         ],
       ),
-      body: _buildCurrentBody(isSplit, state),
+      body: _buildCurrentBody(isSplit),
     );
   }
 
-  Widget _buildProjectSelector({required bool compact}) {
-    return PopupMenuButton<String>(
-      onSelected: (projectId) => unawaited(_store.switchProject(projectId)),
-      itemBuilder: (context) {
-        return _store.projectList
-            .map(
-              (project) => PopupMenuItem<String>(
-                value: project.id,
-                child: Text(project.name),
-              ),
-            )
-            .toList();
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          children: [
-            Container(
-              width: 20,
-              height: 20,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(4),
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              ),
-              child: Icon(
-                Icons.expand_more,
-                size: 16,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                compact
-                    ? _store.activeProjectName
-                    : '${_store.activeProjectName} Project',
-                maxLines: 1,
-                overflow: TextOverflow.fade,
-                softWrap: false,
-                style: const TextStyle(fontSize: 15),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSwitcher({
-    required bool compact,
-    required WorkspaceTab selected,
-  }) {
+  Widget _buildSwitcher({required bool compact}) {
     return SegmentedButton<WorkspaceTab>(
       segments: compact
           ? const [
@@ -188,81 +123,75 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
               ButtonSegment(value: WorkspaceTab.files, label: Text('Files')),
               ButtonSegment(value: WorkspaceTab.diff, label: Text('Diff')),
             ],
-      selected: {selected},
+      selected: {_selected},
       showSelectedIcon: false,
       style: ButtonStyle(
         visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      onSelectionChanged: (selectedSet) {
-        if (selectedSet.isEmpty) return;
-        _store.setTab(selectedSet.first);
+      onSelectionChanged: (selected) {
+        if (selected.isEmpty) return;
+        setState(() => _selected = selected.first);
       },
     );
   }
 
-  Widget _buildDrawerContent(
-    ProjectWorkspaceState state, {
-    required bool closeOnSelect,
-  }) {
-    switch (state.ui.selectedTab) {
+  Widget _buildDrawerContent({required bool closeOnSelect}) {
+    switch (_selected) {
       case WorkspaceTab.chat:
-        return _buildChatList(state, closeOnSelect: closeOnSelect);
+        return _buildChatList(closeOnSelect: closeOnSelect);
       case WorkspaceTab.files:
-        return _buildFileDrawerTree(state, closeOnSelect: closeOnSelect);
+        return _buildFileDrawerTree(closeOnSelect: closeOnSelect);
       case WorkspaceTab.diff:
-        return _buildDiffDrawerSplit(state, closeOnSelect: closeOnSelect);
+        return _buildDiffDrawerSplit(closeOnSelect: closeOnSelect);
     }
   }
 
-  Widget _buildCurrentBody(bool isSplit, ProjectWorkspaceState state) {
+  Widget _buildCurrentBody(bool isSplit) {
     if (!isSplit) {
-      return _buildCurrentMainContent(state);
+      return _buildCurrentMainContent();
     }
     return Row(
       children: [
-        if (!state.ui.sidebarCollapsed)
+        if (!_sidebarCollapsed)
           SizedBox(
             width: _sidebarWidth,
-            child: _buildDrawerContent(state, closeOnSelect: false),
+            child: _buildDrawerContent(closeOnSelect: false),
           ),
-        if (!state.ui.sidebarCollapsed) const VerticalDivider(width: 1),
-        Expanded(child: _buildCurrentMainContent(state)),
+        if (!_sidebarCollapsed) const VerticalDivider(width: 1),
+        Expanded(child: _buildCurrentMainContent()),
       ],
     );
   }
 
-  Widget _buildCurrentMainContent(ProjectWorkspaceState state) {
-    switch (state.ui.selectedTab) {
+  Widget _buildCurrentMainContent() {
+    switch (_selected) {
       case WorkspaceTab.chat:
         return ChatScreen(
-          service: WsService.localPreview(),
+          service: _previewService,
           showAppBar: false,
-          sessionName: state.chat.selectedSession,
+          sessionName: _chatSessions[_selectedChatIndex],
         );
       case WorkspaceTab.files:
         return FileExplorerScreen(
           showAppBar: false,
           showSidebar: false,
-          selectedPath: state.files.selectedFilePath,
-          onFileSelected: _store.selectFile,
+          selectedPath: _selectedFilePath,
+          onFileSelected: (path) => setState(() => _selectedFilePath = path),
         );
       case WorkspaceTab.diff:
         return GitDiffDebugScreen(
           showAppBar: false,
           showSidebar: false,
-          selectedCommitIndex: state.diff.selectedCommitIndex,
-          selectedFilePath: state.diff.selectedFilePath,
-          onCommitSelected: _store.selectDiffCommit,
-          onFileSelected: _store.selectDiffFile,
+          selectedCommitIndex: _diffDrawerCommitIndex,
+          selectedFilePath: _diffDrawerFilePath,
+          onCommitSelected: (index) => setState(() => _diffDrawerCommitIndex = index),
+          onFileSelected: (path) => setState(() => _diffDrawerFilePath = path),
         );
     }
   }
 
-  Widget _buildChatList(
-    ProjectWorkspaceState state, {
-    required bool closeOnSelect,
-  }) {
+  Widget _buildChatList({required bool closeOnSelect}) {
     return Container(
       key: const ValueKey('workspace-sidebar-chat'),
       color: const Color(0xFF252526),
@@ -271,30 +200,23 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
           _drawerTitle('CHAT LIST'),
           Expanded(
             child: ListView.builder(
-              itemCount: state.chat.sessions.length,
+              itemCount: _chatSessions.length,
               itemBuilder: (context, index) {
-                final selected = index == state.chat.selectedSessionIndex;
+                final selected = index == _selectedChatIndex;
                 return InkWell(
                   key: ValueKey('workspace-chat-row-$index'),
                   onTap: () {
-                    _store.selectChatSession(index);
+                    setState(() => _selectedChatIndex = index);
                     if (closeOnSelect && Navigator.of(context).canPop()) {
                       Navigator.pop(context);
                     }
                   },
                   child: Container(
-                    color:
-                        selected ? const Color(0xFF37373D) : Colors.transparent,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
+                    color: selected ? const Color(0xFF37373D) : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     child: Text(
-                      state.chat.sessions[index],
-                      style: const TextStyle(
-                        color: Color(0xFFD4D4D4),
-                        fontSize: 13,
-                      ),
+                      _chatSessions[index],
+                      style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
                     ),
                   ),
                 );
@@ -306,10 +228,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     );
   }
 
-  Widget _buildFileDrawerTree(
-    ProjectWorkspaceState state, {
-    required bool closeOnSelect,
-  }) {
+  Widget _buildFileDrawerTree({required bool closeOnSelect}) {
     return Container(
       key: const ValueKey('workspace-sidebar-files'),
       color: const Color(0xFF252526),
@@ -327,31 +246,21 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
               ),
             ),
           ),
-          ..._buildFileTreeNodes(
-            state.files.root,
-            state.files,
-            0,
-            closeOnSelect,
-          ),
+          ..._buildFileTreeNodes(mockWheelMakerRoot, 0, closeOnSelect),
         ],
       ),
     );
   }
 
-  List<Widget> _buildFileTreeNodes(
-    FileTreeNode node,
-    FilePaneState files,
-    int depth,
-    bool closeOnSelect,
-  ) {
+  List<Widget> _buildFileTreeNodes(FileTreeNode node, int depth, bool closeOnSelect) {
     final pad = EdgeInsets.only(left: 10 + depth * 14, right: 8);
     if (!node.isDirectory) {
-      final selected = node.path == files.selectedFilePath;
+      final selected = node.path == _selectedFilePath;
       return [
         InkWell(
           key: ValueKey('workspace-file-row-${node.path}'),
           onTap: () {
-            _store.selectFile(node.path);
+            setState(() => _selectedFilePath = node.path);
             if (closeOnSelect && Navigator.of(context).canPop()) {
               Navigator.pop(context);
             }
@@ -370,10 +279,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 Expanded(
                   child: Text(
                     node.name,
-                    style: const TextStyle(
-                      color: Color(0xFFD4D4D4),
-                      fontSize: 13,
-                    ),
+                    style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -384,25 +290,26 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
       ];
     }
 
-    final isOpen = files.expandedPaths.contains(node.path);
+    final isOpen = _fileDrawerExpanded.contains(node.path);
     final rows = <Widget>[
       InkWell(
         key: ValueKey('workspace-folder-row-${node.path}'),
-        onTap: () => _store.toggleFolder(node.path),
+        onTap: () {
+          setState(() {
+            if (isOpen) {
+              _fileDrawerExpanded.remove(node.path);
+            } else {
+              _fileDrawerExpanded.add(node.path);
+            }
+          });
+        },
         child: Container(
           padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
           child: Row(
             children: [
-              Icon(
-                isOpen ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
-                size: 16,
-                color: const Color(0xFFCCCCCC),
-              ),
-              Icon(
-                isOpen ? Icons.folder_open : Icons.folder,
-                size: 16,
-                color: const Color(0xFFE8AB53),
-              ),
+              Icon(isOpen ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                  size: 16, color: const Color(0xFFCCCCCC)),
+              Icon(isOpen ? Icons.folder_open : Icons.folder, size: 16, color: const Color(0xFFE8AB53)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -422,31 +329,14 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     ];
     if (isOpen) {
       for (final child in node.children) {
-        rows.addAll(
-          _buildFileTreeNodes(child, files, depth + 1, closeOnSelect),
-        );
+        rows.addAll(_buildFileTreeNodes(child, depth + 1, closeOnSelect));
       }
     }
     return rows;
   }
 
-  Widget _buildDiffDrawerSplit(
-    ProjectWorkspaceState state, {
-    required bool closeOnSelect,
-  }) {
-    if (state.diff.commits.isEmpty) {
-      return Container(
-        key: const ValueKey('workspace-sidebar-diff'),
-        color: const Color(0xFF252526),
-        alignment: Alignment.center,
-        child: const Text(
-          'No commits',
-          style: TextStyle(color: Color(0xFFD4D4D4)),
-        ),
-      );
-    }
-
-    final commit = state.diff.commits[state.diff.selectedCommitIndex];
+  Widget _buildDiffDrawerSplit({required bool closeOnSelect}) {
+    final commit = mockGitCommits[_diffDrawerCommitIndex];
     return Container(
       key: const ValueKey('workspace-sidebar-diff'),
       color: const Color(0xFF252526),
@@ -456,32 +346,31 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
           Expanded(
             flex: 5,
             child: ListView.builder(
-              itemCount: state.diff.commits.length,
+              itemCount: mockGitCommits.length,
               itemBuilder: (context, index) {
-                final item = state.diff.commits[index];
-                final selected = index == state.diff.selectedCommitIndex;
+                final commit = mockGitCommits[index];
+                final selected = index == _diffDrawerCommitIndex;
                 return ListTile(
-                  key: ValueKey('workspace-commit-row-${item.hash}'),
-                  tileColor:
-                      selected ? const Color(0xFF37373D) : Colors.transparent,
+                  key: ValueKey('workspace-commit-row-${commit.hash}'),
+                  tileColor: selected ? const Color(0xFF37373D) : Colors.transparent,
                   dense: true,
                   title: Text(
-                    '${item.hash.substring(0, 7)} ${item.message}',
+                    '${commit.hash.substring(0, 7)} ${commit.message}',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Color(0xFFD4D4D4),
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
                   ),
                   subtitle: Text(
-                    '${item.files.length} files',
-                    style: const TextStyle(
-                      color: Color(0xFF9DA0A6),
-                      fontSize: 11,
-                    ),
+                    '${commit.files.length} files',
+                    style: const TextStyle(color: Color(0xFF9DA0A6), fontSize: 11),
                   ),
-                  onTap: () => _store.selectDiffCommit(index),
+                  onTap: () {
+                    setState(() {
+                      _diffDrawerCommitIndex = index;
+                      _diffDrawerFilePath =
+                          commit.files.isNotEmpty ? commit.files.first.path : null;
+                    });
+                  },
                 );
               },
             ),
@@ -494,22 +383,18 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
               itemCount: commit.files.length,
               itemBuilder: (context, index) {
                 final file = commit.files[index];
-                final selected = file.path == state.diff.selectedFilePath;
+                final selected = file.path == _diffDrawerFilePath;
                 return InkWell(
                   key: ValueKey('workspace-diff-file-row-${file.path}'),
                   onTap: () {
-                    _store.selectDiffFile(file.path);
+                    setState(() => _diffDrawerFilePath = file.path);
                     if (closeOnSelect && Navigator.of(context).canPop()) {
                       Navigator.pop(context);
                     }
                   },
                   child: Container(
-                    color:
-                        selected ? const Color(0xFF37373D) : Colors.transparent,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 9,
-                    ),
+                    color: selected ? const Color(0xFF37373D) : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                     child: Row(
                       children: [
                         _statusBadge(file.status),
@@ -518,10 +403,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                           child: Text(
                             file.path,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xFFD4D4D4),
-                              fontSize: 12,
-                            ),
+                            style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
                           ),
                         ),
                       ],
@@ -570,11 +452,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-        ),
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -617,6 +495,15 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         lowerPath.endsWith('.hxx') ||
         lowerPath.endsWith('.h');
   }
+
+  String? _firstFilePath(FileTreeNode node) {
+    if (!node.isDirectory) return node.path;
+    for (final child in node.children) {
+      final found = _firstFilePath(child);
+      if (found != null) return found;
+    }
+    return null;
+  }
 }
 
 class _WorkspaceSettingsScreen extends StatelessWidget {
@@ -631,65 +518,6 @@ class _WorkspaceSettingsScreen extends StatelessWidget {
           const ListTile(
             title: Text('Workspace Settings'),
             subtitle: Text('Debug settings and session actions'),
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.contrast_outlined),
-            title: const Text('UI Theme'),
-            subtitle: DropdownButtonHideUnderline(
-              child: DropdownButton<UiThemeMode>(
-                value: AppThemeScope.of(context).uiMode,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                    value: UiThemeMode.system,
-                    child: Text('System'),
-                  ),
-                  DropdownMenuItem(
-                    value: UiThemeMode.light,
-                    child: Text('Light'),
-                  ),
-                  DropdownMenuItem(
-                    value: UiThemeMode.dark,
-                    child: Text('Dark'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    AppThemeScope.of(context).setUiMode(value);
-                  }
-                },
-              ),
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.code_outlined),
-            title: const Text('Editor Theme'),
-            subtitle: DropdownButtonHideUnderline(
-              child: DropdownButton<EditorThemePreset>(
-                value: AppThemeScope.of(context).editorTheme,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(
-                    value: EditorThemePreset.vscodeDark,
-                    child: Text('VS Code Modern Dark'),
-                  ),
-                  DropdownMenuItem(
-                    value: EditorThemePreset.vscodeLight,
-                    child: Text('VS Code Light+'),
-                  ),
-                  DropdownMenuItem(
-                    value: EditorThemePreset.vscodeHighContrast,
-                    child: Text('VS Code High Contrast'),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    AppThemeScope.of(context).setEditorTheme(value);
-                  }
-                },
-              ),
-            ),
           ),
           const Divider(height: 1),
           ListTile(

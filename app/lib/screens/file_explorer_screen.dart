@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../data/mock_wheelmaker_fs.dart';
 import '../models/file_tree_node.dart';
-import '../theme/app_theme_controller.dart';
 import 'code_language.dart';
 
 class FileExplorerScreen extends StatefulWidget {
@@ -42,8 +41,7 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
   @override
   void didUpdateWidget(covariant FileExplorerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.selectedPath != null &&
-        widget.selectedPath != oldWidget.selectedPath) {
+    if (widget.selectedPath != null && widget.selectedPath != oldWidget.selectedPath) {
       final found = _findByPath(mockWheelMakerRoot, widget.selectedPath!);
       if (found != null && _activeFile?.path != found.path) {
         setState(() => _activeFile = found);
@@ -57,9 +55,7 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
       builder: (context, constraints) {
         final useSplit = widget.showSidebar && constraints.maxWidth >= 900;
         return Scaffold(
-          appBar: widget.showAppBar
-              ? AppBar(title: const Text('Explorer (Debug)'))
-              : null,
+          appBar: widget.showAppBar ? AppBar(title: const Text('Explorer (Debug)')) : null,
           drawer: useSplit
               ? null
               : Drawer(
@@ -79,24 +75,20 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
     );
   }
 
-  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
-
   Widget _buildTreePane() {
-    final textColor = Theme.of(context).colorScheme.onSurface;
-    final titleColor = Theme.of(context).colorScheme.onSurfaceVariant;
     return Container(
-      color: _isDark ? const Color(0xFF252526) : const Color(0xFFF3F3F3),
+      color: const Color(0xFF252526),
       child: ListView(
         children: [
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
-            child: Row(
+            child: const Row(
               children: [
                 Expanded(
                   child: Text(
                     'EXPLORER',
                     style: TextStyle(
-                      color: titleColor,
+                      color: Color(0xFFBBBBBB),
                       fontWeight: FontWeight.w600,
                       letterSpacing: 1.1,
                       fontSize: 11,
@@ -106,12 +98,12 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 2, 12, 6),
             child: Text(
               'WHEELMAKER',
               style: TextStyle(
-                color: textColor,
+                color: Color(0xFFD4D4D4),
                 fontWeight: FontWeight.w600,
                 fontSize: 11,
               ),
@@ -129,9 +121,9 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
       final selected = _activeFile?.path == node.path;
       final hovered = _hoveredPath == node.path;
       final rowColor = selected
-          ? (_isDark ? const Color(0xFF37373D) : const Color(0xFFDCDCDC))
+          ? const Color(0xFF37373D)
           : hovered
-              ? (_isDark ? const Color(0xFF2A2D2E) : const Color(0xFFEAEAEA))
+              ? const Color(0xFF2A2D2E)
               : Colors.transparent;
       return [
         MouseRegion(
@@ -154,10 +146,7 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
                   Expanded(
                     child: Text(
                       node.name,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontSize: 13,
-                      ),
+                      style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -187,18 +176,14 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
             });
           },
           child: Container(
-            color: hovered
-                ? (_isDark ? const Color(0xFF2A2D2E) : const Color(0xFFEAEAEA))
-                : Colors.transparent,
+            color: hovered ? const Color(0xFF2A2D2E) : Colors.transparent,
             padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
             child: Row(
               children: [
                 Icon(
-                  isOpen
-                      ? Icons.keyboard_arrow_down
-                      : Icons.keyboard_arrow_right,
+                  isOpen ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
                   size: 16,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: const Color(0xFFCCCCCC),
                 ),
                 Icon(
                   isOpen ? Icons.folder_open : Icons.folder,
@@ -209,8 +194,8 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
                 Expanded(
                   child: Text(
                     node.name,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
+                    style: const TextStyle(
+                      color: Color(0xFFD4D4D4),
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
@@ -241,25 +226,22 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
     }
 
     return Container(
-      color: _isDark ? const Color(0xFF1E1E1E) : const Color(0xFFFFFFFF),
+      color: const Color(0xFF1E1E1E),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            color: _isDark ? const Color(0xFF2D2D2D) : const Color(0xFFF8F8F8),
+            color: const Color(0xFF2D2D2D),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
               children: [
-                Icon(Icons.insert_drive_file_outlined,
-                    size: 16, color: Theme.of(context).colorScheme.onSurface),
+                const Icon(Icons.insert_drive_file_outlined,
+                    size: 16, color: Color(0xFFD4D4D4)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     file.path,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurface,
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -304,20 +286,18 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
   Widget _buildCodeView(FileTreeNode file) {
     final content = file.content ?? '';
     final language = languageFromPath(file.path);
-    final themeCtrl = AppThemeScope.maybeOf(context);
     try {
       final editorFont = GoogleFonts.jetBrainsMono(
         fontSize: 13,
         height: 1.45,
-        color: _isDark ? const Color(0xFFD4D4D4) : const Color(0xFF1F1F1F),
+        color: const Color(0xFFD4D4D4),
       );
       return SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: HighlightView(
           content,
           language: language,
-          theme:
-              _themeFor(themeCtrl?.editorTheme ?? EditorThemePreset.vscodeDark),
+          theme: _vscodeTheme,
           textStyle: editorFont,
           padding: EdgeInsets.zero,
         ),
@@ -330,27 +310,15 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
           style: GoogleFonts.jetBrainsMono(
             fontSize: 13,
             height: 1.45,
-            color: _isDark ? const Color(0xFFD4D4D4) : const Color(0xFF1F1F1F),
+            color: const Color(0xFFD4D4D4),
           ),
         ),
       );
     }
   }
 
-  Map<String, TextStyle> _themeFor(EditorThemePreset preset) {
-    switch (preset) {
-      case EditorThemePreset.vscodeLight:
-        return _vscodeLightTheme;
-      case EditorThemePreset.vscodeHighContrast:
-        return _vscodeHighContrastTheme;
-      case EditorThemePreset.vscodeDark:
-        return _vscodeDarkTheme;
-    }
-  }
-
-  static final Map<String, TextStyle> _vscodeDarkTheme = {
-    'root': const TextStyle(
-        color: Color(0xFFD4D4D4), backgroundColor: Color(0xFF1E1E1E)),
+  static final Map<String, TextStyle> _vscodeTheme = {
+    'root': const TextStyle(color: Color(0xFFD4D4D4), backgroundColor: Color(0xFF1E1E1E)),
     'keyword': const TextStyle(color: Color(0xFF569CD6)),
     'built_in': const TextStyle(color: Color(0xFF4EC9B0)),
     'type': const TextStyle(color: Color(0xFF4EC9B0)),
@@ -363,91 +331,37 @@ class FileExplorerScreenState extends State<FileExplorerScreen> {
     'section': const TextStyle(color: Color(0xFFDCDCAA)),
     'attribute': const TextStyle(color: Color(0xFF9CDCFE)),
     'meta': const TextStyle(color: Color(0xFF9CDCFE)),
-  };
-
-  static final Map<String, TextStyle> _vscodeLightTheme = {
-    'root': const TextStyle(
-        color: Color(0xFF1F1F1F), backgroundColor: Color(0xFFFFFFFF)),
-    'keyword': const TextStyle(color: Color(0xFF0000FF)),
-    'built_in': const TextStyle(color: Color(0xFF267F99)),
-    'type': const TextStyle(color: Color(0xFF267F99)),
-    'literal': const TextStyle(color: Color(0xFF0000FF)),
-    'number': const TextStyle(color: Color(0xFF098658)),
-    'string': const TextStyle(color: Color(0xFFA31515)),
-    'subst': const TextStyle(color: Color(0xFF1F1F1F)),
-    'comment': const TextStyle(color: Color(0xFF008000)),
-    'title': const TextStyle(color: Color(0xFF795E26)),
-    'section': const TextStyle(color: Color(0xFF795E26)),
-    'attribute': const TextStyle(color: Color(0xFF001080)),
-    'meta': const TextStyle(color: Color(0xFF001080)),
-  };
-
-  static final Map<String, TextStyle> _vscodeHighContrastTheme = {
-    'root': const TextStyle(
-        color: Color(0xFFFFFFFF), backgroundColor: Color(0xFF000000)),
-    'keyword': const TextStyle(color: Color(0xFFFF9D00)),
-    'built_in': const TextStyle(color: Color(0xFF4FC1FF)),
-    'type': const TextStyle(color: Color(0xFF4FC1FF)),
-    'literal': const TextStyle(color: Color(0xFFFF9D00)),
-    'number': const TextStyle(color: Color(0xFFB5CEA8)),
-    'string': const TextStyle(color: Color(0xFFCE9178)),
-    'subst': const TextStyle(color: Color(0xFFFFFFFF)),
-    'comment': const TextStyle(color: Color(0xFF7CA668)),
-    'title': const TextStyle(color: Color(0xFFFFD700)),
-    'section': const TextStyle(color: Color(0xFFFFD700)),
-    'attribute': const TextStyle(color: Color(0xFF9CDCFE)),
-    'meta': const TextStyle(color: Color(0xFF9CDCFE)),
+    'selector-tag': const TextStyle(color: Color(0xFF569CD6)),
+    'selector-id': const TextStyle(color: Color(0xFFD7BA7D)),
+    'selector-class': const TextStyle(color: Color(0xFFD7BA7D)),
+    'symbol': const TextStyle(color: Color(0xFFB5CEA8)),
+    'bullet': const TextStyle(color: Color(0xFFB5CEA8)),
+    'link': const TextStyle(color: Color(0xFF3794FF)),
+    'emphasis': const TextStyle(fontStyle: FontStyle.italic),
+    'strong': const TextStyle(fontWeight: FontWeight.w700),
   };
 
   IconData _fileIcon(String path) {
     final lower = path.toLowerCase();
-    if (lower.endsWith('.dart')) {
-      return Icons.flutter_dash;
-    }
-    if (lower.endsWith('.go')) {
-      return Icons.memory_outlined;
-    }
-    if (_isCppFile(lower)) {
-      return Icons.code;
-    }
-    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) {
-      return Icons.settings_applications_outlined;
-    }
-    if (lower.endsWith('.json')) {
-      return Icons.data_object;
-    }
-    if (lower.endsWith('.md')) {
-      return Icons.article_outlined;
-    }
-    if (lower.endsWith('.ps1')) {
-      return Icons.terminal_outlined;
-    }
+    if (lower.endsWith('.dart')) return Icons.flutter_dash;
+    if (lower.endsWith('.go')) return Icons.memory_outlined;
+    if (_isCppFile(lower)) return Icons.code;
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return Icons.settings_applications_outlined;
+    if (lower.endsWith('.json')) return Icons.data_object;
+    if (lower.endsWith('.md')) return Icons.article_outlined;
+    if (lower.endsWith('.ps1')) return Icons.terminal_outlined;
     return Icons.description_outlined;
   }
 
   Color _fileColor(String path) {
     final lower = path.toLowerCase();
-    if (lower.endsWith('.dart')) {
-      return const Color(0xFF42A5F5);
-    }
-    if (lower.endsWith('.go')) {
-      return const Color(0xFF00ADD8);
-    }
-    if (_isCppFile(lower)) {
-      return const Color(0xFF649AD2);
-    }
-    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) {
-      return const Color(0xFFCB9B41);
-    }
-    if (lower.endsWith('.json')) {
-      return const Color(0xFFF1D04B);
-    }
-    if (lower.endsWith('.md')) {
-      return const Color(0xFF519ABA);
-    }
-    if (lower.endsWith('.ps1')) {
-      return const Color(0xFF4EC9B0);
-    }
+    if (lower.endsWith('.dart')) return const Color(0xFF42A5F5);
+    if (lower.endsWith('.go')) return const Color(0xFF00ADD8);
+    if (_isCppFile(lower)) return const Color(0xFF649AD2);
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return const Color(0xFFCB9B41);
+    if (lower.endsWith('.json')) return const Color(0xFFF1D04B);
+    if (lower.endsWith('.md')) return const Color(0xFF519ABA);
+    if (lower.endsWith('.ps1')) return const Color(0xFF4EC9B0);
     return const Color(0xFFCCCCCC);
   }
 

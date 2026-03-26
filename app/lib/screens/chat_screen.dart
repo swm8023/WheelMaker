@@ -178,8 +178,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   onPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                          builder: (_) => const FileExplorerScreen()),
+                      MaterialPageRoute(builder: (_) => const FileExplorerScreen()),
                     );
                   },
                   icon: const Icon(Icons.bug_report_outlined),
@@ -193,22 +192,19 @@ class _ChatScreenState extends State<ChatScreen> {
       // while keeping full-width layout on phones.
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final double hPad = constraints.maxWidth > 900
-              ? (constraints.maxWidth - 900) / 2
-              : 0.0;
+          final double hPad =
+              constraints.maxWidth > 900 ? (constraints.maxWidth - 900) / 2 : 0.0;
           return Padding(
             padding: EdgeInsets.symmetric(horizontal: hPad),
             child: Column(
               children: [
-                if (widget.sessionName != null &&
-                    widget.sessionName!.isNotEmpty)
+                if (widget.sessionName != null && widget.sessionName!.isNotEmpty)
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
                     decoration: BoxDecoration(
                       border: Border(
-                        bottom:
-                            BorderSide(color: Theme.of(context).dividerColor),
+                        bottom: BorderSide(color: Theme.of(context).dividerColor),
                       ),
                     ),
                     child: Text(
@@ -224,13 +220,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 Expanded(
                   child: ListView.builder(
                     controller: _scrollCtrl,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     itemCount: _messages.length + (_isWaiting ? 1 : 0),
                     itemBuilder: (ctx, i) {
-                      if (i == _messages.length) {
-                        return const _TypingIndicator();
-                      }
+                      if (i == _messages.length) return const _TypingIndicator();
                       return _buildMessage(ctx, _messages[i]);
                     },
                   ),
@@ -265,7 +258,7 @@ class _ChatScreenState extends State<ChatScreen> {
           margin: const EdgeInsets.symmetric(vertical: 2),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.08),
+            color: Colors.amber.withOpacity(0.08),
             borderRadius: BorderRadius.circular(6),
           ),
           child: Text(
@@ -326,8 +319,8 @@ class _ChatScreenState extends State<ChatScreen> {
   void _copyToClipboard(String text) {
     Clipboard.setData(ClipboardData(text: text));
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Copied'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Copied'), duration: Duration(seconds: 1)));
     }
   }
 
@@ -355,8 +348,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.all(Radius.circular(24)),
                 ),
-                contentPadding:
-                    EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               ),
             ),
           ),
