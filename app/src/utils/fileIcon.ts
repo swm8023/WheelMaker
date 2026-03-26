@@ -1,5 +1,5 @@
 type FileIcon = {
-  glyph: string;
+  name: string;
   color: string;
 };
 
@@ -15,29 +15,29 @@ const color = {
 };
 
 const extensionIconMap: Record<string, FileIcon> = {
-  ts: {glyph: '●', color: color.ts},
-  tsx: {glyph: '●', color: color.ts},
-  js: {glyph: '●', color: color.js},
-  jsx: {glyph: '●', color: color.js},
-  json: {glyph: '●', color: color.json},
-  md: {glyph: '●', color: color.md},
-  markdown: {glyph: '●', color: color.md},
-  go: {glyph: '●', color: color.go},
-  sh: {glyph: '●', color: color.shell},
-  ps1: {glyph: '●', color: color.shell},
-  yml: {glyph: '●', color: color.default},
-  yaml: {glyph: '●', color: color.default},
+  ts: {name: 'file-code', color: color.ts},
+  tsx: {name: 'file-code', color: color.ts},
+  js: {name: 'file-code', color: color.js},
+  jsx: {name: 'file-code', color: color.js},
+  json: {name: 'json', color: color.json},
+  md: {name: 'book', color: color.md},
+  markdown: {name: 'book', color: color.md},
+  go: {name: 'symbol-namespace', color: color.go},
+  sh: {name: 'terminal', color: color.shell},
+  ps1: {name: 'terminal', color: color.shell},
+  yml: {name: 'settings', color: color.default},
+  yaml: {name: 'settings', color: color.default},
 };
 
 const nameIconMap: Record<string, FileIcon> = {
-  dockerfile: {glyph: '●', color: color.default},
-  makefile: {glyph: '●', color: color.default},
-  'package.json': {glyph: '●', color: color.json},
-  'readme.md': {glyph: '●', color: color.md},
+  dockerfile: {name: 'package', color: color.default},
+  makefile: {name: 'tools', color: color.default},
+  'package.json': {name: 'json', color: color.json},
+  'readme.md': {name: 'book', color: color.md},
 };
 
-const folderIcon: FileIcon = {glyph: '▣', color: color.folder};
-const fileIcon: FileIcon = {glyph: '●', color: color.default};
+const folderIcon: FileIcon = {name: 'folder', color: color.folder};
+const fileIcon: FileIcon = {name: 'file', color: color.default};
 
 export function iconForPath(path: string): FileIcon {
   const normalized = path.toLowerCase().trim();

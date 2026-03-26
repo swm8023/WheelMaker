@@ -615,7 +615,7 @@ function Sidebar(args: {
                 ]}
                 onPress={() => args.onDiffFileSelect(file.path)}>
                 <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
-                  <Text style={{color: icon.color}}>{icon.glyph} </Text>
+                  <VsIcon name={icon.name} color={icon.color} /><Text> </Text>
                   {file.path}
                 </Text>
               </Pressable>
@@ -655,7 +655,7 @@ function renderFileTree(args: {
         ]}
         onPress={() => args.onFileSelect(args.node.path)}>
         <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.treeText, {color: args.theme.colors.text}]}>
-          <Text style={{color: icon.color}}>{icon.glyph} </Text>
+          <VsIcon name={icon.name} color={icon.color} /><Text> </Text>
           {args.node.name}
         </Text>
       </Pressable>
@@ -676,7 +676,7 @@ function renderFileTree(args: {
         }}>
         <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.treeText, {color: args.theme.colors.text}]}>
           {isOpen ? 'v ' : '> '}
-          <Text style={{color: icon.color}}>{icon.glyph} </Text>
+          <VsIcon name={icon.name} color={icon.color} /><Text> </Text>
           {args.node.name}
           {isLoading ? ' ...' : ''}
         </Text>
@@ -746,7 +746,20 @@ function findFirstFile(root: FileNode): FileNode | null {
   }
   return null;
 }
+function VsIcon({name, color}: {name: string; color: string}) {
+  const webIconStyle = {color, ...styles.webCodicon} as const;
 
+  if (Platform.OS === 'web') {
+    return (
+      <span
+        className={`codicon codicon-${name}`}
+        style={webIconStyle}
+      />
+    );
+  }
+
+  return <Text style={{color}}>•</Text>;
+}
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -961,7 +974,13 @@ const styles = StyleSheet.create({
   gitDivider: {
     height: 1,
   },
+  webCodicon: {
+    fontSize: 14,
+    verticalAlign: 'middle',
+  },
 });
+
+
 
 
 
