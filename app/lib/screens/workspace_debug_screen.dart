@@ -49,19 +49,19 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
               tooltip: 'Open list',
             ),
-            Text(
-              compact ? 'WheelMaker' : 'WheelMaker Project',
-              style: const TextStyle(fontSize: 15),
+            Expanded(
+              child: Text(
+                compact ? 'WheelMaker Project' : 'WheelMaker Project Workspace',
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.fade,
+                style: const TextStyle(fontSize: 15),
+              ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: compact ? 180 : 320),
-                  child: _buildSwitcher(compact: compact),
-                ),
-              ),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: compact ? 180 : 320),
+              child: _buildSwitcher(compact: compact),
             ),
           ],
         ),
