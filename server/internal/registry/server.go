@@ -1,4 +1,4 @@
-package observe
+package registry
 
 import (
 	"context"
@@ -18,7 +18,7 @@ const (
 	defaultServerVersion   = "0.1.0"
 )
 
-// Config configures the remote observe server.
+// Config configures the project registry server.
 type Config struct {
 	Addr            string
 	Token           string
@@ -61,7 +61,7 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
-// New creates a remote observe server instance.
+// New creates a registry server instance.
 func New(cfg Config) *Server {
 	if cfg.Addr == "" {
 		cfg.Addr = ":9630"
@@ -102,7 +102,7 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return srv.Shutdown(context.Background())
 	case err := <-errCh:
-		return fmt.Errorf("observe server: %w", err)
+		return fmt.Errorf("registry server: %w", err)
 	}
 }
 
@@ -134,18 +134,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleHello(ws, in)
 		case "auth":
 			s.handleAuth(ws, state, in)
-		case "hub.reportProjects":
+		case "registry.reportProjects":
 			if !state.authed {
 				_ = s.writeError(ws, in.RequestID, codeUnauthorized, "not authenticated", nil)
 				continue
 			}
 			s.handleHubReportProjects(ws, state, in)
-		case "project.list":
+		case "registry.listProjects":
 			if !state.authed {
 				_ = s.writeError(ws, in.RequestID, codeUnauthorized, "not authenticated", nil)
 				continue
 			}
-			s.handleProjectList(ws, in)
+			s.handleRegistryListProjects(ws, in)
 		default:
 			_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
 		}
@@ -157,11 +157,11 @@ func (s *Server) handleHello(ws *websocket.Conn, in envelope) {
 		"serverVersion":   s.cfg.ServerVersion,
 		"protocolVersion": s.cfg.ProtocolVersion,
 		"features": map[string]bool{
-			"fs":          false,
-			"git":         false,
-			"push":        false,
-			"hubReport":   true,
-			"projectList": true,
+			"fs":                   false,
+			"git":                  false,
+			"push":                 false,
+			"registryReport":       true,
+			"registryListProjects": true,
 		},
 	}
 	_ = s.writeResponse(ws, in.RequestID, in.Method, payload)
@@ -185,7 +185,7 @@ func (s *Server) handleAuth(ws *websocket.Conn, state *connectionState, in envel
 func (s *Server) handleHubReportProjects(ws *websocket.Conn, state *connectionState, in envelope) {
 	var payload hubReportProjectsPayload
 	if err := json.Unmarshal(in.Payload, &payload); err != nil {
-		_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "invalid hub.reportProjects payload", nil)
+		_ = s.writeError(ws, in.RequestID, codeInvalidArgument, "invalid registry.reportProjects payload", nil)
 		return
 	}
 	if payload.HubID == "" {
@@ -209,7 +209,7 @@ func (s *Server) handleHubReportProjects(ws *websocket.Conn, state *connectionSt
 	})
 }
 
-func (s *Server) handleProjectList(ws *websocket.Conn, in envelope) {
+func (s *Server) handleRegistryListProjects(ws *websocket.Conn, in envelope) {
 	s.mu.RLock()
 	hubs := make([]HubSnapshot, 0, len(s.hubs))
 	for _, h := range s.hubs {
