@@ -1,12 +1,12 @@
-import type { ObserveEnvelope } from '../types/observe';
+import type { RegistryEnvelope } from '../types/observe';
 
 type PendingRequest = {
-  resolve: (value: ObserveEnvelope) => void;
+  resolve: (value: RegistryEnvelope) => void;
   reject: (reason?: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
 };
 
-export class ObserveClient {
+export class RegistryClient {
   private ws: WebSocket | null = null;
   private seq = 0;
   private readonly pending = new Map<string, PendingRequest>();
@@ -25,7 +25,7 @@ export class ObserveClient {
         resolve();
       };
       ws.onerror = event => {
-        reject(new Error(`observe websocket connect failed: ${String(event)}`));
+        reject(new Error(`registry websocket connect failed: ${String(event)}`));
       };
     });
   }
@@ -53,12 +53,12 @@ export class ObserveClient {
     method: string;
     payload: Record<string, unknown>;
     projectId?: string;
-  }): Promise<ObserveEnvelope> {
+  }): Promise<RegistryEnvelope> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('observe websocket is not connected');
+      throw new Error('registry websocket is not connected');
     }
     const requestId = `req-${this.seq++}`;
-    const envelope: ObserveEnvelope = {
+    const envelope: RegistryEnvelope = {
       version: '1.0',
       requestId,
       type: 'request',
@@ -67,10 +67,10 @@ export class ObserveClient {
       ...(args.projectId ? { projectId: args.projectId } : {}),
     };
 
-    return new Promise<ObserveEnvelope>((resolve, reject) => {
+    return new Promise<RegistryEnvelope>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error(`observe request timed out: ${args.method}`));
+        reject(new Error(`registry request timed out: ${args.method}`));
       }, this.timeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
       this.ws?.send(JSON.stringify(envelope));
@@ -90,9 +90,9 @@ export class ObserveClient {
   private bind(ws: WebSocket): void {
     ws.onmessage = event => {
       if (typeof event.data !== 'string') return;
-      let envelope: ObserveEnvelope;
+      let envelope: RegistryEnvelope;
       try {
-        envelope = JSON.parse(event.data) as ObserveEnvelope;
+        envelope = JSON.parse(event.data) as RegistryEnvelope;
       } catch {
         return;
       }
@@ -102,7 +102,7 @@ export class ObserveClient {
       this.pending.delete(envelope.requestId);
       clearTimeout(pending.timer);
       if (envelope.type === 'error') {
-        pending.reject(new Error(envelope.error?.message ?? 'observe error'));
+        pending.reject(new Error(envelope.error?.message ?? 'registry error'));
         return;
       }
       pending.resolve(envelope);
@@ -111,3 +111,5 @@ export class ObserveClient {
     ws.onerror = () => this.close();
   }
 }
+
+export { RegistryClient as ObserveClient };

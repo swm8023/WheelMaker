@@ -1,9 +1,9 @@
-export type ObserveMessageType = 'request' | 'response' | 'error' | 'event';
+export type RegistryMessageType = 'request' | 'response' | 'error' | 'event';
 
-export interface ObserveEnvelope<TPayload = unknown> {
+export interface RegistryEnvelope<TPayload = unknown> {
   version: string;
   requestId?: string;
-  type: ObserveMessageType;
+  type: RegistryMessageType;
   method?: string;
   projectId?: string;
   payload?: TPayload;
@@ -14,16 +14,21 @@ export interface ObserveEnvelope<TPayload = unknown> {
   };
 }
 
-export interface ObserveProject {
+export interface RegistryProject {
   projectId: string;
   name: string;
   online?: boolean;
 }
 
-export interface ObserveFsEntry {
+export interface RegistryFsEntry {
   name: string;
   path: string;
   kind: 'dir' | 'file';
   size?: number;
   mtime?: string;
 }
+
+export type ObserveMessageType = RegistryMessageType;
+export type ObserveEnvelope<TPayload = unknown> = RegistryEnvelope<TPayload>;
+export type ObserveProject = RegistryProject;
+export type ObserveFsEntry = RegistryFsEntry;

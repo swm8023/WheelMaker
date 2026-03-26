@@ -1,8 +1,8 @@
-import { ObserveClient } from './observeClient';
-import type { ObserveEnvelope, ObserveFsEntry, ObserveProject } from '../types/observe';
+import { RegistryClient } from './observeClient';
+import type { RegistryEnvelope, RegistryFsEntry, RegistryProject } from '../types/observe';
 
-export class ObserveRepository {
-  constructor(private readonly client: ObserveClient) {}
+export class RegistryRepository {
+  constructor(private readonly client: RegistryClient) {}
 
   async initialize(url: string, token?: string): Promise<void> {
     await this.client.connect(url);
@@ -12,22 +12,22 @@ export class ObserveRepository {
     }
   }
 
-  async listProjects(): Promise<ObserveProject[]> {
+  async listProjects(): Promise<RegistryProject[]> {
     const resp = await this.client.request({
       method: 'project.list',
       payload: {},
     });
-    const payload = (resp.payload ?? {}) as { projects?: ObserveProject[] };
+    const payload = (resp.payload ?? {}) as { projects?: RegistryProject[] };
     return (payload.projects ?? []).filter(project => !!project.projectId);
   }
 
-  async listFiles(projectId: string, path = '.'): Promise<ObserveFsEntry[]> {
+  async listFiles(projectId: string, path = '.'): Promise<RegistryFsEntry[]> {
     const resp = await this.client.request({
       method: 'fs.list',
       projectId,
       payload: { path, cursor: '', limit: 200 },
     });
-    const payload = (resp.payload ?? {}) as { entries?: ObserveFsEntry[] };
+    const payload = (resp.payload ?? {}) as { entries?: RegistryFsEntry[] };
     return (payload.entries ?? []).filter(entry => !!entry.path && !!entry.name);
   }
 
@@ -46,8 +46,11 @@ export class ObserveRepository {
   }
 }
 
-export const createObserveRepository = (): ObserveRepository => {
-  return new ObserveRepository(new ObserveClient());
+export const createRegistryRepository = (): RegistryRepository => {
+  return new RegistryRepository(new RegistryClient());
 };
 
-export type ObserveResponse<TPayload> = ObserveEnvelope<TPayload>;
+export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+export { RegistryRepository as ObserveRepository };
+export const createObserveRepository = createRegistryRepository;
+export type ObserveResponse<TPayload> = RegistryResponse<TPayload>;

@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { createObserveRepository } from './src/services';
-import type { ObserveFsEntry, ObserveProject } from './src/types/observe';
+import { createRegistryRepository } from './src/services';
+import type { RegistryFsEntry, RegistryProject } from './src/types/observe';
 
 type WorkspaceTab = 'chat' | 'file' | 'git';
 type ThemeMode = 'light' | 'dark' | 'system';
@@ -30,14 +30,14 @@ type TreeNode = {
 type GitFile = { path: string; diff: string };
 type GitCommit = { hash: string; message: string; files: GitFile[] };
 
-const MOCK_PROJECTS: ObserveProject[] = [
+const MOCK_PROJECTS: RegistryProject[] = [
   { projectId: 'wheelmaker', name: 'WheelMaker', online: true },
   { projectId: 'server', name: 'Server', online: true },
 ];
 
 const CHAT_SESSIONS = ['General', 'WheelMaker App', 'Go Service', 'Review'];
 const CHAT_MESSAGES = [
-  { role: 'system', text: 'Observe workspace shell (React Native).' },
+  { role: 'system', text: 'Registry workspace shell (React Native).' },
   { role: 'agent', text: 'Layout-first iteration. Data hooks are in place.' },
 ];
 
@@ -47,7 +47,7 @@ const GIT_COMMITS: GitCommit[] = [
     message: 'feat(app-rn): add adaptive chat git file workspace shell',
     files: [
       { path: 'app/App.tsx', diff: '@@ + layout skeleton ...' },
-      { path: 'app/src/services/observeRepository.ts', diff: '@@ + observe request wrappers ...' },
+      { path: 'app/src/services/observeRepository.ts', diff: '@@ + registry request wrappers ...' },
     ],
   },
   {
@@ -57,7 +57,7 @@ const GIT_COMMITS: GitCommit[] = [
   },
 ];
 
-const MOCK_DIR_ENTRIES: Record<string, ObserveFsEntry[]> = {
+const MOCK_DIR_ENTRIES: Record<string, RegistryFsEntry[]> = {
   '.': [
     { name: 'app', path: 'app', kind: 'dir' },
     { name: 'docs', path: 'docs', kind: 'dir' },
@@ -88,18 +88,18 @@ const MOCK_FILE_CONTENT: Record<string, string> = {
   'README.md': '# WheelMaker\n\nMonorepo for server and app clients.',
   'app/App.tsx': 'export default function App() { return null; }',
   'app/package.json': '{ "name": "WheelMakerRN" }',
-  'app/src/README.md': '# App RN Foundation\n\nObserve client bootstrap.',
+  'app/src/README.md': '# App RN Foundation\n\nRegistry client bootstrap.',
   'app/src/services/observeRepository.ts':
-    'export class ObserveRepository { /* project.list / fs.list / fs.read */ }',
+    'export class RegistryRepository { /* project.list / fs.list / fs.read */ }',
   'app/src/services/observeClient.ts':
-    'export class ObserveClient { /* request/response websocket */ }',
+    'export class RegistryClient { /* request/response websocket */ }',
 };
 
 function App() {
   const { width } = useWindowDimensions();
   const isWide = width >= 920;
 
-  const repository = useMemo(() => createObserveRepository(), []);
+  const repository = useMemo(() => createRegistryRepository(), []);
 
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('chat');
@@ -108,7 +108,7 @@ function App() {
   const [projectMenuVisible, setProjectMenuVisible] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const [projects, setProjects] = useState<ObserveProject[]>(MOCK_PROJECTS);
+  const [projects, setProjects] = useState<RegistryProject[]>(MOCK_PROJECTS);
   const [selectedProjectId, setSelectedProjectId] = useState(MOCK_PROJECTS[0].projectId);
   const [connected, setConnected] = useState(false);
 
@@ -240,7 +240,6 @@ function App() {
   const sidebar = (
     <WorkspaceSidebar
       activeTab={activeTab}
-      onTabChange={setActiveTab}
       chatSessionIndex={chatSessionIndex}
       onChatSessionSelect={index => {
         setChatSessionIndex(index);
@@ -283,6 +282,21 @@ function App() {
           </Pressable>
 
           <View style={styles.topBarSpacer} />
+
+          <View style={styles.tabSwitch}>
+            {(['chat', 'file', 'git'] as WorkspaceTab[]).map((tab, index, arr) => (
+              <Pressable
+                key={tab}
+                style={[
+                  styles.tabSwitchItem,
+                  index === arr.length - 1 && styles.tabSwitchItemLast,
+                  activeTab === tab && styles.tabSwitchItemActive,
+                ]}
+                onPress={() => setActiveTab(tab)}>
+                <Text style={styles.tabSwitchText}>{tab.toUpperCase()}</Text>
+              </Pressable>
+            ))}
+          </View>
 
           <Pressable style={styles.iconButton} onPress={() => setSettingsVisible(true)}>
             <Text style={styles.iconButtonText}>[]</Text>
@@ -397,14 +411,13 @@ function App() {
 
 function WorkspaceSidebar(props: {
   activeTab: WorkspaceTab;
-  onTabChange: (tab: WorkspaceTab) => void;
   chatSessionIndex: number;
   onChatSessionSelect: (index: number) => void;
   fileRoot: TreeNode | null;
   expandedPaths: Set<string>;
   loadingPaths: Set<string>;
   selectedFilePath: string | null;
-  onToggleDirectory: (path: string) => void;
+  onToggleDirectory: (path: string) => Promise<void>;
   onSelectFile: (path: string) => void;
   selectedCommitIndex: number;
   onSelectCommit: (index: number) => void;
@@ -413,11 +426,6 @@ function WorkspaceSidebar(props: {
 }) {
   return (
     <View style={styles.sidebarRow}>
-      <View style={styles.activityBar}>
-        <TabIcon kind="chat" active={props.activeTab === 'chat'} onPress={() => props.onTabChange('chat')} />
-        <TabIcon kind="file" active={props.activeTab === 'file'} onPress={() => props.onTabChange('file')} />
-        <TabIcon kind="git" active={props.activeTab === 'git'} onPress={() => props.onTabChange('git')} />
-      </View>
       <View style={styles.sidebarBody}>
         {props.activeTab === 'chat' ? (
           <ScrollView style={styles.fill} contentContainerStyle={styles.scrollContent}>
@@ -488,40 +496,13 @@ function WorkspaceSidebar(props: {
   );
 }
 
-function TabIcon(props: { kind: WorkspaceTab; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable style={[styles.tabIcon, props.active && styles.tabIconActive]} onPress={props.onPress}>
-      <View style={styles.iconGlyphWrap}>
-        {props.kind === 'chat' ? (
-          <>
-            <View style={[styles.iconRect, props.active && styles.iconRectActive]} />
-            <View style={styles.iconTail} />
-          </>
-        ) : null}
-        {props.kind === 'file' ? (
-          <>
-            <View style={styles.iconFolderTop} />
-            <View style={[styles.iconRect, props.active && styles.iconRectActive]} />
-          </>
-        ) : null}
-        {props.kind === 'git' ? (
-          <>
-            <View style={[styles.iconRect, props.active && styles.iconRectActive]} />
-            <View style={styles.iconBranch} />
-          </>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
 function renderTree(args: {
   node: TreeNode;
   depth: number;
   expandedPaths: Set<string>;
   loadingPaths: Set<string>;
   selectedFilePath: string | null;
-  onToggleDirectory: (path: string) => void;
+  onToggleDirectory: (path: string) => Promise<void>;
   onSelectFile: (path: string) => void;
 }): React.ReactNode {
   const indentStyle = { paddingLeft: args.depth * 12 + 8 };
@@ -564,7 +545,7 @@ function renderTree(args: {
   );
 }
 
-function mapEntriesToNodes(entries: ObserveFsEntry[], projectId: string): TreeNode[] {
+function mapEntriesToNodes(entries: RegistryFsEntry[], projectId: string): TreeNode[] {
   return entries.map(entry => ({
     name: entry.name,
     path: normalizeNodePath(entry.path, entry.name, projectId),
@@ -640,6 +621,33 @@ const styles = StyleSheet.create({
   },
   topBarSpacer: {
     flex: 1,
+  },
+  tabSwitch: {
+    flexDirection: 'row',
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  tabSwitchItem: {
+    minWidth: 58,
+    minHeight: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRightWidth: 1,
+    borderRightColor: '#ddd',
+    paddingHorizontal: 8,
+  },
+  tabSwitchItemActive: {
+    backgroundColor: '#eee',
+  },
+  tabSwitchItemLast: {
+    borderRightWidth: 0,
+  },
+  tabSwitchText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
   iconButton: {
     width: 32,
@@ -759,65 +767,7 @@ const styles = StyleSheet.create({
   },
   sidebarRow: {
     flex: 1,
-    flexDirection: 'row',
     minHeight: 0,
-  },
-  activityBar: {
-    width: 52,
-    borderRightWidth: 1,
-    borderRightColor: '#ddd',
-    alignItems: 'center',
-    paddingTop: 8,
-  },
-  tabIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  tabIconActive: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    backgroundColor: '#f2f2f2',
-  },
-  iconGlyphWrap: {
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  iconRect: {
-    width: 12,
-    height: 8,
-    borderWidth: 1,
-    borderColor: '#666',
-    borderRadius: 2,
-  },
-  iconRectActive: {
-    borderColor: '#111',
-    backgroundColor: '#ddd',
-  },
-  iconTail: {
-    width: 4,
-    height: 4,
-    borderLeftWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#666',
-    marginTop: 1,
-  },
-  iconFolderTop: {
-    width: 7,
-    height: 2,
-    backgroundColor: '#666',
-    marginBottom: 1,
-  },
-  iconBranch: {
-    width: 2,
-    height: 5,
-    backgroundColor: '#666',
-    marginTop: 1,
   },
   sidebarBody: {
     flex: 1,
