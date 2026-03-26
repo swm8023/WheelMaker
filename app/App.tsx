@@ -61,6 +61,13 @@ function App() {
     setSession({...session, selectedProjectId: projectId, fileEntries});
   };
 
+  const listDirectory = async (path: string): Promise<RegistryFsEntry[]> => {
+    if (!session || !repositoryRef.current) {
+      return [];
+    }
+    return repositoryRef.current.listFiles(session.selectedProjectId, path || '.');
+  };
+
   const logout = (): void => {
     repositoryRef.current?.close();
     repositoryRef.current = null;
@@ -77,6 +84,7 @@ function App() {
       selectedProjectId={session.selectedProjectId}
       fileEntries={session.fileEntries}
       onSelectProject={selectProject}
+      onListDirectory={listDirectory}
       onReadFile={readFile}
       onLogout={logout}
       themeMode={themeMode}

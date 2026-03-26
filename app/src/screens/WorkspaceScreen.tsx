@@ -1,4 +1,4 @@
-﻿import React, {useEffect, useMemo, useState} from 'react';
+﻿import React, {useEffect, useState} from 'react';
 import {
   Modal,
   Pressable,
@@ -24,8 +24,8 @@ type FileNode = {
   name: string;
   path: string;
   isDir: boolean;
-  content?: string;
-  children?: FileNode[];
+  loaded: boolean;
+  children: FileNode[];
 };
 
 type GitFile = {
@@ -67,6 +67,7 @@ type WorkspaceScreenProps = {
   selectedProjectId: string;
   fileEntries: RegistryFsEntry[];
   onSelectProject: (projectId: string) => Promise<void>;
+  onListDirectory: (path: string) => Promise<RegistryFsEntry[]>;
   onReadFile: (path: string) => Promise<string>;
   onLogout: () => void;
   themeMode: ThemeMode;
@@ -78,6 +79,7 @@ export function WorkspaceScreen({
   selectedProjectId,
   fileEntries,
   onSelectProject,
+  onListDirectory,
   onReadFile,
   onLogout,
   themeMode,
@@ -100,32 +102,63 @@ export function WorkspaceScreen({
   const [selectedDiffFilePath, setSelectedDiffFilePath] = useState(
     GIT_COMMITS[0].files[0].path,
   );
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(
-    fileEntries.find(entry => entry.kind === 'file')?.path ?? fileEntries[0]?.path ?? null,
-  );
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [selectedFileContent, setSelectedFileContent] = useState('');
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadingFilePath, setLoadingFilePath] = useState('');
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['.']));
+  const [fileTree, setFileTree] = useState<FileNode>(() => ({
+    name: 'Project',
+    path: '.',
+    isDir: true,
+    loaded: true,
+    children: [],
+  }));
+
+  const selectedProject =
+    projects.find(item => item.projectId === selectedProjectId) ?? projects[0];
+  const selectedCommit = GIT_COMMITS[selectedCommitIndex];
+  const selectedDiffFile = selectedCommit.files.find(
+    file => file.path === selectedDiffFilePath,
+  );
 
   useEffect(() => {
-    const firstFile = fileEntries.find(entry => entry.kind === 'file')?.path;
-    if (firstFile && firstFile !== selectedFilePath) {
-      setSelectedFilePath(firstFile);
-    }
-  }, [fileEntries, selectedFilePath]);
+    const root: FileNode = {
+      name: selectedProject?.name ?? 'Project',
+      path: '.',
+      isDir: true,
+      loaded: true,
+      children: fileEntries.map(entryToNode).sort(sortFileNode),
+    };
+    setFileTree(root);
+    setExpandedPaths(new Set(['.']));
 
-  useEffect(() => {
-    const firstFile = fileEntries.find(entry => entry.kind === 'file')?.path;
-    if (!firstFile) {
+    const first = findFirstFile(root);
+    if (first) {
+      setSelectedFilePath(first.path);
+    } else {
+      setSelectedFilePath(null);
       setSelectedFileContent('');
+    }
+  }, [selectedProject?.name, fileEntries]);
+
+  useEffect(() => {
+    if (isWide) {
+      setDrawerOpen(false);
+    }
+  }, [isWide]);
+
+  useEffect(() => {
+    if (!selectedFilePath) {
       return;
     }
 
     let cancelled = false;
     const load = async () => {
-      setLoadingFilePath(firstFile);
+      setLoadingFilePath(selectedFilePath);
       try {
-        const content = await onReadFile(firstFile);
+        const content = await onReadFile(selectedFilePath);
         if (!cancelled) {
           setSelectedFileContent(content);
         }
@@ -135,63 +168,13 @@ export function WorkspaceScreen({
         }
       }
     };
+
     load().catch(() => undefined);
 
     return () => {
       cancelled = true;
     };
-  }, [fileEntries, onReadFile]);
-
-  const selectedCommit = GIT_COMMITS[selectedCommitIndex];
-  const selectedDiffFile = selectedCommit.files.find(
-    file => file.path === selectedDiffFilePath,
-  );
-  const selectedProject =
-    projects.find(item => item.projectId === selectedProjectId) ?? projects[0];
-
-  const fileTree = useMemo(() => {
-    const project = projects.find(item => item.projectId === selectedProjectId);
-    return buildFileTree(project, fileEntries);
-  }, [projects, selectedProjectId, fileEntries]);
-
-  const expandedPaths = useMemo(() => {
-    return new Set([fileTree.path]);
-  }, [fileTree.path]);
-
-  const leftPanel = renderSidebar({
-    theme,
-    tab,
-    expandedPaths,
-    selectedFilePath,
-    onFileSelect: async path => {
-      setSelectedFilePath(path);
-      const entry = fileEntries.find(item => item.path === path);
-      if (entry?.kind === 'file') {
-        setLoadingFilePath(path);
-        try {
-          setSelectedFileContent(await onReadFile(path));
-        } finally {
-          setLoadingFilePath('');
-        }
-      }
-      if (!isWide) {
-        setDrawerOpen(false);
-      }
-    },
-    selectedCommitIndex,
-    onCommitSelect: index => {
-      setSelectedCommitIndex(index);
-      setSelectedDiffFilePath(GIT_COMMITS[index]?.files[0]?.path ?? '');
-    },
-    selectedDiffFilePath,
-    onDiffFileSelect: path => {
-      setSelectedDiffFilePath(path);
-      if (!isWide) {
-        setDrawerOpen(false);
-      }
-    },
-    fileTree,
-  });
+  }, [selectedFilePath, onReadFile]);
 
   const switchProject = async (projectId: string) => {
     setLoadingProject(true);
@@ -205,6 +188,72 @@ export function WorkspaceScreen({
       setDrawerOpen(false);
     }
   };
+
+  const toggleDirectory = async (path: string) => {
+    let shouldExpand = false;
+    setExpandedPaths(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+        shouldExpand = true;
+      }
+      return next;
+    });
+
+    if (!shouldExpand) {
+      return;
+    }
+
+    const target = findNode(fileTree, path);
+    if (!target || !target.isDir || target.loaded) {
+      return;
+    }
+
+    setLoadingDirs(prev => new Set(prev).add(path));
+    try {
+      const entries = await onListDirectory(path);
+      const children = entries.map(entryToNode).sort(sortFileNode);
+      setFileTree(prev => patchNode(prev, path, node => ({...node, loaded: true, children})));
+    } finally {
+      setLoadingDirs(prev => {
+        const next = new Set(prev);
+        next.delete(path);
+        return next;
+      });
+    }
+  };
+
+  const leftPanel = (
+    <Sidebar
+      theme={theme}
+      tab={tab}
+      tree={fileTree}
+      expandedPaths={expandedPaths}
+      loadingDirs={loadingDirs}
+      selectedFilePath={selectedFilePath}
+      onToggleDirectory={toggleDirectory}
+      onFileSelect={async path => {
+        setSelectedFilePath(path);
+        if (!isWide) {
+          setDrawerOpen(false);
+        }
+      }}
+      selectedCommitIndex={selectedCommitIndex}
+      onCommitSelect={index => {
+        setSelectedCommitIndex(index);
+        setSelectedDiffFilePath(GIT_COMMITS[index]?.files[0]?.path ?? '');
+      }}
+      selectedDiffFilePath={selectedDiffFilePath}
+      onDiffFileSelect={path => {
+        setSelectedDiffFilePath(path);
+        if (!isWide) {
+          setDrawerOpen(false);
+        }
+      }}
+    />
+  );
 
   return (
     <SafeAreaProvider>
@@ -222,6 +271,7 @@ export function WorkspaceScreen({
             style={[styles.headerButton, {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary}]}> 
             <Text style={{color: theme.colors.text}}>{isWide ? (sidebarCollapsed ? '>' : '<') : '='}</Text>
           </Pressable>
+
           <Pressable
             onPress={() => setProjectMenuOpen(value => !value)}
             style={[
@@ -234,7 +284,9 @@ export function WorkspaceScreen({
               {loadingProject ? ' ...' : ''}
             </Text>
           </Pressable>
+
           <View style={styles.headerSpacer} />
+
           <View style={[styles.segmentWrap, {borderColor: theme.colors.border}]}> 
             {(['chat', 'file', 'git'] as WorkspaceTab[]).map((item, index, arr) => (
               <Pressable
@@ -250,6 +302,7 @@ export function WorkspaceScreen({
               </Pressable>
             ))}
           </View>
+
           <Pressable
             onPress={() => setSettingsOpen(true)}
             style={[
@@ -260,6 +313,7 @@ export function WorkspaceScreen({
             <Text style={{color: theme.colors.text}}>[]</Text>
           </Pressable>
         </View>
+
         {projectMenuOpen ? (
           <View
             style={[
@@ -298,7 +352,7 @@ export function WorkspaceScreen({
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
                   CHAT - {CHAT_SESSIONS[chatSessionIndex]}
                 </Text>
-                <ScrollView style={styles.scrollArea}>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollPad}>
                   {CHAT_MESSAGES.map((msg, idx) => (
                     <View
                       key={idx}
@@ -345,7 +399,7 @@ export function WorkspaceScreen({
                   {selectedFilePath ?? 'Select a file'}
                   {loadingProject ? ' (loading project...)' : ''}
                 </Text>
-                <ScrollView style={styles.scrollArea}>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollPad}>
                   {loadingFilePath ? (
                     <Text style={{color: theme.colors.textMuted}}>Loading file...</Text>
                   ) : selectedFilePath && isMarkdownPath(selectedFilePath) ? (
@@ -362,7 +416,7 @@ export function WorkspaceScreen({
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
                   {selectedDiffFile?.path ?? 'Select a changed file'}
                 </Text>
-                <ScrollView style={styles.scrollArea}>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollPad}>
                   <CodeView
                     path={selectedDiffFile?.path ?? 'diff.txt'}
                     code={selectedDiffFile?.diff ?? ''}
@@ -377,7 +431,11 @@ export function WorkspaceScreen({
         {!isWide ? (
           <Modal visible={drawerOpen} animationType="slide" transparent>
             <Pressable style={styles.drawerMask} onPress={() => setDrawerOpen(false)}>
-              <View style={[styles.drawer, {backgroundColor: theme.colors.panel}]}> 
+              <View
+                style={[
+                  styles.drawer,
+                  {backgroundColor: theme.colors.panel, width: Math.min(320, Math.floor(width * 0.88))},
+                ]}> 
                 <Pressable>
                   <View style={styles.drawerInner}>{leftPanel}</View>
                 </Pressable>
@@ -385,9 +443,10 @@ export function WorkspaceScreen({
             </Pressable>
           </Modal>
         ) : null}
+
         <Modal visible={settingsOpen} animationType="slide">
-          <SafeAreaView style={[styles.safeArea, {backgroundColor: theme.colors.background}]}>
-            <View style={[styles.settingsHeader, {borderColor: theme.colors.border}]}>
+          <SafeAreaView style={[styles.safeArea, {backgroundColor: theme.colors.background}]}> 
+            <View style={[styles.settingsHeader, {borderColor: theme.colors.border}]}> 
               <Text style={[styles.settingsTitle, {color: theme.colors.text}]}>Settings</Text>
               <Pressable
                 style={[
@@ -432,41 +491,45 @@ export function WorkspaceScreen({
   );
 }
 
-function renderSidebar(args: {
+function Sidebar(args: {
   theme: ReturnType<typeof resolveTheme>;
   tab: WorkspaceTab;
+  tree: FileNode;
   expandedPaths: Set<string>;
+  loadingDirs: Set<string>;
   selectedFilePath: string | null;
+  onToggleDirectory: (path: string) => Promise<void>;
   onFileSelect: (path: string) => void;
   selectedCommitIndex: number;
   onCommitSelect: (index: number) => void;
   selectedDiffFilePath: string;
   onDiffFileSelect: (path: string) => void;
-  fileTree: FileNode;
 }) {
   if (args.tab === 'chat') {
     return (
-      <View style={styles.sideContainer}>
+      <ScrollView style={styles.sideContainer} contentContainerStyle={styles.scrollPad}>
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHAT LIST</Text>
         {CHAT_SESSIONS.map(item => (
           <View key={item} style={styles.sideRow}>
             <Text style={{color: args.theme.colors.text}}>{item}</Text>
           </View>
         ))}
-      </View>
+      </ScrollView>
     );
   }
 
   if (args.tab === 'file') {
     return (
-      <ScrollView style={styles.sideContainer}>
+      <ScrollView style={styles.sideContainer} contentContainerStyle={styles.scrollPad}>
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>EXPLORER</Text>
         {renderFileTree({
-          node: args.fileTree,
+          node: args.tree,
           depth: 0,
           theme: args.theme,
           expandedPaths: args.expandedPaths,
+          loadingDirs: args.loadingDirs,
           selectedFilePath: args.selectedFilePath,
+          onToggleDirectory: args.onToggleDirectory,
           onFileSelect: args.onFileSelect,
         })}
       </ScrollView>
@@ -475,46 +538,51 @@ function renderSidebar(args: {
 
   return (
     <View style={styles.sideContainer}>
-      <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>COMMITS</Text>
-      <ScrollView style={styles.flexOne}>
-        {GIT_COMMITS.map((commit, index) => (
-          <Pressable
-            key={commit.hash}
-            style={[
-              styles.sideRow,
-              index === args.selectedCommitIndex && {
-                backgroundColor: args.theme.colors.rowSelected,
-              },
-            ]}
-            onPress={() => args.onCommitSelect(index)}>
-            <Text numberOfLines={2} style={{color: args.theme.colors.text}}>
-              {commit.hash} {commit.message}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-      <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHANGED FILES</Text>
-      <ScrollView style={styles.flexOne}>
-        {GIT_COMMITS[args.selectedCommitIndex].files.map(file => {
-          const icon = iconForPath(file.path);
-          return (
+      <View style={styles.gitHalf}>
+        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>COMMITS</Text>
+        <ScrollView style={styles.flexOne}>
+          {GIT_COMMITS.map((commit, index) => (
             <Pressable
-              key={file.path}
+              key={commit.hash}
               style={[
                 styles.sideRow,
-                file.path === args.selectedDiffFilePath && {
+                index === args.selectedCommitIndex && {
                   backgroundColor: args.theme.colors.rowSelected,
                 },
               ]}
-              onPress={() => args.onDiffFileSelect(file.path)}>
-              <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
-                <Text style={{color: icon.color}}>{icon.glyph} </Text>
-                {file.path}
+              onPress={() => args.onCommitSelect(index)}>
+              <Text numberOfLines={2} style={{color: args.theme.colors.text}}>
+                {commit.hash} {commit.message}
               </Text>
             </Pressable>
-          );
-        })}
-      </ScrollView>
+          ))}
+        </ScrollView>
+      </View>
+      <View style={[styles.gitDivider, {backgroundColor: args.theme.colors.border}]} />
+      <View style={styles.gitHalf}>
+        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHANGED FILES</Text>
+        <ScrollView style={styles.flexOne}>
+          {GIT_COMMITS[args.selectedCommitIndex].files.map(file => {
+            const icon = iconForPath(file.path);
+            return (
+              <Pressable
+                key={file.path}
+                style={[
+                  styles.sideRow,
+                  file.path === args.selectedDiffFilePath && {
+                    backgroundColor: args.theme.colors.rowSelected,
+                  },
+                ]}
+                onPress={() => args.onDiffFileSelect(file.path)}>
+                <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
+                  <Text style={{color: icon.color}}>{icon.glyph} </Text>
+                  {file.path}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -524,7 +592,9 @@ function renderFileTree(args: {
   depth: number;
   theme: ReturnType<typeof resolveTheme>;
   expandedPaths: Set<string>;
+  loadingDirs: Set<string>;
   selectedFilePath: string | null;
+  onToggleDirectory: (path: string) => Promise<void>;
   onFileSelect: (path: string) => void;
 }): React.ReactNode {
   const indent = {paddingLeft: args.depth * 14 + 8};
@@ -551,16 +621,23 @@ function renderFileTree(args: {
   }
 
   const isOpen = args.expandedPaths.has(args.node.path);
-  const sortedChildren = [...(args.node.children ?? [])].sort(sortFileNode);
+  const isLoading = args.loadingDirs.has(args.node.path);
+  const sortedChildren = [...args.node.children].sort(sortFileNode);
+
   return (
     <View key={args.node.path}>
-      <View style={[styles.sideRow, indent]}>
+      <Pressable
+        style={[styles.sideRow, indent]}
+        onPress={() => {
+          args.onToggleDirectory(args.node.path).catch(() => undefined);
+        }}>
         <Text style={{color: args.theme.colors.text}}>
-          <Text style={{color: icon.color}}>{icon.glyph} </Text>
           {isOpen ? 'v ' : '> '}
+          <Text style={{color: icon.color}}>{icon.glyph} </Text>
           {args.node.name}
+          {isLoading ? ' ...' : ''}
         </Text>
-      </View>
+      </Pressable>
       {isOpen
         ? sortedChildren.map(child =>
             renderFileTree({
@@ -574,6 +651,16 @@ function renderFileTree(args: {
   );
 }
 
+function entryToNode(entry: RegistryFsEntry): FileNode {
+  return {
+    name: entry.name,
+    path: entry.path,
+    isDir: entry.kind === 'dir',
+    loaded: entry.kind !== 'dir',
+    children: [],
+  };
+}
+
 function sortFileNode(a: FileNode, b: FileNode): number {
   if (a.isDir && !b.isDir) {
     return -1;
@@ -584,22 +671,37 @@ function sortFileNode(a: FileNode, b: FileNode): number {
   return a.name.localeCompare(b.name);
 }
 
-function buildFileTree(
-  project: RegistryProject | undefined,
-  entries: RegistryFsEntry[],
-): FileNode {
-  const projectName = project?.name || 'Project';
-  const projectPath = project?.projectId || 'project';
+function findNode(root: FileNode, path: string): FileNode | null {
+  if (root.path === path) {
+    return root;
+  }
+  for (const child of root.children) {
+    const found = findNode(child, path);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+function patchNode(root: FileNode, path: string, updater: (node: FileNode) => FileNode): FileNode {
+  if (root.path === path) {
+    return updater(root);
+  }
   return {
-    name: projectName,
-    path: projectPath,
-    isDir: true,
-    children: entries.map(entry => ({
-      name: entry.name,
-      path: entry.path,
-      isDir: entry.kind === 'dir',
-    })),
+    ...root,
+    children: root.children.map(child => patchNode(child, path, updater)),
   };
+}
+
+function findFirstFile(root: FileNode): FileNode | null {
+  const sorted = [...root.children].sort(sortFileNode);
+  for (const node of sorted) {
+    if (!node.isDir) {
+      return node;
+    }
+  }
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -671,18 +773,22 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     flexDirection: 'row',
+    minHeight: 0,
   },
   sidebar: {
     width: 320,
+    minHeight: 0,
   },
   divider: {
     width: 1,
   },
   mainPane: {
     flex: 1,
+    minHeight: 0,
   },
   sideContainer: {
     flex: 1,
+    minHeight: 0,
   },
   sideTitle: {
     paddingHorizontal: 10,
@@ -697,6 +803,7 @@ const styles = StyleSheet.create({
   },
   mainBlock: {
     flex: 1,
+    minHeight: 0,
   },
   blockTitle: {
     paddingHorizontal: 12,
@@ -706,6 +813,9 @@ const styles = StyleSheet.create({
   },
   scrollArea: {
     flex: 1,
+    minHeight: 0,
+  },
+  scrollPad: {
     padding: 12,
   },
   chatBubble: {
@@ -739,11 +849,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.25)',
   },
   drawer: {
-    width: 320,
     height: '100%',
+    minHeight: 0,
   },
   drawerInner: {
     flex: 1,
+    minHeight: 0,
   },
   settingsHeader: {
     height: 52,
@@ -771,6 +882,14 @@ const styles = StyleSheet.create({
   },
   flexOne: {
     flex: 1,
+    minHeight: 0,
+  },
+  gitHalf: {
+    flex: 1,
+    minHeight: 0,
+  },
+  gitDivider: {
+    height: 1,
   },
 });
 

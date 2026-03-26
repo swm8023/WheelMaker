@@ -15,29 +15,29 @@ const color = {
 };
 
 const extensionIconMap: Record<string, FileIcon> = {
-  ts: {glyph: '$(symbol-method)', color: color.ts},
-  tsx: {glyph: '$(symbol-method)', color: color.ts},
-  js: {glyph: '$(symbol-method)', color: color.js},
-  jsx: {glyph: '$(symbol-method)', color: color.js},
-  json: {glyph: '$(json)', color: color.json},
-  md: {glyph: '$(book)', color: color.md},
-  markdown: {glyph: '$(book)', color: color.md},
-  go: {glyph: '$(symbol-namespace)', color: color.go},
-  sh: {glyph: '$(terminal)', color: color.shell},
-  ps1: {glyph: '$(terminal)', color: color.shell},
-  yml: {glyph: '$(settings)', color: color.default},
-  yaml: {glyph: '$(settings)', color: color.default},
+  ts: {glyph: 'TS', color: color.ts},
+  tsx: {glyph: 'TS', color: color.ts},
+  js: {glyph: 'JS', color: color.js},
+  jsx: {glyph: 'JS', color: color.js},
+  json: {glyph: '{}', color: color.json},
+  md: {glyph: 'MD', color: color.md},
+  markdown: {glyph: 'MD', color: color.md},
+  go: {glyph: 'GO', color: color.go},
+  sh: {glyph: 'SH', color: color.shell},
+  ps1: {glyph: 'SH', color: color.shell},
+  yml: {glyph: 'YML', color: color.default},
+  yaml: {glyph: 'YML', color: color.default},
 };
 
 const nameIconMap: Record<string, FileIcon> = {
-  dockerfile: {glyph: '$(package)', color: color.default},
-  makefile: {glyph: '$(tools)', color: color.default},
-  'package.json': {glyph: '$(json)', color: color.json},
-  'readme.md': {glyph: '$(book)', color: color.md},
+  dockerfile: {glyph: 'DK', color: color.default},
+  makefile: {glyph: 'MK', color: color.default},
+  'package.json': {glyph: '{}', color: color.json},
+  'readme.md': {glyph: 'MD', color: color.md},
 };
 
-const folderIcon: FileIcon = {glyph: '$(folder)', color: color.folder};
-const fileIcon: FileIcon = {glyph: '$(file)', color: color.default};
+const folderIcon: FileIcon = {glyph: '▸', color: color.folder};
+const fileIcon: FileIcon = {glyph: '•', color: color.default};
 
 export function iconForPath(path: string): FileIcon {
   const normalized = path.toLowerCase().trim();
