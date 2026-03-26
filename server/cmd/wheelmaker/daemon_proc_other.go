@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-func listWorkerProcesses(exeName string) ([]daemonProcess, error) {
+func listWorkerProcesses(exeName, markerFlag string) ([]daemonProcess, error) {
 	// On Unix-like systems, scan the process table and match both executable
 	// name and daemon worker marker so we only supervise daemon-managed workers.
 	cmd := exec.Command("ps", "-eo", "pid=,comm=,args=")
@@ -21,6 +21,10 @@ func listWorkerProcesses(exeName string) ([]daemonProcess, error) {
 		return nil, fmt.Errorf("list workers: %w", err)
 	}
 	base := strings.TrimSpace(filepath.Base(exeName))
+	markerFlag = strings.TrimSpace(markerFlag)
+	if markerFlag == "" {
+		markerFlag = daemonWorkerArg
+	}
 	var procs []daemonProcess
 	scanner := bufio.NewScanner(bytes.NewReader(out))
 	for scanner.Scan() {
@@ -41,7 +45,7 @@ func listWorkerProcesses(exeName string) ([]daemonProcess, error) {
 		if base != "" && comm != base {
 			continue
 		}
-		if !strings.Contains(args, "--daemon-worker") {
+		if !strings.Contains(args, markerFlag) {
 			continue
 		}
 		procs = append(procs, daemonProcess{PID: pid})

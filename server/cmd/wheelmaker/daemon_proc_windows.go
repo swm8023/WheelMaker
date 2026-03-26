@@ -9,12 +9,16 @@ import (
 	"strings"
 )
 
-func listWorkerProcesses(exeName string) ([]daemonProcess, error) {
+func listWorkerProcesses(exeName, markerFlag string) ([]daemonProcess, error) {
 	exeName = strings.TrimSpace(exeName)
 	if exeName == "" {
 		return nil, nil
 	}
-	script := fmt.Sprintf(`$p = Get-CimInstance Win32_Process -Filter "Name='%s'" | Where-Object { $_.CommandLine -match '--daemon-worker' } | Select-Object ProcessId; if ($null -eq $p) { '[]' } else { $p | ConvertTo-Json -Compress }`, exeName)
+	markerFlag = strings.TrimSpace(markerFlag)
+	if markerFlag == "" {
+		markerFlag = daemonWorkerArg
+	}
+	script := fmt.Sprintf(`$p = Get-CimInstance Win32_Process -Filter "Name='%s'" | Where-Object { $_.CommandLine -match '%s' } | Select-Object ProcessId; if ($null -eq $p) { '[]' } else { $p | ConvertTo-Json -Compress }`, exeName, markerFlag)
 	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list workers: %w", err)

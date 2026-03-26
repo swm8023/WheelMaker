@@ -20,6 +20,13 @@ type daemonProcess struct {
 	PID int
 }
 
+type workerSpec struct {
+	name       string
+	markerFlag string
+	args       []string
+	keepPID    int
+}
+
 func runGuardian(workerArgs []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -29,17 +36,22 @@ func runGuardian(workerArgs []string) error {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
 	exeName := filepath.Base(exePath)
-	args := sanitizeWorkerArgs(workerArgs)
-	args = append(args, daemonWorkerArg)
+	baseArgs := sanitizeWorkerArgs(workerArgs)
 
-	var keepPID int
+	specs := []*workerSpec{
+		{name: "hub", markerFlag: hubWorkerArg, args: append(append([]string{}, baseArgs...), hubWorkerArg)},
+		{name: "registry", markerFlag: registryWorkerArg, args: append(append([]string{}, baseArgs...), registryWorkerArg)},
+	}
+
 	reconcile := func() {
-		pid, recErr := reconcileWorkers(exePath, exeName, args, keepPID)
-		if recErr != nil {
-			fmt.Fprintf(os.Stderr, "wheelmaker guardian: %v\n", recErr)
-			return
+		for _, spec := range specs {
+			pid, recErr := reconcileWorkers(exePath, exeName, spec.markerFlag, spec.args, spec.keepPID)
+			if recErr != nil {
+				fmt.Fprintf(os.Stderr, "wheelmaker guardian[%s]: %v\n", spec.name, recErr)
+				continue
+			}
+			spec.keepPID = pid
 		}
-		keepPID = pid
 	}
 
 	reconcile()
@@ -60,7 +72,7 @@ func sanitizeWorkerArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	for _, arg := range args {
 		switch arg {
-		case "-d", "--daemon-worker":
+		case "-d", daemonWorkerArg, hubWorkerArg, registryWorkerArg:
 			continue
 		default:
 			out = append(out, arg)
@@ -69,8 +81,8 @@ func sanitizeWorkerArgs(args []string) []string {
 	return out
 }
 
-func reconcileWorkers(exePath, exeName string, workerArgs []string, preferredPID int) (int, error) {
-	workers, err := listWorkerProcesses(exeName)
+func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, preferredPID int) (int, error) {
+	workers, err := listWorkerProcesses(exeName, markerFlag)
 	if err != nil {
 		return 0, err
 	}
@@ -79,7 +91,7 @@ func reconcileWorkers(exePath, exeName string, workerArgs []string, preferredPID
 		if startErr != nil {
 			return 0, startErr
 		}
-		logger.Info("[daemon] started worker pid=%d", pid)
+		logger.Info("[daemon] started %s worker pid=%d", markerFlag, pid)
 		return pid, nil
 	}
 
@@ -89,10 +101,10 @@ func reconcileWorkers(exePath, exeName string, workerArgs []string, preferredPID
 			continue
 		}
 		if killErr := killProcess(proc.PID); killErr != nil {
-			logger.Warn("[daemon] failed to stop extra worker pid=%d: %v", proc.PID, killErr)
+			logger.Warn("[daemon] failed to stop extra %s worker pid=%d: %v", markerFlag, proc.PID, killErr)
 			continue
 		}
-		logger.Warn("[daemon] stopped extra worker pid=%d", proc.PID)
+		logger.Warn("[daemon] stopped extra %s worker pid=%d", markerFlag, proc.PID)
 	}
 	return keepPID, nil
 }
