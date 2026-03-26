@@ -12,10 +12,11 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	rp "github.com/swm8023/wheelmaker/internal/shared/registryproto"
 )
 
 const (
-	defaultProtocolVersion = "1.0"
+	defaultProtocolVersion = rp.DefaultProtocolVersion
 	defaultServerVersion   = "0.1.0"
 	defaultRequestTimeout  = 10 * time.Second
 )
@@ -26,22 +27,6 @@ type Config struct {
 	Token           string
 	ProtocolVersion string
 	ServerVersion   string
-}
-
-// ProjectInfo is one project reported by a hub.
-type ProjectInfo struct {
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name"`
-	Path   string `json:"path,omitempty"`
-	Agent  string `json:"agent,omitempty"`
-	IMType string `json:"imType,omitempty"`
-}
-
-// HubSnapshot describes a connected hub and its project list.
-type HubSnapshot struct {
-	HubID     string        `json:"hubId"`
-	Projects  []ProjectInfo `json:"projects"`
-	UpdatedAt string        `json:"updatedAt"`
 }
 
 type peerConn struct {
@@ -110,7 +95,7 @@ type Server struct {
 	cfg Config
 
 	mu           sync.RWMutex
-	hubs         map[string]HubSnapshot
+	hubs         map[string]rp.HubSnapshot
 	projectToHub map[string]string
 	hubPeers     map[string]*peerConn
 
@@ -141,7 +126,7 @@ func New(cfg Config) *Server {
 	}
 	return &Server{
 		cfg:          cfg,
-		hubs:         make(map[string]HubSnapshot),
+		hubs:         make(map[string]rp.HubSnapshot),
 		projectToHub: make(map[string]string),
 		hubPeers:     make(map[string]*peerConn),
 	}
@@ -294,7 +279,7 @@ func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState,
 			s.projectToHub[id] = payload.HubID
 		}
 	}
-	s.hubs[payload.HubID] = HubSnapshot{
+	s.hubs[payload.HubID] = rp.HubSnapshot{
 		HubID:     payload.HubID,
 		Projects:  payload.Projects,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
@@ -309,7 +294,7 @@ func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState,
 
 func (s *Server) handleRegistryListProjects(peer *peerConn, in envelope) {
 	s.mu.RLock()
-	hubs := make([]HubSnapshot, 0, len(s.hubs))
+	hubs := make([]rp.HubSnapshot, 0, len(s.hubs))
 	for _, h := range s.hubs {
 		hubs = append(hubs, h)
 	}
@@ -389,7 +374,7 @@ func (s *Server) writeResponse(peer *peerConn, requestID, method, projectID stri
 		Type:      "response",
 		Method:    method,
 		ProjectID: projectID,
-		Payload:   mustRaw(payload),
+		Payload:   rp.MustRaw(payload),
 	})
 }
 
@@ -404,9 +389,4 @@ func (s *Server) writeError(peer *peerConn, requestID, code, message string, det
 			Details: details,
 		},
 	})
-}
-
-func mustRaw(v any) json.RawMessage {
-	b, _ := json.Marshal(v)
-	return b
 }

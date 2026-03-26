@@ -12,6 +12,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub"
 	"github.com/swm8023/wheelmaker/internal/registry"
+	sharedcfg "github.com/swm8023/wheelmaker/internal/shared/config"
 	"github.com/swm8023/wheelmaker/internal/shared/logger"
 )
 
@@ -75,7 +76,7 @@ func runHubWorker() error {
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
 	statePath := filepath.Join(home, ".wheelmaker", "state.json")
 
-	cfg, err := hub.LoadConfig(cfgPath)
+	cfg, err := sharedcfg.LoadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
@@ -107,7 +108,7 @@ func runRegistryWorker() error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
-	cfg, err := hub.LoadConfig(cfgPath)
+	cfg, err := sharedcfg.LoadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}

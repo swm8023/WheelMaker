@@ -3,7 +3,7 @@
 // Integration test for agent/claude: verifies that claude.Agent.Connect()
 // spawns a real claude-agent-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/claude/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/hub/agent/claude/... -v -timeout 60s
 // Requires: claude-agent-acp installed (for example via npm -g) and available in PATH,
 //
 //	and ANTHROPIC_API_KEY set in the environment.

@@ -3,7 +3,7 @@
 // Integration test for agent/codex: verifies that codex.Agent.Connect()
 // spawns a real codex-acp subprocess and returns a working *acp.Conn.
 //
-// Run with: go test -tags integration ./internal/agent/codex/... -v -timeout 60s
+// Run with: go test -tags integration ./internal/hub/agent/codex/... -v -timeout 60s
 // Requires: codex-acp installed (for example via npm -g) and available in PATH,
 //
 //	and OPENAI_API_KEY set in the environment.

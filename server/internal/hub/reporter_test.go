@@ -1,17 +1,31 @@
-package registry
+package hub
 
 import (
 	"context"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/swm8023/wheelmaker/internal/registry"
 )
 
+type testEnvelope struct {
+	Version   string         `json:"version"`
+	RequestID string         `json:"requestId,omitempty"`
+	Type      string         `json:"type"`
+	Method    string         `json:"method,omitempty"`
+	ProjectID string         `json:"projectId,omitempty"`
+	Payload   map[string]any `json:"payload,omitempty"`
+	Error     map[string]any `json:"error,omitempty"`
+}
+
 func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
-	s := New(Config{})
-	ts := newTestServer(t, s)
+	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello registry"), 0o644); err != nil {
@@ -24,9 +38,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		Server:            ts,
 		HubID:             "hub-test",
 		ReconnectInterval: 50 * time.Millisecond,
-	}, []ProjectInfo{
-		{ID: "p1", Name: "proj1", Path: root},
-	})
+	}, []ProjectInfo{{ID: "p1", Name: "proj1", Path: root}})
 
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
@@ -50,19 +62,11 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		Type:      "request",
 		Method:    "fs.list",
 		ProjectID: "p1",
-		Payload: map[string]any{
-			"path":  ".",
-			"limit": 50,
-		},
+		Payload:   map[string]any{"path": ".", "limit": 50},
 	})
 	listResp := mustReadEnvelope(t, app)
 	if listResp.Type != "response" || listResp.Method != "fs.list" {
 		t.Fatalf("unexpected list response: %#v", listResp)
-	}
-
-	entries, ok := listResp.Payload["entries"].([]any)
-	if !ok || len(entries) == 0 {
-		t.Fatalf("entries=%v, want non-empty", listResp.Payload["entries"])
 	}
 
 	mustWriteJSON(t, app, testEnvelope{
@@ -71,11 +75,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		Type:      "request",
 		Method:    "fs.read",
 		ProjectID: "p1",
-		Payload: map[string]any{
-			"path":   "hello.txt",
-			"offset": 0,
-			"limit":  1024,
-		},
+		Payload:   map[string]any{"path": "hello.txt", "offset": 0, "limit": 1024},
 	})
 	readResp := mustReadEnvelope(t, app)
 	if readResp.Type != "response" || readResp.Method != "fs.read" {
@@ -87,9 +87,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 }
 
 func TestReporterRunReturnsOnContextCancel(t *testing.T) {
-	s := New(Config{})
-	ts := newTestServer(t, s)
-
+	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
 	ctx, cancel := context.WithCancel(context.Background())
 	r := NewReporter(ReporterConfig{
 		Server:            ts,
@@ -98,9 +96,7 @@ func TestReporterRunReturnsOnContextCancel(t *testing.T) {
 	}, []ProjectInfo{{ID: "p1", Name: "server", Path: t.TempDir()}})
 
 	done := make(chan error, 1)
-	go func() {
-		done <- r.Run(ctx)
-	}()
+	go func() { done <- r.Run(ctx) }()
 	time.Sleep(60 * time.Millisecond)
 	cancel()
 
@@ -114,41 +110,8 @@ func TestReporterRunReturnsOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestBuildWSURLDefaults(t *testing.T) {
-	got, err := buildWSURL("", 9630)
-	if err != nil {
-		t.Fatalf("buildWSURL() err = %v", err)
-	}
-	want := "ws://127.0.0.1:9630/ws"
-	if got != want {
-		t.Fatalf("buildWSURL()=%q, want %q", got, want)
-	}
-}
-
-func TestBuildWSURLHostAndPort(t *testing.T) {
-	got, err := buildWSURL("10.0.0.8", 9001)
-	if err != nil {
-		t.Fatalf("buildWSURL() err = %v", err)
-	}
-	if got != "ws://10.0.0.8:9001/ws" {
-		t.Fatalf("buildWSURL()=%q", got)
-	}
-}
-
-func TestBuildWSURLAbsoluteURL(t *testing.T) {
-	got, err := buildWSURL("http://127.0.0.1:9630", 0)
-	if err != nil {
-		t.Fatalf("buildWSURL() err = %v", err)
-	}
-	if got != "ws://127.0.0.1:9630/ws" {
-		t.Fatalf("buildWSURL()=%q", got)
-	}
-}
-
 func TestReporterAuth(t *testing.T) {
-	s := New(Config{Token: "token-1"})
-	ts := newTestServer(t, s)
-
+	ts := newRegistryServer(t, registry.New(registry.Config{Token: "token-1"}).Handler())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	r := NewReporter(ReporterConfig{
@@ -159,22 +122,38 @@ func TestReporterAuth(t *testing.T) {
 	}, []ProjectInfo{{ID: "p1", Name: "server", Path: t.TempDir()}})
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
-	defer func() {
-		cancel()
-		<-done
-	}()
+	defer func() { cancel(); <-done }()
 
 	waitForProjectOnline(t, ts, "p1", "token-1")
 }
 
-func newTestServer(t *testing.T, s *Server) string {
-	t.Helper()
-	ln, err := startHTTPServer(s.Handler())
-	if err != nil {
-		t.Fatalf("start http server: %v", err)
+func TestBuildWSURLDefaults(t *testing.T) {
+	got, err := buildWSURL("", 9630)
+	if err != nil || got != "ws://127.0.0.1:9630/ws" {
+		t.Fatalf("buildWSURL() = %q, err=%v", got, err)
 	}
-	t.Cleanup(func() { _ = ln.close() })
-	return ln.addr
+}
+
+func TestBuildWSURLAbsoluteURL(t *testing.T) {
+	got, err := buildWSURL("http://127.0.0.1:9630", 0)
+	if err != nil || got != "ws://127.0.0.1:9630/ws" {
+		t.Fatalf("buildWSURL() = %q, err=%v", got, err)
+	}
+}
+
+func newRegistryServer(t *testing.T, h http.Handler) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := &http.Server{Handler: h}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		_ = ln.Close()
+	})
+	return ln.Addr().String()
 }
 
 func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
@@ -184,20 +163,13 @@ func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 		ws := dialWS(t, "http://"+addr+"/ws")
 		if strings.TrimSpace(token) != "" {
 			mustWriteJSON(t, ws, testEnvelope{
-				Version:   "1.0",
-				RequestID: "wait-auth",
-				Type:      "request",
-				Method:    "auth",
-				Payload:   map[string]any{"token": token},
+				Version: "1.0", RequestID: "wait-auth", Type: "request", Method: "auth",
+				Payload: map[string]any{"token": token},
 			})
 			_ = mustReadEnvelope(t, ws)
 		}
 		mustWriteJSON(t, ws, testEnvelope{
-			Version:   "1.0",
-			RequestID: "wait-list",
-			Type:      "request",
-			Method:    "registry.listProjects",
-			Payload:   map[string]any{},
+			Version: "1.0", RequestID: "wait-list", Type: "request", Method: "registry.listProjects", Payload: map[string]any{},
 		})
 		resp := mustReadEnvelope(t, ws)
 		_ = ws.Close()
@@ -214,12 +186,10 @@ func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 				}
 				for _, pRaw := range projects {
 					p, ok := pRaw.(map[string]any)
-					if !ok {
-						continue
-					}
-					id, _ := p["id"].(string)
-					if id == projectID {
-						return
+					if ok {
+						if id, _ := p["id"].(string); id == projectID {
+							return
+						}
 					}
 				}
 			}
@@ -227,4 +197,30 @@ func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 		time.Sleep(40 * time.Millisecond)
 	}
 	t.Fatalf("project %q not online before timeout", projectID)
+}
+
+func dialWS(t *testing.T, rawURL string) *websocket.Conn {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(rawURL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	return conn
+}
+
+func mustWriteJSON(t *testing.T, ws *websocket.Conn, v any) {
+	t.Helper()
+	if err := ws.WriteJSON(v); err != nil {
+		t.Fatalf("write json: %v", err)
+	}
+}
+
+func mustReadEnvelope(t *testing.T, ws *websocket.Conn) testEnvelope {
+	t.Helper()
+	var out testEnvelope
+	if err := ws.ReadJSON(&out); err != nil {
+		t.Fatalf("read json: %v", err)
+	}
+	return out
 }

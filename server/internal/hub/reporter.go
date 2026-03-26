@@ -1,4 +1,4 @@
-package registry
+package hub
 
 import (
 	"context"
@@ -14,7 +14,20 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/swm8023/wheelmaker/internal/shared/logger"
+	rp "github.com/swm8023/wheelmaker/internal/shared/registryproto"
 )
+
+const (
+	defaultProtocolVersion = rp.DefaultProtocolVersion
+	codeInvalidArgument    = rp.CodeInvalidArgument
+	codeNotFound           = rp.CodeNotFound
+	codeInternal           = rp.CodeInternal
+)
+
+type ProjectInfo = rp.ProjectInfo
+type envelope = rp.Envelope
+type protocolError = rp.ProtocolError
+type errorEnvelope = rp.ErrorEnvelope
 
 // ReporterConfig controls hub->registry connection behavior.
 type ReporterConfig struct {
@@ -129,7 +142,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		Version: defaultProtocolVersion,
 		Type:    "request",
 		Method:  "hello",
-		Payload: mustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"clientName":      "wheelmaker-hub",
 			"clientVersion":   "0.1.0",
 			"protocolVersion": defaultProtocolVersion,
@@ -146,7 +159,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 			Version: defaultProtocolVersion,
 			Type:    "request",
 			Method:  "auth",
-			Payload: mustRaw(map[string]any{"token": r.cfg.Token}),
+			Payload: rp.MustRaw(map[string]any{"token": r.cfg.Token}),
 		}); err != nil {
 			return err
 		}
@@ -159,7 +172,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		Version: defaultProtocolVersion,
 		Type:    "request",
 		Method:  "registry.reportProjects",
-		Payload: mustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"hubId":    r.cfg.HubID,
 			"projects": r.projects,
 		}),
@@ -241,7 +254,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: mustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"path":       rel,
 			"entries":    outEntries,
 			"nextCursor": "",
@@ -302,7 +315,7 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: mustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"path":       rel,
 			"content":    string(buf[:n]),
 			"encoding":   "utf-8",
