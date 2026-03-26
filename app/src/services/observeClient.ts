@@ -19,13 +19,51 @@ export class RegistryClient {
     }
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url);
+      let settled = false;
+      let sawErrorEvent = false;
+      const connectTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(
+          new Error(
+            `registry websocket connect timeout: url=${url} (check network, TLS cert, and nginx websocket proxy)`,
+          ),
+        );
+        try {
+          ws.close();
+        } catch {}
+      }, this.timeoutMs);
+
+      const fail = (message: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(connectTimer);
+        reject(new Error(message));
+        try {
+          ws.close();
+        } catch {}
+      };
+
       ws.onopen = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(connectTimer);
         this.ws = ws;
         this.bind(ws);
         resolve();
       };
-      ws.onerror = event => {
-        reject(new Error(`registry websocket connect failed: ${String(event)}`));
+      ws.onerror = () => {
+        // Browser WebSocket error events do not expose details.
+        // Prefer close code/reason from onclose when available.
+        sawErrorEvent = true;
+      };
+      ws.onclose = event => {
+        if (!settled) {
+          const suffix = sawErrorEvent ? ' (after websocket error event)' : '';
+          fail(
+            `registry websocket closed during connect: code=${event.code} reason=${event.reason || 'n/a'} url=${url}${suffix}`,
+          );
+        }
       };
     });
   }
