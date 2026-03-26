@@ -22,6 +22,7 @@ export function CodeView({path, code, theme}: CodeViewProps) {
         language={language}
         style={style}
         highlighter="hljs"
+        wrapLongLines
         fontFamily={theme.font.code}
         fontSize={13}>
         {code || ''}
@@ -34,6 +35,7 @@ const styles = StyleSheet.create({
   wrap: {
     width: '100%',
     minHeight: 160,
+    flexGrow: 1,
     borderRadius: 6,
     overflow: 'hidden',
   },

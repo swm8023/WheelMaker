@@ -377,7 +377,7 @@ export function WorkspaceScreen({
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
                   CHAT - {CHAT_SESSIONS[chatSessionIndex]}
                 </Text>
-                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollPad}>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
                   {CHAT_MESSAGES.map((msg, idx) => (
                     <View
                       key={idx}
@@ -424,7 +424,7 @@ export function WorkspaceScreen({
                   {selectedFilePath ?? 'Select a file'}
                   {loadingProject ? ' (loading project...)' : ''}
                 </Text>
-                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollPad}>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
                   {loadingFilePath ? (
                     <Text style={{color: theme.colors.textMuted}}>Loading file...</Text>
                   ) : selectedFilePath && isMarkdownPath(selectedFilePath) ? (
@@ -441,7 +441,7 @@ export function WorkspaceScreen({
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
                   {selectedDiffFile?.path ?? 'Select a changed file'}
                 </Text>
-                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollPad}>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
                   <CodeView
                     path={selectedDiffFile?.path ?? 'diff.txt'}
                     code={selectedDiffFile?.diff ?? ''}
@@ -546,7 +546,7 @@ function Sidebar(args: {
 }) {
   if (args.tab === 'chat') {
     return (
-      <ScrollView style={styles.sideContainer} contentContainerStyle={styles.scrollPad}>
+      <ScrollView style={styles.sideContainer} contentContainerStyle={styles.sideScrollPad}>
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHAT LIST</Text>
         {CHAT_SESSIONS.map(item => (
           <View key={item} style={styles.sideRow}>
@@ -559,7 +559,7 @@ function Sidebar(args: {
 
   if (args.tab === 'file') {
     return (
-      <ScrollView style={styles.sideContainer} contentContainerStyle={styles.scrollPad}>
+      <ScrollView style={styles.sideContainer} contentContainerStyle={styles.sideScrollPad}>
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>EXPLORER</Text>
         {renderFileTree({
           node: args.tree,
@@ -818,6 +818,7 @@ const styles = StyleSheet.create({
   sidebar: {
     width: 320,
     minHeight: 0,
+    overflow: 'hidden',
   },
   divider: {
     width: 1,
@@ -827,6 +828,7 @@ const styles = StyleSheet.create({
     minHeight: 0,
     minWidth: 0,
     alignSelf: 'stretch',
+    overflow: 'hidden',
   },
   sideContainer: {
     flex: 1,
@@ -860,8 +862,13 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'stretch',
   },
-  scrollPad: {
+  sideScrollPad: {
     padding: 12,
+    flexGrow: 1,
+  },
+  mainScrollPad: {
+    padding: 12,
+    flexGrow: 1,
   },
   chatBubble: {
     padding: 8,
