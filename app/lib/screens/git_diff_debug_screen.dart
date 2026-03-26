@@ -5,7 +5,12 @@ import '../data/mock_git_diff_data.dart';
 import '../models/git_diff_models.dart';
 
 class GitDiffDebugScreen extends StatefulWidget {
-  const GitDiffDebugScreen({super.key});
+  final bool showAppBar;
+
+  const GitDiffDebugScreen({
+    super.key,
+    this.showAppBar = true,
+  });
 
   @override
   State<GitDiffDebugScreen> createState() => _GitDiffDebugScreenState();
@@ -27,7 +32,7 @@ class _GitDiffDebugScreenState extends State<GitDiffDebugScreen> {
       builder: (context, constraints) {
         final useSplit = constraints.maxWidth >= 980;
         return Scaffold(
-          appBar: AppBar(title: const Text('Git Diff (Debug)')),
+          appBar: widget.showAppBar ? AppBar(title: const Text('Git Diff (Debug)')) : null,
           drawer: useSplit ? null : Drawer(child: SafeArea(child: _buildLeftPane())),
           body: useSplit
               ? Row(

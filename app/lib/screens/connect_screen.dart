@@ -3,8 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/ws_service.dart';
 import 'chat_screen.dart';
-import 'file_explorer_screen.dart';
-import 'git_diff_debug_screen.dart';
+import 'workspace_debug_screen.dart';
 
 /// Entry screen: lets the user configure server address and optional auth token.
 class ConnectScreen extends StatefulWidget {
@@ -137,22 +136,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     onPressed: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const FileExplorerScreen()),
+                        MaterialPageRoute(builder: (_) => const WorkspaceDebugScreen()),
                       );
                     },
-                    icon: const Icon(Icons.bug_report_outlined),
-                    label: const Text('Debug: Explorer'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const GitDiffDebugScreen()),
-                      );
-                    },
-                    icon: const Icon(Icons.compare_arrows_outlined),
-                    label: const Text('Debug: Git Diff'),
+                    icon: const Icon(Icons.view_carousel_outlined),
+                    label: const Text('Debug: Workspace'),
                   ),
                 ],
               ),

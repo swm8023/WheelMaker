@@ -7,7 +7,12 @@ import '../models/file_tree_node.dart';
 import 'code_language.dart';
 
 class FileExplorerScreen extends StatefulWidget {
-  const FileExplorerScreen({super.key});
+  final bool showAppBar;
+
+  const FileExplorerScreen({
+    super.key,
+    this.showAppBar = true,
+  });
 
   @override
   State<FileExplorerScreen> createState() => _FileExplorerScreenState();
@@ -30,9 +35,7 @@ class _FileExplorerScreenState extends State<FileExplorerScreen> {
       builder: (context, constraints) {
         final useSplit = constraints.maxWidth >= 900;
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Explorer (Debug)'),
-          ),
+          appBar: widget.showAppBar ? AppBar(title: const Text('Explorer (Debug)')) : null,
           drawer: useSplit
               ? null
               : Drawer(

@@ -15,7 +15,13 @@ import 'file_explorer_screen.dart';
 /// and connection-state indicator.
 class ChatScreen extends StatefulWidget {
   final WsService service;
-  const ChatScreen({super.key, required this.service});
+  final bool showAppBar;
+
+  const ChatScreen({
+    super.key,
+    required this.service,
+    this.showAppBar = true,
+  });
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -161,23 +167,25 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('WheelMaker'),
-        actions: [
-          IconButton(
-            tooltip: 'Debug Explorer',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const FileExplorerScreen()),
-              );
-            },
-            icon: const Icon(Icons.bug_report_outlined),
-          ),
-          _StatusDot(color: _stateColor(), label: _stateLabel()),
-          const SizedBox(width: 8),
-        ],
-      ),
+      appBar: widget.showAppBar
+          ? AppBar(
+              title: const Text('WheelMaker'),
+              actions: [
+                IconButton(
+                  tooltip: 'Debug Explorer',
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const FileExplorerScreen()),
+                    );
+                  },
+                  icon: const Icon(Icons.bug_report_outlined),
+                ),
+                _StatusDot(color: _stateColor(), label: _stateLabel()),
+                const SizedBox(width: 8),
+              ],
+            )
+          : null,
       // LayoutBuilder lets us center content on wide screens (tablet/desktop)
       // while keeping full-width layout on phones.
       body: LayoutBuilder(
