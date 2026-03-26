@@ -15,29 +15,29 @@ const color = {
 };
 
 const extensionIconMap: Record<string, FileIcon> = {
-  ts: {glyph: 'TS', color: color.ts},
-  tsx: {glyph: 'TS', color: color.ts},
-  js: {glyph: 'JS', color: color.js},
-  jsx: {glyph: 'JS', color: color.js},
-  json: {glyph: '{}', color: color.json},
-  md: {glyph: 'MD', color: color.md},
-  markdown: {glyph: 'MD', color: color.md},
-  go: {glyph: 'GO', color: color.go},
-  sh: {glyph: 'SH', color: color.shell},
-  ps1: {glyph: 'SH', color: color.shell},
-  yml: {glyph: 'YML', color: color.default},
-  yaml: {glyph: 'YML', color: color.default},
+  ts: {glyph: '●', color: color.ts},
+  tsx: {glyph: '●', color: color.ts},
+  js: {glyph: '●', color: color.js},
+  jsx: {glyph: '●', color: color.js},
+  json: {glyph: '●', color: color.json},
+  md: {glyph: '●', color: color.md},
+  markdown: {glyph: '●', color: color.md},
+  go: {glyph: '●', color: color.go},
+  sh: {glyph: '●', color: color.shell},
+  ps1: {glyph: '●', color: color.shell},
+  yml: {glyph: '●', color: color.default},
+  yaml: {glyph: '●', color: color.default},
 };
 
 const nameIconMap: Record<string, FileIcon> = {
-  dockerfile: {glyph: 'DK', color: color.default},
-  makefile: {glyph: 'MK', color: color.default},
-  'package.json': {glyph: '{}', color: color.json},
-  'readme.md': {glyph: 'MD', color: color.md},
+  dockerfile: {glyph: '●', color: color.default},
+  makefile: {glyph: '●', color: color.default},
+  'package.json': {glyph: '●', color: color.json},
+  'readme.md': {glyph: '●', color: color.md},
 };
 
-const folderIcon: FileIcon = {glyph: '▸', color: color.folder};
-const fileIcon: FileIcon = {glyph: '•', color: color.default};
+const folderIcon: FileIcon = {glyph: '▣', color: color.folder};
+const fileIcon: FileIcon = {glyph: '●', color: color.default};
 
 export function iconForPath(path: string): FileIcon {
   const normalized = path.toLowerCase().trim();
