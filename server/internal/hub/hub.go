@@ -21,6 +21,11 @@ import (
 	"github.com/swm8023/wheelmaker/internal/registry"
 )
 
+const (
+	feishuVerificationToken = ""
+	feishuEncryptKey        = ""
+)
+
 // Hub orchestrates one or more WheelMaker project clients.
 // Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
@@ -104,9 +109,7 @@ func (h *Hub) buildClient(ctx context.Context, pc ProjectConfig) (*client.Client
 		return claude.New(claude.Config{})
 	})
 	c.RegisterAgent("copilot", func(_ string, _ map[string]string) agent.Agent {
-		return copilot.New(copilot.Config{
-			ExePath: pc.Client.Copilot.ExePath,
-		})
+		return copilot.New(copilot.Config{})
 	})
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
@@ -123,8 +126,8 @@ func (h *Hub) buildIM(pc ProjectConfig) (*im.ImAdapter, error) {
 		return im.New(feishu.New(feishu.Config{
 			AppID:             pc.IM.AppID,
 			AppSecret:         pc.IM.AppSecret,
-			VerificationToken: h.cfg.Feishu.VerificationToken,
-			EncryptKey:        h.cfg.Feishu.EncryptKey,
+			VerificationToken: feishuVerificationToken,
+			EncryptKey:        feishuEncryptKey,
 			Debug:             pc.Debug,
 			YOLO:              pc.YOLO,
 		})), nil

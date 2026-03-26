@@ -9,7 +9,6 @@ import (
 // Config is the top-level config.json structure.
 type Config struct {
 	Projects []ProjectConfig `json:"projects"`
-	Feishu   FeishuConfig    `json:"feishu,omitempty"`
 	Registry RegistryConfig  `json:"registry,omitempty"`
 	Log      LogConfig       `json:"log,omitempty"`
 }
@@ -39,20 +38,7 @@ type IMConfig struct {
 
 // ClientConf describes the AI agent side for a project.
 type ClientConf struct {
-	Agent   string      `json:"agent,omitempty"`
-	Copilot CopilotConf `json:"copilot,omitempty"`
-}
-
-// CopilotConf holds per-project settings for the GitHub Copilot CLI agent.
-type CopilotConf struct {
-	// ExePath is the path to the copilot binary. Empty = search PATH.
-	ExePath string `json:"exePath,omitempty"`
-}
-
-// FeishuConfig holds shared Feishu settings used across all feishu-type projects.
-type FeishuConfig struct {
-	VerificationToken string `json:"verificationToken,omitempty"`
-	EncryptKey        string `json:"encryptKey,omitempty"`
+	Agent string `json:"agent,omitempty"`
 }
 
 // RegistryConfig configures registry sync independent of IM mode.

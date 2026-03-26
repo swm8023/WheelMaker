@@ -85,11 +85,6 @@ Per-project `debug` controls protocol-level logging and IM SDK debug logging:
 { "type": "feishu", "appID": "cli_xxxxxxxx", "appSecret": "your_app_secret" }
 ```
 
-Top-level `feishu` shared config:
-```json
-{ "feishu": { "verificationToken": "your_verification_token", "encryptKey": "" } }
-```
-
 ### Multi-project example
 
 ```json
@@ -107,8 +102,7 @@ Top-level `feishu` shared config:
       "im": { "type": "console" },
       "client": { "agent": "claude", "path": "/home/user/frontend" }
     }
-  ],
-  "feishu": { "verificationToken": "your_verification_token", "encryptKey": "" }
+  ]
 }
 ```
 
