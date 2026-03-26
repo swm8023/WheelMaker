@@ -16,7 +16,9 @@
     "react": "19.2.3",
     "react-dom": "^19.2.3",
     "react-native": "0.84.1",
+    "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "^5.5.2",
+    "react-native-syntax-highlighter": "^2.1.0",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {

@@ -19,7 +19,9 @@ module.exports = {
     rules: [
       {
         test: /\.[jt]sx?$/,
-        exclude: /node_modules/,
+        exclude: modulePath =>
+          /node_modules/.test(modulePath) &&
+          !/node_modules[\\/]react-native-markdown-display/.test(modulePath),
         use: {
           loader: 'babel-loader',
           options: {

@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   Modal,
   Pressable,
@@ -12,7 +12,11 @@ import {
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
+import {CodeView, MarkdownView} from '../components';
+import {nextThemeMode, resolveTheme, type ThemeMode} from '../theme';
 import type {ObserveFsEntry, ObserveProject} from '../types/observe';
+import {isMarkdownPath} from '../utils/codeLanguage';
+import {iconForPath} from '../utils/fileIcon';
 
 type WorkspaceTab = 'chat' | 'file' | 'git';
 
@@ -38,7 +42,7 @@ type GitCommit = {
 const CHAT_SESSIONS = ['General', 'WheelMaker App', 'Go Service', 'Review'];
 const CHAT_MESSAGES = [
   {role: 'system', text: 'Connected to observe workspace.'},
-  {role: 'agent', text: 'This is the React Native migration shell.'},
+  {role: 'agent', text: 'Workspace theme now supports VS Code style modes.'},
 ];
 
 const GIT_COMMITS: GitCommit[] = [
@@ -77,6 +81,9 @@ export function WorkspaceScreen({
   const isWide = width >= 900;
   const compact = width < 560;
 
+  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
+  const theme = resolveTheme(themeMode);
+
   const [tab, setTab] = useState<WorkspaceTab>('chat');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -93,6 +100,41 @@ export function WorkspaceScreen({
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadingFilePath, setLoadingFilePath] = useState('');
 
+  useEffect(() => {
+    const firstFile = fileEntries.find(entry => entry.kind === 'file')?.path;
+    if (firstFile && firstFile !== selectedFilePath) {
+      setSelectedFilePath(firstFile);
+    }
+  }, [fileEntries, selectedFilePath]);
+
+  useEffect(() => {
+    const firstFile = fileEntries.find(entry => entry.kind === 'file')?.path;
+    if (!firstFile) {
+      setSelectedFileContent('');
+      return;
+    }
+
+    let cancelled = false;
+    const load = async () => {
+      setLoadingFilePath(firstFile);
+      try {
+        const content = await onReadFile(firstFile);
+        if (!cancelled) {
+          setSelectedFileContent(content);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingFilePath('');
+        }
+      }
+    };
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fileEntries, onReadFile]);
+
   const selectedCommit = GIT_COMMITS[selectedCommitIndex];
   const selectedDiffFile = selectedCommit.files.find(
     file => file.path === selectedDiffFilePath,
@@ -108,6 +150,7 @@ export function WorkspaceScreen({
   }, [fileTree.path]);
 
   const leftPanel = renderSidebar({
+    theme,
     tab,
     projects,
     selectedProjectId,
@@ -156,9 +199,9 @@ export function WorkspaceScreen({
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="dark-content" />
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
+      <StatusBar barStyle={themeMode === 'dark' ? 'light-content' : 'dark-content'} />
+      <SafeAreaView style={[styles.safeArea, {backgroundColor: theme.colors.background}]}> 
+        <View style={[styles.header, {borderColor: theme.colors.border, backgroundColor: theme.colors.panel}]}> 
           <Pressable
             onPress={() => {
               if (isWide) {
@@ -167,50 +210,83 @@ export function WorkspaceScreen({
                 setDrawerOpen(true);
               }
             }}
-            style={styles.headerButton}>
-            <Text>{isWide ? (sidebarCollapsed ? '>' : '<') : '='}</Text>
+            style={[styles.headerButton, {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary}]}> 
+            <Text style={{color: theme.colors.text}}>{isWide ? (sidebarCollapsed ? '>' : '<') : '='}</Text>
           </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          <Text style={[styles.headerTitle, {color: theme.colors.text}]} numberOfLines={1}>
             WheelMaker Project
           </Text>
-          <View style={styles.segmentWrap}>
+          <Pressable
+            onPress={() => setThemeMode(mode => nextThemeMode(mode))}
+            style={[styles.themeButton, {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary}]}> 
+            <Text style={{color: theme.colors.text}}>{themeMode === 'dark' ? 'Dark' : 'Light'}</Text>
+          </Pressable>
+          <View style={[styles.segmentWrap, {borderColor: theme.colors.border}]}> 
             {(['chat', 'file', 'git'] as WorkspaceTab[]).map(item => (
               <Pressable
                 key={item}
-                style={[styles.segmentItem, tab === item && styles.segmentItemSelected]}
+                style={[
+                  styles.segmentItem,
+                  {borderColor: theme.colors.border},
+                  tab === item && {backgroundColor: theme.colors.rowSelected},
+                ]}
                 onPress={() => setTab(item)}>
-                <Text>{compact ? item[0].toUpperCase() : item.toUpperCase()}</Text>
+                <Text style={{color: theme.colors.text}}>{compact ? item[0].toUpperCase() : item.toUpperCase()}</Text>
               </Pressable>
             ))}
           </View>
         </View>
 
         <View style={styles.container}>
-          {isWide && !sidebarCollapsed ? <View style={styles.sidebar}>{leftPanel}</View> : null}
-          {isWide && !sidebarCollapsed ? <View style={styles.divider} /> : null}
+          {isWide && !sidebarCollapsed ? (
+            <View style={[styles.sidebar, {backgroundColor: theme.colors.panel}]}>{leftPanel}</View>
+          ) : null}
+          {isWide && !sidebarCollapsed ? (
+            <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+          ) : null}
 
-          <View style={styles.mainPane}>
+          <View style={[styles.mainPane, {backgroundColor: theme.colors.background}]}> 
             {tab === 'chat' ? (
               <View style={styles.mainBlock}>
-                <Text style={styles.blockTitle}>CHAT - {CHAT_SESSIONS[chatSessionIndex]}</Text>
+                <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
+                  CHAT - {CHAT_SESSIONS[chatSessionIndex]}
+                </Text>
                 <ScrollView style={styles.scrollArea}>
                   {CHAT_MESSAGES.map((msg, idx) => (
-                    <View key={idx} style={styles.chatBubble}>
-                      <Text>
+                    <View
+                      key={idx}
+                      style={[
+                        styles.chatBubble,
+                        {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                      ]}>
+                      <Text style={{color: theme.colors.text}}>
                         [{msg.role}] {msg.text}
                       </Text>
                     </View>
                   ))}
                 </ScrollView>
-                <View style={styles.inputRow}>
+                <View style={[styles.inputRow, {borderColor: theme.colors.border}]}> 
                   <TextInput
                     value={chatInput}
                     onChangeText={setChatInput}
                     placeholder="Message..."
-                    style={styles.input}
+                    placeholderTextColor={theme.colors.textMuted}
+                    style={[
+                      styles.input,
+                      {
+                        borderColor: theme.colors.border,
+                        color: theme.colors.text,
+                        backgroundColor: theme.colors.inputBackground,
+                      },
+                    ]}
                   />
-                  <Pressable style={styles.sendButton} onPress={() => setChatInput('')}>
-                    <Text>Send</Text>
+                  <Pressable
+                    style={[
+                      styles.sendButton,
+                      {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                    ]}
+                    onPress={() => setChatInput('')}>
+                    <Text style={{color: theme.colors.text}}>Send</Text>
                   </Pressable>
                 </View>
               </View>
@@ -218,27 +294,33 @@ export function WorkspaceScreen({
 
             {tab === 'file' ? (
               <View style={styles.mainBlock}>
-                <Text style={styles.blockTitle}>
+                <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
                   {selectedFilePath ?? 'Select a file'}
                   {loadingProject ? ' (loading project...)' : ''}
                 </Text>
                 <ScrollView style={styles.scrollArea}>
-                  <Text selectable>
-                    {loadingFilePath
-                      ? 'Loading file...'
-                      : selectedFileContent || 'Select a file from the left panel.'}
-                  </Text>
+                  {loadingFilePath ? (
+                    <Text style={{color: theme.colors.textMuted}}>Loading file...</Text>
+                  ) : selectedFilePath && isMarkdownPath(selectedFilePath) ? (
+                    <MarkdownView content={selectedFileContent} theme={theme} />
+                  ) : (
+                    <CodeView path={selectedFilePath ?? 'file.txt'} code={selectedFileContent} theme={theme} />
+                  )}
                 </ScrollView>
               </View>
             ) : null}
 
             {tab === 'git' ? (
               <View style={styles.mainBlock}>
-                <Text style={styles.blockTitle}>
+                <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
                   {selectedDiffFile?.path ?? 'Select a changed file'}
                 </Text>
                 <ScrollView style={styles.scrollArea}>
-                  <Text selectable>{selectedDiffFile?.diff ?? ''}</Text>
+                  <CodeView
+                    path={selectedDiffFile?.path ?? 'diff.txt'}
+                    code={selectedDiffFile?.diff ?? ''}
+                    theme={theme}
+                  />
                 </ScrollView>
               </View>
             ) : null}
@@ -248,7 +330,7 @@ export function WorkspaceScreen({
         {!isWide ? (
           <Modal visible={drawerOpen} animationType="slide" transparent>
             <Pressable style={styles.drawerMask} onPress={() => setDrawerOpen(false)}>
-              <View style={styles.drawer}>
+              <View style={[styles.drawer, {backgroundColor: theme.colors.panel}]}> 
                 <Pressable>
                   <View style={styles.drawerInner}>{leftPanel}</View>
                 </Pressable>
@@ -262,6 +344,7 @@ export function WorkspaceScreen({
 }
 
 function renderSidebar(args: {
+  theme: ReturnType<typeof resolveTheme>;
   tab: WorkspaceTab;
   projects: ObserveProject[];
   selectedProjectId: string;
@@ -278,22 +361,24 @@ function renderSidebar(args: {
   if (args.tab === 'chat') {
     return (
       <View style={styles.sideContainer}>
-        <Text style={styles.sideTitle}>PROJECTS</Text>
+        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>PROJECTS</Text>
         {args.projects.map(project => (
           <Pressable
             key={project.projectId}
             style={[
               styles.sideRow,
-              args.selectedProjectId === project.projectId && styles.sideRowSelected,
+              args.selectedProjectId === project.projectId && {
+                backgroundColor: args.theme.colors.rowSelected,
+              },
             ]}
             onPress={() => args.onProjectSelect(project.projectId)}>
-            <Text>{project.name}</Text>
+            <Text style={{color: args.theme.colors.text}}>{project.name}</Text>
           </Pressable>
         ))}
-        <Text style={styles.sideTitle}>CHAT LIST</Text>
+        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHAT LIST</Text>
         {CHAT_SESSIONS.map(item => (
           <View key={item} style={styles.sideRow}>
-            <Text>{item}</Text>
+            <Text style={{color: args.theme.colors.text}}>{item}</Text>
           </View>
         ))}
       </View>
@@ -303,22 +388,25 @@ function renderSidebar(args: {
   if (args.tab === 'file') {
     return (
       <ScrollView style={styles.sideContainer}>
-        <Text style={styles.sideTitle}>PROJECTS</Text>
+        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>PROJECTS</Text>
         {args.projects.map(project => (
           <Pressable
             key={project.projectId}
             style={[
               styles.sideRow,
-              args.selectedProjectId === project.projectId && styles.sideRowSelected,
+              args.selectedProjectId === project.projectId && {
+                backgroundColor: args.theme.colors.rowSelected,
+              },
             ]}
             onPress={() => args.onProjectSelect(project.projectId)}>
-            <Text>{project.name}</Text>
+            <Text style={{color: args.theme.colors.text}}>{project.name}</Text>
           </Pressable>
         ))}
-        <Text style={styles.sideTitle}>EXPLORER</Text>
+        <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>EXPLORER</Text>
         {renderFileTree({
           node: args.fileTree,
           depth: 0,
+          theme: args.theme,
           expandedPaths: args.expandedPaths,
           selectedFilePath: args.selectedFilePath,
           onFileSelect: args.onFileSelect,
@@ -329,35 +417,45 @@ function renderSidebar(args: {
 
   return (
     <View style={styles.sideContainer}>
-      <Text style={styles.sideTitle}>COMMITS</Text>
+      <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>COMMITS</Text>
       <ScrollView style={styles.flexOne}>
         {GIT_COMMITS.map((commit, index) => (
           <Pressable
             key={commit.hash}
             style={[
               styles.sideRow,
-              index === args.selectedCommitIndex && styles.sideRowSelected,
+              index === args.selectedCommitIndex && {
+                backgroundColor: args.theme.colors.rowSelected,
+              },
             ]}
             onPress={() => args.onCommitSelect(index)}>
-            <Text numberOfLines={2}>
+            <Text numberOfLines={2} style={{color: args.theme.colors.text}}>
               {commit.hash} {commit.message}
             </Text>
           </Pressable>
         ))}
       </ScrollView>
-      <Text style={styles.sideTitle}>CHANGED FILES</Text>
+      <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHANGED FILES</Text>
       <ScrollView style={styles.flexOne}>
-        {GIT_COMMITS[args.selectedCommitIndex].files.map(file => (
-          <Pressable
-            key={file.path}
-            style={[
-              styles.sideRow,
-              file.path === args.selectedDiffFilePath && styles.sideRowSelected,
-            ]}
-            onPress={() => args.onDiffFileSelect(file.path)}>
-            <Text numberOfLines={1}>{file.path}</Text>
-          </Pressable>
-        ))}
+        {GIT_COMMITS[args.selectedCommitIndex].files.map(file => {
+          const icon = iconForPath(file.path);
+          return (
+            <Pressable
+              key={file.path}
+              style={[
+                styles.sideRow,
+                file.path === args.selectedDiffFilePath && {
+                  backgroundColor: args.theme.colors.rowSelected,
+                },
+              ]}
+              onPress={() => args.onDiffFileSelect(file.path)}>
+              <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
+                <Text style={{color: icon.color}}>{icon.glyph} </Text>
+                {file.path}
+              </Text>
+            </Pressable>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -366,11 +464,14 @@ function renderSidebar(args: {
 function renderFileTree(args: {
   node: FileNode;
   depth: number;
+  theme: ReturnType<typeof resolveTheme>;
   expandedPaths: Set<string>;
   selectedFilePath: string | null;
   onFileSelect: (path: string) => void;
 }): React.ReactNode {
   const indent = {paddingLeft: args.depth * 14 + 8};
+  const icon = iconForPath(args.node.path);
+
   if (!args.node.isDir) {
     return (
       <Pressable
@@ -378,10 +479,15 @@ function renderFileTree(args: {
         style={[
           styles.sideRow,
           indent,
-          args.node.path === args.selectedFilePath && styles.sideRowSelected,
+          args.node.path === args.selectedFilePath && {
+            backgroundColor: args.theme.colors.rowSelected,
+          },
         ]}
         onPress={() => args.onFileSelect(args.node.path)}>
-        <Text>{args.node.name}</Text>
+        <Text style={{color: args.theme.colors.text}}>
+          <Text style={{color: icon.color}}>{icon.glyph} </Text>
+          {args.node.name}
+        </Text>
       </Pressable>
     );
   }
@@ -391,7 +497,11 @@ function renderFileTree(args: {
   return (
     <View key={args.node.path}>
       <View style={[styles.sideRow, indent]}>
-        <Text>{isOpen ? 'v ' : '> '}{args.node.name}</Text>
+        <Text style={{color: args.theme.colors.text}}>
+          <Text style={{color: icon.color}}>{icon.glyph} </Text>
+          {isOpen ? 'v ' : '> '}
+          {args.node.name}
+        </Text>
       </View>
       {isOpen
         ? sortedChildren.map(child =>
@@ -437,12 +547,10 @@ function buildFileTree(
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#fff',
   },
   header: {
     height: 52,
     borderBottomWidth: 1,
-    borderColor: '#ddd',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
@@ -453,8 +561,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 4,
+  },
+  themeButton: {
+    minWidth: 56,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: 4,
+    marginRight: 8,
+    paddingHorizontal: 8,
   },
   headerTitle: {
     flex: 1,
@@ -465,7 +582,6 @@ const styles = StyleSheet.create({
   segmentWrap: {
     flexDirection: 'row',
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 6,
     overflow: 'hidden',
   },
@@ -473,10 +589,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRightWidth: 1,
-    borderColor: '#ddd',
-  },
-  segmentItemSelected: {
-    backgroundColor: '#eee',
   },
   container: {
     flex: 1,
@@ -487,7 +599,6 @@ const styles = StyleSheet.create({
   },
   divider: {
     width: 1,
-    backgroundColor: '#ddd',
   },
   mainPane: {
     flex: 1,
@@ -506,9 +617,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
-  sideRowSelected: {
-    backgroundColor: '#eee',
-  },
   mainBlock: {
     flex: 1,
   },
@@ -517,7 +625,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontWeight: '600',
     borderBottomWidth: 1,
-    borderColor: '#ddd',
   },
   scrollArea: {
     flex: 1,
@@ -527,19 +634,16 @@ const styles = StyleSheet.create({
     padding: 8,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 6,
   },
   inputRow: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    borderColor: '#ddd',
     padding: 10,
   },
   input: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -547,7 +651,6 @@ const styles = StyleSheet.create({
   sendButton: {
     marginLeft: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
     borderRadius: 6,
     paddingHorizontal: 12,
     alignItems: 'center',
@@ -560,7 +663,6 @@ const styles = StyleSheet.create({
   drawer: {
     width: 320,
     height: '100%',
-    backgroundColor: '#fff',
   },
   drawerInner: {
     flex: 1,
