@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/mock_git_diff_data.dart';
 import '../data/mock_wheelmaker_fs.dart';
 import '../models/file_tree_node.dart';
+import '../models/git_diff_models.dart';
 import '../services/ws_service.dart';
 import 'chat_screen.dart';
 import 'connect_screen.dart';
@@ -23,11 +24,15 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   late final WsService _previewService;
   WorkspaceTab _selected = WorkspaceTab.chat;
   int _selectedChatIndex = 0;
+  final Set<String> _fileDrawerExpanded = {'/WheelMaker', '/WheelMaker/app'};
+  int _diffDrawerCommitIndex = 0;
+  String? _diffDrawerFilePath;
 
   @override
   void initState() {
     super.initState();
     _previewService = WsService.localPreview();
+    _diffDrawerFilePath = mockGitCommits.first.files.first.path;
   }
 
   @override
@@ -120,9 +125,9 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
       case WorkspaceTab.chat:
         return _buildChatList();
       case WorkspaceTab.files:
-        return _buildFileList();
+        return _buildFileDrawerTree();
       case WorkspaceTab.diff:
-        return _buildDiffList();
+        return _buildDiffDrawerSplit();
     }
   }
 
@@ -165,48 +170,115 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     );
   }
 
-  Widget _buildFileList() {
-    final files = <FileTreeNode>[];
-    _collectFiles(mockWheelMakerRoot, files);
+  Widget _buildFileDrawerTree() {
     return Container(
       color: const Color(0xFF252526),
-      child: Column(
+      child: ListView(
         children: [
-          _drawerTitle('FILES'),
-          Expanded(
-            child: ListView.builder(
-              itemCount: files.length,
-              itemBuilder: (context, index) {
-                final file = files[index];
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    file.path,
-                    style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () => Navigator.pop(context),
-                );
-              },
+          _drawerTitle('EXPLORER'),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(12, 2, 12, 6),
+            child: Text(
+              'WHEELMAKER',
+              style: TextStyle(
+                color: Color(0xFFD4D4D4),
+                fontWeight: FontWeight.w600,
+                fontSize: 11,
+              ),
             ),
           ),
+          ..._buildFileTreeNodes(mockWheelMakerRoot, 0),
         ],
       ),
     );
   }
 
-  Widget _buildDiffList() {
+  List<Widget> _buildFileTreeNodes(FileTreeNode node, int depth) {
+    final pad = EdgeInsets.only(left: 10 + depth * 14, right: 8);
+    if (!node.isDirectory) {
+      return [
+        InkWell(
+          onTap: () => Navigator.pop(context),
+          child: Container(
+            padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
+            child: Row(
+              children: [
+                const Icon(Icons.description_outlined, size: 16, color: Color(0xFFCCCCCC)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    node.name,
+                    style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ];
+    }
+
+    final isOpen = _fileDrawerExpanded.contains(node.path);
+    final rows = <Widget>[
+      InkWell(
+        onTap: () {
+          setState(() {
+            if (isOpen) {
+              _fileDrawerExpanded.remove(node.path);
+            } else {
+              _fileDrawerExpanded.add(node.path);
+            }
+          });
+        },
+        child: Container(
+          padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
+          child: Row(
+            children: [
+              Icon(isOpen ? Icons.keyboard_arrow_down : Icons.keyboard_arrow_right,
+                  size: 16, color: const Color(0xFFCCCCCC)),
+              Icon(isOpen ? Icons.folder_open : Icons.folder, size: 16, color: const Color(0xFFE8AB53)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  node.name,
+                  style: const TextStyle(
+                    color: Color(0xFFD4D4D4),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ];
+    if (isOpen) {
+      for (final child in node.children) {
+        rows.addAll(_buildFileTreeNodes(child, depth + 1));
+      }
+    }
+    return rows;
+  }
+
+  Widget _buildDiffDrawerSplit() {
+    final commit = mockGitCommits[_diffDrawerCommitIndex];
     return Container(
       color: const Color(0xFF252526),
       child: Column(
         children: [
           _drawerTitle('COMMITS'),
           Expanded(
+            flex: 5,
             child: ListView.builder(
               itemCount: mockGitCommits.length,
               itemBuilder: (context, index) {
                 final commit = mockGitCommits[index];
+                final selected = index == _diffDrawerCommitIndex;
                 return ListTile(
+                  tileColor: selected ? const Color(0xFF37373D) : Colors.transparent,
                   dense: true,
                   title: Text(
                     '${commit.hash.substring(0, 7)} ${commit.message}',
@@ -218,7 +290,48 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                     '${commit.files.length} files',
                     style: const TextStyle(color: Color(0xFF9DA0A6), fontSize: 11),
                   ),
-                  onTap: () => Navigator.pop(context),
+                  onTap: () {
+                    setState(() {
+                      _diffDrawerCommitIndex = index;
+                      _diffDrawerFilePath =
+                          commit.files.isNotEmpty ? commit.files.first.path : null;
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          _drawerTitle('CHANGED FILES'),
+          Expanded(
+            flex: 5,
+            child: ListView.builder(
+              itemCount: commit.files.length,
+              itemBuilder: (context, index) {
+                final file = commit.files[index];
+                final selected = file.path == _diffDrawerFilePath;
+                return InkWell(
+                  onTap: () {
+                    setState(() => _diffDrawerFilePath = file.path);
+                    Navigator.pop(context);
+                  },
+                  child: Container(
+                    color: selected ? const Color(0xFF37373D) : Colors.transparent,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                    child: Row(
+                      children: [
+                        _statusBadge(file.status),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            file.path,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Color(0xFFD4D4D4), fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),
@@ -244,14 +357,27 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     );
   }
 
-  void _collectFiles(FileTreeNode node, List<FileTreeNode> out) {
-    if (!node.isDirectory) {
-      out.add(node);
-      return;
-    }
-    for (final child in node.children) {
-      _collectFiles(child, out);
-    }
+  Widget _statusBadge(GitFileStatus status) {
+    final (label, color) = switch (status) {
+      GitFileStatus.added => ('A', const Color(0xFF2EA043)),
+      GitFileStatus.modified => ('M', const Color(0xFF9E6A03)),
+      GitFileStatus.deleted => ('D', const Color(0xFFF85149)),
+      GitFileStatus.renamed => ('R', const Color(0xFF1F6FEB)),
+    };
+    return Container(
+      width: 18,
+      height: 18,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.55)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700),
+      ),
+    );
   }
 }
 
