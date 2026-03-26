@@ -210,26 +210,11 @@ func (h *Hub) setupRegistrySync() {
 		})
 	}
 
-	rep := NewReporter(ReporterConfig{
+	h.regSync = NewReporter(ReporterConfig{
 		Server:            host,
 		Port:              port,
 		Token:             cfg.Token,
 		HubID:             hubID,
 		ReconnectInterval: 2 * time.Second,
 	}, projects)
-	if hasDebugProject(h.cfg.Projects) {
-		if dw := shared.DebugWriter(); dw != nil {
-			rep.SetDebugLogger(dw)
-		}
-	}
-	h.regSync = rep
-}
-
-func hasDebugProject(projects []shared.ProjectConfig) bool {
-	for _, p := range projects {
-		if p.Debug {
-			return true
-		}
-	}
-	return false
 }

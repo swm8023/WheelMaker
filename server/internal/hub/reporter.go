@@ -44,7 +44,6 @@ type Reporter struct {
 	cfg          ReporterConfig
 	projects     []ProjectInfo
 	projectsByID map[string]ProjectInfo
-	debugLog     io.Writer
 }
 
 // NewReporter creates a Reporter.
@@ -87,11 +86,6 @@ func (r *Reporter) Run(ctx context.Context) error {
 	}
 }
 
-// SetDebugLogger sets an optional writer for debug logging of registry envelopes.
-func (r *Reporter) SetDebugLogger(w io.Writer) {
-	r.debugLog = w
-}
-
 func (r *Reporter) runSession(ctx context.Context) error {
 	wsURL, err := buildWSURL(r.cfg.Server, r.cfg.Port)
 	if err != nil {
@@ -120,7 +114,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 
 	for {
 		var in envelope
-		if err := r.readJSON(conn, "<-", &in); err != nil {
+		if err := conn.ReadJSON(&in); err != nil {
 			return err
 		}
 		if in.Type != "request" {
@@ -140,7 +134,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 		case "git.commit.fileDiff":
 			r.replyGitCommitFileDiff(conn, in)
 		default:
-			_ = r.writeJSON(conn, "->", errorEnvelope{
+			_ = conn.WriteJSON(errorEnvelope{
 				Version:   defaultProtocolVersion,
 				RequestID: in.RequestID,
 				Type:      "error",
@@ -155,7 +149,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 }
 
 func (r *Reporter) handshake(conn *websocket.Conn) error {
-	if err := r.writeJSON(conn, "->", envelope{
+	if err := conn.WriteJSON(envelope{
 		Version: defaultProtocolVersion,
 		Type:    "request",
 		Method:  "hello",
@@ -167,13 +161,13 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := r.readAck(conn); err != nil {
+	if _, err := readAck(conn); err != nil {
 		return fmt.Errorf("hello failed: %w", err)
 	}
 	shared.Info("hub registry: hello ok")
 
 	if r.cfg.Token != "" {
-		if err := r.writeJSON(conn, "->", envelope{
+		if err := conn.WriteJSON(envelope{
 			Version: defaultProtocolVersion,
 			Type:    "request",
 			Method:  "auth",
@@ -181,13 +175,13 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		}); err != nil {
 			return err
 		}
-		if _, err := r.readAck(conn); err != nil {
+		if _, err := readAck(conn); err != nil {
 			return fmt.Errorf("auth failed: %w", err)
 		}
 		shared.Info("hub registry: auth ok")
 	}
 
-	if err := r.writeJSON(conn, "->", envelope{
+	if err := conn.WriteJSON(envelope{
 		Version: defaultProtocolVersion,
 		Type:    "request",
 		Method:  "registry.reportProjects",
@@ -198,7 +192,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := r.readAck(conn); err != nil {
+	if _, err := readAck(conn); err != nil {
 		return fmt.Errorf("registry.reportProjects failed: %w", err)
 	}
 	shared.Info("hub registry: reportProjects ok hubId=%s projects=%d", r.cfg.HubID, len(r.projects))
@@ -213,22 +207,22 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 	}
 	var payload fsListPayload
 	if err := decodePayload(req.Payload, &payload); err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid fs.list payload")
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid fs.list payload")
 		return
 	}
 	root, err := r.projectRoot(req.ProjectID)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
 	target, rel, err := safeJoin(root, payload.Path)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, err.Error())
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, err.Error())
 		return
 	}
 	entries, err := os.ReadDir(target)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	sort.Slice(entries, func(i, j int) bool {
@@ -268,7 +262,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 			"mtime": mtime,
 		})
 	}
-	_ = r.writeJSON(conn, "->", envelope{
+	_ = conn.WriteJSON(envelope{
 		Version:   defaultProtocolVersion,
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -290,22 +284,22 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 	}
 	var payload fsReadPayload
 	if err := decodePayload(req.Payload, &payload); err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid fs.read payload")
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid fs.read payload")
 		return
 	}
 	root, err := r.projectRoot(req.ProjectID)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
 	target, rel, err := safeJoin(root, payload.Path)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, err.Error())
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, err.Error())
 		return
 	}
 	f, err := os.Open(target)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	defer f.Close()
@@ -317,19 +311,19 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 		payload.Limit = 64 * 1024
 	}
 	if _, err := f.Seek(payload.Offset, io.SeekStart); err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	buf := make([]byte, payload.Limit)
 	n, err := f.Read(buf)
 	if err != nil && err != io.EOF {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	eof := err == io.EOF || int64(n) < payload.Limit
 	nextOffset := payload.Offset + int64(n)
 
-	_ = r.writeJSON(conn, "->", envelope{
+	_ = conn.WriteJSON(envelope{
 		Version:   defaultProtocolVersion,
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -348,13 +342,13 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 func (r *Reporter) replyGitBranches(conn *websocket.Conn, req envelope) {
 	root, err := r.projectRoot(req.ProjectID)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
 	current, _ := runGit(root, "rev-parse", "--abbrev-ref", "HEAD")
 	branchesRaw, err := runGit(root, "branch", "--format=%(refname:short)")
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	branches := make([]string, 0)
@@ -364,7 +358,7 @@ func (r *Reporter) replyGitBranches(conn *websocket.Conn, req envelope) {
 			branches = append(branches, line)
 		}
 	}
-	_ = r.writeJSON(conn, "->", envelope{
+	_ = conn.WriteJSON(envelope{
 		Version:   defaultProtocolVersion,
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -385,12 +379,12 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 	}
 	var payload gitLogPayload
 	if err := decodePayload(req.Payload, &payload); err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.log payload")
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.log payload")
 		return
 	}
 	root, err := r.projectRoot(req.ProjectID)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
 	ref := strings.TrimSpace(payload.Ref)
@@ -409,7 +403,7 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 	}
 	raw, err := runGit(root, "log", ref, "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s")
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	lines := make([]string, 0)
@@ -443,7 +437,7 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 	if end < len(lines) {
 		nextCursor = strconv.Itoa(end)
 	}
-	_ = r.writeJSON(conn, "->", envelope{
+	_ = conn.WriteJSON(envelope{
 		Version:   defaultProtocolVersion,
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -463,17 +457,17 @@ func (r *Reporter) replyGitCommitFiles(conn *websocket.Conn, req envelope) {
 	}
 	var p payload
 	if err := decodePayload(req.Payload, &p); err != nil || strings.TrimSpace(p.SHA) == "" {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.commit.files payload")
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.commit.files payload")
 		return
 	}
 	root, err := r.projectRoot(req.ProjectID)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
 	numstatRaw, err := runGit(root, "show", "--numstat", "--format=", p.SHA)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	statusRaw, _ := runGit(root, "diff-tree", "--no-commit-id", "--name-status", "-r", p.SHA)
@@ -504,7 +498,7 @@ func (r *Reporter) replyGitCommitFiles(conn *websocket.Conn, req envelope) {
 			"deletions": deletions,
 		})
 	}
-	_ = r.writeJSON(conn, "->", envelope{
+	_ = conn.WriteJSON(envelope{
 		Version:   defaultProtocolVersion,
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -525,12 +519,12 @@ func (r *Reporter) replyGitCommitFileDiff(conn *websocket.Conn, req envelope) {
 	}
 	var p payload
 	if err := decodePayload(req.Payload, &p); err != nil || strings.TrimSpace(p.SHA) == "" || strings.TrimSpace(p.Path) == "" {
-		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.commit.fileDiff payload")
+		_ = writeError(conn, req.RequestID, codeInvalidArgument, "invalid git.commit.fileDiff payload")
 		return
 	}
 	root, err := r.projectRoot(req.ProjectID)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
+		_ = writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
 	contextLines := p.ContextLines
@@ -539,11 +533,11 @@ func (r *Reporter) replyGitCommitFileDiff(conn *websocket.Conn, req envelope) {
 	}
 	diff, err := runGit(root, "show", "--no-color", fmt.Sprintf("--unified=%d", contextLines), p.SHA, "--", p.Path)
 	if err != nil {
-		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		_ = writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
 	}
 	isBinary := strings.Contains(diff, "Binary files")
-	_ = r.writeJSON(conn, "->", envelope{
+	_ = conn.WriteJSON(envelope{
 		Version:   defaultProtocolVersion,
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -608,9 +602,9 @@ func decodePayload(raw []byte, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-func (r *Reporter) readAck(conn *websocket.Conn) (envelope, error) {
+func readAck(conn *websocket.Conn) (envelope, error) {
 	var resp envelope
-	if err := r.readJSON(conn, "<-", &resp); err != nil {
+	if err := conn.ReadJSON(&resp); err != nil {
 		return envelope{}, err
 	}
 	if resp.Type == "error" && resp.Error != nil {
@@ -619,8 +613,8 @@ func (r *Reporter) readAck(conn *websocket.Conn) (envelope, error) {
 	return resp, nil
 }
 
-func (r *Reporter) writeError(conn *websocket.Conn, requestID, code, message string) error {
-	return r.writeJSON(conn, "->", errorEnvelope{
+func writeError(conn *websocket.Conn, requestID, code, message string) error {
+	return conn.WriteJSON(errorEnvelope{
 		Version:   defaultProtocolVersion,
 		RequestID: requestID,
 		Type:      "error",
@@ -629,32 +623,6 @@ func (r *Reporter) writeError(conn *websocket.Conn, requestID, code, message str
 			Message: message,
 		},
 	})
-}
-
-func (r *Reporter) readJSON(conn *websocket.Conn, direction string, out any) error {
-	if err := conn.ReadJSON(out); err != nil {
-		return err
-	}
-	r.writeDebugEnvelope(direction, out)
-	return nil
-}
-
-func (r *Reporter) writeJSON(conn *websocket.Conn, direction string, v any) error {
-	r.writeDebugEnvelope(direction, v)
-	return conn.WriteJSON(v)
-}
-
-func (r *Reporter) writeDebugEnvelope(direction string, v any) {
-	if r.debugLog == nil {
-		return
-	}
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return
-	}
-	if d := strings.TrimSpace(direction); d != "" {
-		_, _ = fmt.Fprintf(r.debugLog, "%s[registry] %s\n", d, strings.TrimSpace(string(raw)))
-	}
 }
 
 func buildWSURL(server string, port int) (string, error) {
