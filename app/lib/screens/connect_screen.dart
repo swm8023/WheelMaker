@@ -35,7 +35,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _addrCtrl.text = prefs.getString('wm_addr') ?? 'ws://127.0.0.1:9527/ws';
+      _addrCtrl.text = prefs.getString('wm_addr') ?? 'ws://127.0.0.1:9630/ws';
       _tokenCtrl.text = prefs.getString('wm_token') ?? '';
     });
   }
@@ -50,11 +50,11 @@ class _ConnectScreenState extends State<ConnectScreen> {
     await prefs.setString('wm_token', token);
 
     setState(() => _connecting = true);
-    WsService? chatService;
+    late final WsService chatService;
+    ObserveProjectDataSource? dataSource;
     try {
-      chatService = WsService();
-      await chatService.connect(addr, token);
-      await _waitChatReady(chatService);
+      // Current app version is registry-only; chat protocol is not required.
+      chatService = WsService.localPreview();
 
       final client = await ObserveWsClient.connect(
         address: addr,
@@ -65,7 +65,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
       if (projects.isEmpty) {
         throw Exception('No projects found on server');
       }
-      final dataSource = ObserveProjectDataSource(
+      dataSource = ObserveProjectDataSource(
         client: client,
         projects: projects,
       );
@@ -80,37 +80,19 @@ class _ConnectScreenState extends State<ConnectScreen> {
         MaterialPageRoute(
           builder: (_) => WorkspaceDebugScreen(
             dataSource: dataSource,
-            chatService: chatService!,
+            chatService: chatService,
           ),
         ),
       );
     } catch (e) {
-      chatService?.dispose();
+      dataSource?.dispose();
+      chatService.dispose();
       if (mounted) {
         setState(() => _connecting = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Login failed: $e')),
         );
       }
-    }
-  }
-
-  Future<void> _waitChatReady(WsService chatService) async {
-    if (chatService.state == WsState.ready) return;
-    if (chatService.state == WsState.error ||
-        chatService.state == WsState.disconnected) {
-      throw Exception('Unable to connect chat service');
-    }
-    final state = await chatService.stateStream
-        .firstWhere(
-          (it) =>
-              it == WsState.ready ||
-              it == WsState.error ||
-              it == WsState.disconnected,
-        )
-        .timeout(const Duration(seconds: 8));
-    if (state != WsState.ready) {
-      throw Exception('Chat service authentication failed');
     }
   }
 
@@ -152,7 +134,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     enabled: !_connecting,
                     decoration: const InputDecoration(
                       labelText: 'Server Address',
-                      hintText: 'ws://192.168.1.x:9527/ws',
+                      hintText: 'ws://127.0.0.1:9630/ws',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.wifi),
                     ),
