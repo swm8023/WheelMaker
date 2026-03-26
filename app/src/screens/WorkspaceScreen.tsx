@@ -1,5 +1,6 @@
-﻿import React, {useEffect, useState} from 'react';
+﻿import React, {useEffect, useRef, useState} from 'react';
 import {
+  Animated,
   Modal,
   Pressable,
   ScrollView,
@@ -88,11 +89,12 @@ export function WorkspaceScreen({
   const {width} = useWindowDimensions();
   const isWide = width >= 900;
   const compact = width < 560;
+  const drawerWidth = Math.min(320, Math.floor(width * 0.88));
 
   const theme = resolveTheme(themeMode);
 
   const [tab, setTab] = useState<WorkspaceTab>('chat');
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerVisible, setDrawerVisible] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -108,6 +110,7 @@ export function WorkspaceScreen({
   const [loadingFilePath, setLoadingFilePath] = useState('');
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['.']));
+  const drawerProgress = useRef(new Animated.Value(0)).current;
   const [fileTree, setFileTree] = useState<FileNode>(() => ({
     name: 'Project',
     path: '.',
@@ -122,6 +125,27 @@ export function WorkspaceScreen({
   const selectedDiffFile = selectedCommit.files.find(
     file => file.path === selectedDiffFilePath,
   );
+
+  const openDrawer = () => {
+    setDrawerVisible(true);
+    Animated.timing(drawerProgress, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeDrawer = () => {
+    Animated.timing(drawerProgress, {
+      toValue: 0,
+      duration: 160,
+      useNativeDriver: true,
+    }).start(({finished}) => {
+      if (finished) {
+        setDrawerVisible(false);
+      }
+    });
+  };
 
   useEffect(() => {
     const root: FileNode = {
@@ -145,9 +169,10 @@ export function WorkspaceScreen({
 
   useEffect(() => {
     if (isWide) {
-      setDrawerOpen(false);
+      setDrawerVisible(false);
+      drawerProgress.setValue(0);
     }
-  }, [isWide]);
+  }, [drawerProgress, isWide]);
 
   useEffect(() => {
     if (!selectedFilePath) {
@@ -185,7 +210,7 @@ export function WorkspaceScreen({
       setLoadingProject(false);
     }
     if (!isWide) {
-      setDrawerOpen(false);
+      closeDrawer();
     }
   };
 
@@ -237,7 +262,7 @@ export function WorkspaceScreen({
       onFileSelect={async path => {
         setSelectedFilePath(path);
         if (!isWide) {
-          setDrawerOpen(false);
+          closeDrawer();
         }
       }}
       selectedCommitIndex={selectedCommitIndex}
@@ -249,7 +274,7 @@ export function WorkspaceScreen({
       onDiffFileSelect={path => {
         setSelectedDiffFilePath(path);
         if (!isWide) {
-          setDrawerOpen(false);
+          closeDrawer();
         }
       }}
     />
@@ -265,7 +290,7 @@ export function WorkspaceScreen({
               if (isWide) {
                 setSidebarCollapsed(value => !value);
               } else {
-                setDrawerOpen(true);
+                openDrawer();
               }
             }}
             style={[styles.headerButton, {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary}]}> 
@@ -429,18 +454,32 @@ export function WorkspaceScreen({
         </View>
 
         {!isWide ? (
-          <Modal visible={drawerOpen} animationType="fade" transparent>
-            <Pressable style={styles.drawerMask} onPress={() => setDrawerOpen(false)}>
-              <View
+          <Modal visible={drawerVisible} animationType="none" transparent onRequestClose={closeDrawer}>
+            <View style={styles.drawerHost}>
+              <Pressable style={styles.drawerOverlay} onPress={closeDrawer}>
+                <Animated.View style={[styles.drawerMask, {opacity: drawerProgress}]} />
+              </Pressable>
+              <Animated.View
                 style={[
                   styles.drawer,
-                  {backgroundColor: theme.colors.panel, width: Math.min(320, Math.floor(width * 0.88))},
+                  {
+                    backgroundColor: theme.colors.panel,
+                    width: drawerWidth,
+                    transform: [
+                      {
+                        translateX: drawerProgress.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-drawerWidth, 0],
+                        }),
+                      },
+                    ],
+                  },
                 ]}> 
                 <Pressable>
                   <View style={styles.drawerInner}>{leftPanel}</View>
                 </Pressable>
-              </View>
-            </Pressable>
+              </Animated.View>
+            </View>
           </Modal>
         ) : null}
 
@@ -850,14 +889,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  drawerMask: {
+  drawerHost: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  drawerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  drawerMask: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.32)',
   },
   drawer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
     height: '100%',
     minHeight: 0,
-    alignSelf: 'flex-start',
   },
   drawerInner: {
     flex: 1,
@@ -899,6 +946,9 @@ const styles = StyleSheet.create({
     height: 1,
   },
 });
+
+
+
 
 
 
