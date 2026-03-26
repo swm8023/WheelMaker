@@ -10,8 +10,6 @@ $ErrorActionPreference = "Continue"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $baseDir = Join-Path -Path $HOME -ChildPath ".wheelmaker"
 $logPath = Join-Path -Path $baseDir -ChildPath "delay_restart_server.log"
-$stdout = Join-Path -Path $baseDir -ChildPath "wheelmaker-stdout.log"
-$stderr = Join-Path -Path $baseDir -ChildPath "wheelmaker-stderr.log"
 $buildScript = Join-Path -Path $PSScriptRoot -ChildPath "build_server.ps1"
 $installScript = Join-Path -Path $PSScriptRoot -ChildPath "install_server.ps1"
 
@@ -63,7 +61,7 @@ if (-not (Test-Path $installedExe)) {
   exit 1
 }
 
-$p = Start-Process -WorkingDirectory $repoRoot -FilePath $installedExe -ArgumentList "-d" -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+$p = Start-Process -WorkingDirectory $repoRoot -FilePath $installedExe -ArgumentList "-d" -WindowStyle Hidden -PassThru
 Add-Content -Path $logPath -Value ("[{0}] started guardian pid={1} path={2}" -f (Get-Date -Format o), $p.Id, $installedExe)
 
 Start-Sleep -Seconds 4
