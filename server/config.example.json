@@ -33,10 +33,6 @@
     "token": "",
     "hubId": "dev-hub"
   },
-  "feishu": {
-    "verificationToken": "zzz",
-    "encryptKey": ""
-  },
   "log": {
     "level": "warn"
   }
