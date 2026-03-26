@@ -5,7 +5,7 @@ Stop reinventing the wheel, start making your own. 🛞
 A bridge daemon that connects local AI coding CLIs (Codex, Claude, etc.) to IM platforms like Feishu, letting you remotely control your local AI assistant from your phone.
 
 ```
-Feishu (mobile) ──► WheelMaker ──► claude-agent-acp / <acp-binary> ──► your codebase
+Feishu ──► WheelMaker ──► claude-agent-acp / <acp-binary> ──► your codebase
 ```
 
 ## Features

@@ -117,7 +117,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		id:     fmt.Sprintf("hub-conn-%d", s.nextID.Add(1)),
 		authed: s.cfg.Token == "",
 	}
-	defer s.dropHub(state.id)
 
 	for {
 		var in envelope
@@ -196,7 +195,7 @@ func (s *Server) handleHubReportProjects(ws *websocket.Conn, state *connectionSt
 	})
 
 	s.mu.Lock()
-	s.hubs[state.id] = HubSnapshot{
+	s.hubs[payload.HubID] = HubSnapshot{
 		HubID:     payload.HubID,
 		Projects:  payload.Projects,
 		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
@@ -220,12 +219,6 @@ func (s *Server) handleRegistryListProjects(ws *websocket.Conn, in envelope) {
 		return hubs[i].HubID < hubs[j].HubID
 	})
 	_ = s.writeResponse(ws, in.RequestID, in.Method, map[string]any{"hubs": hubs})
-}
-
-func (s *Server) dropHub(connID string) {
-	s.mu.Lock()
-	delete(s.hubs, connID)
-	s.mu.Unlock()
 }
 
 func (s *Server) writeResponse(ws *websocket.Conn, requestID, method string, payload any) error {

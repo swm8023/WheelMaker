@@ -1,12 +1,13 @@
 ﻿# WheelMaker — Server
 
-Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, mobile WebSocket, console).
+Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, console), with independent registry sync.
 
 ## Architecture
 
 ```
 Hub
- ├─ im/forwarder.Forwarder ── console | feishu | mobile   (IM layer)
+ ├─ im/forwarder.Forwarder ── console | feishu   (IM layer)
+ ├─ registry.Reporter ──► registry server (project snapshot sync)
  └─ client.Client ── acp.Forwarder ── acp.Conn ── CLI subprocess  (agent layer)
 ```
 
@@ -22,7 +23,7 @@ Hub
 | `internal/im/forwarder/` | Message dedup/filter, pending decisions, HelpResolver |
 | `internal/im/console/` | Console IM adapter (reads stdin) |
 | `internal/im/feishu/` | Feishu Bot IM adapter |
-| `internal/im/mobile/` | WebSocket IM adapter for mobile app |
+| `internal/registry/` | Registry server and hub reporter |
 | `internal/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
 
 ## Config Files
@@ -35,27 +36,13 @@ Hub
   "projects": [
     { "name": "local", "debug": true, "path": "/your/project", "yolo": true,
       "im": { "type": "console" }, "client": { "agent": "claude" } },
-    { "name": "mobile", "path": "/your/project", "yolo": false,
-      "im": { "type": "mobile", "mobile": { "port": 9527, "token": "change-me" } },
+    { "name": "prod", "path": "/your/project", "yolo": false,
+      "im": { "type": "feishu", "appID": "cli_xxx", "appSecret": "yyy" },
       "client": { "agent": "claude" } }
-  ]
+  ],
+  "registry": { "listen": true, "port": 9630, "server": "127.0.0.1" }
 }
 ```
-
-## Mobile WebSocket Protocol
-
-Connect to `ws://<host>:<port>/ws`:
-
-```
-Server → { "type": "auth_required" }
-Client → { "type": "auth", "token": "..." }
-Server → { "type": "ready", "chatId": "..." }
-```
-
-Inbound: `auth` / `message` / `option` / `ping`
-Outbound: `text` / `card` / `options` / `debug` / `pong` / `error` / `ready` / `auth_required`
-
-Decision flow: `options` carries `decisionId` → client sends `{type:"option", decisionId, optionId}`
 
 ## state.go Design
 
@@ -105,9 +92,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_ser
 | 3 | Agent subprocess is created lazily — never at startup |
 | 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im.Channel`) |
 | 5 | `state.json` is the source of truth for runtime state |
-| 6 | Decision messages carry a `decisionId`; mobile adapter resolves via pending-decision map |
+| 6 | Registry sync is independent of IM mode (`registry.listen=true` local, otherwise remote connect) |
 
 ## Key Protocol Docs
 
 - ACP protocol: [../docs/acp-protocol-full.zh-CN.md](../docs/acp-protocol-full.zh-CN.md)
 - Feishu Bot: [../docs/feishu-bot.md](../docs/feishu-bot.md)
+- Remote Observe / Registry: [../docs/remote-observe-protocol-v1.md](../docs/remote-observe-protocol-v1.md)

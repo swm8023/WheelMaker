@@ -14,6 +14,7 @@ type envelope struct {
 	Method    string          `json:"method,omitempty"`
 	ProjectID string          `json:"projectId,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
+	Error     *protocolError  `json:"error,omitempty"`
 }
 
 type protocolError struct {
