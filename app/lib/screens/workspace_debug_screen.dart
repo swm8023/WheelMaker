@@ -21,10 +21,12 @@ class WorkspaceDebugScreen extends StatefulWidget {
 
 class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-  static const double _splitBreakpoint = 980;
+  static const double _splitBreakpoint = 700;
+  static const double _sidebarWidth = 320;
   late final WsService _previewService;
   WorkspaceTab _selected = WorkspaceTab.chat;
   int _selectedChatIndex = 0;
+  bool _sidebarCollapsed = false;
   final Set<String> _fileDrawerExpanded = {'/WheelMaker', '/WheelMaker/app'};
   int _diffDrawerCommitIndex = 0;
   String? _diffDrawerFilePath;
@@ -44,7 +46,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     return Scaffold(
       key: _scaffoldKey,
       drawer: Drawer(
-        child: SafeArea(child: _buildDrawerContent()),
+        child: SafeArea(child: _buildDrawerContent(closeOnSelect: true)),
       ),
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -52,9 +54,20 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
         title: Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.menu),
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-              tooltip: 'Open list',
+              key: const ValueKey('workspace-sidebar-toggle'),
+              icon: Icon(
+                isSplit
+                    ? (_sidebarCollapsed ? Icons.chevron_right : Icons.chevron_left)
+                    : Icons.menu,
+              ),
+              onPressed: () {
+                if (isSplit) {
+                  setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+                } else {
+                  _scaffoldKey.currentState?.openDrawer();
+                }
+              },
+              tooltip: isSplit ? 'Toggle sidebar' : 'Open list',
             ),
             Expanded(
               child: Text(
@@ -115,34 +128,42 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     );
   }
 
-  Widget _buildDrawerContent() {
+  Widget _buildDrawerContent({required bool closeOnSelect}) {
     switch (_selected) {
       case WorkspaceTab.chat:
-        return _buildChatList(closeOnSelect: true);
+        return _buildChatList(closeOnSelect: closeOnSelect);
       case WorkspaceTab.files:
-        return _buildFileDrawerTree();
+        return _buildFileDrawerTree(closeOnSelect: closeOnSelect);
       case WorkspaceTab.diff:
-        return _buildDiffDrawerSplit();
+        return _buildDiffDrawerSplit(closeOnSelect: closeOnSelect);
     }
   }
 
   Widget _buildCurrentBody(bool isSplit) {
+    if (!isSplit) {
+      return _buildCurrentMainContent();
+    }
+    return Row(
+      children: [
+        if (!_sidebarCollapsed)
+          SizedBox(
+            width: _sidebarWidth,
+            child: _buildDrawerContent(closeOnSelect: false),
+          ),
+        if (!_sidebarCollapsed) const VerticalDivider(width: 1),
+        Expanded(child: _buildCurrentMainContent()),
+      ],
+    );
+  }
+
+  Widget _buildCurrentMainContent() {
     switch (_selected) {
       case WorkspaceTab.chat:
-        if (!isSplit) {
-          return ChatScreen(service: _previewService, showAppBar: false);
-        }
-        return Row(
-          children: [
-            SizedBox(width: 320, child: _buildChatList(closeOnSelect: false)),
-            const VerticalDivider(width: 1),
-            Expanded(child: ChatScreen(service: _previewService, showAppBar: false)),
-          ],
-        );
+        return ChatScreen(service: _previewService, showAppBar: false);
       case WorkspaceTab.files:
-        return const FileExplorerScreen(showAppBar: false);
+        return const FileExplorerScreen(showAppBar: false, showSidebar: false);
       case WorkspaceTab.diff:
-        return const GitDiffDebugScreen(showAppBar: false);
+        return const GitDiffDebugScreen(showAppBar: false, showSidebar: false);
     }
   }
 
@@ -154,6 +175,7 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
       'Review Notes',
     ];
     return Container(
+      key: const ValueKey('workspace-sidebar-chat'),
       color: const Color(0xFF252526),
       child: Column(
         children: [
@@ -187,8 +209,9 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     );
   }
 
-  Widget _buildFileDrawerTree() {
+  Widget _buildFileDrawerTree({required bool closeOnSelect}) {
     return Container(
+      key: const ValueKey('workspace-sidebar-files'),
       color: const Color(0xFF252526),
       child: ListView(
         children: [
@@ -204,18 +227,22 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
               ),
             ),
           ),
-          ..._buildFileTreeNodes(mockWheelMakerRoot, 0),
+          ..._buildFileTreeNodes(mockWheelMakerRoot, 0, closeOnSelect),
         ],
       ),
     );
   }
 
-  List<Widget> _buildFileTreeNodes(FileTreeNode node, int depth) {
+  List<Widget> _buildFileTreeNodes(FileTreeNode node, int depth, bool closeOnSelect) {
     final pad = EdgeInsets.only(left: 10 + depth * 14, right: 8);
     if (!node.isDirectory) {
       return [
         InkWell(
-          onTap: () => Navigator.pop(context),
+          onTap: () {
+            if (closeOnSelect && Navigator.of(context).canPop()) {
+              Navigator.pop(context);
+            }
+          },
           child: Container(
             padding: pad.add(const EdgeInsets.symmetric(vertical: 5)),
             child: Row(
@@ -278,15 +305,16 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
     ];
     if (isOpen) {
       for (final child in node.children) {
-        rows.addAll(_buildFileTreeNodes(child, depth + 1));
+        rows.addAll(_buildFileTreeNodes(child, depth + 1, closeOnSelect));
       }
     }
     return rows;
   }
 
-  Widget _buildDiffDrawerSplit() {
+  Widget _buildDiffDrawerSplit({required bool closeOnSelect}) {
     final commit = mockGitCommits[_diffDrawerCommitIndex];
     return Container(
+      key: const ValueKey('workspace-sidebar-diff'),
       color: const Color(0xFF252526),
       child: Column(
         children: [
@@ -334,7 +362,9 @@ class _WorkspaceDebugScreenState extends State<WorkspaceDebugScreen> {
                 return InkWell(
                   onTap: () {
                     setState(() => _diffDrawerFilePath = file.path);
-                    Navigator.pop(context);
+                    if (closeOnSelect && Navigator.of(context).canPop()) {
+                      Navigator.pop(context);
+                    }
                   },
                   child: Container(
                     color: selected ? const Color(0xFF37373D) : Colors.transparent,

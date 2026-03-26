@@ -6,10 +6,12 @@ import '../models/git_diff_models.dart';
 
 class GitDiffDebugScreen extends StatefulWidget {
   final bool showAppBar;
+  final bool showSidebar;
 
   const GitDiffDebugScreen({
     super.key,
     this.showAppBar = true,
+    this.showSidebar = true,
   });
 
   @override
@@ -30,7 +32,7 @@ class _GitDiffDebugScreenState extends State<GitDiffDebugScreen> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final useSplit = constraints.maxWidth >= 980;
+        final useSplit = widget.showSidebar && constraints.maxWidth >= 980;
         return Scaffold(
           appBar: widget.showAppBar ? AppBar(title: const Text('Git Diff (Debug)')) : null,
           drawer: useSplit ? null : Drawer(child: SafeArea(child: _buildLeftPane())),
