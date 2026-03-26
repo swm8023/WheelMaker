@@ -69,3 +69,23 @@ Add-Content -Path $logPath -Value ("[{0}] started guardian pid={1} path={2}" -f 
 Start-Sleep -Seconds 4
 $wm = Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue
 Add-Content -Path $logPath -Value ("[{0}] wheelmaker count after restart={1}" -f (Get-Date -Format o), @($wm).Count)
+
+$guardian = 0
+$hubWorker = 0
+$registryWorker = 0
+foreach ($proc in @($wm)) {
+  $cmd = [string]$proc.CommandLine
+  if ($cmd -match "(^|\s)-d(\s|$)") {
+    $guardian++
+  }
+  if ($cmd -match "(^|\s)--hub-worker(\s|$)") {
+    $hubWorker++
+  }
+  if ($cmd -match "(^|\s)--registry-worker(\s|$)") {
+    $registryWorker++
+  }
+}
+Add-Content -Path $logPath -Value ("[{0}] wheelmaker roles guardian={1} hub={2} registry={3}" -f (Get-Date -Format o), $guardian, $hubWorker, $registryWorker)
+if ($guardian -lt 1 -or $hubWorker -lt 1 -or $registryWorker -lt 1) {
+  Add-Content -Path $logPath -Value ("[{0}] warning: expected at least 1 guardian + 1 hub + 1 registry process" -f (Get-Date -Format o))
+}
