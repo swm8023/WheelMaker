@@ -89,6 +89,13 @@ function App() {
     return repositoryRef.current.gitLog(session.selectedProjectId, ref, '', 50);
   };
 
+  const listGitBranches = async (): Promise<{current: string; branches: string[]}> => {
+    if (!session || !repositoryRef.current) {
+      return {current: '', branches: []};
+    }
+    return repositoryRef.current.gitBranches(session.selectedProjectId);
+  };
+
   const listGitCommitFiles = async (sha: string): Promise<RegistryGitCommitFile[]> => {
     if (!session || !repositoryRef.current) {
       return [];
@@ -120,6 +127,7 @@ function App() {
         onSelectProject={selectProject}
         onListDirectory={listDirectory}
         onReadFile={readFile}
+        onListGitBranches={listGitBranches}
         onListGitCommits={listGitCommits}
         onListGitCommitFiles={listGitCommitFiles}
         onReadGitFileDiff={readGitFileDiff}

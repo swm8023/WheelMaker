@@ -42,6 +42,7 @@ type WorkspaceScreenProps = {
   onSelectProject: (projectId: string) => Promise<void>;
   onListDirectory: (path: string) => Promise<RegistryFsEntry[]>;
   onReadFile: (path: string) => Promise<string>;
+  onListGitBranches: () => Promise<{current: string; branches: string[]}>;
   onListGitCommits: (ref?: string) => Promise<RegistryGitCommit[]>;
   onListGitCommitFiles: (sha: string) => Promise<RegistryGitCommitFile[]>;
   onReadGitFileDiff: (sha: string, path: string) => Promise<RegistryGitFileDiff>;
@@ -59,6 +60,7 @@ export function WorkspaceScreen({
   onSelectProject,
   onListDirectory,
   onReadFile,
+  onListGitBranches,
   onListGitCommits,
   onListGitCommitFiles,
   onReadGitFileDiff,
@@ -88,6 +90,7 @@ export function WorkspaceScreen({
     fileEntries,
     onListDirectory,
     onReadFile,
+    onListGitBranches,
     onListGitCommits,
     onListGitCommitFiles,
     onReadGitFileDiff,
@@ -318,6 +321,7 @@ export function WorkspaceScreen({
       gitLoading={workspaceData.projectState.gitLoading}
       gitError={workspaceData.projectState.gitError}
       gitCommits={workspaceData.projectState.gitCommits}
+      gitCurrentBranch={workspaceData.projectState.gitCurrentBranch}
       selectedCommitSha={workspaceData.projectState.selectedCommitSha}
       onCommitSelect={workspaceData.selectCommit}
       gitFiles={selectedCommitFiles}
@@ -553,7 +557,8 @@ function Sidebar(args: {
   onFileSelect: (path: string) => void;
   gitLoading: boolean;
   gitError: string;
-  gitCommits: Array<{sha: string; title: string}>;
+  gitCommits: RegistryGitCommit[];
+  gitCurrentBranch: string;
   selectedCommitSha: string;
   onCommitSelect: (index: number) => void;
   gitFiles: GitCommitFileView[];
@@ -602,15 +607,37 @@ function Sidebar(args: {
             <Pressable
               key={commit.sha}
               style={[
-                styles.sideRow,
+                styles.commitRow,
                 commit.sha === args.selectedCommitSha && {
                   backgroundColor: args.theme.colors.rowSelected,
                 },
               ]}
               onPress={() => args.onCommitSelect(index)}>
-              <Text numberOfLines={2} style={{color: args.theme.colors.text}}>
-                {commit.sha.slice(0, 7)} {commit.title}
-              </Text>
+              <View style={styles.commitGraph}>
+                <View
+                  style={[
+                    styles.commitLineTop,
+                    {backgroundColor: args.theme.colors.border},
+                    index === 0 && styles.commitLineHidden,
+                  ]}
+                />
+                <View style={[styles.commitNode, {backgroundColor: args.theme.colors.accent}]} />
+                <View style={[styles.commitLineBottom, {backgroundColor: args.theme.colors.border}]} />
+              </View>
+              <View style={styles.commitTextWrap}>
+                <View style={styles.commitTitleRow}>
+                  <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
+                    {commit.title}
+                  </Text>
+                  {index === 0 && args.gitCurrentBranch ? (
+                    <View style={[styles.branchBadge, {borderColor: args.theme.colors.accent}]}>
+                      <Text style={[styles.branchBadgeText, {color: args.theme.colors.accent}]}>
+                        {args.gitCurrentBranch}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
             </Pressable>
           ))}
         </ScrollView>
@@ -859,6 +886,56 @@ const styles = StyleSheet.create({
     minHeight: 22,
     justifyContent: 'center',
     paddingHorizontal: 10,
+  },
+  commitRow: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingLeft: 6,
+    paddingRight: 10,
+  },
+  commitGraph: {
+    width: 18,
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  commitLineTop: {
+    width: 1,
+    flex: 1,
+  },
+  commitLineHidden: {
+    opacity: 0,
+  },
+  commitNode: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginVertical: 2,
+  },
+  commitLineBottom: {
+    width: 1,
+    flex: 1,
+  },
+  commitTextWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 0,
+  },
+  commitTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  branchBadge: {
+    marginLeft: 6,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  branchBadgeText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
   },
   treeText: {
     fontSize: 13,

@@ -45,6 +45,8 @@ type ProjectWorkspaceState = {
   chatInput: string;
   gitLoading: boolean;
   gitError: string;
+  gitCurrentBranch: string;
+  gitBranches: string[];
   gitCommits: GitCommitView[];
   gitFilesBySha: Record<string, GitCommitFileView[]>;
   selectedCommitSha: string;
@@ -57,6 +59,7 @@ type UseWorkspaceDataArgs = {
   fileEntries: RegistryFsEntry[];
   onListDirectory: (path: string) => Promise<RegistryFsEntry[]>;
   onReadFile: (path: string) => Promise<string>;
+  onListGitBranches: () => Promise<{current: string; branches: string[]}>;
   onListGitCommits: (ref?: string) => Promise<RegistryGitCommit[]>;
   onListGitCommitFiles: (sha: string) => Promise<RegistryGitCommitFile[]>;
   onReadGitFileDiff: (sha: string, path: string) => Promise<RegistryGitFileDiff>;
@@ -92,6 +95,8 @@ function initialProjectState(projectName: string, entries: RegistryFsEntry[]): P
     chatInput: '',
     gitLoading: false,
     gitError: '',
+    gitCurrentBranch: '',
+    gitBranches: [],
     gitCommits: [],
     gitFilesBySha: {},
     selectedCommitSha: '',
@@ -106,6 +111,7 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     fileEntries,
     onListDirectory,
     onReadFile,
+    onListGitBranches,
     onListGitCommits,
     onListGitCommitFiles,
     onReadGitFileDiff,
@@ -221,7 +227,7 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
         };
       });
       try {
-        const commits = await onListGitCommits('HEAD');
+        const [branches, commits] = await Promise.all([onListGitBranches(), onListGitCommits('HEAD')]);
         if (cancelled) return;
         setProjectStates(prev => {
           const current = prev[selectedProjectId];
@@ -233,6 +239,8 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
               ...current,
               gitLoading: false,
               gitError: '',
+              gitCurrentBranch: branches.current,
+              gitBranches: branches.branches,
               gitCommits: commits,
               selectedCommitSha,
             },
@@ -258,7 +266,13 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     return () => {
       cancelled = true;
     };
-  }, [onListGitCommits, projectState.gitCommits.length, projectState.gitLoading, selectedProjectId]);
+  }, [
+    onListGitBranches,
+    onListGitCommits,
+    projectState.gitCommits.length,
+    projectState.gitLoading,
+    selectedProjectId,
+  ]);
 
   useEffect(() => {
     if (!selectedProjectId || !projectState.selectedCommitSha) return;
@@ -492,10 +506,13 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
         ? prevSelectedPath
         : findFirstFile(nextRoot)?.path ?? null;
 
+    let nextGitBranches = {current: snapshot.gitCurrentBranch, branches: snapshot.gitBranches};
     let nextGitCommits = snapshot.gitCommits;
     let nextGitError = '';
     try {
-      nextGitCommits = await onListGitCommits('HEAD');
+      const [branches, commits] = await Promise.all([onListGitBranches(), onListGitCommits('HEAD')]);
+      nextGitBranches = branches;
+      nextGitCommits = commits;
     } catch (error) {
       nextGitError = error instanceof Error ? error.message : String(error);
     }
@@ -524,6 +541,8 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
             nextSelectedPath && nextSelectedPath === current.selectedFilePath ? current.selectedFileContent : '',
           gitLoading: false,
           gitError: nextGitError,
+          gitCurrentBranch: nextGitBranches.current,
+          gitBranches: nextGitBranches.branches,
           gitCommits: nextGitCommits,
           selectedCommitSha: nextSelectedCommitSha,
           selectedDiffFilePath: nextSelectedDiffFilePath,

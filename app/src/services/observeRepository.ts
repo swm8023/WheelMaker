@@ -58,6 +58,19 @@ export class RegistryRepository {
     return (payload.commits ?? []).filter(commit => !!commit.sha);
   }
 
+  async gitBranches(projectId: string): Promise<{current: string; branches: string[]}> {
+    const resp = await this.client.request({
+      method: 'git.branches',
+      projectId,
+      payload: {},
+    });
+    const payload = (resp.payload ?? {}) as {current?: string; branches?: string[]};
+    return {
+      current: payload.current ?? '',
+      branches: payload.branches ?? [],
+    };
+  }
+
   async gitCommitFiles(projectId: string, sha: string): Promise<RegistryGitCommitFile[]> {
     const resp = await this.client.request({
       method: 'git.commit.files',
