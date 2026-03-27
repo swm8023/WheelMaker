@@ -11,9 +11,16 @@ type CodeViewProps = {
   code: string;
   theme: AppTheme;
   wrapLines?: boolean;
+  showLineNumbers?: boolean;
 };
 
-export function CodeView({path, code, theme, wrapLines = true}: CodeViewProps) {
+export function CodeView({
+  path,
+  code,
+  theme,
+  wrapLines = true,
+  showLineNumbers = true,
+}: CodeViewProps) {
   const language = languageFromPath(path);
   const style = theme.mode === 'dark' ? vs2015 : vs;
   const webSyntaxStyle = {
@@ -38,6 +45,7 @@ export function CodeView({path, code, theme, wrapLines = true}: CodeViewProps) {
         codeTagProps={{style: webCodeTagStyle}}
         highlighter="hljs"
         wrapLongLines={wrapLines}
+        showLineNumbers={showLineNumbers}
         fontFamily={theme.font.code}
         fontSize={13}>
         {code || ''}

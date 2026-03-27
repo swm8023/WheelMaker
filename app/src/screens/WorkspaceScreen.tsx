@@ -7,6 +7,7 @@ import {
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   Platform,
@@ -85,6 +86,7 @@ export function WorkspaceScreen({
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wrapLines, setWrapLines] = useState(false);
+  const [showLineNumbers, setShowLineNumbers] = useState(true);
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
@@ -314,6 +316,7 @@ export function WorkspaceScreen({
                 code={workspaceData.projectState.selectedFileContent}
                 theme={theme}
                 wrapLines={wrapLines}
+                showLineNumbers={showLineNumbers}
               />
             )}
           </ScrollView>
@@ -336,7 +339,7 @@ export function WorkspaceScreen({
           ) : selectedDiffFile?.diffError ? (
             <Text style={{color: theme.colors.error}}>{selectedDiffFile.diffError}</Text>
           ) : (
-            <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} wrapLines={wrapLines} />
+            <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} wrapLines />
           )}
         </ScrollView>
       </View>
@@ -461,31 +464,22 @@ export function WorkspaceScreen({
               {borderColor: theme.colors.border, backgroundColor: theme.colors.panel},
             ]}>
             <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>QUICK SETTINGS</Text>
-            <Text style={[styles.quickLabel, {color: theme.colors.textMuted}]}>THEME</Text>
-            {(['dark', 'light'] as ThemeMode[]).map(mode => (
-              <Pressable key={mode} style={styles.quickItem} onPress={() => onThemeModeChange(mode)}>
-                <View style={[styles.quickRadioOuter, {borderColor: theme.colors.textMuted}]}>
-                  {themeMode === mode ? (
-                    <View style={[styles.quickRadioInner, {backgroundColor: theme.colors.accent}]} />
-                  ) : null}
-                </View>
-                <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
-              </Pressable>
-            ))}
-            <Text style={[styles.quickLabel, {color: theme.colors.textMuted}]}>WRAP LINE</Text>
-            <Pressable style={styles.quickItem} onPress={() => setWrapLines(true)}>
-              <View style={[styles.quickRadioOuter, {borderColor: theme.colors.textMuted}]}>
-                {wrapLines ? <View style={[styles.quickRadioInner, {backgroundColor: theme.colors.accent}]} /> : null}
-              </View>
-              <Text style={{color: theme.colors.text}}>ON</Text>
+            <Pressable
+              style={styles.quickSwitchItem}
+              onPress={() => onThemeModeChange(themeMode === 'dark' ? 'light' : 'dark')}>
+              <Text style={{color: theme.colors.text}}>Dark Mode</Text>
+              <Switch
+                value={themeMode === 'dark'}
+                onValueChange={value => onThemeModeChange(value ? 'dark' : 'light')}
+              />
             </Pressable>
-            <Pressable style={styles.quickItem} onPress={() => setWrapLines(false)}>
-              <View style={[styles.quickRadioOuter, {borderColor: theme.colors.textMuted}]}>
-                {!wrapLines ? (
-                  <View style={[styles.quickRadioInner, {backgroundColor: theme.colors.accent}]} />
-                ) : null}
-              </View>
-              <Text style={{color: theme.colors.text}}>OFF</Text>
+            <Pressable style={styles.quickSwitchItem} onPress={() => setWrapLines(value => !value)}>
+              <Text style={{color: theme.colors.text}}>Wrap Line</Text>
+              <Switch value={wrapLines} onValueChange={setWrapLines} />
+            </Pressable>
+            <Pressable style={styles.quickSwitchItem} onPress={() => setShowLineNumbers(value => !value)}>
+              <Text style={{color: theme.colors.text}}>Line Number</Text>
+              <Switch value={showLineNumbers} onValueChange={setShowLineNumbers} />
             </Pressable>
             <View style={[styles.quickMoreDivider, {backgroundColor: theme.colors.border}]} />
             <Pressable
@@ -993,32 +987,12 @@ const styles = StyleSheet.create({
     zIndex: 25,
     paddingBottom: 8,
   },
-  quickLabel: {
-    fontSize: 11,
-    lineHeight: 16,
-    paddingHorizontal: 10,
-    paddingTop: 4,
-    paddingBottom: 2,
-  },
-  quickItem: {
-    minHeight: 30,
+  quickSwitchItem: {
+    minHeight: 38,
     paddingHorizontal: 10,
     alignItems: 'center',
     flexDirection: 'row',
-  },
-  quickRadioOuter: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    marginRight: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  quickRadioInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    justifyContent: 'space-between',
   },
   quickMoreDivider: {
     height: 1,
