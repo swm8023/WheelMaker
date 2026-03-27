@@ -1,0 +1,13 @@
+{
+  "migIndex": 1,
+  "data": [
+    {
+      "path": "assets/fonts/codicon.ttf",
+      "sha1": "08e2808bc72948cd18874a3efded185977dd4c72"
+    },
+    {
+      "path": "assets/fonts/seti.ttf",
+      "sha1": "ce0a97d571d86a952b731fb590250734efbc5659"
+    }
+  ]
+}
