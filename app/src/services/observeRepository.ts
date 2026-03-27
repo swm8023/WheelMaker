@@ -53,6 +53,7 @@ export class RegistryRepository {
       method: 'git.log',
       projectId,
       payload: { ref, cursor, limit },
+      timeoutMs: 30000,
     });
     const payload = (resp.payload ?? {}) as { commits?: RegistryGitCommit[] };
     return (payload.commits ?? []).filter(commit => !!commit.sha);
@@ -63,6 +64,7 @@ export class RegistryRepository {
       method: 'git.branches',
       projectId,
       payload: {},
+      timeoutMs: 20000,
     });
     const payload = (resp.payload ?? {}) as {current?: string; branches?: string[]};
     return {
@@ -76,6 +78,7 @@ export class RegistryRepository {
       method: 'git.commit.files',
       projectId,
       payload: { sha },
+      timeoutMs: 20000,
     });
     const payload = (resp.payload ?? {}) as { files?: RegistryGitCommitFile[] };
     return (payload.files ?? []).filter(file => !!file.path);
@@ -91,6 +94,7 @@ export class RegistryRepository {
       method: 'git.commit.fileDiff',
       projectId,
       payload: { sha, path, contextLines },
+      timeoutMs: 30000,
     });
     const payload = (resp.payload ?? {}) as RegistryGitFileDiff;
     return {

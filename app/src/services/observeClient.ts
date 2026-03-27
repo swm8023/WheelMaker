@@ -91,6 +91,7 @@ export class RegistryClient {
     method: string;
     payload: Record<string, unknown>;
     projectId?: string;
+    timeoutMs?: number;
   }): Promise<RegistryEnvelope> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('registry websocket is not connected');
@@ -105,11 +106,12 @@ export class RegistryClient {
       ...(args.projectId ? { projectId: args.projectId } : {}),
     };
 
+    const timeoutMs = args.timeoutMs ?? this.timeoutMs;
     return new Promise<RegistryEnvelope>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new Error(`registry request timed out: ${args.method}`));
-      }, this.timeoutMs);
+        reject(new Error(`registry request timed out (${timeoutMs}ms): ${args.method}`));
+      }, timeoutMs);
       this.pending.set(requestId, { resolve, reject, timer });
       this.ws?.send(JSON.stringify(envelope));
     });
