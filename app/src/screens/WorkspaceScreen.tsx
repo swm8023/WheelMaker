@@ -88,6 +88,7 @@ export function WorkspaceScreen({
   const [showLineNumbers, setShowLineNumbers] = useState(true);
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
+  const [showCommitDetailCard, setShowCommitDetailCard] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const settingsProgress = useRef(new Animated.Value(0)).current;
   const sidebarWidthAnim = useRef(new Animated.Value(320)).current;
@@ -345,7 +346,7 @@ export function WorkspaceScreen({
             <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} wrapLines />
           )}
         </ScrollView>
-        {selectedCommit ? (
+        {showCommitDetailCard && selectedCommit ? (
           <View
             style={[
               styles.commitDetailCard,
@@ -396,10 +397,14 @@ export function WorkspaceScreen({
       gitCommits={workspaceData.projectState.gitCommits}
       gitCurrentBranch={workspaceData.projectState.gitCurrentBranch}
       selectedCommitSha={workspaceData.projectState.selectedCommitSha}
-      onCommitSelect={workspaceData.selectCommit}
+      onCommitSelect={index => {
+        setShowCommitDetailCard(true);
+        workspaceData.selectCommit(index);
+      }}
       gitFiles={selectedCommitFiles}
       selectedDiffFilePath={workspaceData.projectState.selectedDiffFilePath}
       onDiffFileSelect={path => {
+        setShowCommitDetailCard(false);
         workspaceData.selectDiffFile(path);
         if (!isWide) {
           closeDrawer();
@@ -470,6 +475,7 @@ export function WorkspaceScreen({
                 onPress={() => {
                   setTab(item);
                   setQuickSettingsOpen(false);
+                  setShowCommitDetailCard(false);
                 }}>
                 <Text style={{color: theme.colors.text}}>{compact ? item[0].toUpperCase() : item.toUpperCase()}</Text>
               </Pressable>
@@ -1238,7 +1244,7 @@ const styles = StyleSheet.create({
   },
   commitDetailCard: {
     position: 'absolute',
-    right: 12,
+    left: 12,
     top: 56,
     width: 280,
     borderWidth: 1,
