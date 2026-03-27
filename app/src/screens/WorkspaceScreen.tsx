@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
-import {CodeView, MarkdownView} from '../components';
+import {CodeView, InlineDiffView, MarkdownView} from '../components';
 import {
   CHAT_MESSAGES,
   CHAT_SESSIONS,
@@ -300,7 +300,7 @@ export function WorkspaceScreen({
           ) : selectedDiffFile?.diffError ? (
             <Text style={{color: theme.colors.error}}>{selectedDiffFile.diffError}</Text>
           ) : (
-            <CodeView path={selectedDiffFile?.path ?? 'diff.txt'} code={selectedDiffFile?.diff ?? ''} theme={theme} />
+            <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} />
           )}
         </ScrollView>
       </View>
