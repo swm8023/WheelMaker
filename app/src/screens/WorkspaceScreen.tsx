@@ -342,7 +342,9 @@ export function WorkspaceScreen({
               styles.projectRefreshButton,
               {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
             ]}>
-            <Text style={{color: theme.colors.text}}>{refreshingProject ? '...' : '?'}</Text>
+            <Text style={[styles.projectRefreshIcon, {color: theme.colors.text}]}>
+              {refreshingProject ? '...' : '\u21bb'}
+            </Text>
           </Pressable>
 
           <View style={styles.headerSpacer} />
@@ -738,6 +740,11 @@ const styles = StyleSheet.create({
   },
   projectRefreshButton: {
     marginLeft: 8,
+  },
+  projectRefreshIcon: {
+    fontSize: 18,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   projectArrow: {
     marginRight: 6,
