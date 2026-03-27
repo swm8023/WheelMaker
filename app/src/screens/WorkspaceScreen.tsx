@@ -345,6 +345,33 @@ export function WorkspaceScreen({
             <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} wrapLines />
           )}
         </ScrollView>
+        {selectedCommit ? (
+          <View
+            style={[
+              styles.commitDetailCard,
+              {
+                borderColor: theme.colors.border,
+                backgroundColor: theme.colors.panel,
+              },
+            ]}>
+            <Text style={[styles.commitDetailLabel, {color: theme.colors.textMuted}]}>COMMIT</Text>
+            <Text style={[styles.commitDetailTitle, {color: theme.colors.text}]} numberOfLines={2}>
+              {selectedCommit.title}
+            </Text>
+            <Text style={[styles.commitDetailLine, {color: theme.colors.textMuted}]}>
+              Author: {selectedCommit.author || 'unknown'}
+            </Text>
+            <Text style={[styles.commitDetailLine, {color: theme.colors.textMuted}]}>
+              Time: {selectedCommit.time || 'unknown'}
+            </Text>
+            <Text style={[styles.commitDetailLine, {color: theme.colors.textMuted}]}>
+              Files: {selectedCommitFiles.length}
+            </Text>
+            <Text style={[styles.commitDetailHash, {color: theme.colors.textMuted}]}>
+              {selectedCommit.sha}
+            </Text>
+          </View>
+        ) : null}
       </View>
     );
   };
@@ -745,9 +772,6 @@ function Sidebar(args: {
                 ]}
                 onPress={() => args.onCommitSelect(index)}>
                 <View style={styles.commitGraph}>
-                  <View style={styles.commitLaneWrap}>
-                    <View style={[styles.commitLaneLine, {backgroundColor: args.theme.colors.border}]} />
-                  </View>
                   <View style={[styles.commitNode, {backgroundColor: args.theme.colors.accent}]} />
                 </View>
                 <View style={styles.commitTextWrap}>
@@ -1051,22 +1075,14 @@ const styles = StyleSheet.create({
     minHeight: 40,
     flexDirection: 'row',
     alignItems: 'stretch',
-    paddingLeft: 6,
+    paddingLeft: 2,
     paddingRight: 10,
   },
   commitGraph: {
-    width: 22,
+    width: 14,
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 4,
     position: 'relative',
-  },
-  commitLaneWrap: {
-    flex: 1,
-    paddingHorizontal: 6,
-  },
-  commitLaneLine: {
-    width: 1,
-    height: '100%',
   },
   commitNode: {
     width: 8,
@@ -1075,6 +1091,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '50%',
     marginTop: -4,
+    left: 3,
   },
   commitTextWrap: {
     flex: 1,
@@ -1218,6 +1235,36 @@ const styles = StyleSheet.create({
   },
   gitDivider: {
     height: 1,
+  },
+  commitDetailCard: {
+    position: 'absolute',
+    right: 12,
+    top: 56,
+    width: 280,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    zIndex: 5,
+  },
+  commitDetailLabel: {
+    fontSize: 11,
+    lineHeight: 14,
+    marginBottom: 4,
+  },
+  commitDetailTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  commitDetailLine: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  commitDetailHash: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
   },
   webCodicon: {
     fontSize: 14,
