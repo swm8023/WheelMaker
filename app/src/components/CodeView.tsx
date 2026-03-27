@@ -10,22 +10,23 @@ type CodeViewProps = {
   path: string;
   code: string;
   theme: AppTheme;
+  wrapLines?: boolean;
 };
 
-export function CodeView({path, code, theme}: CodeViewProps) {
+export function CodeView({path, code, theme, wrapLines = true}: CodeViewProps) {
   const language = languageFromPath(path);
   const style = theme.mode === 'dark' ? vs2015 : vs;
   const webSyntaxStyle = {
     margin: 0,
     minHeight: '100%',
-    overflowX: 'visible',
+    overflowX: wrapLines ? 'visible' : 'auto',
     overflowY: 'visible',
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
+    whiteSpace: wrapLines ? 'pre-wrap' : 'pre',
+    wordBreak: wrapLines ? 'break-word' : 'normal',
   } as unknown as Record<string, unknown>;
   const webCodeTagStyle = {
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
+    whiteSpace: wrapLines ? 'pre-wrap' : 'pre',
+    wordBreak: wrapLines ? 'break-word' : 'normal',
   } as unknown as Record<string, unknown>;
 
   return (
@@ -36,7 +37,7 @@ export function CodeView({path, code, theme}: CodeViewProps) {
         customStyle={webSyntaxStyle}
         codeTagProps={{style: webCodeTagStyle}}
         highlighter="hljs"
-        wrapLongLines
+        wrapLongLines={wrapLines}
         fontFamily={theme.font.code}
         fontSize={13}>
         {code || ''}

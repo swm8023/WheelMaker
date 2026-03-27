@@ -74,6 +74,7 @@ export function WorkspaceScreen({
   const isWide = width >= 900;
   const compact = width < 560;
   const drawerWidth = Math.min(320, Math.floor(width * 0.88));
+  const settingsPanelWidth = Math.min(360, Math.floor(width * 0.88));
 
   const theme = resolveTheme(themeMode);
 
@@ -81,10 +82,14 @@ export function WorkspaceScreen({
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wrapLines, setWrapLines] = useState(false);
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
+  const settingsProgress = useRef(new Animated.Value(0)).current;
+  const sidebarWidthAnim = useRef(new Animated.Value(320)).current;
   const workspaceData = useWorkspaceData({
     projects,
     selectedProjectId,
@@ -198,6 +203,36 @@ export function WorkspaceScreen({
     }
   }, [drawerProgress, isWide]);
 
+  useEffect(() => {
+    Animated.timing(sidebarWidthAnim, {
+      toValue: isWide && !sidebarCollapsed ? 320 : 0,
+      duration: 160,
+      useNativeDriver: false,
+    }).start();
+  }, [isWide, sidebarCollapsed, sidebarWidthAnim]);
+
+  const openSettings = () => {
+    setQuickSettingsOpen(false);
+    setSettingsOpen(true);
+    Animated.timing(settingsProgress, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeSettings = () => {
+    Animated.timing(settingsProgress, {
+      toValue: 0,
+      duration: 150,
+      useNativeDriver: true,
+    }).start(({finished}) => {
+      if (finished) {
+        setSettingsOpen(false);
+      }
+    });
+  };
+
   const switchProject = async (projectId: string) => {
     setLoadingProject(true);
     try {
@@ -278,6 +313,7 @@ export function WorkspaceScreen({
                 path={workspaceData.projectState.selectedFilePath ?? 'file.txt'}
                 code={workspaceData.projectState.selectedFileContent}
                 theme={theme}
+                wrapLines={wrapLines}
               />
             )}
           </ScrollView>
@@ -300,7 +336,7 @@ export function WorkspaceScreen({
           ) : selectedDiffFile?.diffError ? (
             <Text style={{color: theme.colors.error}}>{selectedDiffFile.diffError}</Text>
           ) : (
-            <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} />
+            <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} wrapLines={wrapLines} />
           )}
         </ScrollView>
       </View>
@@ -388,6 +424,16 @@ export function WorkspaceScreen({
 
           <View style={styles.headerSpacer} />
 
+          <Pressable
+            onPress={() => setQuickSettingsOpen(value => !value)}
+            style={[
+              styles.headerButton,
+              styles.quickSettingsButton,
+              {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+            ]}>
+            <Text style={{color: theme.colors.text}}>⚙</Text>
+          </Pressable>
+
           <View style={[styles.segmentWrap, {borderColor: theme.colors.border}]}> 
             {tabs.map((item, index, arr) => (
               <Pressable
@@ -398,14 +444,17 @@ export function WorkspaceScreen({
                   index === arr.length - 1 && styles.segmentItemLast,
                   tab === item && {backgroundColor: theme.colors.rowSelected},
                 ]}
-                onPress={() => setTab(item)}>
+                onPress={() => {
+                  setTab(item);
+                  setQuickSettingsOpen(false);
+                }}>
                 <Text style={{color: theme.colors.text}}>{compact ? item[0].toUpperCase() : item.toUpperCase()}</Text>
               </Pressable>
             ))}
           </View>
 
           <Pressable
-            onPress={() => setSettingsOpen(true)}
+            onPress={openSettings}
             style={[
               styles.headerButton,
               styles.settingsButton,
@@ -414,6 +463,34 @@ export function WorkspaceScreen({
             <Text style={{color: theme.colors.text}}>[]</Text>
           </Pressable>
         </View>
+
+        {quickSettingsOpen ? (
+          <View
+            style={[
+              styles.quickSettingsMenu,
+              {borderColor: theme.colors.border, backgroundColor: theme.colors.panel},
+            ]}>
+            <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>QUICK SETTINGS</Text>
+            <Text style={[styles.quickLabel, {color: theme.colors.textMuted}]}>THEME</Text>
+            {(['dark', 'light'] as ThemeMode[]).map(mode => (
+              <Pressable key={mode} style={styles.quickItem} onPress={() => onThemeModeChange(mode)}>
+                <Text style={[styles.quickRadio, {color: theme.colors.text}]}>
+                  {themeMode === mode ? '◉' : '○'}
+                </Text>
+                <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
+              </Pressable>
+            ))}
+            <Text style={[styles.quickLabel, {color: theme.colors.textMuted}]}>WRAP LINE</Text>
+            <Pressable style={styles.quickItem} onPress={() => setWrapLines(true)}>
+              <Text style={[styles.quickRadio, {color: theme.colors.text}]}>{wrapLines ? '◉' : '○'}</Text>
+              <Text style={{color: theme.colors.text}}>ON</Text>
+            </Pressable>
+            <Pressable style={styles.quickItem} onPress={() => setWrapLines(false)}>
+              <Text style={[styles.quickRadio, {color: theme.colors.text}]}>{!wrapLines ? '◉' : '○'}</Text>
+              <Text style={{color: theme.colors.text}}>OFF</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {projectMenuOpen ? (
           <View
@@ -440,11 +517,33 @@ export function WorkspaceScreen({
         ) : null}
 
         <View style={styles.container}>
-          {isWide && !sidebarCollapsed ? (
-            <View style={[styles.sidebar, {backgroundColor: theme.colors.panel}]}>{leftPanel}</View>
+          {isWide ? (
+            <Animated.View
+              style={[
+                styles.sidebar,
+                {backgroundColor: theme.colors.panel, width: sidebarWidthAnim},
+              ]}
+              pointerEvents={sidebarCollapsed ? 'none' : 'auto'}>
+              {leftPanel}
+            </Animated.View>
           ) : null}
-          {isWide && !sidebarCollapsed ? (
-            <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
+          {isWide ? (
+            <Animated.View
+              style={[
+                styles.divider,
+                {
+                  width: sidebarWidthAnim.interpolate({
+                    inputRange: [0, 320],
+                    outputRange: [0, 1],
+                  }),
+                  backgroundColor: theme.colors.border,
+                  opacity: sidebarWidthAnim.interpolate({
+                    inputRange: [0, 320],
+                    outputRange: [0, 1],
+                  }),
+                },
+              ]}
+            />
           ) : null}
 
           <View
@@ -503,47 +602,70 @@ export function WorkspaceScreen({
           </Modal>
         ) : null}
 
-        <Modal visible={settingsOpen} animationType="slide">
-          <SafeAreaView style={[styles.safeArea, {backgroundColor: theme.colors.background}]}> 
-            <View style={[styles.settingsHeader, {borderColor: theme.colors.border}]}> 
-              <Text style={[styles.settingsTitle, {color: theme.colors.text}]}>Settings</Text>
-              <Pressable
-                style={[
-                  styles.headerButton,
-                  {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
-                ]}
-                onPress={() => setSettingsOpen(false)}>
-                <Text style={{color: theme.colors.text}}>X</Text>
-              </Pressable>
-            </View>
-            <View style={styles.settingsSection}>
-              <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>THEME</Text>
-              {(['dark', 'light'] as ThemeMode[]).map(mode => (
-                <Pressable
-                  key={mode}
-                  style={[
-                    styles.settingsItem,
+        <Modal visible={settingsOpen} animationType="none" transparent onRequestClose={closeSettings}>
+          <View style={styles.drawerHost}>
+            <Pressable style={styles.drawerOverlay} onPress={closeSettings}>
+              <Animated.View style={[styles.drawerMask, {opacity: settingsProgress}]} />
+            </Pressable>
+            <Animated.View
+              style={[
+                styles.settingsDrawer,
+                {
+                  width: settingsPanelWidth,
+                  borderColor: theme.colors.border,
+                  backgroundColor: theme.colors.panel,
+                  transform: [
                     {
-                      borderColor: theme.colors.border,
-                      backgroundColor:
-                        themeMode === mode ? theme.colors.rowSelected : theme.colors.panelSecondary,
+                      translateX: settingsProgress.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [settingsPanelWidth, 0],
+                      }),
                     },
-                  ]}
-                  onPress={() => onThemeModeChange(mode)}>
-                  <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
-                </Pressable>
-              ))}
-              <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>SESSION</Text>
-              <Pressable
-                style={[
-                  styles.settingsItem,
-                  {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
-                ]}
-                onPress={onLogout}>
-                <Text style={{color: theme.colors.text}}>Back To Login</Text>
-              </Pressable>
-            </View>
-          </SafeAreaView>
+                  ],
+                },
+              ]}>
+              <SafeAreaView style={styles.safeArea}>
+                <View style={[styles.settingsHeader, {borderColor: theme.colors.border}]}>
+                  <Text style={[styles.settingsTitle, {color: theme.colors.text}]}>Settings</Text>
+                  <Pressable
+                    style={[
+                      styles.headerButton,
+                      {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                    ]}
+                    onPress={closeSettings}>
+                    <Text style={{color: theme.colors.text}}>X</Text>
+                  </Pressable>
+                </View>
+                <View style={styles.settingsSection}>
+                  <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>THEME</Text>
+                  {(['dark', 'light'] as ThemeMode[]).map(mode => (
+                    <Pressable
+                      key={mode}
+                      style={[
+                        styles.settingsItem,
+                        {
+                          borderColor: theme.colors.border,
+                          backgroundColor:
+                            themeMode === mode ? theme.colors.rowSelected : theme.colors.panelSecondary,
+                        },
+                      ]}
+                      onPress={() => onThemeModeChange(mode)}>
+                      <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
+                    </Pressable>
+                  ))}
+                  <Text style={[styles.sideTitle, {color: theme.colors.textMuted}]}>SESSION</Text>
+                  <Pressable
+                    style={[
+                      styles.settingsItem,
+                      {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                    ]}
+                    onPress={onLogout}>
+                    <Text style={{color: theme.colors.text}}>Back To Login</Text>
+                  </Pressable>
+                </View>
+              </SafeAreaView>
+            </Animated.View>
+          </View>
         </Modal>
       </SafeAreaView>
     </SafeAreaProvider>
@@ -829,6 +951,9 @@ const styles = StyleSheet.create({
   settingsButton: {
     marginLeft: 8,
   },
+  quickSettingsButton: {
+    marginRight: 6,
+  },
   projectRefreshButton: {
     marginLeft: 8,
   },
@@ -853,6 +978,32 @@ const styles = StyleSheet.create({
   },
   segmentItemLast: {
     borderRightWidth: 0,
+  },
+  quickSettingsMenu: {
+    position: 'absolute',
+    top: 52,
+    right: 110,
+    width: 220,
+    borderWidth: 1,
+    borderRadius: 8,
+    zIndex: 25,
+    paddingBottom: 8,
+  },
+  quickLabel: {
+    fontSize: 11,
+    lineHeight: 16,
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  quickItem: {
+    minHeight: 30,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  quickRadio: {
+    marginRight: 8,
   },
   projectMenu: {
     position: 'absolute',
@@ -1049,6 +1200,13 @@ const styles = StyleSheet.create({
   drawerInner: {
     flex: 1,
     minHeight: 0,
+  },
+  settingsDrawer: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    height: '100%',
+    borderLeftWidth: 1,
   },
   settingsHeader: {
     height: 52,

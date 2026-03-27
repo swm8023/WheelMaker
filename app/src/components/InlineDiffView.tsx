@@ -15,6 +15,7 @@ type DiffRow = {
 type InlineDiffViewProps = {
   diff: string;
   theme: AppTheme;
+  wrapLines?: boolean;
 };
 
 function parseUnifiedDiff(diff: string): DiffRow[] {
@@ -73,7 +74,7 @@ function lineSign(row: DiffRow): string {
   return ' ';
 }
 
-export function InlineDiffView({diff, theme}: InlineDiffViewProps) {
+export function InlineDiffView({diff, theme, wrapLines = false}: InlineDiffViewProps) {
   const rows = useMemo(() => parseUnifiedDiff(diff), [diff]);
   const palette = theme.mode === 'dark'
     ? {
@@ -94,7 +95,7 @@ export function InlineDiffView({diff, theme}: InlineDiffViewProps) {
       };
 
   return (
-    <ScrollView horizontal style={styles.wrap} contentContainerStyle={styles.content}>
+    <ScrollView horizontal={!wrapLines} style={styles.wrap} contentContainerStyle={styles.content}>
       <View style={styles.table}>
         {rows.map((row, index) => (
           <View
@@ -113,7 +114,9 @@ export function InlineDiffView({diff, theme}: InlineDiffViewProps) {
             <Text style={[styles.num, {color: palette.gutter}]}>
               {row.newLine !== undefined ? String(row.newLine) : ''}
             </Text>
-            <Text style={[styles.text, {color: palette.text}]}>{lineText(row)}</Text>
+            <Text style={[styles.text, wrapLines && styles.textWrap, {color: palette.text}]}>
+              {lineText(row)}
+            </Text>
           </View>
         ))}
       </View>
@@ -155,5 +158,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     fontFamily: 'monospace',
+  },
+  textWrap: {
+    flex: 1,
+    flexShrink: 1,
   },
 });
