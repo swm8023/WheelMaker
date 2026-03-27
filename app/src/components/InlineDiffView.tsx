@@ -16,6 +16,7 @@ type InlineDiffViewProps = {
   diff: string;
   theme: AppTheme;
   wrapLines?: boolean;
+  onUserInteract?: () => void;
 };
 
 function parseUnifiedDiff(diff: string): DiffRow[] {
@@ -74,7 +75,7 @@ function lineSign(row: DiffRow): string {
   return ' ';
 }
 
-export function InlineDiffView({diff, theme, wrapLines = false}: InlineDiffViewProps) {
+export function InlineDiffView({diff, theme, wrapLines = false, onUserInteract}: InlineDiffViewProps) {
   const rows = useMemo(() => parseUnifiedDiff(diff), [diff]);
   const palette = theme.mode === 'dark'
     ? {
@@ -95,7 +96,12 @@ export function InlineDiffView({diff, theme, wrapLines = false}: InlineDiffViewP
       };
 
   return (
-    <ScrollView horizontal={!wrapLines} style={styles.wrap} contentContainerStyle={styles.content}>
+    <ScrollView
+      horizontal={!wrapLines}
+      style={styles.wrap}
+      contentContainerStyle={styles.content}
+      onScrollBeginDrag={onUserInteract}
+      onTouchStart={onUserInteract}>
       <View style={styles.table}>
         {rows.map((row, index) => (
           <View

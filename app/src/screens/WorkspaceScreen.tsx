@@ -217,6 +217,33 @@ export function WorkspaceScreen({
     }).start();
   }, [isWide, sidebarCollapsed, sidebarWidthAnim]);
 
+  const gitAutoLoadRef = useRef(false);
+  useEffect(() => {
+    if (tab !== 'git') {
+      gitAutoLoadRef.current = false;
+      return;
+    }
+    if (workspaceData.projectState.gitLoading || refreshingProject || gitAutoLoadRef.current) {
+      return;
+    }
+    if (workspaceData.projectState.gitCommits.length > 0 && !workspaceData.projectState.gitError) {
+      return;
+    }
+    gitAutoLoadRef.current = true;
+    setRefreshingProject(true);
+    workspaceData
+      .refreshProject()
+      .catch(() => undefined)
+      .finally(() => setRefreshingProject(false));
+  }, [
+    refreshingProject,
+    tab,
+    workspaceData,
+    workspaceData.projectState.gitCommits.length,
+    workspaceData.projectState.gitError,
+    workspaceData.projectState.gitLoading,
+  ]);
+
   const openSettings = () => {
     setQuickSettingsOpen(false);
     setSettingsOpen(true);
@@ -343,7 +370,12 @@ export function WorkspaceScreen({
           ) : selectedDiffFile?.diffError ? (
             <Text style={{color: theme.colors.error}}>{selectedDiffFile.diffError}</Text>
           ) : (
-            <InlineDiffView diff={selectedDiffFile?.diff ?? ''} theme={theme} wrapLines />
+            <InlineDiffView
+              diff={selectedDiffFile?.diff ?? ''}
+              theme={theme}
+              wrapLines
+              onUserInteract={() => setShowCommitDetailCard(false)}
+            />
           )}
         </ScrollView>
         {showCommitDetailCard && selectedCommit ? (
