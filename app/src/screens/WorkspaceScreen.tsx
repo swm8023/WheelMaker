@@ -297,6 +297,8 @@ export function WorkspaceScreen({
             <Text style={{color: theme.colors.error}}>{workspaceData.projectState.gitError}</Text>
           ) : selectedDiffFile?.loadingDiff ? (
             <Text style={{color: theme.colors.textMuted}}>Loading diff...</Text>
+          ) : selectedDiffFile?.diffError ? (
+            <Text style={{color: theme.colors.error}}>{selectedDiffFile.diffError}</Text>
           ) : (
             <CodeView path={selectedDiffFile?.path ?? 'diff.txt'} code={selectedDiffFile?.diff ?? ''} theme={theme} />
           )}

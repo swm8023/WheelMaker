@@ -25,6 +25,8 @@ export type GitCommitFileView = RegistryGitCommitFile & {
   isBinary: boolean;
   truncated: boolean;
   loadingDiff: boolean;
+  diffLoaded: boolean;
+  diffError: string;
 };
 
 export const CHAT_SESSIONS = ['General', 'WheelMaker App', 'Go Service', 'Review'];
@@ -306,6 +308,8 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
           isBinary: false,
           truncated: false,
           loadingDiff: false,
+          diffLoaded: false,
+          diffError: '',
         }));
         setProjectStates(prev => {
           const current = prev[selectedProjectId];
@@ -343,7 +347,7 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     const index = files.findIndex(file => file.path === projectState.selectedDiffFilePath);
     if (index < 0) return;
     const target = files[index];
-    if (target.diff || target.loadingDiff) return;
+    if (target.diffLoaded || target.loadingDiff) return;
 
     let cancelled = false;
     const sha = projectState.selectedCommitSha;
@@ -389,6 +393,8 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
                   isBinary: diffResp.isBinary,
                   truncated: diffResp.truncated,
                   loadingDiff: false,
+                  diffLoaded: true,
+                  diffError: '',
                 }
               : file,
           );
@@ -414,6 +420,8 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
               ? {
                   ...file,
                   loadingDiff: false,
+                  diffLoaded: true,
+                  diffError: 'failed to load diff',
                 }
               : file,
           );
