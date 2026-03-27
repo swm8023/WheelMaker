@@ -424,16 +424,6 @@ export function WorkspaceScreen({
 
           <View style={styles.headerSpacer} />
 
-          <Pressable
-            onPress={() => setQuickSettingsOpen(value => !value)}
-            style={[
-              styles.headerButton,
-              styles.quickSettingsButton,
-              {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
-            ]}>
-            <Text style={{color: theme.colors.text}}>⚙</Text>
-          </Pressable>
-
           <View style={[styles.segmentWrap, {borderColor: theme.colors.border}]}> 
             {tabs.map((item, index, arr) => (
               <Pressable
@@ -454,13 +444,13 @@ export function WorkspaceScreen({
           </View>
 
           <Pressable
-            onPress={openSettings}
+            onPress={() => setQuickSettingsOpen(value => !value)}
             style={[
               styles.headerButton,
               styles.settingsButton,
               {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
             ]}>
-            <Text style={{color: theme.colors.text}}>[]</Text>
+            <Text style={{color: theme.colors.text}}>⚙</Text>
           </Pressable>
         </View>
 
@@ -474,20 +464,37 @@ export function WorkspaceScreen({
             <Text style={[styles.quickLabel, {color: theme.colors.textMuted}]}>THEME</Text>
             {(['dark', 'light'] as ThemeMode[]).map(mode => (
               <Pressable key={mode} style={styles.quickItem} onPress={() => onThemeModeChange(mode)}>
-                <Text style={[styles.quickRadio, {color: theme.colors.text}]}>
-                  {themeMode === mode ? '◉' : '○'}
-                </Text>
+                <View style={[styles.quickRadioOuter, {borderColor: theme.colors.textMuted}]}>
+                  {themeMode === mode ? (
+                    <View style={[styles.quickRadioInner, {backgroundColor: theme.colors.accent}]} />
+                  ) : null}
+                </View>
                 <Text style={{color: theme.colors.text}}>{mode.toUpperCase()}</Text>
               </Pressable>
             ))}
             <Text style={[styles.quickLabel, {color: theme.colors.textMuted}]}>WRAP LINE</Text>
             <Pressable style={styles.quickItem} onPress={() => setWrapLines(true)}>
-              <Text style={[styles.quickRadio, {color: theme.colors.text}]}>{wrapLines ? '◉' : '○'}</Text>
+              <View style={[styles.quickRadioOuter, {borderColor: theme.colors.textMuted}]}>
+                {wrapLines ? <View style={[styles.quickRadioInner, {backgroundColor: theme.colors.accent}]} /> : null}
+              </View>
               <Text style={{color: theme.colors.text}}>ON</Text>
             </Pressable>
             <Pressable style={styles.quickItem} onPress={() => setWrapLines(false)}>
-              <Text style={[styles.quickRadio, {color: theme.colors.text}]}>{!wrapLines ? '◉' : '○'}</Text>
+              <View style={[styles.quickRadioOuter, {borderColor: theme.colors.textMuted}]}>
+                {!wrapLines ? (
+                  <View style={[styles.quickRadioInner, {backgroundColor: theme.colors.accent}]} />
+                ) : null}
+              </View>
               <Text style={{color: theme.colors.text}}>OFF</Text>
+            </Pressable>
+            <View style={[styles.quickMoreDivider, {backgroundColor: theme.colors.border}]} />
+            <Pressable
+              style={styles.quickMoreButton}
+              onPress={() => {
+                setQuickSettingsOpen(false);
+                openSettings();
+              }}>
+              <Text style={{color: theme.colors.accent}}>More Settings</Text>
             </Pressable>
           </View>
         ) : null}
@@ -951,9 +958,6 @@ const styles = StyleSheet.create({
   settingsButton: {
     marginLeft: 8,
   },
-  quickSettingsButton: {
-    marginRight: 6,
-  },
   projectRefreshButton: {
     marginLeft: 8,
   },
@@ -982,7 +986,7 @@ const styles = StyleSheet.create({
   quickSettingsMenu: {
     position: 'absolute',
     top: 52,
-    right: 110,
+    right: 8,
     width: 220,
     borderWidth: 1,
     borderRadius: 8,
@@ -1002,8 +1006,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
   },
-  quickRadio: {
+  quickRadioOuter: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
     marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickRadioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  quickMoreDivider: {
+    height: 1,
+    marginTop: 6,
+    marginBottom: 4,
+    marginHorizontal: 10,
+  },
+  quickMoreButton: {
+    minHeight: 32,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
   projectMenu: {
     position: 'absolute',
@@ -1248,6 +1274,7 @@ const styles = StyleSheet.create({
     verticalAlign: 'middle',
   },
 });
+
 
 
 
