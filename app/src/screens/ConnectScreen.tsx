@@ -26,76 +26,37 @@ function toRegistryWsUrl(ipOrAddress: string): string {
   return `ws://${host}/ws`;
 }
 
-function defaultWebRegistryWsUrl(): string {
-  if (Platform.OS !== 'web') {
-    return '';
-  }
-  const win = globalThis as unknown as {
-    location?: {search?: string; protocol?: string; host?: string};
-  };
-  const location = win.location;
-  if (!location) {
-    return '';
-  }
-  try {
-    const params = new URLSearchParams(location.search ?? '');
-    const wsOverride = params.get('ws')?.trim();
-    if (wsOverride) {
-      return wsOverride;
-    }
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${location.host}/ws`;
-  } catch {
-    return '';
-  }
+function defaultAddressByPlatform(): string {
+  if (Platform.OS !== 'web') return '127.0.0.1';
+  const win = globalThis as unknown as {location?: {hostname?: string}};
+  const host = win.location?.hostname ?? '';
+  if (host === '127.0.0.1') return 'ws://127.0.0.1:6930/ws';
+  return host || '';
 }
 
 export function ConnectScreen({onConnect, theme}: ConnectScreenProps) {
-  const isWeb = Platform.OS === 'web';
-  const webDefaultAddress = defaultWebRegistryWsUrl();
-  const [ipOrAddress, setIpOrAddress] = useState(isWeb ? webDefaultAddress : '127.0.0.1');
+  const [ipOrAddress, setIpOrAddress] = useState(defaultAddressByPlatform());
   const [token, setToken] = useState('');
-  const [manualMode, setManualMode] = useState(!isWeb);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [autoTried, setAutoTried] = useState(false);
 
   const disabled = useMemo(() => submitting || !ipOrAddress.trim(), [submitting, ipOrAddress]);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
-      if (isWeb && !manualMode) {
+      const lastAddress = await loadLastRegistryAddress();
+      if (!mounted) return;
+      if (lastAddress) {
+        setIpOrAddress(lastAddress);
         return;
       }
-      const lastAddress = await loadLastRegistryAddress();
-      if (mounted && lastAddress) {
-        setIpOrAddress(lastAddress);
-      }
+      setIpOrAddress(defaultAddressByPlatform());
     })();
     return () => {
       mounted = false;
     };
-  }, [isWeb, manualMode]);
-
-  useEffect(() => {
-    if (!isWeb || manualMode || autoTried || !ipOrAddress.trim()) {
-      return;
-    }
-    setAutoTried(true);
-    setSubmitting(true);
-    setErrorMessage('');
-    (async () => {
-      try {
-        await onConnect(ipOrAddress.trim(), token.trim());
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        setErrorMessage(message || 'connect failed');
-      } finally {
-        setSubmitting(false);
-      }
-    })();
-  }, [autoTried, ipOrAddress, isWeb, manualMode, onConnect, token]);
+  }, []);
 
   const submit = async () => {
     if (disabled) {
@@ -122,35 +83,22 @@ export function ConnectScreen({onConnect, theme}: ConnectScreenProps) {
         <Text style={[styles.title, {color: theme.colors.text}]}>Connect to WheelMaker</Text>
         <Text style={[styles.hint, {color: theme.colors.textMuted}]}>Input server IP/Host and optional token.</Text>
 
-        {isWeb && !manualMode ? (
-          <View
-            style={[
-              styles.webAutoInfo,
-              {borderColor: theme.colors.border, backgroundColor: theme.colors.inputBackground},
-            ]}>
-            <Text style={{color: theme.colors.textMuted}}>Auto address</Text>
-            <Text selectable style={{color: theme.colors.text}}>
-              {ipOrAddress}
-            </Text>
-          </View>
-        ) : (
-          <TextInput
-            style={[
-              styles.input,
-              {
-                borderColor: theme.colors.border,
-                backgroundColor: theme.colors.inputBackground,
-                color: theme.colors.text,
-              },
-            ]}
-            value={ipOrAddress}
-            onChangeText={setIpOrAddress}
-            placeholder="127.0.0.1 or ws://127.0.0.1:9630/ws"
-            placeholderTextColor={theme.colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        )}
+        <TextInput
+          style={[
+            styles.input,
+            {
+              borderColor: theme.colors.border,
+              backgroundColor: theme.colors.inputBackground,
+              color: theme.colors.text,
+            },
+          ]}
+          value={ipOrAddress}
+          onChangeText={setIpOrAddress}
+          placeholder="127.0.0.1 or ws://127.0.0.1:9630/ws"
+          placeholderTextColor={theme.colors.textMuted}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
         <TextInput
           style={[
             styles.input,
@@ -178,16 +126,8 @@ export function ConnectScreen({onConnect, theme}: ConnectScreenProps) {
           ]}
           onPress={submit}
           disabled={disabled}>
-          <Text style={{color: theme.colors.text}}>
-            {submitting ? 'Connecting...' : isWeb && !manualMode ? 'Retry' : 'Connect'}
-          </Text>
+          <Text style={{color: theme.colors.text}}>{submitting ? 'Connecting...' : 'Connect'}</Text>
         </Pressable>
-
-        {isWeb ? (
-          <Pressable style={styles.advancedButton} onPress={() => setManualMode(value => !value)}>
-            <Text style={{color: theme.colors.accent}}>{manualMode ? 'Use Auto Mode' : 'Advanced (Manual Input)'}</Text>
-          </Pressable>
-        ) : null}
       </View>
     </View>
   );
@@ -234,18 +174,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.6,
-  },
-  webAutoInfo: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    marginBottom: 10,
-    gap: 4,
-  },
-  advancedButton: {
-    marginTop: 10,
-    alignSelf: 'flex-start',
   },
 });
 
