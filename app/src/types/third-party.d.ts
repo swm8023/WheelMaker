@@ -1,11 +1,11 @@
-declare module 'react-native-syntax-highlighter' {
-  import * as React from 'react';
+declare module 'prismjs' {
+  type PrismToken = string | {type: string; alias?: string | string[]; content: PrismToken | PrismToken[]};
+  type PrismGrammar = Record<string, unknown>;
 
-  const SyntaxHighlighter: React.ComponentType<Record<string, unknown>>;
-  export default SyntaxHighlighter;
-}
+  const Prism: {
+    languages: Record<string, PrismGrammar>;
+    tokenize: (text: string, grammar: PrismGrammar) => PrismToken[];
+  };
 
-declare module 'react-syntax-highlighter/styles/hljs' {
-  export const vs2015: Record<string, unknown>;
-  export const vs: Record<string, unknown>;
+  export = Prism;
 }

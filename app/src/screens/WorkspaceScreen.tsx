@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
-import {CodeView, InlineDiffView, MarkdownView} from '../components';
+import {InlineDiffView, MarkdownView, PrismCodeView} from '../components';
 import {
   CHAT_MESSAGES,
   CHAT_SESSIONS,
@@ -311,7 +311,7 @@ export function WorkspaceScreen({
               isMarkdownPath(workspaceData.projectState.selectedFilePath) ? (
               <MarkdownView content={workspaceData.projectState.selectedFileContent} theme={theme} />
             ) : (
-              <CodeView
+              <PrismCodeView
                 path={workspaceData.projectState.selectedFilePath ?? 'file.txt'}
                 code={workspaceData.projectState.selectedFileContent}
                 theme={theme}

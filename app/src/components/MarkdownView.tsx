@@ -1,10 +1,9 @@
 import React from 'react';
-import {Platform, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 import Markdown from 'react-native-markdown-display';
-import SyntaxHighlighter from 'react-native-syntax-highlighter';
-import {vs2015, vs} from 'react-syntax-highlighter/styles/hljs';
 
 import type {AppTheme} from '../theme';
+import {PrismCodeBlock} from './PrismCodeBlock';
 
 type MarkdownViewProps = {
   content: string;
@@ -37,14 +36,6 @@ function extractFenceCode(node: MarkdownNode): string {
 }
 
 export function MarkdownView({content, theme}: MarkdownViewProps) {
-  const syntaxStyle = theme.mode === 'dark' ? vs2015 : vs;
-  const codeContainerStyle = {
-    margin: 0,
-    padding: 12,
-    backgroundColor: 'transparent',
-    minWidth: '100%',
-  } as unknown as Record<string, unknown>;
-
   const markdownStyle = {
     body: {
       color: theme.colors.text,
@@ -151,18 +142,14 @@ export function MarkdownView({content, theme}: MarkdownViewProps) {
             const code = extractFenceCode(node as MarkdownNode);
             return (
               <View key={(node as MarkdownNode).key} style={markdownStyle.fence}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
-                  <SyntaxHighlighter
-                    language={language}
-                    style={syntaxStyle}
-                    customStyle={codeContainerStyle}
-                    highlighter="hljs"
-                    wrapLongLines={false}
-                    fontFamily={theme.font.code}
-                    fontSize={13}>
-                    {code}
-                  </SyntaxHighlighter>
-                </ScrollView>
+                <PrismCodeBlock
+                  language={language}
+                  code={code}
+                  theme={theme}
+                  wrapLines={false}
+                  showLineNumbers={false}
+                  backgroundColor="transparent"
+                />
               </View>
             );
           },
@@ -170,18 +157,14 @@ export function MarkdownView({content, theme}: MarkdownViewProps) {
             const code = extractFenceCode(node as MarkdownNode);
             return (
               <View key={(node as MarkdownNode).key} style={markdownStyle.code_block}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
-                  <SyntaxHighlighter
-                    language="plaintext"
-                    style={syntaxStyle}
-                    customStyle={codeContainerStyle}
-                    highlighter="hljs"
-                    wrapLongLines={false}
-                    fontFamily={theme.font.code}
-                    fontSize={13}>
-                    {code}
-                  </SyntaxHighlighter>
-                </ScrollView>
+                <PrismCodeBlock
+                  language="plaintext"
+                  code={code}
+                  theme={theme}
+                  wrapLines={false}
+                  showLineNumbers={false}
+                  backgroundColor="transparent"
+                />
               </View>
             );
           },
