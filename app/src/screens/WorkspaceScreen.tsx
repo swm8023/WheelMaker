@@ -2,6 +2,7 @@
 import {
   Animated,
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StatusBar,
@@ -52,6 +53,7 @@ export function WorkspaceScreen({
   onThemeModeChange,
 }: WorkspaceScreenProps) {
   const {width} = useWindowDimensions();
+  const tabs: WorkspaceTab[] = ['chat', 'file', 'git'];
   const isWide = width >= 900;
   const compact = width < 560;
   const drawerWidth = Math.min(320, Math.floor(width * 0.88));
@@ -80,6 +82,28 @@ export function WorkspaceScreen({
   const selectedDiffFile = selectedCommit.files.find(
     file => file.path === workspaceData.projectState.selectedDiffFilePath,
   );
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_evt, gestureState) =>
+        Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (Math.abs(gestureState.dx) < 56) {
+          return;
+        }
+        const index = tabs.indexOf(tab);
+        if (index < 0) {
+          return;
+        }
+        if (gestureState.dx < 0 && index < tabs.length - 1) {
+          setTab(tabs[index + 1]);
+          return;
+        }
+        if (gestureState.dx > 0 && index > 0) {
+          setTab(tabs[index - 1]);
+        }
+      },
+    }),
+  ).current;
 
   const openDrawer = () => {
     setDrawerVisible(true);
@@ -191,13 +215,13 @@ export function WorkspaceScreen({
               styles.projectRefreshButton,
               {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
             ]}>
-            <Text style={{color: theme.colors.text}}>{refreshingProject ? '...' : 'R'}</Text>
+            <Text style={{color: theme.colors.text}}>{refreshingProject ? '...' : '⟳'}</Text>
           </Pressable>
 
           <View style={styles.headerSpacer} />
 
           <View style={[styles.segmentWrap, {borderColor: theme.colors.border}]}> 
-            {(['chat', 'file', 'git'] as WorkspaceTab[]).map((item, index, arr) => (
+            {tabs.map((item, index, arr) => (
               <Pressable
                 key={item}
                 style={[
@@ -255,7 +279,9 @@ export function WorkspaceScreen({
             <View style={[styles.divider, {backgroundColor: theme.colors.border}]} />
           ) : null}
 
-          <View style={[styles.mainPane, {backgroundColor: theme.colors.background}]}> 
+          <View
+            style={[styles.mainPane, {backgroundColor: theme.colors.background}]}
+            {...panResponder.panHandlers}> 
             {tab === 'chat' ? (
               <View style={styles.mainBlock}>
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
