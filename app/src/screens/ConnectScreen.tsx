@@ -1,6 +1,7 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import type {AppTheme} from '../theme';
+import {loadLastRegistryAddress, saveLastRegistryAddress} from '../services/preferences';
 
 type ConnectScreenProps = {
   onConnect: (ipOrAddress: string, token: string) => Promise<void>;
@@ -33,6 +34,19 @@ export function ConnectScreen({onConnect, theme}: ConnectScreenProps) {
 
   const disabled = useMemo(() => submitting || !ipOrAddress.trim(), [submitting, ipOrAddress]);
 
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const lastAddress = await loadLastRegistryAddress();
+      if (mounted && lastAddress) {
+        setIpOrAddress(lastAddress);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const submit = async () => {
     if (disabled) {
       return;
@@ -40,7 +54,9 @@ export function ConnectScreen({onConnect, theme}: ConnectScreenProps) {
     setSubmitting(true);
     setErrorMessage('');
     try {
-      const wsUrl = toRegistryWsUrl(ipOrAddress);
+      const input = ipOrAddress.trim();
+      await saveLastRegistryAddress(input);
+      const wsUrl = toRegistryWsUrl(input);
       await onConnect(wsUrl, token.trim());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
