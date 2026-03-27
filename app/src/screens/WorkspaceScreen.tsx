@@ -64,6 +64,7 @@ export function WorkspaceScreen({
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [loadingProject, setLoadingProject] = useState(false);
+  const [refreshingProject, setRefreshingProject] = useState(false);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const workspaceData = useWorkspaceData({
     projects,
@@ -174,8 +175,23 @@ export function WorkspaceScreen({
             <Text style={[styles.projectArrow, {color: theme.colors.text}]}>v</Text>
             <Text style={{color: theme.colors.text}} numberOfLines={1}>
               {selectedProject?.name ?? 'Project'}
-              {loadingProject ? ' ...' : ''}
+              {loadingProject || refreshingProject ? ' ...' : ''}
             </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setRefreshingProject(true);
+              workspaceData
+                .refreshProject()
+                .catch(() => undefined)
+                .finally(() => setRefreshingProject(false));
+            }}
+            style={[
+              styles.headerButton,
+              styles.projectRefreshButton,
+              {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+            ]}>
+            <Text style={{color: theme.colors.text}}>{refreshingProject ? '...' : 'R'}</Text>
           </Pressable>
 
           <View style={styles.headerSpacer} />
@@ -628,6 +644,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingsButton: {
+    marginLeft: 8,
+  },
+  projectRefreshButton: {
     marginLeft: 8,
   },
   projectArrow: {

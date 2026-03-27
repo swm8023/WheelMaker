@@ -71,6 +71,7 @@ type UseWorkspaceDataArgs = {
 type UseWorkspaceDataResult = {
   projectState: ProjectWorkspaceState;
   setChatInput: (value: string) => void;
+  refreshProject: () => Promise<void>;
   selectFile: (path: string | null) => void;
   toggleDirectory: (path: string) => Promise<void>;
   selectCommit: (index: number) => void;
@@ -201,6 +202,79 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     });
   };
 
+  const refreshProject = async (): Promise<void> => {
+    if (!selectedProjectId) return;
+    const snapshot =
+      projectStates[selectedProjectId] ??
+      initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
+    const requestedExpanded = new Set(snapshot.expandedPaths);
+    requestedExpanded.add('.');
+    const existingDirs = new Set<string>(['.']);
+    const existingFiles = new Set<string>();
+
+    const buildDir = async (path: string, name: string): Promise<FileNode> => {
+      const entries = await onListDirectory(path);
+      const children = entries.map(entryToNode).sort(sortFileNode);
+      for (const child of children) {
+        if (child.isDir) {
+          existingDirs.add(child.path);
+        } else {
+          existingFiles.add(child.path);
+        }
+      }
+
+      const resolvedChildren: FileNode[] = [];
+      for (const child of children) {
+        if (child.isDir && requestedExpanded.has(child.path)) {
+          const expandedDir = await buildDir(child.path, child.name);
+          resolvedChildren.push(expandedDir);
+        } else {
+          resolvedChildren.push(child);
+        }
+      }
+
+      return {
+        name,
+        path,
+        isDir: true,
+        loaded: true,
+        children: resolvedChildren,
+      };
+    };
+
+    const nextRoot = await buildDir('.', selectedProject?.name ?? 'Project');
+    const nextExpanded = new Set<string>();
+    for (const path of requestedExpanded) {
+      if (existingDirs.has(path)) {
+        nextExpanded.add(path);
+      }
+    }
+    nextExpanded.add('.');
+
+    const prevSelectedPath = snapshot.selectedFilePath;
+    const nextSelectedPath =
+      prevSelectedPath && existingFiles.has(prevSelectedPath)
+        ? prevSelectedPath
+        : findFirstFile(nextRoot)?.path ?? null;
+
+    setProjectStates(prev => {
+      const current = prev[selectedProjectId] ?? snapshot;
+      return {
+        ...prev,
+        [selectedProjectId]: {
+          ...current,
+          fileTree: nextRoot,
+          expandedPaths: nextExpanded,
+          selectedFilePath: nextSelectedPath,
+          selectedFileContent:
+            nextSelectedPath && nextSelectedPath === current.selectedFilePath
+              ? current.selectedFileContent
+              : '',
+        },
+      };
+    });
+  };
+
   const selectFile = (path: string | null) => {
     if (!selectedProjectId) return;
     setProjectStates(prev => {
@@ -321,6 +395,7 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
   return {
     projectState,
     setChatInput,
+    refreshProject,
     selectFile,
     toggleDirectory,
     selectCommit,
