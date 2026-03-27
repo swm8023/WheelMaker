@@ -1,6 +1,12 @@
 import {useEffect, useMemo, useState} from 'react';
 
-import type {RegistryFsEntry, RegistryProject} from '../types/observe';
+import type {
+  RegistryFsEntry,
+  RegistryGitCommit,
+  RegistryGitCommitFile,
+  RegistryGitFileDiff,
+  RegistryProject,
+} from '../types/observe';
 
 export type WorkspaceTab = 'chat' | 'file' | 'git';
 
@@ -12,33 +18,14 @@ export type FileNode = {
   children: FileNode[];
 };
 
-type GitFile = {
-  path: string;
+export type GitCommitView = RegistryGitCommit;
+
+export type GitCommitFileView = RegistryGitCommitFile & {
   diff: string;
+  isBinary: boolean;
+  truncated: boolean;
+  loadingDiff: boolean;
 };
-
-type GitCommit = {
-  hash: string;
-  message: string;
-  files: GitFile[];
-};
-
-export const GIT_COMMITS: GitCommit[] = [
-  {
-    hash: '14b16e2',
-    message: 'feat(app): implement registry connect, project list, and files',
-    files: [
-      {
-        path: 'app/lib/services/registry_ws_client.dart',
-        diff: '@@ -1,3 +1,4 @@\n+class RegistryWsClient { ... }',
-      },
-      {
-        path: 'app/lib/screens/connect_screen.dart',
-        diff: '@@ -40,2 +75,20 @@\n+Future<void> _openRegistryWorkspace() async { ... }',
-      },
-    ],
-  },
-];
 
 export const CHAT_SESSIONS = ['General', 'WheelMaker App', 'Go Service', 'Review'];
 
@@ -56,7 +43,11 @@ type ProjectWorkspaceState = {
   loadingDirs: Set<string>;
   chatSessionIndex: number;
   chatInput: string;
-  selectedCommitIndex: number;
+  gitLoading: boolean;
+  gitError: string;
+  gitCommits: GitCommitView[];
+  gitFilesBySha: Record<string, GitCommitFileView[]>;
+  selectedCommitSha: string;
   selectedDiffFilePath: string;
 };
 
@@ -66,6 +57,9 @@ type UseWorkspaceDataArgs = {
   fileEntries: RegistryFsEntry[];
   onListDirectory: (path: string) => Promise<RegistryFsEntry[]>;
   onReadFile: (path: string) => Promise<string>;
+  onListGitCommits: (ref?: string) => Promise<RegistryGitCommit[]>;
+  onListGitCommitFiles: (sha: string) => Promise<RegistryGitCommitFile[]>;
+  onReadGitFileDiff: (sha: string, path: string) => Promise<RegistryGitFileDiff>;
 };
 
 type UseWorkspaceDataResult = {
@@ -96,15 +90,27 @@ function initialProjectState(projectName: string, entries: RegistryFsEntry[]): P
     loadingDirs: new Set(),
     chatSessionIndex: 0,
     chatInput: '',
-    selectedCommitIndex: 0,
-    selectedDiffFilePath: GIT_COMMITS[0].files[0].path,
+    gitLoading: false,
+    gitError: '',
+    gitCommits: [],
+    gitFilesBySha: {},
+    selectedCommitSha: '',
+    selectedDiffFilePath: '',
   };
 }
 
 export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataResult {
-  const {projects, selectedProjectId: selectedProjectIdArg, fileEntries, onListDirectory, onReadFile} = args;
-  const selectedProject =
-    projects.find(item => item.projectId === selectedProjectIdArg) ?? projects[0];
+  const {
+    projects,
+    selectedProjectId: selectedProjectIdArg,
+    fileEntries,
+    onListDirectory,
+    onReadFile,
+    onListGitCommits,
+    onListGitCommitFiles,
+    onReadGitFileDiff,
+  } = args;
+  const selectedProject = projects.find(item => item.projectId === selectedProjectIdArg) ?? projects[0];
   const selectedProjectId = selectedProject?.projectId ?? '';
   const [projectStates, setProjectStates] = useState<Record<string, ProjectWorkspaceState>>({});
 
@@ -123,15 +129,23 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     if (!selectedProjectId) return;
     setProjectStates(prev => {
       const next = {...prev};
-      next[selectedProjectId] = initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
+      const before = prev[selectedProjectId] ?? initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
+      const refreshed = initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
+      next[selectedProjectId] = {
+        ...refreshed,
+        chatInput: before.chatInput,
+        chatSessionIndex: before.chatSessionIndex,
+        gitCommits: before.gitCommits,
+        gitFilesBySha: before.gitFilesBySha,
+        selectedCommitSha: before.selectedCommitSha,
+        selectedDiffFilePath: before.selectedDiffFilePath,
+      };
       return next;
     });
   }, [selectedProjectId, selectedProject?.name, fileEntries]);
 
   const projectState = useMemo(() => {
-    if (!selectedProjectId) {
-      return initialProjectState('Project', []);
-    }
+    if (!selectedProjectId) return initialProjectState('Project', []);
     return projectStates[selectedProjectId] ?? initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
   }, [selectedProject?.name, selectedProjectId, projectStates, fileEntries]);
 
@@ -187,6 +201,228 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     };
   }, [onReadFile, selectedProjectId, projectState.selectedFilePath]);
 
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    if (projectState.gitLoading) return;
+    if (projectState.gitCommits.length > 0) return;
+
+    let cancelled = false;
+    const run = async () => {
+      setProjectStates(prev => {
+        const current = prev[selectedProjectId];
+        if (!current) return prev;
+        return {
+          ...prev,
+          [selectedProjectId]: {
+            ...current,
+            gitLoading: true,
+            gitError: '',
+          },
+        };
+      });
+      try {
+        const commits = await onListGitCommits('HEAD');
+        if (cancelled) return;
+        setProjectStates(prev => {
+          const current = prev[selectedProjectId];
+          if (!current) return prev;
+          const selectedCommitSha = current.selectedCommitSha || commits[0]?.sha || '';
+          return {
+            ...prev,
+            [selectedProjectId]: {
+              ...current,
+              gitLoading: false,
+              gitError: '',
+              gitCommits: commits,
+              selectedCommitSha,
+            },
+          };
+        });
+      } catch (error) {
+        if (cancelled) return;
+        setProjectStates(prev => {
+          const current = prev[selectedProjectId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [selectedProjectId]: {
+              ...current,
+              gitLoading: false,
+              gitError: error instanceof Error ? error.message : String(error),
+            },
+          };
+        });
+      }
+    };
+    run().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [onListGitCommits, projectState.gitCommits.length, projectState.gitLoading, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !projectState.selectedCommitSha) return;
+    if (projectState.gitFilesBySha[projectState.selectedCommitSha]) {
+      const files = projectState.gitFilesBySha[projectState.selectedCommitSha];
+      if (!projectState.selectedDiffFilePath && files[0]) {
+        setProjectStates(prev => {
+          const current = prev[selectedProjectId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [selectedProjectId]: {
+              ...current,
+              selectedDiffFilePath: files[0].path,
+            },
+          };
+        });
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const targetSha = projectState.selectedCommitSha;
+    const run = async () => {
+      try {
+        const files = await onListGitCommitFiles(targetSha);
+        if (cancelled) return;
+        const normalized: GitCommitFileView[] = files.map(file => ({
+          ...file,
+          diff: '',
+          isBinary: false,
+          truncated: false,
+          loadingDiff: false,
+        }));
+        setProjectStates(prev => {
+          const current = prev[selectedProjectId];
+          if (!current) return prev;
+          const selectedDiffFilePath =
+            current.selectedCommitSha === targetSha
+              ? current.selectedDiffFilePath || normalized[0]?.path || ''
+              : current.selectedDiffFilePath;
+          return {
+            ...prev,
+            [selectedProjectId]: {
+              ...current,
+              gitFilesBySha: {
+                ...current.gitFilesBySha,
+                [targetSha]: normalized,
+              },
+              selectedDiffFilePath,
+            },
+          };
+        });
+      } catch {
+        // ignore; UI can keep previous available state
+      }
+    };
+
+    run().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [onListGitCommitFiles, projectState.gitFilesBySha, projectState.selectedCommitSha, projectState.selectedDiffFilePath, selectedProjectId]);
+
+  useEffect(() => {
+    if (!selectedProjectId || !projectState.selectedCommitSha || !projectState.selectedDiffFilePath) return;
+    const files = projectState.gitFilesBySha[projectState.selectedCommitSha] ?? [];
+    const index = files.findIndex(file => file.path === projectState.selectedDiffFilePath);
+    if (index < 0) return;
+    const target = files[index];
+    if (target.diff || target.loadingDiff) return;
+
+    let cancelled = false;
+    const sha = projectState.selectedCommitSha;
+    const path = projectState.selectedDiffFilePath;
+
+    setProjectStates(prev => {
+      const current = prev[selectedProjectId];
+      if (!current) return prev;
+      const currentFiles = current.gitFilesBySha[sha] ?? [];
+      const nextFiles = currentFiles.map(file =>
+        file.path === path
+          ? {
+              ...file,
+              loadingDiff: true,
+            }
+          : file,
+      );
+      return {
+        ...prev,
+        [selectedProjectId]: {
+          ...current,
+          gitFilesBySha: {
+            ...current.gitFilesBySha,
+            [sha]: nextFiles,
+          },
+        },
+      };
+    });
+
+    const run = async () => {
+      try {
+        const diffResp = await onReadGitFileDiff(sha, path);
+        if (cancelled) return;
+        setProjectStates(prev => {
+          const current = prev[selectedProjectId];
+          if (!current) return prev;
+          const currentFiles = current.gitFilesBySha[sha] ?? [];
+          const nextFiles = currentFiles.map(file =>
+            file.path === path
+              ? {
+                  ...file,
+                  diff: diffResp.diff,
+                  isBinary: diffResp.isBinary,
+                  truncated: diffResp.truncated,
+                  loadingDiff: false,
+                }
+              : file,
+          );
+          return {
+            ...prev,
+            [selectedProjectId]: {
+              ...current,
+              gitFilesBySha: {
+                ...current.gitFilesBySha,
+                [sha]: nextFiles,
+              },
+            },
+          };
+        });
+      } catch {
+        if (cancelled) return;
+        setProjectStates(prev => {
+          const current = prev[selectedProjectId];
+          if (!current) return prev;
+          const currentFiles = current.gitFilesBySha[sha] ?? [];
+          const nextFiles = currentFiles.map(file =>
+            file.path === path
+              ? {
+                  ...file,
+                  loadingDiff: false,
+                }
+              : file,
+          );
+          return {
+            ...prev,
+            [selectedProjectId]: {
+              ...current,
+              gitFilesBySha: {
+                ...current.gitFilesBySha,
+                [sha]: nextFiles,
+              },
+            },
+          };
+        });
+      }
+    };
+
+    run().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [onReadGitFileDiff, projectState.gitFilesBySha, projectState.selectedCommitSha, projectState.selectedDiffFilePath, selectedProjectId]);
+
   const setChatInput = (value: string) => {
     if (!selectedProjectId) return;
     setProjectStates(prev => {
@@ -205,8 +441,7 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
   const refreshProject = async (): Promise<void> => {
     if (!selectedProjectId) return;
     const snapshot =
-      projectStates[selectedProjectId] ??
-      initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
+      projectStates[selectedProjectId] ?? initialProjectState(selectedProject?.name ?? 'Project', fileEntries);
     const requestedExpanded = new Set(snapshot.expandedPaths);
     requestedExpanded.add('.');
     const existingDirs = new Set<string>(['.']);
@@ -257,8 +492,27 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
         ? prevSelectedPath
         : findFirstFile(nextRoot)?.path ?? null;
 
+    let nextGitCommits = snapshot.gitCommits;
+    let nextGitError = '';
+    try {
+      nextGitCommits = await onListGitCommits('HEAD');
+    } catch (error) {
+      nextGitError = error instanceof Error ? error.message : String(error);
+    }
+
+    const commitSet = new Set(nextGitCommits.map(item => item.sha));
+    let nextSelectedCommitSha = snapshot.selectedCommitSha;
+    if (!nextSelectedCommitSha || !commitSet.has(nextSelectedCommitSha)) {
+      nextSelectedCommitSha = nextGitCommits[0]?.sha ?? '';
+    }
+
     setProjectStates(prev => {
       const current = prev[selectedProjectId] ?? snapshot;
+      const currentFiles = current.gitFilesBySha[nextSelectedCommitSha] ?? [];
+      const nextSelectedDiffFilePath =
+        current.selectedDiffFilePath && currentFiles.some(file => file.path === current.selectedDiffFilePath)
+          ? current.selectedDiffFilePath
+          : currentFiles[0]?.path ?? '';
       return {
         ...prev,
         [selectedProjectId]: {
@@ -267,9 +521,12 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
           expandedPaths: nextExpanded,
           selectedFilePath: nextSelectedPath,
           selectedFileContent:
-            nextSelectedPath && nextSelectedPath === current.selectedFilePath
-              ? current.selectedFileContent
-              : '',
+            nextSelectedPath && nextSelectedPath === current.selectedFilePath ? current.selectedFileContent : '',
+          gitLoading: false,
+          gitError: nextGitError,
+          gitCommits: nextGitCommits,
+          selectedCommitSha: nextSelectedCommitSha,
+          selectedDiffFilePath: nextSelectedDiffFilePath,
         },
       };
     });
@@ -295,12 +552,15 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     setProjectStates(prev => {
       const current = prev[selectedProjectId];
       if (!current) return prev;
+      const commit = current.gitCommits[index];
+      if (!commit) return prev;
+      const files = current.gitFilesBySha[commit.sha] ?? [];
       return {
         ...prev,
         [selectedProjectId]: {
           ...current,
-          selectedCommitIndex: index,
-          selectedDiffFilePath: GIT_COMMITS[index]?.files[0]?.path ?? '',
+          selectedCommitSha: commit.sha,
+          selectedDiffFilePath: files[0]?.path ?? '',
         },
       };
     });

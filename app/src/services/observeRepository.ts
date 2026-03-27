@@ -1,5 +1,12 @@
 import { RegistryClient } from './observeClient';
-import type { RegistryEnvelope, RegistryFsEntry, RegistryProject } from '../types/observe';
+import type {
+  RegistryEnvelope,
+  RegistryFsEntry,
+  RegistryGitCommit,
+  RegistryGitCommitFile,
+  RegistryGitFileDiff,
+  RegistryProject,
+} from '../types/observe';
 
 export class RegistryRepository {
   constructor(private readonly client: RegistryClient) {}
@@ -39,6 +46,47 @@ export class RegistryRepository {
     });
     const payload = (resp.payload ?? {}) as { content?: string };
     return payload.content ?? '';
+  }
+
+  async gitLog(projectId: string, ref = 'HEAD', cursor = '', limit = 50): Promise<RegistryGitCommit[]> {
+    const resp = await this.client.request({
+      method: 'git.log',
+      projectId,
+      payload: { ref, cursor, limit },
+    });
+    const payload = (resp.payload ?? {}) as { commits?: RegistryGitCommit[] };
+    return (payload.commits ?? []).filter(commit => !!commit.sha);
+  }
+
+  async gitCommitFiles(projectId: string, sha: string): Promise<RegistryGitCommitFile[]> {
+    const resp = await this.client.request({
+      method: 'git.commit.files',
+      projectId,
+      payload: { sha },
+    });
+    const payload = (resp.payload ?? {}) as { files?: RegistryGitCommitFile[] };
+    return (payload.files ?? []).filter(file => !!file.path);
+  }
+
+  async gitCommitFileDiff(
+    projectId: string,
+    sha: string,
+    path: string,
+    contextLines = 3,
+  ): Promise<RegistryGitFileDiff> {
+    const resp = await this.client.request({
+      method: 'git.commit.fileDiff',
+      projectId,
+      payload: { sha, path, contextLines },
+    });
+    const payload = (resp.payload ?? {}) as RegistryGitFileDiff;
+    return {
+      sha: payload.sha ?? sha,
+      path: payload.path ?? path,
+      isBinary: payload.isBinary ?? false,
+      diff: payload.diff ?? '',
+      truncated: payload.truncated ?? false,
+    };
   }
 
   close(): void {

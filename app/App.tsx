@@ -1,7 +1,13 @@
 ﻿import React, {useEffect, useRef, useState} from 'react';
 import {StyleSheet, View} from 'react-native';
 
-import type {RegistryFsEntry, RegistryProject} from './src/types/observe';
+import type {
+  RegistryFsEntry,
+  RegistryGitCommit,
+  RegistryGitCommitFile,
+  RegistryGitFileDiff,
+  RegistryProject,
+} from './src/types/observe';
 import {
   createRegistryRepository,
   type RegistryRepository,
@@ -76,6 +82,27 @@ function App() {
     setSession(null);
   };
 
+  const listGitCommits = async (ref = 'HEAD'): Promise<RegistryGitCommit[]> => {
+    if (!session || !repositoryRef.current) {
+      return [];
+    }
+    return repositoryRef.current.gitLog(session.selectedProjectId, ref, '', 50);
+  };
+
+  const listGitCommitFiles = async (sha: string): Promise<RegistryGitCommitFile[]> => {
+    if (!session || !repositoryRef.current) {
+      return [];
+    }
+    return repositoryRef.current.gitCommitFiles(session.selectedProjectId, sha);
+  };
+
+  const readGitFileDiff = async (sha: string, path: string): Promise<RegistryGitFileDiff> => {
+    if (!session || !repositoryRef.current) {
+      return {sha, path, isBinary: false, diff: '', truncated: false};
+    }
+    return repositoryRef.current.gitCommitFileDiff(session.selectedProjectId, sha, path, 3);
+  };
+
   if (!session) {
     return (
       <View style={rootStyle}>
@@ -93,6 +120,9 @@ function App() {
         onSelectProject={selectProject}
         onListDirectory={listDirectory}
         onReadFile={readFile}
+        onListGitCommits={listGitCommits}
+        onListGitCommitFiles={listGitCommitFiles}
+        onReadGitFileDiff={readGitFileDiff}
         onLogout={logout}
         themeMode={themeMode}
         onThemeModeChange={setThemeMode}

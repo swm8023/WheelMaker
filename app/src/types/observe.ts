@@ -28,7 +28,33 @@ export interface RegistryFsEntry {
   mtime?: string;
 }
 
+export interface RegistryGitCommit {
+  sha: string;
+  author: string;
+  email: string;
+  time: string;
+  title: string;
+}
+
+export interface RegistryGitCommitFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface RegistryGitFileDiff {
+  sha: string;
+  path: string;
+  isBinary: boolean;
+  diff: string;
+  truncated: boolean;
+}
+
 export type ObserveMessageType = RegistryMessageType;
 export type ObserveEnvelope<TPayload = unknown> = RegistryEnvelope<TPayload>;
 export type ObserveProject = RegistryProject;
 export type ObserveFsEntry = RegistryFsEntry;
+export type ObserveGitCommit = RegistryGitCommit;
+export type ObserveGitCommitFile = RegistryGitCommitFile;
+export type ObserveGitFileDiff = RegistryGitFileDiff;

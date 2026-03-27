@@ -19,13 +19,19 @@ import {CodeView, MarkdownView} from '../components';
 import {
   CHAT_MESSAGES,
   CHAT_SESSIONS,
-  GIT_COMMITS,
   type FileNode,
+  type GitCommitFileView,
   type WorkspaceTab,
   useWorkspaceData,
 } from '../state/workspaceData';
 import {resolveTheme, type ThemeMode} from '../theme';
-import type {RegistryFsEntry, RegistryProject} from '../types/observe';
+import type {
+  RegistryFsEntry,
+  RegistryGitCommit,
+  RegistryGitCommitFile,
+  RegistryGitFileDiff,
+  RegistryProject,
+} from '../types/observe';
 import {isMarkdownPath} from '../utils/codeLanguage';
 import {iconForPath, type FileIcon} from '../utils/fileIcon';
 
@@ -36,6 +42,9 @@ type WorkspaceScreenProps = {
   onSelectProject: (projectId: string) => Promise<void>;
   onListDirectory: (path: string) => Promise<RegistryFsEntry[]>;
   onReadFile: (path: string) => Promise<string>;
+  onListGitCommits: (ref?: string) => Promise<RegistryGitCommit[]>;
+  onListGitCommitFiles: (sha: string) => Promise<RegistryGitCommitFile[]>;
+  onReadGitFileDiff: (sha: string, path: string) => Promise<RegistryGitFileDiff>;
   onLogout: () => void;
   themeMode: ThemeMode;
   onThemeModeChange: (mode: ThemeMode) => void;
@@ -50,6 +59,9 @@ export function WorkspaceScreen({
   onSelectProject,
   onListDirectory,
   onReadFile,
+  onListGitCommits,
+  onListGitCommitFiles,
+  onReadGitFileDiff,
   onLogout,
   themeMode,
   onThemeModeChange,
@@ -76,12 +88,19 @@ export function WorkspaceScreen({
     fileEntries,
     onListDirectory,
     onReadFile,
+    onListGitCommits,
+    onListGitCommitFiles,
+    onReadGitFileDiff,
   });
 
   const selectedProject =
     projects.find(item => item.projectId === selectedProjectId) ?? projects[0];
-  const selectedCommit = GIT_COMMITS[workspaceData.projectState.selectedCommitIndex];
-  const selectedDiffFile = selectedCommit.files.find(
+  const selectedCommit = workspaceData.projectState.gitCommits.find(
+    item => item.sha === workspaceData.projectState.selectedCommitSha,
+  );
+  const selectedCommitFiles =
+    workspaceData.projectState.gitFilesBySha[workspaceData.projectState.selectedCommitSha] ?? [];
+  const selectedDiffFile = selectedCommitFiles.find(
     file => file.path === workspaceData.projectState.selectedDiffFilePath,
   );
   const [mainPaneWidth, setMainPaneWidth] = useState(0);
@@ -264,10 +283,18 @@ export function WorkspaceScreen({
     return (
       <View style={styles.mainBlock}>
         <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}>
-          {selectedDiffFile?.path ?? 'Select a changed file'}
+          {selectedDiffFile?.path ?? selectedCommit?.title ?? 'Select a changed file'}
         </Text>
         <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
-          <CodeView path={selectedDiffFile?.path ?? 'diff.txt'} code={selectedDiffFile?.diff ?? ''} theme={theme} />
+          {workspaceData.projectState.gitLoading ? (
+            <Text style={{color: theme.colors.textMuted}}>Loading commits...</Text>
+          ) : workspaceData.projectState.gitError ? (
+            <Text style={{color: theme.colors.error}}>{workspaceData.projectState.gitError}</Text>
+          ) : selectedDiffFile?.loadingDiff ? (
+            <Text style={{color: theme.colors.textMuted}}>Loading diff...</Text>
+          ) : (
+            <CodeView path={selectedDiffFile?.path ?? 'diff.txt'} code={selectedDiffFile?.diff ?? ''} theme={theme} />
+          )}
         </ScrollView>
       </View>
     );
@@ -288,8 +315,12 @@ export function WorkspaceScreen({
           closeDrawer();
         }
       }}
-      selectedCommitIndex={workspaceData.projectState.selectedCommitIndex}
+      gitLoading={workspaceData.projectState.gitLoading}
+      gitError={workspaceData.projectState.gitError}
+      gitCommits={workspaceData.projectState.gitCommits}
+      selectedCommitSha={workspaceData.projectState.selectedCommitSha}
       onCommitSelect={workspaceData.selectCommit}
+      gitFiles={selectedCommitFiles}
       selectedDiffFilePath={workspaceData.projectState.selectedDiffFilePath}
       onDiffFileSelect={path => {
         workspaceData.selectDiffFile(path);
@@ -520,8 +551,12 @@ function Sidebar(args: {
   selectedFilePath: string | null;
   onToggleDirectory: (path: string) => Promise<void>;
   onFileSelect: (path: string) => void;
-  selectedCommitIndex: number;
+  gitLoading: boolean;
+  gitError: string;
+  gitCommits: Array<{sha: string; title: string}>;
+  selectedCommitSha: string;
   onCommitSelect: (index: number) => void;
+  gitFiles: GitCommitFileView[];
   selectedDiffFilePath: string;
   onDiffFileSelect: (path: string) => void;
 }) {
@@ -561,18 +596,20 @@ function Sidebar(args: {
       <View style={styles.gitHalf}>
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>COMMITS</Text>
         <ScrollView style={styles.flexOne}>
-          {GIT_COMMITS.map((commit, index) => (
+          {args.gitLoading ? <Text style={{color: args.theme.colors.textMuted}}>Loading...</Text> : null}
+          {args.gitError ? <Text style={{color: args.theme.colors.error}}>{args.gitError}</Text> : null}
+          {args.gitCommits.map((commit, index) => (
             <Pressable
-              key={commit.hash}
+              key={commit.sha}
               style={[
                 styles.sideRow,
-                index === args.selectedCommitIndex && {
+                commit.sha === args.selectedCommitSha && {
                   backgroundColor: args.theme.colors.rowSelected,
                 },
               ]}
               onPress={() => args.onCommitSelect(index)}>
               <Text numberOfLines={2} style={{color: args.theme.colors.text}}>
-                {commit.hash} {commit.message}
+                {commit.sha.slice(0, 7)} {commit.title}
               </Text>
             </Pressable>
           ))}
@@ -582,7 +619,7 @@ function Sidebar(args: {
       <View style={styles.gitHalf}>
         <Text style={[styles.sideTitle, {color: args.theme.colors.textMuted}]}>CHANGED FILES</Text>
         <ScrollView style={styles.flexOne}>
-          {GIT_COMMITS[args.selectedCommitIndex].files.map(file => {
+          {args.gitFiles.map(file => {
             const icon = iconForPath(file.path, {mode: args.theme.mode});
             return (
               <Pressable
