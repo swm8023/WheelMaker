@@ -241,6 +241,7 @@ export function PrismCodeBlock({
       ) : (
         <ScrollView
           horizontal
+          style={styles.noWrapScroller}
           showsHorizontalScrollIndicator={Platform.OS === 'web'}
           contentContainerStyle={styles.scrollContent}>
           {lineRows}
@@ -252,16 +253,25 @@ export function PrismCodeBlock({
 
 const styles = StyleSheet.create({
   wrap: {
+    flex: 1,
     width: '100%',
-    minHeight: 160,
+    minHeight: 0,
     borderRadius: 6,
     overflow: 'hidden',
   },
+  noWrapScroller: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+  },
   scrollContent: {
     minWidth: '100%',
+    flexGrow: 1,
   },
   codeArea: {
     minWidth: '100%',
+    flexGrow: 1,
+    alignSelf: 'stretch',
   },
   lineRow: {
     flexDirection: 'row',
