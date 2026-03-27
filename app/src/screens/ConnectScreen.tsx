@@ -28,9 +28,15 @@ function toRegistryWsUrl(ipOrAddress: string): string {
 
 function defaultAddressByPlatform(): string {
   if (Platform.OS !== 'web') return '127.0.0.1';
-  const win = globalThis as unknown as {location?: {hostname?: string}};
+  const win = globalThis as unknown as {
+    location?: {hostname?: string; host?: string; protocol?: string};
+  };
   const host = win.location?.hostname ?? '';
   if (host === '127.0.0.1') return 'ws://127.0.0.1:6930/ws';
+  if (win.location?.host) {
+    const protocol = win.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${win.location.host}/ws`;
+  }
   return host || '';
 }
 
