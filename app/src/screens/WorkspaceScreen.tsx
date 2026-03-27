@@ -52,6 +52,7 @@ type WorkspaceScreenProps = {
 };
 
 const WORKSPACE_TABS: WorkspaceTab[] = ['chat', 'file', 'git'];
+const GRAPH_LANE_COLORS = ['#4ec9b0', '#d7ba7d', '#c586c0'];
 
 export function WorkspaceScreen({
   projects,
@@ -106,6 +107,7 @@ export function WorkspaceScreen({
   const selectedDiffFile = selectedCommitFiles.find(
     file => file.path === workspaceData.projectState.selectedDiffFilePath,
   );
+  const activeTabIndex = tabs.indexOf(tab);
   const [mainPaneWidth, setMainPaneWidth] = useState(0);
   const baseTranslateX = useRef(new Animated.Value(0)).current;
   const dragTranslateX = useRef(new Animated.Value(0)).current;
@@ -462,7 +464,7 @@ export function WorkspaceScreen({
               ]}>
               {tabs.map(item => (
                 <View key={item} style={[styles.mainPage, {width: mainPaneWidth || 1}]}>
-                  {renderMainTab(item)}
+                  {Math.abs(tabs.indexOf(item) - activeTabIndex) <= 1 ? renderMainTab(item) : null}
                 </View>
               ))}
             </Animated.View>
@@ -603,43 +605,56 @@ function Sidebar(args: {
         <ScrollView style={styles.flexOne}>
           {args.gitLoading ? <Text style={{color: args.theme.colors.textMuted}}>Loading...</Text> : null}
           {args.gitError ? <Text style={{color: args.theme.colors.error}}>{args.gitError}</Text> : null}
-          {args.gitCommits.map((commit, index) => (
-            <Pressable
-              key={commit.sha}
-              style={[
-                styles.commitRow,
-                commit.sha === args.selectedCommitSha && {
-                  backgroundColor: args.theme.colors.rowSelected,
-                },
-              ]}
-              onPress={() => args.onCommitSelect(index)}>
-              <View style={styles.commitGraph}>
-                <View
-                  style={[
-                    styles.commitLineTop,
-                    {backgroundColor: args.theme.colors.border},
-                    index === 0 && styles.commitLineHidden,
-                  ]}
-                />
-                <View style={[styles.commitNode, {backgroundColor: args.theme.colors.accent}]} />
-                <View style={[styles.commitLineBottom, {backgroundColor: args.theme.colors.border}]} />
-              </View>
-              <View style={styles.commitTextWrap}>
-                <View style={styles.commitTitleRow}>
-                  <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
-                    {commit.title}
-                  </Text>
-                  {index === 0 && args.gitCurrentBranch ? (
-                    <View style={[styles.branchBadge, {borderColor: args.theme.colors.accent}]}>
-                      <Text style={[styles.branchBadgeText, {color: args.theme.colors.accent}]}>
-                        {args.gitCurrentBranch}
-                      </Text>
-                    </View>
-                  ) : null}
+          {args.gitCommits.map((commit, index) => {
+            const lane = graphLaneFromSha(commit.sha);
+            const laneColor = GRAPH_LANE_COLORS[lane];
+            return (
+              <Pressable
+                key={commit.sha}
+                style={[
+                  styles.commitRow,
+                  commit.sha === args.selectedCommitSha && {
+                    backgroundColor: args.theme.colors.rowSelected,
+                  },
+                ]}
+                onPress={() => args.onCommitSelect(index)}>
+                <View style={styles.commitGraph}>
+                  <View style={styles.commitLaneWrap}>
+                    {GRAPH_LANE_COLORS.map((_, laneIdx) => (
+                      <View
+                        key={`${commit.sha}-${laneIdx}`}
+                        style={[
+                          styles.commitLaneLine,
+                          {backgroundColor: args.theme.colors.border},
+                          laneIdx === lane && styles.commitLaneActive,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                  <View style={[styles.commitNode, {backgroundColor: laneColor, left: lane * 6 + 2}]} />
                 </View>
-              </View>
-            </Pressable>
-          ))}
+                <View style={styles.commitTextWrap}>
+                  <View style={styles.commitTitleRow}>
+                    <Text numberOfLines={1} style={{color: args.theme.colors.text}}>
+                      {commit.title}
+                    </Text>
+                    {index === 0 && args.gitCurrentBranch ? (
+                      <View style={styles.commitBadgeRow}>
+                        <View style={[styles.branchBadge, {borderColor: args.theme.colors.accent}]}>
+                          <Text style={[styles.branchBadgeText, {color: args.theme.colors.accent}]}>HEAD</Text>
+                        </View>
+                        <View style={[styles.branchBadge, {borderColor: args.theme.colors.accent}]}>
+                          <Text style={[styles.branchBadgeText, {color: args.theme.colors.accent}]}>
+                            {args.gitCurrentBranch}
+                          </Text>
+                        </View>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </View>
       <View style={[styles.gitDivider, {backgroundColor: args.theme.colors.border}]} />
@@ -669,6 +684,16 @@ function Sidebar(args: {
       </View>
     </View>
   );
+}
+
+function graphLaneFromSha(sha: string): number {
+  if (!sha) return 0;
+  let acc = 0;
+  const sample = sha.slice(0, 8);
+  for (let i = 0; i < sample.length; i += 1) {
+    acc += sample.charCodeAt(i);
+  }
+  return acc % GRAPH_LANE_COLORS.length;
 }
 
 function renderFileTree(args: {
@@ -895,26 +920,32 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   commitGraph: {
-    width: 18,
-    alignItems: 'center',
+    width: 22,
+    justifyContent: 'center',
     marginRight: 8,
+    position: 'relative',
   },
-  commitLineTop: {
+  commitLaneWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  commitLaneLine: {
     width: 1,
     flex: 1,
+    opacity: 0.55,
   },
-  commitLineHidden: {
-    opacity: 0,
+  commitLaneActive: {
+    opacity: 1,
   },
   commitNode: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginVertical: 2,
-  },
-  commitLineBottom: {
-    width: 1,
-    flex: 1,
+    position: 'absolute',
+    top: '50%',
+    marginTop: -4,
   },
   commitTextWrap: {
     flex: 1,
@@ -922,6 +953,10 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   commitTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  commitBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
