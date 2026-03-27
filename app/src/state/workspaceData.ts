@@ -349,7 +349,6 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     const target = files[index];
     if (target.diffLoaded || target.loadingDiff) return;
 
-    let cancelled = false;
     const sha = projectState.selectedCommitSha;
     const path = projectState.selectedDiffFilePath;
 
@@ -380,7 +379,6 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     const run = async () => {
       try {
         const diffResp = await onReadGitFileDiff(sha, path);
-        if (cancelled) return;
         setProjectStates(prev => {
           const current = prev[selectedProjectId];
           if (!current) return prev;
@@ -410,7 +408,6 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
           };
         });
       } catch {
-        if (cancelled) return;
         setProjectStates(prev => {
           const current = prev[selectedProjectId];
           if (!current) return prev;
@@ -440,9 +437,6 @@ export function useWorkspaceData(args: UseWorkspaceDataArgs): UseWorkspaceDataRe
     };
 
     run().catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
   }, [onReadGitFileDiff, projectState.gitFilesBySha, projectState.selectedCommitSha, projectState.selectedDiffFilePath, selectedProjectId]);
 
   const setChatInput = (value: string) => {

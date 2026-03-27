@@ -53,7 +53,6 @@ type WorkspaceScreenProps = {
 };
 
 const WORKSPACE_TABS: WorkspaceTab[] = ['chat', 'file', 'git'];
-const GRAPH_LANE_COLORS = ['#4ec9b0', '#d7ba7d', '#c586c0'];
 
 export function WorkspaceScreen({
   projects,
@@ -735,8 +734,6 @@ function Sidebar(args: {
           {args.gitLoading ? <Text style={{color: args.theme.colors.textMuted}}>Loading...</Text> : null}
           {args.gitError ? <Text style={{color: args.theme.colors.error}}>{args.gitError}</Text> : null}
           {args.gitCommits.map((commit, index) => {
-            const lane = graphLaneFromSha(commit.sha);
-            const laneColor = GRAPH_LANE_COLORS[lane];
             return (
               <Pressable
                 key={commit.sha}
@@ -749,18 +746,9 @@ function Sidebar(args: {
                 onPress={() => args.onCommitSelect(index)}>
                 <View style={styles.commitGraph}>
                   <View style={styles.commitLaneWrap}>
-                    {GRAPH_LANE_COLORS.map((_, laneIdx) => (
-                      <View
-                        key={`${commit.sha}-${laneIdx}`}
-                        style={[
-                          styles.commitLaneLine,
-                          {backgroundColor: args.theme.colors.border},
-                          laneIdx === lane && styles.commitLaneActive,
-                        ]}
-                      />
-                    ))}
+                    <View style={[styles.commitLaneLine, {backgroundColor: args.theme.colors.border}]} />
                   </View>
-                  <View style={[styles.commitNode, {backgroundColor: laneColor, left: lane * 6 + 2}]} />
+                  <View style={[styles.commitNode, {backgroundColor: args.theme.colors.accent}]} />
                 </View>
                 <View style={styles.commitTextWrap}>
                   <View style={styles.commitTitleRow}>
@@ -813,16 +801,6 @@ function Sidebar(args: {
       </View>
     </View>
   );
-}
-
-function graphLaneFromSha(sha: string): number {
-  if (!sha) return 0;
-  let acc = 0;
-  const sample = sha.slice(0, 8);
-  for (let i = 0; i < sample.length; i += 1) {
-    acc += sample.charCodeAt(i);
-  }
-  return acc % GRAPH_LANE_COLORS.length;
 }
 
 function renderFileTree(args: {
@@ -1084,17 +1062,11 @@ const styles = StyleSheet.create({
   },
   commitLaneWrap: {
     flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 2,
+    paddingHorizontal: 6,
   },
   commitLaneLine: {
     width: 1,
-    flex: 1,
-    opacity: 0.55,
-  },
-  commitLaneActive: {
-    opacity: 1,
+    height: '100%',
   },
   commitNode: {
     width: 8,
