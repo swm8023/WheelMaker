@@ -15,54 +15,18 @@ import {
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 
 import {CodeView, MarkdownView} from '../components';
+import {
+  CHAT_MESSAGES,
+  CHAT_SESSIONS,
+  GIT_COMMITS,
+  type FileNode,
+  type WorkspaceTab,
+  useWorkspaceData,
+} from '../state/workspaceData';
 import {resolveTheme, type ThemeMode} from '../theme';
 import type {RegistryFsEntry, RegistryProject} from '../types/observe';
 import {isMarkdownPath} from '../utils/codeLanguage';
 import {iconForPath, type FileIcon} from '../utils/fileIcon';
-
-type WorkspaceTab = 'chat' | 'file' | 'git';
-
-type FileNode = {
-  name: string;
-  path: string;
-  isDir: boolean;
-  loaded: boolean;
-  children: FileNode[];
-};
-
-type GitFile = {
-  path: string;
-  diff: string;
-};
-
-type GitCommit = {
-  hash: string;
-  message: string;
-  files: GitFile[];
-};
-
-const CHAT_SESSIONS = ['General', 'WheelMaker App', 'Go Service', 'Review'];
-const CHAT_MESSAGES = [
-  {role: 'system', text: 'Connected to registry workspace.'},
-  {role: 'agent', text: 'Workspace theme now supports VS Code style modes.'},
-];
-
-const GIT_COMMITS: GitCommit[] = [
-  {
-    hash: '14b16e2',
-    message: 'feat(app): implement registry connect, project list, and files',
-    files: [
-      {
-        path: 'app/lib/services/registry_ws_client.dart',
-        diff: '@@ -1,3 +1,4 @@\n+class RegistryWsClient { ... }',
-      },
-      {
-        path: 'app/lib/screens/connect_screen.dart',
-        diff: '@@ -40,2 +75,20 @@\n+Future<void> _openRegistryWorkspace() async { ... }',
-      },
-    ],
-  },
-];
 
 type WorkspaceScreenProps = {
   projects: RegistryProject[];
@@ -99,32 +63,21 @@ export function WorkspaceScreen({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [chatSessionIndex] = useState(0);
-  const [chatInput, setChatInput] = useState('');
-  const [selectedCommitIndex, setSelectedCommitIndex] = useState(0);
-  const [selectedDiffFilePath, setSelectedDiffFilePath] = useState(
-    GIT_COMMITS[0].files[0].path,
-  );
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
-  const [selectedFileContent, setSelectedFileContent] = useState('');
   const [loadingProject, setLoadingProject] = useState(false);
-  const [loadingFilePath, setLoadingFilePath] = useState('');
-  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set());
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['.']));
   const drawerProgress = useRef(new Animated.Value(0)).current;
-  const [fileTree, setFileTree] = useState<FileNode>(() => ({
-    name: 'Project',
-    path: '.',
-    isDir: true,
-    loaded: true,
-    children: [],
-  }));
+  const workspaceData = useWorkspaceData({
+    projects,
+    selectedProjectId,
+    fileEntries,
+    onListDirectory,
+    onReadFile,
+  });
 
   const selectedProject =
     projects.find(item => item.projectId === selectedProjectId) ?? projects[0];
-  const selectedCommit = GIT_COMMITS[selectedCommitIndex];
+  const selectedCommit = GIT_COMMITS[workspaceData.projectState.selectedCommitIndex];
   const selectedDiffFile = selectedCommit.files.find(
-    file => file.path === selectedDiffFilePath,
+    file => file.path === workspaceData.projectState.selectedDiffFilePath,
   );
 
   const openDrawer = () => {
@@ -149,58 +102,11 @@ export function WorkspaceScreen({
   };
 
   useEffect(() => {
-    const root: FileNode = {
-      name: selectedProject?.name ?? 'Project',
-      path: '.',
-      isDir: true,
-      loaded: true,
-      children: fileEntries.map(entryToNode).sort(sortFileNode),
-    };
-    setFileTree(root);
-    setExpandedPaths(new Set(['.']));
-
-    const first = findFirstFile(root);
-    if (first) {
-      setSelectedFilePath(first.path);
-    } else {
-      setSelectedFilePath(null);
-      setSelectedFileContent('');
-    }
-  }, [selectedProject?.name, fileEntries]);
-
-  useEffect(() => {
     if (isWide) {
       setDrawerVisible(false);
       drawerProgress.setValue(0);
     }
   }, [drawerProgress, isWide]);
-
-  useEffect(() => {
-    if (!selectedFilePath) {
-      return;
-    }
-
-    let cancelled = false;
-    const load = async () => {
-      setLoadingFilePath(selectedFilePath);
-      try {
-        const content = await onReadFile(selectedFilePath);
-        if (!cancelled) {
-          setSelectedFileContent(content);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingFilePath('');
-        }
-      }
-    };
-
-    load().catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedFilePath, onReadFile]);
 
   const switchProject = async (projectId: string) => {
     setLoadingProject(true);
@@ -215,65 +121,26 @@ export function WorkspaceScreen({
     }
   };
 
-  const toggleDirectory = async (path: string) => {
-    let shouldExpand = false;
-    setExpandedPaths(prev => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-        shouldExpand = true;
-      }
-      return next;
-    });
-
-    if (!shouldExpand) {
-      return;
-    }
-
-    const target = findNode(fileTree, path);
-    if (!target || !target.isDir || target.loaded) {
-      return;
-    }
-
-    setLoadingDirs(prev => new Set(prev).add(path));
-    try {
-      const entries = await onListDirectory(path);
-      const children = entries.map(entryToNode).sort(sortFileNode);
-      setFileTree(prev => patchNode(prev, path, node => ({...node, loaded: true, children})));
-    } finally {
-      setLoadingDirs(prev => {
-        const next = new Set(prev);
-        next.delete(path);
-        return next;
-      });
-    }
-  };
-
   const leftPanel = (
     <Sidebar
       theme={theme}
       tab={tab}
-      tree={fileTree}
-      expandedPaths={expandedPaths}
-      loadingDirs={loadingDirs}
-      selectedFilePath={selectedFilePath}
-      onToggleDirectory={toggleDirectory}
+      tree={workspaceData.projectState.fileTree}
+      expandedPaths={workspaceData.projectState.expandedPaths}
+      loadingDirs={workspaceData.projectState.loadingDirs}
+      selectedFilePath={workspaceData.projectState.selectedFilePath}
+      onToggleDirectory={workspaceData.toggleDirectory}
       onFileSelect={async path => {
-        setSelectedFilePath(path);
+        workspaceData.selectFile(path);
         if (!isWide) {
           closeDrawer();
         }
       }}
-      selectedCommitIndex={selectedCommitIndex}
-      onCommitSelect={index => {
-        setSelectedCommitIndex(index);
-        setSelectedDiffFilePath(GIT_COMMITS[index]?.files[0]?.path ?? '');
-      }}
-      selectedDiffFilePath={selectedDiffFilePath}
+      selectedCommitIndex={workspaceData.projectState.selectedCommitIndex}
+      onCommitSelect={workspaceData.selectCommit}
+      selectedDiffFilePath={workspaceData.projectState.selectedDiffFilePath}
       onDiffFileSelect={path => {
-        setSelectedDiffFilePath(path);
+        workspaceData.selectDiffFile(path);
         if (!isWide) {
           closeDrawer();
         }
@@ -376,7 +243,7 @@ export function WorkspaceScreen({
             {tab === 'chat' ? (
               <View style={styles.mainBlock}>
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
-                  CHAT - {CHAT_SESSIONS[chatSessionIndex]}
+                  CHAT - {CHAT_SESSIONS[workspaceData.projectState.chatSessionIndex]}
                 </Text>
                 <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
                   {CHAT_MESSAGES.map((msg, idx) => (
@@ -394,8 +261,8 @@ export function WorkspaceScreen({
                 </ScrollView>
                 <View style={[styles.inputRow, {borderColor: theme.colors.border}]}> 
                   <TextInput
-                    value={chatInput}
-                    onChangeText={setChatInput}
+                    value={workspaceData.projectState.chatInput}
+                    onChangeText={workspaceData.setChatInput}
                     placeholder="Message..."
                     placeholderTextColor={theme.colors.textMuted}
                     style={[
@@ -412,7 +279,7 @@ export function WorkspaceScreen({
                       styles.sendButton,
                       {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
                     ]}
-                    onPress={() => setChatInput('')}>
+                    onPress={() => workspaceData.setChatInput('')}>
                     <Text style={{color: theme.colors.text}}>Send</Text>
                   </Pressable>
                 </View>
@@ -422,16 +289,21 @@ export function WorkspaceScreen({
             {tab === 'file' ? (
               <View style={styles.mainBlock}>
                 <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
-                  {selectedFilePath ?? 'Select a file'}
+                  {workspaceData.projectState.selectedFilePath ?? 'Select a file'}
                   {loadingProject ? ' (loading project...)' : ''}
                 </Text>
                 <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
-                  {loadingFilePath ? (
+                  {workspaceData.projectState.loadingFilePath ? (
                     <Text style={{color: theme.colors.textMuted}}>Loading file...</Text>
-                  ) : selectedFilePath && isMarkdownPath(selectedFilePath) ? (
-                    <MarkdownView content={selectedFileContent} theme={theme} />
+                  ) : workspaceData.projectState.selectedFilePath &&
+                    isMarkdownPath(workspaceData.projectState.selectedFilePath) ? (
+                    <MarkdownView content={workspaceData.projectState.selectedFileContent} theme={theme} />
                   ) : (
-                    <CodeView path={selectedFilePath ?? 'file.txt'} code={selectedFileContent} theme={theme} />
+                    <CodeView
+                      path={workspaceData.projectState.selectedFilePath ?? 'file.txt'}
+                      code={workspaceData.projectState.selectedFileContent}
+                      theme={theme}
+                    />
                   )}
                 </ScrollView>
               </View>
@@ -699,16 +571,6 @@ function renderFileTree(args: {
   );
 }
 
-function entryToNode(entry: RegistryFsEntry): FileNode {
-  return {
-    name: entry.name,
-    path: entry.path,
-    isDir: entry.kind === 'dir',
-    loaded: entry.kind !== 'dir',
-    children: [],
-  };
-}
-
 function sortFileNode(a: FileNode, b: FileNode): number {
   if (a.isDir && !b.isDir) {
     return -1;
@@ -717,39 +579,6 @@ function sortFileNode(a: FileNode, b: FileNode): number {
     return 1;
   }
   return a.name.localeCompare(b.name);
-}
-
-function findNode(root: FileNode, path: string): FileNode | null {
-  if (root.path === path) {
-    return root;
-  }
-  for (const child of root.children) {
-    const found = findNode(child, path);
-    if (found) {
-      return found;
-    }
-  }
-  return null;
-}
-
-function patchNode(root: FileNode, path: string, updater: (node: FileNode) => FileNode): FileNode {
-  if (root.path === path) {
-    return updater(root);
-  }
-  return {
-    ...root,
-    children: root.children.map(child => patchNode(child, path, updater)),
-  };
-}
-
-function findFirstFile(root: FileNode): FileNode | null {
-  const sorted = [...root.children].sort(sortFileNode);
-  for (const node of sorted) {
-    if (!node.isDir) {
-      return node;
-    }
-  }
-  return null;
 }
 function VsIcon({icon}: {icon: FileIcon}) {
   const webIconStyle = {
