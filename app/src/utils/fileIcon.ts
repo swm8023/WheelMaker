@@ -3,7 +3,7 @@ type ThemeMode = 'dark' | 'light';
 type FileIcon = {
   glyph: string;
   color: string;
-  fontFamily: 'vscode-seti';
+  fontFamily: 'vscode-seti' | 'vscode-codicon';
 };
 
 type IconThemeSection = {
@@ -26,10 +26,26 @@ type SetiThemeJson = IconThemeSection & {
 
 const setiTheme = require('./vscode-seti-theme.json') as SetiThemeJson;
 
+const codiconFolder = String.fromCodePoint(0xea83);
+const codiconFolderOpened = String.fromCodePoint(0xeaf7);
+const codiconFile = String.fromCodePoint(0xea7b);
+
 const fallbackIcon: FileIcon = {
-  glyph: '•',
+  glyph: codiconFile,
   color: '#c5c5c5',
-  fontFamily: 'vscode-seti',
+  fontFamily: 'vscode-codicon',
+};
+
+const folderIcon: FileIcon = {
+  glyph: codiconFolder,
+  color: '#dcb67a',
+  fontFamily: 'vscode-codicon',
+};
+
+const folderExpandedIcon: FileIcon = {
+  glyph: codiconFolderOpened,
+  color: '#dcb67a',
+  fontFamily: 'vscode-codicon',
 };
 
 function toSetiGlyph(fontCharacter?: string): string {
@@ -37,7 +53,7 @@ function toSetiGlyph(fontCharacter?: string): string {
   const normalized = fontCharacter.replace(/^\\/, '');
   const codePoint = Number.parseInt(normalized, 16);
   if (Number.isNaN(codePoint)) return fallbackIcon.glyph;
-  return String.fromCharCode(codePoint);
+  return String.fromCodePoint(codePoint);
 }
 
 function resolveIconFromDefinition(defKey?: string): FileIcon {
@@ -101,7 +117,12 @@ export function iconForPath(path: string, options: IconOptions = {}): FileIcon {
   const section = sectionForMode(mode);
 
   if (options.isDir) {
-    return resolveIconFromDefinition(options.expanded ? section.folderExpanded : section.folder);
+    const folderFromTheme = resolveIconFromDefinition(options.expanded ? section.folderExpanded : section.folder);
+    // Seti file-icon JSON in this repo has no folder keys; use official VS Code codicon as fallback.
+    if (folderFromTheme.fontFamily === 'vscode-codicon') {
+      return options.expanded ? folderExpandedIcon : folderIcon;
+    }
+    return folderFromTheme;
   }
 
   return resolveIconFromDefinition(fileDefKey(path, mode));

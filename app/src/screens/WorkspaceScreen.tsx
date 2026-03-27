@@ -762,6 +762,16 @@ function VsIcon({icon}: {icon: FileIcon}) {
     return <span style={webIconStyle}>{icon.glyph}</span>;
   }
 
+  if (icon.fontFamily === 'vscode-codicon') {
+    const nativeFallback =
+      icon.glyph === String.fromCodePoint(0xeaf7)
+        ? '📂'
+        : icon.glyph === String.fromCodePoint(0xea83)
+          ? '📁'
+          : '📄';
+    return <Text style={{color: icon.color}}>{nativeFallback}</Text>;
+  }
+
   return <Text style={{color: icon.color, fontFamily: icon.fontFamily}}>{icon.glyph}</Text>;
 }
 const styles = StyleSheet.create({
