@@ -45,6 +45,7 @@ module.exports = {
   devServer: {
     host: '0.0.0.0',
     port: 8080,
+    allowedHosts: ['vimernas.myqnapcloud.com'],
     historyApiFallback: true,
     static: {
       directory: path.resolve(__dirname, 'public'),
