@@ -135,10 +135,14 @@ export function WorkspaceScreen({
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponderCapture: (_evt, gestureState) =>
+          gestureState.numberActiveTouches >= 2 &&
           mainPaneWidth > 0 &&
           Math.abs(gestureState.dx) > 18 &&
           Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.15,
         onPanResponderMove: (_evt, gestureState) => {
+          if (gestureState.numberActiveTouches < 2) {
+            return;
+          }
           const atFirst = tabIndex <= 0 && gestureState.dx > 0;
           const atLast = tabIndex >= tabs.length - 1 && gestureState.dx < 0;
           if (atFirst || atLast) {
