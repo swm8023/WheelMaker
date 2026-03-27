@@ -1,4 +1,4 @@
-﻿import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Animated,
   Modal,
@@ -41,6 +41,8 @@ type WorkspaceScreenProps = {
   onThemeModeChange: (mode: ThemeMode) => void;
 };
 
+const WORKSPACE_TABS: WorkspaceTab[] = ['chat', 'file', 'git'];
+
 export function WorkspaceScreen({
   projects,
   selectedProjectId,
@@ -53,7 +55,7 @@ export function WorkspaceScreen({
   onThemeModeChange,
 }: WorkspaceScreenProps) {
   const {width} = useWindowDimensions();
-  const tabs: WorkspaceTab[] = ['chat', 'file', 'git'];
+  const tabs = WORKSPACE_TABS;
   const isWide = width >= 900;
   const compact = width < 560;
   const drawerWidth = Math.min(320, Math.floor(width * 0.88));
@@ -82,28 +84,67 @@ export function WorkspaceScreen({
   const selectedDiffFile = selectedCommit.files.find(
     file => file.path === workspaceData.projectState.selectedDiffFilePath,
   );
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_evt, gestureState) =>
-        Math.abs(gestureState.dx) > 12 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-      onPanResponderRelease: (_evt, gestureState) => {
-        if (Math.abs(gestureState.dx) < 56) {
-          return;
-        }
-        const index = tabs.indexOf(tab);
-        if (index < 0) {
-          return;
-        }
-        if (gestureState.dx < 0 && index < tabs.length - 1) {
-          setTab(tabs[index + 1]);
-          return;
-        }
-        if (gestureState.dx > 0 && index > 0) {
-          setTab(tabs[index - 1]);
-        }
-      },
-    }),
-  ).current;
+  const [mainPaneWidth, setMainPaneWidth] = useState(0);
+  const baseTranslateX = useRef(new Animated.Value(0)).current;
+  const dragTranslateX = useRef(new Animated.Value(0)).current;
+  const tabIndex = tabs.indexOf(tab);
+
+  useEffect(() => {
+    if (mainPaneWidth <= 0 || tabIndex < 0) {
+      return;
+    }
+    Animated.timing(baseTranslateX, {
+      toValue: -tabIndex * mainPaneWidth,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+  }, [baseTranslateX, mainPaneWidth, tabIndex]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_evt, gestureState) =>
+          mainPaneWidth > 0 &&
+          Math.abs(gestureState.dx) > 18 &&
+          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.15,
+        onPanResponderMove: (_evt, gestureState) => {
+          const atFirst = tabIndex <= 0 && gestureState.dx > 0;
+          const atLast = tabIndex >= tabs.length - 1 && gestureState.dx < 0;
+          if (atFirst || atLast) {
+            dragTranslateX.setValue(gestureState.dx * 0.28);
+            return;
+          }
+          dragTranslateX.setValue(gestureState.dx);
+        },
+        onPanResponderRelease: (_evt, gestureState) => {
+          const shouldSwitch = Math.abs(gestureState.dx) > 56 || Math.abs(gestureState.vx) > 0.35;
+          let nextIndex = tabIndex;
+          if (shouldSwitch) {
+            if (gestureState.dx < 0 && tabIndex < tabs.length - 1) {
+              nextIndex = tabIndex + 1;
+            } else if (gestureState.dx > 0 && tabIndex > 0) {
+              nextIndex = tabIndex - 1;
+            }
+          }
+          if (nextIndex !== tabIndex) {
+            setTab(tabs[nextIndex]);
+          }
+          Animated.timing(dragTranslateX, {
+            toValue: 0,
+            duration: 140,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.timing(dragTranslateX, {
+            toValue: 0,
+            duration: 140,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [dragTranslateX, mainPaneWidth, tabIndex, tabs],
+  );
 
   const openDrawer = () => {
     setDrawerVisible(true);
@@ -144,6 +185,92 @@ export function WorkspaceScreen({
     if (!isWide) {
       closeDrawer();
     }
+  };
+
+  const renderMainTab = (currentTab: WorkspaceTab) => {
+    if (currentTab === 'chat') {
+      return (
+        <View style={styles.mainBlock}>
+          <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}>
+            CHAT - {CHAT_SESSIONS[workspaceData.projectState.chatSessionIndex]}
+          </Text>
+          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
+            {CHAT_MESSAGES.map((msg, idx) => (
+              <View
+                key={idx}
+                style={[
+                  styles.chatBubble,
+                  {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+                ]}>
+                <Text style={{color: theme.colors.text}}>
+                  [{msg.role}] {msg.text}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+          <View style={[styles.inputRow, {borderColor: theme.colors.border}]}>
+            <TextInput
+              value={workspaceData.projectState.chatInput}
+              onChangeText={workspaceData.setChatInput}
+              placeholder="Message..."
+              placeholderTextColor={theme.colors.textMuted}
+              style={[
+                styles.input,
+                {
+                  borderColor: theme.colors.border,
+                  color: theme.colors.text,
+                  backgroundColor: theme.colors.inputBackground,
+                },
+              ]}
+            />
+            <Pressable
+              style={[
+                styles.sendButton,
+                {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
+              ]}
+              onPress={() => workspaceData.setChatInput('')}>
+              <Text style={{color: theme.colors.text}}>Send</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (currentTab === 'file') {
+      return (
+        <View style={styles.mainBlock}>
+          <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}>
+            {workspaceData.projectState.selectedFilePath ?? 'Select a file'}
+            {loadingProject ? ' (loading project...)' : ''}
+          </Text>
+          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
+            {workspaceData.projectState.loadingFilePath ? (
+              <Text style={{color: theme.colors.textMuted}}>Loading file...</Text>
+            ) : workspaceData.projectState.selectedFilePath &&
+              isMarkdownPath(workspaceData.projectState.selectedFilePath) ? (
+              <MarkdownView content={workspaceData.projectState.selectedFileContent} theme={theme} />
+            ) : (
+              <CodeView
+                path={workspaceData.projectState.selectedFilePath ?? 'file.txt'}
+                code={workspaceData.projectState.selectedFileContent}
+                theme={theme}
+              />
+            )}
+          </ScrollView>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.mainBlock}>
+        <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}>
+          {selectedDiffFile?.path ?? 'Select a changed file'}
+        </Text>
+        <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
+          <CodeView path={selectedDiffFile?.path ?? 'diff.txt'} code={selectedDiffFile?.diff ?? ''} theme={theme} />
+        </ScrollView>
+      </View>
+    );
   };
 
   const leftPanel = (
@@ -215,7 +342,7 @@ export function WorkspaceScreen({
               styles.projectRefreshButton,
               {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
             ]}>
-            <Text style={{color: theme.colors.text}}>{refreshingProject ? '...' : '⟳'}</Text>
+            <Text style={{color: theme.colors.text}}>{refreshingProject ? '...' : '?'}</Text>
           </Pressable>
 
           <View style={styles.headerSpacer} />
@@ -281,90 +408,27 @@ export function WorkspaceScreen({
 
           <View
             style={[styles.mainPane, {backgroundColor: theme.colors.background}]}
-            {...panResponder.panHandlers}> 
-            {tab === 'chat' ? (
-              <View style={styles.mainBlock}>
-                <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
-                  CHAT - {CHAT_SESSIONS[workspaceData.projectState.chatSessionIndex]}
-                </Text>
-                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
-                  {CHAT_MESSAGES.map((msg, idx) => (
-                    <View
-                      key={idx}
-                      style={[
-                        styles.chatBubble,
-                        {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
-                      ]}>
-                      <Text style={{color: theme.colors.text}}>
-                        [{msg.role}] {msg.text}
-                      </Text>
-                    </View>
-                  ))}
-                </ScrollView>
-                <View style={[styles.inputRow, {borderColor: theme.colors.border}]}> 
-                  <TextInput
-                    value={workspaceData.projectState.chatInput}
-                    onChangeText={workspaceData.setChatInput}
-                    placeholder="Message..."
-                    placeholderTextColor={theme.colors.textMuted}
-                    style={[
-                      styles.input,
-                      {
-                        borderColor: theme.colors.border,
-                        color: theme.colors.text,
-                        backgroundColor: theme.colors.inputBackground,
-                      },
-                    ]}
-                  />
-                  <Pressable
-                    style={[
-                      styles.sendButton,
-                      {borderColor: theme.colors.border, backgroundColor: theme.colors.panelSecondary},
-                    ]}
-                    onPress={() => workspaceData.setChatInput('')}>
-                    <Text style={{color: theme.colors.text}}>Send</Text>
-                  </Pressable>
+            onLayout={event => {
+              const nextWidth = event.nativeEvent.layout.width;
+              if (nextWidth > 0 && nextWidth !== mainPaneWidth) {
+                setMainPaneWidth(nextWidth);
+              }
+            }}
+            {...panResponder.panHandlers}>
+            <Animated.View
+              style={[
+                styles.mainPager,
+                {
+                  width: (mainPaneWidth || 1) * tabs.length,
+                  transform: [{translateX: Animated.add(baseTranslateX, dragTranslateX)}],
+                },
+              ]}>
+              {tabs.map(item => (
+                <View key={item} style={[styles.mainPage, {width: mainPaneWidth || 1}]}>
+                  {renderMainTab(item)}
                 </View>
-              </View>
-            ) : null}
-
-            {tab === 'file' ? (
-              <View style={styles.mainBlock}>
-                <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
-                  {workspaceData.projectState.selectedFilePath ?? 'Select a file'}
-                  {loadingProject ? ' (loading project...)' : ''}
-                </Text>
-                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
-                  {workspaceData.projectState.loadingFilePath ? (
-                    <Text style={{color: theme.colors.textMuted}}>Loading file...</Text>
-                  ) : workspaceData.projectState.selectedFilePath &&
-                    isMarkdownPath(workspaceData.projectState.selectedFilePath) ? (
-                    <MarkdownView content={workspaceData.projectState.selectedFileContent} theme={theme} />
-                  ) : (
-                    <CodeView
-                      path={workspaceData.projectState.selectedFilePath ?? 'file.txt'}
-                      code={workspaceData.projectState.selectedFileContent}
-                      theme={theme}
-                    />
-                  )}
-                </ScrollView>
-              </View>
-            ) : null}
-
-            {tab === 'git' ? (
-              <View style={styles.mainBlock}>
-                <Text style={[styles.blockTitle, {borderColor: theme.colors.border, color: theme.colors.text}]}> 
-                  {selectedDiffFile?.path ?? 'Select a changed file'}
-                </Text>
-                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.mainScrollPad}>
-                  <CodeView
-                    path={selectedDiffFile?.path ?? 'diff.txt'}
-                    code={selectedDiffFile?.diff ?? ''}
-                    theme={theme}
-                  />
-                </ScrollView>
-              </View>
-            ) : null}
+              ))}
+            </Animated.View>
           </View>
         </View>
 
@@ -726,6 +790,16 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     overflow: 'hidden',
   },
+  mainPager: {
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 0,
+  },
+  mainPage: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
   sideContainer: {
     flex: 1,
     minHeight: 0,
@@ -858,6 +932,7 @@ const styles = StyleSheet.create({
     verticalAlign: 'middle',
   },
 });
+
 
 
 
