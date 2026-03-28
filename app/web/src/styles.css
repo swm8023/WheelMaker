@@ -536,6 +536,8 @@ body,
 
 .file-title-tools {
   gap: 6px;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .title-action-group {

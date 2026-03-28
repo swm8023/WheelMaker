@@ -505,7 +505,10 @@ function App() {
     if (!container) return;
     const lineElement = container.querySelector(`.code-wrap [data-line-number="${line}"]`) as HTMLElement | null;
     if (lineElement) {
-      lineElement.scrollIntoView({block: 'center', behavior: 'smooth'});
+      const containerRect = container.getBoundingClientRect();
+      const lineRect = lineElement.getBoundingClientRect();
+      const delta = (lineRect.top - containerRect.top) - (container.clientHeight / 2) + (lineRect.height / 2);
+      container.scrollTo({top: container.scrollTop + delta, behavior: 'smooth'});
     } else {
       const codeElement = container.querySelector('.code-block code') as HTMLElement | null;
       const lineHeight = codeElement ? Number.parseFloat(window.getComputedStyle(codeElement).lineHeight) || 20 : 20;
@@ -890,11 +893,12 @@ function App() {
         <div className="content">
           <div className="block-title with-tools file-title-bar">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
-            <div className="view-tools file-title-tools">
-              <div className="file-action-group title-action-group">
-                <button
-                  type="button"
-                  className={`view-tool ${gotoToolsOpen ? 'active' : ''}`}
+                <div className="view-tools file-title-tools">
+                  {renderViewTools()}
+                  <div className="file-action-group title-action-group">
+                    <button
+                      type="button"
+                      className={`view-tool ${gotoToolsOpen ? 'active' : ''}`}
                   onClick={() => {
                     setGotoToolsOpen(value => {
                       const next = !value;
@@ -906,18 +910,20 @@ function App() {
                   aria-label="Toggle go to line">
                   <span className="codicon codicon-symbol-number view-tool-icon" />
                 </button>
-                <div className={`file-action-panel title-action-panel ${gotoToolsOpen ? 'open' : ''}`}>
-                  <input
-                    className="goto-input"
-                    value={gotoLineInput}
-                    onChange={event => setGotoLineInput(event.target.value)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter') {
-                        triggerGoToLine();
-                      }
-                    }}
-                    inputMode="numeric"
-                    placeholder="Line"
+                    <div className={`file-action-panel title-action-panel ${gotoToolsOpen ? 'open' : ''}`}>
+                      <input
+                        className="goto-input"
+                        value={gotoLineInput}
+                        onChange={event => setGotoLineInput(event.target.value)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            triggerGoToLine();
+                            (event.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        placeholder="Line"
                   />
                   <button type="button" className="view-tool goto-trigger" title="Go to line" onClick={triggerGoToLine}>
                     <span className="codicon codicon-arrow-right view-tool-icon" />
@@ -939,17 +945,19 @@ function App() {
                   aria-label="Toggle search">
                   <span className="codicon codicon-search view-tool-icon" />
                 </button>
-                <div className={`file-action-panel title-action-panel ${searchToolsOpen ? 'open' : ''}`}>
-                  <input
-                    className="search-input"
-                    value={fileSearchQuery}
-                    onChange={event => setFileSearchQuery(event.target.value)}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter') {
-                        navigateSearchMatch(1);
-                      }
-                    }}
-                    placeholder="Find in file"
+                    <div className={`file-action-panel title-action-panel ${searchToolsOpen ? 'open' : ''}`}>
+                      <input
+                        className="search-input"
+                        value={fileSearchQuery}
+                        onChange={event => setFileSearchQuery(event.target.value)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            navigateSearchMatch(1);
+                            (event.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        placeholder="Find in file"
                   />
                   <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
                     <span className="codicon codicon-chevron-up view-tool-icon" />
@@ -960,9 +968,8 @@ function App() {
                   <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
                 </div>
               </div>
-              {renderViewTools()}
-            </div>
-          </div>
+                </div>
+              </div>
           <div className="file-pane">
             <div className="file-main-col">
               {hasPinnedFiles ? (
