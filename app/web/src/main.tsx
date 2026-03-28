@@ -447,7 +447,7 @@ function App() {
                   setChatSessionIndex(index);
                   if (!isWide) setDrawerOpen(false);
                 }}>
-                <span className="file-dot">C</span>
+                <span className="file-dot codicon codicon-comment-discussion" />
                 <span className="label">{session}</span>
               </div>
             ))}
@@ -479,7 +479,7 @@ function App() {
                 setSelectedCommit(commit.sha);
                 if (!isWide) setDrawerOpen(false);
               }}>
-              <span className="file-dot">o</span>
+              <span className="file-dot codicon codicon-git-commit" />
               <span className="label">{commit.title || commit.sha.slice(0, 7)}</span>
             </div>
           ))}
@@ -531,7 +531,12 @@ function App() {
       return (
         <div className="content">
           <div className="block-title">CHAT - {chatSessions[chatSessionIndex]}</div>
-          <div className="scroll-panel chat-block">Chat view keeps shared split layout.</div>
+          <div className="scroll-panel chat-block">
+            <div className="empty-card">
+              <div className="empty-title">Chat Panel</div>
+              <div className="empty-desc">Unified split layout is ready. Chat content will render here.</div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -588,12 +593,12 @@ function App() {
               setDrawerOpen(true);
             }
           }}>
-          {isWide ? (sidebarCollapsed ? '[>]' : '[<]') : '[=]'}
+          <span className={`codicon ${isWide ? (sidebarCollapsed ? 'codicon-panel-left-expand' : 'codicon-panel-left') : 'codicon-menu'}`} />
         </button>
 
         <div className="project-wrap" onPointerDown={event => event.stopPropagation()}>
           <button className="project-btn" onClick={() => setProjectMenuOpen(value => !value)}>
-            <span className="project-arrow">v</span>
+            <span className="project-arrow codicon codicon-chevron-down" />
             <span className="project-name" title={currentProjectName}>{currentProjectName}</span>
             {(loadingProject || refreshingProject) ? <span className="muted">...</span> : null}
           </button>
@@ -612,7 +617,7 @@ function App() {
         </div>
 
         <button className="header-btn refresh-btn" onClick={() => refreshProject().catch(() => undefined)} title="Refresh project">
-          {refreshingProject ? '...' : 'R'}
+          {refreshingProject ? '...' : <span className="codicon codicon-refresh" />}
         </button>
 
         <div className="header-spacer" />
@@ -631,7 +636,7 @@ function App() {
 
         <div className="settings-wrap" onPointerDown={event => event.stopPropagation()}>
           <button className="header-btn" onClick={() => setQuickSettingsOpen(value => !value)}>
-            [*]
+            <span className="codicon codicon-settings-gear" />
           </button>
           {quickSettingsOpen ? (
             <div className="settings-menu">
