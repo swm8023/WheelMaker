@@ -591,6 +591,11 @@ body,
   flex: 0 0 auto;
 }
 
+.pinned-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
 .pinned-entry {
   display: inline-flex;
   align-items: center;

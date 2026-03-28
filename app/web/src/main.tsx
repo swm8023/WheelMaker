@@ -409,6 +409,7 @@ function App() {
   const [gotoToolsOpen, setGotoToolsOpen] = useState(false);
   const [temporaryHighlightLine, setTemporaryHighlightLine] = useState<number | null>(null);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
 
   const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);
   const [chatSessionIndex, setChatSessionIndex] = useState(0);
@@ -456,13 +457,14 @@ function App() {
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
   const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;
+  const hasPinnedFiles = pinnedFiles.length > 0;
   const fileLines = useMemo(() => fileContent.split('\n'), [fileContent]);
   const fileSearchMatches = useMemo(() => {
-    const query = fileSearchQuery.trim().toLowerCase();
+    const query = fileSearchQuery.trim().toLocaleLowerCase();
     if (!query) return [] as number[];
     const matches: number[] = [];
     for (let i = 0; i < fileLines.length; i += 1) {
-      if (fileLines[i].toLowerCase().includes(query)) {
+      if (fileLines[i].toLocaleLowerCase().includes(query)) {
         matches.push(i + 1);
       }
     }
@@ -482,15 +484,29 @@ function App() {
     setCurrentMatchIndex(prev => Math.min(prev, fileSearchMatches.length - 1));
   }, [fileSearchMatches.length]);
 
+  useEffect(() => () => {
+    if (highlightTimerRef.current !== null) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+  }, []);
+
   const scrollToFileLine = (line: number, highlight = false) => {
     const container = fileScrollRef.current;
     if (!container) return;
-    const lineElement = container.querySelector(`[data-line-number="${line}"]`) as HTMLElement | null;
-    if (!lineElement) return;
-    lineElement.scrollIntoView({block: 'center', behavior: 'smooth'});
+    const lineElement = container.querySelector(`.code-wrap [data-line-number="${line}"]`) as HTMLElement | null;
+    if (lineElement) {
+      lineElement.scrollIntoView({block: 'center', behavior: 'smooth'});
+    } else {
+      const codeElement = container.querySelector('.code-block code') as HTMLElement | null;
+      const lineHeight = codeElement ? Number.parseFloat(window.getComputedStyle(codeElement).lineHeight) || 20 : 20;
+      container.scrollTo({top: Math.max(0, (line - 1) * lineHeight), behavior: 'smooth'});
+    }
     if (highlight) {
       setTemporaryHighlightLine(line);
-      window.setTimeout(() => setTemporaryHighlightLine(null), 2000);
+      if (highlightTimerRef.current !== null) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+      highlightTimerRef.current = window.setTimeout(() => setTemporaryHighlightLine(null), 2000);
     }
   };
 
@@ -502,11 +518,21 @@ function App() {
   };
 
   const triggerGoToLine = () => {
-    if (!fileLines.length) return;
-    const parsed = Number.parseInt(gotoLineInput.trim(), 10);
-    if (Number.isNaN(parsed)) return;
+    if (!selectedFile || fileLoading || !fileLines.length) return;
+    const raw = gotoLineInput.trim();
+    if (!raw) return;
+    if (!/^\d+$/.test(raw)) {
+      return;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      return;
+    }
     const line = Math.max(1, Math.min(fileLines.length, parsed));
-    scrollToFileLine(line, true);
+    setGotoLineInput(String(line));
+    window.requestAnimationFrame(() => {
+      scrollToFileLine(line, true);
+    });
   };
 
   const loadDirectory = async (path: string) => {
@@ -855,15 +881,17 @@ function App() {
           <div className="block-title with-tools">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
             <div className="view-tools file-tools">
-              <button
-                type="button"
-                className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
-                onClick={togglePinSelectedFile}
-                disabled={!selectedFile}
-                title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
-                aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
-                <span className="codicon codicon-pinned view-tool-icon" />
-              </button>
+              {!hasPinnedFiles ? (
+                <button
+                  type="button"
+                  className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
+                  onClick={togglePinSelectedFile}
+                  disabled={!selectedFile}
+                  title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
+                  aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+                  <span className="codicon codicon-pinned view-tool-icon" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
@@ -923,23 +951,35 @@ function App() {
               {renderViewTools()}
             </div>
           </div>
-          <div className="pinned-strip">
-            <span className="pinned-label">Pinned</span>
-            {pinnedFiles.map(path => (
-              <div key={path} className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}>
-                <button type="button" className="pinned-open" onClick={() => setSelectedFile(path)} title={path}>
-                  {path.split('/').pop() || path}
-                </button>
-                <button
-                  type="button"
-                  className="pinned-close"
-                  onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
-                  aria-label={`Unpin ${path}`}>
-                  x
-                </button>
-              </div>
-            ))}
-          </div>
+          {hasPinnedFiles ? (
+            <div className="pinned-strip">
+              <span className="pinned-label">Pinned</span>
+              {pinnedFiles.map(path => (
+                <div key={path} className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}>
+                  <button type="button" className="pinned-open" onClick={() => setSelectedFile(path)} title={path}>
+                    {path.split('/').pop() || path}
+                  </button>
+                  <button
+                    type="button"
+                    className="pinned-close"
+                    onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
+                    aria-label={`Unpin ${path}`}>
+                    x
+                  </button>
+                </div>
+              ))}
+              <span className="pinned-spacer" />
+              <button
+                type="button"
+                className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
+                onClick={togglePinSelectedFile}
+                disabled={!selectedFile}
+                title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
+                aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+                <span className="codicon codicon-pinned view-tool-icon" />
+              </button>
+            </div>
+          ) : null}
           <div ref={fileScrollRef} className="scroll-panel">
             {fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}
           </div>
