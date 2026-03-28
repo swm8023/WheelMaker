@@ -539,21 +539,55 @@ function App() {
 
   const renderDiffPane = (content: string) => {
     if (!content) return <div className="muted block">No diff available</div>;
-    const lines = content.split('\n');
+    const rawLines = content.split('\n');
+
+    // Detect language from "+++ b/path" header
+    let diffLang = 'clike';
+    for (const l of rawLines) {
+      if (l.startsWith('+++ ')) {
+        diffLang = detectPrismLanguage(l.slice(4).replace(/^[ab]\//, ''));
+        break;
+      }
+    }
+    const grammar = Prism.languages[diffLang] || Prism.languages.clike;
+
+    let oldLine = 0;
+    let newLine = 0;
+
+    type DRow = {type: 'add' | 'del' | 'ctx' | 'hunk' | 'meta'; oldNum: number | null; newNum: number | null; code: string};
+
+    const rows: DRow[] = rawLines.map((raw): DRow => {
+      if (raw.startsWith('@@')) {
+        const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (m) { oldLine = parseInt(m[1], 10); newLine = parseInt(m[2], 10); }
+        return {type: 'hunk', oldNum: null, newNum: null, code: raw};
+      }
+      if (raw.startsWith('diff ') || raw.startsWith('index ') || raw.startsWith('--- ') || raw.startsWith('+++ ') || raw.startsWith('Binary')) {
+        return {type: 'meta', oldNum: null, newNum: null, code: raw};
+      }
+      const ch = raw[0];
+      if (ch === '+') return {type: 'add', oldNum: null, newNum: newLine++, code: raw.slice(1)};
+      if (ch === '-') return {type: 'del', oldNum: oldLine++, newNum: null, code: raw.slice(1)};
+      // context line (leading space or empty)
+      return {type: 'ctx', oldNum: oldLine++, newNum: newLine++, code: raw.length > 0 ? raw.slice(1) : ''};
+    });
+
     return (
       <div className="code-wrap">
         <div className={`diff-view ${wrapLines ? 'wrap' : 'nowrap'}`}>
-          {lines.map((line, i) => {
-            let type = 'ctx';
-            const ch = line[0];
-            if (ch === '+' && !line.startsWith('+++')) type = 'add';
-            else if (ch === '-' && !line.startsWith('---')) type = 'del';
-            else if (line.startsWith('@@')) type = 'hunk';
-            else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) type = 'meta';
+          {rows.map((row, i) => {
+            const isCode = row.type === 'add' || row.type === 'del' || row.type === 'ctx';
+            const highlighted = isCode ? Prism.highlight(row.code, grammar, diffLang) : null;
             return (
-              <div key={i} className={`diff-line diff-${type}`}>
-                <span className="diff-sign">{type === 'add' ? '+' : type === 'del' ? '-' : '\u00a0'}</span>
-                <span className="diff-text">{type === 'add' || type === 'del' ? line.slice(1) : line}</span>
+              <div key={i} className={`diff-line diff-${row.type}`}>
+                <span className="diff-old-num">{row.oldNum != null ? row.oldNum : '\u00a0'}</span>
+                <span className="diff-new-num">{row.newNum != null ? row.newNum : '\u00a0'}</span>
+                <span className="diff-sign">
+                  {row.type === 'add' ? '+' : row.type === 'del' ? '-' : '\u00a0'}
+                </span>
+                {highlighted != null
+                  ? <span className="diff-text prism-code" dangerouslySetInnerHTML={{__html: highlighted || '\u00a0'}} />
+                  : <span className="diff-text">{row.code}</span>}
               </div>
             );
           })}

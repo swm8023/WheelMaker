@@ -474,7 +474,8 @@ body,
 }
 
 .code-wrap {
-  display: inline-block;
+  display: block;
+  width: max-content;
   min-width: 100%;
   padding: 6px 0;
 }
@@ -574,10 +575,30 @@ body,
   display: table-row;
 }
 
+.diff-old-num,
+.diff-new-num {
+  display: table-cell;
+  width: 40px;
+  min-width: 40px;
+  text-align: right;
+  padding: 0 8px;
+  color: var(--muted);
+  user-select: none;
+  vertical-align: top;
+}
+
+.diff-old-num {
+  opacity: 0.55;
+}
+
+.diff-new-num {
+  border-right: 1px solid rgba(127, 127, 127, 0.18);
+}
+
 .diff-sign {
   display: table-cell;
-  width: 24px;
-  min-width: 24px;
+  width: 20px;
+  min-width: 20px;
   text-align: center;
   padding: 0 4px;
   user-select: none;
@@ -590,9 +611,6 @@ body,
   display: table-cell;
   padding: 0 10px;
   vertical-align: top;
-}
-
-.diff-view.nowrap .diff-text {
   white-space: pre;
 }
 
