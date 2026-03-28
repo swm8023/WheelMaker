@@ -193,6 +193,8 @@ function getDiffViewerStyles(wrap: boolean): any {
       minWidth: '100%',
       tableLayout: 'auto',
       fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+      fontVariantLigatures: 'none',
+      fontFeatureSettings: '"liga" 0, "calt" 0',
       fontSize: '13px',
       lineHeight: '1.5',
       overflowX: wrap ? 'hidden' : 'auto',
@@ -216,6 +218,7 @@ function getDiffViewerStyles(wrap: boolean): any {
       display: 'block',
       width: '100%',
       background: 'transparent',
+      fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
       whiteSpace: wrap ? 'pre-wrap' : 'pre',
       wordBreak: wrap ? 'break-word' : 'normal',
       overflowWrap: wrap ? 'anywhere' : 'normal',
@@ -292,9 +295,9 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
         wrapLines={wrap}
-        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent'}}}
+        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}}
         lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY}}
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}
         lineNumberStyle={{fontFamily: VS_CODE_EDITOR_FONT_FAMILY, color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
         {content || ' '}
       </SyntaxHighlighter>

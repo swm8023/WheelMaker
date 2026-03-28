@@ -11,7 +11,7 @@ describe('web code layout', () => {
     expect(mainTsx).toContain('showLineNumbers={lineNumbers}');
     expect(mainTsx).toContain('wrapLongLines={wrap}');
     expect(mainTsx).toContain('wrapLines={wrap}');
-    expect(mainTsx).toContain("codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent'}}}");
+    expect(mainTsx).toContain("codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontVariantLigatures: 'none', fontFeatureSettings: '\"liga\" 0, \"calt\" 0'}}}");
     expect(mainTsx).toContain("lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}");
     expect(mainTsx).toContain('styles={getDiffViewerStyles(wrapLines)}');
     expect(mainTsx).toContain("whiteSpace: wrap ? 'pre-wrap' : 'pre'");
