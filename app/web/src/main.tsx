@@ -1,7 +1,7 @@
 ﻿import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Prism from 'prismjs';
-import {getIconForFile, getIconForFolder, getIconForOpenFolder} from 'vscode-icons-js';
+import {getIcon as getSetiIcon} from 'seti-file-icons';
 import 'prismjs/components/prism-markup';
 import 'prismjs/components/prism-clike';
 import 'prismjs/components/prism-javascript';
@@ -88,8 +88,32 @@ function detectPrismLanguage(path: string): string {
   }
 }
 
-function toIconUrl(iconFile: string): string {
-  return `https://cdn.jsdelivr.net/npm/vscode-icons-js/icons/${iconFile}`;
+function resolveSetiColor(token: string): string {
+  switch (token) {
+    case 'blue':
+      return '#519aba';
+    case 'grey':
+      return '#4d5a5e';
+    case 'grey-light':
+      return '#6d8086';
+    case 'green':
+      return '#8dc149';
+    case 'orange':
+      return '#e37933';
+    case 'pink':
+      return '#f55385';
+    case 'purple':
+      return '#a074c4';
+    case 'red':
+      return '#cc3e44';
+    case 'yellow':
+      return '#cbcb41';
+    case 'ignore':
+      return '#41535b';
+    case 'white':
+    default:
+      return '#d4d7d6';
+  }
 }
 
 function App() {
@@ -332,7 +356,7 @@ function App() {
     return entries.map(entry => {
       if (entry.kind === 'dir') {
         const expanded = isExpanded(entry.path);
-        const folderIcon = expanded ? getIconForOpenFolder(entry.name) : getIconForFolder(entry.name);
+        const folderIcon = getSetiIcon('folder');
         return (
           <div key={entry.path}>
             <div
@@ -342,7 +366,11 @@ function App() {
                 toggleDirectory(entry.path).catch(() => undefined);
               }}>
               <span className="caret">{expanded ? 'v' : '>'}</span>
-              <img className="node-icon" src={toIconUrl(folderIcon || 'default_folder.svg')} alt="" />
+              <span
+                className="node-icon seti-icon"
+                style={{color: resolveSetiColor(folderIcon.color)}}
+                dangerouslySetInnerHTML={{__html: folderIcon.svg}}
+              />
               <span className="label">{entry.name}</span>
               {loadingDirs[entry.path] ? <span className="muted">...</span> : null}
             </div>
@@ -351,6 +379,7 @@ function App() {
         );
       }
 
+      const fileIcon = getSetiIcon(entry.name);
       return (
         <div
           key={entry.path}
@@ -360,7 +389,11 @@ function App() {
             setSelectedFile(entry.path);
             if (!isWide) setDrawerOpen(false);
           }}>
-          <img className="node-icon" src={toIconUrl(getIconForFile(entry.name) || 'default_file.svg')} alt="" />
+          <span
+            className="node-icon seti-icon"
+            style={{color: resolveSetiColor(fileIcon.color)}}
+            dangerouslySetInnerHTML={{__html: fileIcon.svg}}
+          />
           <span className="label">{entry.name}</span>
         </div>
       );

@@ -303,6 +303,21 @@ body,
   height: 16px;
   flex: 0 0 16px;
   object-fit: contain;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.seti-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.seti-icon svg path,
+.seti-icon svg rect,
+.seti-icon svg polygon,
+.seti-icon svg circle {
+  fill: currentColor;
 }
 
 .status-tag {
