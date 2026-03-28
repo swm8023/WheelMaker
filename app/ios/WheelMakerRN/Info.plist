@@ -54,10 +54,5 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
-	<key>UIAppFonts</key>
-	<array>
-		<string>codicon.ttf</string>
-		<string>seti.ttf</string>
-	</array>
 </dict>
 </plist>
