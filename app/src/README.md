@@ -1,18 +1,14 @@
-# WheelMaker RN Foundation
+# Shared App Layer
 
-This folder contains the React Native migration foundation (phase 0):
+This folder now contains only shared code used by:
 
-- React Native app scaffold (`app-rn/`)
-- Observe protocol WebSocket request-response client
-- Repository wrappers for:
-  - `project.list`
-  - `fs.list`
-  - `fs.read`
+- Native shell (`App.native.tsx`)
+- Pure React web app (`web/`)
 
-Core files:
+Current modules:
 
-- `src/services/observeClient.ts`
-- `src/services/observeRepository.ts`
-- `src/types/observe.ts`
+- `src/config/runtime.ts`: runtime address/source helpers
+- `src/services/*`: registry websocket client and workspace service
+- `src/types/observe.ts`: registry protocol types
 
-This phase intentionally excludes UI migration.
+Legacy RN page-layer modules were removed during cleanup.
