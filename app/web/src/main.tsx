@@ -23,6 +23,8 @@ import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/cascadia-mono/400.css';
+import '@fontsource/cascadia-mono/500.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
@@ -55,7 +57,7 @@ type SetiResolvedIcon = {
 
 const service = new RegistryWorkspaceService();
 const setiTheme = setiThemeJson as SetiTheme;
-const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
+const VS_CODE_EDITOR_FONT_FAMILY = "'Cascadia Mono', Consolas, 'Courier New', monospace";
 
 SyntaxHighlighter.registerLanguage('markup', prismMarkup);
 SyntaxHighlighter.registerLanguage('clike', prismClike);

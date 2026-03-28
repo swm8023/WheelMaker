@@ -399,7 +399,7 @@ body,
 }
 
 .status-tag {
-  font-family: Consolas, 'Courier New', monospace;
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
   font-size: 11px;
   font-weight: 700;
   min-width: 14px;
@@ -483,7 +483,7 @@ body,
 .code-block {
   margin: 0;
   min-width: 100%;
-  font: 13px/1.5 Consolas, 'Courier New', monospace;
+  font: 13px/1.5 'Cascadia Mono', Consolas, 'Courier New', monospace;
   background: transparent;
 }
 
