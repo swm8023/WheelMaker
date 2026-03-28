@@ -511,43 +511,61 @@ body,
   gap: 6px;
 }
 
-.file-action-row {
-  min-height: 34px;
-  border-bottom: 1px solid var(--border);
+.file-pane {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  overflow: hidden;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.file-main-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-action-col {
+  width: 36px;
+  padding: 6px 8px 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
 }
 
 .file-action-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  position: relative;
 }
 
 .file-action-panel {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 0;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   max-width: 0;
   opacity: 0;
   overflow: hidden;
-  transform: translateX(-4px);
-  transition: max-width 160ms ease, opacity 120ms ease, transform 160ms ease;
+  pointer-events: none;
+  transform: translateX(6px);
+  transition: max-width 180ms ease, opacity 120ms ease, transform 180ms ease;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
 }
 
 .file-action-panel.open {
-  max-width: 320px;
+  max-width: 360px;
   opacity: 1;
+  pointer-events: auto;
   transform: translateX(0);
-}
-
-.file-action-spacer {
-  flex: 1;
-  min-width: 8px;
 }
 
 .search-input,
@@ -914,17 +932,34 @@ body,
     overflow-x: auto;
   }
 
-  .file-action-row {
-    padding: 4px 8px;
-    gap: 4px;
+  .file-pane {
+    flex-direction: column;
+    gap: 0;
   }
 
-  .file-action-group {
-    gap: 4px;
+  .file-main-col {
+    order: 2;
+  }
+
+  .file-action-col {
+    order: 1;
+    width: 100%;
+    padding: 6px 8px 4px 8px;
+    border-bottom: 1px solid var(--border);
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .file-action-panel {
+    right: 0;
+    top: calc(100% + 4px);
+    transform: translateY(-4px);
   }
 
   .file-action-panel.open {
-    max-width: 56vw;
+    max-width: min(80vw, 340px);
+    transform: translateY(0);
   }
 
   .search-input {

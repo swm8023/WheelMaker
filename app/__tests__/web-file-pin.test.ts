@@ -11,7 +11,7 @@ describe('web file pin feature', () => {
     expect(mainTsx).toContain('const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;');
     expect(mainTsx).toContain('setPinnedFiles(prev => prev.includes(selectedFile) ? prev.filter(path => path !== selectedFile) : [...prev, selectedFile]);');
     expect(mainTsx).toContain('setPinnedFiles([]);');
-    expect(mainTsx).toContain('className="file-action-row"');
+    expect(mainTsx).toContain('className="file-action-col"');
     expect(mainTsx).toContain('<span className="pinned-label">Pinned</span>');
     expect(mainTsx).toContain('{hasPinnedFiles ? (');
     expect(mainTsx).toContain("className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}");
