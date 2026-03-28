@@ -157,8 +157,6 @@ function parseUnifiedDiff(content: string): UnifiedDiffSides {
         firstNewStart = newStart;
         hasSeenHunk = true;
       }
-      while (oldLines.length < oldStart - 1) oldLines.push('');
-      while (newLines.length < newStart - 1) newLines.push('');
       inHunk = true;
       continue;
     }
