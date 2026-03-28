@@ -717,16 +717,28 @@ body,
   flex: 0 0 auto;
   user-select: none;
   gap: 12px;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .statusbar-item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+}
+
+.statusbar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .statusbar-muted {
   opacity: 0.75;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .statusbar-spacer {

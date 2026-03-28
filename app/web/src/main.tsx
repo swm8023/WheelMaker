@@ -700,7 +700,6 @@ function App() {
               className={`item ${selectedCommit === commit.sha ? 'selected' : ''}`}
               onClick={() => {
                 setSelectedCommit(commit.sha);
-                if (!isWide) setDrawerOpen(false);
               }}>
               <span className="file-dot codicon codicon-git-commit" />
               <span className="label">{commit.title || commit.sha.slice(0, 7)}</span>
@@ -863,7 +862,7 @@ function App() {
             if (isWide) {
               setSidebarCollapsed(value => !value);
             } else {
-              setDrawerOpen(true);
+              setDrawerOpen(value => !value);
             }
           }}>
           <span className={`codicon ${isWide ? (sidebarCollapsed ? 'codicon-layout-sidebar-left-off' : 'codicon-layout-sidebar-left') : 'codicon-menu'}`} />
@@ -935,7 +934,7 @@ function App() {
           {selectedFile ? (
             <span className="statusbar-item">
               <span className="codicon codicon-file" />
-              {selectedFile.split('/').pop()}
+              <span className="statusbar-text">{selectedFile.split('/').pop()}</span>
             </span>
           ) : null}
           {selectedFile && fileContent.length > 0 ? (
@@ -945,7 +944,7 @@ function App() {
           {gitCurrentBranch ? (
             <span className="statusbar-item">
               <span className="codicon codicon-git-branch" />
-              {gitCurrentBranch}
+              <span className="statusbar-text">{gitCurrentBranch}</span>
             </span>
           ) : null}
         </div>
