@@ -20,7 +20,7 @@ export function getDefaultRegistryAddress(): string {
   }
   const host = window.location.hostname;
   if (host === '127.0.0.1') {
-    return 'ws://127.0.0.1:6930/ws';
+    return 'ws://127.0.0.1:9630/ws';
   }
   if (window.location.host) {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
