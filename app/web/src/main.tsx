@@ -375,7 +375,6 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [wrapLines, setWrapLines] = useState(false);
   const [showLineNumbers, setShowLineNumbers] = useState(true);
-  const [foldContext, setFoldContext] = useState(true);
   const setiFontCss = useMemo(() => setiFontFaceCss(), []);
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
@@ -725,7 +724,7 @@ function App() {
     return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
   };
 
-  const renderViewTools = (showFoldToggle: boolean) => (
+  const renderViewTools = () => (
     <div className="view-tools">
       <button type="button" className={`view-tool ${wrapLines ? 'active' : ''}`} onClick={() => setWrapLines(value => !value)}>
         Wrap
@@ -733,11 +732,6 @@ function App() {
       <button type="button" className={`view-tool ${showLineNumbers ? 'active' : ''}`} onClick={() => setShowLineNumbers(value => !value)}>
         Line #
       </button>
-      {showFoldToggle ? (
-        <button type="button" className={`view-tool ${foldContext ? 'active' : ''}`} onClick={() => setFoldContext(value => !value)}>
-          Fold Context
-        </button>
-      ) : null}
     </div>
   );
 
@@ -754,8 +748,7 @@ function App() {
           oldValue={oldText}
           newValue={newText}
           splitView={false}
-          showDiffOnly={foldContext}
-          extraLinesSurroundingDiff={3}
+          showDiffOnly={false}
           disableWordDiff={true}
           compareMethod={DiffMethod.LINES}
           linesOffset={linesOffset}
@@ -788,7 +781,7 @@ function App() {
         <div className="content">
           <div className="block-title with-tools">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
-            {renderViewTools(false)}
+            {renderViewTools()}
           </div>
           <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}</div>
         </div>
@@ -799,7 +792,7 @@ function App() {
       <div className="content">
         <div className="block-title with-tools">
           <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
-          {renderViewTools(true)}
+          {renderViewTools()}
         </div>
         <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
       </div>
