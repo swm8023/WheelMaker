@@ -1,4 +1,4 @@
-import { RegistryClient } from './observeClient';
+import { RegistryClient } from './registryClient';
 import type {
   RegistryEnvelope,
   RegistryFsEntry,
@@ -6,7 +6,7 @@ import type {
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryProject,
-} from '../types/observe';
+} from '../types/registry';
 
 export class RegistryRepository {
   constructor(private readonly client: RegistryClient) {}
@@ -116,6 +116,3 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
-export { RegistryRepository as ObserveRepository };
-export const createObserveRepository = createRegistryRepository;
-export type ObserveResponse<TPayload> = RegistryResponse<TPayload>;

@@ -1,11 +1,11 @@
-import {createRegistryRepository, type RegistryRepository} from './observeRepository';
+import {createRegistryRepository, type RegistryRepository} from './registryRepository';
 import type {
   RegistryFsEntry,
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryProject,
-} from '../types/observe';
+} from '../types/registry';
 
 export type WorkspaceSession = {
   projects: RegistryProject[];

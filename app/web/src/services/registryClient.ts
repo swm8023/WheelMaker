@@ -1,4 +1,4 @@
-import type { RegistryEnvelope } from '../types/observe';
+import type { RegistryEnvelope } from '../types/registry';
 
 type PendingRequest = {
   resolve: (value: RegistryEnvelope) => void;
@@ -152,4 +152,3 @@ export class RegistryClient {
   }
 }
 
-export { RegistryClient as ObserveClient };

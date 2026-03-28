@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
-import type {RegistryGitCommitFile, RegistryProject} from './types/observe';
+import type {RegistryGitCommitFile, RegistryProject} from './types/registry';
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import './styles.css';
 

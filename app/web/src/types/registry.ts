@@ -51,10 +51,3 @@ export interface RegistryGitFileDiff {
   truncated: boolean;
 }
 
-export type ObserveMessageType = RegistryMessageType;
-export type ObserveEnvelope<TPayload = unknown> = RegistryEnvelope<TPayload>;
-export type ObserveProject = RegistryProject;
-export type ObserveFsEntry = RegistryFsEntry;
-export type ObserveGitCommit = RegistryGitCommit;
-export type ObserveGitCommitFile = RegistryGitCommitFile;
-export type ObserveGitFileDiff = RegistryGitFileDiff;
