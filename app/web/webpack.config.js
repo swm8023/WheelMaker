@@ -2,18 +2,18 @@ const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 
 module.exports = {
-  entry: path.resolve(__dirname, 'index.web.js'),
+  entry: {
+    'runtime-config': path.resolve(__dirname, 'public/runtime-config.js'),
+    bundle: path.resolve(__dirname, 'src/main.tsx'),
+  },
   output: {
-    path: path.resolve(__dirname, 'dist'),
-    filename: 'bundle.js',
+    path: path.resolve(__dirname, '../dist'),
+    filename: '[name].js',
     publicPath: '/',
     clean: true,
   },
   resolve: {
-    extensions: ['.web.tsx', '.web.ts', '.web.js', '.tsx', '.ts', '.js'],
-    alias: {
-      'react-native$': 'react-native-web',
-    },
+    extensions: ['.tsx', '.ts', '.js'],
   },
   module: {
     rules: [
@@ -25,21 +25,26 @@ module.exports = {
       },
       {
         test: /\.[jt]sx?$/,
-        exclude: modulePath =>
-          /node_modules/.test(modulePath) &&
-          !/node_modules[\\/]react-native-markdown-display/.test(modulePath),
+        exclude: /node_modules/,
         use: {
           loader: 'babel-loader',
           options: {
-            presets: ['module:@react-native/babel-preset'],
+            babelrc: false,
+            configFile: false,
+            presets: ['@babel/preset-env', '@babel/preset-react', '@babel/preset-typescript'],
           },
         },
+      },
+      {
+        test: /\.css$/,
+        use: ['style-loader', 'css-loader'],
       },
     ],
   },
   plugins: [
     new HtmlWebpackPlugin({
       template: path.resolve(__dirname, 'public/index.html'),
+      inject: false,
     }),
   ],
   devServer: {
