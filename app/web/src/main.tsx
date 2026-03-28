@@ -190,25 +190,42 @@ function getDiffViewerStyles(wrap: boolean): any {
       },
     },
     diffContainer: {
+      width: '100%',
       minWidth: '100%',
+      tableLayout: 'auto',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: '13px',
       lineHeight: '1.5',
       overflowX: wrap ? 'hidden' : 'auto',
       pre: {
         whiteSpace: wrap ? 'pre-wrap' : 'pre',
+        width: '100%',
       },
     },
     content: {
+      width: '100%',
       overflow: 'visible',
+    },
+    line: {
+      verticalAlign: 'top',
     },
     lineContent: {
       overflow: 'visible',
+      width: 'auto',
     },
     contentText: {
+      display: 'block',
+      width: '100%',
+      background: 'transparent',
       whiteSpace: wrap ? 'pre-wrap' : 'pre',
       wordBreak: wrap ? 'break-word' : 'normal',
       overflowWrap: wrap ? 'anywhere' : 'normal',
+    },
+    wordAdded: {
+      background: 'transparent',
+    },
+    wordRemoved: {
+      background: 'transparent',
     },
     lineNumber: {
       color: 'var(--muted)',

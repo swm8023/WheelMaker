@@ -4,13 +4,13 @@ param(
 
 $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
 if ($connections) {
-  $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-  foreach ($pid in $pids) {
+  $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+  foreach ($processId in $processIds) {
     try {
-      Stop-Process -Id $pid -Force -ErrorAction Stop
-      Write-Host "Stopped PID $pid on port $Port"
+      Stop-Process -Id $processId -Force -ErrorAction Stop
+      Write-Host "Stopped PID $processId on port $Port"
     } catch {
-      Write-Host "Failed to stop PID ${pid}: $($_.Exception.Message)"
+      Write-Host "Failed to stop PID ${processId}: $($_.Exception.Message)"
     }
   }
 } else {
