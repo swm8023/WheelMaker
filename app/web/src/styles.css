@@ -470,11 +470,12 @@ body,
   align-items: center;
   gap: 4px;
   flex: 0 0 auto;
+  min-width: 0;
 }
 
 .view-tool {
-  height: 24px;
-  width: 24px;
+  height: 26px;
+  width: 26px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
@@ -499,6 +500,78 @@ body,
   color: #ffffff;
   background: var(--accent);
   border-color: var(--accent);
+}
+
+.view-tool:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.file-tools {
+  gap: 6px;
+}
+
+.search-input,
+.goto-input {
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+
+.search-input {
+  width: 140px;
+}
+
+.goto-input {
+  width: 72px;
+}
+
+.search-input:focus,
+.goto-input:focus {
+  border-color: var(--accent);
+}
+
+.search-count {
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 34px;
+  text-align: center;
+}
+
+.pinned-pin-toggle {
+  height: 26px;
+  width: 26px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pinned-pin-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.pinned-pin-toggle.active {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pinned-pin-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .pinned-strip {
@@ -783,12 +856,31 @@ body,
   }
 
   .view-tool {
-    height: 24px;
-    width: 24px;
+    height: 28px;
+    width: 28px;
+  }
+
+  .pinned-pin-toggle {
+    height: 28px;
+    width: 28px;
   }
 
   .view-tool-icon {
-    font-size: 13px;
+    font-size: 14px;
+  }
+
+  .file-tools {
+    gap: 4px;
+    max-width: 62vw;
+    overflow-x: auto;
+  }
+
+  .search-input {
+    width: 112px;
+  }
+
+  .goto-input {
+    width: 58px;
   }
 
   .pinned-strip {

@@ -11,9 +11,14 @@ describe('web file pin feature', () => {
     expect(mainTsx).toContain('setPinnedFiles(prev => prev.includes(selectedFile) ? prev.filter(path => path !== selectedFile) : [...prev, selectedFile]);');
     expect(mainTsx).toContain('setPinnedFiles([]);');
     expect(mainTsx).toContain('<span className="pinned-label">Pinned</span>');
+    expect(mainTsx).toContain("className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}");
     expect(mainTsx).toContain("className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}");
     expect(mainTsx).toContain('codicon-word-wrap view-tool-icon');
     expect(mainTsx).toContain('codicon-list-ordered view-tool-icon');
-    expect(mainTsx).toContain('codicon-pinned view-tool-icon');
+    expect(mainTsx).toContain('search-input');
+    expect(mainTsx).toContain('search-nav');
+    expect(mainTsx).toContain('goto-input');
+    expect(mainTsx).toContain('goto-trigger');
+    expect(mainTsx).toContain('setTemporaryHighlightLine(line);');
   });
 });

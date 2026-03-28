@@ -1,4 +1,4 @@
-﻿import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import ReactDiffViewer, {DiffMethod} from 'react-diff-viewer-continued';
 import {PrismLight as SyntaxHighlighter} from 'react-syntax-highlighter';
@@ -301,9 +301,10 @@ type PrismCodeBlockProps = {
   language: string;
   wrap: boolean;
   lineNumbers: boolean;
+  highlightLine?: number | null;
 };
 
-function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockProps) {
+function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = null}: PrismCodeBlockProps) {
   return (
     <div className="code-wrap">
       <SyntaxHighlighter
@@ -314,7 +315,15 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         wrapLongLines={wrap}
         wrapLines={wrap}
         codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}}
-        lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
+        lineProps={lineNumber => ({
+          'data-line-number': String(lineNumber),
+          style: {
+            background: highlightLine === lineNumber ? 'rgba(0, 122, 204, 0.24)' : 'transparent',
+            whiteSpace: wrap ? 'pre-wrap' : 'pre',
+            wordBreak: wrap ? 'break-word' : 'normal',
+            overflowWrap: wrap ? 'anywhere' : 'normal',
+          },
+        })}
         customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}
         lineNumberStyle={{fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
         {content || ' '}
@@ -343,14 +352,7 @@ function PrismInlineCode({content, language, wrap}: {content: string; language: 
           fontFeatureSettings: '"liga" 0, "calt" 0',
         },
       }}
-      lineProps={{
-        style: {
-          background: 'transparent',
-          whiteSpace: wrap ? 'pre-wrap' : 'pre',
-          wordBreak: wrap ? 'break-word' : 'normal',
-          overflowWrap: wrap ? 'anywhere' : 'normal',
-        },
-      }}
+      lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
       customStyle={{
         margin: 0,
         padding: 0,
@@ -400,6 +402,13 @@ function App() {
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
   const [fileContent, setFileContent] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const [gotoLineInput, setGotoLineInput] = useState('');
+  const [searchToolsOpen, setSearchToolsOpen] = useState(false);
+  const [gotoToolsOpen, setGotoToolsOpen] = useState(false);
+  const [temporaryHighlightLine, setTemporaryHighlightLine] = useState<number | null>(null);
+  const fileScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);
   const [chatSessionIndex, setChatSessionIndex] = useState(0);
@@ -447,10 +456,57 @@ function App() {
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
   const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;
+  const fileLines = useMemo(() => fileContent.split('\n'), [fileContent]);
+  const fileSearchMatches = useMemo(() => {
+    const query = fileSearchQuery.trim().toLowerCase();
+    if (!query) return [] as number[];
+    const matches: number[] = [];
+    for (let i = 0; i < fileLines.length; i += 1) {
+      if (fileLines[i].toLowerCase().includes(query)) {
+        matches.push(i + 1);
+      }
+    }
+    return matches;
+  }, [fileContent, fileLines, fileSearchQuery]);
 
   const togglePinSelectedFile = () => {
     if (!selectedFile) return;
     setPinnedFiles(prev => prev.includes(selectedFile) ? prev.filter(path => path !== selectedFile) : [...prev, selectedFile]);
+  };
+
+  useEffect(() => {
+    if (fileSearchMatches.length === 0) {
+      setCurrentMatchIndex(0);
+      return;
+    }
+    setCurrentMatchIndex(prev => Math.min(prev, fileSearchMatches.length - 1));
+  }, [fileSearchMatches.length]);
+
+  const scrollToFileLine = (line: number, highlight = false) => {
+    const container = fileScrollRef.current;
+    if (!container) return;
+    const lineElement = container.querySelector(`[data-line-number="${line}"]`) as HTMLElement | null;
+    if (!lineElement) return;
+    lineElement.scrollIntoView({block: 'center', behavior: 'smooth'});
+    if (highlight) {
+      setTemporaryHighlightLine(line);
+      window.setTimeout(() => setTemporaryHighlightLine(null), 2000);
+    }
+  };
+
+  const navigateSearchMatch = (delta: 1 | -1) => {
+    if (fileSearchMatches.length === 0) return;
+    const next = (currentMatchIndex + delta + fileSearchMatches.length) % fileSearchMatches.length;
+    setCurrentMatchIndex(next);
+    scrollToFileLine(fileSearchMatches[next], false);
+  };
+
+  const triggerGoToLine = () => {
+    if (!fileLines.length) return;
+    const parsed = Number.parseInt(gotoLineInput.trim(), 10);
+    if (Number.isNaN(parsed)) return;
+    const line = Math.max(1, Math.min(fileLines.length, parsed));
+    scrollToFileLine(line, true);
   };
 
   const loadDirectory = async (path: string) => {
@@ -728,11 +784,11 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
-    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
+    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} highlightLine={temporaryHighlightLine} />;
   };
 
-  const renderViewTools = (showPinButton: boolean) => (
-    <div className="view-tools">
+  const renderViewTools = () => (
+    <>
       <button
         type="button"
         className={`view-tool ${wrapLines ? 'active' : ''}`}
@@ -749,18 +805,7 @@ function App() {
         aria-label="Toggle line number">
         <span className="codicon codicon-list-ordered view-tool-icon" />
       </button>
-      {showPinButton ? (
-        <button
-          type="button"
-          className={`view-tool ${isSelectedFilePinned ? 'active' : ''}`}
-          onClick={togglePinSelectedFile}
-          disabled={!selectedFile}
-          title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
-          aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
-          <span className="codicon codicon-pinned view-tool-icon" />
-        </button>
-      ) : null}
-    </div>
+    </>
   );
 
   const renderDiffPane = (content: string) => {
@@ -809,41 +854,108 @@ function App() {
         <div className="content">
           <div className="block-title with-tools">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
-            {renderViewTools(true)}
-          </div>
-          {pinnedFiles.length > 0 ? (
-            <div className="pinned-strip">
-              <span className="pinned-label">Pinned</span>
-              {pinnedFiles.map(path => (
-                <div key={path} className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}>
-                  <button type="button" className="pinned-open" onClick={() => setSelectedFile(path)} title={path}>
-                    {path.split('/').pop() || path}
-                  </button>
-                  <button
-                    type="button"
-                    className="pinned-close"
-                    onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
-                    aria-label={`Unpin ${path}`}>
-                    ×
-                  </button>
-                </div>
-              ))}
+            <div className="view-tools file-tools">
+              <button
+                type="button"
+                className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
+                onClick={togglePinSelectedFile}
+                disabled={!selectedFile}
+                title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
+                aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+                <span className="codicon codicon-pinned view-tool-icon" />
+              </button>
+              <button
+                type="button"
+                className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
+                onClick={() => setSearchToolsOpen(value => !value)}
+                title="Toggle search"
+                aria-label="Toggle search">
+                <span className="codicon codicon-search view-tool-icon" />
+              </button>
+              {searchToolsOpen ? (
+                <input
+                  className="search-input"
+                  value={fileSearchQuery}
+                  onChange={event => setFileSearchQuery(event.target.value)}
+                  placeholder="Find in file"
+                />
+              ) : null}
+              {searchToolsOpen ? (
+                <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
+                  <span className="codicon codicon-chevron-up view-tool-icon" />
+                </button>
+              ) : null}
+              {searchToolsOpen ? (
+                <button type="button" className="view-tool search-nav" title="Next match" onClick={() => navigateSearchMatch(1)}>
+                  <span className="codicon codicon-chevron-down view-tool-icon" />
+                </button>
+              ) : null}
+              {searchToolsOpen ? (
+                <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
+              ) : null}
+              <button
+                type="button"
+                className={`view-tool ${gotoToolsOpen ? 'active' : ''}`}
+                onClick={() => setGotoToolsOpen(value => !value)}
+                title="Toggle go to line"
+                aria-label="Toggle go to line">
+                <span className="codicon codicon-symbol-number view-tool-icon" />
+              </button>
+              {gotoToolsOpen ? (
+                <input
+                  className="goto-input"
+                  value={gotoLineInput}
+                  onChange={event => setGotoLineInput(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      triggerGoToLine();
+                    }
+                  }}
+                  inputMode="numeric"
+                  placeholder="Line"
+                />
+              ) : null}
+              {gotoToolsOpen ? (
+                <button type="button" className="view-tool goto-trigger" title="Go to line" onClick={triggerGoToLine}>
+                  <span className="codicon codicon-arrow-right view-tool-icon" />
+                </button>
+              ) : null}
+              {renderViewTools()}
             </div>
-          ) : null}
-          <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}</div>
+          </div>
+          <div className="pinned-strip">
+            <span className="pinned-label">Pinned</span>
+            {pinnedFiles.map(path => (
+              <div key={path} className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}>
+                <button type="button" className="pinned-open" onClick={() => setSelectedFile(path)} title={path}>
+                  {path.split('/').pop() || path}
+                </button>
+                <button
+                  type="button"
+                  className="pinned-close"
+                  onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
+                  aria-label={`Unpin ${path}`}>
+                  x
+                </button>
+              </div>
+            ))}
+          </div>
+          <div ref={fileScrollRef} className="scroll-panel">
+            {fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}
+          </div>
         </div>
       );
     }
 
     return (
-        <div className="content">
-          <div className="block-title with-tools">
-            <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
-            {renderViewTools(false)}
-          </div>
-          <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
+      <div className="content">
+        <div className="block-title with-tools">
+          <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
+          <div className="view-tools">{renderViewTools()}</div>
         </div>
-      );
+        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
+      </div>
+    );
   };
 
   if (!connected) {
@@ -978,4 +1090,7 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
 
