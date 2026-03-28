@@ -887,7 +887,7 @@ function App() {
 
     if (tab === 'file') {
       return (
-        <div className="content">
+        <div className="content file-content">
           <div className="block-title with-tools">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
             <div className="view-tools">{renderViewTools()}</div>

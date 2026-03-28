@@ -439,6 +439,24 @@ body,
   min-height: 0;
 }
 
+.file-content {
+  background:
+    linear-gradient(180deg, rgba(127, 127, 127, 0.08) 0%, rgba(127, 127, 127, 0) 42px),
+    var(--panel-3);
+}
+
+.file-content .block-title.with-tools {
+  height: 34px;
+  padding: 0 12px;
+  color: var(--text);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent);
+}
+
+.file-content .title-text {
+  font-weight: 500;
+}
+
 .block-title {
   height: 30px;
   border-bottom: 1px solid var(--border);
@@ -512,20 +530,25 @@ body,
 }
 
 .file-action-row {
-  min-height: 34px;
-  border-bottom: 1px solid var(--border);
+  min-height: 38px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 8px;
+  padding: 5px 10px;
   overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 84%, transparent);
 }
 
 .file-action-group {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 82%, transparent);
 }
 
 .file-action-panel {
@@ -540,7 +563,7 @@ body,
 }
 
 .file-action-panel.open {
-  max-width: 320px;
+  max-width: 340px;
   opacity: 1;
   transform: translateX(0);
 }
@@ -552,12 +575,12 @@ body,
 
 .search-input,
 .goto-input {
-  height: 26px;
+  height: 28px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--panel);
   color: var(--text);
-  padding: 0 8px;
+  padding: 0 9px;
   font-family: inherit;
   font-size: 12px;
   outline: none;
@@ -579,8 +602,9 @@ body,
 .search-count {
   font-size: 11px;
   color: var(--muted);
-  min-width: 34px;
+  min-width: 42px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .pinned-pin-toggle {
@@ -614,35 +638,38 @@ body,
 }
 
 .pinned-strip {
-  min-height: 30px;
-  border-bottom: 1px solid var(--border);
+  min-height: 32px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   overflow-x: auto;
+  background: color-mix(in srgb, var(--panel) 74%, transparent);
 }
 
 .pinned-label {
-  color: var(--muted);
+  color: color-mix(in srgb, var(--text) 64%, var(--muted));
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
   flex: 0 0 auto;
 }
 
 .pinned-entry {
   display: inline-flex;
   align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
   overflow: hidden;
   flex: 0 0 auto;
 }
 
 .pinned-entry.active {
-  border-color: var(--accent);
-  background: rgba(0, 122, 204, 0.14);
+  border-color: color-mix(in srgb, var(--accent) 74%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
 }
 
 .pinned-open,
@@ -656,17 +683,19 @@ body,
 }
 
 .pinned-open {
-  padding: 4px 8px;
+  padding: 5px 9px;
   max-width: 180px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .pinned-close {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   color: var(--muted);
+  border-left: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 
 .pinned-close:hover {
@@ -677,6 +706,18 @@ body,
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.file-content .scroll-panel {
+  margin: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background: color-mix(in srgb, var(--panel-3) 90%, transparent);
+}
+
+.file-content .code-wrap {
+  padding: 8px 0;
 }
 
 .chat-block {
@@ -915,7 +956,7 @@ body,
   }
 
   .file-action-row {
-    padding: 4px 8px;
+    padding: 5px 8px;
     gap: 4px;
   }
 
@@ -924,7 +965,7 @@ body,
   }
 
   .file-action-panel.open {
-    max-width: 56vw;
+    max-width: 60vw;
   }
 
   .search-input {
@@ -936,7 +977,7 @@ body,
   }
 
   .pinned-strip {
-    padding: 4px 8px;
+    padding: 5px 8px;
     gap: 4px;
   }
 
