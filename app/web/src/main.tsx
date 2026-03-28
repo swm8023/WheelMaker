@@ -23,8 +23,6 @@ import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
-import '@fontsource/jetbrains-mono/400.css';
-import '@fontsource/jetbrains-mono/500.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
@@ -57,6 +55,7 @@ type SetiResolvedIcon = {
 
 const service = new RegistryWorkspaceService();
 const setiTheme = setiThemeJson as SetiTheme;
+const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
 
 SyntaxHighlighter.registerLanguage('markup', prismMarkup);
 SyntaxHighlighter.registerLanguage('clike', prismClike);
@@ -193,7 +192,7 @@ function getDiffViewerStyles(wrap: boolean): any {
       width: '100%',
       minWidth: '100%',
       tableLayout: 'auto',
-      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
       fontSize: '13px',
       lineHeight: '1.5',
       overflowX: wrap ? 'hidden' : 'auto',
@@ -295,8 +294,8 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         wrapLines={wrap}
         codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent'}}}
         lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px'}}
-        lineNumberStyle={{color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY}}
+        lineNumberStyle={{fontFamily: VS_CODE_EDITOR_FONT_FAMILY, color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
         {content || ' '}
       </SyntaxHighlighter>
     </div>

@@ -18,6 +18,9 @@ describe('web code layout', () => {
     expect(mainTsx).toContain('disableWordDiff={true}');
     expect(mainTsx).toContain('compareMethod={DiffMethod.LINES}');
     expect(mainTsx).toContain("overflow: 'visible'");
+    expect(mainTsx).toContain("const VS_CODE_EDITOR_FONT_FAMILY = \"Consolas, 'Courier New', monospace\";");
+    expect(mainTsx).toContain('fontFamily: VS_CODE_EDITOR_FONT_FAMILY');
+    expect(mainTsx).not.toContain("@fontsource/jetbrains-mono");
     expect(mainTsx).not.toContain("from 'prismjs'");
     expect(mainTsx).not.toContain("import 'prismjs/");
   });
