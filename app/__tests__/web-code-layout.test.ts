@@ -22,7 +22,7 @@ describe('web code layout', () => {
     expect(mainTsx).toContain('showDiffOnly={foldContext}');
     expect(mainTsx).toContain('extraLinesSurroundingDiff={3}');
     expect(mainTsx).toContain('const [foldContext, setFoldContext] = useState(true);');
-    expect(mainTsx).toContain('<span>Fold Context</span>');
+    expect(mainTsx).toContain('Fold Context');
     expect(mainTsx).toContain("overflow: 'visible'");
     expect(mainTsx).toContain("const VS_CODE_EDITOR_FONT_FAMILY = \"Consolas, 'Courier New', monospace\";");
     expect(mainTsx).toContain('fontFamily: VS_CODE_EDITOR_FONT_FAMILY');

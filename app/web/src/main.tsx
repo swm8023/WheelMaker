@@ -725,6 +725,22 @@ function App() {
     return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
   };
 
+  const renderViewTools = (showFoldToggle: boolean) => (
+    <div className="view-tools">
+      <button type="button" className={`view-tool ${wrapLines ? 'active' : ''}`} onClick={() => setWrapLines(value => !value)}>
+        Wrap
+      </button>
+      <button type="button" className={`view-tool ${showLineNumbers ? 'active' : ''}`} onClick={() => setShowLineNumbers(value => !value)}>
+        Line #
+      </button>
+      {showFoldToggle ? (
+        <button type="button" className={`view-tool ${foldContext ? 'active' : ''}`} onClick={() => setFoldContext(value => !value)}>
+          Fold Context
+        </button>
+      ) : null}
+    </div>
+  );
+
   const renderDiffPane = (content: string) => {
     if (!content) return <div className="muted block">No diff available</div>;
     const {oldText, newText, hasContent, oldStart, newStart} = parseUnifiedDiff(content);
@@ -770,7 +786,10 @@ function App() {
     if (tab === 'file') {
       return (
         <div className="content">
-          <div className="block-title">{selectedFile || 'Select a file'}</div>
+          <div className="block-title with-tools">
+            <span className="title-text">{selectedFile || 'Select a file'}</span>
+            {renderViewTools(false)}
+          </div>
           <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}</div>
         </div>
       );
@@ -778,7 +797,10 @@ function App() {
 
     return (
       <div className="content">
-        <div className="block-title">{selectedDiff || 'Select a changed file'}</div>
+        <div className="block-title with-tools">
+          <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
+          {renderViewTools(true)}
+        </div>
         <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
       </div>
     );
@@ -872,18 +894,6 @@ function App() {
               <label className="switch-row">
                 <span>Dark Mode</span>
                 <input type="checkbox" checked={themeMode === 'dark'} onChange={e => setThemeMode(e.target.checked ? 'dark' : 'light')} />
-              </label>
-              <label className="switch-row">
-                <span>Wrap Line</span>
-                <input type="checkbox" checked={wrapLines} onChange={e => setWrapLines(e.target.checked)} />
-              </label>
-              <label className="switch-row">
-                <span>Line Number</span>
-                <input type="checkbox" checked={showLineNumbers} onChange={e => setShowLineNumbers(e.target.checked)} />
-              </label>
-              <label className="switch-row">
-                <span>Fold Context</span>
-                <input type="checkbox" checked={foldContext} onChange={e => setFoldContext(e.target.checked)} />
               </label>
             </div>
           ) : null}
