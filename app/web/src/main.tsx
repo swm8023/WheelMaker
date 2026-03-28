@@ -786,15 +786,15 @@ function App() {
         <div className="tabs">
           <button className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
             <span className="codicon codicon-comment-discussion tab-icon" />
-            CHAT
+            <span className="tab-label">CHAT</span>
           </button>
           <button className={`tab ${tab === 'file' ? 'active' : ''}`} onClick={() => setTab('file')}>
             <span className="codicon codicon-files tab-icon" />
-            FILE
+            <span className="tab-label">FILE</span>
           </button>
           <button className={`tab ${tab === 'git' ? 'active' : ''}`} onClick={() => setTab('git')}>
             <span className="codicon codicon-source-control tab-icon" />
-            GIT
+            <span className="tab-label">GIT</span>
           </button>
         </div>
 

@@ -173,6 +173,10 @@ body,
   position: relative;
 }
 
+.settings-wrap {
+  flex: 0 0 auto;
+}
+
 .project-btn {
   display: inline-flex;
   align-items: center;
@@ -239,6 +243,7 @@ body,
 .tabs {
   display: flex;
   align-self: stretch;
+  min-width: 0;
 }
 
 .tab {
@@ -258,6 +263,10 @@ body,
   align-items: center;
   gap: 5px;
   transition: color 100ms ease, border-bottom-color 100ms ease;
+}
+
+.tab-label {
+  display: inline;
 }
 
 .tab:hover {
@@ -629,13 +638,24 @@ body,
   }
 
   .project-btn {
-    max-width: 40vw;
+    max-width: 28vw;
   }
 
   .tab {
-    min-width: 50px;
-    font-size: 10px;
-    gap: 3px;
+    min-width: 36px;
+    padding: 0 8px;
+    font-size: 0;
+    gap: 0;
+    justify-content: center;
+  }
+
+  .tab-label {
+    display: none;
+  }
+
+  .tab-icon {
+    font-size: 16px;
+    opacity: 0.95;
   }
 }
 
