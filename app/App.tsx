@@ -1,4 +1,4 @@
-﻿import React, {useEffect, useRef, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {StyleSheet, View} from 'react-native';
 
 import type {
@@ -8,10 +8,7 @@ import type {
   RegistryGitFileDiff,
   RegistryProject,
 } from './src/types/observe';
-import {
-  createRegistryRepository,
-  type RegistryRepository,
-} from './src/services/observeRepository';
+import {RegistryWorkspaceService, type WorkspaceSession} from './src/services/registryWorkspaceService';
 import {ConnectScreen, WorkspaceScreen} from './src/screens';
 import {resolveTheme, type ThemeMode} from './src/theme';
 
@@ -22,7 +19,7 @@ type SessionState = {
 };
 
 function App() {
-  const repositoryRef = useRef<RegistryRepository | null>(null);
+  const serviceRef = useRef<RegistryWorkspaceService>(new RegistryWorkspaceService());
   const [session, setSession] = useState<SessionState | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const theme = resolveTheme(themeMode);
@@ -30,84 +27,55 @@ function App() {
 
   useEffect(() => {
     return () => {
-      repositoryRef.current?.close();
-      repositoryRef.current = null;
+      serviceRef.current.close();
     };
   }, []);
 
+  const applySession = (next: WorkspaceSession) => {
+    setSession({
+      projects: next.projects,
+      selectedProjectId: next.selectedProjectId,
+      fileEntries: next.fileEntries,
+    });
+  };
+
   const connect = async (wsUrl: string, token: string): Promise<void> => {
-    const repository = createRegistryRepository();
-    try {
-      await repository.initialize(wsUrl, token);
-      const projects = await repository.listProjects();
-      if (projects.length === 0) {
-        throw new Error('no projects available');
-      }
-      const selectedProjectId = projects[0].projectId;
-      const fileEntries = await repository.listFiles(selectedProjectId, '.');
-      repositoryRef.current?.close();
-      repositoryRef.current = repository;
-      setSession({projects, selectedProjectId, fileEntries});
-    } catch (error) {
-      repository.close();
-      throw error;
-    }
+    const nextSession = await serviceRef.current.connect(wsUrl, token);
+    applySession(nextSession);
   };
 
   const readFile = async (path: string): Promise<string> => {
-    if (!session || !repositoryRef.current) {
-      throw new Error('session is not ready');
-    }
-    return repositoryRef.current.readFile(session.selectedProjectId, path);
+    return serviceRef.current.readFile(path);
   };
 
   const selectProject = async (projectId: string): Promise<void> => {
-    if (!session || !repositoryRef.current) {
-      return;
-    }
-    const fileEntries = await repositoryRef.current.listFiles(projectId, '.');
-    setSession({...session, selectedProjectId: projectId, fileEntries});
+    const nextSession = await serviceRef.current.selectProject(projectId);
+    applySession(nextSession);
   };
 
   const listDirectory = async (path: string): Promise<RegistryFsEntry[]> => {
-    if (!session || !repositoryRef.current) {
-      return [];
-    }
-    return repositoryRef.current.listFiles(session.selectedProjectId, path || '.');
+    return serviceRef.current.listDirectory(path);
   };
 
   const logout = (): void => {
-    repositoryRef.current?.close();
-    repositoryRef.current = null;
+    serviceRef.current.close();
     setSession(null);
   };
 
   const listGitCommits = async (ref = 'HEAD'): Promise<RegistryGitCommit[]> => {
-    if (!session || !repositoryRef.current) {
-      return [];
-    }
-    return repositoryRef.current.gitLog(session.selectedProjectId, ref, '', 50);
+    return serviceRef.current.listGitCommits(ref);
   };
 
   const listGitBranches = async (): Promise<{current: string; branches: string[]}> => {
-    if (!session || !repositoryRef.current) {
-      return {current: '', branches: []};
-    }
-    return repositoryRef.current.gitBranches(session.selectedProjectId);
+    return serviceRef.current.listGitBranches();
   };
 
   const listGitCommitFiles = async (sha: string): Promise<RegistryGitCommitFile[]> => {
-    if (!session || !repositoryRef.current) {
-      return [];
-    }
-    return repositoryRef.current.gitCommitFiles(session.selectedProjectId, sha);
+    return serviceRef.current.listGitCommitFiles(sha);
   };
 
   const readGitFileDiff = async (sha: string, path: string): Promise<RegistryGitFileDiff> => {
-    if (!session || !repositoryRef.current) {
-      return {sha, path, isBinary: false, diff: '', truncated: false};
-    }
-    return repositoryRef.current.gitCommitFileDiff(session.selectedProjectId, sha, path, 3);
+    return serviceRef.current.readGitFileDiff(sha, path);
   };
 
   if (!session) {

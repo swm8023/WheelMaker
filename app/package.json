@@ -6,6 +6,7 @@
     "android": "react-native run-android",
     "android:web": "npm run build:web:native && react-native run-android",
     "build:web": "webpack --config webpack.config.js --mode production",
+    "build:web:release": "npm run build:web && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/export_web_release.ps1",
     "build:web:native": "npm run build:web && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync_web_assets.ps1",
     "ios": "react-native run-ios",
     "lint": "eslint .",

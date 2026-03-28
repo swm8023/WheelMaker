@@ -1,25 +1,18 @@
 import React, {useMemo, useState} from 'react';
-import {Platform, Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
+import {Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import {WebView} from 'react-native-webview';
-
-const ANDROID_LOCAL_WEB_URI = 'file:///android_asset/wheelmaker-web/index.html';
-const DEV_WEB_URI = 'http://127.0.0.1:8080';
+import {getNativeWebViewUri, getRemoteWebUrl} from './src/config/runtime';
 
 function initialUri(): string {
-  if (__DEV__) {
-    return DEV_WEB_URI;
-  }
-  if (Platform.OS === 'android') {
-    return ANDROID_LOCAL_WEB_URI;
-  }
-  return DEV_WEB_URI;
+  return getNativeWebViewUri();
 }
 
 function App(): React.JSX.Element {
   const [uri, setUri] = useState(initialUri);
   const [loadFailed, setLoadFailed] = useState(false);
-  const canFallbackToDev = useMemo(() => uri !== DEV_WEB_URI, [uri]);
+  const fallbackUri = useMemo(() => getRemoteWebUrl(), []);
+  const canFallbackToRemote = useMemo(() => uri !== fallbackUri, [fallbackUri, uri]);
 
   return (
     <SafeAreaProvider>
@@ -40,14 +33,14 @@ function App(): React.JSX.Element {
         {loadFailed ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>Web UI load failed: {uri}</Text>
-            {canFallbackToDev ? (
+            {canFallbackToRemote ? (
               <Pressable
                 style={styles.retryButton}
                 onPress={() => {
                   setLoadFailed(false);
-                  setUri(DEV_WEB_URI);
+                  setUri(fallbackUri);
                 }}>
-                <Text style={styles.retryText}>Use Dev URL</Text>
+                <Text style={styles.retryText}>Use Remote URL</Text>
               </Pressable>
             ) : null}
           </View>
