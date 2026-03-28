@@ -817,8 +817,8 @@ function App() {
       </header>
 
       <div className="body">
-        {isWide && !sidebarCollapsed ? <aside className="left">{renderSidebar()}</aside> : null}
-        <main className="right">{renderMain()}</main>
+        {isWide && !sidebarCollapsed ? <aside className="workspace-left">{renderSidebar()}</aside> : null}
+        <main className="workspace-right">{renderMain()}</main>
       </div>
 
       {tab === 'file' ? (

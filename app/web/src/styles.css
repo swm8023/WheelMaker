@@ -276,7 +276,7 @@ body,
   overflow: hidden;
 }
 
-.left {
+.workspace-left {
   width: 320px;
   min-width: 220px;
   max-width: 40vw;
@@ -289,7 +289,7 @@ body,
   animation: wmSlideInLeft 180ms ease-out;
 }
 
-.right {
+.workspace-right {
   flex: 1;
   min-width: 0;
   min-height: 0;
