@@ -13,10 +13,13 @@
     "start": "react-native start",
     "test": "jest",
     "tsc:web": "tsc -p web/tsconfig.web.json --noEmit",
-    "web": "webpack serve --config web/webpack.config.js --mode development --hot"
+    "web": "webpack serve --config web/webpack.config.js --mode development --hot",
+    "web:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/restart_web.ps1 -Port 8080"
   },
   "dependencies": {
     "@codingame/monaco-vscode-theme-seti-default-extension": "^28.4.1",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@vscode/codicons": "^0.0.45",
     "prismjs": "^1.30.0",
     "react": "19.2.3",

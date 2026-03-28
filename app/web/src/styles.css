@@ -41,7 +41,7 @@ body,
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Segoe UI', Arial, sans-serif;
+  font-family: 'IBM Plex Sans', 'Noto Sans', sans-serif;
 }
 
 .page,
@@ -93,6 +93,7 @@ body,
 .workspace {
   display: flex;
   flex-direction: column;
+  animation: wmFadeIn 160ms ease-out;
 }
 
 .header {
@@ -244,6 +245,7 @@ body,
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  animation: wmSlideInLeft 180ms ease-out;
 }
 
 .right {
@@ -254,6 +256,7 @@ body,
   flex-direction: column;
   overflow: hidden;
   background: radial-gradient(1200px 100% at 100% 0%, rgba(14, 99, 156, 0.08), transparent), var(--panel-3);
+  animation: wmFadeIn 180ms ease-out;
 }
 
 .section-title {
@@ -427,7 +430,7 @@ body,
   margin: 0;
   min-width: 100%;
   width: max-content;
-  font: 13px/1.45 Consolas, 'Courier New', monospace;
+  font: 13px/1.5 'JetBrains Mono', 'Fira Code', monospace;
   background: transparent;
 }
 
@@ -578,5 +581,25 @@ body,
 
   .tab {
     min-width: 56px;
+  }
+}
+
+@keyframes wmFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wmSlideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }

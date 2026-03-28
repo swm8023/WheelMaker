@@ -20,6 +20,11 @@ import 'prismjs/components/prism-markdown';
 import 'prismjs/components/prism-diff';
 import 'prismjs/themes/prism-tomorrow.css';
 import '@vscode/codicons/dist/codicon.css';
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
