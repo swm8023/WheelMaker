@@ -1,6 +1,6 @@
 ﻿import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import Prism from 'prismjs';
+import ReactDiffViewer from 'react-diff-viewer-continued';
 import {PrismLight as SyntaxHighlighter} from 'react-syntax-highlighter';
 import oneDark from 'react-syntax-highlighter/dist/cjs/styles/prism/one-dark';
 import prismMarkup from 'react-syntax-highlighter/dist/cjs/languages/prism/markup';
@@ -19,22 +19,6 @@ import prismYaml from 'react-syntax-highlighter/dist/cjs/languages/prism/yaml';
 import prismMarkdown from 'react-syntax-highlighter/dist/cjs/languages/prism/markdown';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
-import 'prismjs/components/prism-markup';
-import 'prismjs/components/prism-clike';
-import 'prismjs/components/prism-javascript';
-import 'prismjs/components/prism-typescript';
-import 'prismjs/components/prism-jsx';
-import 'prismjs/components/prism-tsx';
-import 'prismjs/components/prism-json';
-import 'prismjs/components/prism-go';
-import 'prismjs/components/prism-c';
-import 'prismjs/components/prism-cpp';
-import 'prismjs/components/prism-rust';
-import 'prismjs/components/prism-bash';
-import 'prismjs/components/prism-yaml';
-import 'prismjs/components/prism-markdown';
-import 'prismjs/components/prism-diff';
-import 'prismjs/themes/prism-tomorrow.css';
 import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
@@ -102,7 +86,7 @@ function getFileExtension(path: string): string {
   return match ? match[1].toLowerCase() : '';
 }
 
-function detectPrismLanguage(path: string): string {
+function detectCodeLanguage(path: string): string {
   const ext = getFileExtension(path);
   switch (ext) {
     case 'ts':
@@ -145,6 +129,50 @@ function detectPrismLanguage(path: string): string {
     default:
       return 'clike';
   }
+}
+
+type UnifiedDiffSides = {
+  oldText: string;
+  newText: string;
+  hasContent: boolean;
+};
+
+function parseUnifiedDiff(content: string): UnifiedDiffSides {
+  const lines = content.split('\n');
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  let inHunk = false;
+
+  for (const raw of lines) {
+    if (raw.startsWith('@@')) {
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk) continue;
+    if (raw.startsWith('\\ No newline at end of file')) continue;
+    if (raw.startsWith('+')) {
+      newLines.push(raw.slice(1));
+      continue;
+    }
+    if (raw.startsWith('-')) {
+      oldLines.push(raw.slice(1));
+      continue;
+    }
+    if (raw.startsWith(' ')) {
+      const text = raw.slice(1);
+      oldLines.push(text);
+      newLines.push(text);
+      continue;
+    }
+    oldLines.push(raw);
+    newLines.push(raw);
+  }
+
+  return {
+    oldText: oldLines.join('\n'),
+    newText: newLines.join('\n'),
+    hasContent: oldLines.length > 0 || newLines.length > 0,
+  };
 }
 
 function toSetiGlyph(fontCharacter?: string): string {
@@ -564,65 +592,25 @@ function App() {
 
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
-    const language = languageHint || detectPrismLanguage(selectedFile);
+    const language = languageHint || detectCodeLanguage(selectedFile);
     return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
   };
 
   const renderDiffPane = (content: string) => {
     if (!content) return <div className="muted block">No diff available</div>;
-    const rawLines = content.split('\n');
-
-    // Detect language from "+++ b/path" header
-    let diffLang = 'clike';
-    for (const l of rawLines) {
-      if (l.startsWith('+++ ')) {
-        diffLang = detectPrismLanguage(l.slice(4).replace(/^[ab]\//, ''));
-        break;
-      }
-    }
-    const grammar = Prism.languages[diffLang] || Prism.languages.clike;
-
-    let oldLine = 0;
-    let newLine = 0;
-
-    type DRow = {type: 'add' | 'del' | 'ctx' | 'hunk' | 'meta'; oldNum: number | null; newNum: number | null; code: string};
-
-    const rows: DRow[] = rawLines.map((raw): DRow => {
-      if (raw.startsWith('@@')) {
-        const m = raw.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-        if (m) { oldLine = parseInt(m[1], 10); newLine = parseInt(m[2], 10); }
-        return {type: 'hunk', oldNum: null, newNum: null, code: raw};
-      }
-      if (raw.startsWith('diff ') || raw.startsWith('index ') || raw.startsWith('--- ') || raw.startsWith('+++ ') || raw.startsWith('Binary')) {
-        return {type: 'meta', oldNum: null, newNum: null, code: raw};
-      }
-      const ch = raw[0];
-      if (ch === '+') return {type: 'add', oldNum: null, newNum: newLine++, code: raw.slice(1)};
-      if (ch === '-') return {type: 'del', oldNum: oldLine++, newNum: null, code: raw.slice(1)};
-      // context line (leading space or empty)
-      return {type: 'ctx', oldNum: oldLine++, newNum: newLine++, code: raw.length > 0 ? raw.slice(1) : ''};
-    });
+    const {oldText, newText, hasContent} = parseUnifiedDiff(content);
+    if (!hasContent) return <div className="muted block">No diff hunks available</div>;
 
     return (
-      <div className="code-wrap">
-        <div className={`diff-view ${wrapLines ? 'wrap' : 'nowrap'}`}>
-          {rows.map((row, i) => {
-            const isCode = row.type === 'add' || row.type === 'del' || row.type === 'ctx';
-            const highlighted = isCode ? Prism.highlight(row.code, grammar, diffLang) : null;
-            return (
-              <div key={i} className={`diff-line diff-${row.type}`}>
-                <span className="diff-old-num">{row.oldNum != null ? row.oldNum : '\u00a0'}</span>
-                <span className="diff-new-num">{row.newNum != null ? row.newNum : '\u00a0'}</span>
-                <span className="diff-sign">
-                  {row.type === 'add' ? '+' : row.type === 'del' ? '-' : '\u00a0'}
-                </span>
-                {highlighted != null
-                  ? <span className="diff-text prism-code" dangerouslySetInnerHTML={{__html: highlighted || '\u00a0'}} />
-                  : <span className="diff-text">{row.code}</span>}
-              </div>
-            );
-          })}
-        </div>
+      <div className={`code-wrap diff-wrap ${wrapLines ? 'wrap' : 'nowrap'}`}>
+        <ReactDiffViewer
+          oldValue={oldText}
+          newValue={newText}
+          splitView={false}
+          showDiffOnly={false}
+          hideLineNumbers={!showLineNumbers}
+          useDarkTheme={themeMode === 'dark'}
+        />
       </div>
     );
   };
@@ -646,7 +634,7 @@ function App() {
       return (
         <div className="content">
           <div className="block-title">{selectedFile || 'Select a file'}</div>
-          <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectPrismLanguage(selectedFile))}</div>
+          <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}</div>
         </div>
       );
     }
