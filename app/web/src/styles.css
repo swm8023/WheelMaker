@@ -512,7 +512,7 @@ body,
   padding: 0 10px 0 8px;
   border-right: 1px solid rgba(127, 127, 127, 0.18);
   user-select: none;
-  min-width: 36px;
+  min-width: 26px;
 }
 
 .line-text {
@@ -666,8 +666,20 @@ body,
   table-layout: fixed;
 }
 
-.wrap .line-number {
-  width: 48px;
+.code-grid.line-digits-1 .line-number {
+  min-width: 26px;
+}
+
+.code-grid.line-digits-2 .line-number {
+  min-width: 34px;
+}
+
+.code-grid.line-digits-3 .line-number {
+  min-width: 42px;
+}
+
+.code-grid.line-digits-4 .line-number {
+  min-width: 50px;
 }
 
 .wrap .line-text,

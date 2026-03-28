@@ -27,6 +27,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
+import {getLineNumberDigits} from './codeLayout';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from './types/registry';
 import './styles.css';
@@ -514,6 +515,7 @@ function App() {
     const grammar = Prism.languages[language] || Prism.languages.clike;
     const highlighted = Prism.highlight(content || '', grammar, language);
     const lines = highlighted.split('\n');
+    const lineDigits = Math.min(4, getLineNumberDigits(lines.length));
 
     if (!numbersOn) {
       return (
@@ -525,7 +527,7 @@ function App() {
 
     return (
       <div className="code-wrap">
-        <div className={`code-grid prism-code ${wrapLines ? 'wrap' : 'nowrap'}`}>
+        <div className={`code-grid prism-code ${wrapLines ? 'wrap' : 'nowrap'} line-digits-${lineDigits}`}>
           {lines.map((line: string, index: number) => (
             <div key={`${index}-${line.length}`} className="code-row">
               <span className="line-number">{index + 1}</span>
