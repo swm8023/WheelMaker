@@ -6,8 +6,6 @@
   "include": [
     "App.tsx",
     "App.native.tsx",
-    "src/**/*.ts",
-    "src/**/*.tsx",
     "__tests__/**/*.ts",
     "__tests__/**/*.tsx"
   ],

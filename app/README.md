@@ -9,7 +9,6 @@ The `app` workspace now has two clear parts:
 
 - `web/src`: pure React UI entry and pages
 - `web/public`: web static template and runtime config
-- `src/services`: shared registry service layer used by web and native shell lifecycle
 - `scripts/sync_web_assets.ps1`: copy built web files into Android assets
 - `scripts/export_web_release.ps1`: export web files for Nginx/static hosting
 

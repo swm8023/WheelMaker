@@ -2,7 +2,41 @@ import React, {useMemo, useState} from 'react';
 import {Pressable, StatusBar, StyleSheet, Text, View} from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import {WebView} from 'react-native-webview';
-import {getNativeWebViewUri, getRemoteWebUrl} from './src/config/runtime';
+
+type RuntimeConfig = {
+  webviewSourceMode?: 'local' | 'remote';
+  remoteWebUrl?: string;
+  localWebAssetPathAndroid?: string;
+  webDevUrl?: string;
+};
+
+type GlobalLike = {
+  __WHEELMAKER_RUNTIME_CONFIG__?: RuntimeConfig;
+};
+
+const DEFAULT_WEB_DEV_URL = 'http://127.0.0.1:8080';
+const DEFAULT_ANDROID_LOCAL_WEB_URI = 'file:///android_asset/wheelmaker-web/index.html';
+
+function loadRuntimeConfig(): RuntimeConfig {
+  const globalLike = globalThis as unknown as GlobalLike;
+  return globalLike.__WHEELMAKER_RUNTIME_CONFIG__ ?? {};
+}
+
+function getNativeWebViewUri(): string {
+  const config = loadRuntimeConfig();
+  if (__DEV__) {
+    return config.webDevUrl?.trim() || DEFAULT_WEB_DEV_URL;
+  }
+  if (config.webviewSourceMode === 'remote' && config.remoteWebUrl?.trim()) {
+    return config.remoteWebUrl.trim();
+  }
+  return config.localWebAssetPathAndroid?.trim() || DEFAULT_ANDROID_LOCAL_WEB_URI;
+}
+
+function getRemoteWebUrl(): string {
+  const config = loadRuntimeConfig();
+  return config.remoteWebUrl?.trim() || DEFAULT_WEB_DEV_URL;
+}
 
 function initialUri(): string {
   return getNativeWebViewUri();
