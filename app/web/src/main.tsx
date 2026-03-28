@@ -175,6 +175,28 @@ function parseUnifiedDiff(content: string): UnifiedDiffSides {
   };
 }
 
+function getDiffViewerStyles(wrap: boolean): any {
+  return {
+    diffContainer: {
+      minWidth: '100%',
+      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+      fontSize: '13px',
+      lineHeight: '1.5',
+    },
+    contentText: {
+      whiteSpace: wrap ? 'pre-wrap' : 'pre',
+      wordBreak: wrap ? 'break-word' : 'normal',
+      overflowWrap: wrap ? 'anywhere' : 'normal',
+    },
+    lineNumber: {
+      color: 'var(--muted)',
+    },
+    marker: {
+      userSelect: 'none',
+    },
+  };
+}
+
 function toSetiGlyph(fontCharacter?: string): string {
   if (!fontCharacter) return '?';
   const hex = fontCharacter.replace('\\', '');
@@ -610,6 +632,7 @@ function App() {
           showDiffOnly={false}
           hideLineNumbers={!showLineNumbers}
           useDarkTheme={themeMode === 'dark'}
+          styles={getDiffViewerStyles(wrapLines)}
         />
       </div>
     );
