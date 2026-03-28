@@ -134,6 +134,8 @@ type UnifiedDiffSides = {
   oldText: string;
   newText: string;
   hasContent: boolean;
+  oldStart: number;
+  newStart: number;
 };
 
 function parseUnifiedDiff(content: string): UnifiedDiffSides {
@@ -141,9 +143,22 @@ function parseUnifiedDiff(content: string): UnifiedDiffSides {
   const oldLines: string[] = [];
   const newLines: string[] = [];
   let inHunk = false;
+  let firstOldStart = 1;
+  let firstNewStart = 1;
+  let hasSeenHunk = false;
 
   for (const raw of lines) {
-    if (raw.startsWith('@@')) {
+    const hunkMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (hunkMatch) {
+      const oldStart = Number.parseInt(hunkMatch[1], 10);
+      const newStart = Number.parseInt(hunkMatch[2], 10);
+      if (!hasSeenHunk) {
+        firstOldStart = oldStart;
+        firstNewStart = newStart;
+        hasSeenHunk = true;
+      }
+      while (oldLines.length < oldStart - 1) oldLines.push('');
+      while (newLines.length < newStart - 1) newLines.push('');
       inHunk = true;
       continue;
     }
@@ -171,6 +186,8 @@ function parseUnifiedDiff(content: string): UnifiedDiffSides {
     oldText: oldLines.join('\n'),
     newText: newLines.join('\n'),
     hasContent: oldLines.length > 0 || newLines.length > 0,
+    oldStart: firstOldStart,
+    newStart: firstNewStart,
   };
 }
 
@@ -307,6 +324,50 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
     </div>
   );
 }
+
+function PrismInlineCode({content, language, wrap}: {content: string; language: string; wrap: boolean}) {
+  return (
+    <SyntaxHighlighter
+      PreTag="span"
+      CodeTag="span"
+      className="diff-inline-code"
+      language={language}
+      style={oneDark}
+      wrapLongLines={wrap}
+      wrapLines={wrap}
+      codeTagProps={{
+        style: {
+          whiteSpace: wrap ? 'pre-wrap' : 'pre',
+          background: 'transparent',
+          fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+          fontWeight: 400,
+          fontVariantLigatures: 'none',
+          fontFeatureSettings: '"liga" 0, "calt" 0',
+        },
+      }}
+      lineProps={{
+        style: {
+          background: 'transparent',
+          whiteSpace: wrap ? 'pre-wrap' : 'pre',
+          wordBreak: wrap ? 'break-word' : 'normal',
+          overflowWrap: wrap ? 'anywhere' : 'normal',
+        },
+      }}
+      customStyle={{
+        margin: 0,
+        padding: 0,
+        display: 'inline',
+        background: 'transparent',
+        fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+        fontWeight: 400,
+        fontVariantLigatures: 'none',
+        fontFeatureSettings: '"liga" 0, "calt" 0',
+      }}>
+      {content || ' '}
+    </SyntaxHighlighter>
+  );
+}
+
 function App() {
   const [connected, setConnected] = useState(false);
   const [address, setAddress] = useState(getDefaultRegistryAddress());
@@ -316,6 +377,7 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [wrapLines, setWrapLines] = useState(false);
   const [showLineNumbers, setShowLineNumbers] = useState(true);
+  const [foldContext, setFoldContext] = useState(true);
   const setiFontCss = useMemo(() => setiFontFaceCss(), []);
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
@@ -667,8 +729,10 @@ function App() {
 
   const renderDiffPane = (content: string) => {
     if (!content) return <div className="muted block">No diff available</div>;
-    const {oldText, newText, hasContent} = parseUnifiedDiff(content);
+    const {oldText, newText, hasContent, oldStart, newStart} = parseUnifiedDiff(content);
     if (!hasContent) return <div className="muted block">No diff hunks available</div>;
+    const linesOffset = Math.max(0, Math.min(oldStart, newStart) - 1);
+    const language = detectCodeLanguage(selectedDiff || selectedFile);
 
     return (
       <div className={`code-wrap diff-wrap ${wrapLines ? 'wrap' : 'nowrap'}`}>
@@ -676,9 +740,12 @@ function App() {
           oldValue={oldText}
           newValue={newText}
           splitView={false}
-          showDiffOnly={false}
+          showDiffOnly={foldContext}
+          extraLinesSurroundingDiff={3}
           disableWordDiff={true}
           compareMethod={DiffMethod.LINES}
+          linesOffset={linesOffset}
+          renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} />}
           hideLineNumbers={!showLineNumbers}
           useDarkTheme={themeMode === 'dark'}
           styles={getDiffViewerStyles(wrapLines)}
@@ -815,6 +882,10 @@ function App() {
               <label className="switch-row">
                 <span>Line Number</span>
                 <input type="checkbox" checked={showLineNumbers} onChange={e => setShowLineNumbers(e.target.checked)} />
+              </label>
+              <label className="switch-row">
+                <span>Fold Context</span>
+                <input type="checkbox" checked={foldContext} onChange={e => setFoldContext(e.target.checked)} />
               </label>
             </div>
           ) : null}
