@@ -499,7 +499,7 @@ function App() {
                 setSelectedDiff(file.path);
                 if (!isWide) setDrawerOpen(false);
               }}>
-              <span className="status-tag">{file.status}</span>
+              <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
               <span className="label">{file.path}</span>
             </div>
           ))}
@@ -516,17 +516,48 @@ function App() {
     const lines = highlighted.split('\n');
 
     if (!numbersOn) {
-      return <pre className={`code-block prism-code ${wrapLines ? 'wrap' : 'nowrap'}`} dangerouslySetInnerHTML={{__html: highlighted || ' '}} />;
+      return (
+        <div className="code-wrap">
+          <pre className={`code-block prism-code ${wrapLines ? 'wrap' : 'nowrap'}`} dangerouslySetInnerHTML={{__html: highlighted || ' '}} />
+        </div>
+      );
     }
 
     return (
-      <div className={`code-grid prism-code ${wrapLines ? 'wrap' : 'nowrap'}`}>
-        {lines.map((line: string, index: number) => (
-          <div key={`${index}-${line.length}`} className="code-row">
-            <span className="line-number">{index + 1}</span>
-            <span className="line-text" dangerouslySetInnerHTML={{__html: line || ' '}} />
-          </div>
-        ))}
+      <div className="code-wrap">
+        <div className={`code-grid prism-code ${wrapLines ? 'wrap' : 'nowrap'}`}>
+          {lines.map((line: string, index: number) => (
+            <div key={`${index}-${line.length}`} className="code-row">
+              <span className="line-number">{index + 1}</span>
+              <span className="line-text" dangerouslySetInnerHTML={{__html: line || ' '}} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDiffPane = (content: string) => {
+    if (!content) return <div className="muted block">No diff available</div>;
+    const lines = content.split('\n');
+    return (
+      <div className="code-wrap">
+        <div className={`diff-view ${wrapLines ? 'wrap' : 'nowrap'}`}>
+          {lines.map((line, i) => {
+            let type = 'ctx';
+            const ch = line[0];
+            if (ch === '+' && !line.startsWith('+++')) type = 'add';
+            else if (ch === '-' && !line.startsWith('---')) type = 'del';
+            else if (line.startsWith('@@')) type = 'hunk';
+            else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) type = 'meta';
+            return (
+              <div key={i} className={`diff-line diff-${type}`}>
+                <span className="diff-sign">{type === 'add' ? '+' : type === 'del' ? '-' : '\u00a0'}</span>
+                <span className="diff-text">{type === 'add' || type === 'del' ? line.slice(1) : line}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -558,7 +589,7 @@ function App() {
     return (
       <div className="content">
         <div className="block-title">{selectedDiff || 'Select a changed file'}</div>
-        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderCodePane(diffText, true, 'diff')}</div>
+        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
       </div>
     );
   };
@@ -598,7 +629,7 @@ function App() {
               setDrawerOpen(true);
             }
           }}>
-          <span className={`codicon ${isWide ? (sidebarCollapsed ? 'codicon-panel-left-expand' : 'codicon-panel-left') : 'codicon-menu'}`} />
+          <span className={`codicon ${isWide ? (sidebarCollapsed ? 'codicon-layout-sidebar-left-off' : 'codicon-layout-sidebar-left') : 'codicon-menu'}`} />
         </button>
 
         <div className="project-wrap" onPointerDown={event => event.stopPropagation()}>
@@ -670,12 +701,24 @@ function App() {
         <main className="right">{renderMain()}</main>
       </div>
 
-      {gitCurrentBranch ? (
+      {tab === 'file' ? (
         <div className="status-bar">
-          <span className="statusbar-item">
-            <span className="codicon codicon-git-branch" />
-            {gitCurrentBranch}
-          </span>
+          {selectedFile ? (
+            <span className="statusbar-item">
+              <span className="codicon codicon-file" />
+              {selectedFile.split('/').pop()}
+            </span>
+          ) : null}
+          {selectedFile && fileContent.length > 0 ? (
+            <span className="statusbar-muted">{fileContent.split('\n').length} lines</span>
+          ) : null}
+          <span className="statusbar-spacer" />
+          {gitCurrentBranch ? (
+            <span className="statusbar-item">
+              <span className="codicon codicon-git-branch" />
+              {gitCurrentBranch}
+            </span>
+          ) : null}
         </div>
       ) : null}
 
