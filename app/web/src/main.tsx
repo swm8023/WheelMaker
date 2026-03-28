@@ -1,7 +1,8 @@
 ﻿import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Prism from 'prismjs';
-import {getIcon as getSetiIcon} from 'seti-file-icons';
+import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
+import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
 import 'prismjs/components/prism-markup';
 import 'prismjs/components/prism-clike';
 import 'prismjs/components/prism-javascript';
@@ -18,6 +19,7 @@ import 'prismjs/components/prism-yaml';
 import 'prismjs/components/prism-markdown';
 import 'prismjs/components/prism-diff';
 import 'prismjs/themes/prism-tomorrow.css';
+import '@vscode/codicons/dist/codicon.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
@@ -27,8 +29,29 @@ import './styles.css';
 type Tab = 'chat' | 'file' | 'git';
 type ThemeMode = 'dark' | 'light';
 type DirEntries = Record<string, RegistryFsEntry[]>;
+type SetiThemeSection = {
+  file: string;
+  fileExtensions?: Record<string, string>;
+  fileNames?: Record<string, string>;
+};
+type SetiIconDefinition = {
+  fontCharacter?: string;
+  fontColor?: string;
+};
+type SetiTheme = {
+  iconDefinitions: Record<string, SetiIconDefinition>;
+  file: string;
+  fileExtensions?: Record<string, string>;
+  fileNames?: Record<string, string>;
+  light?: SetiThemeSection;
+};
+type SetiResolvedIcon = {
+  glyph: string;
+  color: string;
+};
 
 const service = new RegistryWorkspaceService();
+const setiTheme = setiThemeJson as SetiTheme;
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
@@ -88,32 +111,44 @@ function detectPrismLanguage(path: string): string {
   }
 }
 
-function resolveSetiColor(token: string): string {
-  switch (token) {
-    case 'blue':
-      return '#519aba';
-    case 'grey':
-      return '#4d5a5e';
-    case 'grey-light':
-      return '#6d8086';
-    case 'green':
-      return '#8dc149';
-    case 'orange':
-      return '#e37933';
-    case 'pink':
-      return '#f55385';
-    case 'purple':
-      return '#a074c4';
-    case 'red':
-      return '#cc3e44';
-    case 'yellow':
-      return '#cbcb41';
-    case 'ignore':
-      return '#41535b';
-    case 'white':
-    default:
-      return '#d4d7d6';
+function toSetiGlyph(fontCharacter?: string): string {
+  if (!fontCharacter) return '?';
+  const hex = fontCharacter.replace('\\', '');
+  const code = Number.parseInt(hex, 16);
+  if (Number.isNaN(code)) return '?';
+  return String.fromCodePoint(code);
+}
+
+function resolveSetiIcon(name: string, mode: ThemeMode): SetiResolvedIcon {
+  const section: SetiThemeSection = mode === 'light' && setiTheme.light
+    ? {file: setiTheme.light.file, fileExtensions: setiTheme.light.fileExtensions, fileNames: setiTheme.light.fileNames}
+    : {file: setiTheme.file, fileExtensions: setiTheme.fileExtensions, fileNames: setiTheme.fileNames};
+
+  const lowerName = name.toLowerCase();
+  let iconId = section.file;
+
+  if (section.fileNames?.[lowerName]) {
+    iconId = section.fileNames[lowerName];
+  } else if (section.fileExtensions) {
+    const parts = lowerName.split('.');
+    for (let i = 0; i < parts.length; i += 1) {
+      const candidate = parts.slice(i).join('.');
+      if (section.fileExtensions[candidate]) {
+        iconId = section.fileExtensions[candidate];
+        break;
+      }
+    }
   }
+
+  const definition = setiTheme.iconDefinitions[iconId] ?? setiTheme.iconDefinitions[section.file] ?? {};
+  return {
+    glyph: toSetiGlyph(definition.fontCharacter),
+    color: definition.fontColor ?? '#d4d7d6',
+  };
+}
+
+function setiFontFaceCss(): string {
+  return `@font-face { font-family: 'wm-seti'; src: url('${setiFontUrl}') format('woff'); font-weight: normal; font-style: normal; }`;
 }
 
 function App() {
@@ -125,6 +160,8 @@ function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
   const [wrapLines, setWrapLines] = useState(false);
   const [showLineNumbers, setShowLineNumbers] = useState(true);
+  const setiFontCss = useMemo(() => setiFontFaceCss(), []);
+  const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
   const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
   const isWide = windowWidth >= 900;
@@ -356,7 +393,6 @@ function App() {
     return entries.map(entry => {
       if (entry.kind === 'dir') {
         const expanded = isExpanded(entry.path);
-        const folderIcon = getSetiIcon('folder');
         return (
           <div key={entry.path}>
             <div
@@ -366,11 +402,7 @@ function App() {
                 toggleDirectory(entry.path).catch(() => undefined);
               }}>
               <span className="caret">{expanded ? 'v' : '>'}</span>
-              <span
-                className="node-icon seti-icon"
-                style={{color: resolveSetiColor(folderIcon.color)}}
-                dangerouslySetInnerHTML={{__html: folderIcon.svg}}
-              />
+              <span className={`node-icon codicon ${expanded ? 'codicon-folder-opened' : 'codicon-folder'}`} />
               <span className="label">{entry.name}</span>
               {loadingDirs[entry.path] ? <span className="muted">...</span> : null}
             </div>
@@ -379,7 +411,7 @@ function App() {
         );
       }
 
-      const fileIcon = getSetiIcon(entry.name);
+      const fileIcon = resolveFileIcon(entry.name);
       return (
         <div
           key={entry.path}
@@ -391,9 +423,10 @@ function App() {
           }}>
           <span
             className="node-icon seti-icon"
-            style={{color: resolveSetiColor(fileIcon.color)}}
-            dangerouslySetInnerHTML={{__html: fileIcon.svg}}
-          />
+            style={{color: fileIcon.color}}
+          >
+            <span className="seti-glyph">{fileIcon.glyph}</span>
+          </span>
           <span className="label">{entry.name}</span>
         </div>
       );
@@ -523,6 +556,7 @@ function App() {
   if (!connected) {
     return (
       <div className={`page theme-${themeMode}`}>
+        <style>{setiFontCss}</style>
         <div className="connect">
           <h3>Connect to WheelMaker Registry</h3>
           <input
@@ -543,6 +577,7 @@ function App() {
 
   return (
     <div className={`workspace theme-${themeMode}`}>
+      <style>{setiFontCss}</style>
       <header className="header">
         <button
           className="header-btn"

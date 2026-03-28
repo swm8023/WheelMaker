@@ -320,6 +320,17 @@ body,
   fill: currentColor;
 }
 
+.seti-glyph {
+  font-family: 'wm-seti', monospace;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.node-icon.codicon {
+  font-size: 15px;
+  color: #dcb67a;
+}
+
 .status-tag {
   color: var(--muted);
   font-family: Consolas, 'Courier New', monospace;

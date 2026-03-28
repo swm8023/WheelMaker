@@ -16,13 +16,14 @@
     "web": "webpack serve --config web/webpack.config.js --mode development --hot"
   },
   "dependencies": {
+    "@codingame/monaco-vscode-theme-seti-default-extension": "^28.4.1",
+    "@vscode/codicons": "^0.0.45",
     "prismjs": "^1.30.0",
     "react": "19.2.3",
     "react-dom": "^19.2.3",
     "react-native": "0.84.1",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-webview": "^13.16.1",
-    "seti-file-icons": "^0.0.8"
+    "react-native-webview": "^13.16.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
