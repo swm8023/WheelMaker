@@ -313,7 +313,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = n
         style={oneDark}
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
-        wrapLines={wrap}
+        wrapLines={true}
         codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}}
         lineProps={lineNumber => ({
           'data-line-number': String(lineNumber),
@@ -484,6 +484,16 @@ function App() {
     setCurrentMatchIndex(prev => Math.min(prev, fileSearchMatches.length - 1));
   }, [fileSearchMatches.length]);
 
+  useEffect(() => {
+    if (!searchToolsOpen) return;
+    const query = fileSearchQuery.trim();
+    if (!query || fileSearchMatches.length === 0) return;
+    setCurrentMatchIndex(0);
+    window.requestAnimationFrame(() => {
+      scrollToFileLine(fileSearchMatches[0], true);
+    });
+  }, [fileSearchMatches, fileSearchQuery, searchToolsOpen]);
+
   useEffect(() => () => {
     if (highlightTimerRef.current !== null) {
       window.clearTimeout(highlightTimerRef.current);
@@ -514,7 +524,7 @@ function App() {
     if (fileSearchMatches.length === 0) return;
     const next = (currentMatchIndex + delta + fileSearchMatches.length) % fileSearchMatches.length;
     setCurrentMatchIndex(next);
-    scrollToFileLine(fileSearchMatches[next], false);
+    scrollToFileLine(fileSearchMatches[next], true);
   };
 
   const triggerGoToLine = () => {
@@ -880,56 +890,34 @@ function App() {
         <div className="content">
           <div className="block-title with-tools">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
-            <div className="view-tools file-tools">
-              {!hasPinnedFiles ? (
-                <button
-                  type="button"
-                  className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
-                  onClick={togglePinSelectedFile}
-                  disabled={!selectedFile}
-                  title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
-                  aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
-                  <span className="codicon codicon-pinned view-tool-icon" />
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
-                onClick={() => setSearchToolsOpen(value => !value)}
-                title="Toggle search"
-                aria-label="Toggle search">
-                <span className="codicon codicon-search view-tool-icon" />
-              </button>
-              {searchToolsOpen ? (
-                <input
-                  className="search-input"
-                  value={fileSearchQuery}
-                  onChange={event => setFileSearchQuery(event.target.value)}
-                  placeholder="Find in file"
-                />
-              ) : null}
-              {searchToolsOpen ? (
-                <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
-                  <span className="codicon codicon-chevron-up view-tool-icon" />
-                </button>
-              ) : null}
-              {searchToolsOpen ? (
-                <button type="button" className="view-tool search-nav" title="Next match" onClick={() => navigateSearchMatch(1)}>
-                  <span className="codicon codicon-chevron-down view-tool-icon" />
-                </button>
-              ) : null}
-              {searchToolsOpen ? (
-                <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
-              ) : null}
+            <div className="view-tools">{renderViewTools()}</div>
+          </div>
+          <div className="file-action-row">
+            <button
+              type="button"
+              className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
+              onClick={togglePinSelectedFile}
+              disabled={!selectedFile}
+              title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
+              aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+              <span className="codicon codicon-pinned view-tool-icon" />
+            </button>
+            <div className="file-action-group">
               <button
                 type="button"
                 className={`view-tool ${gotoToolsOpen ? 'active' : ''}`}
-                onClick={() => setGotoToolsOpen(value => !value)}
+                onClick={() => {
+                  setGotoToolsOpen(value => {
+                    const next = !value;
+                    if (next) setSearchToolsOpen(false);
+                    return next;
+                  });
+                }}
                 title="Toggle go to line"
                 aria-label="Toggle go to line">
                 <span className="codicon codicon-symbol-number view-tool-icon" />
               </button>
-              {gotoToolsOpen ? (
+              <div className={`file-action-panel ${gotoToolsOpen ? 'open' : ''}`}>
                 <input
                   className="goto-input"
                   value={gotoLineInput}
@@ -942,14 +930,48 @@ function App() {
                   inputMode="numeric"
                   placeholder="Line"
                 />
-              ) : null}
-              {gotoToolsOpen ? (
                 <button type="button" className="view-tool goto-trigger" title="Go to line" onClick={triggerGoToLine}>
                   <span className="codicon codicon-arrow-right view-tool-icon" />
                 </button>
-              ) : null}
-              {renderViewTools()}
+              </div>
             </div>
+            <div className="file-action-group">
+              <button
+                type="button"
+                className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
+                onClick={() => {
+                  setSearchToolsOpen(value => {
+                    const next = !value;
+                    if (next) setGotoToolsOpen(false);
+                    return next;
+                  });
+                }}
+                title="Toggle search"
+                aria-label="Toggle search">
+                <span className="codicon codicon-search view-tool-icon" />
+              </button>
+              <div className={`file-action-panel ${searchToolsOpen ? 'open' : ''}`}>
+                <input
+                  className="search-input"
+                  value={fileSearchQuery}
+                  onChange={event => setFileSearchQuery(event.target.value)}
+                  onKeyDown={event => {
+                    if (event.key === 'Enter') {
+                      navigateSearchMatch(1);
+                    }
+                  }}
+                  placeholder="Find in file"
+                />
+                <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
+                  <span className="codicon codicon-chevron-up view-tool-icon" />
+                </button>
+                <button type="button" className="view-tool search-nav" title="Next match" onClick={() => navigateSearchMatch(1)}>
+                  <span className="codicon codicon-chevron-down view-tool-icon" />
+                </button>
+                <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
+              </div>
+            </div>
+            <span className="file-action-spacer" />
           </div>
           {hasPinnedFiles ? (
             <div className="pinned-strip">
@@ -963,21 +985,11 @@ function App() {
                     type="button"
                     className="pinned-close"
                     onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
-                    aria-label={`Unpin ${path}`}>
+                  aria-label={`Unpin ${path}`}>
                     x
                   </button>
                 </div>
               ))}
-              <span className="pinned-spacer" />
-              <button
-                type="button"
-                className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}
-                onClick={togglePinSelectedFile}
-                disabled={!selectedFile}
-                title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
-                aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
-                <span className="codicon codicon-pinned view-tool-icon" />
-              </button>
             </div>
           ) : null}
           <div ref={fileScrollRef} className="scroll-panel">
