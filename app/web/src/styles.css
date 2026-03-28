@@ -440,11 +440,11 @@ body,
 }
 
 .block-title {
-  height: 35px;
+  height: 30px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 10px;
   font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
@@ -468,7 +468,7 @@ body,
 .view-tools {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex: 0 0 auto;
 }
 
@@ -783,8 +783,8 @@ body,
   }
 
   .view-tool {
-    height: 22px;
-    width: 22px;
+    height: 24px;
+    width: 24px;
   }
 
   .view-tool-icon {
