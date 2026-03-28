@@ -1,4 +1,4 @@
-﻿import React, {useEffect, useMemo, useState} from 'react';
+﻿import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Prism from 'prismjs';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
@@ -19,6 +19,8 @@ import 'prismjs/components/prism-yaml';
 import 'prismjs/components/prism-markdown';
 import 'prismjs/components/prism-diff';
 import 'prismjs/themes/prism-tomorrow.css';
+import 'prismjs/plugins/line-numbers/prism-line-numbers.css';
+import 'prismjs/plugins/line-numbers/prism-line-numbers';
 import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
@@ -27,7 +29,6 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
-import {getLineNumberDigits} from './codeLayout';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from './types/registry';
 import './styles.css';
@@ -157,6 +158,29 @@ function setiFontFaceCss(): string {
   return `@font-face { font-family: 'wm-seti'; src: url('${setiFontUrl}') format('woff'); font-weight: normal; font-style: normal; }`;
 }
 
+type PrismCodeBlockProps = {
+  content: string;
+  language: string;
+  wrap: boolean;
+  lineNumbers: boolean;
+};
+
+function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockProps) {
+  const codeRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!codeRef.current) return;
+    Prism.highlightElement(codeRef.current);
+  }, [content, language]);
+
+  return (
+    <div className="code-wrap">
+      <pre className={`code-block prism-code language-${language} ${wrap ? 'wrap' : 'nowrap'} ${lineNumbers ? 'line-numbers' : ''}`}>
+        <code ref={codeRef} className={`language-${language}`}>{content || ' '}</code>
+      </pre>
+    </div>
+  );
+}
 function App() {
   const [connected, setConnected] = useState(false);
   const [address, setAddress] = useState(getDefaultRegistryAddress());
@@ -512,31 +536,7 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectPrismLanguage(selectedFile);
-    const grammar = Prism.languages[language] || Prism.languages.clike;
-    const highlighted = Prism.highlight(content || '', grammar, language);
-    const lines = highlighted.split('\n');
-    const lineDigits = Math.min(4, getLineNumberDigits(lines.length));
-
-    if (!numbersOn) {
-      return (
-        <div className="code-wrap">
-          <pre className={`code-block prism-code ${wrapLines ? 'wrap' : 'nowrap'}`} dangerouslySetInnerHTML={{__html: highlighted || ' '}} />
-        </div>
-      );
-    }
-
-    return (
-      <div className="code-wrap">
-        <div className={`code-grid prism-code ${wrapLines ? 'wrap' : 'nowrap'} line-digits-${lineDigits}`}>
-          {lines.map((line: string, index: number) => (
-            <div key={`${index}-${line.length}`} className="code-row">
-              <span className="line-number">{index + 1}</span>
-              <span className="line-text" dangerouslySetInnerHTML={{__html: line || ' '}} />
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
   };
 
   const renderDiffPane = (content: string) => {
@@ -770,3 +770,4 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+

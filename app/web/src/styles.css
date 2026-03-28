@@ -480,8 +480,7 @@ body,
   padding: 6px 0;
 }
 
-.code-block,
-.code-grid {
+.code-block {
   margin: 0;
   min-width: 100%;
   font: 13px/1.5 'JetBrains Mono', 'Fira Code', monospace;
@@ -490,33 +489,6 @@ body,
 
 .code-block {
   padding: 0;
-}
-
-.code-grid {
-  display: table;
-}
-
-.code-row {
-  display: table-row;
-}
-
-.line-number,
-.line-text {
-  display: table-cell;
-  vertical-align: top;
-}
-
-.line-number {
-  color: var(--muted);
-  text-align: right;
-  padding: 0 10px 0 8px;
-  border-right: 1px solid rgba(127, 127, 127, 0.18);
-  user-select: none;
-  min-width: 26px;
-}
-
-.line-text {
-  padding: 0 10px;
 }
 
 .prism-code .token.comment,
@@ -657,36 +629,26 @@ body,
   font-size: 11px;
 }
 
-.nowrap .line-text,
 .nowrap.code-block {
   white-space: pre;
 }
 
-.wrap.code-grid {
-  table-layout: fixed;
+.code-block.line-numbers {
+  padding-left: 2.9em;
 }
 
-.code-grid.line-digits-1 .line-number {
-  min-width: 26px;
-}
-
-.code-grid.line-digits-2 .line-number {
-  min-width: 34px;
-}
-
-.code-grid.line-digits-3 .line-number {
-  min-width: 42px;
-}
-
-.code-grid.line-digits-4 .line-number {
-  min-width: 50px;
-}
-
-.wrap .line-text,
 .wrap.code-block {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+
+.code-block.line-numbers .line-numbers-rows {
+  border-right: 1px solid rgba(127, 127, 127, 0.18);
+}
+
+.code-block.line-numbers .line-numbers-rows > span:before {
+  color: var(--muted);
 }
 
 .drawer-overlay {
