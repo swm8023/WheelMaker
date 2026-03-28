@@ -397,6 +397,7 @@ function App() {
   const [expandedDirs, setExpandedDirs] = useState<string[]>(['.']);
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [selectedFile, setSelectedFile] = useState('');
+  const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
   const [fileContent, setFileContent] = useState('');
   const [fileLoading, setFileLoading] = useState(false);
 
@@ -445,6 +446,12 @@ function App() {
   );
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
+  const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;
+
+  const togglePinSelectedFile = () => {
+    if (!selectedFile) return;
+    setPinnedFiles(prev => prev.includes(selectedFile) ? prev.filter(path => path !== selectedFile) : [...prev, selectedFile]);
+  };
 
   const loadDirectory = async (path: string) => {
     if (loadingDirs[path]) return;
@@ -567,6 +574,7 @@ function App() {
       setDirEntries({'.': sortEntries(session.fileEntries)});
       setExpandedDirs(['.']);
       setSelectedFile(session.fileEntries.find(item => item.kind === 'file')?.path ?? '');
+      setPinnedFiles([]);
       setFileContent('');
       setCommits([]);
       setSelectedCommit('');
@@ -724,7 +732,7 @@ function App() {
     return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
   };
 
-  const renderViewTools = () => (
+  const renderViewTools = (showPinButton: boolean) => (
     <div className="view-tools">
       <button type="button" className={`view-tool ${wrapLines ? 'active' : ''}`} onClick={() => setWrapLines(value => !value)}>
         Wrap
@@ -732,6 +740,11 @@ function App() {
       <button type="button" className={`view-tool ${showLineNumbers ? 'active' : ''}`} onClick={() => setShowLineNumbers(value => !value)}>
         Line #
       </button>
+      {showPinButton ? (
+        <button type="button" className={`view-tool ${isSelectedFilePinned ? 'active' : ''}`} onClick={togglePinSelectedFile} disabled={!selectedFile}>
+          {isSelectedFilePinned ? 'Unpin' : 'Pin'}
+        </button>
+      ) : null}
     </div>
   );
 
@@ -781,22 +794,41 @@ function App() {
         <div className="content">
           <div className="block-title with-tools">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
-            {renderViewTools()}
+            {renderViewTools(true)}
           </div>
+          {pinnedFiles.length > 0 ? (
+            <div className="pinned-strip">
+              <span className="pinned-label">Pinned</span>
+              {pinnedFiles.map(path => (
+                <div key={path} className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}>
+                  <button type="button" className="pinned-open" onClick={() => setSelectedFile(path)} title={path}>
+                    {path.split('/').pop() || path}
+                  </button>
+                  <button
+                    type="button"
+                    className="pinned-close"
+                    onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
+                    aria-label={`Unpin ${path}`}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}</div>
         </div>
       );
     }
 
     return (
-      <div className="content">
-        <div className="block-title with-tools">
-          <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
-          {renderViewTools()}
+        <div className="content">
+          <div className="block-title with-tools">
+            <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
+            {renderViewTools(false)}
+          </div>
+          <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
         </div>
-        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
-      </div>
-    );
+      );
   };
 
   if (!connected) {

@@ -495,6 +495,66 @@ body,
   border-color: var(--accent);
 }
 
+.pinned-strip {
+  min-height: 30px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  overflow-x: auto;
+}
+
+.pinned-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.pinned-entry {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.pinned-entry.active {
+  border-color: var(--accent);
+  background: rgba(0, 122, 204, 0.14);
+}
+
+.pinned-open,
+.pinned-close {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.pinned-open {
+  padding: 4px 8px;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pinned-close {
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.pinned-close:hover {
+  color: var(--text);
+}
+
 .scroll-panel {
   flex: 1;
   min-height: 0;
@@ -708,6 +768,15 @@ body,
     height: 22px;
     padding: 0 6px;
     font-size: 10px;
+  }
+
+  .pinned-strip {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+
+  .pinned-open {
+    max-width: 120px;
   }
 }
 
