@@ -23,8 +23,6 @@ import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
-import '@fontsource/cascadia-mono/400.css';
-import '@fontsource/cascadia-mono/500.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
@@ -57,7 +55,7 @@ type SetiResolvedIcon = {
 
 const service = new RegistryWorkspaceService();
 const setiTheme = setiThemeJson as SetiTheme;
-const VS_CODE_EDITOR_FONT_FAMILY = "'Cascadia Mono', Consolas, 'Courier New', monospace";
+const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
 
 SyntaxHighlighter.registerLanguage('markup', prismMarkup);
 SyntaxHighlighter.registerLanguage('clike', prismClike);
@@ -195,6 +193,7 @@ function getDiffViewerStyles(wrap: boolean): any {
       minWidth: '100%',
       tableLayout: 'auto',
       fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+      fontWeight: 400,
       fontVariantLigatures: 'none',
       fontFeatureSettings: '"liga" 0, "calt" 0',
       fontSize: '13px',
@@ -221,6 +220,7 @@ function getDiffViewerStyles(wrap: boolean): any {
       width: '100%',
       background: 'transparent',
       fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+      fontWeight: 400,
       whiteSpace: wrap ? 'pre-wrap' : 'pre',
       wordBreak: wrap ? 'break-word' : 'normal',
       overflowWrap: wrap ? 'anywhere' : 'normal',
@@ -232,6 +232,7 @@ function getDiffViewerStyles(wrap: boolean): any {
       background: 'transparent',
     },
     lineNumber: {
+      fontWeight: 400,
       color: 'var(--muted)',
     },
     marker: {
@@ -297,10 +298,10 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
         wrapLines={wrap}
-        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}}
+        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}}
         lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}
-        lineNumberStyle={{fontFamily: VS_CODE_EDITOR_FONT_FAMILY, color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}
+        lineNumberStyle={{fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
         {content || ' '}
       </SyntaxHighlighter>
     </div>
