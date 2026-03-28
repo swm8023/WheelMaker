@@ -253,8 +253,9 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         style={oneDark}
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
+        wrapLines={wrap}
         codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent'}}}
-        lineProps={{style: {background: 'transparent'}}}
+        lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
         customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px'}}
         lineNumberStyle={{color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
         {content || ' '}
