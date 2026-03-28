@@ -12,6 +12,8 @@ describe('web file pin feature', () => {
     expect(mainTsx).toContain('setPinnedFiles([]);');
     expect(mainTsx).toContain('<span className="pinned-label">Pinned</span>');
     expect(mainTsx).toContain("className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}");
-    expect(mainTsx).toContain("isSelectedFilePinned ? 'Unpin' : 'Pin'");
+    expect(mainTsx).toContain('codicon-word-wrap view-tool-icon');
+    expect(mainTsx).toContain('codicon-list-ordered view-tool-icon');
+    expect(mainTsx).toContain('codicon-pinned view-tool-icon');
   });
 });

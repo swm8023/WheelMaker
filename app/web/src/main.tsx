@@ -733,15 +733,31 @@ function App() {
 
   const renderViewTools = (showPinButton: boolean) => (
     <div className="view-tools">
-      <button type="button" className={`view-tool ${wrapLines ? 'active' : ''}`} onClick={() => setWrapLines(value => !value)}>
-        Wrap
+      <button
+        type="button"
+        className={`view-tool ${wrapLines ? 'active' : ''}`}
+        onClick={() => setWrapLines(value => !value)}
+        title="Toggle wrap line"
+        aria-label="Toggle wrap line">
+        <span className="codicon codicon-word-wrap view-tool-icon" />
       </button>
-      <button type="button" className={`view-tool ${showLineNumbers ? 'active' : ''}`} onClick={() => setShowLineNumbers(value => !value)}>
-        Line #
+      <button
+        type="button"
+        className={`view-tool ${showLineNumbers ? 'active' : ''}`}
+        onClick={() => setShowLineNumbers(value => !value)}
+        title="Toggle line number"
+        aria-label="Toggle line number">
+        <span className="codicon codicon-list-ordered view-tool-icon" />
       </button>
       {showPinButton ? (
-        <button type="button" className={`view-tool ${isSelectedFilePinned ? 'active' : ''}`} onClick={togglePinSelectedFile} disabled={!selectedFile}>
-          {isSelectedFilePinned ? 'Unpin' : 'Pin'}
+        <button
+          type="button"
+          className={`view-tool ${isSelectedFilePinned ? 'active' : ''}`}
+          onClick={togglePinSelectedFile}
+          disabled={!selectedFile}
+          title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
+          aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+          <span className="codicon codicon-pinned view-tool-icon" />
         </button>
       ) : null}
     </div>
