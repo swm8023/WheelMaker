@@ -1,5 +1,23 @@
-import React, {useEffect, useMemo, useState} from 'react';
+ï»¿import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
+import Prism from 'prismjs';
+import {getIconForFile, getIconForFolder, getIconForOpenFolder} from 'vscode-icons-js';
+import 'prismjs/components/prism-markup';
+import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-typescript';
+import 'prismjs/components/prism-jsx';
+import 'prismjs/components/prism-tsx';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-go';
+import 'prismjs/components/prism-c';
+import 'prismjs/components/prism-cpp';
+import 'prismjs/components/prism-rust';
+import 'prismjs/components/prism-bash';
+import 'prismjs/components/prism-yaml';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/components/prism-diff';
+import 'prismjs/themes/prism-tomorrow.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
@@ -18,6 +36,60 @@ function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
     if (a.kind !== 'dir' && b.kind === 'dir') return 1;
     return a.name.localeCompare(b.name);
   });
+}
+
+function getFileExtension(path: string): string {
+  const match = /\.([a-z0-9]+)$/i.exec(path);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function detectPrismLanguage(path: string): string {
+  const ext = getFileExtension(path);
+  switch (ext) {
+    case 'ts':
+      return 'typescript';
+    case 'tsx':
+      return 'tsx';
+    case 'js':
+      return 'javascript';
+    case 'jsx':
+      return 'jsx';
+    case 'json':
+      return 'json';
+    case 'go':
+      return 'go';
+    case 'c':
+      return 'c';
+    case 'cc':
+    case 'cpp':
+    case 'cxx':
+    case 'h':
+    case 'hh':
+    case 'hpp':
+      return 'cpp';
+    case 'rs':
+      return 'rust';
+    case 'sh':
+    case 'bash':
+      return 'bash';
+    case 'yml':
+    case 'yaml':
+      return 'yaml';
+    case 'md':
+    case 'markdown':
+      return 'markdown';
+    case 'diff':
+    case 'patch':
+      return 'diff';
+    case 'html':
+      return 'markup';
+    default:
+      return 'clike';
+  }
+}
+
+function toIconUrl(iconFile: string): string {
+  return `https://cdn.jsdelivr.net/npm/vscode-icons-js/icons/${iconFile}`;
 }
 
 function App() {
@@ -260,6 +332,7 @@ function App() {
     return entries.map(entry => {
       if (entry.kind === 'dir') {
         const expanded = isExpanded(entry.path);
+        const folderIcon = expanded ? getIconForOpenFolder(entry.name) : getIconForFolder(entry.name);
         return (
           <div key={entry.path}>
             <div
@@ -268,8 +341,8 @@ function App() {
               onClick={() => {
                 toggleDirectory(entry.path).catch(() => undefined);
               }}>
-              <span className="caret">{expanded ? '?' : '?'}</span>
-              <span className="folder-icon">??</span>
+              <span className="caret">{expanded ? 'v' : '>'}</span>
+              <img className="node-icon" src={toIconUrl(folderIcon || 'default_folder.svg')} alt="" />
               <span className="label">{entry.name}</span>
               {loadingDirs[entry.path] ? <span className="muted">...</span> : null}
             </div>
@@ -287,7 +360,7 @@ function App() {
             setSelectedFile(entry.path);
             if (!isWide) setDrawerOpen(false);
           }}>
-          <span className="file-dot">•</span>
+          <img className="node-icon" src={toIconUrl(getIconForFile(entry.name) || 'default_file.svg')} alt="" />
           <span className="label">{entry.name}</span>
         </div>
       );
@@ -308,7 +381,7 @@ function App() {
                   setChatSessionIndex(index);
                   if (!isWide) setDrawerOpen(false);
                 }}>
-                <span className="file-dot">??</span>
+                <span className="file-dot">C</span>
                 <span className="label">{session}</span>
               </div>
             ))}
@@ -340,7 +413,7 @@ function App() {
                 setSelectedCommit(commit.sha);
                 if (!isWide) setDrawerOpen(false);
               }}>
-              <span className="file-dot">?</span>
+              <span className="file-dot">o</span>
               <span className="label">{commit.title || commit.sha.slice(0, 7)}</span>
             </div>
           ))}
@@ -364,20 +437,23 @@ function App() {
     );
   };
 
-  const renderCodePane = (content: string, forceLineNumbers = false) => {
+  const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
-    const lines = (content || '').split('\n');
+    const language = languageHint || detectPrismLanguage(selectedFile);
+    const grammar = Prism.languages[language] || Prism.languages.clike;
+    const highlighted = Prism.highlight(content || '', grammar, language);
+    const lines = highlighted.split('\n');
 
     if (!numbersOn) {
-      return <pre className={`code-block ${wrapLines ? 'wrap' : 'nowrap'}`}>{content || ''}</pre>;
+      return <pre className={`code-block prism-code ${wrapLines ? 'wrap' : 'nowrap'}`} dangerouslySetInnerHTML={{__html: highlighted || ' '}} />;
     }
 
     return (
-      <div className={`code-grid ${wrapLines ? 'wrap' : 'nowrap'}`}>
-        {lines.map((line, index) => (
+      <div className={`code-grid prism-code ${wrapLines ? 'wrap' : 'nowrap'}`}>
+        {lines.map((line: string, index: number) => (
           <div key={`${index}-${line.length}`} className="code-row">
             <span className="line-number">{index + 1}</span>
-            <span className="line-text">{line || ' '}</span>
+            <span className="line-text" dangerouslySetInnerHTML={{__html: line || ' '}} />
           </div>
         ))}
       </div>
@@ -389,7 +465,7 @@ function App() {
       return (
         <div className="content">
           <div className="block-title">CHAT - {chatSessions[chatSessionIndex]}</div>
-          <div className="scroll-panel chat-block">Chat view is restored with shared split behavior.</div>
+          <div className="scroll-panel chat-block">Chat view keeps shared split layout.</div>
         </div>
       );
     }
@@ -398,7 +474,7 @@ function App() {
       return (
         <div className="content">
           <div className="block-title">{selectedFile || 'Select a file'}</div>
-          <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent)}</div>
+          <div className="scroll-panel">{fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectPrismLanguage(selectedFile))}</div>
         </div>
       );
     }
@@ -406,7 +482,7 @@ function App() {
     return (
       <div className="content">
         <div className="block-title">{selectedDiff || 'Select a changed file'}</div>
-        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderCodePane(diffText, true)}</div>
+        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderCodePane(diffText, true, 'diff')}</div>
       </div>
     );
   };
@@ -444,12 +520,12 @@ function App() {
               setDrawerOpen(true);
             }
           }}>
-          {isWide ? (sidebarCollapsed ? '?' : '?') : '?'}
+          {isWide ? (sidebarCollapsed ? '[>]' : '[<]') : '[=]'}
         </button>
 
         <div className="project-wrap" onPointerDown={event => event.stopPropagation()}>
           <button className="project-btn" onClick={() => setProjectMenuOpen(value => !value)}>
-            <span className="project-arrow">?</span>
+            <span className="project-arrow">v</span>
             <span className="project-name" title={currentProjectName}>{currentProjectName}</span>
             {(loadingProject || refreshingProject) ? <span className="muted">...</span> : null}
           </button>
@@ -468,7 +544,7 @@ function App() {
         </div>
 
         <button className="header-btn refresh-btn" onClick={() => refreshProject().catch(() => undefined)} title="Refresh project">
-          {refreshingProject ? '...' : '?'}
+          {refreshingProject ? '...' : 'R'}
         </button>
 
         <div className="header-spacer" />
@@ -487,7 +563,7 @@ function App() {
 
         <div className="settings-wrap" onPointerDown={event => event.stopPropagation()}>
           <button className="header-btn" onClick={() => setQuickSettingsOpen(value => !value)}>
-            ?
+            [*]
           </button>
           {quickSettingsOpen ? (
             <div className="settings-menu">
