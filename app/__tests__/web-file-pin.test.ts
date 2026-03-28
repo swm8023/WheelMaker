@@ -11,13 +11,14 @@ describe('web file pin feature', () => {
     expect(mainTsx).toContain('const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;');
     expect(mainTsx).toContain('setPinnedFiles(prev => prev.includes(selectedFile) ? prev.filter(path => path !== selectedFile) : [...prev, selectedFile]);');
     expect(mainTsx).toContain('setPinnedFiles([]);');
-    expect(mainTsx).toContain('className="file-action-col"');
+    expect(mainTsx).toContain('file-title-tools');
+    expect(mainTsx).toContain('file-pin-floating');
     expect(mainTsx).toContain('<span className="pinned-label">Pinned</span>');
     expect(mainTsx).toContain('{hasPinnedFiles ? (');
-    expect(mainTsx).toContain("className={`pinned-pin-toggle ${isSelectedFilePinned ? 'active' : ''}`}");
+    expect(mainTsx).toContain("className={`pinned-pin-toggle file-pin-floating ${isSelectedFilePinned ? 'active' : ''}`}");
     expect(mainTsx).toContain("className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}");
-    expect(mainTsx).toContain("className={`file-action-panel ${gotoToolsOpen ? 'open' : ''}`}");
-    expect(mainTsx).toContain("className={`file-action-panel ${searchToolsOpen ? 'open' : ''}`}");
+    expect(mainTsx).toContain("className={`file-action-panel title-action-panel ${gotoToolsOpen ? 'open' : ''}`}");
+    expect(mainTsx).toContain("className={`file-action-panel title-action-panel ${searchToolsOpen ? 'open' : ''}`}");
     expect(mainTsx).toContain('codicon-word-wrap view-tool-icon');
     expect(mainTsx).toContain('codicon-list-ordered view-tool-icon');
     expect(mainTsx).toContain('search-input');
