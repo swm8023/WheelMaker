@@ -1,6 +1,6 @@
 ﻿import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import ReactDiffViewer from 'react-diff-viewer-continued';
+import ReactDiffViewer, {DiffMethod} from 'react-diff-viewer-continued';
 import {PrismLight as SyntaxHighlighter} from 'react-syntax-highlighter';
 import oneDark from 'react-syntax-highlighter/dist/cjs/styles/prism/one-dark';
 import prismMarkup from 'react-syntax-highlighter/dist/cjs/languages/prism/markup';
@@ -177,11 +177,33 @@ function parseUnifiedDiff(content: string): UnifiedDiffSides {
 
 function getDiffViewerStyles(wrap: boolean): any {
   return {
+    variables: {
+      dark: {
+        diffViewerBackground: 'var(--panel-3)',
+        gutterBackground: 'var(--panel)',
+        gutterBackgroundDark: 'var(--panel-2)',
+      },
+      light: {
+        diffViewerBackground: 'var(--panel-3)',
+        gutterBackground: 'var(--panel)',
+        gutterBackgroundDark: 'var(--panel-2)',
+      },
+    },
     diffContainer: {
       minWidth: '100%',
       fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
       fontSize: '13px',
       lineHeight: '1.5',
+      overflowX: wrap ? 'hidden' : 'auto',
+      pre: {
+        whiteSpace: wrap ? 'pre-wrap' : 'pre',
+      },
+    },
+    content: {
+      overflow: 'visible',
+    },
+    lineContent: {
+      overflow: 'visible',
     },
     contentText: {
       whiteSpace: wrap ? 'pre-wrap' : 'pre',
@@ -633,6 +655,8 @@ function App() {
           newValue={newText}
           splitView={false}
           showDiffOnly={false}
+          disableWordDiff={true}
+          compareMethod={DiffMethod.LINES}
           hideLineNumbers={!showLineNumbers}
           useDarkTheme={themeMode === 'dark'}
           styles={getDiffViewerStyles(wrapLines)}

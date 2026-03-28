@@ -15,6 +15,9 @@ describe('web code layout', () => {
     expect(mainTsx).toContain("lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}");
     expect(mainTsx).toContain('styles={getDiffViewerStyles(wrapLines)}');
     expect(mainTsx).toContain("whiteSpace: wrap ? 'pre-wrap' : 'pre'");
+    expect(mainTsx).toContain('disableWordDiff={true}');
+    expect(mainTsx).toContain('compareMethod={DiffMethod.LINES}');
+    expect(mainTsx).toContain("overflow: 'visible'");
     expect(mainTsx).not.toContain("from 'prismjs'");
     expect(mainTsx).not.toContain("import 'prismjs/");
   });
