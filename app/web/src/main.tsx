@@ -1,6 +1,22 @@
-﻿import React, {useEffect, useMemo, useRef, useState} from 'react';
+﻿import React, {useEffect, useMemo, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import Prism from 'prismjs';
+import {PrismLight as SyntaxHighlighter} from 'react-syntax-highlighter';
+import oneDark from 'react-syntax-highlighter/dist/cjs/styles/prism/one-dark';
+import prismMarkup from 'react-syntax-highlighter/dist/cjs/languages/prism/markup';
+import prismClike from 'react-syntax-highlighter/dist/cjs/languages/prism/clike';
+import prismJavascript from 'react-syntax-highlighter/dist/cjs/languages/prism/javascript';
+import prismTypescript from 'react-syntax-highlighter/dist/cjs/languages/prism/typescript';
+import prismJsx from 'react-syntax-highlighter/dist/cjs/languages/prism/jsx';
+import prismTsx from 'react-syntax-highlighter/dist/cjs/languages/prism/tsx';
+import prismJson from 'react-syntax-highlighter/dist/cjs/languages/prism/json';
+import prismGo from 'react-syntax-highlighter/dist/cjs/languages/prism/go';
+import prismC from 'react-syntax-highlighter/dist/cjs/languages/prism/c';
+import prismCpp from 'react-syntax-highlighter/dist/cjs/languages/prism/cpp';
+import prismRust from 'react-syntax-highlighter/dist/cjs/languages/prism/rust';
+import prismBash from 'react-syntax-highlighter/dist/cjs/languages/prism/bash';
+import prismYaml from 'react-syntax-highlighter/dist/cjs/languages/prism/yaml';
+import prismMarkdown from 'react-syntax-highlighter/dist/cjs/languages/prism/markdown';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
 import 'prismjs/components/prism-markup';
@@ -19,8 +35,6 @@ import 'prismjs/components/prism-yaml';
 import 'prismjs/components/prism-markdown';
 import 'prismjs/components/prism-diff';
 import 'prismjs/themes/prism-tomorrow.css';
-import 'prismjs/plugins/line-numbers/prism-line-numbers.css';
-import 'prismjs/plugins/line-numbers/prism-line-numbers';
 import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
@@ -59,6 +73,21 @@ type SetiResolvedIcon = {
 
 const service = new RegistryWorkspaceService();
 const setiTheme = setiThemeJson as SetiTheme;
+
+SyntaxHighlighter.registerLanguage('markup', prismMarkup);
+SyntaxHighlighter.registerLanguage('clike', prismClike);
+SyntaxHighlighter.registerLanguage('javascript', prismJavascript);
+SyntaxHighlighter.registerLanguage('typescript', prismTypescript);
+SyntaxHighlighter.registerLanguage('jsx', prismJsx);
+SyntaxHighlighter.registerLanguage('tsx', prismTsx);
+SyntaxHighlighter.registerLanguage('json', prismJson);
+SyntaxHighlighter.registerLanguage('go', prismGo);
+SyntaxHighlighter.registerLanguage('c', prismC);
+SyntaxHighlighter.registerLanguage('cpp', prismCpp);
+SyntaxHighlighter.registerLanguage('rust', prismRust);
+SyntaxHighlighter.registerLanguage('bash', prismBash);
+SyntaxHighlighter.registerLanguage('yaml', prismYaml);
+SyntaxHighlighter.registerLanguage('markdown', prismMarkdown);
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
@@ -166,18 +195,18 @@ type PrismCodeBlockProps = {
 };
 
 function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockProps) {
-  const codeRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    if (!codeRef.current) return;
-    Prism.highlightElement(codeRef.current);
-  }, [content, language]);
-
   return (
     <div className="code-wrap">
-      <pre className={`code-block prism-code language-${language} ${wrap ? 'wrap' : 'nowrap'} ${lineNumbers ? 'line-numbers' : ''}`}>
-        <code ref={codeRef} className={`language-${language}`}>{content || ' '}</code>
-      </pre>
+      <SyntaxHighlighter
+        className={`code-block prism-code ${wrap ? 'wrap' : 'nowrap'}`}
+        language={language}
+        style={oneDark}
+        showLineNumbers={lineNumbers}
+        wrapLongLines={wrap}
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px'}}
+        lineNumberStyle={{color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
+        {content || ' '}
+      </SyntaxHighlighter>
     </div>
   );
 }

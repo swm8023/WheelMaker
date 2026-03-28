@@ -633,22 +633,10 @@ body,
   white-space: pre;
 }
 
-.code-block.line-numbers {
-  padding-left: 2.9em;
-}
-
 .wrap.code-block {
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
-}
-
-.code-block.line-numbers .line-numbers-rows {
-  border-right: 1px solid rgba(127, 127, 127, 0.18);
-}
-
-.code-block.line-numbers .line-numbers-rows > span:before {
-  color: var(--muted);
 }
 
 .drawer-overlay {
