@@ -406,7 +406,7 @@ function App() {
               onClick={() => {
                 toggleDirectory(entry.path).catch(() => undefined);
               }}>
-              <span className="caret">{expanded ? 'v' : '>'}</span>
+              <span className={`caret codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} />
               <span className={`node-icon codicon ${expanded ? 'codicon-folder-opened' : 'codicon-folder'}`} />
               <span className="label">{entry.name}</span>
               {loadingDirs[entry.path] ? <span className="muted">...</span> : null}
@@ -629,12 +629,15 @@ function App() {
 
         <div className="tabs">
           <button className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
+            <span className="codicon codicon-comment-discussion tab-icon" />
             CHAT
           </button>
           <button className={`tab ${tab === 'file' ? 'active' : ''}`} onClick={() => setTab('file')}>
+            <span className="codicon codicon-files tab-icon" />
             FILE
           </button>
           <button className={`tab ${tab === 'git' ? 'active' : ''}`} onClick={() => setTab('git')}>
+            <span className="codicon codicon-source-control tab-icon" />
             GIT
           </button>
         </div>
@@ -666,6 +669,15 @@ function App() {
         {isWide && !sidebarCollapsed ? <aside className="left">{renderSidebar()}</aside> : null}
         <main className="right">{renderMain()}</main>
       </div>
+
+      {gitCurrentBranch ? (
+        <div className="status-bar">
+          <span className="statusbar-item">
+            <span className="codicon codicon-git-branch" />
+            {gitCurrentBranch}
+          </span>
+        </div>
+      ) : null}
 
       {!isWide ? (
         <div className={`drawer-overlay ${drawerOpen ? 'show' : ''}`} onClick={() => setDrawerOpen(false)}>

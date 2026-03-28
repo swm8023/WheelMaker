@@ -1,31 +1,31 @@
 :root {
   --bg: #1e1e1e;
-  --panel: #232326;
-  --panel-2: #2a2a2e;
-  --panel-3: #1a1a1d;
-  --text: #d4d4d4;
-  --muted: #8f8f8f;
-  --border: #35353a;
-  --accent: #0e639c;
-  --hover: rgba(255, 255, 255, 0.06);
-  --soft-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  --panel: #252526;
+  --panel-2: #2d2d2d;
+  --panel-3: #1e1e1e;
+  --text: #cccccc;
+  --muted: #858585;
+  --border: #3c3c3c;
+  --accent: #007acc;
+  --hover: rgba(255, 255, 255, 0.07);
+  --soft-shadow: 0 4px 12px rgba(0, 0, 0, 0.36);
   --danger: #f48771;
-  --line-num: #6e7681;
+  --line-num: #858585;
 }
 
 .theme-light {
-  --bg: #f6f8fa;
-  --panel: #ffffff;
-  --panel-2: #f0f2f5;
+  --bg: #f5f5f5;
+  --panel: #f3f3f3;
+  --panel-2: #dcdcdc;
   --panel-3: #ffffff;
   --text: #1f2328;
-  --muted: #59636e;
-  --border: #d0d7de;
-  --accent: #0969da;
-  --hover: rgba(9, 105, 218, 0.08);
-  --soft-shadow: 0 8px 18px rgba(36, 41, 47, 0.12);
+  --muted: #717171;
+  --border: #e0e0e0;
+  --accent: #007acc;
+  --hover: rgba(0, 0, 0, 0.06);
+  --soft-shadow: 0 4px 12px rgba(0, 0, 0, 0.14);
   --danger: #cf222e;
-  --line-num: #656d76;
+  --line-num: #717171;
 }
 
 * {
@@ -42,6 +42,8 @@ body,
   background: var(--bg);
   color: var(--text);
   font-family: 'IBM Plex Sans', 'Noto Sans', sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .page,
@@ -60,29 +62,49 @@ body,
   margin: auto;
   width: min(520px, 92vw);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
   background: var(--panel);
-  padding: 16px;
+  padding: 20px;
+}
+
+.connect h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .input {
   width: 100%;
-  margin-top: 10px;
+  margin-top: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 4px;
   background: var(--panel-3);
   color: var(--text);
-  padding: 10px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--accent);
 }
 
 .button {
-  margin-top: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  padding: 10px 14px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #ffffff;
+  padding: 8px 16px;
   cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.button:hover {
+  opacity: 0.9;
 }
 
 .error {
@@ -99,29 +121,33 @@ body,
 .header {
   height: 46px;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  background: var(--panel-2);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 8px;
+  gap: 4px;
+  padding: 0 6px;
   flex: 0 0 auto;
 }
 
 .header-btn,
 .project-btn {
-  border: 1px solid var(--border);
-  background: var(--panel-2);
+  border: none;
+  background: transparent;
   color: var(--text);
   min-height: 30px;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  transition: background-color 100ms ease;
 }
 
 .header-btn:hover,
 .project-btn:hover {
-  background: color-mix(in srgb, var(--panel-2) 72%, var(--accent));
-  border-color: color-mix(in srgb, var(--border) 65%, var(--accent));
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.theme-light .header-btn:hover,
+.theme-light .project-btn:hover {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .header-btn {
@@ -133,8 +159,13 @@ body,
 }
 
 .refresh-btn {
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1;
+}
+
+.tab-icon {
+  font-size: 14px;
+  opacity: 0.85;
 }
 
 .project-wrap,
@@ -167,7 +198,7 @@ body,
   top: calc(100% + 6px);
   border: 1px solid var(--border);
   background: var(--panel);
-  border-radius: 8px;
+  border-radius: 6px;
   z-index: 20;
   box-shadow: var(--soft-shadow);
 }
@@ -205,27 +236,35 @@ body,
 
 .tabs {
   display: flex;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--panel-2);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+  align-self: stretch;
 }
 
 .tab {
   border: 0;
+  border-bottom: 2px solid transparent;
+  border-top: 2px solid transparent;
   background: transparent;
-  color: var(--text);
-  min-width: 66px;
-  height: 30px;
+  color: var(--muted);
+  min-width: 60px;
+  height: 100%;
+  padding: 0 10px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 100ms ease, border-bottom-color 100ms ease;
+}
+
+.tab:hover {
+  color: var(--text);
 }
 
 .tab.active {
-  background: linear-gradient(180deg, rgba(14, 99, 156, 0.65), rgba(14, 99, 156, 0.36));
+  color: var(--text);
+  border-bottom-color: var(--accent);
 }
 
 .body {
@@ -240,7 +279,7 @@ body,
   min-width: 220px;
   max-width: 40vw;
   border-right: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  background: var(--panel);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -255,7 +294,7 @@ body,
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: radial-gradient(1200px 100% at 100% 0%, rgba(14, 99, 156, 0.08), transparent), var(--panel-3);
+  background: var(--panel-3);
   animation: wmFadeIn 180ms ease-out;
 }
 
@@ -285,16 +324,14 @@ body,
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 22px;
   padding: 0 10px;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  border-radius: 6px;
-  margin: 2px 6px;
-  transition: background-color 120ms ease, transform 120ms ease;
+  transition: background-color 80ms ease;
 }
 
 .item:hover {
@@ -302,7 +339,7 @@ body,
 }
 
 .item.selected {
-  background: linear-gradient(180deg, rgba(14, 99, 156, 0.5), rgba(14, 99, 156, 0.28));
+  background: #094771;
 }
 
 .label {
@@ -312,10 +349,11 @@ body,
 }
 
 .caret {
-  width: 12px;
+  width: 16px;
+  flex: 0 0 16px;
   text-align: center;
-  color: #a6a6a6;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .folder-icon,
@@ -383,13 +421,13 @@ body,
 }
 
 .block-title {
-  height: 30px;
+  height: 35px;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 12px;
   font-size: 12px;
-  color: #b8b8b8;
+  color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -408,8 +446,8 @@ body,
 
 .empty-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border-radius: 6px;
+  background: var(--panel);
   padding: 14px;
   max-width: 560px;
 }
@@ -515,6 +553,19 @@ body,
   white-space: pre;
 }
 
+.wrap.code-block,
+.wrap.code-grid {
+  width: 100%;
+}
+
+.wrap.code-grid {
+  table-layout: fixed;
+}
+
+.wrap .line-number {
+  width: 48px;
+}
+
 .wrap .line-text,
 .wrap.code-block {
   white-space: pre-wrap;
@@ -541,7 +592,7 @@ body,
   width: min(88vw, 340px);
   height: 100%;
   border-right: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  background: var(--panel);
   transform: translateX(-100%);
   transition: transform 170ms ease;
   display: flex;
@@ -554,13 +605,13 @@ body,
 }
 
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(130, 130, 130, 0.55);
-  border-radius: 8px;
+  background: rgba(128, 128, 128, 0.4);
+  border-radius: 4px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -569,10 +620,30 @@ body,
   background: transparent;
 }
 
+.status-bar {
+  height: 22px;
+  background: var(--accent);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 500;
+  flex: 0 0 auto;
+  user-select: none;
+  gap: 12px;
+}
+
+.statusbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 @media (max-width: 900px) {
   .header {
-    padding: 0 6px;
-    gap: 6px;
+    padding: 0 4px;
+    gap: 2px;
   }
 
   .project-btn {
@@ -580,7 +651,9 @@ body,
   }
 
   .tab {
-    min-width: 56px;
+    min-width: 50px;
+    font-size: 10px;
+    gap: 3px;
   }
 }
 
