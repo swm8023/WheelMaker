@@ -10,6 +10,8 @@ describe('web code layout', () => {
     expect(mainTsx).toContain("from 'react-diff-viewer-continued'");
     expect(mainTsx).toContain('showLineNumbers={lineNumbers}');
     expect(mainTsx).toContain('wrapLongLines={wrap}');
+    expect(mainTsx).toContain("codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent'}}}");
+    expect(mainTsx).toContain("lineProps={{style: {background: 'transparent'}}}");
     expect(mainTsx).toContain('styles={getDiffViewerStyles(wrapLines)}');
     expect(mainTsx).toContain("whiteSpace: wrap ? 'pre-wrap' : 'pre'");
     expect(mainTsx).not.toContain("from 'prismjs'");
