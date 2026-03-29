@@ -235,6 +235,46 @@ body,
   background: rgba(127, 127, 127, 0.15);
 }
 
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--border);
+  padding: 6px;
+  flex: 0 0 auto;
+}
+
+.sidebar-settings-btn {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  min-height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sidebar-settings-btn:hover {
+  background: var(--hover);
+}
+
+.sidebar-setting-row {
+  margin: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
 .header-spacer {
   flex: 1;
   min-width: 8px;

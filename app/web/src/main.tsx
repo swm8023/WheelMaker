@@ -386,9 +386,9 @@ function App() {
   const [tab, setTab] = useState<Tab>('file');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
 
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [projectId, setProjectId] = useState('');
@@ -439,7 +439,6 @@ function App() {
   useEffect(() => {
     const onPointer = () => {
       setProjectMenuOpen(false);
-      setQuickSettingsOpen(false);
     };
     window.addEventListener('pointerdown', onPointer);
     return () => window.removeEventListener('pointerdown', onPointer);
@@ -677,6 +676,7 @@ function App() {
       setSelectedDiff('');
       setDiffText('');
       setProjectMenuOpen(false);
+      setSidebarSettingsOpen(false);
       if (!isWide) setDrawerOpen(false);
     } finally {
       setLoadingProject(false);
@@ -751,7 +751,7 @@ function App() {
     });
   };
 
-  const renderSidebar = () => {
+  const renderSidebarMain = () => {
     if (tab === 'chat') {
       return (
         <>
@@ -819,6 +819,34 @@ function App() {
       </>
     );
   };
+
+  const renderSidebar = () => (
+    <>
+      <div className="sidebar-scroll">
+        {sidebarSettingsOpen ? (
+          <>
+            <div className="section-title">SETTINGS</div>
+            <div className="list">
+              <label className="switch-row sidebar-setting-row">
+                <span>Dark Mode</span>
+                <input type="checkbox" checked={themeMode === 'dark'} onChange={e => setThemeMode(e.target.checked ? 'dark' : 'light')} />
+              </label>
+            </div>
+          </>
+        ) : renderSidebarMain()}
+      </div>
+      <div className="sidebar-footer">
+        <button
+          type="button"
+          className="sidebar-settings-btn"
+          onClick={() => setSidebarSettingsOpen(value => !value)}
+          title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}>
+          <span className={`codicon ${sidebarSettingsOpen ? 'codicon-arrow-left' : 'codicon-settings-gear'}`} />
+          <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
+        </button>
+      </div>
+    </>
+  );
 
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
@@ -1099,20 +1127,6 @@ function App() {
             <span className="codicon codicon-source-control tab-icon" />
             <span className="tab-label">GIT</span>
           </button>
-        </div>
-
-        <div className="settings-wrap" onPointerDown={event => event.stopPropagation()}>
-          <button className="header-btn" onClick={() => setQuickSettingsOpen(value => !value)}>
-            <span className="codicon codicon-settings-gear" />
-          </button>
-          {quickSettingsOpen ? (
-            <div className="settings-menu">
-              <label className="switch-row">
-                <span>Dark Mode</span>
-                <input type="checkbox" checked={themeMode === 'dark'} onChange={e => setThemeMode(e.target.checked ? 'dark' : 'light')} />
-              </label>
-            </div>
-          ) : null}
         </div>
       </header>
 
