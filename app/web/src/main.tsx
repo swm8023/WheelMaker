@@ -410,6 +410,7 @@ function App() {
   const [temporaryHighlightLine, setTemporaryHighlightLine] = useState<number | null>(null);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
+  const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
 
   const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);
   const [chatSessionIndex, setChatSessionIndex] = useState(0);
@@ -443,6 +444,20 @@ function App() {
     window.addEventListener('pointerdown', onPointer);
     return () => window.removeEventListener('pointerdown', onPointer);
   }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!searchToolsOpen && !gotoToolsOpen) return;
+      const container = fileSideActionsRef.current;
+      if (!container) return;
+      const target = event.target as Node | null;
+      if (target && container.contains(target)) return;
+      setSearchToolsOpen(false);
+      setGotoToolsOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [searchToolsOpen, gotoToolsOpen]);
 
   const currentProjectName = useMemo(
     () => projects.find(item => item.projectId === projectId)?.name ?? 'Project',
@@ -921,83 +936,8 @@ function App() {
         <div className="content">
           <div className="block-title with-tools file-title-bar">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
-                <div className="view-tools file-title-tools">
-                  <div className="file-action-group title-action-group">
-                    <button
-                      type="button"
-                      className={`view-tool ${gotoToolsOpen ? 'active' : ''}`}
-                  onClick={() => {
-                    setGotoToolsOpen(value => {
-                      const next = !value;
-                      if (next) setSearchToolsOpen(false);
-                      return next;
-                    });
-                  }}
-                  title="Toggle go to line"
-                  aria-label="Toggle go to line">
-                  <span className="codicon codicon-symbol-number view-tool-icon" />
-                </button>
-                    <div className={`file-action-panel title-action-panel ${gotoToolsOpen ? 'open' : ''}`}>
-                      <input
-                        className="goto-input"
-                        value={gotoLineInput}
-                        onChange={event => setGotoLineInput(event.target.value)}
-                        onKeyDown={event => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            triggerGoToLine();
-                            (event.currentTarget as HTMLInputElement).blur();
-                          }
-                        }}
-                        inputMode="numeric"
-                        placeholder="Line"
-                  />
-                  <button type="button" className="view-tool goto-trigger" title="Go to line" onClick={triggerGoToLine}>
-                    <span className="codicon codicon-arrow-right view-tool-icon" />
-                  </button>
-                </div>
-              </div>
-                  <div className="file-action-group title-action-group">
-                <button
-                  type="button"
-                  className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
-                  onClick={() => {
-                    setSearchToolsOpen(value => {
-                      const next = !value;
-                      if (next) setGotoToolsOpen(false);
-                      return next;
-                    });
-                  }}
-                  title="Toggle search"
-                  aria-label="Toggle search">
-                  <span className="codicon codicon-search view-tool-icon" />
-                </button>
-                    <div className={`file-action-panel title-action-panel ${searchToolsOpen ? 'open' : ''}`}>
-                      <input
-                        className="search-input"
-                        value={fileSearchQuery}
-                        onChange={event => setFileSearchQuery(event.target.value)}
-                        onKeyDown={event => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            navigateSearchMatch(1);
-                            (event.currentTarget as HTMLInputElement).blur();
-                          }
-                        }}
-                        placeholder="Find in file"
-                  />
-                  <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
-                    <span className="codicon codicon-chevron-up view-tool-icon" />
-                  </button>
-                  <button type="button" className="view-tool search-nav" title="Next match" onClick={() => navigateSearchMatch(1)}>
-                    <span className="codicon codicon-chevron-down view-tool-icon" />
-                  </button>
-                  <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
-                  </div>
-                  {renderViewTools()}
-                </div>
-              </div>
-              </div>
+            <div className="view-tools">{renderViewTools()}</div>
+          </div>
           <div className="file-pane">
             <div className="file-main-col">
               {hasPinnedFiles ? (
@@ -1020,15 +960,90 @@ function App() {
                 </div>
               ) : null}
               <div className="file-code-area">
-                <button
-                  type="button"
-                  className={`pinned-pin-toggle file-pin-floating ${isSelectedFilePinned ? 'active' : ''}`}
-                  onClick={togglePinSelectedFile}
-                  disabled={!selectedFile}
-                  title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
-                  aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
-                  <span className="codicon codicon-pinned view-tool-icon" />
-                </button>
+                <div ref={fileSideActionsRef} className="file-side-actions">
+                  <button
+                    type="button"
+                    className={`pinned-pin-toggle file-pin-floating ${isSelectedFilePinned ? 'active' : ''}`}
+                    onClick={togglePinSelectedFile}
+                    disabled={!selectedFile}
+                    title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
+                    aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+                    <span className="codicon codicon-pinned view-tool-icon" />
+                  </button>
+                  <div className="file-action-group side-action-group">
+                    <button
+                      type="button"
+                      className={`view-tool ${gotoToolsOpen ? 'active' : ''}`}
+                      onClick={() => {
+                        setGotoToolsOpen(value => {
+                          const next = !value;
+                          if (next) setSearchToolsOpen(false);
+                          return next;
+                        });
+                      }}
+                      title="Toggle go to line"
+                      aria-label="Toggle go to line">
+                      <span className="codicon codicon-symbol-number view-tool-icon" />
+                    </button>
+                    <div className={`file-action-panel side-action-panel ${gotoToolsOpen ? 'open' : ''}`}>
+                      <input
+                        className="goto-input"
+                        value={gotoLineInput}
+                        onChange={event => setGotoLineInput(event.target.value)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            triggerGoToLine();
+                            (event.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        inputMode="numeric"
+                        placeholder="Line"
+                      />
+                      <button type="button" className="view-tool goto-trigger" title="Go to line" onClick={triggerGoToLine}>
+                        <span className="codicon codicon-arrow-right view-tool-icon" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="file-action-group side-action-group">
+                    <button
+                      type="button"
+                      className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
+                      onClick={() => {
+                        setSearchToolsOpen(value => {
+                          const next = !value;
+                          if (next) setGotoToolsOpen(false);
+                          return next;
+                        });
+                      }}
+                      title="Toggle search"
+                      aria-label="Toggle search">
+                      <span className="codicon codicon-search view-tool-icon" />
+                    </button>
+                    <div className={`file-action-panel side-action-panel ${searchToolsOpen ? 'open' : ''}`}>
+                      <input
+                        className="search-input"
+                        value={fileSearchQuery}
+                        onChange={event => setFileSearchQuery(event.target.value)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            navigateSearchMatch(1);
+                            (event.currentTarget as HTMLInputElement).blur();
+                          }
+                        }}
+                        placeholder="Find in file"
+                      />
+                      <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
+                        <span className="codicon codicon-chevron-up view-tool-icon" />
+                      </button>
+                      <button type="button" className="view-tool search-nav" title="Next match" onClick={() => navigateSearchMatch(1)}>
+                        <span className="codicon codicon-chevron-down view-tool-icon" />
+                      </button>
+                      <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
+                    </div>
+                  </div>
+                </div>
                 <div ref={fileScrollRef} className="scroll-panel">
                   {fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}
                 </div>
