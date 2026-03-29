@@ -994,7 +994,6 @@ function App() {
                           if (event.key === 'Enter') {
                             event.preventDefault();
                             triggerGoToLine();
-                            (event.currentTarget as HTMLInputElement).blur();
                           }
                         }}
                         inputMode="numeric"
@@ -1029,7 +1028,6 @@ function App() {
                           if (event.key === 'Enter') {
                             event.preventDefault();
                             navigateSearchMatch(1);
-                            (event.currentTarget as HTMLInputElement).blur();
                           }
                         }}
                         placeholder="Find in file"
