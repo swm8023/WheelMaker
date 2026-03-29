@@ -538,10 +538,11 @@ body,
   gap: 6px;
   justify-content: flex-end;
   margin-left: auto;
+  position: relative;
 }
 
 .title-action-group {
-  position: relative;
+  position: static;
 }
 
 .file-action-panel {
@@ -697,6 +698,20 @@ body,
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.file-code-area .scroll-panel {
+  overflow-x: auto;
+  overflow-y: auto;
+}
+
+.file-code-area .code-wrap {
+  width: max-content;
+  min-width: 100%;
+}
+
+.file-code-area .code-block {
+  overflow: visible !important;
 }
 
 .file-code-area {
