@@ -562,6 +562,7 @@ body,
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-2);
+  z-index: 30;
 }
 
 .file-action-panel.open {
@@ -726,7 +727,7 @@ body,
   position: absolute;
   top: 8px;
   right: 10px;
-  z-index: 4;
+  z-index: 6;
 }
 
 .chat-block {
