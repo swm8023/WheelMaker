@@ -894,7 +894,6 @@ function App() {
           <div className="block-title with-tools file-title-bar">
             <span className="title-text">{selectedFile || 'Select a file'}</span>
                 <div className="view-tools file-title-tools">
-                  {renderViewTools()}
                   <div className="file-action-group title-action-group">
                     <button
                       type="button"
@@ -930,7 +929,7 @@ function App() {
                   </button>
                 </div>
               </div>
-              <div className="file-action-group title-action-group">
+                  <div className="file-action-group title-action-group">
                 <button
                   type="button"
                   className={`view-tool ${searchToolsOpen ? 'active' : ''}`}
@@ -966,9 +965,10 @@ function App() {
                     <span className="codicon codicon-chevron-down view-tool-icon" />
                   </button>
                   <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
+                  </div>
+                  {renderViewTools()}
                 </div>
               </div>
-                </div>
               </div>
           <div className="file-pane">
             <div className="file-main-col">
