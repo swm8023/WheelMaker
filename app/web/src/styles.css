@@ -702,8 +702,10 @@ body,
 }
 
 .file-code-area .scroll-panel {
-  overflow-x: auto;
+  overflow-x: visible;
   overflow-y: auto;
+  width: max-content;
+  min-width: 100%;
 }
 
 .file-code-area .code-wrap {
@@ -721,6 +723,8 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .file-pin-floating {
