@@ -20,12 +20,76 @@ export class RegistryRepository {
   }
 
   async listProjects(): Promise<RegistryProject[]> {
-    const resp = await this.client.request({
-      method: 'project.list',
-      payload: {},
-    });
-    const payload = (resp.payload ?? {}) as { projects?: RegistryProject[] };
-    return (payload.projects ?? []).filter(project => !!project.projectId);
+    type FullProjectItem = {
+      projectId: string;
+      name: string;
+      cwd?: string;
+      online?: boolean;
+    };
+    type HubProjectItem = {
+      id?: string;
+      name?: string;
+      path?: string;
+    };
+    type HubSnapshot = {
+      hubId: string;
+      projects?: HubProjectItem[];
+    };
+
+    let baseProjects: RegistryProject[] = [];
+    try {
+      const fullResp = await this.client.request({
+        method: 'project.listFull',
+        payload: {},
+      });
+      const fullPayload = (fullResp.payload ?? {}) as { projects?: FullProjectItem[] };
+      baseProjects = (fullPayload.projects ?? [])
+        .filter(project => !!project.projectId)
+        .map(project => ({
+          projectId: project.projectId,
+          name: project.name,
+          online: project.online,
+          path: project.cwd ?? '',
+        }));
+    } catch {
+      const resp = await this.client.request({
+        method: 'project.list',
+        payload: {},
+      });
+      const payload = (resp.payload ?? {}) as { projects?: RegistryProject[] };
+      baseProjects = (payload.projects ?? []).filter(project => !!project.projectId);
+    }
+
+    try {
+      const hubResp = await this.client.request({
+        method: 'registry.listProjects',
+        payload: {},
+      });
+      const hubPayload = (hubResp.payload ?? {}) as { hubs?: HubSnapshot[] };
+      const hubIndex = new Map<string, {hubId: string; path?: string}>();
+      for (const hub of hubPayload.hubs ?? []) {
+        for (const project of hub.projects ?? []) {
+          const id = (project.id ?? '').trim();
+          const name = (project.name ?? '').trim();
+          if (id) {
+            hubIndex.set(id, {hubId: hub.hubId, path: project.path});
+          }
+          if (name) {
+            hubIndex.set(name, {hubId: hub.hubId, path: project.path});
+          }
+        }
+      }
+      return baseProjects.map(project => {
+        const match = hubIndex.get(project.projectId) ?? hubIndex.get(project.name);
+        return {
+          ...project,
+          path: project.path || match?.path || '',
+          hubId: match?.hubId || '',
+        };
+      });
+    } catch {
+      return baseProjects;
+    }
   }
 
   async listFiles(projectId: string, path = '.'): Promise<RegistryFsEntry[]> {

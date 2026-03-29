@@ -1112,9 +1112,13 @@ function App() {
               {projects.map(project => (
                 <div
                   key={project.projectId}
-                  className={`item ${project.projectId === projectId ? 'selected' : ''}`}
+                  className={`item project-menu-item ${project.projectId === projectId ? 'selected' : ''}`}
                   onClick={() => switchProject(project.projectId).catch(() => undefined)}>
-                  {project.name}
+                  <div className="project-menu-main">
+                    <span className="project-menu-name">{project.name}</span>
+                    <span className="project-menu-path" title={project.path || ''}>{project.path || '-'}</span>
+                  </div>
+                  <span className="project-menu-hub">{project.hubId || 'local-hub'}</span>
                 </div>
               ))}
             </div>

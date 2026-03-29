@@ -18,6 +18,8 @@ export interface RegistryProject {
   projectId: string;
   name: string;
   online?: boolean;
+  path?: string;
+  hubId?: string;
 }
 
 export interface RegistryFsEntry {
