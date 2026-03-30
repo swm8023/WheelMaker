@@ -67,6 +67,51 @@ function Stop-WheelmakerProcesses {
   }
 }
 
+function Ensure-DefaultConfig {
+  $wmDir = Join-Path -Path $HOME -ChildPath ".wheelmaker"
+  $cfgPath = Join-Path -Path $wmDir -ChildPath "config.json"
+  if (Test-Path $cfgPath) {
+    Write-Step ("config already exists: {0}" -f $cfgPath)
+    return
+  }
+  Write-Step ("generating default config: {0}" -f $cfgPath)
+  if ($WhatIf) {
+    Write-Host ("[whatif] write {0}" -f $cfgPath)
+    return
+  }
+  New-Item -ItemType Directory -Path $wmDir -Force | Out-Null
+  $defaultConfig = @'
+{
+  "projects": [
+    {
+      "name": "my-project",
+      "path": "",
+      "im": {
+        "type": "feishu",
+        "appID": "",
+        "appSecret": ""
+      },
+      "client": {
+        "agent": "claude"
+      }
+    }
+  ],
+  "registry": {
+    "listen": true,
+    "port": 9630,
+    "server": "127.0.0.1",
+    "token": "",
+    "hubId": ""
+  },
+  "log": {
+    "level": "warn"
+  }
+}
+'@
+  Set-Content -Path $cfgPath -Value $defaultConfig -Encoding UTF8
+  Write-Step "default config written (edit before first run)"
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $serverRoot = Join-Path $repoRoot "server"
 if ([string]::IsNullOrWhiteSpace($SourceExe)) {
@@ -93,4 +138,5 @@ if ($WhatIf) {
 
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 Copy-Item -Path $source -Destination $targetExe -Force
+Ensure-DefaultConfig
 Write-Step "install done"
