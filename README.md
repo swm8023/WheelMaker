@@ -1,178 +1,109 @@
-# WheelMaker
-WheelMaker – A Go library that turns your phone into a remote AI coding assistant. 
-Stop reinventing the wheel, start making your own. 🛞
+﻿# WheelMaker
 
-A bridge daemon that connects local AI coding CLIs (Codex, Claude, etc.) to IM platforms like Feishu, letting you remotely control your local AI assistant from your phone.
+WheelMaker 是一个将本地 AI Coding CLI（Codex / Claude 等）与 IM（如飞书）连接起来的守护进程。你可以在手机端远程发指令，让本地项目由 AI 执行开发任务。
 
-```
-Feishu ──► WheelMaker ──► claude-agent-acp / <acp-binary> ──► your codebase
-```
+## 功能介绍
 
-## Features
+- 多项目管理：单进程管理多个项目，每个项目独立配置 IM 与 Agent。
+- 多通道交互：支持 `console`（本地调试）与 `feishu`（线上使用）。
+- 会话恢复：重启后可恢复历史会话状态。
+- 懒启动与空闲回收：仅在收到请求时启动 Agent，空闲后自动回收。
+- Registry 扩展（可选）：
+  - 默认模式下 WheelMaker 可独立运行，不依赖 Registry。
+  - 开启 Registry 后，支持远程项目发现、文件/Git 只读查询、状态同步事件等扩展能力。
 
-- **Multi-project**: manage multiple projects in one process, each with its own IM and AI agent
-- **Feishu integration**: send and receive messages via Feishu Bot, with rich card support
-- **Console mode**: use stdin instead of Feishu for local testing
-- **Session persistence**: automatically resumes the previous AI session after restart (via `session/load`)
-- **Lazy loading**: AI subprocess starts on the first message; auto-closes after 30 min idle to save resources
-- **Multiple agents**: Agent factory abstraction supports ACP-compatible CLIs (e.g. claude-agent-acp)
+## 安装及配置
 
-## Quick Start
+### 1. 环境准备
 
-### 1. Install ACP tools (npm)
+- Go 1.22+
+- Node.js（用于安装 ACP 相关 CLI）
+
+可选安装 ACP CLI：
 
 ```bash
 npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
 ```
 
-`install_server.ps1` can auto-install missing ACP dependencies (`codex-acp`, `claude-agent-acp`) by default.
+### 2. 配置文件
 
-### 2. Create a config file
-
-```bash
-cp config.example.json ~/.wheelmaker/config.json
-```
-
-Edit `~/.wheelmaker/config.json`:
+参考 `server/config.example.json`：
 
 ```json
 {
   "projects": [
     {
-      "name": "my-project",
-      "debug": false,
-      "im": { "type": "console" },
-      "client": { "agent": "claude", "path": "/path/to/your/code" }
-    }
-  ]
-}
-```
-
-### 3. Run
-
-```bash
-export OPENAI_API_KEY=sk-...
-go run ./cmd/wheelmaker/
-```
-
-A prompt will appear — type messages directly:
-
-```
-[my-project] > write an HTTP health check endpoint
-```
-
-## Configuration
-
-Config file: `~/.wheelmaker/config.json`
-
-### Project debug
-
-Per-project `debug` controls protocol-level logging and IM SDK debug logging:
-```json
-{ "name": "my-project", "debug": true, "im": { "type": "console" }, "client": { "agent": "claude", "path": "/path/to/your/code" } }
-```
-`debug: true` enables ACP JSON debug output and IM-layer debug logs for that project.
-
-### IM types
-
-**console** (local testing):
-```json
-{ "type": "console" }
-```
-
-**feishu** (production):
-```json
-{ "type": "feishu", "appID": "cli_xxxxxxxx", "appSecret": "your_app_secret" }
-```
-
-### Multi-project example
-
-```json
-{
-  "projects": [
-    {
-      "name": "agent",
-      "debug": false,
-      "im": { "type": "feishu", "appID": "cli_xxx", "appSecret": "yyy" },
-      "client": { "agent": "claude", "path": "/home/user/agent" }
-    },
-    {
-      "name": "frontend",
+      "name": "local-dev",
       "debug": true,
+      "path": "/path/to/your/project",
+      "yolo": true,
       "im": { "type": "console" },
-      "client": { "agent": "claude", "path": "/home/user/frontend" }
+      "client": { "agent": "claude" }
     }
-  ]
+  ],
+  "registry": {
+    "listen": true,
+    "port": 9630,
+    "server": "127.0.0.1",
+    "token": "",
+    "hubId": "dev-hub"
+  },
+  "log": {
+    "level": "warn"
+  }
 }
 ```
 
-## Commands
+说明：
 
-Send in IM or console:
+- `projects[]`：项目配置（必填）。
+- `registry`：Registry 扩展项（可选）。
+  - `listen=true`：启动内置 Registry 服务。
+  - `server/token/hubId`：用于 Hub 与 Registry 的连接与鉴权。
 
-| Command | Description |
-|---------|-------------|
-| `/use <agent>` | Switch AI agent (e.g. `/use claude`) |
-| `/use <agent> --continue` | Switch agent and carry over current context |
-| `/cancel` | Cancel the in-progress request |
-| `/status` | Show current agent and session ID |
-| `/debug` | Show project debug status |
-| anything else | Sent to the AI as a message (including text starting with `/`) |
+### 3. 启动
 
-## Architecture
-
-```
-Hub
-└─ client.Client (per project)
-     ├─ im.Channel       ← Feishu / Console
-     └─ acp.Agent         ← ACP protocol layer
-          └─ acp.Agent → acp.Conn → agent binary
+```bash
+cd server
+go run ./cmd/wheelmaker
 ```
 
-| Package | Responsibility |
-|---------|----------------|
-| `internal/hub/` | Hub process domain and orchestration |
-| `internal/hub/client/` | Per-project coordination: routing, lazy agent init, idle timeout, state persistence |
-| `internal/hub/acp/` | ACP session lifecycle and JSON-RPC stdio transport |
-| `internal/hub/agent/claude/` | Stateless connection factory - launches claude-agent-acp binary |
-| `internal/hub/im/` | IM adapters and forwarder |
-| `internal/registry/` | Registry server + hub long-connection responder |
-| `internal/shared/logger/` | Shared logger for hub/registry processes |
-| `internal/shared/config/` | Shared config schema/loader |
-
-## Development
+常用验证：
 
 ```bash
 go test ./...
-
-# Integration tests (requires real npm-installed ACP CLI)
-go test -tags integration ./internal/hub/agent/claude/...
-
-go build ./cmd/wheelmaker/
+go build ./cmd/wheelmaker
 ```
 
-Runtime state (session IDs) is persisted to `~/.wheelmaker/state.json` automatically.
+## 架构设计
 
-## Protocol Docs
+### 核心链路
 
-- [ACP Protocol](docs/acp-protocol-full.zh-CN.md)
-- [Feishu Bot Setup](docs/feishu-bot.md)
-- [claude-agent-acp Reference](https://docs.anthropic.com/en/docs/claude-code)
+```text
+IM (Feishu/Console)
+  -> Hub (WheelMaker)
+    -> Agent Adapter (Codex/Claude ACP)
+      -> Local Project Workspace
+```
 
+### Registry 扩展链路（可选）
 
+```text
+Hub (project runtime + git/fs providers)
+  <-> Registry (routing, auth, project index)
+  <-> Client (web/mobile observer)
+```
 
+### 模块分层
 
+- `server/internal/hub/`：Hub 领域模型与调度。
+- `server/internal/hub/client/`：单项目生命周期、消息路由、会话管理。
+- `server/internal/hub/acp/`：ACP 会话与 JSON-RPC 传输。
+- `server/internal/hub/im/`：IM 适配层（console / feishu）。
+- `server/internal/registry/`：Registry 服务与转发。
+- `server/internal/shared/`：共享协议、配置、日志等基础组件。
 
+### 协议文档
 
-
-
-
-
-
-
-
-
-
-
-
-
+- 主协议（2.0）：`docs/registry-protocol.md`
+- 历史 1.0：`docs/registry-server-remote-observe-protocol-v1.md`
