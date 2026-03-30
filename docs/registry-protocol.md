@@ -54,7 +54,7 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 }
 ```
 
-所有使用 project 对象的方法必须包含完整字段，不允许部分省略。Client 侧响应额外附加 `projectId` 和 `hubId`。
+所有使用 project 对象的方法必须包含完整字段，不允许部分省略。Client 侧响应额外附加 `projectId`（格式 `hubId:projectName`，客户端从中即可解析 Hub 归属）。
 
 ## 3. 通用连接与握手认证（Hub/Client 共享）
 
@@ -154,10 +154,10 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 | 角色 | 允许的请求方法 |
 |------|---------------|
 | `hub` | `registry.reportProjects`、`registry.updateProject`、`hub.ping` |
-| `client` | `project.list`、`project.syncCheck`、`fs.*`、`git.*`、`agent.*`、`batch`、`subscribe`、`unsubscribe` |
+| `client` | `project.list`、`project.syncCheck`、`fs.*`、`git.*`、`batch` |
 
 - 方法与角色不匹配返回 `FORBIDDEN`。
-- **事件方法**（`project.changed`、`git.workspace.changed`、`project.offline`、`project.online`、`agent.activity`等）是服务端→客户端推送，不受白名单约束。
+- **事件方法**（`project.changed`、`git.workspace.changed`、`project.offline`、`project.online`等）是服务端→客户端推送，不受白名单约束。
 
 ### 3.5 projectId 反查与路由
 
@@ -364,7 +364,6 @@ else:
         "projectId": "local-hub:WheelMaker",
         "name": "WheelMaker",
         "path": "D:/Code/WheelMaker",
-        "hubId": "local-hub",
         "online": true,
         "agent": "codex",
         "imType": "feishu",
@@ -510,6 +509,8 @@ else:
 
 - `isBinary: boolean` — 是否为二进制文件。
 - `mimeType: string` — MIME 类型（如 `"text/markdown"`、`"image/png"`）。
+
+**首次请求**：客户端在打开文件前不知道文件类型，因此首次 `fs.read` **不传** `startLine`/`lineCount`/`offset`/`limit`，仅传 `path`（和可选的 `knownHash`）。服务端自动检测类型，按对应模式返回首段数据及 `isBinary`/`mimeType`。客户端根据响应中的 `isBinary` 判定后续分段使用哪种寻址模式。
 
 两种文件使用不同的读取模式：
 
@@ -1156,56 +1157,7 @@ else:
 - `git.commit.fileDiff` 以 `sha+path+contextLines` 为缓存键。
 - Git 列表不做 `knownHash/notModified` 协商。
 
-### 5.9 Agent 观测接口
-
-#### 5.9.1 `agent.status`
-
-请求：
-
-```json
-{
-  "requestId": 1,
-  "type": "request",
-  "method": "agent.status",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {}
-}
-```
-
-响应：
-
-```json
-{
-  "requestId": 1,
-  "type": "response",
-  "method": "agent.status",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "running": true,
-    "agent": "codex",
-    "currentTask": "Implementing user authentication",
-    "startedAt": "2026-03-30T10:00:00Z",
-    "lastActivityAt": "2026-03-30T10:05:23Z"
-  }
-}
-```
-
-#### 5.9.2 `agent.activity` 事件
-
-```json
-{
-  "type": "event",
-  "method": "agent.activity",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "running": true,
-    "summary": "Editing src/auth/handler.go",
-    "changedFiles": ["src/auth/handler.go", "src/auth/handler_test.go"]
-  }
-}
-```
-
-### 5.10 `batch`（批量请求）
+### 5.9 `batch`（批量请求）
 
 将多个独立请求合并为单次发送，减少移动端高延迟环境下的 RTT 开销。
 
@@ -1249,66 +1201,6 @@ else:
 - 子响应的 `type` 可以是 `response` 或 `error`。
 - 批量内不允许嵌套 `batch`。
 - 批量内不允许 `connect.init`。
-
-### 5.11 `subscribe` / `unsubscribe`（路径级推送订阅）
-
-#### 5.11.1 `subscribe`
-
-```json
-{
-  "requestId": 1,
-  "type": "request",
-  "method": "subscribe",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "paths": ["src/", "docs/registry-protocol.md"],
-    "domains": ["fs", "git", "agent"]
-  }
-}
-```
-
-响应：
-
-```json
-{
-  "requestId": 1,
-  "type": "response",
-  "method": "subscribe",
-  "payload": { "ok": true }
-}
-```
-
-#### 5.11.2 `unsubscribe`
-
-```json
-{
-  "requestId": 2,
-  "type": "request",
-  "method": "unsubscribe",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "paths": ["docs/registry-protocol.md"]
-  }
-}
-```
-
-#### 5.11.3 订阅后的精准事件推送
-
-```json
-{
-  "type": "event",
-  "method": "fs.changed",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "changedPaths": [
-      { "path": "src/main.go", "kind": "file" },
-      { "path": "src/auth/", "kind": "dir" }
-    ]
-  }
-}
-```
-
-客户端折叠目录或离开页面时应主动 `unsubscribe`，避免不必要的推送。
 
 ## 6. Hash 规范（统一算法）
 
@@ -1496,7 +1388,7 @@ Registry 即将关闭客户端连接时提前通知：
 
 7. **共享 ProjectObject**：统一 Hub 上报与 Client 查询的 project 结构，补齐 `agent`/`imType` 字段。
 
-8. **新增方法**：`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status` 枚举补全、`agent.status`/`agent.activity`、`project.syncCheck`、`fs.grep`、`batch`、`subscribe`/`unsubscribe`。
+8. **新增方法**：`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status` 枚举补全、`project.syncCheck`、`fs.grep`、`batch`。
 
 9. **连接管理增强**：`project.offline`/`project.online`/`connection.closing` 事件；方法白名单；Client hub 作用域模型。
 
