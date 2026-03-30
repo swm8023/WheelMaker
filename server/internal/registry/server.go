@@ -176,7 +176,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	rp.Info("registry: ws connected id=%s remote=%s authed=%t", state.id, r.RemoteAddr, state.authed)
 	defer rp.Info("registry: ws disconnected id=%s hub=%s remote=%s", state.id, state.hubID, r.RemoteAddr)
-	defer s.unregisterHub(state)
+	defer s.unregisterHub(state.peer, state)
 	defer state.peer.dropAllPending()
 
 	for {
@@ -509,12 +509,17 @@ func (s *Server) handleForwardRequest(appPeer *peerConn, in envelope) {
 	}
 }
 
-func (s *Server) unregisterHub(state *connectionState) {
+func (s *Server) unregisterHub(peer *peerConn, state *connectionState) {
 	if strings.TrimSpace(state.hubID) == "" {
 		return
 	}
 	s.mu.Lock()
+	if s.hubPeers[state.hubID] != peer {
+		s.mu.Unlock()
+		return
+	}
 	delete(s.hubPeers, state.hubID)
+	delete(s.hubs, state.hubID)
 	for projectID, hubID := range s.projectToHub {
 		if hubID == state.hubID {
 			delete(s.projectToHub, projectID)

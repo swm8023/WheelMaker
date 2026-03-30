@@ -211,52 +211,70 @@ body,
 
 .project-menu {
   left: 0;
-  min-width: 240px;
+  min-width: min(560px, 86vw);
   max-height: min(52vh, 420px);
   overflow: auto;
+  padding: 6px;
 }
 
 .project-menu-item {
-  min-height: 42px;
+  min-height: 56px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.project-menu-item:last-child {
+  margin-bottom: 0;
+}
+
+.project-menu-item:hover {
+  border-color: var(--border);
+}
+
+.project-menu-item.selected {
+  background: rgba(0, 122, 204, 0.18);
+  border-color: rgba(0, 122, 204, 0.45);
 }
 
 .project-menu-main {
+  flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .project-menu-name {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.15;
   color: var(--text);
 }
 
 .project-menu-path {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: min(46vw, 360px);
+  max-width: 100%;
 }
 
 .project-menu-hub {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.2px;
   text-transform: uppercase;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(127, 127, 127, 0.35);
   border-radius: 999px;
-  padding: 2px 7px;
+  padding: 3px 9px;
   color: var(--muted);
   background: var(--panel-2);
 }
@@ -780,10 +798,9 @@ body,
 }
 
 .file-code-area .scroll-panel {
-  overflow-x: visible;
-  overflow-y: auto;
-  width: max-content;
-  min-width: 100%;
+  overflow: auto;
+  width: 100%;
+  min-width: 0;
 }
 
 .file-code-area .code-wrap {
@@ -801,8 +818,7 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
 .file-side-actions {

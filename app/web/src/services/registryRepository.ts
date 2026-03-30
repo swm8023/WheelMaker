@@ -35,6 +35,25 @@ export class RegistryRepository {
       hubId: string;
       projects?: HubProjectItem[];
     };
+    const normalizeFromHub = (hubs: HubSnapshot[]): RegistryProject[] => {
+      const items: RegistryProject[] = [];
+      const seen = new Set<string>();
+      for (const hub of hubs ?? []) {
+        for (const project of hub.projects ?? []) {
+          const projectId = (project.id ?? '').trim() || (project.name ?? '').trim();
+          if (!projectId || seen.has(projectId)) continue;
+          seen.add(projectId);
+          items.push({
+            projectId,
+            name: (project.name ?? '').trim() || projectId,
+            online: true,
+            path: (project.path ?? '').trim(),
+            hubId: hub.hubId,
+          });
+        }
+      }
+      return items;
+    };
 
     let baseProjects: RegistryProject[] = [];
     try {
@@ -66,6 +85,10 @@ export class RegistryRepository {
         payload: {},
       });
       const hubPayload = (hubResp.payload ?? {}) as { hubs?: HubSnapshot[] };
+      const fallbackProjects = normalizeFromHub(hubPayload.hubs ?? []);
+      if (baseProjects.length === 0) {
+        return fallbackProjects;
+      }
       const hubIndex = new Map<string, {hubId: string; path?: string}>();
       for (const hub of hubPayload.hubs ?? []) {
         for (const project of hub.projects ?? []) {

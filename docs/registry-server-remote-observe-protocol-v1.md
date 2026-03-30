@@ -1,93 +1,398 @@
-# WheelMaker 远端查看架构与协议设计（V1 草案）
+# WheelMaker Registry Remote Observe Protocol（V2 草案）
 
-## 1. 目标与范围
+本文在 V1 基础上迭代，重点增强客户端同步能力，并明确基于 Git 版本做增量刷新。
 
-本设计用于支持客户端远端查看 WheelMaker 项目状态，重点覆盖：
+## 1. 目标
 
-- 文件系统只读浏览：
-  - 当前目录列表
-  - 点选目录后继续展开
-  - 点选文件后读取文件内容
-- Git 只读浏览：
-  - 分支列表
-  - 指定分支提交记录
-  - 指定提交改动文件列表
-  - 按文件查看该提交 diff
+- 以 `project` 为同步单元，支持多 Hub、多 Project。
+- Hub 在 Git 分支或版本（HEAD）变化时主动汇报 Registry。
+- 客户端仅刷新可见范围（展开目录、打开/Pin 文件、当前 Git 视图）。
+- 文件系统接口支持 hash 协商，减少重复传输。
+- Git 列表不做 hash 协商：以 `headSha/gitRev` 变化作为拉取触发条件。
 
-约束：
+## 2. V1 -> V2 变更对照表（基于原始 V1 草案）
 
-- 仍以 `client`（project）为单位组织数据。
-- 不走 IM 转发链路，改为网络连接到 WheelMaker 服务进程。
-- 可连接非本机 WheelMaker（远端地址）。
-- 客户端按点击触发请求，每次仅传必要信息。
-- 客户端实现暂缓（后续可为 App 或 Web）。
-- 安全方案先预留接口与扩展点。
+说明：本表只对照原始 V1 协议项，不记录后续编辑过程中的临时调整历史。
 
-## 2. 总体架构
+| V1 基线项 | V2 现状 | 变更类型 | 说明 |
+|---|---|---|---|
+| `project.list` | 保留 | 扩展 | 增加 `hubId`、`git`、`projectRev`，便于客户端识别项目归属 Hub |
+| `project.listFull` | 移除 | 合并 | 语义并入 `project.list`，避免重复 |
+| `registry.reportProjects` | 保留 | 扩展 | Hub 上报以 `project name` 为主键，增加 Git/版本字段 |
+| （V1 无）`registry.reportProjectRevs` | 新增 | 新增 | Hub -> Registry 增量版本推送 |
+| `fs.list` | 保留 | 扩展 | 支持 `knownHash` 与 `notModified` |
+| `fs.read` | 保留 | 扩展 | 支持 `knownHash` 与 `notModified` |
+| `git.log` | 保留 | 调整 | 不做 hash 协商，按 `headSha/gitRev` 触发刷新 |
+| `git.commit.files` | 保留 | 调整 | 以 `sha` 为天然版本键，不额外 hash 协商 |
+| `git.commit.fileDiff` | 保留 | 调整 | 以 `sha+path+context` 为键缓存 |
+| 同步策略（V1 未固化） | 固化 | 规范化 | 采用方案 C：`push hint + pull data` |
+| 文件查找 | 新增 | 新增接口 | 新增 `fs.search`（文件名模糊匹配） |
+| 未提交改动监控 | 新增 | 新增接口/事件 | 新增 `git.status` + `git.workspace.changed` |
 
-### 2.1 组件
+## 3. 标识与状态模型
 
-- `WheelMaker (Registry Server thread, Remote Observe Mode)`
-  - 独立进程启动
-  - 监听 TCP 端口（建议支持 TLS）
-  - 暴露只读查询协议
-- `Project Runtime (existing client model)`
-  - 每个项目仍对应一个 client 上下文
-  - 提供文件/Git查询能力
-- `Remote Client`
-  - 只负责按需请求与展示
-  - 不持有业务状态源，只缓存 UI 所需数据
+标识规则（固定为新版，不做兼容分支）：
 
-### 2.2 连接模型
+- Hub -> Registry 上报：`projects[].name` 作为 Hub 侧项目标识主键。
+- Registry -> Client 返回：`projectId = hubId + ":" + projectName`（固定规则）。
+- 设计目标：客户端能看到 `projectId -> hubId` 归属关系；后续查询通信只使用 `projectId`。
 
-- 长连接协议建议：`WebSocket + JSON`
-- 单连接可访问多个 project（通过 `projectId` 显式指定）
-- 请求-响应模型，支持并发请求（`requestId` 关联）
-- 服务端可选推送（V1 可不启用，仅保留扩展）
+每个 Project 维护：
 
-## 3. 协议原则
+- `projectRev`：项目聚合版本戳（当前阶段仅由 Git 侧状态派生，不做全局 FS 主动监测）
+- `gitRev`：Git 版本戳（建议 `branch + headSha + dirty` 归一后哈希）
+- `headSha`：当前分支 HEAD
+- `dirty`：是否有未提交改动
+- `worktreeRev`：工作区状态版本戳（由 `git status --porcelain` 归一生成）
 
-- 最小必要数据：只返回当前 UI 需要的数据。
-- 分页优先：提交记录和大目录必须支持分页/游标。
-- 显式上下文：除全局发现类接口（如 `project.list`、`project.listFull`）和握手阶段外，每个请求必须带 `projectId`。
-- 只读语义：V1 不提供写操作。
-- 可演进：所有消息包含 `version`，接口可向后兼容扩展字段。
+## 4. Hub -> Registry 汇报增强
 
-## 4. 传输与消息封装
+`registry.reportProjects` 扩展 `projects[]` 字段：
 
-### 4.1 通用消息结构
+- `name`（Hub 侧项目名，作为上报主键）
+- `path`
+- `online`
+- `git.branch`
+- `git.headSha`
+- `git.dirty`
+- `git.gitRev`
+- `git.worktreeRev`
+- `projectRev`
+
+触发时机：
+
+1. Hub 建连后首次全量汇报
+2. 分支变化
+3. HEAD 变化
+4. dirty 变化（未提交改动产生/清空）
+5. `worktreeRev` 变化（文件增删改重命名）
+6. 心跳兜底（例如 30s）
+
+## 4.1 Hub <-> Registry 连接机制（保活与重连）
+
+参考 `docs/feishu-bot.md` 的长连接策略，Hub 与 Registry 采用“长连接 + 心跳 + 自动重连”。
+
+连接流程：
+
+1. Hub 建立 WebSocket 到 Registry（`ws://host:port/ws` 或 `wss://...`）。
+2. 发送 `hello`（声明协议版本、客户端类型 `wheelmaker-hub`）。
+3. 发送 `auth`（统一 token，必选）。
+4. 发送 `registry.reportProjects` 全量快照，等待 ACK。
+5. 进入 steady 状态：保活 + 增量汇报。
+
+保活规则：
+
+- Registry 与 Hub 都支持 ping/pong。
+- 建议 Hub 每 `15s` 发送 ping，`45s` 无 pong 判定连接失活。
+- 失活后立即断开并进入重连流程。
+- 保活失败不应阻塞本地项目运行，只影响远程观察能力。
+
+重连规则：
+
+- 默认自动重连开启（无限重试）。
+- 基础重试间隔：`2s`。
+- 抖动：首次重连随机 `0~30s`，后续指数退避上限 `60s`。
+- 每次重连成功后，必须重新发送一次全量 `registry.reportProjects` 以重建 Registry 映射。
+- 对不可重试错误（如鉴权失败）停止自动重连并上报错误状态。
+
+幂等与一致性：
+
+- `registry.reportProjects` 语义为“当前全量覆盖”，不是增量 patch。
+- Registry 以“最后一次成功汇报”为准。
+- 旧连接断开不应清理新连接的同 `hubId` 映射（需按连接实例区分）。
+
+可观测性：
+
+- 记录连接状态变更日志：`connected/disconnected/retrying/auth_failed`。
+- 暴露指标：`reconnect_count`、`last_report_at`、`heartbeat_timeout_count`、`report_ack_latency_ms`。
+
+## 4.2 Hub -> Registry 协议定义（报文级）
+
+本节定义 Hub 与 Registry 之间的协议报文，便于直接实现与抓包对照。
+
+通用封装：
 
 ```json
 {
   "version": "1.0",
-  "requestId": "uuid-or-seq",
+  "requestId": "req-123",
   "type": "request|response|error|event",
-  "method": "fs.list|git.log|...",
-  "projectId": "project-name",
+  "method": "hello|auth|registry.reportProjects|registry.reportProjectRevs|ping",
   "payload": {}
 }
 ```
 
-### 4.2 错误结构
+### 4.2.1 hello（必选，声明连接身份）
+
+连接方请求（Hub/Client 通用）：
 
 ```json
 {
   "version": "1.0",
-  "requestId": "same-as-request",
+  "requestId": "req-hello",
+  "type": "request",
+  "method": "hello",
+  "payload": {
+    "clientName": "wheelmaker-hub",
+    "clientVersion": "0.1.0",
+    "protocolVersion": "1.0",
+    "role": "hub",
+    "hubId": "local-hub"
+  }
+}
+```
+
+Registry 响应：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-hello",
+  "type": "response",
+  "method": "hello",
+  "payload": {
+    "serverVersion": "x.y.z",
+    "protocolVersion": "1.0",
+    "acceptedRole": "hub",
+    "features": {
+      "hubReportProjects": true,
+      "pushHint": true,
+      "pingPong": true
+    }
+  }
+}
+```
+
+hello 校验规则（强约束）：
+
+- `role` 必填，取值仅允许 `hub` 或 `client`。
+- `role=hub` 时，`hubId` 必填。
+- `role=client` 时，`hubId` 允许省略（由 `auth` 绑定作用域）。
+- Registry 必须在连接状态中记录 `role/hubId`，用于后续方法白名单校验。
+
+### 4.2.2 auth（必选，Hub/Client 通用）
+
+连接方请求（Hub/Client 通用）：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-auth",
+  "type": "request",
+  "method": "auth",
+  "payload": {
+    "token": "******"
+  }
+}
+```
+
+Registry 成功响应：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-auth",
+  "type": "response",
+  "method": "auth",
+  "payload": {
+    "ok": true,
+    "principal": {
+      "role": "hub",
+      "hubId": "local-hub"
+    }
+  }
+}
+```
+
+auth 后续约束：
+
+- 所有业务方法必须在 `auth.ok=true` 后调用。
+- `role=hub` 仅允许调用 `registry.reportProjects`、`registry.reportProjectRevs`、`ping`。
+- `role=client` 仅允许调用 `project.list`、`fs.*`、`git.*`、`ping`。
+- 若调用方法与 `role` 不匹配，返回 `FORBIDDEN`。
+
+### 4.2.3 registry.reportProjects（核心）
+
+Hub 请求（全量覆盖）：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-report-1",
+  "type": "request",
+  "method": "registry.reportProjects",
+  "payload": {
+    "hubId": "local-hub",
+    "projects": [
+      {
+        "name": "WheelMaker",
+        "path": "D:/Code/WheelMaker",
+        "agent": "codex",
+        "imType": "feishu",
+        "git": {
+          "branch": "main",
+          "headSha": "abc123...",
+          "dirty": true,
+          "gitRev": "sha256:...",
+          "worktreeRev": "sha256:..."
+        },
+        "projectRev": "sha256:..."
+      }
+    ]
+  }
+}
+```
+
+Registry ACK：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-report-1",
+  "type": "response",
+  "method": "registry.reportProjects",
+  "payload": {
+    "hubId": "local-hub",
+    "projectCount": 1
+  }
+}
+```
+
+约束：
+
+- `registry.reportProjects` 是“全量快照覆盖”语义，不是 patch。
+- Registry 必须以连接实例区分同 `hubId`，防止旧连接断开误删新映射。
+
+### 4.2.4 ping / pong（保活）
+
+Hub ping：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-ping-1",
+  "type": "request",
+  "method": "ping",
+  "payload": {
+    "ts": 1777777777
+  }
+}
+```
+
+Registry pong：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-ping-1",
+  "type": "response",
+  "method": "ping",
+  "payload": {
+    "ts": 1777777777,
+    "ok": true
+  }
+}
+```
+
+### 4.2.5 error
+
+统一错误报文：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-auth",
   "type": "error",
   "error": {
-    "code": "UNAUTHORIZED|NOT_FOUND|INVALID_ARGUMENT|INTERNAL|RATE_LIMITED",
+    "code": "UNAUTHORIZED|INVALID_ARGUMENT|INTERNAL",
     "message": "human readable",
     "details": {}
   }
 }
 ```
 
-## 5. 握手与会话（V1）
+### 4.2.6 registry.reportProjectRevs（新增：Hub -> Registry 增量 rev 推送）
 
-### 5.1 `hello`
+用途：当仅版本戳变化时，Hub 只推送变更项，不必每次全量 `registry.reportProjects`。
 
-请求：
+Hub 请求（增量）：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-rev-1",
+  "type": "request",
+  "method": "registry.reportProjectRevs",
+  "payload": {
+    "hubId": "local-hub",
+    "connectionEpoch": 7,
+    "updates": [
+      {
+        "seq": 1024,
+        "name": "WheelMaker",
+        "projectRev": "sha256:...",
+        "git": {
+          "branch": "main",
+          "headSha": "def456...",
+          "dirty": true,
+          "gitRev": "sha256:...",
+          "worktreeRev": "sha256:..."
+        },
+        "changedDomains": ["git", "worktree"],
+        "updatedAt": "2026-03-29T13:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+Registry ACK：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-rev-1",
+  "type": "response",
+  "method": "registry.reportProjectRevs",
+  "payload": {
+    "hubId": "local-hub",
+    "accepted": 1
+  }
+}
+```
+
+约束：
+
+- 仅允许已通过 Hub 认证的连接调用。
+- `name` 必须属于该 `hubId` 当前映射，否则返回 `INVALID_ARGUMENT`。
+- 若 Registry 未命中该 project 映射，可要求 Hub 回退发送一次全量 `registry.reportProjects`。
+- 定时心跳周期仍建议发送全量快照做纠偏（例如 30~60s）。
+- 每个 `(hubId, name)` 维护最新 `(connectionEpoch, seq)`，仅接受更“新”的更新，防止乱序覆盖。
+- 当 `seq` 回退或重复时可直接忽略，并在日志记录 `stale_rev_update`。
+
+服务端判新规则（伪代码）：
+
+```text
+key = hubId + "/" + name
+old = lastSeen[key]  // {connectionEpoch, seq}
+new = incoming       // {connectionEpoch, seq}
+
+if new.connectionEpoch > old.connectionEpoch:
+  accept
+else if new.connectionEpoch == old.connectionEpoch and new.seq > old.seq:
+  accept
+else:
+  ignore as stale_rev_update
+```
+
+## 4.3 连接身份与统一 Token 模型（新增）
+
+Registry 必须显式区分两类连接：
+
+- `hub` 连接：Hub -> Registry，负责 `registry.reportProjects` 与项目请求响应。
+- `client` 连接：App/Web -> Registry，负责 `project.list/fs/git` 查询。
+
+必须在 `hello` 中声明连接角色：
 
 ```json
 {
@@ -95,132 +400,232 @@
   "method": "hello",
   "payload": {
     "clientName": "wm-web",
-    "clientVersion": "0.1.0",
-    "protocolVersion": "1.0"
+    "protocolVersion": "1.0",
+    "role": "client"
   }
 }
 ```
 
-响应：
+或：
 
 ```json
 {
-  "type": "response",
+  "type": "request",
   "method": "hello",
   "payload": {
-    "serverVersion": "x.y.z",
+    "clientName": "wheelmaker-hub",
     "protocolVersion": "1.0",
-    "features": {
-      "fs": true,
-      "git": true,
-      "push": false
-    }
+    "role": "hub",
+    "hubId": "local-hub"
   }
 }
 ```
 
-### 5.2 `auth`（预留）
+### 4.3.1 统一 Token（Hub 与 Client 共用）
 
-- V1 可先支持匿名/单 token 模式。
-- 后续扩展 mTLS / OAuth2 / 短期签名 token。
+- 用途：统一认证与授权，Hub 与 Client 都使用同一类 token 机制。
+- 校验模型：
+  - token 绑定 `hubId`（必选）
+  - 可选绑定 `projectIds[]`（更细粒度 ACL）
+  - 可选过期时间与签名（JWT 或 HMAC）
+- 失败结果：`UNAUTHORIZED`，并可终止连接。
 
-### 5.3 项目发现协议
+示例 claims（概念）：
 
-### 5.3.1 项目列表：`project.list`
+```json
+{
+  "sub": "client-user-123",
+  "hubId": "local-hub",
+  "projectIds": ["local-hub:WheelMaker"],
+  "exp": 1777777777
+}
+```
 
-请求：
+### 4.3.2 请求鉴权顺序（客户端）
+
+1. Registry 校验 client token 签名/过期。
+2. 提取 token 中允许的 `hubId/projectIds`。
+3. 根据请求中的 `projectId` 做路由反查（见 4.4）。
+4. 若 `projectId` 对应 hub 不在授权范围，返回 `FORBIDDEN`。
+
+强约束：
+
+- client 在完成 `auth` 前，不允许调用 `project.list`、`fs.*`、`git.*`。
+- client token 必须带明确 `hubId` 作用域；未绑定 hub 的 token 视为无效。
+
+## 4.4 projectId -> hub 反查与路由规则（新增）
+
+Registry 维护映射：
+
+- `projectToHub[projectId] = hubId`
+- `hubPeers[hubId] = peerConn`
+
+来源：
+
+- 仅由 Hub 的最新一次 `registry.reportProjects` 全量覆盖更新。
+
+路由规则：
+
+1. client 请求带 `projectId`。
+2. Registry 先从 `projectId` 按分隔符 `:` 解析出 `hubId`。
+3. 再与 `projectToHub[projectId]` 做一致性校验（防伪造/脏数据）。
+4. 用 `hubPeers[hubId]` 找在线连接并转发。
+5. 若任一步失败，返回：
+   - `NOT_FOUND`：projectId 不存在
+   - `UNAVAILABLE`：project 存在但 hub 不在线
+   - `FORBIDDEN`：client token 无权访问该 hub/project
+
+一致性要求：
+
+- 同 `hubId` 新连接注册后，旧连接断开不得清理新映射（按连接实例校验）。
+- `project.list` 必须返回 `hubId`（用于客户端展示项目所属 Hub）；后续数据请求仍只使用 `projectId`。
+- `projectName` 不允许包含分隔符 `:`；如需支持特殊字符，必须先做编码（如 URL encode）后再拼接 `projectId`。
+
+## 4.5 错误码规范（统一）
+
+为避免实现分歧，Hub/Client 与 Registry 的错误码统一如下：
+
+- `UNAUTHORIZED`：认证失败或 token 缺失/无效。
+- `FORBIDDEN`：已认证，但无权访问目标 hub/project。
+- `NOT_FOUND`：`projectId` 不存在（无映射）。
+- `UNAVAILABLE`：project 存在，但对应 hub 当前不在线。
+- `INVALID_ARGUMENT`：请求参数非法（字段缺失、格式错误、project 不属于该 hub 等）。
+- `CONFLICT`：状态冲突（可选，用于版本竞争场景）。
+- `RATE_LIMITED`：触发限流。
+- `TIMEOUT`：转发或处理超时。
+- `INTERNAL`：服务端内部错误。
+
+建议：
+
+- 错误响应 `details` 至少包含 `projectId`、`hubId`（若可确定）与 `requestId`。
+- 对 `UNAUTHORIZED/FORBIDDEN` 进行安全审计日志记录。
+
+## 5. Client <-> Registry 协议（V2）
+
+## 5.1 hello
+
+客户端声明：
+
+- `supportsPushHint`
+- `supportsHashNegotiation`
+
+服务端返回：
+
+- `pushHintEnabled`
+- `hashAlgorithms`（用于 FS 接口）
+
+## 5.1.1 client auth（与 4.3 统一 Token 对应）
+
+客户端在 `hello` 后发送 `auth`，用于携带统一 token。
 
 ```json
 {
   "type": "request",
-  "method": "project.list",
-  "payload": {}
-}
-```
-
-响应：
-
-```json
-{
-  "type": "response",
-  "method": "project.list",
+  "method": "auth",
   "payload": {
-    "projects": [
-      { "projectId": "server", "name": "server", "online": true },
-      { "projectId": "app", "name": "app", "online": true }
-    ]
+    "hubId": "local-hub",
+    "token": "client-hub-token"
   }
 }
 ```
 
-### 5.3.2 申请所有 project 完整信息：`project.listFull`
+校验成功后，当前连接获得该 token 对应的 `hubId/projectIds` 访问范围。
+若 `auth` 缺少 `hubId` 或 token 不匹配该 hub，返回 `UNAUTHORIZED`。
 
-用于一次性拉取所有 project 的基础元信息和能力信息，便于客户端初始化项目选择器与能力缓存。
+## 5.2 project.list（唯一项目列表）
+
+前置条件：必须先完成 `5.1.1 client auth`，且当前连接已绑定一个 hub。
+返回范围：仅返回该 hub 下可访问的 projects。
 
 请求：
 
 ```json
 {
   "type": "request",
-  "method": "project.listFull",
+  "method": "project.list",
   "payload": {
     "includeStats": true
   }
 }
 ```
 
-响应：
+响应关键字段（示意）：
 
 ```json
 {
   "type": "response",
-  "method": "project.listFull",
+  "method": "project.list",
   "payload": {
     "projects": [
       {
-        "projectId": "server",
-        "name": "server",
-        "cwd": "D:/Code/WheelMaker/server",
+        "projectId": "local-hub:WheelMaker",
+        "name": "WheelMaker",
+        "path": "D:/Code/WheelMaker",
+        "hubId": "local-hub",
         "online": true,
-        "capabilities": { "fs": true, "git": true },
-        "git": { "currentBranch": "main" },
-        "stats": { "lastActiveAt": "2026-03-26T09:20:00Z" }
-      },
-      {
-        "projectId": "app",
-        "name": "app",
-        "cwd": "D:/Code/WheelMaker/app",
-        "online": true,
-        "capabilities": { "fs": true, "git": true },
-        "git": { "currentBranch": "main" },
-        "stats": { "lastActiveAt": "2026-03-26T09:10:00Z" }
+        "projectRev": "sha256:...",
+        "git": {
+          "branch": "main",
+          "headSha": "abc123...",
+          "dirty": true,
+          "gitRev": "sha256:...",
+          "worktreeRev": "sha256:..."
+        }
       }
     ]
   }
 }
 ```
 
-说明：
+## 5.3 fs.list（目录增量）
 
-- `project.listFull` 为全局接口，请求中不需要 `projectId`。
-- `includeStats` 可选，默认 `false`；为 `true` 时允许返回轻量统计字段（如 `lastActiveAt`）。
-- 响应中的 `cwd` 可按权限策略脱敏或隐藏。
+请求新增：
 
-## 6. 文件浏览协议（只读）
+- `knownHash`
+- `visibleOnly`（默认 true）
 
-### 6.1 列目录：`fs.list`
+响应新增：
+
+- `snapshotHash`
+- `notModified`
+
+## 5.4 fs.read（文件增量）
+
+请求新增：
+
+- `knownHash`
+
+响应新增：
+
+- `contentHash`
+- `notModified`
+
+## 5.5 Git 接口策略（按版本触发，不做 hash 协商）
+
+- `git.log`：当 `headSha` 或 `gitRev` 变化时客户端主动拉取。
+- `git.commit.files`：由 `sha` 唯一标识，按 `sha` 缓存。
+- `git.commit.fileDiff`：按 `sha+path+contextLines` 缓存。
+
+备注：Git 列表不需要 `knownHash/notModified`。
+
+## 5.6 fs.search（新增：文件名模糊查找）
+
+仅支持文件名字符串模糊匹配（首版不做内容检索）。
 
 请求：
 
 ```json
 {
   "type": "request",
-  "method": "fs.list",
-  "projectId": "server",
+  "method": "fs.search",
+  "projectId": "local-hub:WheelMaker",
   "payload": {
-    "path": ".",
-    "cursor": "",
-    "limit": 200
+    "query": "reg serv",
+    "root": ".",
+    "mode": "fuzzy",
+    "caseSensitive": false,
+    "limit": 50,
+    "cursor": ""
   }
 }
 ```
@@ -230,240 +635,140 @@
 ```json
 {
   "type": "response",
-  "method": "fs.list",
-  "projectId": "server",
+  "method": "fs.search",
+  "projectId": "local-hub:WheelMaker",
   "payload": {
-    "path": ".",
-    "entries": [
-      { "name": "cmd", "path": "cmd", "kind": "dir", "size": 0, "mtime": "..." },
-      { "name": "go.mod", "path": "go.mod", "kind": "file", "size": 245, "mtime": "..." }
+    "results": [
+      {
+        "path": "docs/registry-server-remote-observe-protocol-v1.md",
+        "name": "registry-server-remote-observe-protocol-v1.md",
+        "score": 0.93
+      }
     ],
     "nextCursor": ""
   }
 }
 ```
 
-说明：
+## 5.7 工作区未提交改动监控（新增）
 
-- 客户端点击目录后，重新调用 `fs.list(path=<clickedDir>)`。
-- 不返回整棵树，避免大目录一次性传输。
-
-### 6.2 读文件：`fs.read`
-
-请求：
+新增查询接口 `git.status`：
 
 ```json
 {
   "type": "request",
-  "method": "fs.read",
-  "projectId": "server",
-  "payload": {
-    "path": "internal/agent/codex/agent.go",
-    "offset": 0,
-    "limit": 65536
-  }
-}
-```
-
-响应：
-
-```json
-{
-  "type": "response",
-  "method": "fs.read",
-  "projectId": "server",
-  "payload": {
-    "path": "internal/agent/codex/agent.go",
-    "content": "...",
-    "encoding": "utf-8",
-    "eof": true,
-    "nextOffset": 65536
-  }
-}
-```
-
-## 7. Git 浏览协议（只读）
-
-### 7.1 分支列表：`git.branches`
-
-请求：
-
-```json
-{
-  "type": "request",
-  "method": "git.branches",
-  "projectId": "server",
+  "method": "git.status",
+  "projectId": "local-hub:WheelMaker",
   "payload": {}
 }
 ```
 
-响应：
+响应示例：
 
 ```json
 {
   "type": "response",
-  "method": "git.branches",
-  "projectId": "server",
+  "method": "git.status",
+  "projectId": "local-hub:WheelMaker",
   "payload": {
-    "current": "main",
-    "branches": ["main", "feature/x"]
+    "branch": "main",
+    "headSha": "abc123...",
+    "dirty": true,
+    "worktreeRev": "sha256:...",
+    "staged": [{"path":"server/internal/registry/server.go","status":"M"}],
+    "unstaged": [{"path":"docs/registry-server-remote-observe-protocol-v1.md","status":"M"}],
+    "untracked": [{"path":"tmp/new.txt","status":"?"}]
   }
 }
 ```
 
-### 7.2 提交记录：`git.log`
+## 6. Hash 规范（按你要求调整）
 
-请求：
+仅用于文件系统同步。
+
+## 6.1 目录 hash
+
+目录项按 `kind,name,dataHash` 参与计算：
+
+- `kind=dir`：`dataHash` 可为空字符串
+- `kind=file`：`dataHash=文件内容 hash`
+
+建议输入串：
+
+`kind|name|dataHash`
+
+目录下所有 entry 按 `kind,name` 排序后拼接，再 `sha256`。
+
+## 6.2 文件 dataHash
+
+`sha256(raw bytes)`。
+
+## 7. 同步策略（采用方案 C，并写入协议）
+
+采用 `push hint + pull data`：
+
+1. 服务端推送事件摘要（不推全量数据）
+2. 客户端收到后，仅拉取可见范围明细
+
+新增事件：
 
 ```json
 {
-  "type": "request",
-  "method": "git.log",
-  "projectId": "server",
+  "type": "event",
+  "method": "project.changed",
+  "projectId": "local-hub:WheelMaker",
   "payload": {
-    "ref": "main",
-    "cursor": "",
-    "limit": 50
+    "projectRev": "sha256:...",
+    "gitRev": "sha256:...",
+    "worktreeRev": "sha256:...",
+    "changedDomains": ["git","worktree"]
   }
 }
 ```
 
-响应：
+补充事件（专门给未提交改动）：
 
 ```json
 {
-  "type": "response",
-  "method": "git.log",
-  "projectId": "server",
+  "type": "event",
+  "method": "git.workspace.changed",
+  "projectId": "local-hub:WheelMaker",
   "payload": {
-    "ref": "main",
-    "commits": [
-      {
-        "sha": "abc123",
-        "author": "name",
-        "email": "x@y.z",
-        "time": "...",
-        "title": "commit subject"
-      }
-    ],
-    "nextCursor": "opaque-cursor"
+    "dirty": true,
+    "worktreeRev": "sha256:..."
   }
 }
 ```
 
-### 7.3 提交文件列表：`git.commit.files`
+## 8. 客户端增量刷新规则
 
-请求：
+1. 收到 `project.changed` 或轮询发现 `projectRev/gitRev/worktreeRev` 变化
+2. Git 刷新：
+- `headSha`/`gitRev` 变化：拉 `git.log`
+- 选中 commit 变化：拉 `git.commit.files`
+- 选中 diff 变化：拉 `git.commit.fileDiff`
+- `worktreeRev` 变化：拉 `git.status`
+3. FS 刷新（按需，不主动全盘监测）：
+- 对已展开目录调用 `fs.list(path, knownHash)`
+- 对打开/Pin 文件调用 `fs.read(path, knownHash)`
 
-```json
-{
-  "type": "request",
-  "method": "git.commit.files",
-  "projectId": "server",
-  "payload": {
-    "sha": "abc123"
-  }
-}
-```
+## 9. 下一步实施计划（附在文档末尾）
 
-响应：
+1. 协议收敛
+- 下线 `project.listFull`，统一 `project.list`。
 
-```json
-{
-  "type": "response",
-  "method": "git.commit.files",
-  "projectId": "server",
-  "payload": {
-    "sha": "abc123",
-    "files": [
-      { "path": "internal/im/feishu/feishu.go", "status": "M", "additions": 10, "deletions": 2 }
-    ]
-  }
-}
-```
+2. Hub 汇报增强
+- 汇报 `gitRev/headSha/dirty/worktreeRev/projectRev`。
+- Git/工作区变化即时上报。
+- `projectRev` 由 Git 侧版本派生，不引入全量 FS watcher。
 
-### 7.4 单文件 diff：`git.commit.fileDiff`
+3. 服务端接口新增（第一阶段必须完成）
+- 新增 `fs.search`（文件名模糊匹配）
+- 新增 `git.status`（未提交改动视图）
 
-请求：
+4. 客户端同步改造
+- 采用方案 C：监听 `project.changed` / `git.workspace.changed`。
+- Git 用版本触发拉取；FS 用 hash 协商。
 
-```json
-{
-  "type": "request",
-  "method": "git.commit.fileDiff",
-  "projectId": "server",
-  "payload": {
-    "sha": "abc123",
-    "path": "internal/im/feishu/feishu.go",
-    "contextLines": 3
-  }
-}
-```
-
-响应：
-
-```json
-{
-  "type": "response",
-  "method": "git.commit.fileDiff",
-  "projectId": "server",
-  "payload": {
-    "sha": "abc123",
-    "path": "internal/im/feishu/feishu.go",
-    "isBinary": false,
-    "diff": "@@ ...",
-    "truncated": false
-  }
-}
-```
-
-## 8. 服务端执行模型建议
-
-- 按 `projectId` 映射到现有 client/project 上下文（cwd、git repo）。
-- 文件查询和 git 查询使用独立只读执行器。
-- 每个请求设置超时（如 5s/10s）。
-- 对重型请求（大 diff / 超大目录）限制返回大小并给出 `truncated=true`。
-
-## 9. 安全预留（V1 先留口）
-
-### 9.1 认证与授权
-
-- 预留 `auth` 消息（token/mTLS/OAuth2）。
-- 每个连接绑定权限范围（可访问 project 列表、只读能力）。
-- project 级 ACL：防止跨项目越权读取。
-
-### 9.2 传输安全
-
-- 建议 TLS（公网必须 TLS）。
-- 预留证书轮换与指纹固定策略。
-
-### 9.3 数据安全
-
-- 文件读取限制在 project root 下，防目录穿越。
-- 禁止读取敏感路径（可配置 denylist）。
-- Git diff/文件内容可配置脱敏策略（如密钥模式匹配）。
-
-### 9.4 审计与限流
-
-- 记录请求审计日志：连接、projectId、method、耗时、结果码。
-- 对连接和请求速率限流。
-- 限制并发请求数，避免资源耗尽。
-
-## 10. 版本演进策略
-
-- `version` 字段用于协议协商。
-- 新增字段保持向后兼容（客户端忽略未知字段）。
-- 破坏性变更走 `2.x` 并提供过渡期双栈。
-
-## 11. V1 实施顺序建议
-
-1. 传输层：WebSocket + `hello` + 基础错误模型
-2. 项目发现：`project.list` + `project.listFull`
-3. 文件只读：`fs.list`、`fs.read`
-4. Git只读：`git.branches`、`git.log`、`git.commit.files`、`git.commit.fileDiff`
-5. 安全最小集：token + root 限制 + 审计日志
-6. 性能增强：分页/游标、响应截断、并发控制
-
----
-
-本稿为协议草案 V1，适合先做后端能力与协议稳定，再接入 App/Web 客户端。
-
+5. 可观测性
+- 增加指标：FS 按需 hash 命中率、Git 刷新耗时、工作区状态推送频率。

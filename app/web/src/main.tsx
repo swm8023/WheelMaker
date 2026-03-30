@@ -26,6 +26,8 @@ import '@fontsource/ibm-plex-sans/600.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
+import {WorkspaceController} from './services/workspaceController';
+import {WorkspaceStore} from './services/workspaceStore';
 import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from './types/registry';
 import './styles.css';
 
@@ -54,6 +56,8 @@ type SetiResolvedIcon = {
 };
 
 const service = new RegistryWorkspaceService();
+const workspaceStore = new WorkspaceStore();
+const workspaceController = new WorkspaceController(service, workspaceStore);
 const setiTheme = setiThemeJson as SetiTheme;
 const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
 
@@ -369,21 +373,26 @@ function PrismInlineCode({content, language, wrap}: {content: string; language: 
 }
 
 function App() {
+  const persistedGlobal = useMemo(() => workspaceStore.getGlobalState(getDefaultRegistryAddress()), []);
   const [connected, setConnected] = useState(false);
-  const [address, setAddress] = useState(getDefaultRegistryAddress());
-  const [token, setToken] = useState('');
+  const [address, setAddress] = useState(persistedGlobal.address || getDefaultRegistryAddress());
+  const [token, setToken] = useState(persistedGlobal.token || '');
   const [error, setError] = useState('');
+  const [autoConnecting, setAutoConnecting] = useState(false);
+  const autoConnectTriedRef = useRef(false);
 
-  const [themeMode, setThemeMode] = useState<ThemeMode>('dark');
-  const [wrapLines, setWrapLines] = useState(false);
-  const [showLineNumbers, setShowLineNumbers] = useState(true);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(persistedGlobal.themeMode === 'light' ? 'light' : 'dark');
+  const [wrapLines, setWrapLines] = useState(!!persistedGlobal.wrapLines);
+  const [showLineNumbers, setShowLineNumbers] = useState(
+    typeof persistedGlobal.showLineNumbers === 'boolean' ? persistedGlobal.showLineNumbers : true,
+  );
   const setiFontCss = useMemo(() => setiFontFaceCss(), []);
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
   const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
   const isWide = windowWidth >= 900;
 
-  const [tab, setTab] = useState<Tab>('file');
+  const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -392,6 +401,7 @@ function App() {
 
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [projectId, setProjectId] = useState('');
+  const projectIdRef = useRef('');
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
 
@@ -424,6 +434,10 @@ function App() {
   const [selectedDiff, setSelectedDiff] = useState('');
   const [diffText, setDiffText] = useState('');
   const [diffLoading, setDiffLoading] = useState(false);
+
+  useEffect(() => {
+    projectIdRef.current = projectId;
+  }, [projectId]);
 
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
@@ -459,6 +473,44 @@ function App() {
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [searchToolsOpen, gotoToolsOpen]);
 
+  useEffect(() => {
+    workspaceStore.rememberGlobalState({
+      address,
+      token,
+      themeMode,
+      wrapLines,
+      showLineNumbers,
+      tab,
+      selectedProjectId: projectId,
+    });
+  }, [address, token, themeMode, wrapLines, showLineNumbers, tab, projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    workspaceStore.rememberProjectSnapshot(projectId, {
+      dirEntries,
+      expandedDirs,
+      selectedFile,
+      pinnedFiles,
+      gitCurrentBranch,
+      commits,
+      selectedCommit,
+      commitFilesBySha,
+      selectedDiff,
+    });
+  }, [
+    projectId,
+    dirEntries,
+    expandedDirs,
+    selectedFile,
+    pinnedFiles,
+    gitCurrentBranch,
+    commits,
+    selectedCommit,
+    commitFilesBySha,
+    selectedDiff,
+  ]);
+
   const currentProjectName = useMemo(
     () => projects.find(item => item.projectId === projectId)?.name ?? 'Project',
     [projectId, projects],
@@ -484,6 +536,38 @@ function App() {
     }
     return matches;
   }, [fileContent, fileLines, fileSearchQuery]);
+
+  const applyHydratedProjectState = (
+    hydrated: {
+      projectId: string;
+      dirEntries: Record<string, RegistryFsEntry[]>;
+      expandedDirs: string[];
+      selectedFile: string;
+      pinnedFiles: string[];
+      gitCurrentBranch: string;
+      commits: RegistryGitCommit[];
+      selectedCommit: string;
+      commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
+      selectedDiff: string;
+      cachedDiffText: string;
+    },
+  ) => {
+    setProjectId(hydrated.projectId);
+    setDirEntries(hydrated.dirEntries);
+    setExpandedDirs(hydrated.expandedDirs);
+    setSelectedFile(hydrated.selectedFile);
+    setPinnedFiles(hydrated.pinnedFiles);
+    setFileContent('');
+    setGitCurrentBranch(hydrated.gitCurrentBranch);
+    setCommits(hydrated.commits);
+    setSelectedCommit(hydrated.selectedCommit);
+    setCommitFilesBySha(hydrated.commitFilesBySha);
+    setSelectedDiff(hydrated.selectedDiff);
+    setDiffText(hydrated.cachedDiffText);
+    setProjectMenuOpen(false);
+    setSidebarSettingsOpen(false);
+    if (!isWide) setDrawerOpen(false);
+  };
 
   const togglePinSelectedFile = () => {
     if (!selectedFile) return;
@@ -595,6 +679,7 @@ function App() {
       const content = await service.readFile(path);
       setFileContent(content);
     } catch (err) {
+      setFileContent('');
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setFileLoading(false);
@@ -644,11 +729,17 @@ function App() {
 
   useEffect(() => {
     const run = async () => {
-      if (!selectedCommit || !selectedDiff) return;
+      if (!projectId || !selectedCommit || !selectedDiff) return;
+      const cachedDiff = workspaceStore.getCachedDiff(projectId, selectedCommit, selectedDiff);
+      if (cachedDiff !== null) {
+        setDiffText(cachedDiff);
+        return;
+      }
       setDiffLoading(true);
       try {
         const diff = await service.readGitFileDiff(selectedCommit, selectedDiff);
         setDiffText(diff.diff || '');
+        workspaceStore.cacheDiff(projectId, selectedCommit, selectedDiff, diff.diff || '', !!diff.isBinary, !!diff.truncated);
       } catch (err) {
         setGitError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -656,43 +747,51 @@ function App() {
       }
     };
     run().catch(() => undefined);
-  }, [selectedCommit, selectedDiff]);
+  }, [projectId, selectedCommit, selectedDiff]);
 
   const connect = async () => {
     setError('');
     try {
       const ws = toRegistryWsUrl(address);
-      const session = await service.connect(ws, token.trim());
-      setProjects(session.projects);
-      setProjectId(session.selectedProjectId);
-      setDirEntries({'.': sortEntries(session.fileEntries)});
-      setExpandedDirs(['.']);
-      setSelectedFile(session.fileEntries.find(item => item.kind === 'file')?.path ?? '');
+      const result = await workspaceController.connect(ws, token.trim());
+      setProjects(result.projects);
+      applyHydratedProjectState(result.hydrated);
       setConnected(true);
+      workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
+        if (projectIdRef.current !== result.hydrated.projectId) return;
+        setDirEntries(validated.dirEntries);
+        setExpandedDirs(validated.expandedDirs);
+      }).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAutoConnecting(false);
     }
   };
+
+  useEffect(() => {
+    if (connected || autoConnecting) return;
+    if (autoConnectTriedRef.current) return;
+    if (!address.trim()) return;
+    if (projects.length > 0) return;
+    autoConnectTriedRef.current = true;
+    setAutoConnecting(true);
+    connect().catch(() => {
+      setAutoConnecting(false);
+    });
+  }, [address, autoConnecting, connected, projects.length]);
 
   const switchProject = async (nextProjectId: string) => {
     setLoadingProject(true);
     try {
-      const session = await service.selectProject(nextProjectId);
-      setProjects(session.projects);
-      setProjectId(session.selectedProjectId);
-      setDirEntries({'.': sortEntries(session.fileEntries)});
-      setExpandedDirs(['.']);
-      setSelectedFile(session.fileEntries.find(item => item.kind === 'file')?.path ?? '');
-      setPinnedFiles([]);
-      setFileContent('');
-      setCommits([]);
-      setSelectedCommit('');
-      setCommitFilesBySha({});
-      setSelectedDiff('');
-      setDiffText('');
-      setProjectMenuOpen(false);
-      setSidebarSettingsOpen(false);
-      if (!isWide) setDrawerOpen(false);
+      const result = await workspaceController.switchProject(nextProjectId);
+      setProjects(result.projects);
+      applyHydratedProjectState(result.hydrated);
+      workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
+        if (projectIdRef.current !== result.hydrated.projectId) return;
+        setDirEntries(validated.dirEntries);
+        setExpandedDirs(validated.expandedDirs);
+      }).catch(() => undefined);
     } finally {
       setLoadingProject(false);
     }
@@ -702,19 +801,9 @@ function App() {
     if (!projectId) return;
     setRefreshingProject(true);
     try {
-      const expandedSnapshot = [...expandedDirs];
-      const session = await service.selectProject(projectId);
-      const nextDirs: DirEntries = {'.': sortEntries(session.fileEntries)};
-      for (const dirPath of expandedSnapshot) {
-        if (dirPath === '.') continue;
-        try {
-          nextDirs[dirPath] = sortEntries(await service.listDirectory(dirPath));
-        } catch {
-          // keep refresh resilient when directory disappeared remotely
-        }
-      }
-      setDirEntries(nextDirs);
-      setExpandedDirs(expandedSnapshot.filter(path => path === '.' || !!nextDirs[path]));
+      const validated = await workspaceController.refreshProject(projectId, [...expandedDirs]);
+      setDirEntries(validated.dirEntries);
+      setExpandedDirs(validated.expandedDirs);
       await loadGit();
     } finally {
       setRefreshingProject(false);
@@ -1076,8 +1165,8 @@ function App() {
             placeholder="127.0.0.1:9630 or ws://127.0.0.1:9630/ws"
           />
           <input className="input" value={token} onChange={e => setToken(e.target.value)} placeholder="Token (optional)" />
-          <button className="button" onClick={connect}>
-            Connect
+          <button className="button" onClick={() => connect().catch(() => undefined)}>
+            {autoConnecting ? 'Connecting...' : 'Connect'}
           </button>
           {error ? <div className="error">{error}</div> : null}
         </div>
