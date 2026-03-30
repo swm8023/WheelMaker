@@ -202,8 +202,10 @@ Registry 成功响应：
     "features": {
       "hubReportProjects": true,
       "pushHint": true,
-      "pingPong": true
-    }
+      "pingPong": true,
+      "supportsHashNegotiation": true
+    },
+    "hashAlgorithms": ["sha256"]
   }
 }
 ```
@@ -314,7 +316,7 @@ Registry pong：
   "requestId": "req-auth",
   "type": "error",
   "error": {
-    "code": "UNAUTHORIZED|INVALID_ARGUMENT|INTERNAL",
+    "code": "UNAUTHORIZED|FORBIDDEN|NOT_FOUND|UNAVAILABLE|INVALID_ARGUMENT|CONFLICT|RATE_LIMITED|TIMEOUT|INTERNAL",
     "message": "human readable",
     "details": {}
   }
@@ -554,7 +556,7 @@ Registry 维护映射：
 校验成功后，当前连接获得该 token 对应的 `hubId/projectIds` 访问范围。
 若 token 缺失、无效或与目标作用域不匹配，返回 `UNAUTHORIZED`。
 
-## 5.2 project.list（唯一项目列表）
+### 5.2 project.list（唯一项目列表）
 
 前置条件：必须先完成 `5.1.1 client auth`，且当前连接已绑定一个 hub。
 返回范围：仅返回该 hub 下可访问的 projects。
@@ -599,7 +601,7 @@ Registry 维护映射：
 }
 ```
 
-## 5.3 fs.list（目录增量）
+### 5.3 fs.list（目录增量）
 
 请求新增：
 
@@ -611,7 +613,7 @@ Registry 维护映射：
 - `snapshotHash`
 - `notModified`
 
-## 5.4 fs.read（文件增量）
+### 5.4 fs.read（文件增量）
 
 请求新增：
 
@@ -622,7 +624,7 @@ Registry 维护映射：
 - `contentHash`
 - `notModified`
 
-## 5.5 Git 接口策略（按版本触发，不做 hash 协商）
+### 5.5 Git 接口策略（按版本触发，不做 hash 协商）
 
 - `git.log`：当 `headSha` 或 `gitRev` 变化时客户端主动拉取。
 - `git.commit.files`：由 `sha` 唯一标识，按 `sha` 缓存。
@@ -630,7 +632,7 @@ Registry 维护映射：
 
 备注：Git 列表不需要 `knownHash/notModified`。
 
-## 5.6 fs.search（新增：文件名模糊查找）
+### 5.6 fs.search（新增：文件名模糊查找）
 
 仅支持文件名字符串模糊匹配（首版不做内容检索）。
 
@@ -672,7 +674,7 @@ Registry 维护映射：
 }
 ```
 
-## 5.7 工作区未提交改动监控（新增）
+### 5.7 工作区未提交改动监控（新增）
 
 新增查询接口 `git.status`：
 
