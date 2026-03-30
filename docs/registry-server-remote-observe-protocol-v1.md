@@ -75,7 +75,7 @@
 连接流程：
 
 1. Hub 建立 WebSocket 到 Registry（`ws://host:port/ws` 或 `wss://...`）。
-2. 发送 `hello`（声明协议版本、客户端类型 `wheelmaker-hub`）。
+2. 发送 `hello`（声明 `protocolVersion` 与连接身份 `role`；`role=hub` 时必须携带 `hubId`）。
 3. 发送 `auth`（统一 token，必选）。
 4. 发送 `registry.reportProjects` 全量快照，等待 ACK。
 5. 进入 steady 状态：保活 + 增量汇报。
@@ -521,7 +521,7 @@ Registry 维护映射：
 
 ## 5. Client <-> Registry 协议（V2）
 
-## 5.1 hello
+### 5.1 hello（客户端视角，权威定义见 4.2.1）
 
 客户端声明：
 
@@ -532,7 +532,7 @@ Registry 维护映射：
 
 - 仅返回最小握手确认（不返回能力细节）
 
-## 5.1.1 client auth（与 4.3 统一 Token 对应）
+### 5.1.1 client auth（客户端视角，权威定义见 4.2.2 / 4.3）
 
 客户端在 `hello` 后发送 `auth`，用于携带统一 token。
 
@@ -546,14 +546,13 @@ Registry 维护映射：
   "type": "request",
   "method": "auth",
   "payload": {
-    "hubId": "local-hub",
     "token": "client-hub-token"
   }
 }
 ```
 
 校验成功后，当前连接获得该 token 对应的 `hubId/projectIds` 访问范围。
-若 `auth` 缺少 `hubId` 或 token 不匹配该 hub，返回 `UNAUTHORIZED`。
+若 token 缺失、无效或与目标作用域不匹配，返回 `UNAUTHORIZED`。
 
 ## 5.2 project.list（唯一项目列表）
 
