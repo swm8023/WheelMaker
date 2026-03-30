@@ -92,23 +92,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_server.ps1
 Copy-Item server\config.example.json ~\.wheelmaker\config.json
 notepad ~\.wheelmaker\config.json
 # 启动
-~\.wheelmaker\start.ps1
+~\.wheelmaker\start.bat
 ```
 
-安装脚本会在 `~/.wheelmaker/` 下生成以下便捷脚本：
+安装脚本会在 `~/.wheelmaker/` 下生成以下便捷脚本（可双击运行）：
 
 | 脚本 | 功能 |
 |------|------|
-| `start.ps1` | 后台启动守护进程（已运行则跳过） |
-| `stop.ps1` | 停止所有 wheelmaker 进程 |
-| `restart.ps1` | 先 stop 再 start |
+| `start.bat` | 后台启动守护进程（已运行则跳过） |
+| `stop.bat` | 停止所有 wheelmaker 进程 |
+| `restart.bat` | 先 stop 再 start |
 
 日常使用：
 
 ```powershell
-~\.wheelmaker\start.ps1     # 启动
-~\.wheelmaker\stop.ps1      # 停止
-~\.wheelmaker\restart.ps1   # 重启
+~\.wheelmaker\start.bat     # 启动
+~\.wheelmaker\stop.bat      # 停止
+~\.wheelmaker\restart.bat   # 重启
 ```
 
 说明：
