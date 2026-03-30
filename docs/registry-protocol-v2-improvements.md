@@ -343,14 +343,15 @@ push hint + pull data → 整体同步循环保障最终一致
 - 文件详细信息（hash、size、mimeType 等）通过 `fs.read` 按需获取。
 - 目录 hash 仅反映条目增删/重命名，**不反映文件内容变化**。
 
-### 文本文件按行读取
+### 统一寻址：`offset` / `count`
 
-文本文件（`isBinary=false`）使用行号寻址：
-- 请求：`startLine`（从 1 开始）、`lineCount`（默认 500 行）。
-- 响应：`totalLines`、`returnedLines`、`hasMore`。
-- 缓存键：`{path, startLine, lineCount, hash}`。
+文本文件和二进制文件使用相同的请求字段 `offset`/`count`，语义由 `fs.info` 返回的 `isBinary` 决定：
+- 文本文件：`offset` = 起始行号（从 1 开始），`count` = 请求行数。
+- 二进制文件：`offset` = 字节偏移（从 0 开始），`count` = 请求字节数。
+- 响应统一字段：`offset`（回显）、`returned`（实际返回数量）、`total`（总量）、`hasMore`。
+- 缓存键：`{path, offset, count, hash}`。
 
-二进制文件（`isBinary=true`）保留字节偏移：`offset`/`limit`/`eof`/`nextOffset`。
+客户端通过 `fs.info` 提前获知 `isBinary`，据此决定寻址语义。
 
 ### `knownHash` = Conditional GET
 
@@ -362,8 +363,7 @@ push hint + pull data → 整体同步循环保障最终一致
 ### 随机范围读取
 
 `hash` 始终是整文件 hash，文件级 hash 未变则任意范围缓存均有效。
-- 文本文件缓存键：`{path, startLine, lineCount, hash}`。
-- 二进制文件缓存键：`{path, offset, limit, hash}`。
+- 统一缓存键：`{path, offset, count, hash}`。
 
 ### 完整字段视图
 
@@ -374,24 +374,28 @@ hash           → 整个目录的 hash（基于 kind|name），协商用
 entries        → [{name, kind}, ...] 极简条目
 ```
 
-**fs.read（文本文件）**：
+**fs.info（路径元信息查询）**：
+
+```
+path           → 请求路径原样回显
+kind           → "file" 或 "dir"
+size           → 文件字节大小（文件时）
+isBinary       → 是否为二进制文件（文件时）
+mimeType       → MIME 类型（文件时）
+totalLines     → 文件总行数（文本文件时）
+entryCount     → 直接子项数量（目录时）
+hash           → 实体 hash
+```
+
+**fs.read（文本/二进制统一寻址）**：
 
 ```
 hash           → 整个文件的 hash（sha256(raw bytes)），首段协商用
-startLine      → 读取起始行号
-lineCount      → 请求行数
-totalLines     → 文件总行数（首段响应）
-returnedLines  → 实际返回行数
-hasMore        → 是否有后续行
-```
-
-**fs.read（二进制文件）**：
-
-```
-hash           → 整个文件的 hash，首块协商用
-offset/limit   → 字节范围
-eof            → 是否到文件末尾
-nextOffset     → 下一块起始偏移
+offset         → 起始位置（文本=行号从1开始，二进制=字节偏移从0开始）
+count          → 请求数量（文本=行数，二进制=字节数）
+total          → 总量（文本=总行数，二进制=总字节数）
+returned       → 实际返回数量
+hasMore        → 是否还有后续数据
 ```
 
 ---
