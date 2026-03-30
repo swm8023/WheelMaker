@@ -206,6 +206,23 @@ func TestForwarder_EmitFlushOnDone(t *testing.T) {
 	}
 }
 
+func TestForwarder_EmitThought_PreservesWhitespaceAcrossChunks(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "thought", Text: "hello "}); err != nil {
+		t.Fatalf("emit thought #1: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "thought", Text: "world"}); err != nil {
+		t.Fatalf("emit thought #2: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "done"}); err != nil {
+		t.Fatalf("emit done: %v", err)
+	}
+	if ad.lastText != "hello world" {
+		t.Fatalf("thought text %q, want %q", ad.lastText, "hello world")
+	}
+}
+
 func TestForwarder_HelpCardActionInjectsCommand(t *testing.T) {
 	ad := &stubAdapter{}
 	f := New(ad)
@@ -547,6 +564,11 @@ func TestForwarder_EmitToolCall_DedupByStatus(t *testing.T) {
 func TestForwarder_EmitToolCall_SameStatusNewOutputStillStreams(t *testing.T) {
 	ad := &toolCardStub{}
 	f := New(ad)
+
+	old := toolCallFlushDelay
+	toolCallFlushDelay = 20 * time.Millisecond
+	defer func() { toolCallFlushDelay = old }()
+
 	raw1 := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"step1"}`)
 	raw2 := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"step2"}`)
 	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw1}); err != nil {
@@ -555,11 +577,42 @@ func TestForwarder_EmitToolCall_SameStatusNewOutputStillStreams(t *testing.T) {
 	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw2}); err != nil {
 		t.Fatalf("emit tool_call #2: %v", err)
 	}
+	time.Sleep(50 * time.Millisecond)
 	if len(ad.toolCalls) != 2 {
 		t.Fatalf("tool card update count=%d, want 2", len(ad.toolCalls))
 	}
 	if ad.textCount != 0 {
 		t.Fatalf("text fallback should not be used when tool cards are supported")
+	}
+}
+
+func TestForwarder_EmitToolCall_ThrottlesWithinWindowAndKeepsLatest(t *testing.T) {
+	ad := &toolCardStub{}
+	f := New(ad)
+
+	old := toolCallFlushDelay
+	toolCallFlushDelay = 40 * time.Millisecond
+	defer func() { toolCallFlushDelay = old }()
+
+	raw1 := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"step1"}`)
+	raw2 := []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run tests","status":"in_progress","rawOutput":"step2"}`)
+
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw1}); err != nil {
+		t.Fatalf("emit tool_call #1: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "tool_call", Raw: raw2}); err != nil {
+		t.Fatalf("emit tool_call #2: %v", err)
+	}
+	if len(ad.toolCalls) != 1 {
+		t.Fatalf("immediate tool call updates=%d, want 1", len(ad.toolCalls))
+	}
+
+	time.Sleep(80 * time.Millisecond)
+	if len(ad.toolCalls) != 2 {
+		t.Fatalf("throttled tool call updates=%d, want 2", len(ad.toolCalls))
+	}
+	if !strings.Contains(string(ad.toolCalls[1].RawOutput), "step2") {
+		t.Fatalf("latest throttled output=%q, want contains step2", string(ad.toolCalls[1].RawOutput))
 	}
 }
 

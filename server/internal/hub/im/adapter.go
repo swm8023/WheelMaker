@@ -23,6 +23,7 @@ type ImAdapter struct {
 	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
 	textFlush    map[string]*time.Timer      // chatID -> delayed text flush timer
 	toolCalls    map[string]map[string]string
+	toolFlush    map[string]map[string]*toolFlushState
 	decisions    map[string]pendingDecision // chatID -> pending (text fallback)
 	decisionByID map[string]pendingDecision // decisionID -> pending (card action)
 	closedDecide map[string]time.Time       // decisionID -> recently closed timestamp
@@ -38,6 +39,7 @@ func New(adapter Channel) *ImAdapter {
 		textBuf:      map[string]*strings.Builder{},
 		textFlush:    map[string]*time.Timer{},
 		toolCalls:    map[string]map[string]string{},
+		toolFlush:    map[string]map[string]*toolFlushState{},
 		decisions:    map[string]pendingDecision{},
 		decisionByID: map[string]pendingDecision{},
 		closedDecide: map[string]time.Time{},
@@ -175,14 +177,20 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	case IMUpdateText:
 		f.enqueueTextChunk(chatID, u.Text)
 	case IMUpdateDone:
+		if err := f.flushPendingToolCalls(chatID); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		f.mu.Lock()
-		delete(f.toolCalls, chatID)
+		f.clearToolStateLocked(chatID)
 		f.mu.Unlock()
 		return f.adapter.MarkDone(chatID)
 	case IMUpdateError:
+		if err := f.flushPendingToolCalls(chatID); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
@@ -190,13 +198,13 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		if msg == "" {
 			msg = "Agent request failed."
 		}
+		f.mu.Lock()
+		f.clearToolStateLocked(chatID)
+		f.mu.Unlock()
 		return f.SendText(chatID, msg)
 	case IMUpdateThought:
-		if err := f.flushTextNow(chatID); err != nil {
-			return err
-		}
 		if strings.TrimSpace(u.Text) != "" {
-			return f.SendText(chatID, strings.TrimSpace(u.Text))
+			f.enqueueTextChunk(chatID, u.Text)
 		}
 	case IMUpdateToolCall:
 		if err := f.flushTextNow(chatID); err != nil {
@@ -221,7 +229,8 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 	return nil
 }
 
-const textFlushDelay = 300 * time.Millisecond
+var textFlushDelay = 700 * time.Millisecond
+var toolCallFlushDelay = 700 * time.Millisecond
 
 func (f *ImAdapter) enqueueTextChunk(chatID, chunk string) {
 	if chunk == "" {
@@ -271,30 +280,128 @@ func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {
 	if !ok {
 		return nil
 	}
-	if !f.shouldEmitToolCall(chatID, upd.ToolCallID, signature) {
-		return nil
-	}
-	err := f.adapter.SendCard(chatID, "", ToolCallCard{Update: upd})
-	f.logOutgoingToolCall(chatID, upd, err)
-	return err
+	return f.enqueueToolCallUpdate(chatID, upd, signature)
 }
 
-func (f *ImAdapter) shouldEmitToolCall(chatID, toolCallID, signature string) bool {
-	if strings.TrimSpace(toolCallID) == "" {
-		return true
+type toolFlushState struct {
+	lastSentAt time.Time
+	pending    *ToolCallUpdate
+	timer      *time.Timer
+}
+
+func (f *ImAdapter) enqueueToolCallUpdate(chatID string, upd ToolCallUpdate, signature string) error {
+	toolCallID := strings.TrimSpace(upd.ToolCallID)
+	if toolCallID == "" {
+		return nil
 	}
+	now := time.Now()
+
 	f.mu.Lock()
-	defer f.mu.Unlock()
+
 	chatCalls := f.toolCalls[chatID]
 	if chatCalls == nil {
 		chatCalls = map[string]string{}
 		f.toolCalls[chatID] = chatCalls
 	}
 	if prev, ok := chatCalls[toolCallID]; ok && prev == signature {
-		return false
+		f.mu.Unlock()
+		return nil
 	}
 	chatCalls[toolCallID] = signature
-	return true
+
+	chatFlush := f.toolFlush[chatID]
+	if chatFlush == nil {
+		chatFlush = map[string]*toolFlushState{}
+		f.toolFlush[chatID] = chatFlush
+	}
+	state := chatFlush[toolCallID]
+	if state == nil {
+		state = &toolFlushState{}
+		chatFlush[toolCallID] = state
+	}
+	updCopy := upd
+	state.pending = &updCopy
+
+	if state.timer != nil {
+		f.mu.Unlock()
+		return nil
+	}
+
+	if state.lastSentAt.IsZero() || now.Sub(state.lastSentAt) >= toolCallFlushDelay {
+		pending := state.pending
+		state.pending = nil
+		state.lastSentAt = now
+		f.mu.Unlock()
+		if pending == nil {
+			return nil
+		}
+		err := f.adapter.SendCard(chatID, "", ToolCallCard{Update: *pending})
+		f.logOutgoingToolCall(chatID, *pending, err)
+		return err
+	}
+
+	wait := toolCallFlushDelay - now.Sub(state.lastSentAt)
+	if wait < 0 {
+		wait = 0
+	}
+	state.timer = time.AfterFunc(wait, func() {
+		_ = f.flushPendingToolCall(chatID, toolCallID)
+	})
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *ImAdapter) flushPendingToolCall(chatID, toolCallID string) error {
+	var pending *ToolCallUpdate
+
+	f.mu.Lock()
+	if chatFlush := f.toolFlush[chatID]; chatFlush != nil {
+		if state := chatFlush[toolCallID]; state != nil {
+			if state.timer != nil {
+				state.timer.Stop()
+				state.timer = nil
+			}
+			pending = state.pending
+			state.pending = nil
+			state.lastSentAt = time.Now()
+		}
+	}
+	f.mu.Unlock()
+
+	if pending == nil {
+		return nil
+	}
+	err := f.adapter.SendCard(chatID, "", ToolCallCard{Update: *pending})
+	f.logOutgoingToolCall(chatID, *pending, err)
+	return err
+}
+
+func (f *ImAdapter) flushPendingToolCalls(chatID string) error {
+	f.mu.Lock()
+	chatFlush := f.toolFlush[chatID]
+	toolCallIDs := make([]string, 0, len(chatFlush))
+	for toolCallID := range chatFlush {
+		toolCallIDs = append(toolCallIDs, toolCallID)
+	}
+	f.mu.Unlock()
+	for _, toolCallID := range toolCallIDs {
+		if err := f.flushPendingToolCall(chatID, toolCallID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *ImAdapter) clearToolStateLocked(chatID string) {
+	if chatFlush := f.toolFlush[chatID]; chatFlush != nil {
+		for _, state := range chatFlush {
+			if state != nil && state.timer != nil {
+				state.timer.Stop()
+			}
+		}
+	}
+	delete(f.toolCalls, chatID)
+	delete(f.toolFlush, chatID)
 }
 
 type pendingDecision struct {
