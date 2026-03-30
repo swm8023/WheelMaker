@@ -112,6 +112,75 @@ function Ensure-DefaultConfig {
   Write-Step "default config written (edit before first run)"
 }
 
+function Install-ServiceScripts {
+  $wmDir = Join-Path -Path $HOME -ChildPath ".wheelmaker"
+  New-Item -ItemType Directory -Path $wmDir -Force | Out-Null
+
+  $startScript = @'
+# WheelMaker start script — launch daemon in background
+$exe = Join-Path $PSScriptRoot "bin\wheelmaker.exe"
+if (-not (Test-Path $exe)) {
+  Write-Host "wheelmaker.exe not found: $exe" -ForegroundColor Red
+  exit 1
+}
+$running = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
+if ($running.Count -gt 0) {
+  Write-Host ("wheelmaker already running (pids: {0})" -f (($running | ForEach-Object { $_.ProcessId }) -join ",")) -ForegroundColor Yellow
+  exit 0
+}
+Start-Process -FilePath $exe -ArgumentList "-d" -WindowStyle Hidden
+Start-Sleep -Seconds 3
+$procs = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
+if ($procs.Count -gt 0) {
+  Write-Host ("wheelmaker started (pids: {0})" -f (($procs | ForEach-Object { $_.ProcessId }) -join ","))
+} else {
+  Write-Host "wheelmaker failed to start" -ForegroundColor Red
+  exit 1
+}
+'@
+
+  $stopScript = @'
+# WheelMaker stop script — stop all wheelmaker processes
+$all = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
+if ($all.Count -eq 0) {
+  Write-Host "no running wheelmaker process"
+  exit 0
+}
+Write-Host ("stopping pids: {0}" -f (($all | ForEach-Object { $_.ProcessId }) -join ","))
+foreach ($p in $all) {
+  Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue
+}
+Start-Sleep -Seconds 2
+$left = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
+foreach ($p in $left) {
+  Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+}
+Write-Host "wheelmaker stopped"
+'@
+
+  $restartScript = @'
+# WheelMaker restart script — stop then start
+& (Join-Path $PSScriptRoot "stop.ps1")
+& (Join-Path $PSScriptRoot "start.ps1")
+'@
+
+  $scripts = @{
+    "start.ps1"   = $startScript
+    "stop.ps1"    = $stopScript
+    "restart.ps1" = $restartScript
+  }
+
+  foreach ($name in $scripts.Keys) {
+    $path = Join-Path $wmDir $name
+    if ($WhatIf) {
+      Write-Host ("[whatif] write {0}" -f $path)
+      continue
+    }
+    Set-Content -Path $path -Value $scripts[$name] -Encoding UTF8
+  }
+  Write-Step "service scripts installed (start/stop/restart)"
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $serverRoot = Join-Path $repoRoot "server"
 if ([string]::IsNullOrWhiteSpace($SourceExe)) {
@@ -139,4 +208,5 @@ if ($WhatIf) {
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 Copy-Item -Path $source -Destination $targetExe -Force
 Ensure-DefaultConfig
+Install-ServiceScripts
 Write-Step "install done"

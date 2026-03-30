@@ -92,7 +92,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_server.ps1
 Copy-Item server\config.example.json ~\.wheelmaker\config.json
 notepad ~\.wheelmaker\config.json
 # 启动
-~/.wheelmaker/bin/wheelmaker.exe -d
+~\.wheelmaker\start.ps1
+```
+
+安装脚本会在 `~/.wheelmaker/` 下生成以下便捷脚本：
+
+| 脚本 | 功能 |
+|------|------|
+| `start.ps1` | 后台启动守护进程（已运行则跳过） |
+| `stop.ps1` | 停止所有 wheelmaker 进程 |
+| `restart.ps1` | 先 stop 再 start |
+
+日常使用：
+
+```powershell
+~\.wheelmaker\start.ps1     # 启动
+~\.wheelmaker\stop.ps1      # 停止
+~\.wheelmaker\restart.ps1   # 重启
 ```
 
 说明：
