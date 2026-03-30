@@ -9,7 +9,7 @@
 - 文件系统接口支持 hash 协商（conditional GET），减少重复传输。
 - 文本文件按行号寻址（`startLine`/`lineCount`），二进制文件按字节偏移（`offset`/`limit`）。
 - 目录条目仅返回名称和类型，文件详情通过 `fs.read` 按需获取。
-- 分块读（目录分页、文件区块）仅作传输优化，不引入额外的一致性机制；由 push hint + pull data 的整体同步循环保障最终一致。
+- 目录列表一次性返回，不做分页；文件分段读取仅作传输优化，不引入额外一致性机制；由 push hint + pull data 的整体同步循环保障最终一致。
 - Git 列表按版本触发刷新，不做 hash 协商。
 - 协议仅描述 2.1 语义，不包含旧版本兼容分支。
 
@@ -496,12 +496,14 @@ else:
 
 #### 5.5.1 Hash 协商语义
 
-与 `fs.list` 相同：`knownHash` 是 conditional GET。
+`hash` 始终是**整个文件**的 hash（`sha256(raw bytes)`），与读取范围无关。
 
-- `hash` 始终是**整个文件**的 hash（`sha256(raw bytes)`），与读取范围无关。
-- 仅当客户端持有本次请求范围的缓存且知道当时的 `hash` 时才可发送 `knownHash`。
-- 若客户端从未读过该文件内容（如首次点击文件），**不得发送 `knownHash`**。
+`knownHash` 协商逻辑：
+
+- **有缓存、不确定是否过期** → 携带 `knownHash`。服务端校验：hash 未变则快速返回 `notModified=true`，hash 变了则返回新数据 + 新 `hash`。
+- **无缓存**（首次打开、缓存已驱逐） → 不传 `knownHash`。服务端直接返回完整数据。
 - 文件级 hash 未变 ⟹ 所有字节未变 ⟹ 任意范围的缓存均有效。
+- 文件 hash 变化后，客户端应失效该文件所有已缓存的范围。
 
 #### 5.5.2 文本 vs 二进制分流
 
@@ -660,9 +662,9 @@ else:
 规则：
 
 - `hash` 始终是整文件 hash，不随 startLine 变化。
-- `knownHash` 表示"我有 `[startLine, startLine+lineCount)` 的缓存，且缓存时文件 hash 为此值"。
-- 文件 hash 未变 → 该行范围缓存有效 → `notModified=true`。
-- 文件 hash 变了 → 返回新数据 + 新 `hash`，客户端应失效该文件所有已缓存的行范围。
+- 有缓存 → 带 `knownHash`，服务端验证后快速返回或返回新数据。
+- 无缓存 → 不带 `knownHash`，服务端直接返回数据。
+- hash 变了 → 客户端失效该文件所有已缓存的行范围。
 
 > **分段一致性**：分段仅为传输优化。若分段过程中文件内容发生变化，客户端可能获得不一致的拼接；下一轮 push hint 事件会触发重新拉取，自动修正。
 
@@ -1221,8 +1223,8 @@ else:
   "method": "batch",
   "payload": {
     "requests": [
-      { "method": "fs.list", "projectId": "local-hub:WheelMaker", "payload": { "path": "src", "limit": 200, "cursor": "" } },
-      { "method": "fs.list", "projectId": "local-hub:WheelMaker", "payload": { "path": "docs", "limit": 200, "cursor": "" } },
+      { "method": "fs.list", "projectId": "local-hub:WheelMaker", "payload": { "path": "src" } },
+      { "method": "fs.list", "projectId": "local-hub:WheelMaker", "payload": { "path": "docs" } },
       { "method": "git.status", "projectId": "local-hub:WheelMaker", "payload": {} }
     ]
   }
@@ -1361,12 +1363,10 @@ else:
 
 统一规则适用于 `fs.list` 和 `fs.read`：
 
-1. **`knownHash` 仅在发送方持有对应请求范围的完整缓存数据时才可携带。**
-2. 若发送方仅持有 hash 值但无对应数据（如 hash 来源于事件推送、或缓存已驱逐），**不得发送 `knownHash`**。
-3. 服务端收到 `knownHash` 且命中时，`notModified=true` 响应中不返回数据体。
-4. 对 `fs.read` 的范围读取：`knownHash` 表示"我有该范围的缓存，且缓存时整文件 hash 为此值"。文本文件范围为行号 `[startLine, startLine+lineCount)`，二进制文件范围为字节 `[offset, offset+limit)`。文件级 hash 未变 ⟹ 全部字节未变 ⟹ 任意范围缓存有效。
-5. 对 `fs.list`：目录 `hash` 仅覆盖 `kind|name`，内容变化不影响目录 hash。客户端通过 `changedPaths` 事件判断已打开文件是否需要刷新。
-6. 文件 hash 变化后，客户端应失效该文件所有已缓存的范围。
+1. **有缓存、不确定是否过期 → 携带 `knownHash`**。服务端校验 hash：未变则返回 `notModified=true`（不含数据体），变了则返回新数据 + 新 `hash`。
+2. **无缓存 → 不传 `knownHash`**。服务端直接返回完整数据。无缓存的场景包括：首次请求、缓存已驱逐、仅从事件推送获知 hash 但从未拉取过数据。
+3. 对 `fs.read`：文件级 hash 未变 ⟹ 全部内容未变 ⟹ 任意行/字节范围的缓存均有效。hash 变化后，客户端应失效该文件所有已缓存的范围。
+4. 对 `fs.list`：目录 `hash` 仅覆盖 `kind|name`。文件内容变化不影响目录 hash，客户端通过 `changedPaths` 事件判断已打开文件是否需要刷新。
 
 ## 7. 同步策略（Push Hint + Pull Data）
 
@@ -1511,8 +1511,9 @@ Registry 即将关闭客户端连接时提前通知：
    - 客户端从父路径 + `name` 自行拼接 `path`。
    - 文件的详细信息（hash、size、mtime 等）通过 `fs.read` 按需获取。
 
-6. **分块/分页简化**
-   - 分块读（文件区块、目录分页）仅作传输优化，不引入额外的一致性机制（无 snapshotToken、无 pageHash）。
+6. **文件分段读取简化**
+   - `fs.list` 不分页，一次性返回全部直接子项。
+   - `fs.read` 分段仅作传输优化，不引入额外的一致性机制（无 snapshotToken）。
    - 由 push hint + pull data 的整体同步循环保障最终一致性。
 
 7. **二进制文件处理**

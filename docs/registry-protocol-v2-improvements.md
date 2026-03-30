@@ -73,48 +73,45 @@
 | `UNAVAILABLE` | Hub 离线 | 是 | 等待 Hub 重连 |
 | `RATE_LIMITED` | 限流 | 是 | 按退避策略重试 |
 | `TIMEOUT` | 处理超时 | 是 | |
-| `SNAPSHOT_EXPIRED` | 分块读中途源数据变化 | 是 | 从首块重新开始 |
 | `INTERNAL` | 服务端内部错误 | 是 | |
 
 **状态**：✅ 已实施
 
-### 1.5 解决 `fs.read` hash 协商与分块读取的语义冲突
+### 1.5 `knownHash` 协商语义
 
-**问题**：`knownHash` 和读取范围可同时出现，行为未定义。hash 是整文件级别的，读取范围是局部的，两者混在一起产生歧义。
+**问题**：`knownHash` 和读取范围可同时出现，行为未定义。
 
-**修复**——两条规则：
+**修复**——统一 `knownHash` 为 conditional GET：
 
-1. **`hash` 始终是整文件 hash**（`sha256(raw bytes)`），不随读取范围变化。
-2. **`knownHash` = conditional GET**：
-   - 客户端必须持有本次请求范围的缓存数据才可发送。
-   - 从未读过该文件 → **不得发送 `knownHash`**。
-   - 文件 hash 未变 ⟹ 全部字节未变 ⟹ 任意范围缓存有效。
-   - 文件 hash 变化 → 失效该文件所有已缓存范围。
+- **有缓存、不确定是否过期** → 携带 `knownHash`，服务端校验后快速返回 `notModified` 或新数据。
+- **无缓存**（首次请求、缓存已驱逐） → 不传 `knownHash`，服务端直接返回完整数据。
+- `hash` 始终是整文件/整目录的 hash，不随读取范围变化。
+- 文件 hash 变化 → 客户端失效该文件所有已缓存范围。
 
 **状态**：✅ 已实施
 
-### 1.6 分块/分页仅作传输优化，不引入一致性机制
+### 1.6 文件分段读取简化
 
-**问题**：分块过程中源数据变化，客户端可能拼接到不一致数据。
+**问题**：分段过程中源数据变化，客户端可能拼接到不一致数据。
 
-**结论**：不引入 `snapshotToken` 等额外机制。理由：
+**结论**：
 
-- 本系统是只读观测，不一致的影响可接受。
-- push hint + pull data 同步循环会在下一轮事件中自动修正。
-- 增加 token/过期机制带来的复杂度远大于收益。
+- `fs.list` **不分页**，目录规模有限，一次性返回全部直接子项。
+- `fs.read` 分段仅作传输优化，不引入 `snapshotToken` 等一致性机制。
+- push hint + pull data 同步循环会在下一轮事件中自动修正不一致。
 
-**状态**：✅ 已实施（决定不做，简化设计）
+**状态**：✅ 已实施（简化设计）
 
 ### 1.7 `fs.list` 极简化
 
-**问题**：早期设计中 `fs.list` 每个条目返回 `path`、`size`、`mtime`、`hash` 等详细信息，对服务端开销过大（需遍历整个目录计算所有文件 hash）。
+**问题**：早期设计中 `fs.list` 每个条目返回 `path`、`size`、`mtime`、`hash` 等详细信息，对服务端开销过大。
 
 **修复**：
 
 - 条目仅返回 `{name, kind}`，不返回详细信息。
 - 客户端从父路径 + `name` 自行拼接 `path`。
-- 文件详情（hash、size、mimeType 等）通过 `fs.read` 按需获取（用户点击时）。
-- 目录 hash 公式随之简化为 `sha256(sorted "kind|name\n")`，仅反映条目增删/重命名。
+- 文件详情（hash、size、mimeType 等）通过 `fs.read` 按需获取。
+- 目录 hash 公式简化为 `sha256(sorted "kind|name\n")`，仅反映条目增删/重命名。
 
 **状态**：✅ 已实施
 
@@ -327,7 +324,8 @@ v2 的 5.4 节有两套相互矛盾的响应示例（一套有 `contentHash`/`no
 
 ```
 hash 管"要不要读" → knownHash 协商（conditional GET）
-分块/分页仅为传输优化 → 不引入额外一致性机制
+fs.list 不分页 → 目录一次性返回全部子项
+fs.read 分段仅为传输优化 → 不引入额外一致性机制
 push hint + pull data → 整体同步循环保障最终一致
 ```
 
@@ -357,12 +355,9 @@ push hint + pull data → 整体同步循环保障最终一致
 ### `knownHash` = Conditional GET
 
 ```
-knownHash 出现  → "我有这份数据的缓存，hash 是这个，没变就别传了"
-knownHash 不传  → "我没有缓存，无论如何把数据给我"
+有缓存、不确定是否过期 → 带 knownHash，服务端校验后快速返回或返回新数据
+无缓存（首次/已驱逐） → 不带 knownHash，服务端直接返回完整数据
 ```
-
-**绝对禁止**：客户端从未读过文件内容时发送 `knownHash`——
-会导致服务端返回 `notModified=true`，客户端无数据可展示的死局。
 
 ### 随机范围读取
 
@@ -372,12 +367,11 @@ knownHash 不传  → "我没有缓存，无论如何把数据给我"
 
 ### 完整字段视图
 
-**fs.list（目录）**：
+**fs.list（目录，不分页）**：
 
 ```
-hash           → 整个目录的 hash（基于 kind|name），首页协商用
+hash           → 整个目录的 hash（基于 kind|name），协商用
 entries        → [{name, kind}, ...] 极简条目
-（无 snapshotToken、无 pageHash、无 entry.hash）
 ```
 
 **fs.read（文本文件）**：
@@ -389,7 +383,6 @@ lineCount      → 请求行数
 totalLines     → 文件总行数（首段响应）
 returnedLines  → 实际返回行数
 hasMore        → 是否有后续行
-（无块级 hash、无 snapshotToken）
 ```
 
 **fs.read（二进制文件）**：
@@ -399,7 +392,6 @@ hash           → 整个文件的 hash，首块协商用
 offset/limit   → 字节范围
 eof            → 是否到文件末尾
 nextOffset     → 下一块起始偏移
-（无块级 hash、无 snapshotToken）
 ```
 
 ---
