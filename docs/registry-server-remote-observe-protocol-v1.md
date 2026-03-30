@@ -151,14 +151,8 @@ Registry 响应：
   "type": "response",
   "method": "hello",
   "payload": {
-    "serverVersion": "x.y.z",
-    "protocolVersion": "1.0",
     "acceptedRole": "hub",
-    "features": {
-      "hubReportProjects": true,
-      "pushHint": true,
-      "pingPong": true
-    }
+    "authRequired": true
   }
 }
 ```
@@ -169,6 +163,7 @@ hello 校验规则（强约束）：
 - `role=hub` 时，`hubId` 必填。
 - `role=client` 时，`hubId` 允许省略（由 `auth` 绑定作用域）。
 - Registry 必须在连接状态中记录 `role/hubId`，用于后续方法白名单校验。
+- 认证前（`auth.ok=true` 之前）不得返回 `features/serverVersion/protocolVersion` 等能力细节。
 
 ### 4.2.2 auth（必选，Hub/Client 通用）
 
@@ -199,6 +194,15 @@ Registry 成功响应：
     "principal": {
       "role": "hub",
       "hubId": "local-hub"
+    },
+    "serverInfo": {
+      "serverVersion": "x.y.z",
+      "protocolVersion": "1.0"
+    },
+    "features": {
+      "hubReportProjects": true,
+      "pushHint": true,
+      "pingPong": true
     }
   }
 }
@@ -210,6 +214,12 @@ auth 后续约束：
 - `role=hub` 仅允许调用 `registry.reportProjects`、`registry.reportProjectRevs`、`ping`。
 - `role=client` 仅允许调用 `project.list`、`fs.*`、`git.*`、`ping`。
 - 若调用方法与 `role` 不匹配，返回 `FORBIDDEN`。
+
+auth 失败与防探测约束：
+
+- `hello/auth` 失败响应统一为 `UNAUTHORIZED`，避免暴露枚举信息。
+- 认证失败后应立即关闭连接，不保留半认证会话。
+- 认证失败不返回详细失败原因（例如 token 不存在/过期/签名错误不区分）。
 
 ### 4.2.3 registry.reportProjects（核心）
 
@@ -453,6 +463,15 @@ Registry 必须显式区分两类连接：
 - client 在完成 `auth` 前，不允许调用 `project.list`、`fs.*`、`git.*`。
 - client token 必须带明确 `hubId` 作用域；未绑定 hub 的 token 视为无效。
 
+### 4.3.3 防探测与抗重放要求（新增）
+
+- 连接级限速：按 `IP + role + hubId` 维度限制握手失败频率，超过阈值返回 `RATE_LIMITED`。
+- 重连退避：认证失败场景要求指数退避（建议 `2s -> 4s -> 8s`，上限 `60s`）。
+- 抗重放：`auth` 请求建议携带 `ts + nonce`，服务端校验时间窗并去重 `nonce`。
+- token 约束：必须校验 `exp`、签名与 `hubId/projectIds` 作用域绑定。
+- 审计：记录 `UNAUTHORIZED/FORBIDDEN/RATE_LIMITED`，包含 `requestId/remoteAddr/role/hubId`。
+- 本阶段不强制协议层 `wss` 要求（由后续网络安全专项统一推进）。
+
 ## 4.4 projectId -> hub 反查与路由规则（新增）
 
 Registry 维护映射：
@@ -498,7 +517,7 @@ Registry 维护映射：
 建议：
 
 - 错误响应 `details` 至少包含 `projectId`、`hubId`（若可确定）与 `requestId`。
-- 对 `UNAUTHORIZED/FORBIDDEN` 进行安全审计日志记录。
+- 对 `UNAUTHORIZED/FORBIDDEN/RATE_LIMITED` 进行安全审计日志记录。
 
 ## 5. Client <-> Registry 协议（V2）
 
@@ -511,12 +530,16 @@ Registry 维护映射：
 
 服务端返回：
 
-- `pushHintEnabled`
-- `hashAlgorithms`（用于 FS 接口）
+- 仅返回最小握手确认（不返回能力细节）
 
 ## 5.1.1 client auth（与 4.3 统一 Token 对应）
 
 客户端在 `hello` 后发送 `auth`，用于携带统一 token。
+
+服务端在 `auth` 成功后返回能力细节：
+
+- `pushHintEnabled`
+- `hashAlgorithms`（用于 FS 接口）
 
 ```json
 {
