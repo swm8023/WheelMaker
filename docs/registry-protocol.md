@@ -7,7 +7,9 @@
 - 以 `project` 为同步单元，支持多 Hub、多 Project。
 - 客户端只刷新可见范围（展开目录、打开/Pin 文件、当前 Git 视图）。
 - 文件系统接口支持 hash 协商（conditional GET），减少重复传输。
-- 分块读（目录分页、文件区块）引入 `snapshotToken` 保证一致性。
+- 文本文件按行号寻址（`startLine`/`lineCount`），二进制文件按字节偏移（`offset`/`limit`）。
+- 目录条目仅返回名称和类型，文件详情通过 `fs.read` 按需获取。
+- 分块读（目录分页、文件区块）仅作传输优化，不引入额外的一致性机制；由 push hint + pull data 的整体同步循环保障最终一致。
 - Git 列表按版本触发刷新，不做 hash 协商。
 - 协议仅描述 2.1 语义，不包含旧版本兼容分支。
 
@@ -207,7 +209,6 @@ Registry 维护：
 | `UNAVAILABLE` | Hub 离线 | 是 | 等待 Hub 重连 |
 | `RATE_LIMITED` | 限流 | 是 | 按 backoff 重试 |
 | `TIMEOUT` | 处理超时 | 是 | |
-| `SNAPSHOT_EXPIRED` | 分块读中途源数据变化 | 是 | 从首块重新开始 |
 | `INTERNAL` | 服务端内部错误 | 是 | |
 
 ## 4. Hub 侧协议
@@ -423,11 +424,9 @@ else:
 
 ### 5.4 `fs.list`（目录）
 
-#### 5.4.1 Hash 协商语义
+目录列表一次性返回全部直接子项，不做分页。目录规模有限，无需分块传输。
 
-`knownHash` 是 **conditional GET** — 仅当客户端持有该目录/页的完整 entries 缓存时才可发送。若客户端仅知道 hash 值但无缓存数据（如 hash 来源于事件推送、或缓存已被驱逐），则**不得发送 `knownHash`**。
-
-#### 5.4.2 基本请求
+#### 5.4.1 请求
 
 ```json
 {
@@ -437,14 +436,15 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "docs",
-    "knownHash": "sha256:prev-docs-hash",
-    "limit": 200,
-    "cursor": ""
+    "knownHash": "sha256:prev-docs-hash"
   }
 }
 ```
 
-#### 5.4.3 响应 — 未变化（knownHash 命中）
+- `knownHash`：可选。客户端持有该目录的 entries 缓存时携带，服务端校验 hash 未变则快速返回 `notModified`。
+- 无缓存或缓存已驱逐时**不传** `knownHash`，服务端直接返回完整数据。
+
+#### 5.4.2 响应 — 未变化
 
 ```json
 {
@@ -454,13 +454,13 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "docs",
-    "snapshotHash": "sha256:prev-docs-hash",
+    "hash": "sha256:prev-docs-hash",
     "notModified": true
   }
 }
 ```
 
-#### 5.4.4 响应 — 有变化（首页）
+#### 5.4.3 响应 — 有变化
 
 ```json
 {
@@ -470,87 +470,27 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "docs",
-    "snapshotHash": "sha256:new-docs-hash",
+    "hash": "sha256:new-docs-hash",
     "notModified": false,
-    "pageHash": "sha256:page-1-hash",
-    "snapshotToken": "dt_17119_x9y8z7",
     "entries": [
-      { "name": "registry-protocol.md", "path": "docs/registry-protocol.md", "kind": "file", "size": 21459, "mtime": "2026-03-30T09:20:00Z", "dataHash": "sha256:..." },
-      { "name": "superpowers", "path": "docs/superpowers", "kind": "dir", "size": 0, "mtime": "2026-03-30T09:10:00Z", "dataHash": "" }
-    ],
-    "nextCursor": "after:200"
+      { "name": "registry-protocol.md", "kind": "file" },
+      { "name": "superpowers", "kind": "dir" }
+    ]
   }
 }
 ```
 
-#### 5.4.5 后续页请求（分页续读）
+#### 5.4.4 字段说明
 
-```json
-{
-  "requestId": 2,
-  "type": "request",
-  "method": "fs.list",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "path": "docs",
-    "snapshotToken": "dt_17119_x9y8z7",
-    "knownPageHash": "sha256:cached-page-2-hash",
-    "cursor": "after:200",
-    "limit": 200
-  }
-}
-```
+| 字段 | 请求 | 响应 |
+|------|------|------|
+| `path` | 必传 | 必返回 |
+| `knownHash` | 可选（有缓存时） | — |
+| `hash` | — | 必返回 |
+| `notModified` | — | 必返回 |
+| `entries` | — | `notModified=false` 时返回 |
 
-后续页响应 — 页未变化：
-
-```json
-{
-  "requestId": 2,
-  "type": "response",
-  "method": "fs.list",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "path": "docs",
-    "pageHash": "sha256:cached-page-2-hash",
-    "notModified": true,
-    "nextCursor": ""
-  }
-}
-```
-
-后续页响应 — 页有变化：
-
-```json
-{
-  "requestId": 2,
-  "type": "response",
-  "method": "fs.list",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "path": "docs",
-    "pageHash": "sha256:new-page-2-hash",
-    "notModified": false,
-    "entries": [...],
-    "nextCursor": ""
-  }
-}
-```
-
-#### 5.4.6 `fs.list` 字段总结
-
-| 字段 | 首页请求 | 首页响应 | 后续页请求 | 后续页响应 |
-|------|---------|---------|-----------|-----------|
-| `knownHash` | 可选（有整页缓存时） | — | — | — |
-| `snapshotHash` | — | 必返回 | — | — |
-| `knownPageHash` | — | — | 可选（有本页缓存时） | — |
-| `pageHash` | — | 必返回 | — | 必返回 |
-| `notModified` | — | 必返回 | — | 必返回 |
-| `snapshotToken` | — | 有后续页时必返回 | 必传 | — |
-| `cursor` | `""` | — | 必传 | — |
-| `nextCursor` | — | 必返回 | — | 必返回 |
-| `entries` | — | `notModified=false` 时 | — | `notModified=false` 时 |
-
-> **`snapshotHash` 仅覆盖当前目录的直接子项**（一级），不递归反映子目录内部变化。客户端必须对每个已展开目录独立发起 `fs.list` 协商；父目录 `notModified=true` 不意味着子目录未变化。
+> **目录 `hash`** 仅覆盖直接子项的名称与类型（`kind|name`），不反映文件内容变化，也不递归反映子目录内部变化。文件内容的变化通过 `project.changed` 事件的 `changedPaths` 推送，客户端对已打开文件单独发起 `fs.read`。
 
 ### 5.5 `fs.read`（文件）
 
@@ -558,25 +498,29 @@ else:
 
 与 `fs.list` 相同：`knownHash` 是 conditional GET。
 
-- `contentHash` 始终是**整个文件**的 hash（`sha256(raw bytes)`），与 `offset/limit` 无关。
-- 仅当客户端持有本次请求范围 `[offset, offset+limit)` 的缓存且知道当时的 `contentHash` 时才可发送 `knownHash`。
-- 若客户端仅从 `fs.list` 的 `dataHash` 获知文件 hash 但从未读过内容，**不得发送 `knownHash`**。
+- `hash` 始终是**整个文件**的 hash（`sha256(raw bytes)`），与读取范围无关。
+- 仅当客户端持有本次请求范围的缓存且知道当时的 `hash` 时才可发送 `knownHash`。
+- 若客户端从未读过该文件内容（如首次点击文件），**不得发送 `knownHash`**。
 - 文件级 hash 未变 ⟹ 所有字节未变 ⟹ 任意范围的缓存均有效。
 
-#### 5.5.2 二进制文件处理
+#### 5.5.2 文本 vs 二进制分流
 
-服务端通过内容检测判定文件是否为二进制。响应中增加：
+服务端通过内容检测判定文件类型，响应中返回：
 
 - `isBinary: boolean` — 是否为二进制文件。
-- `mimeType: string` — MIME 类型（如 `"image/png"`、`"application/octet-stream"`）。
-- 当 `isBinary=true` 时：
-  - 小于 2MiB：`encoding: "base64"`，`content` 为 base64 编码。
-  - 大于等于 2MiB：`encoding: "none"`，`content: null`，仅返回元信息。
-- 当 `isBinary=false` 时：`encoding: "utf-8"`。
+- `mimeType: string` — MIME 类型（如 `"text/markdown"`、`"image/png"`）。
 
-#### 5.5.3 基本请求/响应
+两种文件使用不同的读取模式：
 
-首块或全量请求：
+| | 文本文件（`isBinary=false`） | 二进制文件（`isBinary=true`） |
+|---|---|---|
+| 寻址单位 | **行号**（`startLine` / `lineCount`） | **字节偏移**（`offset` / `limit`） |
+| 编码 | `utf-8` | `base64`（< 2MiB）或 `none`（>= 2MiB，仅元信息） |
+| 缓存粒度 | 按 `{path, startLine, lineCount, hash}` | 按 `{path, offset, limit, hash}` |
+
+#### 5.5.3 文本文件读取
+
+**基本请求**：
 
 ```json
 {
@@ -587,13 +531,15 @@ else:
   "payload": {
     "path": "docs/registry-protocol.md",
     "knownHash": "sha256:old-content-hash",
-    "offset": 0,
-    "limit": 65536
+    "startLine": 1,
+    "lineCount": 500
   }
 }
 ```
 
-响应 — 未变化：
+`startLine` 从 1 开始。`lineCount` 为请求的行数，建议默认 500 行。省略 `startLine` 和 `lineCount` 时默认从第 1 行开始读取，服务端返回默认行数。
+
+**响应 — 未变化**：
 
 ```json
 {
@@ -603,13 +549,13 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "docs/registry-protocol.md",
-    "contentHash": "sha256:old-content-hash",
+    "hash": "sha256:old-content-hash",
     "notModified": true
   }
 }
 ```
 
-响应 — 有变化（小文件一块读完）：
+**响应 — 有变化（小文件一次读完）**：
 
 ```json
 {
@@ -619,23 +565,22 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "docs/registry-protocol.md",
-    "contentHash": "sha256:new-content-hash",
+    "hash": "sha256:new-content-hash",
     "notModified": false,
     "isBinary": false,
     "mimeType": "text/markdown",
-    "content": "...file content...",
     "encoding": "utf-8",
+    "content": "line1\nline2\n...",
     "size": 21459,
-    "eof": true
+    "totalLines": 380,
+    "startLine": 1,
+    "returnedLines": 380,
+    "hasMore": false
   }
 }
 ```
 
-#### 5.5.4 分块读取流程
-
-推荐默认块大小 `64KiB`，单次上限 `1MiB`。
-
-首块响应（有后续块）：
+**大文件分段读取 — 首段响应**：
 
 ```json
 {
@@ -644,22 +589,23 @@ else:
   "method": "fs.read",
   "projectId": "local-hub:WheelMaker",
   "payload": {
-    "path": "docs/big-file.md",
-    "contentHash": "sha256:whole-file-hash",
+    "path": "src/big-module.go",
+    "hash": "sha256:whole-file-hash",
     "notModified": false,
     "isBinary": false,
-    "mimeType": "text/markdown",
-    "content": "...chunk-1...",
+    "mimeType": "text/x-go",
     "encoding": "utf-8",
-    "size": 200000,
-    "eof": false,
-    "nextOffset": 65536,
-    "snapshotToken": "ft_17119_a3b2c1"
+    "content": "package main\n...(500 lines)...",
+    "size": 45000,
+    "totalLines": 1200,
+    "startLine": 1,
+    "returnedLines": 500,
+    "hasMore": true
   }
 }
 ```
 
-后续块请求：
+**后续段请求**：
 
 ```json
 {
@@ -668,15 +614,14 @@ else:
   "method": "fs.read",
   "projectId": "local-hub:WheelMaker",
   "payload": {
-    "path": "docs/big-file.md",
-    "snapshotToken": "ft_17119_a3b2c1",
-    "offset": 65536,
-    "limit": 65536
+    "path": "src/big-module.go",
+    "startLine": 501,
+    "lineCount": 500
   }
 }
 ```
 
-后续块响应：
+**后续段响应**：
 
 ```json
 {
@@ -685,19 +630,17 @@ else:
   "method": "fs.read",
   "projectId": "local-hub:WheelMaker",
   "payload": {
-    "path": "docs/big-file.md",
-    "content": "...chunk-2...",
+    "path": "src/big-module.go",
+    "content": "...(lines 501-1000)...",
     "encoding": "utf-8",
-    "eof": true,
-    "nextOffset": 200000,
-    "snapshotToken": "ft_17119_a3b2c1"
+    "startLine": 501,
+    "returnedLines": 500,
+    "hasMore": true
   }
 }
 ```
 
-#### 5.5.5 随机范围读取
-
-客户端可以从文件任意位置开始读取（如大日志文件滚动到中间）：
+**随机范围读取**（跳转到文件中间）：
 
 ```json
 {
@@ -708,58 +651,115 @@ else:
   "payload": {
     "path": "logs/server.log",
     "knownHash": "sha256:file-hash-when-cached",
-    "offset": 5242880,
-    "limit": 65536
+    "startLine": 8000,
+    "lineCount": 200
   }
 }
 ```
 
 规则：
 
-- `contentHash` 始终是整文件 hash，不随 offset 变化。
-- `knownHash` 表示"我有 `[offset, offset+limit)` 的缓存，且缓存时文件 hash 为此值"。
-- 文件 hash 未变 → 该范围必然未变 → `notModified=true`。
-- 文件 hash 变了 → 返回新数据 + 新 `contentHash`，客户端应失效该文件的所有范围缓存。
+- `hash` 始终是整文件 hash，不随 startLine 变化。
+- `knownHash` 表示"我有 `[startLine, startLine+lineCount)` 的缓存，且缓存时文件 hash 为此值"。
+- 文件 hash 未变 → 该行范围缓存有效 → `notModified=true`。
+- 文件 hash 变了 → 返回新数据 + 新 `hash`，客户端应失效该文件所有已缓存的行范围。
 
-#### 5.5.6 `fs.read` 字段总结
+> **分段一致性**：分段仅为传输优化。若分段过程中文件内容发生变化，客户端可能获得不一致的拼接；下一轮 push hint 事件会触发重新拉取，自动修正。
 
-| 字段 | 首块/范围请求 | 首块响应 | 后续块请求 | 后续块响应 |
-|------|-------------|---------|-----------|-----------|
-| `knownHash` | 可选（有对应范围缓存时） | — | 不传 | — |
-| `contentHash` | — | 必返回 | — | 不返回 |
+#### 5.5.4 二进制文件读取
+
+二进制文件使用字节偏移寻址：
+
+```json
+{
+  "requestId": 5,
+  "type": "request",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "assets/logo.png",
+    "offset": 0,
+    "limit": 65536
+  }
+}
+```
+
+响应（小于 2MiB）：
+
+```json
+{
+  "requestId": 5,
+  "type": "response",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "assets/logo.png",
+    "hash": "sha256:image-hash",
+    "notModified": false,
+    "isBinary": true,
+    "mimeType": "image/png",
+    "encoding": "base64",
+    "content": "iVBORw0KGgo...",
+    "size": 15360,
+    "eof": true
+  }
+}
+```
+
+响应（>= 2MiB，仅元信息）：
+
+```json
+{
+  "requestId": 6,
+  "type": "response",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "assets/large-video.mp4",
+    "hash": "sha256:video-hash",
+    "notModified": false,
+    "isBinary": true,
+    "mimeType": "video/mp4",
+    "encoding": "none",
+    "content": null,
+    "size": 52428800
+  }
+}
+```
+
+二进制分块使用 `offset`/`limit`/`eof`/`nextOffset`，逻辑与文本按行读取类似，只是寻址单位为字节。
+
+#### 5.5.5 `fs.read` 字段总结
+
+**文本文件**：
+
+| 字段 | 首段请求 | 首段响应 | 后续段请求 | 后续段响应 |
+|------|---------|---------|-----------|-----------|
+| `knownHash` | 可选 | — | 不传 | — |
+| `hash` | — | 必返回 | — | 不返回 |
 | `notModified` | — | 必返回 | — | 不返回 |
-| `snapshotToken` | 不传 | 有后续块时必返回 | 必传 | 回显 |
+| `startLine` / `lineCount` | 可选（默认从首行） | — | 必传 | — |
+| `totalLines` | — | 首段必返回 | — | 不返回 |
+| `startLine` (响应) | — | 必返回 | — | 必返回 |
+| `returnedLines` | — | 必返回 | — | 必返回 |
+| `hasMore` | — | 必返回 | — | 必返回 |
+| `isBinary` | — | 首段必返回 | — | 不返回 |
+| `mimeType` | — | 首段必返回 | — | 不返回 |
+| `size` | — | 首段必返回 | — | 不返回 |
+
+**二进制文件**：
+
+| 字段 | 首块请求 | 首块响应 | 后续块请求 | 后续块响应 |
+|------|---------|---------|-----------|-----------|
+| `knownHash` | 可选 | — | 不传 | — |
+| `hash` | — | 必返回 | — | 不返回 |
+| `notModified` | — | 必返回 | — | 不返回 |
 | `offset` / `limit` | 必传 | — | 必传 | — |
 | `eof` | — | 必返回 | — | 必返回 |
 | `nextOffset` | — | `eof=false` 时 | — | 必返回 |
 | `isBinary` | — | 首块必返回 | — | 不返回 |
 | `mimeType` | — | 首块必返回 | — | 不返回 |
 | `size` | — | 首块必返回 | — | 不返回 |
-
-### 5.6 `snapshotToken` 一致性机制
-
-`fs.list`（分页）和 `fs.read`（分块）共享同一套一致性保障规则：
-
-1. 服务端在首块/首页响应中返回 `snapshotToken`（不透明字符串），当且仅当存在后续块/页（`eof=false` 或 `nextCursor!=""`）。
-2. 客户端在所有后续请求中必须回传 `snapshotToken`。
-3. 服务端在处理后续块/页前校验源数据是否变化：
-   - 未变化：正常返回。
-   - 已变化：返回 `SNAPSHOT_EXPIRED` 错误。
-4. 客户端收到 `SNAPSHOT_EXPIRED` 后丢弃已读取的所有部分数据，从首块/首页重新开始。
-5. `snapshotToken` 有服务端 TTL（建议 60 秒）。过期同样返回 `SNAPSHOT_EXPIRED`。
-6. 单块/单页完成（`eof=true` / `nextCursor=""`）的场景不需要 `snapshotToken`。
-
-服务端实现建议（轻量级，不需要 COW）：
-
-```go
-type snapshotToken struct {
-    path  string
-    mtime int64
-    size  int64
-    hash  string
-}
-// 后续块请求时：if file.mtime != token.mtime || file.size != token.size → SNAPSHOT_EXPIRED
-```
 
 ### 5.7 `fs.search`（文件名模糊查找）
 
@@ -1322,35 +1322,21 @@ type snapshotToken struct {
 - 输出格式：`sha256:<hex-lowercase>`。
 - 规范化要求：排序、换行符、路径分隔符必须先归一，再计算哈希。
 
-### 6.1 `dataHash`（文件内容） / `contentHash`
+### 6.1 `hash`（实体哈希）
 
-- 计算：`sha256(raw bytes)`。
-- `dataHash` 出现在目录项的文件条目中。
-- `contentHash` 出现在 `fs.read` 响应中。
-- 二者对同一文件的值完全相同。
+所有实体统一使用 `hash` 字段名。计算方式按实体类型不同：
 
-### 6.2 `snapshotHash`（目录快照）
+**文件**：`hash = sha256(raw bytes)`。仅出现在 `fs.read` 响应中。`fs.list` 不返回单个文件的 hash。
 
-对目录下直接子项（一级）生成字符串：`kind|name|dataHash`。
+**目录**：对目录下直接子项（一级）生成字符串：`kind|name`。
 
-- `kind=dir` 时 `dataHash` 固定为空字符串。
-- `kind=file` 时 `dataHash` 为该文件的 `dataHash`。
 - 对所有条目先按 `(kind, name)` 升序排序，再用 `\n` 拼接。
-- 对拼接结果做 `sha256`，得到 `snapshotHash`。
+- 对拼接结果做 `sha256`，得到 `hash`。
+- 目录 hash 仅反映直接子项的**名称和类型**变化（新增/删除/重命名条目），不反映文件内容变化。
 
-> **重要**：`snapshotHash` 仅覆盖直接子项。子目录内部变化不会反映在父目录的 `snapshotHash` 中。客户端必须对每个展开层级独立做 hash 协商。
+> **重要**：`hash` 仅覆盖直接子项的名称与类型。文件内容变化不影响父目录 `hash`；子目录内部变化也不影响父目录 `hash`。客户端获取文件详细信息（`hash`、`size`、`mtime` 等）需通过 `fs.read` 单独请求。
 
-### 6.3 `pageHash`（目录分页哈希）
-
-计算方式与 `snapshotHash` 相同，但范围从整个目录缩小到**当前页的条目**：
-
-```text
-pageHash = sha256( join("\n", sort(page_entries).map(e => "kind|name|dataHash")) )
-```
-
-用于分页续读时跳过未变化的页。
-
-### 6.4 `worktreeRev`（工作区）
+### 6.2 `worktreeRev`（工作区）
 
 - 输入来源：`git status --porcelain` 输出。
 - 归一规则：
@@ -1359,27 +1345,28 @@ pageHash = sha256( join("\n", sort(page_entries).map(e => "kind|name|dataHash"))
   - 去除尾随空白。
 - 对归一结果做 `sha256` 得到 `worktreeRev`。
 
-### 6.5 `gitRev`（Git 版本）
+### 6.3 `gitRev`（Git 版本）
 
 - 输入串：`branch + "\n" + headSha + "\n" + dirty`。
 - `dirty` 使用布尔字符串 `true/false`。
 - 对输入串做 `sha256` 得到 `gitRev`。
 
-### 6.6 `projectRev`（项目聚合版本）
+### 6.4 `projectRev`（项目聚合版本）
 
 - 当前阶段仅由 Git 侧派生，不引入全量 FS watcher。
 - 输入串：`gitRev + "\n" + worktreeRev`。
 - 对输入串做 `sha256` 得到 `projectRev`。
 
-### 6.7 `knownHash` 协商规则（Conditional GET）
+### 6.5 `knownHash` 协商规则（Conditional GET）
 
 统一规则适用于 `fs.list` 和 `fs.read`：
 
 1. **`knownHash` 仅在发送方持有对应请求范围的完整缓存数据时才可携带。**
-2. 若发送方仅持有 hash 值但无对应数据（如 hash 来源于目录 `dataHash`、事件推送、或缓存已驱逐），**不得发送 `knownHash`**。
+2. 若发送方仅持有 hash 值但无对应数据（如 hash 来源于事件推送、或缓存已驱逐），**不得发送 `knownHash`**。
 3. 服务端收到 `knownHash` 且命中时，`notModified=true` 响应中不返回数据体。
-4. 对 `fs.read` 的范围读取：`knownHash` 表示"我有 `[offset, offset+limit)` 的缓存，且缓存时整文件 hash 为此值"。文件级 hash 未变 ⟹ 全部字节未变 ⟹ 任意范围缓存有效。
-5. 文件 hash 变化后，客户端应失效该文件所有已缓存的范围。
+4. 对 `fs.read` 的范围读取：`knownHash` 表示"我有该范围的缓存，且缓存时整文件 hash 为此值"。文本文件范围为行号 `[startLine, startLine+lineCount)`，二进制文件范围为字节 `[offset, offset+limit)`。文件级 hash 未变 ⟹ 全部字节未变 ⟹ 任意范围缓存有效。
+5. 对 `fs.list`：目录 `hash` 仅覆盖 `kind|name`，内容变化不影响目录 hash。客户端通过 `changedPaths` 事件判断已打开文件是否需要刷新。
+6. 文件 hash 变化后，客户端应失效该文件所有已缓存的范围。
 
 ## 7. 同步策略（Push Hint + Pull Data）
 
@@ -1478,11 +1465,11 @@ Registry 即将关闭客户端连接时提前通知：
 
 ### 8.3 可见范围拉取规则（FS）
 
-- 已展开目录：`fs.list(path, knownHash)`。
-- 当前打开文件和 Pin 文件：`fs.read(path, knownHash, offset, limit)`。
+- 已展开目录：`fs.list(path, knownHash)` — 目录 hash 仅反映条目名称和类型变化。
+- 当前打开文件和 Pin 文件：`fs.read(path, knownHash, ...)` — 获取文件内容、hash、size 等详细信息。
 - 非可见目录与文件不主动拉取。
 - 若 `changedPaths` 存在，仅对交集路径做刷新。
-- 父目录 `notModified=true` **不代表**子目录未变化（见 6.2），每个展开层级独立协商。
+- 文件内容变化不改变父目录 hash，需依赖 `changedPaths` 或 `fs.read` 单独检测。
 
 ### 8.4 幂等与去重
 
@@ -1494,9 +1481,9 @@ Registry 即将关闭客户端连接时提前通知：
 
 1. **协议收敛**：统一 `project.list`；保留 `reportProjects + updateProject` 双上报。
 2. **Hub 侧**：接入 `projectRev/gitRev/headSha/dirty/worktreeRev` 即时上报；回传 `connectionEpoch`。
-3. **服务端**：实现路由反查、幂等判新、`snapshotToken` 管理、错误码标准化。
-4. **客户端**：按方案 C 做可见范围增量刷新；实现 conditional GET 与分块一致性。
-5. **可观测性**：补齐 hash 命中率、snapshotToken 过期率、Git 刷新耗时、工作区变更推送频率等指标。
+3. **服务端**：实现路由反查、幂等判新、错误码标准化。
+4. **客户端**：按 push hint + pull data 做可见范围增量刷新；实现 conditional GET。
+5. **可观测性**：补齐 hash 命中率、Git 刷新耗时、工作区变更推送频率等指标。
 
 ## 10. 版本历史
 
@@ -1512,41 +1499,47 @@ Registry 即将关闭客户端连接时提前通知：
 
 3. **错误体系标准化**
    - 定义统一错误响应 JSON 结构（`code` + `message` + `details`）。
-   - 补齐完整错误码表（含 `SNAPSHOT_EXPIRED`、`INTERNAL`）。
+   - 补齐完整错误码表（含 `INTERNAL`）。
 
 4. **Hash 协商语义收敛（Conditional GET）**
    - 明确 `knownHash` 仅在持有缓存数据时才可发送。
-   - 明确 `contentHash` 始终为整文件 hash，支持任意 offset 范围的缓存验证。
-   - 明确 `snapshotHash` 仅覆盖一级子项，客户端必须按层级独立协商。
+   - 明确 `hash` 始终为整文件 hash，支持任意 offset 范围的缓存验证。
+   - 目录 `hash` 仅覆盖 `kind|name`（条目名称与类型），不包含文件内容 hash。
 
-5. **分块读一致性保障（`snapshotToken`）**
-   - `fs.list` 分页和 `fs.read` 分块统一引入 `snapshotToken`。
-   - 源数据变化时返回 `SNAPSHOT_EXPIRED`，客户端从头重读。
-   - 定义 token TTL（建议 60s）。
+5. **`fs.list` 极简化**
+   - 目录条目仅返回 `name` 和 `kind`，不返回 `size`、`mtime`、`path`、`hash` 等详细信息。
+   - 客户端从父路径 + `name` 自行拼接 `path`。
+   - 文件的详细信息（hash、size、mtime 等）通过 `fs.read` 按需获取。
 
-6. **目录分页增强（`pageHash`）**
-   - 后续页支持 `knownPageHash` 跳过未变化的页，减少传输量。
+6. **分块/分页简化**
+   - 分块读（文件区块、目录分页）仅作传输优化，不引入额外的一致性机制（无 snapshotToken、无 pageHash）。
+   - 由 push hint + pull data 的整体同步循环保障最终一致性。
 
 7. **二进制文件处理**
    - `fs.read` 响应增加 `isBinary`、`mimeType` 字段。
    - 定义 base64 编码和 metadata-only 两种策略。
 
-8. **共享 ProjectObject**
+8. **文本文件行级读取**
+   - 文本文件使用 `startLine`/`lineCount` 行号寻址，取代字节 `offset`/`limit`。
+   - 二进制文件保留字节偏移模式。
+   - 响应返回 `totalLines`、`returnedLines`、`hasMore` 便于客户端分段加载。
+
+9. **共享 ProjectObject**
    - 统一 `reportProjects` 和 `updateProject` 的 project 对象结构。
    - `project.list` 响应补齐 `agent`、`imType` 字段。
 
-9. **新增 Git 方法**
+10. **新增 Git 方法**
    - `git.refs`：合并分支与标签查询（替代 `git.branches`）。
    - `git.diff` / `git.diff.fileDiff`：任意两个 ref 之间的比较。
    - `git.workingTree.fileDiff`：查看未提交改动的 diff（staged/unstaged/untracked）。
    - `git.status` 的 status 值补齐枚举（M/A/D/R/C/U/?）。
    - 补全 `git.log`、`git.commit.files`、`git.commit.fileDiff` 响应示例。
 
-10. **新增 Agent 观测接口**
+11. **新增 Agent 观测接口**
     - `agent.status`：查询 agent 当前状态。
     - `agent.activity` 事件：实时推送 agent 活动。
 
-11. **新增客户端能力**
+12. **新增客户端能力**
     - `project.syncCheck`：重连后高效判断哪些领域需要刷新。
     - `fs.grep`：文件内容搜索。
     - `fs.search` 结果增加 `kind` 字段。
@@ -1554,7 +1547,7 @@ Registry 即将关闭客户端连接时提前通知：
     - `subscribe` / `unsubscribe`：路径级精准推送订阅。
     - Client hub 作用域模型明确（单 hub 绑定 vs 全局）。
 
-12. **连接管理增强**
+13. **连接管理增强**
     - `project.offline` / `project.online` 事件。
     - `connection.closing` 事件（含 idle timeout）。
     - 方法白名单补齐，明确事件不受白名单约束。
@@ -1582,7 +1575,7 @@ Registry 即将关闭客户端连接时提前通知：
 
 5. 文件系统增量协议增强
    - `fs.list` 与 `fs.read` 支持 `knownHash/notModified` 协商，降低重复传输。
-   - 目录 hash 规则收敛为 `kind|name|dataHash`（文件有 `dataHash`，目录为空字符串）。
+   - 目录 hash 规则收敛为 `kind|name`（仅覆盖直接子项名称与类型）。
 
 6. 同步模式标准化
    - 固化方案 C：`push hint + pull data`。
