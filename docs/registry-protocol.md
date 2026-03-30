@@ -6,12 +6,11 @@
 
 - 以 `project` 为同步单元，支持多 Hub、多 Project。
 - 客户端只刷新可见范围（展开目录、打开/Pin 文件、当前 Git 视图）。
-- 文件系统接口支持 hash 协商（conditional GET），减少重复传输。
-- 文本文件按行号寻址（`startLine`/`lineCount`），二进制文件按字节偏移（`offset`/`limit`）。
-- 目录条目仅返回名称和类型，文件详情通过 `fs.read` 按需获取。
-- 目录列表一次性返回，不做分页；文件分段读取仅作传输优化，不引入额外一致性机制；由 push hint + pull data 的整体同步循环保障最终一致。
-- Git 列表按版本触发刷新，不做 hash 协商。
-- 协议仅描述 2.1 语义，不包含旧版本兼容分支。
+- 同步模型：push hint + pull data，保障最终一致。
+- `fs.list`：一次性返回 `{name, kind}` 极简条目，不分页。
+- `fs.read`：文本按行号寻址，二进制按字节偏移，分段仅为传输优化。
+- `hash` 协商（conditional GET）减少重复传输；Git 列表按版本触发，不做 hash 协商。
+- 协议仅描述 2.1 语义，不含旧版本兼容。
 
 ## 2. 核心模型
 
@@ -71,7 +70,7 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 }
 ```
 
-> **变更说明**：2.1 移除了消息体中的 `version` 字段。协议版本通过 `connect.init` 握手中的 `protocolVersion` 唯一协商，消息帧层面不再携带冗余版本号。
+消息体不含 `version` 字段。协议版本通过 `connect.init.protocolVersion` 唯一协商。
 
 ### 3.1.1 `requestId` 规则
 
@@ -738,34 +737,30 @@ else:
 | 字段 | 首段请求 | 首段响应 | 后续段请求 | 后续段响应 |
 |------|---------|---------|-----------|-----------|
 | `knownHash` | 可选 | — | 不传 | — |
-| `hash` | — | 必返回 | — | 不返回 |
-| `notModified` | — | 必返回 | — | 不返回 |
-| `startLine` / `lineCount` | 可选（默认从首行） | — | 必传 | — |
-| `totalLines` | — | 首段必返回 | — | 不返回 |
-| `startLine` (响应) | — | 必返回 | — | 必返回 |
+| `hash` | — | 必返回 | — | — |
+| `notModified` | — | 必返回 | — | — |
+| `startLine`/`lineCount` | 可选（默认首行） | — | 必传 | — |
+| `startLine` | — | 回显 | — | 回显 |
 | `returnedLines` | — | 必返回 | — | 必返回 |
+| `totalLines` | — | 必返回 | — | — |
 | `hasMore` | — | 必返回 | — | 必返回 |
-| `isBinary` | — | 首段必返回 | — | 不返回 |
-| `mimeType` | — | 首段必返回 | — | 不返回 |
-| `size` | — | 首段必返回 | — | 不返回 |
+| `isBinary`/`mimeType`/`size` | — | 必返回 | — | — |
 
 **二进制文件**：
 
 | 字段 | 首块请求 | 首块响应 | 后续块请求 | 后续块响应 |
 |------|---------|---------|-----------|-----------|
 | `knownHash` | 可选 | — | 不传 | — |
-| `hash` | — | 必返回 | — | 不返回 |
-| `notModified` | — | 必返回 | — | 不返回 |
-| `offset` / `limit` | 必传 | — | 必传 | — |
+| `hash` | — | 必返回 | — | — |
+| `notModified` | — | 必返回 | — | — |
+| `offset`/`limit` | 必传 | — | 必传 | — |
 | `eof` | — | 必返回 | — | 必返回 |
 | `nextOffset` | — | `eof=false` 时 | — | 必返回 |
-| `isBinary` | — | 首块必返回 | — | 不返回 |
-| `mimeType` | — | 首块必返回 | — | 不返回 |
-| `size` | — | 首块必返回 | — | 不返回 |
+| `isBinary`/`mimeType`/`size` | — | 必返回 | — | — |
 
-### 5.7 `fs.search`（文件名模糊查找）
+### 5.6 `fs.search`（文件名模糊查找）
 
-首版仅支持文件名模糊匹配，不做内容检索（内容检索见 5.8 `fs.grep`）。
+文件名模糊匹配。内容检索见 5.7 `fs.grep`。
 
 请求：
 
@@ -804,7 +799,7 @@ else:
 }
 ```
 
-### 5.8 `fs.grep`（文件内容搜索）
+### 5.7 `fs.grep`（文件内容搜索）
 
 请求：
 
@@ -855,9 +850,9 @@ else:
 }
 ```
 
-### 5.9 Git 只读接口
+### 5.8 Git 只读接口
 
-#### 5.9.1 `git.refs`（分支与标签）
+#### 5.8.1 `git.refs`（分支与标签）
 
 请求：
 
@@ -890,7 +885,7 @@ else:
 }
 ```
 
-#### 5.9.2 `git.log`
+#### 5.8.2 `git.log`
 
 请求：
 
@@ -938,7 +933,7 @@ else:
 }
 ```
 
-#### 5.9.3 `git.commit.files`
+#### 5.8.3 `git.commit.files`
 
 请求：
 
@@ -972,7 +967,7 @@ else:
 }
 ```
 
-#### 5.9.4 `git.commit.fileDiff`
+#### 5.8.4 `git.commit.fileDiff`
 
 请求：
 
@@ -1008,7 +1003,7 @@ else:
 }
 ```
 
-#### 5.9.5 `git.diff`（任意两个 ref 之间比较）
+#### 5.8.5 `git.diff`（任意两个 ref 之间比较）
 
 请求：
 
@@ -1066,7 +1061,7 @@ else:
 
 响应格式与 `git.commit.fileDiff` 一致（`isBinary`, `diff`, `truncated`）。
 
-#### 5.9.6 `git.status`（工作区未提交改动视图）
+#### 5.8.6 `git.status`（工作区未提交改动视图）
 
 请求：
 
@@ -1110,7 +1105,7 @@ else:
 | `U` | 未合并冲突 (unmerged) |
 | `?` | 未跟踪 (untracked) |
 
-#### 5.9.7 `git.workingTree.fileDiff`（查看工作区未提交文件 diff）
+#### 5.8.7 `git.workingTree.fileDiff`（查看工作区未提交文件 diff）
 
 请求：
 
@@ -1154,16 +1149,16 @@ else:
 }
 ```
 
-#### 5.9.8 Git 缓存规则
+#### 5.8.8 Git 缓存规则
 
 - Git 列表按 `headSha/gitRev` 变化触发刷新。
 - `git.commit.files` 以 `sha` 为缓存键。
 - `git.commit.fileDiff` 以 `sha+path+contextLines` 为缓存键。
 - Git 列表不做 `knownHash/notModified` 协商。
 
-### 5.10 Agent 观测接口
+### 5.9 Agent 观测接口
 
-#### 5.10.1 `agent.status`
+#### 5.9.1 `agent.status`
 
 请求：
 
@@ -1195,7 +1190,7 @@ else:
 }
 ```
 
-#### 5.10.2 `agent.activity` 事件
+#### 5.9.2 `agent.activity` 事件
 
 ```json
 {
@@ -1210,7 +1205,7 @@ else:
 }
 ```
 
-### 5.11 `batch`（批量请求）
+### 5.10 `batch`（批量请求）
 
 将多个独立请求合并为单次发送，减少移动端高延迟环境下的 RTT 开销。
 
@@ -1255,9 +1250,9 @@ else:
 - 批量内不允许嵌套 `batch`。
 - 批量内不允许 `connect.init`。
 
-### 5.12 `subscribe` / `unsubscribe`（路径级推送订阅）
+### 5.11 `subscribe` / `unsubscribe`（路径级推送订阅）
 
-#### 5.12.1 `subscribe`
+#### 5.11.1 `subscribe`
 
 ```json
 {
@@ -1283,7 +1278,7 @@ else:
 }
 ```
 
-#### 5.12.2 `unsubscribe`
+#### 5.11.2 `unsubscribe`
 
 ```json
 {
@@ -1297,7 +1292,7 @@ else:
 }
 ```
 
-#### 5.12.3 订阅后的精准事件推送
+#### 5.11.3 订阅后的精准事件推送
 
 ```json
 {
@@ -1334,9 +1329,7 @@ else:
 
 - 对所有条目先按 `(kind, name)` 升序排序，再用 `\n` 拼接。
 - 对拼接结果做 `sha256`，得到 `hash`。
-- 目录 hash 仅反映直接子项的**名称和类型**变化（新增/删除/重命名条目），不反映文件内容变化。
-
-> **重要**：`hash` 仅覆盖直接子项的名称与类型。文件内容变化不影响父目录 `hash`；子目录内部变化也不影响父目录 `hash`。客户端获取文件详细信息（`hash`、`size`、`mtime` 等）需通过 `fs.read` 单独请求。
+- 目录 hash 仅反映直接子项的**名称和类型**变化（新增/删除/重命名条目），不反映文件内容变化，也不递归反映子目录内部变化。
 
 ### 6.2 `worktreeRev`（工作区）
 
@@ -1489,69 +1482,23 @@ Registry 即将关闭客户端连接时提前通知：
 
 ### 2.1 相比 2.0 的改进
 
-1. **消息封装简化**
-   - 移除消息体中的 `version` 字段，协议版本唯一通过 `connect.init.protocolVersion` 协商。
-   - 明确 `type=event` 不携带 `requestId`。
+1. **消息封装简化**：移除 `version` 字段，版本通过 `connect.init.protocolVersion` 协商；`type=event` 不携带 `requestId`。
 
-2. **`connectionEpoch` 机制明确**
-   - 由 Registry 在 `connect.init` 响应中分配，全局单调递增。
-   - `reportProjects` 新增 `connectionEpoch` 字段，防止旧连接覆盖新数据。
+2. **`connectionEpoch` 机制**：Registry 在 `connect.init` 响应中分配全局单调递增整数，`reportProjects` 回传防止旧连接覆盖。
 
-3. **错误体系标准化**
-   - 定义统一错误响应 JSON 结构（`code` + `message` + `details`）。
-   - 补齐完整错误码表（含 `INTERNAL`）。
+3. **错误体系标准化**：统一错误 JSON 结构（`code` + `message` + `details`），补齐完整错误码表。
 
-4. **Hash 协商语义收敛（Conditional GET）**
-   - 明确 `knownHash` 仅在持有缓存数据时才可发送。
-   - 明确 `hash` 始终为整文件 hash，支持任意 offset 范围的缓存验证。
-   - 目录 `hash` 仅覆盖 `kind|name`（条目名称与类型），不包含文件内容 hash。
+4. **`fs.list` 极简化**：条目仅返回 `{name, kind}`，不分页；目录 `hash` 基于 `kind|name` 仅反映条目增删，不含文件内容 hash。
 
-5. **`fs.list` 极简化**
-   - 目录条目仅返回 `name` 和 `kind`，不返回 `size`、`mtime`、`path`、`hash` 等详细信息。
-   - 客户端从父路径 + `name` 自行拼接 `path`。
-   - 文件的详细信息（hash、size、mtime 等）通过 `fs.read` 按需获取。
+5. **`fs.read` 文本/二进制分流**：文本按行号寻址（`startLine`/`lineCount`/`totalLines`/`hasMore`），二进制按字节偏移（`offset`/`limit`/`eof`）；增加 `isBinary`/`mimeType`；base64 编码或 metadata-only 策略。
 
-6. **文件分段读取简化**
-   - `fs.list` 不分页，一次性返回全部直接子项。
-   - `fs.read` 分段仅作传输优化，不引入额外的一致性机制（无 snapshotToken）。
-   - 由 push hint + pull data 的整体同步循环保障最终一致性。
+6. **`knownHash` 协商（Conditional GET）**：有缓存则携带 `knownHash`，无缓存则不传；文件分段仅为传输优化，不引入一致性机制。
 
-7. **二进制文件处理**
-   - `fs.read` 响应增加 `isBinary`、`mimeType` 字段。
-   - 定义 base64 编码和 metadata-only 两种策略。
+7. **共享 ProjectObject**：统一 Hub 上报与 Client 查询的 project 结构，补齐 `agent`/`imType` 字段。
 
-8. **文本文件行级读取**
-   - 文本文件使用 `startLine`/`lineCount` 行号寻址，取代字节 `offset`/`limit`。
-   - 二进制文件保留字节偏移模式。
-   - 响应返回 `totalLines`、`returnedLines`、`hasMore` 便于客户端分段加载。
+8. **新增方法**：`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status` 枚举补全、`agent.status`/`agent.activity`、`project.syncCheck`、`fs.grep`、`batch`、`subscribe`/`unsubscribe`。
 
-9. **共享 ProjectObject**
-   - 统一 `reportProjects` 和 `updateProject` 的 project 对象结构。
-   - `project.list` 响应补齐 `agent`、`imType` 字段。
-
-10. **新增 Git 方法**
-   - `git.refs`：合并分支与标签查询（替代 `git.branches`）。
-   - `git.diff` / `git.diff.fileDiff`：任意两个 ref 之间的比较。
-   - `git.workingTree.fileDiff`：查看未提交改动的 diff（staged/unstaged/untracked）。
-   - `git.status` 的 status 值补齐枚举（M/A/D/R/C/U/?）。
-   - 补全 `git.log`、`git.commit.files`、`git.commit.fileDiff` 响应示例。
-
-11. **新增 Agent 观测接口**
-    - `agent.status`：查询 agent 当前状态。
-    - `agent.activity` 事件：实时推送 agent 活动。
-
-12. **新增客户端能力**
-    - `project.syncCheck`：重连后高效判断哪些领域需要刷新。
-    - `fs.grep`：文件内容搜索。
-    - `fs.search` 结果增加 `kind` 字段。
-    - `batch`：批量请求支持。
-    - `subscribe` / `unsubscribe`：路径级精准推送订阅。
-    - Client hub 作用域模型明确（单 hub 绑定 vs 全局）。
-
-13. **连接管理增强**
-    - `project.offline` / `project.online` 事件。
-    - `connection.closing` 事件（含 idle timeout）。
-    - 方法白名单补齐，明确事件不受白名单约束。
+9. **连接管理增强**：`project.offline`/`project.online`/`connection.closing` 事件；方法白名单；Client hub 作用域模型。
 
 ### 2.0 相比 1.0 的修正内容
 
