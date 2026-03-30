@@ -1,11 +1,16 @@
 # WheelMaker
 
-WheelMaker is a self-hosted daemon that bridges local AI coding agents (Claude Code, OpenAI Codex, GitHub Copilot) to instant messaging platforms. Send instructions from Feishu/Lark or the mobile app, and let AI agents execute coding tasks on your local projects remotely.
+A self-hosted daemon that turns your phone into a remote AI coding assistant.
+Stop reinventing the wheel, start making your own.
+
+```
+Feishu / Mobile App ──► WheelMaker ──► Claude / Codex / Copilot ──► your codebase
+```
 
 ## Features
 
 - **Multi-project** — manage multiple projects in a single daemon, each with its own IM channel and agent.
-- **Multiple agents** — supports Claude Code, OpenAI Codex, and GitHub Copilot. Switch agents at runtime via `/use <agent>`.
+- **Multiple agents** — supports Claude Code, OpenAI Codex, and GitHub Copilot. Switch at runtime via `/use <agent>`.
 - **Multiple IM channels** — Feishu/Lark bot (rich cards, streaming, decision prompts), console (local debug), and mobile app (WebSocket).
 - **Session persistence** — sessions survive daemon restarts.
 - **Lazy start & idle reclaim** — agent processes spawn on first message and are reclaimed when idle.
@@ -14,69 +19,43 @@ WheelMaker is a self-hosted daemon that bridges local AI coding agents (Claude C
 ## Architecture
 
 ```
-IM (Feishu / Console / Mobile App)
-  → Hub (WheelMaker daemon)
-    → Agent Adapter (Claude / Codex / Copilot via ACP)
-      → Local Project Workspace
-```
-
-In daemon mode (`-d`), a guardian process supervises hub and registry workers, restarting them if they crash.
-
-```
 Guardian (-d)
-  ├── Hub Worker (--hub-worker)
-  │     ├── Project Client 1  [IM: Feishu]  [Agent: Claude]
-  │     ├── Project Client 2  [IM: Mobile]  [Agent: Copilot]
+  ├── Hub Worker
+  │     ├── Project A  [IM: Feishu]   [Agent: Claude]
+  │     ├── Project B  [IM: Mobile]   [Agent: Copilot]
   │     └── ...
-  └── Registry Worker (--registry-worker)  (optional)
+  └── Registry Worker (optional)
         └── WebSocket server for app/web clients
 ```
 
-## Repository Structure
+## Quick Start
 
-```
-WheelMaker/
-  server/   — Go daemon (hub, agent adapters, IM adapters, registry)
-  app/      — React Native mobile app + web dashboard
-  docs/     — Protocol specs and design docs
-  scripts/  — Build, install, and service management scripts
-```
+### 1. Build & Install
 
-## Getting Started
-
-### Prerequisites
-
-- **Go 1.22+**
-- **Node.js 22+** (for ACP agent CLIs and the web dashboard)
-
-Install the ACP agent CLIs:
-
-```bash
-npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
-```
-
-Or let the install script handle it automatically.
-
-### Build & Install (Windows)
+Requires **Go 1.22+** and **Node.js 22+**.
 
 ```powershell
-# Build
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_server.ps1
-
-# Install (copies binary, installs npm deps, generates config and service scripts)
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_server.ps1
 ```
 
-### Configuration
+The install script will:
+- Install ACP CLI dependencies (`codex-acp`, `claude-agent-acp`) if missing
+- Copy the binary to `~/.wheelmaker/bin/`
+- Generate a default `config.json` if none exists
+- Generate `start.bat` / `stop.bat` / `restart.bat` service scripts
 
-On first install, copy the example config and edit it:
+### 2. Configure
+
+Copy the example config and fill in your credentials:
 
 ```powershell
 Copy-Item server\config.example.json ~\.wheelmaker\config.json
 notepad ~\.wheelmaker\config.json
 ```
 
-Example `config.json`:
+<details>
+<summary>Config reference</summary>
 
 ```json
 {
@@ -118,15 +97,11 @@ Example `config.json`:
 | `registry.listen` | Start the built-in registry server when `true` |
 | `log.level` | `"debug"`, `"info"`, `"warn"`, or `"error"` |
 
-### Start / Stop / Restart
+</details>
 
-The install script generates service scripts in `~/.wheelmaker/` (double-click to run):
+### 3. Run
 
-| Script | Description |
-|--------|-------------|
-| `start.bat` | Start daemon in background (skips if already running) |
-| `stop.bat` | Stop all wheelmaker processes |
-| `restart.bat` | Stop then start |
+Double-click or run from terminal:
 
 ```powershell
 ~\.wheelmaker\start.bat     # start
@@ -134,25 +109,7 @@ The install script generates service scripts in `~/.wheelmaker/` (double-click t
 ~\.wheelmaker\restart.bat   # restart
 ```
 
-### Development
-
-Run in foreground (no guardian, single hub worker):
-
-```bash
-cd server
-go run ./cmd/wheelmaker
-```
-
-Run tests:
-
-```bash
-cd server
-go test ./...
-```
-
 ## Chat Commands
-
-Once connected through an IM channel, the following commands are available:
 
 | Command | Description |
 |---------|-------------|
@@ -164,19 +121,25 @@ Once connected through an IM channel, the following commands are available:
 | `/status` | Show project and agent status |
 | `/mode` | Toggle YOLO mode |
 | `/model` | Switch agent model |
-| `/config` | Show current configuration |
-| `/debug` | Toggle debug logging |
-| `/help` | Show command list |
+| `/help` | Show all commands |
 
-## File Locations
+## Repository Structure
 
-| File | Path |
-|------|------|
-| Config | `~/.wheelmaker/config.json` |
-| State | `~/.wheelmaker/state.json` |
-| Binary | `~/.wheelmaker/bin/wheelmaker.exe` |
-| Hub log | `~/.wheelmaker/hub.log` |
-| Registry log | `~/.wheelmaker/registry.log` |
+```
+WheelMaker/
+  server/   — Go daemon (hub, agent adapters, IM adapters, registry)
+  app/      — React Native mobile app + web dashboard
+  docs/     — Protocol specs and design docs
+  scripts/  — Build, install, and service management scripts
+```
+
+## Development
+
+```bash
+cd server
+go run ./cmd/wheelmaker    # run in foreground
+go test ./...              # run tests
+```
 
 ## License
 
