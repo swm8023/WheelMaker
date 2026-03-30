@@ -35,13 +35,23 @@
 ```json
 {
   "version": "1.0",
-  "requestId": "req-123",
+  "requestId": 1,
   "type": "request|response|error|event",
   "method": "connect.init|...",
   "projectId": "optional",
   "payload": {}
 }
 ```
+
+### 3.1.1 `requestId` 规则（Client/Hub 统一）
+
+- `requestId` 类型统一为正整数（`int`），取值范围 `>= 1`。
+- 每次连接建立后，发送方必须从 `1` 开始递增（`1,2,3...`）。
+- 同一连接内不允许重复使用同一个 `requestId`。
+- Registry 必须校验合法性：
+  - 非整数或 `<1`：返回 `INVALID_ARGUMENT`。
+  - 已处理过的 `requestId`（重放/重复）：返回 `CONFLICT`，并丢弃该请求。
+- 连接重建后 `requestId` 重新从 `1` 计数，不与旧连接共享序列。
 
 ### 3.2 `connect.init`（握手与认证合并）
 
@@ -50,7 +60,7 @@
 ```json
 {
   "version": "1.0",
-  "requestId": "req-init",
+  "requestId": 1,
   "type": "request",
   "method": "connect.init",
   "payload": {
@@ -71,7 +81,7 @@
 ```json
 {
   "version": "1.0",
-  "requestId": "req-init",
+  "requestId": 1,
   "type": "response",
   "method": "connect.init",
   "payload": {
@@ -147,7 +157,7 @@ Registry 维护：
 ```json
 {
   "version": "1.0",
-  "requestId": "req-report-1",
+  "requestId": 1,
   "type": "request",
   "method": "registry.reportProjects",
   "payload": {
@@ -188,7 +198,7 @@ Registry 维护：
 ```json
 {
   "version": "1.0",
-  "requestId": "req-update-1",
+  "requestId": 1,
   "type": "request",
   "method": "registry.updateProject",
   "payload": {
@@ -260,7 +270,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-project-list-1",
+  "requestId": 1,
   "type": "request",
   "method": "project.list",
   "payload": {
@@ -274,7 +284,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-project-list-1",
+  "requestId": 1,
   "type": "response",
   "method": "project.list",
   "payload": {
@@ -306,7 +316,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-list-1",
+  "requestId": 1,
   "type": "request",
   "method": "fs.list",
   "projectId": "local-hub:WheelMaker",
@@ -325,7 +335,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-list-1",
+  "requestId": 1,
   "type": "response",
   "method": "fs.list",
   "projectId": "local-hub:WheelMaker",
@@ -344,7 +354,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-list-1",
+  "requestId": 1,
   "type": "response",
   "method": "fs.list",
   "projectId": "local-hub:WheelMaker",
@@ -368,7 +378,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-read-1",
+  "requestId": 1,
   "type": "request",
   "method": "fs.read",
   "projectId": "local-hub:WheelMaker",
@@ -381,12 +391,86 @@ else:
 }
 ```
 
+区块读语义（必须支持）：
+
+- `offset`：从文件字节偏移位置开始读取。
+- `limit`：本次最多返回字节数。
+- `eof=true` 表示已到文件末尾；否则应继续用 `nextOffset` 发起下一块读取。
+- 推荐默认块大小 `64KiB`，单次上限 `1MiB`。
+- 当前实现已支持 `offset/limit/eof/nextOffset` 区块读链路。
+
+区块读示例（两次请求）：
+
+```json
+{
+  "version": "1.0",
+  "requestId": 2,
+  "type": "request",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "offset": 0,
+    "limit": 65536
+  }
+}
+```
+
+```json
+{
+  "version": "1.0",
+  "requestId": 2,
+  "type": "response",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "content": "...chunk-1...",
+    "encoding": "utf-8",
+    "eof": false,
+    "nextOffset": 65536
+  }
+}
+```
+
+```json
+{
+  "version": "1.0",
+  "requestId": 3,
+  "type": "request",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "offset": 65536,
+    "limit": 65536
+  }
+}
+```
+
+```json
+{
+  "version": "1.0",
+  "requestId": 3,
+  "type": "response",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "content": "...chunk-2...",
+    "encoding": "utf-8",
+    "eof": true,
+    "nextOffset": 91123
+  }
+}
+```
+
 响应：
 
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-read-1",
+  "requestId": 1,
   "type": "response",
   "method": "fs.read",
   "projectId": "local-hub:WheelMaker",
@@ -411,7 +495,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-search-1",
+  "requestId": 1,
   "type": "request",
   "method": "fs.search",
   "projectId": "local-hub:WheelMaker",
@@ -431,7 +515,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-fs-search-1",
+  "requestId": 1,
   "type": "response",
   "method": "fs.search",
   "projectId": "local-hub:WheelMaker",
@@ -451,7 +535,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-branches-1",
+  "requestId": 1,
   "type": "request",
   "method": "git.branches",
   "projectId": "local-hub:WheelMaker",
@@ -462,7 +546,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-branches-1",
+  "requestId": 1,
   "type": "response",
   "method": "git.branches",
   "projectId": "local-hub:WheelMaker",
@@ -478,7 +562,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-log-1",
+  "requestId": 1,
   "type": "request",
   "method": "git.log",
   "projectId": "local-hub:WheelMaker",
@@ -495,7 +579,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-files-1",
+  "requestId": 1,
   "type": "request",
   "method": "git.commit.files",
   "projectId": "local-hub:WheelMaker",
@@ -510,7 +594,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-diff-1",
+  "requestId": 1,
   "type": "request",
   "method": "git.commit.fileDiff",
   "projectId": "local-hub:WheelMaker",
@@ -527,7 +611,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-status-1",
+  "requestId": 1,
   "type": "request",
   "method": "git.status",
   "projectId": "local-hub:WheelMaker",
@@ -538,7 +622,7 @@ else:
 ```json
 {
   "version": "1.0",
-  "requestId": "req-git-status-1",
+  "requestId": 1,
   "type": "response",
   "method": "git.status",
   "projectId": "local-hub:WheelMaker",
@@ -559,18 +643,58 @@ else:
 - `git.commit.fileDiff` 以 `sha+path+contextLines` 为缓存键。
 - Git 列表不做 `knownHash/notModified` 协商。
 
-## 6. Hash 规范
+## 6. Hash 规范（统一算法）
 
-### 6.1 目录 hash
+统一约定：
 
-- 输入项：`kind|name|dataHash`
-- `kind=dir` 时 `dataHash` 为空字符串。
-- `kind=file` 时 `dataHash` 为文件内容 hash。
-- 目录下 entry 先按 `kind,name` 排序，再拼接后 `sha256`。
+- 哈希算法：`sha256`。
+- 文本拼接编码：`UTF-8`。
+- 输出格式：`sha256:<hex-lowercase>`。
+- 规范化要求：排序、换行符、路径分隔符必须先归一，再计算哈希。
 
-### 6.2 文件 dataHash
+### 6.1 `dataHash`（文件内容）
 
-- `sha256(raw bytes)`
+- 计算：`sha256(raw bytes)`。
+- 用途：目录项中的文件内容摘要、`fs.read.contentHash`。
+
+### 6.2 `snapshotHash`（目录快照）
+
+对目录下每个 entry 生成字符串：`kind|name|dataHash`。
+
+- `kind=dir` 时 `dataHash` 固定为空字符串。
+- `kind=file` 时 `dataHash` 为该文件的 `dataHash`。
+- 对所有 entry 先按 `(kind, name)` 升序排序，再用 `\n` 拼接。
+- 对拼接结果做 `sha256`，得到 `snapshotHash`。
+
+### 6.3 `worktreeRev`（工作区）
+
+- 输入来源：`git status --porcelain` 输出。
+- 归一规则：
+  - 行按路径升序。
+  - 路径统一为 `/` 分隔。
+  - 去除尾随空白。
+- 对归一结果做 `sha256` 得到 `worktreeRev`。
+
+### 6.4 `gitRev`（Git 版本）
+
+- 推荐输入串：`branch + \"\\n\" + headSha + \"\\n\" + dirty`。
+- `dirty` 使用布尔字符串 `true/false`。
+- 对输入串做 `sha256` 得到 `gitRev`。
+
+### 6.5 `projectRev`（项目聚合版本）
+
+- 当前阶段仅由 Git 侧派生，不引入全量 FS watcher。
+- 推荐输入串：`gitRev + \"\\n\" + worktreeRev`。
+- 对输入串做 `sha256` 得到 `projectRev`。
+
+### 6.6 协商字段与语义
+
+- `fs.list` 请求可带 `knownHash=snapshotHash`：
+  - 命中则返回 `notModified=true`。
+  - 未命中返回新 `snapshotHash` 与完整 `entries`。
+- `fs.read` 请求可带 `knownHash=contentHash`：
+  - 命中则返回 `notModified=true`（可不返回 `content`）。
+  - 未命中返回新 `contentHash` 与 `content`。
 
 ## 7. 同步策略（方案 C）
 
@@ -683,3 +807,4 @@ else:
 - 补齐统一错误码规范（含 `FORBIDDEN/NOT_FOUND/UNAVAILABLE/RATE_LIMITED/TIMEOUT`）。
 - 增加连接级限速、重连退避与审计字段要求。
 - 当前版本不强制协议层 `wss`，由后续网络安全专项推进。
+
