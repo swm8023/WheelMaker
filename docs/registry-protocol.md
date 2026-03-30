@@ -65,7 +65,7 @@ Hub -> Registry 仅定义两类项目上报协议：
 
 保活规则：
 
-- Registry 与 Hub 都支持 ping/pong。
+- 仅 Hub 连接要求使用 ping/pong（见 `4.2.3 hub.ping / hub.pong`）。
 - 建议 Hub 每 `15s` 发送 ping，`45s` 无 pong 判定连接失活。
 - 失活后立即断开并进入重连流程。
 - 保活失败不应阻塞本地项目运行，只影响远程观察能力。
@@ -164,7 +164,7 @@ connect.init 校验规则（强约束）：
 - `token` 必填，必须在 `connect.init` 中携带。
 - 所有业务方法必须在 `connect.init.ok=true` 后调用。
 - `role=hub` 仅允许调用 `registry.reportProjects`、`registry.updateProject`、`ping`。
-- `role=client` 仅允许调用 `project.list`、`fs.*`、`git.*`、`ping`。
+- `role=client` 仅允许调用 `project.list`、`fs.*`、`git.*`。
 - 若调用方法与 `role` 不匹配，返回 `FORBIDDEN`。
 
 connect.init 失败与防探测约束：
@@ -225,7 +225,7 @@ Registry ACK：
 - `registry.reportProjects` 是“全量快照覆盖”语义，不是 patch。
 - Registry 必须以连接实例区分同 `hubId`，防止旧连接断开误删新映射。
 
-### 4.2.3 ping / pong（保活）
+### 4.2.3 hub.ping / hub.pong（仅 Hub 保活）
 
 Hub ping：
 
@@ -476,6 +476,8 @@ Registry 维护映射：
 ## 5. Client <-> Registry 协议
 
 ### 5.1 connect.init（客户端视角，权威定义见 4.2.1）
+
+客户端不要求 ping/pong；在发起业务请求前若发现连接不可用，应先重连并重新执行 `connect.init`。
 
 客户端发送 `connect.init`，携带身份与 token。
 
