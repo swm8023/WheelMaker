@@ -29,7 +29,7 @@ npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
 
 ### 2. 配置文件
 
-参考 `server/config.example.json`：
+参考 `server/config.example.json`（默认使用飞书通道）：
 
 ```json
 {
@@ -40,6 +40,17 @@ npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
       "path": "/path/to/your/project",
       "yolo": true,
       "im": { "type": "console" },
+      "client": { "agent": "claude" }
+    },
+    {
+      "name": "feishu-prod",
+      "path": "/path/to/other/project",
+      "yolo": false,
+      "im": {
+        "type": "feishu",
+        "appID": "cli_xxx",
+        "appSecret": "yyy"
+      },
       "client": { "agent": "claude" }
     }
   ],
@@ -59,6 +70,7 @@ npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
 说明：
 
 - `projects[]`：项目配置（必填）。
+  - `im.type`：`console` 用于本地调试，`feishu` 用于线上飞书通道（需填入 `appID` / `appSecret`）。
 - `registry`：Registry 扩展项（可选）。
   - `listen=true`：启动内置 Registry 服务。
   - `server/token/hubId`：用于 Hub 与 Registry 的连接与鉴权。
@@ -76,11 +88,16 @@ npm install -g @zed-industries/codex-acp @zed-industries/claude-agent-acp
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_server.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_server.ps1
+# 首次安装：拷贝示例配置并编辑（填入飞书 appID/appSecret 等）
+Copy-Item server\config.example.json ~\.wheelmaker\config.json
+notepad ~\.wheelmaker\config.json
+# 启动
 ~/.wheelmaker/bin/wheelmaker.exe -d
 ```
 
 说明：
 
+- 安装脚本会在 `~/.wheelmaker/config.json` 不存在时自动生成默认配置；如需自定义，建议先手动拷贝 example 并编辑。
 - `-d` 为守护模式，会拉起 guardian/hub/registry worker 进程。
 - 如果你希望“延迟重启并自动替换二进制”，可执行：
 
