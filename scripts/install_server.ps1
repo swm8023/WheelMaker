@@ -128,7 +128,7 @@ if %errorlevel%==0 (
   echo wheelmaker already running
   exit /b 0
 )
-start "" "%exe%" -d
+powershell -NoProfile -Command "Start-Process '%exe%' '-d' -WindowStyle Hidden"
 timeout /t 3 /nobreak >nul
 tasklist /FI "IMAGENAME eq wheelmaker.exe" 2>nul | find /I "wheelmaker.exe" >nul
 if %errorlevel%==0 (
