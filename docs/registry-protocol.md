@@ -35,7 +35,12 @@
 
 ## 4. Hub -> Registry 汇报增强
 
-`registry.reportProjects` 扩展 `projects[]` 字段：
+Hub -> Registry 仅定义两类项目上报协议：
+
+- `registry.reportProjects`：全量快照覆盖（用于初始化与重连恢复）
+- `registry.updateProject`：单项目更新（用于某个 project 状态变化时的定点刷新）
+
+两类协议的项目基本项保持一致，统一为 `project` 对象：
 
 - `name`（Hub 侧项目名，作为上报主键）
 - `path`
@@ -47,15 +52,6 @@
 - `git.worktreeRev`
 - `projectRev`
 
-触发时机：
-
-1. Hub 建连后首次全量汇报
-2. 分支变化
-3. HEAD 变化
-4. dirty 变化（未提交改动产生/清空）
-5. `worktreeRev` 变化（文件增删改重命名）
-6. 心跳兜底（例如 30s）
-
 ## 4.1 Hub <-> Registry 连接机制（保活与重连）
 
 参考 `docs/feishu-bot.md` 的长连接策略，Hub 与 Registry 采用“长连接 + 心跳 + 自动重连”。
@@ -64,8 +60,8 @@
 
 1. Hub 建立 WebSocket 到 Registry（`ws://host:port/ws` 或 `wss://...`）。
 2. 发送 `connect.init`（携带 `protocolVersion`、连接身份与统一 token）。
-4. 发送 `registry.reportProjects` 全量快照，等待 ACK。
-5. 进入 steady 状态：保活 + 增量汇报。
+3. 发送 `registry.reportProjects` 全量快照，等待 ACK。
+4. 进入 steady 状态：保活 + 按需发送 `registry.updateProject`。
 
 保活规则：
 
@@ -104,7 +100,7 @@
   "version": "1.0",
   "requestId": "req-123",
   "type": "request|response|error|event",
-  "method": "connect.init|registry.reportProjects|registry.reportProjectRevs|ping",
+  "method": "connect.init|registry.reportProjects|registry.updateProject|ping",
   "payload": {}
 }
 ```
@@ -167,7 +163,7 @@ connect.init 校验规则（强约束）：
 - `role=hub` 时，`hubId` 必填；`role=client` 时可省略，按 token 作用域绑定。
 - `token` 必填，必须在 `connect.init` 中携带。
 - 所有业务方法必须在 `connect.init.ok=true` 后调用。
-- `role=hub` 仅允许调用 `registry.reportProjects`、`registry.reportProjectRevs`、`ping`。
+- `role=hub` 仅允许调用 `registry.reportProjects`、`registry.updateProject`、`ping`。
 - `role=client` 仅允许调用 `project.list`、`fs.*`、`git.*`、`ping`。
 - 若调用方法与 `role` 不匹配，返回 `FORBIDDEN`。
 
@@ -277,37 +273,37 @@ Registry pong：
 }
 ```
 
-### 4.2.5 registry.reportProjectRevs（Hub -> Registry 增量 rev 推送）
+### 4.2.5 registry.updateProject（Hub -> Registry 单项目更新）
 
-用途：当仅版本戳变化时，Hub 只推送变更项，不必每次全量 `registry.reportProjects`。
+用途：当某个 project 状态变化时，仅刷新该 project，避免全量重报。
 
-Hub 请求（增量）：
+Hub 请求（单项目）：
 
 ```json
 {
   "version": "1.0",
-  "requestId": "req-rev-1",
+  "requestId": "req-update-1",
   "type": "request",
-  "method": "registry.reportProjectRevs",
+  "method": "registry.updateProject",
   "payload": {
     "hubId": "local-hub",
     "connectionEpoch": 7,
-    "updates": [
-      {
-        "seq": 1024,
-        "name": "WheelMaker",
-        "projectRev": "sha256:...",
-        "git": {
-          "branch": "main",
-          "headSha": "def456...",
-          "dirty": true,
-          "gitRev": "sha256:...",
-          "worktreeRev": "sha256:..."
-        },
-        "changedDomains": ["git", "worktree"],
-        "updatedAt": "2026-03-29T13:00:00Z"
+    "seq": 1024,
+    "project": {
+      "name": "WheelMaker",
+      "path": "D:/Code/WheelMaker",
+      "online": true,
+      "projectRev": "sha256:...",
+      "git": {
+        "branch": "main",
+        "headSha": "def456...",
+        "dirty": true,
+        "gitRev": "sha256:...",
+        "worktreeRev": "sha256:..."
       }
-    ]
+    },
+    "changedDomains": ["git", "worktree"],
+    "updatedAt": "2026-03-29T13:00:00Z"
   }
 }
 ```
@@ -317,12 +313,12 @@ Registry ACK：
 ```json
 {
   "version": "1.0",
-  "requestId": "req-rev-1",
+  "requestId": "req-update-1",
   "type": "response",
-  "method": "registry.reportProjectRevs",
+  "method": "registry.updateProject",
   "payload": {
     "hubId": "local-hub",
-    "accepted": 1
+    "accepted": true
   }
 }
 ```
@@ -330,16 +326,16 @@ Registry ACK：
 约束：
 
 - 仅允许已通过 Hub 认证的连接调用。
-- `name` 必须属于该 `hubId` 当前映射，否则返回 `INVALID_ARGUMENT`。
+- `project.name` 必须属于该 `hubId` 当前映射，否则返回 `INVALID_ARGUMENT`。
 - 若 Registry 未命中该 project 映射，可要求 Hub 回退发送一次全量 `registry.reportProjects`。
 - 定时心跳周期仍建议发送全量快照做纠偏（例如 30~60s）。
-- 每个 `(hubId, name)` 维护最新 `(connectionEpoch, seq)`，仅接受更“新”的更新，防止乱序覆盖。
-- 当 `seq` 回退或重复时可直接忽略，并在日志记录 `stale_rev_update`。
+- 每个 `(hubId, project.name)` 维护最新 `(connectionEpoch, seq)`，仅接受更“新”的更新，防止乱序覆盖。
+- 当 `seq` 回退或重复时可直接忽略，并在日志记录 `stale_project_update`。
 
 服务端判新规则（伪代码）：
 
 ```text
-key = hubId + "/" + name
+key = hubId + "/" + project.name
 old = lastSeen[key]  // {connectionEpoch, seq}
 new = incoming       // {connectionEpoch, seq}
 
@@ -348,14 +344,14 @@ if new.connectionEpoch > old.connectionEpoch:
 else if new.connectionEpoch == old.connectionEpoch and new.seq > old.seq:
   accept
 else:
-  ignore as stale_rev_update
+  ignore as stale_project_update
 ```
 
 ## 4.3 连接身份与统一 Token 模型
 
 Registry 必须显式区分两类连接：
 
-- `hub` 连接：Hub -> Registry，负责 `registry.reportProjects` 与项目请求响应。
+- `hub` 连接：Hub -> Registry，负责 `registry.reportProjects`、`registry.updateProject` 与项目请求响应。
 - `client` 连接：App/Web -> Registry，负责 `project.list/fs/git` 查询。
 
 必须在 `connect.init` 中声明连接角色并携带 token：
