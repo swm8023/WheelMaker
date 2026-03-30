@@ -8,7 +8,8 @@
 - 客户端只刷新可见范围（展开目录、打开/Pin 文件、当前 Git 视图）。
 - 同步模型：push hint + pull data，保障最终一致。
 - `fs.list`：一次性返回 `{name, kind}` 极简条目，不分页。
-- `fs.read`：文本按行号寻址，二进制按字节偏移，分段仅为传输优化。
+- `fs.info`：查询路径元信息（文件类型、大小、总行数等），客户端据此决定 `fs.read` 的寻址语义。
+- `fs.read`：统一字段 `offset`/`count`，文本按行寻址（行号/行数），二进制按字节偏移寻址，语义由 `isBinary` 决定；分段仅为传输优化。
 - `hash` 协商（conditional GET）减少重复传输；Git 列表按版本触发，不做 hash 协商。
 - 协议仅描述 2.1 语义，不含旧版本兼容。
 
@@ -490,9 +491,79 @@ else:
 
 > **目录 `hash`** 仅覆盖直接子项的名称与类型（`kind|name`），不反映文件内容变化，也不递归反映子目录内部变化。文件内容的变化通过 `project.changed` 事件的 `changedPaths` 推送，客户端对已打开文件单独发起 `fs.read`。
 
-### 5.5 `fs.read`（文件）
+### 5.5 `fs.info`（路径元信息查询）
 
-#### 5.5.1 Hash 协商语义
+客户端在打开文件或展开目录前，通过 `fs.info` 查询路径的元信息。对于文件，返回类型（文本/二进制）、MIME、大小等，客户端据此决定 `fs.read` 中 `offset`/`count` 的寻址语义。
+
+#### 5.5.1 请求
+
+```json
+{
+  "requestId": 1,
+  "type": "request",
+  "method": "fs.info",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md"
+  }
+}
+```
+
+#### 5.5.2 响应 — 文件
+
+```json
+{
+  "requestId": 1,
+  "type": "response",
+  "method": "fs.info",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "kind": "file",
+    "size": 21459,
+    "isBinary": false,
+    "mimeType": "text/markdown",
+    "totalLines": 380,
+    "hash": "sha256:..."
+  }
+}
+```
+
+#### 5.5.3 响应 — 目录
+
+```json
+{
+  "requestId": 1,
+  "type": "response",
+  "method": "fs.info",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs",
+    "kind": "dir",
+    "entryCount": 5,
+    "hash": "sha256:..."
+  }
+}
+```
+
+#### 5.5.4 字段说明
+
+| 字段 | 文件 | 目录 | 说明 |
+|------|------|------|------|
+| `path` | 必返回 | 必返回 | 请求路径原样回显 |
+| `kind` | `"file"` | `"dir"` | 路径类型 |
+| `size` | 必返回 | — | 文件字节大小 |
+| `isBinary` | 必返回 | — | 是否为二进制文件 |
+| `mimeType` | 必返回 | — | MIME 类型 |
+| `totalLines` | 文本文件必返回 | — | 文件总行数（`isBinary=false` 时） |
+| `entryCount` | — | 必返回 | 直接子项数量 |
+| `hash` | 必返回 | 必返回 | 实体 hash |
+
+> 客户端根据 `isBinary` 决定后续 `fs.read` 的寻址语义：文本文件 `offset`/`count` 按**行**寻址，二进制文件按**字节**寻址。
+
+### 5.6 `fs.read`（文件）
+
+#### 5.6.1 Hash 协商语义
 
 `hash` 始终是**整个文件**的 hash（`sha256(raw bytes)`），与读取范围无关。
 
@@ -503,26 +574,29 @@ else:
 - 文件级 hash 未变 ⟹ 所有字节未变 ⟹ 任意范围的缓存均有效。
 - 文件 hash 变化后，客户端应失效该文件所有已缓存的范围。
 
-#### 5.5.2 文本 vs 二进制分流
+#### 5.6.2 统一寻址：`offset` / `count`
 
-服务端通过内容检测判定文件类型，响应中返回：
-
-- `isBinary: boolean` — 是否为二进制文件。
-- `mimeType: string` — MIME 类型（如 `"text/markdown"`、`"image/png"`）。
-
-**首次请求**：客户端在打开文件前不知道文件类型，因此首次 `fs.read` **不传** `startLine`/`lineCount`/`offset`/`limit`，仅传 `path`（和可选的 `knownHash`）。服务端自动检测类型，按对应模式返回首段数据及 `isBinary`/`mimeType`。客户端根据响应中的 `isBinary` 判定后续分段使用哪种寻址模式。
-
-两种文件使用不同的读取模式：
+文本文件和二进制文件使用相同的请求字段 `offset`/`count`，语义由文件类型决定（客户端通过 `fs.info` 提前获知）：
 
 | | 文本文件（`isBinary=false`） | 二进制文件（`isBinary=true`） |
 |---|---|---|
-| 寻址单位 | **行号**（`startLine` / `lineCount`） | **字节偏移**（`offset` / `limit`） |
+| `offset` 含义 | 起始行号（从 1 开始） | 字节偏移（从 0 开始） |
+| `count` 含义 | 请求行数 | 请求字节数 |
 | 编码 | `utf-8` | `base64`（< 2MiB）或 `none`（>= 2MiB，仅元信息） |
-| 缓存粒度 | 按 `{path, startLine, lineCount, hash}` | 按 `{path, offset, limit, hash}` |
+| 缓存粒度 | `{path, offset, count, hash}` | `{path, offset, count, hash}` |
 
-#### 5.5.3 文本文件读取
+响应使用对应的统一字段：
 
-**基本请求**：
+| 响应字段 | 说明 |
+|---------|------|
+| `offset` | 回显请求的起始位置 |
+| `returned` | 实际返回的数量（行数或字节数） |
+| `total` | 总量（总行数或总字节数） |
+| `hasMore` | 是否还有后续数据 |
+
+#### 5.6.3 文本文件读取
+
+**请求**：
 
 ```json
 {
@@ -533,13 +607,13 @@ else:
   "payload": {
     "path": "docs/registry-protocol.md",
     "knownHash": "sha256:old-content-hash",
-    "startLine": 1,
-    "lineCount": 500
+    "offset": 1,
+    "count": 500
   }
 }
 ```
 
-`startLine` 从 1 开始。`lineCount` 为请求的行数，建议默认 500 行。省略 `startLine` 和 `lineCount` 时默认从第 1 行开始读取，服务端返回默认行数。
+省略 `offset` 和 `count` 时默认从第 1 行开始，服务端返回默认行数。
 
 **响应 — 未变化**：
 
@@ -574,15 +648,15 @@ else:
     "encoding": "utf-8",
     "content": "line1\nline2\n...",
     "size": 21459,
-    "totalLines": 380,
-    "startLine": 1,
-    "returnedLines": 380,
+    "total": 380,
+    "offset": 1,
+    "returned": 380,
     "hasMore": false
   }
 }
 ```
 
-**大文件分段读取 — 首段响应**：
+**大文件分段 — 首段响应**：
 
 ```json
 {
@@ -599,9 +673,9 @@ else:
     "encoding": "utf-8",
     "content": "package main\n...(500 lines)...",
     "size": 45000,
-    "totalLines": 1200,
-    "startLine": 1,
-    "returnedLines": 500,
+    "total": 1200,
+    "offset": 1,
+    "returned": 500,
     "hasMore": true
   }
 }
@@ -617,8 +691,8 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "src/big-module.go",
-    "startLine": 501,
-    "lineCount": 500
+    "offset": 501,
+    "count": 500
   }
 }
 ```
@@ -633,44 +707,27 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "path": "src/big-module.go",
-    "content": "...(lines 501-1000)...",
     "encoding": "utf-8",
-    "startLine": 501,
-    "returnedLines": 500,
+    "content": "...(lines 501-1000)...",
+    "offset": 501,
+    "returned": 500,
     "hasMore": true
-  }
-}
-```
-
-**随机范围读取**（跳转到文件中间）：
-
-```json
-{
-  "requestId": 4,
-  "type": "request",
-  "method": "fs.read",
-  "projectId": "local-hub:WheelMaker",
-  "payload": {
-    "path": "logs/server.log",
-    "knownHash": "sha256:file-hash-when-cached",
-    "startLine": 8000,
-    "lineCount": 200
   }
 }
 ```
 
 规则：
 
-- `hash` 始终是整文件 hash，不随 startLine 变化。
+- `hash` 始终是整文件 hash，不随 offset 变化。
 - 有缓存 → 带 `knownHash`，服务端验证后快速返回或返回新数据。
 - 无缓存 → 不带 `knownHash`，服务端直接返回数据。
-- hash 变了 → 客户端失效该文件所有已缓存的行范围。
+- hash 变了 → 客户端失效该文件所有已缓存的范围。
 
 > **分段一致性**：分段仅为传输优化。若分段过程中文件内容发生变化，客户端可能获得不一致的拼接；下一轮 push hint 事件会触发重新拉取，自动修正。
 
-#### 5.5.4 二进制文件读取
+#### 5.6.4 二进制文件读取
 
-二进制文件使用字节偏移寻址：
+**请求**：
 
 ```json
 {
@@ -681,12 +738,12 @@ else:
   "payload": {
     "path": "assets/logo.png",
     "offset": 0,
-    "limit": 65536
+    "count": 65536
   }
 }
 ```
 
-响应（小于 2MiB）：
+**响应（小于 2MiB）**：
 
 ```json
 {
@@ -703,12 +760,15 @@ else:
     "encoding": "base64",
     "content": "iVBORw0KGgo...",
     "size": 15360,
-    "eof": true
+    "total": 15360,
+    "offset": 0,
+    "returned": 15360,
+    "hasMore": false
   }
 }
 ```
 
-响应（>= 2MiB，仅元信息）：
+**响应（>= 2MiB，仅元信息）**：
 
 ```json
 {
@@ -724,44 +784,32 @@ else:
     "mimeType": "video/mp4",
     "encoding": "none",
     "content": null,
-    "size": 52428800
+    "size": 52428800,
+    "total": 52428800,
+    "offset": 0,
+    "returned": 0,
+    "hasMore": false
   }
 }
 ```
 
-二进制分块使用 `offset`/`limit`/`eof`/`nextOffset`，逻辑与文本按行读取类似，只是寻址单位为字节。
-
-#### 5.5.5 `fs.read` 字段总结
-
-**文本文件**：
+#### 5.6.5 `fs.read` 字段总结
 
 | 字段 | 首段请求 | 首段响应 | 后续段请求 | 后续段响应 |
 |------|---------|---------|-----------|-----------|
 | `knownHash` | 可选 | — | 不传 | — |
 | `hash` | — | 必返回 | — | — |
 | `notModified` | — | 必返回 | — | — |
-| `startLine`/`lineCount` | 可选（默认首行） | — | 必传 | — |
-| `startLine` | — | 回显 | — | 回显 |
-| `returnedLines` | — | 必返回 | — | 必返回 |
-| `totalLines` | — | 必返回 | — | — |
+| `offset`/`count` | 可选（默认起始位置） | — | 必传 | — |
+| `offset` | — | 回显 | — | 回显 |
+| `returned` | — | 必返回 | — | 必返回 |
+| `total` | — | 必返回 | — | — |
 | `hasMore` | — | 必返回 | — | 必返回 |
 | `isBinary`/`mimeType`/`size` | — | 必返回 | — | — |
 
-**二进制文件**：
+### 5.7 `fs.search`（文件名模糊查找）
 
-| 字段 | 首块请求 | 首块响应 | 后续块请求 | 后续块响应 |
-|------|---------|---------|-----------|-----------|
-| `knownHash` | 可选 | — | 不传 | — |
-| `hash` | — | 必返回 | — | — |
-| `notModified` | — | 必返回 | — | — |
-| `offset`/`limit` | 必传 | — | 必传 | — |
-| `eof` | — | 必返回 | — | 必返回 |
-| `nextOffset` | — | `eof=false` 时 | — | 必返回 |
-| `isBinary`/`mimeType`/`size` | — | 必返回 | — | — |
-
-### 5.6 `fs.search`（文件名模糊查找）
-
-文件名模糊匹配。内容检索见 5.7 `fs.grep`。
+文件名模糊匹配。内容检索见 5.8 `fs.grep`。
 
 请求：
 
@@ -800,7 +848,7 @@ else:
 }
 ```
 
-### 5.7 `fs.grep`（文件内容搜索）
+### 5.8 `fs.grep`（文件内容搜索）
 
 请求：
 
@@ -851,9 +899,9 @@ else:
 }
 ```
 
-### 5.8 Git 只读接口
+### 5.9 Git 只读接口
 
-#### 5.8.1 `git.refs`（分支与标签）
+#### 5.9.1 `git.refs`（分支与标签）
 
 请求：
 
@@ -886,7 +934,7 @@ else:
 }
 ```
 
-#### 5.8.2 `git.log`
+#### 5.9.2 `git.log`
 
 请求：
 
@@ -934,7 +982,7 @@ else:
 }
 ```
 
-#### 5.8.3 `git.commit.files`
+#### 5.9.3 `git.commit.files`
 
 请求：
 
@@ -968,7 +1016,7 @@ else:
 }
 ```
 
-#### 5.8.4 `git.commit.fileDiff`
+#### 5.9.4 `git.commit.fileDiff`
 
 请求：
 
@@ -1004,7 +1052,7 @@ else:
 }
 ```
 
-#### 5.8.5 `git.diff`（任意两个 ref 之间比较）
+#### 5.9.5 `git.diff`（任意两个 ref 之间比较）
 
 请求：
 
@@ -1062,7 +1110,7 @@ else:
 
 响应格式与 `git.commit.fileDiff` 一致（`isBinary`, `diff`, `truncated`）。
 
-#### 5.8.6 `git.status`（工作区未提交改动视图）
+#### 5.9.6 `git.status`（工作区未提交改动视图）
 
 请求：
 
@@ -1106,7 +1154,7 @@ else:
 | `U` | 未合并冲突 (unmerged) |
 | `?` | 未跟踪 (untracked) |
 
-#### 5.8.7 `git.workingTree.fileDiff`（查看工作区未提交文件 diff）
+#### 5.9.7 `git.workingTree.fileDiff`（查看工作区未提交文件 diff）
 
 请求：
 
@@ -1150,14 +1198,14 @@ else:
 }
 ```
 
-#### 5.8.8 Git 缓存规则
+#### 5.9.8 Git 缓存规则
 
 - Git 列表按 `headSha/gitRev` 变化触发刷新。
 - `git.commit.files` 以 `sha` 为缓存键。
 - `git.commit.fileDiff` 以 `sha+path+contextLines` 为缓存键。
 - Git 列表不做 `knownHash/notModified` 协商。
 
-### 5.9 `batch`（批量请求）
+### 5.10 `batch`（批量请求）
 
 将多个独立请求合并为单次发送，减少移动端高延迟环境下的 RTT 开销。
 
@@ -1250,7 +1298,7 @@ else:
 
 1. **有缓存、不确定是否过期 → 携带 `knownHash`**。服务端校验 hash：未变则返回 `notModified=true`（不含数据体），变了则返回新数据 + 新 `hash`。
 2. **无缓存 → 不传 `knownHash`**。服务端直接返回完整数据。无缓存的场景包括：首次请求、缓存已驱逐、仅从事件推送获知 hash 但从未拉取过数据。
-3. 对 `fs.read`：文件级 hash 未变 ⟹ 全部内容未变 ⟹ 任意行/字节范围的缓存均有效。hash 变化后，客户端应失效该文件所有已缓存的范围。
+3. 对 `fs.read`：文件级 hash 未变 ⟹ 全部内容未变 ⟹ 任意 `offset`/`count` 范围的缓存均有效。hash 变化后，客户端应失效该文件所有已缓存的范围。
 4. 对 `fs.list`：目录 `hash` 仅覆盖 `kind|name`。文件内容变化不影响目录 hash，客户端通过 `changedPaths` 事件判断已打开文件是否需要刷新。
 
 ## 7. 同步策略（Push Hint + Pull Data）
@@ -1351,7 +1399,7 @@ Registry 即将关闭客户端连接时提前通知：
 ### 8.3 可见范围拉取规则（FS）
 
 - 已展开目录：`fs.list(path, knownHash)` — 目录 hash 仅反映条目名称和类型变化。
-- 当前打开文件和 Pin 文件：`fs.read(path, knownHash, ...)` — 获取文件内容、hash、size 等详细信息。
+- 当前打开文件和 Pin 文件：`fs.read(path, knownHash, offset, count)` — 获取文件内容、hash、size 等详细信息。
 - 非可见目录与文件不主动拉取。
 - 若 `changedPaths` 存在，仅对交集路径做刷新。
 - 文件内容变化不改变父目录 hash，需依赖 `changedPaths` 或 `fs.read` 单独检测。
@@ -1366,7 +1414,7 @@ Registry 即将关闭客户端连接时提前通知：
 
 1. **协议收敛**：统一 `project.list`；保留 `reportProjects + updateProject` 双上报。
 2. **Hub 侧**：接入 `projectRev/gitRev/headSha/dirty/worktreeRev` 即时上报；回传 `connectionEpoch`。
-3. **服务端**：实现路由反查、幂等判新、错误码标准化。
+3. **服务端**：实现路由反查、幂等判新、错误码标准化 。
 4. **客户端**：按 push hint + pull data 做可见范围增量刷新；实现 conditional GET。
 5. **可观测性**：补齐 hash 命中率、Git 刷新耗时、工作区变更推送频率等指标。
 
@@ -1382,13 +1430,13 @@ Registry 即将关闭客户端连接时提前通知：
 
 4. **`fs.list` 极简化**：条目仅返回 `{name, kind}`，不分页；目录 `hash` 基于 `kind|name` 仅反映条目增删，不含文件内容 hash。
 
-5. **`fs.read` 文本/二进制分流**：文本按行号寻址（`startLine`/`lineCount`/`totalLines`/`hasMore`），二进制按字节偏移（`offset`/`limit`/`eof`）；增加 `isBinary`/`mimeType`；base64 编码或 metadata-only 策略。
+5. **`fs.info` + `fs.read` 统一寻址**：新增 `fs.info` 查询路径元信息（文件类型、大小、总行数等）；`fs.read` 请求/响应字段统一为 `offset`/`count`/`returned`/`total`/`hasMore`，文本按行寻址、二进制按字节寻址，语义由 `fs.info` 返回的 `isBinary` 决定。
 
 6. **`knownHash` 协商（Conditional GET）**：有缓存则携带 `knownHash`，无缓存则不传；文件分段仅为传输优化，不引入一致性机制。
 
 7. **共享 ProjectObject**：统一 Hub 上报与 Client 查询的 project 结构，补齐 `agent`/`imType` 字段。
 
-8. **新增方法**：`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status` 枚举补全、`project.syncCheck`、`fs.grep`、`batch`。
+8. **新增方法**：`fs.info`、`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status` 枚举补全、`project.syncCheck`、`fs.grep`、`batch`。
 
 9. **连接管理增强**：`project.offline`/`project.online`/`connection.closing` 事件；方法白名单；Client hub 作用域模型。
 
