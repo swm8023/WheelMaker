@@ -1,6 +1,6 @@
-# WheelMaker Registry Remote Observe Protocol（V2 草案）
+# WheelMaker Registry Remote Observe Protocol 2.0
 
-本文在 V1 基础上迭代，重点增强客户端同步能力，并明确基于 Git 版本做增量刷新。
+本文为 2.0 协议规范，描述 Registry、Hub、Client 的统一通信与同步行为。
 
 ## 1. 目标
 
@@ -10,24 +10,12 @@
 - 文件系统接口支持 hash 协商，减少重复传输。
 - Git 列表不做 hash 协商：以 `headSha/gitRev` 变化作为拉取触发条件。
 
-## 2. V1 -> V2 变更对照表（基于原始 V1 草案）
+## 2. 范围
 
-说明：本表只对照原始 V1 协议项，不记录后续编辑过程中的临时调整历史。
-
-| V1 基线项 | V2 现状 | 变更类型 | 说明 |
-|---|---|---|---|
-| `project.list` | 保留 | 扩展 | 增加 `hubId`、`git`、`projectRev`，便于客户端识别项目归属 Hub |
-| `project.listFull` | 移除 | 合并 | 语义并入 `project.list`，避免重复 |
-| `registry.reportProjects` | 保留 | 扩展 | Hub 上报以 `project name` 为主键，增加 Git/版本字段 |
-| （V1 无）`registry.reportProjectRevs` | 新增 | 新增 | Hub -> Registry 增量版本推送 |
-| `fs.list` | 保留 | 扩展 | 支持 `knownHash` 与 `notModified` |
-| `fs.read` | 保留 | 扩展 | 支持 `knownHash` 与 `notModified` |
-| `git.log` | 保留 | 调整 | 不做 hash 协商，按 `headSha/gitRev` 触发刷新 |
-| `git.commit.files` | 保留 | 调整 | 以 `sha` 为天然版本键，不额外 hash 协商 |
-| `git.commit.fileDiff` | 保留 | 调整 | 以 `sha+path+context` 为键缓存 |
-| 同步策略（V1 未固化） | 固化 | 规范化 | 采用方案 C：`push hint + pull data` |
-| 文件查找 | 新增 | 新增接口 | 新增 `fs.search`（文件名模糊匹配） |
-| 未提交改动监控 | 新增 | 新增接口/事件 | 新增 `git.status` + `git.workspace.changed` |
+- 协议版本固定为 `2.0`，不包含旧版本兼容分支。
+- 项目列表统一使用 `project.list`，不使用 `project.listFull`。
+- 握手与认证合并为 `connect.init` 单次初始化请求。
+- Git 列表按版本触发刷新，不做 hash 协商；FS 接口支持 hash 协商。
 
 ## 3. 标识与状态模型
 
@@ -75,8 +63,7 @@
 连接流程：
 
 1. Hub 建立 WebSocket 到 Registry（`ws://host:port/ws` 或 `wss://...`）。
-2. 发送 `hello`（声明 `protocolVersion` 与连接身份 `role`；`role=hub` 时必须携带 `hubId`）。
-3. 发送 `auth`（统一 token，必选）。
+2. 发送 `connect.init`（携带 `protocolVersion`、连接身份与统一 token）。
 4. 发送 `registry.reportProjects` 全量快照，等待 ACK。
 5. 进入 steady 状态：保活 + 增量汇报。
 
@@ -103,7 +90,7 @@
 
 可观测性：
 
-- 记录连接状态变更日志：`connected/disconnected/retrying/auth_failed`。
+- 记录连接状态变更日志：`connected/disconnected/retrying/init_failed`。
 - 暴露指标：`reconnect_count`、`last_report_at`、`heartbeat_timeout_count`、`report_ack_latency_ms`。
 
 ## 4.2 Hub -> Registry 协议定义（报文级）
@@ -117,27 +104,30 @@
   "version": "1.0",
   "requestId": "req-123",
   "type": "request|response|error|event",
-  "method": "hello|auth|registry.reportProjects|registry.reportProjectRevs|ping",
+  "method": "connect.init|registry.reportProjects|registry.reportProjectRevs|ping",
   "payload": {}
 }
 ```
 
-### 4.2.1 hello（必选，声明连接身份）
+### 4.2.1 connect.init（必选，握手与认证合并）
 
 连接方请求（Hub/Client 通用）：
 
 ```json
 {
   "version": "1.0",
-  "requestId": "req-hello",
+  "requestId": "req-init",
   "type": "request",
-  "method": "hello",
+  "method": "connect.init",
   "payload": {
     "clientName": "wheelmaker-hub",
     "clientVersion": "0.1.0",
     "protocolVersion": "1.0",
     "role": "hub",
-    "hubId": "local-hub"
+    "hubId": "local-hub",
+    "token": "******",
+    "ts": 1777777777,
+    "nonce": "a1b2c3d4"
   }
 }
 ```
@@ -147,48 +137,9 @@ Registry 响应：
 ```json
 {
   "version": "1.0",
-  "requestId": "req-hello",
+  "requestId": "req-init",
   "type": "response",
-  "method": "hello",
-  "payload": {
-    "acceptedRole": "hub",
-    "authRequired": true
-  }
-}
-```
-
-hello 校验规则（强约束）：
-
-- `role` 必填，取值仅允许 `hub` 或 `client`。
-- `role=hub` 时，`hubId` 必填。
-- `role=client` 时，`hubId` 允许省略（由 `auth` 绑定作用域）。
-- Registry 必须在连接状态中记录 `role/hubId`，用于后续方法白名单校验。
-- 认证前（`auth.ok=true` 之前）不得返回 `features/serverVersion/protocolVersion` 等能力细节。
-
-### 4.2.2 auth（必选，Hub/Client 通用）
-
-连接方请求（Hub/Client 通用）：
-
-```json
-{
-  "version": "1.0",
-  "requestId": "req-auth",
-  "type": "request",
-  "method": "auth",
-  "payload": {
-    "token": "******"
-  }
-}
-```
-
-Registry 成功响应：
-
-```json
-{
-  "version": "1.0",
-  "requestId": "req-auth",
-  "type": "response",
-  "method": "auth",
+  "method": "connect.init",
   "payload": {
     "ok": true,
     "principal": {
@@ -210,20 +161,23 @@ Registry 成功响应：
 }
 ```
 
-auth 后续约束：
+connect.init 校验规则（强约束）：
 
-- 所有业务方法必须在 `auth.ok=true` 后调用。
+- `role` 必填，取值仅允许 `hub` 或 `client`。
+- `role=hub` 时，`hubId` 必填；`role=client` 时可省略，按 token 作用域绑定。
+- `token` 必填，必须在 `connect.init` 中携带。
+- 所有业务方法必须在 `connect.init.ok=true` 后调用。
 - `role=hub` 仅允许调用 `registry.reportProjects`、`registry.reportProjectRevs`、`ping`。
 - `role=client` 仅允许调用 `project.list`、`fs.*`、`git.*`、`ping`。
 - 若调用方法与 `role` 不匹配，返回 `FORBIDDEN`。
 
-auth 失败与防探测约束：
+connect.init 失败与防探测约束：
 
-- `hello/auth` 失败响应统一为 `UNAUTHORIZED`，避免暴露枚举信息。
+- `connect.init` 失败响应统一为 `UNAUTHORIZED`，避免暴露枚举信息。
 - 认证失败后应立即关闭连接，不保留半认证会话。
 - 认证失败不返回详细失败原因（例如 token 不存在/过期/签名错误不区分）。
 
-### 4.2.3 registry.reportProjects（核心）
+### 4.2.2 registry.reportProjects（核心）
 
 Hub 请求（全量覆盖）：
 
@@ -275,7 +229,7 @@ Registry ACK：
 - `registry.reportProjects` 是“全量快照覆盖”语义，不是 patch。
 - Registry 必须以连接实例区分同 `hubId`，防止旧连接断开误删新映射。
 
-### 4.2.4 ping / pong（保活）
+### 4.2.3 ping / pong（保活）
 
 Hub ping：
 
@@ -306,14 +260,14 @@ Registry pong：
 }
 ```
 
-### 4.2.5 error
+### 4.2.4 error
 
 统一错误报文：
 
 ```json
 {
   "version": "1.0",
-  "requestId": "req-auth",
+  "requestId": "req-init",
   "type": "error",
   "error": {
     "code": "UNAUTHORIZED|FORBIDDEN|NOT_FOUND|UNAVAILABLE|INVALID_ARGUMENT|CONFLICT|RATE_LIMITED|TIMEOUT|INTERNAL",
@@ -323,7 +277,7 @@ Registry pong：
 }
 ```
 
-### 4.2.6 registry.reportProjectRevs（新增：Hub -> Registry 增量 rev 推送）
+### 4.2.5 registry.reportProjectRevs（Hub -> Registry 增量 rev 推送）
 
 用途：当仅版本戳变化时，Hub 只推送变更项，不必每次全量 `registry.reportProjects`。
 
@@ -397,23 +351,24 @@ else:
   ignore as stale_rev_update
 ```
 
-## 4.3 连接身份与统一 Token 模型（新增）
+## 4.3 连接身份与统一 Token 模型
 
 Registry 必须显式区分两类连接：
 
 - `hub` 连接：Hub -> Registry，负责 `registry.reportProjects` 与项目请求响应。
 - `client` 连接：App/Web -> Registry，负责 `project.list/fs/git` 查询。
 
-必须在 `hello` 中声明连接角色：
+必须在 `connect.init` 中声明连接角色并携带 token：
 
 ```json
 {
   "type": "request",
-  "method": "hello",
+  "method": "connect.init",
   "payload": {
     "clientName": "wm-web",
     "protocolVersion": "1.0",
-    "role": "client"
+    "role": "client",
+    "token": "******"
   }
 }
 ```
@@ -423,12 +378,13 @@ Registry 必须显式区分两类连接：
 ```json
 {
   "type": "request",
-  "method": "hello",
+  "method": "connect.init",
   "payload": {
     "clientName": "wheelmaker-hub",
     "protocolVersion": "1.0",
     "role": "hub",
-    "hubId": "local-hub"
+    "hubId": "local-hub",
+    "token": "******"
   }
 }
 ```
@@ -462,19 +418,19 @@ Registry 必须显式区分两类连接：
 
 强约束：
 
-- client 在完成 `auth` 前，不允许调用 `project.list`、`fs.*`、`git.*`。
+- client 在完成 `connect.init` 前，不允许调用 `project.list`、`fs.*`、`git.*`。
 - client token 必须带明确 `hubId` 作用域；未绑定 hub 的 token 视为无效。
 
-### 4.3.3 防探测与抗重放要求（新增）
+### 4.3.3 防探测与抗重放要求
 
 - 连接级限速：按 `IP + role + hubId` 维度限制握手失败频率，超过阈值返回 `RATE_LIMITED`。
 - 重连退避：认证失败场景要求指数退避（建议 `2s -> 4s -> 8s`，上限 `60s`）。
-- 抗重放：`auth` 请求建议携带 `ts + nonce`，服务端校验时间窗并去重 `nonce`。
+- 抗重放：`connect.init` 请求建议携带 `ts + nonce`，服务端校验时间窗并去重 `nonce`。
 - token 约束：必须校验 `exp`、签名与 `hubId/projectIds` 作用域绑定。
 - 审计：记录 `UNAUTHORIZED/FORBIDDEN/RATE_LIMITED`，包含 `requestId/remoteAddr/role/hubId`。
 - 本阶段不强制协议层 `wss` 要求（由后续网络安全专项统一推进）。
 
-## 4.4 projectId -> hub 反查与路由规则（新增）
+## 4.4 projectId -> hub 反查与路由规则
 
 Registry 维护映射：
 
@@ -521,24 +477,13 @@ Registry 维护映射：
 - 错误响应 `details` 至少包含 `projectId`、`hubId`（若可确定）与 `requestId`。
 - 对 `UNAUTHORIZED/FORBIDDEN/RATE_LIMITED` 进行安全审计日志记录。
 
-## 5. Client <-> Registry 协议（V2）
+## 5. Client <-> Registry 协议
 
-### 5.1 hello（客户端视角，权威定义见 4.2.1）
+### 5.1 connect.init（客户端视角，权威定义见 4.2.1）
 
-客户端声明：
+客户端发送 `connect.init`，携带身份与 token。
 
-- `supportsPushHint`
-- `supportsHashNegotiation`
-
-服务端返回：
-
-- 仅返回最小握手确认（不返回能力细节）
-
-### 5.1.1 client auth（客户端视角，权威定义见 4.2.2 / 4.3）
-
-客户端在 `hello` 后发送 `auth`，用于携带统一 token。
-
-服务端在 `auth` 成功后返回能力细节：
+服务端在 `connect.init` 成功后返回能力细节：
 
 - `pushHintEnabled`
 - `hashAlgorithms`（用于 FS 接口）
@@ -546,8 +491,11 @@ Registry 维护映射：
 ```json
 {
   "type": "request",
-  "method": "auth",
+  "method": "connect.init",
   "payload": {
+    "clientName": "wm-web",
+    "protocolVersion": "1.0",
+    "role": "client",
     "token": "client-hub-token"
   }
 }
@@ -558,7 +506,7 @@ Registry 维护映射：
 
 ### 5.2 project.list（唯一项目列表）
 
-前置条件：必须先完成 `5.1.1 client auth`，且当前连接已绑定一个 hub。
+前置条件：必须先完成 `5.1 connect.init`，且当前连接已绑定一个 hub。
 返回范围：仅返回该 hub 下可访问的 projects。
 
 请求：
@@ -603,23 +551,23 @@ Registry 维护映射：
 
 ### 5.3 fs.list（目录增量）
 
-请求新增：
+请求字段：
 
 - `knownHash`
 - `visibleOnly`（默认 true）
 
-响应新增：
+响应字段：
 
 - `snapshotHash`
 - `notModified`
 
 ### 5.4 fs.read（文件增量）
 
-请求新增：
+请求字段：
 
 - `knownHash`
 
-响应新增：
+响应字段：
 
 - `contentHash`
 - `notModified`
@@ -632,7 +580,7 @@ Registry 维护映射：
 
 备注：Git 列表不需要 `knownHash/notModified`。
 
-### 5.6 fs.search（新增：文件名模糊查找）
+### 5.6 fs.search（文件名模糊查找）
 
 仅支持文件名字符串模糊匹配（首版不做内容检索）。
 
@@ -674,9 +622,9 @@ Registry 维护映射：
 }
 ```
 
-### 5.7 工作区未提交改动监控（新增）
+### 5.7 工作区未提交改动监控
 
-新增查询接口 `git.status`：
+查询接口 `git.status`：
 
 ```json
 {
@@ -734,7 +682,7 @@ Registry 维护映射：
 1. 服务端推送事件摘要（不推全量数据）
 2. 客户端收到后，仅拉取可见范围明细
 
-新增事件：
+事件：
 
 ```json
 {
@@ -786,9 +734,9 @@ Registry 维护映射：
 - Git/工作区变化即时上报。
 - `projectRev` 由 Git 侧版本派生，不引入全量 FS watcher。
 
-3. 服务端接口新增（第一阶段必须完成）
-- 新增 `fs.search`（文件名模糊匹配）
-- 新增 `git.status`（未提交改动视图）
+3. 服务端接口（第一阶段必须完成）
+- `fs.search`（文件名模糊匹配）
+- `git.status`（未提交改动视图）
 
 4. 客户端同步改造
 - 采用方案 C：监听 `project.changed` / `git.workspace.changed`。
