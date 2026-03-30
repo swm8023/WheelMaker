@@ -255,10 +255,26 @@ else:
 
 前置条件：已完成 `connect.init` 且连接已绑定 hub 作用域。
 
-响应关键字段示例：
+请求：
 
 ```json
 {
+  "version": "1.0",
+  "requestId": "req-project-list-1",
+  "type": "request",
+  "method": "project.list",
+  "payload": {
+    "includeStats": true
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-project-list-1",
   "type": "response",
   "method": "project.list",
   "payload": {
@@ -285,28 +301,256 @@ else:
 
 ### 5.3 `fs.list`（目录）
 
-请求字段：`path`、`knownHash`、`visibleOnly`（默认 true）、`limit`、`cursor`。
+请求：
 
-响应字段：`entries`、`snapshotHash`、`notModified`、`nextCursor`。
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-list-1",
+  "type": "request",
+  "method": "fs.list",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs",
+    "knownHash": "sha256:prev-docs-hash",
+    "visibleOnly": true,
+    "limit": 200,
+    "cursor": ""
+  }
+}
+```
+
+响应（命中未变化）：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-list-1",
+  "type": "response",
+  "method": "fs.list",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs",
+    "snapshotHash": "sha256:prev-docs-hash",
+    "notModified": true,
+    "entries": [],
+    "nextCursor": ""
+  }
+}
+```
+
+响应（有变化）：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-list-1",
+  "type": "response",
+  "method": "fs.list",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs",
+    "snapshotHash": "sha256:new-docs-hash",
+    "notModified": false,
+    "entries": [
+      { "name": "registry-protocol.md", "path": "docs/registry-protocol.md", "kind": "file", "size": 21459, "mtime": "2026-03-30T09:20:00Z", "dataHash": "sha256:..." },
+      { "name": "superpowers", "path": "docs/superpowers", "kind": "dir", "size": 0, "mtime": "2026-03-30T09:10:00Z", "dataHash": "" }
+    ],
+    "nextCursor": ""
+  }
+}
+```
 
 ### 5.4 `fs.read`（文件）
 
-请求字段：`path`、`knownHash`、`offset`、`limit`。
+请求：
 
-响应字段：`content`、`contentHash`、`notModified`、`eof`、`nextOffset`。
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-read-1",
+  "type": "request",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "knownHash": "sha256:old-content-hash",
+    "offset": 0,
+    "limit": 65536
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-read-1",
+  "type": "response",
+  "method": "fs.read",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "path": "docs/registry-protocol.md",
+    "contentHash": "sha256:new-content-hash",
+    "notModified": false,
+    "content": "...",
+    "encoding": "utf-8",
+    "eof": true,
+    "nextOffset": 65536
+  }
+}
+```
 
 ### 5.5 `fs.search`（文件名模糊查找）
 
 - 首版仅支持文件名模糊匹配，不做内容检索。
-- 建议字段：`query`、`root`、`mode=fuzzy`、`caseSensitive`、`limit`、`cursor`。
+
+请求：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-search-1",
+  "type": "request",
+  "method": "fs.search",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "query": "registry protocol",
+    "root": ".",
+    "mode": "fuzzy",
+    "caseSensitive": false,
+    "limit": 50,
+    "cursor": ""
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-fs-search-1",
+  "type": "response",
+  "method": "fs.search",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "results": [
+      { "path": "docs/registry-protocol.md", "name": "registry-protocol.md", "score": 0.97 }
+    ],
+    "nextCursor": ""
+  }
+}
+```
 
 ### 5.6 Git 只读接口
 
 - `git.branches`
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-branches-1",
+  "type": "request",
+  "method": "git.branches",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {}
+}
+```
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-branches-1",
+  "type": "response",
+  "method": "git.branches",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "current": "main",
+    "branches": ["main", "feature/x"]
+  }
+}
+```
+
 - `git.log`
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-log-1",
+  "type": "request",
+  "method": "git.log",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "ref": "main",
+    "cursor": "",
+    "limit": 50
+  }
+}
+```
+
 - `git.commit.files`
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-files-1",
+  "type": "request",
+  "method": "git.commit.files",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "sha": "abc123"
+  }
+}
+```
+
 - `git.commit.fileDiff`
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-diff-1",
+  "type": "request",
+  "method": "git.commit.fileDiff",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "sha": "abc123",
+    "path": "docs/registry-protocol.md",
+    "contextLines": 3
+  }
+}
+```
+
 - `git.status`（工作区未提交改动视图）
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-status-1",
+  "type": "request",
+  "method": "git.status",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {}
+}
+```
+
+```json
+{
+  "version": "1.0",
+  "requestId": "req-git-status-1",
+  "type": "response",
+  "method": "git.status",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "dirty": true,
+    "worktreeRev": "sha256:...",
+    "staged": [{ "path": "docs/registry-protocol.md", "status": "M" }],
+    "unstaged": [{ "path": "app/web/src/main.tsx", "status": "M" }],
+    "untracked": [{ "path": "tmp/new.txt", "status": "?" }]
+  }
+}
+```
 
 规则：
 
@@ -337,20 +581,66 @@ else:
 
 事件示例：
 
-- `project.changed`：包含 `projectRev/gitRev/worktreeRev/changedDomains`。
-- `git.workspace.changed`：包含 `dirty/worktreeRev`。
+`project.changed`：
+
+```json
+{
+  "version": "1.0",
+  "type": "event",
+  "method": "project.changed",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "projectRev": "sha256:...",
+    "gitRev": "sha256:...",
+    "worktreeRev": "sha256:...",
+    "changedDomains": ["git", "worktree"]
+  }
+}
+```
+
+`git.workspace.changed`：
+
+```json
+{
+  "version": "1.0",
+  "type": "event",
+  "method": "git.workspace.changed",
+  "projectId": "local-hub:WheelMaker",
+  "payload": {
+    "dirty": true,
+    "worktreeRev": "sha256:..."
+  }
+}
+```
+
+同步约束：
+
+- 事件是提示（hint），不是状态真值；客户端必须以拉取结果为准。
+- 同一个 `projectId` 上，客户端应仅保留最后一个待处理事件（可合并去抖）。
+- 处理超时或失败时可重试，重试失败回退到“按 `project.list` + 可见范围全量重拉”。
 
 ## 8. 客户端增量刷新规则
 
-1. 收到 `project.changed`，或轮询发现 `projectRev/gitRev/worktreeRev` 变化。
-2. Git 刷新：
-- `headSha/gitRev` 变化 -> 拉 `git.log`
-- 选中 commit 变化 -> 拉 `git.commit.files`
-- 选中 diff 变化 -> 拉 `git.commit.fileDiff`
-- `worktreeRev` 变化 -> 拉 `git.status`
-3. FS 刷新（按需，不全盘扫描）：
-- 已展开目录 -> `fs.list(path, knownHash)`
-- 打开/Pin 文件 -> `fs.read(path, knownHash)`
+1. 触发源：
+- 收到 `project.changed`/`git.workspace.changed`。
+- 或轮询发现 `projectRev/gitRev/worktreeRev` 与本地缓存不一致。
+
+2. 刷新顺序（同一 project）：
+- 先刷新 `project.list` 中该 project 的元信息缓存。
+- 再按 `changedDomains` 分流：
+  - 包含 `git`：拉 `git.log`，并按当前选中项继续拉 `git.commit.files`/`git.commit.fileDiff`。
+  - 包含 `worktree`：拉 `git.status`。
+  - 包含 `fs` 或未提供 `changedDomains`：按可见范围执行 `fs.list/fs.read`。
+
+3. 可见范围拉取规则（FS）：
+- 已展开目录：`fs.list(path, knownHash)`。
+- 当前打开文件和 Pin 文件：`fs.read(path, knownHash)`。
+- 非可见目录与文件不主动拉取。
+
+4. 幂等与去重：
+- 对同一路径并发请求做合并（同 key 仅保留 1 个在途请求）。
+- 响应 `notModified=true` 时仅更新时间戳，不刷新内容缓存。
+- 新响应版本戳早于本地已处理版本时丢弃（防止乱序覆盖）。
 
 ## 9. 实施建议
 
