@@ -365,6 +365,11 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		retryStream := false
 		for u := range updates {
 			if u.Err != nil {
+				if attempt == 1 && isCopilotReasoningArgError(u.Err) && c.tryCopilotReasoningFallback(ctx) {
+					c.reply("Copilot model incompatibility detected, switched model and retrying once...")
+					retryStream = true
+					break
+				}
 				// Avoid duplicate failure messages:
 				// do not emit generic UpdateError to IM before handling concrete error.
 				if attempt == 1 && !sawText && (isAgentExitError(u.Err) || isSandboxRefreshErr(u.Err)) {
@@ -494,6 +499,92 @@ func isAgentExitError(err error) bool {
 		strings.Contains(s, "broken pipe") ||
 		strings.Contains(s, "connection reset") ||
 		strings.Contains(s, "eof")
+}
+
+func isCopilotReasoningArgError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(strings.TrimSpace(err.Error()))
+	if s == "" {
+		return false
+	}
+	return strings.Contains(s, "reasoning_effort") && strings.Contains(s, "unrecognized request argument")
+}
+
+func (c *Client) tryCopilotReasoningFallback(ctx context.Context) bool {
+	c.mu.Lock()
+	if c.conn == nil || !strings.EqualFold(strings.TrimSpace(c.conn.name), "copilot") {
+		c.mu.Unlock()
+		return false
+	}
+	sid := strings.TrimSpace(c.session.id)
+	fwd := c.conn.forwarder
+	configOptions := append([]acp.ConfigOption(nil), c.sessionMeta.ConfigOptions...)
+	c.mu.Unlock()
+
+	if sid == "" || fwd == nil {
+		return false
+	}
+
+	var modelOpt *acp.ConfigOption
+	for i := range configOptions {
+		opt := &configOptions[i]
+		if strings.EqualFold(strings.TrimSpace(opt.ID), "model") || strings.EqualFold(strings.TrimSpace(opt.Category), "model") {
+			modelOpt = opt
+			break
+		}
+	}
+	if modelOpt == nil || len(modelOpt.Options) == 0 {
+		return false
+	}
+
+	current := strings.ToLower(strings.TrimSpace(modelOpt.CurrentValue))
+	target := ""
+	for _, candidate := range modelOpt.Options {
+		value := strings.TrimSpace(candidate.Value)
+		if value == "" || strings.EqualFold(value, modelOpt.CurrentValue) {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(value), "gpt-5") {
+			target = value
+			break
+		}
+	}
+	if target == "" {
+		for _, candidate := range modelOpt.Options {
+			value := strings.TrimSpace(candidate.Value)
+			lower := strings.ToLower(value)
+			if value == "" || strings.EqualFold(value, modelOpt.CurrentValue) {
+				continue
+			}
+			if strings.HasPrefix(lower, "gpt-4") && strings.HasPrefix(current, "gpt-4") {
+				continue
+			}
+			target = value
+			break
+		}
+	}
+	if target == "" {
+		return false
+	}
+
+	updatedOpts, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+		SessionID: sid,
+		ConfigID:  modelOpt.ID,
+		Value:     target,
+	})
+	if err != nil {
+		return false
+	}
+
+	c.mu.Lock()
+	if len(updatedOpts) > 0 {
+		c.sessionMeta.ConfigOptions = updatedOpts
+	}
+	c.mu.Unlock()
+	c.saveSessionState()
+	return true
 }
 
 // resetDeadConnection clears the current agent connection when it is known-dead.
