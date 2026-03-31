@@ -1,4 +1,4 @@
-# WheelMaker — Server
+# WheelMaker ï¿½ Server
 
 Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, console), with independent registry sync.
 
@@ -27,8 +27,8 @@ Hub
 
 ## Config Files
 
-- `~/.wheelmaker/config.json` — project config (IM type, agent, working dir, yolo)
-- `~/.wheelmaker/state.json` — runtime state (session IDs, agent metadata)
+- `~/.wheelmaker/config.json` ï¿½ project config (IM type, agent, working dir, yolo)
+- `~/.wheelmaker/state.json` ï¿½ runtime state (session IDs, agent metadata)
 
 ```json
 {
@@ -77,8 +77,9 @@ GOOS=linux  GOARCH=amd64 go build -o bin/linux_amd64/wheelmaker  ./cmd/wheelmake
 GOOS=darwin GOARCH=arm64 go build -o bin/darwin_arm64/wheelmaker ./cmd/wheelmaker/
 
 # Root-level helper scripts
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_server.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/install_server.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_server.ps1      # compatibility wrapper
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/install_server.ps1    # compatibility wrapper
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1
 ```
 
@@ -86,9 +87,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_ser
 
 | # | Invariant |
 |---|-----------|
-| 1 | `acp.Conn` is pure transport — no business logic inside |
+| 1 | `acp.Conn` is pure transport ï¿½ no business logic inside |
 | 2 | `client.Client` is the single owner of session state; IM adapters never mutate it directly |
-| 3 | Agent subprocess is created lazily — never at startup |
+| 3 | Agent subprocess is created lazily ï¿½ never at startup |
 | 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im.Channel`) |
 | 5 | `state.json` is the source of truth for runtime state |
 | 6 | Registry sync is independent of IM mode (`registry.listen=true` local, otherwise remote connect) |

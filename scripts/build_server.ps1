@@ -6,28 +6,29 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$serverRoot = Join-Path $repoRoot "server"
-if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-  $OutputPath = Join-Path $serverRoot "bin\windows_amd64\wheelmaker.exe"
+$refreshScript = Join-Path $PSScriptRoot "refresh_server.ps1"
+if (-not (Test-Path $refreshScript)) {
+  throw ("refresh script not found: {0}" -f $refreshScript)
 }
 
-Write-Host ("==> build output: {0}" -f $OutputPath)
+$args = @(
+  "-NoProfile",
+  "-ExecutionPolicy", "Bypass",
+  "-File", $refreshScript,
+  "-SkipGitPull",
+  "-SkipDeps",
+  "-SkipInstall",
+  "-SkipRestart"
+)
+if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
+  $args += @("-OutputPath", $OutputPath)
+}
 if ($WhatIf) {
-  Write-Host ("[whatif] go build -o {0} ./cmd/wheelmaker/" -f $OutputPath)
-  exit 0
+  $args += "-WhatIf"
 }
 
-New-Item -ItemType Directory -Path (Split-Path $OutputPath -Parent) -Force | Out-Null
-Push-Location $serverRoot
-try {
-  & go build -o $OutputPath ./cmd/wheelmaker/
-  if ($LASTEXITCODE -ne 0) {
-    throw ("go build failed (exit={0})" -f $LASTEXITCODE)
-  }
-}
-finally {
-  Pop-Location
-}
+& powershell @args
 
-Write-Host "==> build done"
+if ($LASTEXITCODE -ne 0) {
+  throw ("refresh_server.ps1 build stage failed (exit={0})" -f $LASTEXITCODE)
+}

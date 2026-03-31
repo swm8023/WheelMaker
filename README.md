@@ -30,27 +30,30 @@ Guardian (-d)
 
 ## Quick Start
 
-### 1. Build & Install
+### 1. Pull, Build, Install & Restart
 
 Requires **Go 1.22+** and **Node.js 22+**.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_server.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_server.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
 ```
 
-The install script will:
+The refresh script will:
+- Pull the latest code with `git pull --ff-only` when the worktree is clean
 - Install ACP CLI dependencies (`codex-acp`, `claude-agent-acp`) if missing
-- Copy the binary to `~/.wheelmaker/bin/`
-- Generate a default `config.json` if none exists
-- Generate `start.bat` / `stop.bat` / `restart.bat` service scripts
+- Build `server\bin\windows_amd64\wheelmaker.exe`
+- Install the binary to `~/.wheelmaker\bin\`
+- Preserve an existing `~\.wheelmaker\config.json`, or create one from `server\config.example.json`
+- Generate `start.bat` / `stop.bat` / `restart.bat`
+- Restart the daemon after install
+
+If `config.json` is created for the first time, the script stops before restart so you can edit it safely, then rerun the same command.
 
 ### 2. Configure
 
 Copy the example config and fill in your credentials:
 
 ```powershell
-Copy-Item server\config.example.json ~\.wheelmaker\config.json
 notepad ~\.wheelmaker\config.json
 ```
 
@@ -140,6 +143,8 @@ cd server
 go run ./cmd/wheelmaker    # run in foreground
 go test ./...              # run tests
 ```
+
+Legacy helper scripts (`scripts\build_server.ps1`, `scripts\install_server.ps1`, `scripts\delay_restart_server.ps1`) still exist as compatibility wrappers, but `scripts\refresh_server.ps1` is the primary entrypoint now.
 
 ## License
 

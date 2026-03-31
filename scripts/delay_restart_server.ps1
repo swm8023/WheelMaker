@@ -10,8 +10,7 @@ $ErrorActionPreference = "Continue"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $baseDir = Join-Path -Path $HOME -ChildPath ".wheelmaker"
 $logPath = Join-Path -Path $baseDir -ChildPath "delay_restart_server.log"
-$buildScript = Join-Path -Path $PSScriptRoot -ChildPath "build_server.ps1"
-$installScript = Join-Path -Path $PSScriptRoot -ChildPath "install_server.ps1"
+$refreshScript = Join-Path -Path $PSScriptRoot -ChildPath "refresh_server.ps1"
 
 if (-not (Test-Path $baseDir)) {
   New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
@@ -33,27 +32,17 @@ if (-not $Worker) {
 Add-Content -Path $logPath -Value ("[{0}] restart job begin delay={1}s" -f (Get-Date -Format o), $DelaySeconds)
 Start-Sleep -Seconds $DelaySeconds
 
-if (-not (Test-Path $buildScript)) {
-  Add-Content -Path $logPath -Value ("[{0}] build script missing: {1}" -f (Get-Date -Format o), $buildScript)
-  exit 1
-}
-if (-not (Test-Path $installScript)) {
-  Add-Content -Path $logPath -Value ("[{0}] install script missing: {1}" -f (Get-Date -Format o), $installScript)
+if (-not (Test-Path $refreshScript)) {
+  Add-Content -Path $logPath -Value ("[{0}] refresh script missing: {1}" -f (Get-Date -Format o), $refreshScript)
   exit 1
 }
 
-powershell -NoProfile -ExecutionPolicy Bypass -File $buildScript
+powershell -NoProfile -ExecutionPolicy Bypass -File $refreshScript -SkipGitPull -InstallDir $InstallDir
 if ($LASTEXITCODE -ne 0) {
-  Add-Content -Path $logPath -Value ("[{0}] build failed exit={1}" -f (Get-Date -Format o), $LASTEXITCODE)
+  Add-Content -Path $logPath -Value ("[{0}] refresh failed exit={1}" -f (Get-Date -Format o), $LASTEXITCODE)
   exit $LASTEXITCODE
 }
-
-powershell -NoProfile -ExecutionPolicy Bypass -File $installScript -InstallDir $InstallDir -SkipDeps
-if ($LASTEXITCODE -ne 0) {
-  Add-Content -Path $logPath -Value ("[{0}] install failed exit={1}" -f (Get-Date -Format o), $LASTEXITCODE)
-  exit $LASTEXITCODE
-}
-Add-Content -Path $logPath -Value ("[{0}] install completed" -f (Get-Date -Format o))
+Add-Content -Path $logPath -Value ("[{0}] refresh completed" -f (Get-Date -Format o))
 
 $installedExe = Join-Path -Path $InstallDir -ChildPath "wheelmaker.exe"
 if (-not (Test-Path $installedExe)) {
