@@ -59,15 +59,26 @@ func run() error {
 
 	mux := http.NewServeMux()
 	registerRoutes(mux, mon)
-
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
+	ranAsService, err := runAsWindowsServiceIfNeeded(addr, mux)
+	if err != nil {
+		return err
+	}
+	if ranAsService {
+		return nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	return runHTTPServer(ctx, addr, mux)
+}
+
+func runHTTPServer(ctx context.Context, addr string, handler http.Handler) error {
+
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {

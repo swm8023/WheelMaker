@@ -30,7 +30,10 @@ type workerSpec struct {
 func runGuardian(workerArgs []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	return runGuardianWithContext(ctx, workerArgs)
+}
 
+func runGuardianWithContext(ctx context.Context, workerArgs []string) error {
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)

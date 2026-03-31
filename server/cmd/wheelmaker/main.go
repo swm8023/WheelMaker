@@ -39,6 +39,17 @@ func run() error {
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
 	}
+
+	if !*registryServer && !*registryWorker && !*hubWorker && !*daemonWorker {
+		ranAsService, err := runAsWindowsServiceIfNeeded(fs.Args())
+		if err != nil {
+			return err
+		}
+		if ranAsService {
+			return nil
+		}
+	}
+
 	switch {
 	case *registryServer:
 		return runRegistryServer(*registryAddr, *registryToken)
