@@ -144,7 +144,12 @@ go run ./cmd/wheelmaker    # run in foreground
 go test ./...              # run tests
 ```
 
-Legacy helper scripts (`scripts\build_server.ps1`, `scripts\install_server.ps1`, `scripts\delay_restart_server.ps1`) still exist as compatibility wrappers, but `scripts\refresh_server.ps1` is the primary entrypoint now.
+Scripts overview:
+- `deploy.bat` — one-click manual deploy
+- `deploy_everyday.bat` — register nightly auto-update (3 AM)
+- `scripts\refresh_server.ps1` — core deploy orchestrator (git pull + build + install + restart)
+- `scripts\delay_restart_server.ps1` — delayed restart (used by CI completion gate)
+- `scripts\auto_update.ps1` — git update check + deploy; also manages scheduled task (`-Setup` / `-Uninstall`)
 
 ## License
 

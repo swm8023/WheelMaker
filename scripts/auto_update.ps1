@@ -1,16 +1,26 @@
 <#
 .SYNOPSIS
-  Checks for git updates and runs deploy if new commits are found.
-  Designed to be called by Windows Task Scheduler (e.g. daily at 03:00).
+  WheelMaker auto-update: check git for new commits and deploy, or manage the scheduled task.
+
+.PARAMETER Setup
+  Register a Windows scheduled task to run this script daily. Combine with -Time to set the hour.
+
+.PARAMETER Uninstall
+  Remove the scheduled task.
+
+.PARAMETER Time
+  Time for the daily task (default "03:00"). Only used with -Setup.
 
 .PARAMETER RepoDir
   Path to the WheelMaker repository root. Defaults to the parent of this script's directory.
 
 .PARAMETER Worker
-  Internal flag — runs the actual check/deploy logic. Without it the script
-  spawns a hidden worker process so the Task Scheduler job returns immediately.
+  Internal flag — runs the actual check/deploy logic in background.
 #>
 param(
+  [switch]$Setup,
+  [switch]$Uninstall,
+  [string]$Time = "03:00",
   [string]$RepoDir,
   [switch]$Worker
 )
@@ -24,6 +34,7 @@ if (-not $RepoDir) {
 
 $baseDir  = Join-Path -Path $HOME -ChildPath ".wheelmaker"
 $logPath  = Join-Path -Path $baseDir -ChildPath "auto_update.log"
+$taskName = "WheelMaker-AutoUpdate"
 
 if (-not (Test-Path $baseDir)) {
   New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
@@ -33,6 +44,50 @@ function Write-Log {
   param([string]$Message)
   $ts = Get-Date -Format o
   Add-Content -Path $logPath -Value "[$ts] $Message"
+}
+
+# ── Uninstall scheduled task ──
+if ($Uninstall) {
+  $ErrorActionPreference = "Stop"
+  $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($existing) {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    Write-Host "Removed scheduled task: $taskName"
+  } else {
+    Write-Host "Task '$taskName' not found, nothing to remove."
+  }
+  exit 0
+}
+
+# ── Setup scheduled task ──
+if ($Setup) {
+  $ErrorActionPreference = "Stop"
+  $action = New-ScheduledTaskAction `
+    -Execute "powershell.exe" `
+    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -RepoDir `"$RepoDir`""
+
+  $trigger = New-ScheduledTaskTrigger -Daily -At $Time
+
+  $settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+
+  $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($existing) {
+    Set-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
+    Write-Host "Updated scheduled task: $taskName (daily at $Time)"
+  } else {
+    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "WheelMaker nightly git pull and deploy" | Out-Null
+    Write-Host "Created scheduled task: $taskName (daily at $Time)"
+  }
+
+  Write-Host "  RepoDir: $RepoDir"
+  Write-Host "  Log:     $logPath"
+  Write-Host ""
+  Write-Host "To remove: powershell -File `"$PSCommandPath`" -Uninstall"
+  exit 0
 }
 
 # ── Spawn hidden worker and exit immediately ──

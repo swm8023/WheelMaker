@@ -16,7 +16,7 @@ echo.
 echo ============================================
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\setup_auto_update.ps1" -RepoDir "%~dp0."
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\auto_update.ps1" -Setup -RepoDir "%~dp0."
 
 if %errorlevel% neq 0 (
   echo.

@@ -77,10 +77,10 @@ GOOS=linux  GOARCH=amd64 go build -o bin/linux_amd64/wheelmaker  ./cmd/wheelmake
 GOOS=darwin GOARCH=arm64 go build -o bin/darwin_arm64/wheelmaker ./cmd/wheelmaker/
 
 # Root-level helper scripts
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/build_server.ps1      # compatibility wrapper
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/install_server.ps1    # compatibility wrapper
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1           # full deploy
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1      # delayed restart
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/auto_update.ps1               # git check + deploy
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/auto_update.ps1 -Setup        # register scheduled task
 ```
 
 ## Key Invariants (do not break)
