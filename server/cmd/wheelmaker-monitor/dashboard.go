@@ -239,11 +239,11 @@ body {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .ops-section {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .ops-section:last-child {
@@ -259,17 +259,42 @@ body {
   margin-bottom: 6px;
 }
 
-/* Project list */
-.project-item {
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  margin-bottom: 4px;
-  background: var(--bg);
-  transition: border-color 0.15s;
+.ops-section-head {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ops-section-head .ops-section-title {
+  margin-bottom: 0;
+}
+
+.proc-head-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.proc-head-actions .btn {
+  padding: 4px 9px;
+  font-size: 10px;
+}
+
+/* Project list */
+.project-item {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin-bottom: 3px;
+  background: var(--bg);
+  transition: border-color 0.15s;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  align-items: center;
 }
 
 .project-item:hover { border-color: var(--border-active); }
@@ -277,21 +302,31 @@ body {
 .project-name {
   font-family: var(--mono);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-bright);
   white-space: nowrap;
 }
 
 .project-meta {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-dim);
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   align-items: center;
 }
 
 .project-meta span { display: flex; align-items: center; gap: 4px; }
+
+.project-path {
+  grid-column: 1 / -1;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* Log viewer */
 .log-controls {
@@ -428,23 +463,22 @@ body {
     <div class="ops-layout">
       <div class="ops-col">
         <div class="ops-section">
-          <div class="ops-section-title">Processes</div>
+          <div class="ops-section-head">
+            <div class="ops-section-title">Processes</div>
+            <div class="proc-head-actions">
+              <button class="btn btn-green" onclick="doAction('start')">Start</button>
+              <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
+              <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
+              <button class="btn" onclick="doAction('restart-monitor')">Mon</button>
+            </div>
+          </div>
           <div id="proc-list"></div>
+          <div id="action-msg" class="action-msg"></div>
         </div>
         <div class="ops-section">
           <div class="ops-section-title">Hub</div>
           <div id="hub-info"></div>
           <div id="hub-projects" style="margin-top:8px;"></div>
-        </div>
-        <div class="ops-section">
-          <div class="ops-section-title">Service Control</div>
-          <div class="actions-row">
-            <button class="btn btn-green" onclick="doAction('start')">Start</button>
-            <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
-            <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
-            <button class="btn" onclick="doAction('restart-monitor')">Restart Monitor</button>
-          </div>
-          <div id="action-msg" class="action-msg"></div>
         </div>
       </div>
       <div class="ops-col">
@@ -588,6 +622,7 @@ function renderRegistry(cfg) {
   const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
   let hubHtml = '<div class="registry-info">';
   hubHtml += row('Hub ID', r.hubId || '-');
+  hubHtml += row('Projects', String(projects.length));
   hubHtml += '</div>';
   hubEl.innerHTML = hubHtml;
   if (projects.length === 0) {
@@ -600,7 +635,10 @@ function renderRegistry(cfg) {
       html += '<div class="project-meta">';
       html += '<span><span class="badge badge-blue">' + esc(p.client?.agent || 'none') + '</span></span>';
       html += '<span><span class="badge badge-yellow">' + esc(p.im?.type || 'none') + '</span></span>';
-      html += '</div></div>';
+      html += '<span><span class="badge ' + (p.yolo ? 'badge-green' : 'badge-red') + '">' + (p.yolo ? 'yolo' : 'safe') + '</span></span>';
+      html += '</div>';
+      html += '<div class="project-path">' + esc(p.path || '-') + '</div>';
+      html += '</div>';
     }
     hubProjectsEl.innerHTML = html;
   }
