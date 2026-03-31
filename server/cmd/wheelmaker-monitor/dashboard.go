@@ -108,6 +108,7 @@ body {
 .main-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: minmax(220px, 38vh) minmax(0, 1fr);
   gap: 1px;
   background: var(--border);
   margin: 0;
@@ -469,6 +470,11 @@ body {
 .viewer-card {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+.ops-root {
+  overflow: auto;
 }
 
 .viewer-tabs {
@@ -515,7 +521,7 @@ body {
 @media (max-width: 860px) {
   body { height: auto; overflow: auto; }
   .main-grid { grid-template-columns: 1fr; }
-  .main-grid { height: auto; overflow: visible; }
+  .main-grid { grid-template-rows: auto; height: auto; overflow: visible; }
   .ops-layout { grid-template-columns: 1fr; }
   .viewer-body { min-height: 420px; }
   .log-container { min-height: 280px; }
@@ -548,7 +554,7 @@ body {
 
 <div class="main-grid">
   <!-- Operations -->
-  <div class="card card-full">
+  <div class="card card-full ops-root">
     <div class="card-title">Operations</div>
     <div class="ops-layout">
       <div class="ops-col">
