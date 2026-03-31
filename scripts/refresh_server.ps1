@@ -232,6 +232,7 @@ function Install-ServiceScripts {
   $startBat = @'
 @echo off
 set "exe=%~dp0bin\wheelmaker.exe"
+set "monexe=%~dp0bin\wheelmaker-monitor.exe"
 if not exist "%exe%" (
   echo wheelmaker.exe not found: %exe%
   exit /b 1
@@ -239,22 +240,32 @@ if not exist "%exe%" (
 tasklist /FI "IMAGENAME eq wheelmaker.exe" 2>nul | find /I "wheelmaker.exe" >nul
 if %errorlevel%==0 (
   echo wheelmaker already running
-  exit /b 0
-)
-powershell -NoProfile -Command "Start-Process '%exe%' '-d' -WindowStyle Hidden"
-timeout /t 3 /nobreak >nul
-tasklist /FI "IMAGENAME eq wheelmaker.exe" 2>nul | find /I "wheelmaker.exe" >nul
-if %errorlevel%==0 (
-  echo wheelmaker started
 ) else (
-  echo wheelmaker failed to start
-  exit /b 1
+  powershell -NoProfile -Command "Start-Process '%exe%' '-d' -WindowStyle Hidden"
+  timeout /t 3 /nobreak >nul
+  tasklist /FI "IMAGENAME eq wheelmaker.exe" 2>nul | find /I "wheelmaker.exe" >nul
+  if %errorlevel%==0 (
+    echo wheelmaker started
+  ) else (
+    echo wheelmaker failed to start
+    exit /b 1
+  )
+)
+if exist "%monexe%" (
+  tasklist /FI "IMAGENAME eq wheelmaker-monitor.exe" 2>nul | find /I "wheelmaker-monitor.exe" >nul
+  if %errorlevel%==0 (
+    echo wheelmaker-monitor already running
+  ) else (
+    powershell -NoProfile -Command "Start-Process '%monexe%' -WindowStyle Hidden"
+    timeout /t 2 /nobreak >nul
+    echo wheelmaker-monitor started
+  )
 )
 '@
 
   $stopBat = @'
 @echo off
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$procs = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker.exe'"" -ErrorAction SilentlyContinue); if ($procs.Count -eq 0) { Write-Host 'no running wheelmaker process'; exit 0 }; foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2; $left = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker.exe'"" -ErrorAction SilentlyContinue); foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Write-Host 'wheelmaker stopped'"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$procs = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker.exe'"" -ErrorAction SilentlyContinue); if ($procs.Count -eq 0) { Write-Host 'no running wheelmaker process'; } else { foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2; $left = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker.exe'"" -ErrorAction SilentlyContinue); foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Write-Host 'wheelmaker stopped' }; $mon = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker-monitor.exe'"" -ErrorAction SilentlyContinue); if ($mon.Count -gt 0) { foreach ($p in $mon) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; $left2 = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker-monitor.exe'"" -ErrorAction SilentlyContinue); foreach ($p in $left2) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Write-Host 'wheelmaker-monitor stopped' }"
 if %errorlevel% neq 0 exit /b %errorlevel%
 '@
 
@@ -367,6 +378,30 @@ function Build-ServerBinary {
   }
 }
 
+function Build-MonitorBinary {
+  if ($SkipBuild) {
+    Write-Step "skip monitor build"
+    return
+  }
+
+  Assert-Command -Name "go" -Hint "Install Go 1.22+."
+  Write-Step ("build monitor binary: {0}" -f $script:MonitorOutputBinary)
+
+  if ($WhatIf) {
+    Write-Host ("[whatif] go build -o {0} ./cmd/wheelmaker-monitor/" -f $script:MonitorOutputBinary)
+    return
+  }
+
+  New-Item -ItemType Directory -Path (Split-Path $script:MonitorOutputBinary -Parent) -Force | Out-Null
+  Push-Location $script:ServerRoot
+  try {
+    Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $script:MonitorOutputBinary, "./cmd/wheelmaker-monitor/") -FailureMessage "go build (monitor) failed"
+  }
+  finally {
+    Pop-Location
+  }
+}
+
 function Install-ServerBinary {
   if ($SkipInstall) {
     Write-Step "skip install"
@@ -387,6 +422,53 @@ function Install-ServerBinary {
 
   New-Item -ItemType Directory -Path $script:InstallDirResolved -Force | Out-Null
   Copy-Item -Path $script:SourceBinary -Destination $script:InstalledBinary -Force
+}
+
+function Install-MonitorBinary {
+  if ($SkipInstall) {
+    Write-Step "skip monitor install"
+    return
+  }
+
+  if (-not (Test-Path $script:MonitorOutputBinary)) {
+    Write-Step "monitor binary not found, skipping install"
+    return
+  }
+
+  Write-Step ("install monitor: {0} -> {1}" -f $script:MonitorOutputBinary, $script:MonitorInstalledBinary)
+  Stop-MonitorProcesses
+
+  if ($WhatIf) {
+    Write-Host ("[whatif] copy {0} -> {1}" -f $script:MonitorOutputBinary, $script:MonitorInstalledBinary)
+    return
+  }
+
+  New-Item -ItemType Directory -Path $script:InstallDirResolved -Force | Out-Null
+  Copy-Item -Path $script:MonitorOutputBinary -Destination $script:MonitorInstalledBinary -Force
+}
+
+function Stop-MonitorProcesses {
+  $all = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue)
+  if ($all.Count -eq 0) {
+    Write-Step "no running wheelmaker-monitor process found"
+    return
+  }
+
+  Write-Step ("stop monitor pids: {0}" -f (($all | ForEach-Object { $_.ProcessId }) -join ","))
+  if ($WhatIf) {
+    foreach ($proc in $all) {
+      Write-Host ("[whatif] Stop-Process -Id {0}" -f $proc.ProcessId)
+    }
+    return
+  }
+
+  foreach ($proc in $all) {
+    Stop-Process -Id $proc.ProcessId -ErrorAction SilentlyContinue
+  }
+  Start-Sleep -Seconds 1
+  foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue)) {
+    Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Restart-Server {
@@ -420,6 +502,31 @@ function Restart-Server {
   }
 
   Write-Step ("restart verified: processes={0}, guardian={1}" -f $running.Count, $guardian)
+
+  # Start monitor if binary exists
+  Restart-Monitor
+}
+
+function Restart-Monitor {
+  if ($SkipRestart) {
+    return
+  }
+
+  if (-not (Test-Path $script:MonitorInstalledBinary)) {
+    Write-Step "monitor binary not found, skipping monitor start"
+    return
+  }
+
+  Stop-MonitorProcesses
+
+  Write-Step ("start monitor: {0}" -f $script:MonitorInstalledBinary)
+  if ($WhatIf) {
+    Write-Host ("[whatif] Start-Process -FilePath {0}" -f $script:MonitorInstalledBinary)
+    return
+  }
+
+  $monProc = Start-Process -FilePath $script:MonitorInstalledBinary -WindowStyle Hidden -PassThru
+  Write-Step ("started monitor pid={0}" -f $monProc.Id)
 }
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -431,6 +538,8 @@ $script:InstallDirResolved = Get-ResolvedPathOrDefault -Path $InstallDir -Defaul
 $script:OutputBinary = Get-ResolvedPathOrDefault -Path $OutputPath -Default (Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker.exe")
 $script:SourceBinary = Get-ResolvedPathOrDefault -Path $SourceExe -Default $script:OutputBinary
 $script:InstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker.exe"
+$script:MonitorOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-monitor.exe"
+$script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-monitor.exe"
 
 if (-not (Test-Path $script:ServerRoot)) {
   throw ("server directory not found: {0}" -f $script:ServerRoot)
@@ -440,11 +549,13 @@ Write-Step ("repo root: {0}" -f $script:RepoRoot)
 Pull-Latest
 Ensure-AcpDependencies
 Build-ServerBinary
+Build-MonitorBinary
 
 $configWasCreated = $false
 if (-not $SkipInstall) {
   Backup-Logs
   Install-ServerBinary
+  Install-MonitorBinary
   $configWasCreated = Ensure-Config
   Install-ServiceScripts
 } elseif (-not $SkipRestart) {

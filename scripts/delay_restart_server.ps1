@@ -76,3 +76,16 @@ Add-Content -Path $logPath -Value ("[{0}] wheelmaker roles guardian={1} hub={2} 
 if ($guardian -lt 1 -or $hubWorker -lt 1 -or $registryWorker -lt 1) {
   Add-Content -Path $logPath -Value ("[{0}] warning: expected at least 1 guardian + 1 hub + 1 registry process" -f (Get-Date -Format o))
 }
+
+# Restart monitor if binary exists
+$monitorExe = Join-Path -Path $InstallDir -ChildPath "wheelmaker-monitor.exe"
+if (Test-Path $monitorExe) {
+  $monProcs = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue)
+  foreach ($mp in $monProcs) {
+    Stop-Process -Id $mp.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+  $mp = Start-Process -FilePath $monitorExe -WindowStyle Hidden -PassThru
+  Add-Content -Path $logPath -Value ("[{0}] started monitor pid={1}" -f (Get-Date -Format o), $mp.Id)
+} else {
+  Add-Content -Path $logPath -Value ("[{0}] monitor exe not found, skipping" -f (Get-Date -Format o))
+}

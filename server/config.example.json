@@ -33,6 +33,9 @@
     "token": "",
     "hubId": "dev-hub"
   },
+  "monitor": {
+    "port": 9631
+  },
   "log": {
     "level": "warn"
   }

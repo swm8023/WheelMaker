@@ -10,6 +10,7 @@ import (
 type AppConfig struct {
 	Projects []ProjectConfig `json:"projects"`
 	Registry RegistryConfig  `json:"registry,omitempty"`
+	Monitor  MonitorConfig   `json:"monitor,omitempty"`
 	Log      LogConfig       `json:"log,omitempty"`
 }
 
@@ -39,6 +40,11 @@ type IMConfig struct {
 // ClientConf describes the AI agent side for a project.
 type ClientConf struct {
 	Agent string `json:"agent,omitempty"`
+}
+
+// MonitorConfig configures the wheelmaker-monitor web dashboard.
+type MonitorConfig struct {
+	Port int `json:"port,omitempty"` // HTTP listen port (default: 9631)
 }
 
 // RegistryConfig configures registry sync independent of IM mode.
