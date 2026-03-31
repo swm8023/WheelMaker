@@ -43,8 +43,8 @@ func (c *Client) ensureForwarder(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if debugWriter := c.composeDebugWriter(name, dw); debugWriter != nil {
-		conn.SetDebugLogger(debugWriter)
+	if dw != nil {
+		conn.SetDebugLogger(dw)
 	}
 	fwd := acp.NewForwarder(conn, nil)
 	fwd.SetCallbacks(c)
@@ -110,8 +110,8 @@ func (c *Client) switchAgent(ctx context.Context, name string, mode SwitchMode) 
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if debugWriter := c.composeDebugWriter(name, dw); debugWriter != nil {
-		newConn.SetDebugLogger(debugWriter)
+	if dw != nil {
+		newConn.SetDebugLogger(dw)
 	}
 	newFwd := acp.NewForwarder(newConn, nil)
 	newFwd.SetCallbacks(c)

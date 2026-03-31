@@ -61,7 +61,7 @@ FileState
 
 - Interfaces first: `acp.Session`, `agent.Agent`, `im.Channel`
 - Agent subprocess is lazy: created on first message (`ensureForwarder`)
-- Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/debug`
+- Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load`
 - Code comments and identifiers: **English only**
 - **After every change: `git add` ? `git commit` ? `git push`**
 - Completion gate is defined in repo root `CLAUDE.md`

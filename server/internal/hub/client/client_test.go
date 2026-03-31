@@ -270,27 +270,13 @@ func captureReplies(c *client.Client) *[]string {
 	return messages
 }
 
-func captureRepliesWithDebug(c *client.Client) (*[]string, *[]string) {
-	messages := &[]string{}
-	debugMessages := &[]string{}
-	c.InjectIMChannel(&captureChannel{messages: messages, debugMessages: debugMessages})
-	return messages, debugMessages
-}
-
 type captureChannel struct {
-	messages      *[]string
-	debugMessages *[]string
-	chatIDs       *[]string
+	messages *[]string
+	chatIDs  *[]string
 }
 
 func (a *captureChannel) OnMessage(_ im.MessageHandler) {}
 func (a *captureChannel) Send(chatID string, text string, kind im.TextKind) error {
-	if kind == im.TextDebug {
-		if a.debugMessages != nil {
-			*a.debugMessages = append(*a.debugMessages, text)
-			return nil
-		}
-	}
 	*a.messages = append(*a.messages, text)
 	if a.chatIDs != nil {
 		*a.chatIDs = append(*a.chatIDs, chatID)
@@ -551,25 +537,6 @@ func TestHandleMessage_Use_MissingName(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_Debug_Status(t *testing.T) {
-	mock := &mockSession{agentN: "mock", sessionN: "sess-1"}
-	c := newTestClient(mock)
-	msgs := captureReplies(c)
-
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/debug"})
-
-	found := false
-	for _, m := range *msgs {
-		if strings.Contains(m, "Debug status: off (project)") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("messages = %v, want debug status", *msgs)
-	}
-}
-
 func TestHandleMessage_Mode_SetsMode(t *testing.T) {
 	store := &mockStore{state: &client.ProjectState{
 		ActiveAgent: "codex",
@@ -702,39 +669,6 @@ func TestHandleMessage_Prompt_BurstStreaming_NoLoss(t *testing.T) {
 	joined := strings.Join(*msgs, "\n")
 	if !strings.Contains(joined, want) {
 		t.Fatalf("burst stream lost chunks: got=%q want_contains=%q", joined, want)
-	}
-}
-
-func TestHandleMessage_Prompt_DebugForwardsACPJSONToIM(t *testing.T) {
-	store := &mockStore{state: &client.ProjectState{
-		ActiveAgent: "codex",
-		Agents: map[string]*client.AgentState{
-			"codex": {},
-		},
-	}}
-	c := client.New(store, nil, "test", "/tmp")
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
-		return &minimalMockAgent{}
-	})
-	c.SetDebugLogger(io.Discard)
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	defer c.Close()
-
-	_, debugMsgs := captureRepliesWithDebug(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
-
-	found := false
-	for _, m := range *debugMsgs {
-		if strings.Contains(m, "[debug][codex]") && strings.Contains(m, "[acp]") &&
-			(strings.Contains(m, "\"method\":\"initialize\"") || strings.Contains(m, "\"method\":\"session/prompt\"")) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("debug messages = %v, want debug ACP json forwarded to IM debug channel", *debugMsgs)
 	}
 }
 

@@ -102,12 +102,10 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 	c := client.New(store, imProvider, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
 
-	// Enable ACP JSON debug logging for projects with debug=true.
-	if pc.Debug {
-		if dw := shared.DebugWriter(); dw != nil {
-			c.SetDebugLogger(dw)
-			imProvider.SetDebugLogger(dw)
-		}
+	// ACP/IM debug traces are controlled by logger configuration only.
+	if dw := shared.DebugWriter(); dw != nil {
+		c.SetDebugLogger(dw)
+		imProvider.SetDebugLogger(dw)
 	}
 
 	// Register all known agent factories so users can switch between them at runtime.

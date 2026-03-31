@@ -181,7 +181,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 // Help model / config arg resolution
 // ---------------------------------------------------------------------------
 
-func TestResolveHelpModel_IncludesDebugStatusAction(t *testing.T) {
+func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.RegisterAgent("codex", nil)
 	c.session.ready = true
@@ -197,8 +197,8 @@ func TestResolveHelpModel_IncludesDebugStatusAction(t *testing.T) {
 			hasDebugStatus = true
 		}
 	}
-	if !hasDebugStatus {
-		t.Fatalf("help options missing debug status action: %+v", model.Options)
+	if hasDebugStatus {
+		t.Fatalf("help options should not include debug status action: %+v", model.Options)
 	}
 }
 

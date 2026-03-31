@@ -96,12 +96,6 @@ func (f *ImAdapter) SendReaction(messageID, emoji string) error {
 	return err
 }
 
-func (f *ImAdapter) SendDebug(chatID, text string) error {
-	err := f.adapter.Send(chatID, text, TextDebug)
-	f.logOutgoingSend(chatID, text, TextDebug, err)
-	return err
-}
-
 func (f *ImAdapter) SendThought(chatID, text string) error {
 	err := f.adapter.Send(chatID, text, TextThought)
 	f.logOutgoingSend(chatID, text, TextThought, err)
@@ -152,15 +146,6 @@ func (f *ImAdapter) ReplyText(text string) error {
 		return nil
 	}
 	return f.SendText(chatID, text)
-}
-
-// ReplyDebug sends a debug message to the active chat.
-func (f *ImAdapter) ReplyDebug(text string) error {
-	chatID := f.ActiveChatID()
-	if chatID == "" {
-		return nil
-	}
-	return f.SendDebug(chatID, text)
 }
 
 // SetHelpResolver injects realtime help payload provider from client.

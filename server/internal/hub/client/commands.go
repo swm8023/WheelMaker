@@ -118,10 +118,6 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 	case "/config":
 		c.handleConfigCommand(ctx, args, "Usage: /config <config-id> <value>", "Config", resolveConfigArg)
 
-	case "/debug":
-		if err := c.handleDebugCommand(args); err != nil {
-			c.reply(fmt.Sprintf("Debug error: %v", err))
-		}
 	}
 }
 
@@ -569,7 +565,6 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 
 	// 4. Status
 	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
-	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
 
 	return model, nil
 }

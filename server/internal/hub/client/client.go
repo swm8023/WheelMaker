@@ -129,7 +129,6 @@ type Client struct {
 	terminals *terminalManager
 
 	permRouter *permissionRouter
-	debugSink  *agentDebugSink
 
 	startNoticeSentChatID   string
 	startNoticeReplayQueued bool
@@ -154,7 +153,6 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 	c.initCond = sync.NewCond(&c.mu)
 	c.terminals = newTerminalManager()
 	c.permRouter = newPermissionRouter(c)
-	c.debugSink = newAgentDebugSink(c)
 	return c
 }
 
@@ -304,7 +302,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 // --- internal ---
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load, /debug) are treated as commands;
+// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -312,7 +310,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/debug":
+	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return
@@ -462,19 +460,6 @@ func (c *Client) reply(text string) {
 			chatID = c.projectName
 		}
 		_ = c.imBridge.SendSystem(chatID, text)
-		return
-	}
-	fmt.Println(text)
-}
-
-// replyDebug sends debug text via IM debug channel when available.
-func (c *Client) replyDebug(text string) {
-	if c.imBridge != nil {
-		chatID := c.imBridge.ActiveChatID()
-		if chatID == "" {
-			chatID = c.projectName
-		}
-		_ = c.imBridge.SendDebug(chatID, text)
 		return
 	}
 	fmt.Println(text)
