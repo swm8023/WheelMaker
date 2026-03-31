@@ -332,12 +332,12 @@ func (m *Monitor) GetOverview() (*Overview, error) {
 
 // RegistryProject is one project reported by the registry.
 type RegistryProject struct {
-	ProjectID string                `json:"projectId"`
-	Name      string                `json:"name"`
-	Path      string                `json:"path"`
-	Online    bool                  `json:"online"`
-	Agent     string                `json:"agent"`
-	IMType    string                `json:"imType"`
+	ProjectID string                 `json:"projectId"`
+	Name      string                 `json:"name"`
+	Path      string                 `json:"path"`
+	Online    bool                   `json:"online"`
+	Agent     string                 `json:"agent"`
+	IMType    string                 `json:"imType"`
 	Git       shared.ProjectGitState `json:"git"`
 }
 
@@ -362,10 +362,8 @@ func (m *Monitor) GetRegistryStatus() *RegistryStatus {
 		return &RegistryStatus{Timestamp: ts, Error: "invalid config"}
 	}
 
-	server := cfg.Registry.Server
-	if server == "" {
-		server = "127.0.0.1"
-	}
+	// Monitor is intentionally local-only: always query local registry.
+	server := "127.0.0.1"
 	port := cfg.Registry.Port
 	if port == 0 {
 		port = 9630

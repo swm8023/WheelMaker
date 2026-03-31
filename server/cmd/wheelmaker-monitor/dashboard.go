@@ -468,7 +468,7 @@ body {
 const $ = id => document.getElementById(id);
 
 async function api(path) {
-  const res = await fetch('/api/' + path);
+  const res = await fetch('api/' + path);
   return res.json();
 }
 
