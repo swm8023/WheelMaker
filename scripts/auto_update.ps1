@@ -1,40 +1,45 @@
 <#
 .SYNOPSIS
-  WheelMaker auto-update: check git for new commits and deploy, or manage the scheduled task.
+  WheelMaker updater service manager.
 
 .PARAMETER Setup
-  Register a Windows scheduled task to run this script daily. Combine with -Time to set the hour.
+  Create or update WheelMakerUpdater Windows service.
 
 .PARAMETER Uninstall
-  Remove the scheduled task.
+  Stop and remove WheelMakerUpdater service.
 
 .PARAMETER Time
-  Time for the daily task (default "03:00"). Only used with -Setup.
+  Daily update time in HH:mm, default 03:00.
 
 .PARAMETER RepoDir
-  Path to the WheelMaker repository root. Defaults to the parent of this script's directory.
+  WheelMaker repository path, default parent of scripts directory.
 
-.PARAMETER Worker
-  Internal flag — runs the actual check/deploy logic in background.
+.PARAMETER InstallDir
+  WheelMaker install directory, default ~/.wheelmaker/bin.
+
+.PARAMETER Once
+  Run updater once immediately and exit.
 #>
 param(
   [switch]$Setup,
   [switch]$Uninstall,
+  [switch]$Once,
   [string]$Time = "03:00",
   [string]$RepoDir,
-  [switch]$Worker
+  [string]$InstallDir = (Join-Path -Path $HOME -ChildPath ".wheelmaker\bin")
 )
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 
 if (-not $RepoDir) {
   $RepoDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
 
-$baseDir  = Join-Path -Path $HOME -ChildPath ".wheelmaker"
-$logPath  = Join-Path -Path $baseDir -ChildPath "auto_update.log"
-$taskName = "WheelMaker-AutoUpdate"
+$baseDir = Join-Path -Path $HOME -ChildPath ".wheelmaker"
+$logPath = Join-Path -Path $baseDir -ChildPath "auto_update.log"
+$serviceName = "WheelMakerUpdater"
+$updaterExe = Join-Path $InstallDir "wheelmaker-updater.exe"
 
 if (-not (Test-Path $baseDir)) {
   New-Item -ItemType Directory -Path $baseDir -Force | Out-Null
@@ -42,117 +47,76 @@ if (-not (Test-Path $baseDir)) {
 
 function Write-Log {
   param([string]$Message)
-  $ts = Get-Date -Format o
-  Add-Content -Path $logPath -Value "[$ts] $Message"
+  Add-Content -Path $logPath -Value ("[{0}] {1}" -f (Get-Date -Format o), $Message)
 }
 
-# ── Uninstall scheduled task ──
+function Invoke-Checked {
+  param([string]$FilePath, [string[]]$Arguments, [string]$Fail)
+  & $FilePath @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw ("{0} (exit={1})" -f $Fail, $LASTEXITCODE)
+  }
+}
+
+function Service-Exists {
+  return $null -ne (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)
+}
+
+function Ensure-Service {
+  if (-not (Test-Path $updaterExe)) {
+    throw ("updater executable not found: {0}. Run scripts\refresh_server.ps1 first." -f $updaterExe)
+  }
+
+  $binPath = ('"{0}" --repo "{1}" --install-dir "{2}" --time {3}' -f $updaterExe, $RepoDir, $InstallDir, $Time)
+  if (Service-Exists) {
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $serviceName, "binPath=", $binPath, "start=", "auto") -Fail "service update failed"
+  } else {
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $serviceName, "binPath=", $binPath, "start=", "auto") -Fail "service create failed"
+  }
+}
+
 if ($Uninstall) {
-  $ErrorActionPreference = "Stop"
-  $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  if ($existing) {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
-    Write-Host "Removed scheduled task: $taskName"
+  if (Service-Exists) {
+    Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("delete", $serviceName) -Fail "service delete failed"
+    Write-Host "Removed service: $serviceName"
+    Write-Log "service removed"
   } else {
-    Write-Host "Task '$taskName' not found, nothing to remove."
+    Write-Host "Service '$serviceName' not found"
   }
   exit 0
 }
 
-# ── Setup scheduled task ──
 if ($Setup) {
-  $ErrorActionPreference = "Stop"
-  $action = New-ScheduledTaskAction `
-    -Execute "powershell.exe" `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -RepoDir `"$RepoDir`""
-
-  $trigger = New-ScheduledTaskTrigger -Daily -At $Time
-
-  $settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
-
-  $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  if ($existing) {
-    Set-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
-    Write-Host "Updated scheduled task: $taskName (daily at $Time)"
-  } else {
-    Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description "WheelMaker nightly git pull and deploy" | Out-Null
-    Write-Host "Created scheduled task: $taskName (daily at $Time)"
-  }
-
-  Write-Host "  RepoDir: $RepoDir"
-  Write-Host "  Log:     $logPath"
-  Write-Host ""
-  Write-Host "To remove: powershell -File `"$PSCommandPath`" -Uninstall"
+  Ensure-Service
+  Start-Service -Name $serviceName -ErrorAction SilentlyContinue
+  Write-Host "Service ready: $serviceName (daily at $Time)"
+  Write-Host "  RepoDir:    $RepoDir"
+  Write-Host "  InstallDir: $InstallDir"
+  Write-Host "  Log:        $logPath"
+  Write-Log ("service setup completed repo={0} time={1}" -f $RepoDir, $Time)
   exit 0
 }
 
-# ── Spawn hidden worker and exit immediately ──
-if (-not $Worker) {
-  Start-Process -FilePath "powershell" -ArgumentList @(
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", $PSCommandPath,
-    "-Worker",
-    "-RepoDir", $RepoDir
-  ) -WindowStyle Hidden | Out-Null
-  Write-Log "scheduled auto-update worker repo=$RepoDir"
+if ($Once) {
+  if (-not (Test-Path $updaterExe)) {
+    throw ("updater executable not found: {0}" -f $updaterExe)
+  }
+  Write-Log "manual one-shot update begin"
+  & $updaterExe --repo $RepoDir --install-dir $InstallDir --time $Time --once
+  if ($LASTEXITCODE -ne 0) {
+    Write-Log ("manual one-shot update failed exit={0}" -f $LASTEXITCODE)
+    exit $LASTEXITCODE
+  }
+  Write-Log "manual one-shot update completed"
+  Write-Host "One-shot update finished"
   exit 0
 }
 
-# ── Worker logic ──
-Write-Log "auto-update check begin repo=$RepoDir"
-
-Push-Location $RepoDir
-try {
-  # Fetch remote changes
-  $fetchOut = git fetch origin 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    Write-Log "git fetch failed: $fetchOut"
-    exit 1
-  }
-
-  # Compare local HEAD with remote
-  $localHead  = git rev-parse HEAD 2>&1
-  $branch     = git rev-parse --abbrev-ref HEAD 2>&1
-  $remoteHead = git rev-parse "origin/$branch" 2>&1
-
-  if ($LASTEXITCODE -ne 0) {
-    Write-Log "git rev-parse failed: local=$localHead remote=$remoteHead branch=$branch"
-    exit 1
-  }
-
-  if ($localHead -eq $remoteHead) {
-    Write-Log "already up-to-date ($branch @ $($localHead.Substring(0,8)))"
-    exit 0
-  }
-
-  # Count new commits
-  $newCommits = git log --oneline "$localHead..$remoteHead" 2>&1
-  $count = ($newCommits | Measure-Object -Line).Lines
-  Write-Log "found $count new commit(s) on $branch ($($localHead.Substring(0,8)) -> $($remoteHead.Substring(0,8)))"
-
-  # Run deploy via refresh_server.ps1
-  $refreshScript = Join-Path -Path $PSScriptRoot -ChildPath "refresh_server.ps1"
-  if (-not (Test-Path $refreshScript)) {
-    Write-Log "refresh script missing: $refreshScript"
-    exit 1
-  }
-
-  Write-Log "starting deploy..."
-  powershell -NoProfile -ExecutionPolicy Bypass -File $refreshScript
-  $exitCode = $LASTEXITCODE
-
-  if ($exitCode -ne 0) {
-    Write-Log "deploy failed exit=$exitCode"
-    exit $exitCode
-  }
-
-  $currentHead = git rev-parse HEAD 2>&1
-  Write-Log "deploy completed ($branch @ $($currentHead.Substring(0,8)))"
-} finally {
-  Pop-Location
+if (Service-Exists) {
+  $svc = Get-Service -Name $serviceName
+  Write-Host ("{0}: {1}" -f $serviceName, $svc.Status)
+} else {
+  Write-Host ("{0}: not installed" -f $serviceName)
 }
+Write-Host "Use -Setup to install/update service, -Once to run one-shot update, -Uninstall to remove service."

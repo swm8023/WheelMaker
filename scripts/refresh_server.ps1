@@ -7,11 +7,21 @@ param(
   [switch]$SkipBuild,
   [switch]$SkipInstall,
   [switch]$SkipRestart,
+  [switch]$SkipUpdaterInstall,
+  [switch]$SkipServiceConfig,
+  [string]$UpdateTime = "03:00",
+  [string]$ServiceUser = ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME),
+  [string]$ServicePassword = "",
   [switch]$WhatIf
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$script:WheelmakerService = "WheelMaker"
+$script:MonitorService = "WheelMakerMonitor"
+$script:UpdaterService = "WheelMakerUpdater"
+$script:ServicePasswordPlain = ""
 
 function Write-Step {
   param([string]$Text)
@@ -24,49 +34,26 @@ function Write-Warn {
 }
 
 function Assert-Command {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$Name,
-    [string]$Hint = ""
-  )
-
-  if (Get-Command $Name -ErrorAction SilentlyContinue) {
-    return
-  }
-
-  if ([string]::IsNullOrWhiteSpace($Hint)) {
-    throw ("required command not found in PATH: {0}" -f $Name)
-  }
+  param([Parameter(Mandatory = $true)][string]$Name, [string]$Hint = "")
+  if (Get-Command $Name -ErrorAction SilentlyContinue) { return }
+  if ([string]::IsNullOrWhiteSpace($Hint)) { throw ("required command not found in PATH: {0}" -f $Name) }
   throw ("required command not found in PATH: {0}. {1}" -f $Name, $Hint)
 }
 
 function Invoke-Checked {
-  param(
-    [Parameter(Mandatory = $true)]
-    [string]$FilePath,
-    [string[]]$Arguments = @(),
-    [string]$FailureMessage = ""
-  )
-
+  param([Parameter(Mandatory = $true)][string]$FilePath, [string[]]$Arguments = @(), [string]$FailureMessage = "")
   & $FilePath @Arguments
-  if ($LASTEXITCODE -ne 0) {
-    if ([string]::IsNullOrWhiteSpace($FailureMessage)) {
-      throw ("command failed: {0} {1} (exit={2})" -f $FilePath, ($Arguments -join " "), $LASTEXITCODE)
-    }
-    throw ("{0} (exit={1})" -f $FailureMessage, $LASTEXITCODE)
+  if ($LASTEXITCODE -eq 0) { return }
+  if ([string]::IsNullOrWhiteSpace($FailureMessage)) {
+    throw ("command failed: {0} {1} (exit={2})" -f $FilePath, ($Arguments -join " "), $LASTEXITCODE)
   }
+  throw ("{0} (exit={1})" -f $FailureMessage, $LASTEXITCODE)
 }
 
 function Get-ResolvedPathOrDefault {
-  param(
-    [string]$Path,
-    [string]$Default
-  )
-
+  param([string]$Path, [string]$Default)
   $target = $Path
-  if ([string]::IsNullOrWhiteSpace($target)) {
-    $target = $Default
-  }
+  if ([string]::IsNullOrWhiteSpace($target)) { $target = $Default }
   return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($target)
 }
 
@@ -74,129 +61,67 @@ function Get-GitCurrentBranch {
   Push-Location $script:RepoRoot
   try {
     $branch = ((& git branch --show-current) | Select-Object -First 1)
-    if ($LASTEXITCODE -ne 0) {
-      throw ("git branch --show-current failed (exit={0})" -f $LASTEXITCODE)
-    }
-    $branch = [string]$branch
-    $branch = $branch.Trim()
-    if ($branch -eq "") {
-      throw "repository is in detached HEAD state; cannot pull latest automatically"
-    }
+    if ($LASTEXITCODE -ne 0) { throw ("git branch --show-current failed (exit={0})" -f $LASTEXITCODE) }
+    $branch = ([string]$branch).Trim()
+    if ($branch -eq "") { throw "repository is in detached HEAD state; cannot pull latest automatically" }
     return $branch
-  }
-  finally {
-    Pop-Location
-  }
+  } finally { Pop-Location }
 }
 
 function Assert-CleanGitWorktree {
   Push-Location $script:RepoRoot
   try {
     $status = @(& git status --porcelain)
-    if ($LASTEXITCODE -ne 0) {
-      throw ("git status failed (exit={0})" -f $LASTEXITCODE)
-    }
+    if ($LASTEXITCODE -ne 0) { throw ("git status failed (exit={0})" -f $LASTEXITCODE) }
     if (@($status | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
       throw "git worktree has local changes; commit, stash, or revert them before running refresh_server.ps1"
     }
-  }
-  finally {
-    Pop-Location
-  }
+  } finally { Pop-Location }
 }
 
 function Pull-Latest {
-  if ($SkipGitPull) {
-    Write-Step "skip git pull"
-    return
-  }
-
+  if ($SkipGitPull) { Write-Step "skip git pull"; return }
   Assert-Command -Name "git" -Hint "Install Git and ensure git.exe is available."
   Assert-CleanGitWorktree
   $branch = Get-GitCurrentBranch
-
   Write-Step ("git pull --ff-only origin {0}" -f $branch)
-  if ($WhatIf) {
-    Write-Host ("[whatif] git pull --ff-only origin {0}" -f $branch)
-    return
-  }
-
+  if ($WhatIf) { Write-Host ("[whatif] git pull --ff-only origin {0}" -f $branch); return }
   Push-Location $script:RepoRoot
-  try {
-    Invoke-Checked -FilePath "git" -Arguments @("pull", "--ff-only", "origin", $branch) -FailureMessage "git pull failed"
-  }
-  finally {
-    Pop-Location
-  }
+  try { Invoke-Checked -FilePath "git" -Arguments @("pull", "--ff-only", "origin", $branch) -FailureMessage "git pull failed" }
+  finally { Pop-Location }
 }
 
 function Ensure-AcpDependencies {
-  if ($SkipDeps) {
-    Write-Step "skip dependency install/check (-SkipDeps)"
-    return
-  }
-
+  if ($SkipDeps) { Write-Step "skip dependency install/check (-SkipDeps)"; return }
   Assert-Command -Name "npm" -Hint "Install Node.js 22+."
   $missing = @()
-  if (-not (Get-Command codex-acp -ErrorAction SilentlyContinue)) {
-    $missing += "@zed-industries/codex-acp"
-  }
-  if (-not (Get-Command claude-agent-acp -ErrorAction SilentlyContinue)) {
-    $missing += "@zed-industries/claude-agent-acp"
-  }
-
-  if ($missing.Count -eq 0) {
-    Write-Step "ACP dependencies already installed"
-    return
-  }
-
+  if (-not (Get-Command codex-acp -ErrorAction SilentlyContinue)) { $missing += "@zed-industries/codex-acp" }
+  if (-not (Get-Command claude-agent-acp -ErrorAction SilentlyContinue)) { $missing += "@zed-industries/claude-agent-acp" }
+  if ($missing.Count -eq 0) { Write-Step "ACP dependencies already installed"; return }
   Write-Step ("install ACP dependencies: {0}" -f ($missing -join ", "))
-  if ($WhatIf) {
-    Write-Host ("[whatif] npm install -g {0}" -f ($missing -join " "))
-    return
-  }
-
+  if ($WhatIf) { Write-Host ("[whatif] npm install -g {0}" -f ($missing -join " ")); return }
   Invoke-Checked -FilePath "npm" -Arguments (@("install", "-g") + $missing) -FailureMessage "npm install failed"
 }
 
 function Read-ConfigJson {
   param([Parameter(Mandatory = $true)][string]$Path)
-
-  try {
-    return (Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
-  }
-  catch {
-    throw ("config is not valid JSON: {0}" -f $Path)
-  }
+  try { return (Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json) }
+  catch { throw ("config is not valid JSON: {0}" -f $Path) }
 }
 
 function Validate-ExistingConfig {
   param([Parameter(Mandatory = $true)]$Config)
-
   if ($null -eq $Config.projects -or @($Config.projects).Count -eq 0) {
     Write-Warn "config has no projects configured yet"
     return
   }
-
   foreach ($project in @($Config.projects)) {
     $name = [string]$project.name
-    if ([string]::IsNullOrWhiteSpace($name)) {
-      Write-Warn "config contains a project without a name"
-    }
-
+    if ([string]::IsNullOrWhiteSpace($name)) { Write-Warn "config contains a project without a name" }
     $path = [string]$project.path
-    if ([string]::IsNullOrWhiteSpace($path)) {
-      Write-Warn ("project '{0}' has an empty path" -f $name)
-    } elseif ($path -match "^/path/to/" -or $path -match "\\/path\\/to\\/") {
-      Write-Warn ("project '{0}' still uses the example path: {1}" -f $name, $path)
-    } elseif (-not (Test-Path $path)) {
-      Write-Warn ("project '{0}' path does not exist: {1}" -f $name, $path)
-    }
-
-    $agent = [string]$project.client.agent
-    if ($agent -eq "copilot" -and -not (Get-Command copilot -ErrorAction SilentlyContinue)) {
-      Write-Warn ("project '{0}' uses agent 'copilot' but the 'copilot' CLI was not found in PATH" -f $name)
-    }
+    if ([string]::IsNullOrWhiteSpace($path)) { Write-Warn ("project '{0}' has an empty path" -f $name) }
+    elseif ($path -match "^/path/to/" -or $path -match "\\/path\\/to\\/") { Write-Warn ("project '{0}' still uses the example path: {1}" -f $name, $path) }
+    elseif (-not (Test-Path $path)) { Write-Warn ("project '{0}' path does not exist: {1}" -f $name, $path) }
   }
 }
 
@@ -208,17 +133,9 @@ function Ensure-Config {
     Validate-ExistingConfig -Config $config
     return $false
   }
-
-  if (-not (Test-Path $script:ConfigExamplePath)) {
-    throw ("config example missing: {0}" -f $script:ConfigExamplePath)
-  }
-
+  if (-not (Test-Path $script:ConfigExamplePath)) { throw ("config example missing: {0}" -f $script:ConfigExamplePath) }
   Write-Step ("create config from example: {0}" -f $configPath)
-  if ($WhatIf) {
-    Write-Host ("[whatif] copy {0} -> {1}" -f $script:ConfigExamplePath, $configPath)
-    return $true
-  }
-
+  if ($WhatIf) { Write-Host ("[whatif] copy {0} -> {1}" -f $script:ConfigExamplePath, $configPath); return $true }
   New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
   Copy-Item -Path $script:ConfigExamplePath -Destination $configPath -Force
   Write-Warn ("config was created from example: {0}" -f $configPath)
@@ -228,305 +145,141 @@ function Ensure-Config {
 
 function Install-ServiceScripts {
   Write-Step "install service helper scripts"
+  $startBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -Command `"Start-Service -Name 'WheelMaker' -ErrorAction SilentlyContinue; Start-Service -Name 'WheelMakerMonitor' -ErrorAction SilentlyContinue; Start-Service -Name 'WheelMakerUpdater' -ErrorAction SilentlyContinue`"`r`n"
+  $stopBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -Command `"Stop-Service -Name 'WheelMakerUpdater' -Force -ErrorAction SilentlyContinue; Stop-Service -Name 'WheelMakerMonitor' -Force -ErrorAction SilentlyContinue; Stop-Service -Name 'WheelMaker' -Force -ErrorAction SilentlyContinue`"`r`n"
+  $restartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -Command `"Restart-Service -Name 'WheelMaker' -Force -ErrorAction SilentlyContinue; Restart-Service -Name 'WheelMakerMonitor' -Force -ErrorAction SilentlyContinue; Restart-Service -Name 'WheelMakerUpdater' -Force -ErrorAction SilentlyContinue`"`r`n"
 
-  $startBat = @'
-@echo off
-set "exe=%~dp0bin\wheelmaker.exe"
-set "monexe=%~dp0bin\wheelmaker-monitor.exe"
-if not exist "%exe%" (
-  echo wheelmaker.exe not found: %exe%
-  exit /b 1
-)
-tasklist /FI "IMAGENAME eq wheelmaker.exe" 2>nul | find /I "wheelmaker.exe" >nul
-if %errorlevel%==0 (
-  echo wheelmaker already running
-) else (
-  powershell -NoProfile -Command "Start-Process '%exe%' '-d' -WindowStyle Hidden"
-  timeout /t 3 /nobreak >nul
-  tasklist /FI "IMAGENAME eq wheelmaker.exe" 2>nul | find /I "wheelmaker.exe" >nul
-  if %errorlevel%==0 (
-    echo wheelmaker started
-  ) else (
-    echo wheelmaker failed to start
-    exit /b 1
-  )
-)
-if exist "%monexe%" (
-  tasklist /FI "IMAGENAME eq wheelmaker-monitor.exe" 2>nul | find /I "wheelmaker-monitor.exe" >nul
-  if %errorlevel%==0 (
-    echo wheelmaker-monitor already running
-  ) else (
-    powershell -NoProfile -Command "Start-Process '%monexe%' -WindowStyle Hidden"
-    timeout /t 2 /nobreak >nul
-    echo wheelmaker-monitor started
-  )
-)
-'@
-
-  $stopBat = @'
-@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$procs = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker.exe'"" -ErrorAction SilentlyContinue); if ($procs.Count -eq 0) { Write-Host 'no running wheelmaker process'; } else { foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2; $left = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker.exe'"" -ErrorAction SilentlyContinue); foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Write-Host 'wheelmaker stopped' }; $mon = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker-monitor.exe'"" -ErrorAction SilentlyContinue); if ($mon.Count -gt 0) { foreach ($p in $mon) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 1; $left2 = @(Get-CimInstance Win32_Process -Filter ""Name='wheelmaker-monitor.exe'"" -ErrorAction SilentlyContinue); foreach ($p in $left2) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Write-Host 'wheelmaker-monitor stopped' }"
-if %errorlevel% neq 0 exit /b %errorlevel%
-'@
-
-  $restartBat = @'
-@echo off
-call "%~dp0stop.bat"
-call "%~dp0start.bat"
-'@
-
-  $scripts = @{
-    "start.bat"   = $startBat
-    "stop.bat"    = $stopBat
-    "restart.bat" = $restartBat
-  }
-
+  $scripts = @{ "start.bat" = $startBat; "stop.bat" = $stopBat; "restart.bat" = $restartBat }
   if ($WhatIf) {
-    foreach ($name in $scripts.Keys) {
-      Write-Host ("[whatif] write {0}" -f (Join-Path $script:WheelmakerHome $name))
-    }
+    foreach ($name in $scripts.Keys) { Write-Host ("[whatif] write {0}" -f (Join-Path $script:WheelmakerHome $name)) }
     return
   }
-
   New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
-  foreach ($name in $scripts.Keys) {
-    Set-Content -Path (Join-Path $script:WheelmakerHome $name) -Value $scripts[$name] -Encoding UTF8
-  }
+  foreach ($name in $scripts.Keys) { Set-Content -Path (Join-Path $script:WheelmakerHome $name) -Value $scripts[$name] -Encoding UTF8 }
 }
 
 function Backup-Logs {
   $logDir = Join-Path $script:WheelmakerHome "logs"
   $logFiles = @(Get-ChildItem -Path $script:WheelmakerHome -Filter "*.log" -File -ErrorAction SilentlyContinue)
-  if ($logFiles.Count -eq 0) {
-    Write-Step "no log files to backup"
-    return
-  }
-
+  if ($logFiles.Count -eq 0) { Write-Step "no log files to backup"; return }
   $ts = Get-Date -Format "yyyyMMdd_HHmmss"
   $dest = Join-Path $logDir $ts
   Write-Step ("backup {0} log file(s) -> {1}" -f $logFiles.Count, $dest)
-
   if ($WhatIf) {
-    foreach ($f in $logFiles) {
-      Write-Host ("[whatif] copy {0} -> {1}" -f $f.FullName, $dest)
-    }
+    foreach ($f in $logFiles) { Write-Host ("[whatif] copy {0} -> {1}" -f $f.FullName, $dest) }
     return
   }
-
   New-Item -ItemType Directory -Path $dest -Force | Out-Null
-  foreach ($f in $logFiles) {
-    Copy-Item -Path $f.FullName -Destination $dest -Force
-  }
-
-  # keep only the last 10 backups
-  $backups = @(Get-ChildItem -Path $logDir -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
-  if ($backups.Count -gt 10) {
-    $toRemove = $backups[0..($backups.Count - 11)]
-    foreach ($old in $toRemove) {
-      Remove-Item -Path $old.FullName -Recurse -Force -ErrorAction SilentlyContinue
-    }
-    Write-Step ("pruned {0} old log backup(s)" -f $toRemove.Count)
-  }
+  foreach ($f in $logFiles) { Copy-Item -Path $f.FullName -Destination $dest -Force }
 }
 
-function Stop-WheelmakerProcesses {
-  $all = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
-  if ($all.Count -eq 0) {
-    Write-Step "no running wheelmaker process found"
-    return
-  }
-
-  Write-Step ("stop wheelmaker pids: {0}" -f (($all | ForEach-Object { $_.ProcessId }) -join ","))
-  if ($WhatIf) {
-    foreach ($proc in $all) {
-      Write-Host ("[whatif] Stop-Process -Id {0}" -f $proc.ProcessId)
-    }
-    return
-  }
-
-  foreach ($proc in $all) {
-    Stop-Process -Id $proc.ProcessId -ErrorAction SilentlyContinue
-  }
-
-  Start-Sleep -Seconds 2
-  foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)) {
-    Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-  }
-}
-
-function Build-ServerBinary {
-  if ($SkipBuild) {
-    Write-Step "skip server build"
-    return
-  }
-
+function Build-Binary {
+  param([Parameter(Mandatory = $true)][string]$Out, [Parameter(Mandatory = $true)][string]$Pkg, [Parameter(Mandatory = $true)][string]$Label)
+  if ($SkipBuild) { Write-Step ("skip build: {0}" -f $Label); return }
   Assert-Command -Name "go" -Hint "Install Go 1.22+."
-  Write-Step ("build server binary: {0}" -f $script:OutputBinary)
-
-  if ($WhatIf) {
-    Write-Host ("[whatif] go build -o {0} ./cmd/wheelmaker/" -f $script:OutputBinary)
-    return
-  }
-
-  New-Item -ItemType Directory -Path (Split-Path $script:OutputBinary -Parent) -Force | Out-Null
+  Write-Step ("build {0}: {1}" -f $Label, $Out)
+  if ($WhatIf) { Write-Host ("[whatif] go build -o {0} {1}" -f $Out, $Pkg); return }
+  New-Item -ItemType Directory -Path (Split-Path $Out -Parent) -Force | Out-Null
   Push-Location $script:ServerRoot
+  try { Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $Out, $Pkg) -FailureMessage ("go build failed: {0}" -f $Label) }
+  finally { Pop-Location }
+}
+
+function Test-ServiceExists {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  return $null -ne (Get-Service -Name $Name -ErrorAction SilentlyContinue)
+}
+
+function Wait-ServiceStatus {
+  param([Parameter(Mandatory = $true)][string]$Name, [Parameter(Mandatory = $true)][string]$Status, [int]$TimeoutSeconds = 20)
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $svc) { return }
+    if ([string]$svc.Status -eq $Status) { return }
+    Start-Sleep -Milliseconds 250
+  }
+  throw ("service {0} failed to reach status {1}" -f $Name, $Status)
+}
+
+function Stop-ServiceSafe {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  if (-not (Test-ServiceExists -Name $Name)) { return }
+  Write-Step ("stop service: {0}" -f $Name)
+  if ($WhatIf) { Write-Host ("[whatif] Stop-Service -Name {0} -Force" -f $Name); return }
+  Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+  Wait-ServiceStatus -Name $Name -Status "Stopped" -TimeoutSeconds 20
+}
+
+function Start-ServiceSafe {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  if (-not (Test-ServiceExists -Name $Name)) { Write-Warn ("service not found, skip start: {0}" -f $Name); return }
+  Write-Step ("start service: {0}" -f $Name)
+  if ($WhatIf) { Write-Host ("[whatif] Start-Service -Name {0}" -f $Name); return }
+  Start-Service -Name $Name
+  Wait-ServiceStatus -Name $Name -Status "Running" -TimeoutSeconds 20
+}
+
+function Prepare-ServiceCredentials {
+  if ($SkipServiceConfig -or $WhatIf) { return }
+  if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
+  if (-not [string]::IsNullOrWhiteSpace($ServicePassword)) { $script:ServicePasswordPlain = $ServicePassword; return }
+  if ([Console]::IsInputRedirected) {
+    Write-Warn "service account password not provided; account assignment will be skipped"
+    return
+  }
+  $secure = Read-Host -AsSecureString -Prompt ("Enter password for service account {0} (leave empty to skip account assignment)" -f $ServiceUser)
+  $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try {
-    Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $script:OutputBinary, "./cmd/wheelmaker/") -FailureMessage "go build failed"
-  }
-  finally {
-    Pop-Location
-  }
-}
-
-function Build-MonitorBinary {
-  if ($SkipBuild) {
-    Write-Step "skip monitor build"
-    return
-  }
-
-  Assert-Command -Name "go" -Hint "Install Go 1.22+."
-  Write-Step ("build monitor binary: {0}" -f $script:MonitorOutputBinary)
-
-  if ($WhatIf) {
-    Write-Host ("[whatif] go build -o {0} ./cmd/wheelmaker-monitor/" -f $script:MonitorOutputBinary)
-    return
-  }
-
-  New-Item -ItemType Directory -Path (Split-Path $script:MonitorOutputBinary -Parent) -Force | Out-Null
-  Push-Location $script:ServerRoot
-  try {
-    Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $script:MonitorOutputBinary, "./cmd/wheelmaker-monitor/") -FailureMessage "go build (monitor) failed"
-  }
-  finally {
-    Pop-Location
+    $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    if (-not [string]::IsNullOrWhiteSpace($plain)) { $script:ServicePasswordPlain = $plain }
+    else { Write-Warn "service account password empty; services will keep existing account" }
+  } finally {
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
   }
 }
 
-function Install-ServerBinary {
-  if ($SkipInstall) {
-    Write-Step "skip install"
-    return
+function Ensure-Service {
+  param([Parameter(Mandatory = $true)][string]$Name, [Parameter(Mandatory = $true)][string]$BinaryPath, [string]$Arguments = "")
+  $binPath = ('"{0}" {1}' -f $BinaryPath, $Arguments).Trim()
+  if ($WhatIf) { Write-Host ("[whatif] ensure service {0} binPath={1}" -f $Name, $binPath); return }
+  if (Test-ServiceExists -Name $Name) {
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service config failed: {0}" -f $Name)
+  } else {
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
   }
-
-  if (-not (Test-Path $script:SourceBinary)) {
-    throw ("source binary not found: {0}" -f $script:SourceBinary)
-  }
-
-  Write-Step ("install binary: {0} -> {1}" -f $script:SourceBinary, $script:InstalledBinary)
-  Stop-WheelmakerProcesses
-
-  if ($WhatIf) {
-    Write-Host ("[whatif] copy {0} -> {1}" -f $script:SourceBinary, $script:InstalledBinary)
-    return
-  }
-
-  New-Item -ItemType Directory -Path $script:InstallDirResolved -Force | Out-Null
-  Copy-Item -Path $script:SourceBinary -Destination $script:InstalledBinary -Force
-}
-
-function Install-MonitorBinary {
-  if ($SkipInstall) {
-    Write-Step "skip monitor install"
-    return
-  }
-
-  if (-not (Test-Path $script:MonitorOutputBinary)) {
-    Write-Step "monitor binary not found, skipping install"
-    return
-  }
-
-  Write-Step ("install monitor: {0} -> {1}" -f $script:MonitorOutputBinary, $script:MonitorInstalledBinary)
-  Stop-MonitorProcesses
-
-  if ($WhatIf) {
-    Write-Host ("[whatif] copy {0} -> {1}" -f $script:MonitorOutputBinary, $script:MonitorInstalledBinary)
-    return
-  }
-
-  New-Item -ItemType Directory -Path $script:InstallDirResolved -Force | Out-Null
-  Copy-Item -Path $script:MonitorOutputBinary -Destination $script:MonitorInstalledBinary -Force
-}
-
-function Stop-MonitorProcesses {
-  $all = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue)
-  if ($all.Count -eq 0) {
-    Write-Step "no running wheelmaker-monitor process found"
-    return
-  }
-
-  Write-Step ("stop monitor pids: {0}" -f (($all | ForEach-Object { $_.ProcessId }) -join ","))
-  if ($WhatIf) {
-    foreach ($proc in $all) {
-      Write-Host ("[whatif] Stop-Process -Id {0}" -f $proc.ProcessId)
-    }
-    return
-  }
-
-  foreach ($proc in $all) {
-    Stop-Process -Id $proc.ProcessId -ErrorAction SilentlyContinue
-  }
-  Start-Sleep -Seconds 1
-  foreach ($proc in @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue)) {
-    Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+  if (-not [string]::IsNullOrWhiteSpace($script:ServicePasswordPlain)) {
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "obj=", $ServiceUser, "password=", $script:ServicePasswordPlain) -FailureMessage ("service account config failed: {0}" -f $Name)
   }
 }
 
-function Restart-Server {
-  if ($SkipRestart) {
-    Write-Step "skip restart"
-    return
+function Configure-Services {
+  if ($SkipServiceConfig) { Write-Step "skip service configuration"; return }
+  Prepare-ServiceCredentials
+  Write-Step "ensure windows services"
+  Ensure-Service -Name $script:WheelmakerService -BinaryPath $script:InstalledBinary
+  Ensure-Service -Name $script:MonitorService -BinaryPath $script:MonitorInstalledBinary
+  if (-not $SkipUpdaterInstall) {
+    Ensure-Service -Name $script:UpdaterService -BinaryPath $script:UpdaterInstalledBinary -Arguments ("--repo `"{0}`" --install-dir `"{1}`" --time {2}" -f $script:RepoRoot, $script:InstallDirResolved, $UpdateTime)
   }
-
-  if (-not (Test-Path $script:InstalledBinary)) {
-    throw ("installed binary not found: {0}" -f $script:InstalledBinary)
-  }
-
-  Write-Step ("start daemon: {0} -d" -f $script:InstalledBinary)
-  if ($WhatIf) {
-    Write-Host ("[whatif] Start-Process -FilePath {0} -ArgumentList -d" -f $script:InstalledBinary)
-    return
-  }
-
-  $proc = Start-Process -WorkingDirectory $script:RepoRoot -FilePath $script:InstalledBinary -ArgumentList "-d" -WindowStyle Hidden -PassThru
-  Write-Step ("started guardian pid={0}" -f $proc.Id)
-
-  Start-Sleep -Seconds 4
-  $running = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
-  if ($running.Count -eq 0) {
-    throw "wheelmaker did not remain running after restart"
-  }
-
-  $guardian = @($running | Where-Object { [string]$_.CommandLine -match "(^|\s)-d(\s|$)" }).Count
-  if ($guardian -lt 1) {
-    throw "wheelmaker restart did not leave a guardian process running"
-  }
-
-  Write-Step ("restart verified: processes={0}, guardian={1}" -f $running.Count, $guardian)
-
-  # Start monitor if binary exists
-  Restart-Monitor
 }
 
-function Restart-Monitor {
-  if ($SkipRestart) {
-    return
-  }
+function Install-Binary {
+  param([Parameter(Mandatory = $true)][string]$Source, [Parameter(Mandatory = $true)][string]$Dest, [string]$StopServiceName = "")
+  if ($SkipInstall) { Write-Step ("skip install: {0}" -f (Split-Path $Dest -Leaf)); return }
+  if (-not (Test-Path $Source)) { if ($WhatIf) { Write-Host ("[whatif] source binary missing (expected from build): {0}" -f $Source); return } ; throw ("source binary not found: {0}" -f $Source) }
+  if (-not [string]::IsNullOrWhiteSpace($StopServiceName)) { Stop-ServiceSafe -Name $StopServiceName }
+  Write-Step ("install binary: {0} -> {1}" -f $Source, $Dest)
+  if ($WhatIf) { Write-Host ("[whatif] copy {0} -> {1}" -f $Source, $Dest); return }
+  New-Item -ItemType Directory -Path (Split-Path $Dest -Parent) -Force | Out-Null
+  Copy-Item -Path $Source -Destination $Dest -Force
+}
 
-  if (-not (Test-Path $script:MonitorInstalledBinary)) {
-    Write-Step "monitor binary not found, skipping monitor start"
-    return
-  }
-
-  Stop-MonitorProcesses
-
-  Write-Step ("start monitor: {0}" -f $script:MonitorInstalledBinary)
-  if ($WhatIf) {
-    Write-Host ("[whatif] Start-Process -FilePath {0}" -f $script:MonitorInstalledBinary)
-    return
-  }
-
-  $monProc = Start-Process -FilePath $script:MonitorInstalledBinary -WindowStyle Hidden -PassThru
-  Write-Step ("started monitor pid={0}" -f $monProc.Id)
+function Restart-Services {
+  if ($SkipRestart) { Write-Step "skip restart"; return }
+  Start-ServiceSafe -Name $script:WheelmakerService
+  Start-ServiceSafe -Name $script:MonitorService
+  if (-not $SkipUpdaterInstall) { Start-ServiceSafe -Name $script:UpdaterService }
 }
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -540,28 +293,30 @@ $script:SourceBinary = Get-ResolvedPathOrDefault -Path $SourceExe -Default $scri
 $script:InstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker.exe"
 $script:MonitorOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-monitor.exe"
 $script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-monitor.exe"
+$script:UpdaterOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-updater.exe"
+$script:UpdaterInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-updater.exe"
 
-if (-not (Test-Path $script:ServerRoot)) {
-  throw ("server directory not found: {0}" -f $script:ServerRoot)
-}
+if (-not (Test-Path $script:ServerRoot)) { throw ("server directory not found: {0}" -f $script:ServerRoot) }
 
 Write-Step ("repo root: {0}" -f $script:RepoRoot)
 Pull-Latest
 Ensure-AcpDependencies
-Build-ServerBinary
-Build-MonitorBinary
+Build-Binary -Out $script:OutputBinary -Pkg "./cmd/wheelmaker/" -Label "wheelmaker"
+Build-Binary -Out $script:MonitorOutputBinary -Pkg "./cmd/wheelmaker-monitor/" -Label "wheelmaker-monitor"
+if (-not $SkipUpdaterInstall) { Build-Binary -Out $script:UpdaterOutputBinary -Pkg "./cmd/wheelmaker-updater/" -Label "wheelmaker-updater" }
+else { Write-Step "skip updater build/install" }
 
 $configWasCreated = $false
 if (-not $SkipInstall) {
   Backup-Logs
-  Install-ServerBinary
-  Install-MonitorBinary
+  Install-Binary -Source $script:SourceBinary -Dest $script:InstalledBinary -StopServiceName $script:WheelmakerService
+  Install-Binary -Source $script:MonitorOutputBinary -Dest $script:MonitorInstalledBinary -StopServiceName $script:MonitorService
+  if (-not $SkipUpdaterInstall) { Install-Binary -Source $script:UpdaterOutputBinary -Dest $script:UpdaterInstalledBinary -StopServiceName $script:UpdaterService }
   $configWasCreated = Ensure-Config
   Install-ServiceScripts
+  Configure-Services
 } elseif (-not $SkipRestart) {
-  if (-not (Test-Path $script:ConfigPath)) {
-    throw ("config not found: {0}. Run scripts\refresh_server.ps1 without -SkipInstall first." -f $script:ConfigPath)
-  }
+  if (-not (Test-Path $script:ConfigPath)) { throw ("config not found: {0}. Run scripts\refresh_server.ps1 without -SkipInstall first." -f $script:ConfigPath) }
   Write-Step ("config already exists: {0}" -f $script:ConfigPath)
   $config = Read-ConfigJson -Path $script:ConfigPath
   Validate-ExistingConfig -Config $config
@@ -570,5 +325,8 @@ if (-not $SkipInstall) {
 if ($configWasCreated -and -not $SkipRestart) {
   throw ("config was created from example at {0}; edit it first, then rerun scripts\refresh_server.ps1" -f $script:ConfigPath)
 }
-Restart-Server
+
+Restart-Services
 Write-Step "refresh complete"
+
+

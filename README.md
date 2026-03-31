@@ -19,13 +19,12 @@ Feishu / Mobile App ──► WheelMaker ──► Claude / Codex / Copilot ─�
 ## Architecture
 
 ```
-Guardian (-d)
-  ├── Hub Worker
-  │     ├── Project A  [IM: Feishu]   [Agent: Claude]
-  │     ├── Project B  [IM: Mobile]   [Agent: Copilot]
-  │     └── ...
-  └── Registry Worker (optional)
-        └── WebSocket server for app/web clients
+Windows Services
+  ├── WheelMaker (guardian)
+  │     ├── Hub Worker
+  │     └── Registry Worker (optional)
+  ├── WheelMakerMonitor
+  └── WheelMakerUpdater (daily update scheduler)
 ```
 
 ## Quick Start
@@ -39,13 +38,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
 ```
 
 The refresh script will:
-- Pull the latest code with `git pull --ff-only` when the worktree is clean
+- Pull latest code with `git pull --ff-only` when worktree is clean
 - Install ACP CLI dependencies (`codex-acp`, `claude-agent-acp`) if missing
-- Build `server\bin\windows_amd64\wheelmaker.exe`
-- Install the binary to `~/.wheelmaker\bin\`
-- Preserve an existing `~\.wheelmaker\config.json`, or create one from `server\config.example.json`
-- Generate `start.bat` / `stop.bat` / `restart.bat`
-- Restart the daemon after install
+- Build `wheelmaker.exe`, `wheelmaker-monitor.exe`, and `wheelmaker-updater.exe`
+- Install binaries to `~/.wheelmaker\bin\`
+- Preserve `~/.wheelmaker\config.json`, or create one from `server\config.example.json`
+- Generate `start.bat` / `stop.bat` / `restart.bat` service wrappers
+- Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`, `WheelMakerUpdater`
+- Start services (auto-start enabled)
 
 If `config.json` is created for the first time, the script stops before restart so you can edit it safely, then rerun the same command.
 
@@ -54,62 +54,23 @@ If `config.json` is created for the first time, the script stops before restart 
 Copy the example config and fill in your credentials:
 
 ```powershell
-notepad ~\.wheelmaker\config.json
+notepad ~/.wheelmaker/config.json
 ```
 
-<details>
-<summary>Config reference</summary>
-
-```json
-{
-  "projects": [
-    {
-      "name": "my-project",
-      "path": "C:\\Code\\my-project",
-      "yolo": false,
-      "im": {
-        "type": "feishu",
-        "appID": "cli_xxx",
-        "appSecret": "yyy"
-      },
-      "client": {
-        "agent": "claude"
-      }
-    }
-  ],
-  "registry": {
-    "listen": false,
-    "port": 9630,
-    "server": "127.0.0.1",
-    "token": "",
-    "hubId": ""
-  },
-  "log": {
-    "level": "warn"
-  }
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `projects[].name` | Project identifier |
-| `projects[].path` | Working directory for agent sessions |
-| `projects[].yolo` | Auto-approve all tool permissions when `true` |
-| `projects[].im.type` | `"feishu"`, `"console"`, or `"mobile"` |
-| `projects[].client.agent` | `"claude"`, `"codex"`, or `"copilot"` |
-| `registry.listen` | Start the built-in registry server when `true` |
-| `log.level` | `"debug"`, `"info"`, `"warn"`, or `"error"` |
-
-</details>
-
-### 3. Run
-
-Double-click or run from terminal:
+### 3. Service Operations
 
 ```powershell
-~\.wheelmaker\start.bat     # start
-~\.wheelmaker\stop.bat      # stop
-~\.wheelmaker\restart.bat   # restart
+~/.wheelmaker/start.bat     # start services
+~/.wheelmaker/stop.bat      # stop services
+~/.wheelmaker/restart.bat   # restart services
+```
+
+Updater service management:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto_update.ps1 -Setup -Time 03:00
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto_update.ps1 -Once
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto_update.ps1 -Uninstall
 ```
 
 ## Chat Commands
@@ -145,11 +106,9 @@ go test ./...              # run tests
 ```
 
 Scripts overview:
-- `deploy.bat` — one-click manual deploy
-- `deploy_everyday.bat` — register nightly auto-update (3 AM)
-- `scripts\refresh_server.ps1` — core deploy orchestrator (git pull + build + install + restart)
-- `scripts\delay_restart_server.ps1` — delayed restart (used by CI completion gate)
-- `scripts\auto_update.ps1` — git update check + deploy; also manages scheduled task (`-Setup` / `-Uninstall`)
+- `scripts\refresh_server.ps1` — service-first deploy (build + install + service registration)
+- `scripts\delay_restart_server.ps1` — delayed refresh + service restarts
+- `scripts\auto_update.ps1` — updater service manager (`-Setup` / `-Once` / `-Uninstall`)
 
 ## License
 
