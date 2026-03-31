@@ -52,7 +52,8 @@ body {
   font-family: var(--sans);
   font-size: 14px;
   line-height: 1.4;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .monitor-header {
@@ -110,12 +111,15 @@ body {
   gap: 1px;
   background: var(--border);
   margin: 0;
+  height: calc(100vh - 52px);
+  overflow: hidden;
 }
 
 .card {
   background: var(--bg-card);
   padding: 14px 16px;
   min-height: 0;
+  overflow: hidden;
 }
 
 .card-full {
@@ -378,8 +382,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 8px 10px;
-  max-height: 62vh;
-  min-height: 420px;
+  height: 100%;
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 11px;
@@ -405,7 +408,7 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 10px;
-  max-height: 300px;
+  height: 100%;
   overflow: auto;
   font-family: var(--mono);
   font-size: 11px;
@@ -460,11 +463,59 @@ body {
 }
 .loading { animation: pulse 1.5s ease-in-out infinite; }
 
+/* Workspace tabs */
+.viewer-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.viewer-tab {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.viewer-tab.active {
+  border-color: var(--accent);
+  color: var(--text-bright);
+  background: var(--accent-dim);
+}
+
+.viewer-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.viewer-panel {
+  display: none;
+  height: 100%;
+}
+
+.viewer-panel.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* Responsive */
 @media (max-width: 860px) {
+  body { height: auto; overflow: auto; }
   .main-grid { grid-template-columns: 1fr; }
+  .main-grid { height: auto; overflow: visible; }
   .ops-layout { grid-template-columns: 1fr; }
-  .log-container { max-height: 380px; min-height: 280px; }
+  .viewer-body { min-height: 420px; }
+  .log-container { min-height: 280px; }
   .monitor-header { padding: 8px 16px; }
   .card { padding: 10px 12px; }
 }
@@ -519,33 +570,44 @@ body {
     </div>
   </div>
 
-  <!-- Log Viewer -->
-  <div class="card card-full">
-    <div class="card-title">Logs</div>
-    <div class="log-controls">
-      <select id="log-file" class="log-select" onchange="loadLogs()">
-        <option value="hub">hub.log</option>
-        <option value="debug">hub.debug.log</option>
-        <option value="registry">registry.log</option>
-        <option value="registry-debug">registry.debug.log</option>
-      </select>
-      <select id="log-level" class="log-select" onchange="loadLogs()">
-        <option value="">All Levels</option>
-        <option value="error">Error+</option>
-        <option value="warn">Warn+</option>
-        <option value="info">Info+</option>
-        <option value="debug">Debug+</option>
-      </select>
-      <select id="log-tail" class="log-select" onchange="loadLogs()">
-        <option value="100">Last 100</option>
-        <option value="200" selected>Last 200</option>
-        <option value="500">Last 500</option>
-        <option value="1000">Last 1000</option>
-      </select>
-      <button class="btn" onclick="loadLogs()" style="padding:5px 12px;font-size:11px;">reload</button>
+  <!-- Workspace -->
+  <div class="card card-full viewer-card">
+    <div class="card-title">Workspace</div>
+    <div class="viewer-tabs">
+      <button id="tab-logs" class="viewer-tab active" onclick="switchViewerTab('logs')">Logs</button>
+      <button id="tab-state" class="viewer-tab" onclick="switchViewerTab('state')">State</button>
     </div>
-    <div id="log-container" class="log-container">
-      <div class="empty-state loading">Loading logs...</div>
+    <div class="viewer-body">
+      <div id="panel-logs" class="viewer-panel active">
+        <div class="log-controls">
+          <select id="log-file" class="log-select" onchange="loadLogs()">
+            <option value="hub">hub.log</option>
+            <option value="debug">hub.debug.log</option>
+            <option value="registry">registry.log</option>
+            <option value="registry-debug">registry.debug.log</option>
+          </select>
+          <select id="log-level" class="log-select" onchange="loadLogs()">
+            <option value="">All Levels</option>
+            <option value="error">Error+</option>
+            <option value="warn">Warn+</option>
+            <option value="info">Info+</option>
+            <option value="debug">Debug+</option>
+          </select>
+          <select id="log-tail" class="log-select" onchange="loadLogs()">
+            <option value="100">Last 100</option>
+            <option value="200" selected>Last 200</option>
+            <option value="500">Last 500</option>
+            <option value="1000">Last 1000</option>
+          </select>
+          <button class="btn" onclick="loadLogs()" style="padding:5px 12px;font-size:11px;">reload</button>
+        </div>
+        <div id="log-container" class="log-container">
+          <div class="empty-state loading">Loading logs...</div>
+        </div>
+      </div>
+      <div id="panel-state" class="viewer-panel">
+        <div id="state-view" class="json-view"><span class="loading">Loading...</span></div>
+      </div>
     </div>
   </div>
 
@@ -555,15 +617,18 @@ body {
     <div id="config-view" class="json-view"><span class="loading">Loading...</span></div>
   </div>
 
-  <!-- State -->
-  <div class="card">
-    <div class="card-title">State (state.json)</div>
-    <div id="state-view" class="json-view"><span class="loading">Loading...</span></div>
-  </div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
+
+function switchViewerTab(tab) {
+  const isLogs = tab === 'logs';
+  $('tab-logs').classList.toggle('active', isLogs);
+  $('tab-state').classList.toggle('active', !isLogs);
+  $('panel-logs').classList.toggle('active', isLogs);
+  $('panel-state').classList.toggle('active', !isLogs);
+}
 
 async function api(path) {
   const p = window.location.pathname || '/';
