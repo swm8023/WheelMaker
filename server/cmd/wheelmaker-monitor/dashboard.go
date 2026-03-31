@@ -470,7 +470,8 @@ const $ = id => document.getElementById(id);
 async function api(path) {
   const p = window.location.pathname || '/';
   const base = p.startsWith('/monitor') ? '/monitor/' : '/';
-  const res = await fetch(base + 'api/' + path);
+  const url = window.location.origin + base + 'api/' + path;
+  const res = await fetch(url);
   return res.json();
 }
 
