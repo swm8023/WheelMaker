@@ -656,7 +656,10 @@ async function doAction(action) {
   msg.style.color = 'var(--text-dim)';
 
   try {
-    const res = await fetch('/api/action/' + action, { method: 'POST' });
+    const p = window.location.pathname || '/';
+    const base = p.startsWith('/monitor') ? '/monitor/' : '/';
+    const url = window.location.origin + base + 'api/action/' + action;
+    const res = await fetch(url, { method: 'POST' });
     const data = await res.json();
     if (data.error) {
       msg.textContent = 'Error: ' + data.error;
