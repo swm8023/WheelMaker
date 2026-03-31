@@ -540,6 +540,8 @@ body {
       <select id="log-file" class="log-select" onchange="loadLogs()">
         <option value="hub">hub.log</option>
         <option value="debug">hub.debug.log</option>
+        <option value="registry">registry.log</option>
+        <option value="registry-debug">registry.debug.log</option>
       </select>
       <select id="log-level" class="log-select" onchange="loadLogs()">
         <option value="">All Levels</option>
@@ -562,7 +564,7 @@ body {
   </div>
 
   <!-- Config -->
-  <div class="card">
+  <div class="card" style="display:none;">
     <div class="card-title">Config (config.json)</div>
     <div id="config-view" class="json-view"><span class="loading">Loading...</span></div>
   </div>

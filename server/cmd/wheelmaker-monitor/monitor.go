@@ -182,13 +182,18 @@ type LogResult struct {
 }
 
 // GetLogs reads the specified log file with optional level filter.
-// file: "hub" or "debug". level: "" (all), "warn", "error".
+// file: "hub" | "debug" | "registry" | "registry-debug".
+// level: "" (all), "warn", "error".
 // tail: number of lines from the end (0 = all, max 5000).
 func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, error) {
 	var logPath string
 	switch file {
 	case "debug":
 		logPath = filepath.Join(m.baseDir, "hub.debug.log")
+	case "registry":
+		logPath = filepath.Join(m.baseDir, "registry.log")
+	case "registry-debug":
+		logPath = filepath.Join(m.baseDir, "registry.debug.log")
 	default:
 		logPath = filepath.Join(m.baseDir, "hub.log")
 		file = "hub"
