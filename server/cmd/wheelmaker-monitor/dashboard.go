@@ -633,16 +633,16 @@ async function loadRegistryStatus() {
       return;
     }
     let html = '<table class="reg-table"><thead><tr>';
-    html += '<th>Status</th><th>Project</th><th>Agent</th><th>IM</th><th>Branch</th><th>Dirty</th>';
+    html += '<th>Status</th><th>Hub ID</th><th>Project</th><th>Branch</th><th>Dirty</th>';
     html += '</tr></thead><tbody>';
     for (const p of projects) {
       const dotCls = p.online ? 'on' : 'off';
       const statusText = p.online ? 'online' : 'offline';
+      const hubId = String(p.projectId || '').includes(':') ? String(p.projectId).split(':')[0] : '-';
       html += '<tr>';
       html += '<td><span class="online-dot ' + dotCls + '"></span>' + statusText + '</td>';
+      html += '<td>' + esc(hubId) + '</td>';
       html += '<td>' + esc(p.name || p.projectId) + '</td>';
-      html += '<td>' + (p.agent ? '<span class="badge badge-blue">' + esc(p.agent) + '</span>' : '-') + '</td>';
-      html += '<td>' + (p.imType ? '<span class="badge badge-yellow">' + esc(p.imType) + '</span>' : '-') + '</td>';
       html += '<td>' + (p.git && p.git.branch ? '<span class="git-branch">' + esc(p.git.branch) + '</span>' : '-') + '</td>';
       html += '<td>' + (p.git && p.git.dirty ? '<span class="git-dirty">*</span>' : '-') + '</td>';
       html += '</tr>';
