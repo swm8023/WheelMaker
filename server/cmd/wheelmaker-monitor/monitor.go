@@ -333,19 +333,37 @@ func (m *Monitor) StartService() error {
 
 // RestartMonitor restarts the monitor process itself.
 func (m *Monitor) RestartMonitor() error {
-	exePath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("resolve monitor executable: %w", err)
+	monitorExe := filepath.Join(m.baseDir, "bin", "wheelmaker-monitor.exe")
+	if _, err := os.Stat(monitorExe); err != nil {
+		exePath, exErr := os.Executable()
+		if exErr != nil {
+			return fmt.Errorf("resolve monitor executable: %w", exErr)
+		}
+		monitorExe = exePath
 	}
-	args := append([]string(nil), os.Args[1:]...)
-	cmd := exec.Command(exePath, args...)
-	cmd.Dir = filepath.Dir(exePath)
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start new monitor process: %w", err)
+
+	if runtime.GOOS == "windows" {
+		escapedExe := strings.ReplaceAll(monitorExe, "'", "''")
+		escapedDir := strings.ReplaceAll(m.baseDir, "'", "''")
+		script := fmt.Sprintf(
+			"Start-Sleep -Milliseconds 700; Start-Process -FilePath '%s' -ArgumentList '-dir','%s' -WindowStyle Hidden",
+			escapedExe,
+			escapedDir,
+		)
+		cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("schedule monitor relaunch: %w", err)
+		}
+	} else {
+		cmd := exec.Command(monitorExe, "-dir", m.baseDir)
+		cmd.Dir = filepath.Dir(monitorExe)
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("start new monitor process: %w", err)
+		}
 	}
 
 	go func() {
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(120 * time.Millisecond)
 		os.Exit(0)
 	}()
 	return nil
