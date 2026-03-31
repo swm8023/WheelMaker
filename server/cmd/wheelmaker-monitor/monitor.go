@@ -207,10 +207,11 @@ func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, erro
 	}
 
 	level = strings.ToUpper(strings.TrimSpace(level))
+	minLevel := levelRank(level)
 	var entries []LogEntry
 	for _, line := range lines {
 		entry := parseLine(line)
-		if level != "" && !strings.EqualFold(entry.Level, level) {
+		if level != "" && levelRank(entry.Level) < minLevel {
 			continue
 		}
 		entries = append(entries, entry)
@@ -221,6 +222,22 @@ func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, erro
 		Entries: entries,
 		Total:   len(entries),
 	}, nil
+}
+
+// levelRank returns numeric severity: higher = more severe.
+func levelRank(level string) int {
+	switch strings.ToUpper(level) {
+	case "ERROR":
+		return 4
+	case "WARN":
+		return 3
+	case "INFO":
+		return 2
+	case "DEBUG":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func parseLine(line string) LogEntry {

@@ -50,15 +50,15 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.4;
   min-height: 100vh;
 }
 
 .monitor-header {
   background: linear-gradient(180deg, #111820 0%, var(--bg) 100%);
   border-bottom: 1px solid var(--border);
-  padding: 20px 32px;
+  padding: 10px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -70,7 +70,7 @@ body {
 
 .monitor-header h1 {
   font-family: var(--mono);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-bright);
   letter-spacing: -0.5px;
@@ -114,8 +114,8 @@ body {
 
 .card {
   background: var(--bg-card);
-  padding: 24px;
-  min-height: 180px;
+  padding: 14px 16px;
+  min-height: 0;
 }
 
 .card-full {
@@ -124,21 +124,21 @@ body {
 
 .card-title {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1.5px;
   color: var(--text-dim);
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .card-title::before {
   content: '';
   width: 3px;
-  height: 14px;
+  height: 12px;
   background: var(--accent);
   border-radius: 1px;
 }
@@ -153,17 +153,17 @@ body {
 
 .proc-table th {
   text-align: left;
-  padding: 8px 12px;
+  padding: 4px 10px;
   font-weight: 600;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
   border-bottom: 1px solid var(--border);
 }
 
 .proc-table td {
-  padding: 8px 12px;
+  padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   color: var(--text);
 }
@@ -194,11 +194,11 @@ body {
 
 .btn {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 8px 18px;
+  padding: 5px 14px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 3px;
   background: var(--bg);
   color: var(--text);
   cursor: pointer;
@@ -222,20 +222,23 @@ body {
 
 .action-msg {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
-  margin-top: 10px;
-  min-height: 18px;
+  margin-top: 6px;
+  min-height: 16px;
 }
 
 /* Project list */
 .project-item {
-  padding: 12px 16px;
+  padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  margin-bottom: 8px;
+  border-radius: 3px;
+  margin-bottom: 4px;
   background: var(--bg);
   transition: border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .project-item:hover { border-color: var(--border-active); }
@@ -243,17 +246,18 @@ body {
 .project-name {
   font-family: var(--mono);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-bright);
-  margin-bottom: 4px;
+  white-space: nowrap;
 }
 
 .project-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
   display: flex;
-  gap: 16px;
+  gap: 10px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .project-meta span { display: flex; align-items: center; gap: 4px; }
@@ -261,8 +265,8 @@ body {
 /* Log viewer */
 .log-controls {
   display: flex;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -283,13 +287,13 @@ body {
 .log-container {
   background: #060a10;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 12px;
-  max-height: 420px;
+  border-radius: 3px;
+  padding: 8px 10px;
+  max-height: 380px;
   overflow-y: auto;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.7;
+  font-size: 11px;
+  line-height: 1.6;
   scroll-behavior: smooth;
 }
 
@@ -309,13 +313,13 @@ body {
 .json-view {
   background: #060a10;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 14px;
-  max-height: 360px;
+  border-radius: 3px;
+  padding: 10px;
+  max-height: 300px;
   overflow: auto;
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-all;
@@ -329,20 +333,21 @@ body {
 
 .reg-row {
   display: flex;
-  padding: 6px 0;
+  padding: 3px 0;
   border-bottom: 1px solid var(--border);
+  font-size: 12px;
 }
 
 .reg-row:last-child { border-bottom: none; }
-.reg-label { color: var(--text-dim); width: 140px; flex-shrink: 0; }
+.reg-label { color: var(--text-dim); width: 100px; flex-shrink: 0; }
 .reg-value { color: var(--text); word-break: break-all; }
 
 /* Empty state */
 .empty-state {
   color: var(--text-dim);
   font-family: var(--mono);
-  font-size: 13px;
-  padding: 24px 0;
+  font-size: 12px;
+  padding: 12px 0;
   text-align: center;
 }
 
@@ -356,8 +361,8 @@ body {
 /* Responsive */
 @media (max-width: 860px) {
   .main-grid { grid-template-columns: 1fr; }
-  .monitor-header { padding: 16px 20px; }
-  .card { padding: 18px; }
+  .monitor-header { padding: 8px 16px; }
+  .card { padding: 10px 12px; }
 }
 </style>
 </head>
@@ -388,8 +393,8 @@ body {
       <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
     </div>
     <div id="action-msg" class="action-msg"></div>
-    <div style="margin-top:20px">
-      <div class="card-title" style="margin-bottom:12px">Registry</div>
+    <div style="margin-top:12px">
+      <div class="card-title" style="margin-bottom:8px">Registry</div>
       <div id="registry-info"></div>
     </div>
   </div>
@@ -410,10 +415,10 @@ body {
       </select>
       <select id="log-level" class="log-select" onchange="loadLogs()">
         <option value="">All Levels</option>
-        <option value="error">Error</option>
-        <option value="warn">Warning</option>
-        <option value="info">Info</option>
-        <option value="debug">Debug</option>
+        <option value="error">Error+</option>
+        <option value="warn">Warn+</option>
+        <option value="info">Info+</option>
+        <option value="debug">Debug+</option>
       </select>
       <select id="log-tail" class="log-select" onchange="loadLogs()">
         <option value="100">Last 100</option>
