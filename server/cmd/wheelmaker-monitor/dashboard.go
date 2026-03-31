@@ -129,7 +129,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 1.5px;
   color: var(--text-dim);
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -254,18 +254,18 @@ body {
 .ops-layout {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  gap: 12px;
+  gap: 8px;
 }
 
 .ops-col {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 10px;
+  padding: 6px 8px;
 }
 
 .ops-section {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .ops-section:last-child {
@@ -274,7 +274,7 @@ body {
 
 .ops-section-title {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -307,14 +307,14 @@ body {
 
 /* Project list */
 .project-item {
-  padding: 4px 7px;
+  padding: 3px 6px;
   border: 1px solid var(--border);
   border-radius: 3px;
   margin-bottom: 3px;
   background: var(--bg);
   transition: border-color 0.15s;
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
@@ -323,7 +323,7 @@ body {
 .project-name {
   font-family: var(--mono);
   font-weight: 600;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-bright);
   white-space: nowrap;
 }
@@ -342,13 +342,28 @@ body {
 
 .project-path {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-dim);
   flex: 1 1 auto;
   min-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.hub-summary {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.hub-projects-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  max-height: 132px;
+  overflow: auto;
 }
 
 /* Log viewer */
@@ -463,6 +478,7 @@ body {
 @media (max-width: 860px) {
   .main-grid { grid-template-columns: 1fr; }
   .ops-layout { grid-template-columns: 1fr; }
+  .hub-projects-grid { grid-template-columns: 1fr; max-height: none; }
   .monitor-header { padding: 8px 16px; }
   .card { padding: 10px 12px; }
 }
@@ -492,7 +508,7 @@ body {
               <button class="btn btn-green" onclick="doAction('start')">Start</button>
               <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
               <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
-              <button class="btn" onclick="doAction('restart-monitor')">Mon</button>
+              <button class="btn" onclick="doAction('restart-monitor')">Monitor</button>
             </div>
           </div>
           <div id="proc-list"></div>
@@ -501,7 +517,7 @@ body {
         <div class="ops-section">
           <div class="ops-section-title">Hub</div>
           <div id="hub-info"></div>
-          <div id="hub-projects" style="margin-top:8px;"></div>
+          <div id="hub-projects" style="margin-top:4px;"></div>
         </div>
       </div>
       <div class="ops-col">
@@ -643,25 +659,21 @@ function renderRegistry(cfg) {
   }
   const r = cfg.registry;
   const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
-  let hubHtml = '<div class="registry-info">';
-  hubHtml += row('Hub ID', r.hubId || '-');
-  hubHtml += row('Projects', String(projects.length));
-  hubHtml += '</div>';
-  hubEl.innerHTML = hubHtml;
+  const yoloCount = projects.filter(p => !!p.yolo).length;
+  hubEl.innerHTML = '<div class="hub-summary">hub=' + esc(r.hubId || '-') + ' | projects=' + projects.length + ' | yolo=' + yoloCount + '</div>';
   if (projects.length === 0) {
     hubProjectsEl.innerHTML = '<div class="empty-state">No projects configured</div>';
   } else {
-    let html = '';
+    let html = '<div class="hub-projects-grid">';
     for (const p of projects) {
-      html += '<div class="project-item">';
+      html += '<div class="project-item" title="agent=' + esc(p.client?.agent || 'none') + ', im=' + esc(p.im?.type || 'none') + '">';
       html += '<div class="project-name">' + esc(p.name) + '</div>';
       html += '<div class="project-path">' + esc(p.path || '-') + '</div>';
       html += '<div class="project-meta">';
-      html += '<span><span class="badge badge-blue">' + esc(p.client?.agent || 'none') + '</span></span>';
-      html += '<span><span class="badge badge-yellow">' + esc(p.im?.type || 'none') + '</span></span>';
       html += '<span><span class="badge ' + (p.yolo ? 'badge-green' : 'badge-red') + '">' + (p.yolo ? 'yolo' : 'safe') + '</span></span>';
       html += '</div></div>';
     }
+    html += '</div>';
     hubProjectsEl.innerHTML = html;
   }
 
