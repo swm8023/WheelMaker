@@ -274,7 +274,7 @@ body {
 
 .ops-section-title {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -323,13 +323,13 @@ body {
 .project-name {
   font-family: var(--mono);
   font-weight: 600;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-bright);
   white-space: nowrap;
 }
 
 .project-meta {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
   display: flex;
   gap: 6px;
@@ -342,28 +342,13 @@ body {
 
 .project-path {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
   flex: 1 1 auto;
   min-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.hub-summary {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-dim);
-  margin-bottom: 4px;
-}
-
-.hub-projects-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 3px;
-  max-height: 132px;
-  overflow: auto;
 }
 
 /* Log viewer */
@@ -393,7 +378,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 8px 10px;
-  max-height: 380px;
+  max-height: 62vh;
+  min-height: 420px;
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 11px;
@@ -452,40 +438,9 @@ body {
 .reg-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
 .reg-table tr:last-child td { border-bottom: none; }
 .reg-table tr:hover td { background: var(--bg-card-hover); }
-.conn-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-.conn-badge::before {
-  content: '';
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.conn-badge.on {
-  border-color: rgba(34,197,94,0.3);
-  background: var(--green-dim);
-  color: var(--green);
-}
-.conn-badge.on::before {
-  background: var(--green);
-  box-shadow: 0 0 6px rgba(34,197,94,0.55);
-}
-.conn-badge.off {
-  border-color: rgba(239,68,68,0.3);
-  background: var(--red-dim);
-  color: var(--red);
-}
-.conn-badge.off::before {
-  background: var(--red);
-  box-shadow: 0 0 6px rgba(239,68,68,0.45);
-}
+.status-symbol { font-size: 13px; margin-right: 5px; vertical-align: middle; }
+.status-symbol.on { color: var(--green); }
+.status-symbol.off { color: var(--red); }
 .git-branch { color: var(--accent); }
 .git-dirty { color: var(--yellow); font-weight: 600; }
 
@@ -509,7 +464,7 @@ body {
 @media (max-width: 860px) {
   .main-grid { grid-template-columns: 1fr; }
   .ops-layout { grid-template-columns: 1fr; }
-  .hub-projects-grid { grid-template-columns: 1fr; max-height: none; }
+  .log-container { max-height: 380px; min-height: 280px; }
   .monitor-header { padding: 8px 16px; }
   .card { padding: 10px 12px; }
 }
@@ -692,21 +647,25 @@ function renderRegistry(cfg) {
   }
   const r = cfg.registry;
   const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
-  const yoloCount = projects.filter(p => !!p.yolo).length;
-  hubEl.innerHTML = '<div class="hub-summary">hub=' + esc(r.hubId || '-') + ' | projects=' + projects.length + ' | yolo=' + yoloCount + '</div>';
+  let hubHtml = '<div class="registry-info">';
+  hubHtml += row('Hub ID', r.hubId || '-');
+  hubHtml += row('Projects', String(projects.length));
+  hubHtml += '</div>';
+  hubEl.innerHTML = hubHtml;
   if (projects.length === 0) {
     hubProjectsEl.innerHTML = '<div class="empty-state">No projects configured</div>';
   } else {
-    let html = '<div class="hub-projects-grid">';
+    let html = '';
     for (const p of projects) {
-      html += '<div class="project-item" title="agent=' + esc(p.client?.agent || 'none') + ', im=' + esc(p.im?.type || 'none') + '">';
+      html += '<div class="project-item">';
       html += '<div class="project-name">' + esc(p.name) + '</div>';
       html += '<div class="project-path">' + esc(p.path || '-') + '</div>';
       html += '<div class="project-meta">';
+      html += '<span><span class="badge badge-blue">' + esc(p.client?.agent || 'none') + '</span></span>';
+      html += '<span><span class="badge badge-yellow">' + esc(p.im?.type || 'none') + '</span></span>';
       html += '<span><span class="badge ' + (p.yolo ? 'badge-green' : 'badge-red') + '">' + (p.yolo ? 'yolo' : 'safe') + '</span></span>';
       html += '</div></div>';
     }
-    html += '</div>';
     hubProjectsEl.innerHTML = html;
   }
 
@@ -745,7 +704,7 @@ async function loadRegistryStatus() {
       const statusText = p.online ? 'online' : 'offline';
       const hubId = String(p.projectId || '').includes(':') ? String(p.projectId).split(':')[0] : '-';
       html += '<tr>';
-      html += '<td><span class="conn-badge ' + dotCls + '">' + statusText + '</span></td>';
+      html += '<td><span class="status-symbol ' + dotCls + '">●</span>' + statusText + '</td>';
       html += '<td>' + esc(hubId) + '</td>';
       html += '<td>' + esc(p.name || p.projectId) + '</td>';
       html += '<td>' + (p.git && p.git.branch ? '<span class="git-branch">' + esc(p.git.branch) + '</span>' : '-') + '</td>';
