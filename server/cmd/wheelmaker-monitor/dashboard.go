@@ -468,7 +468,9 @@ body {
 const $ = id => document.getElementById(id);
 
 async function api(path) {
-  const res = await fetch('api/' + path);
+  const p = window.location.pathname || '/';
+  const base = p.startsWith('/monitor') ? '/monitor/' : '/';
+  const res = await fetch(base + 'api/' + path);
   return res.json();
 }
 
