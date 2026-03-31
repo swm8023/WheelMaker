@@ -50,7 +50,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--sans);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.4;
   min-height: 100vh;
 }
@@ -98,7 +98,7 @@ body {
 
 .status-label {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -216,7 +216,7 @@ body {
 
 .btn {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   padding: 5px 14px;
   border: 1px solid var(--border);
@@ -302,7 +302,7 @@ body {
 
 .proc-head-actions .btn {
   padding: 4px 9px;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 /* Project list */
@@ -432,14 +432,14 @@ body {
 /* Registry info */
 .registry-info {
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .reg-row {
   display: flex;
   padding: 3px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .reg-row:last-child { border-bottom: none; }
@@ -447,14 +447,45 @@ body {
 .reg-value { color: var(--text); word-break: break-all; }
 
 /* Registry live table */
-.reg-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
-.reg-table th { text-align: left; padding: 4px 8px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.reg-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+.reg-table th { text-align: left; padding: 4px 8px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 .reg-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
 .reg-table tr:last-child td { border-bottom: none; }
 .reg-table tr:hover td { background: var(--bg-card-hover); }
-.online-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-.online-dot.on { background: var(--green); box-shadow: 0 0 4px rgba(34,197,94,0.4); }
-.online-dot.off { background: var(--text-dim); }
+.conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.conn-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.conn-badge.on {
+  border-color: rgba(34,197,94,0.3);
+  background: var(--green-dim);
+  color: var(--green);
+}
+.conn-badge.on::before {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(34,197,94,0.55);
+}
+.conn-badge.off {
+  border-color: rgba(239,68,68,0.3);
+  background: var(--red-dim);
+  color: var(--red);
+}
+.conn-badge.off::before {
+  background: var(--red);
+  box-shadow: 0 0 6px rgba(239,68,68,0.45);
+}
 .git-branch { color: var(--accent); }
 .git-dirty { color: var(--yellow); font-weight: 600; }
 
@@ -492,6 +523,7 @@ body {
     <div id="hdr-dot" class="status-dot"></div>
     <span id="hdr-label" class="status-label loading">checking...</span>
     <button class="btn btn-accent" onclick="refresh()" style="padding:5px 12px;font-size:11px;">refresh</button>
+    <button class="btn" onclick="doAction('restart-monitor')" style="padding:5px 12px;font-size:11px;">restart monitor</button>
   </div>
 </div>
 
@@ -508,7 +540,6 @@ body {
               <button class="btn btn-green" onclick="doAction('start')">Start</button>
               <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
               <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
-              <button class="btn" onclick="doAction('restart-monitor')">Monitor</button>
             </div>
           </div>
           <div id="proc-list"></div>
@@ -616,7 +647,7 @@ function renderStatus(svc) {
   }
 
   dot.className = 'status-dot online';
-  label.textContent = svc.processes.length + ' process' + (svc.processes.length !== 1 ? 'es' : '');
+  label.textContent = 'online';
 
   let html = '<div class="proc-chips">';
   for (const p of svc.processes) {
@@ -714,7 +745,7 @@ async function loadRegistryStatus() {
       const statusText = p.online ? 'online' : 'offline';
       const hubId = String(p.projectId || '').includes(':') ? String(p.projectId).split(':')[0] : '-';
       html += '<tr>';
-      html += '<td><span class="online-dot ' + dotCls + '"></span>' + statusText + '</td>';
+      html += '<td><span class="conn-badge ' + dotCls + '">' + statusText + '</span></td>';
       html += '<td>' + esc(hubId) + '</td>';
       html += '<td>' + esc(p.name || p.projectId) + '</td>';
       html += '<td>' + (p.git && p.git.branch ? '<span class="git-branch">' + esc(p.git.branch) + '</span>' : '-') + '</td>';
