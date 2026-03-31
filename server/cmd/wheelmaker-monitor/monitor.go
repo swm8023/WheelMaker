@@ -1,0 +1,308 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Monitor holds the base directory and provides all monitoring operations.
+type Monitor struct {
+	baseDir string
+	mu      sync.RWMutex
+}
+
+// NewMonitor creates a Monitor for the given WheelMaker home directory.
+func NewMonitor(baseDir string) *Monitor {
+	return &Monitor{baseDir: baseDir}
+}
+
+// ---------- process monitoring ----------
+
+// ProcessInfo describes one running wheelmaker process.
+type ProcessInfo struct {
+	PID  int    `json:"pid"`
+	Role string `json:"role"` // "guardian", "hub-worker", "registry-worker", "unknown"
+}
+
+// ServiceStatus is an aggregated view of all wheelmaker processes.
+type ServiceStatus struct {
+	Running   bool          `json:"running"`
+	Processes []ProcessInfo `json:"processes"`
+	Timestamp string        `json:"timestamp"`
+}
+
+// GetServiceStatus returns the current wheelmaker process status.
+func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
+	procs, err := listWheelmakerProcesses()
+	if err != nil {
+		return nil, err
+	}
+	return &ServiceStatus{
+		Running:   len(procs) > 0,
+		Processes: procs,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func listWheelmakerProcesses() ([]ProcessInfo, error) {
+	if runtime.GOOS != "windows" {
+		return listProcessesUnix()
+	}
+	return listProcessesWindows()
+}
+
+func listProcessesWindows() ([]ProcessInfo, error) {
+	script := `Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`
+	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
+	if err != nil {
+		return nil, fmt.Errorf("list processes: %w", err)
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" || raw == "null" || raw == "[]" {
+		return nil, nil
+	}
+
+	type psEntry struct {
+		ProcessId   int    `json:"ProcessId"`
+		CommandLine string `json:"CommandLine"`
+	}
+
+	var entries []psEntry
+	if raw[0] == '{' {
+		var single psEntry
+		if err := json.Unmarshal([]byte(raw), &single); err != nil {
+			return nil, err
+		}
+		entries = []psEntry{single}
+	} else {
+		if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+			return nil, err
+		}
+	}
+
+	var procs []ProcessInfo
+	for _, e := range entries {
+		role := classifyRole(e.CommandLine)
+		procs = append(procs, ProcessInfo{PID: e.ProcessId, Role: role})
+	}
+	return procs, nil
+}
+
+func listProcessesUnix() ([]ProcessInfo, error) {
+	out, err := exec.Command("ps", "aux").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list processes: %w", err)
+	}
+	var procs []ProcessInfo
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "wheelmaker") || strings.Contains(line, "wheelmaker-monitor") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		var pid int
+		if _, err := fmt.Sscanf(fields[1], "%d", &pid); err != nil {
+			continue
+		}
+		role := classifyRole(line)
+		procs = append(procs, ProcessInfo{PID: pid, Role: role})
+	}
+	return procs, nil
+}
+
+func classifyRole(cmdline string) string {
+	switch {
+	case strings.Contains(cmdline, "--hub-worker"):
+		return "hub-worker"
+	case strings.Contains(cmdline, "--registry-worker"):
+		return "registry-worker"
+	case strings.Contains(cmdline, " -d"):
+		return "guardian"
+	default:
+		return "unknown"
+	}
+}
+
+// ---------- config / state ----------
+
+// GetConfig reads and returns the parsed config.json.
+func (m *Monitor) GetConfig() (json.RawMessage, error) {
+	return readJSONFile(filepath.Join(m.baseDir, "config.json"))
+}
+
+// GetState reads and returns the parsed state.json.
+func (m *Monitor) GetState() (json.RawMessage, error) {
+	return readJSONFile(filepath.Join(m.baseDir, "state.json"))
+}
+
+func readJSONFile(path string) (json.RawMessage, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return json.RawMessage("null"), nil
+		}
+		return nil, err
+	}
+	// Validate JSON
+	var raw json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("invalid JSON in %s: %w", path, err)
+	}
+	return raw, nil
+}
+
+// ---------- log reading ----------
+
+// LogEntry represents one parsed log line.
+type LogEntry struct {
+	Time    string `json:"time"`
+	Level   string `json:"level"`
+	Message string `json:"message"`
+	Raw     string `json:"raw"`
+}
+
+// LogResult is the response for log queries.
+type LogResult struct {
+	File    string     `json:"file"`
+	Entries []LogEntry `json:"entries"`
+	Total   int        `json:"total"`
+}
+
+// GetLogs reads the specified log file with optional level filter.
+// file: "hub" or "debug". level: "" (all), "warn", "error".
+// tail: number of lines from the end (0 = all, max 5000).
+func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, error) {
+	var logPath string
+	switch file {
+	case "debug":
+		logPath = filepath.Join(m.baseDir, "hub.debug.log")
+	default:
+		logPath = filepath.Join(m.baseDir, "hub.log")
+		file = "hub"
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &LogResult{File: file, Entries: []LogEntry{}}, nil
+		}
+		return nil, err
+	}
+
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if tail <= 0 || tail > 5000 {
+		tail = 5000
+	}
+	if len(lines) > tail {
+		lines = lines[len(lines)-tail:]
+	}
+
+	level = strings.ToUpper(strings.TrimSpace(level))
+	var entries []LogEntry
+	for _, line := range lines {
+		entry := parseLine(line)
+		if level != "" && !strings.EqualFold(entry.Level, level) {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+
+	return &LogResult{
+		File:    file,
+		Entries: entries,
+		Total:   len(entries),
+	}, nil
+}
+
+func parseLine(line string) LogEntry {
+	// Format: "2006/01/02 15:04:05 LEVEL message..."
+	entry := LogEntry{Raw: line}
+	if len(line) < 26 {
+		entry.Message = line
+		return entry
+	}
+	// Try to parse date (19 chars) + space + level (5 chars)
+	if line[4] == '/' && line[7] == '/' && line[10] == ' ' {
+		entry.Time = line[:19]
+		rest := line[20:]
+		// Level tag is 5 chars like "INFO ", "WARN ", "ERROR", "DEBUG"
+		if len(rest) >= 5 {
+			levelStr := strings.TrimSpace(rest[:5])
+			switch levelStr {
+			case "DEBUG", "INFO", "WARN", "ERROR":
+				entry.Level = levelStr
+				entry.Message = strings.TrimSpace(rest[5:])
+				return entry
+			}
+		}
+		entry.Message = rest
+		return entry
+	}
+	entry.Message = line
+	return entry
+}
+
+// ---------- actions ----------
+
+// RestartService restarts the wheelmaker service using the restart.bat.
+func (m *Monitor) RestartService() error {
+	batPath := filepath.Join(m.baseDir, "restart.bat")
+	if _, err := os.Stat(batPath); err != nil {
+		return fmt.Errorf("restart.bat not found at %s", batPath)
+	}
+	cmd := exec.Command("cmd", "/c", batPath)
+	cmd.Dir = m.baseDir
+	return cmd.Start()
+}
+
+// StopService stops the wheelmaker service using stop.bat.
+func (m *Monitor) StopService() error {
+	batPath := filepath.Join(m.baseDir, "stop.bat")
+	if _, err := os.Stat(batPath); err != nil {
+		return fmt.Errorf("stop.bat not found at %s", batPath)
+	}
+	cmd := exec.Command("cmd", "/c", batPath)
+	cmd.Dir = m.baseDir
+	return cmd.Start()
+}
+
+// StartService starts the wheelmaker service using start.bat.
+func (m *Monitor) StartService() error {
+	batPath := filepath.Join(m.baseDir, "start.bat")
+	if _, err := os.Stat(batPath); err != nil {
+		return fmt.Errorf("start.bat not found at %s", batPath)
+	}
+	cmd := exec.Command("cmd", "/c", batPath)
+	cmd.Dir = m.baseDir
+	return cmd.Start()
+}
+
+// Overview returns a combined snapshot of status, config, and state.
+type Overview struct {
+	Service *ServiceStatus  `json:"service"`
+	Config  json.RawMessage `json:"config"`
+	State   json.RawMessage `json:"state"`
+}
+
+func (m *Monitor) GetOverview() (*Overview, error) {
+	svc, err := m.GetServiceStatus()
+	if err != nil {
+		return nil, err
+	}
+	cfg, _ := m.GetConfig()
+	state, _ := m.GetState()
+	return &Overview{
+		Service: svc,
+		Config:  cfg,
+		State:   state,
+	}, nil
+}
