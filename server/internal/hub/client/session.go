@@ -63,6 +63,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 	}
 	c.session.initializing = true
 	fwd := c.conn.forwarder
+	agentName := c.conn.name
 	savedSID := c.session.id
 	cwd := c.cwd
 	c.mu.Unlock()
@@ -103,7 +104,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 	}
 
 	// Step 2: attempt session/load if possible.
-	if savedSID != "" && initResult.AgentCapabilities.LoadSession {
+	if savedSID != "" && initResult.AgentCapabilities.LoadSession && !isCopilotAgent(agentName) {
 		var replayMu sync.Mutex
 		var replay []acp.Update
 		replayMeta := clientSessionMeta{}
@@ -342,6 +343,9 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 
 		var finalUpdate acp.Update
 		if err != nil {
+			if isCopilotReasoningEffortError(err) {
+				c.invalidateSessionForRetry()
+			}
 			finalUpdate = acp.Update{Type: acp.UpdateError, Err: err, Done: true}
 		} else {
 			finalUpdate = acp.Update{Type: acp.UpdateDone, Content: result.StopReason, Done: true}
@@ -354,6 +358,37 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 	}()
 
 	return updates, nil
+}
+
+func isCopilotAgent(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), "copilot")
+}
+
+func isCopilotReasoningEffortError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "reasoning_effort")
+}
+
+// invalidateSessionForRetry clears current session identity so the next prompt
+// forces a fresh session/new instead of reusing potentially incompatible config.
+func (c *Client) invalidateSessionForRetry() {
+	c.mu.Lock()
+	agentName := c.conn.name
+	c.session.id = ""
+	c.session.ready = false
+	c.session.lastReply = ""
+	c.sessionMeta = clientSessionMeta{}
+	if c.state != nil && c.state.Agents != nil {
+		if st := c.state.Agents[agentName]; st != nil {
+			st.LastSessionID = ""
+			st.Session = nil
+		}
+	}
+	c.mu.Unlock()
+	c.saveSessionState()
 }
 
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
