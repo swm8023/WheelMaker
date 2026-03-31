@@ -228,40 +228,36 @@ body {
   min-height: 16px;
 }
 
-/* Ops tabs */
-.control-tabs {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
+/* Operations split */
+.ops-layout {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 12px;
 }
 
-.control-tab {
+.ops-col {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+}
+
+.ops-section {
+  margin-bottom: 12px;
+}
+
+.ops-section:last-child {
+  margin-bottom: 0;
+}
+
+.ops-section-title {
   font-family: var(--mono);
   font-size: 10px;
-  padding: 4px 10px;
-  border: 1px solid var(--border);
-  background: var(--bg);
   color: var(--text-dim);
-  border-radius: 3px;
-  cursor: pointer;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
 }
-
-.control-tab:hover {
-  color: var(--text);
-  border-color: var(--border-active);
-}
-
-.control-tab.active {
-  color: var(--text-bright);
-  background: var(--accent-dim);
-  border-color: rgba(59,130,246,0.45);
-}
-
-.control-pane { display: none; }
-.control-pane.active { display: block; }
 
 /* Project list */
 .project-item {
@@ -408,6 +404,7 @@ body {
 /* Responsive */
 @media (max-width: 860px) {
   .main-grid { grid-template-columns: 1fr; }
+  .ops-layout { grid-template-columns: 1fr; }
   .monitor-header { padding: 8px 16px; }
   .card { padding: 10px 12px; }
 }
@@ -428,34 +425,37 @@ body {
   <!-- Operations -->
   <div class="card card-full">
     <div class="card-title">Operations</div>
-    <div class="control-tabs">
-      <button id="ops-tab-processes" class="control-tab active" onclick="switchOpsTab('processes')">Processes</button>
-      <button id="ops-tab-control" class="control-tab" onclick="switchOpsTab('control')">Service Control</button>
-      <button id="ops-tab-registry" class="control-tab" onclick="switchOpsTab('registry')">Registry Config</button>
-    </div>
-
-    <div id="ops-pane-processes" class="control-pane active">
-      <div id="proc-list"></div>
-    </div>
-
-    <div id="ops-pane-control" class="control-pane">
-      <div class="actions-row">
-        <button class="btn btn-green" onclick="doAction('start')">Start</button>
-        <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
-        <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
+    <div class="ops-layout">
+      <div class="ops-col">
+        <div class="ops-section">
+          <div class="ops-section-title">Processes</div>
+          <div id="proc-list"></div>
+        </div>
+        <div class="ops-section">
+          <div class="ops-section-title">Hub</div>
+          <div id="hub-info"></div>
+        </div>
+        <div class="ops-section">
+          <div class="ops-section-title">Service Control</div>
+          <div class="actions-row">
+            <button class="btn btn-green" onclick="doAction('start')">Start</button>
+            <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
+            <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
+          </div>
+          <div id="action-msg" class="action-msg"></div>
+        </div>
       </div>
-      <div id="action-msg" class="action-msg"></div>
+      <div class="ops-col">
+        <div class="ops-section">
+          <div class="ops-section-title">Registry Config</div>
+          <div id="registry-info"></div>
+        </div>
+        <div class="ops-section">
+          <div class="ops-section-title">Registry Status <span id="reg-status-dot" class="status-dot" style="display:inline-block;margin-left:6px;vertical-align:middle"></span> <span id="reg-status-label" style="font-size:11px;color:var(--text-dim);font-weight:400;margin-left:4px"></span></div>
+          <div id="registry-live"></div>
+        </div>
+      </div>
     </div>
-
-    <div id="ops-pane-registry" class="control-pane">
-      <div id="registry-info"></div>
-    </div>
-  </div>
-
-  <!-- Registry Live Status -->
-  <div class="card card-full">
-    <div class="card-title">Registry Status <span id="reg-status-dot" class="status-dot" style="display:inline-block;margin-left:8px;vertical-align:middle"></span> <span id="reg-status-label" style="font-size:11px;color:var(--text-dim);font-weight:400;margin-left:4px"></span></div>
-    <div id="registry-live"></div>
   </div>
 
   <!-- Projects -->
@@ -507,16 +507,6 @@ body {
 
 <script>
 const $ = id => document.getElementById(id);
-
-function switchOpsTab(tab) {
-  const tabs = ['processes', 'control', 'registry'];
-  for (const key of tabs) {
-    const tabBtn = $('ops-tab-' + key);
-    const pane = $('ops-pane-' + key);
-    if (tabBtn) tabBtn.classList.toggle('active', key === tab);
-    if (pane) pane.classList.toggle('active', key === tab);
-  }
-}
 
 async function api(path) {
   const p = window.location.pathname || '/';
@@ -589,19 +579,28 @@ function renderState(state) {
 }
 
 function renderRegistry(cfg) {
-  const el = $('registry-info');
+  const regEl = $('registry-info');
+  const hubEl = $('hub-info');
   if (!cfg || !cfg.registry) {
-    el.innerHTML = '<div class="empty-state">No registry configured</div>';
+    regEl.innerHTML = '<div class="empty-state">No registry configured</div>';
+    hubEl.innerHTML = '<div class="empty-state">No hub info</div>';
     return;
   }
   const r = cfg.registry;
-  let html = '<div class="registry-info">';
-  html += row('Mode', r.listen ? 'Local Server' : 'Remote Connect');
-  html += row('Server', r.server || '127.0.0.1');
-  html += row('Port', String(r.port || 9630));
-  html += row('Hub ID', r.hubId || '-');
-  html += '</div>';
-  el.innerHTML = html;
+  const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
+  let hubHtml = '<div class="registry-info">';
+  hubHtml += row('Hub ID', r.hubId || '-');
+  hubHtml += row('Projects', String(projects.length));
+  hubHtml += row('Listen', r.listen ? 'true' : 'false');
+  hubHtml += '</div>';
+  hubEl.innerHTML = hubHtml;
+
+  let regHtml = '<div class="registry-info">';
+  regHtml += row('Mode', r.listen ? 'Local Server' : 'Remote Connect');
+  regHtml += row('Server', r.server || '127.0.0.1');
+  regHtml += row('Port', String(r.port || 9630));
+  regHtml += '</div>';
+  regEl.innerHTML = regHtml;
 }
 
 async function loadRegistryStatus() {
