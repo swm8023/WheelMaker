@@ -28,7 +28,7 @@ import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
-import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from './types/registry';
+import type {RegistryFsEntry, RegistryFsInfo, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from './types/registry';
 import './styles.css';
 
 type Tab = 'chat' | 'file' | 'git';
@@ -411,6 +411,7 @@ function App() {
   const [selectedFile, setSelectedFile] = useState('');
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
   const [fileContent, setFileContent] = useState('');
+  const [fileInfo, setFileInfo] = useState<RegistryFsInfo | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
@@ -420,6 +421,10 @@ function App() {
   const [temporaryHighlightLine, setTemporaryHighlightLine] = useState<number | null>(null);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
+  const liveRefreshTimerRef = useRef<number | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const dirHashRef = useRef<Record<string, string>>({});
+  const fileHashRef = useRef<Record<string, string>>({});
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
 
   const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);
@@ -428,6 +433,8 @@ function App() {
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
   const [gitCurrentBranch, setGitCurrentBranch] = useState('');
+  const [gitDirty, setGitDirty] = useState(false);
+  const [gitStatusSummary, setGitStatusSummary] = useState({staged: 0, unstaged: 0, untracked: 0});
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
   const [commitFilesBySha, setCommitFilesBySha] = useState<Record<string, RegistryGitCommitFile[]>>({});
@@ -515,6 +522,10 @@ function App() {
     () => projects.find(item => item.projectId === projectId)?.name ?? 'Project',
     [projectId, projects],
   );
+  const currentProject = useMemo(
+    () => projects.find(item => item.projectId === projectId) ?? null,
+    [projectId, projects],
+  );
 
   const currentCommitFiles = useMemo(
     () => commitFilesBySha[selectedCommit] ?? [],
@@ -556,8 +567,10 @@ function App() {
     setDirEntries(hydrated.dirEntries);
     setExpandedDirs(hydrated.expandedDirs);
     setSelectedFile(hydrated.selectedFile);
+    setPinnedFiles([]);
     setPinnedFiles(hydrated.pinnedFiles);
     setFileContent('');
+    setFileInfo(null);
     setGitCurrentBranch(hydrated.gitCurrentBranch);
     setCommits(hydrated.commits);
     setSelectedCommit(hydrated.selectedCommit);
@@ -595,6 +608,12 @@ function App() {
   useEffect(() => () => {
     if (highlightTimerRef.current !== null) {
       window.clearTimeout(highlightTimerRef.current);
+    }
+    if (liveRefreshTimerRef.current !== null) {
+      window.clearTimeout(liveRefreshTimerRef.current);
+    }
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
     }
   }, []);
 
@@ -650,8 +669,14 @@ function App() {
     if (loadingDirs[path]) return;
     setLoadingDirs(prev => ({...prev, [path]: true}));
     try {
-      const entries = sortEntries(await service.listDirectory(path));
-      setDirEntries(prev => ({...prev, [path]: entries}));
+      const result = await service.listDirectory(path, dirHashRef.current[path]);
+      if (!result.notModified) {
+        const entries = sortEntries(result.entries);
+        setDirEntries(prev => ({...prev, [path]: entries}));
+        if (result.hash) {
+          dirHashRef.current[path] = result.hash;
+        }
+      }
     } finally {
       setLoadingDirs(prev => {
         const next = {...prev};
@@ -676,9 +701,21 @@ function App() {
     if (!path) return;
     setFileLoading(true);
     try {
-      const content = await service.readFile(path);
-      setFileContent(content);
+      const info = await service.getFileInfo(path);
+      setFileInfo(info);
+      const result = await service.readFile(path, {
+        knownHash: fileHashRef.current[path],
+        offset: info.isBinary ? 0 : 1,
+        count: info.isBinary ? 65536 : Math.max(1, info.totalLines ?? 500),
+      });
+      if (!result.notModified) {
+        setFileContent(result.content);
+        if (result.hash) {
+          fileHashRef.current[path] = result.hash;
+        }
+      }
     } catch (err) {
+      setFileInfo(null);
       setFileContent('');
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -687,6 +724,11 @@ function App() {
   };
 
   useEffect(() => {
+    if (!selectedFile) {
+      setFileInfo(null);
+      setFileContent('');
+      return;
+    }
     readSelectedFile(selectedFile).catch(() => undefined);
   }, [selectedFile]);
 
@@ -694,13 +736,20 @@ function App() {
     setGitLoading(true);
     setGitError('');
     try {
-      const [branches, nextCommits] = await Promise.all([
+      const [branchData, commitData, statusData] = await Promise.all([
         service.listGitBranches(),
         service.listGitCommits('HEAD'),
+        service.getGitStatus(),
       ]);
-      setGitCurrentBranch(branches.current || '');
-      setCommits(nextCommits);
-      const firstCommit = nextCommits[0]?.sha ?? '';
+      setGitCurrentBranch(branchData.current || '');
+      setGitDirty(statusData.dirty);
+      setGitStatusSummary({
+        staged: statusData.staged.length,
+        unstaged: statusData.unstaged.length,
+        untracked: statusData.untracked.length,
+      });
+      setCommits(commitData);
+      const firstCommit = commitData[0]?.sha ?? '';
       setSelectedCommit(prev => prev || firstCommit);
     } catch (err) {
       setGitError(err instanceof Error ? err.message : String(err));
@@ -751,11 +800,18 @@ function App() {
 
   const connect = async () => {
     setError('');
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     try {
       const ws = toRegistryWsUrl(address);
       const result = await workspaceController.connect(ws, token.trim());
       setProjects(result.projects);
+      dirHashRef.current = {};
+      fileHashRef.current = {};
       applyHydratedProjectState(result.hydrated);
+      setGitDirty(Boolean(result.projects.find(item => item.projectId === result.hydrated.projectId)?.git?.dirty));
       setConnected(true);
       workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
         if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -764,6 +820,12 @@ function App() {
       }).catch(() => undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      if (projects.length > 0) {
+        reconnectTimerRef.current = window.setTimeout(() => {
+          setAutoConnecting(true);
+          connect().catch(() => undefined);
+        }, 1000);
+      }
     } finally {
       setAutoConnecting(false);
     }
@@ -773,7 +835,6 @@ function App() {
     if (connected || autoConnecting) return;
     if (autoConnectTriedRef.current) return;
     if (!address.trim()) return;
-    if (projects.length > 0) return;
     autoConnectTriedRef.current = true;
     setAutoConnecting(true);
     connect().catch(() => {
@@ -801,14 +862,85 @@ function App() {
     if (!projectId) return;
     setRefreshingProject(true);
     try {
-      const validated = await workspaceController.refreshProject(projectId, [...expandedDirs]);
-      setDirEntries(validated.dirEntries);
-      setExpandedDirs(validated.expandedDirs);
-      await loadGit();
+      const sync = await service.syncCheck({
+        knownProjectRev: currentProject?.projectRev ?? '',
+        knownGitRev: currentProject?.git?.gitRev ?? '',
+        knownWorktreeRev: currentProject?.git?.worktreeRev ?? '',
+      });
+      if (sync.staleDomains.includes('project') || !currentProject) {
+        setProjects(await service.listProjects());
+      }
+      if (sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
+        const validated = await workspaceController.refreshProject(projectId, [...expandedDirs]);
+        setDirEntries(validated.dirEntries);
+        setExpandedDirs(validated.expandedDirs);
+        dirHashRef.current = {};
+      } else {
+        await Promise.all(expandedDirs.map(path => loadDirectory(path)));
+      }
+      if (selectedFile && sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
+        await readSelectedFile(selectedFile);
+      }
+      if (sync.staleDomains.some(domain => domain === 'git' || domain === 'worktree' || domain === 'project')) {
+        await loadGit();
+      }
     } finally {
       setRefreshingProject(false);
     }
   };
+
+  useEffect(() => {
+    if (!connected) return;
+
+    const scheduleRefresh = () => {
+      if (liveRefreshTimerRef.current !== null) {
+        return;
+      }
+      liveRefreshTimerRef.current = window.setTimeout(() => {
+        liveRefreshTimerRef.current = null;
+        refreshProject().catch(() => undefined);
+      }, 150);
+    };
+
+    const unsubscribeEvent = service.onEvent(event => {
+      const eventProjectId = event.projectId ?? '';
+      if (event.method === 'project.online' || event.method === 'project.offline') {
+        setProjects(prev =>
+          prev.map(item =>
+            item.projectId === eventProjectId ? {...item, online: event.method === 'project.online'} : item,
+          ),
+        );
+      }
+      if (eventProjectId && eventProjectId !== projectIdRef.current) {
+        return;
+      }
+      if (
+        event.method === 'project.changed' ||
+        event.method === 'git.workspace.changed' ||
+        event.method === 'project.online' ||
+        event.method === 'project.offline'
+      ) {
+        scheduleRefresh();
+      }
+    });
+
+    const unsubscribeClose = service.onClose(() => {
+      setConnected(false);
+      setError('Registry connection closed. Reconnect to resume live updates.');
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
+      reconnectTimerRef.current = window.setTimeout(() => {
+        setAutoConnecting(true);
+        connect().catch(() => undefined);
+      }, 1000);
+    });
+
+    return () => {
+      unsubscribeEvent();
+      unsubscribeClose();
+    };
+  }, [connected, projectId, expandedDirs]);
 
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
@@ -1194,6 +1326,8 @@ function App() {
           <button className="project-btn" onClick={() => setProjectMenuOpen(value => !value)}>
             <span className="project-arrow codicon codicon-chevron-down" />
             <span className="project-name" title={currentProjectName}>{currentProjectName}</span>
+            <span className={`project-presence ${currentProject?.online ? 'online' : 'offline'}`} />
+            {gitDirty ? <span className="project-dirty">dirty</span> : null}
             {(loadingProject || refreshingProject) ? <span className="muted">...</span> : null}
           </button>
           {projectMenuOpen ? (
@@ -1207,6 +1341,9 @@ function App() {
                     <span className="project-menu-name">{project.name}</span>
                     <span className="project-menu-path" title={project.path || ''}>{project.path || '-'}</span>
                   </div>
+                  <span className={`project-menu-state ${project.online ? 'online' : 'offline'}`}>
+                    {project.online ? 'online' : 'offline'}
+                  </span>
                   <span className="project-menu-hub">{project.hubId || 'local-hub'}</span>
                 </div>
               ))}
@@ -1250,9 +1387,10 @@ function App() {
             </span>
           ) : null}
           {selectedFile && fileContent.length > 0 ? (
-            <span className="statusbar-muted">{fileContent.split('\n').length} lines</span>
+            <span className="statusbar-muted">{fileInfo?.isBinary ? `${fileInfo.size ?? 0} bytes` : `${fileInfo?.totalLines ?? fileContent.split('\n').length} lines`}</span>
           ) : null}
           <span className="statusbar-spacer" />
+          <span className="statusbar-muted">{gitDirty ? `dirty ${gitStatusSummary.staged}/${gitStatusSummary.unstaged}/${gitStatusSummary.untracked}` : 'clean'}</span>
           {gitCurrentBranch ? (
             <span className="statusbar-item">
               <span className="codicon codicon-git-branch" />

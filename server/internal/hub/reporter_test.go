@@ -13,16 +13,15 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/swm8023/wheelmaker/internal/registry"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 type testEnvelope struct {
-	Version   string         `json:"version"`
-	RequestID string         `json:"requestId,omitempty"`
+	RequestID int64          `json:"requestId,omitempty"`
 	Type      string         `json:"type"`
 	Method    string         `json:"method,omitempty"`
 	ProjectID string         `json:"projectId,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
-	Error     map[string]any `json:"error,omitempty"`
 }
 
 func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
@@ -42,7 +41,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		Server:            ts,
 		HubID:             "hub-test",
 		ReconnectInterval: 50 * time.Millisecond,
-	}, []ProjectInfo{{ID: "p1", Name: "proj1", Path: root}})
+	}, []ProjectInfo{{Name: "proj1", Path: root, Online: true}})
 
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
@@ -55,17 +54,17 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		}
 	}()
 
-	waitForProjectOnline(t, ts, "p1", "")
+	waitForProjectOnline(t, ts, shared.ProjectID("hub-test", "proj1"), "")
 
 	app := dialWS(t, "http://"+ts+"/ws")
 	defer app.Close()
+	connectClient(t, app, "")
 
 	mustWriteJSON(t, app, testEnvelope{
-		Version:   "1.0",
-		RequestID: "req-list",
+		RequestID: 2,
 		Type:      "request",
 		Method:    "fs.list",
-		ProjectID: "p1",
+		ProjectID: shared.ProjectID("hub-test", "proj1"),
 		Payload:   map[string]any{"path": ".", "limit": 50},
 	})
 	listResp := mustReadEnvelope(t, app)
@@ -74,11 +73,10 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	}
 
 	mustWriteJSON(t, app, testEnvelope{
-		Version:   "1.0",
-		RequestID: "req-read",
+		RequestID: 3,
 		Type:      "request",
 		Method:    "fs.read",
-		ProjectID: "p1",
+		ProjectID: shared.ProjectID("hub-test", "proj1"),
 		Payload:   map[string]any{"path": "hello.txt", "offset": 0, "limit": 1024},
 	})
 	readResp := mustReadEnvelope(t, app)
@@ -87,23 +85,6 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	}
 	if readResp.Payload["content"] != "hello registry" {
 		t.Fatalf("content=%v, want hello registry", readResp.Payload["content"])
-	}
-
-	mustWriteJSON(t, app, testEnvelope{
-		Version:   "1.0",
-		RequestID: "req-git-branches",
-		Type:      "request",
-		Method:    "git.branches",
-		ProjectID: "p1",
-		Payload:   map[string]any{},
-	})
-	branchesResp := mustReadEnvelope(t, app)
-	if branchesResp.Type != "response" || branchesResp.Method != "git.branches" {
-		t.Fatalf("unexpected git.branches response: %#v", branchesResp)
-	}
-	branches, ok := branchesResp.Payload["branches"].([]any)
-	if !ok || len(branches) < 1 {
-		t.Fatalf("branches=%v, want at least 1 branch", branchesResp.Payload["branches"])
 	}
 }
 
@@ -114,7 +95,7 @@ func TestReporterRunReturnsOnContextCancel(t *testing.T) {
 		Server:            ts,
 		HubID:             "hub-cancel",
 		ReconnectInterval: 30 * time.Millisecond,
-	}, []ProjectInfo{{ID: "p1", Name: "server", Path: t.TempDir()}})
+	}, []ProjectInfo{{Name: "server", Path: t.TempDir(), Online: true}})
 
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
@@ -140,12 +121,194 @@ func TestReporterAuth(t *testing.T) {
 		Token:             "token-1",
 		HubID:             "hub-auth",
 		ReconnectInterval: 30 * time.Millisecond,
-	}, []ProjectInfo{{ID: "p1", Name: "server", Path: t.TempDir()}})
+	}, []ProjectInfo{{Name: "server", Path: t.TempDir(), Online: true}})
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
 	defer func() { cancel(); <-done }()
 
-	waitForProjectOnline(t, ts, "p1", "token-1")
+	waitForProjectOnline(t, ts, shared.ProjectID("hub-auth", "server"), "token-1")
+}
+
+func TestReporterUpdateProjectRefreshesRegistrySnapshot(t *testing.T) {
+	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
+
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewReporter(ReporterConfig{
+		Server:            ts,
+		HubID:             "hub-update",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, []ProjectInfo{{Name: "proj1", Path: root, Online: true, ProjectRev: "p1", Git: shared.ProjectGitState{GitRev: "g1", WorktreeRev: "w1"}}})
+
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	waitForProjectOnline(t, ts, shared.ProjectID("hub-update", "proj1"), "")
+
+	if err := r.UpdateProject(ProjectInfo{
+		Name:       "proj1",
+		Path:       root,
+		Online:     true,
+		ProjectRev: "p2",
+		Git: shared.ProjectGitState{
+			GitRev:      "g2",
+			WorktreeRev: "w2",
+			Dirty:       true,
+		},
+	}); err != nil {
+		t.Fatalf("UpdateProject() err = %v", err)
+	}
+
+	app := dialWS(t, "http://"+ts+"/ws")
+	defer app.Close()
+	connectClient(t, app, "")
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "project.list",
+		Payload:   map[string]any{},
+	})
+	resp := mustReadEnvelope(t, app)
+	projects, ok := resp.Payload["projects"].([]any)
+	if !ok || len(projects) != 1 {
+		t.Fatalf("projects=%v, want 1 item", resp.Payload["projects"])
+	}
+	project, _ := projects[0].(map[string]any)
+	if project["projectRev"] != "p2" {
+		t.Fatalf("projectRev=%v, want p2", project["projectRev"])
+	}
+	gitState, _ := project["git"].(map[string]any)
+	if gitState["gitRev"] != "g2" || gitState["dirty"] != true {
+		t.Fatalf("git=%v, want updated rev/dirty", gitState)
+	}
+}
+
+func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
+	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
+
+	root := t.TempDir()
+	initGitRepo(t, root)
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("alpha\nbeta\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	runGitCmd(t, root, "add", ".")
+	runGitCmd(t, root, "commit", "-m", "init")
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("alpha\nbeta\ngamma\n"), 0o644); err != nil {
+		t.Fatalf("update fixture: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewReporter(ReporterConfig{
+		Server:            ts,
+		HubID:             "hub-hash",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, []ProjectInfo{{Name: "proj1", Path: root, Online: true}})
+
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	waitForProjectOnline(t, ts, shared.ProjectID("hub-hash", "proj1"), "")
+
+	app := dialWS(t, "http://"+ts+"/ws")
+	defer app.Close()
+	connectClient(t, app, "")
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "fs.list",
+		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		Payload:   map[string]any{"path": "."},
+	})
+	listResp := mustReadEnvelope(t, app)
+	listHash, _ := listResp.Payload["hash"].(string)
+	if listHash == "" || listResp.Payload["notModified"] != false {
+		t.Fatalf("unexpected fs.list payload: %#v", listResp.Payload)
+	}
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "fs.list",
+		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		Payload:   map[string]any{"path": ".", "knownHash": listHash},
+	})
+	listCached := mustReadEnvelope(t, app)
+	if listCached.Payload["notModified"] != true {
+		t.Fatalf("expected notModified fs.list response: %#v", listCached.Payload)
+	}
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 4,
+		Type:      "request",
+		Method:    "fs.read",
+		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		Payload:   map[string]any{"path": "hello.txt", "offset": 1, "count": 20},
+	})
+	readResp := mustReadEnvelope(t, app)
+	readHash, _ := readResp.Payload["hash"].(string)
+	if readHash == "" || readResp.Payload["notModified"] != false {
+		t.Fatalf("unexpected fs.read payload: %#v", readResp.Payload)
+	}
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 5,
+		Type:      "request",
+		Method:    "fs.read",
+		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		Payload:   map[string]any{"path": "hello.txt", "knownHash": readHash, "offset": 1, "count": 20},
+	})
+	readCached := mustReadEnvelope(t, app)
+	if readCached.Payload["notModified"] != true {
+		t.Fatalf("expected notModified fs.read response: %#v", readCached.Payload)
+	}
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 6,
+		Type:      "request",
+		Method:    "git.status",
+		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		Payload:   map[string]any{},
+	})
+	statusResp := mustReadEnvelope(t, app)
+	if statusResp.Payload["dirty"] != true {
+		t.Fatalf("expected dirty git.status payload: %#v", statusResp.Payload)
+	}
+	unstaged, _ := statusResp.Payload["unstaged"].([]any)
+	if len(unstaged) == 0 {
+		t.Fatalf("expected unstaged entries: %#v", statusResp.Payload)
+	}
+
+	mustWriteJSON(t, app, testEnvelope{
+		RequestID: 7,
+		Type:      "request",
+		Method:    "git.workingTree.fileDiff",
+		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		Payload:   map[string]any{"path": "hello.txt", "scope": "unstaged", "contextLines": 2},
+	})
+	diffResp := mustReadEnvelope(t, app)
+	diffText, _ := diffResp.Payload["diff"].(string)
+	if !strings.Contains(diffText, "+gamma") {
+		t.Fatalf("unexpected working tree diff: %q", diffText)
+	}
 }
 
 func TestBuildWSURLDefaults(t *testing.T) {
@@ -168,15 +331,13 @@ func TestReporterDebugEnvelope_OneLineWithDirection(t *testing.T) {
 	r.SetDebugLogger(&sb)
 
 	r.writeDebugEnvelope("->", envelope{
-		Version:   "1.0",
-		RequestID: "req-1",
+		RequestID: 1,
 		Type:      "request",
 		Method:    "registry.reportProjects",
 		Payload:   []byte(`{"hubId":"hub-1","note":"hello\nworld"}`),
 	})
 	r.writeDebugEnvelope("<-", envelope{
-		Version:   "1.0",
-		RequestID: "req-1",
+		RequestID: 1,
 		Type:      "response",
 		Method:    "registry.reportProjects",
 		Payload:   []byte(`{"ok":true}`),
@@ -209,20 +370,31 @@ func newRegistryServer(t *testing.T, h http.Handler) string {
 	return ln.Addr().String()
 }
 
+func connectClient(t *testing.T, ws *websocket.Conn, token string) {
+	t.Helper()
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "client",
+			"token":           token,
+		},
+	})
+	_ = mustReadEnvelope(t, ws)
+}
+
 func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		ws := dialWS(t, "http://"+addr+"/ws")
-		if strings.TrimSpace(token) != "" {
-			mustWriteJSON(t, ws, testEnvelope{
-				Version: "1.0", RequestID: "wait-auth", Type: "request", Method: "auth",
-				Payload: map[string]any{"token": token},
-			})
-			_ = mustReadEnvelope(t, ws)
-		}
+		connectClient(t, ws, token)
 		mustWriteJSON(t, ws, testEnvelope{
-			Version: "1.0", RequestID: "wait-list", Type: "request", Method: "project.list", Payload: map[string]any{},
+			RequestID: 2, Type: "request", Method: "project.list", Payload: map[string]any{},
 		})
 		resp := mustReadEnvelope(t, ws)
 		_ = ws.Close()

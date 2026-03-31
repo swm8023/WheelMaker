@@ -2,10 +2,19 @@ import { RegistryClient } from './registryClient';
 import type {
   RegistryEnvelope,
   RegistryFsEntry,
+  RegistryFsInfo,
+  RegistryFsListResponse,
+  RegistryFsReadResponse,
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryGitFileDiff,
+  RegistryGitStatus,
+  RegistryGitWorkspaceChangedPayload,
   RegistryProject,
+  RegistryProjectEventPayload,
+  RegistrySyncCheckPayload,
+  RegistrySyncCheckResponse,
+  RegistryWorkingTreeFileDiff,
 } from '../types/registry';
 
 export class RegistryRepository {
@@ -13,126 +22,108 @@ export class RegistryRepository {
 
   async initialize(url: string, token?: string): Promise<void> {
     await this.client.connect(url);
-    await this.client.hello();
-    if (token && token.trim().length > 0) {
-      await this.client.auth(token.trim());
-    }
+    await this.client.connectInit({
+      clientName: 'wheelmaker-web',
+      clientVersion: '0.1.0',
+      protocolVersion: '2.1',
+      role: 'client',
+      token: token?.trim() ?? '',
+    });
   }
 
   async listProjects(): Promise<RegistryProject[]> {
-    type FullProjectItem = {
-      projectId: string;
-      name: string;
-      cwd?: string;
-      online?: boolean;
-    };
-    type HubProjectItem = {
-      id?: string;
-      name?: string;
-      path?: string;
-    };
-    type HubSnapshot = {
-      hubId: string;
-      projects?: HubProjectItem[];
-    };
-    const normalizeFromHub = (hubs: HubSnapshot[]): RegistryProject[] => {
-      const items: RegistryProject[] = [];
-      const seen = new Set<string>();
-      for (const hub of hubs ?? []) {
-        for (const project of hub.projects ?? []) {
-          const projectId = (project.id ?? '').trim() || (project.name ?? '').trim();
-          if (!projectId || seen.has(projectId)) continue;
-          seen.add(projectId);
-          items.push({
-            projectId,
-            name: (project.name ?? '').trim() || projectId,
-            online: true,
-            path: (project.path ?? '').trim(),
-            hubId: hub.hubId,
-          });
-        }
-      }
-      return items;
-    };
-
-    let baseProjects: RegistryProject[] = [];
-    try {
-      const fullResp = await this.client.request({
-        method: 'project.listFull',
-        payload: {},
-      });
-      const fullPayload = (fullResp.payload ?? {}) as { projects?: FullProjectItem[] };
-      baseProjects = (fullPayload.projects ?? [])
-        .filter(project => !!project.projectId)
-        .map(project => ({
-          projectId: project.projectId,
-          name: project.name,
-          online: project.online,
-          path: project.cwd ?? '',
-        }));
-    } catch {
-      const resp = await this.client.request({
-        method: 'project.list',
-        payload: {},
-      });
-      const payload = (resp.payload ?? {}) as { projects?: RegistryProject[] };
-      baseProjects = (payload.projects ?? []).filter(project => !!project.projectId);
-    }
-
-    try {
-      const hubResp = await this.client.request({
-        method: 'registry.listProjects',
-        payload: {},
-      });
-      const hubPayload = (hubResp.payload ?? {}) as { hubs?: HubSnapshot[] };
-      const fallbackProjects = normalizeFromHub(hubPayload.hubs ?? []);
-      if (baseProjects.length === 0) {
-        return fallbackProjects;
-      }
-      const hubIndex = new Map<string, {hubId: string; path?: string}>();
-      for (const hub of hubPayload.hubs ?? []) {
-        for (const project of hub.projects ?? []) {
-          const id = (project.id ?? '').trim();
-          const name = (project.name ?? '').trim();
-          if (id) {
-            hubIndex.set(id, {hubId: hub.hubId, path: project.path});
-          }
-          if (name) {
-            hubIndex.set(name, {hubId: hub.hubId, path: project.path});
-          }
-        }
-      }
-      return baseProjects.map(project => {
-        const match = hubIndex.get(project.projectId) ?? hubIndex.get(project.name);
-        return {
-          ...project,
-          path: project.path || match?.path || '',
-          hubId: match?.hubId || '',
-        };
-      });
-    } catch {
-      return baseProjects;
-    }
+    const resp = await this.client.request({
+      method: 'project.list',
+      payload: {},
+    });
+    const payload = (resp.payload ?? {}) as { projects?: RegistryProject[] };
+    return (payload.projects ?? [])
+      .filter(project => !!project.projectId)
+      .map(project => ({
+        ...project,
+        hubId: project.hubId || project.projectId.split(':', 1)[0] || '',
+      }));
   }
 
-  async listFiles(projectId: string, path = '.'): Promise<RegistryFsEntry[]> {
+  async syncCheck(projectId: string, payload: RegistrySyncCheckPayload): Promise<RegistrySyncCheckResponse> {
+    const resp = await this.client.request({
+      method: 'project.syncCheck',
+      projectId,
+      payload,
+    });
+    const body = (resp.payload ?? {}) as Partial<RegistrySyncCheckResponse>;
+    return {
+      projectRev: body.projectRev ?? '',
+      gitRev: body.gitRev ?? '',
+      worktreeRev: body.worktreeRev ?? '',
+      staleDomains: Array.isArray(body.staleDomains) ? body.staleDomains.filter(item => typeof item === 'string') : [],
+    };
+  }
+
+  async listFiles(projectId: string, path = '.', knownHash?: string): Promise<RegistryFsListResponse> {
     const resp = await this.client.request({
       method: 'fs.list',
       projectId,
-      payload: { path, cursor: '', limit: 200 },
+      payload: knownHash ? {path, knownHash} : {path},
     });
-    const payload = (resp.payload ?? {}) as { entries?: RegistryFsEntry[] };
-    return (payload.entries ?? []).filter(entry => !!entry.path && !!entry.name);
+    const payload = (resp.payload ?? {}) as RegistryFsListResponse;
+    return {
+      path: payload.path ?? path,
+      hash: payload.hash,
+      notModified: payload.notModified ?? false,
+      entries: (payload.entries ?? []).filter(entry => !!entry.path && !!entry.name),
+    };
   }
 
-  async readFile(projectId: string, path: string): Promise<string> {
+  async getFileInfo(projectId: string, path: string): Promise<RegistryFsInfo> {
+    const resp = await this.client.request({
+      method: 'fs.info',
+      projectId,
+      payload: {path},
+    });
+    const payload = (resp.payload ?? {}) as RegistryFsInfo;
+    return {
+      path: payload.path ?? path,
+      kind: payload.kind ?? 'file',
+      size: payload.size ?? 0,
+      isBinary: payload.isBinary ?? false,
+      mimeType: payload.mimeType ?? '',
+      totalLines: payload.totalLines ?? 0,
+      entryCount: payload.entryCount ?? 0,
+      hash: payload.hash ?? '',
+    };
+  }
+
+  async readFile(
+    projectId: string,
+    path: string,
+    options?: {knownHash?: string; offset?: number; count?: number},
+  ): Promise<RegistryFsReadResponse> {
     const resp = await this.client.request({
       method: 'fs.read',
       projectId,
-      payload: { path, offset: 0, limit: 65536 },
+      payload: {
+        path,
+        ...(options?.knownHash ? {knownHash: options.knownHash} : {}),
+        ...(options?.offset !== undefined ? {offset: options.offset} : {}),
+        ...(options?.count !== undefined ? {count: options.count} : {}),
+      },
     });
-    const payload = (resp.payload ?? {}) as { content?: string };
-    return payload.content ?? '';
+    const payload = (resp.payload ?? {}) as RegistryFsReadResponse;
+    return {
+      path: payload.path ?? path,
+      hash: payload.hash,
+      notModified: payload.notModified ?? false,
+      isBinary: payload.isBinary ?? false,
+      mimeType: payload.mimeType ?? '',
+      encoding: payload.encoding ?? 'utf-8',
+      content: payload.content ?? '',
+      size: payload.size ?? 0,
+      total: payload.total ?? 0,
+      offset: payload.offset ?? options?.offset ?? 1,
+      returned: payload.returned ?? 0,
+      hasMore: payload.hasMore ?? false,
+    };
   }
 
   async gitLog(projectId: string, ref = 'HEAD', cursor = '', limit = 50): Promise<RegistryGitCommit[]> {
@@ -148,7 +139,7 @@ export class RegistryRepository {
 
   async gitBranches(projectId: string): Promise<{current: string; branches: string[]}> {
     const resp = await this.client.request({
-      method: 'git.branches',
+      method: 'git.refs',
       projectId,
       payload: {},
       timeoutMs: 20000,
@@ -193,8 +184,62 @@ export class RegistryRepository {
     };
   }
 
+  async gitStatus(projectId: string): Promise<RegistryGitStatus> {
+    const resp = await this.client.request({
+      method: 'git.status',
+      projectId,
+      payload: {},
+      timeoutMs: 20000,
+    });
+    const payload = (resp.payload ?? {}) as Partial<RegistryGitStatus>;
+    return {
+      dirty: payload.dirty ?? false,
+      worktreeRev: payload.worktreeRev ?? '',
+      staged: payload.staged ?? [],
+      unstaged: payload.unstaged ?? [],
+      untracked: payload.untracked ?? [],
+    };
+  }
+
+  async gitWorkingTreeFileDiff(
+    projectId: string,
+    path: string,
+    scope: 'staged' | 'unstaged' | 'untracked' = 'unstaged',
+    contextLines = 3,
+  ): Promise<RegistryWorkingTreeFileDiff> {
+    const resp = await this.client.request({
+      method: 'git.workingTree.fileDiff',
+      projectId,
+      payload: {path, scope, contextLines},
+      timeoutMs: 30000,
+    });
+    const payload = (resp.payload ?? {}) as Partial<RegistryWorkingTreeFileDiff>;
+    return {
+      path: payload.path ?? path,
+      scope: payload.scope ?? scope,
+      isBinary: payload.isBinary ?? false,
+      diff: payload.diff ?? '',
+      truncated: payload.truncated ?? false,
+    };
+  }
+
   close(): void {
     this.client.close();
+  }
+
+  onEvent(
+    listener: (
+      event:
+        | RegistryEnvelope<RegistryProjectEventPayload>
+        | RegistryEnvelope<RegistryGitWorkspaceChangedPayload>
+        | RegistryEnvelope<Record<string, never>>,
+    ) => void,
+  ): () => void {
+    return this.client.onEvent(listener as (event: RegistryEnvelope) => void);
+  }
+
+  onClose(listener: () => void): () => void {
+    return this.client.onClose(listener);
   }
 }
 

@@ -202,11 +202,13 @@ func (h *Hub) setupRegistrySync() {
 	projects := make([]ProjectInfo, 0, len(h.cfg.Projects))
 	for _, p := range h.cfg.Projects {
 		projects = append(projects, ProjectInfo{
-			ID:     p.Name,
-			Name:   p.Name,
-			Path:   p.Path,
-			Agent:  p.Client.Agent,
-			IMType: p.IM.Type,
+			Name:       p.Name,
+			Path:       p.Path,
+			Online:     true,
+			Agent:      p.Client.Agent,
+			IMType:     p.IM.Type,
+			ProjectRev: "",
+			Git:        shared.ProjectGitState{},
 		})
 	}
 

@@ -1,61 +1,147 @@
 package shared
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
-	DefaultProtocolVersion = "1.0"
+	DefaultProtocolVersion = "2.1"
 
 	CodeUnauthorized    = "UNAUTHORIZED"
 	CodeInvalidArgument = "INVALID_ARGUMENT"
+	CodeForbidden       = "FORBIDDEN"
 	CodeNotFound        = "NOT_FOUND"
+	CodeConflict        = "CONFLICT"
+	CodeUnavailable     = "UNAVAILABLE"
+	CodeRateLimited     = "RATE_LIMITED"
 	CodeInternal        = "INTERNAL"
 	CodeTimeout         = "TIMEOUT"
 )
 
+type ProjectGitState struct {
+	Branch      string `json:"branch"`
+	HeadSHA     string `json:"headSha"`
+	Dirty       bool   `json:"dirty"`
+	GitRev      string `json:"gitRev"`
+	WorktreeRev string `json:"worktreeRev"`
+}
+
 type ProjectInfo struct {
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name"`
-	Path   string `json:"path,omitempty"`
-	Agent  string `json:"agent,omitempty"`
-	IMType string `json:"imType,omitempty"`
+	Name       string          `json:"name"`
+	Path       string          `json:"path"`
+	Online     bool            `json:"online"`
+	Agent      string          `json:"agent"`
+	IMType     string          `json:"imType"`
+	ProjectRev string          `json:"projectRev"`
+	Git        ProjectGitState `json:"git"`
 }
 
 type HubSnapshot struct {
-	HubID     string        `json:"hubId"`
-	Projects  []ProjectInfo `json:"projects"`
-	UpdatedAt string        `json:"updatedAt"`
+	HubID           string        `json:"hubId"`
+	ConnectionEpoch int64         `json:"connectionEpoch"`
+	Projects        []ProjectInfo `json:"projects"`
+	UpdatedAt       string        `json:"updatedAt"`
 }
 
 type Envelope struct {
-	Version   string          `json:"version,omitempty"`
-	RequestID string          `json:"requestId,omitempty"`
+	RequestID int64           `json:"requestId,omitempty"`
 	Type      string          `json:"type"`
 	Method    string          `json:"method,omitempty"`
 	ProjectID string          `json:"projectId,omitempty"`
 	Payload   json.RawMessage `json:"payload,omitempty"`
-	Error     *ProtocolError  `json:"error,omitempty"`
 }
 
-type ProtocolError struct {
+type ErrorPayload struct {
 	Code    string         `json:"code"`
 	Message string         `json:"message"`
 	Details map[string]any `json:"details,omitempty"`
 }
 
-type ErrorEnvelope struct {
-	Version   string        `json:"version,omitempty"`
-	RequestID string        `json:"requestId,omitempty"`
-	Type      string        `json:"type"`
-	Error     ProtocolError `json:"error"`
+type ConnectInitPayload struct {
+	ClientName      string `json:"clientName"`
+	ClientVersion   string `json:"clientVersion"`
+	ProtocolVersion string `json:"protocolVersion"`
+	Role            string `json:"role"`
+	HubID           string `json:"hubId,omitempty"`
+	Token           string `json:"token"`
+	TS              int64  `json:"ts,omitempty"`
+	Nonce           string `json:"nonce,omitempty"`
 }
 
-type AuthPayload struct {
-	Token string `json:"token,omitempty"`
+type ConnectPrincipal struct {
+	Role            string `json:"role"`
+	HubID           string `json:"hubId,omitempty"`
+	ConnectionEpoch int64  `json:"connectionEpoch"`
+}
+
+type ConnectServerInfo struct {
+	ServerVersion   string `json:"serverVersion"`
+	ProtocolVersion string `json:"protocolVersion"`
+}
+
+type ConnectFeatures struct {
+	HubReportProjects       bool `json:"hubReportProjects"`
+	PushHint                bool `json:"pushHint"`
+	PingPong                bool `json:"pingPong"`
+	SupportsHashNegotiation bool `json:"supportsHashNegotiation"`
+	SupportsBatch           bool `json:"supportsBatch"`
+}
+
+type ConnectInitResponsePayload struct {
+	OK             bool              `json:"ok"`
+	Principal      ConnectPrincipal  `json:"principal"`
+	ServerInfo     ConnectServerInfo `json:"serverInfo"`
+	Features       ConnectFeatures   `json:"features"`
+	HashAlgorithms []string          `json:"hashAlgorithms"`
 }
 
 type HubReportProjectsPayload struct {
-	HubID    string        `json:"hubId,omitempty"`
-	Projects []ProjectInfo `json:"projects"`
+	HubID           string        `json:"hubId"`
+	ConnectionEpoch int64         `json:"connectionEpoch"`
+	Projects        []ProjectInfo `json:"projects"`
+}
+
+type HubUpdateProjectPayload struct {
+	HubID           string      `json:"hubId"`
+	ConnectionEpoch int64       `json:"connectionEpoch"`
+	Project         ProjectInfo `json:"project"`
+}
+
+type SyncCheckPayload struct {
+	KnownProjectRev  string `json:"knownProjectRev,omitempty"`
+	KnownGitRev      string `json:"knownGitRev,omitempty"`
+	KnownWorktreeRev string `json:"knownWorktreeRev,omitempty"`
+}
+
+type SyncCheckResponsePayload struct {
+	ProjectRev   string   `json:"projectRev"`
+	GitRev       string   `json:"gitRev"`
+	WorktreeRev  string   `json:"worktreeRev"`
+	StaleDomains []string `json:"staleDomains"`
+}
+
+type ProjectListItem struct {
+	ProjectID  string          `json:"projectId"`
+	Name       string          `json:"name"`
+	Path       string          `json:"path"`
+	Online     bool            `json:"online"`
+	Agent      string          `json:"agent"`
+	IMType     string          `json:"imType"`
+	ProjectRev string          `json:"projectRev"`
+	Git        ProjectGitState `json:"git"`
+}
+
+func ProjectID(hubID, projectName string) string {
+	hubID = strings.TrimSpace(hubID)
+	projectName = strings.TrimSpace(projectName)
+	if hubID == "" {
+		return projectName
+	}
+	if projectName == "" {
+		return hubID + ":"
+	}
+	return hubID + ":" + projectName
 }
 
 func MustRaw(v any) json.RawMessage {

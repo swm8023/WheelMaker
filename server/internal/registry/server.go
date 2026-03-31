@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +19,7 @@ const (
 	defaultProtocolVersion = rp.DefaultProtocolVersion
 	defaultServerVersion   = "0.1.0"
 	defaultRequestTimeout  = 10 * time.Second
+	clientIdleTimeout      = 5 * time.Minute
 )
 
 // Config configures the project registry server.
@@ -36,13 +36,13 @@ type peerConn struct {
 	writeMu sync.Mutex
 
 	pendingMu sync.Mutex
-	pending   map[string]chan envelope
+	pending   map[int64]chan envelope
 }
 
 func newPeerConn(ws websocketWriter) *peerConn {
 	return &peerConn{
 		ws:      ws,
-		pending: make(map[string]chan envelope),
+		pending: make(map[int64]chan envelope),
 	}
 }
 
@@ -52,7 +52,7 @@ func (p *peerConn) write(v any) error {
 	return p.ws.WriteJSON(v)
 }
 
-func (p *peerConn) registerPending(id string) chan envelope {
+func (p *peerConn) registerPending(id int64) chan envelope {
 	ch := make(chan envelope, 1)
 	p.pendingMu.Lock()
 	p.pending[id] = ch
@@ -60,7 +60,7 @@ func (p *peerConn) registerPending(id string) chan envelope {
 	return ch
 }
 
-func (p *peerConn) resolvePending(id string, msg envelope) bool {
+func (p *peerConn) resolvePending(id int64, msg envelope) bool {
 	p.pendingMu.Lock()
 	ch, ok := p.pending[id]
 	if ok {
@@ -87,11 +87,7 @@ type websocketWriter interface {
 	WriteJSON(v any) error
 }
 
-type websocketReader interface {
-	ReadJSON(v any) error
-}
-
-// Server accepts app/hub connections and routes app requests to hub responders.
+// Server accepts client/hub connections and routes client requests to hub responders.
 type Server struct {
 	cfg Config
 
@@ -99,15 +95,22 @@ type Server struct {
 	hubs         map[string]rp.HubSnapshot
 	projectToHub map[string]string
 	hubPeers     map[string]*peerConn
+	clientPeers  map[string]*connectionState
 
-	nextID atomic.Int64
+	nextConnID    atomic.Int64
+	nextForwardID atomic.Int64
+	nextConnEpoch atomic.Int64
 }
 
 type connectionState struct {
-	id     string
-	authed bool
-	hubID  string
-	peer   *peerConn
+	id              string
+	role            string
+	hubID           string
+	scopeHubID      string
+	initialized     bool
+	connectionEpoch int64
+	peer            *peerConn
+	seenRequestIDs  map[int64]struct{}
 }
 
 var upgrader = websocket.Upgrader{
@@ -130,6 +133,7 @@ func New(cfg Config) *Server {
 		hubs:         make(map[string]rp.HubSnapshot),
 		projectToHub: make(map[string]string),
 		hubPeers:     make(map[string]*peerConn),
+		clientPeers:  make(map[string]*connectionState),
 	}
 }
 
@@ -170,119 +174,198 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer ws.Close()
 
 	state := &connectionState{
-		id:     fmt.Sprintf("conn-%d", s.nextID.Add(1)),
-		authed: s.cfg.Token == "",
-		peer:   newPeerConn(ws),
+		id:             fmt.Sprintf("conn-%d", s.nextConnID.Add(1)),
+		peer:           newPeerConn(ws),
+		seenRequestIDs: map[int64]struct{}{},
 	}
-	rp.Info("registry: ws connected id=%s remote=%s authed=%t", state.id, r.RemoteAddr, state.authed)
-	defer rp.Info("registry: ws disconnected id=%s hub=%s remote=%s", state.id, state.hubID, r.RemoteAddr)
+	rp.Info("registry: ws connected id=%s remote=%s", state.id, r.RemoteAddr)
+	defer rp.Info("registry: ws disconnected id=%s role=%s hub=%s remote=%s", state.id, state.role, state.hubID, r.RemoteAddr)
 	defer s.unregisterHub(state.peer, state)
+	defer s.unregisterClient(state)
 	defer state.peer.dropAllPending()
+
+	var idleTimer *time.Timer
+	resetIdleTimer := func() {
+		if !state.initialized || state.role != "client" {
+			return
+		}
+		if idleTimer == nil {
+			idleTimer = time.AfterFunc(clientIdleTimeout, func() {
+				_ = state.peer.write(envelope{
+					Type:   "event",
+					Method: "connection.closing",
+					Payload: rp.MustRaw(map[string]any{
+						"reason": "idle_timeout",
+					}),
+				})
+				_ = ws.Close()
+			})
+			return
+		}
+		idleTimer.Reset(clientIdleTimeout)
+	}
+	defer func() {
+		if idleTimer != nil {
+			idleTimer.Stop()
+		}
+	}()
 
 	for {
 		var in envelope
 		if err := ws.ReadJSON(&in); err != nil {
 			return
 		}
+		resetIdleTimer()
 		if in.Type == "response" || in.Type == "error" {
 			if state.peer.resolvePending(in.RequestID, in) {
 				continue
 			}
 		}
 		if in.Type != "request" {
-			_ = s.writeError(state.peer, in.RequestID, codeInvalidArgument, "type must be request", nil)
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "type must be request", nil)
+			continue
+		}
+		if in.RequestID < 1 {
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "requestId must be >= 1", nil)
+			continue
+		}
+		if _, exists := state.seenRequestIDs[in.RequestID]; exists {
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeConflict, "duplicate requestId", nil)
+			continue
+		}
+		state.seenRequestIDs[in.RequestID] = struct{}{}
+
+		if !state.initialized {
+			if in.Method != "connect.init" {
+				_ = s.writeError(state.peer, in.RequestID, in.Method, codeUnauthorized, "connect.init required", nil)
+				continue
+			}
+			if !s.handleConnectInit(state.peer, state, in) {
+				return
+			}
+			resetIdleTimer()
+			continue
+		}
+
+		if !methodAllowed(state.role, in.Method) {
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeForbidden, "method not allowed for role", map[string]any{"role": state.role})
 			continue
 		}
 
 		switch in.Method {
-		case "hello":
-			s.handleHello(state.peer, in)
-		case "auth":
-			s.handleAuth(state.peer, state, in)
 		case "registry.reportProjects":
-			if !state.authed {
-				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
-				continue
-			}
 			s.handleHubReportProjects(state.peer, state, in)
-		case "registry.listProjects":
-			if !state.authed {
-				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
-				continue
-			}
-			s.handleRegistryListProjects(state.peer, in)
+		case "registry.updateProject":
+			s.handleHubUpdateProject(state.peer, state, in)
 		case "project.list":
-			if !state.authed {
-				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
-				continue
-			}
-			s.handleProjectList(state.peer, in)
-		case "project.listFull":
-			if !state.authed {
-				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
-				continue
-			}
-			s.handleProjectListFull(state.peer, in)
-		case "fs.list", "fs.read", "git.branches", "git.log", "git.commit.files", "git.commit.fileDiff":
-			if !state.authed {
-				_ = s.writeError(state.peer, in.RequestID, codeUnauthorized, "not authenticated", nil)
-				continue
-			}
-			s.handleForwardRequest(state.peer, in)
+			s.handleProjectList(state.peer, state, in)
+		case "project.syncCheck":
+			s.handleProjectSyncCheck(state.peer, state, in)
+		case "batch":
+			s.handleBatch(state.peer, state, in)
+		case "hub.ping":
+			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
+		case "fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
+			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
+			"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":
+			s.handleForwardRequest(state.peer, state, in)
 		default:
-			_ = s.writeError(state.peer, in.RequestID, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
+			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
 		}
 	}
 }
 
-func (s *Server) handleHello(peer *peerConn, in envelope) {
-	rp.Info("registry: hello request requestId=%s", in.RequestID)
-	payload := map[string]any{
-		"serverVersion":   s.cfg.ServerVersion,
-		"protocolVersion": s.cfg.ProtocolVersion,
-		"features": map[string]bool{
-			"fs":                   true,
-			"git":                  true,
-			"push":                 false,
-			"registryReport":       true,
-			"registryListProjects": true,
-		},
+func methodAllowed(role string, method string) bool {
+	switch role {
+	case "hub":
+		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "hub.ping"
+	case "client":
+		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
+			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
+	default:
+		return false
 	}
-	_ = s.writeResponse(peer, in.RequestID, in.Method, "", payload)
 }
 
-func (s *Server) handleAuth(peer *peerConn, state *connectionState, in envelope) {
-	var payload authPayload
-	if err := json.Unmarshal(in.Payload, &payload); err != nil {
-		_ = s.writeError(peer, in.RequestID, codeInvalidArgument, "invalid auth payload", nil)
-		return
+func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in envelope) bool {
+	var payload connectInitPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "invalid connect.init payload", nil)
+		return true
 	}
-	if s.cfg.Token != "" && payload.Token != s.cfg.Token {
-		state.authed = false
-		rp.Warn("registry: auth failed id=%s requestId=%s", state.id, in.RequestID)
-		_ = s.writeError(peer, in.RequestID, codeUnauthorized, "invalid token", nil)
-		return
+	role := strings.TrimSpace(payload.Role)
+	if role != "hub" && role != "client" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "role must be hub or client", nil)
+		return true
 	}
-	state.authed = true
-	rp.Info("registry: auth ok id=%s requestId=%s", state.id, in.RequestID)
-	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
+	if role == "hub" && strings.TrimSpace(payload.HubID) == "" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "hubId is required for hub role", nil)
+		return true
+	}
+	if s.cfg.Token != "" && strings.TrimSpace(payload.Token) != s.cfg.Token {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeUnauthorized, "invalid token", nil)
+		return false
+	}
+
+	state.initialized = true
+	state.role = role
+	state.hubID = strings.TrimSpace(payload.HubID)
+	state.scopeHubID = strings.TrimSpace(payload.HubID)
+	state.connectionEpoch = s.nextConnEpoch.Add(1)
+	if state.role == "client" {
+		s.mu.Lock()
+		s.clientPeers[state.id] = state
+		s.mu.Unlock()
+	}
+
+	resp := connectInitResponsePayload{
+		OK: true,
+		Principal: rp.ConnectPrincipal{
+			Role:            role,
+			HubID:           strings.TrimSpace(payload.HubID),
+			ConnectionEpoch: state.connectionEpoch,
+		},
+		ServerInfo: rp.ConnectServerInfo{
+			ServerVersion:   s.cfg.ServerVersion,
+			ProtocolVersion: s.cfg.ProtocolVersion,
+		},
+		Features: rp.ConnectFeatures{
+			HubReportProjects:       true,
+			PushHint:                true,
+			PingPong:                true,
+			SupportsHashNegotiation: true,
+			SupportsBatch:           true,
+		},
+		HashAlgorithms: []string{"sha256"},
+	}
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", resp)
+	return true
 }
 
 func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState, in envelope) {
 	var payload hubReportProjectsPayload
-	if err := json.Unmarshal(in.Payload, &payload); err != nil {
-		_ = s.writeError(peer, in.RequestID, codeInvalidArgument, "invalid registry.reportProjects payload", nil)
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "invalid registry.reportProjects payload", nil)
 		return
 	}
-	if payload.HubID == "" {
-		payload.HubID = state.id
+	if strings.TrimSpace(payload.HubID) == "" {
+		payload.HubID = state.hubID
 	}
+	if payload.HubID != state.hubID {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeForbidden, "hubId mismatch", nil)
+		return
+	}
+	if payload.ConnectionEpoch != state.connectionEpoch {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "connectionEpoch mismatch", nil)
+		return
+	}
+
 	sort.Slice(payload.Projects, func(i, j int) bool {
 		return payload.Projects[i].Name < payload.Projects[j].Name
 	})
 
 	s.mu.Lock()
-	state.hubID = payload.HubID
+	previous := s.hubs[payload.HubID]
 	s.hubPeers[payload.HubID] = peer
 	for projectID, hubID := range s.projectToHub {
 		if hubID == payload.HubID {
@@ -290,165 +373,405 @@ func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState,
 		}
 	}
 	for _, p := range payload.Projects {
-		id := strings.TrimSpace(p.ID)
-		if id == "" {
-			id = strings.TrimSpace(p.Name)
-		}
-		if id != "" {
-			s.projectToHub[id] = payload.HubID
+		projectID := rp.ProjectID(payload.HubID, p.Name)
+		if strings.TrimSpace(projectID) != "" {
+			s.projectToHub[projectID] = payload.HubID
 		}
 	}
 	s.hubs[payload.HubID] = rp.HubSnapshot{
-		HubID:     payload.HubID,
-		Projects:  payload.Projects,
-		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		HubID:           payload.HubID,
+		ConnectionEpoch: payload.ConnectionEpoch,
+		Projects:        payload.Projects,
+		UpdatedAt:       time.Now().UTC().Format(time.RFC3339),
 	}
 	s.mu.Unlock()
-	rp.Info("registry: reportProjects hub=%s count=%d", payload.HubID, len(payload.Projects))
-	for _, p := range payload.Projects {
-		pid := strings.TrimSpace(p.ID)
-		if pid == "" {
-			pid = strings.TrimSpace(p.Name)
-		}
-		rp.Info("registry: project hub=%s id=%s name=%s path=%s agent=%s im=%s",
-			payload.HubID, pid, p.Name, p.Path, p.Agent, p.IMType)
-	}
+	s.emitProjectSnapshotEvents(payload.HubID, previous.Projects, payload.Projects)
 
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
+		"ok":           true,
 		"hubId":        payload.HubID,
 		"projectCount": len(payload.Projects),
 	})
 }
 
-func (s *Server) handleRegistryListProjects(peer *peerConn, in envelope) {
-	s.mu.RLock()
-	hubs := make([]rp.HubSnapshot, 0, len(s.hubs))
-	for _, h := range s.hubs {
-		hubs = append(hubs, h)
-	}
-	s.mu.RUnlock()
-	sort.Slice(hubs, func(i, j int) bool {
-		return hubs[i].HubID < hubs[j].HubID
-	})
-	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"hubs": hubs})
-}
-
-func (s *Server) handleProjectList(peer *peerConn, in envelope) {
-	type projectListItem struct {
-		ProjectID string `json:"projectId"`
-		Name      string `json:"name"`
-		Online    bool   `json:"online"`
-	}
-	items := make([]projectListItem, 0)
-	for _, p := range s.snapshotProjects() {
-		items = append(items, projectListItem{
-			ProjectID: p.ID,
-			Name:      p.Name,
-			Online:    true,
-		})
-	}
-	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
-		"projects": items,
-	})
-}
-
-func (s *Server) handleProjectListFull(peer *peerConn, in envelope) {
-	type listFullPayload struct {
-		IncludeStats bool `json:"includeStats,omitempty"`
-	}
-	type listFullItem struct {
-		ProjectID    string         `json:"projectId"`
-		Name         string         `json:"name"`
-		CWD          string         `json:"cwd,omitempty"`
-		Online       bool           `json:"online"`
-		Capabilities map[string]any `json:"capabilities"`
-		Git          map[string]any `json:"git,omitempty"`
-		Stats        map[string]any `json:"stats,omitempty"`
-	}
-	var payload listFullPayload
+func (s *Server) handleHubUpdateProject(peer *peerConn, state *connectionState, in envelope) {
+	var payload hubUpdateProjectPayload
 	if err := decodePayload(in.Payload, &payload); err != nil {
-		_ = s.writeError(peer, in.RequestID, codeInvalidArgument, "invalid project.listFull payload", nil)
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "invalid registry.updateProject payload", nil)
+		return
+	}
+	if strings.TrimSpace(payload.HubID) == "" {
+		payload.HubID = state.hubID
+	}
+	if payload.HubID != state.hubID {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeForbidden, "hubId mismatch", nil)
+		return
+	}
+	if payload.ConnectionEpoch != state.connectionEpoch {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "connectionEpoch mismatch", nil)
+		return
+	}
+	projectName := strings.TrimSpace(payload.Project.Name)
+	if projectName == "" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "project.name is required", nil)
 		return
 	}
 
-	items := make([]listFullItem, 0)
-	for _, p := range s.snapshotProjects() {
-		item := listFullItem{
-			ProjectID: p.ID,
-			Name:      p.Name,
-			CWD:       p.Path,
-			Online:    true,
-			Capabilities: map[string]any{
-				"fs":  true,
-				"git": true,
-			},
-		}
-		if branch := gitCurrentBranch(strings.TrimSpace(p.Path)); branch != "" {
-			item.Git = map[string]any{"currentBranch": branch}
-		}
-		if payload.IncludeStats && strings.TrimSpace(p.UpdatedAt) != "" {
-			item.Stats = map[string]any{"lastActiveAt": p.UpdatedAt}
-		}
-		items = append(items, item)
+	s.mu.Lock()
+	hub := s.hubs[payload.HubID]
+	if hub.HubID == "" {
+		s.mu.Unlock()
+		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "hub snapshot not initialized", nil)
+		return
+	}
+	if hub.ConnectionEpoch != state.connectionEpoch {
+		s.mu.Unlock()
+		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "connectionEpoch mismatch", nil)
+		return
 	}
 
+	var previous *rp.ProjectInfo
+	replaced := false
+	for index := range hub.Projects {
+		if strings.TrimSpace(hub.Projects[index].Name) != projectName {
+			continue
+		}
+		prev := hub.Projects[index]
+		previous = &prev
+		hub.Projects[index] = payload.Project
+		replaced = true
+		break
+	}
+	if !replaced {
+		hub.Projects = append(hub.Projects, payload.Project)
+	}
+	sort.Slice(hub.Projects, func(i, j int) bool {
+		return hub.Projects[i].Name < hub.Projects[j].Name
+	})
+	hub.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	s.hubs[payload.HubID] = hub
+	projectID := rp.ProjectID(payload.HubID, payload.Project.Name)
+	if strings.TrimSpace(projectID) != "" {
+		s.projectToHub[projectID] = payload.HubID
+	}
+	s.mu.Unlock()
+
+	s.emitProjectUpdateEvents(payload.HubID, previous, payload.Project)
+	_ = s.writeResponse(peer, in.RequestID, in.Method, projectID, map[string]any{
+		"ok":        true,
+		"projectId": projectID,
+	})
+}
+
+func (s *Server) handleProjectList(peer *peerConn, state *connectionState, in envelope) {
+	items := s.snapshotProjects(state.scopeHubID)
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
 		"projects": items,
 	})
 }
 
-type projectSnapshot struct {
-	ID        string
-	Name      string
-	Path      string
-	UpdatedAt string
+func (s *Server) handleProjectSyncCheck(peer *peerConn, state *connectionState, in envelope) {
+	resp := s.projectSyncCheckEnvelope(state, in)
+	resp.RequestID = in.RequestID
+	_ = peer.write(resp)
 }
 
-func (s *Server) snapshotProjects() []projectSnapshot {
+func (s *Server) handleBatch(peer *peerConn, state *connectionState, in envelope) {
+	type batchItem struct {
+		Method    string          `json:"method"`
+		ProjectID string          `json:"projectId,omitempty"`
+		Payload   json.RawMessage `json:"payload,omitempty"`
+	}
+	type batchPayload struct {
+		Requests []batchItem `json:"requests"`
+	}
+
+	var payload batchPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "invalid batch payload", nil)
+		return
+	}
+
+	responses := make([]map[string]any, 0, len(payload.Requests))
+	for index, item := range payload.Requests {
+		if strings.TrimSpace(item.Method) == "" || item.Method == "batch" || item.Method == "connect.init" {
+			responses = append(responses, map[string]any{
+				"index":  index,
+				"type":   "error",
+				"method": item.Method,
+				"payload": errorPayload{
+					Code:    codeInvalidArgument,
+					Message: "unsupported batch subrequest",
+				},
+			})
+			continue
+		}
+
+		subResp := s.executeBatchRequest(state, envelope{
+			Type:      "request",
+			Method:    item.Method,
+			ProjectID: item.ProjectID,
+			Payload:   item.Payload,
+		})
+		responses = append(responses, map[string]any{
+			"index":     index,
+			"type":      subResp.Type,
+			"method":    subResp.Method,
+			"projectId": subResp.ProjectID,
+			"payload":   json.RawMessage(subResp.Payload),
+		})
+	}
+
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
+		"responses": responses,
+	})
+}
+
+func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelope {
+	switch in.Method {
+	case "project.list":
+		return envelope{
+			Type:   "response",
+			Method: in.Method,
+			Payload: rp.MustRaw(map[string]any{
+				"projects": s.snapshotProjects(state.scopeHubID),
+			}),
+		}
+	case "project.syncCheck":
+		return s.projectSyncCheckEnvelope(state, in)
+	case "hub.ping":
+		return envelope{
+			Type:   "response",
+			Method: in.Method,
+			Payload: rp.MustRaw(map[string]any{
+				"ok": true,
+			}),
+		}
+	default:
+		return s.executeClientRequest(state, in)
+	}
+}
+
+func (s *Server) handleForwardRequest(clientPeer *peerConn, state *connectionState, in envelope) {
+	resp := s.executeClientRequest(state, in)
+	resp.RequestID = in.RequestID
+	_ = clientPeer.write(resp)
+}
+
+func (s *Server) executeClientRequest(state *connectionState, in envelope) envelope {
+	projectID := strings.TrimSpace(in.ProjectID)
+	if projectID == "" {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "projectId is required", nil)
+	}
+	if state.scopeHubID != "" && !strings.HasPrefix(projectID, state.scopeHubID+":") {
+		return s.errorEnvelope(in.Method, codeForbidden, "project out of client scope", map[string]any{"projectId": projectID})
+	}
+
+	s.mu.RLock()
+	hubID := s.projectToHub[projectID]
+	hubPeer := s.hubPeers[hubID]
+	s.mu.RUnlock()
+	if hubID == "" {
+		return s.errorEnvelope(in.Method, codeNotFound, "project not found", map[string]any{"projectId": projectID})
+	}
+	if hubPeer == nil {
+		return s.errorEnvelope(in.Method, codeUnavailable, "hub offline", map[string]any{"projectId": projectID})
+	}
+
+	forwardID := s.nextForwardID.Add(1)
+	waitCh := hubPeer.registerPending(forwardID)
+
+	err := hubPeer.write(envelope{
+		RequestID: forwardID,
+		Type:      "request",
+		Method:    in.Method,
+		ProjectID: projectID,
+		Payload:   in.Payload,
+	})
+	if err != nil {
+		hubPeer.resolvePending(forwardID, envelope{})
+		return s.errorEnvelope(in.Method, codeInternal, "forward request write failed", nil)
+	}
+
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			return s.errorEnvelope(in.Method, codeInternal, "hub disconnected", nil)
+		}
+		resp.ProjectID = projectID
+		return resp
+	case <-time.After(defaultRequestTimeout):
+		hubPeer.resolvePending(forwardID, envelope{})
+		return s.errorEnvelope(in.Method, codeTimeout, "hub response timeout", nil)
+	}
+}
+
+func (s *Server) lookupProject(projectID string) (rp.ProjectListItem, bool) {
+	for _, item := range s.snapshotProjects("") {
+		if item.ProjectID == projectID {
+			return item, true
+		}
+	}
+	return rp.ProjectListItem{}, false
+}
+
+func (s *Server) snapshotProjects(scopeHubID string) []rp.ProjectListItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	items := make([]projectSnapshot, 0, len(s.projectToHub))
-	for projectID, hubID := range s.projectToHub {
-		hub := s.hubs[hubID]
+
+	items := make([]rp.ProjectListItem, 0, len(s.projectToHub))
+	for hubID, hub := range s.hubs {
+		if scopeHubID != "" && hubID != scopeHubID {
+			continue
+		}
 		for _, p := range hub.Projects {
-			id := strings.TrimSpace(p.ID)
-			if id == "" {
-				id = strings.TrimSpace(p.Name)
-			}
-			if id != projectID {
-				continue
-			}
-			items = append(items, projectSnapshot{
-				ID:        projectID,
-				Name:      strings.TrimSpace(p.Name),
-				Path:      strings.TrimSpace(p.Path),
-				UpdatedAt: strings.TrimSpace(hub.UpdatedAt),
+			items = append(items, rp.ProjectListItem{
+				ProjectID:  rp.ProjectID(hubID, p.Name),
+				Name:       strings.TrimSpace(p.Name),
+				Path:       strings.TrimSpace(p.Path),
+				Online:     p.Online,
+				Agent:      p.Agent,
+				IMType:     p.IMType,
+				ProjectRev: p.ProjectRev,
+				Git:        p.Git,
 			})
-			break
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].ID < items[j].ID
+		return items[i].ProjectID < items[j].ProjectID
 	})
 	return items
 }
 
-func gitCurrentBranch(repoPath string) string {
-	if repoPath == "" {
-		return ""
+func (s *Server) projectSyncCheckEnvelope(state *connectionState, in envelope) envelope {
+	var payload syncCheckPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "invalid project.syncCheck payload", nil)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
+
+	projectID := strings.TrimSpace(in.ProjectID)
+	if projectID == "" {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "projectId is required", nil)
 	}
-	branch := strings.TrimSpace(string(out))
-	if branch == "" || branch == "HEAD" {
-		return ""
+	if state.scopeHubID != "" && !strings.HasPrefix(projectID, state.scopeHubID+":") {
+		return s.errorEnvelope(in.Method, codeForbidden, "project out of client scope", map[string]any{"projectId": projectID})
 	}
-	return branch
+
+	project, ok := s.lookupProject(projectID)
+	if !ok {
+		return s.errorEnvelope(in.Method, codeNotFound, "project not found", map[string]any{"projectId": projectID})
+	}
+
+	stale := make([]string, 0, 3)
+	if payload.KnownProjectRev != project.ProjectRev {
+		stale = append(stale, "project")
+	}
+	if payload.KnownGitRev != project.Git.GitRev {
+		stale = append(stale, "git")
+	}
+	if payload.KnownWorktreeRev != project.Git.WorktreeRev {
+		stale = append(stale, "worktree")
+	}
+	if payload.KnownProjectRev != project.ProjectRev && len(stale) == 0 {
+		stale = append(stale, "fs")
+	}
+
+	return envelope{
+		Type:      "response",
+		Method:    in.Method,
+		ProjectID: projectID,
+		Payload: rp.MustRaw(syncCheckResponsePayload{
+			ProjectRev:   project.ProjectRev,
+			GitRev:       project.Git.GitRev,
+			WorktreeRev:  project.Git.WorktreeRev,
+			StaleDomains: stale,
+		}),
+	}
+}
+
+func (s *Server) emitProjectSnapshotEvents(hubID string, previous, current []rp.ProjectInfo) {
+	prevByName := make(map[string]rp.ProjectInfo, len(previous))
+	for _, item := range previous {
+		name := strings.TrimSpace(item.Name)
+		if name != "" {
+			prevByName[name] = item
+		}
+	}
+	for _, item := range current {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		prev, ok := prevByName[name]
+		if ok {
+			s.emitProjectUpdateEvents(hubID, &prev, item)
+		} else {
+			s.emitProjectUpdateEvents(hubID, nil, item)
+		}
+		delete(prevByName, name)
+	}
+	for _, item := range prevByName {
+		offline := item
+		offline.Online = false
+		s.emitProjectUpdateEvents(hubID, &item, offline)
+	}
+}
+
+func (s *Server) emitProjectUpdateEvents(hubID string, previous *rp.ProjectInfo, current rp.ProjectInfo) {
+	projectID := rp.ProjectID(hubID, current.Name)
+	if strings.TrimSpace(projectID) == "" {
+		return
+	}
+	if previous == nil {
+		if current.Online {
+			s.broadcastProjectEvent(hubID, projectID, "project.online", map[string]any{})
+		}
+		return
+	}
+	if !previous.Online && current.Online {
+		s.broadcastProjectEvent(hubID, projectID, "project.online", map[string]any{})
+	}
+	if previous.Online && !current.Online {
+		s.broadcastProjectEvent(hubID, projectID, "project.offline", map[string]any{})
+	}
+	if previous.ProjectRev != current.ProjectRev {
+		s.broadcastProjectEvent(hubID, projectID, "project.changed", map[string]any{
+			"projectRev": current.ProjectRev,
+		})
+	}
+	if previous.Git.GitRev != current.Git.GitRev || previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Dirty != current.Git.Dirty {
+		s.broadcastProjectEvent(hubID, projectID, "git.workspace.changed", map[string]any{
+			"gitRev":      current.Git.GitRev,
+			"worktreeRev": current.Git.WorktreeRev,
+			"headSha":     current.Git.HeadSHA,
+			"dirty":       current.Git.Dirty,
+		})
+	}
+}
+
+func (s *Server) broadcastProjectEvent(hubID, projectID, method string, payload any) {
+	s.mu.RLock()
+	peers := make([]*peerConn, 0, len(s.clientPeers))
+	for _, client := range s.clientPeers {
+		if client == nil || client.peer == nil {
+			continue
+		}
+		if client.scopeHubID != "" && client.scopeHubID != hubID {
+			continue
+		}
+		peers = append(peers, client.peer)
+	}
+	s.mu.RUnlock()
+
+	msg := envelope{
+		Type:      "event",
+		Method:    method,
+		ProjectID: projectID,
+		Payload:   rp.MustRaw(payload),
+	}
+	for _, peer := range peers {
+		_ = peer.write(msg)
+	}
 }
 
 func decodePayload(raw []byte, out any) error {
@@ -461,54 +784,6 @@ func decodePayload(raw []byte, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-func (s *Server) handleForwardRequest(appPeer *peerConn, in envelope) {
-	projectID := strings.TrimSpace(in.ProjectID)
-	if projectID == "" {
-		_ = s.writeError(appPeer, in.RequestID, codeInvalidArgument, "projectId is required", nil)
-		return
-	}
-
-	s.mu.RLock()
-	hubID := s.projectToHub[projectID]
-	hubPeer := s.hubPeers[hubID]
-	s.mu.RUnlock()
-	if hubID == "" || hubPeer == nil {
-		_ = s.writeError(appPeer, in.RequestID, codeNotFound, "project not found or hub offline", map[string]any{"projectId": projectID})
-		return
-	}
-
-	forwardID := fmt.Sprintf("fwd-%d", s.nextID.Add(1))
-	waitCh := hubPeer.registerPending(forwardID)
-
-	err := hubPeer.write(envelope{
-		Version:   s.cfg.ProtocolVersion,
-		RequestID: forwardID,
-		Type:      "request",
-		Method:    in.Method,
-		ProjectID: projectID,
-		Payload:   in.Payload,
-	})
-	if err != nil {
-		hubPeer.resolvePending(forwardID, envelope{})
-		_ = s.writeError(appPeer, in.RequestID, codeInternal, "forward request write failed", nil)
-		return
-	}
-
-	select {
-	case resp, ok := <-waitCh:
-		if !ok {
-			_ = s.writeError(appPeer, in.RequestID, codeInternal, "hub disconnected", nil)
-			return
-		}
-		resp.RequestID = in.RequestID
-		resp.ProjectID = projectID
-		_ = appPeer.write(resp)
-	case <-time.After(defaultRequestTimeout):
-		hubPeer.resolvePending(forwardID, envelope{})
-		_ = s.writeError(appPeer, in.RequestID, codeTimeout, "hub response timeout", nil)
-	}
-}
-
 func (s *Server) unregisterHub(peer *peerConn, state *connectionState) {
 	if strings.TrimSpace(state.hubID) == "" {
 		return
@@ -518,6 +793,7 @@ func (s *Server) unregisterHub(peer *peerConn, state *connectionState) {
 		s.mu.Unlock()
 		return
 	}
+	projects := append([]rp.ProjectInfo(nil), s.hubs[state.hubID].Projects...)
 	delete(s.hubPeers, state.hubID)
 	delete(s.hubs, state.hubID)
 	for projectID, hubID := range s.projectToHub {
@@ -526,11 +802,25 @@ func (s *Server) unregisterHub(peer *peerConn, state *connectionState) {
 		}
 	}
 	s.mu.Unlock()
+	for _, item := range projects {
+		if strings.TrimSpace(item.Name) == "" || !item.Online {
+			continue
+		}
+		s.broadcastProjectEvent(state.hubID, rp.ProjectID(state.hubID, item.Name), "project.offline", map[string]any{})
+	}
 }
 
-func (s *Server) writeResponse(peer *peerConn, requestID, method, projectID string, payload any) error {
+func (s *Server) unregisterClient(state *connectionState) {
+	if state == nil || state.role != "client" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.clientPeers, state.id)
+	s.mu.Unlock()
+}
+
+func (s *Server) writeResponse(peer *peerConn, requestID int64, method, projectID string, payload any) error {
 	return peer.write(envelope{
-		Version:   s.cfg.ProtocolVersion,
 		RequestID: requestID,
 		Type:      "response",
 		Method:    method,
@@ -539,15 +829,20 @@ func (s *Server) writeResponse(peer *peerConn, requestID, method, projectID stri
 	})
 }
 
-func (s *Server) writeError(peer *peerConn, requestID, code, message string, details map[string]any) error {
-	return peer.write(errorEnvelope{
-		Version:   s.cfg.ProtocolVersion,
-		RequestID: requestID,
-		Type:      "error",
-		Error: protocolError{
+func (s *Server) writeError(peer *peerConn, requestID int64, method, code, message string, details map[string]any) error {
+	errEnv := s.errorEnvelope(method, code, message, details)
+	errEnv.RequestID = requestID
+	return peer.write(errEnv)
+}
+
+func (s *Server) errorEnvelope(method, code, message string, details map[string]any) envelope {
+	return envelope{
+		Type:   "error",
+		Method: method,
+		Payload: rp.MustRaw(errorPayload{
 			Code:    code,
 			Message: message,
 			Details: details,
-		},
-	})
+		}),
+	}
 }

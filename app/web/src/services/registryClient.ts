@@ -1,4 +1,4 @@
-import type { RegistryEnvelope } from '../types/registry';
+import type {RegistryConnectInitPayload, RegistryEnvelope, RegistryErrorPayload} from '../types/registry';
 
 type PendingRequest = {
   resolve: (value: RegistryEnvelope) => void;
@@ -6,10 +6,25 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+function parseErrorPayload(payload: unknown): RegistryErrorPayload {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+  const input = payload as Record<string, unknown>;
+  return {
+    code: typeof input.code === 'string' ? input.code : undefined,
+    message: typeof input.message === 'string' ? input.message : undefined,
+    details: input.details,
+  };
+}
+
 export class RegistryClient {
   private ws: WebSocket | null = null;
-  private seq = 0;
-  private readonly pending = new Map<string, PendingRequest>();
+  private seq = 1;
+  private readonly pending = new Map<number, PendingRequest>();
+  private readonly eventListeners = new Set<(event: RegistryEnvelope) => void>();
+  private readonly closeListeners = new Set<() => void>();
+  private closing = false;
 
   constructor(private readonly timeoutMs = 8000) {}
 
@@ -53,8 +68,6 @@ export class RegistryClient {
         resolve();
       };
       ws.onerror = () => {
-        // Browser WebSocket error events do not expose details.
-        // Prefer close code/reason from onclose when available.
         sawErrorEvent = true;
       };
       ws.onclose = event => {
@@ -68,42 +81,29 @@ export class RegistryClient {
     });
   }
 
-  async hello(clientName = 'wheelmaker-rn', clientVersion = '0.1.0'): Promise<void> {
+  async connectInit(payload: RegistryConnectInitPayload): Promise<void> {
     await this.request({
-      method: 'hello',
-      payload: {
-        clientName,
-        clientVersion,
-        protocolVersion: '1.0',
-      },
-    });
-  }
-
-  async auth(token: string): Promise<void> {
-    if (!token) return;
-    await this.request({
-      method: 'auth',
-      payload: { token },
+      method: 'connect.init',
+      payload,
     });
   }
 
   async request(args: {
     method: string;
-    payload: Record<string, unknown>;
+    payload: unknown;
     projectId?: string;
     timeoutMs?: number;
   }): Promise<RegistryEnvelope> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('registry websocket is not connected');
     }
-    const requestId = `req-${this.seq++}`;
+    const requestId = this.seq++;
     const envelope: RegistryEnvelope = {
-      version: '1.0',
       requestId,
       type: 'request',
       method: args.method,
       payload: args.payload,
-      ...(args.projectId ? { projectId: args.projectId } : {}),
+      ...(args.projectId ? {projectId: args.projectId} : {}),
     };
 
     const timeoutMs = args.timeoutMs ?? this.timeoutMs;
@@ -112,12 +112,13 @@ export class RegistryClient {
         this.pending.delete(requestId);
         reject(new Error(`registry request timed out (${timeoutMs}ms): ${args.method}`));
       }, timeoutMs);
-      this.pending.set(requestId, { resolve, reject, timer });
+      this.pending.set(requestId, {resolve, reject, timer});
       this.ws?.send(JSON.stringify(envelope));
     });
   }
 
   close(): void {
+    this.closing = true;
     for (const [id, pending] of this.pending.entries()) {
       clearTimeout(pending.timer);
       pending.reject(new Error(`connection closed before response: ${id}`));
@@ -125,6 +126,22 @@ export class RegistryClient {
     this.pending.clear();
     this.ws?.close();
     this.ws = null;
+    this.emitClosed();
+    this.closing = false;
+  }
+
+  onEvent(listener: (event: RegistryEnvelope) => void): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
+  }
+
+  onClose(listener: () => void): () => void {
+    this.closeListeners.add(listener);
+    return () => {
+      this.closeListeners.delete(listener);
+    };
   }
 
   private bind(ws: WebSocket): void {
@@ -136,19 +153,50 @@ export class RegistryClient {
       } catch {
         return;
       }
+      if (envelope.type === 'event') {
+        this.emitEvent(envelope);
+        return;
+      }
       if (!envelope.requestId) return;
       const pending = this.pending.get(envelope.requestId);
       if (!pending) return;
       this.pending.delete(envelope.requestId);
       clearTimeout(pending.timer);
       if (envelope.type === 'error') {
-        pending.reject(new Error(envelope.error?.message ?? 'registry error'));
+        const payload = parseErrorPayload(envelope.payload);
+        pending.reject(new Error(payload.message ?? 'registry error'));
         return;
       }
       pending.resolve(envelope);
     };
-    ws.onclose = () => this.close();
-    ws.onerror = () => this.close();
+    ws.onclose = () => this.handleSocketClosed(ws);
+    ws.onerror = () => this.handleSocketClosed(ws);
+  }
+
+  private emitEvent(event: RegistryEnvelope): void {
+    for (const listener of this.eventListeners) {
+      listener(event);
+    }
+  }
+
+  private emitClosed(): void {
+    for (const listener of this.closeListeners) {
+      listener();
+    }
+  }
+
+  private handleSocketClosed(ws: WebSocket): void {
+    if (this.ws !== ws) {
+      return;
+    }
+    this.ws = null;
+    for (const [id, pending] of this.pending.entries()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(`connection closed before response: ${id}`));
+    }
+    this.pending.clear();
+    if (!this.closing) {
+      this.emitClosed();
+    }
   }
 }
-

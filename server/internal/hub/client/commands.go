@@ -569,6 +569,7 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 
 	// 4. Status
 	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
+	model.Options = append(model.Options, im.HelpOption{Label: "Project Debug Status", Command: "/debug"})
 
 	return model, nil
 }

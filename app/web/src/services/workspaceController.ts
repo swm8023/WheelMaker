@@ -57,7 +57,8 @@ export class WorkspaceController {
     for (const dirPath of expandedSnapshot) {
       if (dirPath === '.') continue;
       try {
-        dirEntries[dirPath] = sortEntries(await this.service.listDirectory(dirPath));
+        const result = await this.service.listDirectory(dirPath);
+        dirEntries[dirPath] = sortEntries(result.entries);
         expandedDirs.push(dirPath);
       } catch {
         // drop stale directory cache entry

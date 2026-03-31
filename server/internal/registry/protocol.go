@@ -5,17 +5,28 @@ import rp "github.com/swm8023/wheelmaker/internal/shared"
 const (
 	codeUnauthorized    = rp.CodeUnauthorized
 	codeInvalidArgument = rp.CodeInvalidArgument
+	codeForbidden       = rp.CodeForbidden
 	codeNotFound        = rp.CodeNotFound
+	codeConflict        = rp.CodeConflict
+	codeUnavailable     = rp.CodeUnavailable
 	codeInternal        = rp.CodeInternal
 	codeTimeout         = rp.CodeTimeout
 )
 
 type envelope = rp.Envelope
 
-type protocolError = rp.ProtocolError
+type errorPayload = rp.ErrorPayload
 
-type errorEnvelope = rp.ErrorEnvelope
+type connectInitPayload = rp.ConnectInitPayload
 
-type authPayload = rp.AuthPayload
+type connectInitResponsePayload = rp.ConnectInitResponsePayload
 
 type hubReportProjectsPayload = rp.HubReportProjectsPayload
+
+type hubUpdateProjectPayload = rp.HubUpdateProjectPayload
+
+type projectListItem = rp.ProjectListItem
+
+type syncCheckPayload = rp.SyncCheckPayload
+
+type syncCheckResponsePayload = rp.SyncCheckResponsePayload

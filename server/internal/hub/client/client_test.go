@@ -447,6 +447,10 @@ func TestHandleMessage_Cancel(t *testing.T) {
 
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/cancel"})
 
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) && mock.cancelCalls == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
 	if mock.cancelCalls != 1 {
 		t.Errorf("Cancel called %d times, want 1", mock.cancelCalls)
 	}

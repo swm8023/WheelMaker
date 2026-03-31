@@ -198,6 +198,33 @@ body,
   text-overflow: ellipsis;
 }
 
+.project-presence {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.project-presence.online {
+  background: #4ac26b;
+}
+
+.project-presence.offline {
+  background: var(--danger);
+}
+
+.project-dirty {
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(244, 135, 113, 0.16);
+  color: var(--danger);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .project-menu,
 .settings-menu {
   position: absolute;
@@ -254,6 +281,25 @@ body,
   font-weight: 600;
   line-height: 1.15;
   color: var(--text);
+}
+
+.project-menu-state {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.project-menu-state.online {
+  background: rgba(74, 194, 107, 0.14);
+  color: #4ac26b;
+}
+
+.project-menu-state.offline {
+  background: rgba(244, 135, 113, 0.16);
+  color: var(--danger);
 }
 
 .project-menu-path {
