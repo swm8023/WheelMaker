@@ -439,6 +439,7 @@ body {
 .reg-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
 .reg-table th { text-align: left; padding: 4px 8px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
 .reg-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+.reg-table th, .reg-table td { white-space: nowrap; }
 .reg-table tr:last-child td { border-bottom: none; }
 .reg-table tr:hover td { background: var(--bg-card-hover); }
 .status-symbol { font-size: 13px; margin-right: 5px; vertical-align: middle; }
@@ -517,6 +518,16 @@ body {
   .viewer-body { min-height: 420px; }
   .log-container { min-height: 280px; }
   .monitor-header { padding: 8px 16px; }
+  .monitor-header h1 { font-size: 14px; letter-spacing: 0; }
+  .status-label { display: none; }
+  .header-status { gap: 8px; }
+  .project-item { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .project-name { font-size: 11px; }
+  .project-path { width: 100%; min-width: 0; font-size: 10px; }
+  .project-meta { margin-left: 0; gap: 4px; }
+  .badge { font-size: 10px; padding: 1px 6px; }
+  .reg-table th, .reg-table td { padding: 3px 6px; font-size: 11px; }
+  .reg-table td:nth-child(3), .reg-table td:nth-child(4) { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
   .card { padding: 10px 12px; }
 }
 </style>
@@ -524,7 +535,7 @@ body {
 <body>
 
 <div class="monitor-header">
-  <h1><span>&gt;</span> wheelmaker<span>-</span>monitor</h1>
+  <h1 id="brand-title">wheelmaker-monitor</h1>
   <div class="header-status">
     <div id="hdr-dot" class="status-dot"></div>
     <span id="hdr-label" class="status-label loading">checking...</span>
@@ -622,6 +633,16 @@ body {
 <script>
 const $ = id => document.getElementById(id);
 
+function isNarrowScreen() {
+  return window.matchMedia('(max-width: 860px)').matches;
+}
+
+function applyResponsiveLabels() {
+  const title = $('brand-title');
+  if (!title) return;
+  title.textContent = isNarrowScreen() ? 'wheelmaker' : 'wheelmaker-monitor';
+}
+
 function switchViewerTab(tab) {
   const isLogs = tab === 'logs';
   $('tab-logs').classList.toggle('active', isLogs);
@@ -661,20 +682,21 @@ function renderStatus(svc) {
 
   if (!svc || !svc.running) {
     dot.className = 'status-dot offline';
-    label.textContent = 'offline';
+    label.textContent = isNarrowScreen() ? '' : 'offline';
     $('proc-list').innerHTML = '<div class="empty-state">No wheelmaker processes running</div>';
     return;
   }
 
   dot.className = 'status-dot online';
-  label.textContent = 'online';
+  label.textContent = isNarrowScreen() ? '' : 'online';
 
   let html = '<div class="proc-chips">';
   for (const p of svc.processes) {
     const cls = p.role === 'guardian' ? 'badge-blue' :
                 p.role === 'hub-worker' ? 'badge-green' :
                 p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
-    html += '<div class="proc-chip"><span class="pid">#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(p.role) + '</span></div>';
+    const roleLabel = String(p.role || '').replace('-worker', '');
+    html += '<div class="proc-chip"><span class="pid">#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
   }
   html += '</div>';
   $('proc-list').innerHTML = html;
@@ -762,14 +784,15 @@ async function loadRegistryStatus() {
       return;
     }
     let html = '<table class="reg-table"><thead><tr>';
-    html += '<th>Status</th><th>Hub ID</th><th>Project</th><th>Branch</th><th>Dirty</th>';
+    const compact = isNarrowScreen();
+    html += '<th>' + (compact ? 'S' : 'Status') + '</th><th>Hub</th><th>Project</th><th>Branch</th><th>' + (compact ? 'D' : 'Dirty') + '</th>';
     html += '</tr></thead><tbody>';
     for (const p of projects) {
       const dotCls = p.online ? 'on' : 'off';
       const statusText = p.online ? 'online' : 'offline';
       const hubId = String(p.projectId || '').includes(':') ? String(p.projectId).split(':')[0] : '-';
       html += '<tr>';
-      html += '<td><span class="status-symbol ' + dotCls + '">●</span>' + statusText + '</td>';
+      html += '<td><span class="status-symbol ' + dotCls + '">●</span>' + (compact ? '' : statusText) + '</td>';
       html += '<td>' + esc(hubId) + '</td>';
       html += '<td>' + esc(p.name || p.projectId) + '</td>';
       html += '<td>' + (p.git && p.git.branch ? '<span class="git-branch">' + esc(p.git.branch) + '</span>' : '-') + '</td>';
@@ -849,6 +872,7 @@ function esc(s) {
 
 // Initial load
 (async function init() {
+  applyResponsiveLabels();
   try {
     const ov = await api('overview');
     renderStatus(ov.service);
@@ -863,6 +887,8 @@ function esc(s) {
   loadLogs();
   loadRegistryStatus();
 })();
+
+window.addEventListener('resize', applyResponsiveLabels);
 
 // Auto-refresh every 10s
 setInterval(async () => {
