@@ -287,13 +287,37 @@ func (m *Monitor) RestartService() error {
 
 // StopService stops the wheelmaker service using stop.bat.
 func (m *Monitor) StopService() error {
-	batPath := filepath.Join(m.baseDir, "stop.bat")
-	if _, err := os.Stat(batPath); err != nil {
-		return fmt.Errorf("stop.bat not found at %s", batPath)
+	if runtime.GOOS != "windows" {
+		batPath := filepath.Join(m.baseDir, "stop.bat")
+		if _, err := os.Stat(batPath); err != nil {
+			return fmt.Errorf("stop.bat not found at %s", batPath)
+		}
+		cmd := exec.Command("cmd", "/c", batPath)
+		cmd.Dir = m.baseDir
+		return cmd.Run()
 	}
-	cmd := exec.Command("cmd", "/c", batPath)
-	cmd.Dir = m.baseDir
-	return cmd.Start()
+
+	// Keep monitor alive: only stop wheelmaker.exe processes.
+	script := `$ErrorActionPreference = 'SilentlyContinue'
+$procs = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'")
+if ($procs.Count -eq 0) { exit 0 }
+foreach ($p in $procs) { Stop-Process -Id $p.ProcessId -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 800
+$left = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'")
+foreach ($p in $left) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
+$deadline = (Get-Date).AddSeconds(6)
+while ((Get-Date) -lt $deadline) {
+  $remain = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'")
+  if ($remain.Count -eq 0) { exit 0 }
+  Start-Sleep -Milliseconds 300
+}
+Write-Error "wheelmaker.exe still running after stop timeout"
+exit 1`
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("stop wheelmaker failed: %v (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // StartService starts the wheelmaker service using start.bat.
