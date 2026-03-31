@@ -106,9 +106,8 @@ body {
 }
 
 .main-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: minmax(220px, 38vh) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 1px;
   background: var(--border);
   margin: 0;
@@ -474,7 +473,8 @@ body {
 }
 
 .ops-root {
-  overflow: auto;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .viewer-tabs {
@@ -520,8 +520,7 @@ body {
 /* Responsive */
 @media (max-width: 860px) {
   body { height: auto; overflow: auto; }
-  .main-grid { grid-template-columns: 1fr; }
-  .main-grid { grid-template-rows: auto; height: auto; overflow: visible; }
+  .main-grid { display: block; height: auto; overflow: visible; }
   .ops-layout { grid-template-columns: 1fr; }
   .viewer-body { min-height: 420px; }
   .log-container { min-height: 280px; }
