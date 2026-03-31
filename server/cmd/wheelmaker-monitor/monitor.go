@@ -274,27 +274,31 @@ func parseLine(line string) LogEntry {
 
 // ---------- actions ----------
 
-// RestartService restarts the wheelmaker service using the restart.bat.
+// RestartService restarts the wheelmaker service using internal process control.
 func (m *Monitor) RestartService() error {
-	batPath := filepath.Join(m.baseDir, "restart.bat")
-	if _, err := os.Stat(batPath); err != nil {
-		return fmt.Errorf("restart.bat not found at %s", batPath)
+	if err := m.StopService(); err != nil {
+		return err
 	}
-	cmd := exec.Command("cmd", "/c", batPath)
-	cmd.Dir = m.baseDir
-	return cmd.Start()
+	time.Sleep(500 * time.Millisecond)
+	return m.StartService()
 }
 
-// StopService stops the wheelmaker service using stop.bat.
+// StopService stops the wheelmaker service using internal process control.
 func (m *Monitor) StopService() error {
 	if runtime.GOOS != "windows" {
-		batPath := filepath.Join(m.baseDir, "stop.bat")
-		if _, err := os.Stat(batPath); err != nil {
-			return fmt.Errorf("stop.bat not found at %s", batPath)
+		procs, err := listProcessesUnix()
+		if err != nil {
+			return err
 		}
-		cmd := exec.Command("cmd", "/c", batPath)
-		cmd.Dir = m.baseDir
-		return cmd.Run()
+		for _, proc := range procs {
+			_ = exec.Command("kill", "-TERM", fmt.Sprintf("%d", proc.PID)).Run()
+		}
+		time.Sleep(800 * time.Millisecond)
+		remain, _ := listProcessesUnix()
+		for _, proc := range remain {
+			_ = exec.Command("kill", "-KILL", fmt.Sprintf("%d", proc.PID)).Run()
+		}
+		return nil
 	}
 
 	// Keep monitor alive: only stop wheelmaker.exe processes.
@@ -320,37 +324,34 @@ exit 1`
 	return nil
 }
 
-// StartService starts the wheelmaker service using start.bat.
+// StartService starts the wheelmaker service using internal process control.
 func (m *Monitor) StartService() error {
-	batPath := filepath.Join(m.baseDir, "start.bat")
-	if _, err := os.Stat(batPath); err != nil {
-		return fmt.Errorf("start.bat not found at %s", batPath)
+	wheelmakerExe, err := m.resolveWheelmakerExecutable()
+	if err != nil {
+		return err
 	}
-	cmd := exec.Command("cmd", "/c", batPath)
-	cmd.Dir = m.baseDir
-	return cmd.Start()
+	cmd := exec.Command(wheelmakerExe, "-d")
+	cmd.Dir = filepath.Dir(wheelmakerExe)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start wheelmaker failed: %w", err)
+	}
+	return nil
 }
 
 // RestartMonitor restarts the monitor process itself.
 func (m *Monitor) RestartMonitor() error {
-	monitorExe := filepath.Join(m.baseDir, "bin", "wheelmaker-monitor.exe")
-	if _, err := os.Stat(monitorExe); err != nil {
-		exePath, exErr := os.Executable()
-		if exErr != nil {
-			return fmt.Errorf("resolve monitor executable: %w", exErr)
-		}
-		monitorExe = exePath
+	monitorExe, err := m.resolveMonitorExecutable()
+	if err != nil {
+		return err
 	}
 
 	if runtime.GOOS == "windows" {
-		escapedExe := strings.ReplaceAll(monitorExe, "'", "''")
-		escapedDir := strings.ReplaceAll(m.baseDir, "'", "''")
 		script := fmt.Sprintf(
-			"Start-Sleep -Milliseconds 700; Start-Process -FilePath '%s' -ArgumentList '-dir','%s' -WindowStyle Hidden",
-			escapedExe,
-			escapedDir,
+			"Start-Sleep -Milliseconds 900; Start-Process -FilePath %q -ArgumentList @('-dir', %q) -WindowStyle Hidden",
+			monitorExe,
+			m.baseDir,
 		)
-		cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
 		if err := cmd.Start(); err != nil {
 			return fmt.Errorf("schedule monitor relaunch: %w", err)
 		}
@@ -367,6 +368,55 @@ func (m *Monitor) RestartMonitor() error {
 		os.Exit(0)
 	}()
 	return nil
+}
+
+func (m *Monitor) resolveWheelmakerExecutable() (string, error) {
+	name := "wheelmaker"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	candidates := []string{
+		filepath.Join(m.baseDir, "bin", name),
+	}
+	if exePath, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), name))
+	}
+	for _, candidate := range candidates {
+		if fileExists(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("wheelmaker executable not found in candidates: %s", strings.Join(candidates, ", "))
+}
+
+func (m *Monitor) resolveMonitorExecutable() (string, error) {
+	name := "wheelmaker-monitor"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	candidates := make([]string, 0, 3)
+	if exePath, err := os.Executable(); err == nil {
+		candidates = append(candidates, exePath)
+		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), name))
+	}
+	candidates = append(candidates, filepath.Join(m.baseDir, "bin", name))
+	for _, candidate := range candidates {
+		if fileExists(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("monitor executable not found in candidates: %s", strings.Join(candidates, ", "))
+}
+
+func fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
 }
 
 // Overview returns a combined snapshot of status, config, and state.
