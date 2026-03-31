@@ -283,6 +283,41 @@ call "%~dp0start.bat"
   }
 }
 
+function Backup-Logs {
+  $logDir = Join-Path $script:WheelmakerHome "logs"
+  $logFiles = @(Get-ChildItem -Path $script:WheelmakerHome -Filter "*.log" -File -ErrorAction SilentlyContinue)
+  if ($logFiles.Count -eq 0) {
+    Write-Step "no log files to backup"
+    return
+  }
+
+  $ts = Get-Date -Format "yyyyMMdd_HHmmss"
+  $dest = Join-Path $logDir $ts
+  Write-Step ("backup {0} log file(s) -> {1}" -f $logFiles.Count, $dest)
+
+  if ($WhatIf) {
+    foreach ($f in $logFiles) {
+      Write-Host ("[whatif] copy {0} -> {1}" -f $f.FullName, $dest)
+    }
+    return
+  }
+
+  New-Item -ItemType Directory -Path $dest -Force | Out-Null
+  foreach ($f in $logFiles) {
+    Copy-Item -Path $f.FullName -Destination $dest -Force
+  }
+
+  # keep only the last 10 backups
+  $backups = @(Get-ChildItem -Path $logDir -Directory -ErrorAction SilentlyContinue | Sort-Object Name)
+  if ($backups.Count -gt 10) {
+    $toRemove = $backups[0..($backups.Count - 11)]
+    foreach ($old in $toRemove) {
+      Remove-Item -Path $old.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Write-Step ("pruned {0} old log backup(s)" -f $toRemove.Count)
+  }
+}
+
 function Stop-WheelmakerProcesses {
   $all = @(Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" -ErrorAction SilentlyContinue)
   if ($all.Count -eq 0) {
@@ -408,6 +443,7 @@ Build-ServerBinary
 
 $configWasCreated = $false
 if (-not $SkipInstall) {
+  Backup-Logs
   Install-ServerBinary
   $configWasCreated = Ensure-Config
   Install-ServiceScripts
