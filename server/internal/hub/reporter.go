@@ -45,6 +45,8 @@ type ReporterConfig struct {
 	Token             string
 	HubID             string
 	ReconnectInterval time.Duration
+	PingInterval      time.Duration
+	PongTimeout       time.Duration
 }
 
 // Reporter keeps a long-lived hub connection and serves local project queries.
@@ -58,6 +60,7 @@ type Reporter struct {
 	conn         *websocket.Conn
 	pending      map[int64]chan envelope
 	requestSeq   atomic.Int64
+	updateSeq    atomic.Int64
 
 	connectionEpoch int64
 }
@@ -69,6 +72,12 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 	}
 	if cfg.ReconnectInterval <= 0 {
 		cfg.ReconnectInterval = 2 * time.Second
+	}
+	if cfg.PingInterval <= 0 {
+		cfg.PingInterval = 15 * time.Second
+	}
+	if cfg.PongTimeout <= 0 {
+		cfg.PongTimeout = 45 * time.Second
 	}
 	if strings.TrimSpace(cfg.HubID) == "" {
 		cfg.HubID = "wheelmaker-hub"
@@ -120,7 +129,18 @@ func (r *Reporter) UpdateProject(project ProjectInfo) error {
 		return fmt.Errorf("project name is required")
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339)
+	seq := r.updateSeq.Add(1)
+	changedDomains := []string{"project"}
+
 	r.mu.Lock()
+	previous := r.projectsByID[project.Name]
+	if previous.Name != "" {
+		changedDomains = diffProjectDomains(previous, project)
+		if len(changedDomains) == 0 {
+			changedDomains = []string{"project"}
+		}
+	}
 	r.setProjectLocked(project)
 	conn := r.conn
 	connectionEpoch := r.connectionEpoch
@@ -143,7 +163,10 @@ func (r *Reporter) UpdateProject(project ProjectInfo) error {
 		Payload: shared.MustRaw(map[string]any{
 			"hubId":           r.cfg.HubID,
 			"connectionEpoch": connectionEpoch,
+			"seq":             seq,
 			"project":         project,
+			"changedDomains":  changedDomains,
+			"updatedAt":       now,
 		}),
 	}); err != nil {
 		r.mu.Lock()
@@ -203,6 +226,10 @@ func (r *Reporter) runSession(ctx context.Context) error {
 		return err
 	}
 
+	keepaliveDone := make(chan struct{})
+	defer close(keepaliveDone)
+	go r.runKeepalive(ctx, conn, keepaliveDone)
+
 	for {
 		var in envelope
 		if err := r.readJSON(conn, "<-", &in); err != nil {
@@ -255,6 +282,69 @@ func (r *Reporter) runSession(ctx context.Context) error {
 				}),
 			})
 		}
+	}
+}
+
+func (r *Reporter) runKeepalive(ctx context.Context, conn *websocket.Conn, done <-chan struct{}) {
+	if r.cfg.PingInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(r.cfg.PingInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := r.sendHubPing(conn); err != nil {
+				shared.Warn("hub registry: ping failed: %v", err)
+				_ = conn.Close()
+				return
+			}
+		}
+	}
+}
+
+func (r *Reporter) sendHubPing(conn *websocket.Conn) error {
+	requestID := r.requestSeq.Add(1)
+	waitCh := make(chan envelope, 1)
+	r.mu.Lock()
+	r.pending[requestID] = waitCh
+	r.mu.Unlock()
+
+	if err := r.writeJSON(conn, "->", envelope{
+		RequestID: requestID,
+		Type:      "request",
+		Method:    "hub.ping",
+		Payload:   shared.MustRaw(map[string]any{"ts": time.Now().UTC().Unix()}),
+	}); err != nil {
+		r.mu.Lock()
+		delete(r.pending, requestID)
+		r.mu.Unlock()
+		return err
+	}
+
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			return fmt.Errorf("registry connection closed")
+		}
+		if resp.Type == "error" {
+			var payload errorPayload
+			if err := decodePayload(resp.Payload, &payload); err == nil {
+				return fmt.Errorf("%s: %s", payload.Code, payload.Message)
+			}
+			return fmt.Errorf("hub.ping failed")
+		}
+		return nil
+	case <-time.After(r.cfg.PongTimeout):
+		r.mu.Lock()
+		delete(r.pending, requestID)
+		r.mu.Unlock()
+		return fmt.Errorf("hub.ping timeout")
 	}
 }
 
@@ -352,28 +442,13 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 	}
 	outEntries := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
-		info, _ := e.Info()
 		kind := "file"
-		size := int64(0)
-		mtime := ""
-		if info != nil {
-			size = info.Size()
-			mtime = info.ModTime().UTC().Format(time.RFC3339)
-		}
 		if e.IsDir() {
 			kind = "dir"
-			size = 0
-		}
-		childPath := e.Name()
-		if rel != "." && rel != "" {
-			childPath = filepath.ToSlash(filepath.Join(rel, e.Name()))
 		}
 		outEntries = append(outEntries, map[string]any{
-			"name":  e.Name(),
-			"path":  childPath,
-			"kind":  kind,
-			"size":  size,
-			"mtime": mtime,
+			"name": e.Name(),
+			"kind": kind,
 		})
 	}
 	_ = r.writeJSON(conn, "->", envelope{
@@ -1224,6 +1299,23 @@ func (r *Reporter) resolvePending(id int64, msg envelope) bool {
 		close(ch)
 	}
 	return ok
+}
+
+func diffProjectDomains(previous, current ProjectInfo) []string {
+	domains := make([]string, 0, 3)
+	projectChanged := previous.ProjectRev != current.ProjectRev || previous.Agent != current.Agent || previous.IMType != current.IMType || previous.Path != current.Path || previous.Online != current.Online
+	gitChanged := previous.Git.GitRev != current.Git.GitRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Branch != current.Git.Branch
+	worktreeChanged := previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.Dirty != current.Git.Dirty
+	if projectChanged {
+		domains = append(domains, "project")
+	}
+	if gitChanged {
+		domains = append(domains, "git")
+	}
+	if worktreeChanged {
+		domains = append(domains, "worktree")
+	}
+	return domains
 }
 
 func safeJoin(root, rel string) (string, string, error) {

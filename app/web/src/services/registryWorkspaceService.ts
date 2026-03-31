@@ -1,4 +1,5 @@
 import {createRegistryRepository, type RegistryRepository} from './registryRepository';
+import {RegistryRequestError} from './registryClient';
 import type {
   RegistryEnvelope,
   RegistryFsInfo,
@@ -68,8 +69,9 @@ export class RegistryWorkspaceService {
         return {selectedProjectId: project.projectId, fileEntries: fileList.entries ?? []};
       } catch (error) {
         lastError = error;
-        const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-        const offline = message.includes('project not found or hub offline');
+        const offline =
+          error instanceof RegistryRequestError &&
+          (error.code === 'NOT_FOUND' || error.code === 'UNAVAILABLE');
         if (!offline) {
           throw error;
         }

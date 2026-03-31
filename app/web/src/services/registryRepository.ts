@@ -67,11 +67,23 @@ export class RegistryRepository {
       payload: knownHash ? {path, knownHash} : {path},
     });
     const payload = (resp.payload ?? {}) as RegistryFsListResponse;
+    const basePath = payload.path ?? path;
+    const joinPath = (parent: string, name: string): string => {
+      const cleanParent = (parent || '.').replace(/\\/g, '/');
+      if (cleanParent === '.' || cleanParent === '') return name;
+      return `${cleanParent.replace(/\/+$/, '')}/${name}`;
+    };
+    const entries = (payload.entries ?? [])
+      .filter(entry => !!entry?.name)
+      .map(entry => ({
+        ...entry,
+        path: entry.path && entry.path.trim().length > 0 ? entry.path : joinPath(basePath, entry.name),
+      }));
     return {
       path: payload.path ?? path,
       hash: payload.hash,
       notModified: payload.notModified ?? false,
-      entries: (payload.entries ?? []).filter(entry => !!entry.path && !!entry.name),
+      entries,
     };
   }
 

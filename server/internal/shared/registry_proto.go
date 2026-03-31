@@ -105,7 +105,10 @@ type HubReportProjectsPayload struct {
 type HubUpdateProjectPayload struct {
 	HubID           string      `json:"hubId"`
 	ConnectionEpoch int64       `json:"connectionEpoch"`
+	Seq             int64       `json:"seq"`
 	Project         ProjectInfo `json:"project"`
+	ChangedDomains  []string    `json:"changedDomains,omitempty"`
+	UpdatedAt       string      `json:"updatedAt"`
 }
 
 type SyncCheckPayload struct {

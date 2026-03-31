@@ -16,6 +16,9 @@ export interface RegistryEnvelope<TPayload = unknown> {
 
 export interface RegistryProjectEventPayload {
   projectRev?: string;
+  gitRev?: string;
+  worktreeRev?: string;
+  changedDomains?: string[];
   changedPaths?: string[];
 }
 

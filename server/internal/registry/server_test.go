@@ -129,6 +129,82 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 	}
 }
 
+func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hubOld := dialWS(t, ts.URL+"/ws")
+	defer hubOld.Close()
+	mustWriteJSON(t, hubOld, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub-old",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "hub",
+			"hubId":           "hub-a",
+		},
+	})
+	oldInit := mustReadEnvelope(t, hubOld)
+	oldPrincipal, _ := oldInit.Payload["principal"].(map[string]any)
+	oldEpoch, _ := oldPrincipal["connectionEpoch"].(float64)
+
+	hubNew := dialWS(t, ts.URL+"/ws")
+	defer hubNew.Close()
+	mustWriteJSON(t, hubNew, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub-new",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "hub",
+			"hubId":           "hub-a",
+		},
+	})
+	newInit := mustReadEnvelope(t, hubNew)
+	newPrincipal, _ := newInit.Payload["principal"].(map[string]any)
+	newEpoch, _ := newPrincipal["connectionEpoch"].(float64)
+
+	mustWriteJSON(t, hubNew, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-a",
+			"connectionEpoch": int64(newEpoch),
+			"projects": []map[string]any{
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p2", "git": map[string]any{"gitRev": "g2", "worktreeRev": "w2"}},
+			},
+		},
+	})
+	_ = mustReadEnvelope(t, hubNew)
+
+	mustWriteJSON(t, hubOld, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-a",
+			"connectionEpoch": int64(oldEpoch),
+			"projects": []map[string]any{
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+			},
+		},
+	})
+	stale := mustReadEnvelope(t, hubOld)
+	if stale.Type != "error" {
+		t.Fatalf("stale response type=%q, want error", stale.Type)
+	}
+	if stale.Payload["code"] != "CONFLICT" {
+		t.Fatalf("stale error code=%v, want CONFLICT", stale.Payload["code"])
+	}
+}
+
 func TestConnectInitAuthRequired(t *testing.T) {
 	s := New(Config{Token: "secret"})
 	ts := httptest.NewServer(s.Handler())
@@ -156,6 +232,54 @@ func TestConnectInitAuthRequired(t *testing.T) {
 	payload := unauthorized.Payload
 	if payload["code"] != "UNAUTHORIZED" {
 		t.Fatalf("error.code=%v, want UNAUTHORIZED", payload["code"])
+	}
+}
+
+func TestInvalidRequestIDReturnsErrorAndKeepsConnection(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	ws := dialWS(t, ts.URL+"/ws")
+	defer ws.Close()
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "client",
+			"token":           "",
+		},
+	})
+	_ = mustReadEnvelope(t, ws)
+
+	mustWriteJSON(t, ws, map[string]any{
+		"requestId": "bad-id",
+		"type":      "request",
+		"method":    "project.list",
+		"payload":   map[string]any{},
+	})
+	invalid := mustReadEnvelope(t, ws)
+	if invalid.Type != "error" {
+		t.Fatalf("unexpected invalid requestId response: %#v", invalid)
+	}
+	if invalid.Payload["code"] != "INVALID_ARGUMENT" {
+		t.Fatalf("error.code=%v, want INVALID_ARGUMENT", invalid.Payload["code"])
+	}
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "project.list",
+		Payload:   map[string]any{},
+	})
+	listResp := mustReadEnvelope(t, ws)
+	if listResp.Type != "response" || listResp.Method != "project.list" {
+		t.Fatalf("unexpected project.list response after invalid requestId: %#v", listResp)
 	}
 }
 
@@ -341,6 +465,7 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 		Payload: map[string]any{
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
+			"seq":             1,
 			"project": map[string]any{
 				"name":       "server",
 				"path":       "D:/Code/WheelMaker/server",
@@ -355,6 +480,8 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 					"dirty":       true,
 				},
 			},
+			"changedDomains": []string{"project", "git", "worktree"},
+			"updatedAt":      "2026-03-31T10:01:23Z",
 		},
 	})
 	updateResp := mustReadEnvelope(t, hub)
@@ -368,6 +495,19 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 	}
 	if projectChanged.ProjectID != "hub-a:server" {
 		t.Fatalf("projectId=%q, want hub-a:server", projectChanged.ProjectID)
+	}
+	if projectChanged.Payload["projectRev"] != "p2" {
+		t.Fatalf("projectRev=%v, want p2", projectChanged.Payload["projectRev"])
+	}
+	if projectChanged.Payload["gitRev"] != "g2" {
+		t.Fatalf("gitRev=%v, want g2", projectChanged.Payload["gitRev"])
+	}
+	if projectChanged.Payload["worktreeRev"] != "w2" {
+		t.Fatalf("worktreeRev=%v, want w2", projectChanged.Payload["worktreeRev"])
+	}
+	changedDomains, _ := projectChanged.Payload["changedDomains"].([]any)
+	if len(changedDomains) < 2 {
+		t.Fatalf("changedDomains=%v, want at least project+git/worktree", changedDomains)
 	}
 
 	gitChanged := mustReadEnvelope(t, client)

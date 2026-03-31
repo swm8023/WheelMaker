@@ -28,7 +28,14 @@ import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
-import type {RegistryFsEntry, RegistryFsInfo, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from './types/registry';
+import type {
+  RegistryFsEntry,
+  RegistryFsInfo,
+  RegistryGitCommit,
+  RegistryGitCommitFile,
+  RegistryProject,
+  RegistryProjectEventPayload,
+} from './types/registry';
 import './styles.css';
 
 type Tab = 'chat' | 'file' | 'git';
@@ -914,9 +921,45 @@ function App() {
       if (eventProjectId && eventProjectId !== projectIdRef.current) {
         return;
       }
+      if (event.method === 'git.workspace.changed') {
+        loadGit().catch(() => undefined);
+        return;
+      }
+      if (event.method === 'project.changed') {
+        const payload = (event.payload ?? {}) as RegistryProjectEventPayload;
+        const changedDomains = Array.isArray(payload.changedDomains)
+          ? payload.changedDomains.filter(item => typeof item === 'string')
+          : [];
+        const changedPaths = Array.isArray(payload.changedPaths)
+          ? payload.changedPaths.filter(item => typeof item === 'string' && item.trim().length > 0)
+          : [];
+        if (
+          changedDomains.length > 0 &&
+          changedDomains.every(domain => domain === 'git' || domain === 'worktree')
+        ) {
+          loadGit().catch(() => undefined);
+          return;
+        }
+        if (changedPaths.length > 0) {
+          const visibleTargets = [
+            ...(selectedFile ? [selectedFile] : []),
+            ...pinnedFiles,
+            ...expandedDirs,
+          ];
+          const intersectsVisible = visibleTargets.some(target =>
+            changedPaths.some(changedPath => {
+              const t = target.replace(/\\/g, '/');
+              const c = changedPath.replace(/\\/g, '/').replace(/\/+$/, '');
+              return t === c || t.startsWith(`${c}/`) || c.startsWith(`${t}/`);
+            }),
+          );
+          if (!intersectsVisible) {
+            return;
+          }
+        }
+      }
       if (
         event.method === 'project.changed' ||
-        event.method === 'git.workspace.changed' ||
         event.method === 'project.online' ||
         event.method === 'project.offline'
       ) {
@@ -940,7 +983,7 @@ function App() {
       unsubscribeEvent();
       unsubscribeClose();
     };
-  }, [connected, projectId, expandedDirs]);
+  }, [connected, projectId, expandedDirs, pinnedFiles, selectedFile]);
 
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];

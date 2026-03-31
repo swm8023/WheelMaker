@@ -2,9 +2,14 @@ package hub
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -32,12 +37,18 @@ type Hub struct {
 	statePath string
 	clients   []*client.Client
 	regSync   *Reporter
+	regMu     sync.Mutex
+	lastProj  map[string]ProjectInfo
 }
 
 // New creates a Hub from the given config and state file path.
 // hub.Start() must be called before hub.Run().
 func New(cfg *shared.AppConfig, statePath string) *Hub {
-	return &Hub{cfg: cfg, statePath: statePath}
+	return &Hub{
+		cfg:       cfg,
+		statePath: statePath,
+		lastProj:  map[string]ProjectInfo{},
+	}
 }
 
 // Start validates config, creates one client.Client per project, and starts each client.
@@ -143,6 +154,11 @@ func (h *Hub) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			h.monitorRegistryProjectState(ctx)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			if err := h.regSync.Run(ctx); err != nil && ctx.Err() == nil {
 				shared.Error("wheelmaker: registry sync error: %v", err)
 			}
@@ -201,15 +217,7 @@ func (h *Hub) setupRegistrySync() {
 
 	projects := make([]ProjectInfo, 0, len(h.cfg.Projects))
 	for _, p := range h.cfg.Projects {
-		projects = append(projects, ProjectInfo{
-			Name:       p.Name,
-			Path:       p.Path,
-			Online:     true,
-			Agent:      p.Client.Agent,
-			IMType:     p.IM.Type,
-			ProjectRev: "",
-			Git:        shared.ProjectGitState{},
-		})
+		projects = append(projects, h.collectProjectInfo(p))
 	}
 
 	rep := NewReporter(ReporterConfig{
@@ -225,6 +233,146 @@ func (h *Hub) setupRegistrySync() {
 		}
 	}
 	h.regSync = rep
+	h.regMu.Lock()
+	for _, project := range projects {
+		h.lastProj[project.Name] = project
+	}
+	h.regMu.Unlock()
+}
+
+func (h *Hub) monitorRegistryProjectState(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	checkAndReport := func() {
+		for _, cfgProject := range h.cfg.Projects {
+			project := h.collectProjectInfo(cfgProject)
+			h.regMu.Lock()
+			previous := h.lastProj[project.Name]
+			same := sameProjectInfo(previous, project)
+			if !same {
+				h.lastProj[project.Name] = project
+			}
+			h.regMu.Unlock()
+			if same {
+				continue
+			}
+			if err := h.regSync.UpdateProject(project); err != nil {
+				shared.Warn("hub registry: updateProject failed name=%s err=%v", project.Name, err)
+			}
+		}
+	}
+
+	checkAndReport()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkAndReport()
+		}
+	}
+}
+
+func (h *Hub) collectProjectInfo(cfgProject shared.ProjectConfig) ProjectInfo {
+	path := strings.TrimSpace(cfgProject.Path)
+	if path == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			path = cwd
+		} else {
+			path = "."
+		}
+	}
+	absPath, err := filepath.Abs(path)
+	if err == nil {
+		path = absPath
+	}
+	info := ProjectInfo{
+		Name:   cfgProject.Name,
+		Path:   path,
+		Online: true,
+		Agent:  cfgProject.Client.Agent,
+		IMType: cfgProject.IM.Type,
+	}
+	gitState := collectGitState(path)
+	info.Git = gitState
+	info.ProjectRev = hubHashLines(gitState.GitRev, gitState.WorktreeRev)
+	return info
+}
+
+func collectGitState(projectPath string) shared.ProjectGitState {
+	branch, branchErr := runGitLocal(projectPath, "rev-parse", "--abbrev-ref", "HEAD")
+	headSHA, shaErr := runGitLocal(projectPath, "rev-parse", "HEAD")
+	statusRaw, statusErr := runGitLocal(projectPath, "status", "--porcelain")
+	if branchErr != nil || shaErr != nil || statusErr != nil {
+		return shared.ProjectGitState{}
+	}
+	normalizedStatus := normalizeGitStatus(statusRaw)
+	dirty := strings.TrimSpace(normalizedStatus) != ""
+	gitRev := hubHashLines(strings.TrimSpace(branch), strings.TrimSpace(headSHA), boolString(dirty))
+	worktreeRev := hubHashBytes([]byte(normalizedStatus))
+	return shared.ProjectGitState{
+		Branch:      strings.TrimSpace(branch),
+		HeadSHA:     strings.TrimSpace(headSHA),
+		Dirty:       dirty,
+		GitRev:      gitRev,
+		WorktreeRev: worktreeRev,
+	}
+}
+
+func runGitLocal(projectPath string, args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = projectPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func normalizeGitStatus(raw string) string {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	lines := []string{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimRight(strings.TrimSpace(line), " ")
+		if line == "" {
+			continue
+		}
+		lines = append(lines, strings.ReplaceAll(line, "\\", "/"))
+	}
+	sort.Strings(lines)
+	return strings.Join(lines, "\n")
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
+}
+
+func hubHashLines(parts ...string) string {
+	return hubHashBytes([]byte(strings.Join(parts, "\n")))
+}
+
+func hubHashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func sameProjectInfo(a, b ProjectInfo) bool {
+	return a.Name == b.Name &&
+		a.Path == b.Path &&
+		a.Online == b.Online &&
+		a.Agent == b.Agent &&
+		a.IMType == b.IMType &&
+		a.ProjectRev == b.ProjectRev &&
+		a.Git.Branch == b.Git.Branch &&
+		a.Git.HeadSHA == b.Git.HeadSHA &&
+		a.Git.Dirty == b.Git.Dirty &&
+		a.Git.GitRev == b.Git.GitRev &&
+		a.Git.WorktreeRev == b.Git.WorktreeRev
 }
 
 func hasDebugProject(projects []shared.ProjectConfig) bool {

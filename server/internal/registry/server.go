@@ -111,6 +111,7 @@ type connectionState struct {
 	connectionEpoch int64
 	peer            *peerConn
 	seenRequestIDs  map[int64]struct{}
+	lastProjectSeq  map[string]int64
 }
 
 var upgrader = websocket.Upgrader{
@@ -177,6 +178,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		id:             fmt.Sprintf("conn-%d", s.nextConnID.Add(1)),
 		peer:           newPeerConn(ws),
 		seenRequestIDs: map[int64]struct{}{},
+		lastProjectSeq: map[string]int64{},
 	}
 	rp.Info("registry: ws connected id=%s remote=%s", state.id, r.RemoteAddr)
 	defer rp.Info("registry: ws disconnected id=%s role=%s hub=%s remote=%s", state.id, state.role, state.hubID, r.RemoteAddr)
@@ -211,9 +213,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	for {
-		var in envelope
-		if err := ws.ReadJSON(&in); err != nil {
+		in, invalidRequestID, err := readEnvelope(ws)
+		if err != nil {
 			return
+		}
+		if invalidRequestID {
+			_ = s.writeError(state.peer, 0, in.Method, codeInvalidArgument, "requestId must be integer", nil)
+			continue
 		}
 		resetIdleTimer()
 		if in.Type == "response" || in.Type == "error" {
@@ -273,6 +279,36 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = s.writeError(state.peer, in.RequestID, in.Method, codeInvalidArgument, "unsupported method", map[string]any{"method": in.Method})
 		}
 	}
+}
+
+func readEnvelope(ws *websocket.Conn) (envelope, bool, error) {
+	type rawEnvelope struct {
+		RequestID json.RawMessage `json:"requestId,omitempty"`
+		Type      string          `json:"type"`
+		Method    string          `json:"method,omitempty"`
+		ProjectID string          `json:"projectId,omitempty"`
+		Payload   json.RawMessage `json:"payload,omitempty"`
+	}
+	var raw rawEnvelope
+	if err := ws.ReadJSON(&raw); err != nil {
+		return envelope{}, false, err
+	}
+
+	out := envelope{
+		Type:      raw.Type,
+		Method:    raw.Method,
+		ProjectID: raw.ProjectID,
+		Payload:   raw.Payload,
+	}
+	if len(raw.RequestID) == 0 || strings.TrimSpace(string(raw.RequestID)) == "null" {
+		return out, false, nil
+	}
+	var id int64
+	if err := json.Unmarshal(raw.RequestID, &id); err != nil {
+		return out, true, nil
+	}
+	out.RequestID = id
+	return out, false, nil
 }
 
 func methodAllowed(role string, method string) bool {
@@ -360,9 +396,22 @@ func (s *Server) handleHubReportProjects(peer *peerConn, state *connectionState,
 		return
 	}
 
+	s.mu.RLock()
+	currentHubSnapshot, hasCurrentHubSnapshot := s.hubs[payload.HubID]
+	s.mu.RUnlock()
+	if hasCurrentHubSnapshot && payload.ConnectionEpoch < currentHubSnapshot.ConnectionEpoch {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "stale connectionEpoch", map[string]any{
+			"hubId":           payload.HubID,
+			"connectionEpoch": payload.ConnectionEpoch,
+			"currentEpoch":    currentHubSnapshot.ConnectionEpoch,
+		})
+		return
+	}
+
 	sort.Slice(payload.Projects, func(i, j int) bool {
 		return payload.Projects[i].Name < payload.Projects[j].Name
 	})
+	state.lastProjectSeq = map[string]int64{}
 
 	s.mu.Lock()
 	previous := s.hubs[payload.HubID]
@@ -411,9 +460,30 @@ func (s *Server) handleHubUpdateProject(peer *peerConn, state *connectionState, 
 		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "connectionEpoch mismatch", nil)
 		return
 	}
+	if payload.Seq < 1 {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "seq must be >= 1", nil)
+		return
+	}
 	projectName := strings.TrimSpace(payload.Project.Name)
 	if projectName == "" {
 		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "project.name is required", nil)
+		return
+	}
+	if strings.TrimSpace(payload.UpdatedAt) == "" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "updatedAt is required", nil)
+		return
+	}
+	if _, err := time.Parse(time.RFC3339, payload.UpdatedAt); err != nil {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "updatedAt must be RFC3339", nil)
+		return
+	}
+	lastSeq := state.lastProjectSeq[projectName]
+	if payload.Seq <= lastSeq {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeConflict, "stale project update seq", map[string]any{
+			"projectName": projectName,
+			"lastSeq":     lastSeq,
+			"seq":         payload.Seq,
+		})
 		return
 	}
 
@@ -450,6 +520,7 @@ func (s *Server) handleHubUpdateProject(peer *peerConn, state *connectionState, 
 	})
 	hub.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	s.hubs[payload.HubID] = hub
+	state.lastProjectSeq[projectName] = payload.Seq
 	projectID := rp.ProjectID(payload.HubID, payload.Project.Name)
 	if strings.TrimSpace(projectID) != "" {
 		s.projectToHub[projectID] = payload.HubID
@@ -735,8 +806,18 @@ func (s *Server) emitProjectUpdateEvents(hubID string, previous *rp.ProjectInfo,
 		s.broadcastProjectEvent(hubID, projectID, "project.offline", map[string]any{})
 	}
 	if previous.ProjectRev != current.ProjectRev {
+		changedDomains := []string{"project"}
+		if previous.Git.GitRev != current.Git.GitRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Branch != current.Git.Branch {
+			changedDomains = append(changedDomains, "git")
+		}
+		if previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.Dirty != current.Git.Dirty {
+			changedDomains = append(changedDomains, "worktree")
+		}
 		s.broadcastProjectEvent(hubID, projectID, "project.changed", map[string]any{
-			"projectRev": current.ProjectRev,
+			"projectRev":     current.ProjectRev,
+			"gitRev":         current.Git.GitRev,
+			"worktreeRev":    current.Git.WorktreeRev,
+			"changedDomains": changedDomains,
 		})
 	}
 	if previous.Git.GitRev != current.Git.GitRev || previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Dirty != current.Git.Dirty {

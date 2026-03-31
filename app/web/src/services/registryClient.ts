@@ -6,6 +6,18 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+export class RegistryRequestError extends Error {
+  code?: string;
+  details?: unknown;
+
+  constructor(message: string, code?: string, details?: unknown) {
+    super(message);
+    this.name = 'RegistryRequestError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
 function parseErrorPayload(payload: unknown): RegistryErrorPayload {
   if (!payload || typeof payload !== 'object') {
     return {};
@@ -164,7 +176,7 @@ export class RegistryClient {
       clearTimeout(pending.timer);
       if (envelope.type === 'error') {
         const payload = parseErrorPayload(envelope.payload);
-        pending.reject(new Error(payload.message ?? 'registry error'));
+        pending.reject(new RegistryRequestError(payload.message ?? 'registry error', payload.code, payload.details));
         return;
       }
       pending.resolve(envelope);
