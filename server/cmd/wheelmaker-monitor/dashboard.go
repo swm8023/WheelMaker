@@ -170,6 +170,28 @@ body {
 
 .proc-table tr:last-child td { border-bottom: none; }
 
+.proc-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.proc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 3px;
+  padding: 3px 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.proc-chip .pid {
+  color: var(--text-dim);
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -285,15 +307,14 @@ body {
 
 /* Project list */
 .project-item {
-  padding: 6px 8px;
+  padding: 4px 7px;
   border: 1px solid var(--border);
   border-radius: 3px;
   margin-bottom: 3px;
   background: var(--bg);
   transition: border-color 0.15s;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 6px 10px;
+  display: flex;
+  gap: 8px;
   align-items: center;
 }
 
@@ -302,7 +323,7 @@ body {
 .project-name {
   font-family: var(--mono);
   font-weight: 600;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-bright);
   white-space: nowrap;
 }
@@ -311,18 +332,20 @@ body {
   font-size: 10px;
   color: var(--text-dim);
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   align-items: center;
+  margin-left: auto;
 }
 
 .project-meta span { display: flex; align-items: center; gap: 4px; }
 
 .project-path {
-  grid-column: 1 / -1;
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-dim);
+  flex: 1 1 auto;
+  min-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -577,14 +600,14 @@ function renderStatus(svc) {
   dot.className = 'status-dot online';
   label.textContent = svc.processes.length + ' process' + (svc.processes.length !== 1 ? 'es' : '');
 
-  let html = '<table class="proc-table"><thead><tr><th>PID</th><th>Role</th></tr></thead><tbody>';
+  let html = '<div class="proc-chips">';
   for (const p of svc.processes) {
     const cls = p.role === 'guardian' ? 'badge-blue' :
                 p.role === 'hub-worker' ? 'badge-green' :
                 p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
-    html += '<tr><td>' + esc(String(p.pid)) + '</td><td><span class="badge ' + cls + '">' + esc(p.role) + '</span></td></tr>';
+    html += '<div class="proc-chip"><span class="pid">#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(p.role) + '</span></div>';
   }
-  html += '</tbody></table>';
+  html += '</div>';
   $('proc-list').innerHTML = html;
 }
 
@@ -632,13 +655,12 @@ function renderRegistry(cfg) {
     for (const p of projects) {
       html += '<div class="project-item">';
       html += '<div class="project-name">' + esc(p.name) + '</div>';
+      html += '<div class="project-path">' + esc(p.path || '-') + '</div>';
       html += '<div class="project-meta">';
       html += '<span><span class="badge badge-blue">' + esc(p.client?.agent || 'none') + '</span></span>';
       html += '<span><span class="badge badge-yellow">' + esc(p.im?.type || 'none') + '</span></span>';
       html += '<span><span class="badge ' + (p.yolo ? 'badge-green' : 'badge-red') + '">' + (p.yolo ? 'yolo' : 'safe') + '</span></span>';
-      html += '</div>';
-      html += '<div class="project-path">' + esc(p.path || '-') + '</div>';
-      html += '</div>';
+      html += '</div></div>';
     }
     hubProjectsEl.innerHTML = html;
   }
