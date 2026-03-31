@@ -38,15 +38,16 @@ type Channel struct {
 	action  func(im.CardActionEvent)
 	bot     *lark.Bot
 
-	debugMu       sync.Mutex
-	debugStreams  map[string]*debugStream
-	textMu        sync.Mutex
-	textStreams   map[string]*textStream
-	systemStreams map[string]*textStream
-	toolMu        sync.Mutex
-	toolRenderMu  sync.Mutex
-	toolCards     map[string]map[string]*toolCardState // chatID -> toolCallID -> state
-	toolCompact   map[string]*compactToolStream        // chatID -> compact stream state
+	debugMu        sync.Mutex
+	debugStreams   map[string]*debugStream
+	textMu         sync.Mutex
+	textStreams    map[string]*textStream
+	thoughtStreams map[string]*textStream
+	systemStreams  map[string]*textStream
+	toolMu         sync.Mutex
+	toolRenderMu   sync.Mutex
+	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
+	toolCompact    map[string]*compactToolStream        // chatID -> compact stream state
 
 	seenMu        sync.Mutex
 	seenMessageID map[string]time.Time
@@ -103,15 +104,16 @@ type pendingAckReaction struct {
 // New creates a Feishu IM adapter.
 func New(cfg Config) *Channel {
 	return &Channel{
-		cfg:           cfg,
-		debugStreams:  map[string]*debugStream{},
-		textStreams:   map[string]*textStream{},
-		systemStreams: map[string]*textStream{},
-		seenMessageID: map[string]time.Time{},
-		toolCards:     map[string]map[string]*toolCardState{},
-		toolCompact:   map[string]*compactToolStream{},
-		pendingAck:    map[string]pendingAckReaction{},
-		lastOutbound:  map[string]string{},
+		cfg:            cfg,
+		debugStreams:   map[string]*debugStream{},
+		textStreams:    map[string]*textStream{},
+		thoughtStreams: map[string]*textStream{},
+		systemStreams:  map[string]*textStream{},
+		seenMessageID:  map[string]time.Time{},
+		toolCards:      map[string]map[string]*toolCardState{},
+		toolCompact:    map[string]*compactToolStream{},
+		pendingAck:     map[string]pendingAckReaction{},
+		lastOutbound:   map[string]string{},
 	}
 }
 
@@ -132,6 +134,8 @@ func (f *Channel) OnCardAction(handler func(im.CardActionEvent)) {
 // Send dispatches a text message by kind to the appropriate stream.
 func (f *Channel) Send(chatID, text string, kind im.TextKind) error {
 	switch kind {
+	case im.TextThought:
+		return f.sendThought(chatID, text)
 	case im.TextDebug:
 		return f.sendDebug(chatID, text)
 	case im.TextSystem:
@@ -207,6 +211,70 @@ func (f *Channel) sendText(chatID, text string) error {
 	return nil
 }
 
+func (f *Channel) sendThought(chatID, text string) error {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" || text == "" {
+		return nil
+	}
+	f.resetCompactToolStream(chatID)
+	f.textMu.Lock()
+	defer f.textMu.Unlock()
+
+	ts := f.thoughtStreams[chatID]
+	if ts == nil {
+		ts = &textStream{}
+		f.thoughtStreams[chatID] = ts
+	}
+	ts.content.WriteString(text)
+	content := ts.content.String()
+	if content == "" {
+		return nil
+	}
+
+	card := buildThoughtStreamCard(content, false)
+	raw, err := json.Marshal(card)
+	if err != nil {
+		return fmt.Errorf("feishu: marshal thought stream card: %w", err)
+	}
+	bot, err := f.ensureBot()
+	if err != nil {
+		return err
+	}
+	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
+	messageID := strings.TrimSpace(ts.messageID)
+	if messageID == "" {
+		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+		if postErr != nil {
+			return postErr
+		}
+		if resp != nil {
+			if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
+				ts.messageID = mid
+				f.setLastOutbound(chatID, mid)
+			}
+		}
+		f.clearReceiveAck(chatID)
+		return nil
+	}
+	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
+		f.setLastOutbound(chatID, messageID)
+		f.clearReceiveAck(chatID)
+		return nil
+	}
+	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+	if postErr != nil {
+		return postErr
+	}
+	if resp != nil {
+		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
+			ts.messageID = mid
+			f.setLastOutbound(chatID, mid)
+		}
+	}
+	f.clearReceiveAck(chatID)
+	return nil
+}
+
 func (f *Channel) sendSystem(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	text = strings.TrimSpace(text)
@@ -247,6 +315,16 @@ func (f *Channel) resetTextStream(chatID string) {
 	}
 	f.textMu.Lock()
 	delete(f.textStreams, chatID)
+	f.textMu.Unlock()
+}
+
+func (f *Channel) resetThoughtStream(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.textMu.Lock()
+	delete(f.thoughtStreams, chatID)
 	f.textMu.Unlock()
 }
 
@@ -639,11 +717,27 @@ func buildDebugCard(lines []string) im.RawCard {
 func buildTextStreamCard(content string, streaming bool) im.RawCard {
 	_ = streaming
 	elements := []map[string]any{
-		{"tag": "markdown", "content": content},
+		{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
 	}
 	return im.RawCard{
 		"config":   map[string]any{"update_multi": true},
 		"elements": elements,
+	}
+}
+
+func buildThoughtStreamCard(content string, streaming bool) im.RawCard {
+	_ = streaming
+	return im.RawCard{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "🧠 Thinking",
+			},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
+		},
 	}
 }
 
@@ -657,9 +751,49 @@ func buildSystemStreamCard(content string) im.RawCard {
 			},
 		},
 		"elements": []map[string]any{
-			{"tag": "markdown", "content": content},
+			{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
 		},
 	}
+}
+
+func normalizeStreamMarkdown(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines)+4)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if i > 0 && trimmed != "" && startsMarkdownSection(trimmed) {
+			prev := ""
+			if len(out) > 0 {
+				prev = strings.TrimSpace(out[len(out)-1])
+			}
+			if prev != "" {
+				out = append(out, "")
+			}
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+func startsMarkdownSection(line string) bool {
+	if strings.HasPrefix(line, "#") || strings.HasPrefix(line, ">") {
+		return true
+	}
+	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+		return true
+	}
+	if len(line) >= 3 && line[0] >= '0' && line[0] <= '9' {
+		for i := 1; i < len(line); i++ {
+			if line[i] == '.' || line[i] == ')' {
+				return i+1 < len(line) && line[i+1] == ' '
+			}
+			if line[i] < '0' || line[i] > '9' {
+				return false
+			}
+		}
+	}
+	return false
 }
 
 // SendToolCall renders one streaming card per toolCallId and updates it in place.
@@ -681,6 +815,7 @@ func (f *Channel) sendToolCall(chatID string, tc im.ToolCallCard) error {
 	// Tool updates interrupt the current assistant text stream card.
 	f.textMu.Lock()
 	delete(f.textStreams, chatID)
+	delete(f.thoughtStreams, chatID)
 	f.textMu.Unlock()
 
 	f.toolMu.Lock()
@@ -1350,6 +1485,7 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 		// Start a new debug stream card for each new user message in the chat.
 		f.resetDebugStream(*msg.ChatId)
 		f.resetTextStream(*msg.ChatId)
+		f.resetThoughtStream(*msg.ChatId)
 		f.resetSystemStream(*msg.ChatId)
 		f.addReceiveAck(*msg.ChatId, *msg.MessageId)
 		h(im.Message{

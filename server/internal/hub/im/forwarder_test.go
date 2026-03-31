@@ -13,6 +13,7 @@ type stubAdapter struct {
 	onAction             func(CardActionEvent)
 	lastChatID           string
 	lastText             string
+	lastKind             TextKind
 	lastCard             Card
 	lastUpdatedMessageID string
 	textCount            int
@@ -38,9 +39,10 @@ func (s *toolCardStub) SendCard(chatID, messageID string, card Card) error {
 }
 
 func (s *stubAdapter) OnMessage(h MessageHandler) { s.onMsg = h }
-func (s *stubAdapter) Send(chatID, text string, _ TextKind) error {
+func (s *stubAdapter) Send(chatID, text string, kind TextKind) error {
 	s.lastChatID = chatID
 	s.lastText = text
+	s.lastKind = kind
 	s.textCount++
 	return nil
 }
@@ -220,6 +222,26 @@ func TestForwarder_EmitThought_PreservesWhitespaceAcrossChunks(t *testing.T) {
 	}
 	if ad.lastText != "hello world" {
 		t.Fatalf("thought text %q, want %q", ad.lastText, "hello world")
+	}
+	if ad.lastKind != TextThought {
+		t.Fatalf("thought kind %v, want %v", ad.lastKind, TextThought)
+	}
+}
+
+func TestForwarder_EmitText_DeduplicatesImmediateRepeatChunk(t *testing.T) {
+	ad := &stubAdapter{}
+	f := New(ad)
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "text", Text: "Revalidating Go suite"}); err != nil {
+		t.Fatalf("emit text #1: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "text", Text: "Revalidating Go suite"}); err != nil {
+		t.Fatalf("emit text #2: %v", err)
+	}
+	if err := f.Emit(context.Background(), IMUpdate{ChatID: "chat-1", UpdateType: "done"}); err != nil {
+		t.Fatalf("emit done: %v", err)
+	}
+	if ad.lastText != "Revalidating Go suite" {
+		t.Fatalf("deduped text %q", ad.lastText)
 	}
 }
 

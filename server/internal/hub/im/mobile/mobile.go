@@ -69,6 +69,8 @@ func (m *Channel) SendText(chatID, text string) error {
 
 func (m *Channel) Send(chatID, text string, kind im.TextKind) error {
 	switch kind {
+	case im.TextThought:
+		return m.send(chatID, outboundMsg{Type: "thought", ChatID: chatID, Text: text})
 	case im.TextDebug:
 		return m.send(chatID, outboundMsg{Type: "debug", ChatID: chatID, Text: text})
 	case im.TextSystem:

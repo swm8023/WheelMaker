@@ -18,31 +18,39 @@ type ImAdapter struct {
 	adapter Channel
 	handler MessageHandler
 
-	mu           sync.Mutex
-	activeChatID string                      // most recent chat that sent a message
-	textBuf      map[string]*strings.Builder // chatID -> buffered text chunks
-	textFlush    map[string]*time.Timer      // chatID -> delayed text flush timer
-	toolCalls    map[string]map[string]string
-	toolFlush    map[string]map[string]*toolFlushState
-	decisions    map[string]pendingDecision // chatID -> pending (text fallback)
-	decisionByID map[string]pendingDecision // decisionID -> pending (card action)
-	closedDecide map[string]time.Time       // decisionID -> recently closed timestamp
-	helpResolver func(ctx context.Context, chatID string) (HelpModel, error)
-	nextID       atomic.Int64
-	debugWriter  io.Writer
+	mu            sync.Mutex
+	activeChatID  string                      // most recent chat that sent a message
+	textBuf       map[string]*strings.Builder // chatID -> buffered text chunks
+	textFlush     map[string]*time.Timer      // chatID -> delayed text flush timer
+	thoughtBuf    map[string]*strings.Builder // chatID -> buffered thought chunks
+	thoughtFlush  map[string]*time.Timer      // chatID -> delayed thought flush timer
+	lastTextPart  map[string]string           // chatID -> last accepted text chunk
+	lastThinkPart map[string]string           // chatID -> last accepted thought chunk
+	toolCalls     map[string]map[string]string
+	toolFlush     map[string]map[string]*toolFlushState
+	decisions     map[string]pendingDecision // chatID -> pending (text fallback)
+	decisionByID  map[string]pendingDecision // decisionID -> pending (card action)
+	closedDecide  map[string]time.Time       // decisionID -> recently closed timestamp
+	helpResolver  func(ctx context.Context, chatID string) (HelpModel, error)
+	nextID        atomic.Int64
+	debugWriter   io.Writer
 }
 
 // New creates a pass-through bridge over adapter.
 func New(adapter Channel) *ImAdapter {
 	f := &ImAdapter{
-		adapter:      adapter,
-		textBuf:      map[string]*strings.Builder{},
-		textFlush:    map[string]*time.Timer{},
-		toolCalls:    map[string]map[string]string{},
-		toolFlush:    map[string]map[string]*toolFlushState{},
-		decisions:    map[string]pendingDecision{},
-		decisionByID: map[string]pendingDecision{},
-		closedDecide: map[string]time.Time{},
+		adapter:       adapter,
+		textBuf:       map[string]*strings.Builder{},
+		textFlush:     map[string]*time.Timer{},
+		thoughtBuf:    map[string]*strings.Builder{},
+		thoughtFlush:  map[string]*time.Timer{},
+		lastTextPart:  map[string]string{},
+		lastThinkPart: map[string]string{},
+		toolCalls:     map[string]map[string]string{},
+		toolFlush:     map[string]map[string]*toolFlushState{},
+		decisions:     map[string]pendingDecision{},
+		decisionByID:  map[string]pendingDecision{},
+		closedDecide:  map[string]time.Time{},
 	}
 	adapter.OnCardAction(f.handleCardAction)
 	return f
@@ -91,6 +99,12 @@ func (f *ImAdapter) SendReaction(messageID, emoji string) error {
 func (f *ImAdapter) SendDebug(chatID, text string) error {
 	err := f.adapter.Send(chatID, text, TextDebug)
 	f.logOutgoingSend(chatID, text, TextDebug, err)
+	return err
+}
+
+func (f *ImAdapter) SendThought(chatID, text string) error {
+	err := f.adapter.Send(chatID, text, TextThought)
+	f.logOutgoingSend(chatID, text, TextThought, err)
 	return err
 }
 
@@ -180,6 +194,9 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		if err := f.flushPendingToolCalls(chatID); err != nil {
 			return err
 		}
+		if err := f.flushThoughtNow(chatID); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
@@ -189,6 +206,9 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		return f.adapter.MarkDone(chatID)
 	case IMUpdateError:
 		if err := f.flushPendingToolCalls(chatID); err != nil {
+			return err
+		}
+		if err := f.flushThoughtNow(chatID); err != nil {
 			return err
 		}
 		if err := f.flushTextNow(chatID); err != nil {
@@ -204,14 +224,20 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 		return f.SendText(chatID, msg)
 	case IMUpdateThought:
 		if strings.TrimSpace(u.Text) != "" {
-			f.enqueueTextChunk(chatID, u.Text)
+			f.enqueueThoughtChunk(chatID, u.Text)
 		}
 	case IMUpdateToolCall:
+		if err := f.flushThoughtNow(chatID); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
 		return f.emitToolCall(chatID, u.Raw)
 	case IMUpdatePlan:
+		if err := f.flushThoughtNow(chatID); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
@@ -219,6 +245,9 @@ func (f *ImAdapter) Emit(_ context.Context, u IMUpdate) error {
 			return f.SendText(chatID, msg)
 		}
 	case IMUpdateConfigOption:
+		if err := f.flushThoughtNow(chatID); err != nil {
+			return err
+		}
 		if err := f.flushTextNow(chatID); err != nil {
 			return err
 		}
@@ -233,20 +262,39 @@ var textFlushDelay = 700 * time.Millisecond
 var toolCallFlushDelay = 700 * time.Millisecond
 
 func (f *ImAdapter) enqueueTextChunk(chatID, chunk string) {
+	f.enqueueChunk(chatID, chunk, f.textBuf, f.textFlush, f.lastTextPart, f.flushTextNow)
+}
+
+func (f *ImAdapter) enqueueThoughtChunk(chatID, chunk string) {
+	f.enqueueChunk(chatID, chunk, f.thoughtBuf, f.thoughtFlush, f.lastThinkPart, f.flushThoughtNow)
+}
+
+func (f *ImAdapter) enqueueChunk(
+	chatID, chunk string,
+	buffers map[string]*strings.Builder,
+	timers map[string]*time.Timer,
+	lastParts map[string]string,
+	flush func(string) error,
+) {
 	if chunk == "" {
 		return
 	}
 	f.mu.Lock()
-	buf := f.textBuf[chatID]
+	if shouldSkipDuplicateChunk(lastParts[chatID], chunk) {
+		f.mu.Unlock()
+		return
+	}
+	buf := buffers[chatID]
 	if buf == nil {
 		buf = &strings.Builder{}
-		f.textBuf[chatID] = buf
+		buffers[chatID] = buf
 	}
 	buf.WriteString(chunk)
-	timer := f.textFlush[chatID]
+	lastParts[chatID] = chunk
+	timer := timers[chatID]
 	if timer == nil {
-		f.textFlush[chatID] = time.AfterFunc(textFlushDelay, func() {
-			_ = f.flushTextNow(chatID)
+		timers[chatID] = time.AfterFunc(textFlushDelay, func() {
+			_ = flush(chatID)
 		})
 	} else {
 		timer.Reset(textFlushDelay)
@@ -255,7 +303,7 @@ func (f *ImAdapter) enqueueTextChunk(chatID, chunk string) {
 	f.mu.Unlock()
 
 	if flushNow {
-		_ = f.flushTextNow(chatID)
+		_ = flush(chatID)
 	}
 }
 
@@ -273,6 +321,31 @@ func (f *ImAdapter) flushTextNow(chatID string) error {
 		return nil
 	}
 	return f.SendText(chatID, buf.String())
+}
+
+func (f *ImAdapter) flushThoughtNow(chatID string) error {
+	f.mu.Lock()
+	buf := f.thoughtBuf[chatID]
+	delete(f.thoughtBuf, chatID)
+	if timer := f.thoughtFlush[chatID]; timer != nil {
+		timer.Stop()
+		delete(f.thoughtFlush, chatID)
+	}
+	delete(f.lastThinkPart, chatID)
+	f.mu.Unlock()
+
+	if buf == nil || buf.Len() == 0 {
+		return nil
+	}
+	return f.SendThought(chatID, buf.String())
+}
+
+func shouldSkipDuplicateChunk(previous, chunk string) bool {
+	if previous == "" || previous != chunk {
+		return false
+	}
+	trimmed := strings.TrimSpace(chunk)
+	return len(trimmed) >= 8
 }
 
 func (f *ImAdapter) emitToolCall(chatID string, raw []byte) error {

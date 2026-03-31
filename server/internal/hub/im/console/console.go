@@ -38,6 +38,8 @@ func (c *Channel) OnMessage(handler im.MessageHandler) {
 // Send prints a text message to stdout; kind is indicated by a prefix for debug/system.
 func (c *Channel) Send(_ string, text string, kind im.TextKind) error {
 	switch kind {
+	case im.TextThought:
+		fmt.Printf("[%s][thinking] %s\n", c.projectName, text)
 	case im.TextDebug:
 		fmt.Printf("[%s][debug] %s\n", c.projectName, strings.TrimSpace(text))
 	case im.TextSystem:

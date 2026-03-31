@@ -49,9 +49,10 @@ type MessageHandler func(Message)
 type TextKind uint8
 
 const (
-	TextNormal TextKind = iota // regular agent reply
-	TextDebug                  // debug channel (collapsible, smaller font, etc.)
-	TextSystem                 // system/lifecycle notice (visually distinct from agent text)
+	TextNormal  TextKind = iota // regular agent reply
+	TextThought                 // model thinking / reasoning stream
+	TextDebug                   // debug channel (collapsible, smaller font, etc.)
+	TextSystem                  // system/lifecycle notice (visually distinct from agent text)
 )
 
 // Channel abstracts an IM platform for sending and receiving messages.

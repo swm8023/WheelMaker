@@ -79,6 +79,22 @@ func TestBuildTextStreamCard_NoHeader(t *testing.T) {
 	}
 }
 
+func TestBuildThoughtStreamCard_HasHeader(t *testing.T) {
+	card := buildThoughtStreamCard("thinking", false)
+	header, ok := card["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("header missing in thought card: %+v", card)
+	}
+	titleMap, ok := header["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("header title missing in thought card: %+v", card)
+	}
+	title, _ := titleMap["content"].(string)
+	if !strings.Contains(title, "Thinking") {
+		t.Fatalf("thought title mismatch, got %q", title)
+	}
+}
+
 func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
 	card := buildSystemStreamCard("status ok")
 	header, ok := card["header"].(map[string]any)
@@ -116,6 +132,15 @@ func TestResetSystemStream(t *testing.T) {
 	}
 }
 
+func TestResetThoughtStream(t *testing.T) {
+	f := New(Config{})
+	f.thoughtStreams["chat-1"] = &textStream{messageID: "m1"}
+	f.resetThoughtStream("chat-1")
+	if _, ok := f.thoughtStreams["chat-1"]; ok {
+		t.Fatalf("thought stream should be removed")
+	}
+}
+
 func TestShouldHandleMessage_DeduplicatesByMessageID(t *testing.T) {
 	f := New(Config{})
 	if !f.shouldHandleMessage("m-1") {
@@ -142,6 +167,13 @@ func TestBuildTextStreamCard_NoStreamingMarker(t *testing.T) {
 	elements, ok := card["elements"].([]map[string]any)
 	if !ok || len(elements) != 1 {
 		t.Fatalf("elements mismatch in streaming card: %+v", card)
+	}
+}
+
+func TestNormalizeStreamMarkdown_InsertsBlankLineBeforeHeader(t *testing.T) {
+	content := normalizeStreamMarkdown("first line\n## Next")
+	if content != "first line\n\n## Next" {
+		t.Fatalf("normalized content=%q", content)
 	}
 }
 
