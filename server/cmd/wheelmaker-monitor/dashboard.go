@@ -434,6 +434,7 @@ body {
         <div class="ops-section">
           <div class="ops-section-title">Hub</div>
           <div id="hub-info"></div>
+          <div id="hub-projects" style="margin-top:8px;"></div>
         </div>
         <div class="ops-section">
           <div class="ops-section-title">Service Control</div>
@@ -441,6 +442,7 @@ body {
             <button class="btn btn-green" onclick="doAction('start')">Start</button>
             <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
             <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
+            <button class="btn" onclick="doAction('restart-monitor')">Restart Monitor</button>
           </div>
           <div id="action-msg" class="action-msg"></div>
         </div>
@@ -456,12 +458,6 @@ body {
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- Projects -->
-  <div class="card card-full">
-    <div class="card-title">Projects (Config)</div>
-    <div id="project-list"></div>
   </div>
 
   <!-- Log Viewer -->
@@ -581,24 +577,37 @@ function renderState(state) {
 function renderRegistry(cfg) {
   const regEl = $('registry-info');
   const hubEl = $('hub-info');
+  const hubProjectsEl = $('hub-projects');
   if (!cfg || !cfg.registry) {
     regEl.innerHTML = '<div class="empty-state">No registry configured</div>';
     hubEl.innerHTML = '<div class="empty-state">No hub info</div>';
+    hubProjectsEl.innerHTML = '';
     return;
   }
   const r = cfg.registry;
   const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
   let hubHtml = '<div class="registry-info">';
   hubHtml += row('Hub ID', r.hubId || '-');
-  hubHtml += row('Projects', String(projects.length));
-  hubHtml += row('Listen', r.listen ? 'true' : 'false');
   hubHtml += '</div>';
   hubEl.innerHTML = hubHtml;
+  if (projects.length === 0) {
+    hubProjectsEl.innerHTML = '<div class="empty-state">No projects configured</div>';
+  } else {
+    let html = '';
+    for (const p of projects) {
+      html += '<div class="project-item">';
+      html += '<div class="project-name">' + esc(p.name) + '</div>';
+      html += '<div class="project-meta">';
+      html += '<span><span class="badge badge-blue">' + esc(p.client?.agent || 'none') + '</span></span>';
+      html += '<span><span class="badge badge-yellow">' + esc(p.im?.type || 'none') + '</span></span>';
+      html += '</div></div>';
+    }
+    hubProjectsEl.innerHTML = html;
+  }
 
   let regHtml = '<div class="registry-info">';
   regHtml += row('Mode', r.listen ? 'Local Server' : 'Remote Connect');
-  regHtml += row('Server', r.server || '127.0.0.1');
-  regHtml += row('Port', String(r.port || 9630));
+  regHtml += row('Endpoint', (r.server || '127.0.0.1') + ':' + String(r.port || 9630));
   regHtml += '</div>';
   regEl.innerHTML = regHtml;
 }
@@ -649,27 +658,6 @@ async function loadRegistryStatus() {
 
 function row(label, value) {
   return '<div class="reg-row"><span class="reg-label">' + esc(label) + '</span><span class="reg-value">' + esc(value) + '</span></div>';
-}
-
-function renderProjects(cfg) {
-  const el = $('project-list');
-  if (!cfg || !cfg.projects || cfg.projects.length === 0) {
-    el.innerHTML = '<div class="empty-state">No projects configured</div>';
-    return;
-  }
-  let html = '';
-  for (const p of cfg.projects) {
-    html += '<div class="project-item">';
-    html += '<div class="project-name">' + esc(p.name) + '</div>';
-    html += '<div class="project-meta">';
-    html += '<span><span class="badge badge-blue">' + esc(p.client?.agent || 'none') + '</span></span>';
-    html += '<span><span class="badge badge-yellow">' + esc(p.im?.type || 'none') + '</span></span>';
-    html += '<span>' + esc(p.path || '-') + '</span>';
-    if (p.yolo) html += '<span><span class="badge badge-red">YOLO</span></span>';
-    if (p.debug) html += '<span><span class="badge badge-green">DEBUG</span></span>';
-    html += '</div></div>';
-  }
-  el.innerHTML = html;
 }
 
 async function loadLogs() {
@@ -730,7 +718,7 @@ function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Initial load + render projects from overview
+// Initial load
 (async function init() {
   try {
     const ov = await api('overview');
@@ -738,7 +726,6 @@ function esc(s) {
     renderConfig(ov.config);
     renderState(ov.state);
     renderRegistry(ov.config);
-    renderProjects(ov.config);
   } catch(e) {
     $('hdr-dot').className = 'status-dot offline';
     $('hdr-label').textContent = 'error';

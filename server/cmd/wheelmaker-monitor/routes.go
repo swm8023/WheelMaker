@@ -15,6 +15,7 @@ func registerRoutes(mux *http.ServeMux, mon *Monitor) {
 	mux.HandleFunc("GET /api/logs", handleLogs(mon))
 	mux.HandleFunc("GET /api/registry", handleRegistry(mon))
 	mux.HandleFunc("POST /api/action/restart", handleAction(mon, "restart"))
+	mux.HandleFunc("POST /api/action/restart-monitor", handleAction(mon, "restart-monitor"))
 	mux.HandleFunc("POST /api/action/stop", handleAction(mon, "stop"))
 	mux.HandleFunc("POST /api/action/start", handleAction(mon, "start"))
 
@@ -99,6 +100,8 @@ func handleAction(mon *Monitor, action string) http.HandlerFunc {
 		switch action {
 		case "restart":
 			err = mon.RestartService()
+		case "restart-monitor":
+			err = mon.RestartMonitor()
 		case "stop":
 			err = mon.StopService()
 		case "start":

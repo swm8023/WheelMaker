@@ -331,6 +331,26 @@ func (m *Monitor) StartService() error {
 	return cmd.Start()
 }
 
+// RestartMonitor restarts the monitor process itself.
+func (m *Monitor) RestartMonitor() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve monitor executable: %w", err)
+	}
+	args := append([]string(nil), os.Args[1:]...)
+	cmd := exec.Command(exePath, args...)
+	cmd.Dir = filepath.Dir(exePath)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start new monitor process: %w", err)
+	}
+
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		os.Exit(0)
+	}()
+	return nil
+}
+
 // Overview returns a combined snapshot of status, config, and state.
 type Overview struct {
 	Service *ServiceStatus  `json:"service"`
