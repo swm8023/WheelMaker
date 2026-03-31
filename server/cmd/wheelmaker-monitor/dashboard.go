@@ -228,6 +228,41 @@ body {
   min-height: 16px;
 }
 
+/* Ops tabs */
+.control-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.control-tab {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.control-tab:hover {
+  color: var(--text);
+  border-color: var(--border-active);
+}
+
+.control-tab.active {
+  color: var(--text-bright);
+  background: var(--accent-dim);
+  border-color: rgba(59,130,246,0.45);
+}
+
+.control-pane { display: none; }
+.control-pane.active { display: block; }
+
 /* Project list */
 .project-item {
   padding: 8px 12px;
@@ -390,23 +425,29 @@ body {
 </div>
 
 <div class="main-grid">
-  <!-- Process Status -->
-  <div class="card">
-    <div class="card-title">Processes</div>
-    <div id="proc-list"></div>
-  </div>
-
-  <!-- Actions -->
-  <div class="card">
-    <div class="card-title">Service Control</div>
-    <div class="actions-row">
-      <button class="btn btn-green" onclick="doAction('start')">Start</button>
-      <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
-      <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
+  <!-- Operations -->
+  <div class="card card-full">
+    <div class="card-title">Operations</div>
+    <div class="control-tabs">
+      <button id="ops-tab-processes" class="control-tab active" onclick="switchOpsTab('processes')">Processes</button>
+      <button id="ops-tab-control" class="control-tab" onclick="switchOpsTab('control')">Service Control</button>
+      <button id="ops-tab-registry" class="control-tab" onclick="switchOpsTab('registry')">Registry Config</button>
     </div>
-    <div id="action-msg" class="action-msg"></div>
-    <div style="margin-top:12px">
-      <div class="card-title" style="margin-bottom:8px">Registry Config</div>
+
+    <div id="ops-pane-processes" class="control-pane active">
+      <div id="proc-list"></div>
+    </div>
+
+    <div id="ops-pane-control" class="control-pane">
+      <div class="actions-row">
+        <button class="btn btn-green" onclick="doAction('start')">Start</button>
+        <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
+        <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
+      </div>
+      <div id="action-msg" class="action-msg"></div>
+    </div>
+
+    <div id="ops-pane-registry" class="control-pane">
       <div id="registry-info"></div>
     </div>
   </div>
@@ -466,6 +507,16 @@ body {
 
 <script>
 const $ = id => document.getElementById(id);
+
+function switchOpsTab(tab) {
+  const tabs = ['processes', 'control', 'registry'];
+  for (const key of tabs) {
+    const tabBtn = $('ops-tab-' + key);
+    const pane = $('ops-pane-' + key);
+    if (tabBtn) tabBtn.classList.toggle('active', key === tab);
+    if (pane) pane.classList.toggle('active', key === tab);
+  }
+}
 
 async function api(path) {
   const p = window.location.pathname || '/';
