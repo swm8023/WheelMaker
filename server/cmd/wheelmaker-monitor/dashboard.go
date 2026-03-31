@@ -382,7 +382,8 @@ body {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 8px 10px;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 11px;
@@ -506,6 +507,7 @@ body {
 .viewer-panel.active {
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-height: 0;
 }
 
