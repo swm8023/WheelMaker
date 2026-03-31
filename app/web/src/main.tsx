@@ -923,6 +923,7 @@ function App() {
       }
       if (event.method === 'git.workspace.changed') {
         loadGit().catch(() => undefined);
+        scheduleRefresh();
         return;
       }
       if (event.method === 'project.changed') {
@@ -930,32 +931,8 @@ function App() {
         const changedDomains = Array.isArray(payload.changedDomains)
           ? payload.changedDomains.filter(item => typeof item === 'string')
           : [];
-        const changedPaths = Array.isArray(payload.changedPaths)
-          ? payload.changedPaths.filter(item => typeof item === 'string' && item.trim().length > 0)
-          : [];
-        if (
-          changedDomains.length > 0 &&
-          changedDomains.every(domain => domain === 'git' || domain === 'worktree')
-        ) {
+        if (changedDomains.includes('git') || changedDomains.includes('worktree')) {
           loadGit().catch(() => undefined);
-          return;
-        }
-        if (changedPaths.length > 0) {
-          const visibleTargets = [
-            ...(selectedFile ? [selectedFile] : []),
-            ...pinnedFiles,
-            ...expandedDirs,
-          ];
-          const intersectsVisible = visibleTargets.some(target =>
-            changedPaths.some(changedPath => {
-              const t = target.replace(/\\/g, '/');
-              const c = changedPath.replace(/\\/g, '/').replace(/\/+$/, '');
-              return t === c || t.startsWith(`${c}/`) || c.startsWith(`${t}/`);
-            }),
-          );
-          if (!intersectsVisible) {
-            return;
-          }
         }
       }
       if (
@@ -983,7 +960,15 @@ function App() {
       unsubscribeEvent();
       unsubscribeClose();
     };
-  }, [connected, projectId, expandedDirs, pinnedFiles, selectedFile]);
+  }, [connected, projectId]);
+
+  useEffect(() => {
+    if (!connected || tab !== 'git') return;
+    const timer = window.setInterval(() => {
+      loadGit().catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [connected, tab]);
 
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
