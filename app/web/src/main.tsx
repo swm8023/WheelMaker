@@ -33,6 +33,7 @@ import type {
   RegistryFsInfo,
   RegistryGitCommit,
   RegistryGitCommitFile,
+  RegistryGitWorkspaceChangedPayload,
   RegistryProject,
   RegistryProjectEventPayload,
 } from './types/registry';
@@ -409,6 +410,9 @@ function App() {
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const projectIdRef = useRef('');
+  const knownProjectRevRef = useRef('');
+  const knownGitRevRef = useRef('');
+  const knownWorktreeRevRef = useRef('');
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
 
@@ -533,6 +537,14 @@ function App() {
     () => projects.find(item => item.projectId === projectId) ?? null,
     [projectId, projects],
   );
+
+  useEffect(() => {
+    knownProjectRevRef.current = currentProject?.projectRev ?? '';
+    knownGitRevRef.current = currentProject?.git?.gitRev ?? '';
+    if (currentProject?.git?.worktreeRev) {
+      knownWorktreeRevRef.current = currentProject.git.worktreeRev;
+    }
+  }, [currentProject]);
 
   const currentCommitFiles = useMemo(
     () => commitFilesBySha[selectedCommit] ?? [],
@@ -755,6 +767,7 @@ function App() {
         unstaged: statusData.unstaged.length,
         untracked: statusData.untracked.length,
       });
+      knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
       setCommits(commitData);
       const firstCommit = commitData[0]?.sha ?? '';
       setSelectedCommit(prev => prev || firstCommit);
@@ -762,6 +775,21 @@ function App() {
       setGitError(err instanceof Error ? err.message : String(err));
     } finally {
       setGitLoading(false);
+    }
+  };
+
+  const refreshGitStatusOnly = async () => {
+    try {
+      const statusData = await service.getGitStatus();
+      setGitDirty(statusData.dirty);
+      setGitStatusSummary({
+        staged: statusData.staged.length,
+        unstaged: statusData.unstaged.length,
+        untracked: statusData.untracked.length,
+      });
+      knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
+    } catch {
+      // Keep existing UI state on transient status fetch failure.
     }
   };
 
@@ -922,8 +950,12 @@ function App() {
         return;
       }
       if (event.method === 'git.workspace.changed') {
-        loadGit().catch(() => undefined);
-        scheduleRefresh();
+        const payload = (event.payload ?? {}) as RegistryGitWorkspaceChangedPayload;
+        if (payload.gitRev) knownGitRevRef.current = payload.gitRev;
+        if (payload.worktreeRev && payload.worktreeRev === knownWorktreeRevRef.current) {
+          return;
+        }
+        refreshGitStatusOnly().catch(() => undefined);
         return;
       }
       if (event.method === 'project.changed') {
@@ -931,8 +963,17 @@ function App() {
         const changedDomains = Array.isArray(payload.changedDomains)
           ? payload.changedDomains.filter(item => typeof item === 'string')
           : [];
+        if (payload.projectRev) {
+          knownProjectRevRef.current = payload.projectRev;
+        }
+        if (payload.gitRev) {
+          knownGitRevRef.current = payload.gitRev;
+        }
         if (changedDomains.includes('git') || changedDomains.includes('worktree')) {
-          loadGit().catch(() => undefined);
+          refreshGitStatusOnly().catch(() => undefined);
+        }
+        if (changedDomains.length > 0 && !changedDomains.includes('project') && !changedDomains.includes('fs')) {
+          return;
         }
       }
       if (
@@ -961,14 +1002,6 @@ function App() {
       unsubscribeClose();
     };
   }, [connected, projectId]);
-
-  useEffect(() => {
-    if (!connected || tab !== 'git') return;
-    const timer = window.setInterval(() => {
-      loadGit().catch(() => undefined);
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [connected, tab]);
 
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
