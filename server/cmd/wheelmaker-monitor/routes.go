@@ -13,6 +13,7 @@ func registerRoutes(mux *http.ServeMux, mon *Monitor) {
 	mux.HandleFunc("GET /api/config", handleConfig(mon))
 	mux.HandleFunc("GET /api/state", handleState(mon))
 	mux.HandleFunc("GET /api/logs", handleLogs(mon))
+	mux.HandleFunc("GET /api/registry", handleRegistry(mon))
 	mux.HandleFunc("POST /api/action/restart", handleAction(mon, "restart"))
 	mux.HandleFunc("POST /api/action/stop", handleAction(mon, "stop"))
 	mux.HandleFunc("POST /api/action/start", handleAction(mon, "start"))
@@ -81,6 +82,13 @@ func handleLogs(mon *Monitor) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		writeJSON(w, data)
+	}
+}
+
+func handleRegistry(mon *Monitor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data := mon.GetRegistryStatus()
 		writeJSON(w, data)
 	}
 }

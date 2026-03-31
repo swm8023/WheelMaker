@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // Monitor holds the base directory and provides all monitoring operations.
@@ -322,4 +326,115 @@ func (m *Monitor) GetOverview() (*Overview, error) {
 		Config:  cfg,
 		State:   state,
 	}, nil
+}
+
+// ---------- registry status ----------
+
+// RegistryProject is one project reported by the registry.
+type RegistryProject struct {
+	ProjectID string                `json:"projectId"`
+	Name      string                `json:"name"`
+	Path      string                `json:"path"`
+	Online    bool                  `json:"online"`
+	Agent     string                `json:"agent"`
+	IMType    string                `json:"imType"`
+	Git       shared.ProjectGitState `json:"git"`
+}
+
+// RegistryStatus is the live state retrieved from the registry server.
+type RegistryStatus struct {
+	Connected bool              `json:"connected"`
+	Error     string            `json:"error,omitempty"`
+	Projects  []RegistryProject `json:"projects"`
+	Timestamp string            `json:"timestamp"`
+}
+
+// GetRegistryStatus connects to the registry via WebSocket and queries project.list.
+func (m *Monitor) GetRegistryStatus() *RegistryStatus {
+	ts := time.Now().UTC().Format(time.RFC3339)
+
+	cfgRaw, err := m.GetConfig()
+	if err != nil || string(cfgRaw) == "null" {
+		return &RegistryStatus{Timestamp: ts, Error: "config not available"}
+	}
+	var cfg shared.AppConfig
+	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "invalid config"}
+	}
+
+	server := cfg.Registry.Server
+	if server == "" {
+		server = "127.0.0.1"
+	}
+	port := cfg.Registry.Port
+	if port == 0 {
+		port = 9630
+	}
+
+	u := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", server, port), Path: "/ws"}
+	dialer := websocket.Dialer{HandshakeTimeout: 3 * time.Second}
+	conn, _, err := dialer.Dial(u.String(), nil)
+	if err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "registry unreachable: " + err.Error()}
+	}
+	defer conn.Close()
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	// connect.init
+	initReq := map[string]any{
+		"requestId": 1,
+		"type":      "request",
+		"method":    "connect.init",
+		"payload": shared.ConnectInitPayload{
+			ClientName:      "wheelmaker-monitor",
+			ClientVersion:   "0.1.0",
+			ProtocolVersion: shared.DefaultProtocolVersion,
+			Role:            "client",
+			Token:           cfg.Registry.Token,
+		},
+	}
+	if err := conn.WriteJSON(initReq); err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "ws write: " + err.Error()}
+	}
+	var initResp shared.Envelope
+	if err := conn.ReadJSON(&initResp); err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "ws read: " + err.Error()}
+	}
+	if initResp.Type == "error" {
+		var ep shared.ErrorPayload
+		json.Unmarshal(initResp.Payload, &ep)
+		return &RegistryStatus{Timestamp: ts, Error: "connect: " + ep.Message}
+	}
+
+	// project.list
+	listReq := map[string]any{
+		"requestId": 2,
+		"type":      "request",
+		"method":    "project.list",
+	}
+	if err := conn.WriteJSON(listReq); err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "ws write: " + err.Error()}
+	}
+	var listResp shared.Envelope
+	if err := conn.ReadJSON(&listResp); err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "ws read: " + err.Error()}
+	}
+	if listResp.Type == "error" {
+		var ep shared.ErrorPayload
+		json.Unmarshal(listResp.Payload, &ep)
+		return &RegistryStatus{Timestamp: ts, Error: "project.list: " + ep.Message}
+	}
+
+	var payload struct {
+		Projects []RegistryProject `json:"projects"`
+	}
+	if err := json.Unmarshal(listResp.Payload, &payload); err != nil {
+		return &RegistryStatus{Timestamp: ts, Error: "parse projects: " + err.Error()}
+	}
+
+	return &RegistryStatus{
+		Connected: true,
+		Projects:  payload.Projects,
+		Timestamp: ts,
+	}
 }

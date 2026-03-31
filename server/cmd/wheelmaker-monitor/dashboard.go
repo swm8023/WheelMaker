@@ -342,6 +342,18 @@ body {
 .reg-label { color: var(--text-dim); width: 100px; flex-shrink: 0; }
 .reg-value { color: var(--text); word-break: break-all; }
 
+/* Registry live table */
+.reg-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+.reg-table th { text-align: left; padding: 4px 8px; color: var(--text-dim); border-bottom: 1px solid var(--border); font-weight: 500; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+.reg-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text); }
+.reg-table tr:last-child td { border-bottom: none; }
+.reg-table tr:hover td { background: var(--bg-card-hover); }
+.online-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.online-dot.on { background: var(--green); box-shadow: 0 0 4px rgba(34,197,94,0.4); }
+.online-dot.off { background: var(--text-dim); }
+.git-branch { color: var(--accent); }
+.git-dirty { color: var(--yellow); font-weight: 600; }
+
 /* Empty state */
 .empty-state {
   color: var(--text-dim);
@@ -394,14 +406,20 @@ body {
     </div>
     <div id="action-msg" class="action-msg"></div>
     <div style="margin-top:12px">
-      <div class="card-title" style="margin-bottom:8px">Registry</div>
+      <div class="card-title" style="margin-bottom:8px">Registry Config</div>
       <div id="registry-info"></div>
     </div>
   </div>
 
+  <!-- Registry Live Status -->
+  <div class="card card-full">
+    <div class="card-title">Registry Status <span id="reg-status-dot" class="status-dot" style="display:inline-block;margin-left:8px;vertical-align:middle"></span> <span id="reg-status-label" style="font-size:11px;color:var(--text-dim);font-weight:400;margin-left:4px"></span></div>
+    <div id="registry-live"></div>
+  </div>
+
   <!-- Projects -->
   <div class="card card-full">
-    <div class="card-title">Projects</div>
+    <div class="card-title">Projects (Config)</div>
     <div id="project-list"></div>
   </div>
 
@@ -467,6 +485,7 @@ async function refresh() {
     $('hdr-label').className = 'status-label';
   }
   loadLogs();
+  loadRegistryStatus();
 }
 
 function renderStatus(svc) {
@@ -529,6 +548,50 @@ function renderRegistry(cfg) {
   html += row('Hub ID', r.hubId || '-');
   html += '</div>';
   el.innerHTML = html;
+}
+
+async function loadRegistryStatus() {
+  const el = $('registry-live');
+  const dot = $('reg-status-dot');
+  const label = $('reg-status-label');
+  try {
+    const data = await api('registry');
+    if (!data.connected) {
+      dot.className = 'status-dot offline';
+      label.textContent = data.error || 'disconnected';
+      el.innerHTML = '<div class="empty-state">' + esc(data.error || 'Registry not connected') + '</div>';
+      return;
+    }
+    const projects = data.projects || [];
+    const onlineCount = projects.filter(p => p.online).length;
+    dot.className = 'status-dot online';
+    label.textContent = onlineCount + '/' + projects.length + ' online';
+    if (projects.length === 0) {
+      el.innerHTML = '<div class="empty-state">No projects registered</div>';
+      return;
+    }
+    let html = '<table class="reg-table"><thead><tr>';
+    html += '<th>Status</th><th>Project</th><th>Agent</th><th>IM</th><th>Branch</th><th>Dirty</th>';
+    html += '</tr></thead><tbody>';
+    for (const p of projects) {
+      const dotCls = p.online ? 'on' : 'off';
+      const statusText = p.online ? 'online' : 'offline';
+      html += '<tr>';
+      html += '<td><span class="online-dot ' + dotCls + '"></span>' + statusText + '</td>';
+      html += '<td>' + esc(p.name || p.projectId) + '</td>';
+      html += '<td>' + (p.agent ? '<span class="badge badge-blue">' + esc(p.agent) + '</span>' : '-') + '</td>';
+      html += '<td>' + (p.imType ? '<span class="badge badge-yellow">' + esc(p.imType) + '</span>' : '-') + '</td>';
+      html += '<td>' + (p.git && p.git.branch ? '<span class="git-branch">' + esc(p.git.branch) + '</span>' : '-') + '</td>';
+      html += '<td>' + (p.git && p.git.dirty ? '<span class="git-dirty">*</span>' : '-') + '</td>';
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  } catch(e) {
+    dot.className = 'status-dot offline';
+    label.textContent = 'error';
+    el.innerHTML = '<div class="empty-state">Failed to load registry status</div>';
+  }
 }
 
 function row(label, value) {
@@ -626,6 +689,7 @@ function esc(s) {
     $('hdr-label').className = 'status-label';
   }
   loadLogs();
+  loadRegistryStatus();
 })();
 
 // Auto-refresh every 10s
@@ -638,6 +702,9 @@ setInterval(async () => {
 
 // Auto-refresh logs every 15s
 setInterval(loadLogs, 15000);
+
+// Auto-refresh registry status every 15s
+setInterval(loadRegistryStatus, 15000);
 </script>
 </body>
 </html>
