@@ -142,6 +142,42 @@ function detectCodeLanguage(path: string): string {
   }
 }
 
+function isLoopbackHost(host: string): boolean {
+  const v = host.trim().toLowerCase();
+  return v === '127.0.0.1' || v === 'localhost' || v === '::1' || v === '[::1]';
+}
+
+function isLoopbackAddress(address: string): boolean {
+  const input = address.trim();
+  if (!input) return false;
+  if (/^wss?:\/\//i.test(input)) {
+    try {
+      const url = new URL(input);
+      return isLoopbackHost(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+  if (/^https?:\/\//i.test(input)) {
+    try {
+      const url = new URL(input);
+      return isLoopbackHost(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+  const host = input.split('/')[0].split(':')[0];
+  return isLoopbackHost(host);
+}
+
+function resolveInitialRegistryAddress(savedAddress: string, defaultAddress: string): string {
+  const pageHost = window.location.hostname;
+  if (!isLoopbackHost(pageHost) && isLoopbackAddress(savedAddress)) {
+    return defaultAddress;
+  }
+  return savedAddress || defaultAddress;
+}
+
 type UnifiedDiffSides = {
   oldText: string;
   newText: string;
@@ -381,9 +417,11 @@ function PrismInlineCode({content, language, wrap}: {content: string; language: 
 }
 
 function App() {
-  const persistedGlobal = useMemo(() => workspaceStore.getGlobalState(getDefaultRegistryAddress()), []);
+  const defaultRegistryAddress = useMemo(() => getDefaultRegistryAddress(), []);
+  const persistedGlobal = useMemo(() => workspaceStore.getGlobalState(defaultRegistryAddress), [defaultRegistryAddress]);
+  const initialRegistryAddress = resolveInitialRegistryAddress(persistedGlobal.address || '', defaultRegistryAddress);
   const [connected, setConnected] = useState(false);
-  const [address, setAddress] = useState(persistedGlobal.address || getDefaultRegistryAddress());
+  const [address, setAddress] = useState(initialRegistryAddress);
   const [token, setToken] = useState(persistedGlobal.token || '');
   const [error, setError] = useState('');
   const [autoConnecting, setAutoConnecting] = useState(false);
