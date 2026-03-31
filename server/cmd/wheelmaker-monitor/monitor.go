@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -21,6 +22,13 @@ type Monitor struct {
 	baseDir string
 	mu      sync.RWMutex
 }
+
+const (
+	wheelmakerServiceName = "WheelMaker"
+	monitorServiceName    = "WheelMakerMonitor"
+)
+
+var errServiceNotInstalled = errors.New("service not installed")
 
 // NewMonitor creates a Monitor for the given WheelMaker home directory.
 func NewMonitor(baseDir string) *Monitor {
@@ -281,6 +289,15 @@ func parseLine(line string) LogEntry {
 
 // RestartService restarts the wheelmaker service using internal process control.
 func (m *Monitor) RestartService() error {
+	if runtime.GOOS == "windows" {
+		exists, err := windowsServiceExists(wheelmakerServiceName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return windowsServiceRestart(wheelmakerServiceName, 12*time.Second)
+		}
+	}
 	if err := m.StopService(); err != nil {
 		return err
 	}
@@ -304,6 +321,13 @@ func (m *Monitor) StopService() error {
 			_ = exec.Command("kill", "-KILL", fmt.Sprintf("%d", proc.PID)).Run()
 		}
 		return nil
+	}
+	exists, err := windowsServiceExists(wheelmakerServiceName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return windowsServiceStop(wheelmakerServiceName, 10*time.Second)
 	}
 
 	// Keep monitor alive: only stop wheelmaker.exe processes.
@@ -331,6 +355,15 @@ exit 1`
 
 // StartService starts the wheelmaker service using internal process control.
 func (m *Monitor) StartService() error {
+	if runtime.GOOS == "windows" {
+		exists, err := windowsServiceExists(wheelmakerServiceName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			return windowsServiceStart(wheelmakerServiceName, 10*time.Second)
+		}
+	}
 	wheelmakerExe, err := m.resolveWheelmakerExecutable()
 	if err != nil {
 		return err
@@ -345,6 +378,26 @@ func (m *Monitor) StartService() error {
 
 // RestartMonitor restarts the monitor process itself.
 func (m *Monitor) RestartMonitor() error {
+	if runtime.GOOS == "windows" {
+		exists, err := windowsServiceExists(monitorServiceName)
+		if err != nil {
+			return err
+		}
+		if exists {
+			// Run restart in a detached process so this HTTP handler can return before service stop.
+			script := fmt.Sprintf("Start-Sleep -Milliseconds 300; Restart-Service -Name '%s' -Force -ErrorAction Stop", monitorServiceName)
+			cmd := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("schedule monitor service restart: %w", err)
+			}
+			go func() {
+				time.Sleep(120 * time.Millisecond)
+				os.Exit(0)
+			}()
+			return nil
+		}
+	}
+
 	monitorExe, err := m.resolveMonitorExecutable()
 	if err != nil {
 		return err
@@ -422,6 +475,72 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+func windowsServiceExists(serviceName string) (bool, error) {
+	script := fmt.Sprintf("$svc = Get-Service -Name '%s' -ErrorAction SilentlyContinue; if ($null -eq $svc) { exit 3 }; exit 0", serviceName)
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			if ee.ExitCode() == 3 {
+				return false, nil
+			}
+		}
+		return false, fmt.Errorf("check service %s: %w", serviceName, err)
+	}
+	return true, nil
+}
+
+func windowsServiceStart(serviceName string, timeout time.Duration) error {
+	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$svc = Get-Service -Name '%s' -ErrorAction SilentlyContinue
+if ($null -eq $svc) { exit 3 }
+if ($svc.Status -ne 'Running') { Start-Service -Name '%s' -ErrorAction Stop }
+$deadline = (Get-Date).AddMilliseconds(%d)
+while ((Get-Date) -lt $deadline) {
+  $s = (Get-Service -Name '%s').Status
+  if ($s -eq 'Running') { exit 0 }
+  Start-Sleep -Milliseconds 200
+}
+Write-Error 'service start timeout'
+exit 1`, serviceName, serviceName, timeout.Milliseconds(), serviceName)
+	return runWindowsServiceScript(serviceName, script, "start")
+}
+
+func windowsServiceStop(serviceName string, timeout time.Duration) error {
+	script := fmt.Sprintf(`$ErrorActionPreference = 'Stop'
+$svc = Get-Service -Name '%s' -ErrorAction SilentlyContinue
+if ($null -eq $svc) { exit 3 }
+if ($svc.Status -ne 'Stopped') { Stop-Service -Name '%s' -Force -ErrorAction Stop }
+$deadline = (Get-Date).AddMilliseconds(%d)
+while ((Get-Date) -lt $deadline) {
+  $s = (Get-Service -Name '%s').Status
+  if ($s -eq 'Stopped') { exit 0 }
+  Start-Sleep -Milliseconds 200
+}
+Write-Error 'service stop timeout'
+exit 1`, serviceName, serviceName, timeout.Milliseconds(), serviceName)
+	return runWindowsServiceScript(serviceName, script, "stop")
+}
+
+func windowsServiceRestart(serviceName string, timeout time.Duration) error {
+	if err := windowsServiceStop(serviceName, timeout); err != nil {
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
+	return windowsServiceStart(serviceName, timeout)
+}
+
+func runWindowsServiceScript(serviceName string, script string, action string) error {
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 3 {
+			return errServiceNotInstalled
+		}
+		return fmt.Errorf("%s service %s failed: %v (%s)", action, serviceName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // Overview returns a combined snapshot of status, config, and state.
