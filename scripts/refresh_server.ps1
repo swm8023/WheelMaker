@@ -7,6 +7,8 @@ param(
   [switch]$SkipBuild,
   [switch]$SkipInstall,
   [switch]$SkipRestart,
+  [ValidateSet("on", "off")]
+  [string]$AutoUpdate = "on",
   [switch]$SkipUpdaterInstall,
   [switch]$SkipServiceConfig,
   [string]$UpdateTime = "03:00",
@@ -22,6 +24,7 @@ $script:WheelmakerService = "WheelMaker"
 $script:MonitorService = "WheelMakerMonitor"
 $script:UpdaterService = "WheelMakerUpdater"
 $script:ServicePasswordPlain = ""
+$script:EnableAutoUpdate = $true
 
 function Write-Step {
   param([string]$Text)
@@ -275,8 +278,17 @@ function Configure-Services {
   Write-Step "ensure windows services"
   Ensure-Service -Name $script:WheelmakerService -BinaryPath $script:InstalledBinary
   Ensure-Service -Name $script:MonitorService -BinaryPath $script:MonitorInstalledBinary
-  if (-not $SkipUpdaterInstall) {
+  if ($script:EnableAutoUpdate) {
     Ensure-Service -Name $script:UpdaterService -BinaryPath $script:UpdaterInstalledBinary -Arguments ("--repo `"{0}`" --install-dir `"{1}`" --time {2}" -f $script:RepoRoot, $script:InstallDirResolved, $UpdateTime)
+  } else {
+    if (Test-ServiceExists -Name $script:UpdaterService) {
+      Stop-ServiceSafe -Name $script:UpdaterService
+      if ($WhatIf) {
+        Write-Host ("[whatif] sc.exe delete {0}" -f $script:UpdaterService)
+      } else {
+        Invoke-Checked -FilePath "sc.exe" -Arguments @("delete", $script:UpdaterService) -FailureMessage ("service delete failed: {0}" -f $script:UpdaterService)
+      }
+    }
   }
 }
 
@@ -295,7 +307,7 @@ function Restart-Services {
   if ($SkipRestart) { Write-Step "skip restart"; return }
   Start-ServiceSafe -Name $script:WheelmakerService
   Start-ServiceSafe -Name $script:MonitorService
-  if (-not $SkipUpdaterInstall) {
+  if ($script:EnableAutoUpdate) {
     try {
       Start-ServiceSafe -Name $script:UpdaterService
     } catch {
@@ -317,6 +329,7 @@ $script:MonitorOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wh
 $script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-monitor.exe"
 $script:UpdaterOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-updater.exe"
 $script:UpdaterInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-updater.exe"
+$script:EnableAutoUpdate = ($AutoUpdate -ne "off") -and (-not $SkipUpdaterInstall)
 
 if (-not (Test-Path $script:ServerRoot)) { throw ("server directory not found: {0}" -f $script:ServerRoot) }
 
@@ -325,15 +338,18 @@ Pull-Latest
 Ensure-AcpDependencies
 Build-Binary -Out $script:OutputBinary -Pkg "./cmd/wheelmaker/" -Label "wheelmaker"
 Build-Binary -Out $script:MonitorOutputBinary -Pkg "./cmd/wheelmaker-monitor/" -Label "wheelmaker-monitor"
-if (-not $SkipUpdaterInstall) { Build-Binary -Out $script:UpdaterOutputBinary -Pkg "./cmd/wheelmaker-updater/" -Label "wheelmaker-updater" }
-else { Write-Step "skip updater build/install" }
+if ($script:EnableAutoUpdate) {
+  Build-Binary -Out $script:UpdaterOutputBinary -Pkg "./cmd/wheelmaker-updater/" -Label "wheelmaker-updater"
+} else {
+  Write-Step "auto update disabled; skip updater build/install"
+}
 
 $configWasCreated = $false
 if (-not $SkipInstall) {
   Backup-Logs
   Install-Binary -Source $script:SourceBinary -Dest $script:InstalledBinary -StopServiceName $script:WheelmakerService
   Install-Binary -Source $script:MonitorOutputBinary -Dest $script:MonitorInstalledBinary -StopServiceName $script:MonitorService
-  if (-not $SkipUpdaterInstall) { Install-Binary -Source $script:UpdaterOutputBinary -Dest $script:UpdaterInstalledBinary -StopServiceName $script:UpdaterService }
+  if ($script:EnableAutoUpdate) { Install-Binary -Source $script:UpdaterOutputBinary -Dest $script:UpdaterInstalledBinary -StopServiceName $script:UpdaterService }
   $configWasCreated = Ensure-Config
   Install-ServiceScripts
   Configure-Services

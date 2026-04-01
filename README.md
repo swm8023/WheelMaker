@@ -65,12 +65,12 @@ notepad ~/.wheelmaker/config.json
 ~/.wheelmaker/restart.bat   # restart services
 ```
 
-Updater service management:
+Auto update switch is integrated into `refresh_server.ps1`:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto_update.ps1 -Setup -Time 03:00
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto_update.ps1 -Once
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/auto_update.ps1 -Uninstall
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1 -AutoUpdate on  -UpdateTime 03:00
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1 -AutoUpdate off
+~/.wheelmaker/bin/wheelmaker-updater.exe --repo D:\Code\WheelMaker --install-dir ~/.wheelmaker/bin --time 03:00 --once
 ```
 
 ## Chat Commands
@@ -108,7 +108,6 @@ go test ./...              # run tests
 Scripts overview:
 - `scripts\refresh_server.ps1` — service-first deploy (build + install + service registration)
 - `scripts\delay_restart_server.ps1` — delayed refresh + service restarts
-- `scripts\auto_update.ps1` — updater service manager (`-Setup` / `-Once` / `-Uninstall`)
 
 ## License
 
