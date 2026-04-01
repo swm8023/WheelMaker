@@ -13,11 +13,13 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub"
 	"github.com/swm8023/wheelmaker/internal/registry"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
+	"github.com/swm8023/wheelmaker/internal/shared/winsvc"
 )
 
 const daemonWorkerArg = "--daemon-worker"
 const hubWorkerArg = "--hub-worker"
 const registryWorkerArg = "--registry-worker"
+const wheelmakerWindowsServiceName = "WheelMaker"
 
 func main() {
 	if err := run(); err != nil {
@@ -154,4 +156,15 @@ func runRegistryWorker() error {
 		Token: cfg.Registry.Token,
 	})
 	return s.Run(ctx)
+}
+
+func runAsWindowsServiceIfNeeded(workerArgs []string) (bool, error) {
+	sanitizedArgs := sanitizeWorkerArgs(workerArgs)
+	return winsvc.RunIfWindowsService(
+		wheelmakerWindowsServiceName,
+		func(ctx context.Context) error {
+			return runGuardianWithContext(ctx, sanitizedArgs)
+		},
+		nil,
+	)
 }

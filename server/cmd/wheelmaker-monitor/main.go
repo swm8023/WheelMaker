@@ -15,6 +15,7 @@ import (
 	"time"
 
 	shared "github.com/swm8023/wheelmaker/internal/shared"
+	"github.com/swm8023/wheelmaker/internal/shared/winsvc"
 )
 
 const defaultMonitorPort = 9631
@@ -97,4 +98,14 @@ func runHTTPServer(ctx context.Context, addr string, handler http.Handler) error
 	case err := <-errCh:
 		return err
 	}
+}
+
+func runAsWindowsServiceIfNeeded(addr string, handler http.Handler) (bool, error) {
+	return winsvc.RunIfWindowsService(
+		monitorServiceName,
+		func(ctx context.Context) error {
+			return runHTTPServer(ctx, addr, handler)
+		},
+		func(err error) bool { return err == http.ErrServerClosed },
+	)
 }

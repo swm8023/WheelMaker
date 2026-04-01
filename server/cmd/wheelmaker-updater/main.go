@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	shared "github.com/swm8023/wheelmaker/internal/shared"
+	"github.com/swm8023/wheelmaker/internal/shared/winsvc"
 )
 
 const updaterServiceName = "WheelMakerUpdater"
@@ -73,5 +74,19 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	return RunUpdater(ctx, cfg)
+}
+
+func runAsWindowsServiceIfNeeded(cfg UpdaterConfig) (bool, error) {
+	return winsvc.RunIfWindowsService(
+		updaterServiceName,
+		func(ctx context.Context) error {
+			return runUpdaterService(ctx, cfg)
+		},
+		nil,
+	)
+}
+
+func runUpdaterService(ctx context.Context, cfg UpdaterConfig) error {
 	return RunUpdater(ctx, cfg)
 }
