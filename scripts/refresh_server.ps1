@@ -11,11 +11,7 @@ param(
   [switch]$SkipBuild,
   [switch]$SkipInstall,
   [switch]$SkipRestart,
-  [ValidateSet("on", "off")]
-  [string]$AutoUpdate = "on",
-  [switch]$SkipUpdaterInstall,
   [switch]$SkipServiceConfig,
-  [string]$UpdateTime = "03:00",
   [string]$ServiceUser = ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME),
   [string]$ServicePassword = "",
   [switch]$WhatIf
@@ -26,9 +22,7 @@ $ErrorActionPreference = "Stop"
 
 $script:WheelmakerService = "WheelMaker"
 $script:MonitorService = "WheelMakerMonitor"
-$script:UpdaterService = "WheelMakerUpdater"
 $script:ServicePasswordPlain = ""
-$script:EnableAutoUpdate = $true
 
 function Write-Step {
   param([string]$Text)
@@ -152,21 +146,19 @@ function Ensure-Config {
 
 function Install-ServiceScripts {
   Write-Step "install service helper scripts"
-  $scriptFile = Join-Path $script:WheelmakerHome "refresh_server.ps1"
-  $common = " -RepoRoot `"$($script:RepoRoot)`" -InstallDir `"$($script:InstallDirResolved)`" -AutoUpdate $AutoUpdate"
-  $startBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0refresh_server.ps1`" -SkipUpdate -SkipBuild -SkipStop -SkipDeploy$common`r`n"
-  $stopBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0refresh_server.ps1`" -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart$common`r`n"
-  $restartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0refresh_server.ps1`" -SkipUpdate -SkipBuild -SkipDeploy$common`r`n"
-  $updateRestartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0refresh_server.ps1`"$common`r`n"
+  $refreshScript = Join-Path $script:RepoRoot "scripts\refresh_server.ps1"
+  $common = " -RepoRoot `"$($script:RepoRoot)`" -InstallDir `"$($script:InstallDirResolved)`""
+  $startBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`" -SkipUpdate -SkipBuild -SkipStop -SkipDeploy$common`r`n"
+  $stopBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`" -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart$common`r`n"
+  $restartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`" -SkipUpdate -SkipBuild -SkipDeploy$common`r`n"
+  $updateRestartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`"$common`r`n"
 
   $scripts = @{ "start.bat" = $startBat; "stop.bat" = $stopBat; "restart.bat" = $restartBat; "update-restart.bat" = $updateRestartBat }
   if ($WhatIf) {
     foreach ($name in $scripts.Keys) { Write-Host ("[whatif] write {0}" -f (Join-Path $script:WheelmakerHome $name)) }
-    Write-Host ("[whatif] copy {0} -> {1}" -f $PSCommandPath, $scriptFile)
     return
   }
   New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
-  Copy-Item -Path $PSCommandPath -Destination $scriptFile -Force
   foreach ($name in $scripts.Keys) { Set-Content -Path (Join-Path $script:WheelmakerHome $name) -Value $scripts[$name] -Encoding UTF8 }
 }
 
@@ -287,18 +279,6 @@ function Configure-Services {
   Write-Step "ensure windows services"
   Ensure-Service -Name $script:WheelmakerService -BinaryPath $script:InstalledBinary
   Ensure-Service -Name $script:MonitorService -BinaryPath $script:MonitorInstalledBinary
-  if ($script:EnableAutoUpdate) {
-    Ensure-Service -Name $script:UpdaterService -BinaryPath $script:UpdaterInstalledBinary -Arguments ("--repo `"{0}`" --install-dir `"{1}`" --time {2}" -f $script:RepoRoot, $script:InstallDirResolved, $UpdateTime)
-  } else {
-    if (Test-ServiceExists -Name $script:UpdaterService) {
-      Stop-ServiceSafe -Name $script:UpdaterService
-      if ($WhatIf) {
-        Write-Host ("[whatif] sc.exe delete {0}" -f $script:UpdaterService)
-      } else {
-        Invoke-Checked -FilePath "sc.exe" -Arguments @("delete", $script:UpdaterService) -FailureMessage ("service delete failed: {0}" -f $script:UpdaterService)
-      }
-    }
-  }
 }
 
 function Install-Binary {
@@ -316,13 +296,6 @@ function Restart-Services {
   if ($SkipRestart) { Write-Step "skip restart"; return }
   Start-ServiceSafe -Name $script:WheelmakerService
   Start-ServiceSafe -Name $script:MonitorService
-  if ($script:EnableAutoUpdate) {
-    try {
-      Start-ServiceSafe -Name $script:UpdaterService
-    } catch {
-      Write-Warn ("updater service failed to start; continue without updater: {0}" -f $_.Exception.Message)
-    }
-  }
 }
 
 $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Resolve-Path $RepoRoot).Path }
@@ -336,9 +309,6 @@ $script:SourceBinary = Get-ResolvedPathOrDefault -Path $SourceExe -Default $scri
 $script:InstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker.exe"
 $script:MonitorOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-monitor.exe"
 $script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-monitor.exe"
-$script:UpdaterOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-updater.exe"
-$script:UpdaterInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-updater.exe"
-$script:EnableAutoUpdate = ($AutoUpdate -ne "off") -and (-not $SkipUpdaterInstall)
 
 if ($SkipUpdate) {
   $SkipGitPull = $true
@@ -355,23 +325,16 @@ Pull-Latest
 Ensure-AcpDependencies
 Build-Binary -Out $script:OutputBinary -Pkg "./cmd/wheelmaker/" -Label "wheelmaker"
 Build-Binary -Out $script:MonitorOutputBinary -Pkg "./cmd/wheelmaker-monitor/" -Label "wheelmaker-monitor"
-if ($script:EnableAutoUpdate) {
-  Build-Binary -Out $script:UpdaterOutputBinary -Pkg "./cmd/wheelmaker-updater/" -Label "wheelmaker-updater"
-} else {
-  Write-Step "auto update disabled; skip updater build/install"
-}
 
 $configWasCreated = $false
 if (-not $SkipStop) {
   Stop-ServiceSafe -Name $script:WheelmakerService
   Stop-ServiceSafe -Name $script:MonitorService
-  if ($script:EnableAutoUpdate) { Stop-ServiceSafe -Name $script:UpdaterService }
 }
 if (-not $SkipInstall) {
   Backup-Logs
   Install-Binary -Source $script:SourceBinary -Dest $script:InstalledBinary -StopServiceName $script:WheelmakerService
   Install-Binary -Source $script:MonitorOutputBinary -Dest $script:MonitorInstalledBinary -StopServiceName $script:MonitorService
-  if ($script:EnableAutoUpdate) { Install-Binary -Source $script:UpdaterOutputBinary -Dest $script:UpdaterInstalledBinary -StopServiceName $script:UpdaterService }
   $configWasCreated = Ensure-Config
   Install-ServiceScripts
   Configure-Services

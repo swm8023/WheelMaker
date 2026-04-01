@@ -24,7 +24,6 @@ Hub
 | `internal/registry/` | Registry server and hub reporter |
 | `internal/hub/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
 | `internal/shared/` | Shared config, logging, and registry protocol helpers |
-| `cmd/wheelmaker-updater/` | Daily auto-update Windows service |
 
 ## Config Files
 
@@ -47,16 +46,12 @@ go run ./cmd/wheelmaker/            # requires ~/.wheelmaker/config.json
 go test ./...
 go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/
 go build -o bin/windows_amd64/wheelmaker-monitor.exe ./cmd/wheelmaker-monitor/
-go build -o bin/windows_amd64/wheelmaker-updater.exe ./cmd/wheelmaker-updater/
 
 # Root-level helper scripts
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1                      # full deploy (services)
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1                 # delayed refresh + service restart
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -AutoUpdate on -UpdateTime 03:00      # enable updater service
-powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -AutoUpdate off                       # disable updater service
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy    # restart services only
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart # stop services only
-~/.wheelmaker/bin/wheelmaker-updater.exe --repo D:\Code\WheelMaker --install-dir ~/.wheelmaker/bin --time 03:00 --once # run updater one-shot
 ```
 
 ## Key Invariants (do not break)

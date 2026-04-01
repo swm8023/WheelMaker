@@ -23,8 +23,7 @@ Windows Services
   ├── WheelMaker (guardian)
   │     ├── Hub Worker
   │     └── Registry Worker (optional)
-  ├── WheelMakerMonitor
-  └── WheelMakerUpdater (daily update scheduler)
+  └── WheelMakerMonitor
 ```
 
 ## Quick Start
@@ -40,11 +39,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
 The refresh script will:
 - Pull latest code with `git pull --ff-only` when worktree is clean
 - Install ACP CLI dependencies (`codex-acp`, `claude-agent-acp`) if missing
-- Build `wheelmaker.exe`, `wheelmaker-monitor.exe`, and `wheelmaker-updater.exe`
+- Build `wheelmaker.exe` and `wheelmaker-monitor.exe`
 - Install binaries to `~/.wheelmaker\bin\`
 - Preserve `~/.wheelmaker\config.json`, or create one from `server\config.example.json`
-- Generate `start.bat` / `stop.bat` / `restart.bat` service wrappers
-- Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`, `WheelMakerUpdater`
+- Generate `start.bat` / `stop.bat` / `restart.bat` / `update-restart.bat` service wrappers
+- Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`
 - Start services (auto-start enabled)
 
 If `config.json` is created for the first time, the script stops before restart so you can edit it safely, then rerun the same command.
@@ -64,14 +63,6 @@ notepad ~/.wheelmaker/config.json
 ~/.wheelmaker/stop.bat      # stop services
 ~/.wheelmaker/restart.bat   # restart services
 ~/.wheelmaker/update-restart.bat  # update + build + deploy + restart
-```
-
-Auto update switch is integrated into `refresh_server.ps1`:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1 -AutoUpdate on  -UpdateTime 03:00
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1 -AutoUpdate off
-~/.wheelmaker/bin/wheelmaker-updater.exe --repo D:\Code\WheelMaker --install-dir ~/.wheelmaker/bin --time 03:00 --once
 ```
 
 Default refresh flow: `update -> build -> stop -> deploy -> restart`.
