@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -96,5 +97,34 @@ func TestRunUpdateRound_RefreshScriptMissing(t *testing.T) {
 	err := runUpdateRound(context.Background(), cfg, f)
 	if err == nil || !strings.Contains(err.Error(), "refresh script missing") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestConsumeManualSignal(t *testing.T) {
+	dir := t.TempDir()
+	signalPath := filepath.Join(dir, "update-now.signal")
+	if err := os.WriteFile(signalPath, []byte("trigger"), 0o644); err != nil {
+		t.Fatalf("write signal: %v", err)
+	}
+
+	ok, err := consumeManualSignal(signalPath)
+	if err != nil {
+		t.Fatalf("consumeManualSignal error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected signal consumed")
+	}
+	if _, err := os.Stat(signalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected signal file removed, stat err=%v", err)
+	}
+}
+
+func TestConsumeManualSignal_MissingFile(t *testing.T) {
+	ok, err := consumeManualSignal(filepath.Join(t.TempDir(), "missing.signal"))
+	if err != nil {
+		t.Fatalf("consumeManualSignal error: %v", err)
+	}
+	if ok {
+		t.Fatalf("expected no signal when file is missing")
 	}
 }

@@ -54,6 +54,7 @@ The refresh script will:
 - Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`, `WheelMakerUpdater`
 - Configure updater service to run daily update flow at `03:00` (calls `refresh_server.ps1`)
 - Start services (auto-start enabled)
+- Monitor supports manual trigger (`Update Now`) by signaling updater without restarting updater service
 
 Service account behavior:
 - Default service account is current logged-in user (`<DOMAIN>\<USERNAME>`)

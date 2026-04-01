@@ -28,6 +28,7 @@ func run() error {
 	repo := fs.String("repo", "", "WheelMaker repository root")
 	installDir := fs.String("install-dir", "", "WheelMaker install directory (default: ~/.wheelmaker/bin)")
 	at := fs.String("time", "03:00", "daily update time in HH:mm")
+	signalFile := fs.String("signal-file", "", "manual trigger signal file path (default: ~/.wheelmaker/update-now.signal)")
 	once := fs.Bool("once", false, "run one update round then exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return err
@@ -39,6 +40,9 @@ func run() error {
 	}
 	if *installDir == "" {
 		*installDir = filepath.Join(home, ".wheelmaker", "bin")
+	}
+	if *signalFile == "" {
+		*signalFile = filepath.Join(home, ".wheelmaker", "update-now.signal")
 	}
 	if *repo == "" {
 		cwd, cwdErr := os.Getwd()
@@ -61,6 +65,7 @@ func run() error {
 		RepoDir:    *repo,
 		InstallDir: *installDir,
 		DailyTime:  *at,
+		SignalFile: *signalFile,
 		Once:       *once,
 	}
 

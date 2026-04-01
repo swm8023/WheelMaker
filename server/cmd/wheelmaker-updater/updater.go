@@ -14,11 +14,13 @@ import (
 )
 
 const updaterRetryDelay = 10 * time.Minute
+const updaterSignalPollInterval = 5 * time.Second
 
 type UpdaterConfig struct {
 	RepoDir    string
 	InstallDir string
 	DailyTime  string
+	SignalFile string
 	Once       bool
 }
 
@@ -63,16 +65,13 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 	shared.Info("[updater] started daily schedule at %02d:%02d", hour, minute)
 	for {
 		next := nextRunTime(time.Now(), hour, minute)
-		wait := time.Until(next)
 		shared.Info("[updater] next run at %s", next.Format(time.RFC3339))
 
-		timer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return nil
-		case <-timer.C:
+		triggerReason, waitErr := waitForTrigger(ctx, cfg.SignalFile, next)
+		if waitErr != nil {
+			return waitErr
 		}
+		shared.Info("[updater] trigger=%s", triggerReason)
 
 		if err := runUpdateRound(ctx, cfg, runner); err != nil {
 			shared.Error("[updater] update round failed: %v", err)
@@ -88,6 +87,52 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 			}
 		}
 	}
+}
+
+func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (string, error) {
+	timer := time.NewTimer(time.Until(next))
+	ticker := time.NewTicker(updaterSignalPollInterval)
+	defer timer.Stop()
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", nil
+		case <-timer.C:
+			return "scheduled", nil
+		case <-ticker.C:
+			triggered, err := consumeManualSignal(signalPath)
+			if err != nil {
+				shared.Warn("[updater] manual trigger check failed: %v", err)
+				continue
+			}
+			if triggered {
+				return "manual-signal", nil
+			}
+		}
+	}
+}
+
+func consumeManualSignal(path string) (bool, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false, nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if info.IsDir() {
+		return false, fmt.Errorf("manual signal path is a directory: %s", path)
+	}
+	if err := os.Remove(path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner) error {

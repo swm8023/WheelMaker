@@ -18,6 +18,7 @@ func registerRoutes(mux *http.ServeMux, mon *Monitor) {
 	mux.HandleFunc("POST /api/action/restart-monitor", handleAction(mon, "restart-monitor"))
 	mux.HandleFunc("POST /api/action/stop", handleAction(mon, "stop"))
 	mux.HandleFunc("POST /api/action/start", handleAction(mon, "start"))
+	mux.HandleFunc("POST /api/action/update-now", handleAction(mon, "update-now"))
 
 	// Web dashboard (embedded HTML)
 	mux.HandleFunc("GET /", handleDashboard())
@@ -106,6 +107,8 @@ func handleAction(mon *Monitor, action string) http.HandlerFunc {
 			err = mon.StopService()
 		case "start":
 			err = mon.StartService()
+		case "update-now":
+			err = mon.TriggerUpdateNow()
 		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
