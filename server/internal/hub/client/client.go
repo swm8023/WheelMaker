@@ -132,6 +132,7 @@ type Client struct {
 
 	startNoticeSentChatID   string
 	startNoticeReplayQueued bool
+	imBlockedUpdates        map[string]struct{}
 }
 
 // New creates a Client for the given project.
@@ -146,6 +147,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 		registry:    newAgentRegistry(),
 		store:       store,
 		imBridge:    imProvider,
+		imBlockedUpdates: map[string]struct{}{},
 		prompt: promptState{
 			activeTCs: make(map[string]struct{}),
 		},
@@ -168,6 +170,22 @@ func (c *Client) SetYOLO(enabled bool) {
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
 	c.debugLog = w
+	c.mu.Unlock()
+}
+
+// SetIMUpdateBlockList configures outbound IM update types to suppress.
+// Values are case-insensitive; aliases: "tool" -> "tool_call", "system" -> "error".
+func (c *Client) SetIMUpdateBlockList(types []string) {
+	blocked := make(map[string]struct{}, len(types))
+	for _, t := range types {
+		k := canonicalIMBlockType(t)
+		if k == "" {
+			continue
+		}
+		blocked[k] = struct{}{}
+	}
+	c.mu.Lock()
+	c.imBlockedUpdates = blocked
 	c.mu.Unlock()
 }
 
@@ -394,6 +412,9 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 				c.mu.Unlock()
 				return
 			}
+			if c.shouldBlockIMUpdate(u.Type) {
+				continue
+			}
 			if hasEmitter {
 				emitErr := emitter.Emit(ctx, im.IMUpdate{
 					SessionID:  sid,
@@ -447,6 +468,33 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			continue
 		}
 		return
+	}
+}
+
+func (c *Client) shouldBlockIMUpdate(updateType acp.UpdateType) bool {
+	key := canonicalIMBlockType(string(updateType))
+	if key == "" {
+		return false
+	}
+	c.mu.Lock()
+	_, blocked := c.imBlockedUpdates[key]
+	c.mu.Unlock()
+	return blocked
+}
+
+func canonicalIMBlockType(raw string) string {
+	s := strings.ToLower(strings.TrimSpace(raw))
+	switch s {
+	case "":
+		return ""
+	case "tool":
+		return "tool_call"
+	case "tool_call_update", "tool_call_cancelled":
+		return "tool_call"
+	case "system":
+		return "error"
+	default:
+		return s
 	}
 }
 

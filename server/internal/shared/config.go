@@ -39,7 +39,16 @@ type IMConfig struct {
 
 // ClientConf describes the AI agent side for a project.
 type ClientConf struct {
-	Agent string `json:"agent,omitempty"`
+	Agent    string       `json:"agent,omitempty"`
+	IMFilter IMFilterConf `json:"imFilter,omitempty"`
+}
+
+// IMFilterConf controls which client updates are blocked from IM delivery.
+type IMFilterConf struct {
+	// Block contains update types to suppress from IM output.
+	// Supported values include: thought, tool/tool_call, text, system, plan,
+	// config_option_update, available_commands_update, done, error.
+	Block []string `json:"block,omitempty"`
 }
 
 // MonitorConfig configures the wheelmaker-monitor web dashboard.

@@ -273,6 +273,7 @@ func captureReplies(c *client.Client) *[]string {
 type captureChannel struct {
 	messages *[]string
 	chatIDs  *[]string
+	cardN    *int
 }
 
 func (a *captureChannel) OnMessage(_ im.MessageHandler) {}
@@ -283,7 +284,12 @@ func (a *captureChannel) Send(chatID string, text string, kind im.TextKind) erro
 	}
 	return nil
 }
-func (a *captureChannel) SendCard(_ string, _ string, _ im.Card) error { return nil }
+func (a *captureChannel) SendCard(_ string, _ string, _ im.Card) error {
+	if a.cardN != nil {
+		*a.cardN++
+	}
+	return nil
+}
 func (a *captureChannel) SendReaction(_, _ string) error               { return nil }
 func (a *captureChannel) MarkDone(_ string) error                      { return nil }
 func (a *captureChannel) OnCardAction(_ func(im.CardActionEvent))      {}
@@ -696,6 +702,66 @@ func TestHandleMessage_Prompt_ConfigOptionUpdate_NotifiesIM(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("messages = %v, want config update notification", *msgs)
+	}
+}
+
+func TestHandleMessage_Prompt_BlockThoughtUpdate(t *testing.T) {
+	mock := &mockSession{
+		agentN: "codex",
+		promptResult: func(_ string) (<-chan acp.Update, error) {
+			ch := make(chan acp.Update, 4)
+			ch <- acp.Update{Type: acp.UpdateThought, Content: "hidden-thought"}
+			ch <- acp.Update{Type: acp.UpdateText, Content: "visible-reply"}
+			ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+	c := newTestClient(mock)
+	c.SetIMUpdateBlockList([]string{"thought"})
+	msgs := []string{}
+	c.InjectIMChannel(&captureChannel{messages: &msgs})
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "test-thought-filter"})
+
+	joined := strings.Join(msgs, "\n")
+	if strings.Contains(joined, "hidden-thought") {
+		t.Fatalf("thought update should be blocked, messages=%v", msgs)
+	}
+	if !strings.Contains(joined, "visible-reply") {
+		t.Fatalf("text reply should still be delivered, messages=%v", msgs)
+	}
+}
+
+func TestHandleMessage_Prompt_BlockToolCallUpdate(t *testing.T) {
+	mock := &mockSession{
+		agentN: "codex",
+		promptResult: func(_ string) (<-chan acp.Update, error) {
+			ch := make(chan acp.Update, 4)
+			ch <- acp.Update{
+				Type: acp.UpdateToolCall,
+				Raw:  []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run test","status":"in_progress","rawOutput":"ok"}`),
+			}
+			ch <- acp.Update{Type: acp.UpdateText, Content: "visible-after-tool"}
+			ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
+			close(ch)
+			return ch, nil
+		},
+	}
+	c := newTestClient(mock)
+	c.SetIMUpdateBlockList([]string{"tool"})
+	msgs := []string{}
+	cardN := 0
+	c.InjectIMChannel(&captureChannel{messages: &msgs, cardN: &cardN})
+
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "test-tool-filter"})
+
+	if cardN != 0 {
+		t.Fatalf("tool_call updates should be blocked from IM cards, cardN=%d", cardN)
+	}
+	joined := strings.Join(msgs, "\n")
+	if !strings.Contains(joined, "visible-after-tool") {
+		t.Fatalf("text reply should still be delivered, messages=%v", msgs)
 	}
 }
 

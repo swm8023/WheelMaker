@@ -9,7 +9,10 @@
         "type": "console"
       },
       "client": {
-        "agent": "claude"
+        "agent": "claude",
+        "imFilter": {
+          "block": ["thought", "tool_call"]
+        }
       }
     },
     {
@@ -22,7 +25,10 @@
         "appSecret": "yyy"
       },
       "client": {
-        "agent": "claude"
+        "agent": "claude",
+        "imFilter": {
+          "block": ["thought", "tool"]
+        }
       }
     }
   ],

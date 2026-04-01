@@ -101,6 +101,7 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 	// Create the client.
 	c := client.New(store, imProvider, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
+	c.SetIMUpdateBlockList(pc.Client.IMFilter.Block)
 
 	// ACP/IM debug traces are controlled by logger configuration only.
 	if dw := shared.DebugWriter(); dw != nil {

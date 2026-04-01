@@ -278,6 +278,24 @@ func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
 	}
 }
 
+func TestCanonicalIMBlockType(t *testing.T) {
+	cases := map[string]string{
+		"tool":                "tool_call",
+		"tool_call":           "tool_call",
+		"tool_call_update":    "tool_call",
+		"tool_call_cancelled": "tool_call",
+		"system":              "error",
+		"thought":             "thought",
+		"  TEXT  ":            "text",
+		"":                    "",
+	}
+	for in, want := range cases {
+		if got := canonicalIMBlockType(in); got != want {
+			t.Fatalf("canonicalIMBlockType(%q)=%q, want %q", in, got, want)
+		}
+	}
+}
+
 // noopStore is a Store that always returns a default state and discards saves.
 type noopStore struct{}
 
