@@ -315,7 +315,12 @@ function Stop-LegacyProcessMode {
   }
 
   Write-Step "stop legacy process-mode instances (if any)"
-  $legacyNames = @("wheelmaker.exe", "wheelmaker-monitor.exe", "wheelmaker-updater.exe")
+  $legacyNames = @("wheelmaker.exe", "wheelmaker-monitor.exe")
+  if (-not $SkipUpdaterInstall) {
+    $legacyNames += "wheelmaker-updater.exe"
+  } else {
+    Write-Step "skip legacy updater process cleanup (-SkipUpdaterInstall)"
+  }
   foreach ($name in $legacyNames) {
     try {
       $procs = @(Get-CimInstance Win32_Process -Filter ("Name='{0}'" -f $name) -ErrorAction SilentlyContinue)
