@@ -397,6 +397,66 @@ function Ensure-Service {
   }
 }
 
+function Resolve-AccountSid {
+  param([Parameter(Mandatory = $true)][string]$Account)
+  try {
+    $nt = New-Object System.Security.Principal.NTAccount($Account)
+    $sid = $nt.Translate([System.Security.Principal.SecurityIdentifier])
+    return $sid.Value
+  } catch {
+    throw ("failed to resolve SID for account '{0}': {1}" -f $Account, $_.Exception.Message)
+  }
+}
+
+function Get-ServiceSecurityDescriptor {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  $output = & sc.exe sdshow $Name
+  if ($LASTEXITCODE -ne 0) {
+    throw ("service sdshow failed: {0} (exit={1})" -f $Name, $LASTEXITCODE)
+  }
+  $text = (($output | Out-String).Trim())
+  $dPos = $text.IndexOf("D:")
+  if ($dPos -lt 0) {
+    throw ("service {0} security descriptor missing DACL" -f $Name)
+  }
+  return $text.Substring($dPos)
+}
+
+function Ensure-ServiceAclEntry {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][string]$Sid,
+    [Parameter(Mandatory = $true)][string]$Rights
+  )
+  $sd = Get-ServiceSecurityDescriptor -Name $Name
+  $sidPattern = [Regex]::Escape(";;;$Sid)")
+  if ($sd -match $sidPattern) {
+    Write-Step ("service ACL already contains account SID for {0}" -f $Name)
+    return
+  }
+
+  $ace = "(A;;{0};;;{1})" -f $Rights, $Sid
+  $sPos = $sd.IndexOf("S:")
+  if ($sPos -ge 0) {
+    $newSd = $sd.Substring(0, $sPos) + $ace + $sd.Substring($sPos)
+  } else {
+    $newSd = $sd + $ace
+  }
+  Invoke-Checked -FilePath "sc.exe" -Arguments @("sdset", $Name, $newSd) -FailureMessage ("service ACL update failed: {0}" -f $Name)
+  Write-Step ("granted service control ACL: {0}" -f $Name)
+}
+
+function Ensure-ServiceControlAclForAccount {
+  if ($SkipServiceConfig) { return }
+  if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
+  $sid = Resolve-AccountSid -Account $ServiceUser
+  # Rights required for updater-driven service management:
+  # RP(start), WP(stop), LC(query status), LO(interrogate), CR(user-defined), RC(read control)
+  $rights = "RPWPLCLOCRRC"
+  Ensure-ServiceAclEntry -Name $script:WheelmakerService -Sid $sid -Rights $rights
+  Ensure-ServiceAclEntry -Name $script:MonitorService -Sid $sid -Rights $rights
+}
+
 function Configure-Services {
   if ($SkipServiceConfig) { Write-Step "skip service configuration"; return }
   Prepare-ServiceCredentials
@@ -408,6 +468,7 @@ function Configure-Services {
   } else {
     Write-Step "skip updater service configuration (-SkipUpdaterInstall)"
   }
+  Ensure-ServiceControlAclForAccount
 }
 
 function Install-Binary {
