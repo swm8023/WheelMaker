@@ -59,7 +59,7 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 
 	runner := osCommandRunner{}
 	if cfg.Once {
-		return runUpdateRound(ctx, cfg, runner)
+		return runUpdateRound(ctx, cfg, runner, false)
 	}
 
 	shared.Info("[updater] started daily schedule at %02d:%02d", hour, minute)
@@ -73,7 +73,8 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 		}
 		shared.Info("[updater] trigger=%s", triggerReason)
 
-		if err := runUpdateRound(ctx, cfg, runner); err != nil {
+		skipUpdate := triggerReason == "manual-signal"
+		if err := runUpdateRound(ctx, cfg, runner, skipUpdate); err != nil {
 			shared.Error("[updater] update round failed: %v", err)
 			retry := time.NewTimer(updaterRetryDelay)
 			select {
@@ -81,7 +82,7 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 				retry.Stop()
 				return nil
 			case <-retry.C:
-				if retryErr := runUpdateRound(ctx, cfg, runner); retryErr != nil {
+				if retryErr := runUpdateRound(ctx, cfg, runner, skipUpdate); retryErr != nil {
 					shared.Error("[updater] retry update round failed: %v", retryErr)
 				}
 			}
@@ -135,7 +136,7 @@ func consumeManualSignal(path string) (bool, error) {
 	return true, nil
 }
 
-func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner) error {
+func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner, skipUpdate bool) error {
 	shared.Info("[updater] run refresh script begin")
 
 	refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
@@ -143,17 +144,19 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 		return fmt.Errorf("refresh script missing: %w", err)
 	}
 
-	_, err := runner.CombinedOutput(
-		ctx,
-		cfg.RepoDir,
-		"powershell",
+	args := []string{
 		"-NoProfile",
 		"-ExecutionPolicy", "Bypass",
 		"-File", refreshScript,
 		"-InstallDir", cfg.InstallDir,
 		"-SkipUpdaterInstall",
 		"-SkipServiceConfig",
-	)
+	}
+	if skipUpdate {
+		args = append(args, "-SkipUpdate")
+	}
+
+	_, err := runner.CombinedOutput(ctx, cfg.RepoDir, "powershell", args...)
 	if err != nil {
 		return err
 	}

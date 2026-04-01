@@ -75,7 +75,7 @@ func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
 	f := &fakeRunner{results: map[string]fakeResult{}}
 
-	if err := runUpdateRound(context.Background(), cfg, f); err != nil {
+	if err := runUpdateRound(context.Background(), cfg, f, false); err != nil {
 		t.Fatalf("runUpdateRound: %v", err)
 	}
 
@@ -94,9 +94,36 @@ func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 func TestRunUpdateRound_RefreshScriptMissing(t *testing.T) {
 	cfg := UpdaterConfig{RepoDir: t.TempDir(), InstallDir: `C:/Users/test/.wheelmaker/bin`}
 	f := &fakeRunner{results: map[string]fakeResult{}}
-	err := runUpdateRound(context.Background(), cfg, f)
+	err := runUpdateRound(context.Background(), cfg, f, false)
 	if err == nil || !strings.Contains(err.Error(), "refresh script missing") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunUpdateRound_ManualSignalSkipsUpdate(t *testing.T) {
+	repoDir := t.TempDir()
+	scriptsDir := filepath.Join(repoDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
+	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("write refresh script: %v", err)
+	}
+
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
+	f := &fakeRunner{results: map[string]fakeResult{}}
+
+	if err := runUpdateRound(context.Background(), cfg, f, true); err != nil {
+		t.Fatalf("runUpdateRound: %v", err)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("expected one command call, got %d", len(f.calls))
+	}
+	call := f.calls[0]
+	argsLine := strings.Join(call.args, " ")
+	if !strings.Contains(argsLine, "-SkipUpdate") {
+		t.Fatalf("expected -SkipUpdate in args, got: %s", argsLine)
 	}
 }
 
