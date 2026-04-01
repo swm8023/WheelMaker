@@ -302,17 +302,43 @@ function Stop-LegacyProcessMode {
 function Prepare-ServiceCredentials {
   if ($SkipServiceConfig -or $WhatIf) { return }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
-  if (-not [string]::IsNullOrWhiteSpace($ServicePassword)) { $script:ServicePasswordPlain = $ServicePassword; return }
-  if ([Console]::IsInputRedirected) {
-    Write-Warn "service account password not provided; account assignment will be skipped"
+
+  $targets = @($script:WheelmakerService, $script:MonitorService)
+  if (-not $SkipUpdaterInstall) { $targets += $script:UpdaterService }
+
+  $needAccountChange = $false
+  foreach ($name in $targets) {
+    $svc = Get-CimInstance Win32_Service -Filter ("Name='{0}'" -f $name) -ErrorAction SilentlyContinue
+    if ($null -eq $svc) {
+      $needAccountChange = $true
+      break
+    }
+    if ([string]::Compare(([string]$svc.StartName).Trim(), $ServiceUser.Trim(), $true) -ne 0) {
+      $needAccountChange = $true
+      break
+    }
+  }
+  if (-not $needAccountChange) {
+    Write-Step ("service account already configured as {0}" -f $ServiceUser)
     return
   }
-  $secure = Read-Host -AsSecureString -Prompt ("Enter password for service account {0} (leave empty to skip account assignment)" -f $ServiceUser)
+
+  if (-not [string]::IsNullOrWhiteSpace($ServicePassword)) {
+    $script:ServicePasswordPlain = $ServicePassword
+    return
+  }
+  if ([Console]::IsInputRedirected) {
+    throw ("service account password is required to configure services as {0}; pass -ServicePassword in non-interactive mode" -f $ServiceUser)
+  }
+  $secure = Read-Host -AsSecureString -Prompt ("Enter password for service account {0}" -f $ServiceUser)
   $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try {
     $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    if (-not [string]::IsNullOrWhiteSpace($plain)) { $script:ServicePasswordPlain = $plain }
-    else { Write-Warn "service account password empty; services will keep existing account" }
+    if (-not [string]::IsNullOrWhiteSpace($plain)) {
+      $script:ServicePasswordPlain = $plain
+    } else {
+      throw ("service account password is required to configure services as {0}" -f $ServiceUser)
+    }
   } finally {
     [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
   }

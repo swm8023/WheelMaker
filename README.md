@@ -55,6 +55,10 @@ The refresh script will:
 - Configure updater service to run daily update flow at `03:00` (calls `refresh_server.ps1`)
 - Start services (auto-start enabled)
 
+Service account behavior:
+- Default service account is current logged-in user (`<DOMAIN>\<USERNAME>`)
+- First-time registration or account switch requires an elevated terminal and that user's password
+
 If `config.json` is created for the first time, the script stops before restart so you can edit it safely, then rerun the same command.
 
 ### 2. Configure
