@@ -747,6 +747,18 @@ function renderStatus(svc) {
       }
       offlineHtml += '</div>';
     }
+    if (processes.length > 0) {
+      offlineHtml += '<div style="margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--yellow);">Residual wheelmaker processes detected:</div>';
+      offlineHtml += '<div class="proc-chips" style="margin-top:6px;">';
+      for (const p of processes) {
+        const cls = p.role === 'guardian' ? 'badge-blue' :
+                    p.role === 'hub-worker' ? 'badge-green' :
+                    p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
+        const roleLabel = String(p.role || '').replace('-worker', '');
+        offlineHtml += '<div class="proc-chip"><span class="pid">PID#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
+      }
+      offlineHtml += '</div>';
+    }
     $('proc-list').innerHTML = offlineHtml;
     return;
   }

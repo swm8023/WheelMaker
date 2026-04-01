@@ -72,7 +72,6 @@ func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
 	}
 	running := len(procs) > 0
 	if runtime.GOOS == "windows" && len(svcInfos) > 0 {
-		running = false
 		for _, svc := range svcInfos {
 			if strings.EqualFold(svc.Name, wheelmakerServiceName) && strings.EqualFold(svc.Status, "Running") {
 				running = true
