@@ -56,7 +56,7 @@ func run() error {
 
 	if err := shared.Setup(shared.LoggerConfig{
 		Level:        shared.LevelInfo,
-		LogFile:      filepath.Join(stateDir, "auto_update.log"),
+		LogFile:      filepath.Join(stateDir, "updater.log"),
 		DebugLogFile: "",
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)

@@ -104,7 +104,7 @@ Keep as primary deploy entrypoint, but switch process lifecycle actions to servi
 
 ## Observability
 
-- Updater log file: `~/.wheelmaker/auto_update.log`.
+- Updater log file: `~/.wheelmaker/updater.log`.
 - Keep deploy logs from refresh script.
 - Monitor remains source of runtime service status.
 
