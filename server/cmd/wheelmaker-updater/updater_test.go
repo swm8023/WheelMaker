@@ -2,7 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -59,13 +60,19 @@ func TestNextRunAfterNow(t *testing.T) {
 	}
 }
 
-func TestRunUpdateRound_UpToDate(t *testing.T) {
-	cfg := UpdaterConfig{RepoDir: `D:/Code/WheelMaker`, InstallDir: `C:/Users/test/.wheelmaker/bin`}
-	f := &fakeRunner{results: map[string]fakeResult{
-		"git rev-parse --abbrev-ref HEAD": {out: "main"},
-		"git rev-parse HEAD":              {out: "abcdef01"},
-		"git rev-parse origin/main":       {out: "abcdef01"},
-	}}
+func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
+	repoDir := t.TempDir()
+	scriptsDir := filepath.Join(repoDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
+	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
+		t.Fatalf("write refresh script: %v", err)
+	}
+
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: `C:/Users/test/.wheelmaker/bin`}
+	f := &fakeRunner{results: map[string]fakeResult{}}
 
 	if err := runUpdateRound(context.Background(), cfg, f); err != nil {
 		t.Fatalf("runUpdateRound: %v", err)
@@ -76,51 +83,18 @@ func TestRunUpdateRound_UpToDate(t *testing.T) {
 		got = append(got, c.name+" "+strings.Join(c.args, " "))
 	}
 	want := []string{
-		"git fetch origin",
-		"git rev-parse --abbrev-ref HEAD",
-		"git rev-parse HEAD",
-		"git rev-parse origin/main",
+		"powershell -NoProfile -ExecutionPolicy Bypass -File " + refreshPath + " -InstallDir C:/Users/test/.wheelmaker/bin -SkipUpdaterInstall -SkipServiceConfig",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands mismatch\n got: %#v\nwant: %#v", got, want)
 	}
 }
 
-func TestRunUpdateRound_WithUpdatesRunsDeploy(t *testing.T) {
-	cfg := UpdaterConfig{RepoDir: `D:/Code/WheelMaker`, InstallDir: `C:/Users/test/.wheelmaker/bin`}
-	f := &fakeRunner{results: map[string]fakeResult{
-		"git rev-parse --abbrev-ref HEAD": {out: "main"},
-		"git rev-parse HEAD":              {out: "oldsha"},
-		"git rev-parse origin/main":       {out: "newsha"},
-	}}
-
+func TestRunUpdateRound_RefreshScriptMissing(t *testing.T) {
+	cfg := UpdaterConfig{RepoDir: t.TempDir(), InstallDir: `C:/Users/test/.wheelmaker/bin`}
+	f := &fakeRunner{results: map[string]fakeResult{}}
 	err := runUpdateRound(context.Background(), cfg, f)
-	if err == nil {
-		if len(f.calls) < 6 {
-			t.Fatalf("expected deploy command, calls=%d", len(f.calls))
-		}
-		return
-	}
-
-	if !strings.Contains(err.Error(), "refresh script missing") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestRunUpdateRound_PullFailure(t *testing.T) {
-	cfg := UpdaterConfig{RepoDir: `D:/Code/WheelMaker`, InstallDir: `C:/Users/test/.wheelmaker/bin`}
-	f := &fakeRunner{results: map[string]fakeResult{
-		"git rev-parse --abbrev-ref HEAD": {out: "main"},
-		"git rev-parse HEAD":              {out: "oldsha"},
-		"git rev-parse origin/main":       {out: "newsha"},
-		"git pull --ff-only origin main":  {err: errors.New("pull failed")},
-	}}
-
-	err := runUpdateRound(context.Background(), cfg, f)
-	if err == nil {
-		t.Fatalf("expected error")
-	}
-	if !strings.Contains(err.Error(), "pull failed") {
+	if err == nil || !strings.Contains(err.Error(), "refresh script missing") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

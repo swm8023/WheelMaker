@@ -91,53 +91,20 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 }
 
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner) error {
-	shared.Info("[updater] update check begin")
-
-	if _, err := runner.CombinedOutput(ctx, cfg.RepoDir, "git", "fetch", "origin"); err != nil {
-		return err
-	}
-
-	branch, err := runner.CombinedOutput(ctx, cfg.RepoDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return err
-	}
-	branch = strings.TrimSpace(branch)
-	if branch == "" || branch == "HEAD" {
-		return errors.New("git repository is in detached HEAD state")
-	}
-
-	localHead, err := runner.CombinedOutput(ctx, cfg.RepoDir, "git", "rev-parse", "HEAD")
-	if err != nil {
-		return err
-	}
-	remoteHead, err := runner.CombinedOutput(ctx, cfg.RepoDir, "git", "rev-parse", "origin/"+branch)
-	if err != nil {
-		return err
-	}
-
-	if strings.TrimSpace(localHead) == strings.TrimSpace(remoteHead) {
-		shared.Info("[updater] already up-to-date branch=%s head=%s", branch, shortSHA(localHead))
-		return nil
-	}
-
-	shared.Info("[updater] updates found branch=%s %s -> %s", branch, shortSHA(localHead), shortSHA(remoteHead))
-	if _, err := runner.CombinedOutput(ctx, cfg.RepoDir, "git", "pull", "--ff-only", "origin", branch); err != nil {
-		return err
-	}
+	shared.Info("[updater] run refresh script begin")
 
 	refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
 	if _, err := os.Stat(refreshScript); err != nil {
 		return fmt.Errorf("refresh script missing: %w", err)
 	}
 
-	_, err = runner.CombinedOutput(
+	_, err := runner.CombinedOutput(
 		ctx,
 		cfg.RepoDir,
 		"powershell",
 		"-NoProfile",
 		"-ExecutionPolicy", "Bypass",
 		"-File", refreshScript,
-		"-SkipGitPull",
 		"-InstallDir", cfg.InstallDir,
 		"-SkipUpdaterInstall",
 		"-SkipServiceConfig",
@@ -146,7 +113,7 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 		return err
 	}
 
-	shared.Info("[updater] deploy complete")
+	shared.Info("[updater] run refresh script complete")
 	return nil
 }
 
@@ -171,7 +138,7 @@ func validateConfig(cfg UpdaterConfig) error {
 }
 
 func validateCommands() error {
-	for _, name := range []string{"git", "go", "powershell"} {
+	for _, name := range []string{"powershell"} {
 		if _, err := exec.LookPath(name); err != nil {
 			return fmt.Errorf("required command not found: %s", name)
 		}
