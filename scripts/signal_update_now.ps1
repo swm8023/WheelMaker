@@ -24,6 +24,7 @@ if (-not $Worker) {
     "-DelaySeconds", "$DelaySeconds",
     "-SignalPath", $SignalPath
   ) -WindowStyle Hidden | Out-Null
+  Write-Host ("==> updater trigger accepted (delay={0}s, signal={1})" -f $DelaySeconds, $SignalPath) -ForegroundColor Green
   exit 0
 }
 

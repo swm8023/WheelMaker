@@ -645,6 +645,7 @@ body {
             <option value="debug">hub.debug.log</option>
             <option value="registry">registry.log</option>
             <option value="registry-debug">registry.debug.log</option>
+            <option value="updater">updater.log</option>
           </select>
           <select id="log-level" class="log-select" onchange="loadLogs()">
             <option value="">All Levels</option>
