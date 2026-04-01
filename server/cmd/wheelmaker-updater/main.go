@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	shared "github.com/swm8023/wheelmaker/internal/shared"
@@ -41,8 +42,9 @@ func run() error {
 	if *installDir == "" {
 		*installDir = filepath.Join(home, ".wheelmaker", "bin")
 	}
+	stateDir := resolveStateDir(home, *installDir)
 	if *signalFile == "" {
-		*signalFile = filepath.Join(home, ".wheelmaker", "update-now.signal")
+		*signalFile = filepath.Join(stateDir, "update-now.signal")
 	}
 	if *repo == "" {
 		cwd, cwdErr := os.Getwd()
@@ -54,7 +56,7 @@ func run() error {
 
 	if err := shared.Setup(shared.LoggerConfig{
 		Level:        shared.LevelInfo,
-		LogFile:      filepath.Join(home, ".wheelmaker", "auto_update.log"),
+		LogFile:      filepath.Join(stateDir, "auto_update.log"),
 		DebugLogFile: "",
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
@@ -94,4 +96,16 @@ func runAsWindowsServiceIfNeeded(cfg UpdaterConfig) (bool, error) {
 
 func runUpdaterService(ctx context.Context, cfg UpdaterConfig) error {
 	return RunUpdater(ctx, cfg)
+}
+
+func resolveStateDir(home string, installDir string) string {
+	trimmedInstall := strings.TrimSpace(installDir)
+	if trimmedInstall != "" {
+		cleanInstall := filepath.Clean(trimmedInstall)
+		if strings.EqualFold(filepath.Base(cleanInstall), "bin") {
+			return filepath.Dir(cleanInstall)
+		}
+		return cleanInstall
+	}
+	return filepath.Join(home, ".wheelmaker")
 }
