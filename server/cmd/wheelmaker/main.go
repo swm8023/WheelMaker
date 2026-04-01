@@ -97,11 +97,15 @@ func runHubWorker() error {
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
+	hubLog := filepath.Join(wheelmakerLogDir(home), "hub.log")
+	hubDebugLog := filepath.Join(wheelmakerLogDir(home), "hub.debug.log")
+	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "hub.log"), hubLog)
+	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "hub.debug.log"), hubDebugLog)
 
 	if err := shared.Setup(shared.LoggerConfig{
 		Level:        shared.ParseLevel(cfg.Log.Level),
-		LogFile:      filepath.Join(home, ".wheelmaker", "hub.log"),
-		DebugLogFile: filepath.Join(home, ".wheelmaker", "hub.debug.log"),
+		LogFile:      hubLog,
+		DebugLogFile: hubDebugLog,
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
@@ -129,11 +133,15 @@ func runRegistryWorker() error {
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
+	regLog := filepath.Join(wheelmakerLogDir(home), "registry.log")
+	regDebugLog := filepath.Join(wheelmakerLogDir(home), "registry.debug.log")
+	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "registry.log"), regLog)
+	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "registry.debug.log"), regDebugLog)
 
 	if err := shared.Setup(shared.LoggerConfig{
 		Level:        shared.ParseLevel(cfg.Log.Level),
-		LogFile:      filepath.Join(home, ".wheelmaker", "registry.log"),
-		DebugLogFile: filepath.Join(home, ".wheelmaker", "registry.debug.log"),
+		LogFile:      regLog,
+		DebugLogFile: regDebugLog,
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
@@ -156,6 +164,10 @@ func runRegistryWorker() error {
 		Token: cfg.Registry.Token,
 	})
 	return s.Run(ctx)
+}
+
+func wheelmakerLogDir(home string) string {
+	return filepath.Join(home, ".wheelmaker", "log")
 }
 
 func runAsWindowsServiceIfNeeded(workerArgs []string) (bool, error) {

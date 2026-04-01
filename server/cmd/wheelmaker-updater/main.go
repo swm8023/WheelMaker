@@ -53,10 +53,12 @@ func run() error {
 		}
 		*repo = cwd
 	}
+	logPath := updaterLogFilePath(stateDir)
+	_ = shared.MigrateLegacyLogFile(filepath.Join(stateDir, "updater.log"), logPath)
 
 	if err := shared.Setup(shared.LoggerConfig{
 		Level:        shared.LevelInfo,
-		LogFile:      filepath.Join(stateDir, "updater.log"),
+		LogFile:      logPath,
 		DebugLogFile: "",
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
@@ -108,4 +110,8 @@ func resolveStateDir(home string, installDir string) string {
 		return cleanInstall
 	}
 	return filepath.Join(home, ".wheelmaker")
+}
+
+func updaterLogFilePath(stateDir string) string {
+	return filepath.Join(stateDir, "log", "updater.log")
 }

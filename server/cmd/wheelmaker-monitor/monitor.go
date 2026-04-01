@@ -265,20 +265,8 @@ type LogResult struct {
 // level: "" (all), "warn", "error".
 // tail: number of lines from the end (0 = all, max 5000).
 func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, error) {
-	var logPath string
-	switch file {
-	case "debug":
-		logPath = filepath.Join(m.baseDir, "hub.debug.log")
-	case "registry":
-		logPath = filepath.Join(m.baseDir, "registry.log")
-	case "registry-debug":
-		logPath = filepath.Join(m.baseDir, "registry.debug.log")
-	case "updater":
-		logPath = filepath.Join(m.baseDir, "updater.log")
-	default:
-		logPath = filepath.Join(m.baseDir, "hub.log")
-		file = "hub"
-	}
+	logPath := m.resolveLogFilePath(file)
+	file = normalizeLogFileKey(file)
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -312,6 +300,49 @@ func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, erro
 		Entries: entries,
 		Total:   len(entries),
 	}, nil
+}
+
+func normalizeLogFileKey(file string) string {
+	switch strings.TrimSpace(strings.ToLower(file)) {
+	case "debug":
+		return "debug"
+	case "registry":
+		return "registry"
+	case "registry-debug":
+		return "registry-debug"
+	case "updater":
+		return "updater"
+	default:
+		return "hub"
+	}
+}
+
+func logFileNameForKey(file string) string {
+	switch normalizeLogFileKey(file) {
+	case "debug":
+		return "hub.debug.log"
+	case "registry":
+		return "registry.log"
+	case "registry-debug":
+		return "registry.debug.log"
+	case "updater":
+		return "updater.log"
+	default:
+		return "hub.log"
+	}
+}
+
+func (m *Monitor) resolveLogFilePath(file string) string {
+	name := logFileNameForKey(file)
+	preferred := filepath.Join(m.baseDir, "log", name)
+	if fileExists(preferred) {
+		return preferred
+	}
+	legacy := filepath.Join(m.baseDir, name)
+	if fileExists(legacy) {
+		return legacy
+	}
+	return preferred
 }
 
 // levelRank returns numeric severity: higher = more severe.

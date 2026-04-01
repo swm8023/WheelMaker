@@ -33,3 +33,12 @@ func TestResolveStateDir_FallbackHome(t *testing.T) {
 		t.Fatalf("resolveStateDir=%q want=%q", got, want)
 	}
 }
+
+func TestUpdaterLogFilePath(t *testing.T) {
+	stateDir := filepath.Clean(`C:\Users\swm\.wheelmaker`)
+	got := updaterLogFilePath(stateDir)
+	want := filepath.Join(stateDir, "log", "updater.log")
+	if got != want {
+		t.Fatalf("updaterLogFilePath=%q want=%q", got, want)
+	}
+}
