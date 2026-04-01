@@ -34,6 +34,12 @@ func runGuardian(workerArgs []string) error {
 }
 
 func runGuardianWithContext(ctx context.Context, workerArgs []string) error {
+	releaseSingleton, err := acquireGuardianSingleton()
+	if err != nil {
+		return err
+	}
+	defer releaseSingleton()
+
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
