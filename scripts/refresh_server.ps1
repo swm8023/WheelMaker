@@ -284,7 +284,51 @@ function Stop-ServiceSafe {
     if ($null -eq $svc -or [string]$svc.Status -eq "Stopped") {
       return
     }
-    Write-Warn ("service {0} still not fully stopped; continue deploy anyway" -f $Name)
+    throw ("service {0} still not fully stopped after fallback kill" -f $Name)
+  }
+}
+
+function Stop-ProcessesByImageName {
+  param([Parameter(Mandatory = $true)][string]$ImageName)
+  try {
+    $procs = @(Get-CimInstance Win32_Process -Filter ("Name='{0}'" -f $ImageName) -ErrorAction SilentlyContinue)
+  } catch {
+    $procs = @()
+  }
+  foreach ($proc in $procs) {
+    try {
+      Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+    } catch {
+      Write-Warn ("failed to stop process {0} pid={1}: {2}" -f $ImageName, $proc.ProcessId, $_.Exception.Message)
+    }
+  }
+}
+
+function Copy-ItemWithRetry {
+  param(
+    [Parameter(Mandatory = $true)][string]$Source,
+    [Parameter(Mandatory = $true)][string]$Destination,
+    [int]$Attempts = 8,
+    [int]$DelayMilliseconds = 500
+  )
+  $leaf = Split-Path $Destination -Leaf
+  for ($i = 1; $i -le $Attempts; $i++) {
+    try {
+      Copy-Item -Path $Source -Destination $Destination -Force
+      return
+    } catch {
+      $msg = $_.Exception.Message
+      $isLast = ($i -eq $Attempts)
+      if ($msg -match "being used by another process" -or $msg -match "used by another process" -or $msg -match "另一个进程") {
+        Write-Warn ("copy locked ({0}/{1}): {2}" -f $i, $Attempts, $leaf)
+        Stop-ProcessesByImageName -ImageName $leaf
+        if (-not $isLast) {
+          Start-Sleep -Milliseconds $DelayMilliseconds
+          continue
+        }
+      }
+      throw
+    }
   }
 }
 
@@ -485,7 +529,7 @@ function Install-Binary {
   Write-Step ("install binary: {0} -> {1}" -f $Source, $Dest)
   if ($WhatIf) { Write-Host ("[whatif] copy {0} -> {1}" -f $Source, $Dest); return }
   New-Item -ItemType Directory -Path (Split-Path $Dest -Parent) -Force | Out-Null
-  Copy-Item -Path $Source -Destination $Dest -Force
+  Copy-ItemWithRetry -Source $Source -Destination $Dest
 }
 
 function Restart-Services {
