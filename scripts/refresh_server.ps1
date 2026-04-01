@@ -304,6 +304,37 @@ function Stop-ProcessesByImageName {
   }
 }
 
+function Get-ProcessIdsByImageName {
+  param([Parameter(Mandatory = $true)][string]$ImageName)
+  try {
+    $procs = @(Get-CimInstance Win32_Process -Filter ("Name='{0}'" -f $ImageName) -ErrorAction SilentlyContinue)
+  } catch {
+    $procs = @()
+  }
+  return @($procs | ForEach-Object { [int]$_.ProcessId })
+}
+
+function Ensure-NoProcessesByImageName {
+  param(
+    [Parameter(Mandatory = $true)][string]$ImageName,
+    [int]$Attempts = 10,
+    [int]$DelayMilliseconds = 300
+  )
+  for ($i = 1; $i -le $Attempts; $i++) {
+    $pids = @(Get-ProcessIdsByImageName -ImageName $ImageName)
+    if ($pids.Count -eq 0) { return }
+    Write-Warn ("residual process {0} (attempt {1}/{2}): pid={3}" -f $ImageName, $i, $Attempts, ($pids -join ","))
+    Stop-ProcessesByImageName -ImageName $ImageName
+    if ($i -lt $Attempts) {
+      Start-Sleep -Milliseconds $DelayMilliseconds
+    }
+  }
+  $remain = @(Get-ProcessIdsByImageName -ImageName $ImageName)
+  if ($remain.Count -gt 0) {
+    throw ("failed to clear process {0}; pid={1}" -f $ImageName, ($remain -join ","))
+  }
+}
+
 function Copy-ItemWithRetry {
   param(
     [Parameter(Mandatory = $true)][string]$Source,
@@ -376,6 +407,24 @@ function Stop-LegacyProcessMode {
     } catch {
       Write-Warn ("failed to enumerate legacy process {0}: {1}" -f $name, $_.Exception.Message)
     }
+  }
+
+  try {
+    $psWorkers = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+      $_.Name -in @("powershell.exe", "pwsh.exe") -and
+      -not [string]::IsNullOrWhiteSpace($_.CommandLine) -and
+      (
+        $_.CommandLine -match "delay_restart_server\.ps1" -or
+        $_.CommandLine -match "refresh_server\.ps1\s+-SkipGitPull"
+      )
+    })
+    foreach ($proc in $psWorkers) {
+      Write-Step ("stop legacy worker process: pid={0}" -f $proc.ProcessId)
+      try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop }
+      catch { Write-Warn ("failed to stop legacy worker pid={0}: {1}" -f $proc.ProcessId, $_.Exception.Message) }
+    }
+  } catch {
+    Write-Warn ("failed to enumerate legacy worker processes: {0}" -f $_.Exception.Message)
   }
 
   $legacyTasks = @("WheelMakerAutoUpdate", "WheelMakerAutoUpdater", "WheelMakerUpdater", "WheelMaker-Update")
@@ -526,6 +575,8 @@ function Install-Binary {
   if ($SkipInstall) { Write-Step ("skip install: {0}" -f (Split-Path $Dest -Leaf)); return }
   if (-not (Test-Path $Source)) { if ($WhatIf) { Write-Host ("[whatif] source binary missing (expected from build): {0}" -f $Source); return } ; throw ("source binary not found: {0}" -f $Source) }
   if (-not [string]::IsNullOrWhiteSpace($StopServiceName)) { Stop-ServiceSafe -Name $StopServiceName }
+  $imageName = Split-Path $Dest -Leaf
+  Ensure-NoProcessesByImageName -ImageName $imageName
   Write-Step ("install binary: {0} -> {1}" -f $Source, $Dest)
   if ($WhatIf) { Write-Host ("[whatif] copy {0} -> {1}" -f $Source, $Dest); return }
   New-Item -ItemType Directory -Path (Split-Path $Dest -Parent) -Force | Out-Null
