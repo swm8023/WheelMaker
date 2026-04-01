@@ -1,10 +1,12 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+)
 
 func handleDashboard() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
+		if r.URL.Path != "/" && r.URL.Path != "/monitor/" && r.URL.Path != "/monitor" {
 			http.NotFound(w, r)
 			return
 		}
@@ -18,6 +20,12 @@ const dashboardHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0e1520">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link id="wm-manifest" rel="manifest" href="/manifest.webmanifest">
+<link id="wm-icon" rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+<link id="wm-apple-icon" rel="apple-touch-icon" href="/icons/icon.svg">
 <title>WheelMaker Monitor</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
@@ -569,6 +577,30 @@ html, body {
 
 <script>
 const $ = id => document.getElementById(id);
+const appBasePath = (() => {
+  const p = window.location.pathname || '/';
+  return p.startsWith('/monitor') ? '/monitor/' : '/';
+})();
+
+function appURL(rel) {
+  const clean = String(rel || '').replace(/^\/+/, '');
+  return appBasePath + clean;
+}
+
+function initPWA() {
+  const manifest = $('wm-manifest');
+  if (manifest) manifest.setAttribute('href', appURL('manifest.webmanifest'));
+  const icon = $('wm-icon');
+  if (icon) icon.setAttribute('href', appURL('icons/icon.svg'));
+  const apple = $('wm-apple-icon');
+  if (apple) apple.setAttribute('href', appURL('icons/icon.svg'));
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register(appURL('service-worker.js'), { scope: appBasePath }).catch(() => {});
+    });
+  }
+}
 
 function switchTab(tab) {
   const isLogs = tab === 'logs';
@@ -579,9 +611,7 @@ function switchTab(tab) {
 }
 
 async function api(path) {
-  const p = window.location.pathname || '/';
-  const base = p.startsWith('/monitor') ? '/monitor/' : '/';
-  const res = await fetch(window.location.origin + base + 'api/' + path);
+  const res = await fetch(window.location.origin + appURL('api/' + path));
   return res.json();
 }
 
@@ -768,9 +798,7 @@ async function doAction(action) {
   msg.textContent = action + '\u2026';
   msg.style.color = 'var(--text-dim)';
   try {
-    const p = window.location.pathname || '/';
-    const base = p.startsWith('/monitor') ? '/monitor/' : '/';
-    const res  = await fetch(window.location.origin + base + 'api/action/' + action, { method: 'POST' });
+    const res  = await fetch(window.location.origin + appURL('api/action/' + action), { method: 'POST' });
     const data = await res.json();
     if (data.error) {
       msg.textContent = 'Error: ' + data.error;
@@ -785,6 +813,8 @@ async function doAction(action) {
     msg.style.color = 'var(--red)';
   }
 }
+
+initPWA();
 
 (async function init() {
   try {

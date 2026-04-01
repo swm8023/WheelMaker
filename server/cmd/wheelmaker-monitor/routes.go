@@ -7,20 +7,34 @@ import (
 )
 
 func registerRoutes(mux *http.ServeMux, mon *Monitor) {
-	// API endpoints
-	mux.HandleFunc("GET /api/overview", handleOverview(mon))
-	mux.HandleFunc("GET /api/status", handleStatus(mon))
-	mux.HandleFunc("GET /api/config", handleConfig(mon))
-	mux.HandleFunc("GET /api/state", handleState(mon))
-	mux.HandleFunc("GET /api/logs", handleLogs(mon))
-	mux.HandleFunc("GET /api/registry", handleRegistry(mon))
-	mux.HandleFunc("POST /api/action/restart", handleAction(mon, "restart"))
-	mux.HandleFunc("POST /api/action/restart-monitor", handleAction(mon, "restart-monitor"))
-	mux.HandleFunc("POST /api/action/stop", handleAction(mon, "stop"))
-	mux.HandleFunc("POST /api/action/start", handleAction(mon, "start"))
+	registerRoutesAtPrefix(mux, mon, "")
+	registerRoutesAtPrefix(mux, mon, "/monitor")
+}
 
-	// Web dashboard (embedded HTML)
-	mux.HandleFunc("GET /", handleDashboard())
+func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
+	// API endpoints
+	mux.HandleFunc("GET "+prefix+"/api/overview", handleOverview(mon))
+	mux.HandleFunc("GET "+prefix+"/api/status", handleStatus(mon))
+	mux.HandleFunc("GET "+prefix+"/api/config", handleConfig(mon))
+	mux.HandleFunc("GET "+prefix+"/api/state", handleState(mon))
+	mux.HandleFunc("GET "+prefix+"/api/logs", handleLogs(mon))
+	mux.HandleFunc("GET "+prefix+"/api/registry", handleRegistry(mon))
+	mux.HandleFunc("POST "+prefix+"/api/action/restart", handleAction(mon, "restart"))
+	mux.HandleFunc("POST "+prefix+"/api/action/restart-monitor", handleAction(mon, "restart-monitor"))
+	mux.HandleFunc("POST "+prefix+"/api/action/stop", handleAction(mon, "stop"))
+	mux.HandleFunc("POST "+prefix+"/api/action/start", handleAction(mon, "start"))
+
+	// PWA resources
+	mux.HandleFunc("GET "+prefix+"/manifest.webmanifest", handleManifest())
+	mux.HandleFunc("GET "+prefix+"/service-worker.js", handleServiceWorker())
+	mux.HandleFunc("GET "+prefix+"/icons/icon.svg", handleIcon())
+
+	// Web dashboard
+	root := prefix + "/"
+	if prefix == "" {
+		root = "/"
+	}
+	mux.HandleFunc("GET "+root, handleDashboard())
 }
 
 func handleOverview(mon *Monitor) http.HandlerFunc {
