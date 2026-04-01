@@ -296,7 +296,7 @@ html, body {
 .strip {
   border-bottom: 1px solid var(--border);
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   flex-shrink: 0;
   min-height: 0;
   max-height: 200px;
@@ -308,8 +308,6 @@ html, body {
   overflow: auto;
   min-width: 0;
 }
-.strip-panel + .strip-panel { border-left: 1px solid var(--border); }
-
 .strip-title {
   font-size: 9px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 1.5px;
@@ -342,11 +340,6 @@ html, body {
 .s-off { color: var(--red); }
 .git-branch { color: var(--accent); }
 .git-dirty  { color: var(--yellow); font-weight: 700; }
-
-/* State summary (compact kv) */
-.state-kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 11px; }
-.state-kv .sk { color: var(--text-dim); white-space: nowrap; }
-.state-kv .sv { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Log area */
 .log-area {
@@ -524,10 +517,6 @@ html, body {
           </div>
           <div id="reg-live" style="overflow-x:auto;"><div class="empty-state loading">Loading&#x2026;</div></div>
         </div>
-        <div class="strip-panel">
-          <div class="strip-title"><span class="ttl-accent"></span>State Summary</div>
-          <div id="state-summary"><div class="empty-state loading">Loading&#x2026;</div></div>
-        </div>
       </div>
 
       <div class="log-area">
@@ -606,7 +595,6 @@ async function refresh() {
     const ov = await api('overview');
     renderStatus(ov.service);
     renderSidebar(ov.config);
-    renderStateSummary(ov.state);
     renderStateJSON(ov.state);
   } catch(e) {
     $('hdr-dot').className = 'dot offline';
@@ -702,28 +690,6 @@ function renderSidebar(cfg) {
 
 function cfgRow(label, value) {
   return '<div class="reg-row"><span class="rl">' + esc(label) + '</span><span class="rv">' + esc(value) + '</span></div>';
-}
-
-function renderStateSummary(state) {
-  if (!state) { $('state-summary').innerHTML = '<div class="empty-state">No state</div>'; return; }
-  try {
-    const entries = Object.entries(state).slice(0, 8);
-    if (entries.length === 0) {
-      $('state-summary').innerHTML = '<div class="empty-state">Empty state</div>';
-      return;
-    }
-    let html = '<div class="state-kv">';
-    for (const [k, v] of entries) {
-      const val = typeof v === 'object' && v !== null
-        ? (v.agent || v.sessionId || v.imType || JSON.stringify(v).slice(0, 32))
-        : String(v).slice(0, 40);
-      html += '<span class="sk">' + esc(String(k).slice(0,18)) + '</span><span class="sv">' + esc(val) + '</span>';
-    }
-    html += '</div>';
-    $('state-summary').innerHTML = html;
-  } catch(_) {
-    $('state-summary').innerHTML = '<div class="empty-state">Parse error</div>';
-  }
 }
 
 function renderStateJSON(state) {
@@ -825,7 +791,6 @@ async function doAction(action) {
     const ov = await api('overview');
     renderStatus(ov.service);
     renderSidebar(ov.config);
-    renderStateSummary(ov.state);
     renderStateJSON(ov.state);
   } catch(e) {
     $('hdr-dot').className = 'dot offline';

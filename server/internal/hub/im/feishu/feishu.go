@@ -17,6 +17,7 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/swm8023/wheelmaker/internal/hub/im"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // Config configures the Feishu IM adapter.
@@ -55,6 +56,7 @@ type Channel struct {
 	pendingAck    map[string]pendingAckReaction // chatID -> latest inbound reaction to clear on first reply
 	lastMu        sync.Mutex
 	lastOutbound  map[string]string // chatID -> last outbound message ID
+	wsReadyOnce   sync.Once
 }
 
 type debugStream struct {
@@ -1404,8 +1406,10 @@ func decodeRawText(raw json.RawMessage) string {
 func (f *Channel) Run(ctx context.Context) error {
 	bot, err := f.ensureBot()
 	if err != nil {
+		shared.Error("feishu ws: bot init failed: %v", err)
 		return err
 	}
+	shared.Info("feishu ws: starting event loop app_id=%s debug=%t", maskAppID(f.cfg.AppID), f.cfg.Debug)
 	bot.StartHeartbeat()
 	defer bot.StopHeartbeat()
 
@@ -1425,11 +1429,49 @@ func (f *Channel) Run(ctx context.Context) error {
 		larkws.WithEventHandler(eventHandler),
 		larkws.WithLogLevel(logLevel),
 	)
+	shared.Info("feishu ws: websocket client created, connecting")
 
-	if err := wsClient.Start(ctx); err != nil && ctx.Err() == nil {
+	startErr := wsClient.Start(ctx)
+	switch classifyWSRunExit(ctx.Err(), startErr) {
+	case wsExitContextDone:
+		shared.Warn("feishu ws: stopped by context: %v", ctx.Err())
+		return nil
+	case wsExitStartFailed:
+		shared.Error("feishu ws: connection failed: %v", startErr)
 		return fmt.Errorf("feishu ws start: %w", err)
+	default:
+		shared.Warn("feishu ws: event loop exited without context cancellation")
+		return nil
 	}
-	return nil
+}
+
+type wsRunExit string
+
+const (
+	wsExitContextDone wsRunExit = "context_done"
+	wsExitStartFailed wsRunExit = "start_failed"
+	wsExitUnexpected  wsRunExit = "unexpected"
+)
+
+func classifyWSRunExit(ctxErr error, startErr error) wsRunExit {
+	if ctxErr != nil {
+		return wsExitContextDone
+	}
+	if startErr != nil {
+		return wsExitStartFailed
+	}
+	return wsExitUnexpected
+}
+
+func maskAppID(appID string) string {
+	id := strings.TrimSpace(appID)
+	if id == "" {
+		return "unknown"
+	}
+	if len(id) <= 6 {
+		return id
+	}
+	return id[:3] + "***" + id[len(id)-3:]
 }
 
 func (f *Channel) ensureBot() (*lark.Bot, error) {
@@ -1456,6 +1498,9 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		return nil
 	}
+	f.wsReadyOnce.Do(func() {
+		shared.Info("feishu ws: connected (inbound event stream active)")
+	})
 	msg := event.Event.Message
 	if msg.ChatId == nil || msg.MessageId == nil {
 		return nil
@@ -1568,6 +1613,9 @@ func (f *Channel) handleCardAction(_ context.Context, event *callback.CardAction
 	if event == nil || event.Event == nil || event.Event.Action == nil {
 		return &callback.CardActionTriggerResponse{}, nil
 	}
+	f.wsReadyOnce.Do(func() {
+		shared.Info("feishu ws: connected (card action stream active)")
+	})
 	payload := event.Event
 	value := map[string]string{}
 	for k, v := range payload.Action.Value {

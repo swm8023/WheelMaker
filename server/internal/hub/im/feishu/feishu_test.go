@@ -1,6 +1,8 @@
 package feishu
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -435,5 +437,17 @@ func TestLastOutboundState(t *testing.T) {
 	ch.setLastOutbound("chat-1", "msg-1")
 	if got := ch.getLastOutbound("chat-1"); got != "msg-1" {
 		t.Fatalf("last outbound=%q, want %q", got, "msg-1")
+	}
+}
+
+func TestWSRunExitClassification(t *testing.T) {
+	if got := classifyWSRunExit(nil, nil); got != wsExitUnexpected {
+		t.Fatalf("classifyWSRunExit(nil,nil)=%q, want %q", got, wsExitUnexpected)
+	}
+	if got := classifyWSRunExit(context.Canceled, nil); got != wsExitContextDone {
+		t.Fatalf("classifyWSRunExit(context.Canceled,nil)=%q, want %q", got, wsExitContextDone)
+	}
+	if got := classifyWSRunExit(nil, errors.New("dial failed")); got != wsExitStartFailed {
+		t.Fatalf("classifyWSRunExit(nil,err)=%q, want %q", got, wsExitStartFailed)
 	}
 }
