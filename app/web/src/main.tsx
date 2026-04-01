@@ -508,6 +508,7 @@ function App() {
   const [gitCurrentBranch, setGitCurrentBranch] = useState('');
   const [gitDirty, setGitDirty] = useState(false);
   const [gitStatusSummary, setGitStatusSummary] = useState({staged: 0, unstaged: 0, untracked: 0});
+  const [gitLoadedProjectId, setGitLoadedProjectId] = useState('');
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
   const [commitFilesBySha, setCommitFilesBySha] = useState<Record<string, RegistryGitCommitFile[]>>({});
@@ -666,6 +667,8 @@ function App() {
     setCommitFilesBySha(hydrated.commitFilesBySha);
     setSelectedDiff(hydrated.selectedDiff);
     setDiffText(hydrated.cachedDiffText);
+    setWorkingTreeFiles([]);
+    setGitLoadedProjectId('');
     setProjectMenuOpen(false);
     setSidebarSettingsOpen(false);
     if (!isWide) setDrawerOpen(false);
@@ -841,6 +844,7 @@ function App() {
       setWorkingTreeFiles(working);
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
       setCommits(commitData);
+      setGitLoadedProjectId(projectIdRef.current);
       const firstCommit = commitData[0]?.sha ?? '';
       setSelectedCommit(prev => prev || firstCommit);
       if (!selectedDiff) {
@@ -877,10 +881,11 @@ function App() {
 
   useEffect(() => {
     if (!connected || tab !== 'git') return;
+    if (!projectId) return;
     if (gitLoading) return;
-    if (commits.length > 0 && !gitError) return;
+    if (gitLoadedProjectId === projectId && !gitError) return;
     loadGit().catch(() => undefined);
-  }, [connected, tab, commits.length, gitError, gitLoading]);
+  }, [connected, tab, projectId, gitError, gitLoading, gitLoadedProjectId]);
 
   useEffect(() => {
     const run = async () => {
@@ -1040,9 +1045,17 @@ function App() {
       }
       if (event.method === 'git.workspace.changed') {
         const payload = (event.payload ?? {}) as RegistryGitWorkspaceChangedPayload;
+        const gitRevChanged = !!payload.gitRev && payload.gitRev !== knownGitRevRef.current;
         if (payload.gitRev) knownGitRevRef.current = payload.gitRev;
-        if (payload.worktreeRev && payload.worktreeRev === knownWorktreeRevRef.current) {
+        if (!gitRevChanged && payload.worktreeRev && payload.worktreeRev === knownWorktreeRevRef.current) {
           return;
+        }
+        if (gitRevChanged) {
+          setGitLoadedProjectId('');
+          if (tab === 'git') {
+            loadGit().catch(() => undefined);
+            return;
+          }
         }
         refreshGitStatusOnly().catch(() => undefined);
         return;
@@ -1056,10 +1069,22 @@ function App() {
           knownProjectRevRef.current = payload.projectRev;
         }
         if (payload.gitRev) {
+          if (payload.gitRev !== knownGitRevRef.current) {
+            setGitLoadedProjectId('');
+          }
           knownGitRevRef.current = payload.gitRev;
         }
-        if (changedDomains.includes('git') || changedDomains.includes('worktree')) {
+        if (changedDomains.includes('git')) {
+          if (tab === 'git') {
+            loadGit().catch(() => undefined);
+            return;
+          }
           refreshGitStatusOnly().catch(() => undefined);
+          return;
+        }
+        if (changedDomains.includes('worktree')) {
+          refreshGitStatusOnly().catch(() => undefined);
+          return;
         }
         if (changedDomains.length > 0 && !changedDomains.includes('project') && !changedDomains.includes('fs')) {
           return;
