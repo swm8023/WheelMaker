@@ -140,6 +140,7 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 		"-SkipGitPull",
 		"-InstallDir", cfg.InstallDir,
 		"-SkipUpdaterInstall",
+		"-SkipServiceConfig",
 	)
 	if err != nil {
 		return err

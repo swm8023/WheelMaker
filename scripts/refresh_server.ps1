@@ -48,7 +48,7 @@ function Test-IsAdministrator {
 }
 
 function Assert-ServiceAdminAccess {
-  if ($WhatIf -or $SkipServiceConfig) { return }
+  if ($WhatIf -or $SkipServiceConfig -or $SkipInstall) { return }
   if (Test-IsAdministrator) { return }
   throw "windows service configuration requires elevated administrator PowerShell. Re-run deploy.bat in an Administrator terminal, or pass -SkipServiceConfig to skip service registration/config."
 }
@@ -302,27 +302,6 @@ function Stop-LegacyProcessMode {
 function Prepare-ServiceCredentials {
   if ($SkipServiceConfig -or $WhatIf) { return }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
-
-  $targets = @($script:WheelmakerService, $script:MonitorService)
-  if (-not $SkipUpdaterInstall) { $targets += $script:UpdaterService }
-
-  $needAccountChange = $false
-  foreach ($name in $targets) {
-    $svc = Get-CimInstance Win32_Service -Filter ("Name='{0}'" -f $name) -ErrorAction SilentlyContinue
-    if ($null -eq $svc) {
-      $needAccountChange = $true
-      break
-    }
-    if ([string]::Compare(([string]$svc.StartName).Trim(), $ServiceUser.Trim(), $true) -ne 0) {
-      $needAccountChange = $true
-      break
-    }
-  }
-  if (-not $needAccountChange) {
-    Write-Step ("service account already configured as {0}" -f $ServiceUser)
-    return
-  }
-
   if (-not [string]::IsNullOrWhiteSpace($ServicePassword)) {
     $script:ServicePasswordPlain = $ServicePassword
     return
@@ -344,15 +323,30 @@ function Prepare-ServiceCredentials {
   }
 }
 
+function Wait-ServiceDeleted {
+  param([Parameter(Mandatory = $true)][string]$Name, [int]$TimeoutSeconds = 20)
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $svc) { return }
+    Start-Sleep -Milliseconds 250
+  }
+  throw ("service {0} failed to delete within timeout" -f $Name)
+}
+
 function Ensure-Service {
   param([Parameter(Mandatory = $true)][string]$Name, [Parameter(Mandatory = $true)][string]$BinaryPath, [string]$Arguments = "")
   $binPath = ('"{0}" {1}' -f $BinaryPath, $Arguments).Trim()
-  if ($WhatIf) { Write-Host ("[whatif] ensure service {0} binPath={1}" -f $Name, $binPath); return }
-  if (Test-ServiceExists -Name $Name) {
-    Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service config failed: {0}" -f $Name)
-  } else {
-    Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
+  if ($WhatIf) {
+    Write-Host ("[whatif] reinstall service {0} binPath={1}" -f $Name, $binPath)
+    return
   }
+  if (Test-ServiceExists -Name $Name) {
+    Stop-ServiceSafe -Name $Name
+    Invoke-Checked -FilePath "sc.exe" -Arguments @("delete", $Name) -FailureMessage ("service delete failed: {0}" -f $Name)
+    Wait-ServiceDeleted -Name $Name -TimeoutSeconds 20
+  }
+  Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
   if (-not [string]::IsNullOrWhiteSpace($script:ServicePasswordPlain)) {
     Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "obj=", $ServiceUser, "password=", $script:ServicePasswordPlain) -FailureMessage ("service account config failed: {0}" -f $Name)
   }
