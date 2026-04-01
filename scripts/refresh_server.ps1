@@ -48,9 +48,11 @@ function Test-IsAdministrator {
 }
 
 function Assert-ServiceAdminAccess {
-  if ($WhatIf -or $SkipServiceConfig -or $SkipInstall) { return }
+  if ($WhatIf) { return }
+  $needsServiceControl = (-not $SkipInstall) -or (-not $SkipStop) -or (-not $SkipRestart) -or (-not $SkipServiceConfig)
+  if (-not $needsServiceControl) { return }
   if (Test-IsAdministrator) { return }
-  throw "windows service configuration requires elevated administrator PowerShell. Re-run deploy.bat in an Administrator terminal, or pass -SkipServiceConfig to skip service registration/config."
+  throw "windows service operations require elevated administrator PowerShell. Re-run deploy.bat (or refresh_server.ps1) in an Administrator terminal."
 }
 
 function Assert-Command {
@@ -231,7 +233,15 @@ function Stop-ServiceSafe {
   if (-not (Test-ServiceExists -Name $Name)) { return }
   Write-Step ("stop service: {0}" -f $Name)
   if ($WhatIf) { Write-Host ("[whatif] Stop-Service -Name {0} -Force" -f $Name); return }
-  Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
+  try {
+    Stop-Service -Name $Name -Force -ErrorAction Stop
+  } catch {
+    $message = $_.Exception.Message
+    if ($message -match "Access is denied" -or $message -match "Cannot open" -or $message -match "拒绝访问") {
+      throw ("cannot stop service {0}: access denied. Run this script in an Administrator PowerShell terminal." -f $Name)
+    }
+    Write-Warn ("Stop-Service failed for {0}: {1}. Continue with wait/fallback." -f $Name, $message)
+  }
   try {
     Wait-ServiceStatus -Name $Name -Status "Stopped" -TimeoutSeconds 30
   } catch {
