@@ -196,6 +196,48 @@ body {
   color: var(--text-dim);
 }
 
+.service-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.service-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.service-pill .svc-name {
+  color: var(--text-bright);
+  font-weight: 600;
+}
+
+.service-pill .svc-state {
+  color: var(--text-dim);
+}
+
+.service-pill.service-on {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.service-pill.service-warn {
+  background: rgba(234, 179, 8, 0.1);
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+.service-pill.service-off {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;
@@ -528,10 +570,10 @@ body {
   .monitor-header h1 { font-size: 14px; letter-spacing: 0; }
   .status-label { display: none; }
   .header-status { gap: 8px; }
-  .project-item { flex-direction: column; align-items: flex-start; gap: 2px; }
-  .project-name { font-size: 11px; }
-  .project-path { width: 100%; min-width: 0; font-size: 10px; }
-  .project-meta { margin-left: 0; gap: 4px; }
+  .project-item { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; }
+  .project-name { grid-column: 1; font-size: 11px; }
+  .project-path { grid-column: 1; width: 100%; min-width: 0; font-size: 10px; }
+  .project-meta { grid-column: 2; grid-row: 1 / span 2; margin-left: 0; gap: 4px; justify-content: flex-end; }
   .badge { font-size: 10px; padding: 1px 6px; }
   .reg-table th, .reg-table td { padding: 3px 6px; font-size: 11px; }
   .reg-table td:nth-child(3), .reg-table td:nth-child(4) { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
@@ -695,12 +737,12 @@ function renderStatus(svc) {
     let offlineHtml = '<div class="empty-state">WheelMaker service is offline</div>';
     if (services.length > 0) {
       offlineHtml += '<div style="margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--text-dim);">Services:</div>';
-      offlineHtml += '<div class="proc-chips">';
+      offlineHtml += '<div class="service-list">';
       for (const s of services) {
         const status = String(s.status || 'Unknown');
-        const cls = !s.installed ? 'badge-red' :
-                    status.toLowerCase() === 'running' ? 'badge-green' : 'badge-yellow';
-        offlineHtml += '<div class="proc-chip"><span class="badge badge-blue">' + esc(s.name || '-') + '</span><span class="badge ' + cls + '">' + esc(status) + '</span></div>';
+        const tone = !s.installed ? 'service-off' :
+                     status.toLowerCase() === 'running' ? 'service-on' : 'service-warn';
+        offlineHtml += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span><span class="svc-state">' + esc(status) + '</span></div>';
       }
       offlineHtml += '</div>';
     }
@@ -714,13 +756,13 @@ function renderStatus(svc) {
   let html = '';
   if (services.length > 0) {
     html += '<div style="margin-bottom:6px;font-family:var(--mono);font-size:11px;color:var(--text-dim);">Services</div>';
-    html += '<div class="proc-chips" style="margin-bottom:10px;">';
+    html += '<div class="service-list" style="margin-bottom:10px;">';
     for (const s of services) {
       const status = String(s.status || 'Unknown');
-      const cls = !s.installed ? 'badge-red' :
-                  status.toLowerCase() === 'running' ? 'badge-green' : 'badge-yellow';
+      const tone = !s.installed ? 'service-off' :
+                   status.toLowerCase() === 'running' ? 'service-on' : 'service-warn';
       const startType = s.startType && s.startType !== '-' ? (' / ' + s.startType) : '';
-      html += '<div class="proc-chip"><span class="badge badge-blue">' + esc(s.name || '-') + '</span><span class="badge ' + cls + '">' + esc(status + startType) + '</span></div>';
+      html += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span><span class="svc-state">' + esc(status + startType) + '</span></div>';
     }
     html += '</div>';
   }
@@ -776,7 +818,6 @@ function renderRegistry(cfg) {
   const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
   let hubHtml = '<div class="registry-info">';
   hubHtml += row('Hub ID', r.hubId || '-');
-  hubHtml += row('Projects', String(projects.length));
   hubHtml += '</div>';
   hubEl.innerHTML = hubHtml;
   if (projects.length === 0) {
