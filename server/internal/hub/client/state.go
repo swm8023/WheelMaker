@@ -70,11 +70,6 @@ type ProjectState struct {
 	// ActiveAgent is the name of the currently active agent (e.g. "claude").
 	ActiveAgent string `json:"activeAgent,omitempty"`
 
-	// LastChatID is the most recent IM chat ID that sent a message to this project.
-	// Persisted so that lifecycle notices (e.g. "server started") can be delivered
-	// to the correct chat after a server restart.
-	LastChatID string `json:"lastChatId,omitempty"`
-
 	// Connection captures what this client sent in the last initialize call.
 	// Common across all agents since WheelMaker always declares the same capabilities.
 	Connection *ConnectionConfig `json:"connection,omitempty"`
@@ -88,7 +83,6 @@ type ProjectState struct {
 func (s *ProjectState) UnmarshalJSON(data []byte) error {
 	type rawProjectState struct {
 		ActiveAgent       string                 `json:"activeAgent,omitempty"`
-		LastChatID        string                 `json:"lastChatId,omitempty"`
 		Agents            map[string]*AgentState `json:"agents,omitempty"`
 		LegacyActiveAgent string                 `json:"activeBackend,omitempty"`
 		LegacyAgents      map[string]*AgentState `json:"backends,omitempty"`
@@ -103,8 +97,6 @@ func (s *ProjectState) UnmarshalJSON(data []byte) error {
 	if s.ActiveAgent == "" {
 		s.ActiveAgent = raw.LegacyActiveAgent
 	}
-
-	s.LastChatID = raw.LastChatID
 
 	s.Agents = raw.Agents
 	if s.Agents == nil {

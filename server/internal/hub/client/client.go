@@ -74,11 +74,6 @@ const defaultAgentName = "claude"
 
 const acpClientProtocolVersion = 1
 
-const (
-	lifecycleStartNotice    = "WheelMaker server started."
-	lifecycleShutdownNotice = "WheelMaker server stopping."
-)
-
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 
 type sessionState struct {
@@ -129,9 +124,6 @@ type Client struct {
 	terminals *terminalManager
 
 	permRouter *permissionRouter
-
-	startNoticeSentChatID   string
-	startNoticeReplayQueued bool
 	imBlockedUpdates        map[string]struct{}
 }
 
@@ -208,12 +200,6 @@ func (c *Client) Start(ctx context.Context) error {
 	if c.imBridge != nil {
 		c.imBridge.OnMessage(c.HandleMessage)
 		c.imBridge.SetHelpResolver(c.resolveHelpModel)
-		// Restore the last known chat ID so lifecycle notices reach the correct chat
-		// after a server restart.
-		if state.LastChatID != "" {
-			c.imBridge.SetActiveChatID(state.LastChatID)
-		}
-		c.notifyLifecycleStart()
 	}
 	return nil
 }
@@ -229,8 +215,6 @@ func (c *Client) Run(ctx context.Context) error {
 
 // Close saves state and shuts down the active agent.
 func (c *Client) Close() error {
-	c.notifyLifecycle(lifecycleShutdownNotice)
-
 	c.mu.Lock()
 	ac := c.conn
 	c.mu.Unlock()
@@ -248,47 +232,6 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) notifyLifecycle(text string) {
-	c.reply(text)
-}
-
-func (c *Client) notifyLifecycleStart() {
-	if c.imBridge == nil {
-		fmt.Println(lifecycleStartNotice)
-		return
-	}
-	chatID := c.imBridge.ActiveChatID()
-	if chatID == "" {
-		chatID = c.projectName
-	}
-	c.mu.Lock()
-	c.startNoticeSentChatID = strings.TrimSpace(chatID)
-	c.startNoticeReplayQueued = true
-	c.mu.Unlock()
-	_ = c.imBridge.SendSystem(chatID, lifecycleStartNotice)
-}
-
-func (c *Client) maybeReplayLifecycleStart(chatID string) {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return
-	}
-	c.mu.Lock()
-	if !c.startNoticeReplayQueued {
-		c.mu.Unlock()
-		return
-	}
-	sentTo := strings.TrimSpace(c.startNoticeSentChatID)
-	if sentTo == "" || sentTo == chatID {
-		c.startNoticeReplayQueued = false
-		c.mu.Unlock()
-		return
-	}
-	c.startNoticeReplayQueued = false
-	c.mu.Unlock()
-	c.reply(lifecycleStartNotice)
-}
-
 // HandleMessage routes an incoming IM message to the appropriate handler.
 // Known commands (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are dispatched to handleCommand;
 // everything else — including lines starting with "/" that are not known commands —
@@ -297,14 +240,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 	// Update the active chat ID so all outbound messages route to the correct chat.
 	if c.imBridge != nil && strings.TrimSpace(msg.ChatID) != "" {
 		c.imBridge.SetActiveChatID(msg.ChatID)
-		// Persist so that lifecycle notices survive a server restart.
-		c.mu.Lock()
-		if c.state != nil {
-			c.state.LastChatID = msg.ChatID
-		}
-		c.mu.Unlock()
 	}
-	c.maybeReplayLifecycleStart(msg.ChatID)
 
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {

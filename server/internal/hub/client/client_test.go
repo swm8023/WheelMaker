@@ -301,7 +301,7 @@ type localTestErr string
 
 func (e localTestErr) Error() string { return string(e) }
 
-func TestStart_SendsLifecycleStartNotice(t *testing.T) {
+func TestStart_DoesNotSendLifecycleStartNotice(t *testing.T) {
 	store := &mockStore{}
 	c := client.New(store, nil, "test-project", "/tmp")
 	msgs := captureReplies(c)
@@ -309,15 +309,12 @@ func TestStart_SendsLifecycleStartNotice(t *testing.T) {
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start error: %v", err)
 	}
-	if len(*msgs) == 0 {
-		t.Fatalf("expected lifecycle start notice, got no messages")
-	}
-	if !strings.Contains((*msgs)[0], "server started") {
-		t.Fatalf("unexpected start notice: %q", (*msgs)[0])
+	if len(*msgs) != 0 {
+		t.Fatalf("expected no lifecycle start notice, got %v", *msgs)
 	}
 }
 
-func TestClose_SendsLifecycleShutdownNoticeBeforeClose(t *testing.T) {
+func TestClose_DoesNotSendLifecycleShutdownNotice(t *testing.T) {
 	store := &mockStore{}
 	c := client.New(store, nil, "test-project", "/tmp")
 	msgs := captureReplies(c)
@@ -329,81 +326,9 @@ func TestClose_SendsLifecycleShutdownNoticeBeforeClose(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close error: %v", err)
 	}
-	if len(*msgs) == 0 {
-		t.Fatalf("expected lifecycle shutdown notice, got no messages")
+	if len(*msgs) != 0 {
+		t.Fatalf("expected no lifecycle shutdown notice, got %v", *msgs)
 	}
-	if !strings.Contains((*msgs)[0], "server stopping") {
-		t.Fatalf("unexpected shutdown notice: %q", (*msgs)[0])
-	}
-}
-
-func TestClose_UsesLastChatIDForLifecycleShutdownNotice(t *testing.T) {
-	store := &mockStore{}
-	c := client.New(store, nil, "test-project", "/tmp")
-	msgs := []string{}
-	chats := []string{}
-	c.InjectIMChannel(&captureChannel{messages: &msgs, chatIDs: &chats})
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	msgs = msgs[:0]
-	chats = chats[:0]
-
-	c.HandleMessage(im.Message{ChatID: "chat-1", Text: "/status"})
-	msgs = msgs[:0]
-	chats = chats[:0]
-
-	if err := c.Close(); err != nil {
-		t.Fatalf("Close error: %v", err)
-	}
-	if len(msgs) == 0 {
-		t.Fatalf("expected lifecycle shutdown notice, got no messages")
-	}
-	if len(chats) == 0 || chats[0] != "chat-1" {
-		t.Fatalf("shutdown notice sent to %q, want %q", firstOrEmpty(chats), "chat-1")
-	}
-	if !strings.Contains(msgs[0], "server stopping") {
-		t.Fatalf("unexpected shutdown notice: %q", msgs[0])
-	}
-}
-
-func TestHandleMessage_ReplaysLifecycleStartNoticeOnChatIDChangeAfterRestart(t *testing.T) {
-	st := client.DefaultState()
-	st.LastChatID = "mobile-1"
-	store := &mockStore{state: st}
-	c := client.New(store, nil, "test-project", "/tmp")
-	msgs := []string{}
-	chats := []string{}
-	c.InjectIMChannel(&captureChannel{messages: &msgs, chatIDs: &chats})
-
-	if err := c.Start(context.Background()); err != nil {
-		t.Fatalf("Start error: %v", err)
-	}
-	msgs = msgs[:0]
-	chats = chats[:0]
-
-	c.HandleMessage(im.Message{ChatID: "mobile-2", Text: "/status"})
-
-	found := false
-	for i := range msgs {
-		if strings.Contains(msgs[i], "server started") {
-			if chats[i] != "mobile-2" {
-				t.Fatalf("replayed start notice sent to %q, want %q", chats[i], "mobile-2")
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected replayed lifecycle start notice after chat id changed; msgs=%v chats=%v", msgs, chats)
-	}
-}
-
-func firstOrEmpty(v []string) string {
-	if len(v) == 0 {
-		return ""
-	}
-	return v[0]
 }
 
 // testLogWriter is a goroutine-safe log output writer for capturing log output in tests.
