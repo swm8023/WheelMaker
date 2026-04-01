@@ -49,8 +49,10 @@ function Test-IsAdministrator {
 
 function Assert-ServiceAdminAccess {
   if ($WhatIf) { return }
-  # Deploy path (binary install/reinstall) requires elevation.
-  $needsServiceControl = (-not $SkipInstall)
+  # Recreate/reconfigure services requires elevation. Pure update rounds
+  # (for example updater service with -SkipServiceConfig) can continue and
+  # rely on per-operation permission errors if they occur.
+  $needsServiceControl = (-not $SkipServiceConfig)
   if (-not $needsServiceControl) { return }
   if (Test-IsAdministrator) { return }
   throw "windows service operations require elevated administrator PowerShell. Re-run deploy.bat (or refresh_server.ps1) in an Administrator terminal."
