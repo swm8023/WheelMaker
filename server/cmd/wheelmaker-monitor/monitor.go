@@ -198,12 +198,18 @@ func listProcessesUnix() ([]ProcessInfo, error) {
 }
 
 func classifyRole(cmdline string) string {
+	lower := strings.ToLower(cmdline)
 	switch {
-	case strings.Contains(cmdline, "--hub-worker"):
+	case strings.Contains(lower, "--hub-worker"):
 		return "hub-worker"
-	case strings.Contains(cmdline, "--registry-worker"):
+	case strings.Contains(lower, "--registry-worker"):
 		return "registry-worker"
-	case strings.Contains(cmdline, " -d"):
+	case strings.Contains(lower, "--daemon-worker"):
+		return "hub-worker"
+	case strings.Contains(lower, " -d"):
+		return "guardian"
+	case strings.Contains(lower, "wheelmaker.exe"):
+		// Windows service-mode guardian typically runs without "-d" flag.
 		return "guardian"
 	default:
 		return "unknown"
