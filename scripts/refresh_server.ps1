@@ -37,6 +37,22 @@ function Write-Warn {
   Write-Warning $Text
 }
 
+function Test-IsAdministrator {
+  try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  } catch {
+    return $false
+  }
+}
+
+function Assert-ServiceAdminAccess {
+  if ($WhatIf -or $SkipServiceConfig) { return }
+  if (Test-IsAdministrator) { return }
+  throw "windows service configuration requires elevated administrator PowerShell. Re-run deploy.bat in an Administrator terminal, or pass -SkipServiceConfig to skip service registration/config."
+}
+
 function Assert-Command {
   param([Parameter(Mandatory = $true)][string]$Name, [string]$Hint = "")
   if (Get-Command $Name -ErrorAction SilentlyContinue) { return }
@@ -383,6 +399,7 @@ if ($SkipDeploy) {
 
 if (-not (Test-Path $script:ServerRoot)) { throw ("server directory not found: {0}" -f $script:ServerRoot) }
 
+Assert-ServiceAdminAccess
 Write-Step ("repo root: {0}" -f $script:RepoRoot)
 Pull-Latest
 Ensure-AcpDependencies
