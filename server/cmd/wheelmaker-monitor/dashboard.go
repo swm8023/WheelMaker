@@ -559,7 +559,7 @@ body {
       <div class="ops-col">
         <div class="ops-section">
           <div class="ops-section-head">
-            <div class="ops-section-title">Services</div>
+            <div class="ops-section-title">Services & Processes</div>
             <div class="proc-head-actions">
               <button class="btn btn-green" onclick="doAction('start')">Start</button>
               <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
@@ -686,36 +686,59 @@ function renderStatus(svc) {
   const dot = $('hdr-dot');
   const label = $('hdr-label');
   label.className = 'status-label';
+  const services = Array.isArray(svc && svc.services) ? svc.services : [];
+  const processes = Array.isArray(svc && svc.processes) ? svc.processes : [];
 
   if (!svc || !svc.running) {
     dot.className = 'status-dot offline';
     label.textContent = isNarrowScreen() ? '' : 'offline';
-    $('proc-list').innerHTML = '<div class="empty-state">WheelMaker service is offline</div>';
+    let offlineHtml = '<div class="empty-state">WheelMaker service is offline</div>';
+    if (services.length > 0) {
+      offlineHtml += '<div style="margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--text-dim);">Services:</div>';
+      offlineHtml += '<div class="proc-chips">';
+      for (const s of services) {
+        const status = String(s.status || 'Unknown');
+        const cls = !s.installed ? 'badge-red' :
+                    status.toLowerCase() === 'running' ? 'badge-green' : 'badge-yellow';
+        offlineHtml += '<div class="proc-chip"><span class="badge badge-blue">' + esc(s.name || '-') + '</span><span class="badge ' + cls + '">' + esc(status) + '</span></div>';
+      }
+      offlineHtml += '</div>';
+    }
+    $('proc-list').innerHTML = offlineHtml;
     return;
   }
 
   dot.className = 'status-dot online';
   label.textContent = isNarrowScreen() ? '' : 'online';
 
-  let html = '<div class="proc-chips">';
-  if (svc.services && svc.services.length > 0) {
-    for (const s of svc.services) {
+  let html = '';
+  if (services.length > 0) {
+    html += '<div style="margin-bottom:6px;font-family:var(--mono);font-size:11px;color:var(--text-dim);">Services</div>';
+    html += '<div class="proc-chips" style="margin-bottom:10px;">';
+    for (const s of services) {
       const status = String(s.status || 'Unknown');
       const cls = !s.installed ? 'badge-red' :
                   status.toLowerCase() === 'running' ? 'badge-green' : 'badge-yellow';
       const startType = s.startType && s.startType !== '-' ? (' / ' + s.startType) : '';
       html += '<div class="proc-chip"><span class="badge badge-blue">' + esc(s.name || '-') + '</span><span class="badge ' + cls + '">' + esc(status + startType) + '</span></div>';
     }
+    html += '</div>';
+  }
+
+  html += '<div style="margin-bottom:6px;font-family:var(--mono);font-size:11px;color:var(--text-dim);">WheelMaker Processes</div>';
+  if (processes.length === 0) {
+    html += '<div class="empty-state" style="text-align:left;padding:0;">No wheelmaker.exe process found</div>';
   } else {
-    for (const p of (svc.processes || [])) {
+    html += '<div class="proc-chips">';
+    for (const p of processes) {
       const cls = p.role === 'guardian' ? 'badge-blue' :
                   p.role === 'hub-worker' ? 'badge-green' :
                   p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
       const roleLabel = String(p.role || '').replace('-worker', '');
-      html += '<div class="proc-chip"><span class="pid">#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
+      html += '<div class="proc-chip"><span class="pid">PID#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
     }
+    html += '</div>';
   }
-  html += '</div>';
   $('proc-list').innerHTML = html;
 }
 

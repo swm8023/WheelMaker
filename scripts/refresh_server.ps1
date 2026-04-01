@@ -49,7 +49,8 @@ function Test-IsAdministrator {
 
 function Assert-ServiceAdminAccess {
   if ($WhatIf) { return }
-  $needsServiceControl = (-not $SkipInstall) -or (-not $SkipStop) -or (-not $SkipRestart) -or (-not $SkipServiceConfig)
+  # Deploy path (binary install/reinstall) requires elevation.
+  $needsServiceControl = (-not $SkipInstall)
   if (-not $needsServiceControl) { return }
   if (Test-IsAdministrator) { return }
   throw "windows service operations require elevated administrator PowerShell. Re-run deploy.bat (or refresh_server.ps1) in an Administrator terminal."
@@ -290,7 +291,15 @@ function Start-ServiceSafe {
   if (-not (Test-ServiceExists -Name $Name)) { Write-Warn ("service not found, skip start: {0}" -f $Name); return }
   Write-Step ("start service: {0}" -f $Name)
   if ($WhatIf) { Write-Host ("[whatif] Start-Service -Name {0}" -f $Name); return }
-  Start-Service -Name $Name
+  try {
+    Start-Service -Name $Name -ErrorAction Stop
+  } catch {
+    $message = $_.Exception.Message
+    if ($message -match "Access is denied" -or $message -match "Cannot open" -or $message -match "拒绝访问") {
+      throw ("cannot start service {0}: access denied. Run this script in an Administrator PowerShell terminal." -f $Name)
+    }
+    throw
+  }
   Wait-ServiceStatus -Name $Name -Status "Running" -TimeoutSeconds 20
 }
 
