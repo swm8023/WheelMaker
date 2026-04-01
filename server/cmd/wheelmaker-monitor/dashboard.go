@@ -758,7 +758,8 @@ function renderStatus(svc) {
         const status = String(s.status || 'Unknown');
         const tone = !s.installed ? 'service-off' :
                      status.toLowerCase() === 'running' ? 'service-on' : 'service-warn';
-        offlineHtml += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span><span class="svc-state">' + esc(status) + '</span></div>';
+        const stateText = status.toLowerCase() === 'running' ? '' : status;
+        offlineHtml += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span>' + (stateText ? ('<span class="svc-state">' + esc(stateText) + '</span>') : '') + '</div>';
       }
       offlineHtml += '</div>';
     }
@@ -790,8 +791,10 @@ function renderStatus(svc) {
       const tone = !s.installed ? 'service-off' :
                    status.toLowerCase() === 'running' ? 'service-on' : 'service-warn';
       const showStartType = !isNarrowScreen();
-      const startType = showStartType && s.startType && s.startType !== '-' ? (' / ' + s.startType) : '';
-      html += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span><span class="svc-state">' + esc(status + startType) + '</span></div>';
+      const stateText = status.toLowerCase() === 'running'
+        ? ''
+        : (showStartType && s.startType && s.startType !== '-' ? (status + ' / ' + s.startType) : status);
+      html += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span>' + (stateText ? ('<span class="svc-state">' + esc(stateText) + '</span>') : '') + '</div>';
     }
     html += '</div>';
   }
