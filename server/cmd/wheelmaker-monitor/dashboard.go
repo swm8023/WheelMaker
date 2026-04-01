@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 )
 
 func handleDashboard() http.HandlerFunc {
@@ -11,8 +12,17 @@ func handleDashboard() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte(dashboardHTML))
+		_, _ = w.Write([]byte(renderDashboardHTML(r.URL.Path)))
 	}
+}
+
+func renderDashboardHTML(path string) string {
+	base := pwaBasePath(path)
+	replacer := strings.NewReplacer(
+		"__WM_MANIFEST__", pwaJoin(base, "manifest.webmanifest"),
+		"__WM_ICON__", pwaJoin(base, "icons/icon.svg"),
+	)
+	return replacer.Replace(dashboardHTML)
 }
 
 const dashboardHTML = `<!DOCTYPE html>
@@ -23,9 +33,9 @@ const dashboardHTML = `<!DOCTYPE html>
 <meta name="theme-color" content="#0e1520">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link id="wm-manifest" rel="manifest" href="/manifest.webmanifest">
-<link id="wm-icon" rel="icon" type="image/svg+xml" href="/icons/icon.svg">
-<link id="wm-apple-icon" rel="apple-touch-icon" href="/icons/icon.svg">
+<link id="wm-manifest" rel="manifest" href="__WM_MANIFEST__">
+<link id="wm-icon" rel="icon" type="image/svg+xml" href="__WM_ICON__">
+<link id="wm-apple-icon" rel="apple-touch-icon" href="__WM_ICON__">
 <title>WheelMaker Monitor</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');

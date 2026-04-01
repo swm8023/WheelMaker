@@ -25,3 +25,26 @@ func TestDashboardHTML_HasPWASetup(t *testing.T) {
 		t.Fatalf("dashboard should compute app base path for /monitor scope")
 	}
 }
+
+func TestRenderDashboardHTML_PWALinksForMonitor(t *testing.T) {
+	html := renderDashboardHTML("/monitor")
+	if !strings.Contains(html, `href="/monitor/manifest.webmanifest"`) {
+		t.Fatalf("dashboard should render monitor manifest href")
+	}
+	if !strings.Contains(html, `href="/monitor/icons/icon.svg"`) {
+		t.Fatalf("dashboard should render monitor icon href")
+	}
+	if strings.Contains(html, "__WM_MANIFEST__") || strings.Contains(html, "__WM_ICON__") {
+		t.Fatalf("dashboard placeholders should be replaced")
+	}
+}
+
+func TestRenderDashboardHTML_PWALinksForRoot(t *testing.T) {
+	html := renderDashboardHTML("/")
+	if !strings.Contains(html, `href="/manifest.webmanifest"`) {
+		t.Fatalf("dashboard should render root manifest href")
+	}
+	if !strings.Contains(html, `href="/icons/icon.svg"`) {
+		t.Fatalf("dashboard should render root icon href")
+	}
+}
