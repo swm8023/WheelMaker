@@ -1584,7 +1584,30 @@ function App() {
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch(() => undefined);
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+
+    navigator.serviceWorker.register('/service-worker.js').then(registration => {
+      registration.update().catch(() => undefined);
+
+      if (registration.waiting) {
+        registration.waiting.postMessage('SKIP_WAITING');
+      }
+
+      registration.addEventListener('updatefound', () => {
+        const installing = registration.installing;
+        if (!installing) return;
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            registration.waiting?.postMessage('SKIP_WAITING');
+          }
+        });
+      });
+    }).catch(() => undefined);
   });
 }
 
