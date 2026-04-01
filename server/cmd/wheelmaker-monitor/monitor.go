@@ -26,6 +26,7 @@ type Monitor struct {
 const (
 	wheelmakerServiceName = "WheelMaker"
 	monitorServiceName    = "WheelMakerMonitor"
+	updaterServiceName    = "WheelMakerUpdater"
 )
 
 var errServiceNotInstalled = errors.New("service not installed")
@@ -47,20 +48,85 @@ type ProcessInfo struct {
 type ServiceStatus struct {
 	Running   bool          `json:"running"`
 	Processes []ProcessInfo `json:"processes"`
+	Services  []ServiceInfo `json:"services,omitempty"`
 	Timestamp string        `json:"timestamp"`
+}
+
+type ServiceInfo struct {
+	Name      string `json:"name"`
+	Installed bool   `json:"installed"`
+	Status    string `json:"status"`
+	StartType string `json:"startType"`
 }
 
 // GetServiceStatus returns the current wheelmaker process status.
 func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
+	svcInfos, err := listManagedServices()
+	if err != nil {
+		return nil, err
+	}
+
 	procs, err := listWheelmakerProcesses()
 	if err != nil {
 		return nil, err
 	}
+	running := len(procs) > 0
+	if runtime.GOOS == "windows" && len(svcInfos) > 0 {
+		running = false
+		for _, svc := range svcInfos {
+			if strings.EqualFold(svc.Name, wheelmakerServiceName) && strings.EqualFold(svc.Status, "Running") {
+				running = true
+				break
+			}
+		}
+	}
 	return &ServiceStatus{
-		Running:   len(procs) > 0,
+		Running:   running,
 		Processes: procs,
+		Services:  svcInfos,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+func listManagedServices() ([]ServiceInfo, error) {
+	if runtime.GOOS != "windows" {
+		return nil, nil
+	}
+	names := []string{wheelmakerServiceName, monitorServiceName, updaterServiceName}
+	out := make([]ServiceInfo, 0, len(names))
+	for _, name := range names {
+		info, err := getWindowsServiceInfo(name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
+func getWindowsServiceInfo(name string) (ServiceInfo, error) {
+	script := fmt.Sprintf(`$svc = Get-CimInstance Win32_Service -Filter "Name='%s'" -ErrorAction SilentlyContinue
+if ($null -eq $svc) {
+  '{"name":"%s","installed":false,"status":"NotInstalled","startType":"-"}'
+  exit 0
+}
+$obj = @{
+  name = $svc.Name
+  installed = $true
+  status = [string]$svc.State
+  startType = [string]$svc.StartMode
+}
+$obj | ConvertTo-Json -Compress`, name, name)
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	out, err := cmd.Output()
+	if err != nil {
+		return ServiceInfo{}, fmt.Errorf("query service %s: %w", name, err)
+	}
+	var info ServiceInfo
+	if err := json.Unmarshal(out, &info); err != nil {
+		return ServiceInfo{}, fmt.Errorf("parse service info %s: %w", name, err)
+	}
+	return info, nil
 }
 
 func listWheelmakerProcesses() ([]ProcessInfo, error) {
@@ -290,12 +356,12 @@ func parseLine(line string) LogEntry {
 // RestartService restarts the wheelmaker service using internal process control.
 func (m *Monitor) RestartService() error {
 	if runtime.GOOS == "windows" {
-		exists, err := windowsServiceExists(wheelmakerServiceName)
-		if err != nil {
-			return err
+		err := restartManagedRuntimeServices()
+		if err == nil {
+			return nil
 		}
-		if exists {
-			return windowsServiceRestart(wheelmakerServiceName, 12*time.Second)
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
 		}
 	}
 	if err := m.StopService(); err != nil {
@@ -322,12 +388,12 @@ func (m *Monitor) StopService() error {
 		}
 		return nil
 	}
-	exists, err := windowsServiceExists(wheelmakerServiceName)
-	if err != nil {
-		return err
+	err := stopManagedRuntimeServices()
+	if err == nil {
+		return nil
 	}
-	if exists {
-		return windowsServiceStop(wheelmakerServiceName, 10*time.Second)
+	if !errors.Is(err, errServiceNotInstalled) {
+		return err
 	}
 
 	// Keep monitor alive: only stop wheelmaker.exe processes.
@@ -356,12 +422,12 @@ exit 1`
 // StartService starts the wheelmaker service using internal process control.
 func (m *Monitor) StartService() error {
 	if runtime.GOOS == "windows" {
-		exists, err := windowsServiceExists(wheelmakerServiceName)
-		if err != nil {
-			return err
+		err := startManagedRuntimeServices()
+		if err == nil {
+			return nil
 		}
-		if exists {
-			return windowsServiceStart(wheelmakerServiceName, 10*time.Second)
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
 		}
 	}
 	wheelmakerExe, err := m.resolveWheelmakerExecutable()
@@ -539,6 +605,56 @@ func runWindowsServiceScript(serviceName string, script string, action string) e
 			return errServiceNotInstalled
 		}
 		return fmt.Errorf("%s service %s failed: %v (%s)", action, serviceName, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func managedRuntimeServiceNames() []string {
+	return []string{wheelmakerServiceName, updaterServiceName}
+}
+
+func restartManagedRuntimeServices() error {
+	return runManagedRuntimeServiceAction("restart")
+}
+
+func stopManagedRuntimeServices() error {
+	return runManagedRuntimeServiceAction("stop")
+}
+
+func startManagedRuntimeServices() error {
+	return runManagedRuntimeServiceAction("start")
+}
+
+func runManagedRuntimeServiceAction(action string) error {
+	names := managedRuntimeServiceNames()
+	performed := false
+	errs := make([]string, 0)
+	for _, name := range names {
+		var err error
+		switch action {
+		case "start":
+			err = windowsServiceStart(name, 10*time.Second)
+		case "stop":
+			err = windowsServiceStop(name, 10*time.Second)
+		case "restart":
+			err = windowsServiceRestart(name, 12*time.Second)
+		default:
+			return fmt.Errorf("unsupported service action: %s", action)
+		}
+		if err == nil {
+			performed = true
+			continue
+		}
+		if errors.Is(err, errServiceNotInstalled) {
+			continue
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", name, err))
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	if !performed {
+		return errServiceNotInstalled
 	}
 	return nil
 }

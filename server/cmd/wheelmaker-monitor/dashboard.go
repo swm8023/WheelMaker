@@ -559,7 +559,7 @@ body {
       <div class="ops-col">
         <div class="ops-section">
           <div class="ops-section-head">
-            <div class="ops-section-title">Processes</div>
+            <div class="ops-section-title">Services</div>
             <div class="proc-head-actions">
               <button class="btn btn-green" onclick="doAction('start')">Start</button>
               <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
@@ -690,7 +690,7 @@ function renderStatus(svc) {
   if (!svc || !svc.running) {
     dot.className = 'status-dot offline';
     label.textContent = isNarrowScreen() ? '' : 'offline';
-    $('proc-list').innerHTML = '<div class="empty-state">No wheelmaker processes running</div>';
+    $('proc-list').innerHTML = '<div class="empty-state">WheelMaker service is offline</div>';
     return;
   }
 
@@ -698,12 +698,22 @@ function renderStatus(svc) {
   label.textContent = isNarrowScreen() ? '' : 'online';
 
   let html = '<div class="proc-chips">';
-  for (const p of svc.processes) {
-    const cls = p.role === 'guardian' ? 'badge-blue' :
-                p.role === 'hub-worker' ? 'badge-green' :
-                p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
-    const roleLabel = String(p.role || '').replace('-worker', '');
-    html += '<div class="proc-chip"><span class="pid">#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
+  if (svc.services && svc.services.length > 0) {
+    for (const s of svc.services) {
+      const status = String(s.status || 'Unknown');
+      const cls = !s.installed ? 'badge-red' :
+                  status.toLowerCase() === 'running' ? 'badge-green' : 'badge-yellow';
+      const startType = s.startType && s.startType !== '-' ? (' / ' + s.startType) : '';
+      html += '<div class="proc-chip"><span class="badge badge-blue">' + esc(s.name || '-') + '</span><span class="badge ' + cls + '">' + esc(status + startType) + '</span></div>';
+    }
+  } else {
+    for (const p of (svc.processes || [])) {
+      const cls = p.role === 'guardian' ? 'badge-blue' :
+                  p.role === 'hub-worker' ? 'badge-green' :
+                  p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
+      const roleLabel = String(p.role || '').replace('-worker', '');
+      html += '<div class="proc-chip"><span class="pid">#' + esc(String(p.pid)) + '</span><span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
+    }
   }
   html += '</div>';
   $('proc-list').innerHTML = html;
