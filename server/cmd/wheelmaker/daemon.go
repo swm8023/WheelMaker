@@ -70,6 +70,7 @@ func runGuardianWithContext(ctx context.Context, workerArgs []string) error {
 	for {
 		select {
 		case <-ctx.Done():
+			shutdownWorkers(exeName, specs)
 			return nil
 		case <-ticker.C:
 			reconcile()
@@ -116,6 +117,23 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 		logger.Warn("[daemon] stopped extra %s worker pid=%d", markerFlag, proc.PID)
 	}
 	return keepPID, nil
+}
+
+func shutdownWorkers(exeName string, specs []*workerSpec) {
+	for _, spec := range specs {
+		workers, err := listWorkerProcesses(exeName, spec.markerFlag)
+		if err != nil {
+			logger.Warn("[daemon] shutdown list %s workers failed: %v", spec.markerFlag, err)
+			continue
+		}
+		for _, proc := range workers {
+			if killErr := killProcess(proc.PID); killErr != nil {
+				logger.Warn("[daemon] shutdown stop %s worker pid=%d failed: %v", spec.markerFlag, proc.PID, killErr)
+				continue
+			}
+			logger.Info("[daemon] shutdown stopped %s worker pid=%d", spec.markerFlag, proc.PID)
+		}
+	}
 }
 
 func chooseKeepPID(workers []daemonProcess, preferredPID int) int {
