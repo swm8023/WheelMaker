@@ -33,7 +33,7 @@ Windows Services
 Requires **Go 1.22+** and **Node.js 22+**.
 
 ```bat
-deply.bat
+deploy.bat
 ```
 
 or:
