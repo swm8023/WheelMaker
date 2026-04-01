@@ -1051,10 +1051,6 @@ function App() {
         }
         if (gitRevChanged) {
           setGitLoadedProjectId('');
-          if (tab === 'git') {
-            loadGit().catch(() => undefined);
-            return;
-          }
         }
         refreshGitStatusOnly().catch(() => undefined);
         return;
@@ -1074,10 +1070,7 @@ function App() {
           knownGitRevRef.current = payload.gitRev;
         }
         if (changedDomains.includes('git')) {
-          if (tab === 'git') {
-            loadGit().catch(() => undefined);
-            return;
-          }
+          setGitLoadedProjectId('');
           refreshGitStatusOnly().catch(() => undefined);
           return;
         }
@@ -1635,14 +1628,19 @@ function App() {
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
     let refreshing = false;
+    const reloadKey = 'wm_sw_reloaded_once';
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (refreshing) return;
+      if (window.sessionStorage.getItem(reloadKey) === '1') return;
       refreshing = true;
+      window.sessionStorage.setItem(reloadKey, '1');
       window.location.reload();
     });
 
     navigator.serviceWorker.register('/service-worker.js').then(registration => {
-      registration.update().catch(() => undefined);
+      window.setTimeout(() => {
+        registration.update().catch(() => undefined);
+      }, 1500);
 
       if (registration.waiting) {
         registration.waiting.postMessage('SKIP_WAITING');
