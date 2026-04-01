@@ -122,6 +122,7 @@ go test ./...              # run tests
 Scripts overview:
 - `scripts\refresh_server.ps1` — service-first deploy (build + install + service registration)
 - `scripts\signal_update_now.ps1` — async manual updater trigger (returns immediately after scheduling signal)
+- `app\scripts\export_web_release.ps1` — export web release assets to `~/.wheelmaker\web\` (used by `npm run build:web:release`)
 
 ## License
 

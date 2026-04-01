@@ -2,10 +2,15 @@ $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $dist = Join-Path $root "dist"
-$target = Join-Path $root "dist-web"
+$stateRoot = Join-Path $HOME ".wheelmaker"
+$target = Join-Path $stateRoot "web"
 
 if (-not (Test-Path $dist)) {
   throw "Missing dist directory: $dist. Run npm run build:web first."
+}
+
+if (-not (Test-Path $stateRoot)) {
+  New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 }
 
 if (Test-Path $target) {
