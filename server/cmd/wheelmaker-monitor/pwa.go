@@ -65,24 +65,27 @@ const appIconSVG = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0a1018"/>
-      <stop offset="100%" stop-color="#162236"/>
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#13253a"/>
     </linearGradient>
-    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#12243a"/>
-      <stop offset="100%" stop-color="#0b1828"/>
+    <linearGradient id="bridge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22c55e"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#22c55e"/>
     </linearGradient>
   </defs>
   <rect x="24" y="24" width="464" height="464" rx="96" fill="url(#bg)"/>
-  <rect x="84" y="112" width="344" height="240" rx="26" fill="#060b12" stroke="#3b82f6" stroke-width="14"/>
-  <rect x="102" y="132" width="308" height="200" rx="16" fill="url(#glass)"/>
-  <path d="M118 272 L162 272 L186 234 L214 296 L244 210 L276 272 L308 252 L340 272 L394 272"
-        fill="none" stroke="#22c55e" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="126" cy="158" r="9" fill="#22c55e"/>
-  <circle cx="154" cy="158" r="9" fill="#eab308"/>
-  <circle cx="182" cy="158" r="9" fill="#ef4444"/>
-  <rect x="170" y="380" width="172" height="24" rx="12" fill="#0c1422" stroke="#2a3a4f" stroke-width="8"/>
-  <rect x="144" y="404" width="224" height="20" rx="10" fill="#0a111d" stroke="#223248" stroke-width="8"/>
+  <rect x="98" y="126" width="130" height="108" rx="18" fill="#07101b" stroke="#2f4667" stroke-width="9"/>
+  <rect x="284" y="278" width="130" height="108" rx="18" fill="#07101b" stroke="#2f4667" stroke-width="9"/>
+  <path d="M138 176 h48 M138 198 h74 M138 220 h38" stroke="#9fb3cc" stroke-width="9" stroke-linecap="round"/>
+  <path d="M324 328 h48 M324 350 h74 M324 372 h38" stroke="#9fb3cc" stroke-width="9" stroke-linecap="round"/>
+  <path d="M228 234 L284 278" stroke="url(#bridge)" stroke-width="18" stroke-linecap="round"/>
+  <path d="M260 246 L228 234 L238 264" fill="none" stroke="#3b82f6" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M270 248 L284 278 L254 268" fill="none" stroke="#22c55e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="216" cy="224" r="13" fill="#3b82f6"/>
+  <circle cx="296" cy="288" r="13" fill="#22c55e"/>
+  <circle cx="356" cy="144" r="24" fill="#0b1726" stroke="#3b82f6" stroke-width="9"/>
+  <path d="M346 144 h20 M356 134 v20" stroke="#dbe7f6" stroke-width="7" stroke-linecap="round"/>
 </svg>
 `
 

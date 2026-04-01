@@ -12,15 +12,15 @@
     </linearGradient>
   </defs>
   <rect x="24" y="24" width="464" height="464" rx="96" fill="url(#bg)"/>
-  <rect x="72" y="96" width="156" height="130" rx="22" fill="#07101b" stroke="#2f4667" stroke-width="10"/>
-  <rect x="284" y="286" width="156" height="130" rx="22" fill="#07101b" stroke="#2f4667" stroke-width="10"/>
-  <path d="M122 158 h56 M122 182 h84 M122 206 h44" stroke="#9fb3cc" stroke-width="10" stroke-linecap="round"/>
-  <path d="M334 348 h56 M334 372 h84 M334 396 h44" stroke="#9fb3cc" stroke-width="10" stroke-linecap="round"/>
-  <path d="M224 224 L288 288" stroke="url(#bridge)" stroke-width="20" stroke-linecap="round"/>
-  <path d="M266 238 L224 224 L238 266" fill="none" stroke="#3b82f6" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M274 246 L288 288 L246 274" fill="none" stroke="#22c55e" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="206" cy="206" r="16" fill="#3b82f6"/>
-  <circle cx="306" cy="306" r="16" fill="#22c55e"/>
-  <circle cx="356" cy="116" r="28" fill="#0b1726" stroke="#3b82f6" stroke-width="10"/>
-  <path d="M345 116 h22 M356 105 v22" stroke="#dbe7f6" stroke-width="8" stroke-linecap="round"/>
+  <rect x="98" y="126" width="130" height="108" rx="18" fill="#07101b" stroke="#2f4667" stroke-width="9"/>
+  <rect x="284" y="278" width="130" height="108" rx="18" fill="#07101b" stroke="#2f4667" stroke-width="9"/>
+  <path d="M138 176 h48 M138 198 h74 M138 220 h38" stroke="#9fb3cc" stroke-width="9" stroke-linecap="round"/>
+  <path d="M324 328 h48 M324 350 h74 M324 372 h38" stroke="#9fb3cc" stroke-width="9" stroke-linecap="round"/>
+  <path d="M228 234 L284 278" stroke="url(#bridge)" stroke-width="18" stroke-linecap="round"/>
+  <path d="M260 246 L228 234 L238 264" fill="none" stroke="#3b82f6" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M270 248 L284 278 L254 268" fill="none" stroke="#22c55e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="216" cy="224" r="13" fill="#3b82f6"/>
+  <circle cx="296" cy="288" r="13" fill="#22c55e"/>
+  <circle cx="356" cy="144" r="24" fill="#0b1726" stroke="#3b82f6" stroke-width="9"/>
+  <path d="M346 144 h20 M356 134 v20" stroke="#dbe7f6" stroke-width="7" stroke-linecap="round"/>
 </svg>
