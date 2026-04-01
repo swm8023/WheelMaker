@@ -169,9 +169,33 @@ function Install-ServiceScripts {
   Write-Step "install service helper scripts"
   $installedRefreshScript = Join-Path $script:WheelmakerHome "refresh_server.ps1"
   $sourceRefreshScript = Join-Path $script:RepoRoot "scripts\refresh_server.ps1"
-  $common = " -RepoRoot `"$($script:RepoRoot)`" -InstallDir `"$($script:InstallDirResolved)`""
-  $startBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$installedRefreshScript`" -SkipUpdate -SkipBuild -SkipDeploy$common`r`n"
-  $stopBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$installedRefreshScript`" -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart$common`r`n"
+  $common = "-RepoRoot `"$($script:RepoRoot)`" -InstallDir `"$($script:InstallDirResolved)`""
+  $startBody = "-SkipUpdate -SkipBuild -SkipDeploy {0}" -f $common
+  $stopBody = "-SkipUpdate -SkipBuild -SkipDeploy -SkipRestart {0}" -f $common
+  $startBat = @"
+@echo off
+setlocal
+powershell -NoProfile -ExecutionPolicy Bypass -File "$installedRefreshScript" $startBody
+set "_exit=%errorlevel%"
+if not "%_exit%"=="0" (
+  echo.
+  echo [FAILED] start exited with code %_exit%
+  pause
+)
+exit /b %_exit%
+"@
+  $stopBat = @"
+@echo off
+setlocal
+powershell -NoProfile -ExecutionPolicy Bypass -File "$installedRefreshScript" $stopBody
+set "_exit=%errorlevel%"
+if not "%_exit%"=="0" (
+  echo.
+  echo [FAILED] stop exited with code %_exit%
+  pause
+)
+exit /b %_exit%
+"@
 
   $scripts = @{ "start.bat" = $startBat; "stop.bat" = $stopBat }
   if ($WhatIf) {
