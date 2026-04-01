@@ -197,21 +197,22 @@ body {
 }
 
 .service-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px;
 }
 
 .service-pill {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 4px 6px;
   border-radius: 4px;
   border: 1px solid var(--border);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 10px;
+  min-width: 0;
 }
 
 .service-pill .svc-name {
@@ -221,6 +222,7 @@ body {
 
 .service-pill .svc-state {
   color: var(--text-dim);
+  white-space: nowrap;
 }
 
 .service-pill.service-on {
@@ -575,6 +577,7 @@ body {
   .project-path { grid-column: 1; width: 100%; min-width: 0; font-size: 10px; }
   .project-meta { grid-column: 2; grid-row: 1 / span 2; margin-left: 0; gap: 4px; justify-content: flex-end; }
   .badge { font-size: 10px; padding: 1px 6px; }
+  .service-list { grid-template-columns: 1fr; }
   .reg-table th, .reg-table td { padding: 3px 6px; font-size: 11px; }
   .reg-table td:nth-child(3), .reg-table td:nth-child(4) { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
   .card { padding: 10px 12px; }
@@ -723,6 +726,13 @@ async function refresh() {
   }
   loadLogs();
   loadRegistryStatus();
+}
+
+async function refreshStatusOnly() {
+  try {
+    const svc = await api('status');
+    renderStatus(svc);
+  } catch(e) {}
 }
 
 function renderStatus(svc) {
@@ -984,13 +994,15 @@ function esc(s) {
 
 window.addEventListener('resize', applyResponsiveLabels);
 
-// Auto-refresh every 10s
-setInterval(async () => {
-  try {
-    const svc = await api('status');
-    renderStatus(svc);
-  } catch(e) {}
-}, 10000);
+// Auto-refresh service/process status every 5s while tab is visible.
+setInterval(() => {
+  if (document.hidden) return;
+  refreshStatusOnly();
+}, 5000);
+
+window.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshStatusOnly();
+});
 
 // Auto-refresh logs every 15s
 setInterval(loadLogs, 15000);
