@@ -197,27 +197,30 @@ body {
 }
 
 .service-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 4px;
 }
 
 .service-pill {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
   gap: 6px;
-  padding: 4px 6px;
-  border-radius: 4px;
+  padding: 3px 7px;
+  border-radius: 3px;
   border: 1px solid var(--border);
   font-family: var(--mono);
   font-size: 10px;
-  min-width: 0;
+  max-width: 100%;
 }
 
 .service-pill .svc-name {
   color: var(--text-bright);
   font-weight: 600;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .service-pill .svc-state {
@@ -577,7 +580,9 @@ body {
   .project-path { grid-column: 1; width: 100%; min-width: 0; font-size: 10px; }
   .project-meta { grid-column: 2; grid-row: 1 / span 2; margin-left: 0; gap: 4px; justify-content: flex-end; }
   .badge { font-size: 10px; padding: 1px 6px; }
-  .service-list { grid-template-columns: 1fr; }
+  .service-pill { font-size: 9px; padding: 2px 6px; gap: 4px; }
+  .service-pill .svc-name { max-width: 92px; }
+  .service-pill .svc-state { max-width: 88px; overflow: hidden; text-overflow: ellipsis; }
   .reg-table th, .reg-table td { padding: 3px 6px; font-size: 11px; }
   .reg-table td:nth-child(3), .reg-table td:nth-child(4) { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
   .card { padding: 10px 12px; }
@@ -784,7 +789,8 @@ function renderStatus(svc) {
       const status = String(s.status || 'Unknown');
       const tone = !s.installed ? 'service-off' :
                    status.toLowerCase() === 'running' ? 'service-on' : 'service-warn';
-      const startType = s.startType && s.startType !== '-' ? (' / ' + s.startType) : '';
+      const showStartType = !isNarrowScreen();
+      const startType = showStartType && s.startType && s.startType !== '-' ? (' / ' + s.startType) : '';
       html += '<div class="service-pill ' + tone + '"><span class="svc-name">' + esc(s.name || '-') + '</span><span class="svc-state">' + esc(status + startType) + '</span></div>';
     }
     html += '</div>';
