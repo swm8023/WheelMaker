@@ -244,6 +244,45 @@ function Start-ServiceSafe {
   Wait-ServiceStatus -Name $Name -Status "Running" -TimeoutSeconds 20
 }
 
+function Stop-LegacyProcessMode {
+  if ($SkipStop) { return }
+  if ($WhatIf) {
+    Write-Step "stop legacy process-mode instances (whatif)"
+    Write-Host "[whatif] stop process: wheelmaker.exe / wheelmaker-monitor.exe / wheelmaker-updater.exe"
+    Write-Host "[whatif] remove legacy scheduled tasks if present"
+    return
+  }
+
+  Write-Step "stop legacy process-mode instances (if any)"
+  $legacyNames = @("wheelmaker.exe", "wheelmaker-monitor.exe", "wheelmaker-updater.exe")
+  foreach ($name in $legacyNames) {
+    try {
+      $procs = @(Get-CimInstance Win32_Process -Filter ("Name='{0}'" -f $name) -ErrorAction SilentlyContinue)
+      if ($procs.Count -eq 0) { continue }
+      foreach ($proc in $procs) {
+        try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue }
+        catch { Write-Warn ("failed to stop legacy process {0} pid={1}: {2}" -f $name, $proc.ProcessId, $_.Exception.Message) }
+      }
+    } catch {
+      Write-Warn ("failed to enumerate legacy process {0}: {1}" -f $name, $_.Exception.Message)
+    }
+  }
+
+  $legacyTasks = @("WheelMakerAutoUpdate", "WheelMakerAutoUpdater", "WheelMakerUpdater", "WheelMaker-Update")
+  foreach ($task in $legacyTasks) {
+    try {
+      & schtasks.exe /Query /TN $task *> $null
+      if ($LASTEXITCODE -eq 0) {
+        Write-Step ("remove legacy scheduled task: {0}" -f $task)
+        & schtasks.exe /Delete /TN $task /F *> $null
+        if ($LASTEXITCODE -ne 0) { Write-Warn ("failed to delete scheduled task: {0}" -f $task) }
+      }
+    } catch {
+      Write-Warn ("failed to query/delete scheduled task {0}: {1}" -f $task, $_.Exception.Message)
+    }
+  }
+}
+
 function Prepare-ServiceCredentials {
   if ($SkipServiceConfig -or $WhatIf) { return }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
@@ -364,6 +403,7 @@ if (-not $SkipStop) {
   }
   Stop-ServiceSafe -Name $script:WheelmakerService
   Stop-ServiceSafe -Name $script:MonitorService
+  Stop-LegacyProcessMode
 }
 if (-not $SkipInstall) {
   Backup-Logs
