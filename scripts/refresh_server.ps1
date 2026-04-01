@@ -146,19 +146,20 @@ function Ensure-Config {
 
 function Install-ServiceScripts {
   Write-Step "install service helper scripts"
-  $refreshScript = Join-Path $script:RepoRoot "scripts\refresh_server.ps1"
+  $installedRefreshScript = Join-Path $script:WheelmakerHome "refresh_server.ps1"
+  $sourceRefreshScript = Join-Path $script:RepoRoot "scripts\refresh_server.ps1"
   $common = " -RepoRoot `"$($script:RepoRoot)`" -InstallDir `"$($script:InstallDirResolved)`""
-  $startBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`" -SkipUpdate -SkipBuild -SkipStop -SkipDeploy$common`r`n"
-  $stopBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`" -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart$common`r`n"
-  $restartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`" -SkipUpdate -SkipBuild -SkipDeploy$common`r`n"
-  $updateRestartBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$refreshScript`"$common`r`n"
+  $startBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$installedRefreshScript`" -SkipUpdate -SkipBuild -SkipDeploy$common`r`n"
+  $stopBat = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$installedRefreshScript`" -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart$common`r`n"
 
-  $scripts = @{ "start.bat" = $startBat; "stop.bat" = $stopBat; "restart.bat" = $restartBat; "update-restart.bat" = $updateRestartBat }
+  $scripts = @{ "start.bat" = $startBat; "stop.bat" = $stopBat }
   if ($WhatIf) {
+    Write-Host ("[whatif] copy {0} -> {1}" -f $sourceRefreshScript, $installedRefreshScript)
     foreach ($name in $scripts.Keys) { Write-Host ("[whatif] write {0}" -f (Join-Path $script:WheelmakerHome $name)) }
     return
   }
   New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
+  Copy-Item -Path $sourceRefreshScript -Destination $installedRefreshScript -Force
   foreach ($name in $scripts.Keys) { Set-Content -Path (Join-Path $script:WheelmakerHome $name) -Value $scripts[$name] -Encoding UTF8 }
 }
 
@@ -296,6 +297,7 @@ function Restart-Services {
   if ($SkipRestart) { Write-Step "skip restart"; return }
   Start-ServiceSafe -Name $script:WheelmakerService
   Start-ServiceSafe -Name $script:MonitorService
+  Write-Step ("update service uses script entry: {0}" -f (Join-Path $script:WheelmakerHome "refresh_server.ps1"))
 }
 
 $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Resolve-Path $RepoRoot).Path }

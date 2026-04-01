@@ -32,6 +32,12 @@ Windows Services
 
 Requires **Go 1.22+** and **Node.js 22+**.
 
+```bat
+deply.bat
+```
+
+or:
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
 ```
@@ -42,8 +48,9 @@ The refresh script will:
 - Build `wheelmaker.exe` and `wheelmaker-monitor.exe`
 - Install binaries to `~/.wheelmaker\bin\`
 - Preserve `~/.wheelmaker\config.json`, or create one from `server\config.example.json`
-- Generate `start.bat` / `stop.bat` / `restart.bat` / `update-restart.bat` service wrappers
+- Copy `refresh_server.ps1` and generate `start.bat` / `stop.bat` wrappers to `~/.wheelmaker\`
 - Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`
+- Keep update flow script-driven (`~/.wheelmaker\refresh_server.ps1`)
 - Start services (auto-start enabled)
 
 If `config.json` is created for the first time, the script stops before restart so you can edit it safely, then rerun the same command.
@@ -61,8 +68,7 @@ notepad ~/.wheelmaker/config.json
 ```powershell
 ~/.wheelmaker/start.bat     # start services
 ~/.wheelmaker/stop.bat      # stop services
-~/.wheelmaker/restart.bat   # restart services
-~/.wheelmaker/update-restart.bat  # update + build + deploy + restart
+~/.wheelmaker/refresh_server.ps1  # update service entry (script-driven)
 ```
 
 Default refresh flow: `update -> build -> stop -> deploy -> restart`.

@@ -52,6 +52,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1                 # delayed refresh + service restart
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy    # restart services only
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart # stop services only
+# deployed wrappers under ~/.wheelmaker: start.bat / stop.bat / refresh_server.ps1
 ```
 
 ## Key Invariants (do not break)
