@@ -354,7 +354,8 @@ function Prepare-ServiceCredentials {
   if ([Console]::IsInputRedirected) {
     throw ("service account password is required to configure services as {0}; pass -ServicePassword in non-interactive mode" -f $ServiceUser)
   }
-  $secure = Read-Host -AsSecureString -Prompt ("Enter password for service account {0}" -f $ServiceUser)
+  Write-Host ("==> Enter password for service account {0} (input hidden)" -f $ServiceUser) -ForegroundColor Green
+  $secure = Read-Host -AsSecureString -Prompt "Password"
   $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try {
     $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
