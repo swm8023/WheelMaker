@@ -208,7 +208,18 @@ function Stop-ServiceSafe {
   Write-Step ("stop service: {0}" -f $Name)
   if ($WhatIf) { Write-Host ("[whatif] Stop-Service -Name {0} -Force" -f $Name); return }
   Stop-Service -Name $Name -Force -ErrorAction SilentlyContinue
-  Wait-ServiceStatus -Name $Name -Status "Stopped" -TimeoutSeconds 20
+  try {
+    Wait-ServiceStatus -Name $Name -Status "Stopped" -TimeoutSeconds 30
+  } catch {
+    # For monitor service, force kill process as a last resort to avoid blocking deploy.
+    if ($Name -eq $script:MonitorService) {
+      Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+      Start-Sleep -Milliseconds 500
+      return
+    }
+    throw
+  }
 }
 
 function Start-ServiceSafe {
@@ -279,7 +290,13 @@ function Restart-Services {
   if ($SkipRestart) { Write-Step "skip restart"; return }
   Start-ServiceSafe -Name $script:WheelmakerService
   Start-ServiceSafe -Name $script:MonitorService
-  if (-not $SkipUpdaterInstall) { Start-ServiceSafe -Name $script:UpdaterService }
+  if (-not $SkipUpdaterInstall) {
+    try {
+      Start-ServiceSafe -Name $script:UpdaterService
+    } catch {
+      Write-Warn ("updater service failed to start; continue without updater: {0}" -f $_.Exception.Message)
+    }
+  }
 }
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
