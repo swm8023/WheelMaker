@@ -541,13 +541,6 @@ html, body {
             <option value="info">Info+</option>
             <option value="debug">Debug+</option>
           </select>
-          <select id="log-kind" class="log-sel" onchange="loadLogs()">
-            <option value="">All Types</option>
-            <option value="tool">Tool</option>
-            <option value="thought">Thought</option>
-            <option value="text">Text</option>
-            <option value="system">System</option>
-          </select>
           <select id="log-tail" class="log-sel" onchange="loadLogs()">
             <option value="100">&#xd7;100</option>
             <option value="200" selected>&#xd7;200</option>
@@ -748,17 +741,15 @@ async function loadRegistryStatus() {
 async function loadLogs() {
   const file  = $('log-file').value;
   const level = $('log-level').value;
-  const kind  = $('log-kind').value;
   const tail  = $('log-tail').value;
   const el    = $('log-scroll');
   try {
     const data = await api('logs?file=' + file + '&level=' + level + '&tail=' + tail);
-    const entries = (data.entries || []).filter(e => matchesLogKind(e.message, kind));
-    if (!entries || entries.length === 0) {
+    if (!data.entries || data.entries.length === 0) {
       el.innerHTML = '<div class="empty-state">No log entries</div>';
       return;
     }
-    el.innerHTML = entries.map(e => {
+    el.innerHTML = data.entries.map(e => {
       const lvlCls = e.level ? 'lvl-' + e.level.toLowerCase() : '';
       return '<div class="log-line">' +
         (e.time  ? '<span class="ts">' + esc(e.time) + '</span> ' : '') +
@@ -770,34 +761,6 @@ async function loadLogs() {
   } catch(e) {
     el.innerHTML = '<div class="empty-state">Failed to load logs</div>';
   }
-}
-
-function matchesLogKind(message, kind) {
-  if (!kind) return true;
-  const msg = String(message || '').toLowerCase();
-  if (!msg) return false;
-  if (kind === 'tool') {
-    return msg.includes('tool_call') ||
-      msg.includes('tool call') ||
-      msg.includes('tools ') ||
-      msg.includes('[tool]');
-  }
-  if (kind === 'thought') {
-    return msg.includes('thought') ||
-      msg.includes('thinking') ||
-      msg.includes('[thinking]');
-  }
-  if (kind === 'text') {
-    return msg.includes('agent_message_chunk') ||
-      msg.includes('user_message_chunk') ||
-      msg.includes('text stream') ||
-      msg.includes('[text]');
-  }
-  if (kind === 'system') {
-    return msg.includes('system message') ||
-      msg.includes('[system]');
-  }
-  return true;
 }
 
 async function doAction(action) {
