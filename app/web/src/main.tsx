@@ -70,6 +70,8 @@ type SetiResolvedIcon = {
   color: string;
 };
 
+const WORKING_TREE_COMMIT_ID = '__WORKING_TREE__';
+
 const service = new RegistryWorkspaceService();
 const workspaceStore = new WorkspaceStore();
 const workspaceController = new WorkspaceController(service, workspaceStore);
@@ -617,10 +619,7 @@ function App() {
     [commitFilesBySha, selectedCommit],
   );
 
-  const hasWorkingTreeSelection = useMemo(
-    () => selectedDiffSource === 'worktree' && !!selectedDiff,
-    [selectedDiffSource, selectedDiff],
-  );
+  const worktreeActive = selectedDiffSource === 'worktree';
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
   const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;
@@ -1200,53 +1199,79 @@ function App() {
         <div className="list half">
           {gitLoading ? <div className="muted block">Loading commits...</div> : null}
           {gitError ? <div className="error block">{gitError}</div> : null}
+          {workingTreeFiles.length > 0 ? (
+            <div
+              className={`item ${worktreeActive ? 'selected' : ''}`}
+              onClick={() => {
+                setSelectedDiffSource('worktree');
+                if (workingTreeFiles[0]) {
+                  setSelectedDiff(workingTreeFiles[0].path);
+                  setSelectedDiffScope(workingTreeFiles[0].scope);
+                }
+                if (!isWide) setDrawerOpen(false);
+              }}>
+              <span className="file-dot codicon codicon-source-control" />
+              <span className="label">Working Tree</span>
+            </div>
+          ) : null}
           {commits.map(commit => (
             <div
               key={commit.sha}
-              className={`item ${selectedCommit === commit.sha ? 'selected' : ''}`}
+              className={`item ${!worktreeActive && selectedCommit === commit.sha ? 'selected' : ''}`}
               onClick={() => {
                 setSelectedCommit(commit.sha);
                 setSelectedDiffSource('commit');
+                const files = commitFilesBySha[commit.sha] ?? [];
+                if (files[0]) {
+                  setSelectedDiff(files[0].path);
+                } else {
+                  setSelectedDiff('');
+                }
+                setSelectedDiffScope('unstaged');
+                if (!isWide) setDrawerOpen(false);
               }}>
               <span className="file-dot codicon codicon-git-commit" />
               <span className="label">{commit.title || commit.sha.slice(0, 7)}</span>
             </div>
           ))}
         </div>
-        <div className="section-title">WORKING TREE</div>
+        <div className="section-title">FILES</div>
         <div className="list half">
-          {workingTreeFiles.length === 0 ? <div className="muted block">No local changes</div> : null}
-          {workingTreeFiles.map(file => (
-            <div
-              key={`${file.scope}:${file.path}`}
-              className={`item ${hasWorkingTreeSelection && selectedDiff === file.path && selectedDiffScope === file.scope ? 'selected' : ''}`}
-              onClick={() => {
-                setSelectedDiff(file.path);
-                setSelectedDiffSource('worktree');
-                setSelectedDiffScope(file.scope);
-                if (!isWide) setDrawerOpen(false);
-              }}>
-              <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
-              <span className="muted" style={{marginRight: 6}}>{file.scope}</span>
-              <span className="label">{file.path}</span>
-            </div>
-          ))}
-        </div>
-        <div className="section-title">CHANGED FILES</div>
-        <div className="list half">
-          {currentCommitFiles.map(file => (
-            <div
-              key={file.path}
-              className={`item ${selectedDiffSource === 'commit' && selectedDiff === file.path ? 'selected' : ''}`}
-              onClick={() => {
-                setSelectedDiff(file.path);
-                setSelectedDiffSource('commit');
-                if (!isWide) setDrawerOpen(false);
-              }}>
-              <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
-              <span className="label">{file.path}</span>
-            </div>
-          ))}
+          {worktreeActive ? (
+            workingTreeFiles.length === 0 ? (
+              <div className="muted block">No local changes</div>
+            ) : (
+              workingTreeFiles.map(file => (
+                <div
+                  key={`${WORKING_TREE_COMMIT_ID}:${file.scope}:${file.path}`}
+                  className={`item ${selectedDiff === file.path && selectedDiffScope === file.scope ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedDiff(file.path);
+                    setSelectedDiffSource('worktree');
+                    setSelectedDiffScope(file.scope);
+                    if (!isWide) setDrawerOpen(false);
+                  }}>
+                  <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
+                  <span className="muted" style={{marginRight: 6}}>{file.scope}</span>
+                  <span className="label">{file.path}</span>
+                </div>
+              ))
+            )
+          ) : (
+            currentCommitFiles.map(file => (
+              <div
+                key={file.path}
+                className={`item ${selectedDiffSource === 'commit' && selectedDiff === file.path ? 'selected' : ''}`}
+                onClick={() => {
+                  setSelectedDiff(file.path);
+                  setSelectedDiffSource('commit');
+                  if (!isWide) setDrawerOpen(false);
+                }}>
+                <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
+                <span className="label">{file.path}</span>
+              </div>
+            ))
+          )}
         </div>
       </>
     );
