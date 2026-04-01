@@ -65,14 +65,24 @@ const appIconSVG = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0e1520"/>
-      <stop offset="100%" stop-color="#1a2535"/>
+      <stop offset="0%" stop-color="#0a1018"/>
+      <stop offset="100%" stop-color="#162236"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#12243a"/>
+      <stop offset="100%" stop-color="#0b1828"/>
     </linearGradient>
   </defs>
-  <rect x="24" y="24" width="464" height="464" rx="92" fill="url(#bg)"/>
-  <rect x="96" y="112" width="320" height="288" rx="28" fill="#050810" stroke="#3b82f6" stroke-width="16"/>
-  <path d="M156 214 L212 256 L156 298" fill="none" stroke="#22c55e" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
-  <line x1="244" y1="304" x2="348" y2="304" stroke="#dde5ee" stroke-width="18" stroke-linecap="round"/>
+  <rect x="24" y="24" width="464" height="464" rx="96" fill="url(#bg)"/>
+  <rect x="84" y="112" width="344" height="240" rx="26" fill="#060b12" stroke="#3b82f6" stroke-width="14"/>
+  <rect x="102" y="132" width="308" height="200" rx="16" fill="url(#glass)"/>
+  <path d="M118 272 L162 272 L186 234 L214 296 L244 210 L276 272 L308 252 L340 272 L394 272"
+        fill="none" stroke="#22c55e" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="126" cy="158" r="9" fill="#22c55e"/>
+  <circle cx="154" cy="158" r="9" fill="#eab308"/>
+  <circle cx="182" cy="158" r="9" fill="#ef4444"/>
+  <rect x="170" y="380" width="172" height="24" rx="12" fill="#0c1422" stroke="#2a3a4f" stroke-width="8"/>
+  <rect x="144" y="404" width="224" height="20" rx="10" fill="#0a111d" stroke="#223248" stroke-width="8"/>
 </svg>
 `
 
