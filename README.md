@@ -63,6 +63,7 @@ notepad ~/.wheelmaker/config.json
 ~/.wheelmaker/start.bat     # start services
 ~/.wheelmaker/stop.bat      # stop services
 ~/.wheelmaker/restart.bat   # restart services
+~/.wheelmaker/update-restart.bat  # update + build + deploy + restart
 ```
 
 Auto update switch is integrated into `refresh_server.ps1`:
@@ -72,6 +73,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1 -
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1 -AutoUpdate off
 ~/.wheelmaker/bin/wheelmaker-updater.exe --repo D:\Code\WheelMaker --install-dir ~/.wheelmaker/bin --time 03:00 --once
 ```
+
+Default refresh flow: `update -> build -> stop -> deploy -> restart`.
+
+You can skip each stage with:
+- `-SkipUpdate`
+- `-SkipBuild`
+- `-SkipStop`
+- `-SkipDeploy`
+- `-SkipRestart`
 
 ## Chat Commands
 

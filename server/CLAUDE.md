@@ -54,6 +54,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/delay_restart_server.ps1                 # delayed refresh + service restart
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -AutoUpdate on -UpdateTime 03:00      # enable updater service
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -AutoUpdate off                       # disable updater service
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy    # restart services only
+powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1 -SkipUpdate -SkipBuild -SkipDeploy -SkipRestart # stop services only
 ~/.wheelmaker/bin/wheelmaker-updater.exe --repo D:\Code\WheelMaker --install-dir ~/.wheelmaker/bin --time 03:00 --once # run updater one-shot
 ```
 
