@@ -297,7 +297,7 @@ function Stop-ProcessesByImageName {
   }
   foreach ($proc in $procs) {
     try {
-      Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+      Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
     } catch {
       Write-Warn ("failed to stop process {0} pid={1}: {2}" -f $ImageName, $proc.ProcessId, $_.Exception.Message)
     }
@@ -370,7 +370,7 @@ function Stop-LegacyProcessMode {
       $procs = @(Get-CimInstance Win32_Process -Filter ("Name='{0}'" -f $name) -ErrorAction SilentlyContinue)
       if ($procs.Count -eq 0) { continue }
       foreach ($proc in $procs) {
-        try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue }
+        try { Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop }
         catch { Write-Warn ("failed to stop legacy process {0} pid={1}: {2}" -f $name, $proc.ProcessId, $_.Exception.Message) }
       }
     } catch {
