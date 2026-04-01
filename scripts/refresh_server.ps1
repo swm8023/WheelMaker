@@ -211,14 +211,19 @@ function Stop-ServiceSafe {
   try {
     Wait-ServiceStatus -Name $Name -Status "Stopped" -TimeoutSeconds 30
   } catch {
-    # For monitor service, force kill process as a last resort to avoid blocking deploy.
-    if ($Name -eq $script:MonitorService) {
-      Get-CimInstance Win32_Process -Filter "Name='wheelmaker-monitor.exe'" -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-      Start-Sleep -Milliseconds 500
+    Write-Warn ("service stop timeout: {0}; force-killing bound process" -f $Name)
+    try {
+      & taskkill /F /FI ("SERVICES eq {0}" -f $Name) | Out-Null
+    } catch {
+      Write-Warn ("taskkill fallback failed for service {0}: {1}" -f $Name, $_.Exception.Message)
+    }
+    Start-Sleep -Seconds 1
+
+    $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if ($null -eq $svc -or [string]$svc.Status -eq "Stopped") {
       return
     }
-    throw
+    Write-Warn ("service {0} still not fully stopped; continue deploy anyway" -f $Name)
   }
 }
 
