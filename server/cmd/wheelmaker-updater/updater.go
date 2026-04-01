@@ -15,6 +15,8 @@ import (
 
 const updaterRetryDelay = 10 * time.Minute
 const updaterSignalPollInterval = 5 * time.Second
+const updaterWaitHeartbeatInterval = 60 * time.Second
+const updaterRoundTimeout = 20 * time.Minute
 
 type UpdaterConfig struct {
 	RepoDir    string
@@ -74,7 +76,10 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 		shared.Info("[updater] trigger=%s", triggerReason)
 
 		skipUpdate := triggerReason == "manual-signal"
-		if err := runUpdateRound(ctx, cfg, runner, skipUpdate); err != nil {
+		roundCtx, cancelRound := context.WithTimeout(ctx, updaterRoundTimeout)
+		err = runUpdateRound(roundCtx, cfg, runner, skipUpdate)
+		cancelRound()
+		if err != nil {
 			shared.Error("[updater] update round failed: %v", err)
 			retry := time.NewTimer(updaterRetryDelay)
 			select {
@@ -82,7 +87,10 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 				retry.Stop()
 				return nil
 			case <-retry.C:
-				if retryErr := runUpdateRound(ctx, cfg, runner, skipUpdate); retryErr != nil {
+				retryCtx, cancelRetry := context.WithTimeout(ctx, updaterRoundTimeout)
+				retryErr := runUpdateRound(retryCtx, cfg, runner, skipUpdate)
+				cancelRetry()
+				if retryErr != nil {
 					shared.Error("[updater] retry update round failed: %v", retryErr)
 				}
 			}
@@ -93,8 +101,10 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (string, error) {
 	timer := time.NewTimer(time.Until(next))
 	ticker := time.NewTicker(updaterSignalPollInterval)
+	heartbeat := time.NewTicker(updaterWaitHeartbeatInterval)
 	defer timer.Stop()
 	defer ticker.Stop()
+	defer heartbeat.Stop()
 
 	for {
 		select {
@@ -102,6 +112,12 @@ func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (str
 			return "", nil
 		case <-timer.C:
 			return "scheduled", nil
+		case <-heartbeat.C:
+			remaining := time.Until(next).Round(time.Second)
+			if remaining < 0 {
+				remaining = 0
+			}
+			shared.Info("[updater] waiting for next run (remaining=%s)", remaining.String())
 		case <-ticker.C:
 			triggered, err := consumeManualSignal(signalPath)
 			if err != nil {
@@ -109,6 +125,7 @@ func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (str
 				continue
 			}
 			if triggered {
+				shared.Info("[updater] manual trigger signal consumed: %s", signalPath)
 				return "manual-signal", nil
 			}
 		}
@@ -155,6 +172,7 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 	if skipUpdate {
 		args = append(args, "-SkipUpdate")
 	}
+	shared.Info("[updater] invoke powershell %s", strings.Join(args, " "))
 
 	_, err := runner.CombinedOutput(ctx, cfg.RepoDir, "powershell", args...)
 	if err != nil {
