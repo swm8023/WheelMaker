@@ -23,7 +23,8 @@ Windows Services
   ├── WheelMaker (guardian)
   │     ├── Hub Worker
   │     └── Registry Worker (optional)
-  └── WheelMakerMonitor
+  ├── WheelMakerMonitor
+  └── WheelMakerUpdater (daily auto update at 03:00)
 ```
 
 ## Quick Start
@@ -46,11 +47,12 @@ The refresh script will:
 - Pull latest code with `git pull --ff-only` when worktree is clean
 - Install ACP CLI dependencies (`codex-acp`, `claude-agent-acp`) if missing
 - Build `wheelmaker.exe` and `wheelmaker-monitor.exe`
+- Build `wheelmaker-updater.exe`
 - Install binaries to `~/.wheelmaker\bin\`
 - Preserve `~/.wheelmaker\config.json`, or create one from `server\config.example.json`
 - Copy `refresh_server.ps1` and generate `start.bat` / `stop.bat` wrappers to `~/.wheelmaker\`
-- Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`
-- Keep update flow script-driven (`~/.wheelmaker\refresh_server.ps1`)
+- Register or update Windows services: `WheelMaker`, `WheelMakerMonitor`, `WheelMakerUpdater`
+- Configure updater service to run daily update flow at `03:00` (calls `refresh_server.ps1`)
 - Start services (auto-start enabled)
 
 If `config.json` is created for the first time, the script stops before restart so you can edit it safely, then rerun the same command.

@@ -3,6 +3,7 @@ param(
   [string]$InstallDir = (Join-Path -Path $HOME -ChildPath ".wheelmaker\bin"),
   [string]$OutputPath = "",
   [string]$SourceExe = "",
+  [string]$UpdaterDailyTime = "03:00",
   [switch]$SkipUpdate,
   [switch]$SkipStop,
   [switch]$SkipDeploy,
@@ -10,6 +11,7 @@ param(
   [switch]$SkipDeps,
   [switch]$SkipBuild,
   [switch]$SkipInstall,
+  [switch]$SkipUpdaterInstall,
   [switch]$SkipRestart,
   [switch]$SkipServiceConfig,
   [string]$ServiceUser = ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME),
@@ -22,6 +24,7 @@ $ErrorActionPreference = "Stop"
 
 $script:WheelmakerService = "WheelMaker"
 $script:MonitorService = "WheelMakerMonitor"
+$script:UpdaterService = "WheelMakerUpdater"
 $script:ServicePasswordPlain = ""
 
 function Write-Step {
@@ -280,6 +283,11 @@ function Configure-Services {
   Write-Step "ensure windows services"
   Ensure-Service -Name $script:WheelmakerService -BinaryPath $script:InstalledBinary
   Ensure-Service -Name $script:MonitorService -BinaryPath $script:MonitorInstalledBinary
+  if (-not $SkipUpdaterInstall) {
+    Ensure-Service -Name $script:UpdaterService -BinaryPath $script:UpdaterInstalledBinary -Arguments $script:UpdaterServiceArguments
+  } else {
+    Write-Step "skip updater service configuration (-SkipUpdaterInstall)"
+  }
 }
 
 function Install-Binary {
@@ -297,7 +305,18 @@ function Restart-Services {
   if ($SkipRestart) { Write-Step "skip restart"; return }
   Start-ServiceSafe -Name $script:WheelmakerService
   Start-ServiceSafe -Name $script:MonitorService
-  Write-Step ("update service uses script entry: {0}" -f (Join-Path $script:WheelmakerHome "refresh_server.ps1"))
+  if (-not $SkipUpdaterInstall) {
+    Start-ServiceSafe -Name $script:UpdaterService
+  } else {
+    Write-Step "skip updater service start (-SkipUpdaterInstall)"
+  }
+}
+
+function Get-UpdaterServiceArguments {
+  $repo = $script:RepoRoot.Replace('"', '\"')
+  $install = $script:InstallDirResolved.Replace('"', '\"')
+  $timeValue = $UpdaterDailyTime.Replace('"', '\"')
+  return ('--repo "{0}" --install-dir "{1}" --time "{2}"' -f $repo, $install, $timeValue)
 }
 
 $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Resolve-Path $RepoRoot).Path }
@@ -311,6 +330,9 @@ $script:SourceBinary = Get-ResolvedPathOrDefault -Path $SourceExe -Default $scri
 $script:InstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker.exe"
 $script:MonitorOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-monitor.exe"
 $script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-monitor.exe"
+$script:UpdaterOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-updater.exe"
+$script:UpdaterInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-updater.exe"
+$script:UpdaterServiceArguments = Get-UpdaterServiceArguments
 
 if ($SkipUpdate) {
   $SkipGitPull = $true
@@ -327,9 +349,19 @@ Pull-Latest
 Ensure-AcpDependencies
 Build-Binary -Out $script:OutputBinary -Pkg "./cmd/wheelmaker/" -Label "wheelmaker"
 Build-Binary -Out $script:MonitorOutputBinary -Pkg "./cmd/wheelmaker-monitor/" -Label "wheelmaker-monitor"
+if (-not $SkipUpdaterInstall) {
+  Build-Binary -Out $script:UpdaterOutputBinary -Pkg "./cmd/wheelmaker-updater/" -Label "wheelmaker-updater"
+} else {
+  Write-Step "skip build: wheelmaker-updater (-SkipUpdaterInstall)"
+}
 
 $configWasCreated = $false
 if (-not $SkipStop) {
+  if (-not $SkipUpdaterInstall) {
+    Stop-ServiceSafe -Name $script:UpdaterService
+  } else {
+    Write-Step "skip stop service: WheelMakerUpdater (-SkipUpdaterInstall)"
+  }
   Stop-ServiceSafe -Name $script:WheelmakerService
   Stop-ServiceSafe -Name $script:MonitorService
 }
@@ -337,6 +369,11 @@ if (-not $SkipInstall) {
   Backup-Logs
   Install-Binary -Source $script:SourceBinary -Dest $script:InstalledBinary -StopServiceName $script:WheelmakerService
   Install-Binary -Source $script:MonitorOutputBinary -Dest $script:MonitorInstalledBinary -StopServiceName $script:MonitorService
+  if (-not $SkipUpdaterInstall) {
+    Install-Binary -Source $script:UpdaterOutputBinary -Dest $script:UpdaterInstalledBinary -StopServiceName $script:UpdaterService
+  } else {
+    Write-Step "skip install: wheelmaker-updater.exe (-SkipUpdaterInstall)"
+  }
   $configWasCreated = Ensure-Config
   Install-ServiceScripts
   Configure-Services

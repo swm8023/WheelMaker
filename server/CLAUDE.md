@@ -46,6 +46,7 @@ go run ./cmd/wheelmaker/            # requires ~/.wheelmaker/config.json
 go test ./...
 go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/
 go build -o bin/windows_amd64/wheelmaker-monitor.exe ./cmd/wheelmaker-monitor/
+go build -o bin/windows_amd64/wheelmaker-updater.exe ./cmd/wheelmaker-updater/
 
 # Root-level helper scripts
 powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps1                      # full deploy (services)
