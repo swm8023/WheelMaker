@@ -605,7 +605,6 @@ body {
             <div class="proc-head-actions">
               <button class="btn btn-green" onclick="doAction('start')">Start</button>
               <button class="btn btn-accent" onclick="doAction('restart')">Restart</button>
-              <button class="btn" onclick="doAction('update-now')">Update Now</button>
               <button class="btn btn-danger" onclick="doAction('stop')">Stop</button>
             </div>
           </div>

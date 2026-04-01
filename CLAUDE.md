@@ -19,7 +19,7 @@ Before the final user-facing completion message in any implementation task, exec
 1. `git add -A`
 2. `git commit -m "<message>"`
 3. `git push origin <branch>`
-4. If files under `server/` changed: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/delay_restart_server.ps1`
+4. If files under `server/` changed: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/signal_update_now.ps1 -DelaySeconds 30`
 <!-- 5. - If files under `app/` changed: 
   `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_flutter_web.ps1` -->
 If any step fails, report failure and keep working until resolved. Do not claim completion early.

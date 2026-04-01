@@ -666,18 +666,6 @@ func runManagedRuntimeServiceAction(action string) error {
 }
 
 // TriggerUpdateNow sends a manual trigger signal to the updater service loop.
-func (m *Monitor) TriggerUpdateNow() error {
-	signalPath := filepath.Join(m.baseDir, "update-now.signal")
-	if err := os.MkdirAll(filepath.Dir(signalPath), 0o755); err != nil {
-		return fmt.Errorf("ensure update signal directory: %w", err)
-	}
-	payload := []byte(time.Now().UTC().Format(time.RFC3339Nano))
-	if err := os.WriteFile(signalPath, payload, 0o644); err != nil {
-		return fmt.Errorf("write update signal: %w", err)
-	}
-	return nil
-}
-
 // Overview returns a combined snapshot of status, config, and state.
 type Overview struct {
 	Service *ServiceStatus  `json:"service"`
