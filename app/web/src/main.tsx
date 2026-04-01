@@ -33,6 +33,7 @@ import type {
   RegistryFsInfo,
   RegistryGitCommit,
   RegistryGitCommitFile,
+  RegistryGitStatus,
   RegistryGitWorkspaceChangedPayload,
   RegistryProject,
   RegistryProjectEventPayload,
@@ -42,6 +43,12 @@ import './styles.css';
 type Tab = 'chat' | 'file' | 'git';
 type ThemeMode = 'dark' | 'light';
 type DirEntries = Record<string, RegistryFsEntry[]>;
+type GitDiffSource = 'commit' | 'worktree';
+type WorkingTreeFileEntry = {
+  path: string;
+  status: string;
+  scope: 'staged' | 'unstaged' | 'untracked';
+};
 type SetiThemeSection = {
   file: string;
   fileExtensions?: Record<string, string>;
@@ -344,6 +351,23 @@ function setiFontFaceCss(): string {
   return `@font-face { font-family: 'wm-seti'; src: url('${setiFontUrl}') format('woff'); font-weight: normal; font-style: normal; }`;
 }
 
+function buildWorkingTreeFiles(status: RegistryGitStatus): WorkingTreeFileEntry[] {
+  const rows: WorkingTreeFileEntry[] = [];
+  for (const item of status.unstaged ?? []) {
+    if (!item.path) continue;
+    rows.push({path: item.path, status: item.status, scope: 'unstaged'});
+  }
+  for (const item of status.staged ?? []) {
+    if (!item.path) continue;
+    rows.push({path: item.path, status: item.status, scope: 'staged'});
+  }
+  for (const item of status.untracked ?? []) {
+    if (!item.path) continue;
+    rows.push({path: item.path, status: item.status || 'U', scope: 'untracked'});
+  }
+  return rows;
+}
+
 type PrismCodeBlockProps = {
   content: string;
   language: string;
@@ -487,6 +511,9 @@ function App() {
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
   const [commitFilesBySha, setCommitFilesBySha] = useState<Record<string, RegistryGitCommitFile[]>>({});
+  const [workingTreeFiles, setWorkingTreeFiles] = useState<WorkingTreeFileEntry[]>([]);
+  const [selectedDiffSource, setSelectedDiffSource] = useState<GitDiffSource>('commit');
+  const [selectedDiffScope, setSelectedDiffScope] = useState<'staged' | 'unstaged' | 'untracked'>('unstaged');
   const [selectedDiff, setSelectedDiff] = useState('');
   const [diffText, setDiffText] = useState('');
   const [diffLoading, setDiffLoading] = useState(false);
@@ -587,6 +614,11 @@ function App() {
   const currentCommitFiles = useMemo(
     () => commitFilesBySha[selectedCommit] ?? [],
     [commitFilesBySha, selectedCommit],
+  );
+
+  const hasWorkingTreeSelection = useMemo(
+    () => selectedDiffSource === 'worktree' && !!selectedDiff,
+    [selectedDiffSource, selectedDiff],
   );
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
@@ -805,10 +837,21 @@ function App() {
         unstaged: statusData.unstaged.length,
         untracked: statusData.untracked.length,
       });
+      const working = buildWorkingTreeFiles(statusData);
+      setWorkingTreeFiles(working);
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
       setCommits(commitData);
       const firstCommit = commitData[0]?.sha ?? '';
       setSelectedCommit(prev => prev || firstCommit);
+      if (!selectedDiff) {
+        if (working[0]) {
+          setSelectedDiff(working[0].path);
+          setSelectedDiffSource('worktree');
+          setSelectedDiffScope(working[0].scope);
+        } else if (firstCommit) {
+          setSelectedDiffSource('commit');
+        }
+      }
     } catch (err) {
       setGitError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -825,6 +868,7 @@ function App() {
         unstaged: statusData.unstaged.length,
         untracked: statusData.untracked.length,
       });
+      setWorkingTreeFiles(buildWorkingTreeFiles(statusData));
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
     } catch {
       // Keep existing UI state on transient status fetch failure.
@@ -844,24 +888,31 @@ function App() {
       if (commitFilesBySha[selectedCommit]) return;
       const files = await service.listGitCommitFiles(selectedCommit);
       setCommitFilesBySha(prev => ({...prev, [selectedCommit]: files}));
-      if (!selectedDiff && files[0]) setSelectedDiff(files[0].path);
+      if (!selectedDiff && files[0]) {
+        setSelectedDiff(files[0].path);
+        setSelectedDiffSource('commit');
+      }
     };
     run().catch(err => setGitError(err instanceof Error ? err.message : String(err)));
   }, [selectedCommit, commitFilesBySha, selectedDiff]);
 
   useEffect(() => {
     const run = async () => {
-      if (!projectId || !selectedCommit || !selectedDiff) return;
-      const cachedDiff = workspaceStore.getCachedDiff(projectId, selectedCommit, selectedDiff);
+      if (!projectId || !selectedDiff) return;
+      const cacheScope = selectedDiffSource === 'worktree' ? `WORKTREE:${selectedDiffScope}` : selectedCommit;
+      if (!cacheScope) return;
+      const cachedDiff = workspaceStore.getCachedDiff(projectId, cacheScope, selectedDiff);
       if (cachedDiff !== null) {
         setDiffText(cachedDiff);
         return;
       }
       setDiffLoading(true);
       try {
-        const diff = await service.readGitFileDiff(selectedCommit, selectedDiff);
+        const diff = selectedDiffSource === 'worktree'
+          ? await service.readWorkingTreeFileDiff(selectedDiff, selectedDiffScope)
+          : await service.readGitFileDiff(selectedCommit, selectedDiff);
         setDiffText(diff.diff || '');
-        workspaceStore.cacheDiff(projectId, selectedCommit, selectedDiff, diff.diff || '', !!diff.isBinary, !!diff.truncated);
+        workspaceStore.cacheDiff(projectId, cacheScope, selectedDiff, diff.diff || '', !!diff.isBinary, !!diff.truncated);
       } catch (err) {
         setGitError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -869,7 +920,7 @@ function App() {
       }
     };
     run().catch(() => undefined);
-  }, [projectId, selectedCommit, selectedDiff]);
+  }, [projectId, selectedCommit, selectedDiff, selectedDiffSource, selectedDiffScope]);
 
   const connect = async () => {
     setError('');
@@ -1130,9 +1181,29 @@ function App() {
               className={`item ${selectedCommit === commit.sha ? 'selected' : ''}`}
               onClick={() => {
                 setSelectedCommit(commit.sha);
+                setSelectedDiffSource('commit');
               }}>
               <span className="file-dot codicon codicon-git-commit" />
               <span className="label">{commit.title || commit.sha.slice(0, 7)}</span>
+            </div>
+          ))}
+        </div>
+        <div className="section-title">WORKING TREE</div>
+        <div className="list half">
+          {workingTreeFiles.length === 0 ? <div className="muted block">No local changes</div> : null}
+          {workingTreeFiles.map(file => (
+            <div
+              key={`${file.scope}:${file.path}`}
+              className={`item ${hasWorkingTreeSelection && selectedDiff === file.path && selectedDiffScope === file.scope ? 'selected' : ''}`}
+              onClick={() => {
+                setSelectedDiff(file.path);
+                setSelectedDiffSource('worktree');
+                setSelectedDiffScope(file.scope);
+                if (!isWide) setDrawerOpen(false);
+              }}>
+              <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
+              <span className="muted" style={{marginRight: 6}}>{file.scope}</span>
+              <span className="label">{file.path}</span>
             </div>
           ))}
         </div>
@@ -1141,9 +1212,10 @@ function App() {
           {currentCommitFiles.map(file => (
             <div
               key={file.path}
-              className={`item ${selectedDiff === file.path ? 'selected' : ''}`}
+              className={`item ${selectedDiffSource === 'commit' && selectedDiff === file.path ? 'selected' : ''}`}
               onClick={() => {
                 setSelectedDiff(file.path);
+                setSelectedDiffSource('commit');
                 if (!isWide) setDrawerOpen(false);
               }}>
               <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
