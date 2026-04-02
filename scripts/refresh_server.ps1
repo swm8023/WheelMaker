@@ -163,9 +163,29 @@ function Pull-Latest {
 function Ensure-AcpDependencies {
   if ($SkipDeps) { Write-Step "skip dependency install/check (-SkipDeps)"; return }
   Assert-Command -Name "npm" -Hint "Install Node.js 22+."
+
+  $deprecatedClaudePkg = "@zed-industries/claude-agent-acp"
+  $deprecatedInstalled = $false
+  try {
+    $listText = ((& npm list -g --depth=0 $deprecatedClaudePkg 2>$null) | Out-String)
+    if ($listText -match [Regex]::Escape($deprecatedClaudePkg)) {
+      $deprecatedInstalled = $true
+    }
+  } catch {
+    # Ignore npm list errors; treat as not installed.
+  }
+  if ($deprecatedInstalled) {
+    Write-Step ("remove deprecated package: {0}" -f $deprecatedClaudePkg)
+    if ($WhatIf) {
+      Write-Host ("[whatif] npm uninstall -g {0}" -f $deprecatedClaudePkg)
+    } else {
+      Invoke-Checked -FilePath "npm" -Arguments @("uninstall", "-g", $deprecatedClaudePkg) -FailureMessage ("npm uninstall failed: {0}" -f $deprecatedClaudePkg)
+    }
+  }
+
   $missing = @()
   if (-not (Get-Command codex-acp -ErrorAction SilentlyContinue)) { $missing += "@zed-industries/codex-acp" }
-  if (-not (Get-Command claude-agent-acp -ErrorAction SilentlyContinue)) { $missing += "@zed-industries/claude-agent-acp" }
+  if (-not (Get-Command claude-agent-acp -ErrorAction SilentlyContinue)) { $missing += "@agentclientprotocol/claude-agent-acp" }
   if ($missing.Count -eq 0) { Write-Step "ACP dependencies already installed"; return }
   Write-Step ("install ACP dependencies: {0}" -f ($missing -join ", "))
   if ($WhatIf) { Write-Host ("[whatif] npm install -g {0}" -f ($missing -join " ")); return }

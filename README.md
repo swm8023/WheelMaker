@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/refresh_server.ps1
 
 The refresh script will:
 - Pull latest code with `git pull --ff-only` when worktree is clean
-- Install ACP CLI dependencies (`codex-acp`, `claude-agent-acp`) if missing
+- Install ACP CLI dependencies (`@zed-industries/codex-acp`, `@agentclientprotocol/claude-agent-acp`) if missing
 - Build `wheelmaker.exe` and `wheelmaker-monitor.exe`
 - Build `wheelmaker-updater.exe`
 - Install binaries to `~/.wheelmaker\bin\`

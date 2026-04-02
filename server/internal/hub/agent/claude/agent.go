@@ -15,7 +15,7 @@ const agentName = "claude"
 // Config holds configuration for the agent.
 type Config struct {
 	// ExePath is the path to the claude-agent-acp binary.
-	// If empty, npx @zed-industries/claude-agent-acp is used.
+	// If empty, npx @agentclientprotocol/claude-agent-acp is used.
 	ExePath string
 
 	// Env is extra environment variables for the subprocess (e.g. ANTHROPIC_API_KEY).
@@ -75,5 +75,5 @@ func resolveCommand(configPath string) (string, []string, error) {
 	if npxErr != nil {
 		return "", nil, fmt.Errorf("claude: npx not found: %w", npxErr)
 	}
-	return npxPath, []string{"--yes", "@zed-industries/claude-agent-acp"}, nil
+	return npxPath, []string{"--yes", "@agentclientprotocol/claude-agent-acp"}, nil
 }
