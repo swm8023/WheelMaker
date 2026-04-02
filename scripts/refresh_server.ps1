@@ -62,7 +62,6 @@ $script:WheelmakerService = "WheelMaker"
 $script:MonitorService = "WheelMakerMonitor"
 $script:UpdaterService = "WheelMakerUpdater"
 $script:ServicePasswordPlain = ""
-$script:ServiceUserSpecified = $PSBoundParameters.ContainsKey("ServiceUser")
 
 function Write-Step {
   param([string]$Text)
@@ -509,10 +508,6 @@ function Stop-LegacyProcessMode {
 
 function Prepare-ServiceCredentials {
   if ($SkipServiceConfig -or $WhatIf) { return }
-  if (-not $script:ServiceUserSpecified) {
-    Write-Step "service account not specified; keep LocalSystem default (pass -ServiceUser to override)"
-    return
-  }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
   $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
   if ($builtinServiceAccounts -contains $ServiceUser) {
@@ -561,7 +556,7 @@ function Ensure-Service {
   }
   Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
   $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
-  if ($script:ServiceUserSpecified -and -not [string]::IsNullOrWhiteSpace($ServiceUser) -and ($builtinServiceAccounts -notcontains $ServiceUser)) {
+  if (-not [string]::IsNullOrWhiteSpace($ServiceUser) -and ($builtinServiceAccounts -notcontains $ServiceUser)) {
     Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "obj=", $ServiceUser, "password=", $script:ServicePasswordPlain) -FailureMessage ("service account config failed: {0}" -f $Name)
   }
 }
@@ -617,7 +612,6 @@ function Ensure-ServiceAclEntry {
 
 function Ensure-ServiceControlAclForAccount {
   if ($SkipServiceConfig) { return }
-  if (-not $script:ServiceUserSpecified) { return }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
   $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
   if ($builtinServiceAccounts -contains $ServiceUser) {
