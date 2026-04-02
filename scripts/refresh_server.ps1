@@ -228,7 +228,7 @@ function Ensure-Config {
   New-Item -ItemType Directory -Path $script:WheelmakerHome -Force | Out-Null
   Copy-Item -Path $script:ConfigExamplePath -Destination $configPath -Force
   Write-Warn ("config was created from example: {0}" -f $configPath)
-  Write-Warn "edit config.json before the first restart, then rerun scripts\refresh_server.ps1"
+  Write-Warn "edit config.json before the first restart, then rerun scripts\refresh_server.ps1 or run ~/.wheelmaker/start.bat"
   return $true
 }
 
@@ -739,7 +739,7 @@ if (-not $SkipInstall) {
 }
 
 if ($configWasCreated -and -not $SkipRestart) {
-  Write-Warn ("config was created from example at {0}; edit it first, then rerun scripts\refresh_server.ps1" -f $script:ConfigPath)
+  Write-Warn ("config was created from example at {0}; edit it first, then rerun scripts\refresh_server.ps1 or run ~/.wheelmaker/start.bat" -f $script:ConfigPath)
   Write-Step "skip restart because config is newly created"
   return
 }
