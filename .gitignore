@@ -12,6 +12,7 @@ server/bin/**/*
 /vendor/
 .gocache/
 .gomodcache/
+app/dist/
 
 # Runtime log files
 wheelmaker_*.log

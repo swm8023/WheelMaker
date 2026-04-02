@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$RepoRoot = "",
   [string]$InstallDir = (Join-Path -Path $HOME -ChildPath ".wheelmaker\bin"),
   [string]$OutputPath = "",
@@ -18,6 +18,42 @@ param(
   [string]$ServicePassword = "",
   [switch]$WhatIf
 )
+
+# Auto-elevate: if not running as Administrator, relaunch with RunAs
+if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+  $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+
+  # Rebuild parameters for re-invocation
+  $paramParts = @()
+  foreach ($key in $PSBoundParameters.Keys) {
+    $val = $PSBoundParameters[$key]
+    if ($val -is [switch]) {
+      if ($val.IsPresent) { $paramParts += "-$key" }
+    } else {
+      $escaped = ($val -replace "'", "''") -replace '"', '`"'
+      $paramParts += "-{0} `"{1}`"" -f $key, $escaped
+    }
+  }
+  $paramStr = $paramParts -join " "
+  $scriptPathEsc = $PSCommandPath -replace "'", "''"
+
+  # Run elevated; wrap with try/catch so the window stays open on error
+  $cmd = @"
+try {
+  & '$scriptPathEsc' $paramStr
+} catch {
+  Write-Host ('ERROR: ' + `$_.Exception.Message) -ForegroundColor Red
+  `$host.SetShouldExit(1)
+}
+if (-not [Console]::IsInputRedirected) {
+  Write-Host ''
+  Write-Host 'Press Enter to close this window...' -ForegroundColor Gray
+  `$null = Read-Host
+}
+"@
+  $proc = Start-Process $psExe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $cmd) -Verb RunAs -Wait -PassThru
+  exit $(if ($null -ne $proc) { $proc.ExitCode } else { 1 })
+}
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -107,7 +143,15 @@ function Assert-CleanGitWorktree {
 function Pull-Latest {
   if ($SkipGitPull) { Write-Step "skip git pull"; return }
   Assert-Command -Name "git" -Hint "Install Git and ensure git.exe is available."
-  Assert-CleanGitWorktree
+  try {
+    Assert-CleanGitWorktree
+  } catch {
+    if ($_.Exception.Message -match "git worktree has local changes") {
+      Write-Warn "git worktree has local changes; skip git pull and continue"
+      return
+    }
+    throw
+  }
   $branch = Get-GitCurrentBranch
   Write-Step ("git pull --ff-only origin {0}" -f $branch)
   if ($WhatIf) { Write-Host ("[whatif] git pull --ff-only origin {0}" -f $branch); return }
@@ -445,6 +489,11 @@ function Stop-LegacyProcessMode {
 function Prepare-ServiceCredentials {
   if ($SkipServiceConfig -or $WhatIf) { return }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
+  $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
+  if ($builtinServiceAccounts -contains $ServiceUser) {
+    $script:ServicePasswordPlain = ""
+    return
+  }
   if (-not [string]::IsNullOrWhiteSpace($ServicePassword)) {
     $script:ServicePasswordPlain = $ServicePassword
     return
@@ -452,16 +501,11 @@ function Prepare-ServiceCredentials {
   if ([Console]::IsInputRedirected) {
     throw ("service account password is required to configure services as {0}; pass -ServicePassword in non-interactive mode" -f $ServiceUser)
   }
-  Write-Host ("==> Enter password for service account {0} (input hidden)" -f $ServiceUser) -ForegroundColor Green
+  Write-Host ("==> Enter password for service account {0} (press Enter to skip if account has no password)" -f $ServiceUser) -ForegroundColor Green
   $secure = Read-Host -AsSecureString -Prompt "Password"
   $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try {
-    $plain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    if (-not [string]::IsNullOrWhiteSpace($plain)) {
-      $script:ServicePasswordPlain = $plain
-    } else {
-      throw ("service account password is required to configure services as {0}" -f $ServiceUser)
-    }
+    $script:ServicePasswordPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
   } finally {
     [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
   }
@@ -491,7 +535,8 @@ function Ensure-Service {
     Wait-ServiceDeleted -Name $Name -TimeoutSeconds 20
   }
   Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
-  if (-not [string]::IsNullOrWhiteSpace($script:ServicePasswordPlain)) {
+  $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
+  if (-not [string]::IsNullOrWhiteSpace($ServiceUser) -and ($builtinServiceAccounts -notcontains $ServiceUser)) {
     Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "obj=", $ServiceUser, "password=", $script:ServicePasswordPlain) -FailureMessage ("service account config failed: {0}" -f $Name)
   }
 }
@@ -548,6 +593,11 @@ function Ensure-ServiceAclEntry {
 function Ensure-ServiceControlAclForAccount {
   if ($SkipServiceConfig) { return }
   if ([string]::IsNullOrWhiteSpace($ServiceUser)) { return }
+  $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
+  if ($builtinServiceAccounts -contains $ServiceUser) {
+    Write-Step "skip service ACL (built-in account has inherent privileges)"
+    return
+  }
   $sid = Resolve-AccountSid -Account $ServiceUser
   # Rights required for updater-driven service management:
   # RP(start), WP(stop), LC(query status), LO(interrogate), CR(user-defined), RC(read control)
