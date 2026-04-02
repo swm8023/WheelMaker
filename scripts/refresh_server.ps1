@@ -739,7 +739,9 @@ if (-not $SkipInstall) {
 }
 
 if ($configWasCreated -and -not $SkipRestart) {
-  throw ("config was created from example at {0}; edit it first, then rerun scripts\refresh_server.ps1" -f $script:ConfigPath)
+  Write-Warn ("config was created from example at {0}; edit it first, then rerun scripts\refresh_server.ps1" -f $script:ConfigPath)
+  Write-Step "skip restart because config is newly created"
+  return
 }
 
 Restart-Services
