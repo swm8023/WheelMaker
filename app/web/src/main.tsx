@@ -824,6 +824,8 @@ function App() {
   }, [selectedFile]);
 
   const loadGit = async () => {
+    const targetProjectId = projectId;
+    if (!targetProjectId) return;
     setGitLoading(true);
     setGitError('');
     try {
@@ -843,7 +845,7 @@ function App() {
       setWorkingTreeFiles(working);
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
       setCommits(commitData);
-      setGitLoadedProjectId(projectIdRef.current);
+      setGitLoadedProjectId(targetProjectId);
       const firstCommit = commitData[0]?.sha ?? '';
       setSelectedCommit(prev => prev || firstCommit);
       if (!selectedDiff) {
@@ -1627,16 +1629,6 @@ function App() {
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    let refreshing = false;
-    const reloadKey = 'wm_sw_reloaded_once';
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (refreshing) return;
-      if (window.sessionStorage.getItem(reloadKey) === '1') return;
-      refreshing = true;
-      window.sessionStorage.setItem(reloadKey, '1');
-      window.location.reload();
-    });
-
     navigator.serviceWorker.register('/service-worker.js').then(registration => {
       window.setTimeout(() => {
         registration.update().catch(() => undefined);
