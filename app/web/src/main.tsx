@@ -77,6 +77,7 @@ const workspaceStore = new WorkspaceStore();
 const workspaceController = new WorkspaceController(service, workspaceStore);
 const setiTheme = setiThemeJson as SetiTheme;
 const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
+const MAX_AUTO_RENDER_DIFF_CHARS = 200000;
 
 SyntaxHighlighter.registerLanguage('markup', prismMarkup);
 SyntaxHighlighter.registerLanguage('clike', prismClike);
@@ -370,6 +371,21 @@ function buildWorkingTreeFiles(status: RegistryGitStatus): WorkingTreeFileEntry[
   return rows;
 }
 
+function isHeavyGeneratedDiffPath(path: string): boolean {
+  const normalized = (path || '').replace(/\\/g, '/').toLowerCase();
+  return (
+    normalized.endsWith('/dist/bundle.js') ||
+    normalized.endsWith('/dist/bundle.js.map') ||
+    normalized.endsWith('/dist/index.html')
+  );
+}
+
+function pickPreferredPath<T extends {path: string}>(items: T[]): string {
+  if (items.length === 0) return '';
+  const preferred = items.find(item => !isHeavyGeneratedDiffPath(item.path));
+  return (preferred ?? items[0]).path;
+}
+
 type PrismCodeBlockProps = {
   content: string;
   language: string;
@@ -518,12 +534,17 @@ function App() {
   const [selectedDiffSource, setSelectedDiffSource] = useState<GitDiffSource>('commit');
   const [selectedDiffScope, setSelectedDiffScope] = useState<'staged' | 'unstaged' | 'untracked'>('unstaged');
   const [selectedDiff, setSelectedDiff] = useState('');
+  const [allowLargeDiffRender, setAllowLargeDiffRender] = useState(false);
   const [diffText, setDiffText] = useState('');
   const [diffLoading, setDiffLoading] = useState(false);
 
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  useEffect(() => {
+    setAllowLargeDiffRender(false);
+  }, [selectedDiff, selectedCommit, selectedDiffSource, selectedDiffScope]);
 
   useEffect(() => {
     const onResize = () => setWindowWidth(window.innerWidth);
@@ -850,9 +871,11 @@ function App() {
       setSelectedCommit(prev => prev || firstCommit);
       if (!selectedDiff) {
         if (working[0]) {
-          setSelectedDiff(working[0].path);
+          const preferredPath = pickPreferredPath(working);
+          const preferredFile = working.find(item => item.path === preferredPath) ?? working[0];
+          setSelectedDiff(preferredFile.path);
           setSelectedDiffSource('worktree');
-          setSelectedDiffScope(working[0].scope);
+          setSelectedDiffScope(preferredFile.scope);
         } else if (firstCommit) {
           setSelectedDiffSource('commit');
         }
@@ -895,7 +918,7 @@ function App() {
       const files = await service.listGitCommitFiles(selectedCommit);
       setCommitFilesBySha(prev => ({...prev, [selectedCommit]: files}));
       if (!selectedDiff && files[0]) {
-        setSelectedDiff(files[0].path);
+        setSelectedDiff(pickPreferredPath(files));
         setSelectedDiffSource('commit');
       }
     };
@@ -1200,8 +1223,10 @@ function App() {
               onClick={() => {
                 setSelectedDiffSource('worktree');
                 if (workingTreeFiles[0]) {
-                  setSelectedDiff(workingTreeFiles[0].path);
-                  setSelectedDiffScope(workingTreeFiles[0].scope);
+                  const preferredPath = pickPreferredPath(workingTreeFiles);
+                  const preferredFile = workingTreeFiles.find(item => item.path === preferredPath) ?? workingTreeFiles[0];
+                  setSelectedDiff(preferredFile.path);
+                  setSelectedDiffScope(preferredFile.scope);
                 }
                 if (!isWide) setDrawerOpen(false);
               }}>
@@ -1218,7 +1243,7 @@ function App() {
                 setSelectedDiffSource('commit');
                 const files = commitFilesBySha[commit.sha] ?? [];
                 if (files[0]) {
-                  setSelectedDiff(files[0].path);
+                  setSelectedDiff(pickPreferredPath(files));
                 } else {
                   setSelectedDiff('');
                 }
@@ -1329,6 +1354,20 @@ function App() {
 
   const renderDiffPane = (content: string) => {
     if (!content) return <div className="muted block">No diff available</div>;
+    const shouldDelayLargeRender =
+      !allowLargeDiffRender &&
+      isHeavyGeneratedDiffPath(selectedDiff || '') &&
+      content.length > MAX_AUTO_RENDER_DIFF_CHARS;
+    if (shouldDelayLargeRender) {
+      return (
+        <div className="muted block">
+          Large generated diff detected ({(content.length / 1024).toFixed(0)} KB). Click to render when needed.
+          <div style={{marginTop: 10}}>
+            <button type="button" className="button" onClick={() => setAllowLargeDiffRender(true)}>Render Diff</button>
+          </div>
+        </div>
+      );
+    }
     const {oldText, newText, hasContent, oldStart, newStart} = parseUnifiedDiff(content);
     if (!hasContent) return <div className="muted block">No diff hunks available</div>;
     const linesOffset = Math.max(0, Math.min(oldStart, newStart) - 1);
