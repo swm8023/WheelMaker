@@ -23,33 +23,34 @@
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
   $psExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
 
-  # Rebuild parameters for re-invocation
-  $paramParts = @()
-  foreach ($key in $PSBoundParameters.Keys) {
-    $val = $PSBoundParameters[$key]
-    if ($val -is [switch]) {
-      if ($val.IsPresent) { $paramParts += "-$key" }
-    } else {
-      $escaped = ($val -replace "'", "''") -replace '"', '`"'
-      $paramParts += "-{0} `"{1}`"" -f $key, $escaped
-    }
-  }
-  $paramStr = $paramParts -join " "
+  # Persist bound parameters and restore them in elevated process to avoid quoting/escaping bugs.
+  $paramFile = Join-Path $env:TEMP ("wm-refresh-params-{0}.clixml" -f ([Guid]::NewGuid().ToString("N")))
+  $PSBoundParameters | Export-Clixml -Path $paramFile
   $scriptPathEsc = $PSCommandPath -replace "'", "''"
+  $paramFileEsc = $paramFile -replace "'", "''"
 
   # Run elevated; wrap with try/catch so the window stays open on error
   $cmd = @"
 try {
-  & '$scriptPathEsc' $paramStr
+  `$replayParams = @{}
+  if (Test-Path '$paramFileEsc') {
+    `$loaded = Import-Clixml -Path '$paramFileEsc'
+    if (`$null -ne `$loaded) { `$replayParams = `$loaded }
+  }
+  & '$scriptPathEsc' @replayParams
+  `$code = 0
 } catch {
   Write-Host ('ERROR: ' + `$_.Exception.Message) -ForegroundColor Red
-  `$host.SetShouldExit(1)
+  `$code = 1
+} finally {
+  Remove-Item -Path '$paramFileEsc' -Force -ErrorAction SilentlyContinue
 }
 if (-not [Console]::IsInputRedirected) {
   Write-Host ''
   Write-Host 'Press Enter to close this window...' -ForegroundColor Gray
   `$null = Read-Host
 }
+`$host.SetShouldExit(`$code)
 "@
   $proc = Start-Process $psExe -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", $cmd) -Verb RunAs -Wait -PassThru
   exit $(if ($null -ne $proc) { $proc.ExitCode } else { 1 })
@@ -532,14 +533,14 @@ function Prepare-ServiceCredentials {
 }
 
 function Wait-ServiceDeleted {
-  param([Parameter(Mandatory = $true)][string]$Name, [int]$TimeoutSeconds = 20)
+  param([Parameter(Mandatory = $true)][string]$Name, [int]$TimeoutSeconds = 120)
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     $svc = Get-Service -Name $Name -ErrorAction SilentlyContinue
-    if ($null -eq $svc) { return }
+    if ($null -eq $svc) { return $true }
     Start-Sleep -Milliseconds 250
   }
-  throw ("service {0} failed to delete within timeout" -f $Name)
+  return $false
 }
 
 function Ensure-Service {
@@ -551,8 +552,20 @@ function Ensure-Service {
   }
   if (Test-ServiceExists -Name $Name) {
     Stop-ServiceSafe -Name $Name
-    Invoke-Checked -FilePath "sc.exe" -Arguments @("delete", $Name) -FailureMessage ("service delete failed: {0}" -f $Name)
-    Wait-ServiceDeleted -Name $Name -TimeoutSeconds 20
+    & sc.exe delete $Name *> $null
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1072) {
+      throw ("service delete failed: {0} (exit={1})" -f $Name, $LASTEXITCODE)
+    }
+    if ($LASTEXITCODE -eq 1072) {
+      Write-Step ("service {0} already pending deletion; waiting for SCM release" -f $Name)
+    }
+    $deleted = Wait-ServiceDeleted -Name $Name -TimeoutSeconds 120
+    if (-not $deleted) {
+      Write-Warn ("service {0} delete is pending; waiting for SCM release" -f $Name)
+    }
+    if (Test-ServiceExists -Name $Name) {
+      throw ("service {0} is still present after delete request. Close any management tools holding the service handle and rerun." -f $Name)
+    }
   }
   Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
   $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')

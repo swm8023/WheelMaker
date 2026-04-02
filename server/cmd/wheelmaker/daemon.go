@@ -94,7 +94,16 @@ func sanitizeWorkerArgs(args []string) []string {
 func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, preferredPID int) (int, error) {
 	workers, err := listWorkerProcesses(exeName, markerFlag)
 	if err != nil {
-		return 0, err
+		if preferredPID > 0 {
+			logger.Warn("[daemon] list %s workers failed, keep previous pid=%d: %v", markerFlag, preferredPID, err)
+			return preferredPID, nil
+		}
+		pid, startErr := startWorker(exePath, workerArgs)
+		if startErr != nil {
+			return 0, fmt.Errorf("list workers failed: %w; start fallback failed: %v", err, startErr)
+		}
+		logger.Warn("[daemon] list %s workers failed; started fallback pid=%d: %v", markerFlag, pid, err)
+		return pid, nil
 	}
 	if len(workers) == 0 {
 		pid, startErr := startWorker(exePath, workerArgs)
