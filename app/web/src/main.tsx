@@ -534,6 +534,7 @@ function App() {
   const [selectedDiffSource, setSelectedDiffSource] = useState<GitDiffSource>('commit');
   const [selectedDiffScope, setSelectedDiffScope] = useState<'staged' | 'unstaged' | 'untracked'>('unstaged');
   const [selectedDiff, setSelectedDiff] = useState('');
+  const [allowHeavyDiffLoad, setAllowHeavyDiffLoad] = useState(false);
   const [allowLargeDiffRender, setAllowLargeDiffRender] = useState(false);
   const [diffText, setDiffText] = useState('');
   const [diffLoading, setDiffLoading] = useState(false);
@@ -543,6 +544,7 @@ function App() {
   }, [projectId]);
 
   useEffect(() => {
+    setAllowHeavyDiffLoad(false);
     setAllowLargeDiffRender(false);
   }, [selectedDiff, selectedCommit, selectedDiffSource, selectedDiffScope]);
 
@@ -928,6 +930,10 @@ function App() {
   useEffect(() => {
     const run = async () => {
       if (!projectId || !selectedDiff) return;
+      if (isHeavyGeneratedDiffPath(selectedDiff) && !allowHeavyDiffLoad) {
+        setDiffText('');
+        return;
+      }
       const cacheScope = selectedDiffSource === 'worktree' ? `WORKTREE:${selectedDiffScope}` : selectedCommit;
       if (!cacheScope) return;
       const cachedDiff = workspaceStore.getCachedDiff(projectId, cacheScope, selectedDiff);
@@ -949,7 +955,7 @@ function App() {
       }
     };
     run().catch(() => undefined);
-  }, [projectId, selectedCommit, selectedDiff, selectedDiffSource, selectedDiffScope]);
+  }, [projectId, selectedCommit, selectedDiff, selectedDiffSource, selectedDiffScope, allowHeavyDiffLoad]);
 
   const connect = async () => {
     setError('');
@@ -1393,6 +1399,8 @@ function App() {
   };
 
   const renderMain = () => {
+    const heavyDiffDeferred = !!selectedDiff && isHeavyGeneratedDiffPath(selectedDiff) && !allowHeavyDiffLoad;
+
     if (tab === 'chat') {
       return (
         <div className="content">
@@ -1534,7 +1542,20 @@ function App() {
           <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
           <div className="view-tools">{renderViewTools()}</div>
         </div>
-        <div className="scroll-panel">{diffLoading ? <div className="muted block">Loading diff...</div> : renderDiffPane(diffText)}</div>
+        <div className="scroll-panel">
+          {heavyDiffDeferred ? (
+            <div className="muted block">
+              Heavy generated file selected. Diff loading is paused to keep UI responsive.
+              <div style={{marginTop: 10}}>
+                <button type="button" className="button" onClick={() => setAllowHeavyDiffLoad(true)}>Load Diff</button>
+              </div>
+            </div>
+          ) : diffLoading ? (
+            <div className="muted block">Loading diff...</div>
+          ) : (
+            renderDiffPane(diffText)
+          )}
+        </div>
       </div>
     );
   };
