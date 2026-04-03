@@ -91,9 +91,10 @@ type Client struct {
 
 	registry *agentRegistry
 
-	store    Store
-	state    *ProjectState
-	imBridge *im.ImAdapter // nil when no IM channel configured
+	store        Store
+	sessionStore SessionStore // optional; nil = in-memory only
+	state        *ProjectState
+	imBridge     *im.ImAdapter // nil when no IM channel configured
 
 	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
 
@@ -197,6 +198,14 @@ func (c *Client) SetIMUpdateBlockList(types []string) {
 	}
 }
 
+// SetSessionStore sets an optional persistent session store (e.g. SQLite).
+// Must be called before Start(). A nil store means in-memory only.
+func (c *Client) SetSessionStore(ss SessionStore) {
+	c.mu.Lock()
+	c.sessionStore = ss
+	c.mu.Unlock()
+}
+
 // RegisterAgent registers an AgentFactory under the given name.
 func (c *Client) RegisterAgent(name string, factory AgentFactory) {
 	c.registry.register(name, factory)
@@ -239,21 +248,29 @@ func (c *Client) Run(ctx context.Context) error {
 }
 
 // Close saves state and shuts down all active sessions.
+// If a SessionStore is configured, active sessions are persisted before shutdown.
 func (c *Client) Close() error {
 	c.mu.Lock()
 	sessions := make([]*Session, 0, len(c.sessions))
 	for _, sess := range c.sessions {
 		sessions = append(sessions, sess)
 	}
+	ss := c.sessionStore
+	pn := c.projectName
 	c.mu.Unlock()
 
+	ctx := context.Background()
 	for _, sess := range sessions {
 		sess.mu.Lock()
 		inst := sess.instance
 		sess.mu.Unlock()
 		if inst != nil {
 			sess.saveSessionState()
-			_ = inst.Close()
+			if ss != nil {
+				_ = sess.Suspend(ctx, ss, pn)
+			} else {
+				_ = inst.Close()
+			}
 		}
 	}
 
@@ -308,6 +325,17 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 	sessID := c.routeMap[routeKey]
 	if sessID != "" {
 		if sess := c.sessions[sessID]; sess != nil {
+			c.activeSession = sess
+			c.mu.Unlock()
+			return sess
+		}
+	}
+
+	// If only one session exists and no explicit route mapping, reuse it.
+	// This preserves backward compatibility for single-session setups.
+	if len(c.sessions) == 1 {
+		for _, sess := range c.sessions {
+			c.routeMap[routeKey] = sess.ID
 			c.activeSession = sess
 			c.mu.Unlock()
 			return sess

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/acp"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
@@ -511,4 +512,85 @@ func (s *Session) saveSessionState() {
 	if st != nil {
 		_ = s.store.Save(st)
 	}
+}
+
+// Snapshot captures the full state of this Session into a SessionSnapshot.
+func (s *Session) Snapshot(projectName string) *SessionSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	agentName := ""
+	if s.instance != nil {
+		agentName = s.instance.Name()
+	}
+
+	// Deep copy agents map.
+	agents := make(map[string]*SessionAgentState, len(s.agents))
+	for k, v := range s.agents {
+		cp := *v
+		agents[k] = &cp
+	}
+
+	return &SessionSnapshot{
+		ID:           s.ID,
+		ProjectName:  projectName,
+		Status:       s.Status,
+		ActiveAgent:  agentName,
+		LastReply:    s.lastReply,
+		ACPSessionID: s.acpSessionID,
+		CreatedAt:    s.createdAt,
+		LastActiveAt: s.lastActiveAt,
+		Agents:       agents,
+		SessionMeta:  s.sessionMeta,
+		InitMeta:     s.initMeta,
+	}
+}
+
+// Suspend cancels any in-progress prompt, closes the agent, and marks
+// this session as suspended. If a SessionStore is provided, the session
+// state is persisted.
+func (s *Session) Suspend(ctx context.Context, store SessionStore, projectName string) error {
+	_ = s.cancelPrompt()
+
+	s.mu.Lock()
+	inst := s.instance
+	s.instance = nil
+	s.ready = false
+	s.initializing = false
+	s.terminals.KillAll()
+	s.Status = SessionSuspended
+	s.lastActiveAt = time.Now()
+	s.mu.Unlock()
+
+	if inst != nil {
+		_ = inst.Close()
+	}
+
+	if store != nil {
+		snap := s.Snapshot(projectName)
+		return store.Save(ctx, snap)
+	}
+	return nil
+}
+
+// RestoreFromSnapshot re-hydrates a Session from a persisted snapshot.
+// The agent connection is NOT restored — it will be lazily initialized
+// on the next prompt via ensureInstance().
+func RestoreFromSnapshot(snap *SessionSnapshot, cwd string) *Session {
+	s := newSession(snap.ID, cwd)
+	s.Status = SessionActive
+	s.lastReply = snap.LastReply
+	s.acpSessionID = snap.ACPSessionID
+	s.createdAt = snap.CreatedAt
+	s.lastActiveAt = time.Now()
+	s.sessionMeta = snap.SessionMeta
+	s.initMeta = snap.InitMeta
+
+	if snap.Agents != nil {
+		for k, v := range snap.Agents {
+			cp := *v
+			s.agents[k] = &cp
+		}
+	}
+	return s
 }
