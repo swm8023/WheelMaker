@@ -10,18 +10,113 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/acp"
 )
 
-// compile-time check: Client implements acp.ClientCallbacks.
+// compile-time check: Client implements acp.ClientCallbacks (delegates to Session).
 var _ acp.ClientCallbacks = (*Client)(nil)
 
-// SessionUpdate receives session/update notifications from the Forwarder.
-// Routes the update to the active promptUpdatesCh if the session ID matches.
+// compile-time check: Session implements acp.ClientCallbacks.
+var _ acp.ClientCallbacks = (*Session)(nil)
+
+// --- Client delegates to activeSession ---
+
 func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 	c.mu.Lock()
-	sessID := c.session.id
-	ch := c.prompt.updatesCh
-	promptCtx := c.prompt.ctx
-	replayH := c.session.replayH
+	sess := c.activeSession
 	c.mu.Unlock()
+	if sess != nil {
+		sess.SessionUpdate(params)
+	}
+}
+
+func (c *Client) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.SessionRequestPermission(ctx, params)
+	}
+	return acp.PermissionResult{Outcome: "cancelled"}, nil
+}
+
+func (c *Client) FSRead(params acp.FSReadTextFileParams) (acp.FSReadTextFileResult, error) {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.FSRead(params)
+	}
+	return acp.FSReadTextFileResult{}, fmt.Errorf("no active session")
+}
+
+func (c *Client) FSWrite(params acp.FSWriteTextFileParams) error {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.FSWrite(params)
+	}
+	return fmt.Errorf("no active session")
+}
+
+func (c *Client) TerminalCreate(params acp.TerminalCreateParams) (acp.TerminalCreateResult, error) {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.TerminalCreate(params)
+	}
+	return acp.TerminalCreateResult{}, fmt.Errorf("no active session")
+}
+
+func (c *Client) TerminalOutput(params acp.TerminalOutputParams) (acp.TerminalOutputResult, error) {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.TerminalOutput(params)
+	}
+	return acp.TerminalOutputResult{}, fmt.Errorf("no active session")
+}
+
+func (c *Client) TerminalWaitForExit(params acp.TerminalWaitForExitParams) (acp.TerminalWaitForExitResult, error) {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.TerminalWaitForExit(params)
+	}
+	return acp.TerminalWaitForExitResult{}, fmt.Errorf("no active session")
+}
+
+func (c *Client) TerminalKill(params acp.TerminalKillParams) error {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.TerminalKill(params)
+	}
+	return fmt.Errorf("no active session")
+}
+
+func (c *Client) TerminalRelease(params acp.TerminalReleaseParams) error {
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		return sess.TerminalRelease(params)
+	}
+	return fmt.Errorf("no active session")
+}
+
+// --- Session implements the actual callback logic ---
+
+// SessionUpdate receives session/update notifications from the Forwarder.
+func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
+	s.mu.Lock()
+	sessID := s.acpSessionID
+	ch := s.prompt.updatesCh
+	promptCtx := s.prompt.ctx
+	replayH := s.replayH
+	s.mu.Unlock()
 
 	if replayH != nil {
 		replayH(params)
@@ -33,42 +128,37 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 
 	derived := acp.ParseSessionUpdateParams(params)
 
-	// Always update sessionMeta for matching session (even outside an active prompt).
-	// This ensures config_option_update from set_config_option is captured correctly.
 	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
-		c.mu.Lock()
+		s.mu.Lock()
 		if len(derived.AvailableCommands) > 0 {
-			c.sessionMeta.AvailableCommands = derived.AvailableCommands
+			s.sessionMeta.AvailableCommands = derived.AvailableCommands
 		}
 		if len(derived.ConfigOptions) > 0 {
-			c.sessionMeta.ConfigOptions = derived.ConfigOptions
+			s.sessionMeta.ConfigOptions = derived.ConfigOptions
 		}
 		if derived.Title != "" {
-			c.sessionMeta.Title = derived.Title
+			s.sessionMeta.Title = derived.Title
 		}
 		if derived.UpdatedAt != "" {
-			c.sessionMeta.UpdatedAt = derived.UpdatedAt
+			s.sessionMeta.UpdatedAt = derived.UpdatedAt
 		}
-		c.mu.Unlock()
+		s.mu.Unlock()
 	}
 
 	if derived.TrackAddToolCall != "" || derived.TrackDoneToolCall != "" {
-		c.mu.Lock()
+		s.mu.Lock()
 		if derived.TrackAddToolCall != "" {
-			c.prompt.activeTCs[derived.TrackAddToolCall] = struct{}{}
+			s.prompt.activeTCs[derived.TrackAddToolCall] = struct{}{}
 		}
 		if derived.TrackDoneToolCall != "" {
-			delete(c.prompt.activeTCs, derived.TrackDoneToolCall)
+			delete(s.prompt.activeTCs, derived.TrackDoneToolCall)
 		}
-		c.mu.Unlock()
+		s.mu.Unlock()
 	}
 
-	// Route update to the active prompt channel if one exists.
 	if ch == nil {
 		return
 	}
-	// Preserve update ordering and avoid lossy drops under high-frequency streams.
-	// If prompt is already cancelled, skip blocking send.
 	if promptCtx == nil {
 		ch <- derived.Update
 		return
@@ -80,20 +170,19 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 }
 
 // SessionRequestPermission responds to session/request_permission agent requests.
-// Substitutes promptCtx so that Cancel() unblocks pending permission dialogs.
-func (c *Client) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
-	c.mu.Lock()
-	pCtx := c.prompt.ctx
-	snap := acp.SessionConfigSnapshotFromOptions(c.sessionMeta.ConfigOptions)
-	c.mu.Unlock()
+func (s *Session) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+	s.mu.Lock()
+	pCtx := s.prompt.ctx
+	snap := acp.SessionConfigSnapshotFromOptions(s.sessionMeta.ConfigOptions)
+	s.mu.Unlock()
 	if pCtx != nil {
 		ctx = pCtx
 	}
-	return c.permRouter.decide(ctx, params, snap.Mode)
+	return s.permRouter.decide(ctx, params, snap.Mode)
 }
 
 // FSRead responds to fs/read_text_file agent requests.
-func (c *Client) FSRead(params acp.FSReadTextFileParams) (acp.FSReadTextFileResult, error) {
+func (s *Session) FSRead(params acp.FSReadTextFileParams) (acp.FSReadTextFileResult, error) {
 	data, err := os.ReadFile(params.Path)
 	if err != nil {
 		return acp.FSReadTextFileResult{}, fmt.Errorf("fs/read: %w", err)
@@ -124,7 +213,7 @@ func (c *Client) FSRead(params acp.FSReadTextFileParams) (acp.FSReadTextFileResu
 }
 
 // FSWrite responds to fs/write_text_file agent requests.
-func (c *Client) FSWrite(params acp.FSWriteTextFileParams) error {
+func (s *Session) FSWrite(params acp.FSWriteTextFileParams) error {
 	if err := os.MkdirAll(filepath.Dir(params.Path), 0o755); err != nil {
 		return fmt.Errorf("fs/write: mkdir: %w", err)
 	}
@@ -135,26 +224,26 @@ func (c *Client) FSWrite(params acp.FSWriteTextFileParams) error {
 }
 
 // TerminalCreate responds to terminal/create agent requests.
-func (c *Client) TerminalCreate(params acp.TerminalCreateParams) (acp.TerminalCreateResult, error) {
-	return c.terminals.Create(params)
+func (s *Session) TerminalCreate(params acp.TerminalCreateParams) (acp.TerminalCreateResult, error) {
+	return s.terminals.Create(params)
 }
 
 // TerminalOutput responds to terminal/output agent requests.
-func (c *Client) TerminalOutput(params acp.TerminalOutputParams) (acp.TerminalOutputResult, error) {
-	return c.terminals.Output(params.TerminalID)
+func (s *Session) TerminalOutput(params acp.TerminalOutputParams) (acp.TerminalOutputResult, error) {
+	return s.terminals.Output(params.TerminalID)
 }
 
 // TerminalWaitForExit responds to terminal/wait_for_exit agent requests.
-func (c *Client) TerminalWaitForExit(params acp.TerminalWaitForExitParams) (acp.TerminalWaitForExitResult, error) {
-	return c.terminals.WaitForExit(params.TerminalID)
+func (s *Session) TerminalWaitForExit(params acp.TerminalWaitForExitParams) (acp.TerminalWaitForExitResult, error) {
+	return s.terminals.WaitForExit(params.TerminalID)
 }
 
 // TerminalKill responds to terminal/kill agent requests.
-func (c *Client) TerminalKill(params acp.TerminalKillParams) error {
-	return c.terminals.Kill(params.TerminalID)
+func (s *Session) TerminalKill(params acp.TerminalKillParams) error {
+	return s.terminals.Kill(params.TerminalID)
 }
 
 // TerminalRelease responds to terminal/release agent requests.
-func (c *Client) TerminalRelease(params acp.TerminalReleaseParams) error {
-	return c.terminals.Release(params.TerminalID)
+func (s *Session) TerminalRelease(params acp.TerminalReleaseParams) error {
+	return s.terminals.Release(params.TerminalID)
 }

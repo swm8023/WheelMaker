@@ -76,14 +76,6 @@ const acpClientProtocolVersion = 1
 
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 
-type sessionState struct {
-	id           string
-	ready        bool
-	initializing bool
-	lastReply    string
-	replayH      func(acp.SessionUpdateParams)
-}
-
 type promptState struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -108,23 +100,16 @@ type Client struct {
 
 	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
 
-	mu       sync.Mutex
-	promptMu sync.Mutex // serializes handlePrompt and switchAgent
+	mu sync.Mutex
 
-	// active connection; nil until first ensureForwarder
-	conn *agentConn
+	// sessions maps session IDs to Session objects.
+	// In Phase 1 there is always exactly one entry ("default").
+	sessions map[string]*Session
 
-	initCond *sync.Cond
-	session  sessionState
-	prompt   promptState
-	initMeta clientInitMeta
-	// sessionMeta tracks runtime session snapshot from session/update.
-	sessionMeta clientSessionMeta
+	// activeSession is the Session currently handling messages.
+	activeSession *Session
 
-	terminals *terminalManager
-
-	permRouter *permissionRouter
-	imBlockedUpdates        map[string]struct{}
+	imBlockedUpdates map[string]struct{}
 }
 
 // New creates a Client for the given project.
@@ -134,19 +119,22 @@ type Client struct {
 //   - cwd: working directory for agent sessions
 func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName: projectName,
-		cwd:         cwd,
-		registry:    newAgentRegistry(),
-		store:       store,
-		imBridge:    imProvider,
+		projectName:      projectName,
+		cwd:              cwd,
+		registry:         newAgentRegistry(),
+		store:            store,
+		imBridge:         imProvider,
 		imBlockedUpdates: map[string]struct{}{},
-		prompt: promptState{
-			activeTCs: make(map[string]struct{}),
-		},
+		sessions:         make(map[string]*Session),
 	}
-	c.initCond = sync.NewCond(&c.mu)
-	c.terminals = newTerminalManager()
-	c.permRouter = newPermissionRouter(c)
+	sess := newSession("default", cwd)
+	sess.store = store
+	sess.registry = c.registry
+	sess.imBridge = imProvider
+	sess.imBlockedUpdates = c.imBlockedUpdates
+	sess.permRouter = newPermissionRouter(sess)
+	c.activeSession = sess
+	c.sessions["default"] = sess
 	return c
 }
 
@@ -154,7 +142,13 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 func (c *Client) SetYOLO(enabled bool) {
 	c.mu.Lock()
 	c.yolo = enabled
+	sess := c.activeSession
 	c.mu.Unlock()
+	if sess != nil {
+		sess.mu.Lock()
+		sess.yolo = enabled
+		sess.mu.Unlock()
+	}
 }
 
 // SetDebugLogger enables ACP JSON debug logging on every subsequent agent connection.
@@ -162,7 +156,13 @@ func (c *Client) SetYOLO(enabled bool) {
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
 	c.debugLog = w
+	sess := c.activeSession
 	c.mu.Unlock()
+	if sess != nil {
+		sess.mu.Lock()
+		sess.debugLog = w
+		sess.mu.Unlock()
+	}
 }
 
 // SetIMUpdateBlockList configures outbound IM update types to suppress.
@@ -178,7 +178,13 @@ func (c *Client) SetIMUpdateBlockList(types []string) {
 	}
 	c.mu.Lock()
 	c.imBlockedUpdates = blocked
+	sess := c.activeSession
 	c.mu.Unlock()
+	if sess != nil {
+		sess.mu.Lock()
+		sess.imBlockedUpdates = blocked
+		sess.mu.Unlock()
+	}
 }
 
 // RegisterAgent registers an AgentFactory under the given name.
@@ -195,11 +201,19 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	c.state = state
+	sess := c.activeSession
 	c.mu.Unlock()
+
+	// Wire state into the active session.
+	if sess != nil {
+		sess.mu.Lock()
+		sess.state = state
+		sess.mu.Unlock()
+	}
 
 	if c.imBridge != nil {
 		c.imBridge.OnMessage(c.HandleMessage)
-		c.imBridge.SetHelpResolver(c.resolveHelpModel)
+		c.imBridge.SetHelpResolver(sess.resolveHelpModel)
 	}
 	return nil
 }
@@ -216,11 +230,17 @@ func (c *Client) Run(ctx context.Context) error {
 // Close saves state and shuts down the active agent.
 func (c *Client) Close() error {
 	c.mu.Lock()
-	ac := c.conn
+	sess := c.activeSession
 	c.mu.Unlock()
-	if ac != nil {
-		c.saveSessionState()
-		_ = ac.close()
+
+	if sess != nil {
+		sess.mu.Lock()
+		ac := sess.conn
+		sess.mu.Unlock()
+		if ac != nil {
+			sess.saveSessionState()
+			_ = ac.close()
+		}
 	}
 
 	c.mu.Lock()
@@ -246,11 +266,16 @@ func (c *Client) HandleMessage(msg im.Message) {
 	if text == "" {
 		return
 	}
+
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+
 	if cmd, args, ok := parseCommand(text); ok {
-		c.handleCommand(msg, cmd, args)
+		c.handleCommand(sess, msg, cmd, args)
 		return
 	}
-	c.handlePrompt(msg, text)
+	sess.handlePrompt(msg, text)
 }
 
 // --- internal ---
@@ -272,44 +297,44 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
 // promptMu is held for the full duration, serializing with switchAgent.
-func (c *Client) handlePrompt(msg im.Message, text string) {
-	c.promptMu.Lock()
-	defer c.promptMu.Unlock()
+func (s *Session) handlePrompt(msg im.Message, text string) {
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
 
 	ctx := context.Background()
 	for attempt := 1; attempt <= 2; attempt++ {
 		// Lazily initialize the agent if no forwarder exists yet.
-		if err := c.ensureForwarder(ctx); err != nil {
-			c.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		if err := s.ensureForwarder(ctx); err != nil {
+			s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
 
-		if err := c.ensureReadyAndNotify(ctx); err != nil {
-			c.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		if err := s.ensureReadyAndNotify(ctx); err != nil {
+			s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
 
-		updates, err := c.promptStream(ctx, text)
+		updates, err := s.promptStream(ctx, text)
 		if err != nil {
 			// Keepalive: recover dead agent subprocess and retry current prompt once.
-			if c.resetDeadConnection(err) && attempt == 1 {
-				c.reply("Agent disconnected, reconnecting and retrying once...")
+			if s.resetDeadConnection(err) && attempt == 1 {
+				s.reply("Agent disconnected, reconnecting and retrying once...")
 				continue
 			}
-			c.reply(fmt.Sprintf("Prompt error: %v", err))
+			s.reply(fmt.Sprintf("Prompt error: %v", err))
 			return
 		}
 
-		c.mu.Lock()
-		c.prompt.currentCh = updates
-		c.mu.Unlock()
+		s.mu.Lock()
+		s.prompt.currentCh = updates
+		s.mu.Unlock()
 
 		var buf strings.Builder
-		c.mu.Lock()
-		emitter := c.imBridge
+		s.mu.Lock()
+		emitter := s.imBridge
 		hasEmitter := emitter != nil
-		sid := c.session.id
-		c.mu.Unlock()
+		sid := s.acpSessionID
+		s.mu.Unlock()
 
 		sawSandboxRefresh := false
 		sawText := false
@@ -317,38 +342,35 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 		retryStream := false
 		for u := range updates {
 			if u.Err != nil {
-				if attempt == 1 && isCopilotReasoningArgError(u.Err) && c.tryCopilotReasoningFallback(ctx) {
-					c.reply("Copilot model incompatibility detected, switched model and retrying once...")
+				if attempt == 1 && isCopilotReasoningArgError(u.Err) && s.tryCopilotReasoningFallback(ctx) {
+					s.reply("Copilot model incompatibility detected, switched model and retrying once...")
 					retryStream = true
 					break
 				}
-				// Avoid duplicate failure messages:
-				// do not emit generic UpdateError to IM before handling concrete error.
 				if attempt == 1 && !sawText && (isAgentExitError(u.Err) || isSandboxRefreshErr(u.Err)) {
-					c.reply("Agent disconnected during stream, reconnecting and retrying once...")
-					c.forceReconnect()
+					s.reply("Agent disconnected during stream, reconnecting and retrying once...")
+					s.forceReconnect()
 					retryStream = true
 					break
 				}
 				recovered := false
-				if c.resetDeadConnection(u.Err) {
-					// Warm reconnect so the next user message can continue immediately.
-					if recErr := c.ensureForwarder(ctx); recErr == nil {
-						_ = c.ensureReadyAndNotify(ctx)
+				if s.resetDeadConnection(u.Err) {
+					if recErr := s.ensureForwarder(ctx); recErr == nil {
+						_ = s.ensureReadyAndNotify(ctx)
 						recovered = true
 					}
 				}
 				if recovered {
-					c.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
+					s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
 				} else {
-					c.reply(fmt.Sprintf("Agent error: %v", u.Err))
+					s.reply(fmt.Sprintf("Agent error: %v", u.Err))
 				}
-				c.mu.Lock()
-				c.prompt.currentCh = nil
-				c.mu.Unlock()
+				s.mu.Lock()
+				s.prompt.currentCh = nil
+				s.mu.Unlock()
 				return
 			}
-			if c.shouldBlockIMUpdate(u.Type) {
+			if s.shouldBlockIMUpdate(u.Type) {
 				continue
 			}
 			if hasEmitter {
@@ -359,7 +381,7 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 					Raw:        u.Raw,
 				})
 				if emitErr != nil {
-					c.reply(fmt.Sprintf("IM emit error: %v", emitErr))
+					s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 				}
 			}
 			if hasSandboxRefreshError(u) {
@@ -369,8 +391,8 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 				sawText = true
 			}
 			if u.Type == acp.UpdateConfigOption {
-				c.reply(formatConfigOptionUpdateMessage(u.Raw))
-				c.saveSessionState() // persist immediately; don't wait for prompt to finish
+				s.reply(formatConfigOptionUpdateMessage(u.Raw))
+				s.saveSessionState()
 			}
 			if u.Type == acp.UpdateText {
 				if !hasEmitter {
@@ -385,36 +407,33 @@ func (c *Client) handlePrompt(msg im.Message, text string) {
 			continue
 		}
 
-		c.mu.Lock()
-		c.prompt.currentCh = nil
-		c.mu.Unlock()
+		s.mu.Lock()
+		s.prompt.currentCh = nil
+		s.mu.Unlock()
 
-		// Persist after prompt completes: session ID and config metadata may have changed.
-		c.saveSessionState()
+		s.saveSessionState()
 
 		if !hasEmitter && buf.Len() > 0 {
-			c.reply(buf.String())
+			s.reply(buf.String())
 		}
 
-		// Auto-degrade: retry once after reconnect when sandbox setup refresh occurs
-		// and no meaningful text answer was produced.
 		if attempt == 1 && sawSandboxRefresh && !sawText {
-			c.reply("Detected sandbox refresh failure, reconnecting and retrying once...")
-			c.forceReconnect()
+			s.reply("Detected sandbox refresh failure, reconnecting and retrying once...")
+			s.forceReconnect()
 			continue
 		}
 		return
 	}
 }
 
-func (c *Client) shouldBlockIMUpdate(updateType acp.UpdateType) bool {
+func (s *Session) shouldBlockIMUpdate(updateType acp.UpdateType) bool {
 	key := canonicalIMBlockType(string(updateType))
 	if key == "" {
 		return false
 	}
-	c.mu.Lock()
-	_, blocked := c.imBlockedUpdates[key]
-	c.mu.Unlock()
+	s.mu.Lock()
+	_, blocked := s.imBlockedUpdates[key]
+	s.mu.Unlock()
 	return blocked
 }
 
@@ -434,16 +453,13 @@ func canonicalIMBlockType(raw string) string {
 	}
 }
 
-// reply sends a text response to the active chat via the IM channel.
-// Falls back to projectName as chatID when no chat has been established yet
-// (e.g., lifecycle notices before the first user message).
+// reply delegates to the active session's reply method.
 func (c *Client) reply(text string) {
-	if c.imBridge != nil {
-		chatID := c.imBridge.ActiveChatID()
-		if chatID == "" {
-			chatID = c.projectName
-		}
-		_ = c.imBridge.SendSystem(chatID, text)
+	c.mu.Lock()
+	sess := c.activeSession
+	c.mu.Unlock()
+	if sess != nil {
+		sess.reply(text)
 		return
 	}
 	fmt.Println(text)
@@ -481,16 +497,16 @@ func isCopilotReasoningArgError(err error) bool {
 	return strings.Contains(s, "reasoning_effort") && strings.Contains(s, "unrecognized request argument")
 }
 
-func (c *Client) tryCopilotReasoningFallback(ctx context.Context) bool {
-	c.mu.Lock()
-	if c.conn == nil || !strings.EqualFold(strings.TrimSpace(c.conn.name), "copilot") {
-		c.mu.Unlock()
+func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
+	s.mu.Lock()
+	if s.conn == nil || !strings.EqualFold(strings.TrimSpace(s.conn.name), "copilot") {
+		s.mu.Unlock()
 		return false
 	}
-	sid := strings.TrimSpace(c.session.id)
-	fwd := c.conn.forwarder
-	configOptions := append([]acp.ConfigOption(nil), c.sessionMeta.ConfigOptions...)
-	c.mu.Unlock()
+	sid := strings.TrimSpace(s.acpSessionID)
+	fwd := s.conn.forwarder
+	configOptions := append([]acp.ConfigOption(nil), s.sessionMeta.ConfigOptions...)
+	s.mu.Unlock()
 
 	if sid == "" || fwd == nil {
 		return false
@@ -547,50 +563,49 @@ func (c *Client) tryCopilotReasoningFallback(ctx context.Context) bool {
 		return false
 	}
 
-	c.mu.Lock()
+	s.mu.Lock()
 	if len(updatedOpts) > 0 {
-		c.sessionMeta.ConfigOptions = updatedOpts
+		s.sessionMeta.ConfigOptions = updatedOpts
 	}
-	c.mu.Unlock()
-	c.saveSessionState()
+	s.mu.Unlock()
+	s.saveSessionState()
 	return true
 }
 
 // resetDeadConnection clears the current agent connection when it is known-dead.
-// Returns true when a reset happened.
-func (c *Client) resetDeadConnection(err error) bool {
+func (s *Session) resetDeadConnection(err error) bool {
 	if !isAgentExitError(err) {
 		return false
 	}
-	c.mu.Lock()
-	old := c.conn
-	c.conn = nil
-	c.session.ready = false
-	c.session.initializing = false
-	c.prompt.ctx = nil
-	c.prompt.cancel = nil
-	c.prompt.updatesCh = nil
-	c.prompt.currentCh = nil
-	c.prompt.activeTCs = make(map[string]struct{})
-	c.mu.Unlock()
+	s.mu.Lock()
+	old := s.conn
+	s.conn = nil
+	s.ready = false
+	s.initializing = false
+	s.prompt.ctx = nil
+	s.prompt.cancel = nil
+	s.prompt.updatesCh = nil
+	s.prompt.currentCh = nil
+	s.prompt.activeTCs = make(map[string]struct{})
+	s.mu.Unlock()
 	if old != nil {
 		_ = old.close()
 	}
 	return true
 }
 
-func (c *Client) forceReconnect() {
-	c.mu.Lock()
-	old := c.conn
-	c.conn = nil
-	c.session.ready = false
-	c.session.initializing = false
-	c.prompt.ctx = nil
-	c.prompt.cancel = nil
-	c.prompt.updatesCh = nil
-	c.prompt.currentCh = nil
-	c.prompt.activeTCs = make(map[string]struct{})
-	c.mu.Unlock()
+func (s *Session) forceReconnect() {
+	s.mu.Lock()
+	old := s.conn
+	s.conn = nil
+	s.ready = false
+	s.initializing = false
+	s.prompt.ctx = nil
+	s.prompt.cancel = nil
+	s.prompt.updatesCh = nil
+	s.prompt.currentCh = nil
+	s.prompt.activeTCs = make(map[string]struct{})
+	s.mu.Unlock()
 	if old != nil {
 		_ = old.close()
 	}

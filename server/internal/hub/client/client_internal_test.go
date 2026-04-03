@@ -21,18 +21,22 @@ import (
 // with a preset session ID. Used by client_test to bypass Start() when
 // testing with a mock agent.
 func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
+	sess := c.activeSession
 	c.mu.Lock()
 	name := defaultAgentName
 	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" {
 		name = c.state.ActiveAgent
 	}
-	c.conn = &agentConn{name: name, forwarder: f}
-	c.session.id = sessionID
-	c.session.ready = true
 	if c.state == nil {
 		c.state = defaultProjectState()
+		sess.state = c.state
 	}
 	c.mu.Unlock()
+	sess.mu.Lock()
+	sess.conn = &agentConn{name: name, forwarder: f}
+	sess.acpSessionID = sessionID
+	sess.ready = true
+	sess.mu.Unlock()
 	f.SetCallbacks(c)
 }
 
@@ -41,11 +45,17 @@ func (c *Client) InjectState(st *ProjectState) {
 	c.mu.Lock()
 	c.state = st
 	c.mu.Unlock()
+	c.activeSession.mu.Lock()
+	c.activeSession.state = st
+	c.activeSession.mu.Unlock()
 }
 
 // InjectIMChannel sets the IM bridge over the provided IM channel.
 func (c *Client) InjectIMChannel(p im.Channel) {
 	c.imBridge = im.NewBridge(p)
+	c.activeSession.mu.Lock()
+	c.activeSession.imBridge = c.imBridge
+	c.activeSession.mu.Unlock()
 }
 
 // DefaultState returns a freshly initialised default state.
@@ -96,7 +106,7 @@ func (e internalTestErr) Error() string { return string(e) }
 // ---------------------------------------------------------------------------
 
 func TestPermissionRouterDecisionSlotSerializes(t *testing.T) {
-	r := newPermissionRouter(&Client{})
+	r := newPermissionRouter(&Session{})
 
 	if !r.acquireDecisionSlot(context.Background()) {
 		t.Fatal("first acquire failed")
@@ -138,7 +148,7 @@ func TestPermissionRouterDecisionSlotSerializes(t *testing.T) {
 }
 
 func TestPermissionRouterDecisionSlotRespectsContextCancel(t *testing.T) {
-	r := newPermissionRouter(&Client{})
+	r := newPermissionRouter(&Session{})
 
 	if !r.acquireDecisionSlot(context.Background()) {
 		t.Fatal("first acquire failed")
@@ -184,9 +194,9 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.RegisterAgent("codex", nil)
-	c.session.ready = true
+	c.activeSession.ready = true
 
-	model, err := c.resolveHelpModel(context.Background(), "chat-1")
+	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
 	if err != nil {
 		t.Fatalf("resolveHelpModel error: %v", err)
 	}
@@ -206,8 +216,8 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.RegisterAgent("codex", nil)
 	c.RegisterAgent("claude", nil)
-	c.session.ready = true
-	c.sessionMeta.ConfigOptions = []acp.ConfigOption{
+	c.activeSession.ready = true
+	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
 			ID:           "mode",
 			CurrentValue: "plan",
@@ -226,7 +236,7 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 		},
 	}
 
-	model, err := c.resolveHelpModel(context.Background(), "chat-1")
+	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
 	if err != nil {
 		t.Fatalf("resolveHelpModel error: %v", err)
 	}

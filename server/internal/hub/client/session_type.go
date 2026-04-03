@@ -147,8 +147,7 @@ func (s *Session) ensureForwarder(ctx context.Context) error {
 		conn.SetDebugLogger(dw)
 	}
 	fwd := acp.NewForwarder(conn, nil)
-	// SetCallbacks wired after Session implements acp.ClientCallbacks.
-	// fwd.SetCallbacks(s)
+	fwd.SetCallbacks(s)
 
 	s.mu.Lock()
 	if s.conn != nil && s.conn.forwarder != nil {

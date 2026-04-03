@@ -14,14 +14,14 @@ import (
 )
 
 // handleCommand processes recognized "/" commands.
-func (c *Client) handleCommand(msg im.Message, cmd, args string) {
+func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
 	switch cmd {
 	case "/use":
 		if args == "" {
-			c.reply("Usage: /use <agent-name> [--continue]  (e.g. /use claude, /use copilot)")
+			sess.reply("Usage: /use <agent-name> [--continue]  (e.g. /use claude, /use copilot)")
 			return
 		}
 		parts := strings.Fields(args)
@@ -32,96 +32,96 @@ func (c *Client) handleCommand(msg im.Message, cmd, args string) {
 				mode = SwitchWithContext
 			}
 		}
-		if err := c.switchAgent(ctx, name, mode); err != nil {
-			c.reply(fmt.Sprintf("Switch error: %v", err))
+		if err := sess.switchAgent(ctx, name, mode); err != nil {
+			sess.reply(fmt.Sprintf("Switch error: %v", err))
 		}
 
 	case "/cancel":
-		c.mu.Lock()
-		active := c.conn != nil
-		c.mu.Unlock()
+		sess.mu.Lock()
+		active := sess.conn != nil
+		sess.mu.Unlock()
 		if !active {
-			c.reply("No active session.")
+			sess.reply("No active session.")
 			return
 		}
-		if err := c.cancelPrompt(); err != nil {
-			c.reply(fmt.Sprintf("Cancel error: %v", err))
+		if err := sess.cancelPrompt(); err != nil {
+			sess.reply(fmt.Sprintf("Cancel error: %v", err))
 			return
 		}
-		c.reply("Cancelled.")
+		sess.reply("Cancelled.")
 
 	case "/status":
-		c.mu.Lock()
+		sess.mu.Lock()
 		agentName := ""
-		if c.conn != nil {
-			agentName = c.conn.name
+		if sess.conn != nil {
+			agentName = sess.conn.name
 		}
-		sid := c.session.id
-		active := c.conn != nil
-		c.mu.Unlock()
+		sid := sess.acpSessionID
+		active := sess.conn != nil
+		sess.mu.Unlock()
 		if !active {
-			c.reply("No active session.")
+			sess.reply("No active session.")
 			return
 		}
 		status := fmt.Sprintf("Active agent: %s", agentName)
 		if sid != "" {
 			status += fmt.Sprintf("\nACP session: %s", sid)
 		}
-		c.reply(status)
+		sess.reply(status)
 
 	case "/list":
-		c.promptMu.Lock()
-		defer c.promptMu.Unlock()
-		lines, err := c.listSessions(ctx)
+		sess.promptMu.Lock()
+		defer sess.promptMu.Unlock()
+		lines, err := sess.listSessions(ctx)
 		if err != nil {
-			c.reply(fmt.Sprintf("List error: %v", err))
+			sess.reply(fmt.Sprintf("List error: %v", err))
 			return
 		}
-		c.reply(strings.Join(lines, "\n"))
+		sess.reply(strings.Join(lines, "\n"))
 
 	case "/new":
-		c.promptMu.Lock()
-		defer c.promptMu.Unlock()
-		sid, err := c.createNewSession(ctx)
+		sess.promptMu.Lock()
+		defer sess.promptMu.Unlock()
+		sid, err := sess.createNewSession(ctx)
 		if err != nil {
-			c.reply(fmt.Sprintf("New error: %v", err))
+			sess.reply(fmt.Sprintf("New error: %v", err))
 			return
 		}
-		c.reply(fmt.Sprintf("Created new session: %s", sid))
+		sess.reply(fmt.Sprintf("Created new session: %s", sid))
 
 	case "/load":
 		idxStr := strings.TrimSpace(args)
 		if idxStr == "" {
-			c.reply("Usage: /load <index>  (see /list)")
+			sess.reply("Usage: /load <index>  (see /list)")
 			return
 		}
 		idx, err := strconv.Atoi(idxStr)
 		if err != nil || idx <= 0 {
-			c.reply("Load error: index must be a positive integer")
+			sess.reply("Load error: index must be a positive integer")
 			return
 		}
-		c.promptMu.Lock()
-		defer c.promptMu.Unlock()
-		sid, err := c.loadSessionByIndex(ctx, idx)
+		sess.promptMu.Lock()
+		defer sess.promptMu.Unlock()
+		sid, err := sess.loadSessionByIndex(ctx, idx)
 		if err != nil {
-			c.reply(fmt.Sprintf("Load error: %v", err))
+			sess.reply(fmt.Sprintf("Load error: %v", err))
 			return
 		}
-		c.reply(fmt.Sprintf("Loaded session: %s", sid))
+		sess.reply(fmt.Sprintf("Loaded session: %s", sid))
 
 	case "/mode":
-		c.handleConfigCommand(ctx, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
+		sess.handleConfigCommand(ctx, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
 
 	case "/model":
-		c.handleConfigCommand(ctx, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
+		sess.handleConfigCommand(ctx, args, "Usage: /model <model-id-or-name>", "Model", resolveModelArg)
 
 	case "/config":
-		c.handleConfigCommand(ctx, args, "Usage: /config <config-id> <value>", "Config", resolveConfigArg)
+		sess.handleConfigCommand(ctx, args, "Usage: /config <config-id> <value>", "Config", resolveConfigArg)
 
 	}
 }
 
-func (c *Client) handleConfigCommand(
+func (s *Session) handleConfigCommand(
 	ctx context.Context,
 	args string,
 	usage string,
@@ -130,48 +130,48 @@ func (c *Client) handleConfigCommand(
 ) {
 	input := strings.TrimSpace(args)
 	if input == "" {
-		c.reply(usage)
+		s.reply(usage)
 		return
 	}
 
-	c.promptMu.Lock()
-	defer c.promptMu.Unlock()
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
 
-	if err := c.ensureForwarder(ctx); err != nil {
-		c.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+	if err := s.ensureForwarder(ctx); err != nil {
+		s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 		return
 	}
 
 	// Lock section 1: read agentName and sessionState for config resolution.
-	c.mu.Lock()
+	s.mu.Lock()
 	agentName := ""
-	if c.conn != nil {
-		agentName = c.conn.name
+	if s.conn != nil {
+		agentName = s.conn.name
 	}
 	var sessionState *SessionState
-	if c.state != nil && c.state.Agents != nil {
-		if as := c.state.Agents[agentName]; as != nil {
+	if s.state != nil && s.state.Agents != nil {
+		if as := s.state.Agents[agentName]; as != nil {
 			sessionState = as.Session
 		}
 	}
-	c.mu.Unlock()
+	s.mu.Unlock()
 
-	if err := c.ensureReadyAndNotify(ctx); err != nil {
-		c.reply(fmt.Sprintf("%s error: %v", label, err))
+	if err := s.ensureReadyAndNotify(ctx); err != nil {
+		s.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
 	}
 
 	configID, value, err := resolve(input, sessionState)
 	if err != nil {
-		c.reply(fmt.Sprintf("%s error: %v", label, err))
+		s.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
 	}
 
-	// Lock section 2: read fwd and sid after ensureReady has set c.session.id.
-	c.mu.Lock()
-	fwd := c.conn.forwarder
-	sid := c.session.id
-	c.mu.Unlock()
+	// Lock section 2: read fwd and sid after ensureReady has set acpSessionID.
+	s.mu.Lock()
+	fwd := s.conn.forwarder
+	sid := s.acpSessionID
+	s.mu.Unlock()
 
 	updatedOpts, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
 		SessionID: sid,
@@ -179,18 +179,18 @@ func (c *Client) handleConfigCommand(
 		Value:     value,
 	})
 	if err != nil {
-		c.reply(fmt.Sprintf("%s error: %v", label, err))
+		s.reply(fmt.Sprintf("%s error: %v", label, err))
 		return
 	}
 	// Apply returned config options immediately so the help menu reflects the new value.
 	if len(updatedOpts) > 0 {
-		c.mu.Lock()
-		c.sessionMeta.ConfigOptions = updatedOpts
-		c.mu.Unlock()
+		s.mu.Lock()
+		s.sessionMeta.ConfigOptions = updatedOpts
+		s.mu.Unlock()
 	}
 
-	c.saveSessionState()
-	c.reply(fmt.Sprintf("%s set to: %s", label, value))
+	s.saveSessionState()
+	s.reply(fmt.Sprintf("%s set to: %s", label, value))
 }
 
 func resolveModeArg(input string, st *SessionState) (configID, value string, err error) {
@@ -275,22 +275,22 @@ func resolveConfigSelectArg(kind string, defaultConfigID string, input string, s
 	return configID, v, nil
 }
 
-func (c *Client) listSessions(ctx context.Context) ([]string, error) {
-	if err := c.ensureForwarder(ctx); err != nil {
+func (s *Session) listSessions(ctx context.Context) ([]string, error) {
+	if err := s.ensureForwarder(ctx); err != nil {
 		return nil, err
 	}
 
-	if err := c.ensureReady(ctx); err != nil {
+	if err := s.ensureReady(ctx); err != nil {
 		return nil, err
 	}
 
-	c.mu.Lock()
-	fwd := c.conn.forwarder
-	cwd := c.cwd
-	curSID := c.session.id
-	agentName := c.conn.name
-	caps := c.initMeta.AgentCapabilities
-	c.mu.Unlock()
+	s.mu.Lock()
+	fwd := s.conn.forwarder
+	cwd := s.cwd
+	curSID := s.acpSessionID
+	agentName := s.conn.name
+	caps := s.initMeta.AgentCapabilities
+	s.mu.Unlock()
 
 	if fwd == nil {
 		return nil, errors.New("no active forwarder")
@@ -336,22 +336,22 @@ func (c *Client) listSessions(ctx context.Context) ([]string, error) {
 		lines = append(lines, fmt.Sprintf("%s %d. %s  %s", marker, i+1, s.SessionID, title))
 	}
 
-	c.persistSessionSummaries(agentName, summaries)
+	s.persistSessionSummaries(agentName, summaries)
 	return lines, nil
 }
 
-func (c *Client) createNewSession(ctx context.Context) (string, error) {
-	if err := c.ensureForwarder(ctx); err != nil {
+func (s *Session) createNewSession(ctx context.Context) (string, error) {
+	if err := s.ensureForwarder(ctx); err != nil {
 		return "", err
 	}
-	c.mu.Lock()
-	fwd := c.conn.forwarder
-	cwd := c.cwd
-	c.mu.Unlock()
+	s.mu.Lock()
+	fwd := s.conn.forwarder
+	cwd := s.cwd
+	s.mu.Unlock()
 	if fwd == nil {
 		return "", errors.New("no active forwarder")
 	}
-	if err := c.ensureReady(ctx); err != nil {
+	if err := s.ensureReady(ctx); err != nil {
 		return "", err
 	}
 
@@ -363,32 +363,32 @@ func (c *Client) createNewSession(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	c.mu.Lock()
-	c.resetSessionFields(res.SessionID, res.ConfigOptions)
-	c.mu.Unlock()
-	c.saveSessionState()
+	s.mu.Lock()
+	s.resetSessionFields(res.SessionID, res.ConfigOptions)
+	s.mu.Unlock()
+	s.saveSessionState()
 	return res.SessionID, nil
 }
 
-func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, error) {
-	lines, err := c.listSessions(ctx)
+func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, error) {
+	lines, err := s.listSessions(ctx)
 	if err != nil {
 		return "", err
 	}
 	_ = lines // listSessions already refreshes and persists state
 
-	c.mu.Lock()
-	agentName := c.conn.name
-	fwd := c.conn.forwarder
-	cwd := c.cwd
-	loadCap := c.initMeta.AgentCapabilities.LoadSession
+	s.mu.Lock()
+	agentName := s.conn.name
+	fwd := s.conn.forwarder
+	cwd := s.cwd
+	loadCap := s.initMeta.AgentCapabilities.LoadSession
 	var sessions []SessionSummary
-	if c.state != nil && c.state.Agents != nil {
-		if as := c.state.Agents[agentName]; as != nil {
+	if s.state != nil && s.state.Agents != nil {
+		if as := s.state.Agents[agentName]; as != nil {
 			sessions = append(sessions, as.Sessions...)
 		}
 	}
-	c.mu.Unlock()
+	s.mu.Unlock()
 
 	if !loadCap {
 		return "", errors.New("agent does not support session/load")
@@ -413,58 +413,58 @@ func (c *Client) loadSessionByIndex(ctx context.Context, index int) (string, err
 		return "", err
 	}
 
-	c.mu.Lock()
-	c.resetSessionFields(target, nil)
-	c.mu.Unlock()
-	c.saveSessionState()
+	s.mu.Lock()
+	s.resetSessionFields(target, nil)
+	s.mu.Unlock()
+	s.saveSessionState()
 	return target, nil
 }
 
-func (c *Client) persistSessionSummaries(agentName string, sessions []SessionSummary) {
+func (s *Session) persistSessionSummaries(agentName string, sessions []SessionSummary) {
 	if strings.TrimSpace(agentName) == "" {
 		return
 	}
-	c.mu.Lock()
-	if c.state == nil {
-		c.mu.Unlock()
+	s.mu.Lock()
+	if s.state == nil {
+		s.mu.Unlock()
 		return
 	}
-	if c.state.Agents == nil {
-		c.state.Agents = map[string]*AgentState{}
+	if s.state.Agents == nil {
+		s.state.Agents = map[string]*AgentState{}
 	}
-	as := c.state.Agents[agentName]
+	as := s.state.Agents[agentName]
 	if as == nil {
 		as = &AgentState{}
-		c.state.Agents[agentName] = as
+		s.state.Agents[agentName] = as
 	}
 	as.Sessions = sessions
-	s := c.state
-	c.mu.Unlock()
-	_ = c.store.Save(s)
+	st := s.state
+	s.mu.Unlock()
+	_ = s.store.Save(st)
 }
 
-func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {
-	c.mu.Lock()
-	hasForwarder := c.conn != nil && c.conn.forwarder != nil
-	c.mu.Unlock()
+func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {
+	s.mu.Lock()
+	hasForwarder := s.conn != nil && s.conn.forwarder != nil
+	s.mu.Unlock()
 	if !hasForwarder {
-		_ = c.ensureForwarder(ctx)
+		_ = s.ensureForwarder(ctx)
 	}
-	_ = c.ensureReady(ctx)
+	_ = s.ensureReady(ctx)
 
-	c.mu.Lock()
-	opts := append([]acp.ConfigOption(nil), c.sessionMeta.ConfigOptions...)
+	s.mu.Lock()
+	opts := append([]acp.ConfigOption(nil), s.sessionMeta.ConfigOptions...)
 	currentAgent := ""
-	if c.conn != nil {
-		currentAgent = c.conn.name
+	if s.conn != nil {
+		currentAgent = s.conn.name
 	}
 	var cachedSessions []SessionSummary
-	if c.state != nil && c.state.Agents != nil && currentAgent != "" {
-		if as := c.state.Agents[currentAgent]; as != nil {
+	if s.state != nil && s.state.Agents != nil && currentAgent != "" {
+		if as := s.state.Agents[currentAgent]; as != nil {
 			cachedSessions = append([]SessionSummary(nil), as.Sessions...)
 		}
 	}
-	c.mu.Unlock()
+	s.mu.Unlock()
 
 	model := im.HelpModel{
 		Title:    "WheelMaker",
@@ -488,7 +488,7 @@ func (c *Client) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, 
 		Body:   "Choose an agent to switch to.",
 		Parent: model.RootMenu,
 	}
-	agentNames := c.registry.names()
+	agentNames := s.registry.names()
 	for _, name := range agentNames {
 		agentMenu.Options = append(agentMenu.Options, im.HelpOption{
 			Label:   "Agent: " + name,

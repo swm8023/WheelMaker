@@ -45,34 +45,31 @@ type clientSessionMeta struct {
 	UpdatedAt         string
 }
 
-// ensureReady performs the ACP handshake if the client is not yet connected:
+// ensureReady performs the ACP handshake if the session is not yet connected:
 //  1. Send "initialize" and store agent capabilities.
 //  2. If caps.LoadSession and a sessionID is stored, attempt session/load.
 //  3. Otherwise, create a new session via session/new.
-//
-// Single-flight: if concurrent callers race here, only one performs the I/O;
-// others wait on c.initCond and return once ready is set.
-func (c *Client) ensureReady(ctx context.Context) error {
-	c.mu.Lock()
-	for c.session.initializing {
-		c.initCond.Wait()
+func (s *Session) ensureReady(ctx context.Context) error {
+	s.mu.Lock()
+	for s.initializing {
+		s.initCond.Wait()
 	}
-	if c.session.ready {
-		c.mu.Unlock()
+	if s.ready {
+		s.mu.Unlock()
 		return nil
 	}
-	c.session.initializing = true
-	fwd := c.conn.forwarder
-	agentName := c.conn.name
-	savedSID := c.session.id
-	cwd := c.cwd
-	c.mu.Unlock()
+	s.initializing = true
+	fwd := s.conn.forwarder
+	agentName := s.conn.name
+	savedSID := s.acpSessionID
+	cwd := s.cwd
+	s.mu.Unlock()
 
 	notifyDone := func() {
-		c.mu.Lock()
-		c.session.initializing = false
-		c.mu.Unlock()
-		c.initCond.Broadcast()
+		s.mu.Lock()
+		s.initializing = false
+		s.mu.Unlock()
+		s.initCond.Broadcast()
 	}
 
 	// Step 1: initialize handshake.
@@ -109,8 +106,8 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		var replay []acp.Update
 		replayMeta := clientSessionMeta{}
 
-		c.mu.Lock()
-		c.session.replayH = func(p acp.SessionUpdateParams) {
+		s.mu.Lock()
+		s.replayH = func(p acp.SessionUpdateParams) {
 			if p.SessionID != savedSID {
 				return
 			}
@@ -131,7 +128,7 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			}
 			replayMu.Unlock()
 		}
-		c.mu.Unlock()
+		s.mu.Unlock()
 
 		var loadResult acp.SessionLoadResult
 		loadErr := func() error {
@@ -145,9 +142,9 @@ func (c *Client) ensureReady(ctx context.Context) error {
 			}
 			return err
 		}()
-		c.mu.Lock()
-		c.session.replayH = nil
-		c.mu.Unlock()
+		s.mu.Lock()
+		s.replayH = nil
+		s.mu.Unlock()
 
 		if loadErr == nil {
 			replayMu.Lock()
@@ -158,18 +155,17 @@ func (c *Client) ensureReady(ctx context.Context) error {
 				meta.ConfigOptions = loadResult.ConfigOptions
 			}
 
-			c.mu.Lock()
-			c.initMeta = newInitMeta
-			c.sessionMeta = meta
-			c.session.ready = true
-			c.session.initializing = false
-			c.mu.Unlock()
-			c.initCond.Broadcast()
+			s.mu.Lock()
+			s.initMeta = newInitMeta
+			s.sessionMeta = meta
+			s.ready = true
+			s.initializing = false
+			s.mu.Unlock()
+			s.initCond.Broadcast()
 			logger.Info("[client] connected: agent=%s session=%s (resumed, %d history updates)",
-				c.conn.name, savedSID, len(replayUpdates))
+				s.conn.name, savedSID, len(replayUpdates))
 			return nil
 		}
-		// session/load failed — fall through to session/new.
 	}
 
 	// Step 3: create a new session.
@@ -182,16 +178,16 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: session/new: %w", err)
 	}
 
-	c.mu.Lock()
-	c.initMeta = newInitMeta
-	c.session.id = newResult.SessionID
-	c.sessionMeta = clientSessionMeta{
+	s.mu.Lock()
+	s.initMeta = newInitMeta
+	s.acpSessionID = newResult.SessionID
+	s.sessionMeta = clientSessionMeta{
 		ConfigOptions: newResult.ConfigOptions,
 	}
-	c.session.ready = true
-	c.session.initializing = false
-	c.mu.Unlock()
-	c.initCond.Broadcast()
+	s.ready = true
+	s.initializing = false
+	s.mu.Unlock()
+	s.initCond.Broadcast()
 
 	modeID := ""
 	for _, opt := range newResult.ConfigOptions {
@@ -201,77 +197,76 @@ func (c *Client) ensureReady(ctx context.Context) error {
 		}
 	}
 	logger.Info("[client] connected: agent=%s session=%s mode=%s",
-		c.conn.name, newResult.SessionID, modeID)
+		s.conn.name, newResult.SessionID, modeID)
 	return nil
 }
 
 // ensureReadyAndNotify calls ensureReady and sends a "Session ready" message
 // when this call is the one that first transitions to ready.
-func (c *Client) ensureReadyAndNotify(ctx context.Context) error {
-	c.mu.Lock()
-	wasReady := c.session.ready
-	c.mu.Unlock()
+func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
+	s.mu.Lock()
+	wasReady := s.ready
+	s.mu.Unlock()
 
-	if err := c.ensureReady(ctx); err != nil {
+	if err := s.ensureReady(ctx); err != nil {
 		return err
 	}
 
 	if !wasReady {
-		snap := c.sessionConfigSnapshot()
+		snap := s.sessionConfigSnapshot()
 		if snap.Mode != "" || snap.Model != "" {
-			c.reply(fmt.Sprintf("Session ready: mode=%s model=%s",
+			s.reply(fmt.Sprintf("Session ready: mode=%s model=%s",
 				renderUnknown(snap.Mode), renderUnknown(snap.Model)))
 		} else {
-			c.reply("Session ready.")
+			s.reply("Session ready.")
 		}
-		c.saveSessionState()
+		s.saveSessionState()
 	}
 	return nil
 }
 
 // sessionConfigSnapshot returns the current mode/model values.
-func (c *Client) sessionConfigSnapshot() acp.SessionConfigSnapshot {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return acp.SessionConfigSnapshotFromOptions(c.sessionMeta.ConfigOptions)
+func (s *Session) sessionConfigSnapshot() acp.SessionConfigSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return acp.SessionConfigSnapshotFromOptions(s.sessionMeta.ConfigOptions)
 }
 
 // promptStream sends a prompt and returns a channel of streaming updates.
-// The caller must drain the channel until a Done update is received.
-func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Update, error) {
-	c.mu.Lock()
-	c.session.lastReply = ""
-	c.mu.Unlock()
+func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Update, error) {
+	s.mu.Lock()
+	s.lastReply = ""
+	s.mu.Unlock()
 
-	if err := c.ensureReady(ctx); err != nil {
+	if err := s.ensureReady(ctx); err != nil {
 		return nil, err
 	}
 
-	c.mu.Lock()
-	sessID := c.session.id
+	s.mu.Lock()
+	sessID := s.acpSessionID
 	promptCtx, promptCancel := context.WithCancel(ctx)
-	c.prompt.ctx = promptCtx
-	c.prompt.cancel = promptCancel
-	c.mu.Unlock()
+	s.prompt.ctx = promptCtx
+	s.prompt.cancel = promptCancel
+	s.mu.Unlock()
 
 	updates := make(chan acp.Update, 32)
 	interceptCh := make(chan acp.Update, 32)
 
-	c.mu.Lock()
-	c.prompt.updatesCh = interceptCh
-	c.mu.Unlock()
+	s.mu.Lock()
+	s.prompt.updatesCh = interceptCh
+	s.mu.Unlock()
 
 	var replyMu sync.Mutex
 	var replyBuf strings.Builder
 
 	go func() {
 		defer func() {
-			c.mu.Lock()
-			c.prompt.ctx = nil
-			c.prompt.cancel = nil
-			c.prompt.activeTCs = make(map[string]struct{})
-			c.prompt.updatesCh = nil
-			c.mu.Unlock()
+			s.mu.Lock()
+			s.prompt.ctx = nil
+			s.prompt.cancel = nil
+			s.prompt.activeTCs = make(map[string]struct{})
+			s.prompt.updatesCh = nil
+			s.mu.Unlock()
 			promptCancel()
 		}()
 
@@ -281,7 +276,7 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 		}
 		resultCh := make(chan promptResult, 1)
 		go func() {
-			res, err := c.conn.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
+			res, err := s.conn.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
 				SessionID: sessID,
 				Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
 			})
@@ -310,12 +305,11 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 					return
 				}
 			case pr = <-resultCh:
-				// Stop receiving new callback updates, then drain buffered tail.
-				c.mu.Lock()
-				if c.prompt.updatesCh == interceptCh {
-					c.prompt.updatesCh = nil
+				s.mu.Lock()
+				if s.prompt.updatesCh == interceptCh {
+					s.prompt.updatesCh = nil
 				}
-				c.mu.Unlock()
+				s.mu.Unlock()
 				for {
 					select {
 					case u := <-interceptCh:
@@ -337,14 +331,14 @@ func (c *Client) promptStream(ctx context.Context, text string) (<-chan acp.Upda
 		replyMu.Lock()
 		reply := replyBuf.String()
 		replyMu.Unlock()
-		c.mu.Lock()
-		c.session.lastReply = reply
-		c.mu.Unlock()
+		s.mu.Lock()
+		s.lastReply = reply
+		s.mu.Unlock()
 
 		var finalUpdate acp.Update
 		if err != nil {
 			if isCopilotReasoningEffortError(err) {
-				c.invalidateSessionForRetry()
+				s.invalidateSessionForRetry()
 			}
 			finalUpdate = acp.Update{Type: acp.UpdateError, Err: err, Done: true}
 		} else {
@@ -374,35 +368,35 @@ func isCopilotReasoningEffortError(err error) bool {
 
 // invalidateSessionForRetry clears current session identity so the next prompt
 // forces a fresh session/new instead of reusing potentially incompatible config.
-func (c *Client) invalidateSessionForRetry() {
-	c.mu.Lock()
-	agentName := c.conn.name
-	c.session.id = ""
-	c.session.ready = false
-	c.session.lastReply = ""
-	c.sessionMeta = clientSessionMeta{}
-	if c.state != nil && c.state.Agents != nil {
-		if st := c.state.Agents[agentName]; st != nil {
+func (s *Session) invalidateSessionForRetry() {
+	s.mu.Lock()
+	agentName := s.conn.name
+	s.acpSessionID = ""
+	s.ready = false
+	s.lastReply = ""
+	s.sessionMeta = clientSessionMeta{}
+	if s.state != nil && s.state.Agents != nil {
+		if st := s.state.Agents[agentName]; st != nil {
 			st.LastSessionID = ""
 			st.Session = nil
 		}
 	}
-	c.mu.Unlock()
-	c.saveSessionState()
+	s.mu.Unlock()
+	s.saveSessionState()
 }
 
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
-func (c *Client) cancelPrompt() error {
-	c.mu.Lock()
-	sessID := c.session.id
-	ready := c.session.ready
-	cancel := c.prompt.cancel
-	ch := c.prompt.updatesCh
+func (s *Session) cancelPrompt() error {
+	s.mu.Lock()
+	sessID := s.acpSessionID
+	ready := s.ready
+	cancel := s.prompt.cancel
+	ch := s.prompt.updatesCh
 	var cancelIDs []string
-	for id := range c.prompt.activeTCs {
+	for id := range s.prompt.activeTCs {
 		cancelIDs = append(cancelIDs, id)
 	}
-	c.mu.Unlock()
+	s.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
@@ -421,52 +415,39 @@ func (c *Client) cancelPrompt() error {
 	if sessID == "" || !ready {
 		return nil
 	}
-	return c.conn.forwarder.SessionCancel(sessID)
+	return s.conn.forwarder.SessionCancel(sessID)
 }
 
-// persistMeta snapshots current session metadata into in-memory state and
-// returns true if anything changed. Must be called while NOT holding c.mu.
-//
-// Concurrency safety: this function acquires c.mu twice (once to read, once
-// to write). This looks like a TOCTOU window but is safe in practice because
-// every caller is serialized by promptMu:
-//   - saveSessionState is called only from handlePrompt, ensureReadyAndNotify,
-//     switchAgent, createNewSession, and loadSessionByIndex — all under promptMu.
-//   - Close is a known exception: it calls saveSessionState during shutdown
-//     without promptMu, which is acceptable because Close is not concurrent
-//     with prompt operations by contract.
-//
-// c.store.Save (file I/O) is intentionally kept outside c.mu to avoid
-// stalling ACP callback goroutines during disk writes.
-func (c *Client) persistMeta() bool {
-	c.mu.Lock()
-	if c.conn == nil {
-		c.mu.Unlock()
+// persistMeta snapshots current session metadata into in-memory state.
+func (s *Session) persistMeta() bool {
+	s.mu.Lock()
+	if s.conn == nil {
+		s.mu.Unlock()
 		return false
 	}
-	agentName := c.conn.name
-	sessionID := c.session.id
-	initMeta := c.initMeta
-	sessMeta := c.sessionMeta
-	c.mu.Unlock()
+	agentName := s.conn.name
+	sessionID := s.acpSessionID
+	initMeta := s.initMeta
+	sessMeta := s.sessionMeta
+	s.mu.Unlock()
 
 	if agentName == "" {
 		return false
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if c.state == nil {
+	if s.state == nil {
 		return false
 	}
-	if c.state.Agents == nil {
-		c.state.Agents = map[string]*AgentState{}
+	if s.state.Agents == nil {
+		s.state.Agents = map[string]*AgentState{}
 	}
-	as := c.state.Agents[agentName]
+	as := s.state.Agents[agentName]
 	if as == nil {
 		as = &AgentState{}
-		c.state.Agents[agentName] = as
+		s.state.Agents[agentName] = as
 	}
 
 	changed := false
@@ -481,12 +462,12 @@ func (c *Client) persistMeta() bool {
 		as.AgentCapabilities = initMeta.AgentCapabilities
 		as.AgentInfo = initMeta.AgentInfo
 		as.AuthMethods = initMeta.AuthMethods
-		if c.state.Connection == nil {
-			c.state.Connection = &ConnectionConfig{}
+		if s.state.Connection == nil {
+			s.state.Connection = &ConnectionConfig{}
 		}
-		c.state.Connection.ProtocolVersion = initMeta.ClientProtocolVersion
-		c.state.Connection.ClientCapabilities = initMeta.ClientCapabilities
-		c.state.Connection.ClientInfo = initMeta.ClientInfo
+		s.state.Connection.ProtocolVersion = initMeta.ClientProtocolVersion
+		s.state.Connection.ClientCapabilities = initMeta.ClientCapabilities
+		s.state.Connection.ClientInfo = initMeta.ClientInfo
 		changed = true
 	}
 
@@ -510,25 +491,24 @@ func (c *Client) persistMeta() bool {
 	return changed
 }
 
-// resetSessionFields resets the 6 session-level fields common to session/new,
-// session/load, and agent-switch operations. Callers MUST hold c.mu.
-func (c *Client) resetSessionFields(sid string, configOpts []acp.ConfigOption) {
-	c.session.id = sid
-	c.session.ready = true
-	c.session.lastReply = ""
-	c.prompt.activeTCs = make(map[string]struct{})
-	c.sessionMeta = clientSessionMeta{ConfigOptions: configOpts}
+// resetSessionFields resets session-level fields. Callers MUST hold s.mu.
+func (s *Session) resetSessionFields(sid string, configOpts []acp.ConfigOption) {
+	s.acpSessionID = sid
+	s.ready = true
+	s.lastReply = ""
+	s.prompt.activeTCs = make(map[string]struct{})
+	s.sessionMeta = clientSessionMeta{ConfigOptions: configOpts}
 }
 
 // saveSessionState calls persistMeta and writes to disk if changed.
-func (c *Client) saveSessionState() {
-	if !c.persistMeta() {
+func (s *Session) saveSessionState() {
+	if !s.persistMeta() {
 		return
 	}
-	c.mu.Lock()
-	s := c.state
-	c.mu.Unlock()
-	if s != nil {
-		_ = c.store.Save(s)
+	s.mu.Lock()
+	st := s.state
+	s.mu.Unlock()
+	if st != nil {
+		_ = s.store.Save(st)
 	}
 }

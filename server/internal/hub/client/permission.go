@@ -11,15 +11,15 @@ import (
 )
 
 type permissionRouter struct {
-	client *Client
+	session *Session
 
 	mu         sync.Mutex
 	decisionCh chan struct{}
 }
 
-func newPermissionRouter(c *Client) *permissionRouter {
+func newPermissionRouter(s *Session) *permissionRouter {
 	r := &permissionRouter{
-		client:     c,
+		session:    s,
 		decisionCh: make(chan struct{}, 1),
 	}
 	r.decisionCh <- struct{}{}
@@ -32,9 +32,9 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 	}
 	defer r.releaseDecisionSlot()
 
-	r.client.mu.Lock()
-	yolo := r.client.yolo
-	r.client.mu.Unlock()
+	r.session.mu.Lock()
+	yolo := r.session.yolo
+	r.session.mu.Unlock()
 	if yolo {
 		if optionID := chooseAutoAllowOption(params.Options); optionID != "" {
 			return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
@@ -42,9 +42,9 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	r.client.mu.Lock()
-	bridge := r.client.imBridge
-	r.client.mu.Unlock()
+	r.session.mu.Lock()
+	bridge := r.session.imBridge
+	r.session.mu.Unlock()
 	if bridge == nil || !bridge.CanHandleDecision() {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
