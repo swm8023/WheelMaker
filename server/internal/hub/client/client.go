@@ -100,8 +100,11 @@ type Client struct {
 	mu sync.Mutex
 
 	// sessions maps session IDs to Session objects.
-	// In Phase 1 there is always exactly one entry ("default").
 	sessions map[string]*Session
+
+	// routeMap maps IM routing keys to Session IDs.
+	// Multiple routes can point to the same Session.
+	routeMap map[string]string
 
 	// activeSession is the Session currently handling messages.
 	activeSession *Session
@@ -123,6 +126,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 		imBridge:         imProvider,
 		imBlockedUpdates: map[string]struct{}{},
 		sessions:         make(map[string]*Session),
+		routeMap:         make(map[string]string),
 	}
 	sess := newSession("default", cwd)
 	sess.store = store
@@ -139,9 +143,12 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 func (c *Client) SetYOLO(enabled bool) {
 	c.mu.Lock()
 	c.yolo = enabled
-	sess := c.activeSession
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		sessions = append(sessions, s)
+	}
 	c.mu.Unlock()
-	if sess != nil {
+	for _, sess := range sessions {
 		sess.mu.Lock()
 		sess.yolo = enabled
 		sess.mu.Unlock()
@@ -153,9 +160,12 @@ func (c *Client) SetYOLO(enabled bool) {
 func (c *Client) SetDebugLogger(w io.Writer) {
 	c.mu.Lock()
 	c.debugLog = w
-	sess := c.activeSession
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		sessions = append(sessions, s)
+	}
 	c.mu.Unlock()
-	if sess != nil {
+	for _, sess := range sessions {
 		sess.mu.Lock()
 		sess.debugLog = w
 		sess.mu.Unlock()
@@ -175,9 +185,12 @@ func (c *Client) SetIMUpdateBlockList(types []string) {
 	}
 	c.mu.Lock()
 	c.imBlockedUpdates = blocked
-	sess := c.activeSession
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		sessions = append(sessions, s)
+	}
 	c.mu.Unlock()
-	if sess != nil {
+	for _, sess := range sessions {
 		sess.mu.Lock()
 		sess.imBlockedUpdates = blocked
 		sess.mu.Unlock()
@@ -198,19 +211,20 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 	c.mu.Lock()
 	c.state = state
-	sess := c.activeSession
-	c.mu.Unlock()
-
-	// Wire state into the active session.
-	if sess != nil {
+	// Wire state into all sessions.
+	for _, sess := range c.sessions {
 		sess.mu.Lock()
 		sess.state = state
 		sess.mu.Unlock()
 	}
+	activeSess := c.activeSession
+	c.mu.Unlock()
 
 	if c.imBridge != nil {
 		c.imBridge.OnMessage(c.HandleMessage)
-		c.imBridge.SetHelpResolver(sess.resolveHelpModel)
+		if activeSess != nil {
+			c.imBridge.SetHelpResolver(activeSess.resolveHelpModel)
+		}
 	}
 	return nil
 }
@@ -224,13 +238,16 @@ func (c *Client) Run(ctx context.Context) error {
 	return errors.New("no IM channel configured; add a console project to config.json")
 }
 
-// Close saves state and shuts down the active agent.
+// Close saves state and shuts down all active sessions.
 func (c *Client) Close() error {
 	c.mu.Lock()
-	sess := c.activeSession
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, sess := range c.sessions {
+		sessions = append(sessions, sess)
+	}
 	c.mu.Unlock()
 
-	if sess != nil {
+	for _, sess := range sessions {
 		sess.mu.Lock()
 		inst := sess.instance
 		sess.mu.Unlock()
@@ -264,9 +281,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 		return
 	}
 
-	c.mu.Lock()
-	sess := c.activeSession
-	c.mu.Unlock()
+	sess := c.resolveSession(msg)
 
 	if cmd, args, ok := parseCommand(text); ok {
 		c.handleCommand(sess, msg, cmd, args)
@@ -276,6 +291,60 @@ func (c *Client) HandleMessage(msg im.Message) {
 }
 
 // --- internal ---
+
+// resolveSession finds or creates the Session for a given message's route.
+// Uses msg.RouteKey (falls back to msg.ChatID, then "default") to look up the
+// session via routeMap. If no session exists for the route, a new one is created.
+func (c *Client) resolveSession(msg im.Message) *Session {
+	routeKey := msg.RouteKey
+	if routeKey == "" {
+		routeKey = msg.ChatID
+	}
+	if routeKey == "" {
+		routeKey = "default"
+	}
+
+	c.mu.Lock()
+	sessID := c.routeMap[routeKey]
+	if sessID != "" {
+		if sess := c.sessions[sessID]; sess != nil {
+			c.activeSession = sess
+			c.mu.Unlock()
+			return sess
+		}
+	}
+
+	// No session for this route — create one.
+	sess := c.createSessionLocked(routeKey)
+	c.mu.Unlock()
+	return sess
+}
+
+// createSessionLocked creates a new Session, wires back-references, and binds
+// it to the given routeKey. Caller MUST hold c.mu.
+func (c *Client) createSessionLocked(routeKey string) *Session {
+	id := routeKey // use routeKey as session ID for simplicity
+	if existing := c.sessions[id]; existing != nil {
+		c.routeMap[routeKey] = id
+		c.activeSession = existing
+		return existing
+	}
+
+	sess := newSession(id, c.cwd)
+	sess.store = c.store
+	sess.registry = c.registry
+	sess.imBridge = c.imBridge
+	sess.imBlockedUpdates = c.imBlockedUpdates
+	sess.debugLog = c.debugLog
+	sess.yolo = c.yolo
+	sess.state = c.state
+	sess.permRouter = newPermissionRouter(sess)
+
+	c.sessions[id] = sess
+	c.routeMap[routeKey] = id
+	c.activeSession = sess
+	return sess
+}
 
 // parseCommand checks whether text is a recognized WheelMaker command.
 // Only exact first-word matches (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are treated as commands;

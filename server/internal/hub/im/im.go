@@ -11,6 +11,7 @@ type Message struct {
 	MessageID string
 	UserID    string
 	Text      string
+	RouteKey  string // IM-provided routing key; defaults to ChatID if empty
 }
 
 // Card is the sealed sum type for all card payloads sent via Channel.SendCard.

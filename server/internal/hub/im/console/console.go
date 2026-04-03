@@ -116,6 +116,7 @@ func (c *Channel) Run(ctx context.Context) error {
 					ChatID:    c.projectName,
 					MessageID: fmt.Sprintf("console-%d", time.Now().UnixNano()),
 					Text:      line,
+					RouteKey:  "console",
 				})
 			}
 		}

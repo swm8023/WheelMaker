@@ -208,7 +208,7 @@ func (m *Channel) handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if text := strings.TrimSpace(msg.Text); text != "" && m.handler != nil {
-				m.handler(im.Message{ChatID: chatID, Text: text})
+				m.handler(im.Message{ChatID: chatID, Text: text, RouteKey: chatID})
 			}
 
 		case "option":

@@ -1538,6 +1538,7 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 			MessageID: *msg.MessageId,
 			UserID:    userID,
 			Text:      text,
+			RouteKey:  *msg.ChatId,
 		})
 	}
 	return nil
