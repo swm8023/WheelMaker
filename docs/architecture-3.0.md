@@ -1,7 +1,7 @@
 # Architecture 3.0
 
 Updated: 2026-04-03  
-Status: Approved  
+Status: **Implemented** (Phases 1-5 complete)  
 Full design spec: [specs/2026-04-03-architecture-3.0-multi-session-design.md](superpowers/specs/2026-04-03-architecture-3.0-multi-session-design.md)
 
 ## 0. Terms
@@ -198,7 +198,41 @@ Active ──▶ Closed (cancel + cleanup, no persistence)
 | Restored | Recovered from SQLite back to Active | Full |
 | Closed | User explicitly closed | Released |
 
-## 7. Gap vs Current Code
+## 7. Implementation Status
+
+All five phases are implemented and tested. 50 tests pass (43 original + 7 SQLite).
+
+| Phase | Description | Commit | Key Files |
+|-------|-------------|--------|-----------|
+| 1 | Extract Session type | f3b3d6e | session_type.go, session.go, lifecycle.go, commands.go |
+| 2 | Extract AgentInstance + AgentConn | be04073 | agent_conn.go, agent_instance.go, agent_factory.go |
+| 3 | Multi-Session routing (RouteKey) | 163b0cf | client.go (routeMap, resolveSession), im.Message.RouteKey |
+| 4 | Session persistence (SQLite) | 844e0f9 | session_store.go, sqlite_store.go, sqlite_store_test.go |
+| 5 | Cleanup and documentation | (this commit) | architecture-3.0.md, CLAUDE.md |
+
+### What is implemented
+
+- Session extracted as pure business object, decoupled from Client
+- AgentConn with ConnOwned/ConnShared modes and per-instance callback dispatch
+- AgentInstance as the sole ACP interface visible to Session
+- AgentFactoryV2 interface with legacy adapter (wrapLegacyFactory)
+- RouteKey-based multi-session routing in Client (routeMap)
+- Backward-compatible single-session mode (no route mapping → reuse existing session)
+- SessionStore interface + SQLiteSessionStore (CGo-free via modernc.org/sqlite)
+- Session.Snapshot(), Session.Suspend(), RestoreFromSnapshot()
+- Per-agent state preservation across agent switches (agents map)
+
+### What remains deferred
+
+- Shared AgentConn mode not yet exercised (no agent declares SupportsSharedConn=true)
+- `/new`, `/load`, `/list` commands not yet wired to Client-level session management
+- Session state machine transitions (Active → Suspended → Persisted) not yet timer-driven
+- Shared AgentConn reconnect policy (exponential backoff) deferred to usage
+
+## 8. Gap vs Current Code
+
+The gaps listed below reflect the state **before** Architecture 3.0 implementation.
+They are preserved for historical reference; all have been addressed in Phases 1-5.
 
 - Current Client holds a single runtime connection (`c.conn`) globally.
 - Current `/use` switches agent at client-global scope, not session scope.
@@ -209,7 +243,7 @@ Active ──▶ Closed (cancel + cleanup, no persistence)
 - No RouteKey concept; all IM messages go to the single session.
 - No per-agent state snapshot; agent switch discards previous agent's configuration.
 
-## 8. Concurrency and Failure
+## 9. Concurrency and Failure
 
 - Concurrency unit: Session.
 - Locking: per-session promptMu; Client mu only protects sessions map + routeMap.
@@ -219,7 +253,7 @@ Active ──▶ Closed (cancel + cleanup, no persistence)
 - SQLite concurrent writes: single writer goroutine + WAL mode.
 - Session restore failure (SessionLoad fails): fallback to SessionNew.
 
-## 9. Phase Scope
+## 10. Phase Scope
 
 Implementation follows a 5-phase Session-First (bottom-up) approach:
 
@@ -240,7 +274,7 @@ Each phase ends with full test pass and no behavioral regression.
 
 Full implementation plan: see [specs/2026-04-03-architecture-3.0-multi-session-design.md](superpowers/specs/2026-04-03-architecture-3.0-multi-session-design.md)
 
-## 10. Open Questions
+## 11. Open Questions
 
 1. ~~Should routeId always equal chatId, or stay customizable?~~ → RouteKey provided by IM adapter, semantics per adapter.
 2. Should one Session allow ACP session migration policies? → Deferred.

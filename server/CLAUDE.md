@@ -4,12 +4,29 @@ Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, 
 
 ## Architecture
 
+Architecture 3.0 — multi-session with per-agent isolation:
+
 ```
 Hub
- +- im/forwarder.Forwarder -- console | feishu   (IM layer)
+ +- im/forwarder.Forwarder -- console | feishu | mobile   (IM layer)
  +- registry.Reporter -- registry server (project snapshot sync)
- +- client.Client -- acp.Forwarder -- acp.Conn -- CLI subprocess  (agent layer)
+ +- client.Client -- routeMap[routeKey] -> Session
+       +- Session -- AgentInstance -- AgentConn -- acp.Forwarder -- acp.Conn -- CLI subprocess
+       +- SessionStore (SQLite) -- persist/restore sessions
 ```
+
+Key types in `internal/hub/client/`:
+
+| Type | File | Role |
+|------|------|------|
+| Session | session_type.go, session.go | Pure business session: lifecycle, prompt, agent switching |
+| AgentInstance | agent_instance.go | ACP executor bound to one Session (sole ACP interface visible to Session) |
+| AgentConn | agent_conn.go | ACP connection wrapper with ConnOwned/ConnShared modes |
+| AgentFactoryV2 | agent_factory.go | Creates AgentInstance, selects AgentConn policy |
+| SessionStore | session_store.go | Persistence interface for session snapshots |
+| SQLiteSessionStore | sqlite_store.go | SQLite-backed SessionStore (modernc.org/sqlite, CGo-free) |
+
+Full design: [../docs/architecture-3.0.md](../docs/architecture-3.0.md)
 
 ## Package Map
 
@@ -33,8 +50,8 @@ Hub
 ## Dev Conventions
 
 - Interfaces first: `acp.Session`, `agent.Agent`, `im.Channel`
-- Agent subprocess is lazy: created on first message (`ensureForwarder`)
-- Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load`
+- Agent subprocess is lazy: created on first message (`ensureInstance`)
+- Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/config`
 - Code comments and identifiers: **English only**
 - Completion gate is defined in repo root `CLAUDE.md`
 
@@ -61,10 +78,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps
 | # | Invariant |
 |---|-----------|
 | 1 | `acp.Conn` is pure transport - no business logic inside |
-| 2 | `client.Client` is the single owner of session state; IM adapters never mutate it directly |
-| 3 | Agent subprocess is created lazily - never at startup |
+| 2 | `client.Client` owns routing (routeKey → Session); Session owns agent lifecycle and state |
+| 3 | Agent subprocess is created lazily - never at startup (`ensureInstance`) |
 | 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im.Channel`) |
-| 5 | `state.json` is the source of truth for runtime state |
+| 5 | `state.json` is the source of truth for runtime state; `SQLiteSessionStore` for session persistence |
 | 6 | Registry sync is independent of IM mode (`registry.listen=true` local, otherwise remote connect) |
 
 ## Key Protocol Docs

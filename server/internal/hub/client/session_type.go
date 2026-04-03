@@ -35,7 +35,7 @@ type SessionAgentState struct {
 
 // Session is the business session object that owns ACP session state,
 // prompt lifecycle, terminal management, and callback handling.
-// In Phase 1 a Client holds exactly one Session.
+// A Client holds multiple Sessions, routed by IM routeKey.
 type Session struct {
 	ID     string
 	Status SessionStatus
