@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 
-	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // switchAgent cancels any in-progress prompt, waits for it to finish via
-// promptMu, connects a new agent binary, and replaces the forwarder.
+// promptMu, connects a new agent via AgentFactoryV2, and replaces the instance.
 func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode) error {
-	fac := s.registry.get(name)
+	fac := s.registry.getV2(name)
 	if fac == nil {
 		return fmt.Errorf("unknown agent: %q (registered: %v)", name, s.registry.names())
 	}
@@ -34,7 +33,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 
 	// Capture outgoing state.
 	s.mu.Lock()
-	oldConn := s.conn
+	oldInst := s.instance
 	savedLastReply := s.lastReply
 	dw := s.debugLog
 	s.mu.Unlock()
@@ -50,22 +49,17 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	}
 	s.mu.Unlock()
 
-	// Connect new agent.
-	baseAgent := fac("", nil)
-	newConn, err := baseAgent.Connect(ctx)
+	// Connect new agent via factory.
+	_ = dw // debugLog is passed via factory
+	newInst, err := fac.CreateInstance(ctx, s, dw)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
-	if dw != nil {
-		newConn.SetDebugLogger(dw)
-	}
-	newFwd := acp.NewForwarder(newConn, nil)
-	newFwd.SetCallbacks(s)
 
-	// Replace connection atomically; kill terminals; close old conn.
+	// Replace instance atomically; kill terminals; close old instance.
 	s.mu.Lock()
 	s.terminals.KillAll()
-	s.conn = &agentConn{name: name, agent: baseAgent, forwarder: newFwd}
+	s.instance = newInst
 	s.initializing = false
 	s.prompt.updatesCh = nil
 	s.initMeta = clientInitMeta{}
@@ -74,8 +68,8 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	s.mu.Unlock()
 	s.initCond.Broadcast() // MUST be outside s.mu — never inside the lock
 
-	if oldConn != nil {
-		_ = oldConn.close()
+	if oldInst != nil {
+		_ = oldInst.Close()
 	}
 
 	// SwitchWithContext — bootstrap new session with previous reply.

@@ -17,9 +17,9 @@ import (
 // Export helpers (used by package client_test via export_test.go convention)
 // ---------------------------------------------------------------------------
 
-// InjectForwarder sets an active Forwarder and marks the session as ready
-// with a preset session ID. Used by client_test to bypass Start() when
-// testing with a mock agent.
+// InjectForwarder sets an active AgentInstance backed by the given Forwarder
+// and marks the session as ready with a preset session ID.
+// Used by client_test to bypass Start() when testing with a mock agent.
 func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
 	sess := c.activeSession
 	c.mu.Lock()
@@ -32,12 +32,24 @@ func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
 		sess.state = c.state
 	}
 	c.mu.Unlock()
+
+	ac := &AgentConn{
+		forwarder: f,
+		mode:      ConnOwned,
+		instances: make(map[string]*AgentInstance),
+	}
+	inst := &AgentInstance{
+		name:      name,
+		agentConn: ac,
+		callbacks: sess,
+	}
+	f.SetCallbacks(sess)
+
 	sess.mu.Lock()
-	sess.conn = &agentConn{name: name, forwarder: f}
+	sess.instance = inst
 	sess.acpSessionID = sessionID
 	sess.ready = true
 	sess.mu.Unlock()
-	f.SetCallbacks(c)
 }
 
 // InjectState replaces the persisted state.

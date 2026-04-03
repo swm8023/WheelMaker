@@ -19,41 +19,38 @@ import (
 // factories typically ignore them and use closure-captured config instead.
 type AgentFactory func(exePath string, env map[string]string) agent.Agent
 
-// agentConn bundles an active agent subprocess with its ACP forwarder.
-// Client holds at most one agentConn at a time; nil means no connection yet.
-type agentConn struct {
-	name      string         // registered name (key in state.Agents)
-	agent     agent.Agent    // backing agent (owns the subprocess)
-	forwarder *acp.Forwarder // ACP transport; nil only in test injection
-}
-
-func (ac *agentConn) close() error {
-	if ac.forwarder == nil {
-		return nil
-	}
-	return ac.forwarder.Close()
-}
-
 // agentRegistry maps agent names to their factories.
 // It carries its own mutex so Client.mu need not protect registration.
 type agentRegistry struct {
-	mu   sync.Mutex
-	facs map[string]AgentFactory
+	mu     sync.Mutex
+	facs   map[string]AgentFactory
+	v2facs map[string]AgentFactoryV2
 }
 
 func newAgentRegistry() *agentRegistry {
-	return &agentRegistry{facs: make(map[string]AgentFactory)}
+	return &agentRegistry{
+		facs:   make(map[string]AgentFactory),
+		v2facs: make(map[string]AgentFactoryV2),
+	}
 }
 
 func (r *agentRegistry) register(name string, f AgentFactory) {
 	r.mu.Lock()
 	r.facs[name] = f
+	r.v2facs[name] = wrapLegacyFactory(name, f)
 	r.mu.Unlock()
 }
 
 func (r *agentRegistry) get(name string) AgentFactory {
 	r.mu.Lock()
 	f := r.facs[name]
+	r.mu.Unlock()
+	return f
+}
+
+func (r *agentRegistry) getV2(name string) AgentFactoryV2 {
+	r.mu.Lock()
+	f := r.v2facs[name]
 	r.mu.Unlock()
 	return f
 }
@@ -85,7 +82,7 @@ type promptState struct {
 }
 
 // Client is the top-level coordinator for a single WheelMaker project.
-// Agent initialization is lazy: the first incoming message triggers ensureForwarder(),
+// Agent initialization is lazy: the first incoming message triggers ensureInstance(),
 // which connects the active agent and creates the ACP forwarder.
 type Client struct {
 	projectName string
@@ -235,11 +232,11 @@ func (c *Client) Close() error {
 
 	if sess != nil {
 		sess.mu.Lock()
-		ac := sess.conn
+		inst := sess.instance
 		sess.mu.Unlock()
-		if ac != nil {
+		if inst != nil {
 			sess.saveSessionState()
-			_ = ac.close()
+			_ = inst.Close()
 		}
 	}
 
@@ -304,7 +301,7 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 	ctx := context.Background()
 	for attempt := 1; attempt <= 2; attempt++ {
 		// Lazily initialize the agent if no forwarder exists yet.
-		if err := s.ensureForwarder(ctx); err != nil {
+		if err := s.ensureInstance(ctx); err != nil {
 			s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 			return
 		}
@@ -355,7 +352,7 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 				}
 				recovered := false
 				if s.resetDeadConnection(u.Err) {
-					if recErr := s.ensureForwarder(ctx); recErr == nil {
+					if recErr := s.ensureInstance(ctx); recErr == nil {
 						_ = s.ensureReadyAndNotify(ctx)
 						recovered = true
 					}
@@ -499,16 +496,15 @@ func isCopilotReasoningArgError(err error) bool {
 
 func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 	s.mu.Lock()
-	if s.conn == nil || !strings.EqualFold(strings.TrimSpace(s.conn.name), "copilot") {
+	if s.instance == nil || !strings.EqualFold(strings.TrimSpace(s.instance.Name()), "copilot") {
 		s.mu.Unlock()
 		return false
 	}
 	sid := strings.TrimSpace(s.acpSessionID)
-	fwd := s.conn.forwarder
 	configOptions := append([]acp.ConfigOption(nil), s.sessionMeta.ConfigOptions...)
 	s.mu.Unlock()
 
-	if sid == "" || fwd == nil {
+	if sid == "" {
 		return false
 	}
 
@@ -554,7 +550,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 		return false
 	}
 
-	updatedOpts, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+	updatedOpts, err := s.instance.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
 		SessionID: sid,
 		ConfigID:  modelOpt.ID,
 		Value:     target,
@@ -578,8 +574,8 @@ func (s *Session) resetDeadConnection(err error) bool {
 		return false
 	}
 	s.mu.Lock()
-	old := s.conn
-	s.conn = nil
+	old := s.instance
+	s.instance = nil
 	s.ready = false
 	s.initializing = false
 	s.prompt.ctx = nil
@@ -589,15 +585,15 @@ func (s *Session) resetDeadConnection(err error) bool {
 	s.prompt.activeTCs = make(map[string]struct{})
 	s.mu.Unlock()
 	if old != nil {
-		_ = old.close()
+		_ = old.Close()
 	}
 	return true
 }
 
 func (s *Session) forceReconnect() {
 	s.mu.Lock()
-	old := s.conn
-	s.conn = nil
+	old := s.instance
+	s.instance = nil
 	s.ready = false
 	s.initializing = false
 	s.prompt.ctx = nil
@@ -607,7 +603,7 @@ func (s *Session) forceReconnect() {
 	s.prompt.activeTCs = make(map[string]struct{})
 	s.mu.Unlock()
 	if old != nil {
-		_ = old.close()
+		_ = old.Close()
 	}
 }
 

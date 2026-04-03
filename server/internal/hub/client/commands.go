@@ -38,7 +38,7 @@ func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) 
 
 	case "/cancel":
 		sess.mu.Lock()
-		active := sess.conn != nil
+		active := sess.instance != nil
 		sess.mu.Unlock()
 		if !active {
 			sess.reply("No active session.")
@@ -53,11 +53,11 @@ func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) 
 	case "/status":
 		sess.mu.Lock()
 		agentName := ""
-		if sess.conn != nil {
-			agentName = sess.conn.name
+		if sess.instance != nil {
+			agentName = sess.instance.Name()
 		}
 		sid := sess.acpSessionID
-		active := sess.conn != nil
+		active := sess.instance != nil
 		sess.mu.Unlock()
 		if !active {
 			sess.reply("No active session.")
@@ -137,7 +137,7 @@ func (s *Session) handleConfigCommand(
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 
-	if err := s.ensureForwarder(ctx); err != nil {
+	if err := s.ensureInstance(ctx); err != nil {
 		s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
 		return
 	}
@@ -145,8 +145,8 @@ func (s *Session) handleConfigCommand(
 	// Lock section 1: read agentName and sessionState for config resolution.
 	s.mu.Lock()
 	agentName := ""
-	if s.conn != nil {
-		agentName = s.conn.name
+	if s.instance != nil {
+		agentName = s.instance.Name()
 	}
 	var sessionState *SessionState
 	if s.state != nil && s.state.Agents != nil {
@@ -167,13 +167,12 @@ func (s *Session) handleConfigCommand(
 		return
 	}
 
-	// Lock section 2: read fwd and sid after ensureReady has set acpSessionID.
+	// Lock section 2: read sid after ensureReady has set acpSessionID.
 	s.mu.Lock()
-	fwd := s.conn.forwarder
 	sid := s.acpSessionID
 	s.mu.Unlock()
 
-	updatedOpts, err := fwd.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+	updatedOpts, err := s.instance.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
 		SessionID: sid,
 		ConfigID:  configID,
 		Value:     value,
@@ -276,7 +275,7 @@ func resolveConfigSelectArg(kind string, defaultConfigID string, input string, s
 }
 
 func (s *Session) listSessions(ctx context.Context) ([]string, error) {
-	if err := s.ensureForwarder(ctx); err != nil {
+	if err := s.ensureInstance(ctx); err != nil {
 		return nil, err
 	}
 
@@ -285,16 +284,12 @@ func (s *Session) listSessions(ctx context.Context) ([]string, error) {
 	}
 
 	s.mu.Lock()
-	fwd := s.conn.forwarder
 	cwd := s.cwd
 	curSID := s.acpSessionID
-	agentName := s.conn.name
+	agentName := s.instance.Name()
 	caps := s.initMeta.AgentCapabilities
 	s.mu.Unlock()
 
-	if fwd == nil {
-		return nil, errors.New("no active forwarder")
-	}
 	if caps.SessionCapabilities == nil || caps.SessionCapabilities.List == nil {
 		return nil, errors.New("agent does not support session/list")
 	}
@@ -302,7 +297,7 @@ func (s *Session) listSessions(ctx context.Context) ([]string, error) {
 	all := make([]acp.SessionInfo, 0, 16)
 	cursor := ""
 	for page := 0; page < 20; page++ {
-		res, err := fwd.SessionList(ctx, acp.SessionListParams{
+		res, err := s.instance.SessionList(ctx, acp.SessionListParams{
 			CWD:    cwd,
 			Cursor: cursor,
 		})
@@ -341,21 +336,17 @@ func (s *Session) listSessions(ctx context.Context) ([]string, error) {
 }
 
 func (s *Session) createNewSession(ctx context.Context) (string, error) {
-	if err := s.ensureForwarder(ctx); err != nil {
+	if err := s.ensureInstance(ctx); err != nil {
 		return "", err
 	}
 	s.mu.Lock()
-	fwd := s.conn.forwarder
 	cwd := s.cwd
 	s.mu.Unlock()
-	if fwd == nil {
-		return "", errors.New("no active forwarder")
-	}
 	if err := s.ensureReady(ctx); err != nil {
 		return "", err
 	}
 
-	res, err := fwd.SessionNew(ctx, acp.SessionNewParams{
+	res, err := s.instance.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        cwd,
 		MCPServers: emptyMCPServers(),
 	})
@@ -378,8 +369,7 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 	_ = lines // listSessions already refreshes and persists state
 
 	s.mu.Lock()
-	agentName := s.conn.name
-	fwd := s.conn.forwarder
+	agentName := s.instance.Name()
 	cwd := s.cwd
 	loadCap := s.initMeta.AgentCapabilities.LoadSession
 	var sessions []SessionSummary
@@ -393,9 +383,6 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 	if !loadCap {
 		return "", errors.New("agent does not support session/load")
 	}
-	if fwd == nil {
-		return "", errors.New("no active forwarder")
-	}
 	if index < 1 || index > len(sessions) {
 		return "", fmt.Errorf("index out of range (1-%d)", len(sessions))
 	}
@@ -404,7 +391,7 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 		return "", errors.New("invalid session id")
 	}
 
-	_, err = fwd.SessionLoad(ctx, acp.SessionLoadParams{
+	_, err = s.instance.SessionLoad(ctx, acp.SessionLoadParams{
 		SessionID:  target,
 		CWD:        cwd,
 		MCPServers: emptyMCPServers(),
@@ -445,18 +432,18 @@ func (s *Session) persistSessionSummaries(agentName string, sessions []SessionSu
 
 func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {
 	s.mu.Lock()
-	hasForwarder := s.conn != nil && s.conn.forwarder != nil
+	hasInstance := s.instance != nil
 	s.mu.Unlock()
-	if !hasForwarder {
-		_ = s.ensureForwarder(ctx)
+	if !hasInstance {
+		_ = s.ensureInstance(ctx)
 	}
 	_ = s.ensureReady(ctx)
 
 	s.mu.Lock()
 	opts := append([]acp.ConfigOption(nil), s.sessionMeta.ConfigOptions...)
 	currentAgent := ""
-	if s.conn != nil {
-		currentAgent = s.conn.name
+	if s.instance != nil {
+		currentAgent = s.instance.Name()
 	}
 	var cachedSessions []SessionSummary
 	if s.state != nil && s.state.Agents != nil && currentAgent != "" {

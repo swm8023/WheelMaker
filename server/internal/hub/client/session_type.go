@@ -40,8 +40,9 @@ type Session struct {
 	ID     string
 	Status SessionStatus
 
-	// conn bundles the active agent subprocess and forwarder.
-	conn *agentConn
+	// instance is the AgentInstance bound to this Session.
+	// Created lazily by ensureInstance(). Nil means no agent connected yet.
+	instance *AgentInstance
 
 	// Per-agent state indexed by agent name.
 	agents map[string]*SessionAgentState
@@ -109,10 +110,11 @@ func (s *Session) reply(text string) {
 	fmt.Println(text)
 }
 
-// ensureForwarder connects the active agent and sets up the Forwarder if not already running.
-func (s *Session) ensureForwarder(ctx context.Context) error {
+// ensureInstance connects the active agent via AgentFactory and sets up the
+// AgentInstance if not already running. Connect is executed outside s.mu.
+func (s *Session) ensureInstance(ctx context.Context) error {
 	s.mu.Lock()
-	if s.conn != nil && s.conn.forwarder != nil {
+	if s.instance != nil {
 		s.mu.Unlock()
 		return nil
 	}
@@ -133,29 +135,23 @@ func (s *Session) ensureForwarder(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	fac := s.registry.get(name)
+	fac := s.registry.getV2(name)
 	if fac == nil {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
 
-	baseAgent := fac("", nil)
-	conn, err := baseAgent.Connect(ctx)
+	inst, err := fac.CreateInstance(ctx, s, dw)
 	if err != nil {
-		return fmt.Errorf("connect %q: %w", name, err)
+		return err
 	}
-	if dw != nil {
-		conn.SetDebugLogger(dw)
-	}
-	fwd := acp.NewForwarder(conn, nil)
-	fwd.SetCallbacks(s)
 
 	s.mu.Lock()
-	if s.conn != nil && s.conn.forwarder != nil {
+	if s.instance != nil {
 		s.mu.Unlock()
-		_ = fwd.Close()
+		_ = inst.Close()
 		return nil
 	}
-	s.conn = &agentConn{name: name, agent: baseAgent, forwarder: fwd}
+	s.instance = inst
 	s.ready = false
 	s.acpSessionID = savedSID
 	s.mu.Unlock()

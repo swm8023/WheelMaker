@@ -59,8 +59,8 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		return nil
 	}
 	s.initializing = true
-	fwd := s.conn.forwarder
-	agentName := s.conn.name
+	inst := s.instance
+	agentName := inst.Name()
 	savedSID := s.acpSessionID
 	cwd := s.cwd
 	s.mu.Unlock()
@@ -80,7 +80,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		},
 		Terminal: true,
 	}
-	initResult, err := fwd.Initialize(ctx, acp.InitializeParams{
+	initResult, err := inst.Initialize(ctx, acp.InitializeParams{
 		ProtocolVersion:    acpClientProtocolVersion,
 		ClientCapabilities: clientCaps,
 		ClientInfo:         acpClientInfo,
@@ -132,7 +132,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 
 		var loadResult acp.SessionLoadResult
 		loadErr := func() error {
-			res, err := fwd.SessionLoad(ctx, acp.SessionLoadParams{
+			res, err := inst.SessionLoad(ctx, acp.SessionLoadParams{
 				SessionID:  savedSID,
 				CWD:        cwd,
 				MCPServers: emptyMCPServers(),
@@ -163,13 +163,13 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			s.mu.Unlock()
 			s.initCond.Broadcast()
 			logger.Info("[client] connected: agent=%s session=%s (resumed, %d history updates)",
-				s.conn.name, savedSID, len(replayUpdates))
+				inst.Name(), savedSID, len(replayUpdates))
 			return nil
 		}
 	}
 
 	// Step 3: create a new session.
-	newResult, err := fwd.SessionNew(ctx, acp.SessionNewParams{
+	newResult, err := inst.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        cwd,
 		MCPServers: emptyMCPServers(),
 	})
@@ -197,7 +197,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		}
 	}
 	logger.Info("[client] connected: agent=%s session=%s mode=%s",
-		s.conn.name, newResult.SessionID, modeID)
+		inst.Name(), newResult.SessionID, modeID)
 	return nil
 }
 
@@ -276,7 +276,7 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 		}
 		resultCh := make(chan promptResult, 1)
 		go func() {
-			res, err := s.conn.forwarder.SessionPrompt(promptCtx, acp.SessionPromptParams{
+			res, err := s.instance.SessionPrompt(promptCtx, acp.SessionPromptParams{
 				SessionID: sessID,
 				Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
 			})
@@ -370,7 +370,7 @@ func isCopilotReasoningEffortError(err error) bool {
 // forces a fresh session/new instead of reusing potentially incompatible config.
 func (s *Session) invalidateSessionForRetry() {
 	s.mu.Lock()
-	agentName := s.conn.name
+	agentName := s.instance.Name()
 	s.acpSessionID = ""
 	s.ready = false
 	s.lastReply = ""
@@ -415,17 +415,17 @@ func (s *Session) cancelPrompt() error {
 	if sessID == "" || !ready {
 		return nil
 	}
-	return s.conn.forwarder.SessionCancel(sessID)
+	return s.instance.SessionCancel(sessID)
 }
 
 // persistMeta snapshots current session metadata into in-memory state.
 func (s *Session) persistMeta() bool {
 	s.mu.Lock()
-	if s.conn == nil {
+	if s.instance == nil {
 		s.mu.Unlock()
 		return false
 	}
-	agentName := s.conn.name
+	agentName := s.instance.Name()
 	sessionID := s.acpSessionID
 	initMeta := s.initMeta
 	sessMeta := s.sessionMeta
