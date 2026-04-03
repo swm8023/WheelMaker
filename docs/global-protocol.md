@@ -1,153 +1,147 @@
-# WheelMaker Global Protocol (Draft v0.1)
+# WheelMaker Global Protocol
 
-## 1. Background
+## 1. Decision
 
-Current communication contracts are split across multiple places:
+Global Protocol is a top-level envelope protocol for communication governance.
 
-- `internal/shared/registry_proto.go` defines Registry and Hub/Client wire structures.
-- `internal/hub/im/mobile/protocol.go` defines Mobile IM websocket messages.
-- ACP JSON-RPC structs live in `internal/hub/acp/*`.
+- Agent <-> Client business communication remains ACP.
+- ACP content is fully exposed end-to-end.
+- Global Protocol does not translate, rename, or rewrite ACP payload fields.
 
-This fragmentation causes:
+In short: ACP is the business truth, Global Protocol is the envelope.
 
-- Different envelope shapes and naming conventions.
-- Duplicate error and routing semantics.
-- Harder end-to-end evolution for `Agent <-> Client <-> IM <-> Registry`.
+## 2. Scope
 
-This document defines a unified direction named **Global Protocol** and introduces a centralized location for protocol definitions under `server/internal/protocol/`.
+Global Protocol responsibilities:
 
-## 2. Goals
+- routing (`source`, `target`)
+- tracing (`messageId`, `correlationId`)
+- session context (`sessionId`)
+- cross-channel metadata (`meta`)
+- delivery classification (`kind`)
 
-1. Unify wire-level envelope semantics across Agent, Client, IM, and Registry.
-2. Keep compatibility with existing implementations during migration.
-3. Centralize protocol constants, payload structs, and method namespaces in one directory.
-4. Make routing, tracing, and error handling consistent.
+ACP responsibilities:
 
-## 3. Non-goals
+- request/response semantics
+- method names and params
+- result and error payload format
+- streaming event payload semantics
 
-- Replacing ACP transport immediately.
-- Rewriting all existing handlers in one shot.
-- Breaking current `registry`/`hub` behavior.
-
-## 4. Unified Envelope
-
-All cross-component messages should converge to a single envelope model:
+## 3. Envelope Schema
 
 ```json
 {
-  "schema": "wm.global",
-  "version": "0.1",
-  "messageId": "7c6ef4c6-...",
-  "correlationId": "5dbf54c5-...",
-  "type": "request",
-  "method": "message.user",
-  "projectId": "local-hub:WheelMaker",
+  "version": "gp/0.1",
+  "messageId": "8c1947f4-65fc-4b5c-b15f-2b850b7c9f07",
+  "correlationId": "4c87e4f7-7946-4f7f-a7d9-bf750ac9a891",
+  "sessionId": "sess_01JY...",
   "source": {
     "component": "client",
-    "id": "wm-web",
-    "sessionId": "sess-123"
+    "id": "wm-web"
   },
   "target": {
     "component": "agent",
     "id": "codex"
   },
-  "ts": 1777777777,
-  "payload": {}
+  "kind": "acp.request",
+  "meta": {
+    "projectId": "local-hub:WheelMaker",
+    "imChannel": "feishu",
+    "userId": "u_12345"
+  },
+  "payload": {
+    "acp": {
+      "jsonrpc": "2.0",
+      "id": 12,
+      "method": "session.send",
+      "params": {
+        "text": "hello"
+      }
+    }
+  },
+  "ts": 1777777777
 }
 ```
 
-### Field conventions
+## 4. `kind` Definition
 
-- `schema`: fixed namespace, currently `wm.global`.
-- `version`: protocol version (independent from product version).
-- `messageId`: unique ID for this message.
-- `correlationId`: request/response chain ID.
-- `type`: `request | response | event | error`.
-- `method`: namespaced method string.
-- `projectId`: required for project-scoped traffic.
-- `source/target`: explicit endpoints for routing and observability.
-- `ts`: unix timestamp in seconds.
-- `payload`: method-specific data.
+`kind` is for envelope-level delivery type only.
 
-## 5. Method Namespace
+- `acp.request`
+- `acp.response`
+- `acp.notification`
+- `acp.event`
+- `system.handshake`
+- `system.heartbeat`
+- `system.error`
 
-Use a flat namespace with domain prefixes:
+Rules:
 
-- `auth.*` - authentication and handshake.
-- `session.*` - lifecycle control (`open`, `close`, `resume`).
-- `message.*` - human/agent text flow and streaming.
-- `decision.*` - options/confirmations and user selections.
-- `project.*` - project metadata and sync status.
-- `registry.*` - registry snapshot/update/report methods.
-- `heartbeat.*` - ping/pong and keepalive.
+1. If `kind` starts with `acp.`, then `payload.acp` is required.
+2. `payload.acp` must be the original ACP message, unchanged.
+3. `system.*` messages must not carry business ACP method payload.
 
-Examples:
+## 5. ACP Pass-through Contract
 
-- `auth.init`
-- `session.open`
-- `message.user`
-- `message.agent.delta`
-- `decision.request`
-- `decision.reply`
-- `project.syncCheck`
-- `registry.reportProjects`
+For `kind=acp.*`:
 
-## 6. Unified Error Model
+- Allowed: wrapping ACP inside `payload.acp`.
+- Allowed: adding envelope metadata in `meta`.
+- Forbidden: modifying ACP `id/method/params/result/error`.
+- Forbidden: converting ACP messages into alternative business schemas.
 
-Error envelope payload should use one shape everywhere:
+This keeps debugging simple: one ACP message can be traced directly through Client, IM bridge, and Agent.
+
+## 6. ID and Correlation Rules
+
+- `messageId`: unique per Global Protocol frame.
+- `correlationId`: one interaction chain (for logs and tracing).
+- ACP request/response matching relies on ACP `id`.
+- `correlationId` is not a replacement for ACP `id`.
+
+## 7. Session and Ordering
+
+- `sessionId` is generated by session owner (`client` side currently).
+- Ordering guarantee is per `sessionId` (not global ordering).
+- Implementations should process `acp.*` messages in order within the same `sessionId`.
+
+## 8. Error Model
+
+Two error surfaces exist and must be separated:
+
+1. ACP business error: stays inside `payload.acp.error`.
+2. Envelope/system error: uses `kind=system.error` with top-level payload.
+
+`system.error` payload:
 
 ```json
 {
-  "code": "INVALID_ARGUMENT",
-  "message": "projectId is required",
+  "code": "UNAVAILABLE",
+  "message": "target offline",
+  "retryable": true,
   "details": {
-    "field": "projectId"
+    "target": "agent:codex"
   }
 }
 ```
 
-Shared error code set:
+## 9. Compatibility and Migration
 
-- `INVALID_ARGUMENT`
-- `UNAUTHORIZED`
-- `FORBIDDEN`
-- `NOT_FOUND`
-- `CONFLICT`
-- `UNAVAILABLE`
-- `RATE_LIMITED`
-- `TIMEOUT`
-- `INTERNAL`
+No ACP behavior change is introduced in this protocol.
 
-## 7. Migration Plan
+Migration path:
 
-### Phase 0: Centralize definitions (current iteration)
+1. Wrap existing ACP traffic into Global Protocol envelope.
+2. Add routing and metadata consumption incrementally.
+3. Keep old internal adapters as compatibility bridges during rollout.
+4. Remove old translated private schemas after all endpoints consume `kind=acp.*` directly.
 
-- Add `server/internal/protocol/` as the single source of protocol definitions.
-- Move Registry protocol types/constants to this package.
-- Keep `internal/shared/registry_proto.go` as compatibility aliases.
-- Add this `docs/global-protocol.md` specification.
+## 10. Single Source of Truth
 
-### Phase 1: Envelope adoption in runtime
+This document is the canonical design for communication mode change.
 
-- Hub/Registry switch internal envelope aliases to `internal/protocol`.
-- IM adapters map their transport payloads to global envelope semantics.
+Code placement:
 
-### Phase 2: Agent/IM convergence
-
-- Define mapping between ACP JSON-RPC updates and `message.*` global events.
-- Normalize option/decision flow under `decision.*`.
-
-### Phase 3: Full protocol uniformity
-
-- Reduce old per-module protocol structs.
-- Keep transport-specific adapters only (WebSocket, JSON-RPC), with shared semantic payload types.
-
-## 8. Directory Convention
-
-`server/internal/protocol/` is the unified home for protocol definitions:
-
-- `global.go` - cross-component envelope, endpoint, method names.
-- `registry.go` - registry and project synchronization payloads.
-- future: `agent.go`, `im.go`, `client.go` for domain-specific payload contracts.
-
-`internal/shared/registry_proto.go` remains temporarily as a thin compatibility layer to avoid disruptive refactor in one release.
+- `server/internal/protocol/global.go`: envelope and `kind` definitions.
+- `server/internal/protocol/registry.go`: existing registry payload contracts.
+- Future protocol changes should update this document first, then code.
