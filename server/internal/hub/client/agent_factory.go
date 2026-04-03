@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 )
 
 // AgentFactoryV2 creates AgentInstance objects and declares connection sharing policy.
@@ -44,6 +45,55 @@ func (f *legacyAgentFactory) CreateInstance(ctx context.Context, cb SessionCallb
 	return inst, nil
 }
 
+// sharedAgentFactory wraps an AgentFactory and manages a shared AgentConn
+// that is reused across multiple AgentInstance objects.
+type sharedAgentFactory struct {
+	name string
+	fn   AgentFactory
+
+	mu   sync.Mutex
+	conn *AgentConn // lazily created, shared across all instances
+}
+
+func (f *sharedAgentFactory) Name() string              { return f.name }
+func (f *sharedAgentFactory) SupportsSharedConn() bool   { return true }
+
+func (f *sharedAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	// Lazily create the shared connection on first use.
+	if f.conn == nil {
+		a := f.fn("", nil)
+		rawConn, err := a.Connect(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("connect shared %q: %w", f.name, err)
+		}
+		f.conn = newSharedAgentConn(a, rawConn, debugLog)
+	}
+
+	inst := &AgentInstance{
+		name:      f.name,
+		agentConn: f.conn,
+		callbacks: cb,
+		shared:    true,
+	}
+
+	return inst, nil
+}
+
+// CloseConn closes the shared connection. Should be called during shutdown.
+func (f *sharedAgentFactory) CloseConn() error {
+	f.mu.Lock()
+	c := f.conn
+	f.conn = nil
+	f.mu.Unlock()
+	if c != nil {
+		return c.Close()
+	}
+	return nil
+}
+
 // agentRegistryV2 maps agent names to their AgentFactoryV2 implementations.
 type agentRegistryV2 struct {
 	facs map[string]AgentFactoryV2
@@ -72,4 +122,9 @@ func (r *agentRegistryV2) names() []string {
 // wrapLegacyFactory converts an old-style AgentFactory func into AgentFactoryV2.
 func wrapLegacyFactory(name string, fn AgentFactory) AgentFactoryV2 {
 	return &legacyAgentFactory{name: name, fn: fn}
+}
+
+// wrapSharedFactory converts an old-style AgentFactory func into a shared AgentFactoryV2.
+func wrapSharedFactory(name string, fn AgentFactory) AgentFactoryV2 {
+	return &sharedAgentFactory{name: name, fn: fn}
 }

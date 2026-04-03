@@ -70,44 +70,13 @@ func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) 
 		sess.reply(status)
 
 	case "/list":
-		sess.promptMu.Lock()
-		defer sess.promptMu.Unlock()
-		lines, err := sess.listSessions(ctx)
-		if err != nil {
-			sess.reply(fmt.Sprintf("List error: %v", err))
-			return
-		}
-		sess.reply(strings.Join(lines, "\n"))
+		c.handleListCommand(sess)
 
 	case "/new":
-		sess.promptMu.Lock()
-		defer sess.promptMu.Unlock()
-		sid, err := sess.createNewSession(ctx)
-		if err != nil {
-			sess.reply(fmt.Sprintf("New error: %v", err))
-			return
-		}
-		sess.reply(fmt.Sprintf("Created new session: %s", sid))
+		c.handleNewCommand(sess, msg)
 
 	case "/load":
-		idxStr := strings.TrimSpace(args)
-		if idxStr == "" {
-			sess.reply("Usage: /load <index>  (see /list)")
-			return
-		}
-		idx, err := strconv.Atoi(idxStr)
-		if err != nil || idx <= 0 {
-			sess.reply("Load error: index must be a positive integer")
-			return
-		}
-		sess.promptMu.Lock()
-		defer sess.promptMu.Unlock()
-		sid, err := sess.loadSessionByIndex(ctx, idx)
-		if err != nil {
-			sess.reply(fmt.Sprintf("Load error: %v", err))
-			return
-		}
-		sess.reply(fmt.Sprintf("Loaded session: %s", sid))
+		c.handleLoadCommand(sess, msg, args)
 
 	case "/mode":
 		sess.handleConfigCommand(ctx, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
@@ -119,6 +88,92 @@ func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) 
 		sess.handleConfigCommand(ctx, args, "Usage: /config <config-id> <value>", "Config", resolveConfigArg)
 
 	}
+}
+
+// handleNewCommand creates a new Client-level session and rebinds the route.
+func (c *Client) handleNewCommand(sess *Session, msg im.Message) {
+	routeKey := msg.RouteKey
+	if routeKey == "" {
+		routeKey = msg.ChatID
+	}
+	if routeKey == "" {
+		routeKey = "default"
+	}
+	newSess := c.ClientNewSession(routeKey)
+	sess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
+}
+
+// handleLoadCommand loads a session by index and rebinds the route.
+func (c *Client) handleLoadCommand(sess *Session, msg im.Message, args string) {
+	idxStr := strings.TrimSpace(args)
+	if idxStr == "" {
+		sess.reply("Usage: /load <index>  (see /list)")
+		return
+	}
+	idx, err := strconv.Atoi(idxStr)
+	if err != nil || idx <= 0 {
+		sess.reply("Load error: index must be a positive integer")
+		return
+	}
+	routeKey := msg.RouteKey
+	if routeKey == "" {
+		routeKey = msg.ChatID
+	}
+	if routeKey == "" {
+		routeKey = "default"
+	}
+	loaded, err := c.ClientLoadSession(routeKey, idx)
+	if err != nil {
+		sess.reply(fmt.Sprintf("Load error: %v", err))
+		return
+	}
+	// Reply from the NEW session so the message goes to the right context.
+	loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))
+}
+
+// handleListCommand lists all sessions (in-memory + persisted).
+func (c *Client) handleListCommand(sess *Session) {
+	entries, err := c.clientListSessions()
+	if err != nil {
+		sess.reply(fmt.Sprintf("List error: %v", err))
+		return
+	}
+
+	if len(entries) == 0 {
+		sess.reply("No sessions.")
+		return
+	}
+
+	lines := make([]string, 0, len(entries)+1)
+	lines = append(lines, fmt.Sprintf("Sessions (%d):", len(entries)))
+	for i, e := range entries {
+		marker := " "
+		if e.ID == sess.ID {
+			marker = "*"
+		}
+		title := strings.TrimSpace(e.Title)
+		if title == "" {
+			title = "(no title)"
+		}
+		agent := e.Agent
+		if agent == "" {
+			agent = "-"
+		}
+		statusStr := "active"
+		switch e.Status {
+		case SessionSuspended:
+			statusStr = "suspended"
+		case SessionPersisted:
+			statusStr = "persisted"
+		}
+		loc := "mem"
+		if !e.InMemory {
+			loc = "disk"
+		}
+		lines = append(lines, fmt.Sprintf("%s %d. [%s] %s  agent=%s  %s (%s)",
+			marker, i+1, statusStr, e.ID, agent, title, loc))
+	}
+	sess.reply(strings.Join(lines, "\n"))
 }
 
 func (s *Session) handleConfigCommand(

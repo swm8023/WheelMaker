@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // AgentFactory creates a new agent instance.
@@ -38,6 +40,12 @@ func (r *agentRegistry) register(name string, f AgentFactory) {
 	r.mu.Lock()
 	r.facs[name] = f
 	r.v2facs[name] = wrapLegacyFactory(name, f)
+	r.mu.Unlock()
+}
+
+func (r *agentRegistry) registerV2(name string, f AgentFactoryV2) {
+	r.mu.Lock()
+	r.v2facs[name] = f
 	r.mu.Unlock()
 }
 
@@ -110,6 +118,14 @@ type Client struct {
 	// activeSession is the Session currently handling messages.
 	activeSession *Session
 
+	// suspendTimeout is how long a Suspended session stays in memory before
+	// being persisted to SQLite and evicted. Default: 5 minutes.
+	suspendTimeout time.Duration
+	stopPersistCh  chan struct{} // closed to stop the persist timer goroutine
+
+	// sessionCounter generates unique session IDs.
+	sessionCounter int
+
 	imBlockedUpdates map[string]struct{}
 }
 
@@ -128,6 +144,8 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 		imBlockedUpdates: map[string]struct{}{},
 		sessions:         make(map[string]*Session),
 		routeMap:         make(map[string]string),
+		suspendTimeout:   5 * time.Minute,
+		stopPersistCh:    make(chan struct{}),
 	}
 	sess := newSession("default", cwd)
 	sess.store = store
@@ -211,6 +229,12 @@ func (c *Client) RegisterAgent(name string, factory AgentFactory) {
 	c.registry.register(name, factory)
 }
 
+// RegisterAgentV2 registers an AgentFactoryV2 under the given name.
+// Use this for agents that support shared connections.
+func (c *Client) RegisterAgentV2(name string, factory AgentFactoryV2) {
+	c.registry.registerV2(name, factory)
+}
+
 // Start loads persisted state and registers the IM message callback.
 // Agent initialization is deferred until the first incoming message (lazy init).
 func (c *Client) Start(ctx context.Context) error {
@@ -235,6 +259,12 @@ func (c *Client) Start(ctx context.Context) error {
 			c.imBridge.SetHelpResolver(activeSess.resolveHelpModel)
 		}
 	}
+
+	// Start background persist timer for suspended sessions.
+	if c.sessionStore != nil {
+		go c.persistLoop()
+	}
+
 	return nil
 }
 
@@ -250,6 +280,13 @@ func (c *Client) Run(ctx context.Context) error {
 // Close saves state and shuts down all active sessions.
 // If a SessionStore is configured, active sessions are persisted before shutdown.
 func (c *Client) Close() error {
+	// Stop the persist timer goroutine.
+	select {
+	case <-c.stopPersistCh:
+	default:
+		close(c.stopPersistCh)
+	}
+
 	c.mu.Lock()
 	sessions := make([]*Session, 0, len(c.sessions))
 	for _, sess := range c.sessions {
@@ -329,6 +366,30 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 			c.mu.Unlock()
 			return sess
 		}
+		// Session was evicted — try to restore from store.
+		ss := c.sessionStore
+		c.mu.Unlock()
+		if ss != nil {
+			snap, err := ss.Load(context.Background(), sessID)
+			if err == nil && snap != nil {
+				restored := RestoreFromSnapshot(snap, c.cwd)
+				c.mu.Lock()
+				restored.store = c.store
+				restored.registry = c.registry
+				restored.imBridge = c.imBridge
+				restored.imBlockedUpdates = c.imBlockedUpdates
+				restored.debugLog = c.debugLog
+				restored.yolo = c.yolo
+				restored.state = c.state
+				restored.permRouter = newPermissionRouter(restored)
+				c.sessions[restored.ID] = restored
+				c.activeSession = restored
+				c.mu.Unlock()
+				return restored
+			}
+		}
+		// Could not restore — fall through to create new session.
+		c.mu.Lock()
 	}
 
 	// If only one session exists and no explicit route mapping, reuse it.
@@ -358,6 +419,16 @@ func (c *Client) createSessionLocked(routeKey string) *Session {
 		return existing
 	}
 
+	sess := c.newWiredSession(id)
+	c.sessions[id] = sess
+	c.routeMap[routeKey] = id
+	c.activeSession = sess
+	return sess
+}
+
+// newWiredSession creates a Session with all Client back-references wired.
+// Does NOT add it to c.sessions. Caller may hold c.mu.
+func (c *Client) newWiredSession(id string) *Session {
 	sess := newSession(id, c.cwd)
 	sess.store = c.store
 	sess.registry = c.registry
@@ -367,11 +438,269 @@ func (c *Client) createSessionLocked(routeKey string) *Session {
 	sess.yolo = c.yolo
 	sess.state = c.state
 	sess.permRouter = newPermissionRouter(sess)
-
-	c.sessions[id] = sess
-	c.routeMap[routeKey] = id
-	c.activeSession = sess
 	return sess
+}
+
+// nextSessionID returns a unique session ID. Caller MUST hold c.mu.
+func (c *Client) nextSessionID() string {
+	c.sessionCounter++
+	return fmt.Sprintf("session-%d", c.sessionCounter)
+}
+
+// ClientNewSession suspends the current session for the given route,
+// creates a new session, and rebinds the route. Returns the new session.
+func (c *Client) ClientNewSession(routeKey string) *Session {
+	c.mu.Lock()
+	oldSessID := c.routeMap[routeKey]
+	oldSess := c.sessions[oldSessID]
+	ss := c.sessionStore
+	pn := c.projectName
+	c.mu.Unlock()
+
+	// Suspend old session if it is active and has an agent.
+	if oldSess != nil {
+		oldSess.mu.Lock()
+		hasInst := oldSess.instance != nil
+		oldSess.mu.Unlock()
+		if hasInst {
+			if err := oldSess.Suspend(context.Background(), ss, pn); err != nil {
+				logger.Warn("client: suspend old session %s: %v", oldSessID, err)
+			}
+		}
+		oldSess.mu.Lock()
+		oldSess.Status = SessionSuspended
+		oldSess.lastActiveAt = time.Now()
+		oldSess.mu.Unlock()
+	}
+
+	c.mu.Lock()
+	newID := c.nextSessionID()
+	sess := c.newWiredSession(newID)
+	c.sessions[newID] = sess
+	c.routeMap[routeKey] = newID
+	c.activeSession = sess
+	c.mu.Unlock()
+	return sess
+}
+
+// ClientLoadSession restores a session by index from the merged list of
+// in-memory + persisted sessions. Binds the loaded session to the given route.
+func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error) {
+	entries, err := c.clientListSessions()
+	if err != nil {
+		return nil, err
+	}
+	if index < 1 || index > len(entries) {
+		return nil, fmt.Errorf("index out of range (1-%d)", len(entries))
+	}
+	target := entries[index-1]
+
+	// Check if session is already in memory.
+	c.mu.Lock()
+	if sess := c.sessions[target.ID]; sess != nil {
+		// Already in memory — just rebind the route.
+		oldSessID := c.routeMap[routeKey]
+		oldSess := c.sessions[oldSessID]
+		ss := c.sessionStore
+		pn := c.projectName
+		c.mu.Unlock()
+
+		// Suspend old if different from target.
+		if oldSess != nil && oldSess.ID != target.ID {
+			oldSess.mu.Lock()
+			hasInst := oldSess.instance != nil
+			oldSess.mu.Unlock()
+			if hasInst {
+				_ = oldSess.Suspend(context.Background(), ss, pn)
+			}
+			oldSess.mu.Lock()
+			oldSess.Status = SessionSuspended
+			oldSess.lastActiveAt = time.Now()
+			oldSess.mu.Unlock()
+		}
+
+		c.mu.Lock()
+		c.routeMap[routeKey] = target.ID
+		sess.Status = SessionActive
+		c.activeSession = sess
+		c.mu.Unlock()
+		return sess, nil
+	}
+	ss := c.sessionStore
+	pn := c.projectName
+	c.mu.Unlock()
+
+	// Try to load from SessionStore.
+	if ss == nil {
+		return nil, fmt.Errorf("session %q not in memory and no session store configured", target.ID)
+	}
+	snap, err := ss.Load(context.Background(), target.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load session %q: %w", target.ID, err)
+	}
+
+	// Suspend old session.
+	c.mu.Lock()
+	oldSessID := c.routeMap[routeKey]
+	oldSess := c.sessions[oldSessID]
+	c.mu.Unlock()
+	if oldSess != nil && oldSess.ID != target.ID {
+		oldSess.mu.Lock()
+		hasInst := oldSess.instance != nil
+		oldSess.mu.Unlock()
+		if hasInst {
+			_ = oldSess.Suspend(context.Background(), ss, pn)
+		}
+		oldSess.mu.Lock()
+		oldSess.Status = SessionSuspended
+		oldSess.lastActiveAt = time.Now()
+		oldSess.mu.Unlock()
+	}
+
+	restored := RestoreFromSnapshot(snap, c.cwd)
+	c.mu.Lock()
+	restored.store = c.store
+	restored.registry = c.registry
+	restored.imBridge = c.imBridge
+	restored.imBlockedUpdates = c.imBlockedUpdates
+	restored.debugLog = c.debugLog
+	restored.yolo = c.yolo
+	restored.state = c.state
+	restored.permRouter = newPermissionRouter(restored)
+	c.sessions[restored.ID] = restored
+	c.routeMap[routeKey] = restored.ID
+	c.activeSession = restored
+	c.mu.Unlock()
+	return restored, nil
+}
+
+// clientListSessions returns a merged list of in-memory and persisted sessions,
+// sorted by last active time (most recent first). Duplicates are deduplicated
+// favoring in-memory sessions.
+func (c *Client) clientListSessions() ([]sessionListEntry, error) {
+	c.mu.Lock()
+	memEntries := make([]sessionListEntry, 0, len(c.sessions))
+	memIDs := make(map[string]bool, len(c.sessions))
+	for _, sess := range c.sessions {
+		sess.mu.Lock()
+		agentName := ""
+		if sess.instance != nil {
+			agentName = sess.instance.Name()
+		}
+		title := sess.sessionMeta.Title
+		e := sessionListEntry{
+			ID:           sess.ID,
+			Agent:        agentName,
+			Title:        title,
+			Status:       sess.Status,
+			CreatedAt:    sess.createdAt,
+			LastActiveAt: sess.lastActiveAt,
+			InMemory:     true,
+		}
+		sess.mu.Unlock()
+		memEntries = append(memEntries, e)
+		memIDs[sess.ID] = true
+	}
+	ss := c.sessionStore
+	c.mu.Unlock()
+
+	entries := memEntries
+
+	// Merge persisted sessions.
+	if ss != nil {
+		stored, err := ss.List(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("list persisted sessions: %w", err)
+		}
+		for _, s := range stored {
+			if memIDs[s.ID] {
+				continue // already in memory
+			}
+			entries = append(entries, sessionListEntry{
+				ID:           s.ID,
+				Agent:        s.ActiveAgent,
+				Title:        s.Title,
+				Status:       SessionPersisted,
+				CreatedAt:    s.CreatedAt,
+				LastActiveAt: s.LastActiveAt,
+				InMemory:     false,
+			})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].LastActiveAt.After(entries[j].LastActiveAt)
+	})
+	return entries, nil
+}
+
+// sessionListEntry holds merged in-memory + persisted session information.
+type sessionListEntry struct {
+	ID           string
+	Agent        string
+	Title        string
+	Status       SessionStatus
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	InMemory     bool
+}
+
+// persistLoop periodically scans for Suspended sessions that have exceeded
+// the suspend timeout and persists them to the SessionStore.
+func (c *Client) persistLoop() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stopPersistCh:
+			return
+		case <-ticker.C:
+			c.evictSuspendedSessions()
+		}
+	}
+}
+
+// evictSuspendedSessions finds Suspended sessions that have exceeded the
+// suspend timeout, persists them to SQLite, and removes them from memory.
+func (c *Client) evictSuspendedSessions() {
+	c.mu.Lock()
+	ss := c.sessionStore
+	pn := c.projectName
+	timeout := c.suspendTimeout
+	if ss == nil {
+		c.mu.Unlock()
+		return
+	}
+
+	var toEvict []*Session
+	for _, sess := range c.sessions {
+		sess.mu.Lock()
+		if sess.Status == SessionSuspended && time.Since(sess.lastActiveAt) > timeout {
+			toEvict = append(toEvict, sess)
+		}
+		sess.mu.Unlock()
+	}
+	c.mu.Unlock()
+
+	for _, sess := range toEvict {
+		snap := sess.Snapshot(pn)
+		if err := ss.Save(context.Background(), snap); err != nil {
+			logger.Warn("client: persist session %s: %v", sess.ID, err)
+			continue
+		}
+
+		c.mu.Lock()
+		sess.mu.Lock()
+		sess.Status = SessionPersisted
+		sess.mu.Unlock()
+
+		// Remove from sessions map but keep route mapping pointing to the ID
+		// so we can look it up later for restoration.
+		delete(c.sessions, sess.ID)
+		c.mu.Unlock()
+
+		logger.Info("client: evicted suspended session %s to SQLite", sess.ID)
+	}
 }
 
 // parseCommand checks whether text is a recognized WheelMaker command.

@@ -20,6 +20,7 @@ type AgentInstance struct {
 	agentConn *AgentConn
 	callbacks SessionCallbacks // owner Session (receives callbacks)
 	initMeta  clientInitMeta   // cached initialize result
+	shared    bool             // true if using a shared AgentConn
 }
 
 // Name returns the registered agent name.
@@ -31,13 +32,26 @@ func (ai *AgentInstance) Initialize(ctx context.Context, params acp.InitializePa
 }
 
 // SessionNew creates a new ACP session.
+// In shared mode, registers this instance for callback dispatch.
 func (ai *AgentInstance) SessionNew(ctx context.Context, params acp.SessionNewParams) (acp.SessionNewResult, error) {
-	return ai.agentConn.forwarder.SessionNew(ctx, params)
+	res, err := ai.agentConn.forwarder.SessionNew(ctx, params)
+	if err == nil && ai.shared && res.SessionID != "" {
+		ai.agentConn.RegisterInstance(res.SessionID, ai)
+	}
+	return res, err
 }
 
 // SessionLoad loads an existing ACP session.
+// In shared mode, registers this instance for callback dispatch.
 func (ai *AgentInstance) SessionLoad(ctx context.Context, params acp.SessionLoadParams) (acp.SessionLoadResult, error) {
-	return ai.agentConn.forwarder.SessionLoad(ctx, params)
+	if ai.shared && params.SessionID != "" {
+		ai.agentConn.RegisterInstance(params.SessionID, ai)
+	}
+	res, err := ai.agentConn.forwarder.SessionLoad(ctx, params)
+	if err != nil && ai.shared && params.SessionID != "" {
+		ai.agentConn.UnregisterInstance(params.SessionID)
+	}
+	return res, err
 }
 
 // SessionList lists available ACP sessions.
@@ -61,7 +75,13 @@ func (ai *AgentInstance) SessionSetConfigOption(ctx context.Context, params acp.
 }
 
 // Close terminates the underlying AgentConn.
+// In shared mode, the instance is unregistered without closing the connection.
 func (ai *AgentInstance) Close() error {
+	if ai.shared {
+		// Unregister from shared dispatch; don't close the shared connection.
+		ai.agentConn.UnregisterAllForInstance(ai)
+		return nil
+	}
 	return ai.agentConn.Close()
 }
 

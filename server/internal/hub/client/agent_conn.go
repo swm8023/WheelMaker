@@ -52,6 +52,26 @@ func newOwnedAgentConn(a agent.Agent, conn *acp.Conn, debugLog io.Writer) *Agent
 	}
 }
 
+// newSharedAgentConn creates an AgentConn in shared mode.
+// The AgentConn itself is registered as the callback handler so it can
+// dispatch callbacks by acpSessionId.
+func newSharedAgentConn(a agent.Agent, conn *acp.Conn, debugLog io.Writer) *AgentConn {
+	if debugLog != nil {
+		conn.SetDebugLogger(debugLog)
+	}
+	fwd := acp.NewForwarder(conn, nil)
+	ac := &AgentConn{
+		agent:     a,
+		forwarder: fwd,
+		mode:      ConnShared,
+		debugLog:  debugLog,
+		instances: make(map[string]*AgentInstance),
+	}
+	// In shared mode, the AgentConn itself handles callback dispatch.
+	fwd.SetCallbacks(ac)
+	return ac
+}
+
 // SetCallbacks wires the callback handler on the underlying forwarder.
 // In owned mode this is the AgentInstance; in shared mode this is the AgentConn itself.
 func (ac *AgentConn) SetCallbacks(h acp.ClientCallbacks) {
@@ -78,6 +98,18 @@ func (ac *AgentConn) RegisterInstance(acpSessionID string, inst *AgentInstance) 
 func (ac *AgentConn) UnregisterInstance(acpSessionID string) {
 	ac.mu.Lock()
 	delete(ac.instances, acpSessionID)
+	ac.mu.Unlock()
+}
+
+// UnregisterAllForInstance removes all acpSessionId entries that point to the
+// given AgentInstance. Used during shared-mode Close().
+func (ac *AgentConn) UnregisterAllForInstance(inst *AgentInstance) {
+	ac.mu.Lock()
+	for k, v := range ac.instances {
+		if v == inst {
+			delete(ac.instances, k)
+		}
+	}
 	ac.mu.Unlock()
 }
 

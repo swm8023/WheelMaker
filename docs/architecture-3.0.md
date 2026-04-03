@@ -221,13 +221,16 @@ All five phases are implemented and tested. 50 tests pass (43 original + 7 SQLit
 - SessionStore interface + SQLiteSessionStore (CGo-free via modernc.org/sqlite)
 - Session.Snapshot(), Session.Suspend(), RestoreFromSnapshot()
 - Per-agent state preservation across agent switches (agents map)
+- Client-level `/new`, `/load`, `/list` commands with route rebinding
+- Timer-driven state machine: Suspended → Persisted after configurable timeout
+- Evicted sessions auto-restored from SQLite on incoming message
+- Shared AgentConn pooling via sharedAgentFactory, instance registration by acpSessionId
+- RegisterAgentV2 API for shared-mode agents
 
 ### What remains deferred
 
-- Shared AgentConn mode not yet exercised (no agent declares SupportsSharedConn=true)
-- `/new`, `/load`, `/list` commands not yet wired to Client-level session management
-- Session state machine transitions (Active → Suspended → Persisted) not yet timer-driven
-- Shared AgentConn reconnect policy (exponential backoff) deferred to usage
+- No agent currently declares SupportsSharedConn=true in production (infrastructure ready, needs agent-side opt-in)
+- ACP-level `/list` and `/load` commands still delegated to Session; Client-level commands manage WheelMaker sessions independently
 
 ## 8. Gap vs Current Code
 
