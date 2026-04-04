@@ -4,17 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
 
+// Callbacks defines business callback handlers owned by instance users.
+type Callbacks interface {
+	SessionUpdate(params protocol.SessionUpdateParams)
+	SessionRequestPermission(ctx context.Context, params protocol.PermissionRequestParams) (protocol.PermissionResult, error)
+	FSRead(params protocol.FSReadTextFileParams) (protocol.FSReadTextFileResult, error)
+	FSWrite(params protocol.FSWriteTextFileParams) error
+	TerminalCreate(params protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error)
+	TerminalOutput(params protocol.TerminalOutputParams) (protocol.TerminalOutputResult, error)
+	TerminalWaitForExit(params protocol.TerminalWaitForExitParams) (protocol.TerminalWaitForExitResult, error)
+	TerminalKill(params protocol.TerminalKillParams) error
+	TerminalRelease(params protocol.TerminalReleaseParams) error
+}
+
 // Instance is the only ACP-typed runtime interface exposed to Session.
 type Instance interface {
-	RawCallbackBridge
-
 	Name() string
+	HandleInbound(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error)
 	Initialize(ctx context.Context, p protocol.InitializeParams) (protocol.InitializeResult, error)
 	SessionNew(ctx context.Context, p protocol.SessionNewParams) (protocol.SessionNewResult, error)
 	SessionLoad(ctx context.Context, p protocol.SessionLoadParams) (protocol.SessionLoadResult, error)
@@ -195,7 +208,52 @@ func (i *instance) SessionSetConfigOption(ctx context.Context, p protocol.Sessio
 }
 
 func (i *instance) HandleInbound(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
-	return dispatchInbound(ctx, method, params, noResponse, i.callbacks)
+	if noResponse {
+		if method == protocol.MethodSessionUpdate && i.callbacks != nil {
+			var p protocol.SessionUpdateParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return nil, nil
+			}
+			i.callbacks.SessionUpdate(p)
+		}
+		return nil, nil
+	}
+
+	if i.callbacks == nil {
+		if method == protocol.MethodRequestPermission {
+			return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
+		}
+		return nil, fmt.Errorf("no callback handler for method: %s", method)
+	}
+
+	switch method {
+	case protocol.MethodRequestPermission:
+		var p protocol.PermissionRequestParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+		}
+		result, err := i.callbacks.SessionRequestPermission(ctx, p)
+		if err != nil {
+			return nil, err
+		}
+		return protocol.PermissionResponse{Outcome: result}, nil
+	case protocol.MethodFSRead:
+		return callbackCall(method, params, i.callbacks.FSRead)
+	case protocol.MethodFSWrite:
+		return callbackCallVoid(method, params, i.callbacks.FSWrite)
+	case protocol.MethodTerminalCreate:
+		return callbackCall(method, params, i.callbacks.TerminalCreate)
+	case protocol.MethodTerminalOutput:
+		return callbackCall(method, params, i.callbacks.TerminalOutput)
+	case protocol.MethodTerminalWaitExit:
+		return callbackCall(method, params, i.callbacks.TerminalWaitForExit)
+	case protocol.MethodTerminalKill:
+		return callbackCallVoid(method, params, i.callbacks.TerminalKill)
+	case protocol.MethodTerminalRelease:
+		return callbackCallVoid(method, params, i.callbacks.TerminalRelease)
+	default:
+		return nil, fmt.Errorf("unsupported method: %s", method)
+	}
 }
 
 func (i *instance) Close() error {
@@ -210,4 +268,20 @@ func (i *instance) ensureConn() error {
 		return errors.New("agentv2 instance: conn is nil")
 	}
 	return nil
+}
+
+func callbackCall[P any, R any](method string, params json.RawMessage, fn func(P) (R, error)) (any, error) {
+	var p P
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+	}
+	return fn(p)
+}
+
+func callbackCallVoid[P any](method string, params json.RawMessage, fn func(P) error) (any, error) {
+	var p P
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+	}
+	return nil, fn(p)
 }
