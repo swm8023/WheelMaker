@@ -14,12 +14,12 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
-	"github.com/swm8023/wheelmaker/internal/hub/tools"
+	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 )
 
 func requireCodexAcp(t *testing.T) string {
 	t.Helper()
-	path, err := tools.ResolveBinary("codex-acp", "")
+	path, err := agentv2.ResolveACPBinary("codex-acp", "")
 	if err != nil {
 		t.Skipf("codex-acp not found: %v", err)
 	}

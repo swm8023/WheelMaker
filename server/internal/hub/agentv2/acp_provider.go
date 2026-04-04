@@ -2,34 +2,33 @@ package agentv2
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sort"
-
-	"github.com/swm8023/wheelmaker/internal/hub/tools"
 )
 
-// ACPProvider resolves launch details for one ACP agent type.
-type ACPProvider interface {
+// Provider resolves launch details for one ACP agent type.
+type Provider interface {
 	Name() string
 	LaunchSpec() (exe string, args []string, env []string, err error)
 }
 
-// Provider is kept as a compatibility alias for ACPProvider.
-type Provider = ACPProvider
+// ACPProvider is kept as a compatibility alias for Provider.
+type ACPProvider = Provider
 
-// ACPProviderConfig configures an ACP provider instance.
-type ACPProviderConfig struct {
+// ProviderConfig configures an ACP provider instance.
+type ProviderConfig struct {
 	ExePath string
 	Env     map[string]string
 }
 
-// Backward-compatible aliases for existing config names.
-type CodexProviderConfig = ACPProviderConfig
-type ClaudeProviderConfig = ACPProviderConfig
-type CopilotProviderConfig = ACPProviderConfig
+// ACPProviderConfig is kept as a compatibility alias for ProviderConfig.
+type ACPProviderConfig = ProviderConfig
 
-// ACPProviderPreset declares launch behavior for one provider kind.
-type ACPProviderPreset struct {
+// ProviderPreset declares launch behavior for one provider kind.
+type ProviderPreset struct {
 	Name                   string
 	BinaryName             string
 	Args                   []string
@@ -40,18 +39,18 @@ type ACPProviderPreset struct {
 }
 
 var (
-	CodexACPProviderPreset = ACPProviderPreset{
+	CodexProviderPreset = ProviderPreset{
 		Name:       "codex",
 		BinaryName: "codex-acp",
 		NPMPackage: "@zed-industries/codex-acp",
 	}
-	ClaudeACPProviderPreset = ACPProviderPreset{
+	ClaudeProviderPreset = ProviderPreset{
 		Name:                 "claude",
 		BinaryName:           "claude-agent-acp",
 		NPMPackage:           "@agentclientprotocol/claude-agent-acp",
 		ResolveBinaryOnEmpty: true,
 	}
-	CopilotACPProviderPreset = ACPProviderPreset{
+	CopilotProviderPreset = ProviderPreset{
 		Name:                   "copilot",
 		BinaryName:             "copilot",
 		Args:                   []string{"--acp", "--stdio"},
@@ -60,61 +59,66 @@ var (
 	}
 )
 
-// acpProvider is the unified implementation for all ACP providers.
-type acpProvider struct {
-	preset ACPProviderPreset
-	cfg    ACPProviderConfig
+// provider is the unified implementation for all ACP providers.
+type provider struct {
+	preset ProviderPreset
+	cfg    ProviderConfig
 
-	resolveBinary func(name, configPath string) (string, error)
+	resolveBinary func(name, configuredPath string) (string, error)
 	lookPath      func(file string) (string, error)
 }
 
-// NewACPProvider creates a provider from preset + config.
-func NewACPProvider(preset ACPProviderPreset, cfg ACPProviderConfig) *acpProvider {
-	return &acpProvider{
+// NewProvider creates a provider from preset + config.
+func NewProvider(preset ProviderPreset, cfg ProviderConfig) *provider {
+	return &provider{
 		preset:        preset,
 		cfg:           cfg,
-		resolveBinary: tools.ResolveBinary,
+		resolveBinary: ResolveACPBinary,
 		lookPath:      exec.LookPath,
 	}
 }
 
-// Backward-compatible constructors.
-func NewCodexProvider(cfg CodexProviderConfig) *acpProvider {
-	return NewACPProvider(CodexACPProviderPreset, ACPProviderConfig(cfg))
+// NewACPProvider is kept as a compatibility wrapper for NewProvider.
+func NewACPProvider(preset ProviderPreset, cfg ProviderConfig) *provider {
+	return NewProvider(preset, cfg)
 }
 
-func NewClaudeProvider(cfg ClaudeProviderConfig) *acpProvider {
-	return NewACPProvider(ClaudeACPProviderPreset, ACPProviderConfig(cfg))
+func NewCodexProvider(cfg ProviderConfig) *provider {
+	return NewProvider(CodexProviderPreset, cfg)
 }
 
-func NewCopilotProvider(cfg CopilotProviderConfig) *acpProvider {
-	return NewACPProvider(CopilotACPProviderPreset, ACPProviderConfig(cfg))
+func NewClaudeProvider(cfg ProviderConfig) *provider {
+	return NewProvider(ClaudeProviderPreset, cfg)
 }
 
-func (p *acpProvider) Name() string { return p.preset.Name }
+func NewCopilotProvider(cfg ProviderConfig) *provider {
+	return NewProvider(CopilotProviderPreset, cfg)
+}
 
-func (p *acpProvider) LaunchSpec() (string, []string, []string, error) {
+func (p *provider) Name() string { return p.preset.Name }
+
+func (p *provider) LaunchSpec() (string, []string, []string, error) {
 	env := buildEnv(p.cfg.Env)
+	args := cloneArgs(p.preset.Args)
 
 	if p.cfg.ExePath != "" {
 		if p.preset.UseExePathDirect {
-			return p.cfg.ExePath, append([]string(nil), p.preset.Args...), env, nil
+			return p.cfg.ExePath, args, env, nil
 		}
 		exePath, err := p.resolveBinary(p.preset.BinaryName, p.cfg.ExePath)
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
 		}
-		return exePath, append([]string(nil), p.preset.Args...), env, nil
+		return exePath, args, env, nil
 	}
 
 	if p.preset.ResolveBinaryOnEmpty {
 		exePath, err := p.resolveBinary(p.preset.BinaryName, "")
 		if err == nil {
-			return exePath, append([]string(nil), p.preset.Args...), env, nil
+			return exePath, args, env, nil
 		}
 		if p.preset.NPMPackage != "" {
-			npxPath, npxErr := p.lookPath("npx")
+			npxPath, npxErr := p.resolveNpx()
 			if npxErr != nil {
 				return "", nil, nil, fmt.Errorf("%s: resolve binary: %w; and npx not found: %w", p.preset.Name, err, npxErr)
 			}
@@ -124,7 +128,7 @@ func (p *acpProvider) LaunchSpec() (string, []string, []string, error) {
 	}
 
 	if p.preset.NPMPackage != "" {
-		npxPath, err := p.lookPath("npx")
+		npxPath, err := p.resolveNpx()
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: npx not found: %w", p.preset.Name, err)
 		}
@@ -138,7 +142,11 @@ func (p *acpProvider) LaunchSpec() (string, []string, []string, error) {
 		}
 		return "", nil, nil, fmt.Errorf("%s: binary not found in PATH: %w", p.preset.Name, err)
 	}
-	return exePath, append([]string(nil), p.preset.Args...), env, nil
+	return exePath, args, env, nil
+}
+
+func (p *provider) resolveNpx() (string, error) {
+	return p.lookPath("npx")
 }
 
 func buildEnv(m map[string]string) []string {
@@ -155,4 +163,81 @@ func buildEnv(m map[string]string) []string {
 		env = append(env, k+"="+m[k])
 	}
 	return env
+}
+
+func cloneArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	return append([]string(nil), args...)
+}
+
+// ResolveACPBinary locates an ACP executable in this order:
+//  1. configuredPath if non-empty and exists
+//  2. PATH
+//  3. bin/{GOOS}_{GOARCH}/ next to the running executable
+//  4. bin/{GOOS}_{GOARCH}/ relative to current working directory
+func ResolveACPBinary(name, configuredPath string) (string, error) {
+	if configuredPath != "" {
+		if exists(configuredPath) {
+			abs, err := filepath.Abs(configuredPath)
+			if err != nil {
+				return "", fmt.Errorf("agentv2: abs path %q: %w", configuredPath, err)
+			}
+			return abs, nil
+		}
+	}
+
+	path, err := exec.LookPath(name)
+	if err == nil {
+		return path, nil
+	}
+
+	if exeDir, dirErr := executableDir(); dirErr == nil {
+		for _, binName := range binaryNames(name) {
+			candidate := filepath.Join(exeDir, "bin", platformDir(), binName)
+			if exists(candidate) {
+				return candidate, nil
+			}
+		}
+	}
+
+	for _, binName := range binaryNames(name) {
+		candidate := filepath.Join("bin", platformDir(), binName)
+		if exists(candidate) {
+			abs, absErr := filepath.Abs(candidate)
+			if absErr == nil {
+				return abs, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf(
+		"agentv2: %q not found (tried configured path, PATH, and bin/%s/); install with npm: npm install -g @zed-industries/%s",
+		name, platformDir(), name,
+	)
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func platformDir() string {
+	return runtime.GOOS + "_" + runtime.GOARCH
+}
+
+func binaryNames(name string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{name + ".exe", name + ".cmd"}
+	}
+	return []string{name}
+}
+
+func executableDir() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(exe), nil
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
-	p := NewCodexProvider(CodexProviderConfig{})
+	p := NewCodexProvider(ProviderConfig{})
 	p.resolveBinary = func(_ string, _ string) (string, error) {
 		return "", errors.New("not found")
 	}
@@ -34,7 +34,7 @@ func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
 }
 
 func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
-	p := NewClaudeProvider(ClaudeProviderConfig{})
+	p := NewClaudeProvider(ProviderConfig{})
 	p.resolveBinary = func(_ string, _ string) (string, error) {
 		return "", errors.New("not found")
 	}
@@ -58,7 +58,7 @@ func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
 }
 
 func TestCopilotACPProvider_LaunchArgsAndEnv(t *testing.T) {
-	p := NewCopilotProvider(CopilotProviderConfig{Env: map[string]string{"B": "2", "A": "1"}})
+	p := NewCopilotProvider(ProviderConfig{Env: map[string]string{"B": "2", "A": "1"}})
 	p.lookPath = func(bin string) (string, error) {
 		if bin != "copilot" {
 			t.Fatalf("lookPath bin=%q, want copilot", bin)
