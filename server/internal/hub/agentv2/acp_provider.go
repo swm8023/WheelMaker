@@ -12,7 +12,7 @@ import (
 // ACPProvider resolves launch details for one ACP agent type.
 type ACPProvider interface {
 	Name() string
-	LaunchSpec() (exe string, args []string, env []string, err error)
+	Launch() (exe string, args []string, env []string, err error)
 }
 
 // ACPProviderConfig configures an ACP provider instance.
@@ -86,42 +86,35 @@ func NewCopilotProvider(cfg ACPProviderConfig) *acpProvider {
 
 func (p *acpProvider) Name() string { return p.preset.Name }
 
-func (p *acpProvider) LaunchSpec() (string, []string, []string, error) {
+func (p *acpProvider) Launch() (string, []string, []string, error) {
 	env := buildEnv(p.cfg.Env)
-	args := cloneArgs(p.preset.Args)
+	defaultArgs := cloneArgs(p.preset.Args)
 
 	if p.cfg.ExePath != "" {
-		if p.preset.UseExePathDirect {
-			return p.cfg.ExePath, args, env, nil
-		}
-		exePath, err := p.resolveBinary(p.preset.BinaryName, p.cfg.ExePath)
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
-		}
-		return exePath, args, env, nil
+		return p.launchFromConfigured(defaultArgs, env)
 	}
 
 	if p.preset.ResolveBinaryOnEmpty {
 		exePath, err := p.resolveBinary(p.preset.BinaryName, "")
 		if err == nil {
-			return exePath, args, env, nil
+			return exePath, defaultArgs, env, nil
 		}
-		if p.preset.NPMPackage != "" {
-			npxPath, npxErr := p.resolveNpx()
-			if npxErr != nil {
-				return "", nil, nil, fmt.Errorf("%s: resolve binary: %w; and npx not found: %w", p.preset.Name, err, npxErr)
-			}
-			return npxPath, []string{"--yes", p.preset.NPMPackage}, env, nil
+		if p.preset.NPMPackage == "" {
+			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
 		}
-		return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
+		npxPath, npxArgs, npxErr := p.launchWithNpx()
+		if npxErr != nil {
+			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w; and npx not found: %w", p.preset.Name, err, npxErr)
+		}
+		return npxPath, npxArgs, env, nil
 	}
 
 	if p.preset.NPMPackage != "" {
-		npxPath, err := p.resolveNpx()
+		npxPath, npxArgs, err := p.launchWithNpx()
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: npx not found: %w", p.preset.Name, err)
 		}
-		return npxPath, []string{"--yes", p.preset.NPMPackage}, env, nil
+		return npxPath, npxArgs, env, nil
 	}
 
 	exePath, err := p.lookPath(p.preset.BinaryName)
@@ -131,7 +124,26 @@ func (p *acpProvider) LaunchSpec() (string, []string, []string, error) {
 		}
 		return "", nil, nil, fmt.Errorf("%s: binary not found in PATH: %w", p.preset.Name, err)
 	}
-	return exePath, args, env, nil
+	return exePath, defaultArgs, env, nil
+}
+
+func (p *acpProvider) launchFromConfigured(defaultArgs, env []string) (string, []string, []string, error) {
+	if p.preset.UseExePathDirect {
+		return p.cfg.ExePath, defaultArgs, env, nil
+	}
+	exePath, err := p.resolveBinary(p.preset.BinaryName, p.cfg.ExePath)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
+	}
+	return exePath, defaultArgs, env, nil
+}
+
+func (p *acpProvider) launchWithNpx() (string, []string, error) {
+	npxPath, err := p.resolveNpx()
+	if err != nil {
+		return "", nil, err
+	}
+	return npxPath, []string{"--yes", p.preset.NPMPackage}, nil
 }
 
 func (p *acpProvider) resolveNpx() (string, error) {

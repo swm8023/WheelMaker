@@ -18,7 +18,7 @@ func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
 		return "/usr/bin/npx", nil
 	}
 
-	exe, args, env, err := p.LaunchSpec()
+	exe, args, env, err := p.Launch()
 	if err != nil {
 		t.Fatalf("launch spec: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
 		return "/usr/bin/npx", nil
 	}
 
-	exe, args, _, err := p.LaunchSpec()
+	exe, args, _, err := p.Launch()
 	if err != nil {
 		t.Fatalf("launch spec: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestCopilotACPProvider_LaunchArgsAndEnv(t *testing.T) {
 		return "/usr/bin/copilot", nil
 	}
 
-	exe, args, env, err := p.LaunchSpec()
+	exe, args, env, err := p.Launch()
 	if err != nil {
 		t.Fatalf("launch spec: %v", err)
 	}

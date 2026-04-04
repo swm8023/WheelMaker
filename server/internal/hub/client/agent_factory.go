@@ -48,7 +48,7 @@ func NewProviderFactory(provider agentv2.ACPProvider) AgentFactoryV2 {
 }
 
 func newOwnedProviderConn(provider agentv2.ACPProvider) (agentv2.Conn, error) {
-	exe, args, env, err := provider.LaunchSpec()
+	exe, args, env, err := provider.Launch()
 	if err != nil {
 		return nil, err
 	}
