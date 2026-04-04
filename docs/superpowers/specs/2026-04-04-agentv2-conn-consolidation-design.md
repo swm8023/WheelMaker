@@ -231,3 +231,72 @@ Migration is complete only when all are true:
 3. Session depends on `agentv2.Instance` only.
 4. ACP protocol source-of-truth is `internal/protocol/acp.go`.
 5. Full hub test suite passes.
+
+## 12. Bootstrap and SessionID Routing Guarantees
+
+### 12.1 Three-Stage Bootstrap State
+
+Session and Instance bootstrap must be modeled as three independent states:
+
+1. `connReady`: subprocess + RPC channel are alive (`Conn` exists and can `Send/Notify`).
+2. `initialized`: ACP `initialize` handshake completed and capabilities are available.
+3. `acpSessionReady`: ACP session ID is bound and active (from `session/new` or `session/load`).
+
+This separation is mandatory so `/new` and `/load` work correctly before prompt traffic starts.
+
+### 12.2 `/new` and `/load` Before ACP Session Exists
+
+Behavior contract:
+
+1. `/new`
+   - Ensure `connReady`.
+   - Ensure `initialized` (run initialize if needed).
+   - Call `SessionNew`.
+   - Bind returned `sessionID` and set `acpSessionReady=true`.
+
+2. `/load <sessionID>`
+   - Ensure `connReady`.
+   - Ensure `initialized` (run initialize if needed).
+   - Pre-register target `sessionID` as pending route (see 12.3).
+   - Call `SessionLoad`.
+   - On success: promote to active route and set `acpSessionReady=true`.
+   - On failure: rollback pending registration.
+
+3. Prompt when not `acpSessionReady`
+   - Follow explicit bootstrap policy: attempt saved session via `load`, then fallback `new` (or return explicit error if fallback disabled).
+
+### 12.3 Three-Layer SessionID Mapping in `agentv2.Conn`
+
+To guarantee correct callback routing during `new/load` races, Conn maintains three maps:
+
+1. `activeMap`
+   - `sessionID -> binding(instance, epoch)`
+   - Stable, committed routes for normal callback dispatch.
+
+2. `pendingMap`
+   - `requestID -> pendingBinding(instance, targetSessionID, opType, epoch)`
+   - Temporary route during in-flight `session/load` or `session/new`.
+   - `load` success promotes to `activeMap`; failure removes entry.
+
+3. `orphanBuffer`
+   - `sessionID -> []update` with TTL.
+   - Buffers early/late updates that arrive before route commitment.
+   - Replayed after route becomes active; dropped on TTL expiry with warning log.
+
+### 12.4 Correctness Rules
+
+1. `session/load` must register pending route before request send.
+2. Pending route must rollback on load error.
+3. Dispatch must validate `(sessionID, epoch)` to avoid stale-instance delivery.
+4. Unknown-session updates must not be silently dropped; they must be buffered or explicitly logged and rejected by policy.
+5. For `session/new`, if protocol may emit updates before response, orphan buffering is required.
+
+### 12.5 Test Requirements for This Contract
+
+At minimum, add and keep passing tests for:
+
+1. `load` success: pending -> active promotion.
+2. `load` failure: pending rollback and no stale active route.
+3. concurrent switch/load: stale epoch callback is rejected.
+4. unknown-session update before commit: buffered then replayed (or policy-drop with deterministic log).
+5. `new` response + callback ordering edge cases.
