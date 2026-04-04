@@ -20,7 +20,7 @@ func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
 
 	exe, args, env, err := p.Launch()
 	if err != nil {
-		t.Fatalf("launch spec: %v", err)
+		t.Fatalf("launch: %v", err)
 	}
 	if exe != "/usr/bin/npx" {
 		t.Fatalf("exe=%q", exe)
@@ -47,7 +47,7 @@ func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
 
 	exe, args, _, err := p.Launch()
 	if err != nil {
-		t.Fatalf("launch spec: %v", err)
+		t.Fatalf("launch: %v", err)
 	}
 	if exe != "/usr/bin/npx" {
 		t.Fatalf("exe=%q", exe)
@@ -59,16 +59,19 @@ func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
 
 func TestCopilotACPProvider_LaunchArgsAndEnv(t *testing.T) {
 	p := NewCopilotProvider(ACPProviderConfig{Env: map[string]string{"B": "2", "A": "1"}})
-	p.lookPath = func(bin string) (string, error) {
-		if bin != "copilot" {
-			t.Fatalf("lookPath bin=%q, want copilot", bin)
+	p.resolveBinary = func(name string, configuredPath string) (string, error) {
+		if name != "copilot" {
+			t.Fatalf("resolveBinary name=%q, want copilot", name)
+		}
+		if configuredPath != "" {
+			t.Fatalf("resolveBinary configuredPath=%q, want empty", configuredPath)
 		}
 		return "/usr/bin/copilot", nil
 	}
 
 	exe, args, env, err := p.Launch()
 	if err != nil {
-		t.Fatalf("launch spec: %v", err)
+		t.Fatalf("launch: %v", err)
 	}
 	if exe != "/usr/bin/copilot" {
 		t.Fatalf("exe=%q", exe)

@@ -17,8 +17,8 @@ type ACPProvider interface {
 
 // ACPProviderConfig configures an ACP provider instance.
 type ACPProviderConfig struct {
-	ExePath string
-	Env     map[string]string
+	BinaryPath string
+	Env        map[string]string
 }
 
 // ACPProviderPreset declares launch behavior for one provider kind.
@@ -27,8 +27,6 @@ type ACPProviderPreset struct {
 	BinaryName             string
 	Args                   []string
 	NPMPackage             string
-	ResolveBinaryOnEmpty   bool
-	UseExePathDirect       bool
 	MissingPathErrTemplate string
 }
 
@@ -39,16 +37,14 @@ var (
 		NPMPackage: "@zed-industries/codex-acp",
 	}
 	ClaudeACPProviderPreset = ACPProviderPreset{
-		Name:                 "claude",
-		BinaryName:           "claude-agent-acp",
-		NPMPackage:           "@agentclientprotocol/claude-agent-acp",
-		ResolveBinaryOnEmpty: true,
+		Name:       "claude",
+		BinaryName: "claude-agent-acp",
+		NPMPackage: "@agentclientprotocol/claude-agent-acp",
 	}
 	CopilotACPProviderPreset = ACPProviderPreset{
 		Name:                   "copilot",
 		BinaryName:             "copilot",
 		Args:                   []string{"--acp", "--stdio"},
-		UseExePathDirect:       true,
 		MissingPathErrTemplate: "copilot: binary not found in PATH (install GitHub Copilot CLI): %v",
 	}
 )
@@ -90,64 +86,31 @@ func (p *acpProvider) Launch() (string, []string, []string, error) {
 	env := buildEnv(p.cfg.Env)
 	defaultArgs := cloneArgs(p.preset.Args)
 
-	if p.cfg.ExePath != "" {
-		return p.launchFromConfigured(defaultArgs, env)
-	}
-
-	if p.preset.ResolveBinaryOnEmpty {
-		exePath, err := p.resolveBinary(p.preset.BinaryName, "")
-		if err == nil {
-			return exePath, defaultArgs, env, nil
-		}
-		if p.preset.NPMPackage == "" {
+	if p.cfg.BinaryPath != "" {
+		exePath, err := p.resolveBinary(p.preset.BinaryName, p.cfg.BinaryPath)
+		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
 		}
-		npxPath, npxArgs, npxErr := p.launchWithNpx()
-		if npxErr != nil {
-			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w; and npx not found: %w", p.preset.Name, err, npxErr)
-		}
-		return npxPath, npxArgs, env, nil
+		return exePath, defaultArgs, env, nil
+	}
+
+	exePath, err := p.resolveBinary(p.preset.BinaryName, "")
+	if err == nil {
+		return exePath, defaultArgs, env, nil
 	}
 
 	if p.preset.NPMPackage != "" {
-		npxPath, npxArgs, err := p.launchWithNpx()
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("%s: npx not found: %w", p.preset.Name, err)
+		npxPath, npxErr := p.lookPath("npx")
+		if npxErr != nil {
+			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w; and npx not found: %w", p.preset.Name, err, npxErr)
 		}
-		return npxPath, npxArgs, env, nil
+		return npxPath, []string{"--yes", p.preset.NPMPackage}, env, nil
 	}
 
-	exePath, err := p.lookPath(p.preset.BinaryName)
-	if err != nil {
-		if p.preset.MissingPathErrTemplate != "" {
-			return "", nil, nil, fmt.Errorf(p.preset.MissingPathErrTemplate, err)
-		}
-		return "", nil, nil, fmt.Errorf("%s: binary not found in PATH: %w", p.preset.Name, err)
+	if p.preset.MissingPathErrTemplate != "" {
+		return "", nil, nil, fmt.Errorf(p.preset.MissingPathErrTemplate, err)
 	}
-	return exePath, defaultArgs, env, nil
-}
-
-func (p *acpProvider) launchFromConfigured(defaultArgs, env []string) (string, []string, []string, error) {
-	if p.preset.UseExePathDirect {
-		return p.cfg.ExePath, defaultArgs, env, nil
-	}
-	exePath, err := p.resolveBinary(p.preset.BinaryName, p.cfg.ExePath)
-	if err != nil {
-		return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
-	}
-	return exePath, defaultArgs, env, nil
-}
-
-func (p *acpProvider) launchWithNpx() (string, []string, error) {
-	npxPath, err := p.resolveNpx()
-	if err != nil {
-		return "", nil, err
-	}
-	return npxPath, []string{"--yes", p.preset.NPMPackage}, nil
-}
-
-func (p *acpProvider) resolveNpx() (string, error) {
-	return p.lookPath("npx")
+	return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
 }
 
 func buildEnv(m map[string]string) []string {
