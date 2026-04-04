@@ -240,17 +240,11 @@ func (c *ownedConn) handleIncomingRequest(jsonrpc string, id int64, method strin
 		return
 	}
 
-	type rpcResp struct {
-		JSONRPC string                `json:"jsonrpc"`
-		ID      int64                 `json:"id"`
-		Result  any                   `json:"result,omitempty"`
-		Error   *protocol.ACPRPCError `json:"error,omitempty"`
-	}
-
 	if jsonrpc == "" {
 		jsonrpc = protocol.ACPRPCVersion
 	}
-	resp := rpcResp{JSONRPC: jsonrpc, ID: id}
+	resp := protocol.ACPRPCResponse{JSONRPC: jsonrpc, ID: id}
+
 	if h == nil {
 		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
@@ -260,7 +254,12 @@ func (c *ownedConn) handleIncomingRequest(jsonrpc string, id int64, method strin
 		} else if result == nil {
 			resp.Result = json.RawMessage("null")
 		} else {
-			resp.Result = result
+			resultJSON, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: marshalErr.Error()}
+			} else {
+				resp.Result = resultJSON
+			}
 		}
 	}
 
