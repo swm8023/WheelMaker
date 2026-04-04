@@ -29,8 +29,8 @@ type Conn interface {
 	Close() error
 }
 
-// ProcessConn is a transport-only JSON-RPC connection over subprocess stdio.
-type ProcessConn struct {
+// ACPProcess is a transport-only JSON-RPC connection over subprocess stdio.
+type ACPProcess struct {
 	exePath string
 	exeArgs []string
 	env     []string
@@ -53,12 +53,15 @@ type ProcessConn struct {
 	done       chan struct{}
 }
 
-var _ Conn = (*ProcessConn)(nil)
+var _ Conn = (*ACPProcess)(nil)
 
-// NewProcessConn creates a subprocess-backed connection.
-func NewProcessConn(exePath string, env []string, args ...string) *ProcessConn {
+// ProcessConn is kept as a compatibility alias for ACPProcess.
+type ProcessConn = ACPProcess
+
+// NewACPProcess creates a subprocess-backed connection.
+func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &ProcessConn{
+	return &ACPProcess{
 		exePath:    exePath,
 		exeArgs:    append([]string(nil), args...),
 		env:        env,
@@ -69,12 +72,17 @@ func NewProcessConn(exePath string, env []string, args ...string) *ProcessConn {
 	}
 }
 
+// NewProcessConn is kept as a compatibility constructor.
+func NewProcessConn(exePath string, env []string, args ...string) *ACPProcess {
+	return NewACPProcess(exePath, env, args...)
+}
+
 // Start starts the subprocess transport.
-func (c *ProcessConn) Start() error {
+func (c *ACPProcess) Start() error {
 	return c.startProcess()
 }
 
-func (c *ProcessConn) startProcess() error {
+func (c *ACPProcess) startProcess() error {
 	cmd := exec.Command(c.exePath, c.exeArgs...)
 	cmd.Env = append(cmd.Environ(), c.env...)
 	cmd.Stderr = log.Writer()
@@ -99,7 +107,7 @@ func (c *ProcessConn) startProcess() error {
 	return nil
 }
 
-func (c *ProcessConn) Send(ctx context.Context, method string, params any, result any) error {
+func (c *ACPProcess) Send(ctx context.Context, method string, params any, result any) error {
 	id := c.nextID.Add(1)
 	ch := make(chan protocol.ACPRPCResponse, 1)
 	c.setPending(id, ch)
@@ -134,7 +142,7 @@ func (c *ProcessConn) Send(ctx context.Context, method string, params any, resul
 	}
 }
 
-func (c *ProcessConn) Notify(method string, params any) error {
+func (c *ACPProcess) Notify(method string, params any) error {
 	n := protocol.ACPRPCNotification{
 		JSONRPC: protocol.ACPRPCVersion,
 		Method:  method,
@@ -146,13 +154,13 @@ func (c *ProcessConn) Notify(method string, params any) error {
 	return nil
 }
 
-func (c *ProcessConn) OnRequest(h RequestHandler) {
+func (c *ACPProcess) OnRequest(h RequestHandler) {
 	c.reqMu.Lock()
 	c.reqHandler = h
 	c.reqMu.Unlock()
 }
 
-func (c *ProcessConn) Close() error {
+func (c *ACPProcess) Close() error {
 	select {
 	case <-c.done:
 		return nil
@@ -172,19 +180,19 @@ func (c *ProcessConn) Close() error {
 	return nil
 }
 
-func (c *ProcessConn) setPending(id int64, ch chan protocol.ACPRPCResponse) {
+func (c *ACPProcess) setPending(id int64, ch chan protocol.ACPRPCResponse) {
 	c.mu.Lock()
 	c.pending[id] = ch
 	c.mu.Unlock()
 }
 
-func (c *ProcessConn) removePending(id int64) {
+func (c *ACPProcess) removePending(id int64) {
 	c.mu.Lock()
 	delete(c.pending, id)
 	c.mu.Unlock()
 }
 
-func (c *ProcessConn) popPending(id int64) (chan protocol.ACPRPCResponse, bool) {
+func (c *ACPProcess) popPending(id int64) (chan protocol.ACPRPCResponse, bool) {
 	c.mu.Lock()
 	ch, ok := c.pending[id]
 	if ok {
@@ -194,7 +202,7 @@ func (c *ProcessConn) popPending(id int64) (chan protocol.ACPRPCResponse, bool) 
 	return ch, ok
 }
 
-func (c *ProcessConn) failAllPending(err *protocol.ACPRPCError) {
+func (c *ACPProcess) failAllPending(err *protocol.ACPRPCError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for id, ch := range c.pending {
@@ -203,7 +211,7 @@ func (c *ProcessConn) failAllPending(err *protocol.ACPRPCError) {
 	}
 }
 
-func (c *ProcessConn) encodeLocked(v any) error {
+func (c *ACPProcess) encodeLocked(v any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.enc == nil {
@@ -212,7 +220,7 @@ func (c *ProcessConn) encodeLocked(v any) error {
 	return c.enc.Encode(v)
 }
 
-func (c *ProcessConn) readLoop(r io.Reader) {
+func (c *ACPProcess) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
 
@@ -254,7 +262,7 @@ func (c *ProcessConn) readLoop(r io.Reader) {
 	c.failAllPending(&protocol.ACPRPCError{Code: -1, Message: "agent process exited"})
 }
 
-func (c *ProcessConn) handleIncomingRequest(id int64, method string, params json.RawMessage) {
+func (c *ACPProcess) handleIncomingRequest(id int64, method string, params json.RawMessage) {
 	c.reqMu.RLock()
 	handler := c.reqHandler
 	c.reqMu.RUnlock()

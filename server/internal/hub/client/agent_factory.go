@@ -20,19 +20,19 @@ type AgentFactoryV2 interface {
 	CreateInstance(ctx context.Context, callbacks SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error)
 }
 
-// providerAgentFactory creates agent instances from agentv2 providers.
-type providerAgentFactory struct {
-	provider agentv2.Provider
+// acpProviderAgentFactory creates agent instances from agentv2 ACP providers.
+type acpProviderAgentFactory struct {
+	provider agentv2.ACPProvider
 	pool     agentv2.ConnPool
 }
 
-func (f *providerAgentFactory) Name() string { return f.provider.Name() }
+func (f *acpProviderAgentFactory) Name() string { return f.provider.Name() }
 
-func (f *providerAgentFactory) SupportsSharedConn() bool { return false }
+func (f *acpProviderAgentFactory) SupportsSharedConn() bool { return false }
 
-func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
+func (f *acpProviderAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
 	if f.pool == nil {
-		f.pool = newProviderConnPool(f.provider)
+		f.pool = newACPProviderConnPool(f.provider)
 	}
 	conn, err := f.pool.Open()
 	if err != nil {
@@ -41,21 +41,26 @@ func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallb
 	return agentv2.NewInstance(f.provider.Name(), conn, cb), nil
 }
 
-// NewProviderFactory adapts an agentv2.Provider to client.AgentFactoryV2.
-func NewProviderFactory(provider agentv2.Provider) AgentFactoryV2 {
-	return &providerAgentFactory{
+// NewACPProviderFactory adapts an agentv2.ACPProvider to client.AgentFactoryV2.
+func NewACPProviderFactory(provider agentv2.ACPProvider) AgentFactoryV2 {
+	return &acpProviderAgentFactory{
 		provider: provider,
-		pool:     newProviderConnPool(provider),
+		pool:     newACPProviderConnPool(provider),
 	}
 }
 
-func newProviderConnPool(provider agentv2.Provider) agentv2.ConnPool {
+// NewProviderFactory is kept as a compatibility wrapper.
+func NewProviderFactory(provider agentv2.ACPProvider) AgentFactoryV2 {
+	return NewACPProviderFactory(provider)
+}
+
+func newACPProviderConnPool(provider agentv2.ACPProvider) agentv2.ConnPool {
 	connect := func() (agentv2.Conn, error) {
 		exe, args, env, err := provider.LaunchSpec()
 		if err != nil {
 			return nil, err
 		}
-		raw := agentv2.NewProcessConn(exe, env, args...)
+		raw := agentv2.NewACPProcess(exe, env, args...)
 		if err := raw.Start(); err != nil {
 			return nil, err
 		}

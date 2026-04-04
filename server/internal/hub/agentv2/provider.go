@@ -4,11 +4,14 @@ import (
 	"sort"
 )
 
-// Provider resolves launch details for one agent type.
-type Provider interface {
+// ACPProvider resolves launch details for one ACP agent type.
+type ACPProvider interface {
 	Name() string
 	LaunchSpec() (exe string, args []string, env []string, err error)
 }
+
+// Provider is kept as a compatibility alias for ACPProvider.
+type Provider = ACPProvider
 
 func buildEnv(m map[string]string) []string {
 	if len(m) == 0 {

@@ -108,9 +108,9 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 	}
 
 	// Register all known agent providers so users can switch between them at runtime.
-	c.RegisterAgentV2("codex", client.NewProviderFactory(agentv2.NewCodexProvider(agentv2.CodexProviderConfig{})))
-	c.RegisterAgentV2("claude", client.NewProviderFactory(agentv2.NewClaudeProvider(agentv2.ClaudeProviderConfig{})))
-	c.RegisterAgentV2("copilot", client.NewProviderFactory(agentv2.NewCopilotProvider(agentv2.CopilotProviderConfig{})))
+	c.RegisterAgentV2("codex", client.NewACPProviderFactory(agentv2.NewCodexProvider(agentv2.CodexProviderConfig{})))
+	c.RegisterAgentV2("claude", client.NewACPProviderFactory(agentv2.NewClaudeProvider(agentv2.ClaudeProviderConfig{})))
+	c.RegisterAgentV2("copilot", client.NewACPProviderFactory(agentv2.NewCopilotProvider(agentv2.CopilotProviderConfig{})))
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
