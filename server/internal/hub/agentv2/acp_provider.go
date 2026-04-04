@@ -9,26 +9,20 @@ import (
 	"sort"
 )
 
-// Provider resolves launch details for one ACP agent type.
-type Provider interface {
+// ACPProvider resolves launch details for one ACP agent type.
+type ACPProvider interface {
 	Name() string
 	LaunchSpec() (exe string, args []string, env []string, err error)
 }
 
-// ACPProvider is kept as a compatibility alias for Provider.
-type ACPProvider = Provider
-
-// ProviderConfig configures an ACP provider instance.
-type ProviderConfig struct {
+// ACPProviderConfig configures an ACP provider instance.
+type ACPProviderConfig struct {
 	ExePath string
 	Env     map[string]string
 }
 
-// ACPProviderConfig is kept as a compatibility alias for ProviderConfig.
-type ACPProviderConfig = ProviderConfig
-
-// ProviderPreset declares launch behavior for one provider kind.
-type ProviderPreset struct {
+// ACPProviderPreset declares launch behavior for one provider kind.
+type ACPProviderPreset struct {
 	Name                   string
 	BinaryName             string
 	Args                   []string
@@ -39,18 +33,18 @@ type ProviderPreset struct {
 }
 
 var (
-	CodexProviderPreset = ProviderPreset{
+	CodexACPProviderPreset = ACPProviderPreset{
 		Name:       "codex",
 		BinaryName: "codex-acp",
 		NPMPackage: "@zed-industries/codex-acp",
 	}
-	ClaudeProviderPreset = ProviderPreset{
+	ClaudeACPProviderPreset = ACPProviderPreset{
 		Name:                 "claude",
 		BinaryName:           "claude-agent-acp",
 		NPMPackage:           "@agentclientprotocol/claude-agent-acp",
 		ResolveBinaryOnEmpty: true,
 	}
-	CopilotProviderPreset = ProviderPreset{
+	CopilotACPProviderPreset = ACPProviderPreset{
 		Name:                   "copilot",
 		BinaryName:             "copilot",
 		Args:                   []string{"--acp", "--stdio"},
@@ -59,18 +53,18 @@ var (
 	}
 )
 
-// provider is the unified implementation for all ACP providers.
-type provider struct {
-	preset ProviderPreset
-	cfg    ProviderConfig
+// acpProvider is the unified implementation for all ACP providers.
+type acpProvider struct {
+	preset ACPProviderPreset
+	cfg    ACPProviderConfig
 
 	resolveBinary func(name, configuredPath string) (string, error)
 	lookPath      func(file string) (string, error)
 }
 
-// NewProvider creates a provider from preset + config.
-func NewProvider(preset ProviderPreset, cfg ProviderConfig) *provider {
-	return &provider{
+// NewACPProvider creates a provider from preset + config.
+func NewACPProvider(preset ACPProviderPreset, cfg ACPProviderConfig) *acpProvider {
+	return &acpProvider{
 		preset:        preset,
 		cfg:           cfg,
 		resolveBinary: ResolveACPBinary,
@@ -78,26 +72,21 @@ func NewProvider(preset ProviderPreset, cfg ProviderConfig) *provider {
 	}
 }
 
-// NewACPProvider is kept as a compatibility wrapper for NewProvider.
-func NewACPProvider(preset ProviderPreset, cfg ProviderConfig) *provider {
-	return NewProvider(preset, cfg)
+func NewCodexProvider(cfg ACPProviderConfig) *acpProvider {
+	return NewACPProvider(CodexACPProviderPreset, cfg)
 }
 
-func NewCodexProvider(cfg ProviderConfig) *provider {
-	return NewProvider(CodexProviderPreset, cfg)
+func NewClaudeProvider(cfg ACPProviderConfig) *acpProvider {
+	return NewACPProvider(ClaudeACPProviderPreset, cfg)
 }
 
-func NewClaudeProvider(cfg ProviderConfig) *provider {
-	return NewProvider(ClaudeProviderPreset, cfg)
+func NewCopilotProvider(cfg ACPProviderConfig) *acpProvider {
+	return NewACPProvider(CopilotACPProviderPreset, cfg)
 }
 
-func NewCopilotProvider(cfg ProviderConfig) *provider {
-	return NewProvider(CopilotProviderPreset, cfg)
-}
+func (p *acpProvider) Name() string { return p.preset.Name }
 
-func (p *provider) Name() string { return p.preset.Name }
-
-func (p *provider) LaunchSpec() (string, []string, []string, error) {
+func (p *acpProvider) LaunchSpec() (string, []string, []string, error) {
 	env := buildEnv(p.cfg.Env)
 	args := cloneArgs(p.preset.Args)
 
@@ -145,7 +134,7 @@ func (p *provider) LaunchSpec() (string, []string, []string, error) {
 	return exePath, args, env, nil
 }
 
-func (p *provider) resolveNpx() (string, error) {
+func (p *acpProvider) resolveNpx() (string, error) {
 	return p.lookPath("npx")
 }
 
