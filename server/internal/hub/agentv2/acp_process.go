@@ -2,19 +2,20 @@ package agentv2
 
 import (
 	"bufio"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os/exec"
 	"sync"
-	"sync/atomic"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-// ACPProcess is a transport-only JSON-RPC connection over subprocess stdio.
+// ACPProcess is a transport-only subprocess channel for newline-delimited ACP JSON messages.
+//
+// It is intentionally unaware of JSON-RPC request IDs, response matching, and method dispatch.
+// Those are handled by Conn implementations (for example ownedConn).
 type ACPProcess struct {
 	exePath string
 	exeArgs []string
@@ -24,36 +25,26 @@ type ACPProcess struct {
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 
-	enc *json.Encoder
-	mu  sync.Mutex
+	encMu sync.Mutex
+	enc   *json.Encoder
 
-	nextID  atomic.Int64
-	pending map[int64]chan protocol.ACPRPCResponse
+	hMu       sync.RWMutex
+	onMessage func(json.RawMessage)
 
-	reqMu      sync.RWMutex
-	reqHandler RequestHandler
-
-	connCtx    context.Context
-	connCancel context.CancelFunc
-	done       chan struct{}
+	doneOnce sync.Once
+	done     chan struct{}
 }
-
-var _ Conn = (*ACPProcess)(nil)
 
 // ProcessConn is kept as a compatibility alias for ACPProcess.
 type ProcessConn = ACPProcess
 
-// NewACPProcess creates a subprocess-backed connection.
+// NewACPProcess creates a subprocess-backed ACP transport.
 func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
-	ctx, cancel := context.WithCancel(context.Background())
 	return &ACPProcess{
-		exePath:    exePath,
-		exeArgs:    append([]string(nil), args...),
-		env:        env,
-		pending:    make(map[int64]chan protocol.ACPRPCResponse),
-		connCtx:    ctx,
-		connCancel: cancel,
-		done:       make(chan struct{}),
+		exePath: exePath,
+		exeArgs: append([]string(nil), args...),
+		env:     env,
+		done:    make(chan struct{}),
 	}
 }
 
@@ -63,149 +54,64 @@ func NewProcessConn(exePath string, env []string, args ...string) *ACPProcess {
 }
 
 // Start starts the subprocess transport.
-func (c *ACPProcess) Start() error {
-	return c.startProcess()
-}
-
-func (c *ACPProcess) startProcess() error {
-	cmd := exec.Command(c.exePath, c.exeArgs...)
-	cmd.Env = append(cmd.Environ(), c.env...)
+func (p *ACPProcess) Start() error {
+	cmd := exec.Command(p.exePath, p.exeArgs...)
+	cmd.Env = append(cmd.Environ(), p.env...)
 	cmd.Stderr = log.Writer()
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("agentv2 conn: stdin pipe: %w", err)
+		return fmt.Errorf("agentv2 acp process: stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("agentv2 conn: stdout pipe: %w", err)
+		return fmt.Errorf("agentv2 acp process: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("agentv2 conn: start process: %w", err)
+		return fmt.Errorf("agentv2 acp process: start process: %w", err)
 	}
 
-	c.cmd = cmd
-	c.stdin = stdin
-	c.stdout = stdout
-	c.enc = json.NewEncoder(stdin)
-	go c.readLoop(stdout)
+	p.cmd = cmd
+	p.stdin = stdin
+	p.stdout = stdout
+	p.enc = json.NewEncoder(stdin)
+	go p.readLoop(stdout)
 	return nil
 }
 
-func (c *ACPProcess) Send(ctx context.Context, method string, params any, result any) error {
-	id := c.nextID.Add(1)
-	ch := make(chan protocol.ACPRPCResponse, 1)
-	c.setPending(id, ch)
-
-	req := protocol.ACPRPCRequest{
-		JSONRPC: protocol.ACPRPCVersion,
-		ID:      id,
-		Method:  method,
-		Params:  params,
+// SendMessage writes one JSON message to the process stdin.
+func (p *ACPProcess) SendMessage(v any) error {
+	p.encMu.Lock()
+	defer p.encMu.Unlock()
+	if p.enc == nil {
+		return fmt.Errorf("agentv2 acp process: encoder is not ready")
 	}
-	if err := c.encodeLocked(req); err != nil {
-		c.removePending(id)
-		return fmt.Errorf("agentv2 conn: encode request: %w", err)
-	}
-
-	select {
-	case <-ctx.Done():
-		c.removePending(id)
-		return ctx.Err()
-	case resp := <-ch:
-		if resp.Error != nil {
-			return fmt.Errorf("agentv2 rpc error %d: %s", resp.Error.Code, resp.Error.Error())
-		}
-		if result != nil && len(resp.Result) > 0 {
-			if err := json.Unmarshal(resp.Result, result); err != nil {
-				return fmt.Errorf("agentv2 conn: unmarshal result: %w", err)
-			}
-		}
-		return nil
-	case <-c.done:
-		return fmt.Errorf("agentv2 conn: connection closed")
-	}
-}
-
-func (c *ACPProcess) Notify(method string, params any) error {
-	n := protocol.ACPRPCNotification{
-		JSONRPC: protocol.ACPRPCVersion,
-		Method:  method,
-		Params:  params,
-	}
-	if err := c.encodeLocked(n); err != nil {
-		return fmt.Errorf("agentv2 conn: encode notification: %w", err)
+	if err := p.enc.Encode(v); err != nil {
+		return fmt.Errorf("agentv2 acp process: encode message: %w", err)
 	}
 	return nil
 }
 
-func (c *ACPProcess) OnRequest(h RequestHandler) {
-	c.reqMu.Lock()
-	c.reqHandler = h
-	c.reqMu.Unlock()
+// OnMessage sets the raw-message callback for process stdout frames.
+func (p *ACPProcess) OnMessage(h func(json.RawMessage)) {
+	p.hMu.Lock()
+	p.onMessage = h
+	p.hMu.Unlock()
 }
 
-func (c *ACPProcess) Close() error {
-	select {
-	case <-c.done:
-		return nil
-	default:
+// Done is closed when the process transport stops.
+func (p *ACPProcess) Done() <-chan struct{} {
+	if p == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
 	}
-	close(c.done)
-	c.connCancel()
-	if c.stdin != nil {
-		_ = c.stdin.Close()
-	}
-	if c.cmd != nil {
-		if c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
-		}
-		_ = c.cmd.Wait()
-	}
-	return nil
+	return p.done
 }
 
-func (c *ACPProcess) setPending(id int64, ch chan protocol.ACPRPCResponse) {
-	c.mu.Lock()
-	c.pending[id] = ch
-	c.mu.Unlock()
-}
+func (p *ACPProcess) readLoop(r io.Reader) {
+	defer p.markDone()
 
-func (c *ACPProcess) removePending(id int64) {
-	c.mu.Lock()
-	delete(c.pending, id)
-	c.mu.Unlock()
-}
-
-func (c *ACPProcess) popPending(id int64) (chan protocol.ACPRPCResponse, bool) {
-	c.mu.Lock()
-	ch, ok := c.pending[id]
-	if ok {
-		delete(c.pending, id)
-	}
-	c.mu.Unlock()
-	return ch, ok
-}
-
-func (c *ACPProcess) failAllPending(err *protocol.ACPRPCError) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for id, ch := range c.pending {
-		ch <- protocol.ACPRPCResponse{ID: id, Error: err}
-		delete(c.pending, id)
-	}
-}
-
-func (c *ACPProcess) encodeLocked(v any) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.enc == nil {
-		return fmt.Errorf("encoder is not ready")
-	}
-	return c.enc.Encode(v)
-}
-
-func (c *ACPProcess) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
 
@@ -214,64 +120,39 @@ func (c *ACPProcess) readLoop(r io.Reader) {
 		if len(line) == 0 {
 			continue
 		}
+		raw := make([]byte, len(line))
+		copy(raw, line)
 
-		var raw protocol.ACPRPCRawMessage
-		if err := json.Unmarshal(line, &raw); err != nil {
-			continue
-		}
-
-		switch {
-		case raw.ID != nil && raw.Method != "":
-			go c.handleIncomingRequest(*raw.ID, raw.Method, raw.Params)
-		case raw.ID != nil:
-			resp := protocol.ACPRPCResponse{
-				JSONRPC: raw.JSONRPC,
-				ID:      *raw.ID,
-				Result:  raw.Result,
-				Error:   raw.Error,
-			}
-			ch, ok := c.popPending(resp.ID)
-			if ok {
-				ch <- resp
-			}
-		case raw.Method != "":
-			c.reqMu.RLock()
-			h := c.reqHandler
-			c.reqMu.RUnlock()
-			if h != nil {
-				_, _ = h(c.connCtx, raw.Method, raw.Params, true)
-			}
+		p.hMu.RLock()
+		h := p.onMessage
+		p.hMu.RUnlock()
+		if h != nil {
+			h(raw)
 		}
 	}
-
-	c.failAllPending(&protocol.ACPRPCError{Code: -1, Message: "agent process exited"})
 }
 
-func (c *ACPProcess) handleIncomingRequest(id int64, method string, params json.RawMessage) {
-	c.reqMu.RLock()
-	handler := c.reqHandler
-	c.reqMu.RUnlock()
-
-	type rpcResp struct {
-		JSONRPC string                `json:"jsonrpc"`
-		ID      int64                 `json:"id"`
-		Result  any                   `json:"result,omitempty"`
-		Error   *protocol.ACPRPCError `json:"error,omitempty"`
+// Close stops the transport and kills the subprocess if still running.
+func (p *ACPProcess) Close() error {
+	if p == nil {
+		return nil
 	}
+	p.markDone()
 
-	resp := rpcResp{JSONRPC: protocol.ACPRPCVersion, ID: id}
-	if handler == nil {
-		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
-	} else {
-		result, err := handler(c.connCtx, method, params, false)
-		if err != nil {
-			resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: err.Error()}
-		} else if result == nil {
-			resp.Result = json.RawMessage("null")
-		} else {
-			resp.Result = result
+	if p.stdin != nil {
+		_ = p.stdin.Close()
+	}
+	if p.cmd != nil {
+		if p.cmd.Process != nil {
+			_ = p.cmd.Process.Kill()
 		}
+		_ = p.cmd.Wait()
 	}
+	return nil
+}
 
-	_ = c.encodeLocked(resp)
+func (p *ACPProcess) markDone() {
+	p.doneOnce.Do(func() {
+		close(p.done)
+	})
 }
