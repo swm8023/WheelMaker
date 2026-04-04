@@ -14,10 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/hub/agent/claude"
-	"github.com/swm8023/wheelmaker/internal/hub/agent/codex"
-	"github.com/swm8023/wheelmaker/internal/hub/agent/copilot"
+	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/hub/im/console"
@@ -110,16 +107,10 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 		imProvider.SetDebugLogger(dw)
 	}
 
-	// Register all known agent factories so users can switch between them at runtime.
-	c.RegisterAgent("codex", func(_ string, _ map[string]string) agent.Agent {
-		return codex.New(codex.Config{})
-	})
-	c.RegisterAgent("claude", func(_ string, _ map[string]string) agent.Agent {
-		return claude.New(claude.Config{})
-	})
-	c.RegisterAgent("copilot", func(_ string, _ map[string]string) agent.Agent {
-		return copilot.New(copilot.Config{})
-	})
+	// Register all known agent providers so users can switch between them at runtime.
+	c.RegisterAgentV2("codex", client.NewProviderFactory(agentv2.NewCodexProvider(agentv2.CodexProviderConfig{})))
+	c.RegisterAgentV2("claude", client.NewProviderFactory(agentv2.NewClaudeProvider(agentv2.ClaudeProviderConfig{})))
+	c.RegisterAgentV2("copilot", client.NewProviderFactory(agentv2.NewCopilotProvider(agentv2.CopilotProviderConfig{})))
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}

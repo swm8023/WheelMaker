@@ -65,8 +65,20 @@ func (r *agentRegistry) getV2(name string) AgentFactoryV2 {
 
 func (r *agentRegistry) names() []string {
 	r.mu.Lock()
-	ns := make([]string, 0, len(r.facs))
+	seen := make(map[string]struct{}, len(r.v2facs)+len(r.facs))
+	ns := make([]string, 0, len(r.v2facs)+len(r.facs))
+	for n := range r.v2facs {
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		ns = append(ns, n)
+	}
 	for n := range r.facs {
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
 		ns = append(ns, n)
 	}
 	r.mu.Unlock()

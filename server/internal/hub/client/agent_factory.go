@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 )
 
 // AgentFactoryV2 creates AgentInstance objects and declares connection sharing policy.
@@ -14,6 +17,37 @@ type AgentFactoryV2 interface {
 	CreateInstance(ctx context.Context, callbacks SessionCallbacks, debugLog io.Writer) (*AgentInstance, error)
 }
 
+// providerAgentFactory creates agent instances from agentv2 providers.
+type providerAgentFactory struct {
+	provider agentv2.Provider
+}
+
+func (f *providerAgentFactory) Name() string { return f.provider.Name() }
+
+func (f *providerAgentFactory) SupportsSharedConn() bool { return false }
+
+func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
+	exe, args, env, err := f.provider.LaunchSpec()
+	if err != nil {
+		return nil, err
+	}
+	raw := acp.NewConn(exe, env, args...)
+	if debugLog != nil {
+		raw.SetDebugLogger(debugLog)
+	}
+	if err := raw.Start(); err != nil {
+		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
+	}
+	runtimeConn := agentv2.New(raw)
+	runtimeInst := agentv2.NewInstance(f.provider.Name(), runtimeConn, cb)
+	return &AgentInstance{name: f.provider.Name(), runtime: runtimeInst, callbacks: cb}, nil
+}
+
+// NewProviderFactory adapts an agentv2.Provider to client.AgentFactoryV2.
+func NewProviderFactory(provider agentv2.Provider) AgentFactoryV2 {
+	return &providerAgentFactory{provider: provider}
+}
+
 // legacyAgentFactory wraps the old AgentFactory function into an AgentFactoryV2.
 // Each call to CreateInstance creates a new connection (owned mode).
 type legacyAgentFactory struct {
@@ -21,8 +55,8 @@ type legacyAgentFactory struct {
 	fn   AgentFactory
 }
 
-func (f *legacyAgentFactory) Name() string              { return f.name }
-func (f *legacyAgentFactory) SupportsSharedConn() bool   { return false }
+func (f *legacyAgentFactory) Name() string             { return f.name }
+func (f *legacyAgentFactory) SupportsSharedConn() bool { return false }
 
 func (f *legacyAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
 	a := f.fn("", nil)
@@ -55,8 +89,8 @@ type sharedAgentFactory struct {
 	conn *AgentConn // lazily created, shared across all instances
 }
 
-func (f *sharedAgentFactory) Name() string              { return f.name }
-func (f *sharedAgentFactory) SupportsSharedConn() bool   { return true }
+func (f *sharedAgentFactory) Name() string             { return f.name }
+func (f *sharedAgentFactory) SupportsSharedConn() bool { return true }
 
 func (f *sharedAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
 	f.mu.Lock()
