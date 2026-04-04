@@ -393,87 +393,8 @@ func TestResolveSession_RestoresEvictedSession(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared AgentConn
+// Shared Factory Compatibility
 // ---------------------------------------------------------------------------
-
-func TestSharedAgentConn_RegisterUnregister(t *testing.T) {
-	ac := &AgentConn{
-		mode:      ConnShared,
-		instances: make(map[string]*AgentInstance),
-	}
-
-	inst1 := &AgentInstance{name: "a1"}
-	inst2 := &AgentInstance{name: "a2"}
-
-	ac.RegisterInstance("sid-1", inst1)
-	ac.RegisterInstance("sid-2", inst2)
-
-	if got := ac.lookupInstance("sid-1"); got != inst1 {
-		t.Fatalf("lookupInstance(sid-1) = %v, want inst1", got)
-	}
-	if got := ac.lookupInstance("sid-2"); got != inst2 {
-		t.Fatalf("lookupInstance(sid-2) = %v, want inst2", got)
-	}
-
-	ac.UnregisterInstance("sid-1")
-	if got := ac.lookupInstance("sid-1"); got != nil {
-		t.Fatalf("lookupInstance(sid-1) after unregister = %v, want nil", got)
-	}
-}
-
-func TestSharedAgentConn_UnregisterAllForInstance(t *testing.T) {
-	ac := &AgentConn{
-		mode:      ConnShared,
-		instances: make(map[string]*AgentInstance),
-	}
-
-	inst := &AgentInstance{name: "shared-inst"}
-	ac.RegisterInstance("sid-a", inst)
-	ac.RegisterInstance("sid-b", inst)
-	ac.RegisterInstance("sid-c", &AgentInstance{name: "other"})
-
-	ac.UnregisterAllForInstance(inst)
-
-	if got := ac.lookupInstance("sid-a"); got != nil {
-		t.Fatalf("sid-a should be unregistered")
-	}
-	if got := ac.lookupInstance("sid-b"); got != nil {
-		t.Fatalf("sid-b should be unregistered")
-	}
-	if got := ac.lookupInstance("sid-c"); got == nil {
-		t.Fatalf("sid-c (other instance) should still be registered")
-	}
-}
-
-func TestAgentInstance_SharedClose_DoesNotCloseConn(t *testing.T) {
-	ac := &AgentConn{
-		mode:      ConnShared,
-		instances: make(map[string]*AgentInstance),
-	}
-
-	inst := &AgentInstance{
-		name:      "shared",
-		agentConn: ac,
-		shared:    true,
-	}
-	ac.RegisterInstance("sid-1", inst)
-
-	// Close should unregister but not close the AgentConn.
-	if err := inst.Close(); err != nil {
-		t.Fatalf("Close: %v", err)
-	}
-
-	if got := ac.lookupInstance("sid-1"); got != nil {
-		t.Fatal("instance should be unregistered after Close")
-	}
-
-	// AgentConn should still be functional (not closed).
-	// We verify by checking instances map is still accessible.
-	ac.RegisterInstance("sid-2", &AgentInstance{name: "another"})
-	if got := ac.lookupInstance("sid-2"); got == nil {
-		t.Fatal("AgentConn should still be functional after shared instance Close")
-	}
-}
 
 func TestSharedAgentFactory(t *testing.T) {
 	f := &sharedAgentFactory{
