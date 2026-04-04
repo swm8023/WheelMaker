@@ -23,7 +23,7 @@ type AgentFactoryV2 interface {
 // providerAgentFactory creates agent instances from agentv2 providers.
 type providerAgentFactory struct {
 	provider agentv2.Provider
-	router   *agentv2.ProcessConnRouter
+	pool     agentv2.ConnPool
 }
 
 func (f *providerAgentFactory) Name() string { return f.provider.Name() }
@@ -31,10 +31,10 @@ func (f *providerAgentFactory) Name() string { return f.provider.Name() }
 func (f *providerAgentFactory) SupportsSharedConn() bool { return false }
 
 func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
-	if f.router == nil {
-		f.router = newProviderRouter(f.provider)
+	if f.pool == nil {
+		f.pool = newProviderConnPool(f.provider)
 	}
-	conn, err := f.router.Open()
+	conn, err := f.pool.Open()
 	if err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
@@ -45,11 +45,11 @@ func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallb
 func NewProviderFactory(provider agentv2.Provider) AgentFactoryV2 {
 	return &providerAgentFactory{
 		provider: provider,
-		router:   newProviderRouter(provider),
+		pool:     newProviderConnPool(provider),
 	}
 }
 
-func newProviderRouter(provider agentv2.Provider) *agentv2.ProcessConnRouter {
+func newProviderConnPool(provider agentv2.Provider) agentv2.ConnPool {
 	connect := func() (agentv2.Conn, error) {
 		exe, args, env, err := provider.LaunchSpec()
 		if err != nil {
@@ -61,8 +61,8 @@ func newProviderRouter(provider agentv2.Provider) *agentv2.ProcessConnRouter {
 		}
 		return raw, nil
 	}
-	// Provider routers default to own-conn mode for strict isolation.
-	return agentv2.NewProcessConnRouter(connect, false)
+	// Providers default to owned-conn mode for strict isolation.
+	return agentv2.NewOwnedConnPool(connect)
 }
 
 // legacyAgentFactory wraps the old AgentFactory function into an AgentFactoryV2.
