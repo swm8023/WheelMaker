@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"github.com/swm8023/wheelmaker/internal/shared"
 )
 
@@ -723,13 +724,13 @@ func (m *Monitor) GetOverview() (*Overview, error) {
 
 // RegistryProject is one project reported by the registry.
 type RegistryProject struct {
-	ProjectID string                 `json:"projectId"`
-	Name      string                 `json:"name"`
-	Path      string                 `json:"path"`
-	Online    bool                   `json:"online"`
-	Agent     string                 `json:"agent"`
-	IMType    string                 `json:"imType"`
-	Git       shared.ProjectGitState `json:"git"`
+	ProjectID string             `json:"projectId"`
+	Name      string             `json:"name"`
+	Path      string             `json:"path"`
+	Online    bool               `json:"online"`
+	Agent     string             `json:"agent"`
+	IMType    string             `json:"imType"`
+	Git       rp.ProjectGitState `json:"git"`
 }
 
 // RegistryStatus is the live state retrieved from the registry server.
@@ -774,10 +775,10 @@ func (m *Monitor) GetRegistryStatus() *RegistryStatus {
 		"requestId": 1,
 		"type":      "request",
 		"method":    "connect.init",
-		"payload": shared.ConnectInitPayload{
+		"payload": rp.ConnectInitPayload{
 			ClientName:      "wheelmaker-monitor",
 			ClientVersion:   "0.1.0",
-			ProtocolVersion: shared.DefaultProtocolVersion,
+			ProtocolVersion: rp.DefaultProtocolVersion,
 			Role:            "client",
 			Token:           cfg.Registry.Token,
 		},
@@ -785,12 +786,12 @@ func (m *Monitor) GetRegistryStatus() *RegistryStatus {
 	if err := conn.WriteJSON(initReq); err != nil {
 		return &RegistryStatus{Timestamp: ts, Error: "ws write: " + err.Error()}
 	}
-	var initResp shared.Envelope
+	var initResp rp.Envelope
 	if err := conn.ReadJSON(&initResp); err != nil {
 		return &RegistryStatus{Timestamp: ts, Error: "ws read: " + err.Error()}
 	}
 	if initResp.Type == "error" {
-		var ep shared.ErrorPayload
+		var ep rp.ErrorPayload
 		json.Unmarshal(initResp.Payload, &ep)
 		return &RegistryStatus{Timestamp: ts, Error: "connect: " + ep.Message}
 	}
@@ -804,12 +805,12 @@ func (m *Monitor) GetRegistryStatus() *RegistryStatus {
 	if err := conn.WriteJSON(listReq); err != nil {
 		return &RegistryStatus{Timestamp: ts, Error: "ws write: " + err.Error()}
 	}
-	var listResp shared.Envelope
+	var listResp rp.Envelope
 	if err := conn.ReadJSON(&listResp); err != nil {
 		return &RegistryStatus{Timestamp: ts, Error: "ws read: " + err.Error()}
 	}
 	if listResp.Type == "error" {
-		var ep shared.ErrorPayload
+		var ep rp.ErrorPayload
 		json.Unmarshal(listResp.Payload, &ep)
 		return &RegistryStatus{Timestamp: ts, Error: "project.list: " + ep.Message}
 	}
