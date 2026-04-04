@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestCodexProvider_UsesNpxFallback(t *testing.T) {
+func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
 	p := NewCodexProvider(CodexProviderConfig{})
 	p.resolveBinary = func(_ string, _ string) (string, error) {
 		return "", errors.New("not found")
@@ -33,7 +33,7 @@ func TestCodexProvider_UsesNpxFallback(t *testing.T) {
 	}
 }
 
-func TestClaudeProvider_UsesNpxFallback(t *testing.T) {
+func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
 	p := NewClaudeProvider(ClaudeProviderConfig{})
 	p.resolveBinary = func(_ string, _ string) (string, error) {
 		return "", errors.New("not found")
@@ -57,7 +57,7 @@ func TestClaudeProvider_UsesNpxFallback(t *testing.T) {
 	}
 }
 
-func TestCopilotProvider_LaunchArgsAndEnv(t *testing.T) {
+func TestCopilotACPProvider_LaunchArgsAndEnv(t *testing.T) {
 	p := NewCopilotProvider(CopilotProviderConfig{Env: map[string]string{"B": "2", "A": "1"}})
 	p.lookPath = func(bin string) (string, error) {
 		if bin != "copilot" {

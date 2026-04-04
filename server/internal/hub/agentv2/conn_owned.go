@@ -6,48 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 )
 
 // sessionBinder allows Conn implementations to bind ACP session IDs for inbound routing.
 type sessionBinder interface {
 	BindSessionID(acpSessionID string)
-}
-
-// OwnedConnPool creates one raw connection per opened Conn handle.
-type OwnedConnPool struct {
-	connect func() (Conn, error)
-	closed  atomic.Bool
-}
-
-func NewOwnedConnPool(connect func() (Conn, error)) *OwnedConnPool {
-	return &OwnedConnPool{connect: connect}
-}
-
-func (p *OwnedConnPool) Open() (Conn, error) {
-	if p == nil {
-		return nil, errors.New("agentv2 owned conn pool: nil pool")
-	}
-	if p.connect == nil {
-		return nil, errors.New("agentv2 owned conn pool: connect func is nil")
-	}
-	if p.closed.Load() {
-		return nil, errors.New("agentv2 owned conn pool: pool is closed")
-	}
-
-	raw, err := p.connect()
-	if err != nil {
-		return nil, err
-	}
-	return newOwnedConn(raw), nil
-}
-
-func (p *OwnedConnPool) Close() error {
-	if p == nil {
-		return nil
-	}
-	p.closed.Store(true)
-	return nil
 }
 
 // ownedConn maps one instance to one underlying raw connection.
@@ -61,7 +24,8 @@ type ownedConn struct {
 
 var _ Conn = (*ownedConn)(nil)
 
-func newOwnedConn(raw Conn) *ownedConn {
+// NewOwnedConn creates a per-instance owned conn from a raw transport conn.
+func NewOwnedConn(raw Conn) Conn {
 	c := &ownedConn{raw: raw}
 	if raw != nil {
 		raw.OnRequest(c.dispatchInbound)

@@ -23,7 +23,6 @@ type AgentFactoryV2 interface {
 // acpProviderAgentFactory creates agent instances from agentv2 ACP providers.
 type acpProviderAgentFactory struct {
 	provider agentv2.ACPProvider
-	pool     agentv2.ConnPool
 }
 
 func (f *acpProviderAgentFactory) Name() string { return f.provider.Name() }
@@ -31,10 +30,7 @@ func (f *acpProviderAgentFactory) Name() string { return f.provider.Name() }
 func (f *acpProviderAgentFactory) SupportsSharedConn() bool { return false }
 
 func (f *acpProviderAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
-	if f.pool == nil {
-		f.pool = newACPProviderConnPool(f.provider)
-	}
-	conn, err := f.pool.Open()
+	conn, err := newOwnedProviderConn(f.provider)
 	if err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
@@ -43,10 +39,7 @@ func (f *acpProviderAgentFactory) CreateInstance(_ context.Context, cb SessionCa
 
 // NewACPProviderFactory adapts an agentv2.ACPProvider to client.AgentFactoryV2.
 func NewACPProviderFactory(provider agentv2.ACPProvider) AgentFactoryV2 {
-	return &acpProviderAgentFactory{
-		provider: provider,
-		pool:     newACPProviderConnPool(provider),
-	}
+	return &acpProviderAgentFactory{provider: provider}
 }
 
 // NewProviderFactory is kept as a compatibility wrapper.
@@ -54,20 +47,16 @@ func NewProviderFactory(provider agentv2.ACPProvider) AgentFactoryV2 {
 	return NewACPProviderFactory(provider)
 }
 
-func newACPProviderConnPool(provider agentv2.ACPProvider) agentv2.ConnPool {
-	connect := func() (agentv2.Conn, error) {
-		exe, args, env, err := provider.LaunchSpec()
-		if err != nil {
-			return nil, err
-		}
-		raw := agentv2.NewACPProcess(exe, env, args...)
-		if err := raw.Start(); err != nil {
-			return nil, err
-		}
-		return raw, nil
+func newOwnedProviderConn(provider agentv2.ACPProvider) (agentv2.Conn, error) {
+	exe, args, env, err := provider.LaunchSpec()
+	if err != nil {
+		return nil, err
 	}
-	// Providers default to owned-conn mode for strict isolation.
-	return agentv2.NewOwnedConnPool(connect)
+	raw := agentv2.NewACPProcess(exe, env, args...)
+	if err := raw.Start(); err != nil {
+		return nil, err
+	}
+	return agentv2.NewOwnedConn(raw), nil
 }
 
 // legacyAgentFactory wraps the old AgentFactory function into an AgentFactoryV2.

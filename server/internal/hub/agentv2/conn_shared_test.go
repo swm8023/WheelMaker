@@ -8,24 +8,24 @@ import (
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-func TestProcessConnRouter_SharedRoutesBySessionID(t *testing.T) {
+func TestSharedConnPool_RoutesBySessionID(t *testing.T) {
 	raw := &fakeRawConn{}
-	router := NewProcessConnRouter(func() (Conn, error) {
+	shared := NewSharedConnPool(func() (Conn, error) {
 		return raw, nil
-	}, true)
+	})
 
-	r1, err := router.Open()
+	r1, err := shared.Open()
 	if err != nil {
 		t.Fatalf("open route1: %v", err)
 	}
-	r2, err := router.Open()
+	r2, err := shared.Open()
 	if err != nil {
 		t.Fatalf("open route2: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = r1.Close()
 		_ = r2.Close()
-		_ = router.Close()
+		_ = shared.Close()
 	})
 
 	count1 := 0
