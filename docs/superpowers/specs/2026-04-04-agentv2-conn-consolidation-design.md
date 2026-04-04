@@ -42,7 +42,7 @@ The target in this design is an aggressive V2 consolidation:
 | Session boundary | Keep `Session` seeing `Instance` only |
 | Protocol placement | `server/internal/protocol/acp.go` single file |
 | Protocol migration style | Compatibility-first (old `acp` aliases to `protocol`) |
-| Conn role | Connection-only, consistent typed forwarding to Instance |
+| Conn role | Connection-only raw transport (`Send/Notify/OnRequest`) |
 | Agent-specific logic | Instance layer |
 | Old `agent` package | Merge responsibilities into `agentv2` |
 | provider placement | Flat files under `agentv2/` (no subdirectory) |
@@ -70,8 +70,8 @@ server/internal/
     provider_codex.go          # codex process launch + command resolution
     provider_claude.go         # claude process launch + command resolution
     provider_copilot.go        # copilot process launch + command resolution
-    conn.go                    # conn lifecycle + typed ACP calls + callback dispatch
-    callbacks.go               # callback interfaces for conn->instance dispatch
+    conn.go                    # conn lifecycle + raw Send/Notify/OnRequest
+    callbacks.go               # raw callback bridge interfaces (conn->instance)
     instance.go                # base + specialized instance implementations
     factory.go                 # builds Instance + Conn by policy
 ```
@@ -88,8 +88,8 @@ server/internal/
 
 - Owns subprocess connection lifecycle.
 - Owns JSON-RPC request/notification send path.
-- Exposes typed ACP methods (`Initialize`, `SessionNew`, `SessionLoad`, `SessionPrompt`, `SessionCancel`, etc.).
-- Registers and routes inbound callbacks to instance(s).
+- Exposes only raw transport primitives (`Send`, `Notify`, `OnRequest`).
+- Forwards inbound raw request/notification payloads to instance callback bridge.
 - Supports owned/shared mode via `acpSessionId -> Instance` mapping.
 - Does not contain permission decision or business policy.
 
@@ -97,6 +97,8 @@ server/internal/
 
 - Is the only object exposed to Session.
 - Holds business semantics and agent-specific behavior.
+- Owns typed ACP methods (`Initialize`, `SessionNew`, `SessionLoad`, `SessionPrompt`, `SessionCancel`, `SessionSetConfigOption`).
+- Owns raw inbound message decode and method dispatch behavior.
 - Implements permission-related decisions and other policy hooks.
 - Delegates transport operations to `agentv2.Conn`.
 
@@ -131,15 +133,12 @@ type Instance interface {
 // internal/hub/agentv2/conn.go
 package agentv2
 
+type RequestHandler func(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error)
+
 type Conn interface {
-    SetCallbacks(h Callbacks)
-    Initialize(ctx context.Context, p protocol.InitializeParams) (protocol.InitializeResult, error)
-    SessionNew(ctx context.Context, p protocol.SessionNewParams) (protocol.SessionNewResult, error)
-    SessionLoad(ctx context.Context, p protocol.SessionLoadParams) (protocol.SessionLoadResult, error)
-    SessionList(ctx context.Context, p protocol.SessionListParams) (protocol.SessionListResult, error)
-    SessionPrompt(ctx context.Context, p protocol.SessionPromptParams) (protocol.SessionPromptResult, error)
-    SessionCancel(sessionID string) error
-    SessionSetConfigOption(ctx context.Context, p protocol.SessionSetConfigOptionParams) ([]protocol.ConfigOption, error)
+    Send(ctx context.Context, method string, params any, result any) error
+    Notify(method string, params any) error
+    OnRequest(h RequestHandler)
     RegisterInstance(acpSessionID string, inst Instance)
     UnregisterInstance(acpSessionID string)
     UnregisterAllForInstance(inst Instance)
@@ -174,11 +173,12 @@ type Provider interface {
 1. Add `agentv2` interfaces (`Provider`, `Conn`, `Instance`, `Factory`).
 2. Add adapters so current Client/Session can compile without behavior change.
 
-### Phase 4: Move forwarder responsibilities into `agentv2.Conn`
+### Phase 4: Move forwarder responsibilities into `agentv2`
 
-1. Move typed ACP methods from old forwarder to `agentv2.Conn`.
-2. Move callback dispatch wiring from old forwarder into `agentv2.Conn`.
-3. Keep behavior parity for stream, cancel, and callback routing.
+1. Move raw transport behavior from old forwarder/conn stack to `agentv2.Conn` (`Send`, `Notify`, `OnRequest`).
+2. Move typed ACP method wrappers to `agentv2.Instance`.
+3. Keep callback entry in `agentv2.Conn`, but method decode/typed dispatch in `agentv2.Instance`.
+4. Keep behavior parity for stream, cancel, and callback routing.
 
 ### Phase 5: Move old agent package responsibilities
 
