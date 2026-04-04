@@ -516,6 +516,7 @@ function App() {
   const reconnectTimerRef = useRef<number | null>(null);
   const dirHashRef = useRef<Record<string, string>>({});
   const fileHashRef = useRef<Record<string, string>>({});
+  const fileReadSeqRef = useRef(0);
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
 
   const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);
@@ -675,6 +676,7 @@ function App() {
       cachedDiffText: string;
     },
   ) => {
+    fileReadSeqRef.current += 1;
     setProjectId(hydrated.projectId);
     setDirEntries(hydrated.dirEntries);
     setExpandedDirs(hydrated.expandedDirs);
@@ -813,15 +815,19 @@ function App() {
 
   const readSelectedFile = async (path: string) => {
     if (!path) return;
+    const requestSeq = fileReadSeqRef.current + 1;
+    fileReadSeqRef.current = requestSeq;
     setFileLoading(true);
     try {
       const info = await service.getFileInfo(path);
+      if (requestSeq !== fileReadSeqRef.current) return;
       setFileInfo(info);
       const result = await service.readFile(path, {
         knownHash: fileHashRef.current[path],
         offset: info.isBinary ? 0 : 1,
         count: info.isBinary ? 65536 : Math.max(1, info.totalLines ?? 500),
       });
+      if (requestSeq !== fileReadSeqRef.current) return;
       if (!result.notModified) {
         setFileContent(result.content);
         if (result.hash) {
@@ -829,22 +835,27 @@ function App() {
         }
       }
     } catch (err) {
+      if (requestSeq !== fileReadSeqRef.current) return;
       setFileInfo(null);
       setFileContent('');
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setFileLoading(false);
+      if (requestSeq === fileReadSeqRef.current) {
+        setFileLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (!selectedFile) {
+      fileReadSeqRef.current += 1;
+      setFileLoading(false);
       setFileInfo(null);
       setFileContent('');
       return;
     }
     readSelectedFile(selectedFile).catch(() => undefined);
-  }, [selectedFile]);
+  }, [projectId, selectedFile]);
 
   const loadGit = async () => {
     const targetProjectId = projectId;
@@ -1712,7 +1723,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
-
 
