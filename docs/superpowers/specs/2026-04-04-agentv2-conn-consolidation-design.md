@@ -90,7 +90,7 @@ server/internal/
 - Owns JSON-RPC request/notification send path.
 - Exposes only raw transport primitives (`Send`, `Notify`, `OnRequest`).
 - Forwards inbound raw request/notification payloads to instance callback bridge.
-- Supports owned/shared mode via `acpSessionId -> Instance` mapping.
+- Supports owned/shared mode via `acpSessionID -> Instance` mapping.
 - Does not contain permission decision or business policy.
 
 ### 6.3 `agentv2.Instance`
@@ -123,7 +123,7 @@ type Instance interface {
     SessionLoad(ctx context.Context, p protocol.SessionLoadParams) (protocol.SessionLoadResult, error)
     SessionList(ctx context.Context, p protocol.SessionListParams) (protocol.SessionListResult, error)
     SessionPrompt(ctx context.Context, p protocol.SessionPromptParams) (protocol.SessionPromptResult, error)
-    SessionCancel(sessionID string) error
+    SessionCancel(acpSessionID string) error
     SessionSetConfigOption(ctx context.Context, p protocol.SessionSetConfigOptionParams) ([]protocol.ConfigOption, error)
     Close() error
 }
@@ -203,7 +203,7 @@ For each phase, require:
 1. `go test ./internal/hub/...`
 2. callback routing tests (session/update and request handlers)
 3. streaming prompt tests (done/error/cancel)
-4. shared connection dispatch tests (`acpSessionId -> instance`)
+4. shared connection dispatch tests (`acpSessionID -> instance`)
 5. agent launch tests (codex/claude/copilot launch resolution)
 
 No phase advances with failing parity in transport behavior.
@@ -232,7 +232,16 @@ Migration is complete only when all are true:
 4. ACP protocol source-of-truth is `internal/protocol/acp.go`.
 5. Full hub test suite passes.
 
-## 12. Bootstrap and SessionID Routing Guarantees
+## 12. Bootstrap and ACP SessionID Routing Guarantees
+
+### 12.0 Naming Convention (Mandatory)
+
+To avoid ambiguity, this document uses:
+
+1. `clientSessionID`: WheelMaker business session ID (route-bound session in Client/Session domain).
+2. `acpSessionID`: ACP protocol session ID (`session/new` / `session/load` domain).
+
+Any unqualified `sessionID` naming in implementation is out-of-scope for this design and must be replaced by explicit names above.
 
 ### 12.1 Three-Stage Bootstrap State
 
@@ -240,7 +249,7 @@ Session and Instance bootstrap must be modeled as three independent states:
 
 1. `connReady`: subprocess + RPC channel are alive (`Conn` exists and can `Send/Notify`).
 2. `initialized`: ACP `initialize` handshake completed and capabilities are available.
-3. `acpSessionReady`: ACP session ID is bound and active (from `session/new` or `session/load`).
+3. `acpSessionReady`: `acpSessionID` is bound and active (from `session/new` or `session/load`).
 
 This separation is mandatory so `/new` and `/load` work correctly before prompt traffic starts.
 
@@ -252,12 +261,12 @@ Behavior contract:
    - Ensure `connReady`.
    - Ensure `initialized` (run initialize if needed).
    - Call `SessionNew`.
-   - Bind returned `sessionID` and set `acpSessionReady=true`.
+   - Bind returned `acpSessionID` and set `acpSessionReady=true`.
 
-2. `/load <sessionID>`
+2. `/load <acpSessionID>`
    - Ensure `connReady`.
    - Ensure `initialized` (run initialize if needed).
-   - Pre-register target `sessionID` as pending route (see 12.3).
+   - Pre-register target `acpSessionID` as pending route (see 12.3).
    - Call `SessionLoad`.
    - On success: promote to active route and set `acpSessionReady=true`.
    - On failure: rollback pending registration.
@@ -265,21 +274,21 @@ Behavior contract:
 3. Prompt when not `acpSessionReady`
    - Follow explicit bootstrap policy: attempt saved session via `load`, then fallback `new` (or return explicit error if fallback disabled).
 
-### 12.3 Three-Layer SessionID Mapping in `agentv2.Conn`
+### 12.3 Three-Layer ACP SessionID Mapping in `agentv2.Conn`
 
 To guarantee correct callback routing during `new/load` races, Conn maintains three maps:
 
 1. `activeMap`
-   - `sessionID -> binding(instance, epoch)`
+   - `acpSessionID -> binding(instance, epoch)`
    - Stable, committed routes for normal callback dispatch.
 
 2. `pendingMap`
-   - `requestID -> pendingBinding(instance, targetSessionID, opType, epoch)`
+   - `requestID -> pendingBinding(instance, targetACPSessionID, opType, epoch)`
    - Temporary route during in-flight `session/load` or `session/new`.
    - `load` success promotes to `activeMap`; failure removes entry.
 
 3. `orphanBuffer`
-   - `sessionID -> []update` with TTL.
+   - `acpSessionID -> []update` with TTL.
    - Buffers early/late updates that arrive before route commitment.
    - Replayed after route becomes active; dropped on TTL expiry with warning log.
 
@@ -287,7 +296,7 @@ To guarantee correct callback routing during `new/load` races, Conn maintains th
 
 1. `session/load` must register pending route before request send.
 2. Pending route must rollback on load error.
-3. Dispatch must validate `(sessionID, epoch)` to avoid stale-instance delivery.
+3. Dispatch must validate `(acpSessionID, epoch)` to avoid stale-instance delivery.
 4. Unknown-session updates must not be silently dropped; they must be buffered or explicitly logged and rejected by policy.
 5. For `session/new`, if protocol may emit updates before response, orphan buffering is required.
 
@@ -300,3 +309,4 @@ At minimum, add and keep passing tests for:
 3. concurrent switch/load: stale epoch callback is rejected.
 4. unknown-session update before commit: buffered then replayed (or policy-drop with deterministic log).
 5. `new` response + callback ordering edge cases.
+
