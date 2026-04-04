@@ -182,7 +182,12 @@ export class RegistryClient {
       pending.resolve(envelope);
     };
     ws.onclose = () => this.handleSocketClosed(ws);
-    ws.onerror = () => this.handleSocketClosed(ws);
+    ws.onerror = () => {
+      // Error events may fire transiently; wait for onclose before treating as disconnect.
+      if (ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
+        this.handleSocketClosed(ws);
+      }
+    };
   }
 
   private emitEvent(event: RegistryEnvelope): void {
@@ -212,3 +217,4 @@ export class RegistryClient {
     }
   }
 }
+
