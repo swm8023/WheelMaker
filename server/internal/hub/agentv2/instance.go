@@ -85,6 +85,9 @@ func (i *instance) SessionNew(ctx context.Context, p protocol.SessionNewParams) 
 	}
 
 	if sid := strings.TrimSpace(out.SessionID); sid != "" {
+		if binder, ok := i.conn.(sessionBinder); ok {
+			binder.BindSessionID(sid)
+		}
 		i.mu.Lock()
 		i.acpSessionID = sid
 		i.acpSessionReady = true
@@ -106,6 +109,9 @@ func (i *instance) SessionLoad(ctx context.Context, p protocol.SessionLoadParams
 		return protocol.SessionLoadResult{}, err
 	}
 
+	if binder, ok := i.conn.(sessionBinder); ok {
+		binder.BindSessionID(p.SessionID)
+	}
 	i.mu.Lock()
 	i.acpSessionID = p.SessionID
 	i.acpSessionReady = true

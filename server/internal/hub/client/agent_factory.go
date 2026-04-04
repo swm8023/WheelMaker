@@ -23,6 +23,7 @@ type AgentFactoryV2 interface {
 // providerAgentFactory creates agent instances from agentv2 providers.
 type providerAgentFactory struct {
 	provider agentv2.Provider
+	router   *agentv2.ProcessConnRouter
 }
 
 func (f *providerAgentFactory) Name() string { return f.provider.Name() }
@@ -30,20 +31,38 @@ func (f *providerAgentFactory) Name() string { return f.provider.Name() }
 func (f *providerAgentFactory) SupportsSharedConn() bool { return false }
 
 func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
-	exe, args, env, err := f.provider.LaunchSpec()
-	if err != nil {
-		return nil, err
+	if f.router == nil {
+		f.router = newProviderRouter(f.provider)
 	}
-	raw := agentv2.NewProcessConn(exe, env, args...)
-	if err := raw.Start(); err != nil {
+	conn, err := f.router.Open()
+	if err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
-	return agentv2.NewInstance(f.provider.Name(), raw, cb), nil
+	return agentv2.NewInstance(f.provider.Name(), conn, cb), nil
 }
 
 // NewProviderFactory adapts an agentv2.Provider to client.AgentFactoryV2.
 func NewProviderFactory(provider agentv2.Provider) AgentFactoryV2 {
-	return &providerAgentFactory{provider: provider}
+	return &providerAgentFactory{
+		provider: provider,
+		router:   newProviderRouter(provider),
+	}
+}
+
+func newProviderRouter(provider agentv2.Provider) *agentv2.ProcessConnRouter {
+	connect := func() (agentv2.Conn, error) {
+		exe, args, env, err := provider.LaunchSpec()
+		if err != nil {
+			return nil, err
+		}
+		raw := agentv2.NewProcessConn(exe, env, args...)
+		if err := raw.Start(); err != nil {
+			return nil, err
+		}
+		return raw, nil
+	}
+	// Provider routers default to own-conn mode for strict isolation.
+	return agentv2.NewProcessConnRouter(connect, false)
 }
 
 // legacyAgentFactory wraps the old AgentFactory function into an AgentFactoryV2.
