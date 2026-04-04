@@ -490,6 +490,7 @@ function App() {
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const projectIdRef = useRef('');
+  const currentProjectRef = useRef<RegistryProject | null>(null);
   const knownProjectRevRef = useRef('');
   const knownGitRevRef = useRef('');
   const knownWorktreeRevRef = useRef('');
@@ -498,8 +499,10 @@ function App() {
 
   const [dirEntries, setDirEntries] = useState<DirEntries>({'.': []});
   const [expandedDirs, setExpandedDirs] = useState<string[]>(['.']);
+  const expandedDirsRef = useRef<string[]>(['.']);
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
   const [selectedFile, setSelectedFile] = useState('');
+  const selectedFileRef = useRef('');
   const [pinnedFiles, setPinnedFiles] = useState<string[]>([]);
   const [fileContent, setFileContent] = useState('');
   const [fileInfo, setFileInfo] = useState<RegistryFsInfo | null>(null);
@@ -516,6 +519,7 @@ function App() {
   const reconnectTimerRef = useRef<number | null>(null);
   const dirHashRef = useRef<Record<string, string>>({});
   const fileHashRef = useRef<Record<string, string>>({});
+  const fileCacheRef = useRef<Record<string, string>>({});
   const fileReadSeqRef = useRef(0);
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
 
@@ -629,6 +633,9 @@ function App() {
     () => projects.find(item => item.projectId === projectId) ?? null,
     [projectId, projects],
   );
+  currentProjectRef.current = currentProject;
+  expandedDirsRef.current = expandedDirs;
+  selectedFileRef.current = selectedFile;
 
   useEffect(() => {
     knownProjectRevRef.current = currentProject?.projectRev ?? '';
@@ -677,6 +684,10 @@ function App() {
     },
   ) => {
     fileReadSeqRef.current += 1;
+    fileHashRef.current = {};
+    fileCacheRef.current = {};
+    expandedDirsRef.current = hydrated.expandedDirs;
+    selectedFileRef.current = hydrated.selectedFile;
     setProjectId(hydrated.projectId);
     setDirEntries(hydrated.dirEntries);
     setExpandedDirs(hydrated.expandedDirs);
@@ -828,11 +839,18 @@ function App() {
         count: info.isBinary ? 65536 : Math.max(1, info.totalLines ?? 500),
       });
       if (requestSeq !== fileReadSeqRef.current) return;
-      if (!result.notModified) {
-        setFileContent(result.content);
+      if (result.notModified) {
+        const cachedContent = fileCacheRef.current[path];
+        setFileContent(typeof cachedContent === 'string' ? cachedContent : '');
         if (result.hash) {
           fileHashRef.current[path] = result.hash;
         }
+        return;
+      }
+      setFileContent(result.content);
+      fileCacheRef.current[path] = result.content;
+      if (result.hash) {
+        fileHashRef.current[path] = result.hash;
       }
     } catch (err) {
       if (requestSeq !== fileReadSeqRef.current) return;
@@ -980,6 +998,7 @@ function App() {
       setProjects(result.projects);
       dirHashRef.current = {};
       fileHashRef.current = {};
+      fileCacheRef.current = {};
       applyHydratedProjectState(result.hydrated);
       setGitDirty(Boolean(result.projects.find(item => item.projectId === result.hydrated.projectId)?.git?.dirty));
       setConnected(true);
@@ -1030,26 +1049,29 @@ function App() {
 
   const refreshProject = async () => {
     if (!projectId) return;
+    const latestProject = currentProjectRef.current;
+    const latestExpandedDirs = expandedDirsRef.current;
+    const latestSelectedFile = selectedFileRef.current;
     setRefreshingProject(true);
     try {
       const sync = await service.syncCheck({
-        knownProjectRev: currentProject?.projectRev ?? '',
-        knownGitRev: currentProject?.git?.gitRev ?? '',
-        knownWorktreeRev: currentProject?.git?.worktreeRev ?? '',
+        knownProjectRev: latestProject?.projectRev ?? '',
+        knownGitRev: latestProject?.git?.gitRev ?? '',
+        knownWorktreeRev: latestProject?.git?.worktreeRev ?? '',
       });
-      if (sync.staleDomains.includes('project') || !currentProject) {
+      if (sync.staleDomains.includes('project') || !latestProject) {
         setProjects(await service.listProjects());
       }
       if (sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
-        const validated = await workspaceController.refreshProject(projectId, [...expandedDirs]);
+        const validated = await workspaceController.refreshProject(projectId, [...latestExpandedDirs]);
         setDirEntries(validated.dirEntries);
         setExpandedDirs(validated.expandedDirs);
         dirHashRef.current = {};
       } else {
-        await Promise.all(expandedDirs.map(path => loadDirectory(path)));
+        await Promise.all(latestExpandedDirs.map(path => loadDirectory(path)));
       }
-      if (selectedFile && sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
-        await readSelectedFile(selectedFile);
+      if (latestSelectedFile && sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
+        await readSelectedFile(latestSelectedFile);
       }
       if (sync.staleDomains.some(domain => domain === 'git' || domain === 'worktree' || domain === 'project')) {
         await loadGit();
