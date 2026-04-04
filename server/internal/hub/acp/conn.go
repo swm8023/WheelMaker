@@ -44,7 +44,7 @@ type Conn struct {
 	mu  sync.Mutex // protects enc and pending
 
 	nextID  atomic.Int64
-	pending map[int64]chan protocol.Response
+	pending map[int64]chan protocol.ACPRPCResponse
 
 	reqMu      sync.RWMutex
 	reqHandler RequestHandler
@@ -245,7 +245,7 @@ func writeDebugLine(w io.Writer, prefix string, raw []byte) {
 	}
 }
 
-func (c *Conn) setPending(id int64, ch chan protocol.Response) {
+func (c *Conn) setPending(id int64, ch chan protocol.ACPRPCResponse) {
 	c.mu.Lock()
 	c.pending[id] = ch
 	c.mu.Unlock()
@@ -257,7 +257,7 @@ func (c *Conn) removePending(id int64) {
 	c.mu.Unlock()
 }
 
-func (c *Conn) popPending(id int64) (chan protocol.Response, bool) {
+func (c *Conn) popPending(id int64) (chan protocol.ACPRPCResponse, bool) {
 	c.mu.Lock()
 	ch, ok := c.pending[id]
 	if ok {
@@ -273,11 +273,11 @@ func (c *Conn) encodeLocked(v any) error {
 	return c.enc.Encode(v)
 }
 
-func (c *Conn) failAllPending(err *protocol.RPCError) {
+func (c *Conn) failAllPending(err *protocol.ACPRPCError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for id, ch := range c.pending {
-		ch <- protocol.Response{ID: id, Error: err}
+		ch <- protocol.ACPRPCResponse{ID: id, Error: err}
 		delete(c.pending, id)
 	}
 }
@@ -290,7 +290,7 @@ func NewConn(exePath string, env []string, args ...string) *Conn {
 		exePath:    exePath,
 		exeArgs:    append([]string(nil), args...),
 		env:        env,
-		pending:    make(map[int64]chan protocol.Response),
+		pending:    make(map[int64]chan protocol.ACPRPCResponse),
 		connCtx:    ctx,
 		connCancel: cancel,
 		done:       make(chan struct{}),
@@ -301,7 +301,7 @@ func NewConn(exePath string, env []string, args ...string) *Conn {
 func NewInMemoryConn(server InMemoryServer) *Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Conn{
-		pending:        make(map[int64]chan protocol.Response),
+		pending:        make(map[int64]chan protocol.ACPRPCResponse),
 		connCtx:        ctx,
 		connCancel:     cancel,
 		done:           make(chan struct{}),
@@ -389,11 +389,11 @@ func (c *Conn) startProcess() error {
 func (c *Conn) SendAgent(ctx context.Context, method string, params any, result any) error {
 	id := c.nextID.Add(1)
 
-	ch := make(chan protocol.Response, 1)
+	ch := make(chan protocol.ACPRPCResponse, 1)
 	c.setPending(id, ch)
 
-	req := protocol.Request{
-		JSONRPC: protocol.JSONRPCVersion,
+	req := protocol.ACPRPCRequest{
+		JSONRPC: protocol.ACPRPCVersion,
 		ID:      id,
 		Method:  method,
 		Params:  params,
@@ -432,7 +432,7 @@ func (c *Conn) NotifyAgent(method string, params any) error {
 		Method  string `json:"method"`
 		Params  any    `json:"params,omitempty"`
 	}{
-		JSONRPC: protocol.JSONRPCVersion,
+		JSONRPC: protocol.ACPRPCVersion,
 		Method:  method,
 		Params:  params,
 	}
@@ -476,7 +476,7 @@ func (c *Conn) Close() error {
 func (c *Conn) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	// Increase buffer for large messages (e.g. file contents in tool calls).
-	scanner.Buffer(make([]byte, protocol.MaxScannerBuf), protocol.MaxScannerBuf)
+	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -486,7 +486,7 @@ func (c *Conn) readLoop(r io.Reader) {
 
 		c.writeDebugRaw("<-", line)
 
-		var raw protocol.RawMessage
+		var raw protocol.ACPRPCRawMessage
 		if err := json.Unmarshal(line, &raw); err != nil {
 			continue // ignore malformed lines
 		}
@@ -498,7 +498,7 @@ func (c *Conn) readLoop(r io.Reader) {
 
 		case raw.ID != nil:
 			// Response to one of our Conn→Agent requests.
-			resp := protocol.Response{
+			resp := protocol.ACPRPCResponse{
 				JSONRPC: raw.JSONRPC,
 				ID:      *raw.ID,
 				Result:  raw.Result,
@@ -522,7 +522,7 @@ func (c *Conn) readLoop(r io.Reader) {
 	}
 
 	// stdout closed — unblock all pending requests.
-	c.failAllPending(&protocol.RPCError{Code: -1, Message: "agent process exited"})
+	c.failAllPending(&protocol.ACPRPCError{Code: -1, Message: "agent process exited"})
 }
 
 // handleIncomingRequest processes an Agent→Conn request and sends the response.
@@ -533,20 +533,20 @@ func (c *Conn) handleIncomingRequest(id int64, method string, params json.RawMes
 	c.reqMu.RUnlock()
 
 	type rpcResp struct {
-		JSONRPC string             `json:"jsonrpc"`
-		ID      int64              `json:"id"`
-		Result  any                `json:"result,omitempty"`
-		Error   *protocol.RPCError `json:"error,omitempty"`
+		JSONRPC string                `json:"jsonrpc"`
+		ID      int64                 `json:"id"`
+		Result  any                   `json:"result,omitempty"`
+		Error   *protocol.ACPRPCError `json:"error,omitempty"`
 	}
 
-	resp := rpcResp{JSONRPC: protocol.JSONRPCVersion, ID: id}
+	resp := rpcResp{JSONRPC: protocol.ACPRPCVersion, ID: id}
 
 	if handler == nil {
-		resp.Error = &protocol.RPCError{Code: protocol.JSONRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
+		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
 		result, err := handler(c.connCtx, method, params, false)
 		if err != nil {
-			resp.Error = &protocol.RPCError{Code: protocol.JSONRPCCodeInternalError, Message: err.Error()}
+			resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: err.Error()}
 		} else if result == nil {
 			// Per JSON-RPC 2.0: result member MUST be present on success.
 			// Use explicit null rather than omitting the field.

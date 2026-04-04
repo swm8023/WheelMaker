@@ -47,7 +47,7 @@ type ProcessConn struct {
 	mu  sync.Mutex
 
 	nextID  atomic.Int64
-	pending map[int64]chan protocol.Response
+	pending map[int64]chan protocol.ACPRPCResponse
 
 	reqMu      sync.RWMutex
 	reqHandler RequestHandler
@@ -71,7 +71,7 @@ func NewProcessConn(exePath string, env []string, args ...string) *ProcessConn {
 		exePath:    exePath,
 		exeArgs:    append([]string(nil), args...),
 		env:        env,
-		pending:    make(map[int64]chan protocol.Response),
+		pending:    make(map[int64]chan protocol.ACPRPCResponse),
 		connCtx:    ctx,
 		connCancel: cancel,
 		done:       make(chan struct{}),
@@ -82,7 +82,7 @@ func NewProcessConn(exePath string, env []string, args ...string) *ProcessConn {
 func NewInMemoryProcessConn(server InMemoryServer) *ProcessConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ProcessConn{
-		pending:        make(map[int64]chan protocol.Response),
+		pending:        make(map[int64]chan protocol.ACPRPCResponse),
 		connCtx:        ctx,
 		connCancel:     cancel,
 		done:           make(chan struct{}),
@@ -148,11 +148,11 @@ func (c *ProcessConn) startProcess() error {
 
 func (c *ProcessConn) Send(ctx context.Context, method string, params any, result any) error {
 	id := c.nextID.Add(1)
-	ch := make(chan protocol.Response, 1)
+	ch := make(chan protocol.ACPRPCResponse, 1)
 	c.setPending(id, ch)
 
-	req := protocol.Request{
-		JSONRPC: protocol.JSONRPCVersion,
+	req := protocol.ACPRPCRequest{
+		JSONRPC: protocol.ACPRPCVersion,
 		ID:      id,
 		Method:  method,
 		Params:  params,
@@ -183,8 +183,8 @@ func (c *ProcessConn) Send(ctx context.Context, method string, params any, resul
 }
 
 func (c *ProcessConn) Notify(method string, params any) error {
-	n := protocol.Notification{
-		JSONRPC: protocol.JSONRPCVersion,
+	n := protocol.ACPRPCNotification{
+		JSONRPC: protocol.ACPRPCVersion,
 		Method:  method,
 		Params:  params,
 	}
@@ -221,7 +221,7 @@ func (c *ProcessConn) Close() error {
 	return nil
 }
 
-func (c *ProcessConn) setPending(id int64, ch chan protocol.Response) {
+func (c *ProcessConn) setPending(id int64, ch chan protocol.ACPRPCResponse) {
 	c.mu.Lock()
 	c.pending[id] = ch
 	c.mu.Unlock()
@@ -233,7 +233,7 @@ func (c *ProcessConn) removePending(id int64) {
 	c.mu.Unlock()
 }
 
-func (c *ProcessConn) popPending(id int64) (chan protocol.Response, bool) {
+func (c *ProcessConn) popPending(id int64) (chan protocol.ACPRPCResponse, bool) {
 	c.mu.Lock()
 	ch, ok := c.pending[id]
 	if ok {
@@ -243,11 +243,11 @@ func (c *ProcessConn) popPending(id int64) (chan protocol.Response, bool) {
 	return ch, ok
 }
 
-func (c *ProcessConn) failAllPending(err *protocol.RPCError) {
+func (c *ProcessConn) failAllPending(err *protocol.ACPRPCError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for id, ch := range c.pending {
-		ch <- protocol.Response{ID: id, Error: err}
+		ch <- protocol.ACPRPCResponse{ID: id, Error: err}
 		delete(c.pending, id)
 	}
 }
@@ -263,7 +263,7 @@ func (c *ProcessConn) encodeLocked(v any) error {
 
 func (c *ProcessConn) readLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, protocol.MaxScannerBuf), protocol.MaxScannerBuf)
+	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -272,7 +272,7 @@ func (c *ProcessConn) readLoop(r io.Reader) {
 		}
 		c.writeDebugRaw("<-", line)
 
-		var raw protocol.RawMessage
+		var raw protocol.ACPRPCRawMessage
 		if err := json.Unmarshal(line, &raw); err != nil {
 			continue
 		}
@@ -281,7 +281,7 @@ func (c *ProcessConn) readLoop(r io.Reader) {
 		case raw.ID != nil && raw.Method != "":
 			go c.handleIncomingRequest(*raw.ID, raw.Method, raw.Params)
 		case raw.ID != nil:
-			resp := protocol.Response{
+			resp := protocol.ACPRPCResponse{
 				JSONRPC: raw.JSONRPC,
 				ID:      *raw.ID,
 				Result:  raw.Result,
@@ -301,7 +301,7 @@ func (c *ProcessConn) readLoop(r io.Reader) {
 		}
 	}
 
-	c.failAllPending(&protocol.RPCError{Code: -1, Message: "agent process exited"})
+	c.failAllPending(&protocol.ACPRPCError{Code: -1, Message: "agent process exited"})
 }
 
 func (c *ProcessConn) handleIncomingRequest(id int64, method string, params json.RawMessage) {
@@ -310,19 +310,19 @@ func (c *ProcessConn) handleIncomingRequest(id int64, method string, params json
 	c.reqMu.RUnlock()
 
 	type rpcResp struct {
-		JSONRPC string             `json:"jsonrpc"`
-		ID      int64              `json:"id"`
-		Result  any                `json:"result,omitempty"`
-		Error   *protocol.RPCError `json:"error,omitempty"`
+		JSONRPC string                `json:"jsonrpc"`
+		ID      int64                 `json:"id"`
+		Result  any                   `json:"result,omitempty"`
+		Error   *protocol.ACPRPCError `json:"error,omitempty"`
 	}
 
-	resp := rpcResp{JSONRPC: protocol.JSONRPCVersion, ID: id}
+	resp := rpcResp{JSONRPC: protocol.ACPRPCVersion, ID: id}
 	if handler == nil {
-		resp.Error = &protocol.RPCError{Code: protocol.JSONRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
+		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
 		result, err := handler(c.connCtx, method, params, false)
 		if err != nil {
-			resp.Error = &protocol.RPCError{Code: protocol.JSONRPCCodeInternalError, Message: err.Error()}
+			resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: err.Error()}
 		} else if result == nil {
 			resp.Result = json.RawMessage("null")
 		} else {
