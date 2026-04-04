@@ -130,7 +130,7 @@ func newTestClient(mock *mockSession) *client.Client {
 	return c
 }
 
-func newMockForwarder(mock *mockSession) *acp.Forwarder {
+func newMockForwarder(mock *mockSession) *acp.Conn {
 	server := func(r io.Reader, w io.Writer) {
 		enc := json.NewEncoder(w)
 		scanner := bufio.NewScanner(r)
@@ -260,7 +260,7 @@ func newMockForwarder(mock *mockSession) *acp.Forwarder {
 	if err := conn.Start(); err != nil {
 		panic(err)
 	}
-	return acp.NewForwarder(conn, nil)
+	return conn
 }
 
 // captureReplies redirects Client replies to a string slice for inspection.
@@ -290,10 +290,10 @@ func (a *captureChannel) SendCard(_ string, _ string, _ im.Card) error {
 	}
 	return nil
 }
-func (a *captureChannel) SendReaction(_, _ string) error               { return nil }
-func (a *captureChannel) MarkDone(_ string) error                      { return nil }
-func (a *captureChannel) OnCardAction(_ func(im.CardActionEvent))      {}
-func (a *captureChannel) Run(_ context.Context) error                  { return nil }
+func (a *captureChannel) SendReaction(_, _ string) error          { return nil }
+func (a *captureChannel) MarkDone(_ string) error                 { return nil }
+func (a *captureChannel) OnCardAction(_ func(im.CardActionEvent)) {}
+func (a *captureChannel) Run(_ context.Context) error             { return nil }
 
 var _ im.Channel = (*captureChannel)(nil)
 
