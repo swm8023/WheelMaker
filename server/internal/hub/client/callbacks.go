@@ -8,13 +8,14 @@ import (
 	"strings"
 
 	"github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 )
 
-// compile-time check: Client implements acp.ClientCallbacks (delegates to Session).
-var _ acp.ClientCallbacks = (*Client)(nil)
+// compile-time check: Client implements agentv2.Callbacks (delegates to Session).
+var _ agentv2.Callbacks = (*Client)(nil)
 
-// compile-time check: Session implements acp.ClientCallbacks.
-var _ acp.ClientCallbacks = (*Session)(nil)
+// compile-time check: Session implements agentv2.Callbacks.
+var _ agentv2.Callbacks = (*Session)(nil)
 
 // --- Client delegates to activeSession ---
 

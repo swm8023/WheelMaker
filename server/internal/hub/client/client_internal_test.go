@@ -10,6 +10,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
@@ -17,10 +18,9 @@ import (
 // Export helpers (used by package client_test via export_test.go convention)
 // ---------------------------------------------------------------------------
 
-// InjectForwarder sets an active AgentInstance backed by the given Forwarder
-// and marks the session as ready with a preset session ID.
-// Used by client_test to bypass Start() when testing with a mock agent.
-func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
+// InjectForwarder keeps compatibility with existing tests: it now injects a ready
+// ACP connection-backed runtime instance (no legacy Forwarder layer).
+func (c *Client) InjectForwarder(conn *acp.Conn, sessionID string) {
 	sess := c.activeSession
 	c.mu.Lock()
 	name := defaultAgentName
@@ -33,17 +33,12 @@ func (c *Client) InjectForwarder(f *acp.Forwarder, sessionID string) {
 	}
 	c.mu.Unlock()
 
-	ac := &AgentConn{
-		forwarder: f,
-		mode:      ConnOwned,
-		instances: make(map[string]*AgentInstance),
-	}
+	runtime := agentv2.NewInstance(name, wrapACPConn(conn), sess)
 	inst := &AgentInstance{
 		name:      name,
-		agentConn: ac,
+		runtime:   runtime,
 		callbacks: sess,
 	}
-	f.SetCallbacks(sess)
 
 	sess.mu.Lock()
 	sess.instance = inst

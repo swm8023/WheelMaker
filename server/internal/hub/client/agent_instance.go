@@ -2,27 +2,30 @@ package client
 
 import (
 	"context"
+	"errors"
 
 	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 )
 
-// SessionCallbacks is the callback contract that Session provides.
+// SessionCallbacks is the callback contract that Session provides to agentv2 runtime.
 type SessionCallbacks interface {
-	acp.ClientCallbacks
+	agentv2.Callbacks
 }
 
 // AgentInstance is the ACP interface visible to Session.
-// During migration, it can wrap either legacy AgentConn+Forwarder or agentv2.Instance runtime.
 type AgentInstance struct {
-	name    string
-	runtime agentv2.Instance
-
-	// legacy fields kept for transition compatibility
-	agentConn *AgentConn
+	name      string
+	runtime   agentv2.Instance
 	callbacks SessionCallbacks
 	initMeta  clientInitMeta
-	shared    bool
+}
+
+func (ai *AgentInstance) requireRuntime() (agentv2.Instance, error) {
+	if ai.runtime == nil {
+		return nil, errors.New("agent runtime is nil")
+	}
+	return ai.runtime, nil
 }
 
 // Name returns the registered agent name.
@@ -35,87 +38,74 @@ func (ai *AgentInstance) Name() string {
 
 // Initialize sends the ACP initialize request and caches the result.
 func (ai *AgentInstance) Initialize(ctx context.Context, params acp.InitializeParams) (acp.InitializeResult, error) {
-	if ai.runtime != nil {
-		return ai.runtime.Initialize(ctx, params)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return acp.InitializeResult{}, err
 	}
-	return ai.agentConn.forwarder.Initialize(ctx, params)
+	return rt.Initialize(ctx, params)
 }
 
 // SessionNew creates a new ACP session.
 func (ai *AgentInstance) SessionNew(ctx context.Context, params acp.SessionNewParams) (acp.SessionNewResult, error) {
-	if ai.runtime != nil {
-		return ai.runtime.SessionNew(ctx, params)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return acp.SessionNewResult{}, err
 	}
-	res, err := ai.agentConn.forwarder.SessionNew(ctx, params)
-	if err == nil && ai.shared && res.SessionID != "" {
-		ai.agentConn.RegisterInstance(res.SessionID, ai)
-	}
-	return res, err
+	return rt.SessionNew(ctx, params)
 }
 
 // SessionLoad loads an existing ACP session.
 func (ai *AgentInstance) SessionLoad(ctx context.Context, params acp.SessionLoadParams) (acp.SessionLoadResult, error) {
-	if ai.runtime != nil {
-		return ai.runtime.SessionLoad(ctx, params)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return acp.SessionLoadResult{}, err
 	}
-	if ai.shared && params.SessionID != "" {
-		ai.agentConn.RegisterInstance(params.SessionID, ai)
-	}
-	res, err := ai.agentConn.forwarder.SessionLoad(ctx, params)
-	if err != nil && ai.shared && params.SessionID != "" {
-		ai.agentConn.UnregisterInstance(params.SessionID)
-	}
-	return res, err
+	return rt.SessionLoad(ctx, params)
 }
 
 // SessionList lists available ACP sessions.
 func (ai *AgentInstance) SessionList(ctx context.Context, params acp.SessionListParams) (acp.SessionListResult, error) {
-	if ai.runtime != nil {
-		return ai.runtime.SessionList(ctx, params)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return acp.SessionListResult{}, err
 	}
-	return ai.agentConn.forwarder.SessionList(ctx, params)
+	return rt.SessionList(ctx, params)
 }
 
 // SessionPrompt sends a prompt to the ACP session.
 func (ai *AgentInstance) SessionPrompt(ctx context.Context, params acp.SessionPromptParams) (acp.SessionPromptResult, error) {
-	if ai.runtime != nil {
-		return ai.runtime.SessionPrompt(ctx, params)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return acp.SessionPromptResult{}, err
 	}
-	return ai.agentConn.forwarder.SessionPrompt(ctx, params)
+	return rt.SessionPrompt(ctx, params)
 }
 
 // SessionCancel cancels an in-progress prompt.
 func (ai *AgentInstance) SessionCancel(sessionID string) error {
-	if ai.runtime != nil {
-		return ai.runtime.SessionCancel(sessionID)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return err
 	}
-	return ai.agentConn.forwarder.SessionCancel(sessionID)
+	return rt.SessionCancel(sessionID)
 }
 
 // SessionSetConfigOption sets a config option on the ACP session.
 func (ai *AgentInstance) SessionSetConfigOption(ctx context.Context, params acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
-	if ai.runtime != nil {
-		return ai.runtime.SessionSetConfigOption(ctx, params)
+	rt, err := ai.requireRuntime()
+	if err != nil {
+		return nil, err
 	}
-	return ai.agentConn.forwarder.SessionSetConfigOption(ctx, params)
+	return rt.SessionSetConfigOption(ctx, params)
 }
 
-// Close terminates the underlying connection runtime.
+// Close terminates the underlying runtime.
 func (ai *AgentInstance) Close() error {
-	if ai.runtime != nil {
-		return ai.runtime.Close()
-	}
-	if ai.shared {
-		ai.agentConn.UnregisterAllForInstance(ai)
+	if ai.runtime == nil {
 		return nil
 	}
-	return ai.agentConn.Close()
+	return ai.runtime.Close()
 }
 
-// SetDebugLogger sets debug logger on legacy conn path.
-func (ai *AgentInstance) SetDebugLogger(w interface{ Write([]byte) (int, error) }) {
-	if ai.runtime != nil {
-		return
-	}
-	ai.agentConn.debugLog = w
-}
+// SetDebugLogger kept for compatibility; runtime logger is configured at conn creation.
+func (ai *AgentInstance) SetDebugLogger(_ interface{ Write([]byte) (int, error) }) {}
