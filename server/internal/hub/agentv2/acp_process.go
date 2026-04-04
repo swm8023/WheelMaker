@@ -35,9 +35,6 @@ type ACPProcess struct {
 	done     chan struct{}
 }
 
-// ProcessConn is kept as a compatibility alias for ACPProcess.
-type ProcessConn = ACPProcess
-
 // NewACPProcess creates a subprocess-backed ACP transport.
 func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
 	return &ACPProcess{
@@ -46,11 +43,6 @@ func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
 		env:     env,
 		done:    make(chan struct{}),
 	}
-}
-
-// NewProcessConn is kept as a compatibility constructor.
-func NewProcessConn(exePath string, env []string, args ...string) *ACPProcess {
-	return NewACPProcess(exePath, env, args...)
 }
 
 // Start starts the subprocess transport.

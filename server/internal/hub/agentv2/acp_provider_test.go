@@ -1,15 +1,15 @@
 package agentv2
 
 import (
-	"errors"
 	"reflect"
 	"testing"
 )
 
-func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
+func TestCodexACPProvider_UsesNpxByDefault(t *testing.T) {
 	p := NewCodexProvider(ACPProviderConfig{})
-	p.resolveBinary = func(_ string, _ string) (string, error) {
-		return "", errors.New("not found")
+	p.resolveBinary = func(name string, configuredPath string) (string, error) {
+		t.Fatalf("resolveBinary should not be called: name=%q configuredPath=%q", name, configuredPath)
+		return "", nil
 	}
 	p.lookPath = func(bin string) (string, error) {
 		if bin != "npx" {
@@ -33,10 +33,11 @@ func TestCodexACPProvider_UsesNpxFallback(t *testing.T) {
 	}
 }
 
-func TestClaudeACPProvider_UsesNpxFallback(t *testing.T) {
+func TestClaudeACPProvider_UsesNpxByDefault(t *testing.T) {
 	p := NewClaudeProvider(ACPProviderConfig{})
-	p.resolveBinary = func(_ string, _ string) (string, error) {
-		return "", errors.New("not found")
+	p.resolveBinary = func(name string, configuredPath string) (string, error) {
+		t.Fatalf("resolveBinary should not be called: name=%q configuredPath=%q", name, configuredPath)
+		return "", nil
 	}
 	p.lookPath = func(bin string) (string, error) {
 		if bin != "npx" {

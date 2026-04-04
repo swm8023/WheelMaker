@@ -94,23 +94,22 @@ func (p *acpProvider) Launch() (string, []string, []string, error) {
 		return exePath, defaultArgs, env, nil
 	}
 
-	exePath, err := p.resolveBinary(p.preset.BinaryName, "")
-	if err == nil {
-		return exePath, defaultArgs, env, nil
-	}
-
 	if p.preset.NPMPackage != "" {
-		npxPath, npxErr := p.lookPath("npx")
-		if npxErr != nil {
-			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w; and npx not found: %w", p.preset.Name, err, npxErr)
+		npxPath, err := p.lookPath("npx")
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("%s: npx not found: %w", p.preset.Name, err)
 		}
 		return npxPath, []string{"--yes", p.preset.NPMPackage}, env, nil
 	}
 
-	if p.preset.MissingPathErrTemplate != "" {
-		return "", nil, nil, fmt.Errorf(p.preset.MissingPathErrTemplate, err)
+	exePath, err := p.resolveBinary(p.preset.BinaryName, "")
+	if err != nil {
+		if p.preset.MissingPathErrTemplate != "" {
+			return "", nil, nil, fmt.Errorf(p.preset.MissingPathErrTemplate, err)
+		}
+		return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
 	}
-	return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
+	return exePath, defaultArgs, env, nil
 }
 
 func buildEnv(m map[string]string) []string {
