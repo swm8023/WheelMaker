@@ -1,35 +1,38 @@
-// Package acp implements the ACP (Agent Client Protocol) transport layer.
-// It provides Conn (JSON-RPC 2.0 over subprocess stdio), Forwarder (bidirectional
-// message filter with typed outbound methods and ClientCallbacks dispatch),
-// and all ACP protocol types.
-package acp
+package protocol
 
 import (
 	"encoding/json"
 	"fmt"
 )
 
-const jsonrpcVersion = "2.0"
+// JSONRPCVersion is the JSON-RPC protocol version used by WheelMaker transport.
+const JSONRPCVersion = "2.0"
 
-// JSON-RPC 2.0 standard error codes (§15 of ACP protocol).
+// JSON-RPC 2.0 standard error codes.
 const (
-	CodeParseError     = -32700 // Parse error
-	CodeInvalidRequest = -32600 // Invalid request
-	CodeMethodNotFound = -32601 // Method not found
-	CodeInvalidParams  = -32602 // Invalid params
-	CodeInternalError  = -32603 // Internal error
-	CodeAuthRequired   = -32000 // Authentication required
-	CodeNotFound       = -32002 // Resource not found
+	JSONRPCCodeParseError     = -32700
+	JSONRPCCodeInvalidRequest = -32600
+	JSONRPCCodeMethodNotFound = -32601
+	JSONRPCCodeInvalidParams  = -32602
+	JSONRPCCodeInternalError  = -32603
+	JSONRPCCodeAuthRequired   = -32000
+	JSONRPCCodeNotFound       = -32002
 )
 
-// maxScannerBuf is the read buffer size for the JSON-RPC newline-delimited
-// scanner. Must be large enough for big tool-call payloads (e.g. file contents).
-const maxScannerBuf = 1 << 20 // 1 MiB
+// MaxScannerBuf is the scanner buffer size for newline-delimited JSON-RPC.
+const MaxScannerBuf = 1 << 20 // 1 MiB
 
 // Request is a JSON-RPC 2.0 request message.
 type Request struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      int64  `json:"id"`
+	Method  string `json:"method"`
+	Params  any    `json:"params,omitempty"`
+}
+
+// Notification is a JSON-RPC 2.0 notification message.
+type Notification struct {
+	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
 	Params  any    `json:"params,omitempty"`
 }
@@ -50,6 +53,9 @@ type RPCError struct {
 }
 
 func (e *RPCError) Error() string {
+	if e == nil {
+		return ""
+	}
 	if len(e.Data) > 0 {
 		var d struct {
 			Message string `json:"message"`
@@ -62,9 +68,8 @@ func (e *RPCError) Error() string {
 	return e.Message
 }
 
-// rawMessage is used internally to detect whether an incoming line is a
-// Response (has "id") or a Notification (no "id").
-type rawMessage struct {
+// RawMessage is an internal parse shape for JSON-RPC routing.
+type RawMessage struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      *int64          `json:"id"`
 	Method  string          `json:"method"`
