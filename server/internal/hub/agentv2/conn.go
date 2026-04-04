@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"os/exec"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -30,9 +29,6 @@ type Conn interface {
 	Close() error
 }
 
-// InMemoryServer runs a JSON-RPC compatible server in-process.
-type InMemoryServer func(r io.Reader, w io.Writer)
-
 // ProcessConn is a transport-only JSON-RPC connection over subprocess stdio.
 type ProcessConn struct {
 	exePath string
@@ -52,14 +48,9 @@ type ProcessConn struct {
 	reqMu      sync.RWMutex
 	reqHandler RequestHandler
 
-	debugMu  sync.RWMutex
-	debugLog io.Writer
-
 	connCtx    context.Context
 	connCancel context.CancelFunc
 	done       chan struct{}
-
-	inMemoryServer InMemoryServer
 }
 
 var _ Conn = (*ProcessConn)(nil)
@@ -78,47 +69,9 @@ func NewProcessConn(exePath string, env []string, args ...string) *ProcessConn {
 	}
 }
 
-// NewInMemoryProcessConn creates a connection backed by an in-memory server.
-func NewInMemoryProcessConn(server InMemoryServer) *ProcessConn {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &ProcessConn{
-		pending:        make(map[int64]chan protocol.ACPRPCResponse),
-		connCtx:        ctx,
-		connCancel:     cancel,
-		done:           make(chan struct{}),
-		inMemoryServer: server,
-	}
-}
-
-// SetDebugLogger sets a writer for transport debug logs.
-func (c *ProcessConn) SetDebugLogger(w io.Writer) {
-	c.debugMu.Lock()
-	c.debugLog = w
-	c.debugMu.Unlock()
-}
-
-// Start starts the underlying transport.
+// Start starts the subprocess transport.
 func (c *ProcessConn) Start() error {
-	if c.inMemoryServer != nil {
-		return c.startInMemory()
-	}
 	return c.startProcess()
-}
-
-func (c *ProcessConn) startInMemory() error {
-	clientToServerR, clientToServerW := io.Pipe()
-	serverToClientR, serverToClientW := io.Pipe()
-
-	c.stdin = clientToServerW
-	c.stdout = serverToClientR
-	c.enc = json.NewEncoder(c.stdin)
-
-	go c.readLoop(c.stdout)
-	go func() {
-		defer serverToClientW.Close()
-		c.inMemoryServer(clientToServerR, serverToClientW)
-	}()
-	return nil
 }
 
 func (c *ProcessConn) startProcess() error {
@@ -161,7 +114,6 @@ func (c *ProcessConn) Send(ctx context.Context, method string, params any, resul
 		c.removePending(id)
 		return fmt.Errorf("agentv2 conn: encode request: %w", err)
 	}
-	c.writeDebugJSON("->", req)
 
 	select {
 	case <-ctx.Done():
@@ -191,7 +143,6 @@ func (c *ProcessConn) Notify(method string, params any) error {
 	if err := c.encodeLocked(n); err != nil {
 		return fmt.Errorf("agentv2 conn: encode notification: %w", err)
 	}
-	c.writeDebugJSON("->", n)
 	return nil
 }
 
@@ -270,7 +221,6 @@ func (c *ProcessConn) readLoop(r io.Reader) {
 		if len(line) == 0 {
 			continue
 		}
-		c.writeDebugRaw("<-", line)
 
 		var raw protocol.ACPRPCRawMessage
 		if err := json.Unmarshal(line, &raw); err != nil {
@@ -331,37 +281,4 @@ func (c *ProcessConn) handleIncomingRequest(id int64, method string, params json
 	}
 
 	_ = c.encodeLocked(resp)
-}
-
-func (c *ProcessConn) debugWriter() io.Writer {
-	c.debugMu.RLock()
-	dw := c.debugLog
-	c.debugMu.RUnlock()
-	return dw
-}
-
-func (c *ProcessConn) writeDebugJSON(prefix string, payload any) {
-	dw := c.debugWriter()
-	if dw == nil {
-		return
-	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		return
-	}
-	writeDebugLine(dw, prefix, raw)
-}
-
-func (c *ProcessConn) writeDebugRaw(prefix string, raw []byte) {
-	dw := c.debugWriter()
-	if dw == nil || len(raw) == 0 {
-		return
-	}
-	writeDebugLine(dw, prefix, raw)
-}
-
-func writeDebugLine(w io.Writer, prefix string, raw []byte) {
-	if p := strings.TrimSpace(prefix); p != "" {
-		_, _ = fmt.Fprintf(w, "%s[agentv2] %s\n", p, strings.TrimSpace(string(raw)))
-	}
 }

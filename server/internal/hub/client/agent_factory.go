@@ -29,15 +29,12 @@ func (f *providerAgentFactory) Name() string { return f.provider.Name() }
 
 func (f *providerAgentFactory) SupportsSharedConn() bool { return false }
 
-func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error) {
+func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
 	exe, args, env, err := f.provider.LaunchSpec()
 	if err != nil {
 		return nil, err
 	}
 	raw := agentv2.NewProcessConn(exe, env, args...)
-	if debugLog != nil {
-		raw.SetDebugLogger(debugLog)
-	}
 	if err := raw.Start(); err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
