@@ -24,19 +24,20 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
-	defaultProtocolVersion = shared.DefaultProtocolVersion
-	codeInvalidArgument    = shared.CodeInvalidArgument
-	codeNotFound           = shared.CodeNotFound
-	codeInternal           = shared.CodeInternal
+	defaultProtocolVersion = rp.DefaultProtocolVersion
+	codeInvalidArgument    = rp.CodeInvalidArgument
+	codeNotFound           = rp.CodeNotFound
+	codeInternal           = rp.CodeInternal
 )
 
-type ProjectInfo = shared.ProjectInfo
-type envelope = shared.Envelope
-type errorPayload = shared.ErrorPayload
+type ProjectInfo = rp.ProjectInfo
+type envelope = rp.Envelope
+type errorPayload = rp.ErrorPayload
 
 // ReporterConfig controls hub->registry connection behavior.
 type ReporterConfig struct {
@@ -90,7 +91,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		if name == "" {
 			continue
 		}
-		publicID := shared.ProjectID(cfg.HubID, name)
+		publicID := rp.ProjectID(cfg.HubID, name)
 		byID[publicID] = p
 		byID[name] = p
 	}
@@ -160,7 +161,7 @@ func (r *Reporter) UpdateProject(project ProjectInfo) error {
 		RequestID: requestID,
 		Type:      "request",
 		Method:    "registry.updateProject",
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"hubId":           r.cfg.HubID,
 			"connectionEpoch": connectionEpoch,
 			"seq":             seq,
@@ -275,7 +276,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 				RequestID: in.RequestID,
 				Type:      "error",
 				Method:    in.Method,
-				Payload: shared.MustRaw(errorPayload{
+				Payload: rp.MustRaw(errorPayload{
 					Code:    codeInvalidArgument,
 					Message: "unsupported method on hub",
 					Details: map[string]any{"method": in.Method},
@@ -319,7 +320,7 @@ func (r *Reporter) sendHubPing(conn *websocket.Conn) error {
 		RequestID: requestID,
 		Type:      "request",
 		Method:    "hub.ping",
-		Payload:   shared.MustRaw(map[string]any{"ts": time.Now().UTC().Unix()}),
+		Payload:   rp.MustRaw(map[string]any{"ts": time.Now().UTC().Unix()}),
 	}); err != nil {
 		r.mu.Lock()
 		delete(r.pending, requestID)
@@ -353,7 +354,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		RequestID: 1,
 		Type:      "request",
 		Method:    "connect.init",
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"clientName":      "wheelmaker-hub",
 			"clientVersion":   "0.1.0",
 			"protocolVersion": defaultProtocolVersion,
@@ -368,7 +369,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	if err != nil {
 		return fmt.Errorf("connect.init failed: %w", err)
 	}
-	var initResp shared.ConnectInitResponsePayload
+	var initResp rp.ConnectInitResponsePayload
 	if err := decodePayload(resp.Payload, &initResp); err != nil {
 		return fmt.Errorf("decode connect.init response: %w", err)
 	}
@@ -382,7 +383,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 		RequestID: 2,
 		Type:      "request",
 		Method:    "registry.reportProjects",
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"hubId":           r.cfg.HubID,
 			"connectionEpoch": initResp.Principal.ConnectionEpoch,
 			"projects":        projects,
@@ -432,7 +433,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 			Type:      "response",
 			Method:    req.Method,
 			ProjectID: req.ProjectID,
-			Payload: shared.MustRaw(map[string]any{
+			Payload: rp.MustRaw(map[string]any{
 				"path":        rel,
 				"hash":        hash,
 				"notModified": true,
@@ -456,7 +457,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"path":        rel,
 			"hash":        hash,
 			"notModified": false,
@@ -500,7 +501,7 @@ func (r *Reporter) replyFSInfo(conn *websocket.Conn, req envelope) {
 			Type:      "response",
 			Method:    req.Method,
 			ProjectID: req.ProjectID,
-			Payload: shared.MustRaw(map[string]any{
+			Payload: rp.MustRaw(map[string]any{
 				"path":       rel,
 				"kind":       "dir",
 				"entryCount": len(entries),
@@ -532,7 +533,7 @@ func (r *Reporter) replyFSInfo(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload:   shared.MustRaw(resp),
+		Payload:   rp.MustRaw(resp),
 	})
 }
 
@@ -571,7 +572,7 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 			Type:      "response",
 			Method:    req.Method,
 			ProjectID: req.ProjectID,
-			Payload: shared.MustRaw(map[string]any{
+			Payload: rp.MustRaw(map[string]any{
 				"path":        rel,
 				"hash":        hash,
 				"notModified": true,
@@ -614,7 +615,7 @@ func (r *Reporter) replyFSReadText(conn *websocket.Conn, req envelope, rel strin
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"path":        rel,
 			"hash":        hash,
 			"notModified": false,
@@ -659,7 +660,7 @@ func (r *Reporter) replyFSReadBinary(conn *websocket.Conn, req envelope, rel str
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"path":        rel,
 			"hash":        hash,
 			"notModified": false,
@@ -741,7 +742,7 @@ func (r *Reporter) replyFSSearch(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"root":       relRoot,
 			"results":    results,
 			"nextCursor": "",
@@ -845,7 +846,7 @@ func (r *Reporter) replyFSGrep(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"root":         relRoot,
 			"results":      results,
 			"totalMatches": totalMatches,
@@ -898,7 +899,7 @@ func (r *Reporter) replyGitRefs(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"current":  strings.TrimSpace(current),
 			"branches": branches,
 			"tags":     tags,
@@ -977,7 +978,7 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"ref":        ref,
 			"commits":    commits,
 			"nextCursor": nextCursor,
@@ -1037,7 +1038,7 @@ func (r *Reporter) replyGitCommitFiles(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"sha":   p.SHA,
 			"files": files,
 		}),
@@ -1075,7 +1076,7 @@ func (r *Reporter) replyGitCommitFileDiff(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"sha":       p.SHA,
 			"path":      p.Path,
 			"isBinary":  isBinary,
@@ -1110,7 +1111,7 @@ func (r *Reporter) replyGitDiff(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"base":       p.Base,
 			"head":       p.Head,
 			"files":      files,
@@ -1148,7 +1149,7 @@ func (r *Reporter) replyGitDiffFileDiff(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"base":      p.Base,
 			"head":      p.Head,
 			"path":      p.Path,
@@ -1176,7 +1177,7 @@ func (r *Reporter) replyGitStatus(conn *websocket.Conn, req envelope) {
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"dirty":       len(staged)+len(unstaged)+len(untracked) > 0,
 			"worktreeRev": hashBytes([]byte(raw)),
 			"staged":      staged,
@@ -1218,7 +1219,7 @@ func (r *Reporter) replyGitWorkingTreeFileDiff(conn *websocket.Conn, req envelop
 		Type:      "response",
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
-		Payload: shared.MustRaw(map[string]any{
+		Payload: rp.MustRaw(map[string]any{
 			"path":      p.Path,
 			"scope":     scope,
 			"isBinary":  isBinary,
@@ -1251,7 +1252,7 @@ func (r *Reporter) projectRoot(projectID string) (string, error) {
 }
 
 func (r *Reporter) setProjectLocked(project ProjectInfo) {
-	publicID := shared.ProjectID(r.cfg.HubID, project.Name)
+	publicID := rp.ProjectID(r.cfg.HubID, project.Name)
 	updated := false
 	for index := range r.projects {
 		if strings.TrimSpace(r.projects[index].Name) != project.Name {
@@ -1582,7 +1583,7 @@ func (r *Reporter) writeError(conn *websocket.Conn, requestID int64, code, messa
 	return r.writeJSON(conn, "->", envelope{
 		RequestID: requestID,
 		Type:      "error",
-		Payload: shared.MustRaw(errorPayload{
+		Payload: rp.MustRaw(errorPayload{
 			Code:    code,
 			Message: message,
 		}),
