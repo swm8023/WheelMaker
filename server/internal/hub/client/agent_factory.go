@@ -5,15 +5,19 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/swm8023/wheelmaker/internal/hub/acp"
 	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 )
 
-// AgentFactoryV2 creates AgentInstance objects and declares connection sharing policy.
+// SessionCallbacks is the callback contract that Session provides to agentv2 runtime.
+type SessionCallbacks interface {
+	agentv2.Callbacks
+}
+
+// AgentFactoryV2 creates runtime instances and declares connection sharing policy.
 type AgentFactoryV2 interface {
 	Name() string
 	SupportsSharedConn() bool
-	CreateInstance(ctx context.Context, callbacks SessionCallbacks, debugLog io.Writer) (*AgentInstance, error)
+	CreateInstance(ctx context.Context, callbacks SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error)
 }
 
 // providerAgentFactory creates agent instances from agentv2 providers.
@@ -25,20 +29,19 @@ func (f *providerAgentFactory) Name() string { return f.provider.Name() }
 
 func (f *providerAgentFactory) SupportsSharedConn() bool { return false }
 
-func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
+func (f *providerAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error) {
 	exe, args, env, err := f.provider.LaunchSpec()
 	if err != nil {
 		return nil, err
 	}
-	raw := acp.NewConn(exe, env, args...)
+	raw := agentv2.NewProcessConn(exe, env, args...)
 	if debugLog != nil {
 		raw.SetDebugLogger(debugLog)
 	}
 	if err := raw.Start(); err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
-	runtime := agentv2.NewInstance(f.provider.Name(), wrapACPConn(raw), cb)
-	return &AgentInstance{name: f.provider.Name(), runtime: runtime, callbacks: cb}, nil
+	return agentv2.NewInstance(f.provider.Name(), raw, cb), nil
 }
 
 // NewProviderFactory adapts an agentv2.Provider to client.AgentFactoryV2.
@@ -56,7 +59,7 @@ type legacyAgentFactory struct {
 func (f *legacyAgentFactory) Name() string             { return f.name }
 func (f *legacyAgentFactory) SupportsSharedConn() bool { return false }
 
-func (f *legacyAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
+func (f *legacyAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error) {
 	a := f.fn("", nil)
 	conn, err := a.Connect(ctx)
 	if err != nil {
@@ -65,8 +68,7 @@ func (f *legacyAgentFactory) CreateInstance(ctx context.Context, cb SessionCallb
 	if debugLog != nil {
 		conn.SetDebugLogger(debugLog)
 	}
-	runtime := agentv2.NewInstance(f.name, wrapACPConn(conn), cb)
-	return &AgentInstance{name: f.name, runtime: runtime, callbacks: cb}, nil
+	return agentv2.NewInstance(f.name, wrapACPConn(conn), cb), nil
 }
 
 // sharedAgentFactory keeps API compatibility; runtime currently uses one instance per conn.
@@ -78,7 +80,7 @@ type sharedAgentFactory struct {
 func (f *sharedAgentFactory) Name() string             { return f.name }
 func (f *sharedAgentFactory) SupportsSharedConn() bool { return true }
 
-func (f *sharedAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (*AgentInstance, error) {
+func (f *sharedAgentFactory) CreateInstance(ctx context.Context, cb SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error) {
 	legacy := &legacyAgentFactory{name: f.name, fn: f.fn}
 	return legacy.CreateInstance(ctx, cb, debugLog)
 }

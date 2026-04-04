@@ -34,14 +34,8 @@ func (c *Client) InjectForwarder(conn *acp.Conn, sessionID string) {
 	c.mu.Unlock()
 
 	runtime := agentv2.NewInstance(name, wrapACPConn(conn), sess)
-	inst := &AgentInstance{
-		name:      name,
-		runtime:   runtime,
-		callbacks: sess,
-	}
-
 	sess.mu.Lock()
-	sess.instance = inst
+	sess.instance = runtime
 	sess.acpSessionID = sessionID
 	sess.ready = true
 	sess.mu.Unlock()

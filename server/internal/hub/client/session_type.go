@@ -8,6 +8,7 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 )
 
@@ -40,9 +41,9 @@ type Session struct {
 	ID     string
 	Status SessionStatus
 
-	// instance is the AgentInstance bound to this Session.
+	// instance is the agentv2 runtime bound to this Session.
 	// Created lazily by ensureInstance(). Nil means no agent connected yet.
-	instance *AgentInstance
+	instance agentv2.Instance
 
 	// Per-agent state indexed by agent name.
 	agents map[string]*SessionAgentState
@@ -111,7 +112,7 @@ func (s *Session) reply(text string) {
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the
-// AgentInstance if not already running. Connect is executed outside s.mu.
+// runtime instance if not already running. Connect is executed outside s.mu.
 func (s *Session) ensureInstance(ctx context.Context) error {
 	s.mu.Lock()
 	if s.instance != nil {
