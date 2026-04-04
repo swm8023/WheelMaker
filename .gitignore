@@ -25,3 +25,6 @@ debug.log
 
 # RLCR loop state (humanize plugin)
 .humanize*
+
+# Local git worktrees
+.worktrees/
