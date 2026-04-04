@@ -22,6 +22,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/hub/im/console"
 	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
@@ -299,18 +300,18 @@ func (h *Hub) collectProjectInfo(cfgProject shared.ProjectConfig) ProjectInfo {
 	return info
 }
 
-func collectGitState(projectPath string) shared.ProjectGitState {
+func collectGitState(projectPath string) rp.ProjectGitState {
 	branch, branchErr := runGitLocal(projectPath, "rev-parse", "--abbrev-ref", "HEAD")
 	headSHA, shaErr := runGitLocal(projectPath, "rev-parse", "HEAD")
 	statusRaw, statusErr := runGitLocal(projectPath, "status", "--porcelain")
 	if branchErr != nil || shaErr != nil || statusErr != nil {
-		return shared.ProjectGitState{}
+		return rp.ProjectGitState{}
 	}
 	normalizedStatus := normalizeGitStatus(statusRaw)
 	dirty := strings.TrimSpace(normalizedStatus) != ""
 	gitRev := hubHashLines(strings.TrimSpace(branch), strings.TrimSpace(headSHA), boolString(dirty))
 	worktreeRev := hubHashBytes([]byte(normalizedStatus))
-	return shared.ProjectGitState{
+	return rp.ProjectGitState{
 		Branch:      strings.TrimSpace(branch),
 		HeadSHA:     strings.TrimSpace(headSHA),
 		Dirty:       dirty,

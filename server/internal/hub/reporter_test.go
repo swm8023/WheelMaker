@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"github.com/swm8023/wheelmaker/internal/registry"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 type testEnvelope struct {
@@ -54,7 +54,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		}
 	}()
 
-	waitForProjectOnline(t, ts, shared.ProjectID("hub-test", "proj1"), "")
+	waitForProjectOnline(t, ts, rp.ProjectID("hub-test", "proj1"), "")
 
 	app := dialWS(t, "http://"+ts+"/ws")
 	defer app.Close()
@@ -64,7 +64,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		RequestID: 2,
 		Type:      "request",
 		Method:    "fs.list",
-		ProjectID: shared.ProjectID("hub-test", "proj1"),
+		ProjectID: rp.ProjectID("hub-test", "proj1"),
 		Payload:   map[string]any{"path": ".", "limit": 50},
 	})
 	listResp := mustReadEnvelope(t, app)
@@ -76,7 +76,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		RequestID: 3,
 		Type:      "request",
 		Method:    "fs.read",
-		ProjectID: shared.ProjectID("hub-test", "proj1"),
+		ProjectID: rp.ProjectID("hub-test", "proj1"),
 		Payload:   map[string]any{"path": "hello.txt", "offset": 0, "limit": 1024},
 	})
 	readResp := mustReadEnvelope(t, app)
@@ -126,7 +126,7 @@ func TestReporterAuth(t *testing.T) {
 	go func() { done <- r.Run(ctx) }()
 	defer func() { cancel(); <-done }()
 
-	waitForProjectOnline(t, ts, shared.ProjectID("hub-auth", "server"), "token-1")
+	waitForProjectOnline(t, ts, rp.ProjectID("hub-auth", "server"), "token-1")
 }
 
 func TestReporterUpdateProjectRefreshesRegistrySnapshot(t *testing.T) {
@@ -139,7 +139,7 @@ func TestReporterUpdateProjectRefreshesRegistrySnapshot(t *testing.T) {
 		Server:            ts,
 		HubID:             "hub-update",
 		ReconnectInterval: 50 * time.Millisecond,
-	}, []ProjectInfo{{Name: "proj1", Path: root, Online: true, ProjectRev: "p1", Git: shared.ProjectGitState{GitRev: "g1", WorktreeRev: "w1"}}})
+	}, []ProjectInfo{{Name: "proj1", Path: root, Online: true, ProjectRev: "p1", Git: rp.ProjectGitState{GitRev: "g1", WorktreeRev: "w1"}}})
 
 	done := make(chan error, 1)
 	go func() { done <- r.Run(ctx) }()
@@ -152,14 +152,14 @@ func TestReporterUpdateProjectRefreshesRegistrySnapshot(t *testing.T) {
 		}
 	}()
 
-	waitForProjectOnline(t, ts, shared.ProjectID("hub-update", "proj1"), "")
+	waitForProjectOnline(t, ts, rp.ProjectID("hub-update", "proj1"), "")
 
 	if err := r.UpdateProject(ProjectInfo{
 		Name:       "proj1",
 		Path:       root,
 		Online:     true,
 		ProjectRev: "p2",
-		Git: shared.ProjectGitState{
+		Git: rp.ProjectGitState{
 			GitRev:      "g2",
 			WorktreeRev: "w2",
 			Dirty:       true,
@@ -225,7 +225,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		}
 	}()
 
-	waitForProjectOnline(t, ts, shared.ProjectID("hub-hash", "proj1"), "")
+	waitForProjectOnline(t, ts, rp.ProjectID("hub-hash", "proj1"), "")
 
 	app := dialWS(t, "http://"+ts+"/ws")
 	defer app.Close()
@@ -235,7 +235,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		RequestID: 2,
 		Type:      "request",
 		Method:    "fs.list",
-		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		ProjectID: rp.ProjectID("hub-hash", "proj1"),
 		Payload:   map[string]any{"path": "."},
 	})
 	listResp := mustReadEnvelope(t, app)
@@ -248,7 +248,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		RequestID: 3,
 		Type:      "request",
 		Method:    "fs.list",
-		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		ProjectID: rp.ProjectID("hub-hash", "proj1"),
 		Payload:   map[string]any{"path": ".", "knownHash": listHash},
 	})
 	listCached := mustReadEnvelope(t, app)
@@ -260,7 +260,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		RequestID: 4,
 		Type:      "request",
 		Method:    "fs.read",
-		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		ProjectID: rp.ProjectID("hub-hash", "proj1"),
 		Payload:   map[string]any{"path": "hello.txt", "offset": 1, "count": 20},
 	})
 	readResp := mustReadEnvelope(t, app)
@@ -273,7 +273,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		RequestID: 5,
 		Type:      "request",
 		Method:    "fs.read",
-		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		ProjectID: rp.ProjectID("hub-hash", "proj1"),
 		Payload:   map[string]any{"path": "hello.txt", "knownHash": readHash, "offset": 1, "count": 20},
 	})
 	readCached := mustReadEnvelope(t, app)
@@ -285,7 +285,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		RequestID: 6,
 		Type:      "request",
 		Method:    "git.status",
-		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		ProjectID: rp.ProjectID("hub-hash", "proj1"),
 		Payload:   map[string]any{},
 	})
 	statusResp := mustReadEnvelope(t, app)
@@ -301,7 +301,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		RequestID: 7,
 		Type:      "request",
 		Method:    "git.workingTree.fileDiff",
-		ProjectID: shared.ProjectID("hub-hash", "proj1"),
+		ProjectID: rp.ProjectID("hub-hash", "proj1"),
 		Payload:   map[string]any{"path": "hello.txt", "scope": "unstaged", "contextLines": 2},
 	})
 	diffResp := mustReadEnvelope(t, app)
