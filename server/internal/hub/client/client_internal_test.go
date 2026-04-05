@@ -7,10 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -23,13 +21,15 @@ import (
 // Export helpers (used by package client_test via export_test.go convention)
 // ---------------------------------------------------------------------------
 
-// InjectForwarder keeps compatibility with existing tests: it now injects a ready
-// ACP connection-backed runtime instance (no legacy Forwarder layer).
-func (c *Client) InjectForwarder(conn *acp.Conn, sessionID string) {
+// InjectForwarder injects a ready test instance with prompt/cancel callbacks.
+func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.Update, error), cancelFn func() error) {
 	sess := c.activeSession
 	c.mu.Lock()
-	name := defaultAgentName
-	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" {
+	name := strings.TrimSpace(agentName)
+	if name == "" {
+		name = defaultAgentName
+	}
+	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" && strings.TrimSpace(agentName) == "" {
 		name = c.state.ActiveAgent
 	}
 	if c.state == nil {
@@ -38,7 +38,13 @@ func (c *Client) InjectForwarder(conn *acp.Conn, sessionID string) {
 	}
 	c.mu.Unlock()
 
-	runtime := agentv2.NewInstance(name, wrapTestACPConn(conn), sess)
+	runtime := &testInjectedInstance{
+		name:      name,
+		sessionID: sessionID,
+		callbacks: sess,
+		promptFn:  promptFn,
+		cancelFn:  cancelFn,
+	}
 	sess.mu.Lock()
 	sess.instance = runtime
 	sess.acpSessionID = sessionID
@@ -46,88 +52,119 @@ func (c *Client) InjectForwarder(conn *acp.Conn, sessionID string) {
 	sess.mu.Unlock()
 }
 
-type testACPTransportConn struct {
-	raw *acp.Conn
-
-	mu          sync.RWMutex
-	reqHandler  agentv2.ACPRequestHandler
-	respHandler agentv2.ACPResponseHandler
+type testInjectedInstance struct {
+	name      string
+	sessionID string
+	callbacks SessionCallbacks
+	promptFn  func(context.Context, string) (<-chan acp.Update, error)
+	cancelFn  func() error
 }
 
-func wrapTestACPConn(raw *acp.Conn) agentv2.Conn {
-	return &testACPTransportConn{raw: raw}
+var _ agentv2.Instance = (*testInjectedInstance)(nil)
+
+func (i *testInjectedInstance) Name() string { return i.name }
+
+func (i *testInjectedInstance) HandleACPRequest(context.Context, string, json.RawMessage) (any, error) {
+	return nil, errors.New("not implemented in test injected instance")
 }
 
-func (c *testACPTransportConn) Send(ctx context.Context, method string, params any, result any) error {
-	if c == nil || c.raw == nil {
-		return errors.New("test acp transport: nil conn")
+func (i *testInjectedInstance) HandleACPResponse(context.Context, string, json.RawMessage) {}
+
+func (i *testInjectedInstance) Initialize(context.Context, acp.InitializeParams) (acp.InitializeResult, error) {
+	return acp.InitializeResult{
+		ProtocolVersion: "0.1",
+		AgentCapabilities: acp.AgentCapabilities{
+			LoadSession: false,
+		},
+		AgentInfo: &acp.AgentInfo{Name: "test-injected-agent"},
+	}, nil
+}
+
+func (i *testInjectedInstance) SessionNew(context.Context, acp.SessionNewParams) (acp.SessionNewResult, error) {
+	sid := strings.TrimSpace(i.sessionID)
+	if sid == "" {
+		sid = "sess-1"
 	}
-	return c.raw.SendAgent(ctx, method, params, result)
+	return acp.SessionNewResult{SessionID: sid}, nil
 }
 
-func (c *testACPTransportConn) Notify(method string, params any) error {
-	if c == nil || c.raw == nil {
-		return errors.New("test acp transport: nil conn")
-	}
-	return c.raw.NotifyAgent(method, params)
+func (i *testInjectedInstance) SessionLoad(context.Context, acp.SessionLoadParams) (acp.SessionLoadResult, error) {
+	return acp.SessionLoadResult{}, nil
 }
 
-func (c *testACPTransportConn) OnACPRequest(h agentv2.ACPRequestHandler) {
-	if c == nil || c.raw == nil {
-		return
-	}
-	c.mu.Lock()
-	c.reqHandler = h
-	c.mu.Unlock()
-	c.bindRawHandler()
+func (i *testInjectedInstance) SessionList(context.Context, acp.SessionListParams) (acp.SessionListResult, error) {
+	return acp.SessionListResult{}, nil
 }
 
-func (c *testACPTransportConn) OnACPResponse(h agentv2.ACPResponseHandler) {
-	if c == nil || c.raw == nil {
-		return
+func (i *testInjectedInstance) SessionPrompt(ctx context.Context, p acp.SessionPromptParams) (acp.SessionPromptResult, error) {
+	if i.promptFn == nil {
+		return acp.SessionPromptResult{StopReason: "end_turn"}, nil
 	}
-	c.mu.Lock()
-	c.respHandler = h
-	c.mu.Unlock()
-	c.bindRawHandler()
-}
-
-func (c *testACPTransportConn) bindRawHandler() {
-	c.mu.RLock()
-	req := c.reqHandler
-	resp := c.respHandler
-	c.mu.RUnlock()
-
-	if req == nil && resp == nil {
-		c.raw.OnRequest(nil)
-		return
+	text := ""
+	for _, b := range p.Prompt {
+		if b.Type == "text" {
+			text = b.Text
+			break
+		}
 	}
-
-	c.raw.OnRequest(func(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
-		c.mu.RLock()
-		currentReq := c.reqHandler
-		currentResp := c.respHandler
-		c.mu.RUnlock()
-
-		if noResponse {
-			if currentResp != nil {
-				currentResp(ctx, method, params)
+	updates, err := i.promptFn(ctx, text)
+	if err != nil {
+		return acp.SessionPromptResult{}, err
+	}
+	stopReason := "end_turn"
+	for u := range updates {
+		if u.Err != nil {
+			return acp.SessionPromptResult{}, u.Err
+		}
+		if u.Done {
+			if strings.TrimSpace(u.Content) != "" {
+				stopReason = strings.TrimSpace(u.Content)
 			}
-			return nil, nil
+			break
 		}
-
-		if currentReq == nil {
-			return nil, fmt.Errorf("no ACP request handler for method: %s", method)
-		}
-		return currentReq(ctx, method, params)
-	})
+		i.emitUpdate(p.SessionID, u)
+	}
+	return acp.SessionPromptResult{StopReason: stopReason}, nil
 }
 
-func (c *testACPTransportConn) Close() error {
-	if c == nil || c.raw == nil {
-		return nil
+func (i *testInjectedInstance) SessionCancel(_ string) error {
+	if i.cancelFn != nil {
+		return i.cancelFn()
 	}
-	return c.raw.Close()
+	return nil
+}
+
+func (i *testInjectedInstance) SessionSetConfigOption(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+	return []acp.ConfigOption{
+		{
+			ID:           p.ConfigID,
+			CurrentValue: p.Value,
+		},
+	}, nil
+}
+
+func (i *testInjectedInstance) Close() error { return nil }
+
+func (i *testInjectedInstance) emitUpdate(sessionID string, u acp.Update) {
+	if i.callbacks == nil {
+		return
+	}
+	update := acp.SessionUpdate{}
+	switch u.Type {
+	case acp.UpdateText:
+		content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: u.Content})
+		update = acp.SessionUpdate{SessionUpdate: "agent_message_chunk", Content: content}
+	case acp.UpdateThought:
+		content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: u.Content})
+		update = acp.SessionUpdate{SessionUpdate: "agent_thought_chunk", Content: content}
+	case acp.UpdateToolCall, acp.UpdateConfigOption, acp.UpdateAvailableCommands, acp.UpdateSessionInfo, acp.UpdatePlan, acp.UpdateModeChange:
+		if len(u.Raw) == 0 || json.Unmarshal(u.Raw, &update) != nil {
+			return
+		}
+	default:
+		return
+	}
+	i.callbacks.SessionUpdate(acp.SessionUpdateParams{SessionID: sessionID, Update: update})
 }
 
 // InjectState replaces the persisted state.
