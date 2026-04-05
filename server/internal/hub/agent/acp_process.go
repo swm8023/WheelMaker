@@ -1,4 +1,4 @@
-package agentv2
+package agent
 
 import (
 	"bufio"
@@ -53,14 +53,14 @@ func (p *ACPProcess) Start() error {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("agentv2 acp process: stdin pipe: %w", err)
+		return fmt.Errorf("agent acp process: stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("agentv2 acp process: stdout pipe: %w", err)
+		return fmt.Errorf("agent acp process: stdout pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("agentv2 acp process: start process: %w", err)
+		return fmt.Errorf("agent acp process: start process: %w", err)
 	}
 
 	p.cmd = cmd
@@ -76,10 +76,10 @@ func (p *ACPProcess) SendMessage(v any) error {
 	p.encMu.Lock()
 	defer p.encMu.Unlock()
 	if p.enc == nil {
-		return fmt.Errorf("agentv2 acp process: encoder is not ready")
+		return fmt.Errorf("agent acp process: encoder is not ready")
 	}
 	if err := p.enc.Encode(v); err != nil {
-		return fmt.Errorf("agentv2 acp process: encode message: %w", err)
+		return fmt.Errorf("agent acp process: encode message: %w", err)
 	}
 	return nil
 }

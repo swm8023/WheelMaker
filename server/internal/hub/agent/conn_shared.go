@@ -1,4 +1,4 @@
-package agentv2
+package agent
 
 import (
 	"context"
@@ -40,13 +40,13 @@ func NewSharedConnPool(connect func() (Conn, error)) *SharedConnPool {
 
 func (p *SharedConnPool) Open() (Conn, error) {
 	if p == nil {
-		return nil, errors.New("agentv2 shared conn pool: nil pool")
+		return nil, errors.New("agent shared conn pool: nil pool")
 	}
 	if p.connect == nil {
-		return nil, errors.New("agentv2 shared conn pool: connect func is nil")
+		return nil, errors.New("agent shared conn pool: connect func is nil")
 	}
 	if p.closed.Load() {
-		return nil, errors.New("agentv2 shared conn pool: pool is closed")
+		return nil, errors.New("agent shared conn pool: pool is closed")
 	}
 
 	routeKey := fmt.Sprintf("route-%d", p.routeSeq.Add(1))
@@ -55,7 +55,7 @@ func (p *SharedConnPool) Open() (Conn, error) {
 	defer p.mu.Unlock()
 
 	if p.closed.Load() {
-		return nil, errors.New("agentv2 shared conn pool: pool is closed")
+		return nil, errors.New("agent shared conn pool: pool is closed")
 	}
 	if p.sharedRaw == nil {
 		raw, err := p.connect()
@@ -110,7 +110,7 @@ func (p *SharedConnPool) Close() error {
 func (p *SharedConnPool) dispatchInboundRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	target := p.resolveRoute(params)
 	if target == nil {
-		return nil, fmt.Errorf("agentv2 shared conn: no route for inbound method %q", method)
+		return nil, fmt.Errorf("agent shared conn: no route for inbound method %q", method)
 	}
 	return target.invokeInboundRequest(ctx, method, params)
 }
@@ -254,10 +254,10 @@ func (c *sharedConn) rawConn() (Conn, error) {
 	raw := c.raw
 	c.mu.RUnlock()
 	if closed {
-		return nil, errors.New("agentv2 shared conn: route is closed")
+		return nil, errors.New("agent shared conn: route is closed")
 	}
 	if raw == nil {
-		return nil, errors.New("agentv2 shared conn: raw conn is nil")
+		return nil, errors.New("agent shared conn: raw conn is nil")
 	}
 	return raw, nil
 }
@@ -269,10 +269,10 @@ func (c *sharedConn) invokeInboundRequest(ctx context.Context, method string, pa
 	c.mu.RUnlock()
 
 	if closed {
-		return nil, errors.New("agentv2 shared conn: route is closed")
+		return nil, errors.New("agent shared conn: route is closed")
 	}
 	if h == nil {
-		return nil, fmt.Errorf("agentv2 shared conn: no request handler for route %s", c.routeKey)
+		return nil, fmt.Errorf("agent shared conn: no request handler for route %s", c.routeKey)
 	}
 	return h(ctx, method, params)
 }

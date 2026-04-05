@@ -5,51 +5,51 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 )
 
-// SessionCallbacks is the callback contract that Session provides to agentv2 runtime.
+// SessionCallbacks is the callback contract that Session provides to agent runtime.
 type SessionCallbacks interface {
-	agentv2.Callbacks
+	agent.Callbacks
 }
 
-// AgentFactoryV2 creates runtime instances and declares connection sharing policy.
-type AgentFactoryV2 interface {
+// AgentFactory creates runtime instances and declares connection sharing policy.
+type AgentFactory interface {
 	Name() string
 	SupportsSharedConn() bool
-	CreateInstance(ctx context.Context, callbacks SessionCallbacks, debugLog io.Writer) (agentv2.Instance, error)
+	CreateInstance(ctx context.Context, callbacks SessionCallbacks, debugLog io.Writer) (agent.Instance, error)
 }
 
-// acpProviderAgentFactory creates agent instances from agentv2 ACP providers.
+// acpProviderAgentFactory creates agent instances from agent ACP providers.
 type acpProviderAgentFactory struct {
-	provider agentv2.ACPProvider
+	provider agent.ACPProvider
 }
 
 func (f *acpProviderAgentFactory) Name() string { return f.provider.Name() }
 
 func (f *acpProviderAgentFactory) SupportsSharedConn() bool { return false }
 
-func (f *acpProviderAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
+func (f *acpProviderAgentFactory) CreateInstance(_ context.Context, cb SessionCallbacks, _ io.Writer) (agent.Instance, error) {
 	conn, err := newOwnedProviderConn(f.provider)
 	if err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
-	return agentv2.NewInstance(f.provider.Name(), conn, cb), nil
+	return agent.NewInstance(f.provider.Name(), conn, cb), nil
 }
 
-// NewACPProviderFactory adapts an agentv2.ACPProvider to client.AgentFactoryV2.
-func NewACPProviderFactory(provider agentv2.ACPProvider) AgentFactoryV2 {
+// NewACPProviderFactory adapts an agent.ACPProvider to client.AgentFactory.
+func NewACPProviderFactory(provider agent.ACPProvider) AgentFactory {
 	return &acpProviderAgentFactory{provider: provider}
 }
 
-func newOwnedProviderConn(provider agentv2.ACPProvider) (agentv2.Conn, error) {
+func newOwnedProviderConn(provider agent.ACPProvider) (agent.Conn, error) {
 	exe, args, env, err := provider.Launch()
 	if err != nil {
 		return nil, err
 	}
-	raw := agentv2.NewACPProcess(exe, env, args...)
+	raw := agent.NewACPProcess(exe, env, args...)
 	if err := raw.Start(); err != nil {
 		return nil, err
 	}
-	return agentv2.NewOwnedConn(raw), nil
+	return agent.NewOwnedConn(raw), nil
 }

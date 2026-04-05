@@ -22,7 +22,7 @@ Key types in `internal/hub/client/`:
 | Session | session_type.go, session.go | Pure business session: lifecycle, prompt, agent switching |
 | AgentInstance | agent_instance.go | ACP executor bound to one Session (sole ACP interface visible to Session) |
 | AgentConn | agent_conn.go | ACP connection wrapper with ConnOwned/ConnShared modes |
-| AgentFactoryV2 | agent_factory.go | Creates AgentInstance, selects AgentConn policy |
+| AgentFactory | agent_factory.go | Creates AgentInstance, selects AgentConn policy |
 | SessionStore | session_store.go | Persistence interface for session snapshots |
 | SQLiteSessionStore | sqlite_store.go | SQLite-backed SessionStore (modernc.org/sqlite, CGo-free) |
 
@@ -89,3 +89,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps
 - ACP protocol: [../docs/acp-protocol-full.zh-CN.md](../docs/acp-protocol-full.zh-CN.md)
 - Feishu Bot: [../docs/feishu-bot.md](../docs/feishu-bot.md)
 - Remote Observe / Registry: [../docs/registry-server-remote-observe-protocol-v1.md](../docs/registry-server-remote-observe-protocol-v1.md)
+

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -60,7 +60,7 @@ type testInjectedInstance struct {
 	cancelFn  func() error
 }
 
-var _ agentv2.Instance = (*testInjectedInstance)(nil)
+var _ agent.Instance = (*testInjectedInstance)(nil)
 
 func (i *testInjectedInstance) Name() string { return i.name }
 
@@ -320,7 +320,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.RegisterAgentV2("codex", nopFactoryV2{name: "codex"})
+	c.RegisterAgent("codex", nopFactory{name: "codex"})
 	c.activeSession.ready = true
 
 	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
@@ -341,8 +341,8 @@ func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 
 func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.RegisterAgentV2("codex", nopFactoryV2{name: "codex"})
-	c.RegisterAgentV2("claude", nopFactoryV2{name: "claude"})
+	c.RegisterAgent("codex", nopFactory{name: "codex"})
+	c.RegisterAgent("claude", nopFactory{name: "claude"})
 	c.activeSession.ready = true
 	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
@@ -433,15 +433,15 @@ func TestCanonicalIMBlockType(t *testing.T) {
 	}
 }
 
-type nopFactoryV2 struct {
+type nopFactory struct {
 	name string
 }
 
-func (f nopFactoryV2) Name() string { return f.name }
+func (f nopFactory) Name() string { return f.name }
 
-func (f nopFactoryV2) SupportsSharedConn() bool { return false }
+func (f nopFactory) SupportsSharedConn() bool { return false }
 
-func (f nopFactoryV2) CreateInstance(context.Context, SessionCallbacks, io.Writer) (agentv2.Instance, error) {
+func (f nopFactory) CreateInstance(context.Context, SessionCallbacks, io.Writer) (agent.Instance, error) {
 	return nil, errors.New("test-only factory")
 }
 

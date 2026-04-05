@@ -15,34 +15,34 @@ import (
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// agentRegistry maps agent names to AgentFactoryV2 implementations.
+// agentRegistry maps agent names to AgentFactory implementations.
 // It carries its own mutex so Client.mu need not protect registration.
 type agentRegistry struct {
-	mu     sync.Mutex
-	v2facs map[string]AgentFactoryV2
+	mu   sync.Mutex
+	facs map[string]AgentFactory
 }
 
 func newAgentRegistry() *agentRegistry {
-	return &agentRegistry{v2facs: make(map[string]AgentFactoryV2)}
+	return &agentRegistry{facs: make(map[string]AgentFactory)}
 }
 
-func (r *agentRegistry) registerV2(name string, f AgentFactoryV2) {
+func (r *agentRegistry) register(name string, f AgentFactory) {
 	r.mu.Lock()
-	r.v2facs[name] = f
+	r.facs[name] = f
 	r.mu.Unlock()
 }
 
-func (r *agentRegistry) getV2(name string) AgentFactoryV2 {
+func (r *agentRegistry) get(name string) AgentFactory {
 	r.mu.Lock()
-	f := r.v2facs[name]
+	f := r.facs[name]
 	r.mu.Unlock()
 	return f
 }
 
 func (r *agentRegistry) names() []string {
 	r.mu.Lock()
-	ns := make([]string, 0, len(r.v2facs))
-	for n := range r.v2facs {
+	ns := make([]string, 0, len(r.facs))
+	for n := range r.facs {
 		ns = append(ns, n)
 	}
 	r.mu.Unlock()
@@ -200,10 +200,10 @@ func (c *Client) SetSessionStore(ss SessionStore) {
 	c.mu.Unlock()
 }
 
-// RegisterAgentV2 registers an AgentFactoryV2 under the given name.
+// RegisterAgent registers an AgentFactory under the given name.
 // Use this for agents that support shared connections.
-func (c *Client) RegisterAgentV2(name string, factory AgentFactoryV2) {
-	c.registry.registerV2(name, factory)
+func (c *Client) RegisterAgent(name string, factory AgentFactory) {
+	c.registry.register(name, factory)
 }
 
 // Start loads persisted state and registers the IM message callback.

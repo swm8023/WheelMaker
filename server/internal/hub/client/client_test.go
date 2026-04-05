@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
@@ -130,38 +130,38 @@ func newTestClient(mock *mockSession) *client.Client {
 	return c
 }
 
-type testFactoryV2 struct {
+type testFactory struct {
 	name      string
 	env       []string
 	createErr error
 }
 
-func (f testFactoryV2) Name() string { return f.name }
+func (f testFactory) Name() string { return f.name }
 
-func (f testFactoryV2) SupportsSharedConn() bool { return false }
+func (f testFactory) SupportsSharedConn() bool { return false }
 
-func (f testFactoryV2) CreateInstance(_ context.Context, cb client.SessionCallbacks, _ io.Writer) (agentv2.Instance, error) {
+func (f testFactory) CreateInstance(_ context.Context, cb client.SessionCallbacks, _ io.Writer) (agent.Instance, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
 	env := append([]string{"GO_CLIENT_ACP_MOCK=1"}, f.env...)
-	raw := agentv2.NewACPProcess(os.Args[0], env)
+	raw := agent.NewACPProcess(os.Args[0], env)
 	if err := raw.Start(); err != nil {
 		return nil, err
 	}
-	return agentv2.NewInstance(f.name, agentv2.NewOwnedConn(raw), cb), nil
+	return agent.NewInstance(f.name, agent.NewOwnedConn(raw), cb), nil
 }
 
 func registerMockAgent(c *client.Client, name string) {
-	c.RegisterAgentV2(name, testFactoryV2{name: name})
+	c.RegisterAgent(name, testFactory{name: name})
 }
 
 func registerContextRejectAgent(c *client.Client, name string) {
-	c.RegisterAgentV2(name, testFactoryV2{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
+	c.RegisterAgent(name, testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
 }
 
 func registerFailingAgent(c *client.Client, name string) {
-	c.RegisterAgentV2(name, testFactoryV2{name: name, createErr: fmt.Errorf("mock: binary not found")})
+	c.RegisterAgent(name, testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")})
 }
 
 // captureReplies redirects Client replies to a string slice for inspection.
@@ -1069,7 +1069,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 
 // TestClient_Close_PersistsSessionID verifies that Close() saves the current
 // agent session ID to the store, satisfying AC-5.
-// Uses Start() to create a real agentv2 instance so the session is initialized.
+// Uses Start() to create a real agent instance so the session is initialized.
 func TestClient_Close_PersistsSessionID(t *testing.T) {
 	store := &mockStore{state: &client.ProjectState{
 		ActiveAgent: "codex",

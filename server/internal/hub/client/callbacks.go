@@ -3,15 +3,15 @@ package client
 import (
 	"context"
 
-	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-// compile-time check: Client implements agentv2.Callbacks (delegates to Session).
-var _ agentv2.Callbacks = (*Client)(nil)
+// compile-time check: Client implements agent.Callbacks (delegates to Session).
+var _ agent.Callbacks = (*Client)(nil)
 
-// compile-time check: Session implements agentv2.Callbacks.
-var _ agentv2.Callbacks = (*Session)(nil)
+// compile-time check: Session implements agent.Callbacks.
+var _ agent.Callbacks = (*Session)(nil)
 
 // --- Client delegates to activeSession ---
 

@@ -1,4 +1,4 @@
-package agentv2
+package agent
 
 import (
 	"fmt"
@@ -145,7 +145,7 @@ func ResolveACPBinary(name, configuredPath string) (string, error) {
 		if exists(configuredPath) {
 			abs, err := filepath.Abs(configuredPath)
 			if err != nil {
-				return "", fmt.Errorf("agentv2: abs path %q: %w", configuredPath, err)
+				return "", fmt.Errorf("agent: abs path %q: %w", configuredPath, err)
 			}
 			return abs, nil
 		}
@@ -176,7 +176,7 @@ func ResolveACPBinary(name, configuredPath string) (string, error) {
 	}
 
 	return "", fmt.Errorf(
-		"agentv2: %q not found (tried configured path, PATH, and bin/%s/); install with npm: npm install -g @zed-industries/%s",
+		"agent: %q not found (tried configured path, PATH, and bin/%s/); install with npm: npm install -g @zed-industries/%s",
 		name, platformDir(), name,
 	)
 }

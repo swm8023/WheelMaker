@@ -1,4 +1,4 @@
-package agentv2
+package agent
 
 import (
 	"context"
@@ -76,7 +76,7 @@ func (c *ownedConn) Send(ctx context.Context, method string, params any, result 
 	}
 	if err := transport.SendMessage(req); err != nil {
 		c.removePending(id)
-		return fmt.Errorf("agentv2 owned conn: send request: %w", err)
+		return fmt.Errorf("agent owned conn: send request: %w", err)
 	}
 
 	select {
@@ -85,17 +85,17 @@ func (c *ownedConn) Send(ctx context.Context, method string, params any, result 
 		return ctx.Err()
 	case <-c.connCtx.Done():
 		c.removePending(id)
-		return errors.New("agentv2 owned conn: conn is closed")
+		return errors.New("agent owned conn: conn is closed")
 	case <-transport.Done():
 		c.removePending(id)
-		return errors.New("agentv2 owned conn: process exited")
+		return errors.New("agent owned conn: process exited")
 	case resp := <-ch:
 		if resp.Error != nil {
 			return resp.Error
 		}
 		if result != nil && len(resp.Result) > 0 {
 			if err := json.Unmarshal(resp.Result, result); err != nil {
-				return fmt.Errorf("agentv2 owned conn: unmarshal result: %w", err)
+				return fmt.Errorf("agent owned conn: unmarshal result: %w", err)
 			}
 		}
 		return nil
@@ -114,7 +114,7 @@ func (c *ownedConn) Notify(method string, params any) error {
 		Params:  params,
 	}
 	if err := transport.SendMessage(n); err != nil {
-		return fmt.Errorf("agentv2 owned conn: send notification: %w", err)
+		return fmt.Errorf("agent owned conn: send notification: %w", err)
 	}
 	return nil
 }
@@ -164,10 +164,10 @@ func (c *ownedConn) ensureOpen() (ownedTransport, error) {
 	c.mu.RUnlock()
 
 	if closed {
-		return nil, errors.New("agentv2 owned conn: conn is closed")
+		return nil, errors.New("agent owned conn: conn is closed")
 	}
 	if transport == nil {
-		return nil, errors.New("agentv2 owned conn: transport is nil")
+		return nil, errors.New("agent owned conn: transport is nil")
 	}
 	return transport, nil
 }

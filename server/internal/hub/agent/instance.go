@@ -1,4 +1,4 @@
-package agentv2
+package agent
 
 import (
 	"context"
@@ -48,7 +48,7 @@ type instance struct {
 
 var _ Instance = (*instance)(nil)
 
-// NewInstance creates an agentv2 instance and wires conn inbound routing.
+// NewInstance creates an agent instance and wires conn inbound routing.
 func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
 	inst := &instance{
 		name:      strings.TrimSpace(name),
@@ -277,7 +277,7 @@ func (i *instance) Close() error {
 
 func (i *instance) ensureConn() error {
 	if i.conn == nil {
-		return errors.New("agentv2 instance: conn is nil")
+		return errors.New("agent instance: conn is nil")
 	}
 	return nil
 }

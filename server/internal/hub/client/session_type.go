@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -41,9 +41,9 @@ type Session struct {
 	ID     string
 	Status SessionStatus
 
-	// instance is the agentv2 runtime bound to this Session.
+	// instance is the agent runtime bound to this Session.
 	// Created lazily by ensureInstance(). Nil means no agent connected yet.
-	instance agentv2.Instance
+	instance agent.Instance
 
 	// Per-agent state indexed by agent name.
 	agents map[string]*SessionAgentState
@@ -134,7 +134,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	fac := s.registry.getV2(name)
+	fac := s.registry.get(name)
 	if fac == nil {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
