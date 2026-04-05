@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 func tempDBPath(t *testing.T) string {

@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 // SessionStatus defines the lifecycle state of a Session.

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/acp"
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 

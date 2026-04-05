@@ -3,8 +3,8 @@ package client
 import (
 	"context"
 
-	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
 	"github.com/swm8023/wheelmaker/internal/hub/agentv2"
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 // compile-time check: Client implements agentv2.Callbacks (delegates to Session).
