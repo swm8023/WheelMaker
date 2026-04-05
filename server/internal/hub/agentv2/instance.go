@@ -15,13 +15,6 @@ import (
 type Callbacks interface {
 	SessionUpdate(params protocol.SessionUpdateParams)
 	SessionRequestPermission(ctx context.Context, params protocol.PermissionRequestParams) (protocol.PermissionResult, error)
-	FSRead(params protocol.FSReadTextFileParams) (protocol.FSReadTextFileResult, error)
-	FSWrite(params protocol.FSWriteTextFileParams) error
-	TerminalCreate(params protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error)
-	TerminalOutput(params protocol.TerminalOutputParams) (protocol.TerminalOutputResult, error)
-	TerminalWaitForExit(params protocol.TerminalWaitForExitParams) (protocol.TerminalWaitForExitResult, error)
-	TerminalKill(params protocol.TerminalKillParams) error
-	TerminalRelease(params protocol.TerminalReleaseParams) error
 }
 
 // Instance is the only ACP-typed runtime interface exposed to Session.
@@ -43,6 +36,7 @@ type instance struct {
 	name      string
 	conn      Conn
 	callbacks Callbacks
+	runtime   *toolRuntime
 
 	mu              sync.RWMutex
 	connReady       bool
@@ -60,6 +54,7 @@ func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
 		name:      strings.TrimSpace(name),
 		conn:      conn,
 		callbacks: callbacks,
+		runtime:   newToolRuntime(),
 		connReady: conn != nil,
 	}
 	if conn != nil {
@@ -220,15 +215,11 @@ func (i *instance) HandleACPResponse(_ context.Context, method string, params js
 }
 
 func (i *instance) HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	if i.callbacks == nil {
-		if method == protocol.MethodRequestPermission {
-			return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
-		}
-		return nil, fmt.Errorf("no callback handler for method: %s", method)
-	}
-
 	switch method {
 	case protocol.MethodRequestPermission:
+		if i.callbacks == nil {
+			return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
+		}
 		var p protocol.PermissionRequestParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
@@ -239,25 +230,28 @@ func (i *instance) HandleACPRequest(ctx context.Context, method string, params j
 		}
 		return protocol.PermissionResponse{Outcome: result}, nil
 	case protocol.MethodFSRead:
-		return callbackCall(method, params, i.callbacks.FSRead)
+		return callbackCall(method, params, i.runtime.FSRead)
 	case protocol.MethodFSWrite:
-		return callbackCallVoid(method, params, i.callbacks.FSWrite)
+		return callbackCallVoid(method, params, i.runtime.FSWrite)
 	case protocol.MethodTerminalCreate:
-		return callbackCall(method, params, i.callbacks.TerminalCreate)
+		return callbackCall(method, params, i.runtime.TerminalCreate)
 	case protocol.MethodTerminalOutput:
-		return callbackCall(method, params, i.callbacks.TerminalOutput)
+		return callbackCall(method, params, i.runtime.TerminalOutput)
 	case protocol.MethodTerminalWaitExit:
-		return callbackCall(method, params, i.callbacks.TerminalWaitForExit)
+		return callbackCall(method, params, i.runtime.TerminalWaitForExit)
 	case protocol.MethodTerminalKill:
-		return callbackCallVoid(method, params, i.callbacks.TerminalKill)
+		return callbackCallVoid(method, params, i.runtime.TerminalKill)
 	case protocol.MethodTerminalRelease:
-		return callbackCallVoid(method, params, i.callbacks.TerminalRelease)
+		return callbackCallVoid(method, params, i.runtime.TerminalRelease)
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
 }
 
 func (i *instance) Close() error {
+	if i.runtime != nil {
+		i.runtime.Close()
+	}
 	if i.conn == nil {
 		return nil
 	}

@@ -1,16 +1,93 @@
-package client
+package agentv2
 
 import (
 	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 
-	"github.com/swm8023/wheelmaker/internal/hub/acp"
+	"github.com/swm8023/wheelmaker/internal/protocol"
 )
+
+type toolRuntime struct {
+	terminals *terminalManager
+}
+
+func newToolRuntime() *toolRuntime {
+	return &toolRuntime{terminals: newTerminalManager()}
+}
+
+func (r *toolRuntime) Close() {
+	if r == nil || r.terminals == nil {
+		return
+	}
+	r.terminals.KillAll()
+}
+
+func (r *toolRuntime) FSRead(params protocol.FSReadTextFileParams) (protocol.FSReadTextFileResult, error) {
+	data, err := os.ReadFile(params.Path)
+	if err != nil {
+		return protocol.FSReadTextFileResult{}, fmt.Errorf("fs/read: %w", err)
+	}
+	content := string(data)
+	if params.Line != nil || params.Limit != nil {
+		lines := strings.Split(content, "\n")
+		start := 0
+		if params.Line != nil {
+			start = *params.Line - 1
+			if start < 0 {
+				start = 0
+			}
+			if start > len(lines) {
+				start = len(lines)
+			}
+		}
+		end := len(lines)
+		if params.Limit != nil {
+			end = start + *params.Limit
+			if end > len(lines) {
+				end = len(lines)
+			}
+		}
+		content = strings.Join(lines[start:end], "\n")
+	}
+	return protocol.FSReadTextFileResult{Content: content}, nil
+}
+
+func (r *toolRuntime) FSWrite(params protocol.FSWriteTextFileParams) error {
+	if err := os.MkdirAll(filepath.Dir(params.Path), 0o755); err != nil {
+		return fmt.Errorf("fs/write: mkdir: %w", err)
+	}
+	if err := os.WriteFile(params.Path, []byte(params.Content), 0o644); err != nil {
+		return fmt.Errorf("fs/write: %w", err)
+	}
+	return nil
+}
+
+func (r *toolRuntime) TerminalCreate(params protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error) {
+	return r.terminals.Create(params)
+}
+
+func (r *toolRuntime) TerminalOutput(params protocol.TerminalOutputParams) (protocol.TerminalOutputResult, error) {
+	return r.terminals.Output(params.TerminalID)
+}
+
+func (r *toolRuntime) TerminalWaitForExit(params protocol.TerminalWaitForExitParams) (protocol.TerminalWaitForExitResult, error) {
+	return r.terminals.WaitForExit(params.TerminalID)
+}
+
+func (r *toolRuntime) TerminalKill(params protocol.TerminalKillParams) error {
+	return r.terminals.Kill(params.TerminalID)
+}
+
+func (r *toolRuntime) TerminalRelease(params protocol.TerminalReleaseParams) error {
+	return r.terminals.Release(params.TerminalID)
+}
 
 // managedTerminal holds a running subprocess created by terminal/create.
 type managedTerminal struct {
@@ -18,9 +95,9 @@ type managedTerminal struct {
 	output   syncOutputBuffer
 	cmd      *exec.Cmd
 	done     chan struct{}
-	exitCode *int    // set when process exits
-	signal   *string // set when process is killed by signal
-	limit    int     // output byte limit; 0 = no limit
+	exitCode *int
+	signal   *string
+	limit    int
 }
 
 // syncOutputBuffer serializes process output writes and snapshot reads.
@@ -52,18 +129,15 @@ type terminalManager struct {
 }
 
 func newTerminalManager() *terminalManager {
-	return &terminalManager{
-		terms: make(map[string]*managedTerminal),
-	}
+	return &terminalManager{terms: make(map[string]*managedTerminal)}
 }
 
 // Create spawns a subprocess and starts buffering its combined stdout+stderr.
-func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.TerminalCreateResult, error) {
+func (tm *terminalManager) Create(params protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error) {
 	command := params.Command
 	args := params.Args
 
 	if runtime.GOOS == "windows" {
-		// Wrap with cmd.exe /C so built-in shell commands work on Windows.
 		args = append([]string{"/C", command}, args...)
 		command = "cmd.exe"
 	}
@@ -74,7 +148,6 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 	}
 	if len(params.Env) > 0 {
 		env := os.Environ()
-		// B5 fix: Env is now []EnvVariable (was map[string]string).
 		for _, e := range params.Env {
 			env = append(env, e.Name+"="+e.Value)
 		}
@@ -86,16 +159,13 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 		limit = *params.OutputByteLimit
 	}
 
-	t := &managedTerminal{
-		done:  make(chan struct{}),
-		limit: limit,
-	}
+	t := &managedTerminal{done: make(chan struct{}), limit: limit}
 	cmd.Stdout = &t.output
 	cmd.Stderr = &t.output
 	t.cmd = cmd
 
 	if err := cmd.Start(); err != nil {
-		return acp.TerminalCreateResult{}, fmt.Errorf("terminal/create: start %q: %w", params.Command, err)
+		return protocol.TerminalCreateResult{}, fmt.Errorf("terminal/create: start %q: %w", params.Command, err)
 	}
 
 	id := fmt.Sprintf("term-%d", tm.counter.Add(1))
@@ -103,7 +173,6 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 	tm.terms[id] = t
 	tm.mu.Unlock()
 
-	// Wait for exit and record result.
 	go func() {
 		err := cmd.Wait()
 		t.mu.Lock()
@@ -123,14 +192,14 @@ func (tm *terminalManager) Create(params acp.TerminalCreateParams) (acp.Terminal
 		close(t.done)
 	}()
 
-	return acp.TerminalCreateResult{TerminalID: id}, nil
+	return protocol.TerminalCreateResult{TerminalID: id}, nil
 }
 
 // Output returns the accumulated buffered output (non-blocking).
-func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, error) {
+func (tm *terminalManager) Output(terminalID string) (protocol.TerminalOutputResult, error) {
 	t := tm.get(terminalID)
 	if t == nil {
-		return acp.TerminalOutputResult{}, fmt.Errorf("terminal/output: unknown terminalId %q", terminalID)
+		return protocol.TerminalOutputResult{}, fmt.Errorf("terminal/output: unknown terminalId %q", terminalID)
 	}
 
 	t.mu.Lock()
@@ -145,25 +214,18 @@ func (tm *terminalManager) Output(terminalID string) (acp.TerminalOutputResult, 
 	sig := t.signal
 	t.mu.Unlock()
 
-	result := acp.TerminalOutputResult{
-		Output:    output,
-		Truncated: truncated,
-	}
-	// B6 fix: exitStatus is an object {exitCode, signal}, not a plain integer.
+	result := protocol.TerminalOutputResult{Output: output, Truncated: truncated}
 	if exitCode != nil || sig != nil {
-		result.ExitStatus = &acp.TerminalExitStatus{
-			ExitCode: exitCode,
-			Signal:   sig,
-		}
+		result.ExitStatus = &protocol.TerminalExitStatus{ExitCode: exitCode, Signal: sig}
 	}
 	return result, nil
 }
 
 // WaitForExit blocks until the subprocess exits and returns its exit info.
-func (tm *terminalManager) WaitForExit(terminalID string) (acp.TerminalWaitForExitResult, error) {
+func (tm *terminalManager) WaitForExit(terminalID string) (protocol.TerminalWaitForExitResult, error) {
 	t := tm.get(terminalID)
 	if t == nil {
-		return acp.TerminalWaitForExitResult{}, fmt.Errorf("terminal/wait_for_exit: unknown terminalId %q", terminalID)
+		return protocol.TerminalWaitForExitResult{}, fmt.Errorf("terminal/wait_for_exit: unknown terminalId %q", terminalID)
 	}
 
 	<-t.done
@@ -173,10 +235,7 @@ func (tm *terminalManager) WaitForExit(terminalID string) (acp.TerminalWaitForEx
 	sig := t.signal
 	t.mu.Unlock()
 
-	return acp.TerminalWaitForExitResult{
-		ExitCode: exitCode,
-		Signal:   sig,
-	}, nil
+	return protocol.TerminalWaitForExitResult{ExitCode: exitCode, Signal: sig}, nil
 }
 
 // Kill sends SIGKILL to the subprocess.
@@ -201,7 +260,6 @@ func (tm *terminalManager) Release(terminalID string) error {
 	if t != nil && t.cmd.Process != nil {
 		select {
 		case <-t.done:
-			// already exited
 		default:
 			_ = t.cmd.Process.Kill()
 		}
@@ -210,7 +268,6 @@ func (tm *terminalManager) Release(terminalID string) error {
 }
 
 // KillAll kills all running terminals and clears the map.
-// Called when cleaning up before replacing the connection.
 func (tm *terminalManager) KillAll() {
 	tm.mu.Lock()
 	terms := make(map[string]*managedTerminal, len(tm.terms))
@@ -227,7 +284,6 @@ func (tm *terminalManager) KillAll() {
 	}
 }
 
-// get looks up a terminal by ID (thread-safe).
 func (tm *terminalManager) get(id string) *managedTerminal {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()

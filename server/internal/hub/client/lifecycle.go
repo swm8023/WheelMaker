@@ -56,9 +56,8 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
 
-	// Replace instance atomically; kill terminals; close old instance.
+	// Replace instance atomically and close old instance.
 	s.mu.Lock()
-	s.terminals.KillAll()
 	s.instance = newInst
 	s.initializing = false
 	s.prompt.updatesCh = nil

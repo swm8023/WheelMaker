@@ -557,7 +557,6 @@ func (s *Session) Suspend(ctx context.Context, store SessionStore, projectName s
 	s.instance = nil
 	s.ready = false
 	s.initializing = false
-	s.terminals.KillAll()
 	s.Status = SessionSuspended
 	s.lastActiveAt = time.Now()
 	s.mu.Unlock()

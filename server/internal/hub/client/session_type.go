@@ -35,7 +35,7 @@ type SessionAgentState struct {
 }
 
 // Session is the business session object that owns ACP session state,
-// prompt lifecycle, terminal management, and callback handling.
+// prompt lifecycle and callback handling.
 // A Client holds multiple Sessions, routed by IM routeKey.
 type Session struct {
 	ID     string
@@ -60,7 +60,6 @@ type Session struct {
 	prompt   promptState
 	initCond *sync.Cond
 
-	terminals  *terminalManager
 	permRouter *permissionRouter
 
 	// Back-references to Client-owned resources needed by Session methods.
@@ -94,7 +93,6 @@ func newSession(id string, cwd string) *Session {
 		imBlockedUpdates: make(map[string]struct{}),
 	}
 	s.initCond = sync.NewCond(&s.mu)
-	s.terminals = newTerminalManager()
 	return s
 }
 
