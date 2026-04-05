@@ -39,8 +39,6 @@ type instance struct {
 	tools     *instanceTools
 
 	mu              sync.RWMutex
-	connReady       bool
-	initialized     bool
 	acpSessionReady bool
 	acpSessionID    string
 	initResult      protocol.InitializeResult
@@ -55,7 +53,6 @@ func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
 		conn:      conn,
 		callbacks: callbacks,
 		tools:     newInstanceTools(),
-		connReady: conn != nil,
 	}
 	if conn != nil {
 		conn.OnACPRequest(inst.HandleACPRequest)
@@ -77,8 +74,6 @@ func (i *instance) Initialize(ctx context.Context, p protocol.InitializeParams) 
 	}
 
 	i.mu.Lock()
-	i.connReady = true
-	i.initialized = true
 	i.initResult = out
 	i.mu.Unlock()
 	return out, nil

@@ -34,12 +34,9 @@ Full design: [../docs/architecture-3.0.md](../docs/architecture-3.0.md)
 |---------|------|
 | `internal/hub/` | Hub process domain (orchestration + per-project runtime) |
 | `internal/hub/client/` | Command routing, session lifecycle, state persistence |
-| `internal/hub/acp/` | JSON-RPC 2.0 transport over stdio |
-| `internal/hub/agent/claude/` | Launches claude-agent-acp subprocess |
-| `internal/hub/agent/codex/` | Launches codex-acp subprocess |
+| `internal/hub/agent/` | Unified ACP agent layer: provider, process, conn (owned/shared), instance, factory |
 | `internal/hub/im/` | IM adapters and forwarder |
 | `internal/registry/` | Registry server and hub reporter |
-| `internal/hub/tools/` | Binary path resolver (`bin/{GOOS}_{GOARCH}/`) |
 | `internal/shared/` | Shared config, logging, and registry protocol helpers |
 
 ## Config Files

@@ -131,6 +131,12 @@ func (p *ACPProcess) Close() error {
 	}
 	p.markDone()
 
+	// Nil out the encoder so concurrent SendMessage calls get a clean error
+	// instead of a low-level write-to-closed-pipe error.
+	p.encMu.Lock()
+	p.enc = nil
+	p.encMu.Unlock()
+
 	if p.stdin != nil {
 		_ = p.stdin.Close()
 	}

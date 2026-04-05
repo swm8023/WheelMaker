@@ -120,25 +120,3 @@ func (f *fakeCallbacks) SessionRequestPermission(_ context.Context, _ protocol.P
 	f.permissionCount++
 	return protocol.PermissionResult{Outcome: "allow_once", OptionID: "allow"}, nil
 }
-
-func (f *fakeCallbacks) FSRead(_ protocol.FSReadTextFileParams) (protocol.FSReadTextFileResult, error) {
-	return protocol.FSReadTextFileResult{Content: ""}, nil
-}
-
-func (f *fakeCallbacks) FSWrite(_ protocol.FSWriteTextFileParams) error { return nil }
-
-func (f *fakeCallbacks) TerminalCreate(_ protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error) {
-	return protocol.TerminalCreateResult{TerminalID: "t-1"}, nil
-}
-
-func (f *fakeCallbacks) TerminalOutput(_ protocol.TerminalOutputParams) (protocol.TerminalOutputResult, error) {
-	return protocol.TerminalOutputResult{}, nil
-}
-
-func (f *fakeCallbacks) TerminalWaitForExit(_ protocol.TerminalWaitForExitParams) (protocol.TerminalWaitForExitResult, error) {
-	return protocol.TerminalWaitForExitResult{}, nil
-}
-
-func (f *fakeCallbacks) TerminalKill(_ protocol.TerminalKillParams) error { return nil }
-
-func (f *fakeCallbacks) TerminalRelease(_ protocol.TerminalReleaseParams) error { return nil }
