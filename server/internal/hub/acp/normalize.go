@@ -1,6 +1,10 @@
 package acp
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	p "github.com/swm8023/wheelmaker/internal/protocol"
+)
 
 // NormalizeNotificationParams applies protocol compatibility transforms for
 // inbound agent->client notifications. Unknown payloads are passed through.
@@ -18,7 +22,7 @@ func NormalizeNotificationParams(method string, params json.RawMessage) json.Raw
 		return params
 	}
 	sessionUpdate, _ := update["sessionUpdate"].(string)
-	if sessionUpdate != "current_mode_update" {
+	if sessionUpdate != p.SessionUpdateCurrentModeUpdate {
 		return params
 	}
 	modeID, _ := update["modeId"].(string)
@@ -26,12 +30,12 @@ func NormalizeNotificationParams(method string, params json.RawMessage) json.Raw
 		return params
 	}
 
-	update["sessionUpdate"] = "config_option_update"
+	update["sessionUpdate"] = p.SessionUpdateConfigOptionUpdate
 	if _, exists := update["configOptions"]; !exists {
 		update["configOptions"] = []any{
 			map[string]any{
-				"id":           "mode",
-				"category":     "mode",
+				"id":           p.ConfigOptionIDMode,
+				"category":     p.ConfigOptionCategoryMode,
 				"currentValue": modeID,
 			},
 		}

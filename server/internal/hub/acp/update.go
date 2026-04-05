@@ -1,6 +1,10 @@
 package acp
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	p "github.com/swm8023/wheelmaker/internal/protocol"
+)
 
 // UpdateType identifies the kind of streaming update from the agent.
 type UpdateType string
@@ -18,14 +22,14 @@ const (
 	// UpdatePlan is a plan update from the agent.
 	UpdatePlan UpdateType = "plan"
 	// UpdateConfigOption is emitted when the agent sends config_option_update.
-	UpdateConfigOption UpdateType = "config_option_update"
+	UpdateConfigOption UpdateType = UpdateType(p.SessionUpdateConfigOptionUpdate)
 	// UpdateAvailableCommands is emitted when the agent sends available_commands_update.
-	UpdateAvailableCommands UpdateType = "available_commands_update"
+	UpdateAvailableCommands UpdateType = UpdateType(p.SessionUpdateAvailableCommandsUpdate)
 	// UpdateSessionInfo is emitted when the agent sends session_info_update.
-	UpdateSessionInfo UpdateType = "session_info_update"
+	UpdateSessionInfo UpdateType = UpdateType(p.SessionUpdateSessionInfoUpdate)
 	// UpdateUserChunk is a user message reflection chunk (user_message_chunk).
 	// Most integrations can ignore this; it is exposed for completeness.
-	UpdateUserChunk UpdateType = "user_message_chunk"
+	UpdateUserChunk UpdateType = UpdateType(p.SessionUpdateUserMessageChunk)
 	// UpdateModeChange is a legacy mode switch notification
 	// (current_mode_update). New integrations should use UpdateConfigOption.
 	UpdateModeChange UpdateType = "mode_change"
@@ -69,28 +73,28 @@ func parseSessionUpdate(u SessionUpdate) SessionUpdateDerived {
 	}
 
 	switch u.SessionUpdate {
-	case "available_commands_update":
+	case p.SessionUpdateAvailableCommandsUpdate:
 		if len(u.AvailableCommands) > 0 {
 			d.AvailableCommands = u.AvailableCommands
 		}
-	case "config_option_update":
+	case p.SessionUpdateConfigOptionUpdate:
 		if len(u.ConfigOptions) > 0 {
 			d.ConfigOptions = u.ConfigOptions
 		}
-	case "session_info_update":
+	case p.SessionUpdateSessionInfoUpdate:
 		d.Title = u.Title
 		d.UpdatedAt = u.UpdatedAt
-	case "tool_call":
+	case p.SessionUpdateToolCall:
 		if u.ToolCallID != "" {
-			if s := u.Status; s == "completed" || s == "failed" {
+			if s := u.Status; s == p.ToolCallStatusCompleted || s == p.ToolCallStatusFailed {
 				d.TrackDoneToolCall = u.ToolCallID
 			} else {
 				d.TrackAddToolCall = u.ToolCallID
 			}
 		}
-	case "tool_call_update":
+	case p.SessionUpdateToolCallUpdate:
 		if u.ToolCallID != "" {
-			if s := u.Status; s == "completed" || s == "failed" {
+			if s := u.Status; s == p.ToolCallStatusCompleted || s == p.ToolCallStatusFailed {
 				d.TrackDoneToolCall = u.ToolCallID
 			}
 		}
@@ -101,22 +105,22 @@ func parseSessionUpdate(u SessionUpdate) SessionUpdateDerived {
 
 func sessionUpdateToUpdate(u SessionUpdate) Update {
 	switch u.SessionUpdate {
-	case "agent_message_chunk":
+	case p.SessionUpdateAgentMessageChunk:
 		text := ""
 		if u.Content != nil {
 			var cb ContentBlock
-			if err := json.Unmarshal(u.Content, &cb); err == nil && cb.Type == "text" {
+			if err := json.Unmarshal(u.Content, &cb); err == nil && cb.Type == p.ContentBlockTypeText {
 				text = cb.Text
 			}
 		}
 		return Update{Type: UpdateText, Content: text}
 
-	case "user_message_chunk":
+	case p.SessionUpdateUserMessageChunk:
 		// User message reflection — expose as its own type so callers can ignore it
 		// without hitting the default branch. No caller today renders this.
 		return Update{Type: UpdateUserChunk}
 
-	case "agent_thought_chunk":
+	case p.SessionUpdateAgentThoughtChunk:
 		text := ""
 		if u.Content != nil {
 			var cb ContentBlock
@@ -126,19 +130,19 @@ func sessionUpdateToUpdate(u SessionUpdate) Update {
 		}
 		return Update{Type: UpdateThought, Content: text}
 
-	case "tool_call", "tool_call_update":
+	case p.SessionUpdateToolCall, p.SessionUpdateToolCallUpdate:
 		raw, _ := json.Marshal(u)
 		return Update{Type: UpdateToolCall, Raw: raw}
 
-	case "plan":
+	case p.SessionUpdatePlan:
 		raw, _ := json.Marshal(u)
 		return Update{Type: UpdatePlan, Raw: raw}
 
-	case "config_option_update":
+	case p.SessionUpdateConfigOptionUpdate:
 		raw, _ := json.Marshal(u)
 		return Update{Type: UpdateConfigOption, Raw: raw}
 
-	case "current_mode_update":
+	case p.SessionUpdateCurrentModeUpdate:
 		// Legacy path: normalize layer should map this into config_option_update
 		// before parse for regular message handling.
 		raw, _ := json.Marshal(u)
