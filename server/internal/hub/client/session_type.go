@@ -64,7 +64,7 @@ type Session struct {
 	// Back-references to Client-owned resources needed by Session methods.
 	cwd              string
 	yolo             bool
-	registry         *agentRegistry
+	registry         *agent.ACPFactory
 	store            Store
 	state            *ProjectState
 	imBridge         *im.ImAdapter
@@ -131,7 +131,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	creator := s.registry.get(name)
+	creator := s.registry.CreatorByName(name)
 	if creator == nil {
 		return fmt.Errorf("no agent registered for %q", name)
 	}

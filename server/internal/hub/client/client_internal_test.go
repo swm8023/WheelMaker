@@ -190,12 +190,27 @@ func (c *Client) InjectIMChannel(p im.Channel) {
 	c.activeSession.mu.Unlock()
 }
 
-// InjectAgentFactory overrides one built-in provider factory for tests.
+// InjectAgentFactory overrides one built-in provider creator for tests.
 func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.InstanceCreator) {
-	if c == nil || c.registry == nil || creator == nil {
+	if c == nil || creator == nil {
 		return
 	}
-	c.registry.setOverride(provider, creator)
+
+	c.mu.Lock()
+	if c.registry == nil {
+		c.registry = agent.DefaultACPFactory().Clone()
+	} else if c.registry == agent.DefaultACPFactory() {
+		c.registry = c.registry.Clone()
+	}
+	registry := c.registry
+	for _, sess := range c.sessions {
+		sess.registry = registry
+	}
+	c.mu.Unlock()
+
+	if registry != nil {
+		registry.Register(provider, creator)
+	}
 }
 
 // DefaultState returns a freshly initialised default state.

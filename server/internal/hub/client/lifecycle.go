@@ -10,9 +10,9 @@ import (
 // switchAgent cancels any in-progress prompt, waits for it to finish via
 // promptMu, connects a new agent via AgentFactory, and replaces the instance.
 func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode) error {
-	creator := s.registry.get(name)
+	creator := s.registry.CreatorByName(name)
 	if creator == nil {
-		return fmt.Errorf("unknown agent: %q (registered: %v)", name, s.registry.names())
+		return fmt.Errorf("unknown agent: %q (registered: %v)", name, s.registry.Names())
 	}
 
 	// Cancel in-progress prompt, wait for handlePrompt to release promptMu.

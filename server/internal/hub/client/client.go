@@ -15,67 +15,6 @@ import (
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// agentRegistry resolves built-in instance creators from ACP provider enums.
-type agentRegistry struct {
-	mu        sync.RWMutex
-	builtins  *agent.ACPFactory
-	overrides map[acp.ACPProvider]agent.InstanceCreator
-}
-
-func newAgentRegistry() *agentRegistry {
-	return &agentRegistry{
-		builtins:  agent.DefaultACPFactory(),
-		overrides: map[acp.ACPProvider]agent.InstanceCreator{},
-	}
-}
-
-func (r *agentRegistry) setOverride(provider acp.ACPProvider, creator agent.InstanceCreator) {
-	if r == nil || creator == nil {
-		return
-	}
-	r.mu.Lock()
-	r.overrides[provider] = creator
-	r.mu.Unlock()
-}
-
-func (r *agentRegistry) get(name string) agent.InstanceCreator {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return nil
-	}
-	provider, ok := acp.ParseACPProvider(name)
-	if !ok {
-		return nil
-	}
-	if r == nil {
-		return nil
-	}
-	r.mu.RLock()
-	override := r.overrides[provider]
-	builtins := r.builtins
-	r.mu.RUnlock()
-	if override != nil {
-		return override
-	}
-	if builtins == nil {
-		return nil
-	}
-	return builtins.Creator(provider)
-}
-
-func (r *agentRegistry) names() []string {
-	if r == nil {
-		return nil
-	}
-	r.mu.RLock()
-	builtins := r.builtins
-	r.mu.RUnlock()
-	if builtins == nil {
-		return nil
-	}
-	return builtins.Names()
-}
-
 const commandTimeout = 30 * time.Second
 
 const defaultAgentName = string(acp.ACPProviderClaude)
@@ -100,7 +39,7 @@ type Client struct {
 	cwd         string
 	yolo        bool
 
-	registry *agentRegistry
+	registry *agent.ACPFactory
 
 	store        Store
 	sessionStore SessionStore // optional; nil = in-memory only
@@ -139,7 +78,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 	c := &Client{
 		projectName:      projectName,
 		cwd:              cwd,
-		registry:         newAgentRegistry(),
+		registry:         agent.DefaultACPFactory(),
 		store:            store,
 		imBridge:         imProvider,
 		imBlockedUpdates: map[string]struct{}{},

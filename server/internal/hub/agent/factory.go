@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
@@ -12,9 +13,11 @@ import (
 // InstanceCreator creates one runtime instance.
 type InstanceCreator func(ctx context.Context) (Instance, error)
 
-// ACPFactory is a built-in provider preset factory keyed by ACP provider enum.
+// ACPFactory resolves one provider enum to one instance creator.
+// A creator map contains both default built-ins and optional overrides.
 type ACPFactory struct {
-	providers map[protocol.ACPProvider]ACPProvider
+	mu       sync.RWMutex
+	creators map[protocol.ACPProvider]InstanceCreator
 }
 
 var (
@@ -22,60 +25,101 @@ var (
 	defaultACPFactory     *ACPFactory
 )
 
-// DefaultACPFactory returns the singleton built-in ACP factory.
+// DefaultACPFactory returns the singleton ACP factory.
 func DefaultACPFactory() *ACPFactory {
 	defaultACPFactoryOnce.Do(func() {
-		defaultACPFactory = &ACPFactory{
-			providers: map[protocol.ACPProvider]ACPProvider{
-				protocol.ACPProviderCodex:   NewCodexProvider(),
-				protocol.ACPProviderClaude:  NewClaudeProvider(),
-				protocol.ACPProviderCopilot: NewCopilotProvider(),
-			},
-		}
+		defaultACPFactory = newACPFactoryWithDefaults()
 	})
 	return defaultACPFactory
 }
 
-// Creator returns an instance creator by provider enum.
+func newACPFactoryWithDefaults() *ACPFactory {
+	f := &ACPFactory{creators: map[protocol.ACPProvider]InstanceCreator{}}
+	f.Register(protocol.ACPProviderCodex, providerInstanceCreator(NewCodexProvider()))
+	f.Register(protocol.ACPProviderClaude, providerInstanceCreator(NewClaudeProvider()))
+	f.Register(protocol.ACPProviderCopilot, providerInstanceCreator(NewCopilotProvider()))
+	return f
+}
+
+// Clone returns a shallow copy of the creator registry.
+func (f *ACPFactory) Clone() *ACPFactory {
+	if f == nil {
+		return nil
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	cp := &ACPFactory{creators: make(map[protocol.ACPProvider]InstanceCreator, len(f.creators))}
+	for provider, creator := range f.creators {
+		cp.creators[provider] = creator
+	}
+	return cp
+}
+
+// Register binds a provider to a creator. Existing binding is replaced.
+func (f *ACPFactory) Register(provider protocol.ACPProvider, creator InstanceCreator) {
+	if f == nil || creator == nil {
+		return
+	}
+	f.mu.Lock()
+	if f.creators == nil {
+		f.creators = map[protocol.ACPProvider]InstanceCreator{}
+	}
+	f.creators[provider] = creator
+	f.mu.Unlock()
+}
+
+// Creator returns a creator by provider enum.
 func (f *ACPFactory) Creator(provider protocol.ACPProvider) InstanceCreator {
 	if f == nil {
 		return nil
 	}
-	if _, ok := f.providers[provider]; !ok {
-		return nil
-	}
-	return func(ctx context.Context) (Instance, error) {
-		return f.CreateInstance(ctx, provider)
-	}
+	f.mu.RLock()
+	creator := f.creators[provider]
+	f.mu.RUnlock()
+	return creator
 }
 
-// Names returns built-in provider names in stable order.
+// CreatorByName resolves provider name then returns its creator.
+func (f *ACPFactory) CreatorByName(name string) InstanceCreator {
+	provider, ok := protocol.ParseACPProvider(strings.ToLower(strings.TrimSpace(name)))
+	if !ok {
+		return nil
+	}
+	return f.Creator(provider)
+}
+
+// Names returns provider names in stable order.
 func (f *ACPFactory) Names() []string {
 	if f == nil {
 		return nil
 	}
-	names := make([]string, 0, len(f.providers))
-	for provider := range f.providers {
+	f.mu.RLock()
+	names := make([]string, 0, len(f.creators))
+	for provider := range f.creators {
 		names = append(names, string(provider))
 	}
+	f.mu.RUnlock()
 	sort.Strings(names)
 	return names
 }
 
-// CreateInstance creates an instance by provider enum using preset config.
+// CreateInstance creates one runtime instance by provider enum.
 func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPProvider) (Instance, error) {
-	if f == nil {
-		return nil, fmt.Errorf("factory is nil")
-	}
-	preset := f.providers[provider]
-	if preset == nil {
+	creator := f.Creator(provider)
+	if creator == nil {
 		return nil, fmt.Errorf("unknown provider: %q", provider)
 	}
-	conn, err := newOwnedProviderConn(preset)
-	if err != nil {
-		return nil, fmt.Errorf("connect %q: %w", preset.Name(), err)
+	return creator(ctx)
+}
+
+func providerInstanceCreator(provider ACPProvider) InstanceCreator {
+	return func(_ context.Context) (Instance, error) {
+		conn, err := newOwnedProviderConn(provider)
+		if err != nil {
+			return nil, fmt.Errorf("connect %q: %w", provider.Name(), err)
+		}
+		return NewInstance(provider.Name(), conn), nil
 	}
-	return NewInstance(preset.Name(), conn), nil
 }
 
 func newOwnedProviderConn(provider ACPProvider) (Conn, error) {

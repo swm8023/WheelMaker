@@ -530,7 +530,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 		Body:   "Choose an agent to switch to.",
 		Parent: model.RootMenu,
 	}
-	agentNames := s.registry.names()
+	agentNames := s.registry.Names()
 	for _, name := range agentNames {
 		agentMenu.Options = append(agentMenu.Options, im.HelpOption{
 			Label:   "Agent: " + name,
