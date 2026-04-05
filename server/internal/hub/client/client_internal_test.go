@@ -5,7 +5,12 @@ package client
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,12 +38,96 @@ func (c *Client) InjectForwarder(conn *acp.Conn, sessionID string) {
 	}
 	c.mu.Unlock()
 
-	runtime := agentv2.NewInstance(name, wrapACPConn(conn), sess)
+	runtime := agentv2.NewInstance(name, wrapTestACPConn(conn), sess)
 	sess.mu.Lock()
 	sess.instance = runtime
 	sess.acpSessionID = sessionID
 	sess.ready = true
 	sess.mu.Unlock()
+}
+
+type testACPTransportConn struct {
+	raw *acp.Conn
+
+	mu          sync.RWMutex
+	reqHandler  agentv2.ACPRequestHandler
+	respHandler agentv2.ACPResponseHandler
+}
+
+func wrapTestACPConn(raw *acp.Conn) agentv2.Conn {
+	return &testACPTransportConn{raw: raw}
+}
+
+func (c *testACPTransportConn) Send(ctx context.Context, method string, params any, result any) error {
+	if c == nil || c.raw == nil {
+		return errors.New("test acp transport: nil conn")
+	}
+	return c.raw.SendAgent(ctx, method, params, result)
+}
+
+func (c *testACPTransportConn) Notify(method string, params any) error {
+	if c == nil || c.raw == nil {
+		return errors.New("test acp transport: nil conn")
+	}
+	return c.raw.NotifyAgent(method, params)
+}
+
+func (c *testACPTransportConn) OnACPRequest(h agentv2.ACPRequestHandler) {
+	if c == nil || c.raw == nil {
+		return
+	}
+	c.mu.Lock()
+	c.reqHandler = h
+	c.mu.Unlock()
+	c.bindRawHandler()
+}
+
+func (c *testACPTransportConn) OnACPResponse(h agentv2.ACPResponseHandler) {
+	if c == nil || c.raw == nil {
+		return
+	}
+	c.mu.Lock()
+	c.respHandler = h
+	c.mu.Unlock()
+	c.bindRawHandler()
+}
+
+func (c *testACPTransportConn) bindRawHandler() {
+	c.mu.RLock()
+	req := c.reqHandler
+	resp := c.respHandler
+	c.mu.RUnlock()
+
+	if req == nil && resp == nil {
+		c.raw.OnRequest(nil)
+		return
+	}
+
+	c.raw.OnRequest(func(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+		c.mu.RLock()
+		currentReq := c.reqHandler
+		currentResp := c.respHandler
+		c.mu.RUnlock()
+
+		if noResponse {
+			if currentResp != nil {
+				currentResp(ctx, method, params)
+			}
+			return nil, nil
+		}
+
+		if currentReq == nil {
+			return nil, fmt.Errorf("no ACP request handler for method: %s", method)
+		}
+		return currentReq(ctx, method, params)
+	})
+}
+
+func (c *testACPTransportConn) Close() error {
+	if c == nil || c.raw == nil {
+		return nil
+	}
+	return c.raw.Close()
 }
 
 // InjectState replaces the persisted state.
@@ -194,7 +283,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.RegisterAgent("codex", nil)
+	c.RegisterAgentV2("codex", nopFactoryV2{name: "codex"})
 	c.activeSession.ready = true
 
 	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
@@ -215,8 +304,8 @@ func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 
 func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.RegisterAgent("codex", nil)
-	c.RegisterAgent("claude", nil)
+	c.RegisterAgentV2("codex", nopFactoryV2{name: "codex"})
+	c.RegisterAgentV2("claude", nopFactoryV2{name: "claude"})
 	c.activeSession.ready = true
 	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
@@ -305,6 +394,18 @@ func TestCanonicalIMBlockType(t *testing.T) {
 			t.Fatalf("canonicalIMBlockType(%q)=%q, want %q", in, got, want)
 		}
 	}
+}
+
+type nopFactoryV2 struct {
+	name string
+}
+
+func (f nopFactoryV2) Name() string { return f.name }
+
+func (f nopFactoryV2) SupportsSharedConn() bool { return false }
+
+func (f nopFactoryV2) CreateInstance(context.Context, SessionCallbacks, io.Writer) (agentv2.Instance, error) {
+	return nil, errors.New("test-only factory")
 }
 
 // noopStore is a Store that always returns a default state and discards saves.

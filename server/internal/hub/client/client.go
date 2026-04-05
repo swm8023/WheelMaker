@@ -11,49 +11,25 @@ import (
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/hub/acp"
-	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// AgentFactory creates a new agent instance.
-// The exePath and env arguments are provided for compatibility; hub-registered
-// factories typically ignore them and use closure-captured config instead.
-type AgentFactory func(exePath string, env map[string]string) agent.Agent
-
-// agentRegistry maps agent names to their factories.
+// agentRegistry maps agent names to AgentFactoryV2 implementations.
 // It carries its own mutex so Client.mu need not protect registration.
 type agentRegistry struct {
 	mu     sync.Mutex
-	facs   map[string]AgentFactory
 	v2facs map[string]AgentFactoryV2
 }
 
 func newAgentRegistry() *agentRegistry {
-	return &agentRegistry{
-		facs:   make(map[string]AgentFactory),
-		v2facs: make(map[string]AgentFactoryV2),
-	}
-}
-
-func (r *agentRegistry) register(name string, f AgentFactory) {
-	r.mu.Lock()
-	r.facs[name] = f
-	r.v2facs[name] = wrapLegacyFactory(name, f)
-	r.mu.Unlock()
+	return &agentRegistry{v2facs: make(map[string]AgentFactoryV2)}
 }
 
 func (r *agentRegistry) registerV2(name string, f AgentFactoryV2) {
 	r.mu.Lock()
 	r.v2facs[name] = f
 	r.mu.Unlock()
-}
-
-func (r *agentRegistry) get(name string) AgentFactory {
-	r.mu.Lock()
-	f := r.facs[name]
-	r.mu.Unlock()
-	return f
 }
 
 func (r *agentRegistry) getV2(name string) AgentFactoryV2 {
@@ -65,20 +41,8 @@ func (r *agentRegistry) getV2(name string) AgentFactoryV2 {
 
 func (r *agentRegistry) names() []string {
 	r.mu.Lock()
-	seen := make(map[string]struct{}, len(r.v2facs)+len(r.facs))
-	ns := make([]string, 0, len(r.v2facs)+len(r.facs))
+	ns := make([]string, 0, len(r.v2facs))
 	for n := range r.v2facs {
-		if _, ok := seen[n]; ok {
-			continue
-		}
-		seen[n] = struct{}{}
-		ns = append(ns, n)
-	}
-	for n := range r.facs {
-		if _, ok := seen[n]; ok {
-			continue
-		}
-		seen[n] = struct{}{}
 		ns = append(ns, n)
 	}
 	r.mu.Unlock()
@@ -234,11 +198,6 @@ func (c *Client) SetSessionStore(ss SessionStore) {
 	c.mu.Lock()
 	c.sessionStore = ss
 	c.mu.Unlock()
-}
-
-// RegisterAgent registers an AgentFactory under the given name.
-func (c *Client) RegisterAgent(name string, factory AgentFactory) {
-	c.registry.register(name, factory)
 }
 
 // RegisterAgentV2 registers an AgentFactoryV2 under the given name.

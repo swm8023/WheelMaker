@@ -393,32 +393,6 @@ func TestResolveSession_RestoresEvictedSession(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Shared Factory Compatibility
-// ---------------------------------------------------------------------------
-
-func TestSharedAgentFactory(t *testing.T) {
-	f := &sharedAgentFactory{
-		name: "test-shared",
-	}
-	if !f.SupportsSharedConn() {
-		t.Fatal("SupportsSharedConn should return true")
-	}
-	if f.Name() != "test-shared" {
-		t.Fatalf("Name = %q, want %q", f.Name(), "test-shared")
-	}
-}
-
-func TestWrapSharedFactory(t *testing.T) {
-	fac := wrapSharedFactory("shared-agent", nil)
-	if !fac.SupportsSharedConn() {
-		t.Fatal("SupportsSharedConn should be true for shared factory")
-	}
-	if fac.Name() != "shared-agent" {
-		t.Fatalf("Name = %q", fac.Name())
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Session ID generation
 // ---------------------------------------------------------------------------
 
