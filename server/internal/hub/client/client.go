@@ -16,43 +16,80 @@ import (
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// agentRegistry maps agent names to agent.Factory implementations.
-// It carries its own mutex so Client.mu need not protect registration.
+// agentRegistry resolves agent factories via built-in singleton presets
+// plus optional client-local custom overrides.
 type agentRegistry struct {
-	mu   sync.Mutex
-	facs map[string]agent.Factory
+	mu       sync.Mutex
+	custom   map[string]agent.Factory
+	builtins *agent.ACPFactory
 }
 
 func newAgentRegistry() *agentRegistry {
-	return &agentRegistry{facs: make(map[string]agent.Factory)}
+	return &agentRegistry{
+		custom:   make(map[string]agent.Factory),
+		builtins: agent.DefaultACPFactory(),
+	}
 }
 
 func (r *agentRegistry) register(name string, f agent.Factory) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || f == nil {
+		return
+	}
 	r.mu.Lock()
-	r.facs[name] = f
+	r.custom[name] = f
 	r.mu.Unlock()
 }
 
 func (r *agentRegistry) get(name string) agent.Factory {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return nil
+	}
 	r.mu.Lock()
-	f := r.facs[name]
+	f := r.custom[name]
+	builtins := r.builtins
 	r.mu.Unlock()
-	return f
+	if f != nil {
+		return f
+	}
+	provider, ok := acp.ParseACPProvider(name)
+	if !ok || builtins == nil {
+		return nil
+	}
+	return builtins.Get(provider)
 }
 
 func (r *agentRegistry) names() []string {
 	r.mu.Lock()
-	ns := make([]string, 0, len(r.facs))
-	for n := range r.facs {
-		ns = append(ns, n)
+	builtins := r.builtins
+	customNames := make([]string, 0, len(r.custom))
+	for n := range r.custom {
+		customNames = append(customNames, n)
 	}
 	r.mu.Unlock()
-	return ns
+
+	names := make([]string, 0, len(customNames)+3)
+	if builtins != nil {
+		names = append(names, builtins.Names()...)
+	}
+	names = append(names, customNames...)
+	sort.Strings(names)
+	if len(names) < 2 {
+		return names
+	}
+	out := names[:1]
+	for _, n := range names[1:] {
+		if n != out[len(out)-1] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 const commandTimeout = 30 * time.Second
 
-const defaultAgentName = "claude"
+const defaultAgentName = string(acp.ACPProviderClaude)
 
 const acpClientProtocolVersion = 1
 

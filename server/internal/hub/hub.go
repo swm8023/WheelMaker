@@ -6,6 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/swm8023/wheelmaker/internal/hub/client"
+	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/hub/im/console"
+	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,14 +19,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/hub/client"
-	"github.com/swm8023/wheelmaker/internal/hub/im"
-	"github.com/swm8023/wheelmaker/internal/hub/im/console"
-	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
-	rp "github.com/swm8023/wheelmaker/internal/protocol"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
@@ -107,10 +105,8 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 		imProvider.SetDebugLogger(dw)
 	}
 
-	// Register all known agent providers so users can switch between them at runtime.
-	c.RegisterAgent("codex", agent.NewACPProviderFactory(agent.NewCodexProvider(agent.ACPProviderConfig{})))
-	c.RegisterAgent("claude", agent.NewACPProviderFactory(agent.NewClaudeProvider(agent.ACPProviderConfig{})))
-	c.RegisterAgent("copilot", agent.NewACPProviderFactory(agent.NewCopilotProvider(agent.ACPProviderConfig{})))
+	// Built-in providers are preloaded by client's singleton ACP factory.
+
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
