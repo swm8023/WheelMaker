@@ -217,32 +217,49 @@ func (i *instance) HandleACPResponse(_ context.Context, method string, params js
 func (i *instance) HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case protocol.MethodRequestPermission:
-		if i.callbacks == nil {
-			return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
-		}
-		var p protocol.PermissionRequestParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
-		}
-		result, err := i.callbacks.SessionRequestPermission(ctx, p)
-		if err != nil {
+		return i.onPermissionRequest(ctx, method, params)
+	case protocol.MethodFSRead:
+		var p protocol.FSReadTextFileParams
+		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return protocol.PermissionResponse{Outcome: result}, nil
-	case protocol.MethodFSRead:
-		return callbackCall(method, params, i.runtime.FSRead)
+		return i.runtime.FSRead(p)
 	case protocol.MethodFSWrite:
-		return callbackCallVoid(method, params, i.runtime.FSWrite)
+		var p protocol.FSWriteTextFileParams
+		if err := decodeACPParams(method, params, &p); err != nil {
+			return nil, err
+		}
+		return nil, i.runtime.FSWrite(p)
 	case protocol.MethodTerminalCreate:
-		return callbackCall(method, params, i.runtime.TerminalCreate)
+		var p protocol.TerminalCreateParams
+		if err := decodeACPParams(method, params, &p); err != nil {
+			return nil, err
+		}
+		return i.runtime.TerminalCreate(p)
 	case protocol.MethodTerminalOutput:
-		return callbackCall(method, params, i.runtime.TerminalOutput)
+		var p protocol.TerminalOutputParams
+		if err := decodeACPParams(method, params, &p); err != nil {
+			return nil, err
+		}
+		return i.runtime.TerminalOutput(p)
 	case protocol.MethodTerminalWaitExit:
-		return callbackCall(method, params, i.runtime.TerminalWaitForExit)
+		var p protocol.TerminalWaitForExitParams
+		if err := decodeACPParams(method, params, &p); err != nil {
+			return nil, err
+		}
+		return i.runtime.TerminalWaitForExit(p)
 	case protocol.MethodTerminalKill:
-		return callbackCallVoid(method, params, i.runtime.TerminalKill)
+		var p protocol.TerminalKillParams
+		if err := decodeACPParams(method, params, &p); err != nil {
+			return nil, err
+		}
+		return nil, i.runtime.TerminalKill(p)
 	case protocol.MethodTerminalRelease:
-		return callbackCallVoid(method, params, i.runtime.TerminalRelease)
+		var p protocol.TerminalReleaseParams
+		if err := decodeACPParams(method, params, &p); err != nil {
+			return nil, err
+		}
+		return nil, i.runtime.TerminalRelease(p)
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
@@ -265,18 +282,24 @@ func (i *instance) ensureConn() error {
 	return nil
 }
 
-func callbackCall[P any, R any](method string, params json.RawMessage, fn func(P) (R, error)) (any, error) {
-	var p P
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+func (i *instance) onPermissionRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
+	if i.callbacks == nil {
+		return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
 	}
-	return fn(p)
+	var p protocol.PermissionRequestParams
+	if err := decodeACPParams(method, params, &p); err != nil {
+		return nil, err
+	}
+	result, err := i.callbacks.SessionRequestPermission(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return protocol.PermissionResponse{Outcome: result}, nil
 }
 
-func callbackCallVoid[P any](method string, params json.RawMessage, fn func(P) error) (any, error) {
-	var p P
-	if err := json.Unmarshal(params, &p); err != nil {
-		return nil, fmt.Errorf("%s: unmarshal: %w", method, err)
+func decodeACPParams(method string, params json.RawMessage, out any) error {
+	if err := json.Unmarshal(params, out); err != nil {
+		return fmt.Errorf("%s: unmarshal: %w", method, err)
 	}
-	return nil, fn(p)
+	return nil
 }
