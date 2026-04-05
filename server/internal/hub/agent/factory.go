@@ -9,17 +9,12 @@ import (
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-// Factory creates runtime instances and declares connection sharing policy.
-type Factory interface {
-	Name() string
-	SupportsSharedConn() bool
-	CreateInstance(ctx context.Context) (Instance, error)
-}
+// InstanceCreator creates one runtime instance.
+type InstanceCreator func(ctx context.Context) (Instance, error)
 
 // ACPFactory is a built-in provider preset factory keyed by ACP provider enum.
 type ACPFactory struct {
-	mu      sync.RWMutex
-	presets map[protocol.ACPProvider]Factory
+	providers map[protocol.ACPProvider]ACPProvider
 }
 
 var (
@@ -31,25 +26,27 @@ var (
 func DefaultACPFactory() *ACPFactory {
 	defaultACPFactoryOnce.Do(func() {
 		defaultACPFactory = &ACPFactory{
-			presets: map[protocol.ACPProvider]Factory{
-				protocol.ACPProviderCodex:   NewACPProviderFactory(NewCodexProvider()),
-				protocol.ACPProviderClaude:  NewACPProviderFactory(NewClaudeProvider()),
-				protocol.ACPProviderCopilot: NewACPProviderFactory(NewCopilotProvider()),
+			providers: map[protocol.ACPProvider]ACPProvider{
+				protocol.ACPProviderCodex:   NewCodexProvider(),
+				protocol.ACPProviderClaude:  NewClaudeProvider(),
+				protocol.ACPProviderCopilot: NewCopilotProvider(),
 			},
 		}
 	})
 	return defaultACPFactory
 }
 
-// Get returns a preset factory by provider enum.
-func (f *ACPFactory) Get(provider protocol.ACPProvider) Factory {
+// Creator returns an instance creator by provider enum.
+func (f *ACPFactory) Creator(provider protocol.ACPProvider) InstanceCreator {
 	if f == nil {
 		return nil
 	}
-	f.mu.RLock()
-	preset := f.presets[provider]
-	f.mu.RUnlock()
-	return preset
+	if _, ok := f.providers[provider]; !ok {
+		return nil
+	}
+	return func(ctx context.Context) (Instance, error) {
+		return f.CreateInstance(ctx, provider)
+	}
 }
 
 // Names returns built-in provider names in stable order.
@@ -57,45 +54,28 @@ func (f *ACPFactory) Names() []string {
 	if f == nil {
 		return nil
 	}
-	f.mu.RLock()
-	names := make([]string, 0, len(f.presets))
-	for provider := range f.presets {
+	names := make([]string, 0, len(f.providers))
+	for provider := range f.providers {
 		names = append(names, string(provider))
 	}
-	f.mu.RUnlock()
 	sort.Strings(names)
 	return names
 }
 
 // CreateInstance creates an instance by provider enum using preset config.
 func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPProvider) (Instance, error) {
-	preset := f.Get(provider)
+	if f == nil {
+		return nil, fmt.Errorf("factory is nil")
+	}
+	preset := f.providers[provider]
 	if preset == nil {
 		return nil, fmt.Errorf("unknown provider: %q", provider)
 	}
-	return preset.CreateInstance(ctx)
-}
-
-// acpProviderFactory creates agent instances from ACP providers.
-type acpProviderFactory struct {
-	provider ACPProvider
-}
-
-func (f *acpProviderFactory) Name() string { return f.provider.Name() }
-
-func (f *acpProviderFactory) SupportsSharedConn() bool { return false }
-
-func (f *acpProviderFactory) CreateInstance(_ context.Context) (Instance, error) {
-	conn, err := newOwnedProviderConn(f.provider)
+	conn, err := newOwnedProviderConn(preset)
 	if err != nil {
-		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
+		return nil, fmt.Errorf("connect %q: %w", preset.Name(), err)
 	}
-	return NewInstance(f.provider.Name(), conn), nil
-}
-
-// NewACPProviderFactory adapts an ACPProvider to Factory.
-func NewACPProviderFactory(provider ACPProvider) Factory {
-	return &acpProviderFactory{provider: provider}
+	return NewInstance(preset.Name(), conn), nil
 }
 
 func newOwnedProviderConn(provider ACPProvider) (Conn, error) {

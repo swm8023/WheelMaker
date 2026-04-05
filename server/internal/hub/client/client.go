@@ -15,30 +15,30 @@ import (
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// agentRegistry resolves built-in agent factories from ACP provider enums.
+// agentRegistry resolves built-in instance creators from ACP provider enums.
 type agentRegistry struct {
 	mu        sync.RWMutex
 	builtins  *agent.ACPFactory
-	overrides map[acp.ACPProvider]agent.Factory
+	overrides map[acp.ACPProvider]agent.InstanceCreator
 }
 
 func newAgentRegistry() *agentRegistry {
 	return &agentRegistry{
 		builtins:  agent.DefaultACPFactory(),
-		overrides: map[acp.ACPProvider]agent.Factory{},
+		overrides: map[acp.ACPProvider]agent.InstanceCreator{},
 	}
 }
 
-func (r *agentRegistry) setOverride(provider acp.ACPProvider, f agent.Factory) {
-	if r == nil || f == nil {
+func (r *agentRegistry) setOverride(provider acp.ACPProvider, creator agent.InstanceCreator) {
+	if r == nil || creator == nil {
 		return
 	}
 	r.mu.Lock()
-	r.overrides[provider] = f
+	r.overrides[provider] = creator
 	r.mu.Unlock()
 }
 
-func (r *agentRegistry) get(name string) agent.Factory {
+func (r *agentRegistry) get(name string) agent.InstanceCreator {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
 		return nil
@@ -60,7 +60,7 @@ func (r *agentRegistry) get(name string) agent.Factory {
 	if builtins == nil {
 		return nil
 	}
-	return builtins.Get(provider)
+	return builtins.Creator(provider)
 }
 
 func (r *agentRegistry) names() []string {

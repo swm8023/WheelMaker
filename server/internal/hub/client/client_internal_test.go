@@ -191,11 +191,11 @@ func (c *Client) InjectIMChannel(p im.Channel) {
 }
 
 // InjectAgentFactory overrides one built-in provider factory for tests.
-func (c *Client) InjectAgentFactory(provider acp.ACPProvider, f agent.Factory) {
-	if c == nil || c.registry == nil || f == nil {
+func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.InstanceCreator) {
+	if c == nil || c.registry == nil || creator == nil {
 		return
 	}
-	c.registry.setOverride(provider, f)
+	c.registry.setOverride(provider, creator)
 }
 
 // DefaultState returns a freshly initialised default state.
@@ -333,7 +333,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.InjectAgentFactory(acp.ACPProviderCodex, nopFactory{name: "codex"})
+	c.InjectAgentFactory(acp.ACPProviderCodex, nopCreator)
 	c.activeSession.ready = true
 
 	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
@@ -354,8 +354,8 @@ func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 
 func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.InjectAgentFactory(acp.ACPProviderCodex, nopFactory{name: "codex"})
-	c.InjectAgentFactory(acp.ACPProviderClaude, nopFactory{name: "claude"})
+	c.InjectAgentFactory(acp.ACPProviderCodex, nopCreator)
+	c.InjectAgentFactory(acp.ACPProviderClaude, nopCreator)
 	c.activeSession.ready = true
 	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
@@ -446,15 +446,7 @@ func TestCanonicalIMBlockType(t *testing.T) {
 	}
 }
 
-type nopFactory struct {
-	name string
-}
-
-func (f nopFactory) Name() string { return f.name }
-
-func (f nopFactory) SupportsSharedConn() bool { return false }
-
-func (f nopFactory) CreateInstance(context.Context) (agent.Instance, error) {
+func nopCreator(context.Context) (agent.Instance, error) {
 	return nil, errors.New("test-only factory")
 }
 

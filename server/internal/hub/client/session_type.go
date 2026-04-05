@@ -131,12 +131,12 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	fac := s.registry.get(name)
-	if fac == nil {
+	creator := s.registry.get(name)
+	if creator == nil {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
 
-	inst, err := fac.CreateInstance(ctx)
+	inst, err := creator(ctx)
 	if err != nil {
 		return err
 	}

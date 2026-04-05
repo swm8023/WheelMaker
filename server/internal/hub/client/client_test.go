@@ -135,10 +135,6 @@ type testFactory struct {
 	createErr error
 }
 
-func (f testFactory) Name() string { return f.name }
-
-func (f testFactory) SupportsSharedConn() bool { return false }
-
 func (f testFactory) CreateInstance(_ context.Context) (agent.Instance, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
@@ -153,17 +149,20 @@ func (f testFactory) CreateInstance(_ context.Context) (agent.Instance, error) {
 
 func registerMockAgent(c *client.Client, provider acp.ACPProvider) {
 	name := string(provider)
-	c.InjectAgentFactory(provider, testFactory{name: name})
+	factory := testFactory{name: name}
+	c.InjectAgentFactory(provider, factory.CreateInstance)
 }
 
 func registerContextRejectAgent(c *client.Client, provider acp.ACPProvider) {
 	name := string(provider)
-	c.InjectAgentFactory(provider, testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
+	factory := testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}}
+	c.InjectAgentFactory(provider, factory.CreateInstance)
 }
 
 func registerFailingAgent(c *client.Client, provider acp.ACPProvider) {
 	name := string(provider)
-	c.InjectAgentFactory(provider, testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")})
+	factory := testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")}
+	c.InjectAgentFactory(provider, factory.CreateInstance)
 }
 
 // captureReplies redirects Client replies to a string slice for inspection.

@@ -10,8 +10,8 @@ import (
 // switchAgent cancels any in-progress prompt, waits for it to finish via
 // promptMu, connects a new agent via AgentFactory, and replaces the instance.
 func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode) error {
-	fac := s.registry.get(name)
-	if fac == nil {
+	creator := s.registry.get(name)
+	if creator == nil {
 		return fmt.Errorf("unknown agent: %q (registered: %v)", name, s.registry.names())
 	}
 
@@ -49,7 +49,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	s.mu.Unlock()
 
 	// Connect new agent via factory.
-	newInst, err := fac.CreateInstance(ctx)
+	newInst, err := creator(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
