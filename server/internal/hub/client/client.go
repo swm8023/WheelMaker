@@ -10,29 +10,30 @@ import (
 	"sync"
 	"time"
 
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// agentRegistry maps agent names to AgentFactory implementations.
+// agentRegistry maps agent names to agent.Factory implementations.
 // It carries its own mutex so Client.mu need not protect registration.
 type agentRegistry struct {
 	mu   sync.Mutex
-	facs map[string]AgentFactory
+	facs map[string]agent.Factory
 }
 
 func newAgentRegistry() *agentRegistry {
-	return &agentRegistry{facs: make(map[string]AgentFactory)}
+	return &agentRegistry{facs: make(map[string]agent.Factory)}
 }
 
-func (r *agentRegistry) register(name string, f AgentFactory) {
+func (r *agentRegistry) register(name string, f agent.Factory) {
 	r.mu.Lock()
 	r.facs[name] = f
 	r.mu.Unlock()
 }
 
-func (r *agentRegistry) get(name string) AgentFactory {
+func (r *agentRegistry) get(name string) agent.Factory {
 	r.mu.Lock()
 	f := r.facs[name]
 	r.mu.Unlock()
@@ -200,9 +201,9 @@ func (c *Client) SetSessionStore(ss SessionStore) {
 	c.mu.Unlock()
 }
 
-// RegisterAgent registers an AgentFactory under the given name.
+// RegisterAgent registers an agent.Factory under the given name.
 // Use this for agents that support shared connections.
-func (c *Client) RegisterAgent(name string, factory AgentFactory) {
+func (c *Client) RegisterAgent(name string, factory agent.Factory) {
 	c.registry.register(name, factory)
 }
 

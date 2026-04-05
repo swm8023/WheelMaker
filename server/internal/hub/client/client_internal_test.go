@@ -55,7 +55,7 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 type testInjectedInstance struct {
 	name      string
 	sessionID string
-	callbacks SessionCallbacks
+	callbacks agent.Callbacks
 	promptFn  func(context.Context, string) (<-chan acp.Update, error)
 	cancelFn  func() error
 }
@@ -441,7 +441,7 @@ func (f nopFactory) Name() string { return f.name }
 
 func (f nopFactory) SupportsSharedConn() bool { return false }
 
-func (f nopFactory) CreateInstance(context.Context, SessionCallbacks, io.Writer) (agent.Instance, error) {
+func (f nopFactory) CreateInstance(context.Context, agent.Callbacks, io.Writer) (agent.Instance, error) {
 	return nil, errors.New("test-only factory")
 }
 

@@ -140,7 +140,7 @@ func (f testFactory) Name() string { return f.name }
 
 func (f testFactory) SupportsSharedConn() bool { return false }
 
-func (f testFactory) CreateInstance(_ context.Context, cb client.SessionCallbacks, _ io.Writer) (agent.Instance, error) {
+func (f testFactory) CreateInstance(_ context.Context, cb agent.Callbacks, _ io.Writer) (agent.Instance, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
