@@ -20,6 +20,7 @@ type Callbacks interface {
 // Instance is the only ACP-typed runtime interface exposed to Session.
 type Instance interface {
 	Name() string
+	SetCallbacks(callbacks Callbacks)
 	HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error)
 	HandleACPResponse(ctx context.Context, method string, params json.RawMessage)
 	Initialize(ctx context.Context, p protocol.InitializeParams) (protocol.InitializeResult, error)
@@ -47,12 +48,11 @@ type instance struct {
 var _ Instance = (*instance)(nil)
 
 // NewInstance creates an agent instance and wires conn inbound routing.
-func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
+func NewInstance(name string, conn Conn) Instance {
 	inst := &instance{
-		name:      strings.TrimSpace(name),
-		conn:      conn,
-		callbacks: callbacks,
-		tools:     newInstanceTools(),
+		name:  strings.TrimSpace(name),
+		conn:  conn,
+		tools: newInstanceTools(),
 	}
 	if conn != nil {
 		conn.OnACPRequest(inst.HandleACPRequest)
@@ -62,6 +62,12 @@ func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
 }
 
 func (i *instance) Name() string { return i.name }
+
+func (i *instance) SetCallbacks(callbacks Callbacks) {
+	i.mu.Lock()
+	i.callbacks = callbacks
+	i.mu.Unlock()
+}
 
 func (i *instance) Initialize(ctx context.Context, p protocol.InitializeParams) (protocol.InitializeResult, error) {
 	if err := i.ensureConn(); err != nil {
@@ -200,12 +206,16 @@ func (i *instance) SessionSetConfigOption(ctx context.Context, p protocol.Sessio
 }
 
 func (i *instance) HandleACPResponse(_ context.Context, method string, params json.RawMessage) {
-	if method == protocol.MethodSessionUpdate && i.callbacks != nil {
+	if method == protocol.MethodSessionUpdate {
 		var p protocol.SessionUpdateParams
 		if err := json.Unmarshal(params, &p); err != nil {
 			return
 		}
-		i.callbacks.SessionUpdate(p)
+		cb := i.currentCallbacks()
+		if cb == nil {
+			return
+		}
+		cb.SessionUpdate(p)
 	}
 }
 
@@ -278,18 +288,26 @@ func (i *instance) ensureConn() error {
 }
 
 func (i *instance) onPermissionRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
-	if i.callbacks == nil {
+	cb := i.currentCallbacks()
+	if cb == nil {
 		return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
 	}
 	var p protocol.PermissionRequestParams
 	if err := decodeACPParams(method, params, &p); err != nil {
 		return nil, err
 	}
-	result, err := i.callbacks.SessionRequestPermission(ctx, p)
+	result, err := cb.SessionRequestPermission(ctx, p)
 	if err != nil {
 		return nil, err
 	}
 	return protocol.PermissionResponse{Outcome: result}, nil
+}
+
+func (i *instance) currentCallbacks() Callbacks {
+	i.mu.RLock()
+	cb := i.callbacks
+	i.mu.RUnlock()
+	return cb
 }
 
 func decodeACPParams(method string, params json.RawMessage, out any) error {

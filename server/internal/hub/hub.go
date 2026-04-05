@@ -101,7 +101,6 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 
 	// ACP/IM debug traces are controlled by logger configuration only.
 	if dw := shared.DebugWriter(); dw != nil {
-		c.SetDebugLogger(dw)
 		imProvider.SetDebugLogger(dw)
 	}
 

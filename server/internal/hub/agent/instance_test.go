@@ -10,7 +10,7 @@ import (
 
 func TestInstance_NewAndLoadWithoutACPReady(t *testing.T) {
 	fc := &fakeConn{}
-	inst := NewInstance("codex", fc, nil)
+	inst := NewInstance("codex", fc)
 
 	newRes, err := inst.SessionNew(context.Background(), protocol.SessionNewParams{CWD: "."})
 	if err != nil {
@@ -35,7 +35,8 @@ func TestInstance_NewAndLoadWithoutACPReady(t *testing.T) {
 func TestInstance_HandleInboundDispatch(t *testing.T) {
 	fc := &fakeConn{}
 	cb := &fakeCallbacks{}
-	inst := NewInstance("codex", fc, cb)
+	inst := NewInstance("codex", fc)
+	inst.SetCallbacks(cb)
 	if fc.resp == nil || fc.req == nil {
 		t.Fatal("expected ACP request/response handler registration")
 	}

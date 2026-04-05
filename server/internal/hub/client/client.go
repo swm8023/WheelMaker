@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
 	"sync"
@@ -16,28 +15,37 @@ import (
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-// agentRegistry resolves agent factories via built-in singleton presets
-// plus optional client-local custom overrides.
+// agentRegistry resolves built-in agent factories from ACP provider enums.
 type agentRegistry struct {
-	mu       sync.Mutex
-	custom   map[string]agent.Factory
-	builtins *agent.ACPFactory
+	mu        sync.RWMutex
+	builtins  *agent.ACPFactory
+	overrides map[acp.ACPProvider]agent.Factory
+	aliases   map[string]agent.Factory
 }
 
 func newAgentRegistry() *agentRegistry {
 	return &agentRegistry{
-		custom:   make(map[string]agent.Factory),
-		builtins: agent.DefaultACPFactory(),
+		builtins:  agent.DefaultACPFactory(),
+		overrides: map[acp.ACPProvider]agent.Factory{},
+		aliases:   map[string]agent.Factory{},
 	}
 }
 
-func (r *agentRegistry) register(name string, f agent.Factory) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" || f == nil {
+func (r *agentRegistry) setOverride(name string, f agent.Factory) {
+	if r == nil || f == nil {
 		return
 	}
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "" {
+		return
+	}
+	provider, ok := acp.ParseACPProvider(normalized)
 	r.mu.Lock()
-	r.custom[name] = f
+	if ok {
+		r.overrides[provider] = f
+	} else {
+		r.aliases[normalized] = f
+	}
 	r.mu.Unlock()
 }
 
@@ -46,45 +54,42 @@ func (r *agentRegistry) get(name string) agent.Factory {
 	if name == "" {
 		return nil
 	}
-	r.mu.Lock()
-	f := r.custom[name]
-	builtins := r.builtins
-	r.mu.Unlock()
-	if f != nil {
-		return f
+	if r == nil {
+		return nil
 	}
+	r.mu.RLock()
+	if alias := r.aliases[name]; alias != nil {
+		r.mu.RUnlock()
+		return alias
+	}
+	builtins := r.builtins
+	r.mu.RUnlock()
+
 	provider, ok := acp.ParseACPProvider(name)
 	if !ok || builtins == nil {
 		return nil
+	}
+
+	r.mu.RLock()
+	override := r.overrides[provider]
+	r.mu.RUnlock()
+	if override != nil {
+		return override
 	}
 	return builtins.Get(provider)
 }
 
 func (r *agentRegistry) names() []string {
-	r.mu.Lock()
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
 	builtins := r.builtins
-	customNames := make([]string, 0, len(r.custom))
-	for n := range r.custom {
-		customNames = append(customNames, n)
+	r.mu.RUnlock()
+	if builtins == nil {
+		return nil
 	}
-	r.mu.Unlock()
-
-	names := make([]string, 0, len(customNames)+3)
-	if builtins != nil {
-		names = append(names, builtins.Names()...)
-	}
-	names = append(names, customNames...)
-	sort.Strings(names)
-	if len(names) < 2 {
-		return names
-	}
-	out := names[:1]
-	for _, n := range names[1:] {
-		if n != out[len(out)-1] {
-			out = append(out, n)
-		}
-	}
-	return out
+	return builtins.Names()
 }
 
 const commandTimeout = 30 * time.Second
@@ -117,8 +122,6 @@ type Client struct {
 	sessionStore SessionStore // optional; nil = in-memory only
 	state        *ProjectState
 	imBridge     *im.ImAdapter // nil when no IM channel configured
-
-	debugLog io.Writer // optional ACP JSON debug logger; nil = disabled
 
 	mu sync.Mutex
 
@@ -188,23 +191,6 @@ func (c *Client) SetYOLO(enabled bool) {
 	}
 }
 
-// SetDebugLogger enables ACP JSON debug logging on every subsequent agent connection.
-// Pass nil to disable. The writer is injected into acp.Conn at connect time.
-func (c *Client) SetDebugLogger(w io.Writer) {
-	c.mu.Lock()
-	c.debugLog = w
-	sessions := make([]*Session, 0, len(c.sessions))
-	for _, s := range c.sessions {
-		sessions = append(sessions, s)
-	}
-	c.mu.Unlock()
-	for _, sess := range sessions {
-		sess.mu.Lock()
-		sess.debugLog = w
-		sess.mu.Unlock()
-	}
-}
-
 // SetIMUpdateBlockList configures outbound IM update types to suppress.
 // Values are case-insensitive; aliases: "tool" -> "tool_call", "system" -> "error".
 func (c *Client) SetIMUpdateBlockList(types []string) {
@@ -236,12 +222,6 @@ func (c *Client) SetSessionStore(ss SessionStore) {
 	c.mu.Lock()
 	c.sessionStore = ss
 	c.mu.Unlock()
-}
-
-// RegisterAgent registers an agent.Factory under the given name.
-// Use this for agents that support shared connections.
-func (c *Client) RegisterAgent(name string, factory agent.Factory) {
-	c.registry.register(name, factory)
 }
 
 // Start loads persisted state and registers the IM message callback.
@@ -387,7 +367,6 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 				restored.registry = c.registry
 				restored.imBridge = c.imBridge
 				restored.imBlockedUpdates = c.imBlockedUpdates
-				restored.debugLog = c.debugLog
 				restored.yolo = c.yolo
 				restored.state = c.state
 				restored.permRouter = newPermissionRouter(restored)
@@ -443,7 +422,6 @@ func (c *Client) newWiredSession(id string) *Session {
 	sess.registry = c.registry
 	sess.imBridge = c.imBridge
 	sess.imBlockedUpdates = c.imBlockedUpdates
-	sess.debugLog = c.debugLog
 	sess.yolo = c.yolo
 	sess.state = c.state
 	sess.permRouter = newPermissionRouter(sess)
@@ -572,7 +550,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	restored.registry = c.registry
 	restored.imBridge = c.imBridge
 	restored.imBlockedUpdates = c.imBlockedUpdates
-	restored.debugLog = c.debugLog
 	restored.yolo = c.yolo
 	restored.state = c.state
 	restored.permRouter = newPermissionRouter(restored)

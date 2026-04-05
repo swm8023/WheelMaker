@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io"
 	"sort"
 	"sync"
 
@@ -14,7 +13,7 @@ import (
 type Factory interface {
 	Name() string
 	SupportsSharedConn() bool
-	CreateInstance(ctx context.Context, callbacks Callbacks, debugLog io.Writer) (Instance, error)
+	CreateInstance(ctx context.Context) (Instance, error)
 }
 
 // ACPFactory is a built-in provider preset factory keyed by ACP provider enum.
@@ -69,12 +68,12 @@ func (f *ACPFactory) Names() []string {
 }
 
 // CreateInstance creates an instance by provider enum using preset config.
-func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPProvider, callbacks Callbacks, debugLog io.Writer) (Instance, error) {
+func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPProvider) (Instance, error) {
 	preset := f.Get(provider)
 	if preset == nil {
 		return nil, fmt.Errorf("unknown provider: %q", provider)
 	}
-	return preset.CreateInstance(ctx, callbacks, debugLog)
+	return preset.CreateInstance(ctx)
 }
 
 // acpProviderFactory creates agent instances from ACP providers.
@@ -86,12 +85,12 @@ func (f *acpProviderFactory) Name() string { return f.provider.Name() }
 
 func (f *acpProviderFactory) SupportsSharedConn() bool { return false }
 
-func (f *acpProviderFactory) CreateInstance(_ context.Context, cb Callbacks, _ io.Writer) (Instance, error) {
+func (f *acpProviderFactory) CreateInstance(_ context.Context) (Instance, error) {
 	conn, err := newOwnedProviderConn(f.provider)
 	if err != nil {
 		return nil, fmt.Errorf("connect %q: %w", f.provider.Name(), err)
 	}
-	return NewInstance(f.provider.Name(), conn, cb), nil
+	return NewInstance(f.provider.Name(), conn), nil
 }
 
 // NewACPProviderFactory adapts an ACPProvider to Factory.

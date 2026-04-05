@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,6 +64,10 @@ type testInjectedInstance struct {
 var _ agent.Instance = (*testInjectedInstance)(nil)
 
 func (i *testInjectedInstance) Name() string { return i.name }
+
+func (i *testInjectedInstance) SetCallbacks(callbacks agent.Callbacks) {
+	i.callbacks = callbacks
+}
 
 func (i *testInjectedInstance) HandleACPRequest(context.Context, string, json.RawMessage) (any, error) {
 	return nil, errors.New("not implemented in test injected instance")
@@ -185,6 +188,14 @@ func (c *Client) InjectIMChannel(p im.Channel) {
 	c.activeSession.mu.Lock()
 	c.activeSession.imBridge = c.imBridge
 	c.activeSession.mu.Unlock()
+}
+
+// InjectAgentFactory overrides one built-in provider factory for tests.
+func (c *Client) InjectAgentFactory(name string, f agent.Factory) {
+	if c == nil || c.registry == nil || f == nil {
+		return
+	}
+	c.registry.setOverride(name, f)
 }
 
 // DefaultState returns a freshly initialised default state.
@@ -322,7 +333,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.RegisterAgent("codex", nopFactory{name: "codex"})
+	c.InjectAgentFactory("codex", nopFactory{name: "codex"})
 	c.activeSession.ready = true
 
 	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
@@ -343,8 +354,8 @@ func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 
 func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.RegisterAgent("codex", nopFactory{name: "codex"})
-	c.RegisterAgent("claude", nopFactory{name: "claude"})
+	c.InjectAgentFactory("codex", nopFactory{name: "codex"})
+	c.InjectAgentFactory("claude", nopFactory{name: "claude"})
 	c.activeSession.ready = true
 	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
@@ -443,7 +454,7 @@ func (f nopFactory) Name() string { return f.name }
 
 func (f nopFactory) SupportsSharedConn() bool { return false }
 
-func (f nopFactory) CreateInstance(context.Context, agent.Callbacks, io.Writer) (agent.Instance, error) {
+func (f nopFactory) CreateInstance(context.Context) (agent.Instance, error) {
 	return nil, errors.New("test-only factory")
 }
 

@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,7 +139,7 @@ func (f testFactory) Name() string { return f.name }
 
 func (f testFactory) SupportsSharedConn() bool { return false }
 
-func (f testFactory) CreateInstance(_ context.Context, cb agent.Callbacks, _ io.Writer) (agent.Instance, error) {
+func (f testFactory) CreateInstance(_ context.Context) (agent.Instance, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
@@ -149,19 +148,19 @@ func (f testFactory) CreateInstance(_ context.Context, cb agent.Callbacks, _ io.
 	if err := raw.Start(); err != nil {
 		return nil, err
 	}
-	return agent.NewInstance(f.name, agent.NewOwnedConn(raw), cb), nil
+	return agent.NewInstance(f.name, agent.NewOwnedConn(raw)), nil
 }
 
 func registerMockAgent(c *client.Client, name string) {
-	c.RegisterAgent(name, testFactory{name: name})
+	c.InjectAgentFactory(name, testFactory{name: name})
 }
 
 func registerContextRejectAgent(c *client.Client, name string) {
-	c.RegisterAgent(name, testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
+	c.InjectAgentFactory(name, testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
 }
 
 func registerFailingAgent(c *client.Client, name string) {
-	c.RegisterAgent(name, testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")})
+	c.InjectAgentFactory(name, testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")})
 }
 
 // captureReplies redirects Client replies to a string slice for inspection.

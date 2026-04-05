@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
@@ -65,7 +64,6 @@ type Session struct {
 	// Back-references to Client-owned resources needed by Session methods.
 	cwd              string
 	yolo             bool
-	debugLog         io.Writer
 	registry         *agentRegistry
 	store            Store
 	state            *ProjectState
@@ -125,7 +123,6 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	if name == "" {
 		name = defaultAgentName
 	}
-	dw := s.debugLog
 	savedSID := ""
 	if s.state.Agents != nil {
 		if as := s.state.Agents[name]; as != nil && as.LastSessionID != "" {
@@ -139,10 +136,11 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		return fmt.Errorf("no agent registered for %q", name)
 	}
 
-	inst, err := fac.CreateInstance(ctx, s, dw)
+	inst, err := fac.CreateInstance(ctx)
 	if err != nil {
 		return err
 	}
+	inst.SetCallbacks(s)
 
 	s.mu.Lock()
 	if s.instance != nil {

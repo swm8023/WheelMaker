@@ -35,7 +35,6 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	s.mu.Lock()
 	oldInst := s.instance
 	savedLastReply := s.lastReply
-	dw := s.debugLog
 	s.mu.Unlock()
 	s.persistMeta() // save outgoing agent state before reset
 
@@ -50,11 +49,11 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	s.mu.Unlock()
 
 	// Connect new agent via factory.
-	_ = dw // debugLog is passed via factory
-	newInst, err := fac.CreateInstance(ctx, s, dw)
+	newInst, err := fac.CreateInstance(ctx)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}
+	newInst.SetCallbacks(s)
 
 	// Replace instance atomically and close old instance.
 	s.mu.Lock()
