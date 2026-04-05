@@ -36,7 +36,7 @@ type instance struct {
 	name      string
 	conn      Conn
 	callbacks Callbacks
-	runtime   *toolRuntime
+	tools     *instanceTools
 
 	mu              sync.RWMutex
 	connReady       bool
@@ -54,7 +54,7 @@ func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
 		name:      strings.TrimSpace(name),
 		conn:      conn,
 		callbacks: callbacks,
-		runtime:   newToolRuntime(),
+		tools:     newInstanceTools(),
 		connReady: conn != nil,
 	}
 	if conn != nil {
@@ -223,51 +223,51 @@ func (i *instance) HandleACPRequest(ctx context.Context, method string, params j
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return i.runtime.FSRead(p)
+		return i.tools.FSRead(p)
 	case protocol.MethodFSWrite:
 		var p protocol.FSWriteTextFileParams
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return nil, i.runtime.FSWrite(p)
+		return nil, i.tools.FSWrite(p)
 	case protocol.MethodTerminalCreate:
 		var p protocol.TerminalCreateParams
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return i.runtime.TerminalCreate(p)
+		return i.tools.TerminalCreate(p)
 	case protocol.MethodTerminalOutput:
 		var p protocol.TerminalOutputParams
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return i.runtime.TerminalOutput(p)
+		return i.tools.TerminalOutput(p)
 	case protocol.MethodTerminalWaitExit:
 		var p protocol.TerminalWaitForExitParams
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return i.runtime.TerminalWaitForExit(p)
+		return i.tools.TerminalWaitForExit(p)
 	case protocol.MethodTerminalKill:
 		var p protocol.TerminalKillParams
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return nil, i.runtime.TerminalKill(p)
+		return nil, i.tools.TerminalKill(p)
 	case protocol.MethodTerminalRelease:
 		var p protocol.TerminalReleaseParams
 		if err := decodeACPParams(method, params, &p); err != nil {
 			return nil, err
 		}
-		return nil, i.runtime.TerminalRelease(p)
+		return nil, i.tools.TerminalRelease(p)
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
 }
 
 func (i *instance) Close() error {
-	if i.runtime != nil {
-		i.runtime.Close()
+	if i.tools != nil {
+		i.tools.Close()
 	}
 	if i.conn == nil {
 		return nil

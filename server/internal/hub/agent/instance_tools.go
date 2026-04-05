@@ -14,22 +14,22 @@ import (
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-type toolRuntime struct {
+type instanceTools struct {
 	terminals *terminalManager
 }
 
-func newToolRuntime() *toolRuntime {
-	return &toolRuntime{terminals: newTerminalManager()}
+func newInstanceTools() *instanceTools {
+	return &instanceTools{terminals: newTerminalManager()}
 }
 
-func (r *toolRuntime) Close() {
-	if r == nil || r.terminals == nil {
+func (t *instanceTools) Close() {
+	if t == nil || t.terminals == nil {
 		return
 	}
-	r.terminals.KillAll()
+	t.terminals.KillAll()
 }
 
-func (r *toolRuntime) FSRead(params protocol.FSReadTextFileParams) (protocol.FSReadTextFileResult, error) {
+func (t *instanceTools) FSRead(params protocol.FSReadTextFileParams) (protocol.FSReadTextFileResult, error) {
 	data, err := os.ReadFile(params.Path)
 	if err != nil {
 		return protocol.FSReadTextFileResult{}, fmt.Errorf("fs/read: %w", err)
@@ -59,7 +59,7 @@ func (r *toolRuntime) FSRead(params protocol.FSReadTextFileParams) (protocol.FSR
 	return protocol.FSReadTextFileResult{Content: content}, nil
 }
 
-func (r *toolRuntime) FSWrite(params protocol.FSWriteTextFileParams) error {
+func (t *instanceTools) FSWrite(params protocol.FSWriteTextFileParams) error {
 	if err := os.MkdirAll(filepath.Dir(params.Path), 0o755); err != nil {
 		return fmt.Errorf("fs/write: mkdir: %w", err)
 	}
@@ -69,24 +69,24 @@ func (r *toolRuntime) FSWrite(params protocol.FSWriteTextFileParams) error {
 	return nil
 }
 
-func (r *toolRuntime) TerminalCreate(params protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error) {
-	return r.terminals.Create(params)
+func (t *instanceTools) TerminalCreate(params protocol.TerminalCreateParams) (protocol.TerminalCreateResult, error) {
+	return t.terminals.Create(params)
 }
 
-func (r *toolRuntime) TerminalOutput(params protocol.TerminalOutputParams) (protocol.TerminalOutputResult, error) {
-	return r.terminals.Output(params.TerminalID)
+func (t *instanceTools) TerminalOutput(params protocol.TerminalOutputParams) (protocol.TerminalOutputResult, error) {
+	return t.terminals.Output(params.TerminalID)
 }
 
-func (r *toolRuntime) TerminalWaitForExit(params protocol.TerminalWaitForExitParams) (protocol.TerminalWaitForExitResult, error) {
-	return r.terminals.WaitForExit(params.TerminalID)
+func (t *instanceTools) TerminalWaitForExit(params protocol.TerminalWaitForExitParams) (protocol.TerminalWaitForExitResult, error) {
+	return t.terminals.WaitForExit(params.TerminalID)
 }
 
-func (r *toolRuntime) TerminalKill(params protocol.TerminalKillParams) error {
-	return r.terminals.Kill(params.TerminalID)
+func (t *instanceTools) TerminalKill(params protocol.TerminalKillParams) error {
+	return t.terminals.Kill(params.TerminalID)
 }
 
-func (r *toolRuntime) TerminalRelease(params protocol.TerminalReleaseParams) error {
-	return r.terminals.Release(params.TerminalID)
+func (t *instanceTools) TerminalRelease(params protocol.TerminalReleaseParams) error {
+	return t.terminals.Release(params.TerminalID)
 }
 
 // managedTerminal holds a running subprocess created by terminal/create.
