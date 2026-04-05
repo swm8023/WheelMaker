@@ -32,9 +32,9 @@ func DefaultACPFactory() *ACPFactory {
 	defaultACPFactoryOnce.Do(func() {
 		defaultACPFactory = &ACPFactory{
 			presets: map[protocol.ACPProvider]Factory{
-				protocol.ACPProviderCodex:   NewACPProviderFactory(NewCodexProvider(ACPProviderConfig{})),
-				protocol.ACPProviderClaude:  NewACPProviderFactory(NewClaudeProvider(ACPProviderConfig{})),
-				protocol.ACPProviderCopilot: NewACPProviderFactory(NewCopilotProvider(ACPProviderConfig{})),
+				protocol.ACPProviderCodex:   NewACPProviderFactory(NewCodexProvider()),
+				protocol.ACPProviderClaude:  NewACPProviderFactory(NewClaudeProvider()),
+				protocol.ACPProviderCopilot: NewACPProviderFactory(NewCopilotProvider()),
 			},
 		}
 	})

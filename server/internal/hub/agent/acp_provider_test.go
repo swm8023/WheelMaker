@@ -6,7 +6,7 @@ import (
 )
 
 func TestCodexACPProvider_UsesNpxByDefault(t *testing.T) {
-	p := NewCodexProvider(ACPProviderConfig{})
+	p := NewCodexProvider()
 	p.resolveBinary = func(name string, configuredPath string) (string, error) {
 		t.Fatalf("resolveBinary should not be called: name=%q configuredPath=%q", name, configuredPath)
 		return "", nil
@@ -34,7 +34,7 @@ func TestCodexACPProvider_UsesNpxByDefault(t *testing.T) {
 }
 
 func TestClaudeACPProvider_UsesNpxByDefault(t *testing.T) {
-	p := NewClaudeProvider(ACPProviderConfig{})
+	p := NewClaudeProvider()
 	p.resolveBinary = func(name string, configuredPath string) (string, error) {
 		t.Fatalf("resolveBinary should not be called: name=%q configuredPath=%q", name, configuredPath)
 		return "", nil
@@ -58,8 +58,8 @@ func TestClaudeACPProvider_UsesNpxByDefault(t *testing.T) {
 	}
 }
 
-func TestCopilotACPProvider_LaunchArgsAndEnv(t *testing.T) {
-	p := NewCopilotProvider(ACPProviderConfig{Env: map[string]string{"B": "2", "A": "1"}})
+func TestCopilotACPProvider_LaunchArgs(t *testing.T) {
+	p := NewCopilotProvider()
 	p.resolveBinary = func(name string, configuredPath string) (string, error) {
 		if name != "copilot" {
 			t.Fatalf("resolveBinary name=%q, want copilot", name)
@@ -80,7 +80,7 @@ func TestCopilotACPProvider_LaunchArgsAndEnv(t *testing.T) {
 	if !reflect.DeepEqual(args, []string{"--acp", "--stdio"}) {
 		t.Fatalf("args=%v", args)
 	}
-	if !reflect.DeepEqual(env, []string{"A=1", "B=2"}) {
-		t.Fatalf("env=%v", env)
+	if len(env) != 0 {
+		t.Fatalf("env=%v, want empty", env)
 	}
 }

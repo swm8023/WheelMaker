@@ -6,19 +6,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 )
 
 // ACPProvider resolves launch details for one ACP agent type.
 type ACPProvider interface {
 	Name() string
 	Launch() (exe string, args []string, env []string, err error)
-}
-
-// ACPProviderConfig configures an ACP provider instance.
-type ACPProviderConfig struct {
-	BinaryPath string
-	Env        map[string]string
 }
 
 // ACPProviderPreset declares launch behavior for one provider kind.
@@ -52,54 +45,43 @@ var (
 // acpProvider is the unified implementation for all ACP providers.
 type acpProvider struct {
 	preset ACPProviderPreset
-	cfg    ACPProviderConfig
 
 	resolveBinary func(name, configuredPath string) (string, error)
 	lookPath      func(file string) (string, error)
 }
 
-// NewACPProvider creates a provider from preset + config.
-func NewACPProvider(preset ACPProviderPreset, cfg ACPProviderConfig) *acpProvider {
+// NewACPProvider creates a provider from preset.
+func NewACPProvider(preset ACPProviderPreset) *acpProvider {
 	return &acpProvider{
 		preset:        preset,
-		cfg:           cfg,
 		resolveBinary: ResolveACPBinary,
 		lookPath:      exec.LookPath,
 	}
 }
 
-func NewCodexProvider(cfg ACPProviderConfig) *acpProvider {
-	return NewACPProvider(CodexACPProviderPreset, cfg)
+func NewCodexProvider() *acpProvider {
+	return NewACPProvider(CodexACPProviderPreset)
 }
 
-func NewClaudeProvider(cfg ACPProviderConfig) *acpProvider {
-	return NewACPProvider(ClaudeACPProviderPreset, cfg)
+func NewClaudeProvider() *acpProvider {
+	return NewACPProvider(ClaudeACPProviderPreset)
 }
 
-func NewCopilotProvider(cfg ACPProviderConfig) *acpProvider {
-	return NewACPProvider(CopilotACPProviderPreset, cfg)
+func NewCopilotProvider() *acpProvider {
+	return NewACPProvider(CopilotACPProviderPreset)
 }
 
 func (p *acpProvider) Name() string { return p.preset.Name }
 
 func (p *acpProvider) Launch() (string, []string, []string, error) {
-	env := buildEnv(p.cfg.Env)
 	defaultArgs := cloneArgs(p.preset.Args)
-
-	if p.cfg.BinaryPath != "" {
-		exePath, err := p.resolveBinary(p.preset.BinaryName, p.cfg.BinaryPath)
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
-		}
-		return exePath, defaultArgs, env, nil
-	}
 
 	if p.preset.NPMPackage != "" {
 		npxPath, err := p.lookPath("npx")
 		if err != nil {
 			return "", nil, nil, fmt.Errorf("%s: npx not found: %w", p.preset.Name, err)
 		}
-		return npxPath, []string{"--yes", p.preset.NPMPackage}, env, nil
+		return npxPath, []string{"--yes", p.preset.NPMPackage}, nil, nil
 	}
 
 	exePath, err := p.resolveBinary(p.preset.BinaryName, "")
@@ -109,23 +91,7 @@ func (p *acpProvider) Launch() (string, []string, []string, error) {
 		}
 		return "", nil, nil, fmt.Errorf("%s: resolve binary: %w", p.preset.Name, err)
 	}
-	return exePath, defaultArgs, env, nil
-}
-
-func buildEnv(m map[string]string) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	env := make([]string, 0, len(keys))
-	for _, k := range keys {
-		env = append(env, k+"="+m[k])
-	}
-	return env
+	return exePath, defaultArgs, nil, nil
 }
 
 func cloneArgs(args []string) []string {
