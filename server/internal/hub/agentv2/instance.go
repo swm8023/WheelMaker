@@ -27,7 +27,8 @@ type Callbacks interface {
 // Instance is the only ACP-typed runtime interface exposed to Session.
 type Instance interface {
 	Name() string
-	HandleInbound(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error)
+	HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error)
+	HandleACPResponse(ctx context.Context, method string, params json.RawMessage)
 	Initialize(ctx context.Context, p protocol.InitializeParams) (protocol.InitializeResult, error)
 	SessionNew(ctx context.Context, p protocol.SessionNewParams) (protocol.SessionNewResult, error)
 	SessionLoad(ctx context.Context, p protocol.SessionLoadParams) (protocol.SessionLoadResult, error)
@@ -62,7 +63,8 @@ func NewInstance(name string, conn Conn, callbacks Callbacks) Instance {
 		connReady: conn != nil,
 	}
 	if conn != nil {
-		conn.OnRequest(inst.HandleInbound)
+		conn.OnACPRequest(inst.HandleACPRequest)
+		conn.OnACPResponse(inst.HandleACPResponse)
 	}
 	return inst
 }
@@ -207,18 +209,17 @@ func (i *instance) SessionSetConfigOption(ctx context.Context, p protocol.Sessio
 	return opts, nil
 }
 
-func (i *instance) HandleInbound(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
-	if noResponse {
-		if method == protocol.MethodSessionUpdate && i.callbacks != nil {
-			var p protocol.SessionUpdateParams
-			if err := json.Unmarshal(params, &p); err != nil {
-				return nil, nil
-			}
-			i.callbacks.SessionUpdate(p)
+func (i *instance) HandleACPResponse(_ context.Context, method string, params json.RawMessage) {
+	if method == protocol.MethodSessionUpdate && i.callbacks != nil {
+		var p protocol.SessionUpdateParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			return
 		}
-		return nil, nil
+		i.callbacks.SessionUpdate(p)
 	}
+}
 
+func (i *instance) HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	if i.callbacks == nil {
 		if method == protocol.MethodRequestPermission {
 			return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil

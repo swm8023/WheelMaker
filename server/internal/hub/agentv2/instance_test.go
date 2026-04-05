@@ -36,17 +36,15 @@ func TestInstance_HandleInboundDispatch(t *testing.T) {
 	fc := &fakeConn{}
 	cb := &fakeCallbacks{}
 	inst := NewInstance("codex", fc, cb)
-	if fc.handler == nil {
-		t.Fatal("expected OnRequest handler registration")
+	if fc.resp == nil || fc.req == nil {
+		t.Fatal("expected ACP request/response handler registration")
 	}
 
 	updateRaw, _ := json.Marshal(protocol.SessionUpdateParams{
 		SessionID: "acp-1",
 		Update:    protocol.SessionUpdate{SessionUpdate: "agent_message_chunk"},
 	})
-	if _, err := fc.handler(context.Background(), protocol.MethodSessionUpdate, updateRaw, true); err != nil {
-		t.Fatalf("session/update dispatch: %v", err)
-	}
+	fc.resp(context.Background(), protocol.MethodSessionUpdate, updateRaw)
 	if cb.updateCount != 1 {
 		t.Fatalf("updateCount=%d, want 1", cb.updateCount)
 	}
@@ -56,7 +54,7 @@ func TestInstance_HandleInboundDispatch(t *testing.T) {
 		ToolCall:  protocol.ToolCallRef{ToolCallID: "tc-1"},
 		Options:   []protocol.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "once"}},
 	})
-	resp, err := fc.handler(context.Background(), protocol.MethodRequestPermission, permRaw, false)
+	resp, err := fc.req(context.Background(), protocol.MethodRequestPermission, permRaw)
 	if err != nil {
 		t.Fatalf("permission dispatch: %v", err)
 	}
@@ -75,7 +73,8 @@ func TestInstance_HandleInboundDispatch(t *testing.T) {
 }
 
 type fakeConn struct {
-	handler RequestHandler
+	req  ACPRequestHandler
+	resp ACPResponseHandler
 }
 
 func (f *fakeConn) Send(_ context.Context, method string, _ any, result any) error {
@@ -102,7 +101,9 @@ func (f *fakeConn) Send(_ context.Context, method string, _ any, result any) err
 
 func (f *fakeConn) Notify(_ string, _ any) error { return nil }
 
-func (f *fakeConn) OnRequest(h RequestHandler) { f.handler = h }
+func (f *fakeConn) OnACPRequest(h ACPRequestHandler) { f.req = h }
+
+func (f *fakeConn) OnACPResponse(h ACPResponseHandler) { f.resp = h }
 
 func (f *fakeConn) Close() error { return nil }
 

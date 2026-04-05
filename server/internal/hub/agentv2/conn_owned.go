@@ -29,9 +29,10 @@ type ownedConn struct {
 
 	nextID atomic.Int64
 
-	mu      sync.RWMutex
-	handler RequestHandler
-	closed  bool
+	mu          sync.RWMutex
+	reqHandler  ACPRequestHandler
+	respHandler ACPResponseHandler
+	closed      bool
 
 	pendingMu sync.Mutex
 	pending   map[int64]chan protocol.ACPRPCResponse
@@ -118,9 +119,15 @@ func (c *ownedConn) Notify(method string, params any) error {
 	return nil
 }
 
-func (c *ownedConn) OnRequest(h RequestHandler) {
+func (c *ownedConn) OnACPRequest(h ACPRequestHandler) {
 	c.mu.Lock()
-	c.handler = h
+	c.reqHandler = h
+	c.mu.Unlock()
+}
+
+func (c *ownedConn) OnACPResponse(h ACPResponseHandler) {
+	c.mu.Lock()
+	c.respHandler = h
 	c.mu.Unlock()
 }
 
@@ -135,7 +142,8 @@ func (c *ownedConn) Close() error {
 		return nil
 	}
 	c.closed = true
-	c.handler = nil
+	c.reqHandler = nil
+	c.respHandler = nil
 	transport := c.transport
 	c.transport = nil
 	c.mu.Unlock()
@@ -220,19 +228,19 @@ func (c *ownedConn) handleRawMessage(raw json.RawMessage) {
 		}
 	case msg.Method != "":
 		c.mu.RLock()
-		h := c.handler
+		h := c.respHandler
 		closed := c.closed
 		c.mu.RUnlock()
 		if closed || h == nil {
 			return
 		}
-		_, _ = h(c.connCtx, msg.Method, msg.Params, true)
+		h(c.connCtx, msg.Method, msg.Params)
 	}
 }
 
 func (c *ownedConn) handleIncomingRequest(jsonrpc string, id int64, method string, params json.RawMessage) {
 	c.mu.RLock()
-	h := c.handler
+	h := c.reqHandler
 	closed := c.closed
 	transport := c.transport
 	c.mu.RUnlock()
@@ -248,7 +256,7 @@ func (c *ownedConn) handleIncomingRequest(jsonrpc string, id int64, method strin
 	if h == nil {
 		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
-		result, err := h(c.connCtx, method, params, false)
+		result, err := h(c.connCtx, method, params)
 		if err != nil {
 			resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: err.Error()}
 		} else if result == nil {

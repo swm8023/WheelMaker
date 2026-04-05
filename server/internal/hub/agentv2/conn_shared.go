@@ -63,7 +63,8 @@ func (p *SharedConnPool) Open() (Conn, error) {
 			return nil, err
 		}
 		p.sharedRaw = raw
-		p.sharedRaw.OnRequest(p.dispatchInbound)
+		p.sharedRaw.OnACPRequest(p.dispatchInboundRequest)
+		p.sharedRaw.OnACPResponse(p.dispatchInboundResponse)
 	}
 
 	route := &sharedConn{pool: p, routeKey: routeKey, raw: p.sharedRaw}
@@ -89,7 +90,8 @@ func (p *SharedConnPool) Close() error {
 	for _, route := range p.routes {
 		route.mu.Lock()
 		route.closed = true
-		route.handler = nil
+		route.reqHandler = nil
+		route.respHandler = nil
 		route.mu.Unlock()
 	}
 	p.routes = map[string]*sharedConn{}
@@ -105,15 +107,20 @@ func (p *SharedConnPool) Close() error {
 	return nil
 }
 
-func (p *SharedConnPool) dispatchInbound(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+func (p *SharedConnPool) dispatchInboundRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	target := p.resolveRoute(params)
 	if target == nil {
-		if noResponse {
-			return nil, nil
-		}
 		return nil, fmt.Errorf("agentv2 shared conn: no route for inbound method %q", method)
 	}
-	return target.invokeInbound(ctx, method, params, noResponse)
+	return target.invokeInboundRequest(ctx, method, params)
+}
+
+func (p *SharedConnPool) dispatchInboundResponse(ctx context.Context, method string, params json.RawMessage) {
+	target := p.resolveRoute(params)
+	if target == nil {
+		return
+	}
+	target.invokeInboundResponse(ctx, method, params)
 }
 
 func (p *SharedConnPool) resolveRoute(params json.RawMessage) *sharedConn {
@@ -168,7 +175,8 @@ func (p *SharedConnPool) closeRoute(routeKey string) error {
 
 	route.mu.Lock()
 	route.closed = true
-	route.handler = nil
+	route.reqHandler = nil
+	route.respHandler = nil
 	route.mu.Unlock()
 	p.mu.Unlock()
 
@@ -184,9 +192,10 @@ type sharedConn struct {
 	routeKey string
 	raw      Conn
 
-	mu      sync.RWMutex
-	handler RequestHandler
-	closed  bool
+	mu          sync.RWMutex
+	reqHandler  ACPRequestHandler
+	respHandler ACPResponseHandler
+	closed      bool
 }
 
 var _ Conn = (*sharedConn)(nil)
@@ -220,9 +229,15 @@ func (c *sharedConn) Notify(method string, params any) error {
 	return raw.Notify(method, params)
 }
 
-func (c *sharedConn) OnRequest(h RequestHandler) {
+func (c *sharedConn) OnACPRequest(h ACPRequestHandler) {
 	c.mu.Lock()
-	c.handler = h
+	c.reqHandler = h
+	c.mu.Unlock()
+}
+
+func (c *sharedConn) OnACPResponse(h ACPResponseHandler) {
+	c.mu.Lock()
+	c.respHandler = h
 	c.mu.Unlock()
 }
 
@@ -247,25 +262,31 @@ func (c *sharedConn) rawConn() (Conn, error) {
 	return raw, nil
 }
 
-func (c *sharedConn) invokeInbound(ctx context.Context, method string, params json.RawMessage, noResponse bool) (any, error) {
+func (c *sharedConn) invokeInboundRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	c.mu.RLock()
 	closed := c.closed
-	h := c.handler
+	h := c.reqHandler
 	c.mu.RUnlock()
 
 	if closed {
-		if noResponse {
-			return nil, nil
-		}
 		return nil, errors.New("agentv2 shared conn: route is closed")
 	}
 	if h == nil {
-		if noResponse {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("agentv2 shared conn: no handler for route %s", c.routeKey)
+		return nil, fmt.Errorf("agentv2 shared conn: no request handler for route %s", c.routeKey)
 	}
-	return h(ctx, method, params, noResponse)
+	return h(ctx, method, params)
+}
+
+func (c *sharedConn) invokeInboundResponse(ctx context.Context, method string, params json.RawMessage) {
+	c.mu.RLock()
+	closed := c.closed
+	h := c.respHandler
+	c.mu.RUnlock()
+
+	if closed || h == nil {
+		return
+	}
+	h(ctx, method, params)
 }
 
 func parseInboundSessionID(params json.RawMessage) string {

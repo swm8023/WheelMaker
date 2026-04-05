@@ -43,10 +43,7 @@ func TestOwnedConn_IncomingRequestDispatchesAndReplies(t *testing.T) {
 	conn := NewOwnedConn(tr)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	conn.OnRequest(func(_ context.Context, method string, _ json.RawMessage, noResponse bool) (any, error) {
-		if noResponse {
-			t.Fatalf("expected request, got notification")
-		}
+	conn.OnACPRequest(func(_ context.Context, method string, _ json.RawMessage) (any, error) {
 		if method != "session/request_permission" {
 			t.Fatalf("method=%q", method)
 		}
@@ -90,17 +87,16 @@ func TestOwnedConn_IncomingRequestDispatchesAndReplies(t *testing.T) {
 	}
 }
 
-func TestOwnedConn_NotificationDispatchesNoResponse(t *testing.T) {
+func TestOwnedConn_NotificationDispatchesResponseCallback(t *testing.T) {
 	tr := newFakeOwnedTransport()
 	conn := NewOwnedConn(tr)
 	t.Cleanup(func() { _ = conn.Close() })
 
 	notified := make(chan struct{}, 1)
-	conn.OnRequest(func(_ context.Context, method string, _ json.RawMessage, noResponse bool) (any, error) {
-		if method == protocol.MethodSessionUpdate && noResponse {
+	conn.OnACPResponse(func(_ context.Context, method string, _ json.RawMessage) {
+		if method == protocol.MethodSessionUpdate {
 			notified <- struct{}{}
 		}
-		return nil, nil
 	})
 
 	if err := tr.emit(protocol.ACPRPCNotification{

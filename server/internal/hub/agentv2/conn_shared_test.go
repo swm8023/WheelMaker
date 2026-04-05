@@ -30,13 +30,11 @@ func TestSharedConnPool_RoutesBySessionID(t *testing.T) {
 
 	count1 := 0
 	count2 := 0
-	r1.OnRequest(func(_ context.Context, _ string, _ json.RawMessage, _ bool) (any, error) {
+	r1.OnACPResponse(func(_ context.Context, _ string, _ json.RawMessage) {
 		count1++
-		return nil, nil
 	})
-	r2.OnRequest(func(_ context.Context, _ string, _ json.RawMessage, _ bool) (any, error) {
+	r2.OnACPResponse(func(_ context.Context, _ string, _ json.RawMessage) {
 		count2++
-		return nil, nil
 	})
 
 	b1, ok := r1.(sessionBinder)
@@ -51,34 +49,39 @@ func TestSharedConnPool_RoutesBySessionID(t *testing.T) {
 	b2.BindSessionID("sid-2")
 
 	params, _ := json.Marshal(map[string]any{"sessionId": "sid-2"})
-	if _, err := raw.emit(protocol.MethodSessionUpdate, params, true); err != nil {
-		t.Fatalf("emit sid-2: %v", err)
-	}
+	raw.emitResponse(protocol.MethodSessionUpdate, params)
 	if count1 != 0 || count2 != 1 {
 		t.Fatalf("counts after sid-2 emit: c1=%d c2=%d", count1, count2)
 	}
 
 	unknown, _ := json.Marshal(map[string]any{"sessionId": "unknown"})
-	if _, err := raw.emit(protocol.MethodSessionUpdate, unknown, true); err != nil {
-		t.Fatalf("emit unknown: %v", err)
-	}
+	raw.emitResponse(protocol.MethodSessionUpdate, unknown)
 	if count1 != 1 || count2 != 1 {
 		t.Fatalf("counts after unknown emit: c1=%d c2=%d", count1, count2)
 	}
 }
 
 type fakeRawConn struct {
-	h RequestHandler
+	req  ACPRequestHandler
+	resp ACPResponseHandler
 }
 
 func (f *fakeRawConn) Send(_ context.Context, _ string, _ any, _ any) error { return nil }
 func (f *fakeRawConn) Notify(_ string, _ any) error                         { return nil }
-func (f *fakeRawConn) OnRequest(h RequestHandler)                           { f.h = h }
+func (f *fakeRawConn) OnACPRequest(h ACPRequestHandler)                     { f.req = h }
+func (f *fakeRawConn) OnACPResponse(h ACPResponseHandler)                   { f.resp = h }
 func (f *fakeRawConn) Close() error                                         { return nil }
 
-func (f *fakeRawConn) emit(method string, params []byte, noResponse bool) (any, error) {
-	if f.h == nil {
+func (f *fakeRawConn) emitRequest(method string, params []byte) (any, error) {
+	if f.req == nil {
 		return nil, nil
 	}
-	return f.h(context.Background(), method, params, noResponse)
+	return f.req(context.Background(), method, params)
+}
+
+func (f *fakeRawConn) emitResponse(method string, params []byte) {
+	if f.resp == nil {
+		return
+	}
+	f.resp(context.Background(), method, params)
 }
