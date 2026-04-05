@@ -20,32 +20,21 @@ type agentRegistry struct {
 	mu        sync.RWMutex
 	builtins  *agent.ACPFactory
 	overrides map[acp.ACPProvider]agent.Factory
-	aliases   map[string]agent.Factory
 }
 
 func newAgentRegistry() *agentRegistry {
 	return &agentRegistry{
 		builtins:  agent.DefaultACPFactory(),
 		overrides: map[acp.ACPProvider]agent.Factory{},
-		aliases:   map[string]agent.Factory{},
 	}
 }
 
-func (r *agentRegistry) setOverride(name string, f agent.Factory) {
+func (r *agentRegistry) setOverride(provider acp.ACPProvider, f agent.Factory) {
 	if r == nil || f == nil {
 		return
 	}
-	normalized := strings.ToLower(strings.TrimSpace(name))
-	if normalized == "" {
-		return
-	}
-	provider, ok := acp.ParseACPProvider(normalized)
 	r.mu.Lock()
-	if ok {
-		r.overrides[provider] = f
-	} else {
-		r.aliases[normalized] = f
-	}
+	r.overrides[provider] = f
 	r.mu.Unlock()
 }
 
@@ -54,27 +43,22 @@ func (r *agentRegistry) get(name string) agent.Factory {
 	if name == "" {
 		return nil
 	}
+	provider, ok := acp.ParseACPProvider(name)
+	if !ok {
+		return nil
+	}
 	if r == nil {
 		return nil
 	}
 	r.mu.RLock()
-	if alias := r.aliases[name]; alias != nil {
-		r.mu.RUnlock()
-		return alias
-	}
-	builtins := r.builtins
-	r.mu.RUnlock()
-
-	provider, ok := acp.ParseACPProvider(name)
-	if !ok || builtins == nil {
-		return nil
-	}
-
-	r.mu.RLock()
 	override := r.overrides[provider]
+	builtins := r.builtins
 	r.mu.RUnlock()
 	if override != nil {
 		return override
+	}
+	if builtins == nil {
+		return nil
 	}
 	return builtins.Get(provider)
 }

@@ -151,16 +151,19 @@ func (f testFactory) CreateInstance(_ context.Context) (agent.Instance, error) {
 	return agent.NewInstance(f.name, agent.NewOwnedConn(raw)), nil
 }
 
-func registerMockAgent(c *client.Client, name string) {
-	c.InjectAgentFactory(name, testFactory{name: name})
+func registerMockAgent(c *client.Client, provider acp.ACPProvider) {
+	name := string(provider)
+	c.InjectAgentFactory(provider, testFactory{name: name})
 }
 
-func registerContextRejectAgent(c *client.Client, name string) {
-	c.InjectAgentFactory(name, testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
+func registerContextRejectAgent(c *client.Client, provider acp.ACPProvider) {
+	name := string(provider)
+	c.InjectAgentFactory(provider, testFactory{name: name, env: []string{"GO_CLIENT_ACP_MOCK_REJECT_CONTEXT=1"}})
 }
 
-func registerFailingAgent(c *client.Client, name string) {
-	c.InjectAgentFactory(name, testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")})
+func registerFailingAgent(c *client.Client, provider acp.ACPProvider) {
+	name := string(provider)
+	c.InjectAgentFactory(provider, testFactory{name: name, createErr: fmt.Errorf("mock: binary not found")})
 }
 
 // captureReplies redirects Client replies to a string slice for inspection.
@@ -373,7 +376,7 @@ func TestHandleMessage_Mode_SetsMode(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -411,7 +414,7 @@ func TestHandleMessage_Model_SetsConfigOption(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -481,7 +484,7 @@ func TestHandleMessage_Prompt_BurstStreaming_NoLoss(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -502,7 +505,7 @@ func TestHandleMessage_Prompt_ConfigOptionUpdate_NotifiesIM(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -593,8 +596,8 @@ func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
 	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
 
 	// Register a new agent and switch to it after the prompt completes.
-	registerMockAgent(c, "other")
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use other"})
+	registerMockAgent(c, acp.ACPProviderClaude)
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use claude"})
 
 	found := false
 	for _, m := range *msgs {
@@ -640,7 +643,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 		},
 	}
 	c := newTestClient(slow)
-	registerMockAgent(c, "fast")
+	registerMockAgent(c, acp.ACPProviderClaude)
 	msgs := captureReplies(c)
 
 	var wg sync.WaitGroup
@@ -656,7 +659,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 	// Issue /use while prompt is active; promptMu forces it to wait.
 	switchDone := make(chan struct{})
 	go func() {
-		c.HandleMessage(im.Message{ChatID: "c1", Text: "/use fast"})
+		c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude"})
 		close(switchDone)
 	}()
 
@@ -795,10 +798,10 @@ func TestSwitchBackend_PersistsOutgoingSessionID(t *testing.T) {
 		},
 	})
 	c.InjectForwarder("codex", outgoing.sessionN, outgoing.Prompt, outgoing.Cancel)
-	registerMockAgent(c, "new-agent")
+	registerMockAgent(c, acp.ACPProviderClaude)
 
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-agent"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use claude"})
 
 	if len(store.saved) == 0 {
 		t.Fatal("state was not saved after switch")
@@ -808,10 +811,10 @@ func TestSwitchBackend_PersistsOutgoingSessionID(t *testing.T) {
 	if last.Agents["codex"] == nil || last.Agents["codex"].LastSessionID != "outgoing-sess-123" {
 		t.Errorf("Agents[codex].LastSessionID = %q, want outgoing-sess-123", last.Agents["codex"].LastSessionID)
 	}
-	if last.ActiveAgent != "new-agent" {
-		t.Errorf("ActiveAgent = %q, want new-agent", last.ActiveAgent)
+	if last.ActiveAgent != "claude" {
+		t.Errorf("ActiveAgent = %q, want claude", last.ActiveAgent)
 	}
-	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "new-agent") {
+	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "claude") {
 		t.Errorf("reply = %v, want switch confirmation", *msgs)
 	}
 }
@@ -827,15 +830,15 @@ func TestSwitchBackend_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	c.InjectState(&client.ProjectState{
 		ActiveAgent: "codex",
 		Agents: map[string]*client.AgentState{
-			"codex":     {LastSessionID: "codex-sess-1"},
-			"new-agent": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
+			"codex":  {LastSessionID: "codex-sess-1"},
+			"claude": {LastSessionID: "old-stale-sess"}, // pre-existing saved session for target
 		},
 	})
 	c.InjectForwarder("codex", outgoing.sessionN, outgoing.Prompt, outgoing.Cancel)
-	registerMockAgent(c, "new-agent")
+	registerMockAgent(c, acp.ACPProviderClaude)
 
 	captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use new-agent"})
+	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use claude"})
 
 	if len(store.saved) == 0 {
 		t.Fatal("state was not saved after switch")
@@ -844,9 +847,9 @@ func TestSwitchBackend_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 
 	// The incoming agent's saved session ID must be preserved (not overwritten by "")
 	// so that a subsequent switch back can pass it to ag.Switch for session/load.
-	if last.Agents["new-agent"] == nil || last.Agents["new-agent"].LastSessionID != "old-stale-sess" {
-		t.Errorf("Agents[new-agent].LastSessionID = %q, want old-stale-sess (preserved for session/load)",
-			last.Agents["new-agent"].LastSessionID)
+	if last.Agents["claude"] == nil || last.Agents["claude"].LastSessionID != "old-stale-sess" {
+		t.Errorf("Agents[claude].LastSessionID = %q, want old-stale-sess (preserved for session/load)",
+			last.Agents["claude"].LastSessionID)
 	}
 }
 
@@ -859,8 +862,8 @@ func TestSwitchBackend_PersistsTargetSessionIDOnContinue(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
-	registerMockAgent(c, "other")
+	registerMockAgent(c, acp.ACPProviderCodex)
+	registerMockAgent(c, acp.ACPProviderClaude)
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
@@ -878,7 +881,7 @@ func TestSwitchBackend_PersistsTargetSessionIDOnContinue(t *testing.T) {
 	store.saved = nil
 	store.mu.Unlock()
 
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other --continue"})
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude --continue"})
 
 	store.mu.Lock()
 	saved := store.saved
@@ -888,8 +891,8 @@ func TestSwitchBackend_PersistsTargetSessionIDOnContinue(t *testing.T) {
 		t.Fatal("state was not saved after /use --continue")
 	}
 	last := saved[len(saved)-1]
-	if last.Agents["other"] == nil || last.Agents["other"].LastSessionID == "" {
-		t.Errorf("Agents[other].LastSessionID is empty after /use --continue; want bootstrapped session ID")
+	if last.Agents["claude"] == nil || last.Agents["claude"].LastSessionID == "" {
+		t.Errorf("Agents[claude].LastSessionID is empty after /use --continue; want bootstrapped session ID")
 	}
 }
 
@@ -902,7 +905,7 @@ func TestStart_UnregisteredBackend_NonFatal(t *testing.T) {
 	}}
 	c := client.New(store, nil, "test", "/tmp")
 	// Register "codex" but NOT "unknown-agent" (simulating a removed agent).
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
@@ -939,7 +942,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerFailingAgent(c, "codex")
+	registerFailingAgent(c, acp.ACPProviderCodex)
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
@@ -954,8 +957,8 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 	}
 
 	// /use with a working agent should recover and allow prompts.
-	registerMockAgent(c, "other")
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
+	registerMockAgent(c, acp.ACPProviderClaude)
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude"})
 	found := false
 	for _, m := range *msgs {
 		if strings.Contains(m, "Switched to agent") {
@@ -964,7 +967,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("messages = %v, expected switch confirmation after /use other", *msgs)
+		t.Errorf("messages = %v, expected switch confirmation after /use claude", *msgs)
 	}
 
 	// After recovery, a prompt should not return "No active session".
@@ -990,7 +993,7 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
@@ -1009,10 +1012,10 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 	_ = msgs
 
 	// Register "other" with a agent that rejects [context] bootstrap prompts.
-	registerContextRejectAgent(c, "other")
+	registerContextRejectAgent(c, acp.ACPProviderClaude)
 
-	// /use other --continue: ag.Switch sends "[context] client-mock-reply" to the new acp.
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other --continue"})
+	// /use claude --continue: ag.Switch sends "[context] client-mock-reply" to the new acp.
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude --continue"})
 
 	// Poll until the async drain goroutine logs the rejection warning (or timeout).
 	const want = "SwitchWithContext bootstrap prompt failed"
@@ -1033,7 +1036,7 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
@@ -1052,10 +1055,10 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 	_ = msgs
 
 	// Register "other" using a context-rejecting agent.
-	registerContextRejectAgent(c, "other")
+	registerContextRejectAgent(c, acp.ACPProviderClaude)
 
 	// Plain /use (SwitchClean): should NOT send a bootstrap prompt.
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use other"})
+	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude"})
 
 	// Wait long enough for any async operations before asserting.
 	time.Sleep(200 * time.Millisecond)
@@ -1074,7 +1077,7 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 
 	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
@@ -1104,7 +1107,7 @@ func TestHandleMessage_PermissionDecision_ButtonsOnly(t *testing.T) {
 		ActiveAgent: "codex",
 	}}
 	c := client.New(store, nil, "test", "/tmp")
-	registerMockAgent(c, "codex")
+	registerMockAgent(c, acp.ACPProviderCodex)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

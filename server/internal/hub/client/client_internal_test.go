@@ -191,11 +191,11 @@ func (c *Client) InjectIMChannel(p im.Channel) {
 }
 
 // InjectAgentFactory overrides one built-in provider factory for tests.
-func (c *Client) InjectAgentFactory(name string, f agent.Factory) {
+func (c *Client) InjectAgentFactory(provider acp.ACPProvider, f agent.Factory) {
 	if c == nil || c.registry == nil || f == nil {
 		return
 	}
-	c.registry.setOverride(name, f)
+	c.registry.setOverride(provider, f)
 }
 
 // DefaultState returns a freshly initialised default state.
@@ -333,7 +333,7 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.InjectAgentFactory("codex", nopFactory{name: "codex"})
+	c.InjectAgentFactory(acp.ACPProviderCodex, nopFactory{name: "codex"})
 	c.activeSession.ready = true
 
 	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
@@ -354,8 +354,8 @@ func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 
 func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	c.InjectAgentFactory("codex", nopFactory{name: "codex"})
-	c.InjectAgentFactory("claude", nopFactory{name: "claude"})
+	c.InjectAgentFactory(acp.ACPProviderCodex, nopFactory{name: "codex"})
+	c.InjectAgentFactory(acp.ACPProviderClaude, nopFactory{name: "claude"})
 	c.activeSession.ready = true
 	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
