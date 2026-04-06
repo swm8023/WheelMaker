@@ -482,7 +482,7 @@ func (s *Session) persistSessionSummaries(agentName string, sessions []SessionSu
 	as.Sessions = sessions
 	st := s.state
 	s.mu.Unlock()
-	_ = s.store.Save(st)
+	s.persistProjectState(st)
 }
 
 func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {

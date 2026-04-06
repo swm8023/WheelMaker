@@ -68,7 +68,7 @@ type Session struct {
 	cwd              string
 	yolo             bool
 	registry         *agent.ACPFactory
-	store            Store
+	stateStore       ClientStateStore
 	state            *ProjectState
 	imBridge         *im.ImAdapter
 	imBlockedUpdates map[string]struct{}
@@ -279,7 +279,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	st := s.state
 	s.mu.Unlock()
 	if st != nil {
-		_ = s.store.Save(st)
+		s.persistProjectState(st)
 	}
 
 	s.reply(fmt.Sprintf("Switched to agent: %s", name))
@@ -755,6 +755,13 @@ func (s *Session) resetSessionFields(sid string, configOpts []acp.ConfigOption) 
 	s.sessionMeta = clientSessionMeta{ConfigOptions: configOpts}
 }
 
+func (s *Session) persistProjectState(st *ProjectState) {
+	if st == nil || s.stateStore == nil {
+		return
+	}
+	_ = s.stateStore.SaveProjectState(st)
+}
+
 // saveSessionState calls persistMeta and writes to disk if changed.
 func (s *Session) saveSessionState() {
 	if !s.persistMeta() {
@@ -764,7 +771,7 @@ func (s *Session) saveSessionState() {
 	st := s.state
 	s.mu.Unlock()
 	if st != nil {
-		_ = s.store.Save(st)
+		s.persistProjectState(st)
 	}
 }
 
@@ -823,7 +830,7 @@ func (s *Session) Snapshot(projectName string) *SessionSnapshot {
 // Suspend cancels any in-progress prompt, closes the agent, and marks
 // this session as suspended. If a SessionStore is provided, the session
 // state is persisted.
-func (s *Session) Suspend(ctx context.Context, store SessionStore, projectName string) error {
+func (s *Session) Suspend(ctx context.Context, projectName string) error {
 	_ = s.cancelPrompt()
 
 	s.mu.Lock()
@@ -839,9 +846,9 @@ func (s *Session) Suspend(ctx context.Context, store SessionStore, projectName s
 		_ = inst.Close()
 	}
 
-	if store != nil {
+	if s.stateStore != nil && s.stateStore.SessionStoreEnabled() {
 		snap := s.Snapshot(projectName)
-		return store.Save(ctx, snap)
+		return s.stateStore.SaveSession(ctx, snap)
 	}
 	return nil
 }

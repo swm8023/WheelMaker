@@ -41,10 +41,9 @@ type Client struct {
 
 	registry *agent.ACPFactory
 
-	store        Store
-	sessionStore SessionStore // optional; nil = in-memory only
-	state        *ProjectState
-	imBridge     *im.ImAdapter // nil when no IM channel configured
+	stateStore ClientStateStore
+	state      *ProjectState
+	imBridge   *im.ImAdapter // nil when no IM channel configured
 
 	mu sync.Mutex
 
@@ -79,7 +78,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 		projectName:      projectName,
 		cwd:              cwd,
 		registry:         agent.DefaultACPFactory(),
-		store:            store,
+		stateStore:       NewClientStateStore(store, nil),
 		imBridge:         imProvider,
 		imBlockedUpdates: map[string]struct{}{},
 		sessions:         make(map[string]*Session),
@@ -88,7 +87,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 		stopPersistCh:    make(chan struct{}),
 	}
 	sess := newSession("default", cwd)
-	sess.store = store
+	sess.stateStore = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = imProvider
 	sess.imBlockedUpdates = c.imBlockedUpdates
@@ -142,15 +141,13 @@ func (c *Client) SetIMUpdateBlockList(types []string) {
 // SetSessionStore sets an optional persistent session store (e.g. SQLite).
 // Must be called before Start(). A nil store means in-memory only.
 func (c *Client) SetSessionStore(ss SessionStore) {
-	c.mu.Lock()
-	c.sessionStore = ss
-	c.mu.Unlock()
+	c.stateStore.SetSessionStore(ss)
 }
 
 // Start loads persisted state and registers the IM message callback.
 // Agent initialization is deferred until the first incoming message (lazy init).
 func (c *Client) Start(ctx context.Context) error {
-	state, err := c.store.Load()
+	state, err := c.stateStore.LoadProjectState()
 	if err != nil {
 		return fmt.Errorf("client: load state: %w", err)
 	}
@@ -173,7 +170,7 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 
 	// Start background persist timer for suspended sessions.
-	if c.sessionStore != nil {
+	if c.stateStore.SessionStoreEnabled() {
 		go c.persistLoop()
 	}
 
@@ -204,8 +201,8 @@ func (c *Client) Close() error {
 	for _, sess := range c.sessions {
 		sessions = append(sessions, sess)
 	}
-	ss := c.sessionStore
 	pn := c.projectName
+	stateStore := c.stateStore
 	c.mu.Unlock()
 
 	ctx := context.Background()
@@ -215,8 +212,8 @@ func (c *Client) Close() error {
 		sess.mu.Unlock()
 		if inst != nil {
 			sess.saveSessionState()
-			if ss != nil {
-				_ = sess.Suspend(ctx, ss, pn)
+			if stateStore.SessionStoreEnabled() {
+				_ = sess.Suspend(ctx, pn)
 			} else {
 				_ = inst.Close()
 			}
@@ -227,7 +224,7 @@ func (c *Client) Close() error {
 	s := c.state
 	c.mu.Unlock()
 	if s != nil {
-		return c.store.Save(s)
+		return c.stateStore.SaveProjectState(s)
 	}
 	return nil
 }
@@ -279,14 +276,14 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 			return sess
 		}
 		// Session was evicted — try to restore from store.
-		ss := c.sessionStore
+		stateStore := c.stateStore
 		c.mu.Unlock()
-		if ss != nil {
-			snap, err := ss.Load(context.Background(), sessID)
+		if stateStore.SessionStoreEnabled() {
+			snap, err := stateStore.LoadSession(context.Background(), sessID)
 			if err == nil && snap != nil {
 				restored := RestoreFromSnapshot(snap, c.cwd)
 				c.mu.Lock()
-				restored.store = c.store
+				restored.stateStore = c.stateStore
 				restored.registry = c.registry
 				restored.imBridge = c.imBridge
 				restored.imBlockedUpdates = c.imBlockedUpdates
@@ -341,7 +338,7 @@ func (c *Client) createSessionLocked(routeKey string) *Session {
 // Does NOT add it to c.sessions. Caller may hold c.mu.
 func (c *Client) newWiredSession(id string) *Session {
 	sess := newSession(id, c.cwd)
-	sess.store = c.store
+	sess.stateStore = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = c.imBridge
 	sess.imBlockedUpdates = c.imBlockedUpdates
@@ -363,7 +360,6 @@ func (c *Client) ClientNewSession(routeKey string) *Session {
 	c.mu.Lock()
 	oldSessID := c.routeMap[routeKey]
 	oldSess := c.sessions[oldSessID]
-	ss := c.sessionStore
 	pn := c.projectName
 	c.mu.Unlock()
 
@@ -373,7 +369,7 @@ func (c *Client) ClientNewSession(routeKey string) *Session {
 		hasInst := oldSess.instance != nil
 		oldSess.mu.Unlock()
 		if hasInst {
-			if err := oldSess.Suspend(context.Background(), ss, pn); err != nil {
+			if err := oldSess.Suspend(context.Background(), pn); err != nil {
 				logger.Warn("client: suspend old session %s: %v", oldSessID, err)
 			}
 		}
@@ -411,7 +407,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		// Already in memory — just rebind the route.
 		oldSessID := c.routeMap[routeKey]
 		oldSess := c.sessions[oldSessID]
-		ss := c.sessionStore
 		pn := c.projectName
 		c.mu.Unlock()
 
@@ -421,7 +416,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 			hasInst := oldSess.instance != nil
 			oldSess.mu.Unlock()
 			if hasInst {
-				_ = oldSess.Suspend(context.Background(), ss, pn)
+				_ = oldSess.Suspend(context.Background(), pn)
 			}
 			oldSess.mu.Lock()
 			oldSess.Status = SessionSuspended
@@ -436,15 +431,15 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		c.mu.Unlock()
 		return sess, nil
 	}
-	ss := c.sessionStore
+	stateStore := c.stateStore
 	pn := c.projectName
 	c.mu.Unlock()
 
 	// Try to load from SessionStore.
-	if ss == nil {
+	if !stateStore.SessionStoreEnabled() {
 		return nil, fmt.Errorf("session %q not in memory and no session store configured", target.ID)
 	}
-	snap, err := ss.Load(context.Background(), target.ID)
+	snap, err := stateStore.LoadSession(context.Background(), target.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load session %q: %w", target.ID, err)
 	}
@@ -462,7 +457,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		hasInst := oldSess.instance != nil
 		oldSess.mu.Unlock()
 		if hasInst {
-			_ = oldSess.Suspend(context.Background(), ss, pn)
+			_ = oldSess.Suspend(context.Background(), pn)
 		}
 		oldSess.mu.Lock()
 		oldSess.Status = SessionSuspended
@@ -472,7 +467,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 
 	restored := RestoreFromSnapshot(snap, c.cwd)
 	c.mu.Lock()
-	restored.store = c.store
+	restored.stateStore = c.stateStore
 	restored.registry = c.registry
 	restored.imBridge = c.imBridge
 	restored.imBlockedUpdates = c.imBlockedUpdates
@@ -513,14 +508,14 @@ func (c *Client) clientListSessions() ([]sessionListEntry, error) {
 		memEntries = append(memEntries, e)
 		memIDs[sess.ID] = true
 	}
-	ss := c.sessionStore
+	stateStore := c.stateStore
 	c.mu.Unlock()
 
 	entries := memEntries
 
 	// Merge persisted sessions.
-	if ss != nil {
-		stored, err := ss.List(context.Background())
+	if stateStore.SessionStoreEnabled() {
+		stored, err := stateStore.ListSessions(context.Background())
 		if err != nil {
 			return nil, fmt.Errorf("list persisted sessions: %w", err)
 		}
@@ -576,10 +571,10 @@ func (c *Client) persistLoop() {
 // suspend timeout, persists them to SQLite, and removes them from memory.
 func (c *Client) evictSuspendedSessions() {
 	c.mu.Lock()
-	ss := c.sessionStore
+	stateStore := c.stateStore
 	pn := c.projectName
 	timeout := c.suspendTimeout
-	if ss == nil {
+	if !stateStore.SessionStoreEnabled() {
 		c.mu.Unlock()
 		return
 	}
@@ -596,7 +591,7 @@ func (c *Client) evictSuspendedSessions() {
 
 	for _, sess := range toEvict {
 		snap := sess.Snapshot(pn)
-		if err := ss.Save(context.Background(), snap); err != nil {
+		if err := stateStore.SaveSession(context.Background(), snap); err != nil {
 			logger.Warn("client: persist session %s: %v", sess.ID, err)
 			continue
 		}
