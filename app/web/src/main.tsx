@@ -404,7 +404,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = n
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
         wrapLines={true}
-        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}}
+        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: 4}}}
         lineProps={lineNumber => ({
           'data-line-number': String(lineNumber),
           style: {
@@ -414,8 +414,19 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = n
             overflowWrap: wrap ? 'anywhere' : 'normal',
           },
         })}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0'}}
-        lineNumberStyle={{fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, color: 'var(--muted)', minWidth: '2.4em', paddingRight: '10px', borderRight: '1px solid rgba(127, 127, 127, 0.18)', marginRight: '10px', textAlign: 'right', userSelect: 'none'}}>
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: 4}}
+        lineNumberStyle={{
+          fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+          fontWeight: 400,
+          color: 'var(--muted)',
+          paddingRight: '10px',
+          borderRight: '1px solid rgba(127, 127, 127, 0.18)',
+          marginRight: '10px',
+          textAlign: 'right',
+          userSelect: 'none',
+          fontVariantNumeric: 'tabular-nums',
+          fontFeatureSettings: '"tnum" 1',
+        }}>
         {content || ' '}
       </SyntaxHighlighter>
     </div>
