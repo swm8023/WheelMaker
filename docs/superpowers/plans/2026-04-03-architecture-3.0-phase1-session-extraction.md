@@ -121,7 +121,7 @@ type imBridgeAccessor interface {
 	Emit(ctx context.Context, u interface{}) error
 	CanHandleDecision() bool
 	RequestDecision(ctx context.Context, req interface{}) (interface{}, error)
-	ActiveChatID() string
+	RouteKey() string
 }
 ```
 

@@ -20,7 +20,7 @@ Status: Draft (Rewrite v2)
 3. 入站转发给 Client 时必须携带 `routeKey`。
 4. Client 普通回复默认按入站 `routeKey` 定点回发。
 5. `clientSessionId` 作为 chat 绑定目标，支持一对多 chat 绑定。
-6. IM2 仅持久化 chat 投影（`im_active_chats`）。
+6. IM2 仅持久化 chat 投影（`im_route_bindings`）。
 
 ## 2. Non-Goals
 
@@ -41,7 +41,7 @@ Status: Draft (Rewrite v2)
 | Outbound default | 普通回复按当前会话 `routeKey` 定点发送 |
 | Broadcast | 显式无 target 才按 `clientSessionId` 广播 |
 | `/new` behavior | 只重绑当前 `routeKey` |
-| Persistence | IM2 仅维护 `im_active_chats` |
+| Persistence | IM2 仅维护 `im_route_bindings` |
 
 ## 4. Target Architecture
 
@@ -68,7 +68,7 @@ Hub
    - 回复时优先按该 Session 当前 `routeKey` 回发。
 
 3. `im2.State`
-   - 只管理 `routeKey(activeChatID) <-> clientSessionId` 绑定与在线态。
+   - 只管理 `routeKey <-> clientSessionId` 绑定与在线态。
 
 ## 5. Protocol Contract Alignment
 
@@ -142,3 +142,4 @@ Hub
 2. Router 入站和回包都基于 `routeKey`。
 3. `/new` rebind 行为通过测试。
 4. IM2 状态仍只保存 chat 投影。
+

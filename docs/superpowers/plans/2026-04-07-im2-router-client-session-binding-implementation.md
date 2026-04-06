@@ -24,7 +24,7 @@
 |---|---|---|
 | `server/internal/im2/protocol.go` | Modify | 定义 `Channel` 与 routeKey helper |
 | `server/internal/im2/router.go` | Modify | channel 注册、inbound/outbound、rebind |
-| `server/internal/im2/state.go` | Modify | 显式 `RebindActiveChat` |
+| `server/internal/im2/state.go` | Modify | 显式 `RebindRouteKey` |
 | `server/internal/im2/router_test.go` | Modify | routeKey + target/broadcast + rebind 测试 |
 | `server/internal/im2/state_test.go` | Modify | rebind 持久化与重启一致性 |
 | `server/internal/im2/integration_test.go` | Create | IM2 端到端路由行为测试 |
@@ -63,7 +63,7 @@ func TestBuildRouteKey_UsesIMTypeAndChatID(t *testing.T) {
 
 func TestRouter_RegisterChannelAndTargetReply(t *testing.T) {
 	st := newFakeState()
-	_ = st.BindActiveChat(context.Background(), "feishu:oc_123", "feishu", "oc_123", "sess-1", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:oc_123", "feishu", "oc_123", "sess-1", true)
 	ch := &fakeChannel{}
 	r, err := NewRouter("proj", st, func(context.Context) (string, error) { return "sess-1", nil }, nil)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestRouter_RegisterChannelAndTargetReply(t *testing.T) {
 	if err := r.Publish(context.Background(), OutboundEvent{
 		Kind:               OutboundMessage,
 		ClientSessionID:    "sess-1",
-		TargetActiveChatID: "feishu:oc_123",
+		TargetRouteKey: "feishu:oc_123",
 		Text:               "hello",
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -100,7 +100,7 @@ type Channel interface {
 }
 
 func BuildRouteKey(imType, chatID string) (string, error) {
-	return BuildActiveChatID(imType, chatID)
+	return protocol.BuildRouteKey(imType, chatID)
 }
 
 // router.go
@@ -149,17 +149,17 @@ git commit -m "refactor(im2): define routeKey-first channel contract"
 - [ ] **Step 1: 写失败测试**
 
 ```go
-func TestRouter_RebindActiveChat_OnlyAffectsTargetRouteKey(t *testing.T) {
+func TestRouter_RebindRouteKey_OnlyAffectsTargetRouteKey(t *testing.T) {
 	st := newFakeState()
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
 
 	r, err := NewRouter("proj", st, func(context.Context) (string, error) { return "unused", nil }, nil)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	if err := r.RebindActiveChat(context.Background(), "feishu:chat-a", "s-new"); err != nil {
-		t.Fatalf("RebindActiveChat: %v", err)
+	if err := r.RebindRouteKey(context.Background(), "feishu:chat-a", "s-new"); err != nil {
+		t.Fatalf("RebindRouteKey: %v", err)
 	}
 
 	a, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-a")
@@ -172,24 +172,24 @@ func TestRouter_RebindActiveChat_OnlyAffectsTargetRouteKey(t *testing.T) {
 
 - [ ] **Step 2: 运行失败测试**
 
-Run: `cd server; go test ./internal/im2 -run TestRouter_RebindActiveChat_OnlyAffectsTargetRouteKey -v`
+Run: `cd server; go test ./internal/im2 -run TestRouter_RebindRouteKey_OnlyAffectsTargetRouteKey -v`
 Expected: FAIL。
 
 - [ ] **Step 3: 实现 rebind**
 
 ```go
 // state.go
-func (s *sqliteState) RebindActiveChat(ctx context.Context, activeChatID, clientSessionID string) error {
-	imType, chatID, ok := ParseActiveChatID(activeChatID)
+func (s *sqliteState) RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error {
+	imType, chatID, ok := ParseRouteKey(routeKey)
 	if !ok {
-		return fmt.Errorf("im2 state: invalid activeChatID %q", activeChatID)
+		return fmt.Errorf("im2 state: invalid routeKey %q", routeKey)
 	}
-	return s.BindActiveChat(ctx, activeChatID, imType, chatID, clientSessionID, true)
+	return s.BindRouteKey(ctx, routeKey, imType, chatID, clientSessionID, true)
 }
 
 // router.go
-func (r *Router) RebindActiveChat(ctx context.Context, activeChatID, clientSessionID string) error {
-	return r.state.RebindActiveChat(ctx, strings.TrimSpace(activeChatID), strings.TrimSpace(clientSessionID))
+func (r *Router) RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error {
+	return r.state.RebindRouteKey(ctx, strings.TrimSpace(routeKey), strings.TrimSpace(clientSessionID))
 }
 ```
 
@@ -227,8 +227,8 @@ func TestSessionReply_UsesBoundRouteKeyViaIM2(t *testing.T) {
 	if len(fake.outbound) == 0 {
 		t.Fatal("expected outbound via IM2")
 	}
-	if fake.outbound[0].TargetActiveChatID != "feishu:oc_1" {
-		t.Fatalf("target=%q", fake.outbound[0].TargetActiveChatID)
+	if fake.outbound[0].TargetRouteKey != "feishu:oc_1" {
+		t.Fatalf("target=%q", fake.outbound[0].TargetRouteKey)
 	}
 }
 ```
@@ -245,7 +245,7 @@ Expected: FAIL。
 type IM2Router interface {
 	HandleInbound(ctx context.Context, event im2.InboundEvent) error
 	Publish(ctx context.Context, event im2.OutboundEvent) error
-	RebindActiveChat(ctx context.Context, activeChatID, clientSessionID string) error
+	RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error
 }
 
 // client.go
@@ -260,7 +260,7 @@ if s.im2Router != nil && strings.TrimSpace(s.boundRouteKey) != "" {
 	_ = s.im2Router.Publish(context.Background(), im2.OutboundEvent{
 		Kind:               im2.OutboundMessage,
 		ClientSessionID:    s.ID,
-		TargetActiveChatID: s.boundRouteKey,
+		TargetRouteKey: s.boundRouteKey,
 		Text:               text,
 	})
 	return
@@ -375,8 +375,8 @@ func TestHandleNewCommand_RebindsCurrentRouteKeyOnly(t *testing.T) {
 	if len(fake.rebindCalls) != 1 {
 		t.Fatalf("rebind calls=%d, want 1", len(fake.rebindCalls))
 	}
-	if fake.rebindCalls[0].activeChatID != "feishu:chat-a" {
-		t.Fatalf("activeChatID=%q", fake.rebindCalls[0].activeChatID)
+	if fake.rebindCalls[0].routeKey != "feishu:chat-a" {
+		t.Fatalf("routeKey=%q", fake.rebindCalls[0].routeKey)
 	}
 }
 ```
@@ -392,12 +392,12 @@ Expected: FAIL。
 // commands.go
 newSess := c.ClientNewSession(routeKey)
 if c.im2Router != nil {
-	_ = c.im2Router.RebindActiveChat(context.Background(), routeKey, newSess.ID)
+	_ = c.im2Router.RebindRouteKey(context.Background(), routeKey, newSess.ID)
 }
 
 loaded, err := c.ClientLoadSession(routeKey, idx)
 if err == nil && c.im2Router != nil {
-	_ = c.im2Router.RebindActiveChat(context.Background(), routeKey, loaded.ID)
+	_ = c.im2Router.RebindRouteKey(context.Background(), routeKey, loaded.ID)
 }
 ```
 
@@ -431,21 +431,21 @@ func TestIM2_E2E_InboundCarriesRouteKeyToClient(t *testing.T) {
 		return nil
 	})
 	_ = r.HandleInbound(context.Background(), InboundEvent{Kind: InboundPrompt, IMType: "feishu", ChatID: "chat-a", Text: "hello"})
-	if got.ActiveChatID != "feishu:chat-a" || got.ClientSessionID != "s-1" {
-		t.Fatalf("got activeChatID=%q clientSessionID=%q", got.ActiveChatID, got.ClientSessionID)
+	if got.RouteKey != "feishu:chat-a" || got.ClientSessionID != "s-1" {
+		t.Fatalf("got routeKey=%q clientSessionID=%q", got.RouteKey, got.ClientSessionID)
 	}
 }
 
 func TestIM2_E2E_NormalReplyUsesSameRouteKey(t *testing.T) {
 	st := newFakeState()
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-1", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-1", true)
 	ch := &fakeChannel{}
 	r, _ := NewRouter("proj", st, func(context.Context) (string, error) { return "unused", nil }, nil)
 	_ = r.RegisterChannel("feishu", ch)
 	_ = r.Publish(context.Background(), OutboundEvent{
 		Kind:               OutboundMessage,
 		ClientSessionID:    "s-1",
-		TargetActiveChatID: "feishu:chat-a",
+		TargetRouteKey: "feishu:chat-a",
 		Text:               "reply",
 	})
 	if ch.count() != 1 {
@@ -455,10 +455,10 @@ func TestIM2_E2E_NormalReplyUsesSameRouteKey(t *testing.T) {
 
 func TestIM2_E2E_NewRebindOnlyCurrentRouteKey(t *testing.T) {
 	st := newFakeState()
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
 	r, _ := NewRouter("proj", st, func(context.Context) (string, error) { return "s-new", nil }, nil)
-	_ = r.RebindActiveChat(context.Background(), "feishu:chat-a", "s-new")
+	_ = r.RebindRouteKey(context.Background(), "feishu:chat-a", "s-new")
 	a, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-a")
 	b, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-b")
 	if a != "s-new" || b != "s-old" {
@@ -502,4 +502,5 @@ git push origin main
 2. Placeholder scan:
    - 无 TBD/TODO；每个任务含具体文件、命令、提交。
 3. Type consistency:
-   - 统一使用 `routeKey(activeChatID)`、`clientSessionId`、`Channel`。
+   - 统一使用 `routeKey`、`clientSessionId`、`Channel`。
+
