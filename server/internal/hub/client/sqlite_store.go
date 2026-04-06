@@ -58,6 +58,9 @@ func NewSQLiteSessionStore(dbPath, projectName string) (*SQLiteSessionStore, err
 }
 
 func (s *SQLiteSessionStore) Save(ctx context.Context, snap *SessionSnapshot) error {
+	if snap == nil {
+		return fmt.Errorf("save snapshot: nil")
+	}
 	sessionMetaJSON, err := json.Marshal(snap.SessionMeta)
 	if err != nil {
 		return fmt.Errorf("marshal sessionMeta: %w", err)
@@ -103,8 +106,17 @@ func (s *SQLiteSessionStore) Save(ctx context.Context, snap *SessionSnapshot) er
 		}
 		defer stmt.Close()
 		for name, as := range snap.Agents {
-			optsJSON, _ := json.Marshal(as.ConfigOptions)
-			cmdsJSON, _ := json.Marshal(as.Commands)
+			if as == nil {
+				as = &SessionAgentState{}
+			}
+			optsJSON, err := json.Marshal(as.ConfigOptions)
+			if err != nil {
+				return fmt.Errorf("marshal agent %q config options: %w", name, err)
+			}
+			cmdsJSON, err := json.Marshal(as.Commands)
+			if err != nil {
+				return fmt.Errorf("marshal agent %q commands: %w", name, err)
+			}
 			if _, err := stmt.ExecContext(ctx, snap.ID, name, as.ACPSessionID, string(optsJSON), string(cmdsJSON), as.Title, as.UpdatedAt); err != nil {
 				return fmt.Errorf("insert agent %q: %w", name, err)
 			}

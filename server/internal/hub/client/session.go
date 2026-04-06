@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -159,6 +160,12 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 	s.initializing = true
 	inst := s.instance
+	if inst == nil {
+		s.initializing = false
+		s.mu.Unlock()
+		s.initCond.Broadcast()
+		return errors.New("ensureReady: instance is nil")
+	}
 	agentName := inst.Name()
 	savedSID := s.acpSessionID
 	cwd := s.cwd
@@ -469,12 +476,15 @@ func isCopilotReasoningEffortError(err error) bool {
 // forces a fresh session/new instead of reusing potentially incompatible config.
 func (s *Session) invalidateSessionForRetry() {
 	s.mu.Lock()
-	agentName := s.instance.Name()
+	agentName := ""
+	if s.instance != nil {
+		agentName = s.instance.Name()
+	}
 	s.acpSessionID = ""
 	s.ready = false
 	s.lastReply = ""
 	s.sessionMeta = clientSessionMeta{}
-	if s.state != nil && s.state.Agents != nil {
+	if agentName != "" && s.state != nil && s.state.Agents != nil {
 		if st := s.state.Agents[agentName]; st != nil {
 			st.LastSessionID = ""
 			st.Session = nil
@@ -576,8 +586,8 @@ func (s *Session) persistMeta() bool {
 		if as.Session == nil {
 			as.Session = &SessionState{}
 		}
-		as.Session.ConfigOptions = sessMeta.ConfigOptions
-		as.Session.AvailableCommands = sessMeta.AvailableCommands
+		as.Session.ConfigOptions = append([]acp.ConfigOption(nil), sessMeta.ConfigOptions...)
+		as.Session.AvailableCommands = append([]acp.AvailableCommand(nil), sessMeta.AvailableCommands...)
 		if sessMeta.Title != "" {
 			as.Session.Title = sessMeta.Title
 		}
@@ -611,6 +621,24 @@ func (s *Session) saveSessionState() {
 		_ = s.store.Save(st)
 	}
 }
+func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	cp.ConfigOptions = append([]acp.ConfigOption(nil), src.ConfigOptions...)
+	cp.Commands = append([]acp.AvailableCommand(nil), src.Commands...)
+	return &cp
+}
+
+func cloneClientSessionMeta(src clientSessionMeta) clientSessionMeta {
+	return clientSessionMeta{
+		ConfigOptions:     append([]acp.ConfigOption(nil), src.ConfigOptions...),
+		AvailableCommands: append([]acp.AvailableCommand(nil), src.AvailableCommands...),
+		Title:             src.Title,
+		UpdatedAt:         src.UpdatedAt,
+	}
+}
 
 // Snapshot captures the full state of this Session into a SessionSnapshot.
 func (s *Session) Snapshot(projectName string) *SessionSnapshot {
@@ -625,8 +653,7 @@ func (s *Session) Snapshot(projectName string) *SessionSnapshot {
 	// Deep copy agents map.
 	agents := make(map[string]*SessionAgentState, len(s.agents))
 	for k, v := range s.agents {
-		cp := *v
-		agents[k] = &cp
+		agents[k] = cloneSessionAgentState(v)
 	}
 
 	return &SessionSnapshot{
@@ -639,7 +666,7 @@ func (s *Session) Snapshot(projectName string) *SessionSnapshot {
 		CreatedAt:    s.createdAt,
 		LastActiveAt: s.lastActiveAt,
 		Agents:       agents,
-		SessionMeta:  s.sessionMeta,
+		SessionMeta:  cloneClientSessionMeta(s.sessionMeta),
 		InitMeta:     s.initMeta,
 	}
 }
@@ -680,13 +707,12 @@ func RestoreFromSnapshot(snap *SessionSnapshot, cwd string) *Session {
 	s.acpSessionID = snap.ACPSessionID
 	s.createdAt = snap.CreatedAt
 	s.lastActiveAt = time.Now()
-	s.sessionMeta = snap.SessionMeta
+	s.sessionMeta = cloneClientSessionMeta(snap.SessionMeta)
 	s.initMeta = snap.InitMeta
 
 	if snap.Agents != nil {
 		for k, v := range snap.Agents {
-			cp := *v
-			s.agents[k] = &cp
+			s.agents[k] = cloneSessionAgentState(v)
 		}
 	}
 	return s
@@ -735,10 +761,10 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
 		s.mu.Lock()
 		if len(derived.AvailableCommands) > 0 {
-			s.sessionMeta.AvailableCommands = derived.AvailableCommands
+			s.sessionMeta.AvailableCommands = append([]acp.AvailableCommand(nil), derived.AvailableCommands...)
 		}
 		if len(derived.ConfigOptions) > 0 {
-			s.sessionMeta.ConfigOptions = derived.ConfigOptions
+			s.sessionMeta.ConfigOptions = append([]acp.ConfigOption(nil), derived.ConfigOptions...)
 		}
 		if derived.Title != "" {
 			s.sessionMeta.Title = derived.Title
@@ -764,7 +790,10 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		return
 	}
 	if promptCtx == nil {
-		ch <- derived.Update
+		select {
+		case ch <- derived.Update:
+		default:
+		}
 		return
 	}
 	select {

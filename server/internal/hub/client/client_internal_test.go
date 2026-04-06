@@ -1128,3 +1128,165 @@ func TestSQLiteSessionStore_FileCreation(t *testing.T) {
 		t.Error("database file was not created")
 	}
 }
+
+type nilLoadSessionStore struct {
+	entries []SessionSummaryEntry
+}
+
+func (s *nilLoadSessionStore) Save(context.Context, *SessionSnapshot) error { return nil }
+func (s *nilLoadSessionStore) Load(context.Context, string) (*SessionSnapshot, error) {
+	return nil, nil
+}
+func (s *nilLoadSessionStore) List(context.Context) ([]SessionSummaryEntry, error) {
+	return append([]SessionSummaryEntry(nil), s.entries...), nil
+}
+func (s *nilLoadSessionStore) Delete(context.Context, string) error { return nil }
+func (s *nilLoadSessionStore) Close() error                         { return nil }
+
+func TestClientLoadSession_MissingStoredSnapshotReturnsError(t *testing.T) {
+	c := New(&noopStore{}, nil, "test", "/tmp")
+	c.SetSessionStore(&nilLoadSessionStore{entries: []SessionSummaryEntry{
+		{ID: "ghost", ActiveAgent: "claude", CreatedAt: time.Now().Add(-time.Hour), LastActiveAt: time.Now().Add(time.Hour)},
+	}})
+
+	entries, err := c.clientListSessions()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	idx := -1
+	for i, e := range entries {
+		if e.ID == "ghost" {
+			idx = i + 1
+			break
+		}
+	}
+	if idx < 0 {
+		t.Fatalf("ghost entry not found: %+v", entries)
+	}
+
+	_, err = c.ClientLoadSession("route-x", idx)
+	if err == nil || !strings.Contains(err.Error(), "not found in session store") {
+		t.Fatalf("expected not-found error, got: %v", err)
+	}
+}
+
+func TestSessionUpdate_NoPromptContext_DoesNotBlockWhenChannelFull(t *testing.T) {
+	s := newSession("sess", "/tmp")
+	content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: "chunk"})
+
+	ch := make(chan acp.Update, 1)
+	ch <- acp.Update{Type: acp.UpdateText, Content: "prefill"}
+
+	s.mu.Lock()
+	s.acpSessionID = "acp-1"
+	s.prompt.updatesCh = ch
+	s.prompt.ctx = nil
+	s.mu.Unlock()
+
+	params := acp.SessionUpdateParams{
+		SessionID: "acp-1",
+		Update: acp.SessionUpdate{
+			SessionUpdate: "agent_message_chunk",
+			Content:       content,
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.SessionUpdate(params)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("SessionUpdate blocked when prompt channel was full and prompt context was nil")
+	}
+}
+
+func TestSessionSnapshot_DeepCopiesSlices(t *testing.T) {
+	s := newSession("sess", "/tmp")
+	s.mu.Lock()
+	s.sessionMeta = clientSessionMeta{
+		ConfigOptions:     []acp.ConfigOption{{ID: "mode", CurrentValue: "code"}},
+		AvailableCommands: []acp.AvailableCommand{{Name: "build"}},
+	}
+	s.agents["claude"] = &SessionAgentState{
+		ConfigOptions: []acp.ConfigOption{{ID: "model", CurrentValue: "gpt-4"}},
+		Commands:      []acp.AvailableCommand{{Name: "run"}},
+	}
+	s.mu.Unlock()
+
+	snap := s.Snapshot("proj")
+
+	s.mu.Lock()
+	s.sessionMeta.ConfigOptions[0].CurrentValue = "plan"
+	s.sessionMeta.AvailableCommands[0].Name = "changed"
+	s.agents["claude"].ConfigOptions[0].CurrentValue = "gpt-5"
+	s.agents["claude"].Commands[0].Name = "changed-run"
+	s.mu.Unlock()
+
+	if got := snap.SessionMeta.ConfigOptions[0].CurrentValue; got != "code" {
+		t.Fatalf("snapshot sessionMeta config mutated: got=%q want=code", got)
+	}
+	if got := snap.SessionMeta.AvailableCommands[0].Name; got != "build" {
+		t.Fatalf("snapshot sessionMeta command mutated: got=%q want=build", got)
+	}
+	if got := snap.Agents["claude"].ConfigOptions[0].CurrentValue; got != "gpt-4" {
+		t.Fatalf("snapshot agent config mutated: got=%q want=gpt-4", got)
+	}
+	if got := snap.Agents["claude"].Commands[0].Name; got != "run" {
+		t.Fatalf("snapshot agent command mutated: got=%q want=run", got)
+	}
+}
+
+func TestRestoreFromSnapshot_DeepCopiesSlices(t *testing.T) {
+	snap := &SessionSnapshot{
+		ID:          "sess",
+		ProjectName: "proj",
+		SessionMeta: clientSessionMeta{
+			ConfigOptions:     []acp.ConfigOption{{ID: "mode", CurrentValue: "code"}},
+			AvailableCommands: []acp.AvailableCommand{{Name: "build"}},
+		},
+		Agents: map[string]*SessionAgentState{
+			"claude": {
+				ConfigOptions: []acp.ConfigOption{{ID: "model", CurrentValue: "gpt-4"}},
+				Commands:      []acp.AvailableCommand{{Name: "run"}},
+			},
+		},
+	}
+
+	restored := RestoreFromSnapshot(snap, "/tmp")
+
+	snap.SessionMeta.ConfigOptions[0].CurrentValue = "plan"
+	snap.SessionMeta.AvailableCommands[0].Name = "changed"
+	snap.Agents["claude"].ConfigOptions[0].CurrentValue = "gpt-5"
+	snap.Agents["claude"].Commands[0].Name = "changed-run"
+
+	restored.mu.Lock()
+	defer restored.mu.Unlock()
+	if got := restored.sessionMeta.ConfigOptions[0].CurrentValue; got != "code" {
+		t.Fatalf("restored sessionMeta config mutated: got=%q want=code", got)
+	}
+	if got := restored.sessionMeta.AvailableCommands[0].Name; got != "build" {
+		t.Fatalf("restored sessionMeta command mutated: got=%q want=build", got)
+	}
+	if got := restored.agents["claude"].ConfigOptions[0].CurrentValue; got != "gpt-4" {
+		t.Fatalf("restored agent config mutated: got=%q want=gpt-4", got)
+	}
+	if got := restored.agents["claude"].Commands[0].Name; got != "run" {
+		t.Fatalf("restored agent command mutated: got=%q want=run", got)
+	}
+}
+
+func TestSQLiteSessionStore_SaveNilSnapshot(t *testing.T) {
+	store, err := NewSQLiteSessionStore(tempDBPath(t), "proj1")
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.Save(context.Background(), nil); err == nil {
+		t.Fatal("expected error when saving nil snapshot")
+	}
+}

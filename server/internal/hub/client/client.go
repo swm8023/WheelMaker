@@ -448,6 +448,9 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	if err != nil {
 		return nil, fmt.Errorf("load session %q: %w", target.ID, err)
 	}
+	if snap == nil {
+		return nil, fmt.Errorf("session %q not found in session store", target.ID)
+	}
 
 	// Suspend old session.
 	c.mu.Lock()
