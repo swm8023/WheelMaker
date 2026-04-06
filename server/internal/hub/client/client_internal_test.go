@@ -1129,6 +1129,10 @@ func TestSQLiteSessionStore_FileCreation(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Additional regressions for session robustness
+// ---------------------------------------------------------------------------
+
 type nilLoadSessionStore struct {
 	entries []SessionSummaryEntry
 }

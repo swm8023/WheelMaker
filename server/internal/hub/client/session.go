@@ -621,6 +621,8 @@ func (s *Session) saveSessionState() {
 		_ = s.store.Save(st)
 	}
 }
+
+// cloneSessionAgentState deep-copies SessionAgentState and its slice fields.
 func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	if src == nil {
 		return nil
@@ -631,6 +633,7 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	return &cp
 }
 
+// cloneClientSessionMeta deep-copies session meta slices for persistence/snapshot safety.
 func cloneClientSessionMeta(src clientSessionMeta) clientSessionMeta {
 	return clientSessionMeta{
 		ConfigOptions:     append([]acp.ConfigOption(nil), src.ConfigOptions...),
