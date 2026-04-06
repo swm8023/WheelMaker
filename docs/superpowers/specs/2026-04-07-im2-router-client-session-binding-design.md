@@ -1,0 +1,188 @@
+# IM2 Router + ClientSession Binding Design
+
+Updated: 2026-04-07
+Status: Draft (Rewrite)
+
+## 0. Background
+
+Current IM2 work has working prototypes (`protocol/router/state`) but lacks a fully frozen design contract across `client`, `session`, and `im2` boundaries.
+
+Main risks observed:
+
+1. Ownership boundaries are easy to blur (`clientSessionId` lifecycle vs IM binding projection).
+2. `/new` and chat-level rebind semantics are not fully specified end-to-end.
+3. Implementation can drift because protocol constraints are not strict enough.
+
+This design resets IM2 around protocol-first constraints.
+
+## 1. Goals
+
+1. Define one clear ownership model: `Client` owns one `IMRouter`.
+2. Make `clientSessionId` the stable cross-chat session key in IM routing.
+3. Keep IM layer ACP-transparent.
+4. Persist only IM chat projection data in `im2`.
+5. Support one session bound to many chats, with broadcast-by-default outbound behavior.
+
+## 2. Non-Goals
+
+1. Re-design ACP protocol fields.
+2. Move client session lifecycle persistence into `im2`.
+3. Add user identity concepts (`userId`) into IM protocol.
+4. Replace all legacy IM flow in one commit.
+
+## 3. Final Decisions
+
+| Topic | Decision |
+|---|---|
+| Router ownership | One `Client` owns one `IMRouter` |
+| Chat identity | `IMActiveChatID = <imType>:<chatID>` |
+| Session key | Use `clientSessionId` naming consistently |
+| Mapping model | One chat -> one `clientSessionId`; one `clientSessionId` -> many chats |
+| Outbound default | Broadcast to all online chats in same `clientSessionId` |
+| Outbound targeted | `targetActiveChatID` enables point-to-point send |
+| `/new` behavior | Rebind current chat only; other chats unchanged |
+| IM persistence scope | Only `im_active_chats` projection table |
+| User dimension | No `userId` in protocol |
+| ACP handling | Opaque payload pass-through at IM layer |
+
+## 4. Target Architecture
+
+```text
+Hub
+  -> Client
+      -> IMRouter (one per client)
+          -> IM publishers (feishu/console/registry future)
+      -> Session manager (client domain)
+```
+
+Responsibilities:
+
+1. `Client`
+   - Owns `clientSessionId` lifecycle.
+   - Handles `/new`, `/load`, and session selection rules.
+   - Publishes outbound IM events via router.
+
+2. `IMRouter`
+   - Normalizes inbound IM events.
+   - Resolves/binds `activeChatID <-> clientSessionId`.
+   - Routes outbound events (broadcast/targeted).
+   - Does not parse ACP business details.
+
+3. `im2.State`
+   - Persists chat projection (`im_active_chats`).
+   - Exposes chat binding lookup and write API.
+
+4. IM adapters (publishers)
+   - Implement channel-specific send/receive mechanics.
+   - Accept normalized outbound event from router.
+
+## 5. Protocol Contract Alignment
+
+Protocol source-of-truth: `docs/im-protocol-2.0.md`.
+
+Design requirements enforced here:
+
+1. Inbound kinds: `prompt`, `permission_reply`, `command`.
+2. Outbound kinds: `message`, `acp_update`, `command_reply`.
+3. Inbound unknown chat MUST create and persist binding.
+4. Outbound without target MUST broadcast by `clientSessionId`.
+5. Protocol MUST NOT require `userId`.
+
+## 6. State Boundary (Two-State-Manager Model)
+
+1. Client state manager:
+   - Owns client session runtime/lifecycle state.
+   - May persist its own data in SQLite (separate tables under client package).
+
+2. IM2 state manager:
+   - Owns only chat projection/binding state.
+   - Uses `im_active_chats` table only.
+
+3. Shared storage engine:
+   - Same SQLite database is allowed.
+   - Table ownership remains package-scoped (`client` vs `im2`).
+
+## 7. Core Flows
+
+### 7.1 Inbound New Chat
+
+1. IM adapter sends inbound event with `imType + chatID`.
+2. Router builds `activeChatID`.
+3. Router resolves binding; if missing, asks client callback for new `clientSessionId`.
+4. Router persists binding and forwards normalized inbound event to client.
+5. Client lazily performs ACP `load/new` when needed.
+
+### 7.2 Inbound Existing Chat
+
+1. Router resolves existing `clientSessionId` by `activeChatID`.
+2. Router updates liveness timestamps.
+3. Router forwards event to client with resolved session binding.
+
+### 7.3 Outbound Broadcast
+
+1. Client publishes outbound event with `clientSessionId`, no target.
+2. Router lists online chats bound to that session.
+3. Router fan-outs event to each corresponding publisher.
+
+### 7.4 Outbound Targeted
+
+1. Client publishes event with `targetActiveChatID`.
+2. Router sends only to that endpoint.
+
+### 7.5 `/new` on One Chat
+
+1. Client allocates new `clientSessionId`.
+2. Router rebinds current `activeChatID` to new session id.
+3. Future events from that chat route to new session.
+4. Other chats keep old binding.
+
+## 8. API Shape (Design-Level)
+
+`im2` package keeps three public boundaries:
+
+1. `protocol` types (`InboundEvent`, `OutboundEvent`, `IMActiveChat`)
+2. `Router` behavior (inbound normalization + outbound routing)
+3. `State` behavior (resolve/bind/list/online persistence)
+
+No client runtime lifecycle object should leak into `im2` public API.
+
+## 9. Failure and Consistency Rules
+
+1. Invalid `activeChatID` format: reject inbound with explicit error.
+2. Unknown publisher for targeted outbound: return explicit error.
+3. Broadcast with zero online chats: no-op success.
+4. Binding write policy:
+   - critical sync for first bind and explicit rebind
+   - debounced async for liveness touches
+
+## 10. Migration Plan (Design-Level)
+
+1. Freeze protocol doc and this design doc.
+2. Align `im2` API with this design (especially explicit rebind flow).
+3. Integrate client command flow (`/new`, `/load`) with router binding semantics.
+4. Add integration tests crossing `client <-> im2` boundary.
+5. Switch production IM path incrementally, keep legacy flow as fallback during rollout.
+
+## 11. Validation Matrix
+
+1. Unit tests (`internal/im2`):
+   - inbound creates binding
+   - outbound broadcast to all online chats
+   - targeted outbound sends one chat only
+   - state reload preserves bindings
+2. Integration tests (`internal/hub/client + internal/im2`):
+   - `/new` rebind affects only source chat
+   - same `clientSessionId` fan-out to multiple chats
+   - source-targeted reply routes to original chat
+3. Non-regression:
+   - no `userId` field dependency in protocol events
+   - ACP update payload remains opaque in router
+
+## 12. Exit Criteria
+
+This spec is considered ready for implementation planning when:
+
+1. Protocol doc and this design doc are approved.
+2. Client vs IM2 state boundary has no ambiguity.
+3. `/new` rebind semantics are accepted.
+4. Validation matrix is accepted as test gate.
