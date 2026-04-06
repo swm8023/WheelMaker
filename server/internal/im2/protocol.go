@@ -44,7 +44,6 @@ type InboundEvent struct {
 	ActiveChatID    string
 	ClientSessionID string
 	MessageID       string
-	UserID          string
 	Text            string
 	Payload         []byte
 	Meta            map[string]string
