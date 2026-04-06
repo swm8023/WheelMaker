@@ -33,7 +33,7 @@ Flow:
 
 1. router resolves/builds `IMActiveChatID`
 2. router looks up `IMActiveChatID -> clientSessionId`
-3. if not found, router creates a new `clientSessionId` and binds it
+3. if not found, router creates a new `clientSessionId` and binds it to chat
 4. router dispatches unified inbound event to client
 
 ### 3.2 Outbound (Client -> IM)
@@ -58,18 +58,12 @@ IMRouter does not interpret ACP details.
 
 ## 5. State Model
 
-IM 2.0 state persists in SQLite with project isolation (`project_name`).
+IM 2.0 state persists chat-related bindings only in SQLite with project isolation (`project_name`).
 
-Tables:
+Table:
 
-1. `client_sessions`
-- `project_name`
-- `client_session_id`
-- `updated_at`
+`im_active_chats`
 
-Primary key: `(project_name, client_session_id)`
-
-2. `im_active_chats`
 - `project_name`
 - `active_chat_id`
 - `im_type`
@@ -81,13 +75,18 @@ Primary key: `(project_name, client_session_id)`
 
 Primary key: `(project_name, active_chat_id)`
 
+Notes:
+
+- `clientSessionId` lifecycle is owned by client domain.
+- IM 2.0 only persists chat binding/runtime projection.
+
 ## 6. Persistence Policy
 
 Write policy is hybrid:
 
 - critical changes: sync write immediately
-  - new binding
-  - session switch bindings (`/new`, `/load`)
+  - new chat binding
+  - binding switch operations
 - non-critical changes: debounced async flush
   - online/offline
   - heartbeat/last seen updates

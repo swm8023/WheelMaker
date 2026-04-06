@@ -17,12 +17,6 @@ const (
 )
 
 const stateSchema = `
-CREATE TABLE IF NOT EXISTS client_sessions (
-	project_name      TEXT NOT NULL,
-	client_session_id TEXT NOT NULL,
-	updated_at        TEXT NOT NULL,
-	PRIMARY KEY (project_name, client_session_id)
-);
 CREATE TABLE IF NOT EXISTS im_active_chats (
 	project_name      TEXT NOT NULL,
 	active_chat_id    TEXT NOT NULL,
@@ -39,10 +33,9 @@ CREATE INDEX IF NOT EXISTS idx_im_active_chats_online ON im_active_chats(project
 `
 
 // State is the only external state boundary for IM 2.0.
-// Implementations keep memory and persistence consistent with auto-flush behavior.
+// IM 2.0 persists chat binding/runtime only (no client session table).
 type State interface {
 	Load(ctx context.Context) error
-	EnsureClientSession(ctx context.Context, clientSessionID string, critical bool) error
 	ResolveClientSessionID(ctx context.Context, activeChatID string) (string, bool, error)
 	BindActiveChat(ctx context.Context, activeChatID, imType, chatID, clientSessionID string, critical bool) error
 	SetActiveChatOnline(ctx context.Context, activeChatID string, online bool, critical bool) error
@@ -50,23 +43,16 @@ type State interface {
 	Close() error
 }
 
-type clientSessionRecord struct {
-	ClientSessionID string
-	UpdatedAt       time.Time
-}
-
 type sqliteState struct {
 	db          *sql.DB
 	projectName string
 	flushDelay  time.Duration
 
-	mu            sync.Mutex
-	sessions      map[string]clientSessionRecord
-	activeChats   map[string]IMActiveChat
-	dirtySessions map[string]struct{}
-	dirtyChats    map[string]struct{}
-	flushTimer    *time.Timer
-	closed        bool
+	mu          sync.Mutex
+	activeChats map[string]IMActiveChat
+	dirtyChats  map[string]struct{}
+	flushTimer  *time.Timer
+	closed      bool
 }
 
 // NewState creates sqlite-backed IM state with default flush behavior.
@@ -93,13 +79,11 @@ func newSQLiteState(dbPath, projectName string, flushDelay time.Duration) (State
 	}
 
 	s := &sqliteState{
-		db:            db,
-		projectName:   pn,
-		flushDelay:    flushDelay,
-		sessions:      map[string]clientSessionRecord{},
-		activeChats:   map[string]IMActiveChat{},
-		dirtySessions: map[string]struct{}{},
-		dirtyChats:    map[string]struct{}{},
+		db:          db,
+		projectName: pn,
+		flushDelay:  flushDelay,
+		activeChats: map[string]IMActiveChat{},
+		dirtyChats:  map[string]struct{}{},
 	}
 	if err := s.Load(context.Background()); err != nil {
 		_ = db.Close()
@@ -116,33 +100,8 @@ func (s *sqliteState) Load(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	sessions := map[string]clientSessionRecord{}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT client_session_id, updated_at
-		FROM client_sessions
-		WHERE project_name = ?`, s.projectName)
-	if err != nil {
-		return fmt.Errorf("im2 state: load client_sessions: %w", err)
-	}
-	for rows.Next() {
-		var id, updatedAtRaw string
-		if err := rows.Scan(&id, &updatedAtRaw); err != nil {
-			rows.Close()
-			return fmt.Errorf("im2 state: scan client_sessions: %w", err)
-		}
-		sessions[id] = clientSessionRecord{
-			ClientSessionID: id,
-			UpdatedAt:       parseTimestamp(updatedAtRaw),
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("im2 state: iterate client_sessions: %w", err)
-	}
-	rows.Close()
-
 	activeChats := map[string]IMActiveChat{}
-	rows, err = s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT active_chat_id, im_type, chat_id, client_session_id, online, last_seen_at, updated_at
 		FROM im_active_chats
 		WHERE project_name = ?`, s.projectName)
@@ -181,30 +140,10 @@ func (s *sqliteState) Load(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	s.sessions = sessions
 	s.activeChats = activeChats
-	s.dirtySessions = map[string]struct{}{}
 	s.dirtyChats = map[string]struct{}{}
 	s.mu.Unlock()
 	return nil
-}
-
-func (s *sqliteState) EnsureClientSession(ctx context.Context, clientSessionID string, critical bool) error {
-	id := strings.TrimSpace(clientSessionID)
-	if id == "" {
-		return fmt.Errorf("im2 state: empty clientSessionID")
-	}
-
-	now := time.Now().UTC()
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		return fmt.Errorf("im2 state: closed")
-	}
-	s.sessions[id] = clientSessionRecord{ClientSessionID: id, UpdatedAt: now}
-	s.dirtySessions[id] = struct{}{}
-	s.mu.Unlock()
-	return s.persistWithPolicy(ctx, critical)
 }
 
 func (s *sqliteState) ResolveClientSessionID(_ context.Context, activeChatID string) (string, bool, error) {
@@ -241,8 +180,6 @@ func (s *sqliteState) BindActiveChat(ctx context.Context, activeChatID, imType, 
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	s.sessions[csid] = clientSessionRecord{ClientSessionID: csid, UpdatedAt: now}
-	s.dirtySessions[csid] = struct{}{}
 	s.activeChats[resolvedActiveChatID] = IMActiveChat{
 		ProjectName:     s.projectName,
 		ActiveChatID:    resolvedActiveChatID,
@@ -380,17 +317,10 @@ func (s *sqliteState) flush(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	sessionIDs := mapKeys(s.dirtySessions)
 	chatIDs := mapKeys(s.dirtyChats)
-	if len(sessionIDs) == 0 && len(chatIDs) == 0 {
+	if len(chatIDs) == 0 {
 		s.mu.Unlock()
 		return nil
-	}
-	sessions := make([]clientSessionRecord, 0, len(sessionIDs))
-	for _, id := range sessionIDs {
-		if rec, ok := s.sessions[id]; ok {
-			sessions = append(sessions, rec)
-		}
 	}
 	chats := make([]IMActiveChat, 0, len(chatIDs))
 	for _, id := range chatIDs {
@@ -398,31 +328,15 @@ func (s *sqliteState) flush(ctx context.Context) error {
 			chats = append(chats, rec)
 		}
 	}
-	s.dirtySessions = map[string]struct{}{}
 	s.dirtyChats = map[string]struct{}{}
 	s.mu.Unlock()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		s.requeueDirty(sessionIDs, chatIDs)
+		s.requeueDirty(chatIDs)
 		return fmt.Errorf("im2 state: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
-
-	for _, rec := range sessions {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO client_sessions (project_name, client_session_id, updated_at)
-			VALUES (?, ?, ?)
-			ON CONFLICT(project_name, client_session_id) DO UPDATE SET
-				updated_at = excluded.updated_at`,
-			s.projectName,
-			rec.ClientSessionID,
-			rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		); err != nil {
-			s.requeueDirty(sessionIDs, chatIDs)
-			return fmt.Errorf("im2 state: upsert client_session %q: %w", rec.ClientSessionID, err)
-		}
-	}
 
 	for _, rec := range chats {
 		if _, err := tx.ExecContext(ctx, `
@@ -445,26 +359,23 @@ func (s *sqliteState) flush(ctx context.Context) error {
 			rec.LastSeenAt.UTC().Format(time.RFC3339Nano),
 			rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		); err != nil {
-			s.requeueDirty(sessionIDs, chatIDs)
+			s.requeueDirty(chatIDs)
 			return fmt.Errorf("im2 state: upsert active_chat %q: %w", rec.ActiveChatID, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.requeueDirty(sessionIDs, chatIDs)
+		s.requeueDirty(chatIDs)
 		return fmt.Errorf("im2 state: commit tx: %w", err)
 	}
 	return nil
 }
 
-func (s *sqliteState) requeueDirty(sessionIDs, chatIDs []string) {
+func (s *sqliteState) requeueDirty(chatIDs []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
-	}
-	for _, id := range sessionIDs {
-		s.dirtySessions[id] = struct{}{}
 	}
 	for _, id := range chatIDs {
 		s.dirtyChats[id] = struct{}{}

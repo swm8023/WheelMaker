@@ -14,10 +14,6 @@ func TestSQLiteState_PersistAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewState: %v", err)
 	}
-
-	if err := st.EnsureClientSession(context.Background(), "session-1", true); err != nil {
-		t.Fatalf("EnsureClientSession: %v", err)
-	}
 	if err := st.BindActiveChat(context.Background(), "", "feishu", "chat-1", "session-1", true); err != nil {
 		t.Fatalf("BindActiveChat: %v", err)
 	}
