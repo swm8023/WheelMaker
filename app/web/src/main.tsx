@@ -396,7 +396,7 @@ type PrismCodeBlockProps = {
 
 function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = null}: PrismCodeBlockProps) {
   return (
-    <div className="code-wrap">
+    <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
       <SyntaxHighlighter
         className={`code-block prism-code ${wrap ? 'wrap' : 'nowrap'}`}
         language={language}
@@ -410,8 +410,8 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = n
           style: {
             background: highlightLine === lineNumber ? 'rgba(0, 122, 204, 0.24)' : 'transparent',
             whiteSpace: wrap ? 'pre-wrap' : 'pre',
-            wordBreak: wrap ? 'break-word' : 'normal',
-            overflowWrap: wrap ? 'anywhere' : 'normal',
+            wordBreak: 'normal',
+            overflowWrap: wrap ? 'break-word' : 'normal',
           },
         })}
         customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: 4}}

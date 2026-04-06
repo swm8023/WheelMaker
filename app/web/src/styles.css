@@ -850,8 +850,15 @@ body,
 }
 
 .file-code-area .code-wrap {
-  width: max-content;
   min-width: 100%;
+}
+
+.file-code-area .code-wrap.nowrap {
+  width: max-content;
+}
+
+.file-code-area .code-wrap.wrap {
+  width: 100%;
 }
 
 .file-code-area .code-block {
@@ -980,8 +987,8 @@ body,
 
 .wrap.code-block {
   white-space: pre-wrap;
-  word-break: break-word;
-  overflow-wrap: anywhere;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 .drawer-overlay {
