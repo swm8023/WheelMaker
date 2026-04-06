@@ -1,54 +1,54 @@
-# IM2 Router ClientSession Binding Implementation Plan
+# IM2 Router RouteKey Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 落地 IM2 协议与客户端集成，确保路由键固定为 `imType:chatID`、`/new` 仅重绑当前 chat，并统一使用 `channel` 命名（仅命名对齐，不继承 IM 1.0 实现细节）。
+**Goal:** 在不修改 `server/internal/hub/im/*` 的前提下，实现 IM2 独立路由：Router 注册 IM 通道、统一生成 `routeKey=imType:chatID`、入站下发给 Client、普通回复按 routeKey 定点回发。
 
-**Architecture:** 以 `internal/im2` 为路由与绑定核心，`Client` 通过显式桥接调用 IM2，`channel` 继续负责平台收发。路由主键直接使用 `routeKey = IMActiveChatID = imType:chatID`，`clientSessionId` 作为 chat 绑定目标。IM2 仅持久化 chat 投影，不接管 client session 生命周期。
+**Architecture:** `internal/im2` 完整承担路由与绑定逻辑；`client` 消费/发布标准事件；`hub` 通过新增 adapter 把现有 IM 输入桥接到 IM2 Router。`clientSessionId` 仅用于绑定与广播分组，普通回复默认使用当前会话绑定的 routeKey。
 
-**Tech Stack:** Go 1.22+, `modernc.org/sqlite`, existing `internal/hub/client`, `internal/hub/im`, `internal/im2`.
+**Tech Stack:** Go 1.22+, `modernc.org/sqlite`, `internal/im2`, `internal/hub/client`, `internal/hub/hub`.
 
 ---
 
 ## Scope Check
 
-本计划只覆盖一个子系统：`client + im2 + im channel` 路由集成。ACP 协议、agent 运行时、registry 同步不在本计划范围。
+本计划只覆盖 IM2 路由链路，不包含：
+
+1. `server/internal/hub/im/*` 改动
+2. ACP 协议/agent runtime 改动
+3. registry 同步逻辑改动
 
 ## File Structure
 
 | File | Action | Responsibility |
 |---|---|---|
-| `server/internal/im2/protocol.go` | Modify | 将 `Publisher` 明确为 `Channel`，补齐 routeKey 语义定义 |
-| `server/internal/im2/router.go` | Modify | `RegisterChannel`/`UnregisterChannel`、路由分发、显式 Rebind API |
-| `server/internal/im2/state.go` | Modify | 增加显式重绑入口（语义上区分 Bind vs Rebind） |
-| `server/internal/im2/router_test.go` | Modify | 覆盖 routeKey、broadcast、targeted、rebind 语义 |
-| `server/internal/im2/state_test.go` | Modify | 覆盖重绑持久化和 reload 一致性 |
+| `server/internal/im2/protocol.go` | Modify | 定义 `Channel` 与 routeKey helper |
+| `server/internal/im2/router.go` | Modify | channel 注册、inbound/outbound、rebind |
+| `server/internal/im2/state.go` | Modify | 显式 `RebindActiveChat` |
+| `server/internal/im2/router_test.go` | Modify | routeKey + target/broadcast + rebind 测试 |
+| `server/internal/im2/state_test.go` | Modify | rebind 持久化与重启一致性 |
 | `server/internal/im2/integration_test.go` | Create | IM2 端到端路由行为测试 |
-| `server/internal/hub/im/im.go` | Modify | 增加统一 routeKey helper（`imType:chatID`） |
-| `server/internal/hub/im/console/console.go` | Modify | inbound message routeKey 改为 `console:<chatID>` |
-| `server/internal/hub/im/feishu/feishu.go` | Modify | inbound message routeKey 改为 `feishu:<chatID>` |
-| `server/internal/hub/im/mobile/mobile.go` | Modify | inbound message routeKey 改为 `mobile:<chatID>` |
-| `server/internal/hub/im/route_key_test.go` | Create | routeKey helper 和 channel 路由键回归测试 |
-| `server/internal/hub/client/im2_bridge.go` | Create | Client->IM2 最小桥接接口 |
-| `server/internal/hub/client/client.go` | Modify | HandleMessage 接入 IM2 inbound；暴露 session id allocator |
-| `server/internal/hub/client/commands.go` | Modify | `/new` `/load` 后调用 IM2 rebind，保证只影响当前 routeKey |
-| `server/internal/hub/client/client_internal_test.go` | Modify | fake IM2 router + 命令重绑回归测试 |
-| `server/internal/hub/hub.go` | Modify | 初始化 IM2 router + IM2 state（复用同一个 sqlite 文件） |
-| `server/internal/hub/im2_wiring.go` | Create | 提供 IM2 sqlite 路径和装配函数 |
-| `server/internal/hub/hub_test.go` | Modify/Create | Hub 层 IM2 wiring 回归测试 |
-| `docs/im-protocol-2.0.md` | Modify | 同步实现完成后的行为细节 |
-| `docs/architecture-3.0.md` | Modify | 记录 client -> im2 router -> channel 路由关系 |
+| `server/internal/hub/client/im2_bridge.go` | Create | Client <-> IM2 Router 接口 |
+| `server/internal/hub/client/client.go` | Modify | inbound 接 IM2、routeKey 绑定、session id allocator |
+| `server/internal/hub/client/session.go` | Modify | reply 走 routeKey 定点回发 |
+| `server/internal/hub/client/commands.go` | Modify | `/new` `/load` 后 rebind 当前 routeKey |
+| `server/internal/hub/client/client_internal_test.go` | Modify | client+im2 bridge 回归 |
+| `server/internal/hub/im2_adapter.go` | Create | 旧 IM 输入桥接到 IM2（不改 IM 包） |
+| `server/internal/hub/hub.go` | Modify | buildClient 装配 IM2 state/router/adapter |
+| `server/internal/hub/hub_test.go` | Modify/Create | Hub wiring 回归 |
+| `docs/im-protocol-2.0.md` | Modify | 同步 routeKey 入站/回包行为 |
+| `docs/architecture-3.0.md` | Modify | 补充新链路图 |
 
 ---
 
-### Task 1: 固化 IM2 的 `channel` 与 `routeKey` 协议边界
+### Task 1: 固化 IM2 routeKey 与 Channel 合约
 
 **Files:**
 - Modify: `server/internal/im2/protocol.go`
 - Modify: `server/internal/im2/router.go`
 - Modify: `server/internal/im2/router_test.go`
 
-- [ ] **Step 1: 先写失败测试（routeKey 与 channel API）**
+- [ ] **Step 1: 写失败测试**
 
 ```go
 func TestBuildRouteKey_UsesIMTypeAndChatID(t *testing.T) {
@@ -61,11 +61,11 @@ func TestBuildRouteKey_UsesIMTypeAndChatID(t *testing.T) {
 	}
 }
 
-func TestRouter_RegisterChannelAndTargetPublish(t *testing.T) {
+func TestRouter_RegisterChannelAndTargetReply(t *testing.T) {
 	st := newFakeState()
-	_ = st.BindActiveChat(context.Background(), "feishu:oc_123", "feishu", "oc_123", "s1", true)
+	_ = st.BindActiveChat(context.Background(), "feishu:oc_123", "feishu", "oc_123", "sess-1", true)
 	ch := &fakeChannel{}
-	r, err := NewRouter("proj", st, func(context.Context) (string, error) { return "s1", nil }, nil)
+	r, err := NewRouter("proj", st, func(context.Context) (string, error) { return "sess-1", nil }, nil)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -74,45 +74,59 @@ func TestRouter_RegisterChannelAndTargetPublish(t *testing.T) {
 	}
 	if err := r.Publish(context.Background(), OutboundEvent{
 		Kind:               OutboundMessage,
-		ClientSessionID:    "s1",
+		ClientSessionID:    "sess-1",
 		TargetActiveChatID: "feishu:oc_123",
 		Text:               "hello",
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if ch.count() != 1 {
-		t.Fatalf("channel publish count=%d, want 1", ch.count())
+		t.Fatalf("channel count=%d, want 1", ch.count())
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [ ] **Step 2: 运行失败测试**
 
-Run: `cd server; go test ./internal/im2 -run "TestBuildRouteKey_UsesIMTypeAndChatID|TestRouter_RegisterChannelAndTargetPublish" -v`
-Expected: FAIL（`BuildRouteKey`/`RegisterChannel` 尚未定义或行为不匹配）。
+Run: `cd server; go test ./internal/im2 -run "TestBuildRouteKey_UsesIMTypeAndChatID|TestRouter_RegisterChannelAndTargetReply" -v`
+Expected: FAIL。
 
-- [ ] **Step 3: 实现协议命名与接口收敛**
+- [ ] **Step 3: 实现最小代码**
 
 ```go
 // protocol.go
-// Channel naming is unified; runtime behavior remains IM2-specific.
 type Channel interface {
 	PublishToChat(ctx context.Context, chatID string, event OutboundEvent) error
 }
 
-// BuildRouteKey is the canonical route identity: <imType>:<chatID>.
 func BuildRouteKey(imType, chatID string) (string, error) {
 	return BuildActiveChatID(imType, chatID)
 }
-```
 
-```go
 // router.go
-func (r *Router) RegisterChannel(imType string, ch Channel) error { /* ... */ }
-func (r *Router) UnregisterChannel(imType string) { /* ... */ }
+func (r *Router) RegisterChannel(imType string, ch Channel) error {
+	key := strings.ToLower(strings.TrimSpace(imType))
+	if key == "" || ch == nil {
+		return fmt.Errorf("im2 router: invalid channel registration")
+	}
+	r.mu.Lock()
+	r.channels[key] = ch
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Router) UnregisterChannel(imType string) {
+	key := strings.ToLower(strings.TrimSpace(imType))
+	if key == "" {
+		return
+	}
+	r.mu.Lock()
+	delete(r.channels, key)
+	r.mu.Unlock()
+}
 ```
 
-- [ ] **Step 4: 运行 IM2 单测**
+- [ ] **Step 4: 跑 IM2 测试**
 
 Run: `cd server; go test ./internal/im2 -v`
 Expected: PASS。
@@ -121,10 +135,10 @@ Expected: PASS。
 
 ```bash
 git add server/internal/im2/protocol.go server/internal/im2/router.go server/internal/im2/router_test.go
-git commit -m "refactor(im2): align channel terminology and routeKey contract"
+git commit -m "refactor(im2): define routeKey-first channel contract"
 ```
 
-### Task 2: 增加显式 Rebind 语义（支持 `/new` 仅影响当前 chat）
+### Task 2: 实现 rebind 语义（/new 只影响当前 routeKey）
 
 **Files:**
 - Modify: `server/internal/im2/router.go`
@@ -132,10 +146,10 @@ git commit -m "refactor(im2): align channel terminology and routeKey contract"
 - Modify: `server/internal/im2/router_test.go`
 - Modify: `server/internal/im2/state_test.go`
 
-- [ ] **Step 1: 先写失败测试（重绑只影响目标 chat）**
+- [ ] **Step 1: 写失败测试**
 
 ```go
-func TestRouter_RebindActiveChat_OnlyAffectsTarget(t *testing.T) {
+func TestRouter_RebindActiveChat_OnlyAffectsTargetRouteKey(t *testing.T) {
 	st := newFakeState()
 	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
 	_ = st.BindActiveChat(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
@@ -148,23 +162,20 @@ func TestRouter_RebindActiveChat_OnlyAffectsTarget(t *testing.T) {
 		t.Fatalf("RebindActiveChat: %v", err)
 	}
 
-	sidA, okA, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-a")
-	sidB, okB, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-b")
-	if !okA || sidA != "s-new" {
-		t.Fatalf("chat-a sid=%q, want s-new", sidA)
-	}
-	if !okB || sidB != "s-old" {
-		t.Fatalf("chat-b sid=%q, want s-old", sidB)
+	a, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-a")
+	b, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-b")
+	if a != "s-new" || b != "s-old" {
+		t.Fatalf("got a=%q b=%q", a, b)
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [ ] **Step 2: 运行失败测试**
 
-Run: `cd server; go test ./internal/im2 -run TestRouter_RebindActiveChat_OnlyAffectsTarget -v`
-Expected: FAIL（`RebindActiveChat` 尚未实现）。
+Run: `cd server; go test ./internal/im2 -run TestRouter_RebindActiveChat_OnlyAffectsTargetRouteKey -v`
+Expected: FAIL。
 
-- [ ] **Step 3: 增加显式重绑 API（critical sync）**
+- [ ] **Step 3: 实现 rebind**
 
 ```go
 // state.go
@@ -182,7 +193,7 @@ func (r *Router) RebindActiveChat(ctx context.Context, activeChatID, clientSessi
 }
 ```
 
-- [ ] **Step 4: 跑 IM2 回归测试**
+- [ ] **Step 4: 跑 IM2 测试**
 
 Run: `cd server; go test ./internal/im2 -v`
 Expected: PASS。
@@ -191,152 +202,68 @@ Expected: PASS。
 
 ```bash
 git add server/internal/im2/router.go server/internal/im2/state.go server/internal/im2/router_test.go server/internal/im2/state_test.go
-git commit -m "feat(im2): add explicit active-chat rebind semantics"
+git commit -m "feat(im2): add routeKey rebind semantics"
 ```
 
-### Task 3: 统一所有 IM channel 的 routeKey 生成规则
-
-**Files:**
-- Modify: `server/internal/hub/im/im.go`
-- Modify: `server/internal/hub/im/console/console.go`
-- Modify: `server/internal/hub/im/feishu/feishu.go`
-- Modify: `server/internal/hub/im/mobile/mobile.go`
-- Create: `server/internal/hub/im/route_key_test.go`
-
-- [ ] **Step 1: 先写失败测试（routeKey helper）**
-
-```go
-func TestBuildRouteKey(t *testing.T) {
-	got := BuildRouteKey("feishu", "oc_xxx")
-	if got != "feishu:oc_xxx" {
-		t.Fatalf("routeKey=%q, want feishu:oc_xxx", got)
-	}
-}
-
-func TestBuildRouteKey_EmptyInput(t *testing.T) {
-	if got := BuildRouteKey("", "chat"); got != "" {
-		t.Fatalf("routeKey=%q, want empty", got)
-	}
-}
-```
-
-- [ ] **Step 2: 运行测试，确认失败**
-
-Run: `cd server; go test ./internal/hub/im -run TestBuildRouteKey -v`
-Expected: FAIL（helper 尚未定义）。
-
-- [ ] **Step 3: 实现 helper 并替换各 channel 出口**
-
-```go
-// im.go
-func BuildRouteKey(imType, chatID string) string {
-	imType = strings.TrimSpace(strings.ToLower(imType))
-	chatID = strings.TrimSpace(chatID)
-	if imType == "" || chatID == "" {
-		return ""
-	}
-	return imType + ":" + chatID
-}
-```
-
-```go
-// console/console.go
-RouteKey: im.BuildRouteKey("console", c.projectName)
-
-// feishu/feishu.go
-RouteKey: im.BuildRouteKey("feishu", *msg.ChatId)
-
-// mobile/mobile.go
-RouteKey: im.BuildRouteKey("mobile", chatID)
-```
-
-- [ ] **Step 4: 运行 IM 包测试**
-
-Run: `cd server; go test ./internal/hub/im/... -v`
-Expected: PASS。
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add server/internal/hub/im/im.go server/internal/hub/im/console/console.go server/internal/hub/im/feishu/feishu.go server/internal/hub/im/mobile/mobile.go server/internal/hub/im/route_key_test.go
-git commit -m "refactor(im): standardize routeKey as imType:chatID across channels"
-```
-
-### Task 4: 在 Client 增加 IM2 路由桥接边界
+### Task 3: Client 回包按 routeKey 定点
 
 **Files:**
 - Create: `server/internal/hub/client/im2_bridge.go`
 - Modify: `server/internal/hub/client/client.go`
+- Modify: `server/internal/hub/client/session.go`
 - Modify: `server/internal/hub/client/client_internal_test.go`
 
-- [ ] **Step 1: 先写失败测试（Client 能接 IM2 router）**
+- [ ] **Step 1: 写失败测试**
 
 ```go
-type fakeIM2Router struct {
-	inbound []string
-	rebindCalls []struct {
-		activeChatID    string
-		clientSessionID string
-	}
-}
-
-func (f *fakeIM2Router) HandleInbound(_ context.Context, e im2.InboundEvent) error {
-	f.inbound = append(f.inbound, e.ActiveChatID+"|"+e.ClientSessionID)
-	return nil
-}
-
-func (f *fakeIM2Router) RebindActiveChat(_ context.Context, activeChatID, clientSessionID string) error {
-	f.rebindCalls = append(f.rebindCalls, struct {
-		activeChatID    string
-		clientSessionID string
-	}{activeChatID: activeChatID, clientSessionID: clientSessionID})
-	return nil
-}
-
-func TestClient_HandleMessage_IM2BridgeNormalizesInbound(t *testing.T) {
+func TestSessionReply_UsesBoundRouteKeyViaIM2(t *testing.T) {
 	c := New(&noopStore{}, nil, "proj", "/tmp")
-	r := &fakeIM2Router{}
-	c.SetIM2Router(r)
+	fake := &fakeIM2Router{}
+	c.SetIM2Router(fake)
 
-	c.HandleMessage(im.Message{ChatID: "oc_123", RouteKey: "feishu:oc_123", Text: "hello"})
-	if len(r.inbound) != 1 {
-		t.Fatalf("inbound calls=%d, want 1", len(r.inbound))
+	c.HandleMessage(im.Message{ChatID: "oc_1", RouteKey: "feishu:oc_1", Text: "hello"})
+	c.activeSession.reply("world")
+
+	if len(fake.outbound) == 0 {
+		t.Fatal("expected outbound via IM2")
 	}
-	if !strings.Contains(r.inbound[0], "feishu:oc_123") {
-		t.Fatalf("inbound payload=%q", r.inbound[0])
+	if fake.outbound[0].TargetActiveChatID != "feishu:oc_1" {
+		t.Fatalf("target=%q", fake.outbound[0].TargetActiveChatID)
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [ ] **Step 2: 运行失败测试**
 
-Run: `cd server; go test ./internal/hub/client -run TestClient_HandleMessage_IM2BridgeNormalizesInbound -v`
-Expected: FAIL（`SetIM2Router` 与 bridge 未实现）。
+Run: `cd server; go test ./internal/hub/client -run TestSessionReply_UsesBoundRouteKeyViaIM2 -v`
+Expected: FAIL。
 
-- [ ] **Step 3: 增加 Client->IM2 最小桥接接口**
+- [ ] **Step 3: 实现 bridge + routeKey 绑定**
 
 ```go
 // im2_bridge.go
 type IM2Router interface {
 	HandleInbound(ctx context.Context, event im2.InboundEvent) error
+	Publish(ctx context.Context, event im2.OutboundEvent) error
 	RebindActiveChat(ctx context.Context, activeChatID, clientSessionID string) error
 }
 
+// client.go
 func (c *Client) SetIM2Router(r IM2Router) {
 	c.mu.Lock()
 	c.im2Router = r
 	c.mu.Unlock()
 }
-```
 
-```go
-// client.go (HandleMessage 开头)
-if c.im2Router != nil {
-	_ = c.im2Router.HandleInbound(context.Background(), im2.InboundEvent{
-		Kind:         im2.InboundPrompt,
-		ActiveChatID: strings.TrimSpace(msg.RouteKey),
-		Text:         strings.TrimSpace(msg.Text),
+// session.go (reply)
+if s.im2Router != nil && strings.TrimSpace(s.boundRouteKey) != "" {
+	_ = s.im2Router.Publish(context.Background(), im2.OutboundEvent{
+		Kind:               im2.OutboundMessage,
+		ClientSessionID:    s.ID,
+		TargetActiveChatID: s.boundRouteKey,
+		Text:               text,
 	})
+	return
 }
 ```
 
@@ -348,61 +275,133 @@ Expected: PASS。
 - [ ] **Step 5: 提交**
 
 ```bash
-git add server/internal/hub/client/im2_bridge.go server/internal/hub/client/client.go server/internal/hub/client/client_internal_test.go
-git commit -m "feat(client): add IM2 router bridge boundary"
+git add server/internal/hub/client/im2_bridge.go server/internal/hub/client/client.go server/internal/hub/client/session.go server/internal/hub/client/client_internal_test.go
+git commit -m "feat(client): route replies by bound routeKey through IM2"
 ```
 
-### Task 5: 将 `/new` 与 `/load` 重绑到 IM2（仅当前 routeKey）
+### Task 4: Hub 桥接现有 IM 输入到 IM2（不改 IM 包）
+
+**Files:**
+- Create: `server/internal/hub/im2_adapter.go`
+- Modify: `server/internal/hub/hub.go`
+- Modify/Create: `server/internal/hub/hub_test.go`
+
+- [ ] **Step 1: 写失败测试**
+
+```go
+func TestBuildClient_WiresIM2WithoutTouchingIMPackage(t *testing.T) {
+	cfg := &shared.AppConfig{Projects: []shared.ProjectConfig{{
+		Name: "proj",
+		Path: ".",
+		IM:   shared.IMConfig{Type: "console"},
+	}}}
+	h := New(cfg, filepath.Join(t.TempDir(), "state.json"))
+	c, err := h.buildClient(context.Background(), cfg.Projects[0])
+	if err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+	if c == nil || !c.HasIM2Router() {
+		t.Fatal("expected client with IM2 router")
+	}
+}
+```
+
+- [ ] **Step 2: 运行失败测试**
+
+Run: `cd server; go test ./internal/hub -run TestBuildClient_WiresIM2WithoutTouchingIMPackage -v`
+Expected: FAIL。
+
+- [ ] **Step 3: 实现 adapter 与装配**
+
+```go
+// im2_adapter.go
+type IM2Bridge struct {
+	adapter     *im.ImAdapter
+	router      *im2.Router
+	defaultType string
+}
+
+func (b *IM2Bridge) Start() {
+	b.adapter.OnMessage(func(m im.Message) {
+		_ = b.router.HandleInbound(context.Background(), im2.InboundEvent{
+			Kind:   im2.InboundPrompt,
+			IMType: b.defaultType,
+			ChatID: m.ChatID,
+			Text:   m.Text,
+		})
+	})
+}
+
+// hub.go buildClient
+router, err := im2.NewRouter(pc.Name, im2State, func(context.Context) (string, error) {
+	return c.ClientNewSessionID(), nil
+}, nil)
+if err != nil {
+	return nil, err
+}
+c.SetIM2Router(router)
+bridge := &IM2Bridge{adapter: imProvider, router: router, defaultType: pc.IM.Type}
+bridge.Start()
+```
+
+- [ ] **Step 4: 跑 hub 测试**
+
+Run: `cd server; go test ./internal/hub/... -v`
+Expected: PASS。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add server/internal/hub/im2_adapter.go server/internal/hub/hub.go server/internal/hub/hub_test.go
+git commit -m "feat(hub): bridge existing IM input to IM2 router without IM package changes"
+```
+
+### Task 5: `/new` `/load` 后重绑当前 routeKey
 
 **Files:**
 - Modify: `server/internal/hub/client/commands.go`
 - Modify: `server/internal/hub/client/client_internal_test.go`
 
-- [ ] **Step 1: 先写失败测试（/new 重绑当前 route）**
+- [ ] **Step 1: 写失败测试**
 
 ```go
-func TestHandleNewCommand_RebindsOnlyCurrentRoute(t *testing.T) {
+func TestHandleNewCommand_RebindsCurrentRouteKeyOnly(t *testing.T) {
 	c := New(&noopStore{}, nil, "proj", "/tmp")
 	fake := &fakeIM2Router{}
 	c.SetIM2Router(fake)
 
-	msg := im.Message{ChatID: "oc_1", RouteKey: "feishu:oc_1", Text: "/new"}
-	c.HandleMessage(msg)
+	c.HandleMessage(im.Message{ChatID: "a", RouteKey: "feishu:chat-a", Text: "/new"})
 
 	if len(fake.rebindCalls) != 1 {
 		t.Fatalf("rebind calls=%d, want 1", len(fake.rebindCalls))
 	}
-	if fake.rebindCalls[0].activeChatID != "feishu:oc_1" {
+	if fake.rebindCalls[0].activeChatID != "feishu:chat-a" {
 		t.Fatalf("activeChatID=%q", fake.rebindCalls[0].activeChatID)
-	}
-	if strings.TrimSpace(fake.rebindCalls[0].clientSessionID) == "" {
-		t.Fatal("clientSessionID should not be empty")
 	}
 }
 ```
 
-- [ ] **Step 2: 运行测试，确认失败**
+- [ ] **Step 2: 运行失败测试**
 
-Run: `cd server; go test ./internal/hub/client -run TestHandleNewCommand_RebindsOnlyCurrentRoute -v`
-Expected: FAIL（命令路径尚未调用 IM2 rebind）。
+Run: `cd server; go test ./internal/hub/client -run TestHandleNewCommand_RebindsCurrentRouteKeyOnly -v`
+Expected: FAIL。
 
-- [ ] **Step 3: 在命令处理路径接入 rebind**
+- [ ] **Step 3: 实现 rebind 调用**
 
 ```go
-// commands.go - handleNewCommand
+// commands.go
 newSess := c.ClientNewSession(routeKey)
 if c.im2Router != nil {
 	_ = c.im2Router.RebindActiveChat(context.Background(), routeKey, newSess.ID)
 }
 
-// commands.go - handleLoadCommand
 loaded, err := c.ClientLoadSession(routeKey, idx)
 if err == nil && c.im2Router != nil {
 	_ = c.im2Router.RebindActiveChat(context.Background(), routeKey, loaded.ID)
 }
 ```
 
-- [ ] **Step 4: 运行 client 回归**
+- [ ] **Step 4: 跑 client 测试**
 
 Run: `cd server; go test ./internal/hub/client -v`
 Expected: PASS。
@@ -411,102 +410,20 @@ Expected: PASS。
 
 ```bash
 git add server/internal/hub/client/commands.go server/internal/hub/client/client_internal_test.go
-git commit -m "feat(client): rebind current route in IM2 on /new and /load"
+git commit -m "feat(client): rebind current routeKey on new/load"
 ```
 
-### Task 6: Hub 层接入 IM2 router + IM2 state（统一 sqlite）
-
-**Files:**
-- Modify: `server/internal/hub/hub.go`
-- Create: `server/internal/hub/im2_wiring.go`
-- Modify/Create: `server/internal/hub/hub_test.go`
-
-- [ ] **Step 1: 先写失败测试（Hub 会创建 IM2 router）**
-
-```go
-func TestBuildClient_WiresIM2Router(t *testing.T) {
-	cfg := &shared.AppConfig{
-		Projects: []shared.ProjectConfig{{
-			Name: "proj",
-			Path: ".",
-			IM:   shared.IMConfig{Type: "console"},
-			Client: shared.ClientConf{Agent: "codex"},
-		}},
-	}
-	h := New(cfg, filepath.Join(t.TempDir(), "state.json"))
-	c, err := h.buildClient(context.Background(), cfg.Projects[0])
-	if err != nil {
-		t.Fatalf("buildClient: %v", err)
-	}
-	if c == nil {
-		t.Fatal("client is nil")
-	}
-	if !c.HasIM2Router() {
-		t.Fatal("expected IM2 router to be wired")
-	}
-}
-```
-
-- [ ] **Step 2: 运行测试，确认失败**
-
-Run: `cd server; go test ./internal/hub -run TestBuildClient_WiresIM2Router -v`
-Expected: FAIL（尚未 wiring）。
-
-- [ ] **Step 3: 接入 IM2 状态与路由器初始化**
-
-```go
-// im2_wiring.go
-func buildIM2StatePath(statePath string) string {
-	dir := filepath.Dir(statePath)
-	return filepath.Join(dir, "state.db")
-}
-
-// client.go
-func (c *Client) ClientNewSessionID() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.nextSessionID()
-}
-
-func (c *Client) HasIM2Router() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.im2Router != nil
-}
-
-// hub.go -> buildClient
-im2State, err := im2.NewState(buildIM2StatePath(h.statePath), pc.Name)
-if err != nil { return nil, err }
-router, err := im2.NewRouter(pc.Name, im2State, func(context.Context) (string, error) {
-	return c.ClientNewSessionID(), nil
-}, nil)
-if err != nil { return nil, err }
-c.SetIM2Router(router)
-```
-
-- [ ] **Step 4: 运行 hub + 相关回归测试**
-
-Run: `cd server; go test ./internal/hub/... -v`
-Expected: PASS。
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add server/internal/hub/hub.go server/internal/hub/im2_wiring.go server/internal/hub/hub_test.go server/internal/hub/client/client.go
-git commit -m "feat(hub): wire IM2 router/state with shared sqlite lifecycle"
-```
-
-### Task 7: IM2 端到端回归与文档同步
+### Task 6: 端到端与文档收尾
 
 **Files:**
 - Create: `server/internal/im2/integration_test.go`
 - Modify: `docs/im-protocol-2.0.md`
 - Modify: `docs/architecture-3.0.md`
 
-- [ ] **Step 1: 增加端到端集成测试（3 条）**
+- [ ] **Step 1: 写端到端测试**
 
 ```go
-func TestIM2Integration_FirstInboundCreatesBinding(t *testing.T) {
+func TestIM2_E2E_InboundCarriesRouteKeyToClient(t *testing.T) {
 	st := newFakeState()
 	var got InboundEvent
 	r, _ := NewRouter("proj", st, func(context.Context) (string, error) { return "s-1", nil }, func(_ context.Context, ev InboundEvent) error {
@@ -514,12 +431,29 @@ func TestIM2Integration_FirstInboundCreatesBinding(t *testing.T) {
 		return nil
 	})
 	_ = r.HandleInbound(context.Background(), InboundEvent{Kind: InboundPrompt, IMType: "feishu", ChatID: "chat-a", Text: "hello"})
-	if got.ClientSessionID != "s-1" || got.ActiveChatID != "feishu:chat-a" {
-		t.Fatalf("got=(%q,%q)", got.ClientSessionID, got.ActiveChatID)
+	if got.ActiveChatID != "feishu:chat-a" || got.ClientSessionID != "s-1" {
+		t.Fatalf("got activeChatID=%q clientSessionID=%q", got.ActiveChatID, got.ClientSessionID)
 	}
 }
 
-func TestIM2Integration_RebindOnlyCurrentChat(t *testing.T) {
+func TestIM2_E2E_NormalReplyUsesSameRouteKey(t *testing.T) {
+	st := newFakeState()
+	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-1", true)
+	ch := &fakeChannel{}
+	r, _ := NewRouter("proj", st, func(context.Context) (string, error) { return "unused", nil }, nil)
+	_ = r.RegisterChannel("feishu", ch)
+	_ = r.Publish(context.Background(), OutboundEvent{
+		Kind:               OutboundMessage,
+		ClientSessionID:    "s-1",
+		TargetActiveChatID: "feishu:chat-a",
+		Text:               "reply",
+	})
+	if ch.count() != 1 {
+		t.Fatalf("channel count=%d, want 1", ch.count())
+	}
+}
+
+func TestIM2_E2E_NewRebindOnlyCurrentRouteKey(t *testing.T) {
 	st := newFakeState()
 	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
 	_ = st.BindActiveChat(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
@@ -528,45 +462,32 @@ func TestIM2Integration_RebindOnlyCurrentChat(t *testing.T) {
 	a, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-a")
 	b, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-b")
 	if a != "s-new" || b != "s-old" {
-		t.Fatalf("a=%q b=%q", a, b)
-	}
-}
-
-func TestIM2Integration_BroadcastFanoutByClientSession(t *testing.T) {
-	st := newFakeState()
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-1", true)
-	_ = st.BindActiveChat(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-1", true)
-	ch := &fakeChannel{}
-	r, _ := NewRouter("proj", st, func(context.Context) (string, error) { return "unused", nil }, nil)
-	_ = r.RegisterChannel("feishu", ch)
-	_ = r.Publish(context.Background(), OutboundEvent{Kind: OutboundMessage, ClientSessionID: "s-1", Text: "broadcast"})
-	if ch.count() != 2 {
-		t.Fatalf("channel count=%d, want 2", ch.count())
+		t.Fatalf("got a=%q b=%q", a, b)
 	}
 }
 ```
 
-- [ ] **Step 2: 运行完整测试集**
+- [ ] **Step 2: 运行全量测试**
 
 Run: `cd server; go test ./...`
 Expected: PASS。
 
-- [ ] **Step 3: 同步文档到最终实现行为**
+- [ ] **Step 3: 更新文档**
 
 ```md
-- routeKey source: imType:chatID (channel-generated chatID)
-- /new rebind scope: current active chat only
-- channel term replaces publisher term in code and docs
+- im2 与 im 实现隔离，im 包不改
+- routeKey 由 Router 统一生成：imType:chatID
+- inbound 与 normal reply 均以 routeKey 为主
 ```
 
-- [ ] **Step 4: 提交文档与测试收尾**
+- [ ] **Step 4: 提交收尾**
 
 ```bash
 git add -A
-git commit -m "test+docs(im2): finalize route rebind and channel-based integration"
+git commit -m "test+docs(im2): finalize routeKey-driven isolated IM2 flow"
 ```
 
-- [ ] **Step 5: 推送与完成门禁**
+- [ ] **Step 5: 推送**
 
 ```bash
 git push origin main
@@ -575,13 +496,10 @@ git push origin main
 ## Self-Review Notes
 
 1. Spec coverage:
-   - `routeKey = imType:chatID`：Task 1 + Task 3。
-   - `channel` 术语替换 `publisher`：Task 1 + Task 3 + Task 7。
-   - `/new` 仅重绑当前 chat：Task 2 + Task 5。
-   - IM2 仅存 chat 投影：Task 2 + Task 6。
-   - 协议无 `userId`：Task 1/7 回归。
+   - IM2/IM 隔离：Task 4 + Task 6。
+   - routeKey 入站与回包：Task 1 + Task 3。
+   - `/new` 仅重绑当前 routeKey：Task 2 + Task 5。
 2. Placeholder scan:
-   - 无 `TBD/TODO`，每个任务包含具体文件、测试命令、提交命令。
+   - 无 TBD/TODO；每个任务含具体文件、命令、提交。
 3. Type consistency:
-   - `routeKey/activeChatID/clientSessionId/channel` 命名在所有任务保持一致。
-
+   - 统一使用 `routeKey(activeChatID)`、`clientSessionId`、`Channel`。
