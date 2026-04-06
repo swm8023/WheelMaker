@@ -243,7 +243,7 @@ func (s *Session) handleConfigCommand(
 		s.mu.Unlock()
 	}
 
-	s.saveSessionState()
+	s.syncAndPersistProjectState()
 	s.reply(fmt.Sprintf("%s set to: %s", label, value))
 }
 
@@ -412,7 +412,7 @@ func (s *Session) createNewSession(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	s.resetSessionFields(res.SessionID, res.ConfigOptions)
 	s.mu.Unlock()
-	s.saveSessionState()
+	s.syncAndPersistProjectState()
 	return res.SessionID, nil
 }
 
@@ -458,7 +458,7 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 	s.mu.Lock()
 	s.resetSessionFields(target, nil)
 	s.mu.Unlock()
-	s.saveSessionState()
+	s.syncAndPersistProjectState()
 	return target, nil
 }
 

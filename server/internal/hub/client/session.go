@@ -68,7 +68,7 @@ type Session struct {
 	cwd              string
 	yolo             bool
 	registry         *agent.ACPFactory
-	stateStore       ClientStateStore
+	persistence      ClientStateStore
 	state            *ProjectState
 	imBridge         *im.ImAdapter
 	imBlockedUpdates map[string]struct{}
@@ -174,25 +174,6 @@ const (
 	SwitchWithContext
 )
 
-// clientInitMeta holds agent-level metadata from the initialize handshake.
-type clientInitMeta struct {
-	ProtocolVersion       string
-	AgentCapabilities     acp.AgentCapabilities
-	AgentInfo             *acp.AgentInfo
-	AuthMethods           []acp.AuthMethod
-	ClientProtocolVersion int
-	ClientCapabilities    acp.ClientCapabilities
-	ClientInfo            *acp.AgentInfo
-}
-
-// clientSessionMeta holds session-level metadata updated by session/update notifications.
-type clientSessionMeta struct {
-	ConfigOptions     []acp.ConfigOption
-	AvailableCommands []acp.AvailableCommand
-	Title             string
-	UpdatedAt         string
-}
-
 // switchAgent cancels any in-progress prompt, waits for it to finish via
 // promptMu, connects a new agent via AgentFactory, and replaces the instance.
 func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode) error {
@@ -222,7 +203,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	oldInst := s.instance
 	savedLastReply := s.lastReply
 	s.mu.Unlock()
-	s.persistMeta() // save outgoing agent state before reset
+	s.syncRuntimeToProjectState() // save outgoing agent state before reset
 
 	// Read saved session ID for incoming agent.
 	s.mu.Lock()
@@ -268,7 +249,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 				}
 			}
 		}
-		s.persistMeta()
+		s.syncRuntimeToProjectState()
 	}
 
 	// Update ActiveAgent and save.
@@ -472,7 +453,7 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 		} else {
 			s.reply("Session ready.")
 		}
-		s.saveSessionState()
+		s.syncAndPersistProjectState()
 	}
 	return nil
 }
@@ -637,7 +618,7 @@ func (s *Session) invalidateSessionForRetry() {
 		}
 	}
 	s.mu.Unlock()
-	s.saveSessionState()
+	s.syncAndPersistProjectState()
 }
 
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
@@ -673,8 +654,8 @@ func (s *Session) cancelPrompt() error {
 	return s.instance.SessionCancel(sessID)
 }
 
-// persistMeta snapshots current session metadata into in-memory state.
-func (s *Session) persistMeta() bool {
+// syncRuntimeToProjectState snapshots current runtime metadata into ProjectState.
+func (s *Session) syncRuntimeToProjectState() bool {
 	s.mu.Lock()
 	if s.instance == nil {
 		s.mu.Unlock()
@@ -756,15 +737,15 @@ func (s *Session) resetSessionFields(sid string, configOpts []acp.ConfigOption) 
 }
 
 func (s *Session) persistProjectState(st *ProjectState) {
-	if st == nil || s.stateStore == nil {
+	if st == nil || s.persistence == nil {
 		return
 	}
-	_ = s.stateStore.SaveProjectState(st)
+	_ = s.persistence.SaveProjectState(st)
 }
 
-// saveSessionState calls persistMeta and writes to disk if changed.
-func (s *Session) saveSessionState() {
-	if !s.persistMeta() {
+// syncAndPersistProjectState syncs runtime state into ProjectState and persists when changed.
+func (s *Session) syncAndPersistProjectState() {
+	if !s.syncRuntimeToProjectState() {
 		return
 	}
 	s.mu.Lock()
@@ -784,16 +765,6 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	cp.ConfigOptions = append([]acp.ConfigOption(nil), src.ConfigOptions...)
 	cp.Commands = append([]acp.AvailableCommand(nil), src.Commands...)
 	return &cp
-}
-
-// cloneClientSessionMeta deep-copies session meta slices for persistence/snapshot safety.
-func cloneClientSessionMeta(src clientSessionMeta) clientSessionMeta {
-	return clientSessionMeta{
-		ConfigOptions:     append([]acp.ConfigOption(nil), src.ConfigOptions...),
-		AvailableCommands: append([]acp.AvailableCommand(nil), src.AvailableCommands...),
-		Title:             src.Title,
-		UpdatedAt:         src.UpdatedAt,
-	}
 }
 
 // Snapshot captures the full state of this Session into a SessionSnapshot.
@@ -846,9 +817,9 @@ func (s *Session) Suspend(ctx context.Context, projectName string) error {
 		_ = inst.Close()
 	}
 
-	if s.stateStore != nil && s.stateStore.SessionStoreEnabled() {
+	if s.persistence != nil && s.persistence.SessionStoreEnabled() {
 		snap := s.Snapshot(projectName)
-		return s.stateStore.SaveSession(ctx, snap)
+		return s.persistence.SaveSession(ctx, snap)
 	}
 	return nil
 }

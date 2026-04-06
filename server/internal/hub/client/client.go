@@ -87,7 +87,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 		stopPersistCh:    make(chan struct{}),
 	}
 	sess := newSession("default", cwd)
-	sess.stateStore = c.stateStore
+	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = imProvider
 	sess.imBlockedUpdates = c.imBlockedUpdates
@@ -211,7 +211,7 @@ func (c *Client) Close() error {
 		inst := sess.instance
 		sess.mu.Unlock()
 		if inst != nil {
-			sess.saveSessionState()
+			sess.syncAndPersistProjectState()
 			if stateStore.SessionStoreEnabled() {
 				_ = sess.Suspend(ctx, pn)
 			} else {
@@ -283,7 +283,7 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 			if err == nil && snap != nil {
 				restored := RestoreFromSnapshot(snap, c.cwd)
 				c.mu.Lock()
-				restored.stateStore = c.stateStore
+				restored.persistence = c.stateStore
 				restored.registry = c.registry
 				restored.imBridge = c.imBridge
 				restored.imBlockedUpdates = c.imBlockedUpdates
@@ -338,7 +338,7 @@ func (c *Client) createSessionLocked(routeKey string) *Session {
 // Does NOT add it to c.sessions. Caller may hold c.mu.
 func (c *Client) newWiredSession(id string) *Session {
 	sess := newSession(id, c.cwd)
-	sess.stateStore = c.stateStore
+	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = c.imBridge
 	sess.imBlockedUpdates = c.imBlockedUpdates
@@ -467,7 +467,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 
 	restored := RestoreFromSnapshot(snap, c.cwd)
 	c.mu.Lock()
-	restored.stateStore = c.stateStore
+	restored.persistence = c.stateStore
 	restored.registry = c.registry
 	restored.imBridge = c.imBridge
 	restored.imBlockedUpdates = c.imBlockedUpdates
@@ -722,7 +722,7 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 			}
 			if u.Type == acp.UpdateConfigOption {
 				s.reply(formatConfigOptionUpdateMessage(u.Raw))
-				s.saveSessionState()
+				s.syncAndPersistProjectState()
 			}
 			if u.Type == acp.UpdateText {
 				if !hasEmitter {
@@ -741,7 +741,7 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 		s.prompt.currentCh = nil
 		s.mu.Unlock()
 
-		s.saveSessionState()
+		s.syncAndPersistProjectState()
 
 		if !hasEmitter && buf.Len() > 0 {
 			s.reply(buf.String())
@@ -897,7 +897,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 		s.sessionMeta.ConfigOptions = updatedOpts
 	}
 	s.mu.Unlock()
-	s.saveSessionState()
+	s.syncAndPersistProjectState()
 	return true
 }
 
