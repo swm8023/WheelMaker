@@ -22,7 +22,7 @@ This design resets IM2 around protocol-first constraints.
 3. Keep IM layer ACP-transparent.
 4. Persist only IM chat projection data in `im2`.
 5. Support one session bound to many chats, with broadcast-by-default outbound behavior.
-6. Keep channel abstraction aligned with IM 1.0 (`channel`), avoid introducing new ambiguous terms.
+6. Keep `channel` as a unified term only; implementation behavior is IM2-specific.
 
 ## 2. Non-Goals
 
@@ -46,7 +46,7 @@ This design resets IM2 around protocol-first constraints.
 | IM persistence scope | Only `im_active_chats` projection table |
 | User dimension | No `userId` in protocol |
 | ACP handling | Opaque payload pass-through at IM layer |
-| IM abstraction term | Reuse `channel` term from IM 1.0 |
+| IM abstraction term | Use `channel` as naming only; behavior follows IM2 design |
 
 ## 4. Target Architecture
 
@@ -75,7 +75,7 @@ Responsibilities:
    - Persists chat projection (`im_active_chats`).
    - Exposes chat binding lookup and write API.
 
-4. IM channels (same abstraction direction as 1.0)
+4. IM channels (naming aligned only; runtime behavior defined by IM2)
    - Implement channel-specific send/receive mechanics.
    - Accept normalized outbound event from router.
 
@@ -190,3 +190,4 @@ This spec is considered ready for implementation planning when:
 2. Client vs IM2 state boundary has no ambiguity.
 3. `/new` rebind semantics are accepted.
 4. Validation matrix is accepted as test gate.
+
