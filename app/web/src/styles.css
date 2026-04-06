@@ -935,6 +935,13 @@ body,
   padding: 0;
 }
 
+.theme-light .file-code-area .code-block,
+.theme-light .file-code-area .code-block *,
+.theme-light .file-code-area .diff-inline-code,
+.theme-light .file-code-area .diff-inline-code * {
+  text-shadow: none !important;
+}
+
 .prism-code .token.comment,
 .prism-code .token.prolog,
 .prism-code .token.doctype,
