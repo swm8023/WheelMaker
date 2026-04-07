@@ -37,10 +37,39 @@ type Command struct {
 }
 
 type SystemPayload struct {
-	Kind  string
-	Title string
-	Body  string
-	Meta  map[string]string
+	Kind     string
+	Title    string
+	Body     string
+	Meta     map[string]string
+	HelpCard *HelpCardPayload
+}
+
+type HelpOption struct {
+	Label   string
+	Command string
+	Value   string
+	MenuID  string
+}
+
+type HelpMenu struct {
+	Title   string
+	Body    string
+	Options []HelpOption
+	Parent  string
+}
+
+type HelpModel struct {
+	Title    string
+	Body     string
+	Options  []HelpOption
+	RootMenu string
+	Menus    map[string]HelpMenu
+}
+
+type HelpCardPayload struct {
+	Model  HelpModel
+	MenuID string
+	Page   int
 }
 
 type Channel interface {
@@ -74,7 +103,7 @@ func ParseCommand(text string) (Command, bool) {
 		return Command{}, false
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load":
+	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/help":
 		return Command{
 			Name: parts[0],
 			Args: strings.Join(parts[1:], " "),

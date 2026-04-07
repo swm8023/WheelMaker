@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -189,6 +190,19 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))
 		return nil
 	}
+	if cmd == "/help" {
+		sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
+		if sess == nil {
+			return nil
+		}
+		sess.setIMSource(source)
+		menuID, page := parseHelpArgs(args)
+		model, err := sess.resolveHelpModel(ctx, source.ChatID)
+		if err != nil {
+			return c.sendIMDirect(ctx, source, fmt.Sprintf("Help error: %v", err))
+		}
+		return c.sendHelpCard(ctx, source, model, menuID, page)
+	}
 
 	sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
 	if sess == nil {
@@ -211,4 +225,34 @@ func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef
 		return nil
 	}
 	return sess
+}
+
+func parseHelpArgs(args string) (menuID string, page int) {
+	parts := strings.Fields(args)
+	if len(parts) >= 1 {
+		menuID = parts[0]
+	}
+	if len(parts) >= 2 {
+		if n, err := strconv.Atoi(parts[1]); err == nil {
+			page = n
+		}
+	}
+	return
+}
+
+func (c *Client) sendHelpCard(ctx context.Context, source im.ChatRef, model im.HelpModel, menuID string, page int) error {
+	c.mu.Lock()
+	router := c.imRouter
+	c.mu.Unlock()
+	if router == nil {
+		return nil
+	}
+	return router.SystemNotify(ctx, im.SendTarget{ChannelID: source.ChannelID, ChatID: source.ChatID}, im.SystemPayload{
+		Kind: "help_card",
+		HelpCard: &im.HelpCardPayload{
+			Model:  model,
+			MenuID: menuID,
+			Page:   page,
+		},
+	})
 }

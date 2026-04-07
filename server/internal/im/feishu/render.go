@@ -210,3 +210,151 @@ func parsePermissionReply(input string, opts []acp.PermissionOption) acp.Permiss
 	}
 	return acp.PermissionResponse{Outcome: acp.PermissionResult{Outcome: "invalid"}}
 }
+
+func renderDefaultStr(v, d string) string {
+	if strings.TrimSpace(v) == "" {
+		return d
+	}
+	return strings.TrimSpace(v)
+}
+
+func resolveHelpMenu(model im.HelpModel, menuID string) (title, body string, options []im.HelpOption, parent string) {
+	rootID := strings.TrimSpace(model.RootMenu)
+	if rootID == "" {
+		rootID = "root"
+	}
+	if strings.TrimSpace(menuID) == "" || menuID == rootID {
+		return renderDefaultStr(model.Title, "Help"), strings.TrimSpace(model.Body), model.Options, ""
+	}
+	if menu, ok := model.Menus[menuID]; ok {
+		return renderDefaultStr(menu.Title, renderDefaultStr(model.Title, "Help")), strings.TrimSpace(menu.Body), menu.Options, strings.TrimSpace(menu.Parent)
+	}
+	return renderDefaultStr(model.Title, "Help"), strings.TrimSpace(model.Body), model.Options, ""
+}
+
+func buildHelpCard(chatID string, model im.HelpModel, menuID string, page int) RawCard {
+	const pageSize = 8
+
+	title, body, options, parent := resolveHelpMenu(model, menuID)
+
+	if page < 0 {
+		page = 0
+	}
+	total := len(options)
+	maxPage := 0
+	if total > 0 {
+		maxPage = (total - 1) / pageSize
+		if page > maxPage {
+			page = maxPage
+		}
+	}
+	start := page * pageSize
+	end := start + pageSize
+	if end > total {
+		end = total
+	}
+
+	actions := make([]map[string]any, 0, end-start)
+	for _, opt := range options[start:end] {
+		if strings.TrimSpace(opt.MenuID) != "" {
+			actions = append(actions, map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": opt.Label},
+				"type": "default",
+				"value": map[string]any{
+					"kind":    "help_menu",
+					"chat_id": chatID,
+					"menu_id": opt.MenuID,
+				},
+			})
+			continue
+		}
+		actions = append(actions, map[string]any{
+			"tag":  "button",
+			"text": map[string]any{"tag": "plain_text", "content": opt.Label},
+			"type": "default",
+			"value": map[string]any{
+				"kind":    "help_option",
+				"chat_id": chatID,
+				"menu_id": menuID,
+				"command": opt.Command,
+				"value":   opt.Value,
+			},
+		})
+	}
+
+	elements := []map[string]any{
+		{"tag": "markdown", "content": strings.TrimSpace(body)},
+	}
+	if len(actions) > 0 {
+		elements = append(elements, map[string]any{"tag": "action", "actions": actions})
+	}
+
+	if maxPage > 0 {
+		nav := make([]map[string]any, 0, 2)
+		if page > 0 {
+			nav = append(nav, map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": "Prev"},
+				"type": "default",
+				"value": map[string]any{
+					"kind":    "help_page",
+					"chat_id": chatID,
+					"menu_id": menuID,
+					"page":    strconv.Itoa(page - 1),
+				},
+			})
+		}
+		if page < maxPage {
+			nav = append(nav, map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": "Next"},
+				"type": "default",
+				"value": map[string]any{
+					"kind":    "help_page",
+					"chat_id": chatID,
+					"menu_id": menuID,
+					"page":    strconv.Itoa(page + 1),
+				},
+			})
+		}
+		if len(nav) > 0 {
+			elements = append(elements, map[string]any{"tag": "action", "actions": nav})
+		}
+	}
+
+	if strings.TrimSpace(parent) != "" {
+		elements = append(elements, map[string]any{
+			"tag": "action",
+			"actions": []map[string]any{
+				{
+					"tag":  "button",
+					"text": map[string]any{"tag": "plain_text", "content": "Back"},
+					"type": "primary",
+					"value": map[string]any{
+						"kind":    "help_menu",
+						"chat_id": chatID,
+						"menu_id": parent,
+					},
+				},
+			},
+		})
+	}
+
+	headerTitle := renderDefaultStr(title, "Help")
+	if maxPage > 0 {
+		headerTitle = fmt.Sprintf("%s (%d/%d)", headerTitle, page+1, maxPage+1)
+	}
+
+	return RawCard{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": headerTitle,
+			},
+			"template": "green",
+		},
+		"elements": elements,
+	}
+}

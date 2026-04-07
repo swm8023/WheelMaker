@@ -146,6 +146,10 @@ func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payloa
 	if chatID == "" {
 		return fmt.Errorf("im feishu: chat is empty")
 	}
+	if payload.Kind == "help_card" && payload.HelpCard != nil {
+		card := buildHelpCard(chatID, payload.HelpCard.Model, payload.HelpCard.MenuID, payload.HelpCard.Page)
+		return c.inner.SendCard(chatID, "", card)
+	}
 	text := renderSystemText(payload)
 	if text == "" {
 		return nil
@@ -246,9 +250,20 @@ func (c *Channel) handleMessage(m Message) {
 }
 
 func (c *Channel) handleCardAction(evt CardActionEvent) {
-	if strings.TrimSpace(evt.Value["kind"]) != "permission" {
-		return
+	kind := strings.TrimSpace(evt.Value["kind"])
+	switch kind {
+	case "permission":
+		c.handlePermissionAction(evt)
+	case "help_menu":
+		c.handleHelpMenuAction(evt)
+	case "help_page":
+		c.handleHelpPageAction(evt)
+	case "help_option":
+		c.handleHelpOptionAction(evt)
 	}
+}
+
+func (c *Channel) handlePermissionAction(evt CardActionEvent) {
 	requestID, err := strconv.ParseInt(strings.TrimSpace(evt.Value["request_id"]), 10, 64)
 	if err != nil || requestID <= 0 {
 		return
@@ -280,6 +295,76 @@ func (c *Channel) handleCardAction(evt CardActionEvent) {
 	if handler != nil {
 		_ = handler(context.Background(), source, requestID, result)
 	}
+}
+
+func (c *Channel) handleHelpMenuAction(evt CardActionEvent) {
+	chatID := strings.TrimSpace(evt.Value["chat_id"])
+	if chatID == "" {
+		chatID = evt.ChatID
+	}
+	menuID := strings.TrimSpace(evt.Value["menu_id"])
+	if chatID == "" {
+		return
+	}
+	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
+	args := menuID
+	c.mu.Lock()
+	handler := c.onCommand
+	c.mu.Unlock()
+	if handler != nil {
+		_ = handler(context.Background(), source, im.Command{Name: "/help", Args: args, Raw: "/help " + args})
+	}
+}
+
+func (c *Channel) handleHelpPageAction(evt CardActionEvent) {
+	chatID := strings.TrimSpace(evt.Value["chat_id"])
+	if chatID == "" {
+		chatID = evt.ChatID
+	}
+	menuID := strings.TrimSpace(evt.Value["menu_id"])
+	pageStr := strings.TrimSpace(evt.Value["page"])
+	if chatID == "" {
+		return
+	}
+	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
+	args := menuID + " " + pageStr
+	c.mu.Lock()
+	handler := c.onCommand
+	c.mu.Unlock()
+	if handler != nil {
+		_ = handler(context.Background(), source, im.Command{Name: "/help", Args: args, Raw: "/help " + args})
+	}
+}
+
+func (c *Channel) handleHelpOptionAction(evt CardActionEvent) {
+	chatID := strings.TrimSpace(evt.Value["chat_id"])
+	if chatID == "" {
+		chatID = evt.ChatID
+	}
+	cmd := strings.TrimSpace(evt.Value["command"])
+	val := strings.TrimSpace(evt.Value["value"])
+	if cmd == "" || chatID == "" {
+		return
+	}
+	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
+	text := cmd
+	if val != "" {
+		text = cmd + " " + val
+	}
+
+	// Execute the action command, then re-open help at root
+	c.mu.Lock()
+	handler := c.onCommand
+	c.mu.Unlock()
+	if handler == nil {
+		return
+	}
+	if parsed, ok := im.ParseCommand(text); ok {
+		_ = handler(context.Background(), source, parsed)
+	}
+
+	// Re-open help menu at root to show updated state
+	_ = handler(context.Background(), source, im.Command{Name: "/help", Args: "", Raw: "/help"})
 }
 
 func (c *Channel) resolvePermissionText(m Message) bool {

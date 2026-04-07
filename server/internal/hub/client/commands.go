@@ -9,30 +9,15 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-type HelpOption struct {
-	Label   string
-	Command string
-	Value   string
-	MenuID  string
-}
+type HelpOption = im.HelpOption
 
-type HelpMenu struct {
-	Title   string
-	Body    string
-	Options []HelpOption
-	Parent  string
-}
+type HelpMenu = im.HelpMenu
 
-type HelpModel struct {
-	Title    string
-	Body     string
-	Options  []HelpOption
-	RootMenu string
-	Menus    map[string]HelpMenu
-}
+type HelpModel = im.HelpModel
 
 // handleCommand processes recognized "/" commands.
 func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
