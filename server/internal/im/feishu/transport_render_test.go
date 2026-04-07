@@ -69,6 +69,36 @@ func TestBuildThoughtStreamCard_HasHeader(t *testing.T) {
 	}
 }
 
+func TestBuildThoughtStreamCard_CollapsedUsesPanel(t *testing.T) {
+	card := buildThoughtStreamCard("deep thought", true)
+	if schema, _ := card["schema"].(string); schema != "2.0" {
+		t.Fatalf("collapsed thought card should use schema 2.0, got %q", schema)
+	}
+	body, ok := card["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("body missing in collapsed thought card: %+v", card)
+	}
+	elements, ok := body["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("body elements missing in collapsed thought card: %+v", card)
+	}
+	panel := elements[0]
+	if tag, _ := panel["tag"].(string); tag != "collapsible_panel" {
+		t.Fatalf("expected collapsible_panel tag, got %q", tag)
+	}
+	if expanded, _ := panel["expanded"].(bool); expanded {
+		t.Fatalf("collapsed thought card panel should not be expanded")
+	}
+	inner, ok := panel["elements"].([]map[string]any)
+	if !ok || len(inner) == 0 {
+		t.Fatalf("panel elements missing: %+v", panel)
+	}
+	content, _ := inner[0]["content"].(string)
+	if !strings.Contains(content, "deep thought") {
+		t.Fatalf("panel content mismatch, got %q", content)
+	}
+}
+
 func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
 	card := buildSystemStreamCard("status ok")
 	header, ok := card["header"].(map[string]any)

@@ -322,13 +322,17 @@ func (f *transportChannel) flushPendingStreams(chatID string) {
 			shared.Warn("feishu: final text flush: %v", err)
 		}
 	}
-	if ts := f.thoughtStreams[chatID]; ts != nil && ts.content.Len() > ts.pushedLen {
+	if ts := f.thoughtStreams[chatID]; ts != nil {
 		if ts.timer != nil {
 			ts.timer.Stop()
 			ts.timer = nil
 		}
-		if err := f.pushThoughtCard(chatID, ts); err != nil {
-			shared.Warn("feishu: final thought flush: %v", err)
+		// Push collapsed card for the final thought state.
+		if content := ts.content.String(); content != "" {
+			card := buildThoughtStreamCard(content, true)
+			if err := f.postOrUpdateStreamCard(chatID, ts, card); err != nil {
+				shared.Warn("feishu: final thought flush: %v", err)
+			}
 		}
 	}
 }
@@ -431,8 +435,10 @@ func (f *transportChannel) finalizeStream(chatID, streamType string) {
 				ts.timer.Stop()
 				ts.timer = nil
 			}
-			if ts.content.Len() > ts.pushedLen {
-				_ = f.pushThoughtCard(chatID, ts)
+			// Always push collapsed card when thought stream ends.
+			if content := ts.content.String(); content != "" {
+				card := buildThoughtStreamCard(content, true)
+				_ = f.postOrUpdateStreamCard(chatID, ts, card)
 			}
 			delete(f.thoughtStreams, chatID)
 		}
@@ -714,8 +720,44 @@ func buildTextStreamCard(content string, streaming bool) RawCard {
 	}
 }
 
-func buildThoughtStreamCard(content string, streaming bool) RawCard {
-	_ = streaming
+func buildThoughtStreamCard(content string, collapsed bool) RawCard {
+	md := normalizeStreamMarkdown(content)
+	if collapsed {
+		// Card v2 with collapsible_panel, collapsed by default.
+		return RawCard{
+			"schema": "2.0",
+			"config": map[string]any{"update_multi": true},
+			"header": map[string]any{
+				"title": map[string]any{
+					"tag":     "plain_text",
+					"content": "🧠 Thinking",
+				},
+			},
+			"body": map[string]any{
+				"elements": []map[string]any{
+					{
+						"tag":      "collapsible_panel",
+						"expanded": false,
+						"header": map[string]any{
+							"title": map[string]any{
+								"tag":     "plain_text",
+								"content": "Click to expand",
+							},
+							"vertical_align": "center",
+							"padding":        "4px 0px 4px 0px",
+						},
+						"border": map[string]any{
+							"color":         "grey",
+							"corner_radius": "5px",
+						},
+						"elements": []map[string]any{
+							{"tag": "markdown", "content": md},
+						},
+					},
+				},
+			},
+		}
+	}
 	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
@@ -725,7 +767,7 @@ func buildThoughtStreamCard(content string, streaming bool) RawCard {
 			},
 		},
 		"elements": []map[string]any{
-			{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
+			{"tag": "markdown", "content": md},
 		},
 	}
 }
@@ -803,6 +845,17 @@ func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) error {
 
 	// Tool updates interrupt the current assistant text stream card.
 	f.textMu.Lock()
+	// Collapse thought card before clearing the stream.
+	if ts := f.thoughtStreams[chatID]; ts != nil {
+		if ts.timer != nil {
+			ts.timer.Stop()
+			ts.timer = nil
+		}
+		if content := ts.content.String(); content != "" {
+			card := buildThoughtStreamCard(content, true)
+			_ = f.postOrUpdateStreamCard(chatID, ts, card)
+		}
+	}
 	delete(f.textStreams, chatID)
 	delete(f.thoughtStreams, chatID)
 	f.textMu.Unlock()
