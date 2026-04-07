@@ -2,6 +2,7 @@ package im2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -120,6 +121,68 @@ func (r *Router) Send(ctx context.Context, target SendTarget, event OutboundEven
 		Payload:   event.Payload,
 	})
 	return firstErr
+}
+
+func (r *Router) RequestDecision(ctx context.Context, target SendTarget, req DecisionRequest) (DecisionResult, error) {
+	sessionID := strings.TrimSpace(target.SessionID)
+	if sessionID == "" {
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2: decision session is empty")
+	}
+	if target.Source == nil {
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2: decision source is empty")
+	}
+	source := normalizeChat(*target.Source)
+	if source.ChannelID == "" || source.ChatID == "" {
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2: decision source is invalid")
+	}
+	ch, err := r.channel(source.ChannelID)
+	if err != nil {
+		return DecisionResult{Outcome: "invalid"}, err
+	}
+	req.SessionID = sessionID
+	res, err := ch.RequestDecision(ctx, source.ChatID, req)
+	_ = r.history.Append(ctx, HistoryEvent{
+		SessionID: sessionID,
+		Direction: HistoryOutbound,
+		Source:    &source,
+		Targets:   []ChatRef{source},
+		Kind:      OutboundSystem,
+		Payload:   req,
+	})
+	return res, err
+}
+
+func (r *Router) Run(ctx context.Context) error {
+	r.mu.RLock()
+	channels := make([]Channel, 0, len(r.channels))
+	for _, ch := range r.channels {
+		channels = append(channels, ch)
+	}
+	r.mu.RUnlock()
+	if len(channels) == 0 {
+		return fmt.Errorf("im2: no channels registered")
+	}
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(channels))
+	for _, ch := range channels {
+		ch := ch
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ch.Run(ctx); err != nil && !errors.Is(err, context.Canceled) && ctx.Err() == nil {
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Router) recipients(target SendTarget) ([]ChatRef, error) {

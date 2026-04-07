@@ -33,6 +33,7 @@ type ProjectConfig struct {
 // IMConfig describes the IM transport for a project.
 type IMConfig struct {
 	Type      string `json:"type"`
+	Version   int    `json:"version,omitempty"`
 	AppID     string `json:"appID,omitempty"`
 	AppSecret string `json:"appSecret,omitempty"`
 }

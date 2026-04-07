@@ -47,6 +47,10 @@ func (c *Channel) Send(ctx context.Context, chatID string, event im2.OutboundEve
 	}
 }
 
+func (c *Channel) RequestDecision(context.Context, string, im2.DecisionRequest) (im2.DecisionResult, error) {
+	return im2.DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2 feishu: decision not implemented")
+}
+
 func (c *Channel) Run(ctx context.Context) error {
 	return c.inner.Run(ctx)
 }

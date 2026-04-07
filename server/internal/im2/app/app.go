@@ -27,6 +27,10 @@ func (c *Channel) Send(context.Context, string, im2.OutboundEvent) error {
 	return ErrNotImplemented
 }
 
+func (c *Channel) RequestDecision(context.Context, string, im2.DecisionRequest) (im2.DecisionResult, error) {
+	return im2.DecisionResult{Outcome: "invalid"}, ErrNotImplemented
+}
+
 func (c *Channel) Run(context.Context) error {
 	return ErrNotImplemented
 }

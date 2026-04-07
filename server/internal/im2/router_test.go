@@ -15,14 +15,21 @@ func (c *captureInboundClient) HandleIM2Inbound(_ context.Context, event Inbound
 }
 
 type captureChannel struct {
-	id    string
-	sent  []sentEvent
-	onMsg func(context.Context, string, string) error
+	id        string
+	sent      []sentEvent
+	decisions []decisionEvent
+	runCalled bool
+	onMsg     func(context.Context, string, string) error
 }
 
 type sentEvent struct {
 	chatID string
 	event  OutboundEvent
+}
+
+type decisionEvent struct {
+	chatID string
+	req    DecisionRequest
 }
 
 func (c *captureChannel) ID() string { return c.id }
@@ -33,7 +40,14 @@ func (c *captureChannel) Send(_ context.Context, chatID string, event OutboundEv
 	c.sent = append(c.sent, sentEvent{chatID: chatID, event: event})
 	return nil
 }
-func (c *captureChannel) Run(context.Context) error { return nil }
+func (c *captureChannel) RequestDecision(_ context.Context, chatID string, req DecisionRequest) (DecisionResult, error) {
+	c.decisions = append(c.decisions, decisionEvent{chatID: chatID, req: req})
+	return DecisionResult{Outcome: "selected", OptionID: "allow", Value: "allow_once", Source: "card_action"}, nil
+}
+func (c *captureChannel) Run(context.Context) error {
+	c.runCalled = true
+	return nil
+}
 
 func TestHandleInbound_UnboundChatReachesClientWithoutSession(t *testing.T) {
 	ctx := context.Background()
@@ -142,5 +156,44 @@ func TestSend_SessionBroadcastSendsAllBoundChats(t *testing.T) {
 	}
 	if len(ch.sent) != 2 {
 		t.Fatalf("sent count=%d, want 2: %+v", len(ch.sent), ch.sent)
+	}
+}
+
+func TestRequestDecision_RoutesOnlyToSourceChat(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "feishu"}
+	_ = router.RegisterChannel(ch)
+	source := ChatRef{ChannelID: "feishu", ChatID: "chat-a"}
+
+	res, err := router.RequestDecision(ctx, SendTarget{SessionID: "s1", Source: &source}, DecisionRequest{
+		SessionID: "s1",
+		Kind:      DecisionPermission,
+		Title:     "Allow?",
+		Options:   []DecisionOption{{ID: "allow", Label: "Allow", Value: "allow_once"}},
+	})
+	if err != nil {
+		t.Fatalf("RequestDecision: %v", err)
+	}
+	if res.OptionID != "allow" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(ch.decisions) != 1 || ch.decisions[0].chatID != "chat-a" {
+		t.Fatalf("decisions=%+v", ch.decisions)
+	}
+}
+
+func TestRun_StartsRegisteredChannels(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "feishu"}
+	_ = router.RegisterChannel(ch)
+
+	if err := router.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !ch.runCalled {
+		t.Fatal("channel Run was not called")
 	}
 }
