@@ -38,34 +38,6 @@ func TestParseMessageText_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestBuildDebugCard_ContainsLines(t *testing.T) {
-	card := buildDebugCard([]string{"line-1", "line-2"})
-	elements, ok := card["elements"].([]map[string]any)
-	if !ok || len(elements) == 0 {
-		t.Fatalf("elements missing in card: %+v", card)
-	}
-	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "line-1") || !strings.Contains(content, "line-2") {
-		t.Fatalf("debug card content missing lines: %q", content)
-	}
-}
-
-func TestBuildDebugCard_TruncatesToLast120Lines(t *testing.T) {
-	lines := make([]string, 0, 140)
-	for i := 0; i < 140; i++ {
-		lines = append(lines, "line-"+strconv.Itoa(i))
-	}
-	card := buildDebugCard(lines)
-	elements, _ := card["elements"].([]map[string]any)
-	content, _ := elements[0]["content"].(string)
-	if strings.Contains(content, "line-0") {
-		t.Fatalf("old lines should be truncated, got content=%q", content)
-	}
-	if !strings.Contains(content, "line-139") {
-		t.Fatalf("latest lines should be kept, got content=%q", content)
-	}
-}
-
 func TestBuildTextStreamCard_NoHeader(t *testing.T) {
 	card := buildTextStreamCard("hello", false)
 	if _, ok := card["header"]; ok {
@@ -113,15 +85,6 @@ func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
 	}
 	if !strings.Contains(title, "System Message") {
 		t.Fatalf("system title mismatch, got %q", title)
-	}
-}
-
-func TestResetDebugStream(t *testing.T) {
-	f := newTransport(Config{})
-	f.debugStreams["chat-1"] = &debugStream{messageID: "m1", lines: []string{"a"}}
-	f.resetDebugStream("chat-1")
-	if _, ok := f.debugStreams["chat-1"]; ok {
-		t.Fatalf("debug stream should be removed")
 	}
 }
 
@@ -261,14 +224,6 @@ func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
 	}
 	if !strings.Contains(content, "- step one - step two - step three") {
 		t.Fatalf("tool card output should keep original bullet text: %q", content)
-	}
-}
-
-func TestSanitizeDebugStreamLine_StripsPrefixes(t *testing.T) {
-	in := "[debug][codex] <-[acp] {\"jsonrpc\":\"2.0\"}"
-	got := sanitizeDebugStreamLine(in)
-	if got != "<-[acp] {\"jsonrpc\":\"2.0\"}" {
-		t.Fatalf("sanitizeDebugStreamLine()=%q", got)
 	}
 }
 

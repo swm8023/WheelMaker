@@ -42,7 +42,6 @@ type TextKind uint8
 const (
 	TextNormal TextKind = iota
 	TextThought
-	TextDebug
 	TextSystem
 )
 

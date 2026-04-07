@@ -87,7 +87,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd st
 			AppSecret:         pc.IM.AppSecret,
 			VerificationToken: feishuVerificationToken,
 			EncryptKey:        feishuEncryptKey,
-			Debug:             pc.Debug,
 			YOLO:              pc.YOLO,
 			BlockedUpdates:    pc.Client.IMFilter.Block,
 		})); err != nil {
@@ -189,11 +188,6 @@ func (h *Hub) setupRegistrySync() {
 		HubID:             hubID,
 		ReconnectInterval: 2 * time.Second,
 	}, projects)
-	if hasDebugProject(h.cfg.Projects) {
-		if dw := shared.DebugWriter(); dw != nil {
-			rep.SetDebugLogger(dw)
-		}
-	}
 	h.regSync = rep
 	h.regMu.Lock()
 	for _, project := range projects {
@@ -335,13 +329,4 @@ func sameProjectInfo(a, b ProjectInfo) bool {
 		a.Git.Dirty == b.Git.Dirty &&
 		a.Git.GitRev == b.Git.GitRev &&
 		a.Git.WorktreeRev == b.Git.WorktreeRev
-}
-
-func hasDebugProject(projects []shared.ProjectConfig) bool {
-	for _, p := range projects {
-		if p.Debug {
-			return true
-		}
-	}
-	return false
 }

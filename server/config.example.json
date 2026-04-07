@@ -2,7 +2,6 @@
   "projects": [
     {
       "name": "local-dev",
-      "debug": true,
       "path": "/path/to/your/project",
       "yolo": true,
       "im": {

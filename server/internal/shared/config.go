@@ -16,6 +16,14 @@ type AppConfig struct {
 	Log      LogConfig       `json:"log,omitempty"`
 }
 
+type rawAppConfig struct {
+	Projects []rawProjectConfig `json:"projects"`
+}
+
+type rawProjectConfig struct {
+	Debug json.RawMessage `json:"debug,omitempty"`
+}
+
 // LogConfig controls the operational log system.
 type LogConfig struct {
 	// Level is the minimum log level to emit: "debug", "info", "warn" (default), "error".
@@ -25,7 +33,6 @@ type LogConfig struct {
 // ProjectConfig describes one WheelMaker project.
 type ProjectConfig struct {
 	Name   string     `json:"name"`
-	Debug  bool       `json:"debug,omitempty"`
 	Path   string     `json:"path"`
 	YOLO   bool       `json:"yolo,omitempty"`
 	IM     IMConfig   `json:"im"`
@@ -79,6 +86,14 @@ func LoadConfig(path string) (*AppConfig, error) {
 	}
 	if bytes.Contains(data, []byte(`"version"`)) {
 		return nil, fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
+	}
+	var raw rawAppConfig
+	if err := json.Unmarshal(data, &raw); err == nil {
+		for _, project := range raw.Projects {
+			if len(project.Debug) != 0 {
+				return nil, fmt.Errorf("parse config %s: projects[].debug has been removed", path)
+			}
+		}
 	}
 	var cfg AppConfig
 	dec := json.NewDecoder(bytes.NewReader(data))

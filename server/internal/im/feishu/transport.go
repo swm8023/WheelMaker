@@ -26,7 +26,6 @@ type Config struct {
 	AppSecret         string
 	VerificationToken string
 	EncryptKey        string
-	Debug             bool
 	YOLO              bool
 	BlockedUpdates    []string
 }
@@ -40,8 +39,6 @@ type transportChannel struct {
 	action  func(CardActionEvent)
 	bot     *lark.Bot
 
-	debugMu        sync.Mutex
-	debugStreams   map[string]*debugStream
 	textMu         sync.Mutex
 	textStreams    map[string]*textStream
 	thoughtStreams map[string]*textStream
@@ -58,12 +55,6 @@ type transportChannel struct {
 	lastMu        sync.Mutex
 	lastOutbound  map[string]string // chatID -> last outbound message ID
 	wsReadyOnce   sync.Once
-}
-
-type debugStream struct {
-	messageID string
-	lines     []string
-	flushing  bool
 }
 
 type textStream struct {
@@ -108,7 +99,6 @@ type pendingAckReaction struct {
 func newTransport(cfg Config) *transportChannel {
 	return &transportChannel{
 		cfg:            cfg,
-		debugStreams:   map[string]*debugStream{},
 		textStreams:    map[string]*textStream{},
 		thoughtStreams: map[string]*textStream{},
 		systemStreams:  map[string]*textStream{},
@@ -139,8 +129,6 @@ func (f *transportChannel) Send(chatID, text string, kind TextKind) error {
 	switch kind {
 	case TextThought:
 		return f.sendThought(chatID, text)
-	case TextDebug:
-		return f.sendDebug(chatID, text)
 	case TextSystem:
 		return f.sendSystem(chatID, text)
 	default:
@@ -601,124 +589,6 @@ func (f *transportChannel) getLastOutbound(chatID string) string {
 	f.lastMu.Lock()
 	defer f.lastMu.Unlock()
 	return strings.TrimSpace(f.lastOutbound[chatID])
-}
-
-func (f *transportChannel) sendDebug(chatID, text string) error {
-	chatID = strings.TrimSpace(chatID)
-	line := sanitizeDebugStreamLine(text)
-	if chatID == "" || line == "" {
-		return nil
-	}
-	f.debugMu.Lock()
-	ds := f.debugStreams[chatID]
-	if ds == nil {
-		ds = &debugStream{}
-		f.debugStreams[chatID] = ds
-	}
-	ds.lines = append(ds.lines, line)
-	if len(ds.lines) > 200 {
-		ds.lines = ds.lines[len(ds.lines)-200:]
-	}
-	if !ds.flushing {
-		ds.flushing = true
-		time.AfterFunc(2*time.Second, func() { f.flushDebug(chatID) })
-	}
-	f.debugMu.Unlock()
-	return nil
-}
-
-func sanitizeDebugStreamLine(text string) string {
-	line := strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
-	if line == "" {
-		return ""
-	}
-	if strings.HasPrefix(line, "[debug][") {
-		if idx := strings.Index(line, "] "); idx >= 0 && idx+2 < len(line) {
-			line = strings.TrimSpace(line[idx+2:])
-		}
-	}
-	return line
-}
-
-func (f *transportChannel) resetDebugStream(chatID string) {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return
-	}
-	f.debugMu.Lock()
-	delete(f.debugStreams, chatID)
-	f.debugMu.Unlock()
-}
-
-func (f *transportChannel) flushDebug(chatID string) {
-	f.debugMu.Lock()
-	ds := f.debugStreams[chatID]
-	if ds == nil {
-		f.debugMu.Unlock()
-		return
-	}
-	lines := append([]string(nil), ds.lines...)
-	messageID := ds.messageID
-	ds.flushing = false
-	f.debugMu.Unlock()
-
-	if len(lines) == 0 {
-		return
-	}
-	card := buildDebugCard(lines)
-	raw, err := json.Marshal(card)
-	if err != nil {
-		return
-	}
-
-	bot, err := f.ensureBot()
-	if err != nil {
-		return
-	}
-	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-
-	if strings.TrimSpace(messageID) == "" {
-		msg := buf.BindChatID(chatID).Build()
-		resp, postErr := bot.PostMessage(msg)
-		if postErr != nil {
-			return
-		}
-		if resp != nil {
-			f.debugMu.Lock()
-			if cur := f.debugStreams[chatID]; cur != nil {
-				cur.messageID = strings.TrimSpace(resp.Data.MessageID)
-			}
-			f.debugMu.Unlock()
-		}
-		return
-	}
-	msg := buf.Build()
-	_, _ = bot.UpdateMessage(messageID, msg)
-}
-
-func buildDebugCard(lines []string) RawCard {
-	if len(lines) > 120 {
-		lines = lines[len(lines)-120:]
-	}
-	var b strings.Builder
-	b.WriteString("```text\n")
-	for _, line := range lines {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	b.WriteString("```")
-	return RawCard{
-		"config": map[string]any{"update_multi": true},
-		"header": map[string]any{
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": "Debug Stream",
-			},
-		},
-		"elements": []map[string]any{
-			{"tag": "markdown", "content": b.String()},
-		},
-	}
 }
 
 func buildTextStreamCard(content string, streaming bool) RawCard {
@@ -1418,7 +1288,7 @@ func (f *transportChannel) Run(ctx context.Context) error {
 		shared.Error("feishu ws: bot init failed: %v", err)
 		return err
 	}
-	shared.Info("feishu ws: starting event loop app_id=%s debug=%t", maskAppID(f.cfg.AppID), f.cfg.Debug)
+	shared.Info("feishu ws: starting event loop app_id=%s", maskAppID(f.cfg.AppID))
 	bot.StartHeartbeat()
 	defer bot.StopHeartbeat()
 
@@ -1427,16 +1297,11 @@ func (f *transportChannel) Run(ctx context.Context) error {
 		OnP2MessageReceiveV1(f.handleP2MessageReceive).
 		OnP2CardActionTrigger(f.handleCardAction)
 
-	logLevel := larkcore.LogLevelInfo
-	if f.cfg.Debug {
-		logLevel = larkcore.LogLevelDebug
-	}
-
 	wsClient := larkws.NewClient(
 		f.cfg.AppID,
 		f.cfg.AppSecret,
 		larkws.WithEventHandler(eventHandler),
-		larkws.WithLogLevel(logLevel),
+		larkws.WithLogLevel(larkcore.LogLevelInfo),
 	)
 	shared.Info("feishu ws: websocket client created, connecting")
 
@@ -1548,8 +1413,6 @@ func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *lark
 	h := f.handler
 	f.mu.RUnlock()
 	if h != nil {
-		// Start a new debug stream card for each new user message in the chat.
-		f.resetDebugStream(chatID)
 		f.resetTextStream(chatID)
 		f.resetThoughtStream(chatID)
 		f.resetSystemStream(chatID)
