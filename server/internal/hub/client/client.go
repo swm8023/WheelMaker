@@ -55,41 +55,30 @@ type Client struct {
 	// Multiple routes can point to the same Session.
 	routeMap map[string]string
 
-	// activeSession is the Session currently handling messages.
-	activeSession *Session
-
 	// suspendTimeout is how long a Suspended session stays in memory before
 	// being persisted to SQLite and evicted. Default: 5 minutes.
 	suspendTimeout time.Duration
 	stopPersistCh  chan struct{} // closed to stop the persist timer goroutine
-
-	// sessionCounter generates unique session IDs.
-	sessionCounter int
-
-	imBlockedUpdates map[string]struct{}
 }
 
 // New creates a Client for the given project.
 // The second argument is kept only to avoid broad call-site churn while IM1 is removed.
 func New(store Store, _ any, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName:      projectName,
-		cwd:              cwd,
-		registry:         agent.DefaultACPFactory(),
-		stateStore:       NewClientStateStore(store, nil),
-		imBlockedUpdates: map[string]struct{}{},
-		sessions:         make(map[string]*Session),
-		routeMap:         make(map[string]string),
-		suspendTimeout:   5 * time.Minute,
-		stopPersistCh:    make(chan struct{}),
+		projectName:    projectName,
+		cwd:            cwd,
+		registry:       agent.DefaultACPFactory(),
+		stateStore:     NewClientStateStore(store, nil),
+		sessions:       make(map[string]*Session),
+		routeMap:       make(map[string]string),
+		suspendTimeout: 5 * time.Minute,
+		stopPersistCh:  make(chan struct{}),
 	}
 	sess := newSession("default", cwd)
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imRouter = c.imRouter
-	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.permRouter = newPermissionRouter(sess)
-	c.activeSession = sess
 	c.sessions["default"] = sess
 	return c
 }
@@ -106,31 +95,6 @@ func (c *Client) SetYOLO(enabled bool) {
 	for _, sess := range sessions {
 		sess.mu.Lock()
 		sess.yolo = enabled
-		sess.mu.Unlock()
-	}
-}
-
-// SetIMUpdateBlockList configures outbound IM update types to suppress.
-// Values are case-insensitive; aliases: "tool" -> "tool_call", "system" -> "error".
-func (c *Client) SetIMUpdateBlockList(types []string) {
-	blocked := make(map[string]struct{}, len(types))
-	for _, t := range types {
-		k := canonicalIMBlockType(t)
-		if k == "" {
-			continue
-		}
-		blocked[k] = struct{}{}
-	}
-	c.mu.Lock()
-	c.imBlockedUpdates = blocked
-	sessions := make([]*Session, 0, len(c.sessions))
-	for _, s := range c.sessions {
-		sessions = append(sessions, s)
-	}
-	c.mu.Unlock()
-	for _, sess := range sessions {
-		sess.mu.Lock()
-		sess.imBlockedUpdates = blocked
 		sess.mu.Unlock()
 	}
 }
@@ -229,7 +193,6 @@ func (c *Client) resolveSession(routeKey string) *Session {
 	sessID := c.routeMap[routeKey]
 	if sessID != "" {
 		if sess := c.sessions[sessID]; sess != nil {
-			c.activeSession = sess
 			c.mu.Unlock()
 			return sess
 		}
@@ -244,12 +207,10 @@ func (c *Client) resolveSession(routeKey string) *Session {
 				restored.persistence = c.stateStore
 				restored.registry = c.registry
 				restored.imRouter = c.imRouter
-				restored.imBlockedUpdates = c.imBlockedUpdates
 				restored.yolo = c.yolo
 				restored.state = c.state
 				restored.permRouter = newPermissionRouter(restored)
 				c.sessions[restored.ID] = restored
-				c.activeSession = restored
 				c.mu.Unlock()
 				return restored
 			}
@@ -263,7 +224,6 @@ func (c *Client) resolveSession(routeKey string) *Session {
 	if len(c.sessions) == 1 {
 		for _, sess := range c.sessions {
 			c.routeMap[routeKey] = sess.ID
-			c.activeSession = sess
 			c.mu.Unlock()
 			return sess
 		}
@@ -278,17 +238,9 @@ func (c *Client) resolveSession(routeKey string) *Session {
 // createSessionLocked creates a new Session, wires back-references, and binds
 // it to the given routeKey. Caller MUST hold c.mu.
 func (c *Client) createSessionLocked(routeKey string) *Session {
-	id := routeKey // use routeKey as session ID for simplicity
-	if existing := c.sessions[id]; existing != nil {
-		c.routeMap[routeKey] = id
-		c.activeSession = existing
-		return existing
-	}
-
-	sess := c.newWiredSession(id)
-	c.sessions[id] = sess
-	c.routeMap[routeKey] = id
-	c.activeSession = sess
+	sess := c.newWiredSession("")
+	c.sessions[sess.ID] = sess
+	c.routeMap[routeKey] = sess.ID
 	return sess
 }
 
@@ -299,17 +251,10 @@ func (c *Client) newWiredSession(id string) *Session {
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imRouter = c.imRouter
-	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.yolo = c.yolo
 	sess.state = c.state
 	sess.permRouter = newPermissionRouter(sess)
 	return sess
-}
-
-// nextSessionID returns a unique session ID. Caller MUST hold c.mu.
-func (c *Client) nextSessionID() string {
-	c.sessionCounter++
-	return fmt.Sprintf("session-%d", c.sessionCounter)
 }
 
 // ClientNewSession suspends the current session for the given route,
@@ -338,11 +283,9 @@ func (c *Client) ClientNewSession(routeKey string) *Session {
 	}
 
 	c.mu.Lock()
-	newID := c.nextSessionID()
-	sess := c.newWiredSession(newID)
-	c.sessions[newID] = sess
-	c.routeMap[routeKey] = newID
-	c.activeSession = sess
+	sess := c.newWiredSession("")
+	c.sessions[sess.ID] = sess
+	c.routeMap[routeKey] = sess.ID
 	c.mu.Unlock()
 	return sess
 }
@@ -385,7 +328,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		c.mu.Lock()
 		c.routeMap[routeKey] = target.ID
 		sess.Status = SessionActive
-		c.activeSession = sess
 		c.mu.Unlock()
 		return sess, nil
 	}
@@ -428,13 +370,11 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	restored.persistence = c.stateStore
 	restored.registry = c.registry
 	restored.imRouter = c.imRouter
-	restored.imBlockedUpdates = c.imBlockedUpdates
 	restored.yolo = c.yolo
 	restored.state = c.state
 	restored.permRouter = newPermissionRouter(restored)
 	c.sessions[restored.ID] = restored
 	c.routeMap[routeKey] = restored.ID
-	c.activeSession = restored
 	c.mu.Unlock()
 	return restored, nil
 }
@@ -657,9 +597,6 @@ func (s *Session) handlePrompt(text string) {
 				s.mu.Unlock()
 				return
 			}
-			if s.shouldBlockIMUpdate(u.Type) {
-				continue
-			}
 			if hasIMEmitter {
 				target := im.SendTarget{SessionID: s.ID, Source: &imSource}
 				var emitErr error
@@ -722,45 +659,6 @@ func normalizeRouteKey(routeKey string) string {
 		return "default"
 	}
 	return routeKey
-}
-
-func (s *Session) shouldBlockIMUpdate(updateType acp.UpdateType) bool {
-	key := canonicalIMBlockType(string(updateType))
-	if key == "" {
-		return false
-	}
-	s.mu.Lock()
-	_, blocked := s.imBlockedUpdates[key]
-	s.mu.Unlock()
-	return blocked
-}
-
-func canonicalIMBlockType(raw string) string {
-	s := strings.ToLower(strings.TrimSpace(raw))
-	switch s {
-	case "":
-		return ""
-	case "tool":
-		return "tool_call"
-	case "tool_call_update", "tool_call_cancelled":
-		return "tool_call"
-	case "system":
-		return "error"
-	default:
-		return s
-	}
-}
-
-// reply delegates to the active session's reply method.
-func (c *Client) reply(text string) {
-	c.mu.Lock()
-	sess := c.activeSession
-	c.mu.Unlock()
-	if sess != nil {
-		sess.reply(text)
-		return
-	}
-	fmt.Println(text)
 }
 
 func renderUnknown(v string) string {

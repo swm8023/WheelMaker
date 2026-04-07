@@ -28,6 +28,7 @@ type Config struct {
 	EncryptKey        string
 	Debug             bool
 	YOLO              bool
+	BlockedUpdates    []string
 }
 
 // Channel implements Channel using Feishu WS (inbound) + go-lark (outbound).

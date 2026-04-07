@@ -54,7 +54,6 @@ func (c *Client) HandleIMPermissionResponse(_ context.Context, source im.ChatRef
 	c.mu.Lock()
 	sessID := c.routeMap[routeKey]
 	sess := c.sessions[sessID]
-	active := c.activeSession
 	all := make([]*Session, 0, len(c.sessions))
 	for _, s := range c.sessions {
 		all = append(all, s)
@@ -64,11 +63,8 @@ func (c *Client) HandleIMPermissionResponse(_ context.Context, source im.ChatRef
 	if sess != nil && sess.permRouter != nil && sess.permRouter.resolve(requestID, result) {
 		return nil
 	}
-	if active != nil && active != sess && active.permRouter != nil && active.permRouter.resolve(requestID, result) {
-		return nil
-	}
 	for _, candidate := range all {
-		if candidate == nil || candidate == sess || candidate == active || candidate.permRouter == nil {
+		if candidate == nil || candidate == sess || candidate.permRouter == nil {
 			continue
 		}
 		if candidate.permRouter.resolve(requestID, result) {

@@ -35,6 +35,7 @@ type Channel struct {
 	inner transport
 
 	mu                 sync.Mutex
+	blockedUpdates     map[string]struct{}
 	onPrompt           func(context.Context, im.ChatRef, acp.SessionPromptParams) error
 	onCommand          func(context.Context, im.ChatRef, im.Command) error
 	onPermissionResult func(context.Context, im.ChatRef, int64, acp.PermissionResponse) error
@@ -44,12 +45,17 @@ type Channel struct {
 }
 
 func New(cfg Config) *Channel {
-	return newWithTransport(newTransport(cfg))
+	return newWithTransportConfig(newTransport(cfg), cfg)
 }
 
 func newWithTransport(inner transport) *Channel {
+	return newWithTransportConfig(inner, Config{})
+}
+
+func newWithTransportConfig(inner transport, cfg Config) *Channel {
 	c := &Channel{
 		inner:              inner,
+		blockedUpdates:     buildBlockedUpdates(cfg.BlockedUpdates),
 		pendingByRequestID: map[int64]PendingPermission{},
 		pendingByChat:      map[string]PendingPermission{},
 		closed:             map[int64]time.Time{},
@@ -82,6 +88,9 @@ func (c *Channel) OnPermissionResponse(handler func(context.Context, im.ChatRef,
 func (c *Channel) PublishSessionUpdate(ctx context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if c.isBlocked("system") {
+		return nil
 	}
 	chatID := resolveChatID(target)
 	if chatID == "" {
@@ -149,6 +158,9 @@ func (c *Channel) Run(ctx context.Context) error {
 }
 
 func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdateParams) error {
+	if c.isBlockedSessionUpdate(params.Update.SessionUpdate) {
+		return nil
+	}
 	switch params.Update.SessionUpdate {
 	case acp.SessionUpdateAgentMessageChunk:
 		text := extractTextContent(params.Update.Content)
@@ -187,6 +199,9 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 }
 
 func (c *Channel) renderPromptResult(chatID string, result acp.SessionPromptResult) error {
+	if c.isBlocked("prompt_result") {
+		return nil
+	}
 	stopReason := strings.TrimSpace(result.StopReason)
 	if stopReason == "" || stopReason == acp.StopReasonEndTurn {
 		return c.inner.MarkDone(chatID)
@@ -332,4 +347,57 @@ func resolveChatID(target im.SendTarget) string {
 		return strings.TrimSpace(target.Source.ChatID)
 	}
 	return strings.TrimSpace(target.ChatID)
+}
+
+func buildBlockedUpdates(values []string) map[string]struct{} {
+	blocked := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if key := canonicalBlockedUpdate(value); key != "" {
+			blocked[key] = struct{}{}
+		}
+	}
+	return blocked
+}
+
+func (c *Channel) isBlockedSessionUpdate(updateType string) bool {
+	return c.isBlocked(canonicalBlockedUpdate(updateType))
+}
+
+func (c *Channel) isBlocked(key string) bool {
+	if key == "" {
+		return false
+	}
+	c.mu.Lock()
+	_, blocked := c.blockedUpdates[key]
+	c.mu.Unlock()
+	return blocked
+}
+
+func canonicalBlockedUpdate(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "none":
+		return ""
+	case "text", "agent_message_chunk":
+		return "text"
+	case "thought", "agent_thought_chunk":
+		return "thought"
+	case "tool", "tool_call", "tool_call_update", "tool_call_cancelled":
+		return "tool_call"
+	case "plan":
+		return "plan"
+	case "config_option_update":
+		return "config_option_update"
+	case "available_commands_update":
+		return "available_commands_update"
+	case "session_info_update":
+		return "session_info_update"
+	case "current_mode_update":
+		return "current_mode_update"
+	case "done", "prompt_result":
+		return "prompt_result"
+	case "error", "system":
+		return "system"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
 }

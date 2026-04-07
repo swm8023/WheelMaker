@@ -78,7 +78,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd st
 	store := client.NewProjectJSONStore(h.statePath, pc.Name)
 	c := client.New(store, nil, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
-	c.SetIMUpdateBlockList(pc.Client.IMFilter.Block)
 
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())
 	switch pc.IM.Type {
@@ -90,6 +89,7 @@ func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd st
 			EncryptKey:        feishuEncryptKey,
 			Debug:             pc.Debug,
 			YOLO:              pc.YOLO,
+			BlockedUpdates:    pc.Client.IMFilter.Block,
 		})); err != nil {
 			return nil, err
 		}

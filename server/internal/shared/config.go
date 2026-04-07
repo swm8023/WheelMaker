@@ -45,11 +45,12 @@ type ClientConf struct {
 	IMFilter IMFilterConf `json:"imFilter,omitempty"`
 }
 
-// IMFilterConf controls which client updates are blocked from IM delivery.
+// IMFilterConf controls which IM-visible events the IM adapter suppresses.
 type IMFilterConf struct {
-	// Block contains update types to suppress from IM output.
-	// Supported values include: thought, tool/tool_call, text, system, plan,
-	// config_option_update, available_commands_update, done, error.
+	// Block contains IM-level event types to suppress.
+	// Supported values depend on the channel implementation and commonly include:
+	// thought, tool/tool_call, text, system, plan, config_option_update,
+	// available_commands_update, done/prompt_result.
 	Block []string `json:"block,omitempty"`
 }
 

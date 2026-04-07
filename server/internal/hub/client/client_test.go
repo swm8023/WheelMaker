@@ -501,63 +501,6 @@ func TestHandleMessage_Prompt_ConfigOptionUpdate_NotifiesIM(t *testing.T) {
 	}
 }
 
-func TestHandleMessage_Prompt_BlockThoughtUpdate(t *testing.T) {
-	mock := &mockSession{
-		agentN: "codex",
-		promptResult: func(_ string) (<-chan acp.Update, error) {
-			ch := make(chan acp.Update, 4)
-			ch <- acp.Update{Type: acp.UpdateThought, Content: "hidden-thought"}
-			ch <- acp.Update{Type: acp.UpdateText, Content: "visible-reply"}
-			ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
-			close(ch)
-			return ch, nil
-		},
-	}
-	c := newTestClient(mock)
-	c.SetIMUpdateBlockList([]string{"thought"})
-	router := captureRouter(c)
-
-	c.HandleMessage(client.Message{ChatID: "chat1", Text: "test-thought-filter"})
-
-	joined := strings.Join(router.Messages, "\n")
-	if strings.Contains(joined, "hidden-thought") {
-		t.Fatalf("thought update should be blocked, messages=%v", router.Messages)
-	}
-	if !strings.Contains(joined, "visible-reply") {
-		t.Fatalf("text reply should still be delivered, messages=%v", router.Messages)
-	}
-}
-
-func TestHandleMessage_Prompt_BlockToolCallUpdate(t *testing.T) {
-	mock := &mockSession{
-		agentN: "codex",
-		promptResult: func(_ string) (<-chan acp.Update, error) {
-			ch := make(chan acp.Update, 4)
-			ch <- acp.Update{
-				Type: acp.UpdateToolCall,
-				Raw:  []byte(`{"sessionUpdate":"tool_call_update","toolCallId":"call_1","title":"Run test","status":"in_progress","rawOutput":"ok"}`),
-			}
-			ch <- acp.Update{Type: acp.UpdateText, Content: "visible-after-tool"}
-			ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
-			close(ch)
-			return ch, nil
-		},
-	}
-	c := newTestClient(mock)
-	c.SetIMUpdateBlockList([]string{"tool"})
-	router := captureRouter(c)
-
-	c.HandleMessage(client.Message{ChatID: "chat1", Text: "test-tool-filter"})
-
-	if router.CardCount != 0 {
-		t.Fatalf("tool_call updates should be blocked from IM cards, cardN=%d", router.CardCount)
-	}
-	joined := strings.Join(router.Messages, "\n")
-	if !strings.Contains(joined, "visible-after-tool") {
-		t.Fatalf("text reply should still be delivered, messages=%v", router.Messages)
-	}
-}
-
 // TestHandleMessage_Prompt_AllowsSubsequentSwitch verifies that after a prompt
 // completes, a subsequent /use can proceed immediately (promptMu is released).
 func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {

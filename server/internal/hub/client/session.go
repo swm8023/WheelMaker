@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -65,14 +67,13 @@ type Session struct {
 	permRouter *permissionRouter
 
 	// Back-references to Client-owned resources needed by Session methods.
-	cwd              string
-	yolo             bool
-	registry         *agent.ACPFactory
-	persistence      ClientStateStore
-	state            *ProjectState
-	imRouter         IMRouter
-	imSource         *im.ChatRef
-	imBlockedUpdates map[string]struct{}
+	cwd         string
+	yolo        bool
+	registry    *agent.ACPFactory
+	persistence ClientStateStore
+	state       *ProjectState
+	imRouter    IMRouter
+	imSource    *im.ChatRef
 
 	createdAt    time.Time
 	lastActiveAt time.Time
@@ -83,6 +84,9 @@ type Session struct {
 
 // newSession creates a Session with sensible defaults.
 func newSession(id string, cwd string) *Session {
+	if strings.TrimSpace(id) == "" {
+		id = newSessionID()
+	}
 	s := &Session{
 		ID:        id,
 		Status:    SessionActive,
@@ -92,10 +96,27 @@ func newSession(id string, cwd string) *Session {
 		prompt: promptState{
 			activeTCs: make(map[string]struct{}),
 		},
-		imBlockedUpdates: make(map[string]struct{}),
 	}
 	s.initCond = sync.NewCond(&s.mu)
 	return s
+}
+
+func newSessionID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("sess-fallback-%d", time.Now().UnixNano())
+	}
+	buf[6] = (buf[6] & 0x0f) | 0x40
+	buf[8] = (buf[8] & 0x3f) | 0x80
+
+	hexBuf := hex.EncodeToString(buf)
+	return fmt.Sprintf("sess-%s-%s-%s-%s-%s",
+		hexBuf[0:8],
+		hexBuf[8:12],
+		hexBuf[12:16],
+		hexBuf[16:20],
+		hexBuf[20:32],
+	)
 }
 
 // reply sends a text response to the active chat via the IM channel.
@@ -861,27 +882,6 @@ func RestoreFromSnapshot(snap *SessionSnapshot, cwd string) *Session {
 	return s
 }
 
-// SessionUpdate routes session/update notifications to the active session.
-func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
-	c.mu.Lock()
-	sess := c.activeSession
-	c.mu.Unlock()
-	if sess != nil {
-		sess.SessionUpdate(params)
-	}
-}
-
-// SessionRequestPermission handles agent permission requests via active session state.
-func (c *Client) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
-	c.mu.Lock()
-	sess := c.activeSession
-	c.mu.Unlock()
-	if sess != nil {
-		return sess.SessionRequestPermission(ctx, requestID, params)
-	}
-	return acp.PermissionResult{Outcome: "cancelled"}, nil
-}
-
 // SessionUpdate receives session/update notifications from the agent.
 func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	s.mu.Lock()
@@ -956,4 +956,3 @@ func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64,
 	}
 	return s.permRouter.decide(ctx, requestID, params, snap.Mode)
 }
-

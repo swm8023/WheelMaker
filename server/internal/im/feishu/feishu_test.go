@@ -120,6 +120,48 @@ func TestPublishSessionUpdate_RendersByUpdateType(t *testing.T) {
 	}
 }
 
+func TestPublishSessionUpdate_BlockThoughtAtChannelLevel(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransportConfig(ft, Config{BlockedUpdates: []string{"thought"}})
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+
+	err := ch.PublishSessionUpdate(context.Background(), target, acp.SessionUpdateParams{
+		SessionID: "s1",
+		Update: acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateAgentThoughtChunk,
+			Content:       []byte(`{"type":"text","text":"hidden-thought"}`),
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishSessionUpdate(thought): %v", err)
+	}
+	if len(ft.sends) != 0 {
+		t.Fatalf("thought update should be filtered by feishu channel, sends=%+v", ft.sends)
+	}
+}
+
+func TestPublishSessionUpdate_BlockToolCardsAtChannelLevel(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransportConfig(ft, Config{BlockedUpdates: []string{"tool"}})
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+
+	err := ch.PublishSessionUpdate(context.Background(), target, acp.SessionUpdateParams{
+		SessionID: "s1",
+		Update: acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateToolCallUpdate,
+			ToolCallID:    "tc-1",
+			Title:         "Read file",
+			Status:        acp.ToolCallStatusCompleted,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishSessionUpdate(tool): %v", err)
+	}
+	if len(ft.cards) != 0 {
+		t.Fatalf("tool update should be filtered by feishu channel, cards=%+v", ft.cards)
+	}
+}
+
 func TestPublishPromptResult_EndTurnMarksDone(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)

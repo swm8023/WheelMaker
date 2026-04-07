@@ -25,7 +25,7 @@ import (
 
 // InjectForwarder injects a ready test instance with prompt/cancel callbacks.
 func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.Update, error), cancelFn func() error) {
-	sess := c.activeSession
+	sess := c.sessions["default"]
 	c.mu.Lock()
 	name := strings.TrimSpace(agentName)
 	if name == "" {
@@ -54,6 +54,12 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	sess.mu.Unlock()
 }
 
+func defaultTestSession(c *Client) *Session {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessions["default"]
+}
+
 type testInjectedInstance struct {
 	name      string
 	sessionID string
@@ -79,11 +85,11 @@ type TestCaptureRouter struct {
 }
 
 type fakeIMRouter struct {
-	binds          []fakeIMBind
-	updates        []fakeIMUpdate
-	promptResults  []fakeIMPromptResult
-	permissions    []fakeIMPermissionRequest
-	systems        []fakeIMSystem
+	binds         []fakeIMBind
+	updates       []fakeIMUpdate
+	promptResults []fakeIMPromptResult
+	permissions   []fakeIMPermissionRequest
+	systems       []fakeIMSystem
 }
 
 type fakeIMBind struct {
@@ -351,10 +357,16 @@ func (i *testInjectedInstance) emitUpdate(sessionID string, u acp.Update) {
 func (c *Client) InjectState(st *ProjectState) {
 	c.mu.Lock()
 	c.state = st
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, sess := range c.sessions {
+		sessions = append(sessions, sess)
+	}
 	c.mu.Unlock()
-	c.activeSession.mu.Lock()
-	c.activeSession.state = st
-	c.activeSession.mu.Unlock()
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		sess.state = st
+		sess.mu.Unlock()
+	}
 }
 
 // HandleMessage preserves the old test entrypoint shape while routing through IM.
@@ -581,9 +593,10 @@ func TestChooseAutoAllowOptionFallbackFirst(t *testing.T) {
 func TestResolveHelpModel_ExcludesDebugStatusAction(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.InjectAgentFactory(acp.ACPProviderCodex, nopCreator)
-	c.activeSession.ready = true
+	sess := defaultTestSession(c)
+	sess.ready = true
 
-	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
+	model, err := sess.resolveHelpModel(context.Background(), "chat-1")
 	if err != nil {
 		t.Fatalf("resolveHelpModel error: %v", err)
 	}
@@ -603,8 +616,9 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	c.InjectAgentFactory(acp.ACPProviderCodex, nopCreator)
 	c.InjectAgentFactory(acp.ACPProviderClaude, nopCreator)
-	c.activeSession.ready = true
-	c.activeSession.sessionMeta.ConfigOptions = []acp.ConfigOption{
+	sess := defaultTestSession(c)
+	sess.ready = true
+	sess.sessionMeta.ConfigOptions = []acp.ConfigOption{
 		{
 			ID:           "mode",
 			CurrentValue: "plan",
@@ -623,7 +637,7 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 		},
 	}
 
-	model, err := c.activeSession.resolveHelpModel(context.Background(), "chat-1")
+	model, err := sess.resolveHelpModel(context.Background(), "chat-1")
 	if err != nil {
 		t.Fatalf("resolveHelpModel error: %v", err)
 	}
@@ -672,24 +686,6 @@ func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
 
 	if _, _, err := resolveConfigArg("theme blue", st); err == nil {
 		t.Fatalf("expected unknown config value error")
-	}
-}
-
-func TestCanonicalIMBlockType(t *testing.T) {
-	cases := map[string]string{
-		"tool":                "tool_call",
-		"tool_call":           "tool_call",
-		"tool_call_update":    "tool_call",
-		"tool_call_cancelled": "tool_call",
-		"system":              "error",
-		"thought":             "thought",
-		"  TEXT  ":            "text",
-		"":                    "",
-	}
-	for in, want := range cases {
-		if got := canonicalIMBlockType(in); got != want {
-			t.Fatalf("canonicalIMBlockType(%q)=%q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -791,14 +787,10 @@ func TestHandleIMInbound_ReusesBoundRouteWithoutSessionID(t *testing.T) {
 	}
 
 	c.mu.Lock()
-	activeID := c.activeSession.ID
 	routedID := c.routeMap[routeKey]
 	sessionCount := len(c.sessions)
 	c.mu.Unlock()
 
-	if activeID != existing.ID {
-		t.Fatalf("active session = %q, want %q", activeID, existing.ID)
-	}
 	if routedID != existing.ID {
 		t.Fatalf("routeMap[%q] = %q, want %q", routeKey, routedID, existing.ID)
 	}
@@ -811,7 +803,7 @@ func TestSessionRequestPermission_UsesIMDecision(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 	fake := &fakeIMRouter{}
 	c.SetIMRouter(fake)
-	sess := c.activeSession
+	sess := defaultTestSession(c)
 	sess.setIMSource(im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
 
 	done := make(chan struct {
@@ -865,7 +857,7 @@ func TestSessionRequestPermission_UsesIMDecision(t *testing.T) {
 func TestClientNewSession_CreatesAndBindsRoute(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 
-	oldSess := c.activeSession
+	oldSess := defaultTestSession(c)
 	if oldSess == nil {
 		t.Fatal("expected default session")
 	}
@@ -876,9 +868,6 @@ func TestClientNewSession_CreatesAndBindsRoute(t *testing.T) {
 	}
 	if newSess.ID == oldSess.ID {
 		t.Fatal("new session should have different ID from old")
-	}
-	if c.activeSession != newSess {
-		t.Fatal("activeSession should be the new session")
 	}
 
 	c.mu.Lock()
@@ -905,7 +894,7 @@ func TestClientNewSession_SuspendsOldSession(t *testing.T) {
 	c.routeMap["route-1"] = "default"
 	c.mu.Unlock()
 
-	oldSess := c.activeSession
+	oldSess := defaultTestSession(c)
 
 	_ = c.ClientNewSession("route-1")
 
@@ -1092,6 +1081,23 @@ func TestClientLoadSession_InMemoryRebind(t *testing.T) {
 	}
 }
 
+func TestClientNewSession_GeneratesNonCounterIDs(t *testing.T) {
+	c := New(&noopStore{}, nil, "test", "/tmp")
+
+	s1 := c.ClientNewSession("route-1")
+	s2 := c.ClientNewSession("route-1")
+
+	if s1.ID == s2.ID {
+		t.Fatalf("session IDs must be unique: %q", s1.ID)
+	}
+	if s1.ID == "route-1" || s2.ID == "route-1" {
+		t.Fatalf("session IDs must not reuse route keys: %q %q", s1.ID, s2.ID)
+	}
+	if strings.HasPrefix(s1.ID, "session-") || strings.HasPrefix(s2.ID, "session-") {
+		t.Fatalf("session IDs should not use counter prefix: %q %q", s1.ID, s2.ID)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Timer-driven eviction
 // ---------------------------------------------------------------------------
@@ -1238,25 +1244,6 @@ func TestResolveSession_RestoresEvictedSession(t *testing.T) {
 	c.mu.Unlock()
 	if !exists {
 		t.Fatal("restored session should be in sessions map")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Session ID generation
-// ---------------------------------------------------------------------------
-
-func TestNextSessionID_Unique(t *testing.T) {
-	c := New(&noopStore{}, nil, "test", "/tmp")
-
-	ids := make(map[string]bool)
-	for i := 0; i < 10; i++ {
-		c.mu.Lock()
-		id := c.nextSessionID()
-		c.mu.Unlock()
-		if ids[id] {
-			t.Fatalf("duplicate session ID: %s", id)
-		}
-		ids[id] = true
 	}
 }
 
