@@ -217,7 +217,7 @@ func (s *Session) handleConfigCommand(
 	defer s.promptMu.Unlock()
 
 	if err := s.ensureInstance(ctx); err != nil {
-		s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+		s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 		return
 	}
 

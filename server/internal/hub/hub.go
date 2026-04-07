@@ -76,7 +76,7 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 
 func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
 	store := client.NewProjectJSONStore(h.statePath, pc.Name)
-	c := client.New(store, nil, pc.Name, cwd)
+	c := client.New(store, pc.Client.Agent, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
 
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())

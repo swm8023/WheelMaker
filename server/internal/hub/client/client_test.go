@@ -898,6 +898,49 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 	}
 }
 
+func TestStart_ConfiguredAgentOverridesPersistedState(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+	}}
+	c := client.New(store, "copilot", "test", "/tmp")
+	registerMockAgent(c, acp.ACPProviderCopilot)
+
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start() returned error %v, want nil", err)
+	}
+
+	msgs := captureReplies(c)
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
+
+	joined := strings.Join(*msgs, "\n")
+	if strings.Contains(joined, "No active session") {
+		t.Fatalf("configured agent should override stale state; messages=%v", *msgs)
+	}
+	if !strings.Contains(joined, "client-mock-reply") {
+		t.Fatalf("expected configured agent reply, messages=%v", *msgs)
+	}
+}
+
+func TestStart_ConnectError_SuggestsConcreteAgentCommand(t *testing.T) {
+	store := &mockStore{state: &client.ProjectState{
+		ActiveAgent: "codex",
+	}}
+	c := client.New(store, nil, "test", "/tmp")
+	registerFailingAgent(c, acp.ACPProviderCodex)
+
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start() returned error %v, want nil", err)
+	}
+
+	msgs := captureReplies(c)
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
+
+	joined := strings.Join(*msgs, "\n")
+	if !strings.Contains(joined, "`/use codex`") {
+		t.Fatalf("expected concrete connect hint, messages=%v", *msgs)
+	}
+}
+
 // --- Minimal ACP mock server for client tests ---
 
 // TestHandleMessage_Use_Continue_BootstrapsContext verifies that /use <name> --continue

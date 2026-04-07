@@ -36,9 +36,10 @@ type promptState struct {
 // Agent initialization is lazy: the first incoming message triggers ensureInstance(),
 // which connects the active agent and creates the ACP forwarder.
 type Client struct {
-	projectName string
-	cwd         string
-	yolo        bool
+	projectName     string
+	cwd             string
+	yolo            bool
+	configuredAgent string
 
 	registry *agent.ACPFactory
 
@@ -63,16 +64,17 @@ type Client struct {
 
 // New creates a Client for the given project.
 // The second argument is kept only to avoid broad call-site churn while IM1 is removed.
-func New(store Store, _ any, projectName string, cwd string) *Client {
+func New(store Store, preferredAgent any, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName:    projectName,
-		cwd:            cwd,
-		registry:       agent.DefaultACPFactory(),
-		stateStore:     NewClientStateStore(store, nil),
-		sessions:       make(map[string]*Session),
-		routeMap:       make(map[string]string),
-		suspendTimeout: 5 * time.Minute,
-		stopPersistCh:  make(chan struct{}),
+		projectName:     projectName,
+		cwd:             cwd,
+		configuredAgent: normalizePreferredAgent(preferredAgent),
+		registry:        agent.DefaultACPFactory(),
+		stateStore:      NewClientStateStore(store, nil),
+		sessions:        make(map[string]*Session),
+		routeMap:        make(map[string]string),
+		suspendTimeout:  5 * time.Minute,
+		stopPersistCh:   make(chan struct{}),
 	}
 	sess := newSession("default", cwd)
 	sess.persistence = c.stateStore
@@ -113,11 +115,11 @@ func (c *Client) Start(ctx context.Context) error {
 		return fmt.Errorf("client: load state: %w", err)
 	}
 	c.mu.Lock()
-	c.state = state
+	c.state = c.normalizeLoadedState(state)
 	// Wire state into all sessions.
 	for _, sess := range c.sessions {
 		sess.mu.Lock()
-		sess.state = state
+		sess.state = c.state
 		sess.mu.Unlock()
 	}
 	c.mu.Unlock()
@@ -128,6 +130,40 @@ func (c *Client) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func normalizePreferredAgent(value any) string {
+	var name string
+	switch v := value.(type) {
+	case string:
+		name = v
+	case acp.ACPProvider:
+		name = string(v)
+	default:
+		return ""
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return ""
+	}
+	if provider, ok := acp.ParseACPProvider(name); ok {
+		return string(provider)
+	}
+	return name
+}
+
+func (c *Client) normalizeLoadedState(state *ProjectState) *ProjectState {
+	if state == nil {
+		state = defaultProjectState()
+	}
+	ensureStateMaps(state)
+
+	if configured := strings.TrimSpace(c.configuredAgent); configured != "" {
+		state.ActiveAgent = configured
+	} else if strings.TrimSpace(state.ActiveAgent) == "" {
+		state.ActiveAgent = defaultAgentName
+	}
+	return state
 }
 
 // Run blocks until ctx is cancelled, delegating to the IM router's Run loop.
@@ -533,12 +569,12 @@ func (s *Session) handlePrompt(text string) {
 	for attempt := 1; attempt <= 2; attempt++ {
 		// Lazily initialize the agent if no forwarder exists yet.
 		if err := s.ensureInstance(ctx); err != nil {
-			s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 			return
 		}
 
 		if err := s.ensureReadyAndNotify(ctx); err != nil {
-			s.reply(fmt.Sprintf("No active session: %v. Use /use <agent> to connect.", err))
+			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 			return
 		}
 
@@ -666,6 +702,26 @@ func renderUnknown(v string) string {
 		return "unknown"
 	}
 	return v
+}
+
+func (s *Session) connectHint() string {
+	agentName := s.preferredAgentName()
+	if agentName == "" {
+		return "Run `/use claude`, `/use codex`, or `/use copilot` to connect."
+	}
+	return fmt.Sprintf("Run `%s` to connect.", "/use "+agentName)
+}
+
+func (s *Session) preferredAgentName() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
+		return strings.TrimSpace(s.instance.Name())
+	}
+	if s.state != nil && strings.TrimSpace(s.state.ActiveAgent) != "" {
+		return strings.TrimSpace(s.state.ActiveAgent)
+	}
+	return defaultAgentName
 }
 
 func isAgentExitError(err error) bool {
