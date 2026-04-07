@@ -162,19 +162,8 @@ func (f *transportChannel) sendText(chatID, text string) error {
 		f.textStreams[chatID] = ts
 	}
 	ts.content.WriteString(text)
-
-	// Throttle: push at most once per streamThrottle interval.
-	now := time.Now()
-	if ts.lastPush.IsZero() || now.Sub(ts.lastPush) >= streamThrottle {
-		if ts.timer != nil {
-			ts.timer.Stop()
-			ts.timer = nil
-		}
-		return f.pushTextCard(chatID, ts)
-	}
 	if ts.timer == nil {
-		remaining := streamThrottle - now.Sub(ts.lastPush)
-		ts.timer = time.AfterFunc(remaining, func() {
+		ts.timer = time.AfterFunc(streamThrottle, func() {
 			f.textMu.Lock()
 			defer f.textMu.Unlock()
 			ts.timer = nil
@@ -221,18 +210,8 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 		f.thoughtStreams[chatID] = ts
 	}
 	ts.content.WriteString(text)
-
-	now := time.Now()
-	if ts.lastPush.IsZero() || now.Sub(ts.lastPush) >= streamThrottle {
-		if ts.timer != nil {
-			ts.timer.Stop()
-			ts.timer = nil
-		}
-		return f.pushThoughtCard(chatID, ts)
-	}
 	if ts.timer == nil {
-		remaining := streamThrottle - now.Sub(ts.lastPush)
-		ts.timer = time.AfterFunc(remaining, func() {
+		ts.timer = time.AfterFunc(streamThrottle, func() {
 			f.textMu.Lock()
 			defer f.textMu.Unlock()
 			ts.timer = nil
@@ -446,7 +425,7 @@ func (f *transportChannel) finalizeStream(chatID, streamType string) {
 }
 
 // SendCard dispatches a card payload to the appropriate renderer.
-func (f *transportChannel) SendCard(chatID, messageID string, card Card) error {
+func (f *transportChannel) SendCard(chatID, messageID string, card Card) (string, error) {
 	switch c := card.(type) {
 	case RawCard:
 		return f.sendRawCard(chatID, messageID, c)
@@ -455,19 +434,19 @@ func (f *transportChannel) SendCard(chatID, messageID string, card Card) error {
 	case ToolCallCard:
 		return f.sendToolCall(chatID, c)
 	default:
-		return fmt.Errorf("feishu: unsupported card type %T", card)
+		return "", fmt.Errorf("feishu: unsupported card type %T", card)
 	}
 }
 
 // sendRawCard posts a new card or updates an existing one in place.
-func (f *transportChannel) sendRawCard(chatID, messageID string, card RawCard) error {
+func (f *transportChannel) sendRawCard(chatID, messageID string, card RawCard) (string, error) {
 	bot, err := f.ensureBot()
 	if err != nil {
-		return err
+		return "", err
 	}
 	raw, err := json.Marshal(card)
 	if err != nil {
-		return fmt.Errorf("feishu: marshal card: %w", err)
+		return "", fmt.Errorf("feishu: marshal card: %w", err)
 	}
 	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
 	if messageID = strings.TrimSpace(messageID); messageID != "" {
@@ -476,20 +455,21 @@ func (f *transportChannel) sendRawCard(chatID, messageID string, card RawCard) e
 			f.setLastOutbound(chatID, messageID)
 			f.clearReceiveAck(chatID)
 		}
-		return err
+		return messageID, err
 	}
 	resp, err := bot.PostMessage(buf.BindChatID(chatID).Build())
 	if err == nil {
 		if resp != nil {
-			f.setLastOutbound(chatID, strings.TrimSpace(resp.Data.MessageID))
+			messageID = strings.TrimSpace(resp.Data.MessageID)
+			f.setLastOutbound(chatID, messageID)
 		}
 		f.clearReceiveAck(chatID)
 	}
-	return err
+	return messageID, err
 }
 
 // sendOptions renders decision options as interactive buttons.
-func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
+func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) (string, error) {
 	title, body, options, meta := oc.Title, oc.Body, oc.Options, oc.Meta
 	toolCallID := strings.TrimSpace(meta["tool_call_id"])
 	requestID := strings.TrimSpace(meta["request_id"])
@@ -502,7 +482,7 @@ func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 			f.toolMu.Unlock()
 			f.clearReceiveAck(chatID)
 		}
-		return err
+		return "", err
 	}
 
 	elements := make([]map[string]any, 0, 2)
@@ -828,19 +808,19 @@ func startsMarkdownSection(line string) bool {
 }
 
 // SendToolCall renders one streaming card per toolCallId and updates it in place.
-func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) error {
+func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) (string, error) {
 	update := tc.Update
 	chatID = strings.TrimSpace(chatID)
 	toolCallID := strings.TrimSpace(update.ToolCallID)
 	if chatID == "" || toolCallID == "" {
-		return nil
+		return "", nil
 	}
 	if f.cfg.YOLO {
 		err := f.sendToolCallCompact(chatID, update)
 		if err == nil {
 			f.clearReceiveAck(chatID)
 		}
-		return err
+		return "", err
 	}
 
 	// Tool updates interrupt the current assistant text stream card.
@@ -898,7 +878,7 @@ func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) error {
 	if err == nil {
 		f.clearReceiveAck(chatID)
 	}
-	return err
+	return "", err
 }
 
 func (f *transportChannel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _ bool) error {

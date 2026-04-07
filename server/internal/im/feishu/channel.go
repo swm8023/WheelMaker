@@ -16,7 +16,7 @@ type transport interface {
 	OnMessage(MessageHandler)
 	OnCardAction(func(CardActionEvent))
 	Send(chatID, text string, kind TextKind) error
-	SendCard(chatID, messageID string, card Card) error
+	SendCard(chatID, messageID string, card Card) (string, error)
 	SendReaction(messageID, emoji string) error
 	MarkDone(chatID string) error
 	Run(ctx context.Context) error
@@ -41,6 +41,7 @@ type Channel struct {
 	onPermissionResult func(context.Context, im.ChatRef, int64, acp.PermissionResponse) error
 	pendingByRequestID map[int64]PendingPermission
 	pendingByChat      map[string]PendingPermission
+	helpCards          map[string]string
 	closed             map[int64]time.Time
 }
 
@@ -58,6 +59,7 @@ func newWithTransportConfig(inner transport, cfg Config) *Channel {
 		blockedUpdates:     buildBlockedUpdates(cfg.BlockedUpdates),
 		pendingByRequestID: map[int64]PendingPermission{},
 		pendingByChat:      map[string]PendingPermission{},
+		helpCards:          map[string]string{},
 		closed:             map[int64]time.Time{},
 	}
 	inner.OnMessage(c.handleMessage)
@@ -148,7 +150,16 @@ func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payloa
 	}
 	if payload.Kind == "help_card" && payload.HelpCard != nil {
 		card := buildHelpCard(chatID, payload.HelpCard.Model, payload.HelpCard.MenuID, payload.HelpCard.Page)
-		return c.inner.SendCard(chatID, "", card)
+		messageID := c.helpCardMessageID(chatID)
+		sentID, err := c.inner.SendCard(chatID, messageID, card)
+		if err != nil && messageID != "" {
+			sentID, err = c.inner.SendCard(chatID, "", card)
+		}
+		if err != nil {
+			return err
+		}
+		c.rememberHelpCard(chatID, sentID)
+		return nil
 	}
 	text := renderSystemText(payload)
 	if text == "" {
@@ -180,15 +191,18 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 		return c.inner.Send(chatID, text, TextThought)
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 		if upd, ok := parseToolCallUpdate(params.Update); ok {
-			return c.inner.SendCard(chatID, "", ToolCallCard{Update: upd})
+			_, err := c.inner.SendCard(chatID, "", ToolCallCard{Update: upd})
+			return err
 		}
 	case acp.SessionUpdatePlan:
 		if card := buildPlanCard(params.Update); card != nil {
-			return c.inner.SendCard(chatID, "", card)
+			_, err := c.inner.SendCard(chatID, "", card)
+			return err
 		}
 	case acp.SessionUpdateConfigOptionUpdate:
 		if card := buildConfigCard(params.Update); card != nil {
-			return c.inner.SendCard(chatID, "", card)
+			_, err := c.inner.SendCard(chatID, "", card)
+			return err
 		}
 	case acp.SessionUpdateAvailableCommandsUpdate:
 		// Silenced: command list updates are noisy and rarely useful to the user.
@@ -214,7 +228,8 @@ func (c *Channel) renderPromptResult(chatID string, result acp.SessionPromptResu
 }
 
 func (c *Channel) renderPermissionRequest(chatID string, requestID int64, params acp.PermissionRequestParams) error {
-	return c.inner.SendCard(chatID, "", buildPermissionCard(chatID, requestID, params))
+	_, err := c.inner.SendCard(chatID, "", buildPermissionCard(chatID, requestID, params))
+	return err
 }
 
 func (c *Channel) handleMessage(m Message) {
@@ -306,6 +321,7 @@ func (c *Channel) handleHelpMenuAction(evt CardActionEvent) {
 	if chatID == "" {
 		return
 	}
+	c.rememberHelpCard(chatID, evt.MessageID)
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
 	args := menuID
 	c.mu.Lock()
@@ -326,6 +342,7 @@ func (c *Channel) handleHelpPageAction(evt CardActionEvent) {
 	if chatID == "" {
 		return
 	}
+	c.rememberHelpCard(chatID, evt.MessageID)
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
 	args := menuID + " " + pageStr
 	c.mu.Lock()
@@ -346,6 +363,7 @@ func (c *Channel) handleHelpOptionAction(evt CardActionEvent) {
 	if cmd == "" || chatID == "" {
 		return
 	}
+	c.rememberHelpCard(chatID, evt.MessageID)
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
 	text := cmd
 	if val != "" {
@@ -425,6 +443,27 @@ func (c *Channel) takePending(chatID string, requestID int64) (PendingPermission
 
 func (c *Channel) markClosedLocked(requestID int64) {
 	c.closed[requestID] = time.Now()
+}
+
+func (c *Channel) helpCardMessageID(chatID string) string {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSpace(c.helpCards[chatID])
+}
+
+func (c *Channel) rememberHelpCard(chatID, messageID string) {
+	chatID = strings.TrimSpace(chatID)
+	messageID = strings.TrimSpace(messageID)
+	if chatID == "" || messageID == "" {
+		return
+	}
+	c.mu.Lock()
+	c.helpCards[chatID] = messageID
+	c.mu.Unlock()
 }
 
 func resolveChatID(target im.SendTarget) string {

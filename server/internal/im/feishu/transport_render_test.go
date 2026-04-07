@@ -53,6 +53,29 @@ func TestBuildTextStreamCard_NoHeader(t *testing.T) {
 	}
 }
 
+func TestSendText_FirstChunkWaitsBeforePosting(t *testing.T) {
+	f := newTransport(Config{})
+
+	if err := f.sendText("chat-1", "hello"); err != nil {
+		t.Fatalf("sendText() first chunk should be buffered, got error: %v", err)
+	}
+
+	ts := f.textStreams["chat-1"]
+	if ts == nil {
+		t.Fatal("text stream should be created")
+	}
+	if got := ts.content.String(); got != "hello" {
+		t.Fatalf("buffered content=%q, want %q", got, "hello")
+	}
+	if ts.pushedLen != 0 {
+		t.Fatalf("pushedLen=%d, want 0 before first flush", ts.pushedLen)
+	}
+	if ts.timer == nil {
+		t.Fatal("first chunk should arm a delayed flush timer")
+	}
+	ts.timer.Stop()
+}
+
 func TestBuildThoughtStreamCard_HasHeader(t *testing.T) {
 	card := buildThoughtStreamCard("thinking", false)
 	header, ok := card["header"].(map[string]any)

@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -24,6 +25,7 @@ type fakeTransport struct {
 	sends    []fakeSend
 	cards    []fakeCard
 	done     []string
+	nextCard int
 }
 
 type fakeSend struct {
@@ -33,8 +35,9 @@ type fakeSend struct {
 }
 
 type fakeCard struct {
-	chatID string
-	card   Card
+	chatID    string
+	messageID string
+	card      Card
 }
 
 func (f *fakeTransport) OnMessage(h MessageHandler) {
@@ -50,9 +53,13 @@ func (f *fakeTransport) Send(chatID, text string, kind TextKind) error {
 	return nil
 }
 
-func (f *fakeTransport) SendCard(chatID, _ string, card Card) error {
-	f.cards = append(f.cards, fakeCard{chatID: chatID, card: card})
-	return nil
+func (f *fakeTransport) SendCard(chatID, messageID string, card Card) (string, error) {
+	if messageID == "" {
+		f.nextCard++
+		messageID = fmt.Sprintf("card-%d", f.nextCard)
+	}
+	f.cards = append(f.cards, fakeCard{chatID: chatID, messageID: messageID, card: card})
+	return messageID, nil
 }
 
 func (f *fakeTransport) SendReaction(_, _ string) error { return nil }
@@ -302,5 +309,37 @@ func TestPermissionTextReply_ResolvesWithPendingRequest(t *testing.T) {
 	}
 	if gotResult.Outcome.Outcome != "selected" || gotResult.Outcome.OptionID != "allow" {
 		t.Fatalf("result=%+v", gotResult)
+	}
+}
+
+func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+	payload := im.SystemPayload{
+		Kind: "help_card",
+		HelpCard: &im.HelpCardPayload{
+			Model: im.HelpModel{
+				Title: "Help",
+				Body:  "body",
+			},
+		},
+	}
+
+	if err := ch.SystemNotify(context.Background(), target, payload); err != nil {
+		t.Fatalf("SystemNotify(first): %v", err)
+	}
+	if err := ch.SystemNotify(context.Background(), target, payload); err != nil {
+		t.Fatalf("SystemNotify(second): %v", err)
+	}
+
+	if len(ft.cards) != 2 {
+		t.Fatalf("cards=%+v, want 2 help sends", ft.cards)
+	}
+	if ft.cards[0].messageID == "" {
+		t.Fatal("first help card should produce a message id")
+	}
+	if ft.cards[1].messageID != ft.cards[0].messageID {
+		t.Fatalf("second help update should reuse messageID %q, got %q", ft.cards[0].messageID, ft.cards[1].messageID)
 	}
 }
