@@ -11,7 +11,6 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
-	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -45,7 +44,6 @@ type Client struct {
 	stateStore ClientStateStore
 	state      *ProjectState
 	imBridge   *im.ImAdapter // nil when no IM channel configured
-	im2Router  IM2Router
 
 	mu sync.Mutex
 
@@ -92,7 +90,6 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = imProvider
-	sess.im2Router = c.im2Router
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.permRouter = newPermissionRouter(sess)
 	c.activeSession = sess
@@ -145,35 +142,6 @@ func (c *Client) SetIMUpdateBlockList(types []string) {
 // Must be called before Start(). A nil store means in-memory only.
 func (c *Client) SetSessionStore(ss SessionStore) {
 	c.stateStore.SetSessionStore(ss)
-}
-
-// SetIM2Router installs IM2 router bridge for this client.
-func (c *Client) SetIM2Router(r IM2Router) {
-	c.mu.Lock()
-	c.im2Router = r
-	for _, sess := range c.sessions {
-		if sess == nil {
-			continue
-		}
-		sess.mu.Lock()
-		sess.im2Router = r
-		sess.mu.Unlock()
-	}
-	c.mu.Unlock()
-}
-
-// HasIM2Router reports whether this client has an IM2 router bridge.
-func (c *Client) HasIM2Router() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.im2Router != nil
-}
-
-// ClientNewSessionID allocates a new client session id for IM2 router binding.
-func (c *Client) ClientNewSessionID() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.nextSessionID()
 }
 
 // Start loads persisted state and registers the IM message callback.
@@ -285,37 +253,6 @@ func (c *Client) HandleMessage(msg im.Message) {
 	sess.handlePrompt(msg, text)
 }
 
-// HandleIM2Inbound accepts normalized IM2 inbound events and routes them to session handlers.
-func (c *Client) HandleIM2Inbound(_ context.Context, event im2.InboundEvent) error {
-	routeKey := strings.TrimSpace(event.RouteKey)
-	if routeKey == "" {
-		if built, err := im2.BuildRouteKey(event.IMType, event.ChatID); err == nil {
-			routeKey = built
-		}
-	}
-	if routeKey == "" {
-		return fmt.Errorf("client: empty routeKey in im2 inbound")
-	}
-	clientSessionID := strings.TrimSpace(event.ClientSessionID)
-	if clientSessionID != "" {
-		c.mu.Lock()
-		c.routeMap[routeKey] = clientSessionID
-		if sess := c.sessions[clientSessionID]; sess != nil {
-			sess.mu.Lock()
-			sess.boundRouteKey = routeKey
-			sess.mu.Unlock()
-		}
-		c.mu.Unlock()
-	}
-	c.HandleMessage(im.Message{
-		ChatID:    event.ChatID,
-		MessageID: event.MessageID,
-		Text:      event.Text,
-		RouteKey:  routeKey,
-	})
-	return nil
-}
-
 // --- internal ---
 
 // resolveSession finds or creates the Session for a given message's route.
@@ -334,9 +271,6 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 	sessID := c.routeMap[routeKey]
 	if sessID != "" {
 		if sess := c.sessions[sessID]; sess != nil {
-			sess.mu.Lock()
-			sess.boundRouteKey = routeKey
-			sess.mu.Unlock()
 			c.activeSession = sess
 			c.mu.Unlock()
 			return sess
@@ -352,11 +286,9 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 				restored.persistence = c.stateStore
 				restored.registry = c.registry
 				restored.imBridge = c.imBridge
-				restored.im2Router = c.im2Router
 				restored.imBlockedUpdates = c.imBlockedUpdates
 				restored.yolo = c.yolo
 				restored.state = c.state
-				restored.boundRouteKey = routeKey
 				restored.permRouter = newPermissionRouter(restored)
 				c.sessions[restored.ID] = restored
 				c.activeSession = restored
@@ -364,34 +296,14 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 				return restored
 			}
 		}
-		// Could not restore — create a fresh session with the mapped session ID.
+		// Could not restore — fall through to create new session.
 		c.mu.Lock()
-		if sess := c.sessions[sessID]; sess != nil {
-			sess.mu.Lock()
-			sess.boundRouteKey = routeKey
-			sess.mu.Unlock()
-			c.activeSession = sess
-			c.mu.Unlock()
-			return sess
-		}
-		if strings.TrimSpace(sessID) != "" {
-			sess := c.newWiredSession(sessID)
-			sess.boundRouteKey = routeKey
-			c.sessions[sessID] = sess
-			c.routeMap[routeKey] = sessID
-			c.activeSession = sess
-			c.mu.Unlock()
-			return sess
-		}
 	}
 
 	// If only one session exists and no explicit route mapping, reuse it.
 	// This preserves backward compatibility for single-session setups.
 	if len(c.sessions) == 1 {
 		for _, sess := range c.sessions {
-			sess.mu.Lock()
-			sess.boundRouteKey = routeKey
-			sess.mu.Unlock()
 			c.routeMap[routeKey] = sess.ID
 			c.activeSession = sess
 			c.mu.Unlock()
@@ -410,16 +322,12 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 func (c *Client) createSessionLocked(routeKey string) *Session {
 	id := routeKey // use routeKey as session ID for simplicity
 	if existing := c.sessions[id]; existing != nil {
-		existing.mu.Lock()
-		existing.boundRouteKey = routeKey
-		existing.mu.Unlock()
 		c.routeMap[routeKey] = id
 		c.activeSession = existing
 		return existing
 	}
 
 	sess := c.newWiredSession(id)
-	sess.boundRouteKey = routeKey
 	c.sessions[id] = sess
 	c.routeMap[routeKey] = id
 	c.activeSession = sess
@@ -433,7 +341,6 @@ func (c *Client) newWiredSession(id string) *Session {
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = c.imBridge
-	sess.im2Router = c.im2Router
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.yolo = c.yolo
 	sess.state = c.state
@@ -475,7 +382,6 @@ func (c *Client) ClientNewSession(routeKey string) *Session {
 	c.mu.Lock()
 	newID := c.nextSessionID()
 	sess := c.newWiredSession(newID)
-	sess.boundRouteKey = routeKey
 	c.sessions[newID] = sess
 	c.routeMap[routeKey] = newID
 	c.activeSession = sess
@@ -521,7 +427,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		c.mu.Lock()
 		c.routeMap[routeKey] = target.ID
 		sess.Status = SessionActive
-		sess.boundRouteKey = routeKey
 		c.activeSession = sess
 		c.mu.Unlock()
 		return sess, nil
@@ -565,11 +470,9 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	restored.persistence = c.stateStore
 	restored.registry = c.registry
 	restored.imBridge = c.imBridge
-	restored.im2Router = c.im2Router
 	restored.imBlockedUpdates = c.imBlockedUpdates
 	restored.yolo = c.yolo
 	restored.state = c.state
-	restored.boundRouteKey = routeKey
 	restored.permRouter = newPermissionRouter(restored)
 	c.sessions[restored.ID] = restored
 	c.routeMap[routeKey] = restored.ID

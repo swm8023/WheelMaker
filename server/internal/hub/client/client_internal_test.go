@@ -15,7 +15,6 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
-	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -1293,66 +1292,5 @@ func TestSQLiteSessionStore_SaveNilSnapshot(t *testing.T) {
 
 	if err := store.Save(context.Background(), nil); err == nil {
 		t.Fatal("expected error when saving nil snapshot")
-	}
-}
-
-type fakeIM2Router struct {
-	inbound     []im2.InboundEvent
-	outbound    []im2.OutboundEvent
-	rebindCalls []struct {
-		routeKey        string
-		clientSessionID string
-	}
-	handleErr  error
-	publishErr error
-	rebindErr  error
-}
-
-func (f *fakeIM2Router) HandleInbound(_ context.Context, event im2.InboundEvent) error {
-	f.inbound = append(f.inbound, event)
-	return f.handleErr
-}
-
-func (f *fakeIM2Router) Publish(_ context.Context, event im2.OutboundEvent) error {
-	f.outbound = append(f.outbound, event)
-	return f.publishErr
-}
-
-func (f *fakeIM2Router) RebindRouteKey(_ context.Context, routeKey, clientSessionID string) error {
-	f.rebindCalls = append(f.rebindCalls, struct {
-		routeKey        string
-		clientSessionID string
-	}{routeKey: routeKey, clientSessionID: clientSessionID})
-	return f.rebindErr
-}
-
-func TestSessionReply_UsesBoundRouteKeyViaIM2(t *testing.T) {
-	c := New(&noopStore{}, nil, "proj", "/tmp")
-	fake := &fakeIM2Router{}
-	c.SetIM2Router(fake)
-
-	sess := c.resolveSession(im.Message{ChatID: "oc_1", RouteKey: "feishu:oc_1"})
-	sess.reply("world")
-
-	if len(fake.outbound) == 0 {
-		t.Fatal("expected outbound via IM2")
-	}
-	if fake.outbound[0].TargetRouteKey != "feishu:oc_1" {
-		t.Fatalf("target=%q", fake.outbound[0].TargetRouteKey)
-	}
-}
-
-func TestHandleNewCommand_RebindsCurrentRouteKeyOnly(t *testing.T) {
-	c := New(&noopStore{}, nil, "proj", "/tmp")
-	fake := &fakeIM2Router{}
-	c.SetIM2Router(fake)
-
-	c.HandleMessage(im.Message{ChatID: "a", RouteKey: "feishu:chat-a", Text: "/new"})
-
-	if len(fake.rebindCalls) != 1 {
-		t.Fatalf("rebind calls=%d, want 1", len(fake.rebindCalls))
-	}
-	if fake.rebindCalls[0].routeKey != "feishu:chat-a" {
-		t.Fatalf("routeKey=%q", fake.rebindCalls[0].routeKey)
 	}
 }

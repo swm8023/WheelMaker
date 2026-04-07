@@ -100,12 +100,6 @@ func (c *Client) handleNewCommand(sess *Session, msg im.Message) {
 		routeKey = "default"
 	}
 	newSess := c.ClientNewSession(routeKey)
-	c.mu.Lock()
-	router := c.im2Router
-	c.mu.Unlock()
-	if router != nil {
-		_ = router.RebindRouteKey(context.Background(), routeKey, newSess.ID)
-	}
 	sess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
 }
 
@@ -132,12 +126,6 @@ func (c *Client) handleLoadCommand(sess *Session, msg im.Message, args string) {
 	if err != nil {
 		sess.reply(fmt.Sprintf("Load error: %v", err))
 		return
-	}
-	c.mu.Lock()
-	router := c.im2Router
-	c.mu.Unlock()
-	if router != nil {
-		_ = router.RebindRouteKey(context.Background(), routeKey, loaded.ID)
 	}
 	// Reply from the NEW session so the message goes to the right context.
 	loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))

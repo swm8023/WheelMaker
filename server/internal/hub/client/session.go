@@ -10,7 +10,6 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
-	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -72,8 +71,6 @@ type Session struct {
 	persistence      ClientStateStore
 	state            *ProjectState
 	imBridge         *im.ImAdapter
-	im2Router        IM2Router
-	boundRouteKey    string
 	imBlockedUpdates map[string]struct{}
 
 	createdAt    time.Time
@@ -100,23 +97,8 @@ func newSession(id string, cwd string) *Session {
 	return s
 }
 
-// reply sends a text response to the active chat via IM2 routeKey or legacy IM channel.
+// reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
-	s.mu.Lock()
-	router := s.im2Router
-	routeKey := strings.TrimSpace(s.boundRouteKey)
-	s.mu.Unlock()
-
-	if router != nil && routeKey != "" {
-		_ = router.Publish(context.Background(), im2.OutboundEvent{
-			Kind:            im2.OutboundMessage,
-			ClientSessionID: s.ID,
-			TargetRouteKey:  routeKey,
-			Text:            text,
-		})
-		return
-	}
-
 	if s.imBridge != nil {
 		chatID := s.imBridge.ActiveChatID()
 		if chatID == "" {

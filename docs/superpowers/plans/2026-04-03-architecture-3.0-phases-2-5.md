@@ -274,7 +274,7 @@ func (c *Client) HandleMessage(msg im.Message) {
 
     // Set active chat for reply routing
     if c.imBridge != nil {
-        c.imBridge.SetRouteKey(routeKey)
+        c.imBridge.SetActiveChatID(msg.ChatID)
     }
 
     text := strings.TrimSpace(msg.Text)
