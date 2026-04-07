@@ -2,32 +2,6 @@ package protocol
 
 import "encoding/json"
 
-// --- ACP method names ---
-
-// Client → Agent methods.
-const (
-	MethodInitialize      = "initialize"
-	MethodSessionNew      = "session/new"
-	MethodSessionPrompt   = "session/prompt"
-	MethodSessionCancel   = "session/cancel" // notification
-	MethodSessionLoad     = "session/load"
-	MethodSessionList     = "session/list"
-	MethodSetConfigOption = "session/set_config_option"
-)
-
-// Agent → Client methods.
-const (
-	MethodRequestPermission = "session/request_permission"
-	MethodFSRead            = "fs/read_text_file"
-	MethodFSWrite           = "fs/write_text_file"
-	MethodTerminalCreate    = "terminal/create"
-	MethodTerminalOutput    = "terminal/output"
-	MethodTerminalWaitExit  = "terminal/wait_for_exit"
-	MethodTerminalKill      = "terminal/kill"
-	MethodTerminalRelease   = "terminal/release"
-	MethodSessionUpdate     = "session/update" // notification
-)
-
 // --- ACP-specific param/result types ---
 
 // InitializeParams are sent by the client during the initialize handshake.
@@ -430,10 +404,10 @@ type SessionConfigSnapshot struct {
 func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
 	snap := SessionConfigSnapshot{}
 	for _, opt := range opts {
-		if snap.Mode == "" && (opt.ID == "mode" || opt.Category == "mode") {
+		if snap.Mode == "" && (opt.ID == ConfigOptionIDMode || opt.Category == ConfigOptionCategoryMode) {
 			snap.Mode = opt.CurrentValue
 		}
-		if snap.Model == "" && (opt.ID == "model" || opt.Category == "model") {
+		if snap.Model == "" && (opt.ID == ConfigOptionIDModel || opt.Category == ConfigOptionCategoryModel) {
 			snap.Model = opt.CurrentValue
 		}
 	}

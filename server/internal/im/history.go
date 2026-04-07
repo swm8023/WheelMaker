@@ -9,6 +9,14 @@ import (
 const (
 	HistoryInbound  = "inbound"
 	HistoryOutbound = "outbound"
+
+	HistoryKindPrompt             = "prompt"
+	HistoryKindCommand            = "command"
+	HistoryKindPermissionResponse = "permission_response"
+	HistoryKindSessionUpdate      = "session_update"
+	HistoryKindPromptResult       = "prompt_result"
+	HistoryKindPermissionRequest  = "permission_request"
+	HistoryKindSystem             = "system"
 )
 
 type HistoryEvent struct {
@@ -16,7 +24,7 @@ type HistoryEvent struct {
 	Direction string
 	Source    *ChatRef
 	Targets   []ChatRef
-	Kind      OutboundKind
+	Kind      string
 	Payload   any
 	Text      string
 	CreatedAt time.Time

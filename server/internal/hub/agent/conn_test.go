@@ -43,7 +43,10 @@ func TestOwnedConn_IncomingRequestDispatchesAndReplies(t *testing.T) {
 	conn := NewOwnedConn(tr)
 	t.Cleanup(func() { _ = conn.Close() })
 
-	conn.OnACPRequest(func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+	conn.OnACPRequest(func(_ context.Context, requestID int64, method string, _ json.RawMessage) (any, error) {
+		if requestID != 42 {
+			t.Fatalf("requestID=%d, want 42", requestID)
+		}
 		if method != "session/request_permission" {
 			t.Fatalf("method=%q", method)
 		}

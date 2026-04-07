@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -618,6 +619,9 @@ func (s *Session) handlePrompt(text string) {
 
 		var buf strings.Builder
 		imRouter, imSource, hasIMEmitter := s.imContext()
+		s.mu.Lock()
+		acpSessionID := s.acpSessionID
+		s.mu.Unlock()
 
 		sawSandboxRefresh := false
 		sawText := false
@@ -657,18 +661,17 @@ func (s *Session) handlePrompt(text string) {
 				continue
 			}
 			if hasIMEmitter {
-				emitErr := imRouter.Send(ctx, im.SendTarget{
-					SessionID: s.ID,
-					Source:    &imSource,
-				}, im.OutboundEvent{
-					Kind: im.OutboundACP,
-					Payload: im.ACPPayload{
-						SessionID:  s.ID,
-						UpdateType: string(u.Type),
-						Text:       u.Content,
-						Raw:        u.Raw,
-					},
-				})
+				target := im.SendTarget{SessionID: s.ID, Source: &imSource}
+				var emitErr error
+				switch u.Type {
+				case acp.UpdateDone:
+					emitErr = imRouter.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
+				default:
+					params, ok := sessionUpdateParamsFromUpdate(acpSessionID, u)
+					if ok {
+						emitErr = imRouter.PublishSessionUpdate(ctx, target, params)
+					}
+				}
 				if emitErr != nil {
 					s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 				}
@@ -679,7 +682,7 @@ func (s *Session) handlePrompt(text string) {
 			if u.Type == acp.UpdateText && strings.TrimSpace(u.Content) != "" {
 				sawText = true
 			}
-			if u.Type == acp.UpdateConfigOption {
+			if u.Type == acp.UpdateConfigOption && !hasIMEmitter {
 				s.reply(formatConfigOptionUpdateMessage(u.Raw))
 				s.syncAndPersistProjectState()
 			}
@@ -908,6 +911,25 @@ func (s *Session) forceReconnect() {
 func hasSandboxRefreshError(u acp.Update) bool {
 	s := strings.ToLower(u.Content + " " + string(u.Raw))
 	return strings.Contains(s, "windows sandbox: spawn setup refresh")
+}
+
+func sessionUpdateParamsFromUpdate(sessionID string, u acp.Update) (acp.SessionUpdateParams, bool) {
+	update := acp.SessionUpdate{}
+	switch u.Type {
+	case acp.UpdateText:
+		content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: u.Content})
+		update = acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}
+	case acp.UpdateThought:
+		content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: u.Content})
+		update = acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentThoughtChunk, Content: content}
+	case acp.UpdateToolCall, acp.UpdateConfigOption, acp.UpdateAvailableCommands, acp.UpdateSessionInfo, acp.UpdatePlan, acp.UpdateModeChange, acp.UpdateUserChunk:
+		if len(u.Raw) == 0 || json.Unmarshal(u.Raw, &update) != nil {
+			return acp.SessionUpdateParams{}, false
+		}
+	default:
+		return acp.SessionUpdateParams{}, false
+	}
+	return acp.SessionUpdateParams{SessionID: sessionID, Update: update}, true
 }
 
 func isSandboxRefreshErr(err error) bool {

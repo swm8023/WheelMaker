@@ -17,19 +17,70 @@ const (
 	SessionUpdateCurrentModeUpdate       = "current_mode_update"
 )
 
+// --- ACP method names ---
+
+const (
+	MethodInitialize          = "initialize"
+	MethodSessionNew          = "session/new"
+	MethodSessionPrompt       = "session/prompt"
+	MethodSessionCancel       = "session/cancel"
+	MethodSessionLoad         = "session/load"
+	MethodSessionList         = "session/list"
+	MethodSetConfigOption     = "session/set_config_option"
+	MethodRequestPermission   = "session/request_permission"
+	MethodFSRead              = "fs/read_text_file"
+	MethodFSWrite             = "fs/write_text_file"
+	MethodTerminalCreate      = "terminal/create"
+	MethodTerminalOutput      = "terminal/output"
+	MethodTerminalWaitExit    = "terminal/wait_for_exit"
+	MethodTerminalKill        = "terminal/kill"
+	MethodTerminalRelease     = "terminal/release"
+	MethodSessionUpdate       = "session/update"
+)
+
 // --- ACP statuses ---
 
 const (
+	ToolCallStatusPending    = "pending"
+	ToolCallStatusInProgress = "in_progress"
 	ToolCallStatusCompleted = "completed"
 	ToolCallStatusFailed    = "failed"
+)
+
+// --- ACP tool kinds ---
+
+const (
+	ToolKindRead    = "read"
+	ToolKindWrite   = "write"
+	ToolKindExecute = "execute"
+	ToolKindOther   = "other"
 )
 
 // --- ACP payload literals ---
 
 const (
-	ContentBlockTypeText     = "text"
-	ConfigOptionIDMode       = "mode"
-	ConfigOptionCategoryMode = "mode"
+	ContentBlockTypeText         = "text"
+	ContentBlockTypeImage        = "image"
+	ContentBlockTypeAudio        = "audio"
+	ContentBlockTypeResource     = "resource"
+	ContentBlockTypeResourceLink = "resource_link"
+
+	ConfigOptionIDMode            = "mode"
+	ConfigOptionIDModel           = "model"
+	ConfigOptionIDThoughtLevel    = "thought_level"
+	ConfigOptionCategoryMode      = "mode"
+	ConfigOptionCategoryModel     = "model"
+	ConfigOptionCategoryThoughtLv = "thought_level"
+)
+
+// --- ACP stop reasons ---
+
+const (
+	StopReasonEndTurn        = "end_turn"
+	StopReasonMaxTokens      = "max_tokens"
+	StopReasonMaxTurnRequests = "max_turn_requests"
+	StopReasonRefusal        = "refusal"
+	StopReasonCancelled      = "cancelled"
 )
 
 // ACPProvider identifies a built-in ACP provider preset.

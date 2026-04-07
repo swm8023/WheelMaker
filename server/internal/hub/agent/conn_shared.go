@@ -107,12 +107,12 @@ func (p *SharedConnPool) Close() error {
 	return nil
 }
 
-func (p *SharedConnPool) dispatchInboundRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (p *SharedConnPool) dispatchInboundRequest(ctx context.Context, requestID int64, method string, params json.RawMessage) (any, error) {
 	target := p.resolveRoute(params)
 	if target == nil {
 		return nil, fmt.Errorf("agent shared conn: no route for inbound method %q", method)
 	}
-	return target.invokeInboundRequest(ctx, method, params)
+	return target.invokeInboundRequest(ctx, requestID, method, params)
 }
 
 func (p *SharedConnPool) dispatchInboundResponse(ctx context.Context, method string, params json.RawMessage) {
@@ -262,7 +262,7 @@ func (c *sharedConn) rawConn() (Conn, error) {
 	return raw, nil
 }
 
-func (c *sharedConn) invokeInboundRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (c *sharedConn) invokeInboundRequest(ctx context.Context, requestID int64, method string, params json.RawMessage) (any, error) {
 	c.mu.RLock()
 	closed := c.closed
 	h := c.reqHandler
@@ -274,7 +274,7 @@ func (c *sharedConn) invokeInboundRequest(ctx context.Context, method string, pa
 	if h == nil {
 		return nil, fmt.Errorf("agent shared conn: no request handler for route %s", c.routeKey)
 	}
-	return h(ctx, method, params)
+	return h(ctx, requestID, method, params)
 }
 
 func (c *sharedConn) invokeInboundResponse(ctx context.Context, method string, params json.RawMessage) {

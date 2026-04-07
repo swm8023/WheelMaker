@@ -101,9 +101,9 @@ func newSession(id string, cwd string) *Session {
 // reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
 	if router, source, ok := s.imContext(); ok {
-		_ = router.Send(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.OutboundEvent{
-			Kind:    im.OutboundSystem,
-			Payload: im.TextPayload{Text: text},
+		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.SystemPayload{
+			Kind: "message",
+			Body: text,
 		})
 		return
 	}
@@ -872,12 +872,12 @@ func (c *Client) SessionUpdate(params acp.SessionUpdateParams) {
 }
 
 // SessionRequestPermission handles agent permission requests via active session state.
-func (c *Client) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+func (c *Client) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	c.mu.Lock()
 	sess := c.activeSession
 	c.mu.Unlock()
 	if sess != nil {
-		return sess.SessionRequestPermission(ctx, params)
+		return sess.SessionRequestPermission(ctx, requestID, params)
 	}
 	return acp.PermissionResult{Outcome: "cancelled"}, nil
 }
@@ -946,7 +946,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 }
 
 // SessionRequestPermission responds to session/request_permission agent requests.
-func (s *Session) SessionRequestPermission(ctx context.Context, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
+func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	s.mu.Lock()
 	pCtx := s.prompt.ctx
 	snap := acp.SessionConfigSnapshotFromOptions(s.sessionMeta.ConfigOptions)
@@ -954,35 +954,6 @@ func (s *Session) SessionRequestPermission(ctx context.Context, params acp.Permi
 	if pCtx != nil {
 		ctx = pCtx
 	}
-	if router, source, ok := s.imContext(); ok {
-		res, err := router.RequestDecision(ctx, im.SendTarget{SessionID: s.ID, Source: &source}, im.DecisionRequest{
-			SessionID: s.ID,
-			Kind:      im.DecisionPermission,
-			Title:     "Permission request",
-			Body:      permissionDecisionBody(params),
-			Options:   imDecisionOptions(params.Options),
-			Meta: map[string]string{
-				"tool_call_id": params.ToolCall.ToolCallID,
-			},
-		})
-		if err != nil {
-			return acp.PermissionResult{Outcome: "cancelled"}, err
-		}
-		return acp.PermissionResult{Outcome: res.Outcome, OptionID: res.OptionID}, nil
-	}
-	return s.permRouter.decide(ctx, params, snap.Mode)
+	return s.permRouter.decide(ctx, requestID, params, snap.Mode)
 }
 
-func permissionDecisionBody(params acp.PermissionRequestParams) string {
-	title := strings.TrimSpace(params.ToolCall.Title)
-	if title == "" {
-		title = strings.TrimSpace(params.ToolCall.ToolCallID)
-	}
-	if title == "" {
-		title = "Tool call"
-	}
-	if kind := strings.TrimSpace(params.ToolCall.Kind); kind != "" {
-		return fmt.Sprintf("%s\nKind: %s", title, kind)
-	}
-	return title
-}

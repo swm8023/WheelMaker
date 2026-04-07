@@ -3,53 +3,127 @@ package im
 import (
 	"context"
 	"testing"
+
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 type captureInboundClient struct {
-	events []InboundEvent
+	prompts             []capturedPrompt
+	commands            []capturedCommand
+	permissionResponses []capturedPermissionResponse
 }
 
-func (c *captureInboundClient) HandleIMInbound(_ context.Context, event InboundEvent) error {
-	c.events = append(c.events, event)
+type capturedPrompt struct {
+	source ChatRef
+	params acp.SessionPromptParams
+}
+
+type capturedCommand struct {
+	source ChatRef
+	cmd    Command
+}
+
+type capturedPermissionResponse struct {
+	source    ChatRef
+	requestID int64
+	result    acp.PermissionResponse
+}
+
+func (c *captureInboundClient) HandleIMPrompt(_ context.Context, source ChatRef, params acp.SessionPromptParams) error {
+	c.prompts = append(c.prompts, capturedPrompt{source: source, params: params})
+	return nil
+}
+
+func (c *captureInboundClient) HandleIMCommand(_ context.Context, source ChatRef, cmd Command) error {
+	c.commands = append(c.commands, capturedCommand{source: source, cmd: cmd})
+	return nil
+}
+
+func (c *captureInboundClient) HandleIMPermissionResponse(_ context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error {
+	c.permissionResponses = append(c.permissionResponses, capturedPermissionResponse{
+		source:    source,
+		requestID: requestID,
+		result:    result,
+	})
 	return nil
 }
 
 type captureChannel struct {
-	id        string
-	sent      []sentEvent
-	decisions []decisionEvent
+	id string
+
 	runCalled bool
-	onMsg     func(context.Context, string, string) error
+
+	onPrompt             func(context.Context, ChatRef, acp.SessionPromptParams) error
+	onCommand            func(context.Context, ChatRef, Command) error
+	onPermissionResponse func(context.Context, ChatRef, int64, acp.PermissionResponse) error
+
+	updates       []capturedSessionUpdate
+	promptResults []capturedPromptResult
+	permissions   []capturedPermissionRequest
+	systems       []capturedSystem
 }
 
-type sentEvent struct {
-	chatID string
-	event  OutboundEvent
+type capturedSessionUpdate struct {
+	target SendTarget
+	params acp.SessionUpdateParams
 }
 
-type decisionEvent struct {
-	chatID string
-	req    DecisionRequest
+type capturedPromptResult struct {
+	target SendTarget
+	result acp.SessionPromptResult
+}
+
+type capturedPermissionRequest struct {
+	target    SendTarget
+	requestID int64
+	params    acp.PermissionRequestParams
+}
+
+type capturedSystem struct {
+	target  SendTarget
+	payload SystemPayload
 }
 
 func (c *captureChannel) ID() string { return c.id }
-func (c *captureChannel) OnMessage(fn func(context.Context, string, string) error) {
-	c.onMsg = fn
+
+func (c *captureChannel) OnPrompt(fn func(context.Context, ChatRef, acp.SessionPromptParams) error) {
+	c.onPrompt = fn
 }
-func (c *captureChannel) Send(_ context.Context, chatID string, event OutboundEvent) error {
-	c.sent = append(c.sent, sentEvent{chatID: chatID, event: event})
+
+func (c *captureChannel) OnCommand(fn func(context.Context, ChatRef, Command) error) {
+	c.onCommand = fn
+}
+
+func (c *captureChannel) OnPermissionResponse(fn func(context.Context, ChatRef, int64, acp.PermissionResponse) error) {
+	c.onPermissionResponse = fn
+}
+
+func (c *captureChannel) PublishSessionUpdate(_ context.Context, target SendTarget, params acp.SessionUpdateParams) error {
+	c.updates = append(c.updates, capturedSessionUpdate{target: target, params: params})
 	return nil
 }
-func (c *captureChannel) RequestDecision(_ context.Context, chatID string, req DecisionRequest) (DecisionResult, error) {
-	c.decisions = append(c.decisions, decisionEvent{chatID: chatID, req: req})
-	return DecisionResult{Outcome: "selected", OptionID: "allow", Value: "allow_once", Source: "card_action"}, nil
+
+func (c *captureChannel) PublishPromptResult(_ context.Context, target SendTarget, result acp.SessionPromptResult) error {
+	c.promptResults = append(c.promptResults, capturedPromptResult{target: target, result: result})
+	return nil
 }
+
+func (c *captureChannel) PublishPermissionRequest(_ context.Context, target SendTarget, requestID int64, params acp.PermissionRequestParams) error {
+	c.permissions = append(c.permissions, capturedPermissionRequest{target: target, requestID: requestID, params: params})
+	return nil
+}
+
+func (c *captureChannel) SystemNotify(_ context.Context, target SendTarget, payload SystemPayload) error {
+	c.systems = append(c.systems, capturedSystem{target: target, payload: payload})
+	return nil
+}
+
 func (c *captureChannel) Run(context.Context) error {
 	c.runCalled = true
 	return nil
 }
 
-func TestHandleInbound_UnboundChatReachesClientWithoutSession(t *testing.T) {
+func TestHandlePrompt_UnboundChatReachesClientWithoutSession(t *testing.T) {
 	ctx := context.Background()
 	client := &captureInboundClient{}
 	router := NewRouter(client, nil)
@@ -58,68 +132,68 @@ func TestHandleInbound_UnboundChatReachesClientWithoutSession(t *testing.T) {
 		t.Fatalf("RegisterChannel: %v", err)
 	}
 
-	if err := ch.onMsg(ctx, "chat-a", "hello"); err != nil {
-		t.Fatalf("onMsg: %v", err)
+	params := acp.SessionPromptParams{
+		Prompt: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}},
+	}
+	if err := ch.onPrompt(ctx, ChatRef{ChatID: "chat-a"}, params); err != nil {
+		t.Fatalf("onPrompt: %v", err)
 	}
 
-	if len(client.events) != 1 {
-		t.Fatalf("events=%d, want 1", len(client.events))
+	if len(client.prompts) != 1 {
+		t.Fatalf("prompts=%d, want 1", len(client.prompts))
 	}
-	got := client.events[0]
-	if got.ChannelID != "feishu" || got.ChatID != "chat-a" || got.Text != "hello" || got.SessionID != "" {
-		t.Fatalf("event=%+v", got)
+	got := client.prompts[0]
+	if got.source.ChannelID != "feishu" || got.source.ChatID != "chat-a" {
+		t.Fatalf("source=%+v", got.source)
+	}
+	if text := promptText(got.params); text != "hello" {
+		t.Fatalf("prompt text=%q, want hello", text)
 	}
 }
 
-func TestBind_CausesLaterInboundToCarrySessionID(t *testing.T) {
+func TestBind_CausesLaterPromptHistoryToCarrySessionID(t *testing.T) {
 	ctx := context.Background()
 	client := &captureInboundClient{}
-	router := NewRouter(client, nil)
+	store := NewMemoryHistoryStore()
+	router := NewRouter(client, store)
 	ch := &captureChannel{id: "app"}
 	_ = router.RegisterChannel(ch)
 	if err := router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "chat-a"}, "session-1", BindOptions{}); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 
-	if err := ch.onMsg(ctx, "chat-a", "hello"); err != nil {
-		t.Fatalf("onMsg: %v", err)
+	if err := ch.onPrompt(ctx, ChatRef{ChatID: "chat-a"}, acp.SessionPromptParams{
+		Prompt: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}},
+	}); err != nil {
+		t.Fatalf("onPrompt: %v", err)
 	}
 
-	if got := client.events[0].SessionID; got != "session-1" {
-		t.Fatalf("SessionID=%q, want session-1", got)
+	got, err := store.List(ctx, "session-1", HistoryQuery{})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 || got[0].Kind != HistoryKindPrompt {
+		t.Fatalf("history=%+v", got)
 	}
 }
 
-func TestHandleInbound_PreservesMessageText(t *testing.T) {
+func TestHandleCommand_PreservesRawText(t *testing.T) {
 	ctx := context.Background()
 	client := &captureInboundClient{}
 	router := NewRouter(client, nil)
-
-	err := router.HandleInbound(ctx, InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "  hello\n"})
-	if err != nil {
-		t.Fatalf("HandleInbound: %v", err)
-	}
-	if got := client.events[0].Text; got != "  hello\n" {
-		t.Fatalf("Text=%q, want preserved whitespace", got)
-	}
-}
-
-func TestSend_DirectChatSendsOnlyTarget(t *testing.T) {
-	ctx := context.Background()
-	router := NewRouter(nil, nil)
 	ch := &captureChannel{id: "feishu"}
 	_ = router.RegisterChannel(ch)
 
-	err := router.Send(ctx, SendTarget{ChannelID: "feishu", ChatID: "chat-a"}, OutboundEvent{Kind: OutboundSystem, Payload: "choose a session"})
-	if err != nil {
-		t.Fatalf("Send: %v", err)
+	cmd := Command{Name: "/status", Raw: "/status"}
+	if err := ch.onCommand(ctx, ChatRef{ChatID: "chat-a"}, cmd); err != nil {
+		t.Fatalf("onCommand: %v", err)
 	}
-	if len(ch.sent) != 1 || ch.sent[0].chatID != "chat-a" {
-		t.Fatalf("sent=%+v", ch.sent)
+	if got := client.commands[0].cmd.Raw; got != "/status" {
+		t.Fatalf("Raw=%q, want /status", got)
 	}
 }
 
-func TestSend_ReplyFansOutToWatchChatsOnly(t *testing.T) {
+func TestPublishSessionUpdate_ReplyFansOutToWatchChatsOnly(t *testing.T) {
 	ctx := context.Background()
 	router := NewRouter(nil, nil)
 	ch := &captureChannel{id: "app"}
@@ -129,20 +203,23 @@ func TestSend_ReplyFansOutToWatchChatsOnly(t *testing.T) {
 	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "c"}, "s1", BindOptions{})
 	source := ChatRef{ChannelID: "app", ChatID: "a"}
 
-	err := router.Send(ctx, SendTarget{SessionID: "s1", Source: &source}, OutboundEvent{Kind: OutboundMessage, Payload: "hello"})
+	err := router.PublishSessionUpdate(ctx, SendTarget{SessionID: "s1", Source: &source}, acp.SessionUpdateParams{
+		SessionID: "acp-1",
+		Update:    acp.SessionUpdate{SessionUpdate: acp.SessionUpdatePlan},
+	})
 	if err != nil {
-		t.Fatalf("Send: %v", err)
+		t.Fatalf("PublishSessionUpdate: %v", err)
 	}
 
-	if len(ch.sent) != 2 {
-		t.Fatalf("sent count=%d, want 2: %+v", len(ch.sent), ch.sent)
+	if len(ch.updates) != 2 {
+		t.Fatalf("updates count=%d, want 2: %+v", len(ch.updates), ch.updates)
 	}
-	if ch.sent[0].chatID != "a" || ch.sent[1].chatID != "b" {
-		t.Fatalf("sent=%+v", ch.sent)
+	if ch.updates[0].target.ChatID != "a" || ch.updates[1].target.ChatID != "b" {
+		t.Fatalf("updates=%+v", ch.updates)
 	}
 }
 
-func TestSend_SessionBroadcastSendsAllBoundChats(t *testing.T) {
+func TestPublishPromptResult_SessionBroadcastSendsAllBoundChats(t *testing.T) {
 	ctx := context.Background()
 	router := NewRouter(nil, nil)
 	ch := &captureChannel{id: "app"}
@@ -150,36 +227,62 @@ func TestSend_SessionBroadcastSendsAllBoundChats(t *testing.T) {
 	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "a"}, "s1", BindOptions{})
 	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "b"}, "s1", BindOptions{Watch: true})
 
-	err := router.Send(ctx, SendTarget{SessionID: "s1"}, OutboundEvent{Kind: OutboundSystem, Payload: "broadcast"})
+	err := router.PublishPromptResult(ctx, SendTarget{SessionID: "s1"}, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn})
 	if err != nil {
-		t.Fatalf("Send: %v", err)
+		t.Fatalf("PublishPromptResult: %v", err)
 	}
-	if len(ch.sent) != 2 {
-		t.Fatalf("sent count=%d, want 2: %+v", len(ch.sent), ch.sent)
+	if len(ch.promptResults) != 2 {
+		t.Fatalf("promptResults count=%d, want 2: %+v", len(ch.promptResults), ch.promptResults)
 	}
 }
 
-func TestRequestDecision_RoutesOnlyToSourceChat(t *testing.T) {
+func TestPublishPermissionRequest_RoutesOnlyToSourceChat(t *testing.T) {
 	ctx := context.Background()
 	router := NewRouter(nil, nil)
 	ch := &captureChannel{id: "feishu"}
 	_ = router.RegisterChannel(ch)
 	source := ChatRef{ChannelID: "feishu", ChatID: "chat-a"}
 
-	res, err := router.RequestDecision(ctx, SendTarget{SessionID: "s1", Source: &source}, DecisionRequest{
-		SessionID: "s1",
-		Kind:      DecisionPermission,
-		Title:     "Allow?",
-		Options:   []DecisionOption{{ID: "allow", Label: "Allow", Value: "allow_once"}},
+	err := router.PublishPermissionRequest(ctx, SendTarget{SessionID: "s1", Source: &source}, 42, acp.PermissionRequestParams{
+		SessionID: "acp-1",
+		ToolCall:  acp.ToolCallRef{ToolCallID: "call-1", Title: "Allow?"},
 	})
 	if err != nil {
-		t.Fatalf("RequestDecision: %v", err)
+		t.Fatalf("PublishPermissionRequest: %v", err)
 	}
-	if res.OptionID != "allow" {
-		t.Fatalf("result=%+v", res)
+	if len(ch.permissions) != 1 || ch.permissions[0].target.ChatID != "chat-a" || ch.permissions[0].requestID != 42 {
+		t.Fatalf("permissions=%+v", ch.permissions)
 	}
-	if len(ch.decisions) != 1 || ch.decisions[0].chatID != "chat-a" {
-		t.Fatalf("decisions=%+v", ch.decisions)
+}
+
+func TestSystemNotify_DirectChatSendsOnlyTarget(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "feishu"}
+	_ = router.RegisterChannel(ch)
+
+	err := router.SystemNotify(ctx, SendTarget{ChannelID: "feishu", ChatID: "chat-a"}, SystemPayload{Kind: "status", Body: "choose a session"})
+	if err != nil {
+		t.Fatalf("SystemNotify: %v", err)
+	}
+	if len(ch.systems) != 1 || ch.systems[0].target.ChatID != "chat-a" {
+		t.Fatalf("systems=%+v", ch.systems)
+	}
+}
+
+func TestHandlePermissionResponse_ReachesClient(t *testing.T) {
+	ctx := context.Background()
+	client := &captureInboundClient{}
+	router := NewRouter(client, nil)
+	ch := &captureChannel{id: "feishu"}
+	_ = router.RegisterChannel(ch)
+
+	res := acp.PermissionResponse{Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "allow"}}
+	if err := ch.onPermissionResponse(ctx, ChatRef{ChatID: "chat-a"}, 42, res); err != nil {
+		t.Fatalf("onPermissionResponse: %v", err)
+	}
+	if len(client.permissionResponses) != 1 || client.permissionResponses[0].requestID != 42 {
+		t.Fatalf("responses=%+v", client.permissionResponses)
 	}
 }
 

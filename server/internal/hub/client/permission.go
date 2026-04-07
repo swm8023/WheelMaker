@@ -2,7 +2,6 @@ package client
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -15,18 +14,20 @@ type permissionRouter struct {
 
 	mu         sync.Mutex
 	decisionCh chan struct{}
+	pending    map[int64]chan acp.PermissionResult
 }
 
 func newPermissionRouter(s *Session) *permissionRouter {
 	r := &permissionRouter{
 		session:    s,
 		decisionCh: make(chan struct{}, 1),
+		pending:    map[int64]chan acp.PermissionResult{},
 	}
 	r.decisionCh <- struct{}{}
 	return r
 }
 
-func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequestParams, mode string) (acp.PermissionResult, error) {
+func (r *permissionRouter) decide(ctx context.Context, requestID int64, params acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
 	if !r.acquireDecisionSlot(ctx) {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
@@ -47,44 +48,25 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	title := strings.TrimSpace(params.ToolCall.Title)
-	if title == "" {
-		title = "Permission request"
-	}
+	waitCh := make(chan acp.PermissionResult, 1)
+	r.mu.Lock()
+	r.pending[requestID] = waitCh
+	r.mu.Unlock()
+	defer r.clearPending(requestID, waitCh)
 
-	req := im.DecisionRequest{
-		SessionID: params.SessionID,
-		Kind:      im.DecisionPermission,
-		Title:     title,
-		Body:      fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
-		Meta: map[string]string{
-			"tool_call_id": params.ToolCall.ToolCallID,
-			"tool_title":   params.ToolCall.Title,
-			"tool_kind":    params.ToolCall.Kind,
-		},
-		Hint: map[string]string{
-			// Permission decisions may require explicit human confirmation delay.
-			// Keep them valid longer to avoid stale-button failures.
-			"timeoutSec": "1800",
-		},
-	}
-	req.Options = make([]im.DecisionOption, 0, len(params.Options))
-	for _, o := range params.Options {
-		req.Options = append(req.Options, im.DecisionOption{
-			ID:    o.OptionID,
-			Label: o.Name,
-			Value: o.Kind,
-		})
-	}
-
-	res, err := router.RequestDecision(ctx, im.SendTarget{SessionID: r.session.ID, Source: &source}, req)
-	if err != nil {
+	if err := router.PublishPermissionRequest(ctx, im.SendTarget{SessionID: r.session.ID, Source: &source}, requestID, params); err != nil {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
-	if res.Outcome == "selected" && strings.TrimSpace(res.OptionID) != "" {
-		return acp.PermissionResult{Outcome: "selected", OptionID: res.OptionID}, nil
+
+	select {
+	case <-ctx.Done():
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	case result := <-waitCh:
+		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
+			return result, nil
+		}
+		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
-	return acp.PermissionResult{Outcome: "cancelled"}, nil
 }
 
 func (r *permissionRouter) acquireDecisionSlot(ctx context.Context) bool {
@@ -100,6 +82,32 @@ func (r *permissionRouter) releaseDecisionSlot() {
 	select {
 	case r.decisionCh <- struct{}{}:
 	default:
+	}
+}
+
+func (r *permissionRouter) resolve(requestID int64, result acp.PermissionResponse) bool {
+	r.mu.Lock()
+	ch, ok := r.pending[requestID]
+	if ok {
+		delete(r.pending, requestID)
+	}
+	r.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- result.Outcome:
+	default:
+	}
+	return true
+}
+
+func (r *permissionRouter) clearPending(requestID int64, ch chan acp.PermissionResult) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, ok := r.pending[requestID]
+	if ok && current == ch {
+		delete(r.pending, requestID)
 	}
 }
 

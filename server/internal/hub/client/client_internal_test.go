@@ -79,9 +79,11 @@ type TestCaptureRouter struct {
 }
 
 type fakeIMRouter struct {
-	binds     []fakeIMBind
-	sends     []fakeIMSend
-	decisions []fakeIMDecision
+	binds          []fakeIMBind
+	updates        []fakeIMUpdate
+	promptResults  []fakeIMPromptResult
+	permissions    []fakeIMPermissionRequest
+	systems        []fakeIMSystem
 }
 
 type fakeIMBind struct {
@@ -90,14 +92,31 @@ type fakeIMBind struct {
 	opts      im.BindOptions
 }
 
-type fakeIMSend struct {
+type fakeIMUpdate struct {
 	target im.SendTarget
-	event  im.OutboundEvent
+	params acp.SessionUpdateParams
+}
+
+type fakeIMPromptResult struct {
+	target im.SendTarget
+	result acp.SessionPromptResult
+}
+
+type fakeIMPermissionRequest struct {
+	target    im.SendTarget
+	requestID int64
+	params    acp.PermissionRequestParams
+}
+
+type fakeIMSystem struct {
+	target  im.SendTarget
+	payload im.SystemPayload
 }
 
 type fakeIMDecision struct {
-	target im.SendTarget
-	req    im.DecisionRequest
+	target    im.SendTarget
+	requestID int64
+	params    acp.PermissionRequestParams
 }
 
 func (f *fakeIMRouter) Bind(_ context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error {
@@ -105,14 +124,24 @@ func (f *fakeIMRouter) Bind(_ context.Context, chat im.ChatRef, sessionID string
 	return nil
 }
 
-func (f *fakeIMRouter) Send(_ context.Context, target im.SendTarget, event im.OutboundEvent) error {
-	f.sends = append(f.sends, fakeIMSend{target: target, event: event})
+func (f *fakeIMRouter) PublishSessionUpdate(_ context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
+	f.updates = append(f.updates, fakeIMUpdate{target: target, params: params})
 	return nil
 }
 
-func (f *fakeIMRouter) RequestDecision(_ context.Context, target im.SendTarget, req im.DecisionRequest) (im.DecisionResult, error) {
-	f.decisions = append(f.decisions, fakeIMDecision{target: target, req: req})
-	return im.DecisionResult{Outcome: "selected", OptionID: "allow", Value: "allow_once", Source: "card_action"}, nil
+func (f *fakeIMRouter) PublishPromptResult(_ context.Context, target im.SendTarget, result acp.SessionPromptResult) error {
+	f.promptResults = append(f.promptResults, fakeIMPromptResult{target: target, result: result})
+	return nil
+}
+
+func (f *fakeIMRouter) PublishPermissionRequest(_ context.Context, target im.SendTarget, requestID int64, params acp.PermissionRequestParams) error {
+	f.permissions = append(f.permissions, fakeIMPermissionRequest{target: target, requestID: requestID, params: params})
+	return nil
+}
+
+func (f *fakeIMRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
+	f.systems = append(f.systems, fakeIMSystem{target: target, payload: payload})
+	return nil
 }
 
 func (f *fakeIMRouter) Run(context.Context) error { return nil }
@@ -125,7 +154,7 @@ func (r *TestCaptureRouter) Bind(context.Context, im.ChatRef, string, im.BindOpt
 	return nil
 }
 
-func (r *TestCaptureRouter) Send(_ context.Context, target im.SendTarget, event im.OutboundEvent) error {
+func (r *TestCaptureRouter) PublishSessionUpdate(_ context.Context, target im.SendTarget, params acp.SessionUpdateParams) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -134,46 +163,69 @@ func (r *TestCaptureRouter) Send(_ context.Context, target im.SendTarget, event 
 		chatID = strings.TrimSpace(target.Source.ChatID)
 	}
 
-	switch event.Kind {
-	case im.OutboundSystem:
-		payload, ok := event.Payload.(im.TextPayload)
-		if !ok {
-			return nil
+	switch params.Update.SessionUpdate {
+	case acp.SessionUpdateAgentMessageChunk:
+		var content acp.ContentBlock
+		if len(params.Update.Content) > 0 && json.Unmarshal(params.Update.Content, &content) == nil {
+			key := strings.TrimSpace(target.SessionID)
+			if key == "" {
+				key = chatID
+			}
+			r.textBuffers[key] += content.Text
 		}
-		r.Messages = append(r.Messages, payload.Text)
+	case acp.SessionUpdateConfigOptionUpdate:
+		r.Messages = append(r.Messages, formatConfigOptionUpdateMessage(mustJSON(params.Update)))
 		r.ChatIDs = append(r.ChatIDs, chatID)
-	case im.OutboundACP:
-		payload, ok := event.Payload.(im.ACPPayload)
-		if !ok {
-			return nil
-		}
-		key := strings.TrimSpace(target.SessionID)
-		if key == "" {
-			key = chatID
-		}
-		switch payload.UpdateType {
-		case string(acp.UpdateText):
-			r.textBuffers[key] += payload.Text
-		case string(acp.UpdateDone):
-			if text := r.textBuffers[key]; text != "" {
-				r.Messages = append(r.Messages, text)
-				r.ChatIDs = append(r.ChatIDs, chatID)
-				delete(r.textBuffers, key)
-			}
-		default:
-			if strings.HasPrefix(payload.UpdateType, "tool_call") {
-				r.CardCount++
-			}
+	default:
+		if strings.HasPrefix(params.Update.SessionUpdate, "tool_call") {
+			r.CardCount++
 		}
 	}
 	return nil
 }
 
-func (r *TestCaptureRouter) RequestDecision(_ context.Context, target im.SendTarget, req im.DecisionRequest) (im.DecisionResult, error) {
+func (r *TestCaptureRouter) PublishPromptResult(_ context.Context, target im.SendTarget, result acp.SessionPromptResult) error {
 	r.mu.Lock()
-	r.Decisions = append(r.Decisions, fakeIMDecision{target: target, req: req})
+	defer r.mu.Unlock()
+
+	chatID := target.ChatID
+	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
+		chatID = strings.TrimSpace(target.Source.ChatID)
+	}
+	key := strings.TrimSpace(target.SessionID)
+	if key == "" {
+		key = chatID
+	}
+	if text := r.textBuffers[key]; text != "" {
+		r.Messages = append(r.Messages, text)
+		r.ChatIDs = append(r.ChatIDs, chatID)
+		delete(r.textBuffers, key)
+	}
+	return nil
+}
+
+func (r *TestCaptureRouter) PublishPermissionRequest(_ context.Context, target im.SendTarget, requestID int64, params acp.PermissionRequestParams) error {
+	r.mu.Lock()
+	r.Decisions = append(r.Decisions, fakeIMDecision{
+		target:    target,
+		requestID: requestID,
+		params:    params,
+	})
 	r.mu.Unlock()
-	return im.DecisionResult{Outcome: "cancelled", Source: "test"}, nil
+	return nil
+}
+
+func (r *TestCaptureRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	chatID := target.ChatID
+	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
+		chatID = strings.TrimSpace(target.Source.ChatID)
+	}
+	r.Messages = append(r.Messages, payload.Body)
+	r.ChatIDs = append(r.ChatIDs, chatID)
+	return nil
 }
 
 func (r *TestCaptureRouter) Run(context.Context) error { return nil }
@@ -181,13 +233,18 @@ func (r *TestCaptureRouter) Run(context.Context) error { return nil }
 var _ agent.Instance = (*testInjectedInstance)(nil)
 var _ IMRouter = (*TestCaptureRouter)(nil)
 
+func mustJSON(v any) []byte {
+	raw, _ := json.Marshal(v)
+	return raw
+}
+
 func (i *testInjectedInstance) Name() string { return i.name }
 
 func (i *testInjectedInstance) SetCallbacks(callbacks agent.Callbacks) {
 	i.callbacks = callbacks
 }
 
-func (i *testInjectedInstance) HandleACPRequest(context.Context, string, json.RawMessage) (any, error) {
+func (i *testInjectedInstance) HandleACPRequest(context.Context, int64, string, json.RawMessage) (any, error) {
 	return nil, errors.New("not implemented in test injected instance")
 }
 
@@ -661,11 +718,11 @@ func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
 	if len(fake.binds) != 0 {
 		t.Fatalf("binds=%+v, want none", fake.binds)
 	}
-	if len(fake.sends) != 1 {
-		t.Fatalf("sends=%+v, want direct /list response", fake.sends)
+	if len(fake.systems) != 1 {
+		t.Fatalf("systems=%+v, want direct /list response", fake.systems)
 	}
-	if fake.sends[0].target.SessionID != "" || fake.sends[0].target.ChannelID != "feishu" || fake.sends[0].target.ChatID != "chat-a" {
-		t.Fatalf("target=%+v, want direct chat target", fake.sends[0].target)
+	if fake.systems[0].target.SessionID != "" || fake.systems[0].target.ChannelID != "feishu" || fake.systems[0].target.ChatID != "chat-a" {
+		t.Fatalf("target=%+v, want direct chat target", fake.systems[0].target)
 	}
 }
 
@@ -701,19 +758,23 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 		t.Fatalf("bind=%+v", fake.binds[0])
 	}
 	foundACP := false
-	for _, send := range fake.sends {
-		if send.event.Kind == im.OutboundACP {
-			payload, ok := send.event.Payload.(im.ACPPayload)
-			if ok && payload.UpdateType == string(acp.UpdateText) {
-				foundACP = true
-				if payload.Text != "hello back" {
-					t.Fatalf("payload=%+v", payload)
-				}
+	for _, update := range fake.updates {
+		if update.params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
+			var content acp.ContentBlock
+			if err := json.Unmarshal(update.params.Update.Content, &content); err != nil {
+				t.Fatalf("unmarshal content: %v", err)
+			}
+			foundACP = true
+			if content.Text != "hello back" {
+				t.Fatalf("content=%+v", content)
 			}
 		}
 	}
 	if !foundACP {
-		t.Fatalf("sends=%+v, want OutboundACP", fake.sends)
+		t.Fatalf("updates=%+v, want session/update", fake.updates)
+	}
+	if len(fake.promptResults) != 1 || fake.promptResults[0].result.StopReason != acp.StopReasonEndTurn {
+		t.Fatalf("promptResults=%+v", fake.promptResults)
 	}
 }
 
@@ -753,25 +814,45 @@ func TestSessionRequestPermission_UsesIMDecision(t *testing.T) {
 	sess := c.activeSession
 	sess.setIMSource(im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
 
-	res, err := sess.SessionRequestPermission(context.Background(), acp.PermissionRequestParams{
-		SessionID: "acp-1",
-		ToolCall:  acp.ToolCallRef{ToolCallID: "tc-1", Title: "Read file", Kind: "read"},
-		Options:   []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
-	})
-	if err != nil {
-		t.Fatalf("SessionRequestPermission: %v", err)
+	done := make(chan struct {
+		result acp.PermissionResult
+		err    error
+	}, 1)
+	go func() {
+		res, err := sess.SessionRequestPermission(context.Background(), 42, acp.PermissionRequestParams{
+			SessionID: "acp-1",
+			ToolCall:  acp.ToolCallRef{ToolCallID: "tc-1", Title: "Read file", Kind: "read"},
+			Options:   []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
+		})
+		done <- struct {
+			result acp.PermissionResult
+			err    error
+		}{result: res, err: err}
+	}()
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		if len(fake.permissions) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	if res.OptionID != "allow" || res.Outcome != "selected" {
-		t.Fatalf("result=%+v", res)
+	if len(fake.permissions) != 1 {
+		t.Fatalf("permissions=%+v, want one", fake.permissions)
 	}
-	if len(fake.decisions) != 1 {
-		t.Fatalf("decisions=%+v, want one", fake.decisions)
+	if fake.permissions[0].target.Source == nil || fake.permissions[0].target.Source.ChatID != "chat-a" {
+		t.Fatalf("target=%+v", fake.permissions[0].target)
 	}
-	if fake.decisions[0].target.Source == nil || fake.decisions[0].target.Source.ChatID != "chat-a" {
-		t.Fatalf("target=%+v", fake.decisions[0].target)
+	if fake.permissions[0].params.Options[0].OptionID != "allow" {
+		t.Fatalf("request=%+v", fake.permissions[0].params)
 	}
-	if fake.decisions[0].req.Options[0].ID != "allow" {
-		t.Fatalf("request=%+v", fake.decisions[0].req)
+	if !sess.permRouter.resolve(42, acp.PermissionResponse{Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "allow"}}) {
+		t.Fatal("expected permission resolve to succeed")
+	}
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("SessionRequestPermission: %v", got.err)
+	}
+	if got.result.OptionID != "allow" || got.result.Outcome != "selected" {
+		t.Fatalf("result=%+v", got.result)
 	}
 }
 

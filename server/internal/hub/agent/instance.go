@@ -14,14 +14,14 @@ import (
 // Callbacks defines business callback handlers owned by instance users.
 type Callbacks interface {
 	SessionUpdate(params protocol.SessionUpdateParams)
-	SessionRequestPermission(ctx context.Context, params protocol.PermissionRequestParams) (protocol.PermissionResult, error)
+	SessionRequestPermission(ctx context.Context, requestID int64, params protocol.PermissionRequestParams) (protocol.PermissionResult, error)
 }
 
 // Instance is the only ACP-typed runtime interface exposed to Session.
 type Instance interface {
 	Name() string
 	SetCallbacks(callbacks Callbacks)
-	HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error)
+	HandleACPRequest(ctx context.Context, requestID int64, method string, params json.RawMessage) (any, error)
 	HandleACPResponse(ctx context.Context, method string, params json.RawMessage)
 	Initialize(ctx context.Context, p protocol.InitializeParams) (protocol.InitializeResult, error)
 	SessionNew(ctx context.Context, p protocol.SessionNewParams) (protocol.SessionNewResult, error)
@@ -219,10 +219,10 @@ func (i *instance) HandleACPResponse(_ context.Context, method string, params js
 	}
 }
 
-func (i *instance) HandleACPRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (i *instance) HandleACPRequest(ctx context.Context, requestID int64, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case protocol.MethodRequestPermission:
-		return i.onPermissionRequest(ctx, method, params)
+		return i.onPermissionRequest(ctx, requestID, method, params)
 	case protocol.MethodFSRead:
 		var p protocol.FSReadTextFileParams
 		if err := decodeACPParams(method, params, &p); err != nil {
@@ -287,7 +287,7 @@ func (i *instance) ensureConn() error {
 	return nil
 }
 
-func (i *instance) onPermissionRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
+func (i *instance) onPermissionRequest(ctx context.Context, requestID int64, method string, params json.RawMessage) (any, error) {
 	cb := i.currentCallbacks()
 	if cb == nil {
 		return protocol.PermissionResponse{Outcome: protocol.PermissionResult{Outcome: "cancelled"}}, nil
@@ -296,7 +296,7 @@ func (i *instance) onPermissionRequest(ctx context.Context, method string, param
 	if err := decodeACPParams(method, params, &p); err != nil {
 		return nil, err
 	}
-	result, err := cb.SessionRequestPermission(ctx, p)
+	result, err := cb.SessionRequestPermission(ctx, requestID, p)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
@@ -76,8 +77,8 @@ type toolCardState struct {
 }
 
 type toolPermissionState struct {
-	decisionID    string
-	options       []DecisionOption
+	requestID     string
+	options       []PermissionOption
 	active        bool
 	selectedID    string
 	selectedLabel string
@@ -386,8 +387,8 @@ func (f *transportChannel) sendRawCard(chatID, messageID string, card RawCard) e
 func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 	title, body, options, meta := oc.Title, oc.Body, oc.Options, oc.Meta
 	toolCallID := strings.TrimSpace(meta["tool_call_id"])
-	decisionID := strings.TrimSpace(meta["decision_id"])
-	if toolCallID != "" && decisionID != "" {
+	requestID := strings.TrimSpace(meta["request_id"])
+	if toolCallID != "" && requestID != "" {
 		err := f.attachPermissionOptionsToToolCard(chatID, toolCallID, title, options, meta)
 		if err == nil {
 			f.toolMu.Lock()
@@ -409,12 +410,16 @@ func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 	if len(options) > 0 {
 		actions := make([]map[string]any, 0, len(options))
 		for _, opt := range options {
+			label := strings.TrimSpace(opt.Name)
+			if label == "" {
+				label = strings.TrimSpace(opt.OptionID)
+			}
 			value := map[string]any{
-				"kind":         "decision",
-				"chat_id":      chatID,
-				"option_id":    opt.ID,
-				"option_label": opt.Label,
-				"value":        opt.Value,
+				"kind":        "permission",
+				"chat_id":     chatID,
+				"option_id":   opt.OptionID,
+				"option_name": label,
+				"option_kind": opt.Kind,
 			}
 			for k, v := range meta {
 				if strings.TrimSpace(k) == "" {
@@ -424,7 +429,7 @@ func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 			}
 			actions = append(actions, map[string]any{
 				"tag":   "button",
-				"text":  map[string]any{"tag": "plain_text", "content": opt.Label},
+				"text":  map[string]any{"tag": "plain_text", "content": label},
 				"type":  "default",
 				"value": value,
 			})
@@ -439,7 +444,7 @@ func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": firstNonEmpty(title, "Decision required"),
+				"content": firstNonEmpty(title, "Permission required"),
 			},
 		},
 		"elements": elements,
@@ -447,13 +452,13 @@ func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 	return f.sendRawCard(chatID, "", rawCard)
 }
 
-func (f *transportChannel) attachPermissionOptionsToToolCard(chatID, toolCallID, title string, options []DecisionOption, meta map[string]string) error {
+func (f *transportChannel) attachPermissionOptionsToToolCard(chatID, toolCallID, title string, options []PermissionOption, meta map[string]string) error {
 	chatID = strings.TrimSpace(chatID)
 	toolCallID = strings.TrimSpace(toolCallID)
 	if chatID == "" || toolCallID == "" {
 		return nil
 	}
-	decisionID := strings.TrimSpace(meta["decision_id"])
+	requestID := strings.TrimSpace(meta["request_id"])
 	toolTitle := strings.TrimSpace(meta["tool_title"])
 	toolKind := strings.TrimSpace(meta["tool_kind"])
 	if toolTitle == "" {
@@ -480,7 +485,7 @@ func (f *transportChannel) attachPermissionOptionsToToolCard(chatID, toolCallID,
 				ToolCallID: toolCallID,
 				Title:      toolTitle,
 				Kind:       toolKind,
-				Status:     "pending",
+				Status:     acp.ToolCallStatusPending,
 			},
 		}
 		chatCards[toolCallID] = st
@@ -492,9 +497,9 @@ func (f *transportChannel) attachPermissionOptionsToToolCard(chatID, toolCallID,
 		st.update.Kind = toolKind
 	}
 	st.perm = &toolPermissionState{
-		decisionID: decisionID,
-		options:    append([]DecisionOption(nil), options...),
-		active:     true,
+		requestID: requestID,
+		options:   append([]PermissionOption(nil), options...),
+		active:    true,
 	}
 	stCopy := *st
 	if st.perm != nil {
@@ -1175,17 +1180,21 @@ func buildToolCallCard(chatID string, update ToolCallUpdate, perm *toolPermissio
 		if perm.active && len(perm.options) > 0 {
 			actions := make([]map[string]any, 0, len(perm.options))
 			for _, opt := range perm.options {
+				label := strings.TrimSpace(opt.Name)
+				if label == "" {
+					label = strings.TrimSpace(opt.OptionID)
+				}
 				actions = append(actions, map[string]any{
 					"tag":  "button",
-					"text": map[string]any{"tag": "plain_text", "content": opt.Label},
+					"text": map[string]any{"tag": "plain_text", "content": label},
 					"type": "default",
 					"value": map[string]any{
-						"kind":         "decision",
+						"kind":         "permission",
 						"chat_id":      chatID,
-						"decision_id":  perm.decisionID,
-						"option_id":    opt.ID,
-						"value":        opt.Value,
-						"option_label": opt.Label,
+						"request_id":   perm.requestID,
+						"option_id":    opt.OptionID,
+						"option_name":  label,
+						"option_kind":  opt.Kind,
 						"tool_call_id": update.ToolCallID,
 					},
 				})
@@ -1633,16 +1642,16 @@ func (f *transportChannel) handleCardAction(_ context.Context, event *callback.C
 	for k, v := range payload.Action.Value {
 		value[k] = fmt.Sprint(v)
 	}
-	if strings.TrimSpace(value["kind"]) == "decision" {
+	if strings.TrimSpace(value["kind"]) == "permission" {
 		chatID := firstNonEmpty(value["chat_id"], payload.Context.OpenChatID)
 		toolCallID := strings.TrimSpace(value["tool_call_id"])
-		decisionID := strings.TrimSpace(value["decision_id"])
+		requestID := strings.TrimSpace(value["request_id"])
 		selectedID := strings.TrimSpace(value["option_id"])
-		selectedLabel := strings.TrimSpace(value["option_label"])
-		if chatID != "" && toolCallID != "" && decisionID != "" {
+		selectedLabel := strings.TrimSpace(value["option_name"])
+		if chatID != "" && toolCallID != "" && requestID != "" {
 			f.toolMu.Lock()
 			if chatCards := f.toolCards[chatID]; chatCards != nil {
-				if st := chatCards[toolCallID]; st != nil && st.perm != nil && st.perm.decisionID == decisionID {
+				if st := chatCards[toolCallID]; st != nil && st.perm != nil && st.perm.requestID == requestID {
 					st.perm.active = false
 					st.perm.selectedID = selectedID
 					if selectedLabel == "" {

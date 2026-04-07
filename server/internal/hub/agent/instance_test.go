@@ -55,7 +55,7 @@ func TestInstance_HandleInboundDispatch(t *testing.T) {
 		ToolCall:  protocol.ToolCallRef{ToolCallID: "tc-1"},
 		Options:   []protocol.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "once"}},
 	})
-	resp, err := fc.req(context.Background(), protocol.MethodRequestPermission, permRaw)
+	resp, err := fc.req(context.Background(), 42, protocol.MethodRequestPermission, permRaw)
 	if err != nil {
 		t.Fatalf("permission dispatch: %v", err)
 	}
@@ -68,6 +68,9 @@ func TestInstance_HandleInboundDispatch(t *testing.T) {
 	}
 	if cb.permissionCount != 1 {
 		t.Fatalf("permissionCount=%d, want 1", cb.permissionCount)
+	}
+	if cb.lastRequestID != 42 {
+		t.Fatalf("lastRequestID=%d, want 42", cb.lastRequestID)
 	}
 
 	_ = inst
@@ -111,13 +114,15 @@ func (f *fakeConn) Close() error { return nil }
 type fakeCallbacks struct {
 	updateCount     int
 	permissionCount int
+	lastRequestID   int64
 }
 
 func (f *fakeCallbacks) SessionUpdate(_ protocol.SessionUpdateParams) {
 	f.updateCount++
 }
 
-func (f *fakeCallbacks) SessionRequestPermission(_ context.Context, _ protocol.PermissionRequestParams) (protocol.PermissionResult, error) {
+func (f *fakeCallbacks) SessionRequestPermission(_ context.Context, requestID int64, _ protocol.PermissionRequestParams) (protocol.PermissionResult, error) {
 	f.permissionCount++
+	f.lastRequestID = requestID
 	return protocol.PermissionResult{Outcome: "allow_once", OptionID: "allow"}, nil
 }

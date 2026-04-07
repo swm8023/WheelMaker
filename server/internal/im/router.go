@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 type binding struct {
@@ -44,8 +46,17 @@ func (r *Router) RegisterChannel(ch Channel) error {
 	r.mu.Lock()
 	r.channels[id] = ch
 	r.mu.Unlock()
-	ch.OnMessage(func(ctx context.Context, chatID string, text string) error {
-		return r.HandleInbound(ctx, InboundEvent{ChannelID: id, ChatID: chatID, Text: text})
+	ch.OnPrompt(func(ctx context.Context, source ChatRef, params acp.SessionPromptParams) error {
+		source.ChannelID = id
+		return r.HandlePrompt(ctx, source, params)
+	})
+	ch.OnCommand(func(ctx context.Context, source ChatRef, cmd Command) error {
+		source.ChannelID = id
+		return r.HandleCommand(ctx, source, cmd)
+	})
+	ch.OnPermissionResponse(func(ctx context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error {
+		source.ChannelID = id
+		return r.HandlePermissionResponse(ctx, source, requestID, result)
 	})
 	return nil
 }
@@ -73,28 +84,69 @@ func (r *Router) Unbind(_ context.Context, chat ChatRef) error {
 	return nil
 }
 
-func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
-	chat := normalizeChat(ChatRef{ChannelID: event.ChannelID, ChatID: event.ChatID})
-	if chat.ChannelID == "" || chat.ChatID == "" {
-		return fmt.Errorf("im: inbound chat is invalid")
+func (r *Router) HandlePrompt(ctx context.Context, source ChatRef, params acp.SessionPromptParams) error {
+	source = normalizeChat(source)
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("im: prompt source is invalid")
 	}
-	if strings.TrimSpace(event.Text) == "" {
-		return nil
-	}
-	r.mu.RLock()
-	b := r.bindings[chat]
-	r.mu.RUnlock()
-	event.ChannelID = chat.ChannelID
-	event.ChatID = chat.ChatID
-	event.SessionID = b.sessionID
-	_ = r.history.Append(ctx, HistoryEvent{SessionID: event.SessionID, Direction: HistoryInbound, Source: &chat, Text: event.Text})
+	sessionID := r.lookupSessionID(source)
+	_ = r.history.Append(ctx, HistoryEvent{
+		SessionID: sessionID,
+		Direction: HistoryInbound,
+		Source:    &source,
+		Kind:      HistoryKindPrompt,
+		Payload:   params,
+		Text:      promptText(params),
+	})
 	if r.client == nil {
 		return nil
 	}
-	return r.client.HandleIMInbound(ctx, event)
+	return r.client.HandleIMPrompt(ctx, source, params)
 }
 
-func (r *Router) Send(ctx context.Context, target SendTarget, event OutboundEvent) error {
+func (r *Router) HandleCommand(ctx context.Context, source ChatRef, cmd Command) error {
+	source = normalizeChat(source)
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("im: command source is invalid")
+	}
+	sessionID := r.lookupSessionID(source)
+	_ = r.history.Append(ctx, HistoryEvent{
+		SessionID: sessionID,
+		Direction: HistoryInbound,
+		Source:    &source,
+		Kind:      HistoryKindCommand,
+		Payload:   cmd,
+		Text:      cmd.Raw,
+	})
+	if r.client == nil {
+		return nil
+	}
+	return r.client.HandleIMCommand(ctx, source, cmd)
+}
+
+func (r *Router) HandlePermissionResponse(ctx context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error {
+	source = normalizeChat(source)
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("im: permission response source is invalid")
+	}
+	sessionID := r.lookupSessionID(source)
+	_ = r.history.Append(ctx, HistoryEvent{
+		SessionID: sessionID,
+		Direction: HistoryInbound,
+		Source:    &source,
+		Kind:      HistoryKindPermissionResponse,
+		Payload: struct {
+			RequestID int64
+			Result    acp.PermissionResponse
+		}{RequestID: requestID, Result: result},
+	})
+	if r.client == nil {
+		return nil
+	}
+	return r.client.HandleIMPermissionResponse(ctx, source, requestID, result)
+}
+
+func (r *Router) PublishSessionUpdate(ctx context.Context, target SendTarget, params acp.SessionUpdateParams) error {
 	recipients, err := r.recipients(target)
 	if err != nil {
 		return err
@@ -108,7 +160,8 @@ func (r *Router) Send(ctx context.Context, target SendTarget, event OutboundEven
 			}
 			continue
 		}
-		if err := ch.Send(ctx, chat.ChatID, event); err != nil && firstErr == nil {
+		deliver := deliveryTarget(target, chat)
+		if err := ch.PublishSessionUpdate(ctx, deliver, params); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
@@ -117,39 +170,103 @@ func (r *Router) Send(ctx context.Context, target SendTarget, event OutboundEven
 		Direction: HistoryOutbound,
 		Source:    target.Source,
 		Targets:   recipients,
-		Kind:      event.Kind,
-		Payload:   event.Payload,
+		Kind:      HistoryKindSessionUpdate,
+		Payload:   params,
 	})
 	return firstErr
 }
 
-func (r *Router) RequestDecision(ctx context.Context, target SendTarget, req DecisionRequest) (DecisionResult, error) {
+func (r *Router) PublishPromptResult(ctx context.Context, target SendTarget, result acp.SessionPromptResult) error {
+	recipients, err := r.recipients(target)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, chat := range recipients {
+		ch, err := r.channel(chat.ChannelID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deliver := deliveryTarget(target, chat)
+		if err := ch.PublishPromptResult(ctx, deliver, result); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	_ = r.history.Append(ctx, HistoryEvent{
+		SessionID: strings.TrimSpace(target.SessionID),
+		Direction: HistoryOutbound,
+		Source:    target.Source,
+		Targets:   recipients,
+		Kind:      HistoryKindPromptResult,
+		Payload:   result,
+	})
+	return firstErr
+}
+
+func (r *Router) PublishPermissionRequest(ctx context.Context, target SendTarget, requestID int64, params acp.PermissionRequestParams) error {
 	sessionID := strings.TrimSpace(target.SessionID)
 	if sessionID == "" {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im: decision session is empty")
+		return fmt.Errorf("im: permission session is empty")
 	}
 	if target.Source == nil {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im: decision source is empty")
+		return fmt.Errorf("im: permission source is empty")
 	}
 	source := normalizeChat(*target.Source)
 	if source.ChannelID == "" || source.ChatID == "" {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im: decision source is invalid")
+		return fmt.Errorf("im: permission source is invalid")
 	}
 	ch, err := r.channel(source.ChannelID)
 	if err != nil {
-		return DecisionResult{Outcome: "invalid"}, err
+		return err
 	}
-	req.SessionID = sessionID
-	res, err := ch.RequestDecision(ctx, source.ChatID, req)
+	deliver := deliveryTarget(target, source)
+	err = ch.PublishPermissionRequest(ctx, deliver, requestID, params)
 	_ = r.history.Append(ctx, HistoryEvent{
 		SessionID: sessionID,
 		Direction: HistoryOutbound,
 		Source:    &source,
 		Targets:   []ChatRef{source},
-		Kind:      OutboundSystem,
-		Payload:   req,
+		Kind:      HistoryKindPermissionRequest,
+		Payload: struct {
+			RequestID int64
+			Params    acp.PermissionRequestParams
+		}{RequestID: requestID, Params: params},
 	})
-	return res, err
+	return err
+}
+
+func (r *Router) SystemNotify(ctx context.Context, target SendTarget, payload SystemPayload) error {
+	recipients, err := r.recipients(target)
+	if err != nil {
+		return err
+	}
+	var firstErr error
+	for _, chat := range recipients {
+		ch, err := r.channel(chat.ChannelID)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deliver := deliveryTarget(target, chat)
+		if err := ch.SystemNotify(ctx, deliver, payload); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	_ = r.history.Append(ctx, HistoryEvent{
+		SessionID: strings.TrimSpace(target.SessionID),
+		Direction: HistoryOutbound,
+		Source:    target.Source,
+		Targets:   recipients,
+		Kind:      HistoryKindSystem,
+		Payload:   payload,
+		Text:      strings.TrimSpace(payload.Body),
+	})
+	return firstErr
 }
 
 func (r *Router) Run(ctx context.Context) error {
@@ -234,6 +351,29 @@ func (r *Router) channel(channelID string) (Channel, error) {
 
 func normalizeChat(chat ChatRef) ChatRef {
 	return ChatRef{ChannelID: normalize(chat.ChannelID), ChatID: strings.TrimSpace(chat.ChatID)}
+}
+
+func (r *Router) lookupSessionID(chat ChatRef) string {
+	r.mu.RLock()
+	b := r.bindings[chat]
+	r.mu.RUnlock()
+	return b.sessionID
+}
+
+func promptText(params acp.SessionPromptParams) string {
+	for _, block := range params.Prompt {
+		if block.Type == acp.ContentBlockTypeText {
+			return block.Text
+		}
+	}
+	return ""
+}
+
+func deliveryTarget(target SendTarget, chat ChatRef) SendTarget {
+	out := target
+	out.ChannelID = chat.ChannelID
+	out.ChatID = chat.ChatID
+	return out
 }
 
 func normalize(s string) string {

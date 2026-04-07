@@ -3,7 +3,7 @@ package feishu
 import (
 	"encoding/json"
 
-	"github.com/swm8023/wheelmaker/internal/im"
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 type Message struct {
@@ -25,7 +25,7 @@ func (RawCard) isCard() {}
 type OptionsCard struct {
 	Title   string
 	Body    string
-	Options []DecisionOption
+	Options []PermissionOption
 	Meta    map[string]string
 }
 
@@ -74,4 +74,4 @@ type CardActionEvent struct {
 	Value     map[string]string
 }
 
-type DecisionOption = im.DecisionOption
+type PermissionOption = acp.PermissionOption

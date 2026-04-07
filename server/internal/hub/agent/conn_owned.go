@@ -256,7 +256,7 @@ func (c *ownedConn) handleIncomingRequest(jsonrpc string, id int64, method strin
 	if h == nil {
 		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
-		result, err := h(c.connCtx, method, params)
+			result, err := h(c.connCtx, id, method, params)
 		if err != nil {
 			resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: err.Error()}
 		} else if result == nil {
