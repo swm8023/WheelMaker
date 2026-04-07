@@ -4,13 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
-	"github.com/swm8023/wheelmaker/internal/hub/im"
-	"github.com/swm8023/wheelmaker/internal/hub/im/console"
-	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
 	im2 "github.com/swm8023/wheelmaker/internal/im2"
+	im2app "github.com/swm8023/wheelmaker/internal/im2/app"
 	im2feishu "github.com/swm8023/wheelmaker/internal/im2/feishu"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
@@ -50,20 +47,8 @@ func New(cfg *shared.AppConfig, statePath string) *Hub {
 }
 
 // Start validates config, creates one client.Client per project, and starts each client.
-// Returns an error if more than one project uses type "console", or if any project
-// has an unsupported IM type.
+// Returns an error if any project has an unsupported IM type.
 func (h *Hub) Start(ctx context.Context) error {
-	// Validate: at most one console IM project.
-	consoleCount := 0
-	for _, pc := range h.cfg.Projects {
-		if pc.IM.Type == "console" {
-			consoleCount++
-		}
-	}
-	if consoleCount > 1 {
-		return errors.New("hub: at most one project may use im.type = \"console\"")
-	}
-
 	for _, pc := range h.cfg.Projects {
 		c, err := h.buildClient(ctx, pc)
 		if err != nil {
@@ -86,36 +71,7 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 			cwd = "."
 		}
 	}
-
-	if pc.IM.Version == 2 {
-		return h.buildIM2Client(ctx, pc, cwd)
-	}
-
-	// Create IM channel.
-	imProvider, err := h.buildIM(pc)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create per-project state store.
-	store := client.NewProjectJSONStore(h.statePath, pc.Name)
-
-	// Create the client.
-	c := client.New(store, imProvider, pc.Name, cwd)
-	c.SetYOLO(pc.YOLO)
-	c.SetIMUpdateBlockList(pc.Client.IMFilter.Block)
-
-	// ACP/IM debug traces are controlled by logger configuration only.
-	if dw := shared.DebugWriter(); dw != nil {
-		imProvider.SetDebugLogger(dw)
-	}
-
-	// Built-in providers are preloaded by client's singleton ACP factory.
-
-	if err := c.Start(ctx); err != nil {
-		return nil, fmt.Errorf("start: %w", err)
-	}
-	return c, nil
+	return h.buildIM2Client(ctx, pc, cwd)
 }
 
 func (h *Hub) buildIM2Client(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
@@ -137,33 +93,18 @@ func (h *Hub) buildIM2Client(ctx context.Context, pc shared.ProjectConfig, cwd s
 		})); err != nil {
 			return nil, err
 		}
+	case "app":
+		if err := router.RegisterChannel(im2app.New()); err != nil {
+			return nil, err
+		}
 	default:
-		return nil, fmt.Errorf("unsupported im2 type %q (supported: feishu)", pc.IM.Type)
+		return nil, fmt.Errorf("unsupported im.type %q (supported: feishu, app)", pc.IM.Type)
 	}
 	c.SetIM2Router(router)
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
 	return c, nil
-}
-
-// buildIM creates the im.ImAdapter for a project's IM config.
-func (h *Hub) buildIM(pc shared.ProjectConfig) (*im.ImAdapter, error) {
-	switch pc.IM.Type {
-	case "console":
-		return im.New(console.New(pc.Name, pc.Debug)), nil
-	case "feishu":
-		return im.New(feishu.New(feishu.Config{
-			AppID:             pc.IM.AppID,
-			AppSecret:         pc.IM.AppSecret,
-			VerificationToken: feishuVerificationToken,
-			EncryptKey:        feishuEncryptKey,
-			Debug:             pc.Debug,
-			YOLO:              pc.YOLO,
-		})), nil
-	default:
-		return nil, fmt.Errorf("unknown im.type %q (supported: console, feishu)", pc.IM.Type)
-	}
 }
 
 // Run starts each project client in a goroutine and blocks until ctx is done

@@ -1,9 +1,11 @@
 package shared
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // AppConfig is the top-level config.json structure.
@@ -33,7 +35,6 @@ type ProjectConfig struct {
 // IMConfig describes the IM transport for a project.
 type IMConfig struct {
 	Type      string `json:"type"`
-	Version   int    `json:"version,omitempty"`
 	AppID     string `json:"appID,omitempty"`
 	AppSecret string `json:"appSecret,omitempty"`
 }
@@ -75,9 +76,21 @@ func LoadConfig(path string) (*AppConfig, error) {
 		}
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
+	if bytes.Contains(data, []byte(`"version"`)) {
+		return nil, fmt.Errorf("parse config %s: im.version has been removed; IM2 is the only supported runtime", path)
+	}
 	var cfg AppConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	for _, project := range cfg.Projects {
+		switch strings.ToLower(strings.TrimSpace(project.IM.Type)) {
+		case "feishu", "app":
+		default:
+			return nil, fmt.Errorf("parse config %s: unsupported im.type %q (supported: feishu, app)", path, project.IM.Type)
+		}
 	}
 	return &cfg, nil
 }
