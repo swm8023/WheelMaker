@@ -10,18 +10,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	hubim "github.com/swm8023/wheelmaker/internal/hub/im"
-	hubfeishu "github.com/swm8023/wheelmaker/internal/hub/im/feishu"
 	"github.com/swm8023/wheelmaker/internal/im2"
 )
 
-type Config = hubfeishu.Config
-
 type transport interface {
-	OnMessage(hubim.MessageHandler)
-	OnCardAction(func(hubim.CardActionEvent))
-	Send(chatID, text string, kind hubim.TextKind) error
-	SendCard(chatID, messageID string, card hubim.Card) error
+	OnMessage(MessageHandler)
+	OnCardAction(func(CardActionEvent))
+	Send(chatID, text string, kind TextKind) error
+	SendCard(chatID, messageID string, card Card) error
 	SendReaction(messageID, emoji string) error
 	MarkDone(chatID string) error
 	Run(ctx context.Context) error
@@ -45,7 +41,7 @@ type Channel struct {
 }
 
 func New(cfg Config) *Channel {
-	return newWithTransport(hubfeishu.New(cfg))
+	return newWithTransport(newTransport(cfg))
 }
 
 func newWithTransport(inner transport) *Channel {
@@ -76,9 +72,9 @@ func (c *Channel) Send(ctx context.Context, chatID string, event im2.OutboundEve
 	case im2.OutboundACP:
 		return c.sendACP(chatID, event.Payload)
 	case im2.OutboundSystem:
-		return c.inner.Send(chatID, payloadText(event.Payload), hubim.TextSystem)
+		return c.inner.Send(chatID, payloadText(event.Payload), TextSystem)
 	default:
-		return c.inner.Send(chatID, payloadText(event.Payload), hubim.TextNormal)
+		return c.inner.Send(chatID, payloadText(event.Payload), TextNormal)
 	}
 }
 
@@ -107,10 +103,10 @@ func (c *Channel) RequestDecision(ctx context.Context, chatID string, req im2.De
 			meta[k] = strings.TrimSpace(v)
 		}
 	}
-	card := hubim.OptionsCard{
+	card := OptionsCard{
 		Title:   req.Title,
 		Body:    req.Body,
-		Options: toHubOptions(req.Options),
+		Options: req.Options,
 		Meta:    meta,
 	}
 	if err := c.inner.SendCard(chatID, "", card); err != nil {
@@ -139,13 +135,13 @@ func (c *Channel) Run(ctx context.Context) error {
 func (c *Channel) sendACP(chatID string, payload any) error {
 	p, ok := payload.(im2.ACPPayload)
 	if !ok {
-		return c.inner.Send(chatID, payloadText(payload), hubim.TextNormal)
+		return c.inner.Send(chatID, payloadText(payload), TextNormal)
 	}
 	switch p.UpdateType {
 	case "text":
-		return c.inner.Send(chatID, p.Text, hubim.TextNormal)
+		return c.inner.Send(chatID, p.Text, TextNormal)
 	case "thought":
-		return c.inner.Send(chatID, p.Text, hubim.TextThought)
+		return c.inner.Send(chatID, p.Text, TextThought)
 	case "done":
 		return c.inner.MarkDone(chatID)
 	case "error":
@@ -153,24 +149,24 @@ func (c *Channel) sendACP(chatID string, payload any) error {
 		if text == "" {
 			text = "Agent request failed."
 		}
-		return c.inner.Send(chatID, text, hubim.TextNormal)
+		return c.inner.Send(chatID, text, TextNormal)
 	case "tool_call", "tool_call_update":
 		if upd, ok := parseToolCallUpdate(p.Raw); ok {
-			return c.inner.SendCard(chatID, "", hubim.ToolCallCard{Update: upd})
+			return c.inner.SendCard(chatID, "", ToolCallCard{Update: upd})
 		}
 	case "plan":
 		if msg := renderRawSummary("Plan update", p.Raw); msg != "" {
-			return c.inner.Send(chatID, msg, hubim.TextNormal)
+			return c.inner.Send(chatID, msg, TextNormal)
 		}
 	case "config_option_update":
 		if msg := renderRawSummary("Config updated", p.Raw); msg != "" {
-			return c.inner.Send(chatID, msg, hubim.TextNormal)
+			return c.inner.Send(chatID, msg, TextNormal)
 		}
 	}
 	return nil
 }
 
-func (c *Channel) handleMessage(m hubim.Message) {
+func (c *Channel) handleMessage(m Message) {
 	if c.resolveDecisionText(m) {
 		return
 	}
@@ -182,7 +178,7 @@ func (c *Channel) handleMessage(m hubim.Message) {
 	}
 }
 
-func (c *Channel) handleCardAction(evt hubim.CardActionEvent) {
+func (c *Channel) handleCardAction(evt CardActionEvent) {
 	if strings.TrimSpace(evt.Value["kind"]) != "decision" {
 		return
 	}
@@ -218,7 +214,7 @@ func (c *Channel) handleCardAction(evt hubim.CardActionEvent) {
 	}
 }
 
-func (c *Channel) resolveDecisionText(m hubim.Message) bool {
+func (c *Channel) resolveDecisionText(m Message) bool {
 	chatID := strings.TrimSpace(m.ChatID)
 	c.mu.Lock()
 	pd, ok := c.byChat[chatID]
@@ -260,14 +256,6 @@ func (c *Channel) wasClosedLocked(decisionID string) bool {
 	return ok && time.Since(t) < 5*time.Minute
 }
 
-func toHubOptions(options []im2.DecisionOption) []hubim.DecisionOption {
-	out := make([]hubim.DecisionOption, 0, len(options))
-	for _, opt := range options {
-		out = append(out, hubim.DecisionOption{ID: opt.ID, Label: opt.Label, Value: opt.Value})
-	}
-	return out
-}
-
 func parseDecisionReply(input string, opts []im2.DecisionOption) im2.DecisionResult {
 	if input == "" {
 		return im2.DecisionResult{Outcome: "invalid", Source: "text_reply"}
@@ -287,17 +275,17 @@ func parseDecisionReply(input string, opts []im2.DecisionOption) im2.DecisionRes
 	return im2.DecisionResult{Outcome: "invalid", Source: "text_reply"}
 }
 
-func parseToolCallUpdate(raw []byte) (hubim.ToolCallUpdate, bool) {
+func parseToolCallUpdate(raw []byte) (ToolCallUpdate, bool) {
 	if len(raw) == 0 {
-		return hubim.ToolCallUpdate{}, false
+		return ToolCallUpdate{}, false
 	}
-	var upd hubim.ToolCallUpdate
+	var upd ToolCallUpdate
 	if err := json.Unmarshal(raw, &upd); err != nil {
-		return hubim.ToolCallUpdate{}, false
+		return ToolCallUpdate{}, false
 	}
 	upd.ToolCallID = strings.TrimSpace(upd.ToolCallID)
 	if upd.ToolCallID == "" {
-		return hubim.ToolCallUpdate{}, false
+		return ToolCallUpdate{}, false
 	}
 	return upd, true
 }
@@ -325,13 +313,4 @@ func renderRawSummary(prefix string, raw []byte) string {
 		return fmt.Sprintf("%s: %s", prefix, strings.TrimSpace(title))
 	}
 	return prefix
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

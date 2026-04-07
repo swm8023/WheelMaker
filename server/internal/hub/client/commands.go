@@ -9,12 +9,33 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
+type HelpOption struct {
+	Label   string
+	Command string
+	Value   string
+	MenuID  string
+}
+
+type HelpMenu struct {
+	Title   string
+	Body    string
+	Options []HelpOption
+	Parent  string
+}
+
+type HelpModel struct {
+	Title    string
+	Body     string
+	Options  []HelpOption
+	RootMenu string
+	Menus    map[string]HelpMenu
+}
+
 // handleCommand processes recognized "/" commands.
-func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) {
+func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 
@@ -73,10 +94,10 @@ func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) 
 		c.handleListCommand(sess)
 
 	case "/new":
-		c.handleNewCommand(sess, msg)
+		c.handleNewCommand(routeKey)
 
 	case "/load":
-		c.handleLoadCommand(sess, msg, args)
+		c.handleLoadCommand(sess, routeKey, args)
 
 	case "/mode":
 		sess.handleConfigCommand(ctx, args, "Usage: /mode <mode-id-or-name>", "Mode", resolveModeArg)
@@ -91,20 +112,14 @@ func (c *Client) handleCommand(sess *Session, msg im.Message, cmd, args string) 
 }
 
 // handleNewCommand creates a new Client-level session and rebinds the route.
-func (c *Client) handleNewCommand(sess *Session, msg im.Message) {
-	routeKey := msg.RouteKey
-	if routeKey == "" {
-		routeKey = msg.ChatID
-	}
-	if routeKey == "" {
-		routeKey = "default"
-	}
+func (c *Client) handleNewCommand(routeKey string) {
+	routeKey = normalizeRouteKey(routeKey)
 	newSess := c.ClientNewSession(routeKey)
 	newSess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
 }
 
 // handleLoadCommand loads a session by index and rebinds the route.
-func (c *Client) handleLoadCommand(sess *Session, msg im.Message, args string) {
+func (c *Client) handleLoadCommand(sess *Session, routeKey, args string) {
 	idxStr := strings.TrimSpace(args)
 	if idxStr == "" {
 		sess.reply("Usage: /load <index>  (see /list)")
@@ -115,13 +130,7 @@ func (c *Client) handleLoadCommand(sess *Session, msg im.Message, args string) {
 		sess.reply(fmt.Sprintf("Load error: %v", err))
 		return
 	}
-	routeKey := msg.RouteKey
-	if routeKey == "" {
-		routeKey = msg.ChatID
-	}
-	if routeKey == "" {
-		routeKey = "default"
-	}
+	routeKey = normalizeRouteKey(routeKey)
 	loaded, err := c.ClientLoadSession(routeKey, idx)
 	if err != nil {
 		sess.reply(fmt.Sprintf("Load error: %v", err))
@@ -500,7 +509,7 @@ func (s *Session) persistSessionSummaries(agentName string, sessions []SessionSu
 	s.persistProjectState(st)
 }
 
-func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel, error) {
+func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, error) {
 	s.mu.Lock()
 	hasInstance := s.instance != nil
 	s.mu.Unlock()
@@ -523,11 +532,11 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 	}
 	s.mu.Unlock()
 
-	model := im.HelpModel{
+	model := HelpModel{
 		Title:    "WheelMaker",
 		Body:     "",
 		RootMenu: "root",
-		Menus:    map[string]im.HelpMenu{},
+		Menus:    map[string]HelpMenu{},
 	}
 
 	// 1. Agent switch (show current agent in label)
@@ -536,18 +545,18 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 		agentLabel = "Agent: " + currentAgent
 	}
 	agentMenuID := "menu:agents"
-	model.Options = append(model.Options, im.HelpOption{
+	model.Options = append(model.Options, HelpOption{
 		Label:  agentLabel,
 		MenuID: agentMenuID,
 	})
-	agentMenu := im.HelpMenu{
+	agentMenu := HelpMenu{
 		Title:  "Agent Switch",
 		Body:   "Choose an agent to switch to.",
 		Parent: model.RootMenu,
 	}
 	agentNames := s.registry.Names()
 	for _, name := range agentNames {
-		agentMenu.Options = append(agentMenu.Options, im.HelpOption{
+		agentMenu.Options = append(agentMenu.Options, HelpOption{
 			Label:   "Agent: " + name,
 			Command: "/use",
 			Value:   name,
@@ -566,11 +575,11 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 			label += " (" + cur + ")"
 		}
 		menuID := "menu:config:" + cfgID
-		model.Options = append(model.Options, im.HelpOption{
+		model.Options = append(model.Options, HelpOption{
 			Label:  label,
 			MenuID: menuID,
 		})
-		cfgMenu := im.HelpMenu{
+		cfgMenu := HelpMenu{
 			Title:  "Config: " + cfgID,
 			Body:   "Select a value.",
 			Parent: model.RootMenu,
@@ -580,7 +589,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 			if display == "" {
 				continue
 			}
-			cfgMenu.Options = append(cfgMenu.Options, im.HelpOption{
+			cfgMenu.Options = append(cfgMenu.Options, HelpOption{
 				Label:   display,
 				Command: "/config",
 				Value:   cfgID + " " + v.Value,
@@ -594,11 +603,11 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 
 	// 3. Session List — submenu from cached sessions, clicking loads the session
 	sessionMenuID := "menu:sessions"
-	model.Options = append(model.Options, im.HelpOption{
+	model.Options = append(model.Options, HelpOption{
 		Label:  "Session List",
 		MenuID: sessionMenuID,
 	})
-	sessionMenu := im.HelpMenu{
+	sessionMenu := HelpMenu{
 		Title:  "Sessions",
 		Body:   "Select a session to load.",
 		Parent: model.RootMenu,
@@ -609,7 +618,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 			title = "(no title)"
 		}
 		label := fmt.Sprintf("%d. %s", i+1, title)
-		sessionMenu.Options = append(sessionMenu.Options, im.HelpOption{
+		sessionMenu.Options = append(sessionMenu.Options, HelpOption{
 			Label:   label,
 			Command: "/load",
 			Value:   strconv.Itoa(i + 1),
@@ -621,7 +630,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (im.HelpModel,
 	model.Menus[sessionMenuID] = sessionMenu
 
 	// 4. Status
-	model.Options = append(model.Options, im.HelpOption{Label: "Status", Command: "/status"})
+	model.Options = append(model.Options, HelpOption{Label: "Status", Command: "/status"})
 
 	return model, nil
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	hubim "github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/im2"
 )
 
@@ -21,8 +20,8 @@ func TestChannelIDIsFeishu(t *testing.T) {
 }
 
 type fakeTransport struct {
-	onMsg    hubim.MessageHandler
-	onAction func(hubim.CardActionEvent)
+	onMsg    MessageHandler
+	onAction func(CardActionEvent)
 	sends    []fakeSend
 	cards    []fakeCard
 	done     []string
@@ -31,28 +30,28 @@ type fakeTransport struct {
 type fakeSend struct {
 	chatID string
 	text   string
-	kind   hubim.TextKind
+	kind   TextKind
 }
 
 type fakeCard struct {
 	chatID string
-	card   hubim.Card
+	card   Card
 }
 
-func (f *fakeTransport) OnMessage(h hubim.MessageHandler) {
+func (f *fakeTransport) OnMessage(h MessageHandler) {
 	f.onMsg = h
 }
 
-func (f *fakeTransport) OnCardAction(h func(hubim.CardActionEvent)) {
+func (f *fakeTransport) OnCardAction(h func(CardActionEvent)) {
 	f.onAction = h
 }
 
-func (f *fakeTransport) Send(chatID, text string, kind hubim.TextKind) error {
+func (f *fakeTransport) Send(chatID, text string, kind TextKind) error {
 	f.sends = append(f.sends, fakeSend{chatID: chatID, text: text, kind: kind})
 	return nil
 }
 
-func (f *fakeTransport) SendCard(chatID, _ string, card hubim.Card) error {
+func (f *fakeTransport) SendCard(chatID, _ string, card Card) error {
 	f.cards = append(f.cards, fakeCard{chatID: chatID, card: card})
 	return nil
 }
@@ -67,7 +66,7 @@ func (f *fakeTransport) Run(context.Context) error { return nil }
 func TestSend_ACPPayloadRendersByUpdateType(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
-	rawTool, _ := json.Marshal(hubim.ToolCallUpdate{SessionUpdate: "tool_call_update", ToolCallID: "tc-1", Title: "Read", Status: "completed"})
+	rawTool, _ := json.Marshal(ToolCallUpdate{SessionUpdate: "tool_call_update", ToolCallID: "tc-1", Title: "Read", Status: "completed"})
 
 	tests := []struct {
 		name string
@@ -89,13 +88,13 @@ func TestSend_ACPPayloadRendersByUpdateType(t *testing.T) {
 	if len(ft.sends) != 2 {
 		t.Fatalf("sends=%+v, want text and thought", ft.sends)
 	}
-	if ft.sends[0].kind != hubim.TextNormal || ft.sends[1].kind != hubim.TextThought {
+	if ft.sends[0].kind != TextNormal || ft.sends[1].kind != TextThought {
 		t.Fatalf("sends=%+v", ft.sends)
 	}
 	if len(ft.cards) != 1 {
 		t.Fatalf("cards=%+v, want one tool card", ft.cards)
 	}
-	if _, ok := ft.cards[0].card.(hubim.ToolCallCard); !ok {
+	if _, ok := ft.cards[0].card.(ToolCallCard); !ok {
 		t.Fatalf("card type=%T, want ToolCallCard", ft.cards[0].card)
 	}
 	if len(ft.done) != 1 || ft.done[0] != "chat-a" {
@@ -117,12 +116,12 @@ func TestRequestDecision_CardActionResolvesOnce(t *testing.T) {
 	}()
 
 	waitForCard(t, ft)
-	card := ft.cards[0].card.(hubim.OptionsCard)
+	card := ft.cards[0].card.(OptionsCard)
 	decisionID := card.Meta["decision_id"]
-	ft.onAction(hubim.CardActionEvent{ChatID: "chat-a", Value: map[string]string{
+	ft.onAction(CardActionEvent{ChatID: "chat-a", Value: map[string]string{
 		"kind": "decision", "decision_id": decisionID, "option_id": "allow", "value": "allow_once",
 	}})
-	ft.onAction(hubim.CardActionEvent{ChatID: "chat-a", Value: map[string]string{
+	ft.onAction(CardActionEvent{ChatID: "chat-a", Value: map[string]string{
 		"kind": "decision", "decision_id": decisionID, "option_id": "deny", "value": "deny",
 	}})
 
@@ -150,7 +149,7 @@ func TestRequestDecision_TextFallbackResolves(t *testing.T) {
 	}()
 
 	waitForCard(t, ft)
-	ft.onMsg(hubim.Message{ChatID: "chat-a", Text: "1"})
+	ft.onMsg(Message{ChatID: "chat-a", Text: "1"})
 	select {
 	case res := <-done:
 		if res.OptionID != "allow" || res.Source != "text_reply" {
@@ -166,7 +165,7 @@ func waitForCard(t *testing.T, ft *fakeTransport) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		if len(ft.cards) > 0 {
-			if _, ok := ft.cards[0].card.(hubim.OptionsCard); !ok {
+			if _, ok := ft.cards[0].card.(OptionsCard); !ok {
 				t.Fatalf("card type=%T, want OptionsCard", ft.cards[0].card)
 			}
 			return

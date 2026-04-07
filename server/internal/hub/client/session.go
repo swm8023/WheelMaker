@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
@@ -71,7 +70,6 @@ type Session struct {
 	registry         *agent.ACPFactory
 	persistence      ClientStateStore
 	state            *ProjectState
-	imBridge         *im.ImAdapter
 	im2Router        IM2Router
 	im2Source        *im2.ChatRef
 	imBlockedUpdates map[string]struct{}
@@ -107,14 +105,6 @@ func (s *Session) reply(text string) {
 			Kind:    im2.OutboundSystem,
 			Payload: im2.TextPayload{Text: text},
 		})
-		return
-	}
-	if s.imBridge != nil {
-		chatID := s.imBridge.ActiveChatID()
-		if chatID == "" {
-			chatID = s.ID
-		}
-		_ = s.imBridge.SendSystem(chatID, text)
 		return
 	}
 	fmt.Println(text)

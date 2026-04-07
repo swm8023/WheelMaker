@@ -10,11 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -62,6 +62,22 @@ type testInjectedInstance struct {
 	cancelFn  func() error
 }
 
+type Message struct {
+	ChannelID string
+	ChatID    string
+	Text      string
+	SessionID string
+}
+
+type TestCaptureRouter struct {
+	mu          sync.Mutex
+	Messages    []string
+	ChatIDs     []string
+	CardCount   int
+	Decisions   []fakeIM2Decision
+	textBuffers map[string]string
+}
+
 type fakeIM2Router struct {
 	binds     []fakeIM2Bind
 	sends     []fakeIM2Send
@@ -101,7 +117,69 @@ func (f *fakeIM2Router) RequestDecision(_ context.Context, target im2.SendTarget
 
 func (f *fakeIM2Router) Run(context.Context) error { return nil }
 
+func NewTestCaptureRouter() *TestCaptureRouter {
+	return &TestCaptureRouter{textBuffers: map[string]string{}}
+}
+
+func (r *TestCaptureRouter) Bind(context.Context, im2.ChatRef, string, im2.BindOptions) error {
+	return nil
+}
+
+func (r *TestCaptureRouter) Send(_ context.Context, target im2.SendTarget, event im2.OutboundEvent) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	chatID := target.ChatID
+	if target.Source != nil && strings.TrimSpace(target.Source.ChatID) != "" {
+		chatID = strings.TrimSpace(target.Source.ChatID)
+	}
+
+	switch event.Kind {
+	case im2.OutboundSystem:
+		payload, ok := event.Payload.(im2.TextPayload)
+		if !ok {
+			return nil
+		}
+		r.Messages = append(r.Messages, payload.Text)
+		r.ChatIDs = append(r.ChatIDs, chatID)
+	case im2.OutboundACP:
+		payload, ok := event.Payload.(im2.ACPPayload)
+		if !ok {
+			return nil
+		}
+		key := strings.TrimSpace(target.SessionID)
+		if key == "" {
+			key = chatID
+		}
+		switch payload.UpdateType {
+		case string(acp.UpdateText):
+			r.textBuffers[key] += payload.Text
+		case string(acp.UpdateDone):
+			if text := r.textBuffers[key]; text != "" {
+				r.Messages = append(r.Messages, text)
+				r.ChatIDs = append(r.ChatIDs, chatID)
+				delete(r.textBuffers, key)
+			}
+		default:
+			if strings.HasPrefix(payload.UpdateType, "tool_call") {
+				r.CardCount++
+			}
+		}
+	}
+	return nil
+}
+
+func (r *TestCaptureRouter) RequestDecision(_ context.Context, target im2.SendTarget, req im2.DecisionRequest) (im2.DecisionResult, error) {
+	r.mu.Lock()
+	r.Decisions = append(r.Decisions, fakeIM2Decision{target: target, req: req})
+	r.mu.Unlock()
+	return im2.DecisionResult{Outcome: "cancelled", Source: "test"}, nil
+}
+
+func (r *TestCaptureRouter) Run(context.Context) error { return nil }
+
 var _ agent.Instance = (*testInjectedInstance)(nil)
+var _ IM2Router = (*TestCaptureRouter)(nil)
 
 func (i *testInjectedInstance) Name() string { return i.name }
 
@@ -222,12 +300,69 @@ func (c *Client) InjectState(st *ProjectState) {
 	c.activeSession.mu.Unlock()
 }
 
-// InjectIMChannel sets the IM bridge over the provided IM channel.
-func (c *Client) InjectIMChannel(p im.Channel) {
-	c.imBridge = im.NewBridge(p)
-	c.activeSession.mu.Lock()
-	c.activeSession.imBridge = c.imBridge
-	c.activeSession.mu.Unlock()
+// HandleMessage preserves the old test entrypoint shape while routing through IM2.
+func (c *Client) HandleMessage(msg Message) {
+	channelID := strings.TrimSpace(msg.ChannelID)
+	if channelID == "" {
+		channelID = "test"
+	}
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		return
+	}
+
+	source := im2.ChatRef{ChannelID: channelID, ChatID: strings.TrimSpace(msg.ChatID)}
+	routeKey := normalizeRouteKey(im2RouteKey(source))
+	if source.ChatID == "" {
+		routeKey = "default"
+	}
+
+	if cmd, args, ok := parseCommand(text); ok {
+		switch cmd {
+		case "/new":
+			sess := c.ClientNewSession(routeKey)
+			if source.ChatID != "" {
+				sess.setIM2Source(source)
+			}
+			sess.reply("Created new session: " + sess.ID)
+			return
+		case "/load":
+			idx, err := parsePositiveIndex(args)
+			if err != nil {
+				sess := c.resolveSession(routeKey)
+				if source.ChatID != "" {
+					sess.setIM2Source(source)
+				}
+				sess.reply("Load error: " + err.Error())
+				return
+			}
+			loaded, err := c.ClientLoadSession(routeKey, idx)
+			if err != nil {
+				sess := c.resolveSession(routeKey)
+				if source.ChatID != "" {
+					sess.setIM2Source(source)
+				}
+				sess.reply("Load error: " + err.Error())
+				return
+			}
+			if source.ChatID != "" {
+				loaded.setIM2Source(source)
+			}
+			loaded.reply("Loaded session: " + loaded.ID)
+			return
+		}
+	}
+
+	sess := c.resolveSession(routeKey)
+	if source.ChatID != "" {
+		sess.setIM2Source(source)
+	}
+
+	if cmd, args, ok := parseCommand(text); ok {
+		c.handleCommand(sess, routeKey, cmd, args)
+		return
+	}
+	sess.handlePrompt(text)
 }
 
 // InjectAgentFactory overrides one built-in provider creator for tests.
@@ -579,6 +714,35 @@ func TestHandleIM2Inbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	}
 	if !foundACP {
 		t.Fatalf("sends=%+v, want OutboundACP", fake.sends)
+	}
+}
+
+func TestHandleIM2Inbound_ReusesBoundRouteWithoutSessionID(t *testing.T) {
+	c := New(&noopStore{}, nil, "test", "/tmp")
+	fake := &fakeIM2Router{}
+	c.SetIM2Router(fake)
+
+	routeKey := im2RouteKey(im2.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
+	existing := c.ClientNewSession(routeKey)
+
+	if err := c.HandleIM2Inbound(context.Background(), im2.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/status"}); err != nil {
+		t.Fatalf("HandleIM2Inbound: %v", err)
+	}
+
+	c.mu.Lock()
+	activeID := c.activeSession.ID
+	routedID := c.routeMap[routeKey]
+	sessionCount := len(c.sessions)
+	c.mu.Unlock()
+
+	if activeID != existing.ID {
+		t.Fatalf("active session = %q, want %q", activeID, existing.ID)
+	}
+	if routedID != existing.ID {
+		t.Fatalf("routeMap[%q] = %q, want %q", routeKey, routedID, existing.ID)
+	}
+	if sessionCount != 2 {
+		t.Fatalf("session count = %d, want 2", sessionCount)
 	}
 }
 
@@ -978,8 +1142,7 @@ func TestResolveSession_RestoresEvictedSession(t *testing.T) {
 	c.mu.Unlock()
 
 	// resolveSession should restore from SQLite.
-	msg := im.Message{RouteKey: "route-x"}
-	sess := c.resolveSession(msg)
+	sess := c.resolveSession("route-x")
 
 	if sess.ID != "evicted-sess" {
 		t.Fatalf("resolved session ID = %q, want %q", sess.ID, "evicted-sess")

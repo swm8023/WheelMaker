@@ -16,7 +16,6 @@ import (
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
@@ -30,13 +29,13 @@ type Config struct {
 	YOLO              bool
 }
 
-// Channel implements im.Channel using Feishu WS (inbound) + go-lark (outbound).
-type Channel struct {
+// Channel implements Channel using Feishu WS (inbound) + go-lark (outbound).
+type transportChannel struct {
 	cfg Config
 
 	mu      sync.RWMutex
-	handler im.MessageHandler
-	action  func(im.CardActionEvent)
+	handler MessageHandler
+	action  func(CardActionEvent)
 	bot     *lark.Bot
 
 	debugMu        sync.Mutex
@@ -72,13 +71,13 @@ type textStream struct {
 
 type toolCardState struct {
 	messageID string
-	update    im.ToolCallUpdate
+	update    ToolCallUpdate
 	perm      *toolPermissionState
 }
 
 type toolPermissionState struct {
 	decisionID    string
-	options       []im.DecisionOption
+	options       []DecisionOption
 	active        bool
 	selectedID    string
 	selectedLabel string
@@ -104,8 +103,8 @@ type pendingAckReaction struct {
 }
 
 // New creates a Feishu IM adapter.
-func New(cfg Config) *Channel {
-	return &Channel{
+func newTransport(cfg Config) *transportChannel {
+	return &transportChannel{
 		cfg:            cfg,
 		debugStreams:   map[string]*debugStream{},
 		textStreams:    map[string]*textStream{},
@@ -120,34 +119,34 @@ func New(cfg Config) *Channel {
 }
 
 // OnMessage registers the inbound message handler.
-func (f *Channel) OnMessage(handler im.MessageHandler) {
+func (f *transportChannel) OnMessage(handler MessageHandler) {
 	f.mu.Lock()
 	f.handler = handler
 	f.mu.Unlock()
 }
 
 // OnCardAction registers card interaction callback.
-func (f *Channel) OnCardAction(handler func(im.CardActionEvent)) {
+func (f *transportChannel) OnCardAction(handler func(CardActionEvent)) {
 	f.mu.Lock()
 	f.action = handler
 	f.mu.Unlock()
 }
 
 // Send dispatches a text message by kind to the appropriate stream.
-func (f *Channel) Send(chatID, text string, kind im.TextKind) error {
+func (f *transportChannel) Send(chatID, text string, kind TextKind) error {
 	switch kind {
-	case im.TextThought:
+	case TextThought:
 		return f.sendThought(chatID, text)
-	case im.TextDebug:
+	case TextDebug:
 		return f.sendDebug(chatID, text)
-	case im.TextSystem:
+	case TextSystem:
 		return f.sendSystem(chatID, text)
 	default:
 		return f.sendText(chatID, text)
 	}
 }
 
-func (f *Channel) sendText(chatID, text string) error {
+func (f *transportChannel) sendText(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" || text == "" {
 		return nil
@@ -213,7 +212,7 @@ func (f *Channel) sendText(chatID, text string) error {
 	return nil
 }
 
-func (f *Channel) sendThought(chatID, text string) error {
+func (f *transportChannel) sendThought(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" || text == "" {
 		return nil
@@ -277,7 +276,7 @@ func (f *Channel) sendThought(chatID, text string) error {
 	return nil
 }
 
-func (f *Channel) sendSystem(chatID, text string) error {
+func (f *transportChannel) sendSystem(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	text = strings.TrimSpace(text)
 	if chatID == "" || text == "" {
@@ -310,7 +309,7 @@ func (f *Channel) sendSystem(chatID, text string) error {
 	return nil
 }
 
-func (f *Channel) resetTextStream(chatID string) {
+func (f *transportChannel) resetTextStream(chatID string) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return
@@ -320,7 +319,7 @@ func (f *Channel) resetTextStream(chatID string) {
 	f.textMu.Unlock()
 }
 
-func (f *Channel) resetThoughtStream(chatID string) {
+func (f *transportChannel) resetThoughtStream(chatID string) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return
@@ -330,7 +329,7 @@ func (f *Channel) resetThoughtStream(chatID string) {
 	f.textMu.Unlock()
 }
 
-func (f *Channel) resetSystemStream(chatID string) {
+func (f *transportChannel) resetSystemStream(chatID string) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return
@@ -341,13 +340,13 @@ func (f *Channel) resetSystemStream(chatID string) {
 }
 
 // SendCard dispatches a card payload to the appropriate renderer.
-func (f *Channel) SendCard(chatID, messageID string, card im.Card) error {
+func (f *transportChannel) SendCard(chatID, messageID string, card Card) error {
 	switch c := card.(type) {
-	case im.RawCard:
+	case RawCard:
 		return f.sendRawCard(chatID, messageID, c)
-	case im.OptionsCard:
+	case OptionsCard:
 		return f.sendOptions(chatID, c)
-	case im.ToolCallCard:
+	case ToolCallCard:
 		return f.sendToolCall(chatID, c)
 	default:
 		return fmt.Errorf("feishu: unsupported card type %T", card)
@@ -355,7 +354,7 @@ func (f *Channel) SendCard(chatID, messageID string, card im.Card) error {
 }
 
 // sendRawCard posts a new card or updates an existing one in place.
-func (f *Channel) sendRawCard(chatID, messageID string, card im.RawCard) error {
+func (f *transportChannel) sendRawCard(chatID, messageID string, card RawCard) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -384,7 +383,7 @@ func (f *Channel) sendRawCard(chatID, messageID string, card im.RawCard) error {
 }
 
 // sendOptions renders decision options as interactive buttons.
-func (f *Channel) sendOptions(chatID string, oc im.OptionsCard) error {
+func (f *transportChannel) sendOptions(chatID string, oc OptionsCard) error {
 	title, body, options, meta := oc.Title, oc.Body, oc.Options, oc.Meta
 	toolCallID := strings.TrimSpace(meta["tool_call_id"])
 	decisionID := strings.TrimSpace(meta["decision_id"])
@@ -435,7 +434,7 @@ func (f *Channel) sendOptions(chatID string, oc im.OptionsCard) error {
 			"actions": actions,
 		})
 	}
-	rawCard := im.RawCard{
+	rawCard := RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -448,7 +447,7 @@ func (f *Channel) sendOptions(chatID string, oc im.OptionsCard) error {
 	return f.sendRawCard(chatID, "", rawCard)
 }
 
-func (f *Channel) attachPermissionOptionsToToolCard(chatID, toolCallID, title string, options []im.DecisionOption, meta map[string]string) error {
+func (f *transportChannel) attachPermissionOptionsToToolCard(chatID, toolCallID, title string, options []DecisionOption, meta map[string]string) error {
 	chatID = strings.TrimSpace(chatID)
 	toolCallID = strings.TrimSpace(toolCallID)
 	if chatID == "" || toolCallID == "" {
@@ -477,7 +476,7 @@ func (f *Channel) attachPermissionOptionsToToolCard(chatID, toolCallID, title st
 	st := chatCards[toolCallID]
 	if st == nil {
 		st = &toolCardState{
-			update: im.ToolCallUpdate{
+			update: ToolCallUpdate{
 				ToolCallID: toolCallID,
 				Title:      toolTitle,
 				Kind:       toolKind,
@@ -494,7 +493,7 @@ func (f *Channel) attachPermissionOptionsToToolCard(chatID, toolCallID, title st
 	}
 	st.perm = &toolPermissionState{
 		decisionID: decisionID,
-		options:    append([]im.DecisionOption(nil), options...),
+		options:    append([]DecisionOption(nil), options...),
 		active:     true,
 	}
 	stCopy := *st
@@ -508,7 +507,7 @@ func (f *Channel) attachPermissionOptionsToToolCard(chatID, toolCallID, title st
 }
 
 // SendReaction adds an emoji reaction.
-func (f *Channel) SendReaction(messageID, emoji string) error {
+func (f *transportChannel) SendReaction(messageID, emoji string) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
@@ -518,7 +517,7 @@ func (f *Channel) SendReaction(messageID, emoji string) error {
 }
 
 // MarkDone adds DONE reaction to the last outbound message in this chat.
-func (f *Channel) MarkDone(chatID string) error {
+func (f *transportChannel) MarkDone(chatID string) error {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return nil
@@ -530,7 +529,7 @@ func (f *Channel) MarkDone(chatID string) error {
 	return f.SendReaction(messageID, "DONE")
 }
 
-func (f *Channel) addReceiveAck(chatID, messageID string) {
+func (f *transportChannel) addReceiveAck(chatID, messageID string) {
 	chatID = strings.TrimSpace(chatID)
 	messageID = strings.TrimSpace(messageID)
 	if chatID == "" || messageID == "" {
@@ -553,7 +552,7 @@ func (f *Channel) addReceiveAck(chatID, messageID string) {
 	f.ackMu.Unlock()
 }
 
-func (f *Channel) popPendingAck(chatID string) (pendingAckReaction, bool) {
+func (f *transportChannel) popPendingAck(chatID string) (pendingAckReaction, bool) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return pendingAckReaction{}, false
@@ -568,7 +567,7 @@ func (f *Channel) popPendingAck(chatID string) (pendingAckReaction, bool) {
 	return ack, true
 }
 
-func (f *Channel) clearReceiveAck(chatID string) (pendingAckReaction, bool) {
+func (f *transportChannel) clearReceiveAck(chatID string) (pendingAckReaction, bool) {
 	ack, ok := f.popPendingAck(chatID)
 	if !ok {
 		return pendingAckReaction{}, false
@@ -577,7 +576,7 @@ func (f *Channel) clearReceiveAck(chatID string) (pendingAckReaction, bool) {
 	return ack, true
 }
 
-func (f *Channel) setLastOutbound(chatID, messageID string) {
+func (f *transportChannel) setLastOutbound(chatID, messageID string) {
 	chatID = strings.TrimSpace(chatID)
 	messageID = strings.TrimSpace(messageID)
 	if chatID == "" || messageID == "" {
@@ -588,7 +587,7 @@ func (f *Channel) setLastOutbound(chatID, messageID string) {
 	f.lastMu.Unlock()
 }
 
-func (f *Channel) getLastOutbound(chatID string) string {
+func (f *transportChannel) getLastOutbound(chatID string) string {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return ""
@@ -598,7 +597,7 @@ func (f *Channel) getLastOutbound(chatID string) string {
 	return strings.TrimSpace(f.lastOutbound[chatID])
 }
 
-func (f *Channel) sendDebug(chatID, text string) error {
+func (f *transportChannel) sendDebug(chatID, text string) error {
 	chatID = strings.TrimSpace(chatID)
 	line := sanitizeDebugStreamLine(text)
 	if chatID == "" || line == "" {
@@ -635,7 +634,7 @@ func sanitizeDebugStreamLine(text string) string {
 	return line
 }
 
-func (f *Channel) resetDebugStream(chatID string) {
+func (f *transportChannel) resetDebugStream(chatID string) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return
@@ -645,7 +644,7 @@ func (f *Channel) resetDebugStream(chatID string) {
 	f.debugMu.Unlock()
 }
 
-func (f *Channel) flushDebug(chatID string) {
+func (f *transportChannel) flushDebug(chatID string) {
 	f.debugMu.Lock()
 	ds := f.debugStreams[chatID]
 	if ds == nil {
@@ -691,7 +690,7 @@ func (f *Channel) flushDebug(chatID string) {
 	_, _ = bot.UpdateMessage(messageID, msg)
 }
 
-func buildDebugCard(lines []string) im.RawCard {
+func buildDebugCard(lines []string) RawCard {
 	if len(lines) > 120 {
 		lines = lines[len(lines)-120:]
 	}
@@ -702,7 +701,7 @@ func buildDebugCard(lines []string) im.RawCard {
 		b.WriteString("\n")
 	}
 	b.WriteString("```")
-	return im.RawCard{
+	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -716,20 +715,20 @@ func buildDebugCard(lines []string) im.RawCard {
 	}
 }
 
-func buildTextStreamCard(content string, streaming bool) im.RawCard {
+func buildTextStreamCard(content string, streaming bool) RawCard {
 	_ = streaming
 	elements := []map[string]any{
 		{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
 	}
-	return im.RawCard{
+	return RawCard{
 		"config":   map[string]any{"update_multi": true},
 		"elements": elements,
 	}
 }
 
-func buildThoughtStreamCard(content string, streaming bool) im.RawCard {
+func buildThoughtStreamCard(content string, streaming bool) RawCard {
 	_ = streaming
-	return im.RawCard{
+	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -743,8 +742,8 @@ func buildThoughtStreamCard(content string, streaming bool) im.RawCard {
 	}
 }
 
-func buildSystemStreamCard(content string) im.RawCard {
-	return im.RawCard{
+func buildSystemStreamCard(content string) RawCard {
+	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -799,7 +798,7 @@ func startsMarkdownSection(line string) bool {
 }
 
 // SendToolCall renders one streaming card per toolCallId and updates it in place.
-func (f *Channel) sendToolCall(chatID string, tc im.ToolCallCard) error {
+func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) error {
 	update := tc.Update
 	chatID = strings.TrimSpace(chatID)
 	toolCallID := strings.TrimSpace(update.ToolCallID)
@@ -861,7 +860,7 @@ func (f *Channel) sendToolCall(chatID string, tc im.ToolCallCard) error {
 	return err
 }
 
-func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _ bool) error {
+func (f *transportChannel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _ bool) error {
 	if st == nil {
 		return nil
 	}
@@ -922,7 +921,7 @@ func (f *Channel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _
 	return nil
 }
 
-func (f *Channel) resetCompactToolStream(chatID string) {
+func (f *transportChannel) resetCompactToolStream(chatID string) {
 	if !f.cfg.YOLO {
 		return
 	}
@@ -935,7 +934,7 @@ func (f *Channel) resetCompactToolStream(chatID string) {
 	f.toolMu.Unlock()
 }
 
-func (f *Channel) sendToolCallCompact(chatID string, update im.ToolCallUpdate) error {
+func (f *transportChannel) sendToolCallCompact(chatID string, update ToolCallUpdate) error {
 	toolCallID := strings.TrimSpace(update.ToolCallID)
 	if toolCallID == "" {
 		return nil
@@ -1062,7 +1061,7 @@ func compactStatusEmoji(status string) string {
 	}
 }
 
-func buildCompactToolCard(lines []string, transcript string, streaming bool) im.RawCard {
+func buildCompactToolCard(lines []string, transcript string, streaming bool) RawCard {
 	_ = streaming
 	title := compactToolIconTitle(lines)
 	if strings.TrimSpace(transcript) == "" {
@@ -1072,7 +1071,7 @@ func buildCompactToolCard(lines []string, transcript string, streaming bool) im.
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
 	}
-	return im.RawCard{
+	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"template": "blue",
@@ -1155,7 +1154,7 @@ func isToolCallTerminalStatus(status string) bool {
 	}
 }
 
-func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermissionState, streaming bool) im.RawCard {
+func buildToolCallCard(chatID string, update ToolCallUpdate, perm *toolPermissionState, streaming bool) RawCard {
 	_ = streaming
 	status := strings.ToLower(strings.TrimSpace(update.Status))
 	if status == "" {
@@ -1194,7 +1193,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 			elements = append(elements, map[string]any{"tag": "action", "actions": actions})
 		}
 	}
-	return im.RawCard{
+	return RawCard{
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"template": template,
@@ -1207,7 +1206,7 @@ func buildToolCallCard(chatID string, update im.ToolCallUpdate, perm *toolPermis
 	}
 }
 
-func toolCallCommandSummary(update im.ToolCallUpdate) string {
+func toolCallCommandSummary(update ToolCallUpdate) string {
 	out := toolCallCommandLine(update)
 	if out == "" {
 		if strings.TrimSpace(update.Kind) != "" {
@@ -1249,7 +1248,7 @@ func toolPermissionEmoji(perm *toolPermissionState) string {
 	}
 	return "\U000026AA"
 }
-func toolCallDetailBlock(update im.ToolCallUpdate) string {
+func toolCallDetailBlock(update ToolCallUpdate) string {
 	cmd := strings.TrimSpace(toolCallCommandLine(update))
 	if cmd == "" {
 		cmd = "<unknown command>"
@@ -1262,7 +1261,7 @@ func toolCallDetailBlock(update im.ToolCallUpdate) string {
 	return previewBlock(block, 3200)
 }
 
-func toolCallCommandLine(update im.ToolCallUpdate) string {
+func toolCallCommandLine(update ToolCallUpdate) string {
 	if cmd := commandFromRawInput(update.RawInput); cmd != "" {
 		return cmd
 	}
@@ -1310,7 +1309,7 @@ func commandFromRawOutput(raw json.RawMessage) string {
 	}
 	return strings.TrimSpace(strings.Join(payload.Command, " "))
 }
-func toolCallOutputText(update im.ToolCallUpdate) string {
+func toolCallOutputText(update ToolCallUpdate) string {
 	if text := outputFromRawOutput(update.RawOutput); text != "" {
 		return text
 	}
@@ -1403,7 +1402,7 @@ func decodeRawText(raw json.RawMessage) string {
 }
 
 // Run starts Feishu WS event loop and blocks until ctx is done.
-func (f *Channel) Run(ctx context.Context) error {
+func (f *transportChannel) Run(ctx context.Context) error {
 	bot, err := f.ensureBot()
 	if err != nil {
 		shared.Error("feishu ws: bot init failed: %v", err)
@@ -1438,11 +1437,18 @@ func (f *Channel) Run(ctx context.Context) error {
 		return nil
 	case wsExitStartFailed:
 		shared.Error("feishu ws: connection failed: %v", startErr)
-		return fmt.Errorf("feishu ws start: %w", err)
+		return finalizeWSRunError(ctx.Err(), startErr)
 	default:
 		shared.Warn("feishu ws: event loop exited without context cancellation")
 		return nil
 	}
+}
+
+func finalizeWSRunError(ctxErr, startErr error) error {
+	if classifyWSRunExit(ctxErr, startErr) != wsExitStartFailed {
+		return nil
+	}
+	return fmt.Errorf("feishu ws start: %w", startErr)
 }
 
 type wsRunExit string
@@ -1474,7 +1480,7 @@ func maskAppID(appID string) string {
 	return id[:3] + "***" + id[len(id)-3:]
 }
 
-func (f *Channel) ensureBot() (*lark.Bot, error) {
+func (f *transportChannel) ensureBot() (*lark.Bot, error) {
 	f.mu.RLock()
 	if f.bot != nil {
 		b := f.bot
@@ -1494,7 +1500,7 @@ func (f *Channel) ensureBot() (*lark.Bot, error) {
 	return bot, nil
 }
 
-func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageReceiveV1) error {
+func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageReceiveV1) error {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		return nil
 	}
@@ -1505,10 +1511,15 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 	if msg.ChatId == nil || msg.MessageId == nil {
 		return nil
 	}
+	chatID := strings.TrimSpace(*msg.ChatId)
+	messageID := strings.TrimSpace(*msg.MessageId)
+	if chatID == "" || messageID == "" {
+		return nil
+	}
 	if isFeishuMessageStale(msg.CreateTime) {
 		return nil
 	}
-	if !f.shouldHandleMessage(*msg.MessageId) {
+	if !f.shouldHandleMessage(messageID) {
 		return nil
 	}
 	text := parseMessageText(msg.MessageType, msg.Content)
@@ -1528,23 +1539,23 @@ func (f *Channel) handleP2MessageReceive(_ context.Context, event *larkim.P2Mess
 	f.mu.RUnlock()
 	if h != nil {
 		// Start a new debug stream card for each new user message in the chat.
-		f.resetDebugStream(*msg.ChatId)
-		f.resetTextStream(*msg.ChatId)
-		f.resetThoughtStream(*msg.ChatId)
-		f.resetSystemStream(*msg.ChatId)
-		f.addReceiveAck(*msg.ChatId, *msg.MessageId)
-		h(im.Message{
-			ChatID:    *msg.ChatId,
-			MessageID: *msg.MessageId,
+		f.resetDebugStream(chatID)
+		f.resetTextStream(chatID)
+		f.resetThoughtStream(chatID)
+		f.resetSystemStream(chatID)
+		f.addReceiveAck(chatID, messageID)
+		h(Message{
+			ChatID:    chatID,
+			MessageID: messageID,
 			UserID:    userID,
 			Text:      text,
-			RouteKey:  *msg.ChatId,
+			RouteKey:  chatID,
 		})
 	}
 	return nil
 }
 
-func (f *Channel) shouldHandleMessage(messageID string) bool {
+func (f *transportChannel) shouldHandleMessage(messageID string) bool {
 	messageID = strings.TrimSpace(messageID)
 	if messageID == "" {
 		return true
@@ -1610,7 +1621,7 @@ func parseEpochMillis(raw string) (int64, error) {
 	return strconv.ParseInt(raw, 10, 64)
 }
 
-func (f *Channel) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
+func (f *transportChannel) handleCardAction(_ context.Context, event *callback.CardActionTriggerEvent) (*callback.CardActionTriggerResponse, error) {
 	if event == nil || event.Event == nil || event.Event.Action == nil {
 		return &callback.CardActionTriggerResponse{}, nil
 	}
@@ -1655,7 +1666,7 @@ forward:
 	h := f.action
 	f.mu.RUnlock()
 	if h != nil {
-		evt := im.CardActionEvent{
+		evt := CardActionEvent{
 			ChatID:    firstNonEmpty(value["chat_id"], payload.Context.OpenChatID),
 			MessageID: payload.Context.OpenMessageID,
 			UserID:    payload.Operator.OpenID,
@@ -1717,4 +1728,4 @@ func splitTextForFeishu(text string, maxRunes int) []string {
 	return parts
 }
 
-var _ im.Channel = (*Channel)(nil)
+var _ transport = (*transportChannel)(nil)

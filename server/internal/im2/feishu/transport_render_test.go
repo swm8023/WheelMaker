@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/hub/im"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
 func TestParseMessageText_Text(t *testing.T) {
@@ -117,7 +117,7 @@ func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
 }
 
 func TestResetDebugStream(t *testing.T) {
-	f := New(Config{})
+	f := newTransport(Config{})
 	f.debugStreams["chat-1"] = &debugStream{messageID: "m1", lines: []string{"a"}}
 	f.resetDebugStream("chat-1")
 	if _, ok := f.debugStreams["chat-1"]; ok {
@@ -126,7 +126,7 @@ func TestResetDebugStream(t *testing.T) {
 }
 
 func TestResetSystemStream(t *testing.T) {
-	f := New(Config{})
+	f := newTransport(Config{})
 	f.systemStreams["chat-1"] = &textStream{messageID: "m1"}
 	f.resetSystemStream("chat-1")
 	if _, ok := f.systemStreams["chat-1"]; ok {
@@ -135,7 +135,7 @@ func TestResetSystemStream(t *testing.T) {
 }
 
 func TestResetThoughtStream(t *testing.T) {
-	f := New(Config{})
+	f := newTransport(Config{})
 	f.thoughtStreams["chat-1"] = &textStream{messageID: "m1"}
 	f.resetThoughtStream("chat-1")
 	if _, ok := f.thoughtStreams["chat-1"]; ok {
@@ -144,7 +144,7 @@ func TestResetThoughtStream(t *testing.T) {
 }
 
 func TestShouldHandleMessage_DeduplicatesByMessageID(t *testing.T) {
-	f := New(Config{})
+	f := newTransport(Config{})
 	if !f.shouldHandleMessage("m-1") {
 		t.Fatalf("first message should pass")
 	}
@@ -157,7 +157,7 @@ func TestShouldHandleMessage_DeduplicatesByMessageID(t *testing.T) {
 }
 
 func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
-	f := New(Config{})
+	f := newTransport(Config{})
 	f.seenMessageID["old"] = time.Now().Add(-3 * time.Hour)
 	if !f.shouldHandleMessage("old") {
 		t.Fatalf("expired message id should be accepted again")
@@ -212,7 +212,7 @@ func TestSplitTextForFeishu_PreservesBoundaryWhitespace(t *testing.T) {
 }
 
 func TestBuildToolCallCard(t *testing.T) {
-	card := buildToolCallCard("chat-1", im.ToolCallUpdate{
+	card := buildToolCallCard("chat-1", ToolCallUpdate{
 		ToolCallID: "call-1",
 		Title:      "Run tests",
 		Status:     "failed",
@@ -245,7 +245,7 @@ func TestBuildToolCallCard(t *testing.T) {
 }
 
 func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
-	card := buildToolCallCard("chat-1", im.ToolCallUpdate{
+	card := buildToolCallCard("chat-1", ToolCallUpdate{
 		ToolCallID: "call-1",
 		Title:      "Run tests",
 		Status:     "completed",
@@ -287,7 +287,7 @@ func TestCompactStatusEmoji(t *testing.T) {
 func TestBuildCompactToolCard(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"✅ go test ./...", "⏳ rg -n tool", "❌ go vet ./..."},
-		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/hub/im/feishu/feishu.go",
+		"$ go test ./...\nPASS\n\n$ rg -n tool\ninternal/im2/feishu/transport_impl.go",
 
 		false,
 	)
@@ -433,7 +433,7 @@ func TestBuildCompactToolCard_NoStreamingMarker(t *testing.T) {
 }
 
 func TestLastOutboundState(t *testing.T) {
-	ch := New(Config{})
+	ch := newTransport(Config{})
 	ch.setLastOutbound("chat-1", "msg-1")
 	if got := ch.getLastOutbound("chat-1"); got != "msg-1" {
 		t.Fatalf("last outbound=%q, want %q", got, "msg-1")
@@ -450,4 +450,43 @@ func TestWSRunExitClassification(t *testing.T) {
 	if got := classifyWSRunExit(nil, errors.New("dial failed")); got != wsExitStartFailed {
 		t.Fatalf("classifyWSRunExit(nil,err)=%q, want %q", got, wsExitStartFailed)
 	}
+}
+
+func TestFinalizeWSRunError_WrapsStartError(t *testing.T) {
+	startErr := errors.New("dial failed")
+	err := finalizeWSRunError(nil, startErr)
+	if !errors.Is(err, startErr) {
+		t.Fatalf("finalizeWSRunError() should wrap startErr, got %v", err)
+	}
+}
+
+func TestHandleP2MessageReceive_DropsEmptyChatID(t *testing.T) {
+	f := newTransport(Config{})
+	called := false
+	f.OnMessage(func(Message) {
+		called = true
+	})
+
+	event := &larkim.P2MessageReceiveV1{
+		Event: &larkim.P2MessageReceiveV1Data{
+			Message: &larkim.EventMessage{
+				ChatId:      strPtr("   "),
+				MessageId:   strPtr("msg-1"),
+				CreateTime:  strPtr(strconv.FormatInt(time.Now().UnixMilli(), 10)),
+				MessageType: strPtr("text"),
+				Content:     strPtr(`{"text":"hello"}`),
+			},
+		},
+	}
+
+	if err := f.handleP2MessageReceive(context.Background(), event); err != nil {
+		t.Fatalf("handleP2MessageReceive() error = %v", err)
+	}
+	if called {
+		t.Fatal("handleP2MessageReceive() should drop blank chat IDs")
+	}
+}
+
+func strPtr(value string) *string {
+	return &value
 }
