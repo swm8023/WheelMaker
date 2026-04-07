@@ -21,7 +21,7 @@ func extractTextContent(raw json.RawMessage) string {
 	if block.Type != "" && block.Type != acp.ContentBlockTypeText {
 		return ""
 	}
-	return strings.TrimSpace(block.Text)
+	return block.Text
 }
 
 func parseToolCallUpdate(update acp.SessionUpdate) (ToolCallUpdate, bool) {

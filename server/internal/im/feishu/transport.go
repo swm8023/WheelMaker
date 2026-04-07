@@ -20,6 +20,11 @@ import (
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
+// streamThrottle is the minimum interval between card pushes for the same
+// streaming card. Chunks arriving within this window are accumulated and
+// pushed together to reduce Feishu API call frequency.
+const streamThrottle = 3 * time.Second
+
 // Config configures the Feishu IM adapter.
 type Config struct {
 	AppID             string
@@ -60,6 +65,9 @@ type transportChannel struct {
 type textStream struct {
 	messageID string
 	content   strings.Builder
+	pushedLen int         // content length at last push
+	lastPush  time.Time   // timestamp of last push
+	timer     *time.Timer // deferred flush timer
 }
 
 type toolCardState struct {
@@ -152,54 +160,46 @@ func (f *transportChannel) sendText(chatID, text string) error {
 		f.textStreams[chatID] = ts
 	}
 	ts.content.WriteString(text)
+
+	// Throttle: push at most once per streamThrottle interval.
+	now := time.Now()
+	if ts.lastPush.IsZero() || now.Sub(ts.lastPush) >= streamThrottle {
+		if ts.timer != nil {
+			ts.timer.Stop()
+			ts.timer = nil
+		}
+		return f.pushTextCard(chatID, ts)
+	}
+	if ts.timer == nil {
+		remaining := streamThrottle - now.Sub(ts.lastPush)
+		ts.timer = time.AfterFunc(remaining, func() {
+			f.textMu.Lock()
+			defer f.textMu.Unlock()
+			ts.timer = nil
+			if ts.content.Len() > ts.pushedLen {
+				if err := f.pushTextCard(chatID, ts); err != nil {
+					shared.Warn("feishu: deferred text flush: %v", err)
+				}
+			}
+		})
+	}
+	return nil
+}
+
+// pushTextCard builds a text card and posts/updates it.
+// Must be called with f.textMu held.
+func (f *transportChannel) pushTextCard(chatID string, ts *textStream) error {
 	content := ts.content.String()
 	if content == "" {
 		return nil
 	}
-
 	card := buildTextStreamCard(content, false)
-	raw, err := json.Marshal(card)
-	if err != nil {
-		return fmt.Errorf("feishu: marshal text stream card: %w", err)
+	err := f.postOrUpdateStreamCard(chatID, ts, card)
+	if err == nil {
+		ts.pushedLen = ts.content.Len()
+		ts.lastPush = time.Now()
 	}
-	bot, err := f.ensureBot()
-	if err != nil {
-		return err
-	}
-	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-	messageID := strings.TrimSpace(ts.messageID)
-	if messageID == "" {
-		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
-		if postErr != nil {
-			return postErr
-		}
-		if resp != nil {
-			mid := strings.TrimSpace(resp.Data.MessageID)
-			if mid != "" {
-				ts.messageID = mid
-				f.setLastOutbound(chatID, mid)
-			}
-		}
-		f.clearReceiveAck(chatID)
-		return nil
-	}
-	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
-		f.setLastOutbound(chatID, messageID)
-		f.clearReceiveAck(chatID)
-		return nil
-	}
-	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
-	if postErr != nil {
-		return postErr
-	}
-	if resp != nil {
-		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
-			ts.messageID = mid
-			f.setLastOutbound(chatID, mid)
-		}
-	}
-	f.clearReceiveAck(chatID)
-	return nil
+	return err
 }
 
 func (f *transportChannel) sendThought(chatID, text string) error {
@@ -217,15 +217,53 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 		f.thoughtStreams[chatID] = ts
 	}
 	ts.content.WriteString(text)
+
+	now := time.Now()
+	if ts.lastPush.IsZero() || now.Sub(ts.lastPush) >= streamThrottle {
+		if ts.timer != nil {
+			ts.timer.Stop()
+			ts.timer = nil
+		}
+		return f.pushThoughtCard(chatID, ts)
+	}
+	if ts.timer == nil {
+		remaining := streamThrottle - now.Sub(ts.lastPush)
+		ts.timer = time.AfterFunc(remaining, func() {
+			f.textMu.Lock()
+			defer f.textMu.Unlock()
+			ts.timer = nil
+			if ts.content.Len() > ts.pushedLen {
+				if err := f.pushThoughtCard(chatID, ts); err != nil {
+					shared.Warn("feishu: deferred thought flush: %v", err)
+				}
+			}
+		})
+	}
+	return nil
+}
+
+// pushThoughtCard builds a thought card and posts/updates it.
+// Must be called with f.textMu held.
+func (f *transportChannel) pushThoughtCard(chatID string, ts *textStream) error {
 	content := ts.content.String()
 	if content == "" {
 		return nil
 	}
-
 	card := buildThoughtStreamCard(content, false)
+	err := f.postOrUpdateStreamCard(chatID, ts, card)
+	if err == nil {
+		ts.pushedLen = ts.content.Len()
+		ts.lastPush = time.Now()
+	}
+	return err
+}
+
+// postOrUpdateStreamCard posts a new card or updates an existing one for a
+// streaming text/thought card. Must be called with f.textMu held.
+func (f *transportChannel) postOrUpdateStreamCard(chatID string, ts *textStream, card RawCard) error {
 	raw, err := json.Marshal(card)
 	if err != nil {
-		return fmt.Errorf("feishu: marshal thought stream card: %w", err)
+		return fmt.Errorf("feishu: marshal stream card: %w", err)
 	}
 	bot, err := f.ensureBot()
 	if err != nil {
@@ -264,6 +302,31 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 	}
 	f.clearReceiveAck(chatID)
 	return nil
+}
+
+// flushPendingStreams pushes any buffered text/thought content that has not
+// yet been pushed due to throttling. Call before MarkDone or stream reset.
+func (f *transportChannel) flushPendingStreams(chatID string) {
+	f.textMu.Lock()
+	defer f.textMu.Unlock()
+	if ts := f.textStreams[chatID]; ts != nil && ts.content.Len() > ts.pushedLen {
+		if ts.timer != nil {
+			ts.timer.Stop()
+			ts.timer = nil
+		}
+		if err := f.pushTextCard(chatID, ts); err != nil {
+			shared.Warn("feishu: final text flush: %v", err)
+		}
+	}
+	if ts := f.thoughtStreams[chatID]; ts != nil && ts.content.Len() > ts.pushedLen {
+		if ts.timer != nil {
+			ts.timer.Stop()
+			ts.timer = nil
+		}
+		if err := f.pushThoughtCard(chatID, ts); err != nil {
+			shared.Warn("feishu: final thought flush: %v", err)
+		}
+	}
 }
 
 func (f *transportChannel) sendSystem(chatID, text string) error {
@@ -305,6 +368,10 @@ func (f *transportChannel) resetTextStream(chatID string) {
 		return
 	}
 	f.textMu.Lock()
+	if ts := f.textStreams[chatID]; ts != nil && ts.timer != nil {
+		ts.timer.Stop()
+		ts.timer = nil
+	}
 	delete(f.textStreams, chatID)
 	f.textMu.Unlock()
 }
@@ -315,6 +382,10 @@ func (f *transportChannel) resetThoughtStream(chatID string) {
 		return
 	}
 	f.textMu.Lock()
+	if ts := f.thoughtStreams[chatID]; ts != nil && ts.timer != nil {
+		ts.timer.Stop()
+		ts.timer = nil
+	}
 	delete(f.thoughtStreams, chatID)
 	f.textMu.Unlock()
 }
@@ -516,6 +587,8 @@ func (f *transportChannel) MarkDone(chatID string) error {
 	if chatID == "" {
 		return nil
 	}
+	// Flush any throttled stream content before marking done.
+	f.flushPendingStreams(chatID)
 	messageID := f.getLastOutbound(chatID)
 	if messageID == "" {
 		return nil
