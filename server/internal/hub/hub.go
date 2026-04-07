@@ -10,6 +10,8 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/hub/im/console"
 	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
+	im2 "github.com/swm8023/wheelmaker/internal/im2"
+	im2feishu "github.com/swm8023/wheelmaker/internal/im2/feishu"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 	"os"
@@ -85,6 +87,10 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 		}
 	}
 
+	if pc.IM.Version == 2 {
+		return h.buildIM2Client(ctx, pc, cwd)
+	}
+
 	// Create IM channel.
 	imProvider, err := h.buildIM(pc)
 	if err != nil {
@@ -106,6 +112,35 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 
 	// Built-in providers are preloaded by client's singleton ACP factory.
 
+	if err := c.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start: %w", err)
+	}
+	return c, nil
+}
+
+func (h *Hub) buildIM2Client(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
+	store := client.NewProjectJSONStore(h.statePath, pc.Name)
+	c := client.New(store, nil, pc.Name, cwd)
+	c.SetYOLO(pc.YOLO)
+	c.SetIMUpdateBlockList(pc.Client.IMFilter.Block)
+
+	router := im2.NewRouter(c, im2.NewMemoryHistoryStore())
+	switch pc.IM.Type {
+	case "feishu":
+		if err := router.RegisterChannel(im2feishu.New(im2feishu.Config{
+			AppID:             pc.IM.AppID,
+			AppSecret:         pc.IM.AppSecret,
+			VerificationToken: feishuVerificationToken,
+			EncryptKey:        feishuEncryptKey,
+			Debug:             pc.Debug,
+			YOLO:              pc.YOLO,
+		})); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported im2 type %q (supported: feishu)", pc.IM.Type)
+	}
+	c.SetIM2Router(router)
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
