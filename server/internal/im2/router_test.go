@@ -76,6 +76,20 @@ func TestBind_CausesLaterInboundToCarrySessionID(t *testing.T) {
 	}
 }
 
+func TestHandleInbound_PreservesMessageText(t *testing.T) {
+	ctx := context.Background()
+	client := &captureInboundClient{}
+	router := NewRouter(client, nil)
+
+	err := router.HandleInbound(ctx, InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "  hello\n"})
+	if err != nil {
+		t.Fatalf("HandleInbound: %v", err)
+	}
+	if got := client.events[0].Text; got != "  hello\n" {
+		t.Fatalf("Text=%q, want preserved whitespace", got)
+	}
+}
+
 func TestSend_DirectChatSendsOnlyTarget(t *testing.T) {
 	ctx := context.Background()
 	router := NewRouter(nil, nil)

@@ -74,11 +74,10 @@ func (r *Router) Unbind(_ context.Context, chat ChatRef) error {
 
 func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
 	chat := normalizeChat(ChatRef{ChannelID: event.ChannelID, ChatID: event.ChatID})
-	text := strings.TrimSpace(event.Text)
 	if chat.ChannelID == "" || chat.ChatID == "" {
 		return fmt.Errorf("im2: inbound chat is invalid")
 	}
-	if text == "" {
+	if strings.TrimSpace(event.Text) == "" {
 		return nil
 	}
 	r.mu.RLock()
@@ -86,9 +85,8 @@ func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
 	r.mu.RUnlock()
 	event.ChannelID = chat.ChannelID
 	event.ChatID = chat.ChatID
-	event.Text = text
 	event.SessionID = b.sessionID
-	_ = r.history.Append(ctx, HistoryEvent{SessionID: event.SessionID, Direction: HistoryInbound, Source: &chat, Text: text})
+	_ = r.history.Append(ctx, HistoryEvent{SessionID: event.SessionID, Direction: HistoryInbound, Source: &chat, Text: event.Text})
 	if r.client == nil {
 		return nil
 	}
