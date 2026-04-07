@@ -37,14 +37,14 @@ This plan covers one end-to-end IM2 integration slice: opt-in config, hub/client
 
 ## Tasks
 
-- [ ] Add config and IM2 protocol payload tests, then implement `IMConfig.Version`, `TextPayload`, `ACPPayload`, `Decision*` types, and `Channel.RequestDecision`.
-- [ ] Add router tests for `Run` and `RequestDecision`, then implement router channel running and source-only decision routing.
-- [ ] Add App stub compile tests, then update App channel for `RequestDecision`.
-- [ ] Add Feishu tests using an injected fake Feishu transport, then implement IM2-owned `Send` routing for message/system/acp and `RequestDecision` with card-action/text fallback.
-- [ ] Add client tests for `SetIM2Router`, unbound `/list` direct response, unbound prompt bind, existing session routing, ACP outbound payload, and permission mapping; then implement client/session IM2 bridge.
-- [ ] Add hub tests for IM1 default, IM2 Feishu opt-in, and unsupported IM2 type; then implement hub config branching.
-- [ ] Run `gofmt`, `go test ./internal/im2/... -v`, `go test ./internal/hub/client -v`, `go test ./internal/hub -v`, and `go test ./...` from `server/`.
-- [ ] Commit and push branch, then trigger `scripts/signal_update_now.ps1 -DelaySeconds 30` after merge/push per `CLAUDE.md`.
+- [x] Add config and IM2 protocol payload tests, then implement `IMConfig.Version`, `TextPayload`, `ACPPayload`, `Decision*` types, and `Channel.RequestDecision`.
+- [x] Add router tests for `Run` and `RequestDecision`, then implement router channel running and source-only decision routing.
+- [x] Add App stub compile tests, then update App channel for `RequestDecision`.
+- [x] Add Feishu tests using an injected fake Feishu transport, then implement IM2-owned `Send` routing for message/system/acp and `RequestDecision` with card-action/text fallback.
+- [x] Add client tests for `SetIM2Router`, unbound `/list` direct response, unbound prompt bind, existing session routing, ACP outbound payload, and permission mapping; then implement client/session IM2 bridge.
+- [x] Add hub tests for IM1 default, IM2 Feishu opt-in, and unsupported IM2 type; then implement hub config branching.
+- [x] Run `gofmt`, `go test ./internal/im2/... -v`, `go test ./internal/hub/client -v`, `go test ./internal/hub -v`, and `go test ./...` from `server/`.
+- [x] Commit and push branch, then trigger `scripts/signal_update_now.ps1 -DelaySeconds 30` after merge/push per `CLAUDE.md`.
 
 ## TDD Notes
 
