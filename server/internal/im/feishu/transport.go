@@ -151,6 +151,8 @@ func (f *transportChannel) sendText(chatID, text string) error {
 	}
 	// Non-tool text breaks the contiguous tool segment in YOLO mode.
 	f.resetCompactToolStream(chatID)
+	// Finalize thought stream so the two types don't silently merge.
+	f.finalizeStream(chatID, "thought")
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
 
@@ -208,6 +210,8 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 		return nil
 	}
 	f.resetCompactToolStream(chatID)
+	// Finalize text stream so the two types don't silently merge.
+	f.finalizeStream(chatID, "text")
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
 
@@ -338,6 +342,9 @@ func (f *transportChannel) sendSystem(chatID, text string) error {
 	// System text also breaks contiguous tool segment and is rendered as
 	// independent cards (no streaming merge).
 	f.resetCompactToolStream(chatID)
+	// Finalize text/thought streams so system message doesn't silently merge.
+	f.finalizeStream(chatID, "text")
+	f.finalizeStream(chatID, "thought")
 	card := buildSystemStreamCard(text)
 	raw, err := json.Marshal(card)
 	if err != nil {
@@ -398,6 +405,38 @@ func (f *transportChannel) resetSystemStream(chatID string) {
 	f.textMu.Lock()
 	delete(f.systemStreams, chatID)
 	f.textMu.Unlock()
+}
+
+// finalizeStream flushes any buffered content in the given stream type and
+// resets it so the next chunk of that type starts a fresh card. This prevents
+// content from silently concatenating across stream-type switches.
+func (f *transportChannel) finalizeStream(chatID, streamType string) {
+	f.textMu.Lock()
+	defer f.textMu.Unlock()
+	switch streamType {
+	case "text":
+		if ts := f.textStreams[chatID]; ts != nil {
+			if ts.timer != nil {
+				ts.timer.Stop()
+				ts.timer = nil
+			}
+			if ts.content.Len() > ts.pushedLen {
+				_ = f.pushTextCard(chatID, ts)
+			}
+			delete(f.textStreams, chatID)
+		}
+	case "thought":
+		if ts := f.thoughtStreams[chatID]; ts != nil {
+			if ts.timer != nil {
+				ts.timer.Stop()
+				ts.timer = nil
+			}
+			if ts.content.Len() > ts.pushedLen {
+				_ = f.pushThoughtCard(chatID, ts)
+			}
+			delete(f.thoughtStreams, chatID)
+		}
+	}
 }
 
 // SendCard dispatches a card payload to the appropriate renderer.
@@ -1152,7 +1191,7 @@ func buildToolCallCard(chatID string, update ToolCallUpdate, perm *toolPermissio
 			"template": template,
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": fmt.Sprintf("🛠️ %s %s", permEmoji, previewLine(title, 22)),
+				"content": fmt.Sprintf("%s %s %s", toolKindIcon(update.Kind), permEmoji, previewLine(title, 22)),
 			},
 		},
 		"elements": elements,
@@ -1201,6 +1240,28 @@ func toolPermissionEmoji(perm *toolPermissionState) string {
 	}
 	return "\U000026AA"
 }
+
+func toolKindIcon(kind string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "bash", "shell", "terminal", "command":
+		return "💻"
+	case "read", "read_file", "view":
+		return "📖"
+	case "write", "write_file", "create", "create_file":
+		return "✏️"
+	case "edit", "edit_file", "replace", "str_replace_editor":
+		return "📝"
+	case "grep", "search", "ripgrep":
+		return "🔍"
+	case "glob", "find", "list_dir", "ls":
+		return "📁"
+	case "web", "browser", "fetch", "curl":
+		return "🌐"
+	default:
+		return "🛠️"
+	}
+}
+
 func toolCallDetailBlock(update ToolCallUpdate) string {
 	cmd := strings.TrimSpace(toolCallCommandLine(update))
 	if cmd == "" {
@@ -1221,7 +1282,22 @@ func toolCallCommandLine(update ToolCallUpdate) string {
 	if cmd := commandFromRawOutput(update.RawOutput); cmd != "" {
 		return cmd
 	}
-	if text := decodeRawText(update.RawInput); text != "" {
+	// Kind-aware: build a summary from structured input fields.
+	if cmd := commandFromInputFields(update.Kind, update.RawInput); cmd != "" {
+		return cmd
+	}
+	// ToolCallContent path fields.
+	for _, c := range update.ToolCallContent {
+		if p := strings.TrimSpace(c.Path); p != "" {
+			kind := strings.TrimSpace(update.Kind)
+			if kind != "" {
+				return kind + " " + p
+			}
+			return p
+		}
+	}
+	// Raw text (only if rawInput is a simple string, not an object).
+	if text := decodeRawText(update.RawInput); text != "" && !isJSONObject(update.RawInput) {
 		return text
 	}
 	for _, c := range update.ToolCallContent {
@@ -1262,6 +1338,50 @@ func commandFromRawOutput(raw json.RawMessage) string {
 	}
 	return strings.TrimSpace(strings.Join(payload.Command, " "))
 }
+
+// commandFromInputFields extracts a human-readable command line from
+// structured rawInput fields based on the tool kind.
+func commandFromInputFields(kind string, raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var fields map[string]any
+	if json.Unmarshal(raw, &fields) != nil {
+		return ""
+	}
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	path := firstStringField(fields, "path", "file_path", "file", "directory")
+	pattern := firstStringField(fields, "pattern", "query", "regex")
+	switch {
+	case kind != "" && path != "":
+		if pattern != "" {
+			return kind + " '" + previewLine(pattern, 40) + "' " + path
+		}
+		return kind + " " + path
+	case kind != "" && pattern != "":
+		return kind + " '" + previewLine(pattern, 60) + "'"
+	case path != "":
+		return path
+	case pattern != "":
+		return pattern
+	}
+	return ""
+}
+
+func firstStringField(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := m[k].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func isJSONObject(raw json.RawMessage) bool {
+	trimmed := strings.TrimSpace(string(raw))
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
 func toolCallOutputText(update ToolCallUpdate) string {
 	if text := outputFromRawOutput(update.RawOutput); text != "" {
 		return text
@@ -1282,10 +1402,14 @@ func outputFromRawOutput(raw json.RawMessage) string {
 		return ""
 	}
 	var payload struct {
-		Output string `json:"output"`
-		Stdout string `json:"stdout"`
-		Stderr string `json:"stderr"`
-		Error  string `json:"error"`
+		Output  string `json:"output"`
+		Stdout  string `json:"stdout"`
+		Stderr  string `json:"stderr"`
+		Error   string `json:"error"`
+		Content string `json:"content"`
+		Result  string `json:"result"`
+		Text    string `json:"text"`
+		Diff    string `json:"diff"`
 	}
 	if err := json.Unmarshal(raw, &payload); err == nil {
 		lines := []string{}
@@ -1294,6 +1418,15 @@ func outputFromRawOutput(raw json.RawMessage) string {
 		}
 		if strings.TrimSpace(payload.Stdout) != "" {
 			lines = append(lines, strings.TrimSpace(payload.Stdout))
+		}
+		// Fallback content fields when no primary output is present.
+		if len(lines) == 0 {
+			for _, v := range []string{payload.Content, payload.Result, payload.Text, payload.Diff} {
+				if strings.TrimSpace(v) != "" {
+					lines = append(lines, strings.TrimSpace(v))
+					break
+				}
+			}
 		}
 		if strings.TrimSpace(payload.Stderr) != "" {
 			lines = append(lines, "stderr: "+strings.TrimSpace(payload.Stderr))

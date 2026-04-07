@@ -10,6 +10,82 @@ import (
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
+// buildPlanCard renders agent plan entries as a structured card.
+func buildPlanCard(update acp.SessionUpdate) RawCard {
+	if len(update.Entries) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(update.Entries))
+	for _, entry := range update.Entries {
+		content := strings.TrimSpace(entry.Content)
+		if content == "" {
+			continue
+		}
+		emoji := planStatusEmoji(entry.Status)
+		lines = append(lines, fmt.Sprintf("%s %s", emoji, previewLine(content, 80)))
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	md := strings.Join(lines, "\n")
+	return RawCard{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"template": "indigo",
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "📋 Plan",
+			},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": md},
+		},
+	}
+}
+
+func planStatusEmoji(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "done":
+		return "✅"
+	case "in_progress", "in-progress", "running":
+		return "⏳"
+	case "failed", "error":
+		return "❌"
+	case "skipped":
+		return "⏭️"
+	default:
+		return "⬜"
+	}
+}
+
+// buildConfigCard renders a config update as a small system card.
+func buildConfigCard(update acp.SessionUpdate) RawCard {
+	snap := acp.SessionConfigSnapshotFromOptions(update.ConfigOptions)
+	parts := make([]string, 0, 4)
+	if strings.TrimSpace(snap.Mode) != "" {
+		parts = append(parts, "**mode** = "+strings.TrimSpace(snap.Mode))
+	}
+	if strings.TrimSpace(snap.Model) != "" {
+		parts = append(parts, "**model** = "+strings.TrimSpace(snap.Model))
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return RawCard{
+		"config": map[string]any{"update_multi": true},
+		"header": map[string]any{
+			"template": "grey",
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "⚙️ Config Updated",
+			},
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": strings.Join(parts, "\n")},
+		},
+	}
+}
+
 func extractTextContent(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""

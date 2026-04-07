@@ -876,6 +876,13 @@ func sessionUpdateParamsFromUpdate(sessionID string, u acp.Update) (acp.SessionU
 	case acp.UpdateThought:
 		content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: u.Content})
 		update = acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentThoughtChunk, Content: content}
+	case acp.UpdateToolCallCancelled:
+		// Content holds the toolCallID; synthesize a tool_call_update with cancelled status.
+		update = acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateToolCallUpdate,
+			ToolCallID:    strings.TrimSpace(u.Content),
+			Status:        "cancelled",
+		}
 	case acp.UpdateToolCall, acp.UpdateConfigOption, acp.UpdateAvailableCommands, acp.UpdateSessionInfo, acp.UpdatePlan, acp.UpdateModeChange, acp.UpdateUserChunk:
 		if len(u.Raw) == 0 || json.Unmarshal(u.Raw, &update) != nil {
 			return acp.SessionUpdateParams{}, false

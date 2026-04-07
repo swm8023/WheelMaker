@@ -183,20 +183,20 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 			return c.inner.SendCard(chatID, "", ToolCallCard{Update: upd})
 		}
 	case acp.SessionUpdatePlan:
-		if msg := renderUpdateSummary("Plan update", params.Update); msg != "" {
-			return c.inner.Send(chatID, msg, TextNormal)
+		if card := buildPlanCard(params.Update); card != nil {
+			return c.inner.SendCard(chatID, "", card)
 		}
 	case acp.SessionUpdateConfigOptionUpdate:
-		if msg := renderUpdateSummary("Config updated", params.Update); msg != "" {
-			return c.inner.Send(chatID, msg, TextNormal)
+		if card := buildConfigCard(params.Update); card != nil {
+			return c.inner.SendCard(chatID, "", card)
 		}
 	case acp.SessionUpdateAvailableCommandsUpdate:
-		if msg := renderUpdateSummary("Commands updated", params.Update); msg != "" {
-			return c.inner.Send(chatID, msg, TextNormal)
-		}
+		// Silenced: command list updates are noisy and rarely useful to the user.
+	case acp.SessionUpdateUserMessageChunk:
+		// User message reflection: skip (the user already sees their own message).
 	case acp.SessionUpdateSessionInfoUpdate, acp.SessionUpdateCurrentModeUpdate:
 		if msg := renderUpdateSummary("Session updated", params.Update); msg != "" {
-			return c.inner.Send(chatID, msg, TextNormal)
+			return c.inner.Send(chatID, msg, TextSystem)
 		}
 	}
 	return nil
