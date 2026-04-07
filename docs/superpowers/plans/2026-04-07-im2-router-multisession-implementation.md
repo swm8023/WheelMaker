@@ -1,6 +1,6 @@
 # IM2 Router Multi-Session Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Build an isolated IM2 router package with multi-session chat bindings, watch fanout, normalized history hooks, a Feishu channel implementation, and an App channel stub while keeping IM 1.0 as the default runtime.
 
@@ -36,7 +36,7 @@ The spec covers one subsystem: an isolated IM2 package and channel implementatio
 - Create: `server/internal/im2/router.go`
 - Create: `server/internal/im2/router_test.go`
 
-- [ ] **Step 1: Write failing router tests**
+- [x] **Step 1: Write failing router tests**
 
 Add `server/internal/im2/router_test.go`:
 
@@ -120,13 +120,13 @@ func TestBind_CausesLaterInboundToCarrySessionID(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run: `cd server; go test ./internal/im2 -run "TestHandleInbound_UnboundChatReachesClientWithoutSession|TestBind_CausesLaterInboundToCarrySessionID" -v`
 
 Expected: FAIL because `server/internal/im2` and its types do not exist.
 
-- [ ] **Step 3: Implement minimal protocol and router**
+- [x] **Step 3: Implement minimal protocol and router**
 
 Create `server/internal/im2/protocol.go`:
 
@@ -292,13 +292,13 @@ func normalize(s string) string {
 }
 ```
 
-- [ ] **Step 4: Run router tests and verify GREEN**
+- [x] **Step 4: Run router tests and verify GREEN**
 
 Run: `cd server; go test ./internal/im2 -run "TestHandleInbound_UnboundChatReachesClientWithoutSession|TestBind_CausesLaterInboundToCarrySessionID" -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -314,7 +314,7 @@ git commit -m "feat(im2): add router binding core"
 - Create: `server/internal/im2/history_test.go`
 - Modify: `server/internal/im2/router.go`
 
-- [ ] **Step 1: Write failing history tests**
+- [x] **Step 1: Write failing history tests**
 
 Add `server/internal/im2/history_test.go`:
 
@@ -346,13 +346,13 @@ func TestMemoryHistoryStore_ListFiltersBySession(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run: `cd server; go test ./internal/im2 -run TestMemoryHistoryStore_ListFiltersBySession -v`
 
 Expected: FAIL because `NewMemoryHistoryStore` is missing.
 
-- [ ] **Step 3: Implement history store**
+- [x] **Step 3: Implement history store**
 
 Create `server/internal/im2/history.go`:
 
@@ -432,13 +432,13 @@ func (s *MemoryHistoryStore) List(_ context.Context, sessionID string, query His
 }
 ```
 
-- [ ] **Step 4: Run history tests and verify GREEN**
+- [x] **Step 4: Run history tests and verify GREEN**
 
 Run: `cd server; go test ./internal/im2 -run TestMemoryHistoryStore_ListFiltersBySession -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -453,7 +453,7 @@ git commit -m "feat(im2): add session history store"
 - Modify: `server/internal/im2/router.go`
 - Modify: `server/internal/im2/router_test.go`
 
-- [ ] **Step 1: Write failing send tests**
+- [x] **Step 1: Write failing send tests**
 
 Append these tests to `server/internal/im2/router_test.go`:
 
@@ -514,13 +514,13 @@ func TestSend_SessionBroadcastSendsAllBoundChats(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run: `cd server; go test ./internal/im2 -run "TestSend_" -v`
 
 Expected: FAIL because `Router.Send` is missing.
 
-- [ ] **Step 3: Implement send fanout**
+- [x] **Step 3: Implement send fanout**
 
 Add to `server/internal/im2/router.go`:
 
@@ -595,13 +595,13 @@ func (r *Router) channel(channelID string) (Channel, error) {
 }
 ```
 
-- [ ] **Step 4: Run send tests and verify GREEN**
+- [x] **Step 4: Run send tests and verify GREEN**
 
 Run: `cd server; go test ./internal/im2 -run "TestSend_" -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -616,7 +616,7 @@ git commit -m "feat(im2): add unified send fanout"
 - Create: `server/internal/im2/app/app.go`
 - Create: `server/internal/im2/app/app_test.go`
 
-- [ ] **Step 1: Write failing App tests**
+- [x] **Step 1: Write failing App tests**
 
 Add `server/internal/im2/app/app_test.go`:
 
@@ -640,13 +640,13 @@ func TestChannelIDIsApp(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `cd server; go test ./internal/im2/app -v`
 
 Expected: FAIL because package `internal/im2/app` does not exist.
 
-- [ ] **Step 3: Implement App stub**
+- [x] **Step 3: Implement App stub**
 
 Create `server/internal/im2/app/app.go`:
 
@@ -685,13 +685,13 @@ func (c *Channel) Run(context.Context) error {
 }
 ```
 
-- [ ] **Step 4: Run App tests and verify GREEN**
+- [x] **Step 4: Run App tests and verify GREEN**
 
 Run: `cd server; go test ./internal/im2/app -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -706,7 +706,7 @@ git commit -m "feat(im2): add app channel stub"
 - Create: `server/internal/im2/feishu/feishu.go`
 - Create: `server/internal/im2/feishu/feishu_test.go`
 
-- [ ] **Step 1: Write failing Feishu tests**
+- [x] **Step 1: Write failing Feishu tests**
 
 Add `server/internal/im2/feishu/feishu_test.go`:
 
@@ -730,13 +730,13 @@ func TestChannelIDIsFeishu(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `cd server; go test ./internal/im2/feishu -v`
 
 Expected: FAIL because package `internal/im2/feishu` does not exist.
 
-- [ ] **Step 3: Implement Feishu adapter through composition**
+- [x] **Step 3: Implement Feishu adapter through composition**
 
 Create `server/internal/im2/feishu/feishu.go`:
 
@@ -795,13 +795,13 @@ func (c *Channel) Run(ctx context.Context) error {
 }
 ```
 
-- [ ] **Step 4: Run Feishu tests and verify GREEN**
+- [x] **Step 4: Run Feishu tests and verify GREEN**
 
 Run: `cd server; go test ./internal/im2/feishu -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Run:
 
@@ -815,25 +815,25 @@ git commit -m "feat(im2): add feishu channel adapter"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-04-07-im2-router-multisession-implementation.md`
 
-- [ ] **Step 1: Run focused IM2 tests**
+- [x] **Step 1: Run focused IM2 tests**
 
 Run: `cd server; go test ./internal/im2/... -v`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run server full test suite**
+- [x] **Step 2: Run server full test suite**
 
 Run: `cd server; go test ./...`
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify Hub default path does not import IM2**
+- [x] **Step 3: Verify Hub default path does not import IM2**
 
 Run: `rg -n "internal/im2|im2" server/internal/hub server/cmd`
 
 Expected: no production Hub/CMD wiring references to `internal/im2`. Test package references under `server/internal/im2` are fine because the command scope excludes that directory.
 
-- [ ] **Step 4: Commit final plan file if not already committed**
+- [x] **Step 4: Commit final plan file if not already committed**
 
 Run:
 
