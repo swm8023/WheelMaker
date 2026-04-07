@@ -11,6 +11,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -44,6 +45,7 @@ type Client struct {
 	stateStore ClientStateStore
 	state      *ProjectState
 	imBridge   *im.ImAdapter // nil when no IM channel configured
+	im2Router  IM2Router
 
 	mu sync.Mutex
 
@@ -90,6 +92,7 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = imProvider
+	sess.im2Router = c.im2Router
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.permRouter = newPermissionRouter(sess)
 	c.activeSession = sess
@@ -180,6 +183,9 @@ func (c *Client) Start(ctx context.Context) error {
 // Run blocks until ctx is cancelled, delegating to the IM channel's Run loop.
 // Returns an error if no IM channel is configured.
 func (c *Client) Run(ctx context.Context) error {
+	if c.im2Router != nil {
+		return c.im2Router.Run(ctx)
+	}
 	if c.imBridge != nil {
 		return c.imBridge.Run(ctx)
 	}
@@ -286,6 +292,7 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 				restored.persistence = c.stateStore
 				restored.registry = c.registry
 				restored.imBridge = c.imBridge
+				restored.im2Router = c.im2Router
 				restored.imBlockedUpdates = c.imBlockedUpdates
 				restored.yolo = c.yolo
 				restored.state = c.state
@@ -341,6 +348,7 @@ func (c *Client) newWiredSession(id string) *Session {
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
 	sess.imBridge = c.imBridge
+	sess.im2Router = c.im2Router
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.yolo = c.yolo
 	sess.state = c.state
@@ -470,6 +478,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	restored.persistence = c.stateStore
 	restored.registry = c.registry
 	restored.imBridge = c.imBridge
+	restored.im2Router = c.im2Router
 	restored.imBlockedUpdates = c.imBlockedUpdates
 	restored.yolo = c.yolo
 	restored.state = c.state
@@ -665,6 +674,8 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 		hasEmitter := emitter != nil
 		sid := s.acpSessionID
 		s.mu.Unlock()
+		im2Router, im2Source, hasIM2Emitter := s.im2Context()
+		hasEmitter = hasEmitter || hasIM2Emitter
 
 		sawSandboxRefresh := false
 		sawText := false
@@ -703,7 +714,23 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 			if s.shouldBlockIMUpdate(u.Type) {
 				continue
 			}
-			if hasEmitter {
+			if hasIM2Emitter {
+				emitErr := im2Router.Send(ctx, im2.SendTarget{
+					SessionID: s.ID,
+					Source:    &im2Source,
+				}, im2.OutboundEvent{
+					Kind: im2.OutboundACP,
+					Payload: im2.ACPPayload{
+						SessionID:  s.ID,
+						UpdateType: string(u.Type),
+						Text:       u.Content,
+						Raw:        u.Raw,
+					},
+				})
+				if emitErr != nil {
+					s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
+				}
+			} else if emitter != nil {
 				emitErr := emitter.Emit(ctx, im.IMUpdate{
 					SessionID:  sid,
 					UpdateType: string(u.Type),

@@ -15,6 +15,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -60,6 +61,45 @@ type testInjectedInstance struct {
 	promptFn  func(context.Context, string) (<-chan acp.Update, error)
 	cancelFn  func() error
 }
+
+type fakeIM2Router struct {
+	binds     []fakeIM2Bind
+	sends     []fakeIM2Send
+	decisions []fakeIM2Decision
+}
+
+type fakeIM2Bind struct {
+	chat      im2.ChatRef
+	sessionID string
+	opts      im2.BindOptions
+}
+
+type fakeIM2Send struct {
+	target im2.SendTarget
+	event  im2.OutboundEvent
+}
+
+type fakeIM2Decision struct {
+	target im2.SendTarget
+	req    im2.DecisionRequest
+}
+
+func (f *fakeIM2Router) Bind(_ context.Context, chat im2.ChatRef, sessionID string, opts im2.BindOptions) error {
+	f.binds = append(f.binds, fakeIM2Bind{chat: chat, sessionID: sessionID, opts: opts})
+	return nil
+}
+
+func (f *fakeIM2Router) Send(_ context.Context, target im2.SendTarget, event im2.OutboundEvent) error {
+	f.sends = append(f.sends, fakeIM2Send{target: target, event: event})
+	return nil
+}
+
+func (f *fakeIM2Router) RequestDecision(_ context.Context, target im2.SendTarget, req im2.DecisionRequest) (im2.DecisionResult, error) {
+	f.decisions = append(f.decisions, fakeIM2Decision{target: target, req: req})
+	return im2.DecisionResult{Outcome: "selected", OptionID: "allow", Value: "allow_once", Source: "card_action"}, nil
+}
+
+func (f *fakeIM2Router) Run(context.Context) error { return nil }
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
 
@@ -470,6 +510,106 @@ type noopStore struct{}
 
 func (s *noopStore) Load() (*ProjectState, error) { return defaultProjectState(), nil }
 func (s *noopStore) Save(_ *ProjectState) error   { return nil }
+
+func TestHandleIM2Inbound_ListDirectDoesNotBind(t *testing.T) {
+	c := New(&noopStore{}, nil, "test", "/tmp")
+	fake := &fakeIM2Router{}
+	c.SetIM2Router(fake)
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := c.HandleIM2Inbound(context.Background(), im2.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/list"}); err != nil {
+		t.Fatalf("HandleIM2Inbound: %v", err)
+	}
+
+	if len(fake.binds) != 0 {
+		t.Fatalf("binds=%+v, want none", fake.binds)
+	}
+	if len(fake.sends) != 1 {
+		t.Fatalf("sends=%+v, want direct /list response", fake.sends)
+	}
+	if fake.sends[0].target.SessionID != "" || fake.sends[0].target.ChannelID != "feishu" || fake.sends[0].target.ChatID != "chat-a" {
+		t.Fatalf("target=%+v, want direct chat target", fake.sends[0].target)
+	}
+}
+
+func TestHandleIM2Inbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
+	c := New(&noopStore{}, nil, "test", "/tmp")
+	fake := &fakeIM2Router{}
+	c.SetIM2Router(fake)
+	c.InjectAgentFactory(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+		return &testInjectedInstance{
+			name:      "claude",
+			sessionID: "acp-1",
+			promptFn: func(context.Context, string) (<-chan acp.Update, error) {
+				ch := make(chan acp.Update, 2)
+				ch <- acp.Update{Type: acp.UpdateText, Content: "hello back"}
+				ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
+				close(ch)
+				return ch, nil
+			},
+		}, nil
+	})
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := c.HandleIM2Inbound(context.Background(), im2.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
+		t.Fatalf("HandleIM2Inbound: %v", err)
+	}
+
+	if len(fake.binds) != 1 {
+		t.Fatalf("binds=%+v, want one bind", fake.binds)
+	}
+	if fake.binds[0].chat != (im2.ChatRef{ChannelID: "feishu", ChatID: "chat-a"}) {
+		t.Fatalf("bind=%+v", fake.binds[0])
+	}
+	foundACP := false
+	for _, send := range fake.sends {
+		if send.event.Kind == im2.OutboundACP {
+			payload, ok := send.event.Payload.(im2.ACPPayload)
+			if ok && payload.UpdateType == string(acp.UpdateText) {
+				foundACP = true
+				if payload.Text != "hello back" {
+					t.Fatalf("payload=%+v", payload)
+				}
+			}
+		}
+	}
+	if !foundACP {
+		t.Fatalf("sends=%+v, want OutboundACP", fake.sends)
+	}
+}
+
+func TestSessionRequestPermission_UsesIM2Decision(t *testing.T) {
+	c := New(&noopStore{}, nil, "test", "/tmp")
+	fake := &fakeIM2Router{}
+	c.SetIM2Router(fake)
+	sess := c.activeSession
+	sess.setIM2Source(im2.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
+
+	res, err := sess.SessionRequestPermission(context.Background(), acp.PermissionRequestParams{
+		SessionID: "acp-1",
+		ToolCall:  acp.ToolCallRef{ToolCallID: "tc-1", Title: "Read file", Kind: "read"},
+		Options:   []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
+	})
+	if err != nil {
+		t.Fatalf("SessionRequestPermission: %v", err)
+	}
+	if res.OptionID != "allow" || res.Outcome != "selected" {
+		t.Fatalf("result=%+v", res)
+	}
+	if len(fake.decisions) != 1 {
+		t.Fatalf("decisions=%+v, want one", fake.decisions)
+	}
+	if fake.decisions[0].target.Source == nil || fake.decisions[0].target.Source.ChatID != "chat-a" {
+		t.Fatalf("target=%+v", fake.decisions[0].target)
+	}
+	if fake.decisions[0].req.Options[0].ID != "allow" {
+		t.Fatalf("request=%+v", fake.decisions[0].req)
+	}
+}
 
 // --- merged from server/internal/hub/client/multi_session_test.go ---
 

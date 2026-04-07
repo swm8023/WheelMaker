@@ -10,6 +10,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -71,6 +72,8 @@ type Session struct {
 	persistence      ClientStateStore
 	state            *ProjectState
 	imBridge         *im.ImAdapter
+	im2Router        IM2Router
+	im2Source        *im2.ChatRef
 	imBlockedUpdates map[string]struct{}
 
 	createdAt    time.Time
@@ -99,6 +102,13 @@ func newSession(id string, cwd string) *Session {
 
 // reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
+	if router, source, ok := s.im2Context(); ok {
+		_ = router.Send(context.Background(), im2.SendTarget{SessionID: s.ID, Source: &source}, im2.OutboundEvent{
+			Kind:    im2.OutboundSystem,
+			Payload: im2.TextPayload{Text: text},
+		})
+		return
+	}
 	if s.imBridge != nil {
 		chatID := s.imBridge.ActiveChatID()
 		if chatID == "" {
@@ -108,6 +118,22 @@ func (s *Session) reply(text string) {
 		return
 	}
 	fmt.Println(text)
+}
+
+func (s *Session) setIM2Source(source im2.ChatRef) {
+	source = im2.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+	s.mu.Lock()
+	s.im2Source = &source
+	s.mu.Unlock()
+}
+
+func (s *Session) im2Context() (IM2Router, im2.ChatRef, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.im2Router == nil || s.im2Source == nil || s.im2Source.ChannelID == "" || s.im2Source.ChatID == "" {
+		return nil, im2.ChatRef{}, false
+	}
+	return s.im2Router, *s.im2Source, true
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the
@@ -938,5 +964,35 @@ func (s *Session) SessionRequestPermission(ctx context.Context, params acp.Permi
 	if pCtx != nil {
 		ctx = pCtx
 	}
+	if router, source, ok := s.im2Context(); ok {
+		res, err := router.RequestDecision(ctx, im2.SendTarget{SessionID: s.ID, Source: &source}, im2.DecisionRequest{
+			SessionID: s.ID,
+			Kind:      im2.DecisionPermission,
+			Title:     "Permission request",
+			Body:      permissionDecisionBody(params),
+			Options:   im2DecisionOptions(params.Options),
+			Meta: map[string]string{
+				"tool_call_id": params.ToolCall.ToolCallID,
+			},
+		})
+		if err != nil {
+			return acp.PermissionResult{Outcome: "cancelled"}, err
+		}
+		return acp.PermissionResult{Outcome: res.Outcome, OptionID: res.OptionID}, nil
+	}
 	return s.permRouter.decide(ctx, params, snap.Mode)
+}
+
+func permissionDecisionBody(params acp.PermissionRequestParams) string {
+	title := strings.TrimSpace(params.ToolCall.Title)
+	if title == "" {
+		title = strings.TrimSpace(params.ToolCall.ToolCallID)
+	}
+	if title == "" {
+		title = "Tool call"
+	}
+	if kind := strings.TrimSpace(params.ToolCall.Kind); kind != "" {
+		return fmt.Sprintf("%s\nKind: %s", title, kind)
+	}
+	return title
 }

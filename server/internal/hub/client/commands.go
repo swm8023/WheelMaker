@@ -100,7 +100,7 @@ func (c *Client) handleNewCommand(sess *Session, msg im.Message) {
 		routeKey = "default"
 	}
 	newSess := c.ClientNewSession(routeKey)
-	sess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
+	newSess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
 }
 
 // handleLoadCommand loads a session by index and rebinds the route.
@@ -110,9 +110,9 @@ func (c *Client) handleLoadCommand(sess *Session, msg im.Message, args string) {
 		sess.reply("Usage: /load <index>  (see /list)")
 		return
 	}
-	idx, err := strconv.Atoi(idxStr)
-	if err != nil || idx <= 0 {
-		sess.reply("Load error: index must be a positive integer")
+	idx, err := parsePositiveIndex(idxStr)
+	if err != nil {
+		sess.reply(fmt.Sprintf("Load error: %v", err))
 		return
 	}
 	routeKey := msg.RouteKey
@@ -131,24 +131,39 @@ func (c *Client) handleLoadCommand(sess *Session, msg im.Message, args string) {
 	loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))
 }
 
+func parsePositiveIndex(value string) (int, error) {
+	idx, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || idx <= 0 {
+		return 0, fmt.Errorf("index must be a positive integer")
+	}
+	return idx, nil
+}
+
 // handleListCommand lists all sessions (in-memory + persisted).
 func (c *Client) handleListCommand(sess *Session) {
-	entries, err := c.clientListSessions()
+	body, err := c.formatSessionList(sess.ID)
 	if err != nil {
 		sess.reply(fmt.Sprintf("List error: %v", err))
 		return
 	}
+	sess.reply(body)
+}
+
+func (c *Client) formatSessionList(currentID string) (string, error) {
+	entries, err := c.clientListSessions()
+	if err != nil {
+		return "", err
+	}
 
 	if len(entries) == 0 {
-		sess.reply("No sessions.")
-		return
+		return "No sessions.", nil
 	}
 
 	lines := make([]string, 0, len(entries)+1)
 	lines = append(lines, fmt.Sprintf("Sessions (%d):", len(entries)))
 	for i, e := range entries {
 		marker := " "
-		if e.ID == sess.ID {
+		if e.ID == currentID {
 			marker = "*"
 		}
 		title := strings.TrimSpace(e.Title)
@@ -173,7 +188,7 @@ func (c *Client) handleListCommand(sess *Session) {
 		lines = append(lines, fmt.Sprintf("%s %d. [%s] %s  agent=%s  %s (%s)",
 			marker, i+1, statusStr, e.ID, agent, title, loc))
 	}
-	sess.reply(strings.Join(lines, "\n"))
+	return strings.Join(lines, "\n"), nil
 }
 
 func (s *Session) handleConfigCommand(
