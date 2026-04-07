@@ -75,3 +75,58 @@ func TestBind_CausesLaterInboundToCarrySessionID(t *testing.T) {
 		t.Fatalf("SessionID=%q, want session-1", got)
 	}
 }
+
+func TestSend_DirectChatSendsOnlyTarget(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "feishu"}
+	_ = router.RegisterChannel(ch)
+
+	err := router.Send(ctx, SendTarget{ChannelID: "feishu", ChatID: "chat-a"}, OutboundEvent{Kind: OutboundSystem, Payload: "choose a session"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(ch.sent) != 1 || ch.sent[0].chatID != "chat-a" {
+		t.Fatalf("sent=%+v", ch.sent)
+	}
+}
+
+func TestSend_ReplyFansOutToWatchChatsOnly(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "app"}
+	_ = router.RegisterChannel(ch)
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "a"}, "s1", BindOptions{})
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "b"}, "s1", BindOptions{Watch: true})
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "c"}, "s1", BindOptions{})
+	source := ChatRef{ChannelID: "app", ChatID: "a"}
+
+	err := router.Send(ctx, SendTarget{SessionID: "s1", Source: &source}, OutboundEvent{Kind: OutboundMessage, Payload: "hello"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+
+	if len(ch.sent) != 2 {
+		t.Fatalf("sent count=%d, want 2: %+v", len(ch.sent), ch.sent)
+	}
+	if ch.sent[0].chatID != "a" || ch.sent[1].chatID != "b" {
+		t.Fatalf("sent=%+v", ch.sent)
+	}
+}
+
+func TestSend_SessionBroadcastSendsAllBoundChats(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "app"}
+	_ = router.RegisterChannel(ch)
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "a"}, "s1", BindOptions{})
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "b"}, "s1", BindOptions{Watch: true})
+
+	err := router.Send(ctx, SendTarget{SessionID: "s1"}, OutboundEvent{Kind: OutboundSystem, Payload: "broadcast"})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if len(ch.sent) != 2 {
+		t.Fatalf("sent count=%d, want 2: %+v", len(ch.sent), ch.sent)
+	}
+}
