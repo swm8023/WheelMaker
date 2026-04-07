@@ -1,4 +1,4 @@
-package im2
+package im
 
 import (
 	"context"
@@ -9,7 +9,7 @@ type captureInboundClient struct {
 	events []InboundEvent
 }
 
-func (c *captureInboundClient) HandleIM2Inbound(_ context.Context, event InboundEvent) error {
+func (c *captureInboundClient) HandleIMInbound(_ context.Context, event InboundEvent) error {
 	c.events = append(c.events, event)
 	return nil
 }

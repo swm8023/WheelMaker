@@ -8,7 +8,7 @@ import (
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-func TestBuildClient_FeishuEnablesIM2WithoutVersion(t *testing.T) {
+func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
 	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
 	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
@@ -18,12 +18,12 @@ func TestBuildClient_FeishuEnablesIM2WithoutVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
 	}
-	if !c.HasIM2Router() {
-		t.Fatal("expected IM2 router for feishu config")
+	if !c.HasIMRouter() {
+		t.Fatal("expected IM router for feishu config")
 	}
 }
 
-func TestBuildClient_AppEnablesIM2Stub(t *testing.T) {
+func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
 	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
@@ -33,8 +33,8 @@ func TestBuildClient_AppEnablesIM2Stub(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
 	}
-	if !c.HasIM2Router() {
-		t.Fatal("expected IM2 router for app config")
+	if !c.HasIMRouter() {
+		t.Fatal("expected IM router for app config")
 	}
 }
 

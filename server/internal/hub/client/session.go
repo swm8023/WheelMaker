@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -70,8 +70,8 @@ type Session struct {
 	registry         *agent.ACPFactory
 	persistence      ClientStateStore
 	state            *ProjectState
-	im2Router        IM2Router
-	im2Source        *im2.ChatRef
+	imRouter         IMRouter
+	imSource         *im.ChatRef
 	imBlockedUpdates map[string]struct{}
 
 	createdAt    time.Time
@@ -100,30 +100,30 @@ func newSession(id string, cwd string) *Session {
 
 // reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
-	if router, source, ok := s.im2Context(); ok {
-		_ = router.Send(context.Background(), im2.SendTarget{SessionID: s.ID, Source: &source}, im2.OutboundEvent{
-			Kind:    im2.OutboundSystem,
-			Payload: im2.TextPayload{Text: text},
+	if router, source, ok := s.imContext(); ok {
+		_ = router.Send(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.OutboundEvent{
+			Kind:    im.OutboundSystem,
+			Payload: im.TextPayload{Text: text},
 		})
 		return
 	}
 	fmt.Println(text)
 }
 
-func (s *Session) setIM2Source(source im2.ChatRef) {
-	source = im2.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+func (s *Session) setIMSource(source im.ChatRef) {
+	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
 	s.mu.Lock()
-	s.im2Source = &source
+	s.imSource = &source
 	s.mu.Unlock()
 }
 
-func (s *Session) im2Context() (IM2Router, im2.ChatRef, bool) {
+func (s *Session) imContext() (IMRouter, im.ChatRef, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.im2Router == nil || s.im2Source == nil || s.im2Source.ChannelID == "" || s.im2Source.ChatID == "" {
-		return nil, im2.ChatRef{}, false
+	if s.imRouter == nil || s.imSource == nil || s.imSource.ChannelID == "" || s.imSource.ChatID == "" {
+		return nil, im.ChatRef{}, false
 	}
-	return s.im2Router, *s.im2Source, true
+	return s.imRouter, *s.imSource, true
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the
@@ -954,13 +954,13 @@ func (s *Session) SessionRequestPermission(ctx context.Context, params acp.Permi
 	if pCtx != nil {
 		ctx = pCtx
 	}
-	if router, source, ok := s.im2Context(); ok {
-		res, err := router.RequestDecision(ctx, im2.SendTarget{SessionID: s.ID, Source: &source}, im2.DecisionRequest{
+	if router, source, ok := s.imContext(); ok {
+		res, err := router.RequestDecision(ctx, im.SendTarget{SessionID: s.ID, Source: &source}, im.DecisionRequest{
 			SessionID: s.ID,
-			Kind:      im2.DecisionPermission,
+			Kind:      im.DecisionPermission,
 			Title:     "Permission request",
 			Body:      permissionDecisionBody(params),
-			Options:   im2DecisionOptions(params.Options),
+			Options:   imDecisionOptions(params.Options),
 			Meta: map[string]string{
 				"tool_call_id": params.ToolCall.ToolCallID,
 			},

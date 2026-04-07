@@ -10,4 +10,3 @@ type IgnoreError func(error) bool
 func RunIfWindowsService(_ string, _ Runner, _ IgnoreError) (bool, error) {
 	return false, nil
 }
-

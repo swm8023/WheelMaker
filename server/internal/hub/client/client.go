@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -43,7 +43,7 @@ type Client struct {
 
 	stateStore ClientStateStore
 	state      *ProjectState
-	im2Router  IM2Router
+	imRouter   IMRouter
 
 	mu sync.Mutex
 
@@ -85,7 +85,7 @@ func New(store Store, _ any, projectName string, cwd string) *Client {
 	sess := newSession("default", cwd)
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
-	sess.im2Router = c.im2Router
+	sess.imRouter = c.imRouter
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.permRouter = newPermissionRouter(sess)
 	c.activeSession = sess
@@ -141,7 +141,7 @@ func (c *Client) SetSessionStore(ss SessionStore) {
 }
 
 // Start loads persisted state.
-// Agent initialization is deferred until the first incoming IM2 event (lazy init).
+// Agent initialization is deferred until the first incoming IM event (lazy init).
 func (c *Client) Start(ctx context.Context) error {
 	state, err := c.stateStore.LoadProjectState()
 	if err != nil {
@@ -165,13 +165,13 @@ func (c *Client) Start(ctx context.Context) error {
 	return nil
 }
 
-// Run blocks until ctx is cancelled, delegating to the IM2 router's Run loop.
-// Returns an error if no IM2 router is configured.
+// Run blocks until ctx is cancelled, delegating to the IM router's Run loop.
+// Returns an error if no IM router is configured.
 func (c *Client) Run(ctx context.Context) error {
-	if c.im2Router != nil {
-		return c.im2Router.Run(ctx)
+	if c.imRouter != nil {
+		return c.imRouter.Run(ctx)
 	}
-	return errors.New("no IM2 router configured")
+	return errors.New("no IM router configured")
 }
 
 // Close saves state and shuts down all active sessions.
@@ -242,7 +242,7 @@ func (c *Client) resolveSession(routeKey string) *Session {
 				c.mu.Lock()
 				restored.persistence = c.stateStore
 				restored.registry = c.registry
-				restored.im2Router = c.im2Router
+				restored.imRouter = c.imRouter
 				restored.imBlockedUpdates = c.imBlockedUpdates
 				restored.yolo = c.yolo
 				restored.state = c.state
@@ -297,7 +297,7 @@ func (c *Client) newWiredSession(id string) *Session {
 	sess := newSession(id, c.cwd)
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
-	sess.im2Router = c.im2Router
+	sess.imRouter = c.imRouter
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.yolo = c.yolo
 	sess.state = c.state
@@ -426,7 +426,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	c.mu.Lock()
 	restored.persistence = c.stateStore
 	restored.registry = c.registry
-	restored.im2Router = c.im2Router
+	restored.imRouter = c.imRouter
 	restored.imBlockedUpdates = c.imBlockedUpdates
 	restored.yolo = c.yolo
 	restored.state = c.state
@@ -617,7 +617,7 @@ func (s *Session) handlePrompt(text string) {
 		s.mu.Unlock()
 
 		var buf strings.Builder
-		im2Router, im2Source, hasIM2Emitter := s.im2Context()
+		imRouter, imSource, hasIMEmitter := s.imContext()
 
 		sawSandboxRefresh := false
 		sawText := false
@@ -656,13 +656,13 @@ func (s *Session) handlePrompt(text string) {
 			if s.shouldBlockIMUpdate(u.Type) {
 				continue
 			}
-			if hasIM2Emitter {
-				emitErr := im2Router.Send(ctx, im2.SendTarget{
+			if hasIMEmitter {
+				emitErr := imRouter.Send(ctx, im.SendTarget{
 					SessionID: s.ID,
-					Source:    &im2Source,
-				}, im2.OutboundEvent{
-					Kind: im2.OutboundACP,
-					Payload: im2.ACPPayload{
+					Source:    &imSource,
+				}, im.OutboundEvent{
+					Kind: im.OutboundACP,
+					Payload: im.ACPPayload{
 						SessionID:  s.ID,
 						UpdateType: string(u.Type),
 						Text:       u.Content,
@@ -683,7 +683,7 @@ func (s *Session) handlePrompt(text string) {
 				s.reply(formatConfigOptionUpdateMessage(u.Raw))
 				s.syncAndPersistProjectState()
 			}
-			if u.Type == acp.UpdateText && !hasIM2Emitter {
+			if u.Type == acp.UpdateText && !hasIMEmitter {
 				buf.WriteString(u.Content)
 			}
 			if u.Done {
@@ -700,7 +700,7 @@ func (s *Session) handlePrompt(text string) {
 
 		s.syncAndPersistProjectState()
 
-		if !hasIM2Emitter && buf.Len() > 0 {
+		if !hasIMEmitter && buf.Len() > 0 {
 			s.reply(buf.String())
 		}
 

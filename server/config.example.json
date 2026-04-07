@@ -6,7 +6,7 @@
       "path": "/path/to/your/project",
       "yolo": true,
       "im": {
-        "type": "console"
+        "type": "app"
       },
       "client": {
         "agent": "claude",

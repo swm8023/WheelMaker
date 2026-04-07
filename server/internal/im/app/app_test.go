@@ -3,11 +3,11 @@ package app
 import (
 	"testing"
 
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
-func TestChannelImplementsIM2Channel(t *testing.T) {
-	var _ im2.Channel = New()
+func TestChannelImplementsIMChannel(t *testing.T) {
+	var _ im.Channel = New()
 }
 
 func TestChannelIDIsApp(t *testing.T) {

@@ -172,7 +172,7 @@ func captureReplies(c *client.Client) *[]string {
 
 func captureRouter(c *client.Client) *client.TestCaptureRouter {
 	router := client.NewTestCaptureRouter()
-	c.SetIM2Router(router)
+	c.SetIMRouter(router)
 	return router
 }
 

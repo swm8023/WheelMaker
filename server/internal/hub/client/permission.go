@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -42,7 +42,7 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	router, source, ok := r.session.im2Context()
+	router, source, ok := r.session.imContext()
 	if !ok {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
@@ -52,9 +52,9 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		title = "Permission request"
 	}
 
-	req := im2.DecisionRequest{
+	req := im.DecisionRequest{
 		SessionID: params.SessionID,
-		Kind:      im2.DecisionPermission,
+		Kind:      im.DecisionPermission,
 		Title:     title,
 		Body:      fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
 		Meta: map[string]string{
@@ -68,16 +68,16 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 			"timeoutSec": "1800",
 		},
 	}
-	req.Options = make([]im2.DecisionOption, 0, len(params.Options))
+	req.Options = make([]im.DecisionOption, 0, len(params.Options))
 	for _, o := range params.Options {
-		req.Options = append(req.Options, im2.DecisionOption{
+		req.Options = append(req.Options, im.DecisionOption{
 			ID:    o.OptionID,
 			Label: o.Name,
 			Value: o.Kind,
 		})
 	}
 
-	res, err := router.RequestDecision(ctx, im2.SendTarget{SessionID: r.session.ID, Source: &source}, req)
+	res, err := router.RequestDecision(ctx, im.SendTarget{SessionID: r.session.ID, Source: &source}, req)
 	if err != nil {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}

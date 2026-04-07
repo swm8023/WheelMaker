@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 type transport interface {
@@ -26,8 +26,8 @@ type transport interface {
 type pendingDecision struct {
 	id     string
 	chatID string
-	req    im2.DecisionRequest
-	ch     chan im2.DecisionResult
+	req    im.DecisionRequest
+	ch     chan im.DecisionResult
 }
 
 type Channel struct {
@@ -64,24 +64,24 @@ func (c *Channel) OnMessage(handler func(context.Context, string, string) error)
 	c.mu.Unlock()
 }
 
-func (c *Channel) Send(ctx context.Context, chatID string, event im2.OutboundEvent) error {
+func (c *Channel) Send(ctx context.Context, chatID string, event im.OutboundEvent) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	switch event.Kind {
-	case im2.OutboundACP:
+	case im.OutboundACP:
 		return c.sendACP(chatID, event.Payload)
-	case im2.OutboundSystem:
+	case im.OutboundSystem:
 		return c.inner.Send(chatID, payloadText(event.Payload), TextSystem)
 	default:
 		return c.inner.Send(chatID, payloadText(event.Payload), TextNormal)
 	}
 }
 
-func (c *Channel) RequestDecision(ctx context.Context, chatID string, req im2.DecisionRequest) (im2.DecisionResult, error) {
+func (c *Channel) RequestDecision(ctx context.Context, chatID string, req im.DecisionRequest) (im.DecisionResult, error) {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
-		return im2.DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2 feishu: decision chat is empty")
+		return im.DecisionResult{Outcome: "invalid"}, fmt.Errorf("im feishu: decision chat is empty")
 	}
 	timeout := 2 * time.Minute
 	if v := strings.TrimSpace(req.Hint["timeoutSec"]); v != "" {
@@ -89,8 +89,8 @@ func (c *Channel) RequestDecision(ctx context.Context, chatID string, req im2.De
 			timeout = time.Duration(sec) * time.Second
 		}
 	}
-	decisionID := fmt.Sprintf("im2-dec-%d", c.nextID.Add(1))
-	ch := make(chan im2.DecisionResult, 1)
+	decisionID := fmt.Sprintf("im-dec-%d", c.nextID.Add(1))
+	ch := make(chan im.DecisionResult, 1)
 	pd := pendingDecision{id: decisionID, chatID: chatID, req: req, ch: ch}
 	c.mu.Lock()
 	c.byID[decisionID] = pd
@@ -111,7 +111,7 @@ func (c *Channel) RequestDecision(ctx context.Context, chatID string, req im2.De
 	}
 	if err := c.inner.SendCard(chatID, "", card); err != nil {
 		c.clearDecision(chatID, decisionID, ch)
-		return im2.DecisionResult{Outcome: "invalid"}, err
+		return im.DecisionResult{Outcome: "invalid"}, err
 	}
 
 	timer := time.NewTimer(timeout)
@@ -121,10 +121,10 @@ func (c *Channel) RequestDecision(ctx context.Context, chatID string, req im2.De
 		return res, nil
 	case <-ctx.Done():
 		c.clearDecision(chatID, decisionID, ch)
-		return im2.DecisionResult{Outcome: "cancelled", Source: "default_policy"}, nil
+		return im.DecisionResult{Outcome: "cancelled", Source: "default_policy"}, nil
 	case <-timer.C:
 		c.clearDecision(chatID, decisionID, ch)
-		return im2.DecisionResult{Outcome: "timeout", Source: "default_policy"}, nil
+		return im.DecisionResult{Outcome: "timeout", Source: "default_policy"}, nil
 	}
 }
 
@@ -133,7 +133,7 @@ func (c *Channel) Run(ctx context.Context) error {
 }
 
 func (c *Channel) sendACP(chatID string, payload any) error {
-	p, ok := payload.(im2.ACPPayload)
+	p, ok := payload.(im.ACPPayload)
 	if !ok {
 		return c.inner.Send(chatID, payloadText(payload), TextNormal)
 	}
@@ -201,7 +201,7 @@ func (c *Channel) handleCardAction(evt CardActionEvent) {
 	c.markClosedLocked(decisionID)
 	c.mu.Unlock()
 
-	res := im2.DecisionResult{
+	res := im.DecisionResult{
 		Outcome:  "selected",
 		OptionID: firstNonEmpty(evt.Value["option_id"], evt.Value["option"], evt.Option),
 		Value:    firstNonEmpty(evt.Value["value"], evt.Value["option"], evt.Option),
@@ -235,7 +235,7 @@ func (c *Channel) resolveDecisionText(m Message) bool {
 	return true
 }
 
-func (c *Channel) clearDecision(chatID, decisionID string, ch chan im2.DecisionResult) {
+func (c *Channel) clearDecision(chatID, decisionID string, ch chan im.DecisionResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if pd, ok := c.byChat[chatID]; ok && pd.ch == ch {
@@ -256,23 +256,23 @@ func (c *Channel) wasClosedLocked(decisionID string) bool {
 	return ok && time.Since(t) < 5*time.Minute
 }
 
-func parseDecisionReply(input string, opts []im2.DecisionOption) im2.DecisionResult {
+func parseDecisionReply(input string, opts []im.DecisionOption) im.DecisionResult {
 	if input == "" {
-		return im2.DecisionResult{Outcome: "invalid", Source: "text_reply"}
+		return im.DecisionResult{Outcome: "invalid", Source: "text_reply"}
 	}
 	if strings.EqualFold(input, "cancel") {
-		return im2.DecisionResult{Outcome: "cancelled", Source: "text_reply"}
+		return im.DecisionResult{Outcome: "cancelled", Source: "text_reply"}
 	}
 	if idx, err := strconv.Atoi(input); err == nil && idx >= 1 && idx <= len(opts) {
 		o := opts[idx-1]
-		return im2.DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
+		return im.DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
 	}
 	for _, o := range opts {
 		if strings.EqualFold(input, o.ID) || strings.EqualFold(input, o.Label) {
-			return im2.DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
+			return im.DecisionResult{Outcome: "selected", OptionID: o.ID, Value: o.Value, Source: "text_reply"}
 		}
 	}
-	return im2.DecisionResult{Outcome: "invalid", Source: "text_reply"}
+	return im.DecisionResult{Outcome: "invalid", Source: "text_reply"}
 }
 
 func parseToolCallUpdate(raw []byte) (ToolCallUpdate, bool) {
@@ -292,7 +292,7 @@ func parseToolCallUpdate(raw []byte) (ToolCallUpdate, bool) {
 
 func payloadText(payload any) string {
 	switch p := payload.(type) {
-	case im2.TextPayload:
+	case im.TextPayload:
 		return p.Text
 	case string:
 		return p

@@ -77,7 +77,7 @@ func LoadConfig(path string) (*AppConfig, error) {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
 	if bytes.Contains(data, []byte(`"version"`)) {
-		return nil, fmt.Errorf("parse config %s: im.version has been removed; IM2 is the only supported runtime", path)
+		return nil, fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
 	}
 	var cfg AppConfig
 	dec := json.NewDecoder(bytes.NewReader(data))
