@@ -10,6 +10,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/hub/im/console"
 	"github.com/swm8023/wheelmaker/internal/hub/im/feishu"
+	"github.com/swm8023/wheelmaker/internal/im2"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 	"os"
@@ -32,6 +33,7 @@ type Hub struct {
 	cfg       *shared.AppConfig
 	statePath string
 	clients   []*client.Client
+	im2States []im2.State
 	regSync   *Reporter
 	regMu     sync.Mutex
 	lastProj  map[string]ProjectInfo
@@ -104,12 +106,47 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 		imProvider.SetDebugLogger(dw)
 	}
 
-	// Built-in providers are preloaded by client's singleton ACP factory.
+	im2State, err := im2.NewState(h.im2StateDBPath(), pc.Name)
+	if err != nil {
+		return nil, fmt.Errorf("init im2 state: %w", err)
+	}
+	stateRegistered := false
+	defer func() {
+		if !stateRegistered {
+			_ = im2State.Close()
+		}
+	}()
 
+	router, err := im2.NewRouter(pc.Name, im2State, func(context.Context) (string, error) {
+		return c.ClientNewSessionID(), nil
+	}, c.HandleIM2Inbound)
+	if err != nil {
+		return nil, fmt.Errorf("init im2 router: %w", err)
+	}
+	if err := router.RegisterChannel(pc.IM.Type, &im2OutboundChannel{adapter: imProvider}); err != nil {
+		return nil, fmt.Errorf("register im2 channel: %w", err)
+	}
+	c.SetIM2Router(router)
+
+	// Built-in providers are preloaded by client's singleton ACP factory.
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}
+
+	bridge := NewIM2Bridge(imProvider, router, pc.IM.Type)
+	bridge.Start()
+
+	h.im2States = append(h.im2States, im2State)
+	stateRegistered = true
 	return c, nil
+}
+
+func (h *Hub) im2StateDBPath() string {
+	dir := filepath.Dir(strings.TrimSpace(h.statePath))
+	if strings.TrimSpace(dir) == "" {
+		dir = "."
+	}
+	return filepath.Join(dir, "im_state.db")
 }
 
 // buildIM creates the im.ImAdapter for a project's IM config.
@@ -168,6 +205,14 @@ func (h *Hub) Close() error {
 	var errs []error
 	for _, c := range h.clients {
 		if err := c.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, st := range h.im2States {
+		if st == nil {
+			continue
+		}
+		if err := st.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

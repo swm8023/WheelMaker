@@ -9,7 +9,7 @@ import (
 )
 
 // Router is the single IM 2.0 ingress/egress boundary for one client.
-// One client owns one Router; router maps many IMActiveChats to many client sessions.
+// One client owns one Router; router maps many routeKeys to many client sessions.
 type Router struct {
 	projectName        string
 	state              State
@@ -17,7 +17,7 @@ type Router struct {
 
 	mu             sync.RWMutex
 	inboundHandler InboundHandler
-	publishers     map[string]Publisher // key: imType
+	channels       map[string]Channel // key: imType
 }
 
 // NewRouter creates an IM router for one client/project.
@@ -42,7 +42,7 @@ func NewRouter(
 		state:              state,
 		newClientSessionID: newClientSessionID,
 		inboundHandler:     handler,
-		publishers:         map[string]Publisher{},
+		channels:           map[string]Channel{},
 	}, nil
 }
 
@@ -53,34 +53,34 @@ func (r *Router) SetInboundHandler(handler InboundHandler) {
 	r.mu.Unlock()
 }
 
-// RegisterPublisher binds one imType to one outbound publisher.
-func (r *Router) RegisterPublisher(imType string, publisher Publisher) error {
+// RegisterChannel binds one imType to one outbound channel.
+func (r *Router) RegisterChannel(imType string, ch Channel) error {
 	key := strings.ToLower(strings.TrimSpace(imType))
 	if key == "" {
 		return fmt.Errorf("im2 router: empty imType")
 	}
-	if publisher == nil {
-		return fmt.Errorf("im2 router: nil publisher")
+	if ch == nil {
+		return fmt.Errorf("im2 router: nil channel")
 	}
 	r.mu.Lock()
-	r.publishers[key] = publisher
+	r.channels[key] = ch
 	r.mu.Unlock()
 	return nil
 }
 
-// UnregisterPublisher removes publisher binding for imType.
-func (r *Router) UnregisterPublisher(imType string) {
+// UnregisterChannel removes channel binding for imType.
+func (r *Router) UnregisterChannel(imType string) {
 	key := strings.ToLower(strings.TrimSpace(imType))
 	if key == "" {
 		return
 	}
 	r.mu.Lock()
-	delete(r.publishers, key)
+	delete(r.channels, key)
 	r.mu.Unlock()
 }
 
 // HandleInbound normalizes one inbound IM event, resolves/creates clientSessionId,
-// persists routing binding, then dispatches to Client via inbound handler.
+// persists route binding, then dispatches to Client via inbound handler.
 func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
 	ev, err := r.normalizeInbound(ctx, event)
 	if err != nil {
@@ -97,38 +97,43 @@ func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
 }
 
 // Publish sends one client event to IM.
-// If TargetActiveChatID is empty it broadcasts to all online chats in clientSessionId.
+// If TargetRouteKey is empty it broadcasts to all online chats in clientSessionId.
 func (r *Router) Publish(ctx context.Context, event OutboundEvent) error {
 	clientSessionID := strings.TrimSpace(event.ClientSessionID)
 	if clientSessionID == "" {
 		return fmt.Errorf("im2 router: empty clientSessionId")
 	}
 
-	target := strings.TrimSpace(event.TargetActiveChatID)
+	target := strings.TrimSpace(event.TargetRouteKey)
 	if target != "" {
-		return r.publishToActiveChat(ctx, target, event)
+		return r.publishToRouteKey(ctx, target, event)
 	}
 
-	chats, err := r.state.ListSessionActiveChats(ctx, clientSessionID, true)
+	bindings, err := r.state.ListSessionRouteBindings(ctx, clientSessionID, true)
 	if err != nil {
-		return fmt.Errorf("im2 router: list active chats for %q: %w", clientSessionID, err)
+		return fmt.Errorf("im2 router: list route bindings for %q: %w", clientSessionID, err)
 	}
-	if len(chats) == 0 {
+	if len(bindings) == 0 {
 		return nil
 	}
 
 	var firstErr error
-	for _, chat := range chats {
-		if err := r.publishToActiveChat(ctx, chat.ActiveChatID, event); err != nil && firstErr == nil {
+	for _, binding := range bindings {
+		if err := r.publishToRouteKey(ctx, binding.RouteKey, event); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
 }
 
-// MarkActiveChatOffline updates runtime state for disconnected chat endpoints.
-func (r *Router) MarkActiveChatOffline(ctx context.Context, activeChatID string, critical bool) error {
-	return r.state.SetActiveChatOnline(ctx, activeChatID, false, critical)
+// RebindRouteKey updates one routeKey to a new client session binding.
+func (r *Router) RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error {
+	return r.state.RebindRouteKey(ctx, strings.TrimSpace(routeKey), strings.TrimSpace(clientSessionID))
+}
+
+// MarkRouteKeyOffline updates runtime state for disconnected chat endpoints.
+func (r *Router) MarkRouteKeyOffline(ctx context.Context, routeKey string, critical bool) error {
+	return r.state.SetRouteKeyOnline(ctx, routeKey, false, critical)
 }
 
 func (r *Router) normalizeInbound(ctx context.Context, event InboundEvent) (InboundEvent, error) {
@@ -137,14 +142,14 @@ func (r *Router) normalizeInbound(ctx context.Context, event InboundEvent) (Inbo
 		ev.ReceivedAt = time.Now().UTC()
 	}
 
-	activeChatID := strings.TrimSpace(ev.ActiveChatID)
+	routeKey := strings.TrimSpace(ev.RouteKey)
 	imType := strings.ToLower(strings.TrimSpace(ev.IMType))
 	chatID := strings.TrimSpace(ev.ChatID)
 
-	if activeChatID != "" {
-		parsedType, parsedChatID, ok := ParseActiveChatID(activeChatID)
+	if routeKey != "" {
+		parsedType, parsedChatID, ok := ParseRouteKey(routeKey)
 		if !ok {
-			return InboundEvent{}, fmt.Errorf("im2 router: invalid activeChatID %q", activeChatID)
+			return InboundEvent{}, fmt.Errorf("im2 router: invalid routeKey %q", routeKey)
 		}
 		if imType == "" {
 			imType = parsedType
@@ -153,14 +158,14 @@ func (r *Router) normalizeInbound(ctx context.Context, event InboundEvent) (Inbo
 			chatID = parsedChatID
 		}
 	} else {
-		id, err := BuildActiveChatID(imType, chatID)
+		id, err := BuildRouteKey(imType, chatID)
 		if err != nil {
-			return InboundEvent{}, fmt.Errorf("im2 router: build active chat id: %w", err)
+			return InboundEvent{}, fmt.Errorf("im2 router: build routeKey: %w", err)
 		}
-		activeChatID = id
+		routeKey = id
 	}
 
-	clientSessionID, ok, err := r.state.ResolveClientSessionID(ctx, activeChatID)
+	clientSessionID, ok, err := r.state.ResolveClientSessionID(ctx, routeKey)
 	if err != nil {
 		return InboundEvent{}, fmt.Errorf("im2 router: resolve clientSessionId: %w", err)
 	}
@@ -173,38 +178,38 @@ func (r *Router) normalizeInbound(ctx context.Context, event InboundEvent) (Inbo
 		if clientSessionID == "" {
 			return InboundEvent{}, fmt.Errorf("im2 router: empty clientSessionId from generator")
 		}
-		if err := r.state.BindActiveChat(ctx, activeChatID, imType, chatID, clientSessionID, true); err != nil {
-			return InboundEvent{}, fmt.Errorf("im2 router: bind new active chat: %w", err)
+		if err := r.state.BindRouteKey(ctx, routeKey, imType, chatID, clientSessionID, true); err != nil {
+			return InboundEvent{}, fmt.Errorf("im2 router: bind new routeKey: %w", err)
 		}
 	} else {
-		if err := r.state.BindActiveChat(ctx, activeChatID, imType, chatID, clientSessionID, false); err != nil {
-			return InboundEvent{}, fmt.Errorf("im2 router: touch active chat binding: %w", err)
+		if err := r.state.BindRouteKey(ctx, routeKey, imType, chatID, clientSessionID, false); err != nil {
+			return InboundEvent{}, fmt.Errorf("im2 router: touch route binding: %w", err)
 		}
 	}
 
-	ev.ActiveChatID = activeChatID
+	ev.RouteKey = routeKey
 	ev.IMType = imType
 	ev.ChatID = chatID
 	ev.ClientSessionID = clientSessionID
 	return ev, nil
 }
 
-func (r *Router) publishToActiveChat(ctx context.Context, activeChatID string, event OutboundEvent) error {
-	imType, chatID, ok := ParseActiveChatID(activeChatID)
+func (r *Router) publishToRouteKey(ctx context.Context, routeKey string, event OutboundEvent) error {
+	imType, chatID, ok := ParseRouteKey(routeKey)
 	if !ok {
-		return fmt.Errorf("im2 router: invalid activeChatID %q", activeChatID)
+		return fmt.Errorf("im2 router: invalid routeKey %q", routeKey)
 	}
 
 	r.mu.RLock()
-	publisher := r.publishers[imType]
+	ch := r.channels[imType]
 	r.mu.RUnlock()
-	if publisher == nil {
-		return fmt.Errorf("im2 router: publisher not registered for imType=%q", imType)
+	if ch == nil {
+		return fmt.Errorf("im2 router: channel not registered for imType=%q", imType)
 	}
 
 	ev := event
-	ev.TargetActiveChatID = activeChatID
-	if err := publisher.PublishToChat(ctx, chatID, ev); err != nil {
+	ev.TargetRouteKey = routeKey
+	if err := ch.PublishToChat(ctx, chatID, ev); err != nil {
 		return fmt.Errorf("im2 router: publish to %s:%s failed: %w", imType, chatID, err)
 	}
 	return nil

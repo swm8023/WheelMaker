@@ -11,73 +11,69 @@ import (
 type fakeState struct {
 	mu sync.Mutex
 
-	bindings map[string]IMActiveChat
-	sessions map[string]struct{}
+	bindings map[string]IMRouteBinding
 }
 
 func newFakeState() *fakeState {
-	return &fakeState{
-		bindings: map[string]IMActiveChat{},
-		sessions: map[string]struct{}{},
-	}
+	return &fakeState{bindings: map[string]IMRouteBinding{}}
 }
 
 func (s *fakeState) Load(context.Context) error { return nil }
 
-func (s *fakeState) EnsureClientSession(_ context.Context, clientSessionID string, _ bool) error {
-	s.mu.Lock()
-	s.sessions[clientSessionID] = struct{}{}
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *fakeState) ResolveClientSessionID(_ context.Context, activeChatID string) (string, bool, error) {
+func (s *fakeState) ResolveClientSessionID(_ context.Context, routeKey string) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	chat, ok := s.bindings[activeChatID]
+	binding, ok := s.bindings[routeKey]
 	if !ok {
 		return "", false, nil
 	}
-	return chat.ClientSessionID, true, nil
+	return binding.ClientSessionID, true, nil
 }
 
-func (s *fakeState) BindActiveChat(_ context.Context, activeChatID, imType, chatID, clientSessionID string, _ bool) error {
+func (s *fakeState) BindRouteKey(_ context.Context, routeKey, imType, chatID, clientSessionID string, _ bool) error {
 	s.mu.Lock()
-	s.bindings[activeChatID] = IMActiveChat{
-		ActiveChatID:    activeChatID,
+	s.bindings[routeKey] = IMRouteBinding{
+		RouteKey:        routeKey,
 		IMType:          imType,
 		ChatID:          chatID,
 		ClientSessionID: clientSessionID,
 		Online:          true,
 		UpdatedAt:       time.Now(),
 	}
-	s.sessions[clientSessionID] = struct{}{}
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *fakeState) SetActiveChatOnline(_ context.Context, activeChatID string, online bool, _ bool) error {
+func (s *fakeState) RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error {
+	t, c, ok := ParseRouteKey(routeKey)
+	if !ok {
+		return errors.New("invalid route key")
+	}
+	return s.BindRouteKey(ctx, routeKey, t, c, clientSessionID, true)
+}
+
+func (s *fakeState) SetRouteKeyOnline(_ context.Context, routeKey string, online bool, _ bool) error {
 	s.mu.Lock()
-	chat := s.bindings[activeChatID]
-	chat.Online = online
-	chat.UpdatedAt = time.Now()
-	s.bindings[activeChatID] = chat
+	binding := s.bindings[routeKey]
+	binding.Online = online
+	binding.UpdatedAt = time.Now()
+	s.bindings[routeKey] = binding
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *fakeState) ListSessionActiveChats(_ context.Context, clientSessionID string, onlineOnly bool) ([]IMActiveChat, error) {
+func (s *fakeState) ListSessionRouteBindings(_ context.Context, clientSessionID string, onlineOnly bool) ([]IMRouteBinding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]IMActiveChat, 0, 4)
-	for _, chat := range s.bindings {
-		if chat.ClientSessionID != clientSessionID {
+	out := make([]IMRouteBinding, 0, 4)
+	for _, binding := range s.bindings {
+		if binding.ClientSessionID != clientSessionID {
 			continue
 		}
-		if onlineOnly && !chat.Online {
+		if onlineOnly && !binding.Online {
 			continue
 		}
-		out = append(out, chat)
+		out = append(out, binding)
 	}
 	return out, nil
 }
@@ -91,26 +87,36 @@ type capturedPublish struct {
 	event  OutboundEvent
 }
 
-type fakePublisher struct {
+type fakeChannel struct {
 	mu      sync.Mutex
 	records []capturedPublish
 	err     error
 }
 
-func (p *fakePublisher) PublishToChat(_ context.Context, chatID string, event OutboundEvent) error {
-	if p.err != nil {
-		return p.err
+func (ch *fakeChannel) PublishToChat(_ context.Context, chatID string, event OutboundEvent) error {
+	if ch.err != nil {
+		return ch.err
 	}
-	p.mu.Lock()
-	p.records = append(p.records, capturedPublish{chatID: chatID, event: event})
-	p.mu.Unlock()
+	ch.mu.Lock()
+	ch.records = append(ch.records, capturedPublish{chatID: chatID, event: event})
+	ch.mu.Unlock()
 	return nil
 }
 
-func (p *fakePublisher) count() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.records)
+func (ch *fakeChannel) count() int {
+	ch.mu.Lock()
+	defer ch.mu.Unlock()
+	return len(ch.records)
+}
+
+func TestBuildRouteKey_UsesIMTypeAndChatID(t *testing.T) {
+	got, err := BuildRouteKey("feishu", "oc_123")
+	if err != nil {
+		t.Fatalf("BuildRouteKey: %v", err)
+	}
+	if got != "feishu:oc_123" {
+		t.Fatalf("routeKey=%q, want feishu:oc_123", got)
+	}
 }
 
 func TestRouterHandleInboundCreatesBinding(t *testing.T) {
@@ -138,25 +144,25 @@ func TestRouterHandleInboundCreatesBinding(t *testing.T) {
 	if got.ClientSessionID != "session-1" {
 		t.Fatalf("clientSessionId=%q, want session-1", got.ClientSessionID)
 	}
-	if got.ActiveChatID != "feishu:chat-1" {
-		t.Fatalf("activeChatId=%q, want feishu:chat-1", got.ActiveChatID)
+	if got.RouteKey != "feishu:chat-1" {
+		t.Fatalf("routeKey=%q, want feishu:chat-1", got.RouteKey)
 	}
 }
 
 func TestRouterPublishBroadcastsToOnlineChats(t *testing.T) {
 	state := newFakeState()
-	_ = state.BindActiveChat(context.Background(), "feishu:chat-1", "feishu", "chat-1", "session-1", true)
-	_ = state.BindActiveChat(context.Background(), "feishu:chat-2", "feishu", "chat-2", "session-1", true)
+	_ = state.BindRouteKey(context.Background(), "feishu:chat-1", "feishu", "chat-1", "session-1", true)
+	_ = state.BindRouteKey(context.Background(), "feishu:chat-2", "feishu", "chat-2", "session-1", true)
 
-	publisher := &fakePublisher{}
+	ch := &fakeChannel{}
 	r, err := NewRouter("proj", state, func(context.Context) (string, error) {
 		return "", errors.New("not used")
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	if err := r.RegisterPublisher("feishu", publisher); err != nil {
-		t.Fatalf("RegisterPublisher: %v", err)
+	if err := r.RegisterChannel("feishu", ch); err != nil {
+		t.Fatalf("RegisterChannel: %v", err)
 	}
 
 	if err := r.Publish(context.Background(), OutboundEvent{
@@ -167,40 +173,59 @@ func TestRouterPublishBroadcastsToOnlineChats(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
-	if publisher.count() != 2 {
-		t.Fatalf("publish count=%d, want 2", publisher.count())
+	if ch.count() != 2 {
+		t.Fatalf("publish count=%d, want 2", ch.count())
 	}
 }
 
-func TestRouterPublishTargeted(t *testing.T) {
+func TestRouter_RegisterChannelAndTargetReply(t *testing.T) {
 	state := newFakeState()
-	_ = state.BindActiveChat(context.Background(), "feishu:chat-1", "feishu", "chat-1", "session-1", true)
-	_ = state.BindActiveChat(context.Background(), "feishu:chat-2", "feishu", "chat-2", "session-1", true)
+	_ = state.BindRouteKey(context.Background(), "feishu:oc_123", "feishu", "oc_123", "sess-1", true)
 
-	publisher := &fakePublisher{}
+	ch := &fakeChannel{}
 	r, err := NewRouter("proj", state, func(context.Context) (string, error) {
 		return "", errors.New("not used")
 	}, nil)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
-	if err := r.RegisterPublisher("feishu", publisher); err != nil {
-		t.Fatalf("RegisterPublisher: %v", err)
+	if err := r.RegisterChannel("feishu", ch); err != nil {
+		t.Fatalf("RegisterChannel: %v", err)
 	}
 
 	if err := r.Publish(context.Background(), OutboundEvent{
-		Kind:               OutboundCommandReply,
-		ClientSessionID:    "session-1",
-		TargetActiveChatID: "feishu:chat-2",
-		Text:               "only one",
+		Kind:            OutboundCommandReply,
+		ClientSessionID: "sess-1",
+		TargetRouteKey:  "feishu:oc_123",
+		Text:            "only one",
 	}); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
-	if publisher.count() != 1 {
-		t.Fatalf("publish count=%d, want 1", publisher.count())
+	if ch.count() != 1 {
+		t.Fatalf("publish count=%d, want 1", ch.count())
 	}
-	if publisher.records[0].chatID != "chat-2" {
-		t.Fatalf("target chat=%q, want chat-2", publisher.records[0].chatID)
+	if ch.records[0].chatID != "oc_123" {
+		t.Fatalf("target chat=%q, want oc_123", ch.records[0].chatID)
+	}
+}
+
+func TestRouter_RebindRouteKey_OnlyAffectsTargetRouteKey(t *testing.T) {
+	st := newFakeState()
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-a", "feishu", "chat-a", "s-old", true)
+	_ = st.BindRouteKey(context.Background(), "feishu:chat-b", "feishu", "chat-b", "s-old", true)
+
+	r, err := NewRouter("proj", st, func(context.Context) (string, error) { return "unused", nil }, nil)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+	if err := r.RebindRouteKey(context.Background(), "feishu:chat-a", "s-new"); err != nil {
+		t.Fatalf("RebindRouteKey: %v", err)
+	}
+
+	a, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-a")
+	b, _, _ := st.ResolveClientSessionID(context.Background(), "feishu:chat-b")
+	if a != "s-new" || b != "s-old" {
+		t.Fatalf("got a=%q b=%q", a, b)
 	}
 }

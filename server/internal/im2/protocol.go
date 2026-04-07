@@ -28,12 +28,12 @@ const (
 // OutboundEvent is a protocol-agnostic event emitted by Client.
 // Payload semantics are transparent to IM router.
 type OutboundEvent struct {
-	Kind               OutboundKind
-	ClientSessionID    string
-	TargetActiveChatID string // empty means broadcast to all online chats of the session
-	Text               string
-	Payload            []byte
-	Meta               map[string]string
+	Kind            OutboundKind
+	ClientSessionID string
+	TargetRouteKey  string // empty means broadcast to all online chats of the session
+	Text            string
+	Payload         []byte
+	Meta            map[string]string
 }
 
 // InboundEvent is a normalized inbound event from IM channels.
@@ -41,7 +41,7 @@ type InboundEvent struct {
 	Kind            InboundKind
 	IMType          string
 	ChatID          string
-	ActiveChatID    string
+	RouteKey        string
 	ClientSessionID string
 	MessageID       string
 	Text            string
@@ -50,10 +50,10 @@ type InboundEvent struct {
 	ReceivedAt      time.Time
 }
 
-// IMActiveChat is the lightweight runtime view of one active IM chat endpoint.
-type IMActiveChat struct {
+// IMRouteBinding is the lightweight runtime view of one IM route binding.
+type IMRouteBinding struct {
 	ProjectName     string
-	ActiveChatID    string
+	RouteKey        string
 	IMType          string
 	ChatID          string
 	ClientSessionID string
@@ -65,25 +65,25 @@ type IMActiveChat struct {
 // InboundHandler consumes inbound events routed by Router.
 type InboundHandler func(ctx context.Context, event InboundEvent) error
 
-// Publisher is implemented by concrete IM integrations (feishu/console/mobile/etc).
-// Router keeps ACP protocol transparent and only pushes normalized events to publishers.
-type Publisher interface {
+// Channel is implemented by concrete IM integrations (feishu/console/mobile/etc).
+// Router keeps ACP protocol transparent and only pushes normalized events to channels.
+type Channel interface {
 	PublishToChat(ctx context.Context, chatID string, event OutboundEvent) error
 }
 
-// BuildActiveChatID builds normalized IM active chat id: <imType>:<chatID>.
-func BuildActiveChatID(imType, chatID string) (string, error) {
+// BuildRouteKey builds normalized IM route key: <imType>:<chatID>.
+func BuildRouteKey(imType, chatID string) (string, error) {
 	t := strings.ToLower(strings.TrimSpace(imType))
 	c := strings.TrimSpace(chatID)
 	if t == "" || c == "" {
-		return "", fmt.Errorf("invalid active chat id parts: imType=%q chatID=%q", imType, chatID)
+		return "", fmt.Errorf("invalid route key parts: imType=%q chatID=%q", imType, chatID)
 	}
 	return t + ":" + c, nil
 }
 
-// ParseActiveChatID parses normalized IM active chat id.
-func ParseActiveChatID(activeChatID string) (imType, chatID string, ok bool) {
-	v := strings.TrimSpace(activeChatID)
+// ParseRouteKey parses normalized IM route key.
+func ParseRouteKey(routeKey string) (imType, chatID string, ok bool) {
+	v := strings.TrimSpace(routeKey)
 	if v == "" {
 		return "", "", false
 	}

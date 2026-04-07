@@ -17,29 +17,30 @@ const (
 )
 
 const stateSchema = `
-CREATE TABLE IF NOT EXISTS im_active_chats (
+CREATE TABLE IF NOT EXISTS im_route_bindings (
 	project_name      TEXT NOT NULL,
-	active_chat_id    TEXT NOT NULL,
+	route_key         TEXT NOT NULL,
 	im_type           TEXT NOT NULL,
 	chat_id           TEXT NOT NULL,
 	client_session_id TEXT NOT NULL,
 	online            INTEGER NOT NULL DEFAULT 0,
 	last_seen_at      TEXT NOT NULL,
 	updated_at        TEXT NOT NULL,
-	PRIMARY KEY (project_name, active_chat_id)
+	PRIMARY KEY (project_name, route_key)
 );
-CREATE INDEX IF NOT EXISTS idx_im_active_chats_session ON im_active_chats(project_name, client_session_id);
-CREATE INDEX IF NOT EXISTS idx_im_active_chats_online ON im_active_chats(project_name, online);
+CREATE INDEX IF NOT EXISTS idx_im_route_bindings_session ON im_route_bindings(project_name, client_session_id);
+CREATE INDEX IF NOT EXISTS idx_im_route_bindings_online ON im_route_bindings(project_name, online);
 `
 
 // State is the only external state boundary for IM 2.0.
 // IM 2.0 persists chat binding/runtime only (no client session table).
 type State interface {
 	Load(ctx context.Context) error
-	ResolveClientSessionID(ctx context.Context, activeChatID string) (string, bool, error)
-	BindActiveChat(ctx context.Context, activeChatID, imType, chatID, clientSessionID string, critical bool) error
-	SetActiveChatOnline(ctx context.Context, activeChatID string, online bool, critical bool) error
-	ListSessionActiveChats(ctx context.Context, clientSessionID string, onlineOnly bool) ([]IMActiveChat, error)
+	ResolveClientSessionID(ctx context.Context, routeKey string) (string, bool, error)
+	BindRouteKey(ctx context.Context, routeKey, imType, chatID, clientSessionID string, critical bool) error
+	RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error
+	SetRouteKeyOnline(ctx context.Context, routeKey string, online bool, critical bool) error
+	ListSessionRouteBindings(ctx context.Context, clientSessionID string, onlineOnly bool) ([]IMRouteBinding, error)
 	Close() error
 }
 
@@ -48,11 +49,11 @@ type sqliteState struct {
 	projectName string
 	flushDelay  time.Duration
 
-	mu          sync.Mutex
-	activeChats map[string]IMActiveChat
-	dirtyChats  map[string]struct{}
-	flushTimer  *time.Timer
-	closed      bool
+	mu            sync.Mutex
+	routeBindings map[string]IMRouteBinding
+	dirtyRoutes   map[string]struct{}
+	flushTimer    *time.Timer
+	closed        bool
 }
 
 // NewState creates sqlite-backed IM state with default flush behavior.
@@ -79,11 +80,11 @@ func newSQLiteState(dbPath, projectName string, flushDelay time.Duration) (State
 	}
 
 	s := &sqliteState{
-		db:          db,
-		projectName: pn,
-		flushDelay:  flushDelay,
-		activeChats: map[string]IMActiveChat{},
-		dirtyChats:  map[string]struct{}{},
+		db:            db,
+		projectName:   pn,
+		flushDelay:    flushDelay,
+		routeBindings: map[string]IMRouteBinding{},
+		dirtyRoutes:   map[string]struct{}{},
 	}
 	if err := s.Load(context.Background()); err != nil {
 		_ = db.Close()
@@ -100,27 +101,27 @@ func (s *sqliteState) Load(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	activeChats := map[string]IMActiveChat{}
+	bindings := map[string]IMRouteBinding{}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT active_chat_id, im_type, chat_id, client_session_id, online, last_seen_at, updated_at
-		FROM im_active_chats
+		SELECT route_key, im_type, chat_id, client_session_id, online, last_seen_at, updated_at
+		FROM im_route_bindings
 		WHERE project_name = ?`, s.projectName)
 	if err != nil {
-		return fmt.Errorf("im2 state: load im_active_chats: %w", err)
+		return fmt.Errorf("im2 state: load im_route_bindings: %w", err)
 	}
 	for rows.Next() {
 		var (
-			activeChatID, imType, chatID, clientSessionID string
-			onlineInt                                     int
-			lastSeenRaw, updatedAtRaw                     string
+			routeKey, imType, chatID, clientSessionID string
+			onlineInt                                 int
+			lastSeenRaw, updatedAtRaw                 string
 		)
-		if err := rows.Scan(&activeChatID, &imType, &chatID, &clientSessionID, &onlineInt, &lastSeenRaw, &updatedAtRaw); err != nil {
+		if err := rows.Scan(&routeKey, &imType, &chatID, &clientSessionID, &onlineInt, &lastSeenRaw, &updatedAtRaw); err != nil {
 			rows.Close()
-			return fmt.Errorf("im2 state: scan im_active_chats: %w", err)
+			return fmt.Errorf("im2 state: scan im_route_bindings: %w", err)
 		}
-		activeChats[activeChatID] = IMActiveChat{
+		bindings[routeKey] = IMRouteBinding{
 			ProjectName:     s.projectName,
-			ActiveChatID:    activeChatID,
+			RouteKey:        routeKey,
 			IMType:          imType,
 			ChatID:          chatID,
 			ClientSessionID: clientSessionID,
@@ -131,7 +132,7 @@ func (s *sqliteState) Load(ctx context.Context) error {
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return fmt.Errorf("im2 state: iterate im_active_chats: %w", err)
+		return fmt.Errorf("im2 state: iterate im_route_bindings: %w", err)
 	}
 	rows.Close()
 
@@ -140,15 +141,15 @@ func (s *sqliteState) Load(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	s.activeChats = activeChats
-	s.dirtyChats = map[string]struct{}{}
+	s.routeBindings = bindings
+	s.dirtyRoutes = map[string]struct{}{}
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *sqliteState) ResolveClientSessionID(_ context.Context, activeChatID string) (string, bool, error) {
-	id := strings.TrimSpace(activeChatID)
-	if id == "" {
+func (s *sqliteState) ResolveClientSessionID(_ context.Context, routeKey string) (string, bool, error) {
+	routeKey = strings.TrimSpace(routeKey)
+	if routeKey == "" {
 		return "", false, nil
 	}
 	s.mu.Lock()
@@ -156,20 +157,20 @@ func (s *sqliteState) ResolveClientSessionID(_ context.Context, activeChatID str
 	if s.closed {
 		return "", false, fmt.Errorf("im2 state: closed")
 	}
-	chat, ok := s.activeChats[id]
-	if !ok || strings.TrimSpace(chat.ClientSessionID) == "" {
+	binding, ok := s.routeBindings[routeKey]
+	if !ok || strings.TrimSpace(binding.ClientSessionID) == "" {
 		return "", false, nil
 	}
-	return chat.ClientSessionID, true, nil
+	return binding.ClientSessionID, true, nil
 }
 
-func (s *sqliteState) BindActiveChat(ctx context.Context, activeChatID, imType, chatID, clientSessionID string, critical bool) error {
-	csid := strings.TrimSpace(clientSessionID)
-	if csid == "" {
+func (s *sqliteState) BindRouteKey(ctx context.Context, routeKey, imType, chatID, clientSessionID string, critical bool) error {
+	clientSessionID = strings.TrimSpace(clientSessionID)
+	if clientSessionID == "" {
 		return fmt.Errorf("im2 state: empty clientSessionID")
 	}
 
-	resolvedActiveChatID, resolvedIMType, resolvedChatID, err := normalizeActiveChatParts(activeChatID, imType, chatID)
+	resolvedRouteKey, resolvedIMType, resolvedChatID, err := normalizeRouteParts(routeKey, imType, chatID)
 	if err != nil {
 		return err
 	}
@@ -180,24 +181,32 @@ func (s *sqliteState) BindActiveChat(ctx context.Context, activeChatID, imType, 
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	s.activeChats[resolvedActiveChatID] = IMActiveChat{
+	s.routeBindings[resolvedRouteKey] = IMRouteBinding{
 		ProjectName:     s.projectName,
-		ActiveChatID:    resolvedActiveChatID,
+		RouteKey:        resolvedRouteKey,
 		IMType:          resolvedIMType,
 		ChatID:          resolvedChatID,
-		ClientSessionID: csid,
+		ClientSessionID: clientSessionID,
 		Online:          true,
 		LastSeenAt:      now,
 		UpdatedAt:       now,
 	}
-	s.dirtyChats[resolvedActiveChatID] = struct{}{}
+	s.dirtyRoutes[resolvedRouteKey] = struct{}{}
 	s.mu.Unlock()
 	return s.persistWithPolicy(ctx, critical)
 }
 
-func (s *sqliteState) SetActiveChatOnline(ctx context.Context, activeChatID string, online bool, critical bool) error {
-	id := strings.TrimSpace(activeChatID)
-	if id == "" {
+func (s *sqliteState) RebindRouteKey(ctx context.Context, routeKey, clientSessionID string) error {
+	imType, chatID, ok := ParseRouteKey(routeKey)
+	if !ok {
+		return fmt.Errorf("im2 state: invalid routeKey %q", routeKey)
+	}
+	return s.BindRouteKey(ctx, routeKey, imType, chatID, clientSessionID, true)
+}
+
+func (s *sqliteState) SetRouteKeyOnline(ctx context.Context, routeKey string, online bool, critical bool) error {
+	routeKey = strings.TrimSpace(routeKey)
+	if routeKey == "" {
 		return nil
 	}
 
@@ -207,25 +216,25 @@ func (s *sqliteState) SetActiveChatOnline(ctx context.Context, activeChatID stri
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	chat, ok := s.activeChats[id]
+	binding, ok := s.routeBindings[routeKey]
 	if !ok {
 		s.mu.Unlock()
 		return nil
 	}
-	chat.Online = online
+	binding.Online = online
 	if online {
-		chat.LastSeenAt = now
+		binding.LastSeenAt = now
 	}
-	chat.UpdatedAt = now
-	s.activeChats[id] = chat
-	s.dirtyChats[id] = struct{}{}
+	binding.UpdatedAt = now
+	s.routeBindings[routeKey] = binding
+	s.dirtyRoutes[routeKey] = struct{}{}
 	s.mu.Unlock()
 	return s.persistWithPolicy(ctx, critical)
 }
 
-func (s *sqliteState) ListSessionActiveChats(_ context.Context, clientSessionID string, onlineOnly bool) ([]IMActiveChat, error) {
-	csid := strings.TrimSpace(clientSessionID)
-	if csid == "" {
+func (s *sqliteState) ListSessionRouteBindings(_ context.Context, clientSessionID string, onlineOnly bool) ([]IMRouteBinding, error) {
+	clientSessionID = strings.TrimSpace(clientSessionID)
+	if clientSessionID == "" {
 		return nil, nil
 	}
 	s.mu.Lock()
@@ -233,23 +242,23 @@ func (s *sqliteState) ListSessionActiveChats(_ context.Context, clientSessionID 
 	if s.closed {
 		return nil, fmt.Errorf("im2 state: closed")
 	}
-	chats := make([]IMActiveChat, 0, 8)
-	for _, chat := range s.activeChats {
-		if chat.ClientSessionID != csid {
+	bindings := make([]IMRouteBinding, 0, 8)
+	for _, binding := range s.routeBindings {
+		if binding.ClientSessionID != clientSessionID {
 			continue
 		}
-		if onlineOnly && !chat.Online {
+		if onlineOnly && !binding.Online {
 			continue
 		}
-		chats = append(chats, chat)
+		bindings = append(bindings, binding)
 	}
-	sort.Slice(chats, func(i, j int) bool {
-		if chats[i].UpdatedAt.Equal(chats[j].UpdatedAt) {
-			return chats[i].ActiveChatID < chats[j].ActiveChatID
+	sort.Slice(bindings, func(i, j int) bool {
+		if bindings[i].UpdatedAt.Equal(bindings[j].UpdatedAt) {
+			return bindings[i].RouteKey < bindings[j].RouteKey
 		}
-		return chats[i].UpdatedAt.After(chats[j].UpdatedAt)
+		return bindings[i].UpdatedAt.After(bindings[j].UpdatedAt)
 	})
-	return chats, nil
+	return bindings, nil
 }
 
 func (s *sqliteState) Close() error {
@@ -317,33 +326,33 @@ func (s *sqliteState) flush(ctx context.Context) error {
 		s.mu.Unlock()
 		return fmt.Errorf("im2 state: closed")
 	}
-	chatIDs := mapKeys(s.dirtyChats)
-	if len(chatIDs) == 0 {
+	routeKeys := mapKeys(s.dirtyRoutes)
+	if len(routeKeys) == 0 {
 		s.mu.Unlock()
 		return nil
 	}
-	chats := make([]IMActiveChat, 0, len(chatIDs))
-	for _, id := range chatIDs {
-		if rec, ok := s.activeChats[id]; ok {
-			chats = append(chats, rec)
+	records := make([]IMRouteBinding, 0, len(routeKeys))
+	for _, routeKey := range routeKeys {
+		if rec, ok := s.routeBindings[routeKey]; ok {
+			records = append(records, rec)
 		}
 	}
-	s.dirtyChats = map[string]struct{}{}
+	s.dirtyRoutes = map[string]struct{}{}
 	s.mu.Unlock()
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		s.requeueDirty(chatIDs)
+		s.requeueDirty(routeKeys)
 		return fmt.Errorf("im2 state: begin tx: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	for _, rec := range chats {
+	for _, rec := range records {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO im_active_chats (
-				project_name, active_chat_id, im_type, chat_id, client_session_id, online, last_seen_at, updated_at
+			INSERT INTO im_route_bindings (
+				project_name, route_key, im_type, chat_id, client_session_id, online, last_seen_at, updated_at
 			) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT(project_name, active_chat_id) DO UPDATE SET
+			ON CONFLICT(project_name, route_key) DO UPDATE SET
 				im_type = excluded.im_type,
 				chat_id = excluded.chat_id,
 				client_session_id = excluded.client_session_id,
@@ -351,7 +360,7 @@ func (s *sqliteState) flush(ctx context.Context) error {
 				last_seen_at = excluded.last_seen_at,
 				updated_at = excluded.updated_at`,
 			s.projectName,
-			rec.ActiveChatID,
+			rec.RouteKey,
 			rec.IMType,
 			rec.ChatID,
 			rec.ClientSessionID,
@@ -359,46 +368,46 @@ func (s *sqliteState) flush(ctx context.Context) error {
 			rec.LastSeenAt.UTC().Format(time.RFC3339Nano),
 			rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		); err != nil {
-			s.requeueDirty(chatIDs)
-			return fmt.Errorf("im2 state: upsert active_chat %q: %w", rec.ActiveChatID, err)
+			s.requeueDirty(routeKeys)
+			return fmt.Errorf("im2 state: upsert route_binding %q: %w", rec.RouteKey, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.requeueDirty(chatIDs)
+		s.requeueDirty(routeKeys)
 		return fmt.Errorf("im2 state: commit tx: %w", err)
 	}
 	return nil
 }
 
-func (s *sqliteState) requeueDirty(chatIDs []string) {
+func (s *sqliteState) requeueDirty(routeKeys []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return
 	}
-	for _, id := range chatIDs {
-		s.dirtyChats[id] = struct{}{}
+	for _, routeKey := range routeKeys {
+		s.dirtyRoutes[routeKey] = struct{}{}
 	}
 	s.scheduleFlushLocked()
 }
 
-func normalizeActiveChatParts(activeChatID, imType, chatID string) (string, string, string, error) {
-	id := strings.TrimSpace(activeChatID)
-	if id != "" {
-		t, c, ok := ParseActiveChatID(id)
+func normalizeRouteParts(routeKey, imType, chatID string) (string, string, string, error) {
+	routeKey = strings.TrimSpace(routeKey)
+	if routeKey != "" {
+		t, c, ok := ParseRouteKey(routeKey)
 		if !ok {
-			return "", "", "", fmt.Errorf("im2 state: invalid activeChatID %q", activeChatID)
+			return "", "", "", fmt.Errorf("im2 state: invalid routeKey %q", routeKey)
 		}
-		return id, t, c, nil
+		return routeKey, t, c, nil
 	}
 
-	id, err := BuildActiveChatID(imType, chatID)
+	routeKey, err := BuildRouteKey(imType, chatID)
 	if err != nil {
-		return "", "", "", fmt.Errorf("im2 state: build active chat id: %w", err)
+		return "", "", "", fmt.Errorf("im2 state: build routeKey: %w", err)
 	}
-	t, c, _ := ParseActiveChatID(id)
-	return id, t, c, nil
+	t, c, _ := ParseRouteKey(routeKey)
+	return routeKey, t, c, nil
 }
 
 func mapKeys[T any](m map[string]T) []string {
