@@ -1,6 +1,6 @@
 # WheelMaker - Server
 
-Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, console), with independent registry sync.
+Go daemon bridging local AI CLIs (Codex, Claude) to remote IM channels (Feishu, app stub), with independent registry sync.
 
 ## Architecture
 
@@ -8,7 +8,7 @@ Architecture 3.0 — multi-session with per-agent isolation:
 
 ```
 Hub
- +- im/forwarder.Forwarder -- console | feishu | mobile   (IM layer)
+ +- im2.Router -- feishu | app   (formal IM layer)
  +- registry.Reporter -- registry server (project snapshot sync)
  +- client.Client -- routeMap[routeKey] -> Session
        +- Session -- AgentInstance -- AgentConn -- acp.Forwarder -- acp.Conn -- CLI subprocess
@@ -35,7 +35,7 @@ Full design: [../docs/architecture-3.0.md](../docs/architecture-3.0.md)
 | `internal/hub/` | Hub process domain (orchestration + per-project runtime) |
 | `internal/hub/client/` | Command routing, session lifecycle, state persistence |
 | `internal/hub/agent/` | Unified ACP agent layer: provider, process, conn (owned/shared), instance, factory |
-| `internal/hub/im/` | IM adapters and forwarder |
+| `internal/im2/` | Formal IM runtime, router, and channels |
 | `internal/registry/` | Registry server and hub reporter |
 | `internal/shared/` | Shared config, logging, and registry protocol helpers |
 
@@ -46,7 +46,7 @@ Full design: [../docs/architecture-3.0.md](../docs/architecture-3.0.md)
 
 ## Dev Conventions
 
-- Interfaces first: `acp.Session`, `agent.Agent`, `im.Channel`
+- Interfaces first: `acp.Session`, `agent.Agent`, `im2.Channel`
 - Agent subprocess is lazy: created on first message (`ensureInstance`)
 - Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/config`
 - Code comments and identifiers: **English only**
@@ -77,7 +77,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/refresh_server.ps
 | 1 | `acp.Conn` is pure transport - no business logic inside |
 | 2 | `client.Client` owns routing (routeKey → Session); Session owns agent lifecycle and state |
 | 3 | Agent subprocess is created lazily - never at startup (`ensureInstance`) |
-| 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im.Channel`) |
+| 4 | All cross-layer deps injected via interfaces (`acp.Session`, `agent.Agent`, `im2.Channel`) |
 | 5 | `state.json` is the source of truth for runtime state; `SQLiteSessionStore` for session persistence |
 | 6 | Registry sync is independent of IM mode (`registry.listen=true` local, otherwise remote connect) |
 

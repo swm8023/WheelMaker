@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/swm8023/wheelmaker/internal/hub/im"
+	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -42,10 +42,8 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	r.session.mu.Lock()
-	bridge := r.session.imBridge
-	r.session.mu.Unlock()
-	if bridge == nil || !bridge.CanHandleDecision() {
+	router, source, ok := r.session.im2Context()
+	if !ok {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
@@ -54,11 +52,11 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 		title = "Permission request"
 	}
 
-	// ChatID is left empty; RequestDecision will use imBridge.activeChatID.
-	req := im.DecisionRequest{
-		Kind:  im.DecisionPermission,
-		Title: title,
-		Body:  fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
+	req := im2.DecisionRequest{
+		SessionID: params.SessionID,
+		Kind:      im2.DecisionPermission,
+		Title:     title,
+		Body:      fmt.Sprintf("mode=%s toolCall=%s", renderUnknown(mode), params.ToolCall.ToolCallID),
 		Meta: map[string]string{
 			"tool_call_id": params.ToolCall.ToolCallID,
 			"tool_title":   params.ToolCall.Title,
@@ -70,16 +68,16 @@ func (r *permissionRouter) decide(ctx context.Context, params acp.PermissionRequ
 			"timeoutSec": "1800",
 		},
 	}
-	req.Options = make([]im.DecisionOption, 0, len(params.Options))
+	req.Options = make([]im2.DecisionOption, 0, len(params.Options))
 	for _, o := range params.Options {
-		req.Options = append(req.Options, im.DecisionOption{
+		req.Options = append(req.Options, im2.DecisionOption{
 			ID:    o.OptionID,
 			Label: o.Name,
 			Value: o.Kind,
 		})
 	}
 
-	res, err := bridge.RequestDecision(ctx, req)
+	res, err := router.RequestDecision(ctx, im2.SendTarget{SessionID: r.session.ID, Source: &source}, req)
 	if err != nil {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}

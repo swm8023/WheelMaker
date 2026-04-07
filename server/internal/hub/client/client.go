@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
@@ -44,7 +43,6 @@ type Client struct {
 
 	stateStore ClientStateStore
 	state      *ProjectState
-	imBridge   *im.ImAdapter // nil when no IM channel configured
 	im2Router  IM2Router
 
 	mu sync.Mutex
@@ -71,17 +69,13 @@ type Client struct {
 }
 
 // New creates a Client for the given project.
-//   - store: persistent state store scoped to this project
-//   - imProvider: IM bridge; nil means Run() returns an error (use Hub with a console project)
-//   - projectName: identifier used in logs and state keys
-//   - cwd: working directory for agent sessions
-func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) *Client {
+// The second argument is kept only to avoid broad call-site churn while IM1 is removed.
+func New(store Store, _ any, projectName string, cwd string) *Client {
 	c := &Client{
 		projectName:      projectName,
 		cwd:              cwd,
 		registry:         agent.DefaultACPFactory(),
 		stateStore:       NewClientStateStore(store, nil),
-		imBridge:         imProvider,
 		imBlockedUpdates: map[string]struct{}{},
 		sessions:         make(map[string]*Session),
 		routeMap:         make(map[string]string),
@@ -91,7 +85,6 @@ func New(store Store, imProvider *im.ImAdapter, projectName string, cwd string) 
 	sess := newSession("default", cwd)
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
-	sess.imBridge = imProvider
 	sess.im2Router = c.im2Router
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.permRouter = newPermissionRouter(sess)
@@ -147,8 +140,8 @@ func (c *Client) SetSessionStore(ss SessionStore) {
 	c.stateStore.SetSessionStore(ss)
 }
 
-// Start loads persisted state and registers the IM message callback.
-// Agent initialization is deferred until the first incoming message (lazy init).
+// Start loads persisted state.
+// Agent initialization is deferred until the first incoming IM2 event (lazy init).
 func (c *Client) Start(ctx context.Context) error {
 	state, err := c.stateStore.LoadProjectState()
 	if err != nil {
@@ -162,15 +155,7 @@ func (c *Client) Start(ctx context.Context) error {
 		sess.state = state
 		sess.mu.Unlock()
 	}
-	activeSess := c.activeSession
 	c.mu.Unlock()
-
-	if c.imBridge != nil {
-		c.imBridge.OnMessage(c.HandleMessage)
-		if activeSess != nil {
-			c.imBridge.SetHelpResolver(activeSess.resolveHelpModel)
-		}
-	}
 
 	// Start background persist timer for suspended sessions.
 	if c.stateStore.SessionStoreEnabled() {
@@ -180,16 +165,13 @@ func (c *Client) Start(ctx context.Context) error {
 	return nil
 }
 
-// Run blocks until ctx is cancelled, delegating to the IM channel's Run loop.
-// Returns an error if no IM channel is configured.
+// Run blocks until ctx is cancelled, delegating to the IM2 router's Run loop.
+// Returns an error if no IM2 router is configured.
 func (c *Client) Run(ctx context.Context) error {
 	if c.im2Router != nil {
 		return c.im2Router.Run(ctx)
 	}
-	if c.imBridge != nil {
-		return c.imBridge.Run(ctx)
-	}
-	return errors.New("no IM channel configured; add a console project to config.json")
+	return errors.New("no IM2 router configured")
 }
 
 // Close saves state and shuts down all active sessions.
@@ -235,43 +217,12 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// HandleMessage routes an incoming IM message to the appropriate handler.
-// Known commands (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are dispatched to handleCommand;
-// everything else — including lines starting with "/" that are not known commands —
-// is forwarded to the agent as a prompt.
-func (c *Client) HandleMessage(msg im.Message) {
-	// Update the active chat ID so all outbound messages route to the correct chat.
-	if c.imBridge != nil && strings.TrimSpace(msg.ChatID) != "" {
-		c.imBridge.SetActiveChatID(msg.ChatID)
-	}
-
-	text := strings.TrimSpace(msg.Text)
-	if text == "" {
-		return
-	}
-
-	sess := c.resolveSession(msg)
-
-	if cmd, args, ok := parseCommand(text); ok {
-		c.handleCommand(sess, msg, cmd, args)
-		return
-	}
-	sess.handlePrompt(msg, text)
-}
-
 // --- internal ---
 
-// resolveSession finds or creates the Session for a given message's route.
-// Uses msg.RouteKey (falls back to msg.ChatID, then "default") to look up the
-// session via routeMap. If no session exists for the route, a new one is created.
-func (c *Client) resolveSession(msg im.Message) *Session {
-	routeKey := msg.RouteKey
-	if routeKey == "" {
-		routeKey = msg.ChatID
-	}
-	if routeKey == "" {
-		routeKey = "default"
-	}
+// resolveSession finds or creates the Session for a given route key.
+// If no session exists for the route, a new one is created.
+func (c *Client) resolveSession(routeKey string) *Session {
+	routeKey = normalizeRouteKey(routeKey)
 
 	c.mu.Lock()
 	sessID := c.routeMap[routeKey]
@@ -291,7 +242,6 @@ func (c *Client) resolveSession(msg im.Message) *Session {
 				c.mu.Lock()
 				restored.persistence = c.stateStore
 				restored.registry = c.registry
-				restored.imBridge = c.imBridge
 				restored.im2Router = c.im2Router
 				restored.imBlockedUpdates = c.imBlockedUpdates
 				restored.yolo = c.yolo
@@ -347,7 +297,6 @@ func (c *Client) newWiredSession(id string) *Session {
 	sess := newSession(id, c.cwd)
 	sess.persistence = c.stateStore
 	sess.registry = c.registry
-	sess.imBridge = c.imBridge
 	sess.im2Router = c.im2Router
 	sess.imBlockedUpdates = c.imBlockedUpdates
 	sess.yolo = c.yolo
@@ -477,7 +426,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	c.mu.Lock()
 	restored.persistence = c.stateStore
 	restored.registry = c.registry
-	restored.imBridge = c.imBridge
 	restored.im2Router = c.im2Router
 	restored.imBlockedUpdates = c.imBlockedUpdates
 	restored.yolo = c.yolo
@@ -636,7 +584,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
 // promptMu is held for the full duration, serializing with switchAgent.
-func (s *Session) handlePrompt(msg im.Message, text string) {
+func (s *Session) handlePrompt(text string) {
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 
@@ -669,13 +617,7 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 		s.mu.Unlock()
 
 		var buf strings.Builder
-		s.mu.Lock()
-		emitter := s.imBridge
-		hasEmitter := emitter != nil
-		sid := s.acpSessionID
-		s.mu.Unlock()
 		im2Router, im2Source, hasIM2Emitter := s.im2Context()
-		hasEmitter = hasEmitter || hasIM2Emitter
 
 		sawSandboxRefresh := false
 		sawText := false
@@ -730,16 +672,6 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 				if emitErr != nil {
 					s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 				}
-			} else if emitter != nil {
-				emitErr := emitter.Emit(ctx, im.IMUpdate{
-					SessionID:  sid,
-					UpdateType: string(u.Type),
-					Text:       u.Content,
-					Raw:        u.Raw,
-				})
-				if emitErr != nil {
-					s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
-				}
 			}
 			if hasSandboxRefreshError(u) {
 				sawSandboxRefresh = true
@@ -751,10 +683,8 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 				s.reply(formatConfigOptionUpdateMessage(u.Raw))
 				s.syncAndPersistProjectState()
 			}
-			if u.Type == acp.UpdateText {
-				if !hasEmitter {
-					buf.WriteString(u.Content)
-				}
+			if u.Type == acp.UpdateText && !hasIM2Emitter {
+				buf.WriteString(u.Content)
 			}
 			if u.Done {
 				break
@@ -770,7 +700,7 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 
 		s.syncAndPersistProjectState()
 
-		if !hasEmitter && buf.Len() > 0 {
+		if !hasIM2Emitter && buf.Len() > 0 {
 			s.reply(buf.String())
 		}
 
@@ -781,6 +711,14 @@ func (s *Session) handlePrompt(msg im.Message, text string) {
 		}
 		return
 	}
+}
+
+func normalizeRouteKey(routeKey string) string {
+	routeKey = strings.TrimSpace(routeKey)
+	if routeKey == "" {
+		return "default"
+	}
+	return routeKey
 }
 
 func (s *Session) shouldBlockIMUpdate(updateType acp.UpdateType) bool {

@@ -8,44 +8,44 @@ import (
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-func TestBuildClient_IM1DefaultDoesNotEnableIM2(t *testing.T) {
+func TestBuildClient_FeishuEnablesIM2WithoutVersion(t *testing.T) {
 	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
 	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
 		Path: ".",
-		IM:   shared.IMConfig{Type: "console"},
-	})
-	if err != nil {
-		t.Fatalf("buildClient: %v", err)
-	}
-	if c.HasIM2Router() {
-		t.Fatal("IM2 router enabled for default IM1 config")
-	}
-}
-
-func TestBuildClient_IM2FeishuEnablesIM2(t *testing.T) {
-	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
-	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
-		Name: "p",
-		Path: ".",
-		IM:   shared.IMConfig{Type: "feishu", Version: 2},
+		IM:   shared.IMConfig{Type: "feishu"},
 	})
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
 	}
 	if !c.HasIM2Router() {
-		t.Fatal("expected IM2 router for im.version=2")
+		t.Fatal("expected IM2 router for feishu config")
 	}
 }
 
-func TestBuildClient_IM2UnsupportedType(t *testing.T) {
+func TestBuildClient_AppEnablesIM2Stub(t *testing.T) {
+	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
+	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
+		Name: "p",
+		Path: ".",
+		IM:   shared.IMConfig{Type: "app"},
+	})
+	if err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+	if !c.HasIM2Router() {
+		t.Fatal("expected IM2 router for app config")
+	}
+}
+
+func TestBuildClient_RejectsRemovedConsoleType(t *testing.T) {
 	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
 	_, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
 		Path: ".",
-		IM:   shared.IMConfig{Type: "console", Version: 2},
+		IM:   shared.IMConfig{Type: "console"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported im2 type") {
-		t.Fatalf("err=%v, want unsupported im2 type", err)
+	if err == nil || !strings.Contains(err.Error(), "unsupported im.type") {
+		t.Fatalf("err=%v, want unsupported im.type", err)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	"github.com/swm8023/wheelmaker/internal/im2"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -52,13 +51,22 @@ func (c *Client) HandleIM2Inbound(ctx context.Context, event im2.InboundEvent) e
 		return c.sendIM2Direct(ctx, source, body)
 	}
 
+	if strings.TrimSpace(event.SessionID) == "" {
+		c.mu.Lock()
+		if existing := c.routeMap[routeKey]; existing != "" {
+			event.SessionID = existing
+		}
+		c.mu.Unlock()
+	}
+
 	var sess *Session
 	switch {
 	case strings.TrimSpace(event.SessionID) != "":
+		sessionID := strings.TrimSpace(event.SessionID)
 		c.mu.Lock()
-		c.routeMap[routeKey] = strings.TrimSpace(event.SessionID)
+		c.routeMap[routeKey] = sessionID
 		c.mu.Unlock()
-		sess = c.resolveSession(im.Message{ChatID: event.ChatID, RouteKey: routeKey, Text: event.Text})
+		sess = c.resolveSession(routeKey)
 	case isCommand && cmd == "/new":
 		sess = c.ClientNewSession(routeKey)
 		if err := c.bindIM2(ctx, source, sess.ID); err != nil {
@@ -84,10 +92,10 @@ func (c *Client) HandleIM2Inbound(ctx context.Context, event im2.InboundEvent) e
 
 	sess.setIM2Source(source)
 	if isCommand {
-		c.handleCommand(sess, im.Message{ChatID: event.ChatID, RouteKey: routeKey, Text: event.Text}, cmd, args)
+		c.handleCommand(sess, routeKey, cmd, args)
 		return nil
 	}
-	sess.handlePrompt(im.Message{ChatID: event.ChatID, RouteKey: routeKey, Text: event.Text}, text)
+	sess.handlePrompt(text)
 	return nil
 }
 

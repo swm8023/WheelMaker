@@ -18,7 +18,6 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
-	"github.com/swm8023/wheelmaker/internal/hub/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -167,37 +166,15 @@ func registerFailingAgent(c *client.Client, provider acp.ACPProvider) {
 
 // captureReplies redirects Client replies to a string slice for inspection.
 func captureReplies(c *client.Client) *[]string {
-	messages := &[]string{}
-	c.InjectIMChannel(&captureChannel{messages: messages})
-	return messages
+	router := captureRouter(c)
+	return &router.Messages
 }
 
-type captureChannel struct {
-	messages *[]string
-	chatIDs  *[]string
-	cardN    *int
+func captureRouter(c *client.Client) *client.TestCaptureRouter {
+	router := client.NewTestCaptureRouter()
+	c.SetIM2Router(router)
+	return router
 }
-
-func (a *captureChannel) OnMessage(_ im.MessageHandler) {}
-func (a *captureChannel) Send(chatID string, text string, kind im.TextKind) error {
-	*a.messages = append(*a.messages, text)
-	if a.chatIDs != nil {
-		*a.chatIDs = append(*a.chatIDs, chatID)
-	}
-	return nil
-}
-func (a *captureChannel) SendCard(_ string, _ string, _ im.Card) error {
-	if a.cardN != nil {
-		*a.cardN++
-	}
-	return nil
-}
-func (a *captureChannel) SendReaction(_, _ string) error          { return nil }
-func (a *captureChannel) MarkDone(_ string) error                 { return nil }
-func (a *captureChannel) OnCardAction(_ func(im.CardActionEvent)) {}
-func (a *captureChannel) Run(_ context.Context) error             { return nil }
-
-var _ im.Channel = (*captureChannel)(nil)
 
 type localTestErr string
 
@@ -264,7 +241,7 @@ func TestHandleMessage_Cancel(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/cancel"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/cancel"})
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) && mock.cancelCalls == 0 {
@@ -283,7 +260,7 @@ func TestHandleMessage_Cancel_NoSession(t *testing.T) {
 	c := client.New(store, nil, "test", "/tmp")
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/cancel"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/cancel"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want no active session message", *msgs)
@@ -295,7 +272,7 @@ func TestHandleMessage_Status(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/status"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/status"})
 
 	if len(*msgs) == 0 {
 		t.Fatal("no reply received")
@@ -314,7 +291,7 @@ func TestHandleMessage_Status_NoSession(t *testing.T) {
 	c := client.New(store, nil, "test", "/tmp")
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/status"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/status"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want no active session message", *msgs)
@@ -332,7 +309,7 @@ func TestHandleMessage_PromptError_NoDuplicateFailureMessage(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "hello"})
 
 	if len(*msgs) == 0 {
 		t.Fatalf("expected error reply, got no messages")
@@ -351,7 +328,7 @@ func TestHandleMessage_Use_UnknownBackend(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use nonexistent"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/use nonexistent"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Switch error") {
 		t.Errorf("reply = %v, want Switch error message", *msgs)
@@ -363,7 +340,7 @@ func TestHandleMessage_Use_MissingName(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/use"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Usage:") {
 		t.Errorf("reply = %v, want Usage: message", *msgs)
@@ -382,7 +359,7 @@ func TestHandleMessage_Mode_SetsMode(t *testing.T) {
 	defer c.Close()
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/mode code"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/mode code"})
 
 	found := false
 	for _, m := range *msgs {
@@ -401,7 +378,7 @@ func TestHandleMessage_Mode_MissingName(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/mode"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/mode"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "Usage: /mode") {
 		t.Fatalf("reply = %v, want /mode usage", *msgs)
@@ -421,8 +398,8 @@ func TestHandleMessage_Model_SetsConfigOption(t *testing.T) {
 
 	msgs := captureReplies(c)
 	// Prime the session so model updates can be applied on an active ACP session.
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/model gpt-4.1-mini"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "/model gpt-4.1-mini"})
 
 	found := false
 	for _, m := range *msgs {
@@ -441,7 +418,7 @@ func TestHandleMessage_EmptyMessage(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "   "})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "   "})
 
 	if len(*msgs) != 0 {
 		t.Errorf("expected no reply for empty message, got %v", *msgs)
@@ -465,7 +442,7 @@ func TestHandleMessage_Prompt_TextStreaming(t *testing.T) {
 	c := newTestClient(mock)
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hi there"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "hi there"})
 
 	if len(mock.promptCalls) != 1 || mock.promptCalls[0] != "hi there" {
 		t.Errorf("Prompt called with %v, want [hi there]", mock.promptCalls)
@@ -490,7 +467,7 @@ func TestHandleMessage_Prompt_BurstStreaming_NoLoss(t *testing.T) {
 	defer c.Close()
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "burst-chunks"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "burst-chunks"})
 
 	want := strings.Repeat("x", 200)
 	joined := strings.Join(*msgs, "\n")
@@ -510,7 +487,7 @@ func TestHandleMessage_Prompt_ConfigOptionUpdate_NotifiesIM(t *testing.T) {
 	}
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "emit-config-update"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "emit-config-update"})
 
 	found := false
 	for _, m := range *msgs {
@@ -538,17 +515,16 @@ func TestHandleMessage_Prompt_BlockThoughtUpdate(t *testing.T) {
 	}
 	c := newTestClient(mock)
 	c.SetIMUpdateBlockList([]string{"thought"})
-	msgs := []string{}
-	c.InjectIMChannel(&captureChannel{messages: &msgs})
+	router := captureRouter(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "test-thought-filter"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "test-thought-filter"})
 
-	joined := strings.Join(msgs, "\n")
+	joined := strings.Join(router.Messages, "\n")
 	if strings.Contains(joined, "hidden-thought") {
-		t.Fatalf("thought update should be blocked, messages=%v", msgs)
+		t.Fatalf("thought update should be blocked, messages=%v", router.Messages)
 	}
 	if !strings.Contains(joined, "visible-reply") {
-		t.Fatalf("text reply should still be delivered, messages=%v", msgs)
+		t.Fatalf("text reply should still be delivered, messages=%v", router.Messages)
 	}
 }
 
@@ -569,18 +545,16 @@ func TestHandleMessage_Prompt_BlockToolCallUpdate(t *testing.T) {
 	}
 	c := newTestClient(mock)
 	c.SetIMUpdateBlockList([]string{"tool"})
-	msgs := []string{}
-	cardN := 0
-	c.InjectIMChannel(&captureChannel{messages: &msgs, cardN: &cardN})
+	router := captureRouter(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "test-tool-filter"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "test-tool-filter"})
 
-	if cardN != 0 {
-		t.Fatalf("tool_call updates should be blocked from IM cards, cardN=%d", cardN)
+	if router.CardCount != 0 {
+		t.Fatalf("tool_call updates should be blocked from IM cards, cardN=%d", router.CardCount)
 	}
-	joined := strings.Join(msgs, "\n")
+	joined := strings.Join(router.Messages, "\n")
 	if !strings.Contains(joined, "visible-after-tool") {
-		t.Fatalf("text reply should still be delivered, messages=%v", msgs)
+		t.Fatalf("text reply should still be delivered, messages=%v", router.Messages)
 	}
 }
 
@@ -592,11 +566,11 @@ func TestHandleMessage_Prompt_AllowsSubsequentSwitch(t *testing.T) {
 	msgs := captureReplies(c)
 
 	// Complete a prompt synchronously.
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "hello"})
 
 	// Register a new agent and switch to it after the prompt completes.
 	registerMockAgent(c, acp.ACPProviderClaude)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use claude"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/use claude"})
 
 	found := false
 	for _, m := range *msgs {
@@ -615,7 +589,7 @@ func TestHandleMessage_Prompt_NoSession(t *testing.T) {
 	c := client.New(store, nil, "test", "/tmp")
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "hello"})
 
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want no active session", *msgs)
@@ -649,7 +623,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		c.HandleMessage(im.Message{ChatID: "c1", Text: "slow prompt"})
+		c.HandleMessage(client.Message{ChatID: "c1", Text: "slow prompt"})
 	}()
 
 	// Wait for the prompt goroutine to be inside Prompt().
@@ -658,7 +632,7 @@ func TestHandlePrompt_ConcurrentSwitch(t *testing.T) {
 	// Issue /use while prompt is active; promptMu forces it to wait.
 	switchDone := make(chan struct{})
 	go func() {
-		c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude"})
+		c.HandleMessage(client.Message{ChatID: "c1", Text: "/use claude"})
 		close(switchDone)
 	}()
 
@@ -800,7 +774,7 @@ func TestSwitchBackend_PersistsOutgoingSessionID(t *testing.T) {
 	registerMockAgent(c, acp.ACPProviderClaude)
 
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use claude"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/use claude"})
 
 	if len(store.saved) == 0 {
 		t.Fatal("state was not saved after switch")
@@ -837,7 +811,7 @@ func TestSwitchBackend_PreservesIncomingSessionIDOnCleanSwitch(t *testing.T) {
 	registerMockAgent(c, acp.ACPProviderClaude)
 
 	captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "chat1", Text: "/use claude"})
+	c.HandleMessage(client.Message{ChatID: "chat1", Text: "/use claude"})
 
 	if len(store.saved) == 0 {
 		t.Fatal("state was not saved after switch")
@@ -872,7 +846,7 @@ func TestSwitchBackend_PersistsTargetSessionIDOnContinue(t *testing.T) {
 
 	// Prime lastReply so SwitchWithContext has something to bootstrap with.
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
 	_ = msgs
 
 	// Reset saves so we only inspect the switch-triggered save.
@@ -880,7 +854,7 @@ func TestSwitchBackend_PersistsTargetSessionIDOnContinue(t *testing.T) {
 	store.saved = nil
 	store.mu.Unlock()
 
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude --continue"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "/use claude --continue"})
 
 	store.mu.Lock()
 	saved := store.saved
@@ -913,13 +887,13 @@ func TestStart_UnregisteredBackend_NonFatal(t *testing.T) {
 
 	// With no active session, messages should get "No active session".
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want 'No active session'", *msgs)
 	}
 
 	// /use with a registered agent should recover.
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use codex"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "/use codex"})
 	found := false
 	for _, m := range *msgs {
 		if strings.Contains(m, "Switched to agent") {
@@ -950,14 +924,14 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 
 	// With no active session, messages should get "No active session".
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
 	if len(*msgs) == 0 || !strings.Contains((*msgs)[0], "No active session") {
 		t.Errorf("reply = %v, want 'No active session'", *msgs)
 	}
 
 	// /use with a working agent should recover and allow prompts.
 	registerMockAgent(c, acp.ACPProviderClaude)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "/use claude"})
 	found := false
 	for _, m := range *msgs {
 		if strings.Contains(m, "Switched to agent") {
@@ -971,7 +945,7 @@ func TestStart_ConnectError_NonFatal(t *testing.T) {
 
 	// After recovery, a prompt should not return "No active session".
 	prevLen := len(*msgs)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "prompt after recovery"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "prompt after recovery"})
 	if len(*msgs) > prevLen {
 		for _, m := range (*msgs)[prevLen:] {
 			if strings.Contains(m, "No active session") {
@@ -1007,14 +981,14 @@ func TestHandleMessage_Use_Continue_BootstrapsContext(t *testing.T) {
 
 	// Prime lastReply: the mock sends "client-mock-reply" text notification for session/prompt.
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
 	_ = msgs
 
 	// Register "other" with a agent that rejects [context] bootstrap prompts.
 	registerContextRejectAgent(c, acp.ACPProviderClaude)
 
 	// /use claude --continue: ag.Switch sends "[context] client-mock-reply" to the new acp.
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude --continue"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "/use claude --continue"})
 
 	// Poll until the async drain goroutine logs the rejection warning (or timeout).
 	const want = "SwitchWithContext bootstrap prompt failed"
@@ -1050,14 +1024,14 @@ func TestHandleMessage_Use_Clean_NoBootstrap(t *testing.T) {
 
 	// Prime lastReply so that if SwitchWithContext were used, it would have content.
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
 	_ = msgs
 
 	// Register "other" using a context-rejecting agent.
 	registerContextRejectAgent(c, acp.ACPProviderClaude)
 
 	// Plain /use (SwitchClean): should NOT send a bootstrap prompt.
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "/use claude"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "/use claude"})
 
 	// Wait long enough for any async operations before asserting.
 	time.Sleep(200 * time.Millisecond)
@@ -1085,7 +1059,7 @@ func TestClient_Close_PersistsSessionID(t *testing.T) {
 
 	// Trigger ensureReady to establish a session ID via session/new.
 	msgs := captureReplies(c)
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "hello"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "hello"})
 	_ = msgs
 
 	if err := c.Close(); err != nil {
@@ -1113,7 +1087,7 @@ func TestHandleMessage_PermissionDecision_ButtonsOnly(t *testing.T) {
 	defer c.Close()
 	msgs := captureReplies(c)
 
-	c.HandleMessage(im.Message{ChatID: "c1", Text: "4"})
+	c.HandleMessage(client.Message{ChatID: "c1", Text: "4"})
 
 	joined := strings.Join(*msgs, "\n")
 	if strings.Contains(joined, "Permission request") {
