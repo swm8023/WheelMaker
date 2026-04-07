@@ -19,3 +19,10 @@ func TestLoadConfig_RejectsRemovedIMVersion(t *testing.T) {
 		t.Fatalf("err=%v, want removed im.version error", err)
 	}
 }
+
+func TestLoadConfig_ConfigExampleIsValid(t *testing.T) {
+	path := filepath.Join("..", "..", "config.example.json")
+	if _, err := LoadConfig(path); err != nil {
+		t.Fatalf("LoadConfig(config.example.json) error = %v", err)
+	}
+}

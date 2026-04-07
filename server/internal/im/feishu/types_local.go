@@ -3,7 +3,7 @@ package feishu
 import (
 	"encoding/json"
 
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
 type Message struct {
@@ -74,4 +74,4 @@ type CardActionEvent struct {
 	Value     map[string]string
 }
 
-type DecisionOption = im2.DecisionOption
+type DecisionOption = im.DecisionOption

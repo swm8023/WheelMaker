@@ -1,4 +1,4 @@
-package im2
+package im
 
 import (
 	"context"
@@ -35,11 +35,11 @@ func NewRouter(client InboundHandler, history SessionHistoryStore) *Router {
 
 func (r *Router) RegisterChannel(ch Channel) error {
 	if ch == nil {
-		return fmt.Errorf("im2: channel is nil")
+		return fmt.Errorf("im: channel is nil")
 	}
 	id := normalize(ch.ID())
 	if id == "" {
-		return fmt.Errorf("im2: channel id is empty")
+		return fmt.Errorf("im: channel id is empty")
 	}
 	r.mu.Lock()
 	r.channels[id] = ch
@@ -54,7 +54,7 @@ func (r *Router) Bind(_ context.Context, chat ChatRef, sessionID string, opts Bi
 	chat = normalizeChat(chat)
 	sessionID = strings.TrimSpace(sessionID)
 	if chat.ChannelID == "" || chat.ChatID == "" || sessionID == "" {
-		return fmt.Errorf("im2: invalid binding")
+		return fmt.Errorf("im: invalid binding")
 	}
 	r.mu.Lock()
 	r.bindings[chat] = binding{sessionID: sessionID, watch: opts.Watch}
@@ -65,7 +65,7 @@ func (r *Router) Bind(_ context.Context, chat ChatRef, sessionID string, opts Bi
 func (r *Router) Unbind(_ context.Context, chat ChatRef) error {
 	chat = normalizeChat(chat)
 	if chat.ChannelID == "" || chat.ChatID == "" {
-		return fmt.Errorf("im2: invalid chat")
+		return fmt.Errorf("im: invalid chat")
 	}
 	r.mu.Lock()
 	delete(r.bindings, chat)
@@ -76,7 +76,7 @@ func (r *Router) Unbind(_ context.Context, chat ChatRef) error {
 func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
 	chat := normalizeChat(ChatRef{ChannelID: event.ChannelID, ChatID: event.ChatID})
 	if chat.ChannelID == "" || chat.ChatID == "" {
-		return fmt.Errorf("im2: inbound chat is invalid")
+		return fmt.Errorf("im: inbound chat is invalid")
 	}
 	if strings.TrimSpace(event.Text) == "" {
 		return nil
@@ -91,7 +91,7 @@ func (r *Router) HandleInbound(ctx context.Context, event InboundEvent) error {
 	if r.client == nil {
 		return nil
 	}
-	return r.client.HandleIM2Inbound(ctx, event)
+	return r.client.HandleIMInbound(ctx, event)
 }
 
 func (r *Router) Send(ctx context.Context, target SendTarget, event OutboundEvent) error {
@@ -126,14 +126,14 @@ func (r *Router) Send(ctx context.Context, target SendTarget, event OutboundEven
 func (r *Router) RequestDecision(ctx context.Context, target SendTarget, req DecisionRequest) (DecisionResult, error) {
 	sessionID := strings.TrimSpace(target.SessionID)
 	if sessionID == "" {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2: decision session is empty")
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im: decision session is empty")
 	}
 	if target.Source == nil {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2: decision source is empty")
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im: decision source is empty")
 	}
 	source := normalizeChat(*target.Source)
 	if source.ChannelID == "" || source.ChatID == "" {
-		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im2: decision source is invalid")
+		return DecisionResult{Outcome: "invalid"}, fmt.Errorf("im: decision source is invalid")
 	}
 	ch, err := r.channel(source.ChannelID)
 	if err != nil {
@@ -160,7 +160,7 @@ func (r *Router) Run(ctx context.Context) error {
 	}
 	r.mu.RUnlock()
 	if len(channels) == 0 {
-		return fmt.Errorf("im2: no channels registered")
+		return fmt.Errorf("im: no channels registered")
 	}
 
 	var wg sync.WaitGroup
@@ -190,7 +190,7 @@ func (r *Router) recipients(target SendTarget) ([]ChatRef, error) {
 	if sessionID == "" {
 		chat := normalizeChat(ChatRef{ChannelID: target.ChannelID, ChatID: target.ChatID})
 		if chat.ChannelID == "" || chat.ChatID == "" {
-			return nil, fmt.Errorf("im2: direct send target is invalid")
+			return nil, fmt.Errorf("im: direct send target is invalid")
 		}
 		return []ChatRef{chat}, nil
 	}
@@ -199,7 +199,7 @@ func (r *Router) recipients(target SendTarget) ([]ChatRef, error) {
 	if target.Source != nil {
 		source := normalizeChat(*target.Source)
 		if source.ChannelID == "" || source.ChatID == "" {
-			return nil, fmt.Errorf("im2: reply source is invalid")
+			return nil, fmt.Errorf("im: reply source is invalid")
 		}
 		out := []ChatRef{source}
 		for chat, b := range r.bindings {
@@ -216,7 +216,7 @@ func (r *Router) recipients(target SendTarget) ([]ChatRef, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("im2: no chats bound to session %q", sessionID)
+		return nil, fmt.Errorf("im: no chats bound to session %q", sessionID)
 	}
 	return out, nil
 }
@@ -227,7 +227,7 @@ func (r *Router) channel(channelID string) (Channel, error) {
 	ch := r.channels[id]
 	r.mu.RUnlock()
 	if ch == nil {
-		return nil, fmt.Errorf("im2: channel %q is not registered", id)
+		return nil, fmt.Errorf("im: channel %q is not registered", id)
 	}
 	return ch, nil
 }

@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
-func TestChannelImplementsIM2Channel(t *testing.T) {
-	var _ im2.Channel = New(Config{})
+func TestChannelImplementsIMChannel(t *testing.T) {
+	var _ im.Channel = New(Config{})
 }
 
 func TestChannelIDIsFeishu(t *testing.T) {
@@ -70,12 +70,12 @@ func TestSend_ACPPayloadRendersByUpdateType(t *testing.T) {
 
 	tests := []struct {
 		name string
-		ev   im2.OutboundEvent
+		ev   im.OutboundEvent
 	}{
-		{name: "text", ev: im2.OutboundEvent{Kind: im2.OutboundACP, Payload: im2.ACPPayload{UpdateType: "text", Text: "hello"}}},
-		{name: "thought", ev: im2.OutboundEvent{Kind: im2.OutboundACP, Payload: im2.ACPPayload{UpdateType: "thought", Text: "thinking"}}},
-		{name: "tool", ev: im2.OutboundEvent{Kind: im2.OutboundACP, Payload: im2.ACPPayload{UpdateType: "tool_call_update", Raw: rawTool}}},
-		{name: "done", ev: im2.OutboundEvent{Kind: im2.OutboundACP, Payload: im2.ACPPayload{UpdateType: "done"}}},
+		{name: "text", ev: im.OutboundEvent{Kind: im.OutboundACP, Payload: im.ACPPayload{UpdateType: "text", Text: "hello"}}},
+		{name: "thought", ev: im.OutboundEvent{Kind: im.OutboundACP, Payload: im.ACPPayload{UpdateType: "thought", Text: "thinking"}}},
+		{name: "tool", ev: im.OutboundEvent{Kind: im.OutboundACP, Payload: im.ACPPayload{UpdateType: "tool_call_update", Raw: rawTool}}},
+		{name: "done", ev: im.OutboundEvent{Kind: im.OutboundACP, Payload: im.ACPPayload{UpdateType: "done"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,12 +105,12 @@ func TestSend_ACPPayloadRendersByUpdateType(t *testing.T) {
 func TestRequestDecision_CardActionResolvesOnce(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
-	done := make(chan im2.DecisionResult, 1)
+	done := make(chan im.DecisionResult, 1)
 	go func() {
-		res, _ := ch.RequestDecision(context.Background(), "chat-a", im2.DecisionRequest{
-			Kind:    im2.DecisionPermission,
+		res, _ := ch.RequestDecision(context.Background(), "chat-a", im.DecisionRequest{
+			Kind:    im.DecisionPermission,
 			Title:   "Allow?",
-			Options: []im2.DecisionOption{{ID: "allow", Label: "Allow", Value: "allow_once"}},
+			Options: []im.DecisionOption{{ID: "allow", Label: "Allow", Value: "allow_once"}},
 		})
 		done <- res
 	}()
@@ -138,12 +138,12 @@ func TestRequestDecision_CardActionResolvesOnce(t *testing.T) {
 func TestRequestDecision_TextFallbackResolves(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
-	done := make(chan im2.DecisionResult, 1)
+	done := make(chan im.DecisionResult, 1)
 	go func() {
-		res, _ := ch.RequestDecision(context.Background(), "chat-a", im2.DecisionRequest{
-			Kind:    im2.DecisionPermission,
+		res, _ := ch.RequestDecision(context.Background(), "chat-a", im.DecisionRequest{
+			Kind:    im.DecisionPermission,
 			Title:   "Allow?",
-			Options: []im2.DecisionOption{{ID: "allow", Label: "Allow", Value: "allow_once"}},
+			Options: []im.DecisionOption{{ID: "allow", Label: "Allow", Value: "allow_once"}},
 		})
 		done <- res
 	}()

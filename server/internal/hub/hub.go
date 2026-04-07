@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
-	im2 "github.com/swm8023/wheelmaker/internal/im2"
-	im2app "github.com/swm8023/wheelmaker/internal/im2/app"
-	im2feishu "github.com/swm8023/wheelmaker/internal/im2/feishu"
+	im "github.com/swm8023/wheelmaker/internal/im"
+	imapp "github.com/swm8023/wheelmaker/internal/im/app"
+	imfeishu "github.com/swm8023/wheelmaker/internal/im/feishu"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	shared "github.com/swm8023/wheelmaker/internal/shared"
 	"os"
@@ -71,19 +71,19 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 			cwd = "."
 		}
 	}
-	return h.buildIM2Client(ctx, pc, cwd)
+	return h.buildIMClient(ctx, pc, cwd)
 }
 
-func (h *Hub) buildIM2Client(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
+func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
 	store := client.NewProjectJSONStore(h.statePath, pc.Name)
 	c := client.New(store, nil, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
 	c.SetIMUpdateBlockList(pc.Client.IMFilter.Block)
 
-	router := im2.NewRouter(c, im2.NewMemoryHistoryStore())
+	router := im.NewRouter(c, im.NewMemoryHistoryStore())
 	switch pc.IM.Type {
 	case "feishu":
-		if err := router.RegisterChannel(im2feishu.New(im2feishu.Config{
+		if err := router.RegisterChannel(imfeishu.New(imfeishu.Config{
 			AppID:             pc.IM.AppID,
 			AppSecret:         pc.IM.AppSecret,
 			VerificationToken: feishuVerificationToken,
@@ -94,13 +94,13 @@ func (h *Hub) buildIM2Client(ctx context.Context, pc shared.ProjectConfig, cwd s
 			return nil, err
 		}
 	case "app":
-		if err := router.RegisterChannel(im2app.New()); err != nil {
+		if err := router.RegisterChannel(imapp.New()); err != nil {
 			return nil, err
 		}
 	default:
 		return nil, fmt.Errorf("unsupported im.type %q (supported: feishu, app)", pc.IM.Type)
 	}
-	c.SetIM2Router(router)
+	c.SetIMRouter(router)
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start: %w", err)
 	}

@@ -81,4 +81,3 @@ func (s *genericService) isIgnored(err error) bool {
 	}
 	return s.ignore(err)
 }
-

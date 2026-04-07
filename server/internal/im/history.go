@@ -1,4 +1,4 @@
-package im2
+package im
 
 import (
 	"context"

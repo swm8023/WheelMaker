@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 )
 
-var ErrNotImplemented = errors.New("im2 app channel: not implemented")
+var ErrNotImplemented = errors.New("im app channel: not implemented")
 
 type Channel struct {
 	handler func(context.Context, string, string) error
@@ -23,12 +23,12 @@ func (c *Channel) OnMessage(handler func(context.Context, string, string) error)
 	c.handler = handler
 }
 
-func (c *Channel) Send(context.Context, string, im2.OutboundEvent) error {
+func (c *Channel) Send(context.Context, string, im.OutboundEvent) error {
 	return ErrNotImplemented
 }
 
-func (c *Channel) RequestDecision(context.Context, string, im2.DecisionRequest) (im2.DecisionResult, error) {
-	return im2.DecisionResult{Outcome: "invalid"}, ErrNotImplemented
+func (c *Channel) RequestDecision(context.Context, string, im.DecisionRequest) (im.DecisionResult, error) {
+	return im.DecisionResult{Outcome: "invalid"}, ErrNotImplemented
 }
 
 func (c *Channel) Run(context.Context) error {

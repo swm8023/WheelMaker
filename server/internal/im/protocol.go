@@ -1,4 +1,4 @@
-package im2
+package im
 
 import "context"
 
@@ -91,5 +91,5 @@ type Channel interface {
 }
 
 type InboundHandler interface {
-	HandleIM2Inbound(ctx context.Context, event InboundEvent) error
+	HandleIMInbound(ctx context.Context, event InboundEvent) error
 }

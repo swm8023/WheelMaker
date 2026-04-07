@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/im2"
+	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -74,58 +74,58 @@ type TestCaptureRouter struct {
 	Messages    []string
 	ChatIDs     []string
 	CardCount   int
-	Decisions   []fakeIM2Decision
+	Decisions   []fakeIMDecision
 	textBuffers map[string]string
 }
 
-type fakeIM2Router struct {
-	binds     []fakeIM2Bind
-	sends     []fakeIM2Send
-	decisions []fakeIM2Decision
+type fakeIMRouter struct {
+	binds     []fakeIMBind
+	sends     []fakeIMSend
+	decisions []fakeIMDecision
 }
 
-type fakeIM2Bind struct {
-	chat      im2.ChatRef
+type fakeIMBind struct {
+	chat      im.ChatRef
 	sessionID string
-	opts      im2.BindOptions
+	opts      im.BindOptions
 }
 
-type fakeIM2Send struct {
-	target im2.SendTarget
-	event  im2.OutboundEvent
+type fakeIMSend struct {
+	target im.SendTarget
+	event  im.OutboundEvent
 }
 
-type fakeIM2Decision struct {
-	target im2.SendTarget
-	req    im2.DecisionRequest
+type fakeIMDecision struct {
+	target im.SendTarget
+	req    im.DecisionRequest
 }
 
-func (f *fakeIM2Router) Bind(_ context.Context, chat im2.ChatRef, sessionID string, opts im2.BindOptions) error {
-	f.binds = append(f.binds, fakeIM2Bind{chat: chat, sessionID: sessionID, opts: opts})
+func (f *fakeIMRouter) Bind(_ context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error {
+	f.binds = append(f.binds, fakeIMBind{chat: chat, sessionID: sessionID, opts: opts})
 	return nil
 }
 
-func (f *fakeIM2Router) Send(_ context.Context, target im2.SendTarget, event im2.OutboundEvent) error {
-	f.sends = append(f.sends, fakeIM2Send{target: target, event: event})
+func (f *fakeIMRouter) Send(_ context.Context, target im.SendTarget, event im.OutboundEvent) error {
+	f.sends = append(f.sends, fakeIMSend{target: target, event: event})
 	return nil
 }
 
-func (f *fakeIM2Router) RequestDecision(_ context.Context, target im2.SendTarget, req im2.DecisionRequest) (im2.DecisionResult, error) {
-	f.decisions = append(f.decisions, fakeIM2Decision{target: target, req: req})
-	return im2.DecisionResult{Outcome: "selected", OptionID: "allow", Value: "allow_once", Source: "card_action"}, nil
+func (f *fakeIMRouter) RequestDecision(_ context.Context, target im.SendTarget, req im.DecisionRequest) (im.DecisionResult, error) {
+	f.decisions = append(f.decisions, fakeIMDecision{target: target, req: req})
+	return im.DecisionResult{Outcome: "selected", OptionID: "allow", Value: "allow_once", Source: "card_action"}, nil
 }
 
-func (f *fakeIM2Router) Run(context.Context) error { return nil }
+func (f *fakeIMRouter) Run(context.Context) error { return nil }
 
 func NewTestCaptureRouter() *TestCaptureRouter {
 	return &TestCaptureRouter{textBuffers: map[string]string{}}
 }
 
-func (r *TestCaptureRouter) Bind(context.Context, im2.ChatRef, string, im2.BindOptions) error {
+func (r *TestCaptureRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
 	return nil
 }
 
-func (r *TestCaptureRouter) Send(_ context.Context, target im2.SendTarget, event im2.OutboundEvent) error {
+func (r *TestCaptureRouter) Send(_ context.Context, target im.SendTarget, event im.OutboundEvent) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -135,15 +135,15 @@ func (r *TestCaptureRouter) Send(_ context.Context, target im2.SendTarget, event
 	}
 
 	switch event.Kind {
-	case im2.OutboundSystem:
-		payload, ok := event.Payload.(im2.TextPayload)
+	case im.OutboundSystem:
+		payload, ok := event.Payload.(im.TextPayload)
 		if !ok {
 			return nil
 		}
 		r.Messages = append(r.Messages, payload.Text)
 		r.ChatIDs = append(r.ChatIDs, chatID)
-	case im2.OutboundACP:
-		payload, ok := event.Payload.(im2.ACPPayload)
+	case im.OutboundACP:
+		payload, ok := event.Payload.(im.ACPPayload)
 		if !ok {
 			return nil
 		}
@@ -169,17 +169,17 @@ func (r *TestCaptureRouter) Send(_ context.Context, target im2.SendTarget, event
 	return nil
 }
 
-func (r *TestCaptureRouter) RequestDecision(_ context.Context, target im2.SendTarget, req im2.DecisionRequest) (im2.DecisionResult, error) {
+func (r *TestCaptureRouter) RequestDecision(_ context.Context, target im.SendTarget, req im.DecisionRequest) (im.DecisionResult, error) {
 	r.mu.Lock()
-	r.Decisions = append(r.Decisions, fakeIM2Decision{target: target, req: req})
+	r.Decisions = append(r.Decisions, fakeIMDecision{target: target, req: req})
 	r.mu.Unlock()
-	return im2.DecisionResult{Outcome: "cancelled", Source: "test"}, nil
+	return im.DecisionResult{Outcome: "cancelled", Source: "test"}, nil
 }
 
 func (r *TestCaptureRouter) Run(context.Context) error { return nil }
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
-var _ IM2Router = (*TestCaptureRouter)(nil)
+var _ IMRouter = (*TestCaptureRouter)(nil)
 
 func (i *testInjectedInstance) Name() string { return i.name }
 
@@ -300,7 +300,7 @@ func (c *Client) InjectState(st *ProjectState) {
 	c.activeSession.mu.Unlock()
 }
 
-// HandleMessage preserves the old test entrypoint shape while routing through IM2.
+// HandleMessage preserves the old test entrypoint shape while routing through IM.
 func (c *Client) HandleMessage(msg Message) {
 	channelID := strings.TrimSpace(msg.ChannelID)
 	if channelID == "" {
@@ -311,8 +311,8 @@ func (c *Client) HandleMessage(msg Message) {
 		return
 	}
 
-	source := im2.ChatRef{ChannelID: channelID, ChatID: strings.TrimSpace(msg.ChatID)}
-	routeKey := normalizeRouteKey(im2RouteKey(source))
+	source := im.ChatRef{ChannelID: channelID, ChatID: strings.TrimSpace(msg.ChatID)}
+	routeKey := normalizeRouteKey(imRouteKey(source))
 	if source.ChatID == "" {
 		routeKey = "default"
 	}
@@ -322,7 +322,7 @@ func (c *Client) HandleMessage(msg Message) {
 		case "/new":
 			sess := c.ClientNewSession(routeKey)
 			if source.ChatID != "" {
-				sess.setIM2Source(source)
+				sess.setIMSource(source)
 			}
 			sess.reply("Created new session: " + sess.ID)
 			return
@@ -331,7 +331,7 @@ func (c *Client) HandleMessage(msg Message) {
 			if err != nil {
 				sess := c.resolveSession(routeKey)
 				if source.ChatID != "" {
-					sess.setIM2Source(source)
+					sess.setIMSource(source)
 				}
 				sess.reply("Load error: " + err.Error())
 				return
@@ -340,13 +340,13 @@ func (c *Client) HandleMessage(msg Message) {
 			if err != nil {
 				sess := c.resolveSession(routeKey)
 				if source.ChatID != "" {
-					sess.setIM2Source(source)
+					sess.setIMSource(source)
 				}
 				sess.reply("Load error: " + err.Error())
 				return
 			}
 			if source.ChatID != "" {
-				loaded.setIM2Source(source)
+				loaded.setIMSource(source)
 			}
 			loaded.reply("Loaded session: " + loaded.ID)
 			return
@@ -355,7 +355,7 @@ func (c *Client) HandleMessage(msg Message) {
 
 	sess := c.resolveSession(routeKey)
 	if source.ChatID != "" {
-		sess.setIM2Source(source)
+		sess.setIMSource(source)
 	}
 
 	if cmd, args, ok := parseCommand(text); ok {
@@ -646,16 +646,16 @@ type noopStore struct{}
 func (s *noopStore) Load() (*ProjectState, error) { return defaultProjectState(), nil }
 func (s *noopStore) Save(_ *ProjectState) error   { return nil }
 
-func TestHandleIM2Inbound_ListDirectDoesNotBind(t *testing.T) {
+func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	fake := &fakeIM2Router{}
-	c.SetIM2Router(fake)
+	fake := &fakeIMRouter{}
+	c.SetIMRouter(fake)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := c.HandleIM2Inbound(context.Background(), im2.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/list"}); err != nil {
-		t.Fatalf("HandleIM2Inbound: %v", err)
+	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/list"}); err != nil {
+		t.Fatalf("HandleIMInbound: %v", err)
 	}
 
 	if len(fake.binds) != 0 {
@@ -669,10 +669,10 @@ func TestHandleIM2Inbound_ListDirectDoesNotBind(t *testing.T) {
 	}
 }
 
-func TestHandleIM2Inbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
+func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	fake := &fakeIM2Router{}
-	c.SetIM2Router(fake)
+	fake := &fakeIMRouter{}
+	c.SetIMRouter(fake)
 	c.InjectAgentFactory(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
 		return &testInjectedInstance{
 			name:      "claude",
@@ -690,20 +690,20 @@ func TestHandleIM2Inbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := c.HandleIM2Inbound(context.Background(), im2.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
-		t.Fatalf("HandleIM2Inbound: %v", err)
+	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
+		t.Fatalf("HandleIMInbound: %v", err)
 	}
 
 	if len(fake.binds) != 1 {
 		t.Fatalf("binds=%+v, want one bind", fake.binds)
 	}
-	if fake.binds[0].chat != (im2.ChatRef{ChannelID: "feishu", ChatID: "chat-a"}) {
+	if fake.binds[0].chat != (im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"}) {
 		t.Fatalf("bind=%+v", fake.binds[0])
 	}
 	foundACP := false
 	for _, send := range fake.sends {
-		if send.event.Kind == im2.OutboundACP {
-			payload, ok := send.event.Payload.(im2.ACPPayload)
+		if send.event.Kind == im.OutboundACP {
+			payload, ok := send.event.Payload.(im.ACPPayload)
 			if ok && payload.UpdateType == string(acp.UpdateText) {
 				foundACP = true
 				if payload.Text != "hello back" {
@@ -717,16 +717,16 @@ func TestHandleIM2Inbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	}
 }
 
-func TestHandleIM2Inbound_ReusesBoundRouteWithoutSessionID(t *testing.T) {
+func TestHandleIMInbound_ReusesBoundRouteWithoutSessionID(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	fake := &fakeIM2Router{}
-	c.SetIM2Router(fake)
+	fake := &fakeIMRouter{}
+	c.SetIMRouter(fake)
 
-	routeKey := im2RouteKey(im2.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
+	routeKey := imRouteKey(im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
 	existing := c.ClientNewSession(routeKey)
 
-	if err := c.HandleIM2Inbound(context.Background(), im2.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/status"}); err != nil {
-		t.Fatalf("HandleIM2Inbound: %v", err)
+	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/status"}); err != nil {
+		t.Fatalf("HandleIMInbound: %v", err)
 	}
 
 	c.mu.Lock()
@@ -746,12 +746,12 @@ func TestHandleIM2Inbound_ReusesBoundRouteWithoutSessionID(t *testing.T) {
 	}
 }
 
-func TestSessionRequestPermission_UsesIM2Decision(t *testing.T) {
+func TestSessionRequestPermission_UsesIMDecision(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
-	fake := &fakeIM2Router{}
-	c.SetIM2Router(fake)
+	fake := &fakeIMRouter{}
+	c.SetIMRouter(fake)
 	sess := c.activeSession
-	sess.setIM2Source(im2.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
+	sess.setIMSource(im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
 
 	res, err := sess.SessionRequestPermission(context.Background(), acp.PermissionRequestParams{
 		SessionID: "acp-1",
