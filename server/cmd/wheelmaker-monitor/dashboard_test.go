@@ -48,3 +48,27 @@ func TestRenderDashboardHTML_PWALinksForRoot(t *testing.T) {
 		t.Fatalf("dashboard should render root icon href")
 	}
 }
+
+func TestDashboardHTML_HasAgentsJSONModalUI(t *testing.T) {
+	if !strings.Contains(dashboardHTML, `id="json-modal"`) {
+		t.Fatalf("dashboard should include json modal container")
+	}
+	if !strings.Contains(dashboardHTML, `id="json-modal-body"`) {
+		t.Fatalf("dashboard should include json modal body")
+	}
+	if !strings.Contains(dashboardHTML, "View JSON") {
+		t.Fatalf("dashboard should include View JSON action text")
+	}
+}
+
+func TestDashboardHTML_HasAgentsJSONModalScriptHooks(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "openAgentsJSONModal") {
+		t.Fatalf("dashboard should define openAgentsJSONModal")
+	}
+	if !strings.Contains(dashboardHTML, "closeJSONModal") {
+		t.Fatalf("dashboard should define closeJSONModal")
+	}
+	if !strings.Contains(dashboardHTML, "json-cell-btn") {
+		t.Fatalf("dashboard should include json-cell-btn class hook")
+	}
+}

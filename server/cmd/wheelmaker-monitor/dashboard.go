@@ -445,6 +445,156 @@ html, body {
 }
 .db-table-wrap { overflow-x: auto; }
 
+/* JSON modal */
+.hidden { display: none !important; }
+.json-cell-btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border: 1px solid rgba(59,130,246,.35);
+  border-radius: 2px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.json-cell-btn:hover { border-color: var(--accent); color: var(--text-hi); }
+
+.json-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+}
+.json-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 8, 15, .72);
+}
+.json-modal-panel {
+  position: relative;
+  width: min(960px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  background: var(--surface);
+  border: 1px solid var(--border-hi);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, .45);
+}
+.json-modal-header {
+  height: 40px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 12px;
+}
+.json-modal-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .6px;
+  text-transform: uppercase;
+  color: var(--text-hi);
+}
+.json-modal-close {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid var(--border-hi);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text);
+  padding: 3px 8px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  cursor: pointer;
+}
+.json-modal-close:hover {
+  border-color: var(--accent);
+  color: var(--text-hi);
+  background: var(--accent-bg);
+}
+.json-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  background: #050810;
+}
+.json-card {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  margin-bottom: 10px;
+}
+.json-card-hd {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.json-card-title {
+  color: var(--text-hi);
+  font-size: 11px;
+  font-weight: 700;
+}
+.json-grid { padding: 8px 10px; display: grid; grid-template-columns: 130px 1fr; gap: 5px 8px; }
+.json-k { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .4px; }
+.json-v { color: var(--text); word-break: break-word; }
+.json-subsection { border-top: 1px dashed var(--border); padding: 8px 10px; }
+.json-subtitle {
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+}
+.json-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.json-pill {
+  display: inline-block;
+  border: 1px solid var(--border-hi);
+  border-radius: 2px;
+  padding: 1px 6px;
+  font-size: 10px;
+  color: var(--text);
+  background: var(--surface-2);
+}
+.json-table-wrap { overflow-x: auto; }
+.json-mini-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.json-mini-table th, .json-mini-table td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+.json-mini-table th {
+  color: var(--text-dim);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+.json-mini-table td:last-child { color: var(--text-hi); }
+.json-code {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #0b111a;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .empty-state { color: var(--text-dim); font-size: 11px; padding: 8px 0; text-align: center; }
 
 @keyframes pulse { 0%,100%{ opacity:.4 } 50%{ opacity:1 } }
@@ -596,12 +746,25 @@ html, body {
   </div>
 </div>
 
+<div id="json-modal" class="json-modal hidden" role="dialog" aria-modal="true" aria-labelledby="json-modal-title">
+  <div class="json-modal-backdrop" onclick="closeJSONModal()"></div>
+  <div class="json-modal-panel">
+    <div class="json-modal-header">
+      <div id="json-modal-title" class="json-modal-title">Session Agent Details</div>
+      <button type="button" class="json-modal-close" onclick="closeJSONModal()">Close</button>
+    </div>
+    <div id="json-modal-body" class="json-modal-body"></div>
+  </div>
+</div>
+
 <script>
 const $ = id => document.getElementById(id);
 const appBasePath = (() => {
   const p = window.location.pathname || '/';
   return p.startsWith('/monitor') ? '/monitor/' : '/';
 })();
+const jsonCellStore = {};
+let jsonCellSeq = 0;
 
 function appURL(rel) {
   const clean = String(rel || '').replace(/^\/+/, '');
@@ -639,6 +802,93 @@ async function api(path) {
 function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function stashJSONCellValue(raw) {
+  jsonCellSeq += 1;
+  const key = 'j' + String(jsonCellSeq);
+  jsonCellStore[key] = raw == null ? '' : String(raw);
+  return key;
+}
+
+function openAgentsJSONModal(key) {
+  const body = $('json-modal-body');
+  const modal = $('json-modal');
+  if (!body || !modal) return;
+  const raw = jsonCellStore[key];
+  if (raw == null) return;
+  body.innerHTML = renderAgentsJSONContent(raw);
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeJSONModal() {
+  const modal = $('json-modal');
+  const body = $('json-modal-body');
+  if (!modal || !body) return;
+  modal.classList.add('hidden');
+  body.innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+function renderAgentsJSONContent(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    return '<pre class="json-code">' + esc(raw) + '</pre>';
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
+  }
+  const agents = Object.keys(parsed);
+  if (agents.length === 0) {
+    return '<div class="empty-state">No agent data</div>';
+  }
+  let html = '';
+  for (const agent of agents) {
+    const info = parsed[agent] || {};
+    const agentInfo = info.agentInfo || {};
+    const configOptions = Array.isArray(info.configOptions) ? info.configOptions : [];
+    const commands = Array.isArray(info.commands) ? info.commands : [];
+    const authMethods = Array.isArray(info.authMethods) ? info.authMethods : [];
+    html += '<div class="json-card">';
+    html += '<div class="json-card-hd"><div class="json-card-title">' + esc(agent) + '</div>' +
+      '<span class="json-pill">' + esc(agentInfo.version || 'unknown') + '</span></div>';
+    html += '<div class="json-grid">' +
+      '<div class="json-k">ACP Session</div><div class="json-v">' + esc(info.acpSessionId || '-') + '</div>' +
+      '<div class="json-k">Protocol</div><div class="json-v">' + esc(info.protocolVersion || '-') + '</div>' +
+      '<div class="json-k">Agent Info</div><div class="json-v">' + esc((agentInfo.title || agentInfo.name || '-') + (agentInfo.name && agentInfo.title ? ' (' + agentInfo.name + ')' : '')) + '</div>' +
+      '<div class="json-k">Config Options</div><div class="json-v">' + String(configOptions.length) + '</div>' +
+      '<div class="json-k">Commands</div><div class="json-v">' + String(commands.length) + '</div>' +
+      '</div>';
+    if (configOptions.length > 0) {
+      html += '<div class="json-subsection"><div class="json-subtitle">Config Options</div><div class="json-table-wrap"><table class="json-mini-table"><thead><tr><th>ID</th><th>Name</th><th>Current</th></tr></thead><tbody>';
+      for (const opt of configOptions) {
+        html += '<tr><td>' + esc(opt && opt.id ? opt.id : '-') + '</td><td>' + esc(opt && opt.name ? opt.name : '-') + '</td><td>' + esc(opt && opt.currentValue != null ? String(opt.currentValue) : '-') + '</td></tr>';
+      }
+      html += '</tbody></table></div></div>';
+    }
+    if (commands.length > 0) {
+      html += '<div class="json-subsection"><div class="json-subtitle">Commands</div><div class="json-list">';
+      for (const cmd of commands) {
+        html += '<span class="json-pill">' + esc(cmd && cmd.name ? cmd.name : '-') + '</span>';
+      }
+      html += '</div></div>';
+    }
+    if (authMethods.length > 0) {
+      html += '<div class="json-subsection"><div class="json-subtitle">Auth Methods</div><div class="json-list">';
+      for (const m of authMethods) {
+        html += '<span class="json-pill">' + esc(m && (m.name || m.id) ? (m.name || m.id) : '-') + '</span>';
+      }
+      html += '</div></div>';
+    }
+    if (info.agentCapabilities) {
+      html += '<div class="json-subsection"><div class="json-subtitle">Capabilities</div><pre class="json-code">' + esc(JSON.stringify(info.agentCapabilities, null, 2)) + '</pre></div>';
+    }
+    html += '</div>';
+  }
+  return html;
 }
 
 async function refresh() {
@@ -768,7 +1018,15 @@ function renderDBTables(db) {
       html += '</tr></thead><tbody>';
       for (const row of t.rows) {
         html += '<tr>';
-        for (const val of row) {
+        for (let i = 0; i < row.length; i++) {
+          const val = row[i];
+          const col = i < t.columns.length ? String(t.columns[i] || '') : '';
+          const isAgentsJSON = String(t.name || '').toLowerCase() === 'sessions' && col.toLowerCase() === 'agents_json';
+          if (isAgentsJSON) {
+            const key = stashJSONCellValue(val == null ? '' : String(val));
+            html += '<td><button type="button" class="json-cell-btn" onclick="openAgentsJSONModal(\'' + key + '\')">View JSON</button></td>';
+            continue;
+          }
           const s = val == null ? '' : String(val);
           const truncated = s.length > 80 ? s.substring(0, 77) + '...' : s;
           html += '<td title="' + esc(s) + '">' + esc(truncated) + '</td>';
@@ -891,6 +1149,9 @@ setInterval(() => { if (!document.hidden) refreshStatusOnly(); }, 5000);
 setInterval(loadLogs, 15000);
 setInterval(loadRegistryStatus, 15000);
 window.addEventListener('visibilitychange', () => { if (!document.hidden) refreshStatusOnly(); });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeJSONModal();
+});
 </script>
 </body>
 </html>
