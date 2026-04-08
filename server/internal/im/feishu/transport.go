@@ -46,7 +46,7 @@ type transportChannel struct {
 	bot     *lark.Bot
 
 	textMu         sync.Mutex
-	unifiedStreams map[string]*unifiedStream
+	unifiedStreams  map[string]*unifiedStream
 	toolMu         sync.Mutex
 	toolRenderMu   sync.Mutex
 	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -81,8 +81,8 @@ type streamSegment struct {
 type unifiedStream struct {
 	messageID   string
 	segments    []streamSegment
-	totalRunes  int // running rune count across all segments
-	pushedRunes int // totalRunes at last push (dirty check)
+	totalRunes  int         // running rune count across all segments
+	pushedRunes int         // totalRunes at last push (dirty check)
 	lastPush    time.Time
 	timer       *time.Timer
 }
@@ -124,7 +124,7 @@ type pendingAckReaction struct {
 func newTransport(cfg Config) *transportChannel {
 	return &transportChannel{
 		cfg:            cfg,
-		unifiedStreams: map[string]*unifiedStream{},
+		unifiedStreams:  map[string]*unifiedStream{},
 		seenMessageID:  map[string]time.Time{},
 		toolCards:      map[string]map[string]*toolCardState{},
 		toolCompact:    map[string]*compactToolStream{},
@@ -865,21 +865,13 @@ func startsMarkdownSection(line string) bool {
 	return false
 }
 
-// SendToolCall renders tool updates.
-// read/edit kinds are always split into fresh cards (no compact merge, no in-place update).
+// SendToolCall renders one streaming card per toolCallId and updates it in place.
 func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) (string, error) {
 	update := tc.Update
 	chatID = strings.TrimSpace(chatID)
 	toolCallID := strings.TrimSpace(update.ToolCallID)
 	if chatID == "" || toolCallID == "" {
 		return "", nil
-	}
-	if isReadEditToolKind(update.Kind) {
-		err := f.sendToolCallAsNewCard(chatID, update)
-		if err == nil {
-			f.clearReceiveAck(chatID)
-		}
-		return "", err
 	}
 	if f.cfg.YOLO {
 		err := f.sendToolCallCompact(chatID, update)
@@ -933,54 +925,6 @@ func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) (string,
 	return "", err
 }
 
-func (f *transportChannel) sendToolCallAsNewCard(chatID string, update ToolCallUpdate) error {
-	toolCallID := strings.TrimSpace(update.ToolCallID)
-	if toolCallID == "" {
-		return nil
-	}
-
-	// read/edit updates break both text stream and compact tool stream.
-	f.resetCompactToolStream(chatID)
-	f.finalizeUnifiedStream(chatID)
-
-	f.toolMu.Lock()
-	chatCards := f.toolCards[chatID]
-	if chatCards == nil {
-		chatCards = map[string]*toolCardState{}
-		f.toolCards[chatID] = chatCards
-	}
-	st := chatCards[toolCallID]
-	if st == nil {
-		st = &toolCardState{}
-		chatCards[toolCallID] = st
-	}
-	if strings.TrimSpace(update.Status) == "" && strings.TrimSpace(st.update.Status) != "" {
-		update.Status = st.update.Status
-	}
-	if strings.TrimSpace(update.Status) == "" {
-		update.Status = "pending"
-	}
-	if strings.TrimSpace(update.Title) == "" {
-		update.Title = st.update.Title
-	}
-	if strings.TrimSpace(update.Kind) == "" {
-		update.Kind = st.update.Kind
-	}
-	st.update = update
-	if isToolCallTerminalStatus(update.Status) && st.perm != nil {
-		st.perm.active = false
-	}
-	// Force post-as-new-card for every read/edit update.
-	st.messageID = ""
-	stCopy := *st
-	if st.perm != nil {
-		permCopy := *st.perm
-		stCopy.perm = &permCopy
-	}
-	f.toolMu.Unlock()
-
-	return f.postToolCard(chatID, toolCallID, &stCopy)
-}
 func (f *transportChannel) upsertToolCard(chatID, toolCallID string, st *toolCardState, _ bool) error {
 	if st == nil {
 		return nil
@@ -1042,61 +986,6 @@ func (f *transportChannel) upsertToolCard(chatID, toolCallID string, st *toolCar
 	return nil
 }
 
-func (f *transportChannel) postToolCard(chatID, toolCallID string, st *toolCardState) error {
-	if st == nil {
-		return nil
-	}
-	f.toolRenderMu.Lock()
-	defer f.toolRenderMu.Unlock()
-
-	f.toolMu.Lock()
-	chatCards := f.toolCards[chatID]
-	if chatCards == nil {
-		chatCards = map[string]*toolCardState{}
-		f.toolCards[chatID] = chatCards
-	}
-	cur := chatCards[toolCallID]
-	if cur == nil {
-		cur = &toolCardState{}
-		chatCards[toolCallID] = cur
-	}
-	cur.update = st.update
-	cur.perm = st.perm
-	cur.messageID = ""
-	update := cur.update
-	perm := cur.perm
-	f.toolMu.Unlock()
-
-	card := buildToolCallCard(chatID, update, perm, false)
-	raw, err := json.Marshal(card)
-	if err != nil {
-		return fmt.Errorf("feishu: marshal tool card: %w", err)
-	}
-	bot, err := f.ensureBot()
-	if err != nil {
-		return err
-	}
-	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
-	if postErr != nil {
-		return postErr
-	}
-	messageID := ""
-	if resp != nil {
-		messageID = strings.TrimSpace(resp.Data.MessageID)
-	}
-	if messageID != "" {
-		f.setLastOutbound(chatID, messageID)
-		f.toolMu.Lock()
-		if cards := f.toolCards[chatID]; cards != nil {
-			if curState := cards[toolCallID]; curState != nil {
-				curState.messageID = messageID
-			}
-		}
-		f.toolMu.Unlock()
-	}
-	return nil
-}
 func (f *transportChannel) resetCompactToolStream(chatID string) {
 	if !f.cfg.YOLO {
 		return
@@ -1434,15 +1323,6 @@ func toolPermissionEmoji(perm *toolPermissionState) string {
 		return "\U0001F534"
 	}
 	return "\U000026AA"
-}
-
-func isReadEditToolKind(kind string) bool {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "read", "read_file", "view", "edit", "edit_file", "replace", "str_replace_editor":
-		return true
-	default:
-		return false
-	}
 }
 
 func toolKindIcon(kind string) string {
