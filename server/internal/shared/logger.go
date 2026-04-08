@@ -71,22 +71,6 @@ type loggerInst struct {
 	out       io.Writer
 	debugOut  io.Writer
 	opFile    *os.File
-	debugFile *os.File
-}
-
-type syncedFileWriter struct {
-	mu sync.Mutex
-	f  *os.File
-}
-
-func (w *syncedFileWriter) Write(p []byte) (int, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	n, err := w.f.Write(p)
-	if syncErr := w.f.Sync(); err == nil && syncErr != nil {
-		err = syncErr
-	}
-	return n, err
 }
 
 var levelTag = [4]string{"DEBUG", "INFO ", "WARN ", "ERROR"}
@@ -142,19 +126,20 @@ func (l *loggerInst) setup(cfg LoggerConfig) error {
 			if err := os.MkdirAll(filepath.Dir(dbgPath), 0o755); err != nil {
 				return fmt.Errorf("logger: mkdir %q: %w", filepath.Dir(dbgPath), err)
 			}
-			f, err := os.OpenFile(dbgPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-			if err != nil {
-				return fmt.Errorf("logger: open debug log %q: %w", dbgPath, err)
+			if c, ok := l.debugOut.(io.Closer); ok {
+				_ = c.Close()
 			}
-			if l.debugFile != nil {
-				_ = l.debugFile.Close()
-			}
-			l.debugFile = f
-			l.debugOut = &syncedFileWriter{f: f}
+			l.debugOut = newDebugDailyRotator(dbgPath, 7, time.Now)
 		} else {
+			if c, ok := l.debugOut.(io.Closer); ok {
+				_ = c.Close()
+			}
 			l.debugOut = nil
 		}
 	} else {
+		if c, ok := l.debugOut.(io.Closer); ok {
+			_ = c.Close()
+		}
 		l.debugOut = nil
 	}
 
@@ -164,11 +149,10 @@ func (l *loggerInst) setup(cfg LoggerConfig) error {
 func (l *loggerInst) close() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.debugFile != nil {
-		_ = l.debugFile.Close()
-		l.debugFile = nil
-		l.debugOut = nil
+	if c, ok := l.debugOut.(io.Closer); ok {
+		_ = c.Close()
 	}
+	l.debugOut = nil
 	if l.opFile != nil {
 		_ = l.opFile.Close()
 		l.opFile = nil
