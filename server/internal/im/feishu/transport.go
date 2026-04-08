@@ -696,17 +696,28 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 				continue
 			}
 			isLastSeg := (i == len(segments)-1)
-			if md := buildThoughtMarkdown(content, done, isLastSeg); md != "" {
+			thoughtDone := done || !isLastSeg
+			if thoughtDone {
+				elements = append(elements, buildThoughtCollapsible(content))
+			} else {
+				md := "**🧠 Thinking**\n\n" + normalizeStreamMarkdown(content)
 				elements = append(elements, map[string]any{
 					"tag":     "markdown",
 					"content": md,
 				})
 			}
 		case segDivider:
-			elements = append(elements, map[string]any{
-				"tag":     "markdown",
-				"content": "---",
-			})
+			// Only render a visible divider between segments of different
+			// kinds (ABC pattern). When both sides are the same kind (ABA),
+			// the separate segments already produce a paragraph break.
+			prevKind := findAdjacentKind(segments, i, -1)
+			nextKind := findAdjacentKind(segments, i, 1)
+			if prevKind != nextKind && prevKind != segDivider && nextKind != segDivider {
+				elements = append(elements, map[string]any{
+					"tag":     "markdown",
+					"content": "---",
+				})
+			}
 		}
 	}
 	// Strip leading/trailing dividers
@@ -736,16 +747,52 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 	}
 }
 
-func buildThoughtMarkdown(content string, done bool, isLastSeg bool) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
+// findAdjacentKind scans from position `from` in direction `dir` (-1 or +1)
+// and returns the kind of the first non-divider segment found.
+func findAdjacentKind(segments []streamSegment, from int, dir int) segmentKind {
+	for j := from + dir; j >= 0 && j < len(segments); j += dir {
+		if segments[j].kind != segDivider {
+			return segments[j].kind
+		}
 	}
-	heading := "**🧠 Thinking**"
-	if done || !isLastSeg {
-		heading = "**🧠 Thought**"
+	return segDivider
+}
+
+// buildThoughtCollapsible renders a completed thought as a Feishu
+// collapsible_panel element, collapsed by default.
+func buildThoughtCollapsible(content string) map[string]any {
+	summary := thoughtSummary(content)
+	return map[string]any{
+		"tag":              "collapsible_panel",
+		"expanded":         false,
+		"vertical_spacing": "8px",
+		"padding":          "4px 8px",
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "🧠 " + summary,
+			},
+			"vertical_align": "center",
+		},
+		"border": map[string]any{
+			"color":         "grey",
+			"corner_radius": "8px",
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
+		},
 	}
-	return heading + "\n\n" + normalizeStreamMarkdown(content)
+}
+
+// thoughtSummary returns a short preview of the first non-empty line.
+func thoughtSummary(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			return previewLine(trimmed, 60)
+		}
+	}
+	return "Thought"
 }
 
 func isMarkdownDividerElement(element map[string]any) bool {

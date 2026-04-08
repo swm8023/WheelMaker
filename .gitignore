@@ -13,6 +13,7 @@ server/bin/**/*
 .gocache/
 .gomodcache/
 app/dist/
+app/android/app/src/main/assets/wheelmaker-web/
 
 # Runtime log files
 wheelmaker_*.log

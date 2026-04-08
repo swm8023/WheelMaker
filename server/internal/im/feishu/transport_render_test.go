@@ -122,6 +122,7 @@ func TestSendText_SecondChunkDoesNotPanic(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_ThoughtRenderedAsMarkdown(t *testing.T) {
+	// Streaming thought (done=false, last segment) → rendered as markdown
 	seg := streamSegment{kind: segThought, content: "thinking"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, false)
 	if card == nil {
@@ -151,7 +152,8 @@ func TestBuildUnifiedStreamCard_ThoughtRenderedAsMarkdown(t *testing.T) {
 	}
 }
 
-func TestBuildUnifiedStreamCard_ThoughtDoneStillMarkdown(t *testing.T) {
+func TestBuildUnifiedStreamCard_ThoughtDoneCollapsible(t *testing.T) {
+	// Completed thought (done=true) → rendered as collapsible_panel
 	seg := streamSegment{kind: segThought, content: "deep thought"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, true)
 	if card == nil {
@@ -160,7 +162,6 @@ func TestBuildUnifiedStreamCard_ThoughtDoneStillMarkdown(t *testing.T) {
 	if schema, _ := card["schema"].(string); schema != "2.0" {
 		t.Fatalf("collapsed thought card should use schema 2.0, got %q", schema)
 	}
-	// Collapsed card should not have a top-level header.
 	if _, ok := card["header"]; ok {
 		t.Fatalf("collapsed thought card should not have top-level header: %+v", card)
 	}
@@ -173,12 +174,31 @@ func TestBuildUnifiedStreamCard_ThoughtDoneStillMarkdown(t *testing.T) {
 		t.Fatalf("body elements missing in collapsed thought card: %+v", card)
 	}
 	first := elements[0]
-	if tag, _ := first["tag"].(string); tag != "markdown" {
-		t.Fatalf("expected markdown tag, got %q", tag)
+	if tag, _ := first["tag"].(string); tag != "collapsible_panel" {
+		t.Fatalf("expected collapsible_panel tag, got %q", tag)
 	}
-	content, _ := first["content"].(string)
-	if !strings.Contains(content, "deep thought") {
-		t.Fatalf("thought content mismatch, got %q", content)
+	if expanded, _ := first["expanded"].(bool); expanded {
+		t.Fatal("completed thought should be collapsed by default")
+	}
+	header, ok := first["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("collapsible_panel missing header: %+v", first)
+	}
+	titleMap, ok := header["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("collapsible_panel header missing title: %+v", header)
+	}
+	titleContent, _ := titleMap["content"].(string)
+	if !strings.Contains(titleContent, "🧠") {
+		t.Fatalf("thought title should contain brain emoji, got %q", titleContent)
+	}
+	innerElements, ok := first["elements"].([]map[string]any)
+	if !ok || len(innerElements) == 0 {
+		t.Fatalf("collapsible_panel missing inner elements: %+v", first)
+	}
+	innerContent, _ := innerElements[0]["content"].(string)
+	if !strings.Contains(innerContent, "deep thought") {
+		t.Fatalf("thought content mismatch, got %q", innerContent)
 	}
 }
 
@@ -573,13 +593,13 @@ func TestBuildUnifiedStreamCard_MixedSegments(t *testing.T) {
 	}
 	elements, ok := body["elements"].([]map[string]any)
 	if !ok || len(elements) != 3 {
-		t.Fatalf("expected 3 elements (text+thought+text), got %d", len(elements))
+		t.Fatalf("expected 3 elements (text+collapsible_thought+text), got %d", len(elements))
 	}
 	if tag, _ := elements[0]["tag"].(string); tag != "markdown" {
 		t.Fatalf("first element should be markdown, got %q", tag)
 	}
-	if tag, _ := elements[1]["tag"].(string); tag != "markdown" {
-		t.Fatalf("second element should be markdown, got %q", tag)
+	if tag, _ := elements[1]["tag"].(string); tag != "collapsible_panel" {
+		t.Fatalf("second element should be collapsible_panel, got %q", tag)
 	}
 	if tag, _ := elements[2]["tag"].(string); tag != "markdown" {
 		t.Fatalf("third element should be markdown, got %q", tag)
@@ -587,6 +607,8 @@ func TestBuildUnifiedStreamCard_MixedSegments(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_DividerBetweenText(t *testing.T) {
+	// ABA pattern: text + divider + text (same kind) → no visible divider,
+	// just two separate markdown elements (paragraph break).
 	seg1 := streamSegment{kind: segText, content: "first part"}
 	seg2 := streamSegment{kind: segDivider}
 	seg3 := streamSegment{kind: segText, content: "second part"}
@@ -597,8 +619,30 @@ func TestBuildUnifiedStreamCard_DividerBetweenText(t *testing.T) {
 	}
 	body := card["body"].(map[string]any)
 	elements := body["elements"].([]map[string]any)
+	if len(elements) != 2 {
+		t.Fatalf("expected 2 elements (text+text, no divider), got %d", len(elements))
+	}
+	c1, _ := elements[0]["content"].(string)
+	c2, _ := elements[1]["content"].(string)
+	if c1 != "first part" || c2 != "second part" {
+		t.Fatalf("content mismatch: %q, %q", c1, c2)
+	}
+}
+
+func TestBuildUnifiedStreamCard_DividerBetweenDifferentKinds(t *testing.T) {
+	// ABC pattern: text + divider + thought (different kinds) → visible divider.
+	seg1 := streamSegment{kind: segText, content: "reply text"}
+	seg2 := streamSegment{kind: segDivider}
+	seg3 := streamSegment{kind: segThought, content: "inner thought"}
+
+	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
+	body := card["body"].(map[string]any)
+	elements := body["elements"].([]map[string]any)
 	if len(elements) != 3 {
-		t.Fatalf("expected 3 elements (text+divider+text), got %d", len(elements))
+		t.Fatalf("expected 3 elements (text+divider+thought), got %d", len(elements))
 	}
 	if tag, _ := elements[1]["tag"].(string); tag != "markdown" {
 		t.Fatalf("middle element should be markdown divider, got %q", tag)
