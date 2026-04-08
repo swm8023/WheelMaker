@@ -43,9 +43,16 @@ func TestBuildTextStreamCard_NoHeader(t *testing.T) {
 	if _, ok := card["header"]; ok {
 		t.Fatalf("acp text stream card should not have header: %+v", card)
 	}
-	elements, ok := card["elements"].([]map[string]any)
+	if schema, _ := card["schema"].(string); schema != "2.0" {
+		t.Fatalf("text stream card should use schema 2.0, got %q", schema)
+	}
+	body, ok := card["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("body missing in card: %+v", card)
+	}
+	elements, ok := body["elements"].([]map[string]any)
 	if !ok || len(elements) == 0 {
-		t.Fatalf("elements missing in card: %+v", card)
+		t.Fatalf("body elements missing in card: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
 	if content != "hello" {
@@ -78,6 +85,9 @@ func TestSendText_FirstChunkWaitsBeforePosting(t *testing.T) {
 
 func TestBuildThoughtStreamCard_HasHeader(t *testing.T) {
 	card := buildThoughtStreamCard("thinking", false)
+	if schema, _ := card["schema"].(string); schema != "2.0" {
+		t.Fatalf("streaming thought card should use schema 2.0, got %q", schema)
+	}
 	header, ok := card["header"].(map[string]any)
 	if !ok {
 		t.Fatalf("header missing in thought card: %+v", card)
@@ -97,6 +107,10 @@ func TestBuildThoughtStreamCard_CollapsedUsesPanel(t *testing.T) {
 	if schema, _ := card["schema"].(string); schema != "2.0" {
 		t.Fatalf("collapsed thought card should use schema 2.0, got %q", schema)
 	}
+	// Collapsed card should not have a top-level header (content is in panel).
+	if _, ok := card["header"]; ok {
+		t.Fatalf("collapsed thought card should not have top-level header: %+v", card)
+	}
 	body, ok := card["body"].(map[string]any)
 	if !ok {
 		t.Fatalf("body missing in collapsed thought card: %+v", card)
@@ -112,6 +126,19 @@ func TestBuildThoughtStreamCard_CollapsedUsesPanel(t *testing.T) {
 	if expanded, _ := panel["expanded"].(bool); expanded {
 		t.Fatalf("collapsed thought card panel should not be expanded")
 	}
+	// Panel header should use the first line of content as title.
+	panelHeader, ok := panel["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("panel header missing: %+v", panel)
+	}
+	panelTitle, ok := panelHeader["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("panel header title missing: %+v", panelHeader)
+	}
+	titleContent, _ := panelTitle["content"].(string)
+	if !strings.Contains(titleContent, "deep thought") {
+		t.Fatalf("panel title should contain first line of content, got %q", titleContent)
+	}
 	inner, ok := panel["elements"].([]map[string]any)
 	if !ok || len(inner) == 0 {
 		t.Fatalf("panel elements missing: %+v", panel)
@@ -124,6 +151,9 @@ func TestBuildThoughtStreamCard_CollapsedUsesPanel(t *testing.T) {
 
 func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
 	card := buildSystemStreamCard("status ok")
+	if schema, _ := card["schema"].(string); schema != "2.0" {
+		t.Fatalf("system stream card should use schema 2.0, got %q", schema)
+	}
 	header, ok := card["header"].(map[string]any)
 	if !ok {
 		t.Fatalf("header missing in system card: %+v", card)
@@ -182,7 +212,11 @@ func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 
 func TestBuildTextStreamCard_NoStreamingMarker(t *testing.T) {
 	card := buildTextStreamCard("hello", true)
-	elements, ok := card["elements"].([]map[string]any)
+	body, ok := card["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("body missing in streaming card: %+v", card)
+	}
+	elements, ok := body["elements"].([]map[string]any)
 	if !ok || len(elements) != 1 {
 		t.Fatalf("elements mismatch in streaming card: %+v", card)
 	}

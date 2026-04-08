@@ -691,28 +691,36 @@ func (f *transportChannel) getLastOutbound(chatID string) string {
 
 func buildTextStreamCard(content string, streaming bool) RawCard {
 	_ = streaming
-	elements := []map[string]any{
-		{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
-	}
 	return RawCard{
-		"config":   map[string]any{"update_multi": true},
-		"elements": elements,
+		"schema": "2.0",
+		"config": map[string]any{"update_multi": true},
+		"body": map[string]any{
+			"elements": []map[string]any{
+				{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
+			},
+		},
 	}
 }
 
 func buildThoughtStreamCard(content string, collapsed bool) RawCard {
 	md := normalizeStreamMarkdown(content)
 	if collapsed {
-		// Card v2 with collapsible_panel, collapsed by default.
+		// Use first meaningful line as the panel header for better info density.
+		panelTitle := "Thinking"
+		for _, line := range strings.Split(content, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed != "" {
+				if len(trimmed) > 80 {
+					panelTitle = trimmed[:80] + "…"
+				} else {
+					panelTitle = trimmed
+				}
+				break
+			}
+		}
 		return RawCard{
 			"schema": "2.0",
 			"config": map[string]any{"update_multi": true},
-			"header": map[string]any{
-				"title": map[string]any{
-					"tag":     "plain_text",
-					"content": "🧠 Thinking",
-				},
-			},
 			"body": map[string]any{
 				"elements": []map[string]any{
 					{
@@ -721,10 +729,14 @@ func buildThoughtStreamCard(content string, collapsed bool) RawCard {
 						"header": map[string]any{
 							"title": map[string]any{
 								"tag":     "plain_text",
-								"content": "Click to expand",
+								"content": "🧠 " + panelTitle,
 							},
 							"vertical_align": "center",
-							"padding":        "4px 0px 4px 0px",
+							"icon": map[string]any{
+								"tag":   "standard_icon",
+								"token": "down-small-ccm_outlined",
+							},
+							"padding": "4px 0px 4px 0px",
 						},
 						"border": map[string]any{
 							"color":         "grey",
@@ -739,6 +751,7 @@ func buildThoughtStreamCard(content string, collapsed bool) RawCard {
 		}
 	}
 	return RawCard{
+		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -746,14 +759,17 @@ func buildThoughtStreamCard(content string, collapsed bool) RawCard {
 				"content": "🧠 Thinking",
 			},
 		},
-		"elements": []map[string]any{
-			{"tag": "markdown", "content": md},
+		"body": map[string]any{
+			"elements": []map[string]any{
+				{"tag": "markdown", "content": md},
+			},
 		},
 	}
 }
 
 func buildSystemStreamCard(content string) RawCard {
 	return RawCard{
+		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
@@ -761,8 +777,10 @@ func buildSystemStreamCard(content string) RawCard {
 				"content": "📣 System Message",
 			},
 		},
-		"elements": []map[string]any{
-			{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
+		"body": map[string]any{
+			"elements": []map[string]any{
+				{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
+			},
 		},
 	}
 }
