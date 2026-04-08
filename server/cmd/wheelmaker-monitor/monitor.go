@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -33,6 +34,7 @@ const (
 )
 
 var errServiceNotInstalled = errors.New("service not installed")
+var debugSessionPrefixRe = regexp.MustCompile(`\{([0-9a-fA-F-]{36})\s+([^}]*)\}`)
 
 // NewMonitor creates a Monitor for the given WheelMaker home directory.
 func NewMonitor(baseDir string) *Monitor {
@@ -348,6 +350,7 @@ type LogResult struct {
 func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, error) {
 	logPath := m.resolveLogFilePath(file)
 	file = normalizeLogFileKey(file)
+	isDebugLog := isDebugLogKey(file)
 
 	data, err := os.ReadFile(logPath)
 	if err != nil {
@@ -372,6 +375,9 @@ func (m *Monitor) GetLogs(file string, level string, tail int) (*LogResult, erro
 		entry := parseLine(line)
 		if level != "" && levelRank(entry.Level) < minLevel {
 			continue
+		}
+		if isDebugLog {
+			normalizeDebugLogEntry(&entry)
 		}
 		entries = append(entries, entry)
 	}
@@ -424,6 +430,60 @@ func (m *Monitor) resolveLogFilePath(file string) string {
 		return legacy
 	}
 	return preferred
+}
+
+func isDebugLogKey(file string) bool {
+	key := normalizeLogFileKey(file)
+	return key == "debug" || key == "registry-debug"
+}
+
+func normalizeDebugLogEntry(entry *LogEntry) {
+	entry.Time = ""
+	entry.Level = ""
+	entry.Message = normalizeDebugLogMessage(entry.Message)
+}
+
+func normalizeDebugLogMessage(message string) string {
+	matches := debugSessionPrefixRe.FindStringSubmatchIndex(message)
+	if matches == nil {
+		return message
+	}
+	fullSessionID := message[matches[2]:matches[3]]
+	eventName := strings.TrimSpace(message[matches[4]:matches[5]])
+	shortenedPrefix := "{" + shortSessionID(fullSessionID)
+	if eventName != "" {
+		shortenedPrefix += " " + eventName
+	}
+	shortenedPrefix += "}"
+
+	normalized := message[:matches[0]] + shortenedPrefix + message[matches[1]:]
+	return removeDuplicateSessionID(normalized, fullSessionID)
+}
+
+func removeDuplicateSessionID(message string, sessionID string) string {
+	fieldWithComma := "\"sessionId\":\"" + sessionID + "\","
+	if strings.Contains(message, fieldWithComma) {
+		return strings.Replace(message, fieldWithComma, "", 1)
+	}
+
+	fieldWithLeadingComma := ",\"sessionId\":\"" + sessionID + "\""
+	if strings.Contains(message, fieldWithLeadingComma) {
+		return strings.Replace(message, fieldWithLeadingComma, "", 1)
+	}
+
+	fieldOnlyObject := "{\"sessionId\":\"" + sessionID + "\"}"
+	if strings.Contains(message, fieldOnlyObject) {
+		return strings.Replace(message, fieldOnlyObject, "{}", 1)
+	}
+
+	return message
+}
+
+func shortSessionID(sessionID string) string {
+	if len(sessionID) <= 12 {
+		return sessionID
+	}
+	return sessionID[:8] + ".." + sessionID[len(sessionID)-4:]
 }
 
 // levelRank returns numeric severity: higher = more severe.
