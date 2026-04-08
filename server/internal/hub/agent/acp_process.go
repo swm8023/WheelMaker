@@ -5,11 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // ACPProcess is a transport-only subprocess channel for newline-delimited ACP JSON messages.
@@ -24,6 +25,7 @@ type ACPProcess struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
+	stderr io.ReadCloser
 
 	encMu sync.Mutex
 	enc   *json.Encoder
@@ -33,6 +35,9 @@ type ACPProcess struct {
 
 	doneOnce sync.Once
 	done     chan struct{}
+
+	lifecycleMu sync.Mutex
+	closing     bool
 }
 
 // NewACPProcess creates a subprocess-backed ACP transport.
@@ -49,7 +54,6 @@ func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
 func (p *ACPProcess) Start() error {
 	cmd := exec.Command(p.exePath, p.exeArgs...)
 	cmd.Env = append(cmd.Environ(), p.env...)
-	cmd.Stderr = log.Writer()
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -59,15 +63,24 @@ func (p *ACPProcess) Start() error {
 	if err != nil {
 		return fmt.Errorf("agent acp process: stdout pipe: %w", err)
 	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("agent acp process: stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("agent acp process: start process: %w", err)
 	}
 
+	p.lifecycleMu.Lock()
+	p.closing = false
+	p.lifecycleMu.Unlock()
 	p.cmd = cmd
 	p.stdin = stdin
 	p.stdout = stdout
+	p.stderr = stderr
 	p.enc = json.NewEncoder(stdin)
 	go p.readLoop(stdout)
+	go p.readStderrLoop(stderr)
 	return nil
 }
 
@@ -77,6 +90,9 @@ func (p *ACPProcess) SendMessage(v any) error {
 	defer p.encMu.Unlock()
 	if p.enc == nil {
 		return fmt.Errorf("agent acp process: encoder is not ready")
+	}
+	if raw, err := json.Marshal(v); err == nil {
+		logACPDebugRaw('>', raw)
 	}
 	if err := p.enc.Encode(v); err != nil {
 		return fmt.Errorf("agent acp process: encode message: %w", err)
@@ -114,6 +130,7 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 		}
 		raw := make([]byte, len(line))
 		copy(raw, line)
+		logACPDebugRaw('<', raw)
 
 		p.hMu.RLock()
 		h := p.onMessage
@@ -122,6 +139,29 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 			h(raw)
 		}
 	}
+
+	if p.isClosing() {
+		return
+	}
+	if err := scanner.Err(); err != nil {
+		shared.Error("[acp] ! {- -} stdout read failed: %v", err)
+		return
+	}
+	shared.Error("[acp] ! {- -} process stdout closed")
+}
+
+func (p *ACPProcess) readStderrLoop(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
+	for scanner.Scan() {
+		logACPStderrLine(scanner.Text())
+	}
+	if p.isClosing() {
+		return
+	}
+	if err := scanner.Err(); err != nil {
+		shared.Error("[acp] ! {- -} stderr read failed: %v", err)
+	}
 }
 
 // Close stops the transport and kills the subprocess if still running.
@@ -129,6 +169,7 @@ func (p *ACPProcess) Close() error {
 	if p == nil {
 		return nil
 	}
+	p.setClosing(true)
 	p.markDone()
 
 	// Nil out the encoder so concurrent SendMessage calls get a clean error
@@ -139,6 +180,12 @@ func (p *ACPProcess) Close() error {
 
 	if p.stdin != nil {
 		_ = p.stdin.Close()
+	}
+	if p.stderr != nil {
+		_ = p.stderr.Close()
+	}
+	if p.stdout != nil {
+		_ = p.stdout.Close()
 	}
 	if p.cmd != nil {
 		if p.cmd.Process != nil {
@@ -153,4 +200,28 @@ func (p *ACPProcess) markDone() {
 	p.doneOnce.Do(func() {
 		close(p.done)
 	})
+}
+
+func logACPDebugRaw(dir rune, raw []byte) {
+	shared.Debug("%s", formatACPLogLine(dir, raw))
+}
+
+func logACPStderrLine(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	shared.Error("[acp] ! {- -} %s", string(redactAndTrimACPPayload([]byte(line))))
+}
+
+func (p *ACPProcess) setClosing(v bool) {
+	p.lifecycleMu.Lock()
+	p.closing = v
+	p.lifecycleMu.Unlock()
+}
+
+func (p *ACPProcess) isClosing() bool {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+	return p.closing
 }
