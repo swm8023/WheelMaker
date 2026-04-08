@@ -43,6 +43,7 @@ const (
 	TextNormal TextKind = iota
 	TextThought
 	TextSystem
+	TextDivider // insert divider in unified stream
 )
 
 type ToolCallContent struct {

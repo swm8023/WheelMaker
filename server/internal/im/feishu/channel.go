@@ -174,6 +174,11 @@ func (c *Channel) Run(ctx context.Context) error {
 
 func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdateParams) error {
 	if c.isBlockedSessionUpdate(params.Update.SessionUpdate) {
+		// Stream-breaking updates still insert a divider even when blocked,
+		// so adjacent text chunks don't silently concatenate.
+		if isStreamBreakingUpdate(params.Update.SessionUpdate) {
+			return c.inner.Send(chatID, "", TextDivider)
+		}
 		return nil
 	}
 	switch params.Update.SessionUpdate {
@@ -524,4 +529,12 @@ func canonicalBlockedUpdate(raw string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(raw))
 	}
+}
+
+func isStreamBreakingUpdate(updateType string) bool {
+	switch updateType {
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate, acp.SessionUpdatePlan:
+		return true
+	}
+	return false
 }

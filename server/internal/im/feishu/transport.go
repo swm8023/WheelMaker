@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-lark/lark"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -45,9 +46,7 @@ type transportChannel struct {
 	bot     *lark.Bot
 
 	textMu         sync.Mutex
-	textStreams    map[string]*textStream
-	thoughtStreams map[string]*textStream
-	systemStreams  map[string]*textStream
+	unifiedStreams  map[string]*unifiedStream
 	toolMu         sync.Mutex
 	toolRenderMu   sync.Mutex
 	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -62,12 +61,30 @@ type transportChannel struct {
 	wsReadyOnce   sync.Once
 }
 
-type textStream struct {
-	messageID string
-	content   strings.Builder
-	pushedLen int         // content length at last push
-	lastPush  time.Time   // timestamp of last push
-	timer     *time.Timer // deferred flush timer
+type segmentKind uint8
+
+const (
+	segText segmentKind = iota
+	segThought
+	segDivider
+)
+
+// unifiedStreamMaxRunes is the content threshold after which the next
+// incoming segment starts a new card.
+const unifiedStreamMaxRunes = 10000
+
+type streamSegment struct {
+	kind    segmentKind
+	content strings.Builder
+}
+
+type unifiedStream struct {
+	messageID   string
+	segments    []streamSegment
+	totalRunes  int         // running rune count across all segments
+	pushedRunes int         // totalRunes at last push (dirty check)
+	lastPush    time.Time
+	timer       *time.Timer
 }
 
 type toolCardState struct {
@@ -107,9 +124,7 @@ type pendingAckReaction struct {
 func newTransport(cfg Config) *transportChannel {
 	return &transportChannel{
 		cfg:            cfg,
-		textStreams:    map[string]*textStream{},
-		thoughtStreams: map[string]*textStream{},
-		systemStreams:  map[string]*textStream{},
+		unifiedStreams:  map[string]*unifiedStream{},
 		seenMessageID:  map[string]time.Time{},
 		toolCards:      map[string]map[string]*toolCardState{},
 		toolCompact:    map[string]*compactToolStream{},
@@ -139,6 +154,9 @@ func (f *transportChannel) Send(chatID, text string, kind TextKind) error {
 		return f.sendThought(chatID, text)
 	case TextSystem:
 		return f.sendSystem(chatID, text)
+	case TextDivider:
+		f.insertDivider(chatID)
+		return nil
 	default:
 		return f.sendText(chatID, text)
 	}
@@ -151,46 +169,39 @@ func (f *transportChannel) sendText(chatID, text string) error {
 	}
 	// Non-tool text breaks the contiguous tool segment in YOLO mode.
 	f.resetCompactToolStream(chatID)
-	// Finalize thought stream so the two types don't silently merge.
-	f.finalizeStream(chatID, "thought")
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
 
-	ts := f.textStreams[chatID]
-	if ts == nil {
-		ts = &textStream{}
-		f.textStreams[chatID] = ts
+	us := f.unifiedStreams[chatID]
+	if us == nil {
+		us = &unifiedStream{}
+		f.unifiedStreams[chatID] = us
 	}
-	ts.content.WriteString(text)
-	if ts.timer == nil {
-		ts.timer = time.AfterFunc(streamThrottle, func() {
-			f.textMu.Lock()
-			defer f.textMu.Unlock()
-			ts.timer = nil
-			if ts.content.Len() > ts.pushedLen {
-				if err := f.pushTextCard(chatID, ts); err != nil {
-					shared.Warn("feishu: deferred text flush: %v", err)
-				}
-			}
-		})
-	}
-	return nil
-}
 
-// pushTextCard builds a text card and posts/updates it.
-// Must be called with f.textMu held.
-func (f *transportChannel) pushTextCard(chatID string, ts *textStream) error {
-	content := ts.content.String()
-	if content == "" {
-		return nil
+	// Auto-split: if content exceeds threshold, finalize and start new card
+	if us.totalRunes > unifiedStreamMaxRunes && len(us.segments) > 0 {
+		if us.timer != nil {
+			us.timer.Stop()
+			us.timer = nil
+		}
+		_ = f.pushUnifiedCardLocked(chatID, us, true)
+		us = &unifiedStream{}
+		f.unifiedStreams[chatID] = us
 	}
-	card := buildTextStreamCard(content, false)
-	err := f.postOrUpdateStreamCard(chatID, ts, card)
-	if err == nil {
-		ts.pushedLen = ts.content.Len()
-		ts.lastPush = time.Now()
+
+	// Append to last text segment, or create new one
+	n := len(us.segments)
+	if n > 0 && us.segments[n-1].kind == segText {
+		us.segments[n-1].content.WriteString(text)
+	} else {
+		seg := streamSegment{kind: segText}
+		seg.content.WriteString(text)
+		us.segments = append(us.segments, seg)
 	}
-	return err
+	us.totalRunes += utf8.RuneCountInString(text)
+
+	f.armUnifiedTimer(chatID, us)
+	return nil
 }
 
 func (f *transportChannel) sendThought(chatID, text string) error {
@@ -199,61 +210,93 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 		return nil
 	}
 	f.resetCompactToolStream(chatID)
-	// Finalize text stream so the two types don't silently merge.
-	f.finalizeStream(chatID, "text")
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
 
-	ts := f.thoughtStreams[chatID]
-	if ts == nil {
-		ts = &textStream{}
-		f.thoughtStreams[chatID] = ts
+	us := f.unifiedStreams[chatID]
+	if us == nil {
+		us = &unifiedStream{}
+		f.unifiedStreams[chatID] = us
 	}
-	ts.content.WriteString(text)
-	if ts.timer == nil {
-		ts.timer = time.AfterFunc(streamThrottle, func() {
-			f.textMu.Lock()
-			defer f.textMu.Unlock()
-			ts.timer = nil
-			if ts.content.Len() > ts.pushedLen {
-				if err := f.pushThoughtCard(chatID, ts); err != nil {
-					shared.Warn("feishu: deferred thought flush: %v", err)
-				}
-			}
-		})
+
+	if us.totalRunes > unifiedStreamMaxRunes && len(us.segments) > 0 {
+		if us.timer != nil {
+			us.timer.Stop()
+			us.timer = nil
+		}
+		_ = f.pushUnifiedCardLocked(chatID, us, true)
+		us = &unifiedStream{}
+		f.unifiedStreams[chatID] = us
 	}
+
+	n := len(us.segments)
+	if n > 0 && us.segments[n-1].kind == segThought {
+		us.segments[n-1].content.WriteString(text)
+	} else {
+		seg := streamSegment{kind: segThought}
+		seg.content.WriteString(text)
+		us.segments = append(us.segments, seg)
+	}
+	us.totalRunes += utf8.RuneCountInString(text)
+
+	f.armUnifiedTimer(chatID, us)
 	return nil
 }
 
-// pushThoughtCard builds a thought card and posts/updates it.
-// Must be called with f.textMu held.
-func (f *transportChannel) pushThoughtCard(chatID string, ts *textStream) error {
-	content := ts.content.String()
-	if content == "" {
-		return nil
+func (f *transportChannel) insertDivider(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
 	}
-	card := buildThoughtStreamCard(content, false)
-	err := f.postOrUpdateStreamCard(chatID, ts, card)
-	if err == nil {
-		ts.pushedLen = ts.content.Len()
-		ts.lastPush = time.Now()
+	f.textMu.Lock()
+	defer f.textMu.Unlock()
+	us := f.unifiedStreams[chatID]
+	if us == nil || len(us.segments) == 0 {
+		return
 	}
-	return err
+	// Don't add consecutive dividers
+	if us.segments[len(us.segments)-1].kind == segDivider {
+		return
+	}
+	us.segments = append(us.segments, streamSegment{kind: segDivider})
 }
 
-// postOrUpdateStreamCard posts a new card or updates an existing one for a
-// streaming text/thought card. Must be called with f.textMu held.
-func (f *transportChannel) postOrUpdateStreamCard(chatID string, ts *textStream, card RawCard) error {
+func (f *transportChannel) armUnifiedTimer(chatID string, us *unifiedStream) {
+	if us.timer != nil {
+		return
+	}
+	us.timer = time.AfterFunc(streamThrottle, func() {
+		f.textMu.Lock()
+		defer f.textMu.Unlock()
+		us.timer = nil
+		if us.totalRunes > us.pushedRunes {
+			if err := f.pushUnifiedCardLocked(chatID, us, false); err != nil {
+				shared.Warn("feishu: deferred unified flush: %v", err)
+			}
+		}
+	})
+}
+
+// pushUnifiedCardLocked builds and posts/updates the unified card.
+// Must be called with f.textMu held.
+func (f *transportChannel) pushUnifiedCardLocked(chatID string, us *unifiedStream, done bool) error {
+	if len(us.segments) == 0 {
+		return nil
+	}
+	card := buildUnifiedStreamCard(us.segments, done)
+	if card == nil {
+		return nil
+	}
 	raw, err := json.Marshal(card)
 	if err != nil {
-		return fmt.Errorf("feishu: marshal stream card: %w", err)
+		return fmt.Errorf("feishu: marshal unified card: %w", err)
 	}
 	bot, err := f.ensureBot()
 	if err != nil {
 		return err
 	}
 	buf := lark.NewMsgBuffer(lark.MsgInteractive).Card(string(raw))
-	messageID := strings.TrimSpace(ts.messageID)
+	messageID := strings.TrimSpace(us.messageID)
 	if messageID == "" {
 		resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
 		if postErr != nil {
@@ -261,59 +304,48 @@ func (f *transportChannel) postOrUpdateStreamCard(chatID string, ts *textStream,
 		}
 		if resp != nil {
 			if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
-				ts.messageID = mid
+				us.messageID = mid
 				f.setLastOutbound(chatID, mid)
 			}
 		}
 		f.clearReceiveAck(chatID)
-		return nil
-	}
-	if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
-		f.setLastOutbound(chatID, messageID)
-		f.clearReceiveAck(chatID)
-		return nil
-	}
-	resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
-	if postErr != nil {
-		return postErr
-	}
-	if resp != nil {
-		if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
-			ts.messageID = mid
-			f.setLastOutbound(chatID, mid)
+	} else {
+		if _, err := bot.UpdateMessage(messageID, buf.Build()); err == nil {
+			f.setLastOutbound(chatID, messageID)
+			f.clearReceiveAck(chatID)
+		} else {
+			resp, postErr := bot.PostMessage(buf.BindChatID(chatID).Build())
+			if postErr != nil {
+				return postErr
+			}
+			if resp != nil {
+				if mid := strings.TrimSpace(resp.Data.MessageID); mid != "" {
+					us.messageID = mid
+					f.setLastOutbound(chatID, mid)
+				}
+			}
+			f.clearReceiveAck(chatID)
 		}
 	}
-	f.clearReceiveAck(chatID)
+	us.pushedRunes = us.totalRunes
+	us.lastPush = time.Now()
 	return nil
 }
 
-// flushPendingStreams pushes any buffered text/thought content that has not
+// flushPendingStreams pushes any buffered unified stream content that has not
 // yet been pushed due to throttling. Call before MarkDone or stream reset.
 func (f *transportChannel) flushPendingStreams(chatID string) {
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
-	if ts := f.textStreams[chatID]; ts != nil && ts.content.Len() > ts.pushedLen {
-		if ts.timer != nil {
-			ts.timer.Stop()
-			ts.timer = nil
-		}
-		if err := f.pushTextCard(chatID, ts); err != nil {
-			shared.Warn("feishu: final text flush: %v", err)
-		}
+	us := f.unifiedStreams[chatID]
+	if us == nil {
+		return
 	}
-	if ts := f.thoughtStreams[chatID]; ts != nil {
-		if ts.timer != nil {
-			ts.timer.Stop()
-			ts.timer = nil
-		}
-		// Push collapsed card for the final thought state.
-		if content := ts.content.String(); content != "" {
-			card := buildThoughtStreamCard(content, true)
-			if err := f.postOrUpdateStreamCard(chatID, ts, card); err != nil {
-				shared.Warn("feishu: final thought flush: %v", err)
-			}
-		}
+	if us.timer != nil {
+		us.timer.Stop()
+		us.timer = nil
 	}
+	_ = f.pushUnifiedCardLocked(chatID, us, true)
 }
 
 func (f *transportChannel) sendSystem(chatID, text string) error {
@@ -325,9 +357,8 @@ func (f *transportChannel) sendSystem(chatID, text string) error {
 	// System text also breaks contiguous tool segment and is rendered as
 	// independent cards (no streaming merge).
 	f.resetCompactToolStream(chatID)
-	// Finalize text/thought streams so system message doesn't silently merge.
-	f.finalizeStream(chatID, "text")
-	f.finalizeStream(chatID, "thought")
+	// Finalize unified stream so system message is visually separate.
+	f.finalizeUnifiedStream(chatID)
 	card := buildSystemStreamCard(text)
 	raw, err := json.Marshal(card)
 	if err != nil {
@@ -348,80 +379,36 @@ func (f *transportChannel) sendSystem(chatID, text string) error {
 		}
 	}
 	f.clearReceiveAck(chatID)
-	f.resetSystemStream(chatID)
 	return nil
 }
 
-func (f *transportChannel) resetTextStream(chatID string) {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return
-	}
-	f.textMu.Lock()
-	if ts := f.textStreams[chatID]; ts != nil && ts.timer != nil {
-		ts.timer.Stop()
-		ts.timer = nil
-	}
-	delete(f.textStreams, chatID)
-	f.textMu.Unlock()
-}
-
-func (f *transportChannel) resetThoughtStream(chatID string) {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return
-	}
-	f.textMu.Lock()
-	if ts := f.thoughtStreams[chatID]; ts != nil && ts.timer != nil {
-		ts.timer.Stop()
-		ts.timer = nil
-	}
-	delete(f.thoughtStreams, chatID)
-	f.textMu.Unlock()
-}
-
-func (f *transportChannel) resetSystemStream(chatID string) {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return
-	}
-	f.textMu.Lock()
-	delete(f.systemStreams, chatID)
-	f.textMu.Unlock()
-}
-
-// finalizeStream flushes any buffered content in the given stream type and
-// resets it so the next chunk of that type starts a fresh card. This prevents
-// content from silently concatenating across stream-type switches.
-func (f *transportChannel) finalizeStream(chatID, streamType string) {
+func (f *transportChannel) finalizeUnifiedStream(chatID string) {
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
-	switch streamType {
-	case "text":
-		if ts := f.textStreams[chatID]; ts != nil {
-			if ts.timer != nil {
-				ts.timer.Stop()
-				ts.timer = nil
-			}
-			if ts.content.Len() > ts.pushedLen {
-				_ = f.pushTextCard(chatID, ts)
-			}
-			delete(f.textStreams, chatID)
-		}
-	case "thought":
-		if ts := f.thoughtStreams[chatID]; ts != nil {
-			if ts.timer != nil {
-				ts.timer.Stop()
-				ts.timer = nil
-			}
-			// Always push collapsed card when thought stream ends.
-			if content := ts.content.String(); content != "" {
-				card := buildThoughtStreamCard(content, true)
-				_ = f.postOrUpdateStreamCard(chatID, ts, card)
-			}
-			delete(f.thoughtStreams, chatID)
-		}
+	us := f.unifiedStreams[chatID]
+	if us == nil {
+		return
 	}
+	if us.timer != nil {
+		us.timer.Stop()
+		us.timer = nil
+	}
+	_ = f.pushUnifiedCardLocked(chatID, us, true)
+	delete(f.unifiedStreams, chatID)
+}
+
+func (f *transportChannel) resetUnifiedStream(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.textMu.Lock()
+	if us := f.unifiedStreams[chatID]; us != nil && us.timer != nil {
+		us.timer.Stop()
+		us.timer = nil
+	}
+	delete(f.unifiedStreams, chatID)
+	f.textMu.Unlock()
 }
 
 // SendCard dispatches a card payload to the appropriate renderer.
@@ -554,7 +541,11 @@ func (f *transportChannel) attachPermissionOptionsToToolCard(chatID, toolCallID,
 	}
 
 	f.textMu.Lock()
-	delete(f.textStreams, chatID)
+	if us := f.unifiedStreams[chatID]; us != nil && us.timer != nil {
+		us.timer.Stop()
+		us.timer = nil
+	}
+	delete(f.unifiedStreams, chatID)
 	f.textMu.Unlock()
 
 	f.toolMu.Lock()
@@ -689,80 +680,96 @@ func (f *transportChannel) getLastOutbound(chatID string) string {
 	return strings.TrimSpace(f.lastOutbound[chatID])
 }
 
-func buildTextStreamCard(content string, streaming bool) RawCard {
-	_ = streaming
+func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
+	elements := make([]map[string]any, 0, len(segments)*2)
+	for i, seg := range segments {
+		switch seg.kind {
+		case segText:
+			content := seg.content.String()
+			if content != "" {
+				elements = append(elements, map[string]any{
+					"tag":     "markdown",
+					"content": normalizeStreamMarkdown(content),
+				})
+			}
+		case segThought:
+			content := seg.content.String()
+			if content == "" {
+				continue
+			}
+			// Last thought segment and still streaming → expanded
+			isLastSeg := (i == len(segments)-1)
+			collapsed := done || !isLastSeg
+			elements = append(elements, buildInlineThoughtElement(content, collapsed))
+		case segDivider:
+			elements = append(elements, map[string]any{"tag": "hr"})
+		}
+	}
+	// Strip leading/trailing dividers
+	for len(elements) > 0 {
+		if tag, _ := elements[0]["tag"].(string); tag == "hr" {
+			elements = elements[1:]
+		} else {
+			break
+		}
+	}
+	for len(elements) > 0 {
+		if tag, _ := elements[len(elements)-1]["tag"].(string); tag == "hr" {
+			elements = elements[:len(elements)-1]
+		} else {
+			break
+		}
+	}
+	if len(elements) == 0 {
+		return nil
+	}
 	return RawCard{
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
 		"body": map[string]any{
-			"elements": []map[string]any{
-				{"tag": "markdown", "content": normalizeStreamMarkdown(content)},
-			},
+			"elements": elements,
 		},
 	}
 }
 
-func buildThoughtStreamCard(content string, collapsed bool) RawCard {
+func buildInlineThoughtElement(content string, collapsed bool) map[string]any {
 	md := normalizeStreamMarkdown(content)
+	panelTitle := "Thinking"
 	if collapsed {
-		// Use first meaningful line as the panel header for better info density.
-		panelTitle := "Thinking"
 		for _, line := range strings.Split(content, "\n") {
 			trimmed := strings.TrimSpace(line)
 			if trimmed != "" {
-				if len(trimmed) > 80 {
-					panelTitle = trimmed[:80] + "…"
+				r := []rune(trimmed)
+				if len(r) > 80 {
+					panelTitle = string(r[:80]) + "…"
 				} else {
 					panelTitle = trimmed
 				}
 				break
 			}
 		}
-		return RawCard{
-			"schema": "2.0",
-			"config": map[string]any{"update_multi": true},
-			"body": map[string]any{
-				"elements": []map[string]any{
-					{
-						"tag":      "collapsible_panel",
-						"expanded": false,
-						"header": map[string]any{
-							"title": map[string]any{
-								"tag":     "plain_text",
-								"content": "🧠 " + panelTitle,
-							},
-							"vertical_align": "center",
-							"icon": map[string]any{
-								"tag":   "standard_icon",
-								"token": "down-small-ccm_outlined",
-							},
-							"padding": "4px 0px 4px 0px",
-						},
-						"border": map[string]any{
-							"color":         "grey",
-							"corner_radius": "5px",
-						},
-						"elements": []map[string]any{
-							{"tag": "markdown", "content": md},
-						},
-					},
-				},
-			},
-		}
 	}
-	return RawCard{
-		"schema": "2.0",
-		"config": map[string]any{"update_multi": true},
+	return map[string]any{
+		"tag":      "collapsible_panel",
+		"expanded": !collapsed,
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": "🧠 Thinking",
+				"content": "🧠 " + panelTitle,
 			},
+			"vertical_align": "center",
+			"icon": map[string]any{
+				"tag":   "standard_icon",
+				"token": "down-small-ccm_outlined",
+			},
+			"padding": "4px 0px 4px 0px",
 		},
-		"body": map[string]any{
-			"elements": []map[string]any{
-				{"tag": "markdown", "content": md},
-			},
+		"border": map[string]any{
+			"color":         "grey",
+			"corner_radius": "5px",
+		},
+		"elements": []map[string]any{
+			{"tag": "markdown", "content": md},
 		},
 	}
 }
@@ -841,22 +848,8 @@ func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) (string,
 		return "", err
 	}
 
-	// Tool updates interrupt the current assistant text stream card.
-	f.textMu.Lock()
-	// Collapse thought card before clearing the stream.
-	if ts := f.thoughtStreams[chatID]; ts != nil {
-		if ts.timer != nil {
-			ts.timer.Stop()
-			ts.timer = nil
-		}
-		if content := ts.content.String(); content != "" {
-			card := buildThoughtStreamCard(content, true)
-			_ = f.postOrUpdateStreamCard(chatID, ts, card)
-		}
-	}
-	delete(f.textStreams, chatID)
-	delete(f.thoughtStreams, chatID)
-	f.textMu.Unlock()
+	// Tool updates interrupt the current unified stream.
+	f.finalizeUnifiedStream(chatID)
 
 	f.toolMu.Lock()
 	chatCards := f.toolCards[chatID]
@@ -987,7 +980,14 @@ func (f *transportChannel) sendToolCallCompact(chatID string, update ToolCallUpd
 
 	// Tool updates interrupt assistant text card.
 	f.textMu.Lock()
-	delete(f.textStreams, chatID)
+	if us := f.unifiedStreams[chatID]; us != nil {
+		if us.timer != nil {
+			us.timer.Stop()
+			us.timer = nil
+		}
+		_ = f.pushUnifiedCardLocked(chatID, us, true)
+	}
+	delete(f.unifiedStreams, chatID)
 	f.textMu.Unlock()
 
 	f.toolMu.Lock()
@@ -1670,9 +1670,7 @@ func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *lark
 	h := f.handler
 	f.mu.RUnlock()
 	if h != nil {
-		f.resetTextStream(chatID)
-		f.resetThoughtStream(chatID)
-		f.resetSystemStream(chatID)
+		f.resetUnifiedStream(chatID)
 		f.addReceiveAck(chatID, messageID)
 		h(Message{
 			ChatID:    chatID,

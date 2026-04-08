@@ -38,13 +38,18 @@ func TestParseMessageText_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestBuildTextStreamCard_NoHeader(t *testing.T) {
-	card := buildTextStreamCard("hello", false)
+func TestBuildUnifiedStreamCard_TextOnly(t *testing.T) {
+	seg := streamSegment{kind: segText}
+	seg.content.WriteString("hello")
+	card := buildUnifiedStreamCard([]streamSegment{seg}, false)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
 	if _, ok := card["header"]; ok {
-		t.Fatalf("acp text stream card should not have header: %+v", card)
+		t.Fatalf("unified text-only card should not have header: %+v", card)
 	}
 	if schema, _ := card["schema"].(string); schema != "2.0" {
-		t.Fatalf("text stream card should use schema 2.0, got %q", schema)
+		t.Fatalf("unified card should use schema 2.0, got %q", schema)
 	}
 	body, ok := card["body"].(map[string]any)
 	if !ok {
@@ -67,47 +72,76 @@ func TestSendText_FirstChunkWaitsBeforePosting(t *testing.T) {
 		t.Fatalf("sendText() first chunk should be buffered, got error: %v", err)
 	}
 
-	ts := f.textStreams["chat-1"]
-	if ts == nil {
-		t.Fatal("text stream should be created")
+	us := f.unifiedStreams["chat-1"]
+	if us == nil {
+		t.Fatal("unified stream should be created")
 	}
-	if got := ts.content.String(); got != "hello" {
+	if len(us.segments) != 1 || us.segments[0].kind != segText {
+		t.Fatalf("expected one text segment, got %d segments", len(us.segments))
+	}
+	if got := us.segments[0].content.String(); got != "hello" {
 		t.Fatalf("buffered content=%q, want %q", got, "hello")
 	}
-	if ts.pushedLen != 0 {
-		t.Fatalf("pushedLen=%d, want 0 before first flush", ts.pushedLen)
+	if us.pushedRunes != 0 {
+		t.Fatalf("pushedRunes=%d, want 0 before first flush", us.pushedRunes)
 	}
-	if ts.timer == nil {
+	if us.timer == nil {
 		t.Fatal("first chunk should arm a delayed flush timer")
 	}
-	ts.timer.Stop()
+	us.timer.Stop()
 }
 
-func TestBuildThoughtStreamCard_HasHeader(t *testing.T) {
-	card := buildThoughtStreamCard("thinking", false)
+func TestBuildUnifiedStreamCard_ThoughtExpanded(t *testing.T) {
+	seg := streamSegment{kind: segThought}
+	seg.content.WriteString("thinking")
+	card := buildUnifiedStreamCard([]streamSegment{seg}, false)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
 	if schema, _ := card["schema"].(string); schema != "2.0" {
-		t.Fatalf("streaming thought card should use schema 2.0, got %q", schema)
+		t.Fatalf("unified thought card should use schema 2.0, got %q", schema)
 	}
-	header, ok := card["header"].(map[string]any)
+	body, ok := card["body"].(map[string]any)
 	if !ok {
-		t.Fatalf("header missing in thought card: %+v", card)
+		t.Fatalf("body missing in thought card: %+v", card)
 	}
-	titleMap, ok := header["title"].(map[string]any)
+	elements, ok := body["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("body elements missing in thought card: %+v", card)
+	}
+	panel := elements[0]
+	if tag, _ := panel["tag"].(string); tag != "collapsible_panel" {
+		t.Fatalf("expected collapsible_panel tag, got %q", tag)
+	}
+	// Last thought segment, not done → expanded
+	if expanded, _ := panel["expanded"].(bool); !expanded {
+		t.Fatalf("thought panel should be expanded while streaming")
+	}
+	panelHeader, ok := panel["header"].(map[string]any)
 	if !ok {
-		t.Fatalf("header title missing in thought card: %+v", card)
+		t.Fatalf("panel header missing: %+v", panel)
 	}
-	title, _ := titleMap["content"].(string)
+	panelTitle, ok := panelHeader["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("panel header title missing: %+v", panelHeader)
+	}
+	title, _ := panelTitle["content"].(string)
 	if !strings.Contains(title, "Thinking") {
 		t.Fatalf("thought title mismatch, got %q", title)
 	}
 }
 
-func TestBuildThoughtStreamCard_CollapsedUsesPanel(t *testing.T) {
-	card := buildThoughtStreamCard("deep thought", true)
+func TestBuildUnifiedStreamCard_ThoughtCollapsed(t *testing.T) {
+	seg := streamSegment{kind: segThought}
+	seg.content.WriteString("deep thought")
+	card := buildUnifiedStreamCard([]streamSegment{seg}, true)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
 	if schema, _ := card["schema"].(string); schema != "2.0" {
 		t.Fatalf("collapsed thought card should use schema 2.0, got %q", schema)
 	}
-	// Collapsed card should not have a top-level header (content is in panel).
+	// Collapsed card should not have a top-level header.
 	if _, ok := card["header"]; ok {
 		t.Fatalf("collapsed thought card should not have top-level header: %+v", card)
 	}
@@ -171,21 +205,12 @@ func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
 	}
 }
 
-func TestResetSystemStream(t *testing.T) {
+func TestResetUnifiedStream(t *testing.T) {
 	f := newTransport(Config{})
-	f.systemStreams["chat-1"] = &textStream{messageID: "m1"}
-	f.resetSystemStream("chat-1")
-	if _, ok := f.systemStreams["chat-1"]; ok {
-		t.Fatalf("system stream should be removed")
-	}
-}
-
-func TestResetThoughtStream(t *testing.T) {
-	f := newTransport(Config{})
-	f.thoughtStreams["chat-1"] = &textStream{messageID: "m1"}
-	f.resetThoughtStream("chat-1")
-	if _, ok := f.thoughtStreams["chat-1"]; ok {
-		t.Fatalf("thought stream should be removed")
+	f.unifiedStreams["chat-1"] = &unifiedStream{messageID: "m1"}
+	f.resetUnifiedStream("chat-1")
+	if _, ok := f.unifiedStreams["chat-1"]; ok {
+		t.Fatalf("unified stream should be removed")
 	}
 }
 
@@ -210,15 +235,17 @@ func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 	}
 }
 
-func TestBuildTextStreamCard_NoStreamingMarker(t *testing.T) {
-	card := buildTextStreamCard("hello", true)
+func TestBuildUnifiedStreamCard_DoneCardHasSingleElement(t *testing.T) {
+	seg := streamSegment{kind: segText}
+	seg.content.WriteString("hello")
+	card := buildUnifiedStreamCard([]streamSegment{seg}, true)
 	body, ok := card["body"].(map[string]any)
 	if !ok {
-		t.Fatalf("body missing in streaming card: %+v", card)
+		t.Fatalf("body missing in done card: %+v", card)
 	}
 	elements, ok := body["elements"].([]map[string]any)
 	if !ok || len(elements) != 1 {
-		t.Fatalf("elements mismatch in streaming card: %+v", card)
+		t.Fatalf("elements mismatch in done card: %+v", card)
 	}
 }
 
@@ -531,4 +558,129 @@ func TestHandleP2MessageReceive_DropsEmptyChatID(t *testing.T) {
 
 func strPtr(value string) *string {
 	return &value
+}
+
+func TestBuildUnifiedStreamCard_MixedSegments(t *testing.T) {
+	seg1 := streamSegment{kind: segText}
+	seg1.content.WriteString("hello world")
+	seg2 := streamSegment{kind: segThought}
+	seg2.content.WriteString("deep reasoning")
+	seg3 := streamSegment{kind: segText}
+	seg3.content.WriteString("conclusion")
+
+	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
+	body, ok := card["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("body missing: %+v", card)
+	}
+	elements, ok := body["elements"].([]map[string]any)
+	if !ok || len(elements) != 3 {
+		t.Fatalf("expected 3 elements (text+thought+text), got %d", len(elements))
+	}
+	if tag, _ := elements[0]["tag"].(string); tag != "markdown" {
+		t.Fatalf("first element should be markdown, got %q", tag)
+	}
+	if tag, _ := elements[1]["tag"].(string); tag != "collapsible_panel" {
+		t.Fatalf("second element should be collapsible_panel, got %q", tag)
+	}
+	if tag, _ := elements[2]["tag"].(string); tag != "markdown" {
+		t.Fatalf("third element should be markdown, got %q", tag)
+	}
+}
+
+func TestBuildUnifiedStreamCard_DividerBetweenText(t *testing.T) {
+	seg1 := streamSegment{kind: segText}
+	seg1.content.WriteString("first part")
+	seg2 := streamSegment{kind: segDivider}
+	seg3 := streamSegment{kind: segText}
+	seg3.content.WriteString("second part")
+
+	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
+	body := card["body"].(map[string]any)
+	elements := body["elements"].([]map[string]any)
+	if len(elements) != 3 {
+		t.Fatalf("expected 3 elements (text+hr+text), got %d", len(elements))
+	}
+	if tag, _ := elements[1]["tag"].(string); tag != "hr" {
+		t.Fatalf("middle element should be hr, got %q", tag)
+	}
+}
+
+func TestBuildUnifiedStreamCard_StripEdgeDividers(t *testing.T) {
+	seg1 := streamSegment{kind: segDivider}
+	seg2 := streamSegment{kind: segText}
+	seg2.content.WriteString("content")
+	seg3 := streamSegment{kind: segDivider}
+
+	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
+	if card == nil {
+		t.Fatal("expected non-nil card")
+	}
+	body := card["body"].(map[string]any)
+	elements := body["elements"].([]map[string]any)
+	if len(elements) != 1 {
+		t.Fatalf("expected 1 element after stripping edge dividers, got %d", len(elements))
+	}
+	if tag, _ := elements[0]["tag"].(string); tag != "markdown" {
+		t.Fatalf("remaining element should be markdown, got %q", tag)
+	}
+}
+
+func TestInsertDivider_NoConsecutive(t *testing.T) {
+	f := newTransport(Config{})
+	_ = f.sendText("chat-1", "hello")
+	f.insertDivider("chat-1")
+	f.insertDivider("chat-1")
+	f.insertDivider("chat-1")
+
+	us := f.unifiedStreams["chat-1"]
+	if us == nil {
+		t.Fatal("unified stream should exist")
+	}
+	// Should be: text + divider (no consecutive dividers)
+	if len(us.segments) != 2 {
+		t.Fatalf("expected 2 segments (text+divider), got %d", len(us.segments))
+	}
+	if us.segments[1].kind != segDivider {
+		t.Fatalf("second segment should be divider, got %v", us.segments[1].kind)
+	}
+	us.timer.Stop()
+}
+
+func TestSendText_AutoSplitAt10K(t *testing.T) {
+	f := newTransport(Config{})
+
+	// Write content exceeding unifiedStreamMaxRunes
+	bigChunk := strings.Repeat("x", unifiedStreamMaxRunes+1)
+	_ = f.sendText("chat-1", bigChunk)
+
+	us := f.unifiedStreams["chat-1"]
+	if us == nil {
+		t.Fatal("unified stream should exist")
+	}
+	us.timer.Stop()
+
+	// Now send another chunk; since totalRunes > 10K, it should trigger auto-split
+	// (which calls pushUnifiedCardLocked and creates a new stream).
+	// Because we don't have a bot, push will fail silently.
+	// The key check: after sendText, a new stream is created.
+	_ = f.sendText("chat-1", "more")
+
+	usNew := f.unifiedStreams["chat-1"]
+	if usNew == nil {
+		t.Fatal("new unified stream should exist after auto-split")
+	}
+	if len(usNew.segments) != 1 {
+		t.Fatalf("new stream should have 1 segment, got %d", len(usNew.segments))
+	}
+	if got := usNew.segments[0].content.String(); got != "more" {
+		t.Fatalf("new stream content=%q, want %q", got, "more")
+	}
+	usNew.timer.Stop()
 }
