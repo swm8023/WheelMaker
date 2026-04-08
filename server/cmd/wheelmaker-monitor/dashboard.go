@@ -427,12 +427,23 @@ html, body {
 .log-line .lvl-debug { color: var(--text-dim); }
 .log-line .msg { color: var(--text); }
 
-.json-view {
+.db-view {
   flex: 1; min-height: 0; overflow: auto;
   padding: 10px 14px; background: #050810;
-  font-size: 11.5px; line-height: 1.5;
-  white-space: pre-wrap; word-break: break-all; color: var(--text);
 }
+.db-section { margin-bottom: 14px; }
+.db-table-title {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px;
+  color: var(--accent); margin-bottom: 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.db-count {
+  font-size: 10px; font-weight: 400;
+  color: var(--text-dim); letter-spacing: 0;
+  text-transform: none;
+}
+.db-table-wrap { overflow-x: auto; }
 
 .empty-state { color: var(--text-dim); font-size: 11px; padding: 8px 0; text-align: center; }
 
@@ -459,7 +470,7 @@ html, body {
   .strip-panel + .strip-panel { border-left: none; border-top: 1px solid var(--border); }
   .log-area { height: 100dvh; min-height: 420px; }
   .log-scroll { min-height: 300px; }
-  .json-view { min-height: 300px; }
+  .db-view { min-height: 300px; }
   .topbar-label { display: none; }
   .tbtn { font-size: 10px; padding: 3px 8px; }
 }
@@ -542,7 +553,7 @@ html, body {
         <div class="log-toolbar">
           <div class="log-toolbar-tabs">
             <button id="vtab-logs"  class="vtab active" onclick="switchTab('logs')">Logs</button>
-            <button id="vtab-state" class="vtab"        onclick="switchTab('state')">State JSON</button>
+            <button id="vtab-db" class="vtab"        onclick="switchTab('db')">Database</button>
           </div>
           <div class="log-sep"></div>
           <select id="log-file"  class="log-sel" onchange="loadLogs()">
@@ -573,8 +584,8 @@ html, body {
           <div id="panel-logs" class="log-panel active">
             <div id="log-scroll" class="log-scroll"><div class="empty-state loading">Loading logs&#x2026;</div></div>
           </div>
-          <div id="panel-state" class="log-panel">
-            <div id="state-view" class="json-view"><span class="loading">Loading&#x2026;</span></div>
+          <div id="panel-db" class="log-panel">
+            <div id="db-view" class="db-view"><span class="loading">Loading&#x2026;</span></div>
           </div>
         </div>
 
@@ -615,9 +626,9 @@ function initPWA() {
 function switchTab(tab) {
   const isLogs = tab === 'logs';
   $('vtab-logs').classList.toggle('active', isLogs);
-  $('vtab-state').classList.toggle('active', !isLogs);
+  $('vtab-db').classList.toggle('active', !isLogs);
   $('panel-logs').classList.toggle('active', isLogs);
-  $('panel-state').classList.toggle('active', !isLogs);
+  $('panel-db').classList.toggle('active', !isLogs);
 }
 
 async function api(path) {
@@ -635,7 +646,7 @@ async function refresh() {
     const ov = await api('overview');
     renderStatus(ov.service);
     renderSidebar(ov.config);
-    renderStateJSON(ov.state);
+    renderDBTables(ov.db);
   } catch(e) {
     $('hdr-dot').className = 'dot offline';
     $('hdr-label').textContent = 'error';
@@ -732,8 +743,43 @@ function cfgRow(label, value) {
   return '<div class="reg-row"><span class="rl">' + esc(label) + '</span><span class="rv">' + esc(value) + '</span></div>';
 }
 
-function renderStateJSON(state) {
-  $('state-view').textContent = state ? JSON.stringify(state, null, 2) : 'null';
+function renderDBTables(db) {
+  const el = $('db-view');
+  if (!db || db.error) {
+    el.innerHTML = '<div class="empty-state">' + esc(db ? db.error : 'No data') + '</div>';
+    return;
+  }
+  const tables = db.tables || [];
+  if (tables.length === 0) {
+    el.innerHTML = '<div class="empty-state">No tables</div>';
+    return;
+  }
+  let html = '';
+  for (const t of tables) {
+    html += '<div class="db-section">';
+    html += '<div class="db-table-title">' + esc(t.name) + '<span class="db-count">' + t.rows.length + ' rows</span></div>';
+    if (t.rows.length === 0) {
+      html += '<div class="empty-state">Empty</div>';
+    } else {
+      html += '<div class="db-table-wrap"><table class="reg-table"><thead><tr>';
+      for (const col of t.columns) {
+        html += '<th>' + esc(col) + '</th>';
+      }
+      html += '</tr></thead><tbody>';
+      for (const row of t.rows) {
+        html += '<tr>';
+        for (const val of row) {
+          const s = val == null ? '' : String(val);
+          const truncated = s.length > 80 ? s.substring(0, 77) + '...' : s;
+          html += '<td title="' + esc(s) + '">' + esc(truncated) + '</td>';
+        }
+        html += '</tr>';
+      }
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+  }
+  el.innerHTML = html;
 }
 
 async function loadRegistryStatus() {
@@ -831,7 +877,7 @@ initPWA();
     const ov = await api('overview');
     renderStatus(ov.service);
     renderSidebar(ov.config);
-    renderStateJSON(ov.state);
+    renderDBTables(ov.db);
   } catch(e) {
     $('hdr-dot').className = 'dot offline';
     $('hdr-label').textContent = 'error';

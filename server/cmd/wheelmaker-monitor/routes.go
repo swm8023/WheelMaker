@@ -16,7 +16,7 @@ func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/api/overview", handleOverview(mon))
 	mux.HandleFunc("GET "+prefix+"/api/status", handleStatus(mon))
 	mux.HandleFunc("GET "+prefix+"/api/config", handleConfig(mon))
-	mux.HandleFunc("GET "+prefix+"/api/state", handleState(mon))
+	mux.HandleFunc("GET "+prefix+"/api/db", handleDBTables(mon))
 	mux.HandleFunc("GET "+prefix+"/api/logs", handleLogs(mon))
 	mux.HandleFunc("GET "+prefix+"/api/registry", handleRegistry(mon))
 	mux.HandleFunc("POST "+prefix+"/api/action/restart", handleAction(mon, "restart"))
@@ -70,13 +70,9 @@ func handleConfig(mon *Monitor) http.HandlerFunc {
 	}
 }
 
-func handleState(mon *Monitor) http.HandlerFunc {
+func handleDBTables(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, err := mon.GetState()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		data := mon.GetDBTables()
 		writeJSON(w, data)
 	}
 }

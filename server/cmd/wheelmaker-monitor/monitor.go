@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"github.com/swm8023/wheelmaker/internal/shared"
+	_ "modernc.org/sqlite"
 )
 
 // Monitor holds the base directory and provides all monitoring operations.
@@ -223,9 +225,87 @@ func (m *Monitor) GetConfig() (json.RawMessage, error) {
 	return readJSONFile(filepath.Join(m.baseDir, "config.json"))
 }
 
-// GetState reads and returns the parsed state.json.
-func (m *Monitor) GetState() (json.RawMessage, error) {
-	return readJSONFile(filepath.Join(m.baseDir, "state.json"))
+// ---------- database tables ----------
+
+// DBTablesResult holds the query results for all database tables.
+type DBTablesResult struct {
+	Tables []DBTable `json:"tables"`
+	Error  string    `json:"error,omitempty"`
+}
+
+// DBTable holds one table's column names and row data.
+type DBTable struct {
+	Name    string   `json:"name"`
+	Columns []string `json:"columns"`
+	Rows    [][]any  `json:"rows"`
+}
+
+// GetDBTables opens the client SQLite database read-only and returns all table contents.
+func (m *Monitor) GetDBTables() *DBTablesResult {
+	dbPath := filepath.Join(m.baseDir, "db", "client.sqlite3")
+	if !fileExists(dbPath) {
+		return &DBTablesResult{Error: "database not found"}
+	}
+
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+	if err != nil {
+		return &DBTablesResult{Error: "open database: " + err.Error()}
+	}
+	defer db.Close()
+
+	tableNames := []string{"projects", "route_bindings", "sessions"}
+	tables := make([]DBTable, 0, len(tableNames))
+
+	for _, name := range tableNames {
+		t, err := queryTable(db, name)
+		if err != nil {
+			tables = append(tables, DBTable{
+				Name:    name,
+				Columns: []string{"error"},
+				Rows:    [][]any{{err.Error()}},
+			})
+			continue
+		}
+		tables = append(tables, *t)
+	}
+
+	return &DBTablesResult{Tables: tables}
+}
+
+func queryTable(db *sql.DB, name string) (*DBTable, error) {
+	rows, err := db.Query("SELECT * FROM " + name) //nolint:gosec // table names are hard-coded
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	var result [][]any
+	for rows.Next() {
+		values := make([]any, len(cols))
+		scanPtrs := make([]any, len(cols))
+		for i := range values {
+			scanPtrs[i] = &values[i]
+		}
+		if err := rows.Scan(scanPtrs...); err != nil {
+			return nil, err
+		}
+		for i, v := range values {
+			if b, ok := v.([]byte); ok {
+				values[i] = string(b)
+			}
+		}
+		result = append(result, values)
+	}
+	if result == nil {
+		result = [][]any{}
+	}
+
+	return &DBTable{Name: name, Columns: cols, Rows: result}, nil
 }
 
 func readJSONFile(path string) (json.RawMessage, error) {
@@ -698,12 +778,11 @@ func runManagedRuntimeServiceAction(action string) error {
 	return nil
 }
 
-// TriggerUpdateNow sends a manual trigger signal to the updater service loop.
-// Overview returns a combined snapshot of status, config, and state.
+// Overview returns a combined snapshot of status, config, and database tables.
 type Overview struct {
 	Service *ServiceStatus  `json:"service"`
 	Config  json.RawMessage `json:"config"`
-	State   json.RawMessage `json:"state"`
+	DB      *DBTablesResult `json:"db"`
 }
 
 func (m *Monitor) GetOverview() (*Overview, error) {
@@ -712,11 +791,11 @@ func (m *Monitor) GetOverview() (*Overview, error) {
 		return nil, err
 	}
 	cfg, _ := m.GetConfig()
-	state, _ := m.GetState()
+	db := m.GetDBTables()
 	return &Overview{
 		Service: svc,
 		Config:  cfg,
-		State:   state,
+		DB:      db,
 	}, nil
 }
 
