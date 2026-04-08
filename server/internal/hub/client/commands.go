@@ -98,8 +98,16 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 
 // handleNewCommand creates a new Client-level session and rebinds the route.
 func (c *Client) handleNewCommand(routeKey string) {
-	routeKey = normalizeRouteKey(routeKey)
-	newSess := c.ClientNewSession(routeKey)
+	newSess, err := c.ClientNewSession(routeKey)
+	if err != nil {
+		if routeKey == "" {
+			return
+		}
+		if sess, resolveErr := c.resolveSession(routeKey); resolveErr == nil && sess != nil {
+			sess.reply(fmt.Sprintf("New error: %v", err))
+		}
+		return
+	}
 	newSess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
 }
 
@@ -115,7 +123,6 @@ func (c *Client) handleLoadCommand(sess *Session, routeKey, args string) {
 		sess.reply(fmt.Sprintf("Load error: %v", err))
 		return
 	}
-	routeKey = normalizeRouteKey(routeKey)
 	loaded, err := c.ClientLoadSession(routeKey, idx)
 	if err != nil {
 		sess.reply(fmt.Sprintf("Load error: %v", err))
@@ -190,7 +197,7 @@ func (s *Session) handleConfigCommand(
 	args string,
 	usage string,
 	label string,
-	resolve func(input string, st *SessionState) (configID, value string, err error),
+	resolve func(input string, st *SessionAgentState) (configID, value string, err error),
 ) {
 	input := strings.TrimSpace(args)
 	if input == "" {
@@ -206,18 +213,9 @@ func (s *Session) handleConfigCommand(
 		return
 	}
 
-	// Lock section 1: read agentName and sessionState for config resolution.
+	// Lock section 1: read session state for config resolution.
 	s.mu.Lock()
-	agentName := ""
-	if s.instance != nil {
-		agentName = s.instance.Name()
-	}
-	var sessionState *SessionState
-	if s.state != nil && s.state.Agents != nil {
-		if as := s.state.Agents[agentName]; as != nil {
-			sessionState = as.Session
-		}
-	}
+	sessionState := cloneSessionAgentState(s.agents[s.currentAgentNameLocked()])
 	s.mu.Unlock()
 
 	if err := s.ensureReadyAndNotify(ctx); err != nil {
@@ -248,23 +246,25 @@ func (s *Session) handleConfigCommand(
 	// Apply returned config options immediately so the help menu reflects the new value.
 	if len(updatedOpts) > 0 {
 		s.mu.Lock()
-		s.sessionMeta.ConfigOptions = updatedOpts
+		if state := s.agentStateLocked(s.currentAgentNameLocked()); state != nil {
+			state.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
+		}
 		s.mu.Unlock()
 	}
 
-	s.syncAndPersistProjectState()
+	s.persistSessionBestEffort()
 	s.reply(fmt.Sprintf("%s set to: %s", label, value))
 }
 
-func resolveModeArg(input string, st *SessionState) (configID, value string, err error) {
+func resolveModeArg(input string, st *SessionAgentState) (configID, value string, err error) {
 	return resolveConfigSelectArg("mode", "mode", input, st)
 }
 
-func resolveModelArg(input string, st *SessionState) (configID, value string, err error) {
+func resolveModelArg(input string, st *SessionAgentState) (configID, value string, err error) {
 	return resolveConfigSelectArg("model", "model", input, st)
 }
 
-func resolveConfigArg(input string, st *SessionState) (configID, value string, err error) {
+func resolveConfigArg(input string, st *SessionAgentState) (configID, value string, err error) {
 	parts := strings.Fields(strings.TrimSpace(input))
 	if len(parts) < 2 {
 		return "", "", fmt.Errorf("usage: /config <config-id> <value>")
@@ -302,7 +302,7 @@ func resolveConfigArg(input string, st *SessionState) (configID, value string, e
 	return configID, value, nil
 }
 
-func resolveConfigSelectArg(kind string, defaultConfigID string, input string, st *SessionState) (configID, value string, err error) {
+func resolveConfigSelectArg(kind string, defaultConfigID string, input string, st *SessionAgentState) (configID, value string, err error) {
 	v := strings.TrimSpace(input)
 	if v == "" {
 		return "", "", fmt.Errorf("empty %s", kind)
@@ -350,8 +350,11 @@ func (s *Session) listSessions(ctx context.Context) ([]string, error) {
 	s.mu.Lock()
 	cwd := s.cwd
 	curSID := s.acpSessionID
-	agentName := s.instance.Name()
-	caps := s.initMeta.AgentCapabilities
+	agentName := s.currentAgentNameLocked()
+	caps := acp.AgentCapabilities{}
+	if state := s.agents[agentName]; state != nil {
+		caps = state.AgentCapabilities
+	}
 	s.mu.Unlock()
 
 	if caps.SessionCapabilities == nil || caps.SessionCapabilities.List == nil {
@@ -419,9 +422,20 @@ func (s *Session) createNewSession(ctx context.Context) (string, error) {
 	}
 
 	s.mu.Lock()
-	s.resetSessionFields(res.SessionID, res.ConfigOptions)
+	agentName := s.currentAgentNameLocked()
+	s.acpSessionID = res.SessionID
+	s.ready = true
+	s.lastReply = ""
+	s.prompt.activeTCs = make(map[string]struct{})
+	if state := s.agentStateLocked(agentName); state != nil {
+		state.ACPSessionID = res.SessionID
+		state.ConfigOptions = append([]acp.ConfigOption(nil), res.ConfigOptions...)
+		state.Commands = nil
+		state.Title = ""
+		state.UpdatedAt = ""
+	}
 	s.mu.Unlock()
-	s.syncAndPersistProjectState()
+	s.persistSessionBestEffort()
 	return res.SessionID, nil
 }
 
@@ -433,14 +447,13 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 	_ = lines // listSessions already refreshes and persists state
 
 	s.mu.Lock()
-	agentName := s.instance.Name()
+	agentName := s.currentAgentNameLocked()
 	cwd := s.cwd
-	loadCap := s.initMeta.AgentCapabilities.LoadSession
+	loadCap := false
 	var sessions []SessionSummary
-	if s.state != nil && s.state.Agents != nil {
-		if as := s.state.Agents[agentName]; as != nil {
-			sessions = append(sessions, as.Sessions...)
-		}
+	if state := s.agents[agentName]; state != nil {
+		loadCap = state.AgentCapabilities.LoadSession
+		sessions = append(sessions, state.Sessions...)
 	}
 	s.mu.Unlock()
 
@@ -465,9 +478,15 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 	}
 
 	s.mu.Lock()
-	s.resetSessionFields(target, nil)
+	s.acpSessionID = target
+	s.ready = true
+	s.lastReply = ""
+	s.prompt.activeTCs = make(map[string]struct{})
+	if state := s.agentStateLocked(agentName); state != nil {
+		state.ACPSessionID = target
+	}
 	s.mu.Unlock()
-	s.syncAndPersistProjectState()
+	s.persistSessionBestEffort()
 	return target, nil
 }
 
@@ -476,22 +495,10 @@ func (s *Session) persistSessionSummaries(agentName string, sessions []SessionSu
 		return
 	}
 	s.mu.Lock()
-	if s.state == nil {
-		s.mu.Unlock()
-		return
-	}
-	if s.state.Agents == nil {
-		s.state.Agents = map[string]*AgentState{}
-	}
-	as := s.state.Agents[agentName]
-	if as == nil {
-		as = &AgentState{}
-		s.state.Agents[agentName] = as
-	}
-	as.Sessions = sessions
-	st := s.state
+	as := s.agentStateLocked(agentName)
+	as.Sessions = cloneSessionSummaries(sessions)
 	s.mu.Unlock()
-	s.persistProjectState(st)
+	s.persistSessionBestEffort()
 }
 
 func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, error) {
@@ -503,19 +510,13 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 	}
 	_ = s.ensureReady(ctx)
 
-	s.mu.Lock()
-	opts := append([]acp.ConfigOption(nil), s.sessionMeta.ConfigOptions...)
-	currentAgent := ""
-	if s.instance != nil {
-		currentAgent = s.instance.Name()
+	state, currentAgent := s.currentAgentStateSnapshot()
+	opts := []acp.ConfigOption(nil)
+	cachedSessions := []SessionSummary(nil)
+	if state != nil {
+		opts = append(opts, state.ConfigOptions...)
+		cachedSessions = cloneSessionSummaries(state.Sessions)
 	}
-	var cachedSessions []SessionSummary
-	if s.state != nil && s.state.Agents != nil && currentAgent != "" {
-		if as := s.state.Agents[currentAgent]; as != nil {
-			cachedSessions = append([]SessionSummary(nil), as.Sessions...)
-		}
-	}
-	s.mu.Unlock()
 
 	model := HelpModel{
 		Title:    "WheelMaker",

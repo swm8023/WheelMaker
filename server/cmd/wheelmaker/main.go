@@ -91,7 +91,7 @@ func runHubWorker() error {
 	}
 
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
-	statePath := filepath.Join(home, ".wheelmaker", "state.json")
+	dbPath := filepath.Join(home, ".wheelmaker", "db", "client.sqlite3")
 
 	cfg, err := shared.LoadConfig(cfgPath)
 	if err != nil {
@@ -114,7 +114,7 @@ func runHubWorker() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	h := hub.New(cfg, statePath)
+	h := hub.New(cfg, dbPath)
 	if err := h.Start(ctx); err != nil {
 		return err
 	}

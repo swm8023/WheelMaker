@@ -29,19 +29,19 @@ const (
 // Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
 	cfg       *shared.AppConfig
-	statePath string
+	dbPath    string
 	clients   []*client.Client
 	regSync   *Reporter
 	regMu     sync.Mutex
 	lastProj  map[string]ProjectInfo
 }
 
-// New creates a Hub from the given config and state file path.
+// New creates a Hub from the given config and client DB path.
 // hub.Start() must be called before hub.Run().
-func New(cfg *shared.AppConfig, statePath string) *Hub {
+func New(cfg *shared.AppConfig, dbPath string) *Hub {
 	return &Hub{
 		cfg:       cfg,
-		statePath: statePath,
+		dbPath:    dbPath,
 		lastProj:  map[string]ProjectInfo{},
 	}
 }
@@ -75,7 +75,10 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 }
 
 func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
-	store := client.NewProjectJSONStore(h.statePath, pc.Name)
+	store, err := client.NewStore(h.dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("new store: %w", err)
+	}
 	c := client.New(store, pc.Client.Agent, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
 
@@ -90,17 +93,21 @@ func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd st
 			YOLO:              pc.YOLO,
 			BlockedUpdates:    pc.Client.IMFilter.Block,
 		})); err != nil {
+			_ = c.Close()
 			return nil, err
 		}
 	case "app":
 		if err := router.RegisterChannel(imapp.New()); err != nil {
+			_ = c.Close()
 			return nil, err
 		}
 	default:
+		_ = c.Close()
 		return nil, fmt.Errorf("unsupported im.type %q (supported: feishu, app)", pc.IM.Type)
 	}
 	c.SetIMRouter(router)
 	if err := c.Start(ctx); err != nil {
+		_ = c.Close()
 		return nil, fmt.Errorf("start: %w", err)
 	}
 	return c, nil

@@ -9,7 +9,7 @@ import (
 )
 
 func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
-	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
+	h := New(&shared.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
 		Path: ".",
@@ -21,10 +21,11 @@ func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
 	if !c.HasIMRouter() {
 		t.Fatal("expected IM router for feishu config")
 	}
+	t.Cleanup(func() { _ = c.Close() })
 }
 
 func TestBuildClient_AppEnablesIMStub(t *testing.T) {
-	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
+	h := New(&shared.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	c, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
 		Path: ".",
@@ -36,10 +37,11 @@ func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 	if !c.HasIMRouter() {
 		t.Fatal("expected IM router for app config")
 	}
+	t.Cleanup(func() { _ = c.Close() })
 }
 
 func TestBuildClient_RejectsRemovedConsoleType(t *testing.T) {
-	h := New(&shared.AppConfig{}, t.TempDir()+"/state.json")
+	h := New(&shared.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	_, err := h.buildClient(context.Background(), shared.ProjectConfig{
 		Name: "p",
 		Path: ".",

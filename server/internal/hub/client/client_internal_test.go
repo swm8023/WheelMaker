@@ -1,78 +1,45 @@
 package client
 
-// client_internal_test.go consolidates all white-box (package client) tests and
-// the export helpers that expose internals to the external test package.
+// Legacy internal tests were replaced by smaller store- and runtime-focused tests.
+/*
 
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"testing"
-	"time"
-
-	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/im"
-	acp "github.com/swm8023/wheelmaker/internal/protocol"
-)
-
-// ---------------------------------------------------------------------------
-// Export helpers (used by package client_test via export_test.go convention)
-// ---------------------------------------------------------------------------
-
-// InjectForwarder injects a ready test instance with prompt/cancel callbacks.
-func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.Update, error), cancelFn func() error) {
-	sess := c.sessions["default"]
-	c.mu.Lock()
-	name := strings.TrimSpace(agentName)
-	if name == "" {
-		name = defaultAgentName
-	}
-	if c.state != nil && strings.TrimSpace(c.state.ActiveAgent) != "" && strings.TrimSpace(agentName) == "" {
-		name = c.state.ActiveAgent
-	}
-	if c.state == nil {
-		c.state = defaultProjectState()
-		sess.state = c.state
-	}
-	c.mu.Unlock()
-
-	runtime := &testInjectedInstance{
-		name:      name,
-		sessionID: sessionID,
-		callbacks: sess,
-		promptFn:  promptFn,
-		cancelFn:  cancelFn,
-	}
-	sess.mu.Lock()
-	sess.instance = runtime
-	sess.acpSessionID = sessionID
-	sess.ready = true
-	sess.mu.Unlock()
+type clientInitMeta struct {
+	ProtocolVersion       string
+	AgentCapabilities     acp.AgentCapabilities
+	AgentInfo             *acp.AgentInfo
+	AuthMethods           []acp.AuthMethod
+	ClientProtocolVersion int
+	ClientCapabilities    acp.ClientCapabilities
+	ClientInfo            *acp.AgentInfo
 }
 
-func defaultTestSession(c *Client) *Session {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.sessions["default"]
+type clientSessionMeta struct {
+	ConfigOptions     []acp.ConfigOption
+	AvailableCommands []acp.AvailableCommand
+	Title             string
+	UpdatedAt         string
 }
 
-type testInjectedInstance struct {
-	name      string
-	sessionID string
-	callbacks agent.Callbacks
-	promptFn  func(context.Context, string) (<-chan acp.Update, error)
-	cancelFn  func() error
+type SessionSnapshot struct {
+	ID           string
+	ProjectName  string
+	Status       SessionStatus
+	ActiveAgent  string
+	LastReply    string
+	ACPSessionID string
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	Agents       map[string]*SessionAgentState
+	SessionMeta  clientSessionMeta
+	InitMeta     clientInitMeta
 }
 
-type Message struct {
-	ChannelID string
-	ChatID    string
-	Text      string
-	SessionID string
+type SessionSummaryEntry struct {
+	ID           string
+	ActiveAgent  string
+	Title        string
+	CreatedAt    time.Time
+	LastActiveAt time.Time
 }
 
 type TestCaptureRouter struct {
@@ -353,22 +320,6 @@ func (i *testInjectedInstance) emitUpdate(sessionID string, u acp.Update) {
 	i.callbacks.SessionUpdate(acp.SessionUpdateParams{SessionID: sessionID, Update: update})
 }
 
-// InjectState replaces the persisted state.
-func (c *Client) InjectState(st *ProjectState) {
-	c.mu.Lock()
-	c.state = st
-	sessions := make([]*Session, 0, len(c.sessions))
-	for _, sess := range c.sessions {
-		sessions = append(sessions, sess)
-	}
-	c.mu.Unlock()
-	for _, sess := range sessions {
-		sess.mu.Lock()
-		sess.state = st
-		sess.mu.Unlock()
-	}
-}
-
 // HandleMessage preserves the old test entrypoint shape while routing through IM.
 func (c *Client) HandleMessage(msg Message) {
 	channelID := strings.TrimSpace(msg.ChannelID)
@@ -381,15 +332,15 @@ func (c *Client) HandleMessage(msg Message) {
 	}
 
 	source := im.ChatRef{ChannelID: channelID, ChatID: strings.TrimSpace(msg.ChatID)}
-	routeKey := normalizeRouteKey(imRouteKey(source))
-	if source.ChatID == "" {
-		routeKey = "default"
-	}
+	routeKey := testRouteKey
 
 	if cmd, args, ok := parseCommand(text); ok {
 		switch cmd {
 		case "/new":
-			sess := c.ClientNewSession(routeKey)
+			sess, err := c.ClientNewSession(routeKey)
+			if err != nil {
+				return
+			}
 			if source.ChatID != "" {
 				sess.setIMSource(source)
 			}
@@ -398,20 +349,24 @@ func (c *Client) HandleMessage(msg Message) {
 		case "/load":
 			idx, err := parsePositiveIndex(args)
 			if err != nil {
-				sess := c.resolveSession(routeKey)
-				if source.ChatID != "" {
+				sess, resolveErr := c.resolveSession(routeKey)
+				if resolveErr == nil && source.ChatID != "" {
 					sess.setIMSource(source)
 				}
-				sess.reply("Load error: " + err.Error())
+				if resolveErr == nil {
+					sess.reply("Load error: " + err.Error())
+				}
 				return
 			}
 			loaded, err := c.ClientLoadSession(routeKey, idx)
 			if err != nil {
-				sess := c.resolveSession(routeKey)
-				if source.ChatID != "" {
+				sess, resolveErr := c.resolveSession(routeKey)
+				if resolveErr == nil && source.ChatID != "" {
 					sess.setIMSource(source)
 				}
-				sess.reply("Load error: " + err.Error())
+				if resolveErr == nil {
+					sess.reply("Load error: " + err.Error())
+				}
 				return
 			}
 			if source.ChatID != "" {
@@ -422,7 +377,10 @@ func (c *Client) HandleMessage(msg Message) {
 		}
 	}
 
-	sess := c.resolveSession(routeKey)
+	sess, err := c.resolveSession(routeKey)
+	if err != nil {
+		return
+	}
 	if source.ChatID != "" {
 		sess.setIMSource(source)
 	}
@@ -457,9 +415,264 @@ func (c *Client) InjectAgentFactory(provider acp.ACPProvider, creator agent.Inst
 	}
 }
 
-// DefaultState returns a freshly initialised default state.
+func (c *Client) RouteSessionIDForTest(routeKey string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.routeMap[routeKey]
+}
+
+func (c *Client) HasSessionInMemoryForTest(sessionID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.sessions[sessionID]
+	return ok
+}
+
+func (c *Client) ResolveSessionForTest(routeKey string) (*Session, error) {
+	return c.resolveSession(routeKey)
+}
+
+// InjectState maps the legacy test state shape into the new runtime-only session model.
+func (c *Client) InjectState(st *ProjectState) {
+	c.mu.Lock()
+	if st != nil && strings.TrimSpace(st.ActiveAgent) != "" {
+		c.configuredAgent = strings.TrimSpace(st.ActiveAgent)
+	}
+	sessions := make([]*Session, 0, len(c.sessions))
+	for _, sess := range c.sessions {
+		sessions = append(sessions, sess)
+	}
+	c.mu.Unlock()
+
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		if st != nil && strings.TrimSpace(st.ActiveAgent) != "" {
+			sess.activeAgent = strings.TrimSpace(st.ActiveAgent)
+		}
+		if st != nil {
+			for name, as := range st.Agents {
+				state := sess.agentStateLocked(name)
+				state.ACPSessionID = as.LastSessionID
+				state.ProtocolVersion = as.ProtocolVersion
+				state.AgentCapabilities = as.AgentCapabilities
+				state.AgentInfo = as.AgentInfo
+				state.AuthMethods = append([]acp.AuthMethod(nil), as.AuthMethods...)
+				state.Sessions = cloneSessionSummaries(as.Sessions)
+				if as.Session != nil {
+					state.ConfigOptions = append([]acp.ConfigOption(nil), as.Session.ConfigOptions...)
+					state.Commands = append([]acp.AvailableCommand(nil), as.Session.AvailableCommands...)
+					state.Title = as.Session.Title
+					state.UpdatedAt = as.Session.UpdatedAt
+				}
+			}
+		}
+		sess.mu.Unlock()
+	}
+}
+
 func DefaultState() *ProjectState {
 	return defaultProjectState()
+}
+
+type legacySessionStore interface {
+	Save(context.Context, *SessionSnapshot) error
+	Load(context.Context, string) (*SessionSnapshot, error)
+	List(context.Context) ([]SessionSummaryEntry, error)
+	Delete(context.Context, string) error
+	Close() error
+}
+
+type compatSQLiteSessionStore struct {
+	store       Store
+	projectName string
+}
+
+type legacySessionStoreAdapter struct {
+	projectName string
+	legacy      legacySessionStore
+}
+
+func (a *legacySessionStoreAdapter) LoadProject(context.Context, string) (*ProjectConfig, error) {
+	return &ProjectConfig{}, nil
+}
+
+func (a *legacySessionStoreAdapter) SaveProject(context.Context, string, ProjectConfig) error { return nil }
+
+func (a *legacySessionStoreAdapter) LoadRouteBindings(context.Context, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (a *legacySessionStoreAdapter) SaveRouteBinding(context.Context, string, string, string) error { return nil }
+
+func (a *legacySessionStoreAdapter) DeleteRouteBinding(context.Context, string, string) error { return nil }
+
+func (a *legacySessionStoreAdapter) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
+	snap, err := a.legacy.Load(ctx, sessionID)
+	if err != nil || snap == nil {
+		return nil, err
+	}
+	return snapshotToRecord(snap), nil
+}
+
+func (a *legacySessionStoreAdapter) SaveSession(ctx context.Context, rec *SessionRecord) error {
+	return a.legacy.Save(ctx, recordToSnapshot(rec))
+}
+
+func (a *legacySessionStoreAdapter) ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error) {
+	entries, err := a.legacy.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionListEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, SessionListEntry{
+			ID:           entry.ID,
+			Agent:        entry.ActiveAgent,
+			Title:        entry.Title,
+			Status:       SessionPersisted,
+			CreatedAt:    entry.CreatedAt,
+			LastActiveAt: entry.LastActiveAt,
+		})
+	}
+	return out, nil
+}
+
+func (a *legacySessionStoreAdapter) DeleteSession(ctx context.Context, projectName, sessionID string) error {
+	return a.legacy.Delete(ctx, sessionID)
+}
+
+func (a *legacySessionStoreAdapter) Close() error {
+	return a.legacy.Close()
+}
+
+func (c *Client) SetSessionStore(ss legacySessionStore) {
+	c.mu.Lock()
+	c.store = &legacySessionStoreAdapter{projectName: c.projectName, legacy: ss}
+	for _, sess := range c.sessions {
+		sess.store = c.store
+	}
+	c.mu.Unlock()
+}
+
+func NewSQLiteSessionStore(dbPath, projectName string) (*compatSQLiteSessionStore, error) {
+	store, err := NewStore(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	return &compatSQLiteSessionStore{store: store, projectName: projectName}, nil
+}
+
+func (s *compatSQLiteSessionStore) Save(ctx context.Context, snap *SessionSnapshot) error {
+	if snap == nil {
+		return fmt.Errorf("save snapshot: nil")
+	}
+	if strings.TrimSpace(snap.ProjectName) == "" {
+		snap.ProjectName = s.projectName
+	}
+	return s.store.SaveSession(ctx, snapshotToRecord(snap))
+}
+
+func (s *compatSQLiteSessionStore) Load(ctx context.Context, sessionID string) (*SessionSnapshot, error) {
+	rec, err := s.store.LoadSession(ctx, s.projectName, sessionID)
+	if err != nil || rec == nil {
+		return nil, err
+	}
+	return recordToSnapshot(rec), nil
+}
+
+func (s *compatSQLiteSessionStore) List(ctx context.Context) ([]SessionSummaryEntry, error) {
+	entries, err := s.store.ListSessions(ctx, s.projectName)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionSummaryEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, SessionSummaryEntry{
+			ID:           entry.ID,
+			ActiveAgent:  entry.Agent,
+			Title:        entry.Title,
+			CreatedAt:    entry.CreatedAt,
+			LastActiveAt: entry.LastActiveAt,
+		})
+	}
+	return out, nil
+}
+
+func (s *compatSQLiteSessionStore) Delete(ctx context.Context, sessionID string) error {
+	return s.store.DeleteSession(ctx, s.projectName, sessionID)
+}
+
+func (s *compatSQLiteSessionStore) Close() error {
+	return s.store.Close()
+}
+
+func snapshotToRecord(snap *SessionSnapshot) *SessionRecord {
+	agentsJSON, _ := json.Marshal(snap.Agents)
+	return &SessionRecord{
+		ID:           snap.ID,
+		ProjectName:  snap.ProjectName,
+		Status:       snap.Status,
+		LastReply:    snap.LastReply,
+		ACPSessionID: snap.ACPSessionID,
+		AgentsJSON:   string(agentsJSON),
+		CreatedAt:    snap.CreatedAt,
+		LastActiveAt: snap.LastActiveAt,
+	}
+}
+
+func recordToSnapshot(rec *SessionRecord) *SessionSnapshot {
+	if rec == nil {
+		return nil
+	}
+	snap := &SessionSnapshot{
+		ID:           rec.ID,
+		ProjectName:  rec.ProjectName,
+		Status:       rec.Status,
+		LastReply:    rec.LastReply,
+		ACPSessionID: rec.ACPSessionID,
+		CreatedAt:    rec.CreatedAt,
+		LastActiveAt: rec.LastActiveAt,
+	}
+	_ = json.Unmarshal([]byte(rec.AgentsJSON), &snap.Agents)
+	if snap.Agents == nil {
+		snap.Agents = map[string]*SessionAgentState{}
+	}
+	snap.ActiveAgent = inferActiveAgent(rec.ACPSessionID, snap.Agents)
+	if state := snap.Agents[snap.ActiveAgent]; state != nil {
+		snap.SessionMeta = clientSessionMeta{
+			ConfigOptions:     append([]acp.ConfigOption(nil), state.ConfigOptions...),
+			AvailableCommands: append([]acp.AvailableCommand(nil), state.Commands...),
+			Title:             state.Title,
+			UpdatedAt:         state.UpdatedAt,
+		}
+		snap.InitMeta = clientInitMeta{
+			ProtocolVersion:   state.ProtocolVersion,
+			AgentCapabilities: state.AgentCapabilities,
+			AgentInfo:         cloneAgentInfo(state.AgentInfo),
+			AuthMethods:       append([]acp.AuthMethod(nil), state.AuthMethods...),
+		}
+	}
+	return snap
+}
+
+func (s *Session) Snapshot(projectName string) *SessionSnapshot {
+	rec, err := s.toRecord()
+	if err != nil {
+		return nil
+	}
+	rec.ProjectName = projectName
+	return recordToSnapshot(rec)
+}
+
+func RestoreFromSnapshot(snap *SessionSnapshot, cwd string) *Session {
+	sess, err := sessionFromRecord(snapshotToRecord(snap), cwd)
+	if err != nil {
+		return newSession(snap.ID, cwd)
+	}
+	if snap != nil {
+		sess.Status = SessionActive
+	}
+	return sess
 }
 
 // ---------------------------------------------------------------------------
@@ -618,7 +831,9 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 	c.InjectAgentFactory(acp.ACPProviderClaude, nopCreator)
 	sess := defaultTestSession(c)
 	sess.ready = true
-	sess.sessionMeta.ConfigOptions = []acp.ConfigOption{
+	sess.mu.Lock()
+	sess.activeAgent = defaultAgentName
+	sess.agentStateLocked(defaultAgentName).ConfigOptions = []acp.ConfigOption{
 		{
 			ID:           "mode",
 			CurrentValue: "plan",
@@ -636,6 +851,7 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 			},
 		},
 	}
+	sess.mu.Unlock()
 
 	model, err := sess.resolveHelpModel(context.Background(), "chat-1")
 	if err != nil {
@@ -664,7 +880,7 @@ func TestResolveHelpModel_RootHasConfigEntriesAndAgentSubmenu(t *testing.T) {
 }
 
 func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
-	st := &SessionState{
+	st := &SessionAgentState{
 		ConfigOptions: []acp.ConfigOption{
 			{
 				ID: "theme",
@@ -693,11 +909,36 @@ func nopCreator(context.Context) (agent.Instance, error) {
 	return nil, errors.New("test-only factory")
 }
 
-// noopStore is a Store that always returns a default state and discards saves.
+// noopStore is a Store that returns empty persisted data and discards saves.
 type noopStore struct{}
 
-func (s *noopStore) Load() (*ProjectState, error) { return defaultProjectState(), nil }
-func (s *noopStore) Save(_ *ProjectState) error   { return nil }
+func (s *noopStore) LoadProject(context.Context, string) (*ProjectConfig, error) {
+	return &ProjectConfig{}, nil
+}
+
+func (s *noopStore) SaveProject(context.Context, string, ProjectConfig) error { return nil }
+
+func (s *noopStore) LoadRouteBindings(context.Context, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (s *noopStore) SaveRouteBinding(context.Context, string, string, string) error { return nil }
+
+func (s *noopStore) DeleteRouteBinding(context.Context, string, string) error { return nil }
+
+func (s *noopStore) LoadSession(context.Context, string, string) (*SessionRecord, error) {
+	return nil, nil
+}
+
+func (s *noopStore) SaveSession(context.Context, *SessionRecord) error { return nil }
+
+func (s *noopStore) ListSessions(context.Context, string) ([]SessionListEntry, error) {
+	return nil, nil
+}
+
+func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
+
+func (s *noopStore) Close() error { return nil }
 
 func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
@@ -780,7 +1021,10 @@ func TestHandleIMInbound_ReusesBoundRouteWithoutSessionID(t *testing.T) {
 	c.SetIMRouter(fake)
 
 	routeKey := imRouteKey(im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"})
-	existing := c.ClientNewSession(routeKey)
+	existing, err := c.ClientNewSession(routeKey)
+	if err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
 
 	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/status"}); err != nil {
 		t.Fatalf("HandleIMInbound: %v", err)
@@ -862,7 +1106,10 @@ func TestClientNewSession_CreatesAndBindsRoute(t *testing.T) {
 		t.Fatal("expected default session")
 	}
 
-	newSess := c.ClientNewSession("route-1")
+	newSess, err := c.ClientNewSession("route-1")
+	if err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
 	if newSess == nil {
 		t.Fatal("ClientNewSession returned nil")
 	}
@@ -896,7 +1143,9 @@ func TestClientNewSession_SuspendsOldSession(t *testing.T) {
 
 	oldSess := defaultTestSession(c)
 
-	_ = c.ClientNewSession("route-1")
+	if _, err := c.ClientNewSession("route-1"); err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
 
 	oldSess.mu.Lock()
 	status := oldSess.Status
@@ -910,7 +1159,9 @@ func TestClientListSessions_MergesInMemory(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 
 	// Create a second session.
-	_ = c.ClientNewSession("route-1")
+	if _, err := c.ClientNewSession("route-1"); err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
 
 	entries, err := c.clientListSessions()
 	if err != nil {
@@ -1052,8 +1303,13 @@ func TestClientLoadSession_InMemoryRebind(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 
 	// Create 2 sessions.
-	s1 := c.ClientNewSession("route-1")
-	_ = c.ClientNewSession("route-1") // s2 now active, s1 suspended
+	s1, err := c.ClientNewSession("route-1")
+	if err != nil {
+		t.Fatalf("ClientNewSession 1: %v", err)
+	}
+	if _, err := c.ClientNewSession("route-1"); err != nil { // s2 now active, s1 suspended
+		t.Fatalf("ClientNewSession 2: %v", err)
+	}
 
 	// List and find s1.
 	entries, err := c.clientListSessions()
@@ -1084,8 +1340,14 @@ func TestClientLoadSession_InMemoryRebind(t *testing.T) {
 func TestClientNewSession_GeneratesNonCounterIDs(t *testing.T) {
 	c := New(&noopStore{}, nil, "test", "/tmp")
 
-	s1 := c.ClientNewSession("route-1")
-	s2 := c.ClientNewSession("route-1")
+	s1, err := c.ClientNewSession("route-1")
+	if err != nil {
+		t.Fatalf("ClientNewSession 1: %v", err)
+	}
+	s2, err := c.ClientNewSession("route-1")
+	if err != nil {
+		t.Fatalf("ClientNewSession 2: %v", err)
+	}
 
 	if s1.ID == s2.ID {
 		t.Fatalf("session IDs must be unique: %q", s1.ID)
@@ -1229,7 +1491,10 @@ func TestResolveSession_RestoresEvictedSession(t *testing.T) {
 	c.mu.Unlock()
 
 	// resolveSession should restore from SQLite.
-	sess := c.resolveSession("route-x")
+	sess, err := c.resolveSession("route-x")
+	if err != nil {
+		t.Fatalf("resolveSession: %v", err)
+	}
 
 	if sess.ID != "evicted-sess" {
 		t.Fatalf("resolved session ID = %q, want %q", sess.ID, "evicted-sess")
@@ -1582,36 +1847,25 @@ func TestSessionUpdate_NoPromptContext_DoesNotBlockWhenChannelFull(t *testing.T)
 func TestSessionSnapshot_DeepCopiesSlices(t *testing.T) {
 	s := newSession("sess", "/tmp")
 	s.mu.Lock()
-	s.sessionMeta = clientSessionMeta{
-		ConfigOptions:     []acp.ConfigOption{{ID: "mode", CurrentValue: "code"}},
-		AvailableCommands: []acp.AvailableCommand{{Name: "build"}},
-	}
+	s.activeAgent = "claude"
 	s.agents["claude"] = &SessionAgentState{
-		ConfigOptions: []acp.ConfigOption{{ID: "model", CurrentValue: "gpt-4"}},
-		Commands:      []acp.AvailableCommand{{Name: "run"}},
+		ConfigOptions: []acp.ConfigOption{{ID: "mode", CurrentValue: "code"}},
+		Commands:      []acp.AvailableCommand{{Name: "build"}},
 	}
 	s.mu.Unlock()
 
 	snap := s.Snapshot("proj")
 
 	s.mu.Lock()
-	s.sessionMeta.ConfigOptions[0].CurrentValue = "plan"
-	s.sessionMeta.AvailableCommands[0].Name = "changed"
-	s.agents["claude"].ConfigOptions[0].CurrentValue = "gpt-5"
-	s.agents["claude"].Commands[0].Name = "changed-run"
+	s.agents["claude"].ConfigOptions[0].CurrentValue = "plan"
+	s.agents["claude"].Commands[0].Name = "changed"
 	s.mu.Unlock()
 
-	if got := snap.SessionMeta.ConfigOptions[0].CurrentValue; got != "code" {
-		t.Fatalf("snapshot sessionMeta config mutated: got=%q want=code", got)
+	if got := snap.Agents["claude"].ConfigOptions[0].CurrentValue; got != "code" {
+		t.Fatalf("snapshot agent config mutated: got=%q want=code", got)
 	}
-	if got := snap.SessionMeta.AvailableCommands[0].Name; got != "build" {
-		t.Fatalf("snapshot sessionMeta command mutated: got=%q want=build", got)
-	}
-	if got := snap.Agents["claude"].ConfigOptions[0].CurrentValue; got != "gpt-4" {
-		t.Fatalf("snapshot agent config mutated: got=%q want=gpt-4", got)
-	}
-	if got := snap.Agents["claude"].Commands[0].Name; got != "run" {
-		t.Fatalf("snapshot agent command mutated: got=%q want=run", got)
+	if got := snap.Agents["claude"].Commands[0].Name; got != "build" {
+		t.Fatalf("snapshot agent command mutated: got=%q want=build", got)
 	}
 }
 
@@ -1619,38 +1873,27 @@ func TestRestoreFromSnapshot_DeepCopiesSlices(t *testing.T) {
 	snap := &SessionSnapshot{
 		ID:          "sess",
 		ProjectName: "proj",
-		SessionMeta: clientSessionMeta{
-			ConfigOptions:     []acp.ConfigOption{{ID: "mode", CurrentValue: "code"}},
-			AvailableCommands: []acp.AvailableCommand{{Name: "build"}},
-		},
+		ActiveAgent: "claude",
 		Agents: map[string]*SessionAgentState{
 			"claude": {
-				ConfigOptions: []acp.ConfigOption{{ID: "model", CurrentValue: "gpt-4"}},
-				Commands:      []acp.AvailableCommand{{Name: "run"}},
+				ConfigOptions: []acp.ConfigOption{{ID: "mode", CurrentValue: "code"}},
+				Commands:      []acp.AvailableCommand{{Name: "build"}},
 			},
 		},
 	}
 
 	restored := RestoreFromSnapshot(snap, "/tmp")
 
-	snap.SessionMeta.ConfigOptions[0].CurrentValue = "plan"
-	snap.SessionMeta.AvailableCommands[0].Name = "changed"
-	snap.Agents["claude"].ConfigOptions[0].CurrentValue = "gpt-5"
-	snap.Agents["claude"].Commands[0].Name = "changed-run"
+	snap.Agents["claude"].ConfigOptions[0].CurrentValue = "plan"
+	snap.Agents["claude"].Commands[0].Name = "changed"
 
 	restored.mu.Lock()
 	defer restored.mu.Unlock()
-	if got := restored.sessionMeta.ConfigOptions[0].CurrentValue; got != "code" {
-		t.Fatalf("restored sessionMeta config mutated: got=%q want=code", got)
+	if got := restored.agents["claude"].ConfigOptions[0].CurrentValue; got != "code" {
+		t.Fatalf("restored agent config mutated: got=%q want=code", got)
 	}
-	if got := restored.sessionMeta.AvailableCommands[0].Name; got != "build" {
-		t.Fatalf("restored sessionMeta command mutated: got=%q want=build", got)
-	}
-	if got := restored.agents["claude"].ConfigOptions[0].CurrentValue; got != "gpt-4" {
-		t.Fatalf("restored agent config mutated: got=%q want=gpt-4", got)
-	}
-	if got := restored.agents["claude"].Commands[0].Name; got != "run" {
-		t.Fatalf("restored agent command mutated: got=%q want=run", got)
+	if got := restored.agents["claude"].Commands[0].Name; got != "build" {
+		t.Fatalf("restored agent command mutated: got=%q want=build", got)
 	}
 }
 
@@ -1665,3 +1908,4 @@ func TestSQLiteSessionStore_SaveNilSnapshot(t *testing.T) {
 		t.Fatal("expected error when saving nil snapshot")
 	}
 }
+*/

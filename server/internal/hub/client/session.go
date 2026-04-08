@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,14 +29,24 @@ const (
 	SessionPersisted
 )
 
-// SessionAgentState holds per-agent metadata within one Session.
-// Preserved across agent switches so that switching back restores previous state.
+type SessionSummary struct {
+	ID        string `json:"id"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+// SessionAgentState holds all persisted per-agent metadata within one Session.
 type SessionAgentState struct {
-	ACPSessionID  string                 `json:"acpSessionId,omitempty"`
-	ConfigOptions []acp.ConfigOption     `json:"configOptions,omitempty"`
-	Commands      []acp.AvailableCommand `json:"commands,omitempty"`
-	Title         string                 `json:"title,omitempty"`
-	UpdatedAt     string                 `json:"updatedAt,omitempty"`
+	ACPSessionID      string                 `json:"acpSessionId,omitempty"`
+	ConfigOptions     []acp.ConfigOption     `json:"configOptions,omitempty"`
+	Commands          []acp.AvailableCommand `json:"commands,omitempty"`
+	Title             string                 `json:"title,omitempty"`
+	UpdatedAt         string                 `json:"updatedAt,omitempty"`
+	ProtocolVersion   string                 `json:"protocolVersion,omitempty"`
+	AgentCapabilities acp.AgentCapabilities  `json:"agentCapabilities,omitempty"`
+	AgentInfo         *acp.AgentInfo         `json:"agentInfo,omitempty"`
+	AuthMethods       []acp.AuthMethod       `json:"authMethods,omitempty"`
+	Sessions          []SessionSummary       `json:"sessions,omitempty"`
 }
 
 // Session is the business session object that owns ACP session state,
@@ -51,6 +62,7 @@ type Session struct {
 
 	// Per-agent state indexed by agent name.
 	agents map[string]*SessionAgentState
+	activeAgent string
 
 	// Runtime ACP session state (moved from Client.session / Client.sessionMeta / Client.initMeta).
 	acpSessionID string
@@ -58,8 +70,6 @@ type Session struct {
 	initializing bool
 	lastReply    string
 	replayH      func(acp.SessionUpdateParams)
-	initMeta     clientInitMeta
-	sessionMeta  clientSessionMeta
 
 	prompt   promptState
 	initCond *sync.Cond
@@ -67,11 +77,11 @@ type Session struct {
 	permRouter *permissionRouter
 
 	// Back-references to Client-owned resources needed by Session methods.
+	projectName string
 	cwd         string
 	yolo        bool
 	registry    *agent.ACPFactory
-	persistence ClientStateStore
-	state       *ProjectState
+	store       Store
 	imRouter    IMRouter
 	imSource    *im.ChatRef
 
@@ -99,6 +109,84 @@ func newSession(id string, cwd string) *Session {
 	}
 	s.initCond = sync.NewCond(&s.mu)
 	return s
+}
+
+func cloneAgentInfo(src *acp.AgentInfo) *acp.AgentInfo {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	return &cp
+}
+
+func cloneSessionSummaries(src []SessionSummary) []SessionSummary {
+	return append([]SessionSummary(nil), src...)
+}
+
+func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	cp.ConfigOptions = append([]acp.ConfigOption(nil), src.ConfigOptions...)
+	cp.Commands = append([]acp.AvailableCommand(nil), src.Commands...)
+	cp.AuthMethods = append([]acp.AuthMethod(nil), src.AuthMethods...)
+	cp.Sessions = cloneSessionSummaries(src.Sessions)
+	cp.AgentInfo = cloneAgentInfo(src.AgentInfo)
+	return &cp
+}
+
+func inferActiveAgent(acpSessionID string, agents map[string]*SessionAgentState) string {
+	acpSessionID = strings.TrimSpace(acpSessionID)
+	if acpSessionID != "" {
+		for name, state := range agents {
+			if state != nil && strings.TrimSpace(state.ACPSessionID) == acpSessionID {
+				return name
+			}
+		}
+	}
+	if len(agents) == 1 {
+		for name := range agents {
+			return name
+		}
+	}
+	return ""
+}
+
+func (s *Session) agentStateLocked(name string) *SessionAgentState {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	if s.agents == nil {
+		s.agents = map[string]*SessionAgentState{}
+	}
+	state := s.agents[name]
+	if state == nil {
+		state = &SessionAgentState{}
+		s.agents[name] = state
+	}
+	return state
+}
+
+func (s *Session) currentAgentNameLocked() string {
+	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
+		return strings.TrimSpace(s.instance.Name())
+	}
+	if strings.TrimSpace(s.activeAgent) != "" {
+		return strings.TrimSpace(s.activeAgent)
+	}
+	return inferActiveAgent(s.acpSessionID, s.agents)
+}
+
+func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name := s.currentAgentNameLocked()
+	if name == "" {
+		return nil, ""
+	}
+	return cloneSessionAgentState(s.agents[name]), name
 }
 
 func newSessionID() string {
@@ -155,19 +243,13 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	if s.state == nil {
-		s.mu.Unlock()
-		return fmt.Errorf("state not loaded")
-	}
-	name := s.state.ActiveAgent
+	name := s.currentAgentNameLocked()
 	if name == "" {
 		name = defaultAgentName
 	}
 	savedSID := ""
-	if s.state.Agents != nil {
-		if as := s.state.Agents[name]; as != nil && as.LastSessionID != "" {
-			savedSID = as.LastSessionID
-		}
+	if as := s.agents[name]; as != nil && strings.TrimSpace(as.ACPSessionID) != "" {
+		savedSID = strings.TrimSpace(as.ACPSessionID)
 	}
 	s.mu.Unlock()
 
@@ -189,6 +271,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		return nil
 	}
 	s.instance = inst
+	s.activeAgent = name
 	s.ready = false
 	s.acpSessionID = savedSID
 	s.mu.Unlock()
@@ -240,15 +323,12 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	oldInst := s.instance
 	savedLastReply := s.lastReply
 	s.mu.Unlock()
-	s.syncRuntimeToProjectState() // save outgoing agent state before reset
 
 	// Read saved session ID for incoming agent.
 	s.mu.Lock()
 	var savedSID string
-	if s.state != nil && s.state.Agents != nil {
-		if as := s.state.Agents[name]; as != nil {
-			savedSID = as.LastSessionID
-		}
+	if as := s.agents[name]; as != nil {
+		savedSID = strings.TrimSpace(as.ACPSessionID)
 	}
 	s.mu.Unlock()
 
@@ -264,8 +344,10 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	s.instance = newInst
 	s.initializing = false
 	s.prompt.updatesCh = nil
-	s.initMeta = clientInitMeta{}
-	s.resetSessionFields(savedSID, nil) // sets ready=true — override below:
+	s.activeAgent = name
+	s.acpSessionID = savedSID
+	s.lastReply = ""
+	s.prompt.activeTCs = make(map[string]struct{})
 	s.ready = false
 	s.mu.Unlock()
 	s.initCond.Broadcast() // MUST be outside s.mu — never inside the lock
@@ -286,19 +368,9 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 				}
 			}
 		}
-		s.syncRuntimeToProjectState()
+		s.persistSessionBestEffort()
 	}
-
-	// Update ActiveAgent and save.
-	s.mu.Lock()
-	if s.state != nil {
-		s.state.ActiveAgent = name
-	}
-	st := s.state
-	s.mu.Unlock()
-	if st != nil {
-		s.persistProjectState(st)
-	}
+	s.persistSessionBestEffort()
 
 	s.reply(fmt.Sprintf("Switched to agent: %s", name))
 	snap := s.sessionConfigSnapshot()
@@ -360,21 +432,11 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
-	newInitMeta := clientInitMeta{
-		ProtocolVersion:       initResult.ProtocolVersion.String(),
-		AgentCapabilities:     initResult.AgentCapabilities,
-		AgentInfo:             initResult.AgentInfo,
-		AuthMethods:           initResult.AuthMethods,
-		ClientProtocolVersion: acpClientProtocolVersion,
-		ClientCapabilities:    clientCaps,
-		ClientInfo:            acpClientInfo,
-	}
-
 	// Step 2: attempt session/load if possible.
 	if savedSID != "" && initResult.AgentCapabilities.LoadSession && !isCopilotAgent(agentName) {
 		var replayMu sync.Mutex
 		var replay []acp.Update
-		replayMeta := clientSessionMeta{}
+		replayState := &SessionAgentState{}
 
 		s.mu.Lock()
 		s.replayH = func(p acp.SessionUpdateParams) {
@@ -385,16 +447,16 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			replayMu.Lock()
 			replay = append(replay, derived.Update)
 			if len(derived.AvailableCommands) > 0 {
-				replayMeta.AvailableCommands = derived.AvailableCommands
+				replayState.Commands = append([]acp.AvailableCommand(nil), derived.AvailableCommands...)
 			}
 			if len(derived.ConfigOptions) > 0 {
-				replayMeta.ConfigOptions = derived.ConfigOptions
+				replayState.ConfigOptions = append([]acp.ConfigOption(nil), derived.ConfigOptions...)
 			}
 			if derived.Title != "" {
-				replayMeta.Title = derived.Title
+				replayState.Title = derived.Title
 			}
 			if derived.UpdatedAt != "" {
-				replayMeta.UpdatedAt = derived.UpdatedAt
+				replayState.UpdatedAt = derived.UpdatedAt
 			}
 			replayMu.Unlock()
 		}
@@ -419,15 +481,28 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		if loadErr == nil {
 			replayMu.Lock()
 			replayUpdates := replay
-			meta := replayMeta
+			meta := cloneSessionAgentState(replayState)
 			replayMu.Unlock()
+			if meta == nil {
+				meta = &SessionAgentState{}
+			}
 			if len(meta.ConfigOptions) == 0 && len(loadResult.ConfigOptions) > 0 {
-				meta.ConfigOptions = loadResult.ConfigOptions
+				meta.ConfigOptions = append([]acp.ConfigOption(nil), loadResult.ConfigOptions...)
 			}
 
 			s.mu.Lock()
-			s.initMeta = newInitMeta
-			s.sessionMeta = meta
+			state := s.agentStateLocked(agentName)
+			state.ACPSessionID = savedSID
+			state.ConfigOptions = append([]acp.ConfigOption(nil), meta.ConfigOptions...)
+			state.Commands = append([]acp.AvailableCommand(nil), meta.Commands...)
+			state.Title = meta.Title
+			state.UpdatedAt = meta.UpdatedAt
+			state.ProtocolVersion = initResult.ProtocolVersion.String()
+			state.AgentCapabilities = initResult.AgentCapabilities
+			state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
+			state.AuthMethods = append([]acp.AuthMethod(nil), initResult.AuthMethods...)
+			s.activeAgent = agentName
+			s.acpSessionID = savedSID
 			s.ready = true
 			s.initializing = false
 			s.mu.Unlock()
@@ -449,11 +524,18 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 
 	s.mu.Lock()
-	s.initMeta = newInitMeta
+	state := s.agentStateLocked(agentName)
+	state.ACPSessionID = newResult.SessionID
+	state.ConfigOptions = append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
+	state.Commands = nil
+	state.Title = ""
+	state.UpdatedAt = ""
+	state.ProtocolVersion = initResult.ProtocolVersion.String()
+	state.AgentCapabilities = initResult.AgentCapabilities
+	state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
+	state.AuthMethods = append([]acp.AuthMethod(nil), initResult.AuthMethods...)
+	s.activeAgent = agentName
 	s.acpSessionID = newResult.SessionID
-	s.sessionMeta = clientSessionMeta{
-		ConfigOptions: newResult.ConfigOptions,
-	}
 	s.ready = true
 	s.initializing = false
 	s.mu.Unlock()
@@ -490,16 +572,18 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 		} else {
 			s.reply("Session ready.")
 		}
-		s.syncAndPersistProjectState()
+		s.persistSessionBestEffort()
 	}
 	return nil
 }
 
 // sessionConfigSnapshot returns the current mode/model values.
 func (s *Session) sessionConfigSnapshot() acp.SessionConfigSnapshot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return acp.SessionConfigSnapshotFromOptions(s.sessionMeta.ConfigOptions)
+	state, _ := s.currentAgentStateSnapshot()
+	if state == nil {
+		return acp.SessionConfigSnapshot{}
+	}
+	return acp.SessionConfigSnapshotFromOptions(state.ConfigOptions)
 }
 
 // promptStream sends a prompt and returns a channel of streaming updates.
@@ -640,22 +724,21 @@ func isCopilotReasoningEffortError(err error) bool {
 // forces a fresh session/new instead of reusing potentially incompatible config.
 func (s *Session) invalidateSessionForRetry() {
 	s.mu.Lock()
-	agentName := ""
-	if s.instance != nil {
-		agentName = s.instance.Name()
-	}
+	agentName := s.currentAgentNameLocked()
 	s.acpSessionID = ""
 	s.ready = false
 	s.lastReply = ""
-	s.sessionMeta = clientSessionMeta{}
-	if agentName != "" && s.state != nil && s.state.Agents != nil {
-		if st := s.state.Agents[agentName]; st != nil {
-			st.LastSessionID = ""
-			st.Session = nil
+	if agentName != "" {
+		if st := s.agentStateLocked(agentName); st != nil {
+			st.ACPSessionID = ""
+			st.ConfigOptions = nil
+			st.Commands = nil
+			st.Title = ""
+			st.UpdatedAt = ""
 		}
 	}
 	s.mu.Unlock()
-	s.syncAndPersistProjectState()
+	s.persistSessionBestEffort()
 }
 
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
@@ -691,154 +774,72 @@ func (s *Session) cancelPrompt() error {
 	return s.instance.SessionCancel(sessID)
 }
 
-// syncRuntimeToProjectState snapshots current runtime metadata into ProjectState.
-func (s *Session) syncRuntimeToProjectState() bool {
-	s.mu.Lock()
-	if s.instance == nil {
-		s.mu.Unlock()
-		return false
-	}
-	agentName := s.instance.Name()
-	sessionID := s.acpSessionID
-	initMeta := s.initMeta
-	sessMeta := s.sessionMeta
-	s.mu.Unlock()
-
-	if agentName == "" {
-		return false
-	}
-
+func (s *Session) toRecord() (*SessionRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.state == nil {
-		return false
-	}
-	if s.state.Agents == nil {
-		s.state.Agents = map[string]*AgentState{}
-	}
-	as := s.state.Agents[agentName]
-	if as == nil {
-		as = &AgentState{}
-		s.state.Agents[agentName] = as
-	}
-
-	changed := false
-
-	if sessionID != "" && as.LastSessionID != sessionID {
-		as.LastSessionID = sessionID
-		changed = true
-	}
-
-	if initMeta.ProtocolVersion != "" {
-		as.ProtocolVersion = initMeta.ProtocolVersion
-		as.AgentCapabilities = initMeta.AgentCapabilities
-		as.AgentInfo = initMeta.AgentInfo
-		as.AuthMethods = initMeta.AuthMethods
-		if s.state.Connection == nil {
-			s.state.Connection = &ConnectionConfig{}
+	if name := s.currentAgentNameLocked(); name != "" {
+		if state := s.agentStateLocked(name); state != nil {
+			state.ACPSessionID = s.acpSessionID
 		}
-		s.state.Connection.ProtocolVersion = initMeta.ClientProtocolVersion
-		s.state.Connection.ClientCapabilities = initMeta.ClientCapabilities
-		s.state.Connection.ClientInfo = initMeta.ClientInfo
-		changed = true
 	}
 
-	hasSessionData := len(sessMeta.AvailableCommands) > 0 || len(sessMeta.ConfigOptions) > 0 ||
-		sessMeta.Title != "" || sessMeta.UpdatedAt != ""
-	if hasSessionData {
-		if as.Session == nil {
-			as.Session = &SessionState{}
-		}
-		as.Session.ConfigOptions = append([]acp.ConfigOption(nil), sessMeta.ConfigOptions...)
-		as.Session.AvailableCommands = append([]acp.AvailableCommand(nil), sessMeta.AvailableCommands...)
-		if sessMeta.Title != "" {
-			as.Session.Title = sessMeta.Title
-		}
-		if sessMeta.UpdatedAt != "" {
-			as.Session.UpdatedAt = sessMeta.UpdatedAt
-		}
-		changed = true
+	agentsJSON, err := json.Marshal(s.agents)
+	if err != nil {
+		return nil, fmt.Errorf("marshal agents: %w", err)
 	}
 
-	return changed
-}
-
-// resetSessionFields resets session-level fields. Callers MUST hold s.mu.
-func (s *Session) resetSessionFields(sid string, configOpts []acp.ConfigOption) {
-	s.acpSessionID = sid
-	s.ready = true
-	s.lastReply = ""
-	s.prompt.activeTCs = make(map[string]struct{})
-	s.sessionMeta = clientSessionMeta{ConfigOptions: configOpts}
-}
-
-func (s *Session) persistProjectState(st *ProjectState) {
-	if st == nil || s.persistence == nil {
-		return
-	}
-	_ = s.persistence.SaveProjectState(st)
-}
-
-// syncAndPersistProjectState syncs runtime state into ProjectState and persists when changed.
-func (s *Session) syncAndPersistProjectState() {
-	if !s.syncRuntimeToProjectState() {
-		return
-	}
-	s.mu.Lock()
-	st := s.state
-	s.mu.Unlock()
-	if st != nil {
-		s.persistProjectState(st)
-	}
-}
-
-// cloneSessionAgentState deep-copies SessionAgentState and its slice fields.
-func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
-	if src == nil {
-		return nil
-	}
-	cp := *src
-	cp.ConfigOptions = append([]acp.ConfigOption(nil), src.ConfigOptions...)
-	cp.Commands = append([]acp.AvailableCommand(nil), src.Commands...)
-	return &cp
-}
-
-// Snapshot captures the full state of this Session into a SessionSnapshot.
-func (s *Session) Snapshot(projectName string) *SessionSnapshot {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	agentName := ""
-	if s.instance != nil {
-		agentName = s.instance.Name()
-	}
-
-	// Deep copy agents map.
-	agents := make(map[string]*SessionAgentState, len(s.agents))
-	for k, v := range s.agents {
-		agents[k] = cloneSessionAgentState(v)
-	}
-
-	return &SessionSnapshot{
+	return &SessionRecord{
 		ID:           s.ID,
-		ProjectName:  projectName,
+		ProjectName:  s.projectName,
 		Status:       s.Status,
-		ActiveAgent:  agentName,
 		LastReply:    s.lastReply,
 		ACPSessionID: s.acpSessionID,
+		AgentsJSON:   string(agentsJSON),
 		CreatedAt:    s.createdAt,
 		LastActiveAt: s.lastActiveAt,
-		Agents:       agents,
-		SessionMeta:  cloneClientSessionMeta(s.sessionMeta),
-		InitMeta:     s.initMeta,
+	}, nil
+}
+
+func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
+	s := newSession(rec.ID, cwd)
+	s.Status = rec.Status
+	s.lastReply = rec.LastReply
+	s.acpSessionID = rec.ACPSessionID
+	s.createdAt = rec.CreatedAt
+	s.lastActiveAt = rec.LastActiveAt
+	if strings.TrimSpace(rec.AgentsJSON) != "" {
+		if err := json.Unmarshal([]byte(rec.AgentsJSON), &s.agents); err != nil {
+			return nil, fmt.Errorf("unmarshal agents_json: %w", err)
+		}
+	}
+	if s.agents == nil {
+		s.agents = map[string]*SessionAgentState{}
+	}
+	s.activeAgent = inferActiveAgent(rec.ACPSessionID, s.agents)
+	return s, nil
+}
+
+func (s *Session) persistSession(ctx context.Context) error {
+	if s.store == nil {
+		return nil
+	}
+	rec, err := s.toRecord()
+	if err != nil {
+		return err
+	}
+	return s.store.SaveSession(ctx, rec)
+}
+
+func (s *Session) persistSessionBestEffort() {
+	if err := s.persistSession(context.Background()); err != nil {
+		logger.Warn("client: persist session %s: %v", s.ID, err)
 	}
 }
 
 // Suspend cancels any in-progress prompt, closes the agent, and marks
-// this session as suspended. If a SessionStore is provided, the session
-// state is persisted.
-func (s *Session) Suspend(ctx context.Context, projectName string) error {
+// this session as suspended.
+func (s *Session) Suspend(ctx context.Context) error {
 	_ = s.cancelPrompt()
 
 	s.mu.Lock()
@@ -853,33 +854,7 @@ func (s *Session) Suspend(ctx context.Context, projectName string) error {
 	if inst != nil {
 		_ = inst.Close()
 	}
-
-	if s.persistence != nil && s.persistence.SessionStoreEnabled() {
-		snap := s.Snapshot(projectName)
-		return s.persistence.SaveSession(ctx, snap)
-	}
-	return nil
-}
-
-// RestoreFromSnapshot re-hydrates a Session from a persisted snapshot.
-// The agent connection is NOT restored — it will be lazily initialized
-// on the next prompt via ensureInstance().
-func RestoreFromSnapshot(snap *SessionSnapshot, cwd string) *Session {
-	s := newSession(snap.ID, cwd)
-	s.Status = SessionActive
-	s.lastReply = snap.LastReply
-	s.acpSessionID = snap.ACPSessionID
-	s.createdAt = snap.CreatedAt
-	s.lastActiveAt = time.Now()
-	s.sessionMeta = cloneClientSessionMeta(snap.SessionMeta)
-	s.initMeta = snap.InitMeta
-
-	if snap.Agents != nil {
-		for k, v := range snap.Agents {
-			s.agents[k] = cloneSessionAgentState(v)
-		}
-	}
-	return s
+	return s.persistSession(ctx)
 }
 
 // SessionUpdate receives session/update notifications from the agent.
@@ -901,21 +876,30 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 
 	derived := acp.ParseSessionUpdateParams(params)
 
+	changed := false
 	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
 		s.mu.Lock()
+		state := s.agentStateLocked(s.currentAgentNameLocked())
+		if state == nil {
+			state = s.agentStateLocked(s.activeAgent)
+		}
+		if state != nil {
+			state.ACPSessionID = s.acpSessionID
+		}
 		if len(derived.AvailableCommands) > 0 {
-			s.sessionMeta.AvailableCommands = append([]acp.AvailableCommand(nil), derived.AvailableCommands...)
+			state.Commands = append([]acp.AvailableCommand(nil), derived.AvailableCommands...)
 		}
 		if len(derived.ConfigOptions) > 0 {
-			s.sessionMeta.ConfigOptions = append([]acp.ConfigOption(nil), derived.ConfigOptions...)
+			state.ConfigOptions = append([]acp.ConfigOption(nil), derived.ConfigOptions...)
 		}
 		if derived.Title != "" {
-			s.sessionMeta.Title = derived.Title
+			state.Title = derived.Title
 		}
 		if derived.UpdatedAt != "" {
-			s.sessionMeta.UpdatedAt = derived.UpdatedAt
+			state.UpdatedAt = derived.UpdatedAt
 		}
 		s.mu.Unlock()
+		changed = true
 	}
 
 	if derived.TrackAddToolCall != "" || derived.TrackDoneToolCall != "" {
@@ -927,6 +911,9 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 			delete(s.prompt.activeTCs, derived.TrackDoneToolCall)
 		}
 		s.mu.Unlock()
+	}
+	if changed {
+		s.persistSessionBestEffort()
 	}
 
 	if ch == nil {
@@ -949,10 +936,15 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	s.mu.Lock()
 	pCtx := s.prompt.ctx
-	snap := acp.SessionConfigSnapshotFromOptions(s.sessionMeta.ConfigOptions)
+	name := s.currentAgentNameLocked()
+	options := []acp.ConfigOption(nil)
+	if state := s.agents[name]; state != nil {
+		options = append(options, state.ConfigOptions...)
+	}
 	s.mu.Unlock()
 	if pCtx != nil {
 		ctx = pCtx
 	}
+	snap := acp.SessionConfigSnapshotFromOptions(options)
 	return s.permRouter.decide(ctx, requestID, params, snap.Mode)
 }

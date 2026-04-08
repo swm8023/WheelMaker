@@ -173,7 +173,10 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		return c.sendIMDirect(ctx, source, body)
 	}
 	if cmd == "/new" {
-		sess := c.ClientNewSession(routeKey)
+		sess, err := c.ClientNewSession(routeKey)
+		if err != nil {
+			return c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
+		}
 		if err := c.bindIM(ctx, source, sess.ID); err != nil {
 			return err
 		}
@@ -218,9 +221,18 @@ func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef
 	sessID := c.routeMap[routeKey]
 	c.mu.Unlock()
 	if sessID != "" {
-		return c.resolveSession(routeKey)
+		sess, err := c.resolveSession(routeKey)
+		if err != nil {
+			_ = c.sendIMDirect(ctx, source, fmt.Sprintf("Route error: %v", err))
+			return nil
+		}
+		return sess
 	}
-	sess := c.ClientNewSession(routeKey)
+	sess, err := c.ClientNewSession(routeKey)
+	if err != nil {
+		_ = c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
+		return nil
+	}
 	if err := c.bindIM(ctx, source, sess.ID); err != nil {
 		return nil
 	}
