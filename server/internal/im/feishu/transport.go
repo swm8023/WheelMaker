@@ -697,24 +697,30 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 			if content == "" {
 				continue
 			}
-			// Last thought segment and still streaming → expanded
 			isLastSeg := (i == len(segments)-1)
-			collapsed := done || !isLastSeg
-			elements = append(elements, buildInlineThoughtElement(content, collapsed))
+			if md := buildThoughtMarkdown(content, done, isLastSeg); md != "" {
+				elements = append(elements, map[string]any{
+					"tag":     "markdown",
+					"content": md,
+				})
+			}
 		case segDivider:
-			elements = append(elements, map[string]any{"tag": "hr"})
+			elements = append(elements, map[string]any{
+				"tag":     "markdown",
+				"content": "---",
+			})
 		}
 	}
 	// Strip leading/trailing dividers
 	for len(elements) > 0 {
-		if tag, _ := elements[0]["tag"].(string); tag == "hr" {
+		if isMarkdownDividerElement(elements[0]) {
 			elements = elements[1:]
 		} else {
 			break
 		}
 	}
 	for len(elements) > 0 {
-		if tag, _ := elements[len(elements)-1]["tag"].(string); tag == "hr" {
+		if isMarkdownDividerElement(elements[len(elements)-1]) {
 			elements = elements[:len(elements)-1]
 		} else {
 			break
@@ -732,46 +738,28 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 	}
 }
 
-func buildInlineThoughtElement(content string, collapsed bool) map[string]any {
-	md := normalizeStreamMarkdown(content)
-	panelTitle := "Thinking"
-	if collapsed {
-		for _, line := range strings.Split(content, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed != "" {
-				r := []rune(trimmed)
-				if len(r) > 80 {
-					panelTitle = string(r[:80]) + "…"
-				} else {
-					panelTitle = trimmed
-				}
-				break
-			}
-		}
+func buildThoughtMarkdown(content string, done bool, isLastSeg bool) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
 	}
-	return map[string]any{
-		"tag":      "collapsible_panel",
-		"expanded": !collapsed,
-		"header": map[string]any{
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": "🧠 " + panelTitle,
-			},
-			"vertical_align": "center",
-			"icon": map[string]any{
-				"tag":   "standard_icon",
-				"token": "down-small-ccm_outlined",
-			},
-			"padding": "4px 0px 4px 0px",
-		},
-		"border": map[string]any{
-			"color":         "grey",
-			"corner_radius": "5px",
-		},
-		"elements": []map[string]any{
-			{"tag": "markdown", "content": md},
-		},
+	heading := "**🧠 Thinking**"
+	if done || !isLastSeg {
+		heading = "**🧠 Thought**"
 	}
+	return heading + "\n\n" + normalizeStreamMarkdown(content)
+}
+
+func isMarkdownDividerElement(element map[string]any) bool {
+	if element == nil {
+		return false
+	}
+	tag, _ := element["tag"].(string)
+	if tag != "markdown" {
+		return false
+	}
+	content, _ := element["content"].(string)
+	return strings.TrimSpace(content) == "---"
 }
 
 func buildSystemStreamCard(content string) RawCard {
