@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -13,6 +15,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
+	shared "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const testRouteKey = "test:local"
@@ -401,7 +404,7 @@ func (s *noopStore) LoadRouteBindings(context.Context, string) (map[string]strin
 	return map[string]string{}, nil
 }
 func (s *noopStore) SaveRouteBinding(context.Context, string, string, string) error { return nil }
-func (s *noopStore) DeleteRouteBinding(context.Context, string, string) error { return nil }
+func (s *noopStore) DeleteRouteBinding(context.Context, string, string) error       { return nil }
 func (s *noopStore) LoadSession(context.Context, string, string) (*SessionRecord, error) {
 	return nil, nil
 }
@@ -508,6 +511,44 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	}
 	if !foundACP {
 		t.Fatalf("updates=%+v, want ACP session/update emission", fake.updates)
+	}
+}
+
+type failingPermissionIMRouter struct{}
+
+func (f *failingPermissionIMRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
+	return nil
+}
+func (f *failingPermissionIMRouter) PublishSessionUpdate(context.Context, im.SendTarget, acp.SessionUpdateParams) error {
+	return nil
+}
+func (f *failingPermissionIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.SessionPromptResult) error {
+	return nil
+}
+func (f *failingPermissionIMRouter) PublishPermissionRequest(context.Context, im.SendTarget, int64, acp.PermissionRequestParams) error {
+	return errors.New("publish fail")
+}
+func (f *failingPermissionIMRouter) SystemNotify(context.Context, im.SendTarget, im.SystemPayload) error {
+	return nil
+}
+func (f *failingPermissionIMRouter) Run(context.Context) error { return nil }
+
+func TestPermissionRouter_PublishFailureLogged(t *testing.T) {
+	var buf bytes.Buffer
+	if err := shared.Setup(shared.LoggerConfig{Level: shared.LevelWarn}); err != nil {
+		t.Fatalf("setup logger: %v", err)
+	}
+	defer shared.Close()
+	shared.SetOutput(&buf)
+	defer shared.SetOutput(os.Stderr)
+
+	s := newSession("sess-1", "/tmp")
+	s.imRouter = &failingPermissionIMRouter{}
+	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
+	r := newPermissionRouter(s)
+	_, _ = r.decide(context.Background(), 1, acp.PermissionRequestParams{}, "")
+	if got := buf.String(); got == "" || !strings.Contains(got, "permission publish failed") {
+		t.Fatalf("expected permission publish failure log, got: %q", got)
 	}
 }
 

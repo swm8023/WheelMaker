@@ -110,17 +110,25 @@ func runHubWorker() error {
 		return fmt.Errorf("logger setup: %w", err)
 	}
 	defer shared.Close()
+	shared.Info("wheelmaker: hub worker start cfg=%s db=%s", cfgPath, dbPath)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	h := hub.New(cfg, dbPath)
 	if err := h.Start(ctx); err != nil {
+		shared.Error("wheelmaker: hub start failed err=%v", err)
 		return err
 	}
+	shared.Info("wheelmaker: hub started")
 	defer h.Close()
 
-	return h.Run(ctx)
+	if err := h.Run(ctx); err != nil {
+		shared.Error("wheelmaker: hub run failed err=%v", err)
+		return err
+	}
+	shared.Info("wheelmaker: hub run exited")
+	return nil
 }
 
 func runRegistryWorker() error {
@@ -159,11 +167,17 @@ func runRegistryWorker() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	shared.Info("wheelmaker: registry worker start addr=%s", addr)
 	s := registry.New(registry.Config{
 		Addr:  addr,
 		Token: cfg.Registry.Token,
 	})
-	return s.Run(ctx)
+	if err := s.Run(ctx); err != nil {
+		shared.Error("wheelmaker: registry worker run failed err=%v", err)
+		return err
+	}
+	shared.Info("wheelmaker: registry worker exited")
+	return nil
 }
 
 func wheelmakerLogDir(home string) string {

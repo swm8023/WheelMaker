@@ -28,35 +28,40 @@ const (
 // Hub orchestrates one or more WheelMaker project clients.
 // Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
-	cfg       *shared.AppConfig
-	dbPath    string
-	clients   []*client.Client
-	regSync   *Reporter
-	regMu     sync.Mutex
-	lastProj  map[string]ProjectInfo
+	cfg      *shared.AppConfig
+	dbPath   string
+	clients  []*client.Client
+	regSync  *Reporter
+	regMu    sync.Mutex
+	lastProj map[string]ProjectInfo
 }
 
 // New creates a Hub from the given config and client DB path.
 // hub.Start() must be called before hub.Run().
 func New(cfg *shared.AppConfig, dbPath string) *Hub {
 	return &Hub{
-		cfg:       cfg,
-		dbPath:    dbPath,
-		lastProj:  map[string]ProjectInfo{},
+		cfg:      cfg,
+		dbPath:   dbPath,
+		lastProj: map[string]ProjectInfo{},
 	}
 }
 
 // Start validates config, creates one client.Client per project, and starts each client.
 // Returns an error if any project has an unsupported IM type.
 func (h *Hub) Start(ctx context.Context) error {
+	shared.Info("hub: start projects=%d", len(h.cfg.Projects))
 	for _, pc := range h.cfg.Projects {
+		shared.Info("hub: build client project=%s im=%s", pc.Name, pc.IM.Type)
 		c, err := h.buildClient(ctx, pc)
 		if err != nil {
+			shared.Error("hub: build client failed project=%s err=%v", pc.Name, err)
 			return fmt.Errorf("hub: project %q: %w", pc.Name, err)
 		}
 		h.clients = append(h.clients, c)
+		shared.Info("hub: client ready project=%s", pc.Name)
 	}
 	h.setupRegistrySync()
+	shared.Info("hub: start completed projects=%d", len(h.clients))
 	return nil
 }
 
@@ -75,8 +80,10 @@ func (h *Hub) buildClient(ctx context.Context, pc shared.ProjectConfig) (*client
 }
 
 func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd string) (*client.Client, error) {
+	shared.Info("hub: opening store project=%s db=%s", pc.Name, h.dbPath)
 	store, err := client.NewStore(h.dbPath)
 	if err != nil {
+		shared.Error("hub: open store failed project=%s err=%v", pc.Name, err)
 		return nil, fmt.Errorf("new store: %w", err)
 	}
 	c := client.New(store, pc.Client.Agent, pc.Name, cwd)
@@ -85,6 +92,7 @@ func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd st
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())
 	switch pc.IM.Type {
 	case "feishu":
+		shared.Info("hub: register channel project=%s type=feishu", pc.Name)
 		if err := router.RegisterChannel(imfeishu.New(imfeishu.Config{
 			AppID:             pc.IM.AppID,
 			AppSecret:         pc.IM.AppSecret,
@@ -93,23 +101,30 @@ func (h *Hub) buildIMClient(ctx context.Context, pc shared.ProjectConfig, cwd st
 			YOLO:              pc.YOLO,
 			BlockedUpdates:    pc.Client.IMFilter.Block,
 		})); err != nil {
+			shared.Error("hub: register channel failed project=%s type=feishu err=%v", pc.Name, err)
 			_ = c.Close()
 			return nil, err
 		}
 	case "app":
+		shared.Info("hub: register channel project=%s type=app", pc.Name)
 		if err := router.RegisterChannel(imapp.New()); err != nil {
+			shared.Error("hub: register channel failed project=%s type=app err=%v", pc.Name, err)
 			_ = c.Close()
 			return nil, err
 		}
 	default:
+		shared.Error("hub: build client failed project=%s err=unsupported im.type %q", pc.Name, pc.IM.Type)
 		_ = c.Close()
 		return nil, fmt.Errorf("unsupported im.type %q (supported: feishu, app)", pc.IM.Type)
 	}
 	c.SetIMRouter(router)
+	shared.Info("hub: starting client project=%s", pc.Name)
 	if err := c.Start(ctx); err != nil {
+		shared.Error("hub: start client failed project=%s err=%v", pc.Name, err)
 		_ = c.Close()
 		return nil, fmt.Errorf("start: %w", err)
 	}
+	shared.Info("hub: client started project=%s", pc.Name)
 	return c, nil
 }
 

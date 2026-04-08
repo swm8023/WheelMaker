@@ -7,6 +7,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 type permissionRouter struct {
@@ -55,11 +56,13 @@ func (r *permissionRouter) decide(ctx context.Context, requestID int64, params a
 	defer r.clearPending(requestID, waitCh)
 
 	if err := router.PublishPermissionRequest(ctx, im.SendTarget{SessionID: r.session.ID, Source: &source}, requestID, params); err != nil {
+		logger.Error("client: permission publish failed session=%s request=%d err=%v", r.session.ID, requestID, err)
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
 	select {
 	case <-ctx.Done():
+		logger.Warn("client: permission request timeout/cancelled session=%s request=%d", r.session.ID, requestID)
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	case result := <-waitCh:
 		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
