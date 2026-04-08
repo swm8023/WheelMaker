@@ -72,6 +72,65 @@ type SetiResolvedIcon = {
 
 const WORKING_TREE_COMMIT_ID = '__WORKING_TREE__';
 
+type ThinkingBlockProps = {
+  content: string;
+  isStreaming: boolean;
+};
+
+function ThinkingBlock({content, isStreaming}: ThinkingBlockProps) {
+  const [expanded, setExpanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [contentHeight, setContentHeight] = useState(0);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      setContentHeight(contentRef.current.scrollHeight);
+    }
+  }, [content, expanded]);
+
+  // Auto-collapse when streaming finishes
+  const wasStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      setExpanded(false);
+    }
+    wasStreamingRef.current = isStreaming;
+  }, [isStreaming]);
+
+  const summaryText = useMemo(() => {
+    if (isStreaming) return '';
+    const firstLine = content.split('\n').find(l => l.trim().length > 0) || '';
+    return firstLine.length > 120 ? firstLine.slice(0, 120) + '…' : firstLine;
+  }, [content, isStreaming]);
+
+  return (
+    <div className={`thinking-block ${isStreaming ? 'streaming' : 'done'} ${expanded ? 'expanded' : ''}`}>
+      <button
+        className="thinking-header"
+        onClick={() => !isStreaming && setExpanded(v => !v)}
+        disabled={isStreaming}
+        aria-expanded={expanded}
+      >
+        <span className="thinking-icon codicon codicon-sparkle" />
+        {isStreaming ? (
+          <span className="thinking-title streaming-text">Thinking<span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span></span>
+        ) : (
+          <span className="thinking-title summary-text">{summaryText}</span>
+        )}
+        {!isStreaming && (
+          <span className={`thinking-chevron codicon ${expanded ? 'codicon-chevron-up' : 'codicon-chevron-down'}`} />
+        )}
+      </button>
+      <div
+        className="thinking-body"
+        style={{maxHeight: expanded ? contentHeight + 16 : 0}}
+      >
+        <div className="thinking-content" ref={contentRef}>{content}</div>
+      </div>
+    </div>
+  );
+}
+
 const service = new RegistryWorkspaceService();
 const workspaceStore = new WorkspaceStore();
 const workspaceController = new WorkspaceController(service, workspaceStore);
@@ -1450,10 +1509,18 @@ function App() {
         <div className="content">
           <div className="block-title">CHAT - {chatSessions[chatSessionIndex]}</div>
           <div className="scroll-panel chat-block">
-            <div className="empty-card">
-              <div className="empty-title">Chat Panel</div>
-              <div className="empty-desc">Unified split layout is ready. Chat content will render here.</div>
-            </div>
+            <ThinkingBlock
+              content={"Now I have a good understanding of the codebase structure. The server uses a Go daemon with ACP bridge and IM adapters, the app is built with React/React Native for cross-platform support.\n\nThe key files are:\n- server/internal/protocol/update.go — streaming update types\n- app/web/src/main.tsx — main web entry point\n- app/web/src/styles.css — all styles\n\nI'll proceed to implement the thinking block component with the collapsible UI pattern the user requested."}
+              isStreaming={false}
+            />
+            <ThinkingBlock
+              content={"Let me analyze the protocol definitions to understand how thought chunks are structured and streamed from the agent..."}
+              isStreaming={true}
+            />
+            <ThinkingBlock
+              content={"The user wants better information density for thinking blocks. Currently the thinking block takes too much space when collapsed. I should redesign it so the title bar shows a summary of the thinking content after streaming completes, and clicking expands to show full content.\n\nKey design decisions:\n1. Use the first meaningful line as summary text\n2. Chevron icon to indicate expandability\n3. Smooth height animation for expand/collapse\n4. Distinct visual treatment for streaming vs completed states"}
+              isStreaming={false}
+            />
           </div>
         </div>
       );

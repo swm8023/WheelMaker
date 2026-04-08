@@ -896,6 +896,131 @@ body,
 
 .chat-block {
   padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Thinking Block ── */
+.thinking-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+  transition: border-color 200ms ease;
+}
+
+.thinking-block.streaming {
+  border-color: rgba(0, 122, 204, 0.4);
+}
+
+.thinking-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 100ms ease;
+}
+
+.thinking-block.streaming .thinking-header {
+  cursor: default;
+}
+
+.thinking-block.done .thinking-header:hover {
+  background: var(--hover);
+}
+
+.thinking-icon {
+  flex: 0 0 auto;
+  font-size: 13px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.thinking-block.streaming .thinking-icon {
+  color: var(--accent);
+  opacity: 1;
+  animation: thinkPulse 1.6s ease-in-out infinite;
+}
+
+.thinking-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinking-title.streaming-text {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.thinking-title.summary-text {
+  color: var(--text);
+  opacity: 0.85;
+}
+
+.thinking-dots {
+  display: inline;
+}
+
+.thinking-dots span {
+  animation: dotBlink 1.4s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+.thinking-chevron {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  transition: transform 180ms ease, color 100ms ease;
+}
+
+.thinking-block.done .thinking-header:hover .thinking-chevron {
+  color: var(--text);
+}
+
+.thinking-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.thinking-content {
+  padding: 0 10px 10px 30px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@keyframes thinkPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes dotBlink {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }
 
 .empty-card {
