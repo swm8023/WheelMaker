@@ -51,6 +51,7 @@ type ToolCallContent struct {
 	Content    json.RawMessage `json:"content,omitempty"`
 	TerminalID string          `json:"terminalId,omitempty"`
 	Path       string          `json:"path,omitempty"`
+	OldText    *string         `json:"oldText,omitempty"`
 	NewText    string          `json:"newText,omitempty"`
 }
 

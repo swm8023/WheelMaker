@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,7 +47,7 @@ type transportChannel struct {
 	bot     *lark.Bot
 
 	textMu         sync.Mutex
-	unifiedStreams  map[string]*unifiedStream
+	unifiedStreams map[string]*unifiedStream
 	toolMu         sync.Mutex
 	toolRenderMu   sync.Mutex
 	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -81,8 +82,8 @@ type streamSegment struct {
 type unifiedStream struct {
 	messageID   string
 	segments    []streamSegment
-	totalRunes  int         // running rune count across all segments
-	pushedRunes int         // totalRunes at last push (dirty check)
+	totalRunes  int // running rune count across all segments
+	pushedRunes int // totalRunes at last push (dirty check)
 	lastPush    time.Time
 	timer       *time.Timer
 }
@@ -124,7 +125,7 @@ type pendingAckReaction struct {
 func newTransport(cfg Config) *transportChannel {
 	return &transportChannel{
 		cfg:            cfg,
-		unifiedStreams:  map[string]*unifiedStream{},
+		unifiedStreams: map[string]*unifiedStream{},
 		seenMessageID:  map[string]time.Time{},
 		toolCards:      map[string]map[string]*toolCardState{},
 		toolCompact:    map[string]*compactToolStream{},
@@ -873,7 +874,7 @@ func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) (string,
 	if chatID == "" || toolCallID == "" {
 		return "", nil
 	}
-	if f.cfg.YOLO {
+	if f.cfg.YOLO && !isEditToolKind(update.Kind) {
 		err := f.sendToolCallCompact(chatID, update)
 		if err == nil {
 			f.clearReceiveAck(chatID)
@@ -1240,8 +1241,15 @@ func buildToolCallCard(chatID string, update ToolCallUpdate, perm *toolPermissio
 	permEmoji := toolPermissionEmoji(perm)
 
 	content := toolCallDetailBlock(update)
+	codeFenceLang := "text"
+	if isEditToolKind(update.Kind) {
+		if diff := toolCallEditDiff(update); diff != "" {
+			content = previewBlock(diff, 3200)
+			codeFenceLang = "diff"
+		}
+	}
 	elements := []map[string]any{
-		{"tag": "markdown", "content": "```text\n" + content + "\n```"},
+		{"tag": "markdown", "content": "```" + codeFenceLang + "\n" + content + "\n```"},
 	}
 	if perm != nil {
 		if perm.active && len(perm.options) > 0 {
@@ -1325,6 +1333,15 @@ func toolPermissionEmoji(perm *toolPermissionState) string {
 	return "\U000026AA"
 }
 
+func isEditToolKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "edit", "edit_file", "replace", "str_replace_editor":
+		return true
+	default:
+		return false
+	}
+}
+
 func toolKindIcon(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "bash", "shell", "terminal", "command":
@@ -1344,6 +1361,222 @@ func toolKindIcon(kind string) string {
 	default:
 		return "🛠️"
 	}
+}
+
+type rawToolChange struct {
+	UnifiedDiff string `json:"unified_diff"`
+}
+
+type rawToolChangePayload struct {
+	UnifiedDiff string                   `json:"unified_diff"`
+	Diff        string                   `json:"diff"`
+	Changes     map[string]rawToolChange `json:"changes"`
+}
+
+type lineDiff struct {
+	kind byte
+	text string
+}
+
+func toolCallEditDiff(update ToolCallUpdate) string {
+	if diff := unifiedDiffFromRawPayload(update.RawOutput); diff != "" {
+		return diff
+	}
+	if diff := unifiedDiffFromRawPayload(update.RawInput); diff != "" {
+		return diff
+	}
+	return unifiedDiffFromToolCallContent(update.ToolCallContent)
+}
+
+func unifiedDiffFromRawPayload(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var payload rawToolChangePayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, 1+len(payload.Changes))
+	if diff := normalizeDiffText(payload.UnifiedDiff); diff != "" {
+		parts = append(parts, diff)
+	}
+	if diff := normalizeDiffText(payload.Diff); diff != "" {
+		parts = append(parts, diff)
+	}
+	if len(payload.Changes) > 0 {
+		keys := make([]string, 0, len(payload.Changes))
+		for path := range payload.Changes {
+			keys = append(keys, path)
+		}
+		sort.Strings(keys)
+		for _, path := range keys {
+			if diff := normalizeDiffText(payload.Changes[path].UnifiedDiff); diff != "" {
+				parts = append(parts, diff)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func unifiedDiffFromToolCallContent(content []ToolCallContent) string {
+	parts := make([]string, 0, len(content))
+	for _, c := range content {
+		if strings.TrimSpace(c.Type) != "" && strings.TrimSpace(c.Type) != "diff" {
+			continue
+		}
+		if strings.TrimSpace(c.NewText) == "" && c.OldText == nil {
+			continue
+		}
+		diff := buildInlineUnifiedDiff(c.Path, c.OldText, c.NewText)
+		if diff != "" {
+			parts = append(parts, diff)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func normalizeDiffText(text string) string {
+	trimmed := strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if trimmed == "" {
+		return ""
+	}
+	// Avoid rendering plain text payload as diff.
+	if !strings.Contains(trimmed, "@@") && !strings.Contains(trimmed, "diff --git ") {
+		return ""
+	}
+	return trimmed
+}
+
+func buildInlineUnifiedDiff(path string, oldText *string, newText string) string {
+	p := strings.TrimSpace(path)
+	if p == "" {
+		p = "unknown"
+	}
+	newLines := splitDiffLines(newText)
+	oldLines := []string{}
+	if oldText != nil {
+		oldLines = splitDiffLines(*oldText)
+	}
+	edits := diffLineSequence(oldLines, newLines)
+	changed := false
+	oldCount := 0
+	newCount := 0
+	for _, e := range edits {
+		switch e.kind {
+		case '-':
+			changed = true
+			oldCount++
+		case '+':
+			changed = true
+			newCount++
+		default:
+			oldCount++
+			newCount++
+		}
+	}
+	if !changed {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("diff --git a/")
+	b.WriteString(p)
+	b.WriteString(" b/")
+	b.WriteString(p)
+	b.WriteString("\n")
+	if oldText == nil {
+		b.WriteString("--- /dev/null\n")
+	} else {
+		b.WriteString("--- a/")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("+++ b/")
+	b.WriteString(p)
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", oldCount, newCount))
+	for _, e := range edits {
+		b.WriteByte(e.kind)
+		b.WriteString(e.text)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func splitDiffLines(text string) []string {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	lines := strings.Split(normalized, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		return lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func diffLineSequence(oldLines, newLines []string) []lineDiff {
+	const maxLCSLines = 800
+	if len(oldLines)+len(newLines) > maxLCSLines {
+		out := make([]lineDiff, 0, len(oldLines)+len(newLines))
+		for _, line := range oldLines {
+			out = append(out, lineDiff{kind: '-', text: line})
+		}
+		for _, line := range newLines {
+			out = append(out, lineDiff{kind: '+', text: line})
+		}
+		return out
+	}
+
+	n := len(oldLines)
+	m := len(newLines)
+	lcs := make([][]int, n+1)
+	for i := range lcs {
+		lcs[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if oldLines[i] == newLines[j] {
+				lcs[i][j] = lcs[i+1][j+1] + 1
+				continue
+			}
+			if lcs[i+1][j] >= lcs[i][j+1] {
+				lcs[i][j] = lcs[i+1][j]
+			} else {
+				lcs[i][j] = lcs[i][j+1]
+			}
+		}
+	}
+
+	out := make([]lineDiff, 0, n+m)
+	i, j := 0, 0
+	for i < n && j < m {
+		if oldLines[i] == newLines[j] {
+			out = append(out, lineDiff{kind: ' ', text: oldLines[i]})
+			i++
+			j++
+			continue
+		}
+		if lcs[i+1][j] >= lcs[i][j+1] {
+			out = append(out, lineDiff{kind: '-', text: oldLines[i]})
+			i++
+		} else {
+			out = append(out, lineDiff{kind: '+', text: newLines[j]})
+			j++
+		}
+	}
+	for i < n {
+		out = append(out, lineDiff{kind: '-', text: oldLines[i]})
+		i++
+	}
+	for j < m {
+		out = append(out, lineDiff{kind: '+', text: newLines[j]})
+		j++
+	}
+	return out
 }
 
 func toolCallDetailBlock(update ToolCallUpdate) string {

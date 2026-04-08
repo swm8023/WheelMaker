@@ -359,6 +359,112 @@ func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
 	}
 }
 
+func TestBuildToolCallCard_EditRendersUnifiedDiffFromRawInput(t *testing.T) {
+	card := buildToolCallCard("chat-1", ToolCallUpdate{
+		ToolCallID: "call-1",
+		Kind:       "edit",
+		Title:      "Edit transport_render_test.go",
+		Status:     "completed",
+		RawInput: []byte(`{
+			"changes": {
+				"D:/Code/WheelMaker/server/internal/im/feishu/transport_render_test.go": {
+					"type": "update",
+					"unified_diff": "@@ -1,1 +1,2 @@\n-old line\n+new line\n+more line\n"
+				}
+			}
+		}`),
+	}, nil, false)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "```diff\n") {
+		t.Fatalf("edit tool card should use diff code block: %q", content)
+	}
+	if !strings.Contains(content, "@@ -1,1 +1,2 @@") || !strings.Contains(content, "+more line") {
+		t.Fatalf("edit diff content mismatch: %q", content)
+	}
+}
+
+func TestBuildToolCallCard_EditBuildsDiffFromToolCallContent(t *testing.T) {
+	oldText := "line1\nline2\nline3\n"
+	card := buildToolCallCard("chat-1", ToolCallUpdate{
+		ToolCallID: "call-1",
+		Kind:       "edit",
+		Title:      "Edit foo.go",
+		Status:     "completed",
+		ToolCallContent: []ToolCallContent{
+			{
+				Type:    "diff",
+				Path:    "foo.go",
+				OldText: &oldText,
+				NewText: "line1\nlineX\nline3\n",
+			},
+		},
+	}, nil, false)
+	elements, ok := card["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("elements missing in card: %+v", card)
+	}
+	content, _ := elements[0]["content"].(string)
+	if !strings.Contains(content, "```diff\n") {
+		t.Fatalf("edit tool card should use diff code block: %q", content)
+	}
+	if !strings.Contains(content, "diff --git a/foo.go b/foo.go") {
+		t.Fatalf("inline diff header missing: %q", content)
+	}
+	if !strings.Contains(content, "-line2") || !strings.Contains(content, "+lineX") {
+		t.Fatalf("inline diff body mismatch: %q", content)
+	}
+}
+
+func TestSendToolCall_YOLOEditBypassesCompact(t *testing.T) {
+	f := newTransport(Config{YOLO: true})
+	_, err := f.sendToolCall("chat-1", ToolCallCard{
+		Update: ToolCallUpdate{
+			ToolCallID: "call-1",
+			Kind:       "edit",
+			Title:      "Edit foo.go",
+			Status:     "completed",
+			RawInput: []byte(`{
+				"changes": {"foo.go": {"type": "update", "unified_diff": "@@ -1,1 +1,1 @@\n-a\n+b\n"}}
+			}`),
+		},
+	})
+	if err == nil {
+		t.Fatal("sendToolCall(edit) should fail without app credentials")
+	}
+	if st := f.toolCompact["chat-1"]; st != nil && len(st.order) > 0 {
+		t.Fatalf("edit should bypass compact stream, got order=%v", st.order)
+	}
+	if cards := f.toolCards["chat-1"]; cards == nil || cards["call-1"] == nil {
+		t.Fatalf("edit should create/update standalone toolCards state")
+	}
+}
+
+func TestSendToolCall_YOLOReadKeepsCompact(t *testing.T) {
+	f := newTransport(Config{YOLO: true})
+	_, err := f.sendToolCall("chat-1", ToolCallCard{
+		Update: ToolCallUpdate{
+			ToolCallID: "call-1",
+			Kind:       "read",
+			Title:      "Read foo.go",
+			Status:     "completed",
+		},
+	})
+	if err == nil {
+		t.Fatal("sendToolCall(read) should fail without app credentials")
+	}
+	st := f.toolCompact["chat-1"]
+	if st == nil || len(st.order) != 1 || st.order[0] != "call-1" {
+		t.Fatalf("read should stay in compact stream, state=%+v", st)
+	}
+	if cards := f.toolCards["chat-1"]; cards != nil && cards["call-1"] != nil {
+		t.Fatalf("read should not create standalone tool card in YOLO compact mode")
+	}
+}
+
 func TestCompactStatusEmoji(t *testing.T) {
 	if got := compactStatusEmoji("completed"); got != "✅" {
 		t.Fatalf("completed emoji=%q", got)
