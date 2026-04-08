@@ -265,9 +265,13 @@ func (c *Client) wireSession(sess *Session) {
 
 func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
 	if err := sess.persistSession(context.Background()); err != nil {
+		logger.Error("client: save session failed project=%s route=%s session=%s err=%v",
+			c.projectName, routeKey, sess.ID, err)
 		return fmt.Errorf("save session: %w", err)
 	}
 	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.ID); err != nil {
+		logger.Error("client: save route binding failed project=%s route=%s session=%s err=%v",
+			c.projectName, routeKey, sess.ID, err)
 		return fmt.Errorf("save route binding: %w", err)
 	}
 	return nil
@@ -580,71 +584,98 @@ func (s *Session) handlePrompt(text string) {
 
 		sawSandboxRefresh := false
 		sawText := false
+		observe := newPromptObserveState(time.Now())
+		observeTicker := time.NewTicker(promptObserveInterval)
 
 		retryStream := false
-		for u := range updates {
-			if u.Err != nil {
-				if attempt == 1 && isCopilotReasoningArgError(u.Err) && s.tryCopilotReasoningFallback(ctx) {
-					s.reply("Copilot model incompatibility detected, switched model and retrying once...")
-					retryStream = true
+		streamDone := false
+		for !streamDone {
+			select {
+			case u, ok := <-updates:
+				if !ok {
+					streamDone = true
 					break
 				}
-				if attempt == 1 && !sawText && (isAgentExitError(u.Err) || isSandboxRefreshErr(u.Err)) {
-					s.reply("Agent disconnected during stream, reconnecting and retrying once...")
-					s.forceReconnect()
-					retryStream = true
-					break
+				observe.MarkActivity(time.Now(), true)
+				if u.Err != nil {
+					if attempt == 1 && isCopilotReasoningArgError(u.Err) && s.tryCopilotReasoningFallback(ctx) {
+						s.reply("Copilot model incompatibility detected, switched model and retrying once...")
+						retryStream = true
+						break
+					}
+					if attempt == 1 && !sawText && (isAgentExitError(u.Err) || isSandboxRefreshErr(u.Err)) {
+						s.reply("Agent disconnected during stream, reconnecting and retrying once...")
+						s.forceReconnect()
+						retryStream = true
+						break
+					}
+					recovered := false
+					if s.resetDeadConnection(u.Err) {
+						if recErr := s.ensureInstance(ctx); recErr == nil {
+							_ = s.ensureReadyAndNotify(ctx)
+							recovered = true
+						}
+					}
+					if recovered {
+						s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
+					} else {
+						s.reply(fmt.Sprintf("Agent error: %v", u.Err))
+					}
+					s.mu.Lock()
+					s.prompt.currentCh = nil
+					s.mu.Unlock()
+					observeTicker.Stop()
+					return
 				}
-				recovered := false
-				if s.resetDeadConnection(u.Err) {
-					if recErr := s.ensureInstance(ctx); recErr == nil {
-						_ = s.ensureReadyAndNotify(ctx)
-						recovered = true
+				if hasIMEmitter {
+					target := im.SendTarget{SessionID: s.ID, Source: &imSource}
+					var emitErr error
+					switch u.Type {
+					case acp.UpdateDone:
+						emitErr = imRouter.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
+					default:
+						params, ok := sessionUpdateParamsFromUpdate(acpSessionID, u)
+						if ok {
+							emitErr = imRouter.PublishSessionUpdate(ctx, target, params)
+						}
+					}
+					if emitErr != nil {
+						s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 					}
 				}
-				if recovered {
-					s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
-				} else {
-					s.reply(fmt.Sprintf("Agent error: %v", u.Err))
+				if hasSandboxRefreshError(u) {
+					sawSandboxRefresh = true
 				}
-				s.mu.Lock()
-				s.prompt.currentCh = nil
-				s.mu.Unlock()
-				return
-			}
-			if hasIMEmitter {
-				target := im.SendTarget{SessionID: s.ID, Source: &imSource}
-				var emitErr error
-				switch u.Type {
-				case acp.UpdateDone:
-					emitErr = imRouter.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
-				default:
-					params, ok := sessionUpdateParamsFromUpdate(acpSessionID, u)
-					if ok {
-						emitErr = imRouter.PublishSessionUpdate(ctx, target, params)
-					}
+				if u.Type == acp.UpdateText && strings.TrimSpace(u.Content) != "" {
+					sawText = true
 				}
-				if emitErr != nil {
-					s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
+				if u.Type == acp.UpdateConfigOption && !hasIMEmitter {
+					s.reply(formatConfigOptionUpdateMessage(u.Raw))
+					s.persistSessionBestEffort()
 				}
-			}
-			if hasSandboxRefreshError(u) {
-				sawSandboxRefresh = true
-			}
-			if u.Type == acp.UpdateText && strings.TrimSpace(u.Content) != "" {
-				sawText = true
-			}
-			if u.Type == acp.UpdateConfigOption && !hasIMEmitter {
-				s.reply(formatConfigOptionUpdateMessage(u.Raw))
-				s.persistSessionBestEffort()
-			}
-			if u.Type == acp.UpdateText && !hasIMEmitter {
-				buf.WriteString(u.Content)
-			}
-			if u.Done {
-				break
+				if u.Type == acp.UpdateText && !hasIMEmitter {
+					buf.WriteString(u.Content)
+				}
+				if u.Done {
+					streamDone = true
+				}
+			case <-observeTicker.C:
+				ev := observe.Eval(time.Now(), observe.Started())
+				if ev.WarnFirstWait {
+					logger.Warn("client: timeout warn category=timeout stage=stream kind=first_wait session=%s", s.ID)
+				}
+				if ev.ErrorFirstWait {
+					s.reportTimeoutError("stream", "first_wait")
+				}
+				if ev.WarnSilence {
+					logger.Warn("client: timeout warn category=timeout stage=stream kind=silence session=%s", s.ID)
+				}
+				if ev.ErrorSilence {
+					s.reportTimeoutError("stream", "silence")
+				}
 			}
 		}
+		observeTicker.Stop()
 		if retryStream {
 			continue
 		}
@@ -681,6 +712,43 @@ func renderUnknown(v string) string {
 		return "unknown"
 	}
 	return v
+}
+
+func (s *Session) reportTimeoutError(stage string, kind string) {
+	now := time.Now()
+	s.mu.Lock()
+	agent := s.currentAgentNameLocked()
+	sid := s.acpSessionID
+	allow := true
+	if s.timeoutLimiter != nil {
+		allow = s.timeoutLimiter.Allow(kind, now)
+	}
+	s.mu.Unlock()
+
+	logger.Error("client: timeout error category=timeout stage=%s kind=%s agent=%s session=%s",
+		stage, kind, renderUnknown(agent), renderUnknown(sid))
+	if !allow {
+		return
+	}
+
+	router, source, ok := s.imContext()
+	if !ok {
+		return
+	}
+	body := fmt.Sprintf(
+		"category=timeout stage=%s agent=%s sessionID=%s action=check /status then retry",
+		stage,
+		renderUnknown(agent),
+		renderUnknown(sid),
+	)
+	if err := router.SystemNotify(
+		context.Background(),
+		im.SendTarget{SessionID: s.ID, Source: &source},
+		im.SystemPayload{Kind: "message", Body: body},
+	); err != nil {
+		logger.Error("client: timeout im notify failed stage=%s kind=%s session=%s err=%v",
+			stage, kind, s.ID, err)
+	}
 }
 
 func (s *Session) connectHint() string {

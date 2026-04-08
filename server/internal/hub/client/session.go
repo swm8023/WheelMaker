@@ -61,7 +61,7 @@ type Session struct {
 	instance agent.Instance
 
 	// Per-agent state indexed by agent name.
-	agents map[string]*SessionAgentState
+	agents      map[string]*SessionAgentState
 	activeAgent string
 
 	// Runtime ACP session state (moved from Client.session / Client.sessionMeta / Client.initMeta).
@@ -74,7 +74,8 @@ type Session struct {
 	prompt   promptState
 	initCond *sync.Cond
 
-	permRouter *permissionRouter
+	permRouter     *permissionRouter
+	timeoutLimiter *timeoutNotifyLimiter
 
 	// Back-references to Client-owned resources needed by Session methods.
 	projectName string
@@ -106,6 +107,7 @@ func newSession(id string, cwd string) *Session {
 		prompt: promptState{
 			activeTCs: make(map[string]struct{}),
 		},
+		timeoutLimiter: newTimeoutNotifyLimiter(timeoutNotifyCooldown),
 	}
 	s.initCond = sync.NewCond(&s.mu)
 	return s
