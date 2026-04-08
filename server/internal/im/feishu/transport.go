@@ -75,7 +75,7 @@ const unifiedStreamMaxRunes = 10000
 
 type streamSegment struct {
 	kind    segmentKind
-	content strings.Builder
+	content string
 }
 
 type unifiedStream struct {
@@ -192,10 +192,9 @@ func (f *transportChannel) sendText(chatID, text string) error {
 	// Append to last text segment, or create new one
 	n := len(us.segments)
 	if n > 0 && us.segments[n-1].kind == segText {
-		us.segments[n-1].content.WriteString(text)
+		us.segments[n-1].content += text
 	} else {
-		seg := streamSegment{kind: segText}
-		seg.content.WriteString(text)
+		seg := streamSegment{kind: segText, content: text}
 		us.segments = append(us.segments, seg)
 	}
 	us.totalRunes += utf8.RuneCountInString(text)
@@ -231,10 +230,9 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 
 	n := len(us.segments)
 	if n > 0 && us.segments[n-1].kind == segThought {
-		us.segments[n-1].content.WriteString(text)
+		us.segments[n-1].content += text
 	} else {
-		seg := streamSegment{kind: segThought}
-		seg.content.WriteString(text)
+		seg := streamSegment{kind: segThought, content: text}
 		us.segments = append(us.segments, seg)
 	}
 	us.totalRunes += utf8.RuneCountInString(text)
@@ -685,7 +683,7 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 	for i, seg := range segments {
 		switch seg.kind {
 		case segText:
-			content := seg.content.String()
+			content := seg.content
 			if content != "" {
 				elements = append(elements, map[string]any{
 					"tag":     "markdown",
@@ -693,7 +691,7 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 				})
 			}
 		case segThought:
-			content := seg.content.String()
+			content := seg.content
 			if content == "" {
 				continue
 			}

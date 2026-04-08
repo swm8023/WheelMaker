@@ -39,8 +39,7 @@ func TestParseMessageText_InvalidJSON(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_TextOnly(t *testing.T) {
-	seg := streamSegment{kind: segText}
-	seg.content.WriteString("hello")
+	seg := streamSegment{kind: segText, content: "hello"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, false)
 	if card == nil {
 		t.Fatal("expected non-nil card")
@@ -79,7 +78,7 @@ func TestSendText_FirstChunkWaitsBeforePosting(t *testing.T) {
 	if len(us.segments) != 1 || us.segments[0].kind != segText {
 		t.Fatalf("expected one text segment, got %d segments", len(us.segments))
 	}
-	if got := us.segments[0].content.String(); got != "hello" {
+	if got := us.segments[0].content; got != "hello" {
 		t.Fatalf("buffered content=%q, want %q", got, "hello")
 	}
 	if us.pushedRunes != 0 {
@@ -91,9 +90,39 @@ func TestSendText_FirstChunkWaitsBeforePosting(t *testing.T) {
 	us.timer.Stop()
 }
 
+func TestSendText_SecondChunkDoesNotPanic(t *testing.T) {
+	f := newTransport(Config{})
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("sendText second chunk panicked: %v", r)
+		}
+	}()
+
+	if err := f.sendText("chat-1", "我"); err != nil {
+		t.Fatalf("sendText() first chunk error: %v", err)
+	}
+	if err := f.sendText("chat-1", "好"); err != nil {
+		t.Fatalf("sendText() second chunk error: %v", err)
+	}
+
+	us := f.unifiedStreams["chat-1"]
+	if us == nil {
+		t.Fatal("unified stream should exist")
+	}
+	if len(us.segments) != 1 {
+		t.Fatalf("expected one merged segment, got %d", len(us.segments))
+	}
+	if got := us.segments[0].content; got != "我好" {
+		t.Fatalf("merged content=%q, want %q", got, "我好")
+	}
+	if us.timer != nil {
+		us.timer.Stop()
+	}
+}
+
 func TestBuildUnifiedStreamCard_ThoughtRenderedAsMarkdown(t *testing.T) {
-	seg := streamSegment{kind: segThought}
-	seg.content.WriteString("thinking")
+	seg := streamSegment{kind: segThought, content: "thinking"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, false)
 	if card == nil {
 		t.Fatal("expected non-nil card")
@@ -123,8 +152,7 @@ func TestBuildUnifiedStreamCard_ThoughtRenderedAsMarkdown(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_ThoughtDoneStillMarkdown(t *testing.T) {
-	seg := streamSegment{kind: segThought}
-	seg.content.WriteString("deep thought")
+	seg := streamSegment{kind: segThought, content: "deep thought"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, true)
 	if card == nil {
 		t.Fatal("expected non-nil card")
@@ -207,8 +235,7 @@ func TestShouldHandleMessage_ExpiresTTL(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_DoneCardHasSingleElement(t *testing.T) {
-	seg := streamSegment{kind: segText}
-	seg.content.WriteString("hello")
+	seg := streamSegment{kind: segText, content: "hello"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, true)
 	body, ok := card["body"].(map[string]any)
 	if !ok {
@@ -532,12 +559,9 @@ func strPtr(value string) *string {
 }
 
 func TestBuildUnifiedStreamCard_MixedSegments(t *testing.T) {
-	seg1 := streamSegment{kind: segText}
-	seg1.content.WriteString("hello world")
-	seg2 := streamSegment{kind: segThought}
-	seg2.content.WriteString("deep reasoning")
-	seg3 := streamSegment{kind: segText}
-	seg3.content.WriteString("conclusion")
+	seg1 := streamSegment{kind: segText, content: "hello world"}
+	seg2 := streamSegment{kind: segThought, content: "deep reasoning"}
+	seg3 := streamSegment{kind: segText, content: "conclusion"}
 
 	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
 	if card == nil {
@@ -563,11 +587,9 @@ func TestBuildUnifiedStreamCard_MixedSegments(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_DividerBetweenText(t *testing.T) {
-	seg1 := streamSegment{kind: segText}
-	seg1.content.WriteString("first part")
+	seg1 := streamSegment{kind: segText, content: "first part"}
 	seg2 := streamSegment{kind: segDivider}
-	seg3 := streamSegment{kind: segText}
-	seg3.content.WriteString("second part")
+	seg3 := streamSegment{kind: segText, content: "second part"}
 
 	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
 	if card == nil {
@@ -589,8 +611,7 @@ func TestBuildUnifiedStreamCard_DividerBetweenText(t *testing.T) {
 
 func TestBuildUnifiedStreamCard_StripEdgeDividers(t *testing.T) {
 	seg1 := streamSegment{kind: segDivider}
-	seg2 := streamSegment{kind: segText}
-	seg2.content.WriteString("content")
+	seg2 := streamSegment{kind: segText, content: "content"}
 	seg3 := streamSegment{kind: segDivider}
 
 	card := buildUnifiedStreamCard([]streamSegment{seg1, seg2, seg3}, true)
@@ -654,7 +675,7 @@ func TestSendText_AutoSplitAt10K(t *testing.T) {
 	if len(usNew.segments) != 1 {
 		t.Fatalf("new stream should have 1 segment, got %d", len(usNew.segments))
 	}
-	if got := usNew.segments[0].content.String(); got != "more" {
+	if got := usNew.segments[0].content; got != "more" {
 		t.Fatalf("new stream content=%q, want %q", got, "more")
 	}
 	usNew.timer.Stop()
