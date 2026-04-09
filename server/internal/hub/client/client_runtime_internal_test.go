@@ -30,6 +30,7 @@ type Message struct {
 type testInjectedInstance struct {
 	name      string
 	sessionID string
+	alive     bool
 	callbacks agent.Callbacks
 	promptFn  func(context.Context, string) (<-chan acp.Update, error)
 	cancelFn  func() error
@@ -82,6 +83,7 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	runtime := &testInjectedInstance{
 		name:      name,
 		sessionID: sessionID,
+		alive:     true,
 		callbacks: sess,
 		promptFn:  promptFn,
 		cancelFn:  cancelFn,
@@ -299,6 +301,9 @@ func mustJSON(v any) []byte {
 }
 
 func (i *testInjectedInstance) Name() string { return i.name }
+func (i *testInjectedInstance) Alive() bool {
+	return i.alive
+}
 func (i *testInjectedInstance) SetCallbacks(callbacks agent.Callbacks) {
 	i.callbacks = callbacks
 }
@@ -445,6 +450,24 @@ func TestIsAgentRecoverableRuntimeErr(t *testing.T) {
 	}
 	if isAgentRecoverableRuntimeErr(errors.New("selected model is at capacity")) {
 		t.Fatal("capacity error should not be treated as recoverable runtime error")
+	}
+}
+
+func TestSessionShouldReconnectOnRecoverableErr_RequiresDeadProcess(t *testing.T) {
+	s := newSession("sess-1", "/tmp")
+
+	s.mu.Lock()
+	s.instance = &testInjectedInstance{name: "codex", alive: true}
+	s.mu.Unlock()
+	if s.shouldReconnectOnRecoverableErr(errors.New("windows sandbox: spawn setup refresh")) {
+		t.Fatal("alive process should not trigger reconnect")
+	}
+
+	s.mu.Lock()
+	s.instance = &testInjectedInstance{name: "codex", alive: false}
+	s.mu.Unlock()
+	if !s.shouldReconnectOnRecoverableErr(errors.New("windows sandbox: spawn setup refresh")) {
+		t.Fatal("dead process should trigger reconnect for recoverable runtime error")
 	}
 }
 

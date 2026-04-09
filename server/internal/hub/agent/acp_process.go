@@ -117,6 +117,19 @@ func (p *ACPProcess) Done() <-chan struct{} {
 	return p.done
 }
 
+// Alive reports whether the subprocess transport is still considered alive.
+func (p *ACPProcess) Alive() bool {
+	if p == nil || p.isClosing() {
+		return false
+	}
+	select {
+	case <-p.done:
+		return false
+	default:
+	}
+	return p.cmd != nil && p.cmd.Process != nil
+}
+
 func (p *ACPProcess) readLoop(r io.Reader) {
 	defer p.markDone()
 

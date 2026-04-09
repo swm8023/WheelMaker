@@ -248,6 +248,23 @@ func (c *sharedConn) Close() error {
 	return c.pool.closeRoute(c.routeKey)
 }
 
+func (c *sharedConn) Alive() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	closed := c.closed
+	raw := c.raw
+	c.mu.RUnlock()
+	if closed || raw == nil {
+		return false
+	}
+	if probe, ok := raw.(interface{ Alive() bool }); ok {
+		return probe.Alive()
+	}
+	return true
+}
+
 func (c *sharedConn) rawConn() (Conn, error) {
 	c.mu.RLock()
 	closed := c.closed

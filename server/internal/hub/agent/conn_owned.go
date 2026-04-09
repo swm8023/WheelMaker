@@ -157,6 +157,33 @@ func (c *ownedConn) Close() error {
 	return nil
 }
 
+func (c *ownedConn) Alive() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.RLock()
+	closed := c.closed
+	transport := c.transport
+	c.mu.RUnlock()
+	if closed || transport == nil {
+		return false
+	}
+	if probe, ok := transport.(interface{ Alive() bool }); ok && !probe.Alive() {
+		return false
+	}
+	select {
+	case <-c.connCtx.Done():
+		return false
+	default:
+	}
+	select {
+	case <-transport.Done():
+		return false
+	default:
+	}
+	return true
+}
+
 func (c *ownedConn) ensureOpen() (ownedTransport, error) {
 	c.mu.RLock()
 	closed := c.closed
@@ -256,7 +283,7 @@ func (c *ownedConn) handleIncomingRequest(jsonrpc string, id int64, method strin
 	if h == nil {
 		resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeMethodNotFound, Message: fmt.Sprintf("method not found: %s", method)}
 	} else {
-			result, err := h(c.connCtx, id, method, params)
+		result, err := h(c.connCtx, id, method, params)
 		if err != nil {
 			resp.Error = &protocol.ACPRPCError{Code: protocol.ACPRPCCodeInternalError, Message: err.Error()}
 		} else if result == nil {

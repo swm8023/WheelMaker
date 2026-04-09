@@ -63,6 +63,17 @@ func NewInstance(name string, conn Conn) Instance {
 
 func (i *instance) Name() string { return i.name }
 
+// Alive reports whether the underlying ACP connection appears alive.
+func (i *instance) Alive() bool {
+	if i == nil || i.conn == nil {
+		return false
+	}
+	if probe, ok := i.conn.(interface{ Alive() bool }); ok {
+		return probe.Alive()
+	}
+	return true
+}
+
 func (i *instance) SetCallbacks(callbacks Callbacks) {
 	i.mu.Lock()
 	i.callbacks = callbacks

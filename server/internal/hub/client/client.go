@@ -557,7 +557,7 @@ func (s *Session) handlePrompt(text string) {
 		}
 
 		if err := s.ensureReadyAndNotify(ctx); err != nil {
-			if attempt == 1 && isAgentRecoverableRuntimeErr(err) {
+			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
 				s.reply("Agent init failed transiently, reconnecting and retrying once...")
 				s.forceReconnect()
 				continue
@@ -568,12 +568,12 @@ func (s *Session) handlePrompt(text string) {
 
 		updates, err := s.promptStream(ctx, text)
 		if err != nil {
-			if attempt == 1 && isAgentRecoverableRuntimeErr(err) {
+			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
 				s.reply("Agent disconnected, reconnecting and retrying once...")
 				s.forceReconnect()
 				continue
 			}
-			if isAgentExitError(err) {
+			if isAgentExitError(err) && !s.agentProcessAlive() {
 				_ = s.resetDeadConnection(err)
 			}
 			s.reply(fmt.Sprintf("Prompt error: %v", err))
@@ -611,14 +611,14 @@ func (s *Session) handlePrompt(text string) {
 						retryStream = true
 						break
 					}
-					if attempt == 1 && !sawText && isAgentRecoverableRuntimeErr(u.Err) {
+					if attempt == 1 && !sawText && s.shouldReconnectOnRecoverableErr(u.Err) {
 						s.reply("Agent disconnected during stream, reconnecting and retrying once...")
 						s.forceReconnect()
 						retryStream = true
 						break
 					}
 					recovered := false
-					if s.resetDeadConnection(u.Err) {
+					if !s.agentProcessAlive() && s.resetDeadConnection(u.Err) {
 						if recErr := s.ensureInstance(ctx); recErr == nil {
 							_ = s.ensureReadyAndNotify(ctx)
 							recovered = true
@@ -698,7 +698,7 @@ func (s *Session) handlePrompt(text string) {
 			s.reply(buf.String())
 		}
 
-		if attempt == 1 && sawSandboxRefresh && !sawText {
+		if attempt == 1 && sawSandboxRefresh && !sawText && !s.agentProcessAlive() {
 			s.reply("Detected sandbox refresh failure, reconnecting and retrying once...")
 			s.forceReconnect()
 			continue
@@ -777,6 +777,32 @@ func (s *Session) preferredAgentName() string {
 		return strings.TrimSpace(s.activeAgent)
 	}
 	return defaultAgentName
+}
+
+type instanceLivenessProbe interface {
+	Alive() bool
+}
+
+func (s *Session) agentProcessAlive() bool {
+	s.mu.Lock()
+	inst := s.instance
+	s.mu.Unlock()
+	if inst == nil {
+		return false
+	}
+	probe, ok := inst.(instanceLivenessProbe)
+	if !ok {
+		// Backward-compatible fallback for instances without explicit liveness support.
+		return true
+	}
+	return probe.Alive()
+}
+
+func (s *Session) shouldReconnectOnRecoverableErr(err error) bool {
+	if !isAgentRecoverableRuntimeErr(err) {
+		return false
+	}
+	return !s.agentProcessAlive()
 }
 
 func isAgentExitError(err error) bool {
