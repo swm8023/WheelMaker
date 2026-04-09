@@ -68,7 +68,6 @@ type Session struct {
 	ready        bool
 	initializing bool
 	lastReply    string
-	replayH      func(acp.SessionUpdateParams)
 
 	prompt   promptState
 	initCond *sync.Cond
@@ -463,87 +462,29 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 
 	// Step 2: attempt session/load if possible.
-	if savedSID != "" && initResult.AgentCapabilities.LoadSession && !isCopilotAgent(agentName) {
-		var replayMu sync.Mutex
-		var replay []acp.Update
-		replayState := &SessionAgentState{}
-
-		s.mu.Lock()
-		s.replayH = func(p acp.SessionUpdateParams) {
-			if p.SessionID != savedSID {
-				return
-			}
-			update := p.Update
-			replayMu.Lock()
-			replay = append(replay, acp.SessionUpdateToUpdate(update))
-			switch update.SessionUpdate {
-			case acp.SessionUpdateAvailableCommandsUpdate:
-				if len(update.AvailableCommands) > 0 {
-					replayState.Commands = append([]acp.AvailableCommand(nil), update.AvailableCommands...)
-				}
-			case acp.SessionUpdateConfigOptionUpdate:
-				if len(update.ConfigOptions) > 0 {
-					replayState.ConfigOptions = append([]acp.ConfigOption(nil), update.ConfigOptions...)
-				}
-			case acp.SessionUpdateSessionInfoUpdate:
-				if update.Title != "" {
-					replayState.Title = update.Title
-				}
-				if update.UpdatedAt != "" {
-					replayState.UpdatedAt = update.UpdatedAt
-				}
-			}
-			replayMu.Unlock()
-		}
-		s.mu.Unlock()
-
-		var loadResult acp.SessionLoadResult
-		loadErr := func() error {
-			res, err := inst.SessionLoad(ctx, acp.SessionLoadParams{
-				SessionID:  savedSID,
-				CWD:        cwd,
-				MCPServers: emptyMCPServers(),
-			})
-			if err == nil {
-				loadResult = res
-			}
-			return err
-		}()
-		s.mu.Lock()
-		s.replayH = nil
-		s.mu.Unlock()
-
+	if savedSID != "" && initResult.AgentCapabilities.LoadSession {
+		loadResult, loadErr := inst.SessionLoad(ctx, acp.SessionLoadParams{
+			SessionID:  savedSID,
+			CWD:        cwd,
+			MCPServers: emptyMCPServers(),
+		})
 		if loadErr == nil {
-			replayMu.Lock()
-			replayUpdates := replay
-			meta := cloneSessionAgentState(replayState)
-			replayMu.Unlock()
-			if meta == nil {
-				meta = &SessionAgentState{}
-			}
-			if len(meta.ConfigOptions) == 0 && len(loadResult.ConfigOptions) > 0 {
-				meta.ConfigOptions = append([]acp.ConfigOption(nil), loadResult.ConfigOptions...)
-			}
-
 			s.mu.Lock()
 			state := s.agentStateLocked(agentName)
 			state.ACPSessionID = savedSID
-			state.ConfigOptions = append([]acp.ConfigOption(nil), meta.ConfigOptions...)
-			state.Commands = append([]acp.AvailableCommand(nil), meta.Commands...)
-			state.Title = meta.Title
-			state.UpdatedAt = meta.UpdatedAt
+			state.ConfigOptions = loadResult.ConfigOptions
 			state.ProtocolVersion = initResult.ProtocolVersion.String()
 			state.AgentCapabilities = initResult.AgentCapabilities
 			state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
-			state.AuthMethods = append([]acp.AuthMethod(nil), initResult.AuthMethods...)
+			state.AuthMethods = initResult.AuthMethods
 			s.activeAgent = agentName
 			s.acpSessionID = savedSID
 			s.ready = true
 			s.initializing = false
 			s.mu.Unlock()
 			s.initCond.Broadcast()
-			hubLogger(s.projectName).Info("connected agent=%s session=%s resumed_history_updates=%d",
-				inst.Name(), savedSID, len(replayUpdates))
+			hubLogger(s.projectName).Info("connected agent=%s session=%s resumed",
+				inst.Name(), savedSID)
 			return nil
 		}
 	}
@@ -561,14 +502,14 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	s.mu.Lock()
 	state := s.agentStateLocked(agentName)
 	state.ACPSessionID = newResult.SessionID
-	state.ConfigOptions = append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
+	state.ConfigOptions = newResult.ConfigOptions
 	state.Commands = nil
 	state.Title = ""
 	state.UpdatedAt = ""
 	state.ProtocolVersion = initResult.ProtocolVersion.String()
 	state.AgentCapabilities = initResult.AgentCapabilities
 	state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
-	state.AuthMethods = append([]acp.AuthMethod(nil), initResult.AuthMethods...)
+	state.AuthMethods = initResult.AuthMethods
 	s.activeAgent = agentName
 	s.acpSessionID = newResult.SessionID
 	s.ready = true
@@ -726,9 +667,6 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 
 		var finalUpdate acp.Update
 		if err != nil {
-			if s.shouldInvalidateSessionForRetry(err) {
-				s.invalidateSessionForRetry()
-			}
 			finalUpdate = acp.Update{Type: acp.UpdateError, Err: err, Done: true}
 		} else {
 			finalUpdate = acp.Update{Type: acp.UpdateDone, Content: result.StopReason, Done: true}
@@ -743,42 +681,8 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 	return updates, nil
 }
 
-func isCopilotAgent(name string) bool {
-	return strings.EqualFold(strings.TrimSpace(name), "copilot")
-}
-
-func (s *Session) shouldInvalidateSessionForRetry(err error) bool {
-	if !isUnsupportedReasoningEffortError(err) {
-		return false
-	}
-	s.mu.Lock()
-	agentName := s.currentAgentNameLocked()
-	s.mu.Unlock()
-	return isCopilotAgent(agentName)
-}
-
-// invalidateSessionForRetry clears current session identity so the next prompt
-// forces a fresh session/new instead of reusing potentially incompatible config.
-func (s *Session) invalidateSessionForRetry() {
-	s.mu.Lock()
-	agentName := s.currentAgentNameLocked()
-	s.acpSessionID = ""
-	s.ready = false
-	s.lastReply = ""
-	if agentName != "" {
-		if st := s.agentStateLocked(agentName); st != nil {
-			st.ACPSessionID = ""
-			st.ConfigOptions = nil
-			st.Commands = nil
-			st.Title = ""
-			st.UpdatedAt = ""
-		}
-	}
-	s.mu.Unlock()
-	s.persistSessionBestEffort()
-}
-
 // cancelPrompt emits tool_call_cancelled updates then sends session/cancel.
+
 func (s *Session) cancelPrompt() error {
 	s.mu.Lock()
 	sessID := s.acpSessionID
@@ -900,19 +804,47 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	sessID := s.acpSessionID
 	ch := s.prompt.updatesCh
 	promptCtx := s.prompt.ctx
-	replayH := s.replayH
 	s.mu.Unlock()
-
-	if replayH != nil {
-		replayH(params)
-	}
 
 	if params.SessionID != sessID {
 		return
 	}
 
 	update := params.Update
-	parsedUpdate := acp.SessionUpdateToUpdate(update)
+	parsedUpdate := acp.Update{}
+	switch update.SessionUpdate {
+	case acp.SessionUpdateAgentMessageChunk:
+		var content acp.ContentBlock
+		if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil && content.Type == acp.ContentBlockTypeText {
+			parsedUpdate = acp.Update{Type: acp.UpdateText, Content: content.Text}
+		} else {
+			parsedUpdate = acp.Update{Type: acp.UpdateText}
+		}
+	case acp.SessionUpdateUserMessageChunk:
+		parsedUpdate = acp.Update{Type: acp.UpdateUserChunk}
+	case acp.SessionUpdateAgentThoughtChunk:
+		var content acp.ContentBlock
+		if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil {
+			parsedUpdate = acp.Update{Type: acp.UpdateThought, Content: content.Text}
+		} else {
+			parsedUpdate = acp.Update{Type: acp.UpdateThought}
+		}
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		raw, _ := json.Marshal(update)
+		parsedUpdate = acp.Update{Type: acp.UpdateToolCall, Raw: raw}
+	case acp.SessionUpdatePlan:
+		raw, _ := json.Marshal(update)
+		parsedUpdate = acp.Update{Type: acp.UpdatePlan, Raw: raw}
+	case acp.SessionUpdateConfigOptionUpdate:
+		raw, _ := json.Marshal(update)
+		parsedUpdate = acp.Update{Type: acp.UpdateConfigOption, Raw: raw}
+	case acp.SessionUpdateCurrentModeUpdate:
+		raw, _ := json.Marshal(update)
+		parsedUpdate = acp.Update{Type: acp.UpdateModeChange, Raw: raw}
+	default:
+		raw, _ := json.Marshal(update)
+		parsedUpdate = acp.Update{Type: acp.UpdateType(update.SessionUpdate), Raw: raw}
+	}
 
 	changed := false
 	if update.SessionUpdate == acp.SessionUpdateAvailableCommandsUpdate ||
@@ -929,12 +861,12 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		switch update.SessionUpdate {
 		case acp.SessionUpdateAvailableCommandsUpdate:
 			if len(update.AvailableCommands) > 0 {
-				state.Commands = append([]acp.AvailableCommand(nil), update.AvailableCommands...)
+				state.Commands = update.AvailableCommands
 				changed = true
 			}
 		case acp.SessionUpdateConfigOptionUpdate:
 			if len(update.ConfigOptions) > 0 {
-				state.ConfigOptions = append([]acp.ConfigOption(nil), update.ConfigOptions...)
+				state.ConfigOptions = update.ConfigOptions
 				changed = true
 			}
 		case acp.SessionUpdateSessionInfoUpdate:
