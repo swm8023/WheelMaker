@@ -473,20 +473,25 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			if p.SessionID != savedSID {
 				return
 			}
-			derived := acp.ParseSessionUpdateParams(p)
+			update := p.Update
 			replayMu.Lock()
-			replay = append(replay, derived.Update)
-			if len(derived.AvailableCommands) > 0 {
-				replayState.Commands = append([]acp.AvailableCommand(nil), derived.AvailableCommands...)
-			}
-			if len(derived.ConfigOptions) > 0 {
-				replayState.ConfigOptions = append([]acp.ConfigOption(nil), derived.ConfigOptions...)
-			}
-			if derived.Title != "" {
-				replayState.Title = derived.Title
-			}
-			if derived.UpdatedAt != "" {
-				replayState.UpdatedAt = derived.UpdatedAt
+			replay = append(replay, acp.SessionUpdateToUpdate(update))
+			switch update.SessionUpdate {
+			case acp.SessionUpdateAvailableCommandsUpdate:
+				if len(update.AvailableCommands) > 0 {
+					replayState.Commands = append([]acp.AvailableCommand(nil), update.AvailableCommands...)
+				}
+			case acp.SessionUpdateConfigOptionUpdate:
+				if len(update.ConfigOptions) > 0 {
+					replayState.ConfigOptions = append([]acp.ConfigOption(nil), update.ConfigOptions...)
+				}
+			case acp.SessionUpdateSessionInfoUpdate:
+				if update.Title != "" {
+					replayState.Title = update.Title
+				}
+				if update.UpdatedAt != "" {
+					replayState.UpdatedAt = update.UpdatedAt
+				}
 			}
 			replayMu.Unlock()
 		}
@@ -906,10 +911,13 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		return
 	}
 
-	derived := acp.ParseSessionUpdateParams(params)
+	update := params.Update
+	parsedUpdate := acp.SessionUpdateToUpdate(update)
 
 	changed := false
-	if len(derived.AvailableCommands) > 0 || len(derived.ConfigOptions) > 0 || derived.Title != "" || derived.UpdatedAt != "" {
+	if update.SessionUpdate == acp.SessionUpdateAvailableCommandsUpdate ||
+		update.SessionUpdate == acp.SessionUpdateConfigOptionUpdate ||
+		update.SessionUpdate == acp.SessionUpdateSessionInfoUpdate {
 		s.mu.Lock()
 		state := s.agentStateLocked(s.currentAgentNameLocked())
 		if state == nil {
@@ -918,29 +926,38 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		if state != nil {
 			state.ACPSessionID = s.acpSessionID
 		}
-		if len(derived.AvailableCommands) > 0 {
-			state.Commands = append([]acp.AvailableCommand(nil), derived.AvailableCommands...)
-		}
-		if len(derived.ConfigOptions) > 0 {
-			state.ConfigOptions = append([]acp.ConfigOption(nil), derived.ConfigOptions...)
-		}
-		if derived.Title != "" {
-			state.Title = derived.Title
-		}
-		if derived.UpdatedAt != "" {
-			state.UpdatedAt = derived.UpdatedAt
+		switch update.SessionUpdate {
+		case acp.SessionUpdateAvailableCommandsUpdate:
+			if len(update.AvailableCommands) > 0 {
+				state.Commands = append([]acp.AvailableCommand(nil), update.AvailableCommands...)
+				changed = true
+			}
+		case acp.SessionUpdateConfigOptionUpdate:
+			if len(update.ConfigOptions) > 0 {
+				state.ConfigOptions = append([]acp.ConfigOption(nil), update.ConfigOptions...)
+				changed = true
+			}
+		case acp.SessionUpdateSessionInfoUpdate:
+			if update.Title != "" {
+				state.Title = update.Title
+				changed = true
+			}
+			if update.UpdatedAt != "" {
+				state.UpdatedAt = update.UpdatedAt
+				changed = true
+			}
 		}
 		s.mu.Unlock()
-		changed = true
 	}
 
-	if derived.TrackAddToolCall != "" || derived.TrackDoneToolCall != "" {
+	addToolCallID, doneToolCallID := trackToolCallUpdate(update)
+	if addToolCallID != "" || doneToolCallID != "" {
 		s.mu.Lock()
-		if derived.TrackAddToolCall != "" {
-			s.prompt.activeTCs[derived.TrackAddToolCall] = struct{}{}
+		if addToolCallID != "" {
+			s.prompt.activeTCs[addToolCallID] = struct{}{}
 		}
-		if derived.TrackDoneToolCall != "" {
-			delete(s.prompt.activeTCs, derived.TrackDoneToolCall)
+		if doneToolCallID != "" {
+			delete(s.prompt.activeTCs, doneToolCallID)
 		}
 		s.mu.Unlock()
 	}
@@ -953,15 +970,36 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	}
 	if promptCtx == nil {
 		select {
-		case ch <- derived.Update:
+		case ch <- parsedUpdate:
 		default:
 		}
 		return
 	}
 	select {
-	case ch <- derived.Update:
+	case ch <- parsedUpdate:
 	case <-promptCtx.Done():
 	}
+}
+
+func trackToolCallUpdate(update acp.SessionUpdate) (addToolCallID string, doneToolCallID string) {
+	toolCallID := strings.TrimSpace(update.ToolCallID)
+	if toolCallID == "" {
+		return "", ""
+	}
+
+	isDoneStatus := update.Status == acp.ToolCallStatusCompleted || update.Status == acp.ToolCallStatusFailed
+	switch update.SessionUpdate {
+	case acp.SessionUpdateToolCall:
+		if isDoneStatus {
+			return "", toolCallID
+		}
+		return toolCallID, ""
+	case acp.SessionUpdateToolCallUpdate:
+		if isDoneStatus {
+			return "", toolCallID
+		}
+	}
+	return "", ""
 }
 
 // SessionRequestPermission responds to session/request_permission agent requests.

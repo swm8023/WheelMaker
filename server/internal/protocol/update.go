@@ -16,60 +16,8 @@ type Update struct {
 	Err     error
 }
 
-// SessionUpdateDerived is a parsed, client-ready view of SessionUpdate.
-type SessionUpdateDerived struct {
-	Update            Update
-	ConfigOptions     []ConfigOption
-	AvailableCommands []AvailableCommand
-	Title             string
-	UpdatedAt         string
-	TrackAddToolCall  string
-	TrackDoneToolCall string
-}
-
-// ParseSessionUpdateParams parses protocol-level session/update details into a
-// derived structure so upper layers can consume normalized fields only.
-func ParseSessionUpdateParams(params SessionUpdateParams) SessionUpdateDerived {
-	return parseSessionUpdate(params.Update)
-}
-
-func parseSessionUpdate(u SessionUpdate) SessionUpdateDerived {
-	d := SessionUpdateDerived{
-		Update: sessionUpdateToUpdate(u),
-	}
-
-	switch u.SessionUpdate {
-	case SessionUpdateAvailableCommandsUpdate:
-		if len(u.AvailableCommands) > 0 {
-			d.AvailableCommands = u.AvailableCommands
-		}
-	case SessionUpdateConfigOptionUpdate:
-		if len(u.ConfigOptions) > 0 {
-			d.ConfigOptions = u.ConfigOptions
-		}
-	case SessionUpdateSessionInfoUpdate:
-		d.Title = u.Title
-		d.UpdatedAt = u.UpdatedAt
-	case SessionUpdateToolCall:
-		if u.ToolCallID != "" {
-			if s := u.Status; s == ToolCallStatusCompleted || s == ToolCallStatusFailed {
-				d.TrackDoneToolCall = u.ToolCallID
-			} else {
-				d.TrackAddToolCall = u.ToolCallID
-			}
-		}
-	case SessionUpdateToolCallUpdate:
-		if u.ToolCallID != "" {
-			if s := u.Status; s == ToolCallStatusCompleted || s == ToolCallStatusFailed {
-				d.TrackDoneToolCall = u.ToolCallID
-			}
-		}
-	}
-
-	return d
-}
-
-func sessionUpdateToUpdate(u SessionUpdate) Update {
+// SessionUpdateToUpdate maps a protocol session/update payload into runtime Update.
+func SessionUpdateToUpdate(u SessionUpdate) Update {
 	switch u.SessionUpdate {
 	case SessionUpdateAgentMessageChunk:
 		text := ""
