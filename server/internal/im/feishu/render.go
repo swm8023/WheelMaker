@@ -86,30 +86,13 @@ func buildConfigCard(update acp.SessionUpdate) RawCard {
 	}
 }
 
-func buildUsageCard(update acp.SessionUpdate) RawCard {
+func renderUsageStreamText(update acp.SessionUpdate) string {
 	size, used, ok := usageMetricsFromUpdate(update)
 	if !ok {
-		return nil
+		return ""
 	}
 	percent := (float64(used) / float64(size)) * 100
-	parts := []string{
-		"**Used**: `" + formatUsageInt(used) + " bytes`",
-		"**Quota**: `" + formatUsageInt(size) + " bytes`",
-		fmt.Sprintf("**Usage**: `%.1f%%`", percent),
-	}
-	return RawCard{
-		"config": map[string]any{"update_multi": true},
-		"header": map[string]any{
-			"template": "blue",
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": "📊 Usage",
-			},
-		},
-		"elements": []map[string]any{
-			{"tag": "markdown", "content": strings.Join(parts, "\n")},
-		},
-	}
+	return fmt.Sprintf("context usage %.0f%%", percent)
 }
 
 func usageMetricsFromUpdate(update acp.SessionUpdate) (size int64, used int64, ok bool) {
@@ -122,24 +105,6 @@ func usageMetricsFromUpdate(update acp.SessionUpdate) (size int64, used int64, o
 		return 0, 0, false
 	}
 	return size, used, true
-}
-
-func formatUsageInt(v int64) string {
-	s := strconv.FormatInt(v, 10)
-	if len(s) <= 3 {
-		return s
-	}
-	var b strings.Builder
-	first := len(s) % 3
-	if first == 0 {
-		first = 3
-	}
-	b.WriteString(s[:first])
-	for i := first; i < len(s); i += 3 {
-		b.WriteString(",")
-		b.WriteString(s[i : i+3])
-	}
-	return b.String()
 }
 
 func extractTextContent(raw json.RawMessage) string {

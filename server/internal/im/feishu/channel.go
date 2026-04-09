@@ -212,9 +212,8 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 			return err
 		}
 	case acp.SessionUpdateUsageUpdate:
-		if card := buildUsageCard(params.Update); card != nil {
-			_, err := c.inner.SendCard(chatID, "", card)
-			return err
+		if text := renderUsageStreamText(params.Update); text != "" {
+			return c.inner.Send(chatID, text, TextNormal)
 		}
 	case acp.SessionUpdateAvailableCommandsUpdate:
 		// Silenced: command list updates are noisy and rarely useful to the user.

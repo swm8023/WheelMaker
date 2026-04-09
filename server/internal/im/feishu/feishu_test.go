@@ -3,7 +3,6 @@ package feishu
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -401,7 +400,7 @@ func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
 	}
 }
 
-func TestPublishSessionUpdate_UsageUpdateRendersCard(t *testing.T) {
+func TestPublishSessionUpdate_UsageUpdateRendersInlineText(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
 	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
@@ -419,18 +418,14 @@ func TestPublishSessionUpdate_UsageUpdateRendersCard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublishSessionUpdate(usage): %v", err)
 	}
-	if len(ft.cards) != 1 {
-		t.Fatalf("cards=%+v, want one usage card", ft.cards)
+	if len(ft.cards) != 0 {
+		t.Fatalf("usage update should not render card, cards=%+v", ft.cards)
 	}
-	card, ok := ft.cards[0].card.(RawCard)
-	if !ok {
-		t.Fatalf("card type=%T, want RawCard", ft.cards[0].card)
+	if len(ft.sends) != 1 {
+		t.Fatalf("sends=%+v, want 1", ft.sends)
 	}
-	header, _ := card["header"].(map[string]any)
-	titleMap, _ := header["title"].(map[string]any)
-	title, _ := titleMap["content"].(string)
-	if !strings.Contains(title, "Usage") {
-		t.Fatalf("usage card title=%q, want contains Usage", title)
+	if ft.sends[0].kind != TextNormal || ft.sends[0].text != "context usage 71%" {
+		t.Fatalf("usage send=%+v", ft.sends[0])
 	}
 }
 
@@ -452,7 +447,7 @@ func TestPublishSessionUpdate_BlockUsageAtChannelLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublishSessionUpdate(usage): %v", err)
 	}
-	if len(ft.cards) != 0 {
-		t.Fatalf("usage update should be filtered by feishu channel, cards=%+v", ft.cards)
+	if len(ft.cards) != 0 || len(ft.sends) != 0 {
+		t.Fatalf("usage update should be filtered by feishu channel, sends=%+v cards=%+v", ft.sends, ft.cards)
 	}
 }
