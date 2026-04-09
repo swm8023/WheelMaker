@@ -375,7 +375,7 @@ func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
 		t.Fatalf("elements missing in card: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "``	ext\n") {
+	if !strings.Contains(content, "```text\n") {
 		t.Fatalf("tool card should use code block: %q", content)
 	}
 	if !strings.Contains(content, "- step one - step two - step three") {
@@ -428,7 +428,7 @@ func TestBuildCompactToolCard(t *testing.T) {
 	if strings.Contains(content, "go test ./...") && !strings.Contains(content, "$ go test ./...") {
 		t.Fatalf("summary text should not be rendered above transcript: %q", content)
 	}
-	if !strings.Contains(content, "``	ext") ||
+	if !strings.Contains(content, "```text") ||
 		!strings.Contains(content, "$ go test ./...") ||
 		!strings.Contains(content, "PASS") {
 		t.Fatalf("compact transcript mismatch: %q", content)
@@ -447,7 +447,7 @@ func TestBuildCompactToolCard_DoesNotFormatInlineNumberedTranscript(t *testing.T
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "``	ext\n1. collect context 2. update tests 3. ship\n```") {
+	if !strings.Contains(content, "```text\n1. collect context 2. update tests 3. ship\n```") {
 		t.Fatalf("compact transcript should keep original numbered text, got: %q", content)
 	}
 }
@@ -463,7 +463,7 @@ func TestBuildCompactToolCard_DoesNotFormatNumberedVariants(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "``	ext\n1)collect context 2)update tests 3)ship\n```") {
+	if !strings.Contains(content, "```text\n1)collect context 2)update tests 3)ship\n```") {
 		t.Fatalf("compact transcript should keep numbered variant with ), got: %q", content)
 	}
 
@@ -478,7 +478,7 @@ func TestBuildCompactToolCard_DoesNotFormatNumberedVariants(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card2)
 	}
 	content2, _ := elements2[0]["content"].(string)
-	if !strings.Contains(content2, "``	ext\n1、准备\u30002、验证\u30003、发布\n```") {
+	if !strings.Contains(content2, "```text\n1、准备\u30002、验证\u30003、发布\n```") {
 		t.Fatalf("compact transcript should keep full-width numbered variant, got: %q", content2)
 	}
 }
@@ -495,7 +495,7 @@ func TestBuildCompactToolCard_DoesNotFormatInlineHyphenBullets(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "``	ext\n- collect context - update tests - ship\n```") {
+	if !strings.Contains(content, "```text\n- collect context - update tests - ship\n```") {
 		t.Fatalf("compact transcript should keep original hyphen bullets, got: %q", content)
 	}
 }

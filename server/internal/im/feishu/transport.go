@@ -1148,7 +1148,7 @@ func buildCompactToolCard(lines []string, transcript string, streaming bool) Raw
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
 	}
-	content := "``	ext\n" + transcript + "\n```"
+	content := "```text\n" + transcript + "\n```"
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
 	}
@@ -1250,7 +1250,7 @@ func buildToolCallCard(chatID string, update ToolCallUpdate, perm *toolPermissio
 
 	content := toolCallDetailBlock(update)
 	elements := []map[string]any{
-		{"tag": "markdown", "content": "``	ext\n" + content + "\n```"},
+		{"tag": "markdown", "content": "```text\n" + content + "\n```"},
 	}
 	if perm != nil {
 		if perm.active && len(perm.options) > 0 {
