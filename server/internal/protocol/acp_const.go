@@ -15,6 +15,7 @@ const (
 	SessionUpdateAvailableCommandsUpdate = "available_commands_update"
 	SessionUpdateSessionInfoUpdate       = "session_info_update"
 	SessionUpdateCurrentModeUpdate       = "current_mode_update"
+	SessionUpdateUsageUpdate             = "usage_update"
 )
 
 // --- ACP method names ---

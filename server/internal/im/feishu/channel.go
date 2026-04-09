@@ -211,6 +211,11 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 			_, err := c.inner.SendCard(chatID, "", card)
 			return err
 		}
+	case acp.SessionUpdateUsageUpdate:
+		if card := buildUsageCard(params.Update); card != nil {
+			_, err := c.inner.SendCard(chatID, "", card)
+			return err
+		}
 	case acp.SessionUpdateAvailableCommandsUpdate:
 		// Silenced: command list updates are noisy and rarely useful to the user.
 	case acp.SessionUpdateUserMessageChunk:
@@ -627,6 +632,8 @@ func canonicalBlockedUpdate(raw string) string {
 		return "session_info_update"
 	case "current_mode_update":
 		return "current_mode_update"
+	case "usage", "usage_update":
+		return "usage_update"
 	case "done", "prompt_result":
 		return "prompt_result"
 	case "error", "system":

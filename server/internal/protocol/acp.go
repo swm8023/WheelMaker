@@ -189,6 +189,8 @@ type SessionUpdate struct {
 	// only for backward-compatible input parsing.
 	ModeID        string         `json:"modeId,omitempty"`
 	ConfigOptions []ConfigOption `json:"configOptions,omitempty"`
+	Size          *int64         `json:"size,omitempty"`
+	Used          *int64         `json:"used,omitempty"`
 	UpdatedAt     string         `json:"updatedAt,omitempty"`
 }
 

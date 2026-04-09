@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -397,5 +398,61 @@ func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
 	}
 	if ft.cards[1].messageID != ft.cards[0].messageID {
 		t.Fatalf("second help update should reuse messageID %q, got %q", ft.cards[0].messageID, ft.cards[1].messageID)
+	}
+}
+
+func TestPublishSessionUpdate_UsageUpdateRendersCard(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+
+	size := int64(258400)
+	used := int64(183223)
+	err := ch.PublishSessionUpdate(context.Background(), target, acp.SessionUpdateParams{
+		SessionID: "s1",
+		Update: acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateUsageUpdate,
+			Size:          &size,
+			Used:          &used,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishSessionUpdate(usage): %v", err)
+	}
+	if len(ft.cards) != 1 {
+		t.Fatalf("cards=%+v, want one usage card", ft.cards)
+	}
+	card, ok := ft.cards[0].card.(RawCard)
+	if !ok {
+		t.Fatalf("card type=%T, want RawCard", ft.cards[0].card)
+	}
+	header, _ := card["header"].(map[string]any)
+	titleMap, _ := header["title"].(map[string]any)
+	title, _ := titleMap["content"].(string)
+	if !strings.Contains(title, "Usage") {
+		t.Fatalf("usage card title=%q, want contains Usage", title)
+	}
+}
+
+func TestPublishSessionUpdate_BlockUsageAtChannelLevel(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransportConfig(ft, Config{BlockedUpdates: []string{"usage"}})
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+
+	size := int64(258400)
+	used := int64(183223)
+	err := ch.PublishSessionUpdate(context.Background(), target, acp.SessionUpdateParams{
+		SessionID: "s1",
+		Update: acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateUsageUpdate,
+			Size:          &size,
+			Used:          &used,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishSessionUpdate(usage): %v", err)
+	}
+	if len(ft.cards) != 0 {
+		t.Fatalf("usage update should be filtered by feishu channel, cards=%+v", ft.cards)
 	}
 }
