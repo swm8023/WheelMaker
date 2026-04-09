@@ -3,39 +3,20 @@ package client
 import (
 	"context"
 	"strings"
-	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-type permissionRouter struct {
-	session *Session
-
-	mu         sync.Mutex
-	decisionCh chan struct{}
-	pending    map[int64]chan acp.PermissionResult
-}
-
-func newPermissionRouter(s *Session) *permissionRouter {
-	r := &permissionRouter{
-		session:    s,
-		decisionCh: make(chan struct{}, 1),
-		pending:    map[int64]chan acp.PermissionResult{},
-	}
-	r.decisionCh <- struct{}{}
-	return r
-}
-
-func (r *permissionRouter) decide(ctx context.Context, requestID int64, params acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
-	if !r.acquireDecisionSlot(ctx) {
+func (s *Session) decidePermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
+	if !s.acquirePermissionDecisionSlot(ctx) {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
-	defer r.releaseDecisionSlot()
+	defer s.releasePermissionDecisionSlot()
 
-	r.session.mu.Lock()
-	yolo := r.session.yolo
-	r.session.mu.Unlock()
+	s.mu.Lock()
+	yolo := s.yolo
+	s.mu.Unlock()
 	if yolo {
 		if optionID := chooseAutoAllowOption(params.Options); optionID != "" {
 			return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
@@ -43,25 +24,25 @@ func (r *permissionRouter) decide(ctx context.Context, requestID int64, params a
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
-	router, source, ok := r.session.imContext()
+	bridge, source, ok := s.imContext()
 	if !ok {
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
 	waitCh := make(chan acp.PermissionResult, 1)
-	r.mu.Lock()
-	r.pending[requestID] = waitCh
-	r.mu.Unlock()
-	defer r.clearPending(requestID, waitCh)
+	s.permissionMu.Lock()
+	s.permissionPending[requestID] = waitCh
+	s.permissionMu.Unlock()
+	defer s.clearPermissionPending(requestID, waitCh)
 
-	if err := router.PublishPermissionRequest(ctx, im.SendTarget{SessionID: r.session.ID, Source: &source}, requestID, params); err != nil {
-		hubLogger(r.session.projectName).Error("permission publish failed session=%s request=%d err=%v", r.session.ID, requestID, err)
+	if err := bridge.PublishPermissionRequest(ctx, im.SendTarget{SessionID: s.ID, Source: &source}, requestID, params); err != nil {
+		hubLogger(s.projectName).Error("permission publish failed session=%s request=%d err=%v", s.ID, requestID, err)
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 
 	select {
 	case <-ctx.Done():
-		hubLogger(r.session.projectName).Warn("permission request timeout/cancelled session=%s request=%d", r.session.ID, requestID)
+		hubLogger(s.projectName).Warn("permission request timeout/cancelled session=%s request=%d", s.ID, requestID)
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	case result := <-waitCh:
 		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
@@ -71,29 +52,29 @@ func (r *permissionRouter) decide(ctx context.Context, requestID int64, params a
 	}
 }
 
-func (r *permissionRouter) acquireDecisionSlot(ctx context.Context) bool {
+func (s *Session) acquirePermissionDecisionSlot(ctx context.Context) bool {
 	select {
 	case <-ctx.Done():
 		return false
-	case <-r.decisionCh:
+	case <-s.permissionDecisionCh:
 		return true
 	}
 }
 
-func (r *permissionRouter) releaseDecisionSlot() {
+func (s *Session) releasePermissionDecisionSlot() {
 	select {
-	case r.decisionCh <- struct{}{}:
+	case s.permissionDecisionCh <- struct{}{}:
 	default:
 	}
 }
 
-func (r *permissionRouter) resolve(requestID int64, result acp.PermissionResponse) bool {
-	r.mu.Lock()
-	ch, ok := r.pending[requestID]
+func (s *Session) resolvePermission(requestID int64, result acp.PermissionResponse) bool {
+	s.permissionMu.Lock()
+	ch, ok := s.permissionPending[requestID]
 	if ok {
-		delete(r.pending, requestID)
+		delete(s.permissionPending, requestID)
 	}
-	r.mu.Unlock()
+	s.permissionMu.Unlock()
 	if !ok {
 		return false
 	}
@@ -104,12 +85,12 @@ func (r *permissionRouter) resolve(requestID int64, result acp.PermissionRespons
 	return true
 }
 
-func (r *permissionRouter) clearPending(requestID int64, ch chan acp.PermissionResult) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	current, ok := r.pending[requestID]
+func (s *Session) clearPermissionPending(requestID int64, ch chan acp.PermissionResult) {
+	s.permissionMu.Lock()
+	defer s.permissionMu.Unlock()
+	current, ok := s.permissionPending[requestID]
 	if ok && current == ch {
-		delete(r.pending, requestID)
+		delete(s.permissionPending, requestID)
 	}
 }
 

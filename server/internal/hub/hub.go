@@ -118,7 +118,7 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 			return nil, err
 		}
 	}
-	c.SetIMRouter(router)
+	c.SetClientIMBridge(router)
 	hubLogger(pc.Name).Info("starting client")
 	if err := c.Start(ctx); err != nil {
 		hubLogger(pc.Name).Error("start client failed err=%v", err)

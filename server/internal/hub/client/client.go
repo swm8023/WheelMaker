@@ -40,7 +40,7 @@ type Client struct {
 	registry *agent.ACPFactory
 
 	store    Store
-	imRouter IMRouter
+	imBridge ClientIMBridge
 
 	mu sync.Mutex
 
@@ -118,8 +118,8 @@ func (c *Client) Start(ctx context.Context) error {
 // Run blocks until ctx is cancelled, delegating to the IM router's Run loop.
 // Returns an error if no IM router is configured.
 func (c *Client) Run(ctx context.Context) error {
-	if c.imRouter != nil {
-		return c.imRouter.Run(ctx)
+	if c.imBridge != nil {
+		return c.imBridge.Run(ctx)
 	}
 	return errors.New("no IM router configured")
 }
@@ -224,13 +224,12 @@ func (c *Client) newWiredSession(id string) *Session {
 func (c *Client) wireSession(sess *Session) {
 	sess.projectName = c.projectName
 	sess.registry = c.registry
-	sess.imRouter = c.imRouter
+	sess.imBridge = c.imBridge
 	sess.yolo = c.yolo
 	sess.store = c.store
 	if strings.TrimSpace(sess.activeAgent) == "" {
 		sess.activeAgent = c.preferredAvailableAgent()
 	}
-	sess.permRouter = newPermissionRouter(sess)
 }
 
 func (c *Client) preferredAvailableAgent() string {
@@ -562,7 +561,7 @@ func (s *Session) handlePrompt(text string) {
 		s.mu.Unlock()
 
 		var buf strings.Builder
-		imRouter, imSource, hasIMEmitter := s.imContext()
+		imBridge, imSource, hasIMEmitter := s.imContext()
 		s.mu.Lock()
 		acpSessionID := s.acpSessionID
 		s.mu.Unlock()
@@ -583,8 +582,8 @@ func (s *Session) handlePrompt(text string) {
 				}
 				observe.MarkActivity(time.Now(), true)
 				if u.Err != nil {
-					if attempt == 1 && isCopilotReasoningArgError(u.Err) && s.tryCopilotReasoningFallback(ctx) {
-						s.reply("Copilot model incompatibility detected, switched model and retrying once...")
+					if attempt == 1 && isUnsupportedReasoningEffortError(u.Err) && s.tryCopilotReasoningFallback(ctx) {
+						s.reply("Detected incompatible reasoning settings, switched model and retrying once...")
 						retryStream = true
 						break
 					}
@@ -617,11 +616,11 @@ func (s *Session) handlePrompt(text string) {
 					var emitErr error
 					switch u.Type {
 					case acp.UpdateDone:
-						emitErr = imRouter.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
+						emitErr = imBridge.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
 					default:
 						params, ok := sessionUpdateParamsFromUpdate(acpSessionID, u)
 						if ok {
-							emitErr = imRouter.PublishSessionUpdate(ctx, target, params)
+							emitErr = imBridge.PublishSessionUpdate(ctx, target, params)
 						}
 					}
 					if emitErr != nil {
@@ -822,15 +821,42 @@ func isAgentRecoverableRuntimeErr(err error) bool {
 	return isAgentExitError(err) || isSandboxRefreshErr(err)
 }
 
-func isCopilotReasoningArgError(err error) bool {
+func isUnsupportedReasoningEffortError(err error) bool {
 	if err == nil {
 		return false
 	}
-	s := strings.ToLower(strings.TrimSpace(err.Error()))
-	if s == "" {
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	if msg == "" || !strings.Contains(msg, "reasoning_effort") {
 		return false
 	}
-	return strings.Contains(s, "reasoning_effort") && strings.Contains(s, "unrecognized request argument")
+	hints := []string{
+		"unrecognized request argument",
+		"unknown field",
+		"not supported",
+		"unsupported",
+		"invalid request",
+	}
+	for _, hint := range hints {
+		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func pickAlternativeModelValue(opt *acp.ConfigOption) string {
+	if opt == nil || len(opt.Options) == 0 {
+		return ""
+	}
+	current := strings.TrimSpace(opt.CurrentValue)
+	for _, candidate := range opt.Options {
+		value := strings.TrimSpace(candidate.Value)
+		if value == "" || strings.EqualFold(value, current) {
+			continue
+		}
+		return value
+	}
+	return ""
 }
 
 func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
@@ -853,41 +879,12 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 	var modelOpt *acp.ConfigOption
 	for i := range configOptions {
 		opt := &configOptions[i]
-		if strings.EqualFold(strings.TrimSpace(opt.ID), "model") || strings.EqualFold(strings.TrimSpace(opt.Category), "model") {
+		if strings.EqualFold(strings.TrimSpace(opt.ID), acp.ConfigOptionIDModel) || strings.EqualFold(strings.TrimSpace(opt.Category), acp.ConfigOptionCategoryModel) {
 			modelOpt = opt
 			break
 		}
 	}
-	if modelOpt == nil || len(modelOpt.Options) == 0 {
-		return false
-	}
-
-	current := strings.ToLower(strings.TrimSpace(modelOpt.CurrentValue))
-	target := ""
-	for _, candidate := range modelOpt.Options {
-		value := strings.TrimSpace(candidate.Value)
-		if value == "" || strings.EqualFold(value, modelOpt.CurrentValue) {
-			continue
-		}
-		if strings.HasPrefix(strings.ToLower(value), "gpt-5") {
-			target = value
-			break
-		}
-	}
-	if target == "" {
-		for _, candidate := range modelOpt.Options {
-			value := strings.TrimSpace(candidate.Value)
-			lower := strings.ToLower(value)
-			if value == "" || strings.EqualFold(value, modelOpt.CurrentValue) {
-				continue
-			}
-			if strings.HasPrefix(lower, "gpt-4") && strings.HasPrefix(current, "gpt-4") {
-				continue
-			}
-			target = value
-			break
-		}
-	}
+	target := pickAlternativeModelValue(modelOpt)
 	if target == "" {
 		return false
 	}

@@ -397,7 +397,7 @@ func (i *testInjectedInstance) emitUpdate(sessionID string, u acp.Update) {
 }
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
-var _ IMRouter = (*TestCaptureRouter)(nil)
+var _ ClientIMBridge = (*TestCaptureRouter)(nil)
 
 type noopStore struct{}
 
@@ -585,10 +585,9 @@ func TestPermissionRouter_PublishFailureLogged(t *testing.T) {
 	defer logger.SetOutput(os.Stderr)
 
 	s := newSession("sess-1", "/tmp")
-	s.imRouter = &failingPermissionIMRouter{}
+	s.imBridge = &failingPermissionIMRouter{}
 	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
-	r := newPermissionRouter(s)
-	_, _ = r.decide(context.Background(), 1, acp.PermissionRequestParams{}, "")
+	_, _ = s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{})
 	if got := buf.String(); got == "" || !strings.Contains(got, "permission publish failed") {
 		t.Fatalf("expected permission publish failure log, got: %q", got)
 	}

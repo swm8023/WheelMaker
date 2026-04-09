@@ -17,6 +17,7 @@ type AppConfig struct {
 }
 
 type rawAppConfig struct {
+	Version  json.RawMessage    `json:"version,omitempty"`
 	Projects []rawProjectConfig `json:"projects"`
 }
 
@@ -24,6 +25,10 @@ type rawProjectConfig struct {
 	Debug  json.RawMessage `json:"debug,omitempty"`
 	IM     json.RawMessage `json:"im,omitempty"`
 	Client json.RawMessage `json:"client,omitempty"`
+}
+
+type rawIMConfig struct {
+	Version json.RawMessage `json:"version,omitempty"`
 }
 
 // LogConfig controls the operational log system.
@@ -108,39 +113,64 @@ func LoadConfig(path string) (*AppConfig, error) {
 		}
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	if bytes.Contains(data, []byte(`"version"`)) {
-		return nil, fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
+
+	if err := validateRemovedLegacyFields(path, data); err != nil {
+		return nil, err
 	}
-	var raw rawAppConfig
-	if err := json.Unmarshal(data, &raw); err == nil {
-		for _, project := range raw.Projects {
-			if len(project.Debug) != 0 {
-				return nil, fmt.Errorf("parse config %s: projects[].debug has been removed", path)
-			}
-			if len(project.IM) != 0 {
-				return nil, fmt.Errorf("parse config %s: projects[].im has been removed; use projects[].feishu instead", path)
-			}
-			if len(project.Client) != 0 {
-				return nil, fmt.Errorf("parse config %s: projects[].client has been removed; provider is auto-detected", path)
-			}
-		}
-	}
+
 	var cfg AppConfig
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
-	for _, project := range cfg.Projects {
-		if project.Feishu != nil {
-			appID := strings.TrimSpace(project.Feishu.AppID)
-			appSecret := strings.TrimSpace(project.Feishu.AppSecret)
-			if appID == "" || appSecret == "" {
-				return nil, fmt.Errorf("parse config %s: projects[].feishu requires both app_id and app_secret", path)
-			}
-		}
+	if err := validateFeishuConfig(path, cfg.Projects); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
+}
+
+func validateRemovedLegacyFields(path string, data []byte) error {
+	var raw rawAppConfig
+	if err := json.Unmarshal(data, &raw); err != nil {
+		// Let strict decode in LoadConfig return the canonical parse error.
+		return nil
+	}
+
+	if len(raw.Version) != 0 {
+		return fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
+	}
+
+	for _, project := range raw.Projects {
+		if len(project.Debug) != 0 {
+			return fmt.Errorf("parse config %s: projects[].debug has been removed", path)
+		}
+		if len(project.IM) != 0 {
+			var legacyIM rawIMConfig
+			if err := json.Unmarshal(project.IM, &legacyIM); err == nil && len(legacyIM.Version) != 0 {
+				return fmt.Errorf("parse config %s: im.version has been removed; IM is the only supported runtime", path)
+			}
+			return fmt.Errorf("parse config %s: projects[].im has been removed; use projects[].feishu instead", path)
+		}
+		if len(project.Client) != 0 {
+			return fmt.Errorf("parse config %s: projects[].client has been removed; provider is auto-detected", path)
+		}
+	}
+	return nil
+}
+
+func validateFeishuConfig(path string, projects []ProjectConfig) error {
+	for _, project := range projects {
+		if project.Feishu == nil {
+			continue
+		}
+		appID := strings.TrimSpace(project.Feishu.AppID)
+		appSecret := strings.TrimSpace(project.Feishu.AppSecret)
+		if appID == "" || appSecret == "" {
+			return fmt.Errorf("parse config %s: projects[].feishu requires both app_id and app_secret", path)
+		}
+	}
+	return nil
 }
 
 func firstNonEmpty(values ...string) string {

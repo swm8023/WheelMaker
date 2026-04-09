@@ -73,8 +73,10 @@ type Session struct {
 	prompt   promptState
 	initCond *sync.Cond
 
-	permRouter     *permissionRouter
-	timeoutLimiter *timeoutNotifyLimiter
+	permissionMu         sync.Mutex
+	permissionDecisionCh chan struct{}
+	permissionPending    map[int64]chan acp.PermissionResult
+	timeoutLimiter       *timeoutNotifyLimiter
 
 	// Back-references to Client-owned resources needed by Session methods.
 	projectName string
@@ -82,7 +84,7 @@ type Session struct {
 	yolo        bool
 	registry    *agent.ACPFactory
 	store       Store
-	imRouter    IMRouter
+	imBridge    ClientIMBridge
 	imSource    *im.ChatRef
 
 	createdAt    time.Time
@@ -106,9 +108,12 @@ func newSession(id string, cwd string) *Session {
 		prompt: promptState{
 			activeTCs: make(map[string]struct{}),
 		},
-		timeoutLimiter: newTimeoutNotifyLimiter(timeoutNotifyCooldown),
+		permissionDecisionCh: make(chan struct{}, 1),
+		permissionPending:    make(map[int64]chan acp.PermissionResult),
+		timeoutLimiter:       newTimeoutNotifyLimiter(timeoutNotifyCooldown),
 	}
 	s.initCond = sync.NewCond(&s.mu)
+	s.permissionDecisionCh <- struct{}{}
 	return s
 }
 
@@ -227,13 +232,13 @@ func (s *Session) setIMSource(source im.ChatRef) {
 	s.mu.Unlock()
 }
 
-func (s *Session) imContext() (IMRouter, im.ChatRef, bool) {
+func (s *Session) imContext() (ClientIMBridge, im.ChatRef, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.imRouter == nil || s.imSource == nil || s.imSource.ChannelID == "" || s.imSource.ChatID == "" {
+	if s.imBridge == nil || s.imSource == nil || s.imSource.ChannelID == "" || s.imSource.ChatID == "" {
 		return nil, im.ChatRef{}, false
 	}
-	return s.imRouter, *s.imSource, true
+	return s.imBridge, *s.imSource, true
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the
@@ -716,7 +721,7 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 
 		var finalUpdate acp.Update
 		if err != nil {
-			if isCopilotReasoningEffortError(err) {
+			if s.shouldInvalidateSessionForRetry(err) {
 				s.invalidateSessionForRetry()
 			}
 			finalUpdate = acp.Update{Type: acp.UpdateError, Err: err, Done: true}
@@ -737,12 +742,14 @@ func isCopilotAgent(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "copilot")
 }
 
-func isCopilotReasoningEffortError(err error) bool {
-	if err == nil {
+func (s *Session) shouldInvalidateSessionForRetry(err error) bool {
+	if !isUnsupportedReasoningEffortError(err) {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "reasoning_effort")
+	s.mu.Lock()
+	agentName := s.currentAgentNameLocked()
+	s.mu.Unlock()
+	return isCopilotAgent(agentName)
 }
 
 // invalidateSessionForRetry clears current session identity so the next prompt
@@ -971,5 +978,5 @@ func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64,
 		ctx = pCtx
 	}
 	snap := acp.SessionConfigSnapshotFromOptions(options)
-	return s.permRouter.decide(ctx, requestID, params, snap.Mode)
+	return s.decidePermission(ctx, requestID, params, snap.Mode)
 }
