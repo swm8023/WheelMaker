@@ -15,7 +15,7 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const testRouteKey = "test:local"
@@ -577,12 +577,12 @@ func (f *failingPermissionIMRouter) Run(context.Context) error { return nil }
 
 func TestPermissionRouter_PublishFailureLogged(t *testing.T) {
 	var buf bytes.Buffer
-	if err := shared.Setup(shared.LoggerConfig{Level: shared.LevelWarn}); err != nil {
+	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
 		t.Fatalf("setup logger: %v", err)
 	}
-	defer shared.Close()
-	shared.SetOutput(&buf)
-	defer shared.SetOutput(os.Stderr)
+	defer logger.Close()
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stderr)
 
 	s := newSession("sess-1", "/tmp")
 	s.imRouter = &failingPermissionIMRouter{}

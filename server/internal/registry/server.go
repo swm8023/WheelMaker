@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
@@ -148,7 +148,7 @@ func (s *Server) Handler() http.Handler {
 
 // Run starts HTTP server and blocks until context cancellation.
 func (s *Server) Run(ctx context.Context) error {
-	shared.Info("registry: listening on %s", s.cfg.Addr)
+	logger.Info("registry: listening on %s", s.cfg.Addr)
 	srv := &http.Server{
 		Addr:    s.cfg.Addr,
 		Handler: s.Handler(),
@@ -181,8 +181,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		seenRequestIDs: map[int64]struct{}{},
 		lastProjectSeq: map[string]int64{},
 	}
-	shared.Info("registry: ws connected id=%s remote=%s", state.id, r.RemoteAddr)
-	defer shared.Info("registry: ws disconnected id=%s role=%s hub=%s remote=%s", state.id, state.role, state.hubID, r.RemoteAddr)
+	logger.Info("registry: ws connected id=%s remote=%s", state.id, r.RemoteAddr)
+	defer logger.Info("registry: ws disconnected id=%s role=%s hub=%s remote=%s", state.id, state.role, state.hubID, r.RemoteAddr)
 	defer s.unregisterHub(state.peer, state)
 	defer s.unregisterClient(state)
 	defer state.peer.dropAllPending()

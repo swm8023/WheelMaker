@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // ACPProcess is a transport-only subprocess channel for newline-delimited ACP JSON messages.
@@ -157,10 +157,10 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		shared.Error("[acp] ! {- -} stdout read failed: %v", err)
+		logger.Error("[acp] ! {- -} stdout read failed: %v", err)
 		return
 	}
-	shared.Error("[acp] ! {- -} process stdout closed")
+	logger.Error("[acp] ! {- -} process stdout closed")
 }
 
 func (p *ACPProcess) readStderrLoop(r io.Reader) {
@@ -173,7 +173,7 @@ func (p *ACPProcess) readStderrLoop(r io.Reader) {
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		shared.Error("[acp] ! {- -} stderr read failed: %v", err)
+		logger.Error("[acp] ! {- -} stderr read failed: %v", err)
 	}
 }
 
@@ -216,7 +216,7 @@ func (p *ACPProcess) markDone() {
 }
 
 func logACPDebugRaw(dir rune, raw []byte) {
-	shared.Debug("%s", formatACPLogLine(dir, raw))
+	logger.Debug("%s", formatACPLogLine(dir, raw))
 }
 
 func logACPStderrLine(line string) {
@@ -224,7 +224,7 @@ func logACPStderrLine(line string) {
 	if line == "" {
 		return
 	}
-	shared.Error("[acp] ! {- -} %s", string(redactAndTrimACPPayload([]byte(line))))
+	logger.Error("[acp] ! {- -} %s", string(redactAndTrimACPPayload([]byte(line))))
 }
 
 func (p *ACPProcess) setClosing(v bool) {

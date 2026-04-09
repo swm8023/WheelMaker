@@ -55,4 +55,3 @@ func TestDebugRotator_KeepSevenDays(t *testing.T) {
 		}
 	}
 }
-

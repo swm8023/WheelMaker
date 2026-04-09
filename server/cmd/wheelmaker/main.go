@@ -12,7 +12,7 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub"
 	"github.com/swm8023/wheelmaker/internal/registry"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 	"github.com/swm8023/wheelmaker/internal/shared/winsvc"
 )
 
@@ -93,41 +93,37 @@ func runHubWorker() error {
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
 	dbPath := filepath.Join(home, ".wheelmaker", "db", "client.sqlite3")
 
-	cfg, err := shared.LoadConfig(cfgPath)
+	cfg, err := logger.LoadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
 	hubLog := filepath.Join(wheelmakerLogDir(home), "hub.log")
-	hubDebugLog := filepath.Join(wheelmakerLogDir(home), "hub.debug.log")
-	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "hub.log"), hubLog)
-	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "hub.debug.log"), hubDebugLog)
 
-	if err := shared.Setup(shared.LoggerConfig{
-		Level:        shared.ParseLevel(cfg.Log.Level),
-		LogFile:      hubLog,
-		DebugLogFile: hubDebugLog,
+	if err := logger.Setup(logger.LoggerConfig{
+		Level:   logger.ParseLevel(cfg.Log.Level),
+		LogFile: hubLog,
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
-	defer shared.Close()
-	shared.Info("wheelmaker: hub worker start cfg=%s db=%s", cfgPath, dbPath)
+	defer logger.Close()
+	logger.Info("wheelmaker: hub worker start cfg=%s db=%s", cfgPath, dbPath)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	h := hub.New(cfg, dbPath)
 	if err := h.Start(ctx); err != nil {
-		shared.Error("wheelmaker: hub start failed err=%v", err)
+		logger.Error("wheelmaker: hub start failed err=%v", err)
 		return err
 	}
-	shared.Info("wheelmaker: hub started")
+	logger.Info("wheelmaker: hub started")
 	defer h.Close()
 
 	if err := h.Run(ctx); err != nil {
-		shared.Error("wheelmaker: hub run failed err=%v", err)
+		logger.Error("wheelmaker: hub run failed err=%v", err)
 		return err
 	}
-	shared.Info("wheelmaker: hub run exited")
+	logger.Info("wheelmaker: hub run exited")
 	return nil
 }
 
@@ -137,23 +133,19 @@ func runRegistryWorker() error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
-	cfg, err := shared.LoadConfig(cfgPath)
+	cfg, err := logger.LoadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
 	regLog := filepath.Join(wheelmakerLogDir(home), "registry.log")
-	regDebugLog := filepath.Join(wheelmakerLogDir(home), "registry.debug.log")
-	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "registry.log"), regLog)
-	_ = shared.MigrateLegacyLogFile(filepath.Join(home, ".wheelmaker", "registry.debug.log"), regDebugLog)
 
-	if err := shared.Setup(shared.LoggerConfig{
-		Level:        shared.ParseLevel(cfg.Log.Level),
-		LogFile:      regLog,
-		DebugLogFile: regDebugLog,
+	if err := logger.Setup(logger.LoggerConfig{
+		Level:   logger.ParseLevel(cfg.Log.Level),
+		LogFile: regLog,
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
-	defer shared.Close()
+	defer logger.Close()
 
 	host := cfg.Registry.Server
 	if host == "" {
@@ -167,16 +159,16 @@ func runRegistryWorker() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	shared.Info("wheelmaker: registry worker start addr=%s", addr)
+	logger.Info("wheelmaker: registry worker start addr=%s", addr)
 	s := registry.New(registry.Config{
 		Addr:  addr,
 		Token: cfg.Registry.Token,
 	})
 	if err := s.Run(ctx); err != nil {
-		shared.Error("wheelmaker: registry worker run failed err=%v", err)
+		logger.Error("wheelmaker: registry worker run failed err=%v", err)
 		return err
 	}
-	shared.Info("wheelmaker: registry worker exited")
+	logger.Info("wheelmaker: registry worker exited")
 	return nil
 }
 

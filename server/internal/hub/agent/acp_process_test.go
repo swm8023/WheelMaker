@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 func TestLogOutboundACPDebugLine(t *testing.T) {
 	debugLog := filepath.Join(t.TempDir(), "hub.debug.log")
-	if err := shared.Setup(shared.LoggerConfig{Level: shared.LevelDebug, DebugLogFile: debugLog}); err != nil {
+	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelDebug, DebugLogFile: debugLog}); err != nil {
 		t.Fatalf("setup logger: %v", err)
 	}
 
 	raw := []byte(`{"method":"session/prompt","params":{"sessionId":"sess-1","token":"abc"}}`)
 	logACPDebugRaw('>', raw)
-	shared.Close()
+	logger.Close()
 
 	data, err := os.ReadFile(debugLog)
 	if err != nil {
@@ -36,12 +36,12 @@ func TestLogOutboundACPDebugLine(t *testing.T) {
 
 func TestLogACPStderrLineAsError(t *testing.T) {
 	var buf bytes.Buffer
-	if err := shared.Setup(shared.LoggerConfig{Level: shared.LevelWarn}); err != nil {
+	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
 		t.Fatalf("setup logger: %v", err)
 	}
-	defer shared.Close()
-	shared.SetOutput(&buf)
-	defer shared.SetOutput(os.Stderr)
+	defer logger.Close()
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stderr)
 
 	logACPStderrLine("panic: worker crashed")
 	got := buf.String()

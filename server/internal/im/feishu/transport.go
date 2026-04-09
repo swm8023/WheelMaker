@@ -18,7 +18,7 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // streamThrottle is the minimum interval between card pushes for the same
@@ -269,7 +269,7 @@ func (f *transportChannel) armUnifiedTimer(chatID string, us *unifiedStream) {
 		us.timer = nil
 		if us.totalRunes > us.pushedRunes {
 			if err := f.pushUnifiedCardLocked(chatID, us, false); err != nil {
-				shared.Warn("feishu: deferred unified flush: %v", err)
+				logger.Warn("feishu: deferred unified flush: %v", err)
 			}
 		}
 	})
@@ -1575,10 +1575,10 @@ func decodeRawText(raw json.RawMessage) string {
 func (f *transportChannel) Run(ctx context.Context) error {
 	bot, err := f.ensureBot()
 	if err != nil {
-		shared.Error("feishu ws: bot init failed: %v", err)
+		logger.Error("feishu ws: bot init failed: %v", err)
 		return err
 	}
-	shared.Info("feishu ws: starting event loop app_id=%s", maskAppID(f.cfg.AppID))
+	logger.Info("feishu ws: starting event loop app_id=%s", maskAppID(f.cfg.AppID))
 	bot.StartHeartbeat()
 	defer bot.StopHeartbeat()
 
@@ -1593,18 +1593,18 @@ func (f *transportChannel) Run(ctx context.Context) error {
 		larkws.WithEventHandler(eventHandler),
 		larkws.WithLogLevel(larkcore.LogLevelInfo),
 	)
-	shared.Info("feishu ws: websocket client created, connecting")
+	logger.Info("feishu ws: websocket client created, connecting")
 
 	startErr := wsClient.Start(ctx)
 	switch classifyWSRunExit(ctx.Err(), startErr) {
 	case wsExitContextDone:
-		shared.Warn("feishu ws: stopped by context: %v", ctx.Err())
+		logger.Warn("feishu ws: stopped by context: %v", ctx.Err())
 		return nil
 	case wsExitStartFailed:
-		shared.Error("feishu ws: connection failed: %v", startErr)
+		logger.Error("feishu ws: connection failed: %v", startErr)
 		return finalizeWSRunError(ctx.Err(), startErr)
 	default:
-		shared.Warn("feishu ws: event loop exited without context cancellation")
+		logger.Warn("feishu ws: event loop exited without context cancellation")
 		return nil
 	}
 }
@@ -1670,7 +1670,7 @@ func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *lark
 		return nil
 	}
 	f.wsReadyOnce.Do(func() {
-		shared.Info("feishu ws: connected (inbound event stream active)")
+		logger.Info("feishu ws: connected (inbound event stream active)")
 	})
 	msg := event.Event.Message
 	if msg.ChatId == nil || msg.MessageId == nil {
@@ -1787,7 +1787,7 @@ func (f *transportChannel) handleCardAction(_ context.Context, event *callback.C
 		return &callback.CardActionTriggerResponse{}, nil
 	}
 	f.wsReadyOnce.Do(func() {
-		shared.Info("feishu ws: connected (card action stream active)")
+		logger.Info("feishu ws: connected (card action stream active)")
 	})
 	payload := event.Event
 	value := map[string]string{}

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 	"github.com/swm8023/wheelmaker/internal/shared/winsvc"
 )
 
@@ -54,16 +54,14 @@ func run() error {
 		*repo = cwd
 	}
 	logPath := updaterLogFilePath(stateDir)
-	_ = shared.MigrateLegacyLogFile(filepath.Join(stateDir, "updater.log"), logPath)
 
-	if err := shared.Setup(shared.LoggerConfig{
-		Level:        shared.LevelInfo,
-		LogFile:      logPath,
-		DebugLogFile: "",
+	if err := logger.Setup(logger.LoggerConfig{
+		Level:   logger.LevelInfo,
+		LogFile: logPath,
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
-	defer shared.Close()
+	defer logger.Close()
 
 	cfg := UpdaterConfig{
 		RepoDir:    *repo,

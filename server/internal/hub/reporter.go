@@ -25,7 +25,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
@@ -109,7 +109,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 func (r *Reporter) Run(ctx context.Context) error {
 	for {
 		if err := r.runSession(ctx); err != nil && ctx.Err() == nil {
-			shared.Warn("registry reporter: session ended: %v", err)
+			logger.Warn("registry reporter: session ended: %v", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -202,7 +202,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	shared.Info("hub registry: connecting to %s", wsURL)
+	logger.Info("hub registry: connecting to %s", wsURL)
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, nil)
 	if err != nil {
 		return fmt.Errorf("dial registry %s: %w", wsURL, err)
@@ -212,7 +212,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 	r.conn = conn
 	r.mu.Unlock()
 	defer r.clearConn(conn)
-	shared.Info("hub registry: connected to %s", wsURL)
+	logger.Info("hub registry: connected to %s", wsURL)
 	stop := make(chan struct{})
 	go func() {
 		select {
@@ -301,7 +301,7 @@ func (r *Reporter) runKeepalive(ctx context.Context, conn *websocket.Conn, done 
 			return
 		case <-ticker.C:
 			if err := r.sendHubPing(conn); err != nil {
-				shared.Warn("hub registry: ping failed: %v", err)
+				logger.Warn("hub registry: ping failed: %v", err)
 				_ = conn.Close()
 				return
 			}
@@ -377,7 +377,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	r.connectionEpoch = initResp.Principal.ConnectionEpoch
 	projects := append([]ProjectInfo(nil), r.projects...)
 	r.mu.Unlock()
-	shared.Info("hub registry: connect.init ok epoch=%d", initResp.Principal.ConnectionEpoch)
+	logger.Info("hub registry: connect.init ok epoch=%d", initResp.Principal.ConnectionEpoch)
 
 	if err := r.writeJSON(conn, "->", envelope{
 		RequestID: 2,
@@ -394,7 +394,7 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	if _, err := r.readAck(conn); err != nil {
 		return fmt.Errorf("registry.reportProjects failed: %w", err)
 	}
-	shared.Info("hub registry: reportProjects ok hubId=%s projects=%d", r.cfg.HubID, len(r.projects))
+	logger.Info("hub registry: reportProjects ok hubId=%s projects=%d", r.cfg.HubID, len(r.projects))
 	return nil
 }
 

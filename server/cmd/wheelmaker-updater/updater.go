@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	shared "github.com/swm8023/wheelmaker/internal/shared"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const updaterRetryDelay = 10 * time.Minute
@@ -64,23 +64,23 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 		return runUpdateRound(ctx, cfg, runner, false)
 	}
 
-	shared.Info("[updater] started daily schedule at %02d:%02d", hour, minute)
+	logger.Info("[updater] started daily schedule at %02d:%02d", hour, minute)
 	for {
 		next := nextRunTime(time.Now(), hour, minute)
-		shared.Info("[updater] next run at %s", next.Format(time.RFC3339))
+		logger.Info("[updater] next run at %s", next.Format(time.RFC3339))
 
 		triggerReason, waitErr := waitForTrigger(ctx, cfg.SignalFile, next)
 		if waitErr != nil {
 			return waitErr
 		}
-		shared.Info("[updater] trigger=%s", triggerReason)
+		logger.Info("[updater] trigger=%s", triggerReason)
 
 		skipUpdate := triggerReason == "manual-signal"
 		roundCtx, cancelRound := context.WithTimeout(ctx, updaterRoundTimeout)
 		err = runUpdateRound(roundCtx, cfg, runner, skipUpdate)
 		cancelRound()
 		if err != nil {
-			shared.Error("[updater] update round failed: %v", err)
+			logger.Error("[updater] update round failed: %v", err)
 			retry := time.NewTimer(updaterRetryDelay)
 			select {
 			case <-ctx.Done():
@@ -91,7 +91,7 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 				retryErr := runUpdateRound(retryCtx, cfg, runner, skipUpdate)
 				cancelRetry()
 				if retryErr != nil {
-					shared.Error("[updater] retry update round failed: %v", retryErr)
+					logger.Error("[updater] retry update round failed: %v", retryErr)
 				}
 			}
 		}
@@ -117,15 +117,15 @@ func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (str
 			if remaining < 0 {
 				remaining = 0
 			}
-			shared.Info("[updater] waiting for next run (remaining=%s)", remaining.String())
+			logger.Info("[updater] waiting for next run (remaining=%s)", remaining.String())
 		case <-ticker.C:
 			triggered, err := consumeManualSignal(signalPath)
 			if err != nil {
-				shared.Warn("[updater] manual trigger check failed: %v", err)
+				logger.Warn("[updater] manual trigger check failed: %v", err)
 				continue
 			}
 			if triggered {
-				shared.Info("[updater] manual trigger signal consumed: %s", signalPath)
+				logger.Info("[updater] manual trigger signal consumed: %s", signalPath)
 				return "manual-signal", nil
 			}
 		}
@@ -154,7 +154,7 @@ func consumeManualSignal(path string) (bool, error) {
 }
 
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner, skipUpdate bool) error {
-	shared.Info("[updater] run refresh script begin")
+	logger.Info("[updater] run refresh script begin")
 
 	refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
 	if _, err := os.Stat(refreshScript); err != nil {
@@ -172,14 +172,14 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 	if skipUpdate {
 		args = append(args, "-SkipUpdate")
 	}
-	shared.Info("[updater] invoke powershell %s", strings.Join(args, " "))
+	logger.Info("[updater] invoke powershell %s", strings.Join(args, " "))
 
 	_, err := runner.CombinedOutput(ctx, cfg.RepoDir, "powershell", args...)
 	if err != nil {
 		return err
 	}
 
-	shared.Info("[updater] run refresh script complete")
+	logger.Info("[updater] run refresh script complete")
 	return nil
 }
 
