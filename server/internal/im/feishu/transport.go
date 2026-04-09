@@ -54,6 +54,7 @@ type transportChannel struct {
 
 	textMu         sync.Mutex
 	unifiedStreams map[string]*unifiedStream
+	usageByChat    map[string]string // chatID -> latest context usage (set by usage_update)
 	toolMu         sync.Mutex
 	toolRenderMu   sync.Mutex
 	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -85,8 +86,17 @@ type streamSegment struct {
 	content string
 }
 
+type unifiedFooterState uint8
+
+const (
+	unifiedFooterNone unifiedFooterState = iota
+	unifiedFooterThinking
+	unifiedFooterDone
+)
+
 type unifiedStream struct {
 	messageID   string
+	startedAt   time.Time
 	segments    []streamSegment
 	totalRunes  int // running rune count across all segments
 	pushedRunes int // totalRunes at last push (dirty check)
@@ -132,6 +142,7 @@ func newTransport(cfg Config) *transportChannel {
 	t := &transportChannel{
 		cfg:            cfg,
 		unifiedStreams: map[string]*unifiedStream{},
+		usageByChat:    map[string]string{},
 		seenMessageID:  map[string]time.Time{},
 		toolCards:      map[string]map[string]*toolCardState{},
 		toolCompact:    map[string]*compactToolStream{},
@@ -183,7 +194,7 @@ func (f *transportChannel) sendText(chatID, text string) error {
 
 	us := f.unifiedStreams[chatID]
 	if us == nil {
-		us = &unifiedStream{}
+		us = &unifiedStream{startedAt: time.Now()}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -193,8 +204,8 @@ func (f *transportChannel) sendText(chatID, text string) error {
 			us.timer.Stop()
 			us.timer = nil
 		}
-		_ = f.pushUnifiedCardLocked(chatID, us, true)
-		us = &unifiedStream{}
+		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterThinking)
+		us = &unifiedStream{startedAt: time.Now()}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -223,7 +234,7 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 
 	us := f.unifiedStreams[chatID]
 	if us == nil {
-		us = &unifiedStream{}
+		us = &unifiedStream{startedAt: time.Now()}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -232,8 +243,8 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 			us.timer.Stop()
 			us.timer = nil
 		}
-		_ = f.pushUnifiedCardLocked(chatID, us, true)
-		us = &unifiedStream{}
+		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterThinking)
+		us = &unifiedStream{startedAt: time.Now()}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -277,7 +288,7 @@ func (f *transportChannel) armUnifiedTimer(chatID string, us *unifiedStream) {
 		defer f.textMu.Unlock()
 		us.timer = nil
 		if us.totalRunes > us.pushedRunes {
-			if err := f.pushUnifiedCardLocked(chatID, us, false); err != nil {
+			if err := f.pushUnifiedCardLocked(chatID, us, false, unifiedFooterThinking); err != nil {
 				logger.Warn("feishu: deferred unified flush: %v", err)
 			}
 		}
@@ -286,7 +297,7 @@ func (f *transportChannel) armUnifiedTimer(chatID string, us *unifiedStream) {
 
 // pushUnifiedCardLocked builds and posts/updates the unified card.
 // Must be called with f.textMu held.
-func (f *transportChannel) pushUnifiedCardLocked(chatID string, us *unifiedStream, done bool) error {
+func (f *transportChannel) pushUnifiedCardLocked(chatID string, us *unifiedStream, done bool, footerState unifiedFooterState) error {
 	if len(us.segments) == 0 {
 		return nil
 	}
@@ -294,6 +305,7 @@ func (f *transportChannel) pushUnifiedCardLocked(chatID string, us *unifiedStrea
 	if card == nil {
 		return nil
 	}
+	appendUnifiedFooter(card, f.buildUnifiedFooterLine(chatID, us, footerState))
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal unified card: %w", err)
@@ -352,7 +364,7 @@ func (f *transportChannel) flushPendingStreams(chatID string) {
 		us.timer.Stop()
 		us.timer = nil
 	}
-	_ = f.pushUnifiedCardLocked(chatID, us, true)
+	_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterDone)
 }
 
 func (f *transportChannel) sendSystem(chatID, text string) error {
@@ -400,7 +412,7 @@ func (f *transportChannel) finalizeUnifiedStream(chatID string) {
 		us.timer.Stop()
 		us.timer = nil
 	}
-	_ = f.pushUnifiedCardLocked(chatID, us, true)
+	_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterThinking)
 	delete(f.unifiedStreams, chatID)
 }
 
@@ -415,6 +427,7 @@ func (f *transportChannel) resetUnifiedStream(chatID string) {
 		us.timer = nil
 	}
 	delete(f.unifiedStreams, chatID)
+	delete(f.usageByChat, chatID)
 	f.textMu.Unlock()
 }
 
@@ -604,12 +617,30 @@ func (f *transportChannel) SendReaction(messageID, emoji string) error {
 	return err
 }
 
+// SetUsage stores the latest usage text for this chat and defers rendering
+// until the final unified card update before DONE reaction.
+func (f *transportChannel) SetUsage(chatID, usage string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	usage = strings.TrimSpace(usage)
+	f.textMu.Lock()
+	if usage == "" {
+		delete(f.usageByChat, chatID)
+	} else {
+		f.usageByChat[chatID] = usage
+	}
+	f.textMu.Unlock()
+}
+
 // MarkDone adds DONE reaction to the last outbound message in this chat.
 func (f *transportChannel) MarkDone(chatID string) error {
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return nil
 	}
+	defer f.clearUsage(chatID)
 	// Flush any throttled stream content before marking done.
 	f.flushPendingStreams(chatID)
 	messageID := f.getLastOutbound(chatID)
@@ -617,6 +648,16 @@ func (f *transportChannel) MarkDone(chatID string) error {
 		return nil
 	}
 	return f.SendReaction(messageID, "DONE")
+}
+
+func (f *transportChannel) clearUsage(chatID string) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return
+	}
+	f.textMu.Lock()
+	delete(f.usageByChat, chatID)
+	f.textMu.Unlock()
 }
 
 func (f *transportChannel) addReceiveAck(chatID, messageID string) {
@@ -1027,7 +1068,7 @@ func (f *transportChannel) sendToolCallCompact(chatID string, update ToolCallUpd
 			us.timer.Stop()
 			us.timer = nil
 		}
-		_ = f.pushUnifiedCardLocked(chatID, us, true)
+		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterThinking)
 	}
 	delete(f.unifiedStreams, chatID)
 	f.textMu.Unlock()
@@ -1103,6 +1144,73 @@ func (f *transportChannel) sendToolCallCompact(chatID string, update ToolCallUpd
 		f.toolMu.Unlock()
 	}
 	return nil
+}
+
+func (f *transportChannel) buildUnifiedFooterLine(chatID string, us *unifiedStream, state unifiedFooterState) string {
+	if us == nil || state == unifiedFooterNone {
+		return ""
+	}
+	chatID = strings.TrimSpace(chatID)
+	startedAt := us.startedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
+	stateLabel := "思考中"
+	if state == unifiedFooterDone {
+		stateLabel = "已完成"
+	}
+	parts := []string{
+		stateLabel,
+		"耗时 " + formatUnifiedElapsed(time.Since(startedAt)),
+	}
+	if state == unifiedFooterDone {
+		if usage := strings.TrimSpace(f.usageByChat[chatID]); usage != "" {
+			parts = append(parts, usage)
+		}
+	}
+	return strings.Join(parts, " · ")
+}
+
+func appendUnifiedFooter(card RawCard, footer string) {
+	footer = strings.TrimSpace(footer)
+	if card == nil || footer == "" {
+		return
+	}
+	body, ok := card["body"].(map[string]any)
+	if !ok {
+		return
+	}
+	elements, ok := body["elements"].([]map[string]any)
+	if !ok {
+		return
+	}
+	elements = append(elements, map[string]any{
+		"tag":     "markdown",
+		"content": footer,
+	})
+	body["elements"] = elements
+	card["body"] = body
+}
+
+func formatUnifiedElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	seconds := int(d.Round(time.Second).Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+	hours := seconds / 3600
+	minutes := (seconds % 3600) / 60
+	secs := seconds % 60
+	switch {
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm %ds", hours, minutes, secs)
+	case minutes > 0:
+		return fmt.Sprintf("%dm %ds", minutes, secs)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
 }
 
 func compactToolLines(stream *compactToolStream) []string {

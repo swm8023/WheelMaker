@@ -25,6 +25,7 @@ type fakeTransport struct {
 	sends    []fakeSend
 	cards    []fakeCard
 	done     []string
+	usage    map[string]string
 	nextCard int
 }
 
@@ -63,6 +64,13 @@ func (f *fakeTransport) SendCard(chatID, messageID string, card Card) (string, e
 }
 
 func (f *fakeTransport) SendReaction(_, _ string) error { return nil }
+
+func (f *fakeTransport) SetUsage(chatID, usage string) {
+	if f.usage == nil {
+		f.usage = map[string]string{}
+	}
+	f.usage[chatID] = usage
+}
 
 func (f *fakeTransport) MarkDone(chatID string) error {
 	f.done = append(f.done, chatID)
@@ -421,9 +429,12 @@ func TestPublishSessionUpdate_UsageUpdateDoesNotSyncRealtime(t *testing.T) {
 	if len(ft.cards) != 0 || len(ft.sends) != 0 {
 		t.Fatalf("usage update should not sync in realtime, sends=%+v cards=%+v", ft.sends, ft.cards)
 	}
+	if got := ft.usage["chat-a"]; got != "context usage 71%" {
+		t.Fatalf("usage=%q, want context usage 71%%", got)
+	}
 }
 
-func TestPublishPromptResult_AppendsPendingUsageBeforeDone(t *testing.T) {
+func TestPublishPromptResult_EndTurnDoesNotAppendUsageText(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
 	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
@@ -444,11 +455,8 @@ func TestPublishPromptResult_AppendsPendingUsageBeforeDone(t *testing.T) {
 	if err := ch.PublishPromptResult(context.Background(), target, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}); err != nil {
 		t.Fatalf("PublishPromptResult(end_turn): %v", err)
 	}
-	if len(ft.sends) != 1 {
-		t.Fatalf("sends=%+v, want 1", ft.sends)
-	}
-	if ft.sends[0].kind != TextNormal || ft.sends[0].text != "\ncontext usage 71%" {
-		t.Fatalf("usage append send=%+v", ft.sends[0])
+	if len(ft.sends) != 0 {
+		t.Fatalf("end_turn should not append usage text via channel, sends=%+v", ft.sends)
 	}
 	if len(ft.done) != 1 || ft.done[0] != "chat-a" {
 		t.Fatalf("done=%+v", ft.done)
@@ -475,5 +483,8 @@ func TestPublishSessionUpdate_BlockUsageAtChannelLevel(t *testing.T) {
 	}
 	if len(ft.cards) != 0 || len(ft.sends) != 0 {
 		t.Fatalf("usage update should be filtered by feishu channel, sends=%+v cards=%+v", ft.sends, ft.cards)
+	}
+	if len(ft.usage) != 0 {
+		t.Fatalf("usage update should be filtered by feishu channel, usage=%+v", ft.usage)
 	}
 }
