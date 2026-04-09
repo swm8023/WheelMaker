@@ -557,16 +557,24 @@ func (s *Session) handlePrompt(text string) {
 		}
 
 		if err := s.ensureReadyAndNotify(ctx); err != nil {
+			if attempt == 1 && isAgentRecoverableRuntimeErr(err) {
+				s.reply("Agent init failed transiently, reconnecting and retrying once...")
+				s.forceReconnect()
+				continue
+			}
 			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 			return
 		}
 
 		updates, err := s.promptStream(ctx, text)
 		if err != nil {
-			// Keepalive: recover dead agent subprocess and retry current prompt once.
-			if s.resetDeadConnection(err) && attempt == 1 {
+			if attempt == 1 && isAgentRecoverableRuntimeErr(err) {
 				s.reply("Agent disconnected, reconnecting and retrying once...")
+				s.forceReconnect()
 				continue
+			}
+			if isAgentExitError(err) {
+				_ = s.resetDeadConnection(err)
 			}
 			s.reply(fmt.Sprintf("Prompt error: %v", err))
 			return
@@ -603,7 +611,7 @@ func (s *Session) handlePrompt(text string) {
 						retryStream = true
 						break
 					}
-					if attempt == 1 && !sawText && (isAgentExitError(u.Err) || isSandboxRefreshErr(u.Err)) {
+					if attempt == 1 && !sawText && isAgentRecoverableRuntimeErr(u.Err) {
 						s.reply("Agent disconnected during stream, reconnecting and retrying once...")
 						s.forceReconnect()
 						retryStream = true
@@ -779,10 +787,27 @@ func isAgentExitError(err error) bool {
 	if s == "" {
 		return false
 	}
+	// Network handshake EOF from remote APIs does not necessarily imply the local ACP
+	// subprocess died; treat it as non-exit so we don't restart blindly.
+	if strings.Contains(s, "tls handshake eof") {
+		return false
+	}
+	if s == "eof" || strings.HasSuffix(s, ": eof") {
+		return true
+	}
 	return strings.Contains(s, "agent process exited") ||
+		strings.Contains(s, "process exited") ||
+		strings.Contains(s, "conn is closed") ||
 		strings.Contains(s, "broken pipe") ||
 		strings.Contains(s, "connection reset") ||
-		strings.Contains(s, "eof")
+		strings.Contains(s, "process stdout closed")
+}
+
+func isAgentRecoverableRuntimeErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return isAgentExitError(err) || isSandboxRefreshErr(err)
 }
 
 func isCopilotReasoningArgError(err error) bool {

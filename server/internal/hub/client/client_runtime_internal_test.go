@@ -429,6 +429,25 @@ func TestIsAgentExitError(t *testing.T) {
 	}
 }
 
+func TestIsAgentExitError_TLSHandshakeEOFFalse(t *testing.T) {
+	err := errors.New("failed to connect to websocket: IO error: tls handshake eof")
+	if isAgentExitError(err) {
+		t.Fatal("tls handshake eof should not be treated as local agent process exit")
+	}
+}
+
+func TestIsAgentRecoverableRuntimeErr(t *testing.T) {
+	if !isAgentRecoverableRuntimeErr(errors.New("agent owned conn: process exited")) {
+		t.Fatal("expected process-exit error to be recoverable")
+	}
+	if !isAgentRecoverableRuntimeErr(errors.New("windows sandbox: spawn setup refresh")) {
+		t.Fatal("expected sandbox refresh error to be recoverable")
+	}
+	if isAgentRecoverableRuntimeErr(errors.New("selected model is at capacity")) {
+		t.Fatal("capacity error should not be treated as recoverable runtime error")
+	}
+}
+
 func TestHasSandboxRefreshError(t *testing.T) {
 	u := acp.Update{Type: acp.UpdateToolCall, Content: "tool failed: windows sandbox: spawn setup refresh"}
 	if !hasSandboxRefreshError(u) {
