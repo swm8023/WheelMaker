@@ -24,7 +24,7 @@ var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 type promptState struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	updatesCh chan<- acp.Update
+	updatesCh chan<- acp.SessionUpdateParams
 	currentCh <-chan acp.Update // tracked for draining during switchAgent
 	activeTCs map[string]struct{}
 }

@@ -580,7 +580,7 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 	s.mu.Unlock()
 
 	updates := make(chan acp.Update, 32)
-	interceptCh := make(chan acp.Update, 32)
+	interceptCh := make(chan acp.SessionUpdateParams, 32)
 
 	s.mu.Lock()
 	s.prompt.updatesCh = interceptCh
@@ -613,7 +613,42 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 			resultCh <- promptResult{result: res, err: err}
 		}()
 
-		drain := func(u acp.Update) bool {
+		drain := func(params acp.SessionUpdateParams) bool {
+			update := params.Update
+			u := acp.Update{}
+			switch update.SessionUpdate {
+			case acp.SessionUpdateAgentMessageChunk:
+				var content acp.ContentBlock
+				if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil && content.Type == acp.ContentBlockTypeText {
+					u = acp.Update{Type: acp.UpdateText, Content: content.Text}
+				} else {
+					u = acp.Update{Type: acp.UpdateText}
+				}
+			case acp.SessionUpdateUserMessageChunk:
+				u = acp.Update{Type: acp.UpdateUserChunk}
+			case acp.SessionUpdateAgentThoughtChunk:
+				var content acp.ContentBlock
+				if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil {
+					u = acp.Update{Type: acp.UpdateThought, Content: content.Text}
+				} else {
+					u = acp.Update{Type: acp.UpdateThought}
+				}
+			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+				raw, _ := json.Marshal(update)
+				u = acp.Update{Type: acp.UpdateToolCall, Raw: raw}
+			case acp.SessionUpdatePlan:
+				raw, _ := json.Marshal(update)
+				u = acp.Update{Type: acp.UpdatePlan, Raw: raw}
+			case acp.SessionUpdateConfigOptionUpdate:
+				raw, _ := json.Marshal(update)
+				u = acp.Update{Type: acp.UpdateConfigOption, Raw: raw}
+			case acp.SessionUpdateCurrentModeUpdate:
+				raw, _ := json.Marshal(update)
+				u = acp.Update{Type: acp.UpdateModeChange, Raw: raw}
+			default:
+				raw, _ := json.Marshal(update)
+				u = acp.Update{Type: acp.UpdateType(update.SessionUpdate), Raw: raw}
+			}
 			if u.Type == acp.UpdateText {
 				replyMu.Lock()
 				replyBuf.WriteString(u.Content)
@@ -700,7 +735,14 @@ func (s *Session) cancelPrompt() error {
 	}
 
 	for _, id := range cancelIDs {
-		u := acp.Update{Type: acp.UpdateToolCallCancelled, Content: id}
+		u := acp.SessionUpdateParams{
+			SessionID: sessID,
+			Update: acp.SessionUpdate{
+				SessionUpdate: acp.SessionUpdateToolCallUpdate,
+				ToolCallID:    id,
+				Status:        "cancelled",
+			},
+		}
 		if ch != nil {
 			select {
 			case ch <- u:
@@ -811,40 +853,6 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	}
 
 	update := params.Update
-	parsedUpdate := acp.Update{}
-	switch update.SessionUpdate {
-	case acp.SessionUpdateAgentMessageChunk:
-		var content acp.ContentBlock
-		if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil && content.Type == acp.ContentBlockTypeText {
-			parsedUpdate = acp.Update{Type: acp.UpdateText, Content: content.Text}
-		} else {
-			parsedUpdate = acp.Update{Type: acp.UpdateText}
-		}
-	case acp.SessionUpdateUserMessageChunk:
-		parsedUpdate = acp.Update{Type: acp.UpdateUserChunk}
-	case acp.SessionUpdateAgentThoughtChunk:
-		var content acp.ContentBlock
-		if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil {
-			parsedUpdate = acp.Update{Type: acp.UpdateThought, Content: content.Text}
-		} else {
-			parsedUpdate = acp.Update{Type: acp.UpdateThought}
-		}
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		raw, _ := json.Marshal(update)
-		parsedUpdate = acp.Update{Type: acp.UpdateToolCall, Raw: raw}
-	case acp.SessionUpdatePlan:
-		raw, _ := json.Marshal(update)
-		parsedUpdate = acp.Update{Type: acp.UpdatePlan, Raw: raw}
-	case acp.SessionUpdateConfigOptionUpdate:
-		raw, _ := json.Marshal(update)
-		parsedUpdate = acp.Update{Type: acp.UpdateConfigOption, Raw: raw}
-	case acp.SessionUpdateCurrentModeUpdate:
-		raw, _ := json.Marshal(update)
-		parsedUpdate = acp.Update{Type: acp.UpdateModeChange, Raw: raw}
-	default:
-		raw, _ := json.Marshal(update)
-		parsedUpdate = acp.Update{Type: acp.UpdateType(update.SessionUpdate), Raw: raw}
-	}
 
 	changed := false
 	if update.SessionUpdate == acp.SessionUpdateAvailableCommandsUpdate ||
@@ -902,13 +910,13 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	}
 	if promptCtx == nil {
 		select {
-		case ch <- parsedUpdate:
+		case ch <- params:
 		default:
 		}
 		return
 	}
 	select {
-	case ch <- parsedUpdate:
+	case ch <- params:
 	case <-promptCtx.Done():
 	}
 }

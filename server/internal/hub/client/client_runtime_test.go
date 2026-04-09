@@ -667,8 +667,8 @@ func TestSessionUpdate_NoPromptContext_DoesNotBlockWhenChannelFull(t *testing.T)
 	s := newSession("sess", "/tmp")
 	content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: "chunk"})
 
-	ch := make(chan acp.Update, 1)
-	ch <- acp.Update{Type: acp.UpdateText, Content: "prefill"}
+	ch := make(chan acp.SessionUpdateParams, 1)
+	ch <- acp.SessionUpdateParams{SessionID: "acp-1", Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk}}
 
 	s.mu.Lock()
 	s.acpSessionID = "acp-1"
