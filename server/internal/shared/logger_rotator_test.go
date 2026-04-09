@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestDebugRotator_RotateOnDayChange(t *testing.T) {
+func TestLoggerDebugRotator_RotateOnDayChange(t *testing.T) {
 	base := t.TempDir()
 	path := filepath.Join(base, "hub.debug.log")
 
@@ -29,7 +29,7 @@ func TestDebugRotator_RotateOnDayChange(t *testing.T) {
 	}
 }
 
-func TestDebugRotator_KeepSevenDays(t *testing.T) {
+func TestLoggerDebugRotator_KeepSevenDays(t *testing.T) {
 	base := t.TempDir()
 	path := filepath.Join(base, "hub.debug.log")
 	now := time.Date(2026, 4, 8, 0, 0, 0, 0, time.UTC)
