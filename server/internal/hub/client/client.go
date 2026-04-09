@@ -518,9 +518,46 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 	return
 }
 
+func normalizeSessionPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]acp.ContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		kind := strings.TrimSpace(block.Type)
+		if kind == "" {
+			continue
+		}
+		if kind == acp.ContentBlockTypeText {
+			text := strings.TrimSpace(block.Text)
+			if text == "" {
+				continue
+			}
+			block.Text = text
+		}
+		block.Type = kind
+		out = append(out, block)
+	}
+	return out
+}
+
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
 // promptMu is held for the full duration, serializing with switchAgent.
 func (s *Session) handlePrompt(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	s.handlePromptBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}})
+}
+
+// handlePromptBlocks sends content blocks to the active (or lazily initialized) session.
+// promptMu is held for the full duration, serializing with switchAgent.
+func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
+	blocks = normalizeSessionPromptBlocks(blocks)
+	if len(blocks) == 0 {
+		return
+	}
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 
@@ -542,7 +579,7 @@ func (s *Session) handlePrompt(text string) {
 			return
 		}
 
-		updates, err := s.promptStream(ctx, text)
+		updates, err := s.promptStream(ctx, blocks)
 		if err != nil {
 			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
 				s.reply("Agent disconnected, reconnecting and retrying once...")

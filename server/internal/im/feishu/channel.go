@@ -34,15 +34,16 @@ type PendingPermission struct {
 type Channel struct {
 	inner transport
 
-	mu                 sync.Mutex
-	blockedUpdates     map[string]struct{}
-	onPrompt           func(context.Context, im.ChatRef, acp.SessionPromptParams) error
-	onCommand          func(context.Context, im.ChatRef, im.Command) error
-	onPermissionResult func(context.Context, im.ChatRef, int64, acp.PermissionResponse) error
-	pendingByRequestID map[int64]PendingPermission
-	pendingByChat      map[string]PendingPermission
-	helpCards          map[string]string
-	closed             map[int64]time.Time
+	mu                  sync.Mutex
+	blockedUpdates      map[string]struct{}
+	onPrompt            func(context.Context, im.ChatRef, acp.SessionPromptParams) error
+	onCommand           func(context.Context, im.ChatRef, im.Command) error
+	onPermissionResult  func(context.Context, im.ChatRef, int64, acp.PermissionResponse) error
+	pendingByRequestID  map[int64]PendingPermission
+	pendingByChat       map[string]PendingPermission
+	helpCards           map[string]string
+	pendingPromptByChat map[string][]acp.ContentBlock
+	closed              map[int64]time.Time
 }
 
 func New(cfg Config) *Channel {
@@ -55,12 +56,13 @@ func newWithTransport(inner transport) *Channel {
 
 func newWithTransportConfig(inner transport, cfg Config) *Channel {
 	c := &Channel{
-		inner:              inner,
-		blockedUpdates:     buildBlockedUpdates(cfg.BlockedUpdates),
-		pendingByRequestID: map[int64]PendingPermission{},
-		pendingByChat:      map[string]PendingPermission{},
-		helpCards:          map[string]string{},
-		closed:             map[int64]time.Time{},
+		inner:               inner,
+		blockedUpdates:      buildBlockedUpdates(cfg.BlockedUpdates),
+		pendingByRequestID:  map[int64]PendingPermission{},
+		pendingByChat:       map[string]PendingPermission{},
+		helpCards:           map[string]string{},
+		pendingPromptByChat: map[string][]acp.ContentBlock{},
+		closed:              map[int64]time.Time{},
 	}
 	inner.OnMessage(c.handleMessage)
 	inner.OnCardAction(c.handleCardAction)
@@ -241,32 +243,131 @@ func (c *Channel) handleMessage(m Message) {
 	if c.resolvePermissionText(m) {
 		return
 	}
-	text := strings.TrimSpace(m.Text)
-	if text == "" {
-		return
-	}
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: strings.TrimSpace(m.ChatID)}
 	if source.ChatID == "" {
 		return
 	}
-	if cmd, ok := im.ParseCommand(text); ok {
-		c.mu.Lock()
-		handler := c.onCommand
-		c.mu.Unlock()
-		if handler != nil {
-			_ = handler(context.Background(), source, cmd)
-		}
+	blocks := normalizePromptBlocks(m)
+	if len(blocks) == 0 {
 		return
+	}
+	if text, ok := singleTextPrompt(blocks); ok {
+		if cmd, parsed := im.ParseCommand(text); parsed {
+			c.mu.Lock()
+			handler := c.onCommand
+			c.mu.Unlock()
+			if handler != nil {
+				_ = handler(context.Background(), source, cmd)
+			}
+			return
+		}
+	}
+	if !hasTextPromptBlock(blocks) {
+		c.cachePendingPromptBlocks(source.ChatID, blocks)
+		return
+	}
+	prefix := c.takePendingPromptBlocks(source.ChatID)
+	if len(prefix) > 0 {
+		merged := make([]acp.ContentBlock, 0, len(prefix)+len(blocks))
+		merged = append(merged, prefix...)
+		merged = append(merged, blocks...)
+		blocks = merged
 	}
 
 	c.mu.Lock()
 	handler := c.onPrompt
 	c.mu.Unlock()
 	if handler != nil {
-		_ = handler(context.Background(), source, acp.SessionPromptParams{
-			Prompt: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}},
-		})
+		_ = handler(context.Background(), source, acp.SessionPromptParams{Prompt: blocks})
 	}
+}
+
+func normalizePromptBlocks(m Message) []acp.ContentBlock {
+	if len(m.Prompt) == 0 {
+		text := strings.TrimSpace(m.Text)
+		if text == "" {
+			return nil
+		}
+		return []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}}
+	}
+	blocks := make([]acp.ContentBlock, 0, len(m.Prompt))
+	for _, block := range m.Prompt {
+		kind := strings.TrimSpace(block.Type)
+		if kind == "" {
+			continue
+		}
+		if kind == acp.ContentBlockTypeText {
+			text := strings.TrimSpace(block.Text)
+			if text == "" {
+				continue
+			}
+			block.Text = text
+		}
+		blocks = append(blocks, block)
+	}
+	if len(blocks) == 0 {
+		text := strings.TrimSpace(m.Text)
+		if text == "" {
+			return nil
+		}
+		return []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}}
+	}
+	return blocks
+}
+
+func singleTextPrompt(blocks []acp.ContentBlock) (string, bool) {
+	if len(blocks) != 1 || blocks[0].Type != acp.ContentBlockTypeText {
+		return "", false
+	}
+	text := strings.TrimSpace(blocks[0].Text)
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+func hasTextPromptBlock(blocks []acp.ContentBlock) bool {
+	for _, block := range blocks {
+		if block.Type == acp.ContentBlockTypeText && strings.TrimSpace(block.Text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Channel) cachePendingPromptBlocks(chatID string, blocks []acp.ContentBlock) {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" || len(blocks) == 0 {
+		return
+	}
+	copied := make([]acp.ContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if block.Type != acp.ContentBlockTypeText {
+			copied = append(copied, block)
+		}
+	}
+	if len(copied) == 0 {
+		return
+	}
+	c.mu.Lock()
+	c.pendingPromptByChat[chatID] = append(c.pendingPromptByChat[chatID], copied...)
+	c.mu.Unlock()
+}
+
+func (c *Channel) takePendingPromptBlocks(chatID string) []acp.ContentBlock {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	blocks := c.pendingPromptByChat[chatID]
+	if len(blocks) == 0 {
+		return nil
+	}
+	copied := append([]acp.ContentBlock(nil), blocks...)
+	delete(c.pendingPromptByChat, chatID)
+	return copied
 }
 
 func (c *Channel) handleCardAction(evt CardActionEvent) {
@@ -391,6 +492,10 @@ func (c *Channel) handleHelpOptionAction(evt CardActionEvent) {
 }
 
 func (c *Channel) resolvePermissionText(m Message) bool {
+	text := strings.TrimSpace(m.Text)
+	if text == "" {
+		return false
+	}
 	chatID := strings.TrimSpace(m.ChatID)
 	if chatID == "" {
 		return false
@@ -411,7 +516,7 @@ func (c *Channel) resolvePermissionText(m Message) bool {
 	handler := c.onPermissionResult
 	c.mu.Unlock()
 	if handler != nil {
-		_ = handler(context.Background(), im.ChatRef{ChannelID: c.ID(), ChatID: chatID}, pending.RequestID, parsePermissionReply(strings.TrimSpace(m.Text), pending.Options))
+		_ = handler(context.Background(), im.ChatRef{ChannelID: c.ID(), ChatID: chatID}, pending.RequestID, parsePermissionReply(text, pending.Options))
 	}
 	return true
 }

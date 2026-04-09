@@ -2,8 +2,11 @@ package feishu
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-lark/lark"
+	larkoapi "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
@@ -44,6 +48,9 @@ type transportChannel struct {
 	handler MessageHandler
 	action  func(CardActionEvent)
 	bot     *lark.Bot
+	api     *larkoapi.Client
+
+	imageFetcher func(context.Context, string, string) (acp.ContentBlock, error)
 
 	textMu         sync.Mutex
 	unifiedStreams map[string]*unifiedStream
@@ -122,7 +129,7 @@ type pendingAckReaction struct {
 
 // New creates a Feishu IM adapter.
 func newTransport(cfg Config) *transportChannel {
-	return &transportChannel{
+	t := &transportChannel{
 		cfg:            cfg,
 		unifiedStreams: map[string]*unifiedStream{},
 		seenMessageID:  map[string]time.Time{},
@@ -131,6 +138,8 @@ func newTransport(cfg Config) *transportChannel {
 		pendingAck:     map[string]pendingAckReaction{},
 		lastOutbound:   map[string]string{},
 	}
+	t.imageFetcher = t.fetchImageBlock
+	return t
 }
 
 // OnMessage registers the inbound message handler.
@@ -1139,7 +1148,7 @@ func buildCompactToolCard(lines []string, transcript string, streaming bool) Raw
 	if strings.TrimSpace(transcript) == "" {
 		transcript = "<no output>"
 	}
-	content := "```text\n" + transcript + "\n```"
+	content := "``	ext\n" + transcript + "\n```"
 	elements := []map[string]any{
 		{"tag": "markdown", "content": content},
 	}
@@ -1241,7 +1250,7 @@ func buildToolCallCard(chatID string, update ToolCallUpdate, perm *toolPermissio
 
 	content := toolCallDetailBlock(update)
 	elements := []map[string]any{
-		{"tag": "markdown", "content": "```text\n" + content + "\n```"},
+		{"tag": "markdown", "content": "``	ext\n" + content + "\n```"},
 	}
 	if perm != nil {
 		if perm.active && len(perm.options) > 0 {
@@ -1665,7 +1674,188 @@ func (f *transportChannel) ensureBot() (*lark.Bot, error) {
 	return bot, nil
 }
 
-func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *larkim.P2MessageReceiveV1) error {
+func (f *transportChannel) ensureOpenAPIClient() (*larkoapi.Client, error) {
+	f.mu.RLock()
+	if f.api != nil {
+		cli := f.api
+		f.mu.RUnlock()
+		return cli, nil
+	}
+	f.mu.RUnlock()
+
+	if strings.TrimSpace(f.cfg.AppID) == "" || strings.TrimSpace(f.cfg.AppSecret) == "" {
+		return nil, fmt.Errorf("feishu: app id/secret required")
+	}
+
+	cli := larkoapi.NewClient(
+		f.cfg.AppID,
+		f.cfg.AppSecret,
+		larkoapi.WithLogLevel(larkcore.LogLevelWarn),
+	)
+	f.mu.Lock()
+	if f.api == nil {
+		f.api = cli
+	}
+	out := f.api
+	f.mu.Unlock()
+	return out, nil
+}
+
+func (f *transportChannel) parseMessagePromptBlocks(ctx context.Context, messageID string, msgType *string, content *string) []acp.ContentBlock {
+	if msgType == nil || content == nil {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(*msgType)) {
+	case "text":
+		text := parseMessageText(msgType, content)
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		return []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}}
+	case "image":
+		imageKey := parseMessageImageKey(content)
+		if imageKey == "" {
+			return nil
+		}
+		fetcher := f.imageFetcher
+		if fetcher == nil {
+			return nil
+		}
+		block, err := fetcher(ctx, messageID, imageKey)
+		if err != nil {
+			logger.Warn("feishu: fetch inbound image failed message=%s image=%s err=%v", messageID, imageKey, err)
+			return nil
+		}
+		return []acp.ContentBlock{block}
+	default:
+		return nil
+	}
+}
+
+func parseMessageImageKey(content *string) string {
+	if content == nil {
+		return ""
+	}
+	var payload struct {
+		ImageKey string `json:"image_key"`
+		FileKey  string `json:"file_key"`
+	}
+	if err := json.Unmarshal([]byte(*content), &payload); err != nil {
+		return ""
+	}
+	if key := strings.TrimSpace(payload.ImageKey); key != "" {
+		return key
+	}
+	return strings.TrimSpace(payload.FileKey)
+}
+
+func (f *transportChannel) fetchImageBlock(ctx context.Context, messageID, imageKey string) (acp.ContentBlock, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	data, mimeType, err := f.downloadMessageImage(ctx, messageID, imageKey)
+	if err != nil {
+		return acp.ContentBlock{}, err
+	}
+	if len(data) == 0 {
+		return acp.ContentBlock{}, fmt.Errorf("feishu: image payload is empty")
+	}
+	mimeType = normalizeContentType(mimeType)
+	if mimeType == "" {
+		mimeType = normalizeContentType(http.DetectContentType(data))
+	}
+	if !strings.HasPrefix(mimeType, "image/") {
+		mimeType = "image/png"
+	}
+	return acp.ContentBlock{
+		Type:     acp.ContentBlockTypeImage,
+		MimeType: mimeType,
+		Data:     base64.StdEncoding.EncodeToString(data),
+	}, nil
+}
+
+func (f *transportChannel) downloadMessageImage(ctx context.Context, messageID, imageKey string) ([]byte, string, error) {
+	if data, mimeType, err := f.fetchImageViaMessageResource(ctx, messageID, imageKey); err == nil {
+		return data, mimeType, nil
+	}
+	if data, mimeType, err := f.fetchImageViaImageAPI(ctx, imageKey); err == nil {
+		return data, mimeType, nil
+	}
+	return nil, "", fmt.Errorf("feishu: unable to download image key=%s", strings.TrimSpace(imageKey))
+}
+
+func (f *transportChannel) fetchImageViaMessageResource(ctx context.Context, messageID, imageKey string) ([]byte, string, error) {
+	if strings.TrimSpace(messageID) == "" {
+		return nil, "", fmt.Errorf("message id is empty")
+	}
+	if strings.TrimSpace(imageKey) == "" {
+		return nil, "", fmt.Errorf("image key is empty")
+	}
+	cli, err := f.ensureOpenAPIClient()
+	if err != nil {
+		return nil, "", err
+	}
+	req := larkim.NewGetMessageResourceReqBuilder().
+		MessageId(strings.TrimSpace(messageID)).
+		FileKey(strings.TrimSpace(imageKey)).
+		Type("image").
+		Build()
+	resp, err := cli.Im.V1.MessageResource.Get(ctx, req)
+	if err != nil {
+		return nil, "", err
+	}
+	if resp == nil || resp.File == nil {
+		return nil, "", fmt.Errorf("empty response file")
+	}
+	data, err := io.ReadAll(resp.File)
+	if err != nil {
+		return nil, "", err
+	}
+	mimeType := ""
+	if resp.ApiResp != nil {
+		mimeType = normalizeContentType(resp.ApiResp.Header.Get("Content-Type"))
+	}
+	return data, mimeType, nil
+}
+
+func (f *transportChannel) fetchImageViaImageAPI(ctx context.Context, imageKey string) ([]byte, string, error) {
+	if strings.TrimSpace(imageKey) == "" {
+		return nil, "", fmt.Errorf("image key is empty")
+	}
+	cli, err := f.ensureOpenAPIClient()
+	if err != nil {
+		return nil, "", err
+	}
+	req := larkim.NewGetImageReqBuilder().ImageKey(strings.TrimSpace(imageKey)).Build()
+	resp, err := cli.Im.V1.Image.Get(ctx, req)
+	if err != nil {
+		return nil, "", err
+	}
+	if resp == nil || resp.File == nil {
+		return nil, "", fmt.Errorf("empty response file")
+	}
+	data, err := io.ReadAll(resp.File)
+	if err != nil {
+		return nil, "", err
+	}
+	mimeType := ""
+	if resp.ApiResp != nil {
+		mimeType = normalizeContentType(resp.ApiResp.Header.Get("Content-Type"))
+	}
+	return data, mimeType, nil
+}
+
+func normalizeContentType(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if idx := strings.Index(raw, ";"); idx >= 0 {
+		raw = raw[:idx]
+	}
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+func (f *transportChannel) handleP2MessageReceive(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 	if event == nil || event.Event == nil || event.Event.Message == nil {
 		return nil
 	}
@@ -1687,9 +1877,16 @@ func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *lark
 	if !f.shouldHandleMessage(messageID) {
 		return nil
 	}
-	text := parseMessageText(msg.MessageType, msg.Content)
-	if strings.TrimSpace(text) == "" {
+	promptBlocks := f.parseMessagePromptBlocks(ctx, messageID, msg.MessageType, msg.Content)
+	if len(promptBlocks) == 0 {
 		return nil
+	}
+	text := ""
+	for _, block := range promptBlocks {
+		if block.Type == acp.ContentBlockTypeText && strings.TrimSpace(block.Text) != "" {
+			text = strings.TrimSpace(block.Text)
+			break
+		}
 	}
 
 	userID := ""
@@ -1710,6 +1907,7 @@ func (f *transportChannel) handleP2MessageReceive(_ context.Context, event *lark
 			MessageID: messageID,
 			UserID:    userID,
 			Text:      text,
+			Prompt:    promptBlocks,
 			RouteKey:  chatID,
 		})
 	}

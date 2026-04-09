@@ -28,12 +28,13 @@ type Message struct {
 }
 
 type testInjectedInstance struct {
-	name      string
-	sessionID string
-	alive     bool
-	callbacks agent.Callbacks
-	promptFn  func(context.Context, string) (<-chan acp.Update, error)
-	cancelFn  func() error
+	name       string
+	sessionID  string
+	alive      bool
+	callbacks  agent.Callbacks
+	promptFn   func(context.Context, string) (<-chan acp.Update, error)
+	lastPrompt []acp.ContentBlock
+	cancelFn   func() error
 }
 
 type fakeIMRouter struct {
@@ -334,6 +335,7 @@ func (i *testInjectedInstance) SessionList(context.Context, acp.SessionListParam
 	return acp.SessionListResult{}, nil
 }
 func (i *testInjectedInstance) SessionPrompt(ctx context.Context, p acp.SessionPromptParams) (acp.SessionPromptResult, error) {
+	i.lastPrompt = append([]acp.ContentBlock(nil), p.Prompt...)
 	if i.promptFn == nil {
 		return acp.SessionPromptResult{StopReason: "end_turn"}, nil
 	}

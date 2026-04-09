@@ -11,6 +11,7 @@ type Message struct {
 	MessageID string
 	UserID    string
 	Text      string
+	Prompt    []acp.ContentBlock
 	RouteKey  string
 }
 

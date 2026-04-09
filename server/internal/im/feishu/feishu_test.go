@@ -239,6 +239,62 @@ func TestHandleMessage_RoutesPromptAndCommand(t *testing.T) {
 	}
 }
 
+func TestHandleMessage_CachesImageThenMergesWithTextPrompt(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+
+	var gotPrompt []acp.ContentBlock
+	ch.OnPrompt(func(_ context.Context, _ im.ChatRef, params acp.SessionPromptParams) error {
+		gotPrompt = append([]acp.ContentBlock(nil), params.Prompt...)
+		return nil
+	})
+
+	ft.onMsg(Message{ChatID: "chat-a", Prompt: []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "aGVsbG8="}}})
+	if len(gotPrompt) != 0 {
+		t.Fatalf("image-only message should be cached, got prompt=%+v", gotPrompt)
+	}
+
+	ft.onMsg(Message{ChatID: "chat-a", Text: "describe this image"})
+	if len(gotPrompt) != 2 {
+		t.Fatalf("gotPrompt=%+v, want 2 blocks", gotPrompt)
+	}
+	if gotPrompt[0].Type != acp.ContentBlockTypeImage {
+		t.Fatalf("first block type=%q, want image", gotPrompt[0].Type)
+	}
+	if gotPrompt[1].Type != acp.ContentBlockTypeText || gotPrompt[1].Text != "describe this image" {
+		t.Fatalf("second block=%+v", gotPrompt[1])
+	}
+}
+
+func TestHandleMessage_CommandDoesNotConsumeCachedImage(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+
+	var gotPrompt []acp.ContentBlock
+	var gotCmd im.Command
+	ch.OnPrompt(func(_ context.Context, _ im.ChatRef, params acp.SessionPromptParams) error {
+		gotPrompt = append([]acp.ContentBlock(nil), params.Prompt...)
+		return nil
+	})
+	ch.OnCommand(func(_ context.Context, _ im.ChatRef, cmd im.Command) error {
+		gotCmd = cmd
+		return nil
+	})
+
+	ft.onMsg(Message{ChatID: "chat-a", Prompt: []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "aGVsbG8="}}})
+	ft.onMsg(Message{ChatID: "chat-a", Text: "/status"})
+	if gotCmd.Name != "/status" {
+		t.Fatalf("gotCmd=%+v", gotCmd)
+	}
+	if len(gotPrompt) != 0 {
+		t.Fatalf("command should not trigger prompt, got=%+v", gotPrompt)
+	}
+
+	ft.onMsg(Message{ChatID: "chat-a", Text: "now answer"})
+	if len(gotPrompt) != 2 {
+		t.Fatalf("cached image should still be merged, got=%+v", gotPrompt)
+	}
+}
 func TestPermissionCardAction_ResolvesWithRequestID(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)

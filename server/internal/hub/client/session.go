@@ -387,7 +387,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 
 	// SwitchWithContext — bootstrap new session with previous reply.
 	if mode == SwitchWithContext && savedLastReply != "" {
-		ch, err := s.promptStream(ctx, "[context] "+savedLastReply)
+		ch, err := s.promptStream(ctx, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "[context] " + savedLastReply}})
 		if err != nil {
 			hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", err)
 		} else {
@@ -563,7 +563,7 @@ func (s *Session) sessionConfigSnapshot() acp.SessionConfigSnapshot {
 }
 
 // promptStream sends a prompt and returns a channel of streaming updates.
-func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Update, error) {
+func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (<-chan acp.Update, error) {
 	s.mu.Lock()
 	s.lastReply = ""
 	s.mu.Unlock()
@@ -608,7 +608,7 @@ func (s *Session) promptStream(ctx context.Context, text string) (<-chan acp.Upd
 		go func() {
 			res, err := s.instance.SessionPrompt(promptCtx, acp.SessionPromptParams{
 				SessionID: sessID,
-				Prompt:    []acp.ContentBlock{{Type: "text", Text: text}},
+				Prompt:    blocks,
 			})
 			resultCh <- promptResult{result: res, err: err}
 		}()

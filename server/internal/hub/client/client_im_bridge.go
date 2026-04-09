@@ -35,7 +35,7 @@ func (c *Client) HasIMRouter() bool {
 }
 
 func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {
-	return c.handleIMText(ctx, source, promptTextFromBlocks(params.Prompt))
+	return c.handleIMPromptBlocks(ctx, source, params.Prompt)
 }
 
 func (c *Client) HandleIMCommand(ctx context.Context, source im.ChatRef, cmd im.Command) error {
@@ -133,33 +133,69 @@ func imRouteKey(source im.ChatRef) string {
 	return "im:" + strings.ToLower(strings.TrimSpace(source.ChannelID)) + ":" + strings.TrimSpace(source.ChatID)
 }
 
-func promptTextFromBlocks(blocks []acp.ContentBlock) string {
-	for _, block := range blocks {
-		if block.Type == acp.ContentBlockTypeText {
-			return block.Text
-		}
-	}
-	return ""
-}
-
-func (c *Client) handleIMText(ctx context.Context, source im.ChatRef, text string) error {
-	text = strings.TrimSpace(text)
-	if text == "" {
+func normalizeIMPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
+	if len(blocks) == 0 {
 		return nil
 	}
-	routeKey := imRouteKey(source)
-
-	if cmd, ok := im.ParseCommand(text); ok {
-		return c.handleIMCommand(ctx, source, cmd.Name, cmd.Args)
+	out := make([]acp.ContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		kind := strings.TrimSpace(block.Type)
+		if kind == "" {
+			continue
+		}
+		if kind == acp.ContentBlockTypeText {
+			text := strings.TrimSpace(block.Text)
+			if text == "" {
+				continue
+			}
+			block.Text = text
+		}
+		block.Type = kind
+		out = append(out, block)
 	}
+	return out
+}
 
+func singleTextIMPrompt(blocks []acp.ContentBlock) (string, bool) {
+	if len(blocks) != 1 || blocks[0].Type != acp.ContentBlockTypeText {
+		return "", false
+	}
+	text := strings.TrimSpace(blocks[0].Text)
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+func (c *Client) handleIMPromptBlocks(ctx context.Context, source im.ChatRef, blocks []acp.ContentBlock) error {
+	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("client im: invalid source")
+	}
+	blocks = normalizeIMPromptBlocks(blocks)
+	if len(blocks) == 0 {
+		return nil
+	}
+	if text, ok := singleTextIMPrompt(blocks); ok {
+		if cmd, parsed := im.ParseCommand(text); parsed {
+			return c.handleIMCommand(ctx, source, cmd.Name, cmd.Args)
+		}
+	}
+	routeKey := imRouteKey(source)
 	sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
 	if sess == nil {
 		return nil
 	}
 	sess.setIMSource(source)
-	sess.handlePrompt(text)
+	sess.handlePromptBlocks(blocks)
 	return nil
+}
+func (c *Client) handleIMText(ctx context.Context, source im.ChatRef, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	return c.handleIMPromptBlocks(ctx, source, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}})
 }
 
 func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, args string) error {
@@ -215,7 +251,6 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 	c.handleCommand(sess, routeKey, cmd, args)
 	return nil
 }
-
 func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef, routeKey string) *Session {
 	c.mu.Lock()
 	sessID := c.routeMap[routeKey]

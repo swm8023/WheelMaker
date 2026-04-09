@@ -9,6 +9,8 @@ import (
 	"time"
 
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 func TestParseMessageText_Text(t *testing.T) {
@@ -38,6 +40,28 @@ func TestParseMessageText_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestParseMessageImageKey(t *testing.T) {
+	content := `{"image_key":"img_123"}`
+	if got := parseMessageImageKey(&content); got != "img_123" {
+		t.Fatalf("parseMessageImageKey()=%q, want %q", got, "img_123")
+	}
+}
+
+func TestParseMessagePromptBlocks_Image(t *testing.T) {
+	f := newTransport(Config{})
+	f.imageFetcher = func(context.Context, string, string) (acp.ContentBlock, error) {
+		return acp.ContentBlock{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "aGVsbG8="}, nil
+	}
+	msgType := "image"
+	content := `{"image_key":"img_123"}`
+	blocks := f.parseMessagePromptBlocks(context.Background(), "msg-1", &msgType, &content)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks=%+v, want one image block", blocks)
+	}
+	if blocks[0].Type != acp.ContentBlockTypeImage {
+		t.Fatalf("block type=%q, want image", blocks[0].Type)
+	}
+}
 func TestBuildUnifiedStreamCard_TextOnly(t *testing.T) {
 	seg := streamSegment{kind: segText, content: "hello"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, false)
@@ -351,7 +375,7 @@ func TestBuildToolCallCard_DoesNotFormatInlineBullets(t *testing.T) {
 		t.Fatalf("elements missing in card: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "```text\n") {
+	if !strings.Contains(content, "``	ext\n") {
 		t.Fatalf("tool card should use code block: %q", content)
 	}
 	if !strings.Contains(content, "- step one - step two - step three") {
@@ -404,7 +428,7 @@ func TestBuildCompactToolCard(t *testing.T) {
 	if strings.Contains(content, "go test ./...") && !strings.Contains(content, "$ go test ./...") {
 		t.Fatalf("summary text should not be rendered above transcript: %q", content)
 	}
-	if !strings.Contains(content, "```text") ||
+	if !strings.Contains(content, "``	ext") ||
 		!strings.Contains(content, "$ go test ./...") ||
 		!strings.Contains(content, "PASS") {
 		t.Fatalf("compact transcript mismatch: %q", content)
@@ -423,7 +447,7 @@ func TestBuildCompactToolCard_DoesNotFormatInlineNumberedTranscript(t *testing.T
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "```text\n1. collect context 2. update tests 3. ship\n```") {
+	if !strings.Contains(content, "``	ext\n1. collect context 2. update tests 3. ship\n```") {
 		t.Fatalf("compact transcript should keep original numbered text, got: %q", content)
 	}
 }
@@ -439,7 +463,7 @@ func TestBuildCompactToolCard_DoesNotFormatNumberedVariants(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "```text\n1)collect context 2)update tests 3)ship\n```") {
+	if !strings.Contains(content, "``	ext\n1)collect context 2)update tests 3)ship\n```") {
 		t.Fatalf("compact transcript should keep numbered variant with ), got: %q", content)
 	}
 
@@ -454,7 +478,7 @@ func TestBuildCompactToolCard_DoesNotFormatNumberedVariants(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card2)
 	}
 	content2, _ := elements2[0]["content"].(string)
-	if !strings.Contains(content2, "```text\n1、准备\u30002、验证\u30003、发布\n```") {
+	if !strings.Contains(content2, "``	ext\n1、准备\u30002、验证\u30003、发布\n```") {
 		t.Fatalf("compact transcript should keep full-width numbered variant, got: %q", content2)
 	}
 }
@@ -471,7 +495,7 @@ func TestBuildCompactToolCard_DoesNotFormatInlineHyphenBullets(t *testing.T) {
 		t.Fatalf("elements mismatch: %+v", card)
 	}
 	content, _ := elements[0]["content"].(string)
-	if !strings.Contains(content, "```text\n- collect context - update tests - ship\n```") {
+	if !strings.Contains(content, "``	ext\n- collect context - update tests - ship\n```") {
 		t.Fatalf("compact transcript should keep original hyphen bullets, got: %q", content)
 	}
 }
