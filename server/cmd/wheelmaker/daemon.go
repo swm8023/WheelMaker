@@ -10,8 +10,6 @@ import (
 	"slices"
 	"syscall"
 	"time"
-
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const guardianInterval = 30 * time.Second
@@ -95,14 +93,14 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 	workers, err := listWorkerProcesses(exeName, markerFlag)
 	if err != nil {
 		if preferredPID > 0 {
-			logger.Warn("[daemon] list %s workers failed, keep previous pid=%d: %v", markerFlag, preferredPID, err)
+			hubScopedLogger.Warn("daemon list %s workers failed keep_previous_pid=%d err=%v", markerFlag, preferredPID, err)
 			return preferredPID, nil
 		}
 		pid, startErr := startWorker(exePath, workerArgs)
 		if startErr != nil {
 			return 0, fmt.Errorf("list workers failed: %w; start fallback failed: %v", err, startErr)
 		}
-		logger.Warn("[daemon] list %s workers failed; started fallback pid=%d: %v", markerFlag, pid, err)
+		hubScopedLogger.Warn("daemon list %s workers failed started_fallback_pid=%d err=%v", markerFlag, pid, err)
 		return pid, nil
 	}
 	if len(workers) == 0 {
@@ -110,7 +108,7 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 		if startErr != nil {
 			return 0, startErr
 		}
-		logger.Info("[daemon] started %s worker pid=%d", markerFlag, pid)
+		hubScopedLogger.Info("daemon started %s worker pid=%d", markerFlag, pid)
 		return pid, nil
 	}
 
@@ -120,10 +118,10 @@ func reconcileWorkers(exePath, exeName, markerFlag string, workerArgs []string, 
 			continue
 		}
 		if killErr := killProcess(proc.PID); killErr != nil {
-			logger.Warn("[daemon] failed to stop extra %s worker pid=%d: %v", markerFlag, proc.PID, killErr)
+			hubScopedLogger.Warn("daemon failed to stop extra %s worker pid=%d err=%v", markerFlag, proc.PID, killErr)
 			continue
 		}
-		logger.Warn("[daemon] stopped extra %s worker pid=%d", markerFlag, proc.PID)
+		hubScopedLogger.Warn("daemon stopped extra %s worker pid=%d", markerFlag, proc.PID)
 	}
 	return keepPID, nil
 }
@@ -132,15 +130,15 @@ func shutdownWorkers(exeName string, specs []*workerSpec) {
 	for _, spec := range specs {
 		workers, err := listWorkerProcesses(exeName, spec.markerFlag)
 		if err != nil {
-			logger.Warn("[daemon] shutdown list %s workers failed: %v", spec.markerFlag, err)
+			hubScopedLogger.Warn("daemon shutdown list %s workers failed err=%v", spec.markerFlag, err)
 			continue
 		}
 		for _, proc := range workers {
 			if killErr := killProcess(proc.PID); killErr != nil {
-				logger.Warn("[daemon] shutdown stop %s worker pid=%d failed: %v", spec.markerFlag, proc.PID, killErr)
+				hubScopedLogger.Warn("daemon shutdown stop %s worker pid=%d failed err=%v", spec.markerFlag, proc.PID, killErr)
 				continue
 			}
-			logger.Info("[daemon] shutdown stopped %s worker pid=%d", spec.markerFlag, proc.PID)
+			hubScopedLogger.Info("daemon shutdown stopped %s worker pid=%d", spec.markerFlag, proc.PID)
 		}
 	}
 }

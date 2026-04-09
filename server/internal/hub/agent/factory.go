@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // InstanceCreator creates one runtime instance.
@@ -52,7 +51,7 @@ func newACPFactoryWithDefaults() *ACPFactory {
 		f.Register(candidate.provider, providerInstanceCreator(prov))
 	}
 	if len(f.Names()) == 0 {
-		logger.Warn("agent factory: no available ACP providers detected")
+		agentLogger().Warn("no available ACP providers detected")
 	}
 	return f
 }
@@ -82,7 +81,7 @@ func (f *ACPFactory) Register(provider protocol.ACPProvider, creator InstanceCre
 	}
 	f.creators[provider] = creator
 	f.mu.Unlock()
-	logger.Info("agent factory: registered provider=%s", provider)
+	agentLogger().Info("registered provider=%s", provider)
 }
 
 // Creator returns a creator by provider enum.
@@ -177,7 +176,7 @@ func isProviderAvailable(provider ACPProvider) bool {
 	}
 	_, _, _, err := provider.Launch()
 	if err != nil {
-		logger.Warn("agent factory: skip provider=%s reason=%v", provider.Name(), err)
+		agentLogger().Warn("skip provider=%s reason=%v", provider.Name(), err)
 		return false
 	}
 	return true

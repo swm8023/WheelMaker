@@ -97,33 +97,33 @@ func runHubWorker() error {
 	if err != nil {
 		return fmt.Errorf("cannot load config.json at %s: %w\n\nCreate one based on config.example.json in the project root.", cfgPath, err)
 	}
-	hubLog := filepath.Join(wheelmakerLogDir(home), "hub.log")
+	hubLogPath := filepath.Join(wheelmakerLogDir(home), "hub.log")
 
 	if err := logger.Setup(logger.LoggerConfig{
 		Level:   logger.ParseLevel(cfg.Log.Level),
-		LogFile: hubLog,
+		LogFile: hubLogPath,
 	}); err != nil {
 		return fmt.Errorf("logger setup: %w", err)
 	}
 	defer logger.Close()
-	logger.Info("wheelmaker: hub worker start cfg=%s db=%s", cfgPath, dbPath)
+	hubScopedLogger.Info("worker start cfg=%s db=%s", cfgPath, dbPath)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	h := hub.New(cfg, dbPath)
 	if err := h.Start(ctx); err != nil {
-		logger.Error("wheelmaker: hub start failed err=%v", err)
+		hubScopedLogger.Error("start failed err=%v", err)
 		return err
 	}
-	logger.Info("wheelmaker: hub started")
+	hubScopedLogger.Info("started")
 	defer h.Close()
 
 	if err := h.Run(ctx); err != nil {
-		logger.Error("wheelmaker: hub run failed err=%v", err)
+		hubScopedLogger.Error("run failed err=%v", err)
 		return err
 	}
-	logger.Info("wheelmaker: hub run exited")
+	hubScopedLogger.Info("run exited")
 	return nil
 }
 
@@ -159,16 +159,16 @@ func runRegistryWorker() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	logger.Info("wheelmaker: registry worker start addr=%s", addr)
+	registryScopedLogger.Info("worker start addr=%s", addr)
 	s := registry.New(registry.Config{
 		Addr:  addr,
 		Token: cfg.Registry.Token,
 	})
 	if err := s.Run(ctx); err != nil {
-		logger.Error("wheelmaker: registry worker run failed err=%v", err)
+		registryScopedLogger.Error("worker run failed err=%v", err)
 		return err
 	}
-	logger.Info("wheelmaker: registry worker exited")
+	registryScopedLogger.Info("worker exited")
 	return nil
 }
 

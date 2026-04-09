@@ -14,7 +14,6 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // SessionStatus defines the lifecycle state of a Session.
@@ -270,7 +269,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 			return fmt.Errorf("no available ACP provider")
 		}
 		if !strings.EqualFold(fallback, name) {
-			logger.Warn("client: requested agent unavailable requested=%s fallback=%s", name, fallback)
+			hubLogger(s.projectName).Warn("requested agent unavailable requested=%s fallback=%s", name, fallback)
 		}
 		name = fallback
 		creator = s.registry.CreatorByName(name)
@@ -386,11 +385,11 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	if mode == SwitchWithContext && savedLastReply != "" {
 		ch, err := s.promptStream(ctx, "[context] "+savedLastReply)
 		if err != nil {
-			logger.Warn("client: SwitchWithContext bootstrap prompt failed: %v", err)
+			hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", err)
 		} else {
 			for u := range ch {
 				if u.Err != nil {
-					logger.Warn("client: SwitchWithContext bootstrap prompt failed: %v", u.Err)
+					hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", u.Err)
 				}
 			}
 		}
@@ -533,7 +532,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			s.initializing = false
 			s.mu.Unlock()
 			s.initCond.Broadcast()
-			logger.Info("[client] connected: agent=%s session=%s (resumed, %d history updates)",
+			hubLogger(s.projectName).Info("connected agent=%s session=%s resumed_history_updates=%d",
 				inst.Name(), savedSID, len(replayUpdates))
 			return nil
 		}
@@ -574,7 +573,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			break
 		}
 	}
-	logger.Info("[client] connected: agent=%s session=%s mode=%s",
+	hubLogger(s.projectName).Info("connected agent=%s session=%s mode=%s",
 		inst.Name(), newResult.SessionID, modeID)
 	return nil
 }
@@ -859,7 +858,7 @@ func (s *Session) persistSession(ctx context.Context) error {
 
 func (s *Session) persistSessionBestEffort() {
 	if err := s.persistSession(context.Background()); err != nil {
-		logger.Warn("client: persist session %s: %v", s.ID, err)
+		hubLogger(s.projectName).Warn("persist session failed session=%s err=%v", s.ID, err)
 	}
 }
 

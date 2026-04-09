@@ -68,7 +68,7 @@ func TestBuildClient_InvalidFeishuLogsError(t *testing.T) {
 		Path:   ".",
 		Feishu: &logger.FeishuConfig{AppID: "cli_xxx"},
 	})
-	if !strings.Contains(buf.String(), "hub: build client failed") {
+	if !strings.Contains(buf.String(), "[Hub:p] build client failed") {
 		t.Fatalf("missing startup error log: %s", buf.String())
 	}
 }

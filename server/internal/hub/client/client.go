@@ -13,7 +13,6 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const commandTimeout = 30 * time.Second
@@ -90,7 +89,7 @@ func (c *Client) SetYOLO(enabled bool) {
 	}
 	if store != nil {
 		if err := store.SaveProject(context.Background(), projectName, ProjectConfig{YOLO: enabled}); err != nil {
-			logger.Warn("client: save project config: %v", err)
+			hubLogger(projectName).Warn("save project config failed err=%v", err)
 		}
 	}
 }
@@ -149,12 +148,12 @@ func (c *Client) Close() error {
 		sess.mu.Unlock()
 		if inst != nil {
 			if err := sess.Suspend(ctx); err != nil {
-				logger.Warn("client: suspend session %s during close: %v", sess.ID, err)
+				hubLogger(c.projectName).Warn("suspend session during close session=%s err=%v", sess.ID, err)
 			}
 			continue
 		}
 		if err := sess.persistSession(ctx); err != nil {
-			logger.Warn("client: persist session %s during close: %v", sess.ID, err)
+			hubLogger(c.projectName).Warn("persist session during close session=%s err=%v", sess.ID, err)
 		}
 	}
 	if store != nil {
@@ -243,13 +242,13 @@ func (c *Client) preferredAvailableAgent() string {
 
 func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
 	if err := sess.persistSession(context.Background()); err != nil {
-		logger.Error("client: save session failed project=%s route=%s session=%s err=%v",
-			c.projectName, routeKey, sess.ID, err)
+		hubLogger(c.projectName).Error("save session failed route=%s session=%s err=%v",
+			routeKey, sess.ID, err)
 		return fmt.Errorf("save session: %w", err)
 	}
 	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.ID); err != nil {
-		logger.Error("client: save route binding failed project=%s route=%s session=%s err=%v",
-			c.projectName, routeKey, sess.ID, err)
+		hubLogger(c.projectName).Error("save route binding failed route=%s session=%s err=%v",
+			routeKey, sess.ID, err)
 		return fmt.Errorf("save route binding: %w", err)
 	}
 	return nil
@@ -274,7 +273,7 @@ func (c *Client) ClientNewSession(routeKey string) (*Session, error) {
 		oldSess.mu.Unlock()
 		if hasInst {
 			if err := oldSess.Suspend(context.Background()); err != nil {
-				logger.Warn("client: suspend old session %s: %v", oldSessID, err)
+				hubLogger(c.projectName).Warn("suspend old session failed session=%s err=%v", oldSessID, err)
 			}
 		}
 		oldSess.mu.Lock()
@@ -487,7 +486,7 @@ func (c *Client) evictSuspendedSessions() {
 
 	for _, sess := range toEvict {
 		if err := sess.persistSession(context.Background()); err != nil {
-			logger.Warn("client: persist session %s: %v", sess.ID, err)
+			hubLogger(c.projectName).Warn("persist session failed session=%s err=%v", sess.ID, err)
 			continue
 		}
 
@@ -501,7 +500,7 @@ func (c *Client) evictSuspendedSessions() {
 		delete(c.sessions, sess.ID)
 		c.mu.Unlock()
 
-		logger.Info("client: evicted suspended session %s to SQLite", sess.ID)
+		hubLogger(c.projectName).Info("evicted suspended session to sqlite session=%s", sess.ID)
 	}
 }
 
@@ -648,13 +647,13 @@ func (s *Session) handlePrompt(text string) {
 			case <-observeTicker.C:
 				ev := observe.Eval(time.Now(), observe.Started())
 				if ev.WarnFirstWait {
-					logger.Warn("client: timeout warn category=timeout stage=stream kind=first_wait session=%s", s.ID)
+					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=first_wait session=%s", s.ID)
 				}
 				if ev.ErrorFirstWait {
 					s.reportTimeoutError("stream", "first_wait")
 				}
 				if ev.WarnSilence {
-					logger.Warn("client: timeout warn category=timeout stage=stream kind=silence session=%s", s.ID)
+					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=silence session=%s", s.ID)
 				}
 				if ev.ErrorSilence {
 					s.reportTimeoutError("stream", "silence")
@@ -711,7 +710,7 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 	}
 	s.mu.Unlock()
 
-	logger.Error("client: timeout error category=timeout stage=%s kind=%s agent=%s session=%s",
+	hubLogger(s.projectName).Error("timeout error category=timeout stage=%s kind=%s agent=%s session=%s",
 		stage, kind, renderUnknown(agent), renderUnknown(sid))
 	if !allow {
 		return
@@ -732,7 +731,7 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 		im.SendTarget{SessionID: s.ID, Source: &source},
 		im.SystemPayload{Kind: "message", Body: body},
 	); err != nil {
-		logger.Error("client: timeout im notify failed stage=%s kind=%s session=%s err=%v",
+		hubLogger(s.projectName).Error("timeout im notify failed stage=%s kind=%s session=%s err=%v",
 			stage, kind, s.ID, err)
 	}
 }

@@ -50,19 +50,19 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 // Start validates config, creates one client.Client per project, and starts each client.
 // Returns an error if any project has an unsupported IM type.
 func (h *Hub) Start(ctx context.Context) error {
-	logger.Info("hub: start projects=%d", len(h.cfg.Projects))
+	hubLogger("").Info("start projects=%d", len(h.cfg.Projects))
 	for _, pc := range h.cfg.Projects {
-		logger.Info("hub: build client project=%s im=%s", pc.Name, pc.IMType())
+		hubLogger(pc.Name).Info("build client im=%s", pc.IMType())
 		c, err := h.buildClient(ctx, pc)
 		if err != nil {
-			logger.Error("hub: build client failed project=%s err=%v", pc.Name, err)
+			hubLogger(pc.Name).Error("build client failed err=%v", err)
 			return fmt.Errorf("hub: project %q: %w", pc.Name, err)
 		}
 		h.clients = append(h.clients, c)
-		logger.Info("hub: client ready project=%s", pc.Name)
+		hubLogger(pc.Name).Info("client ready")
 	}
 	h.setupRegistrySync()
-	logger.Info("hub: start completed projects=%d", len(h.clients))
+	hubLogger("").Info("start completed projects=%d", len(h.clients))
 	return nil
 }
 
@@ -81,10 +81,10 @@ func (h *Hub) buildClient(ctx context.Context, pc logger.ProjectConfig) (*client
 }
 
 func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd string) (*client.Client, error) {
-	logger.Info("hub: opening store project=%s db=%s", pc.Name, h.dbPath)
+	hubLogger(pc.Name).Info("opening store db=%s", h.dbPath)
 	store, err := client.NewStore(h.dbPath)
 	if err != nil {
-		logger.Error("hub: open store failed project=%s err=%v", pc.Name, err)
+		hubLogger(pc.Name).Error("open store failed err=%v", err)
 		return nil, fmt.Errorf("new store: %w", err)
 	}
 	c := client.New(store, pc.Name, cwd)
@@ -92,12 +92,12 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())
 	if pc.Feishu != nil && !pc.HasFeishu() {
-		logger.Error("hub: build client failed project=%s err=invalid feishu config", pc.Name)
+		hubLogger(pc.Name).Error("build client failed err=invalid feishu config")
 		_ = c.Close()
 		return nil, fmt.Errorf("invalid feishu config: both app_id and app_secret are required")
 	}
 	if pc.HasFeishu() {
-		logger.Info("hub: register channel project=%s type=feishu", pc.Name)
+		hubLogger(pc.Name).Info("register channel type=feishu")
 		if err := router.RegisterChannel(imfeishu.New(imfeishu.Config{
 			AppID:             pc.Feishu.AppID,
 			AppSecret:         pc.Feishu.AppSecret,
@@ -106,26 +106,26 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 			YOLO:              pc.YOLO,
 			BlockedUpdates:    pc.IMFilter.Block,
 		})); err != nil {
-			logger.Error("hub: register channel failed project=%s type=feishu err=%v", pc.Name, err)
+			hubLogger(pc.Name).Error("register channel failed type=feishu err=%v", err)
 			_ = c.Close()
 			return nil, err
 		}
 	} else {
-		logger.Info("hub: register channel project=%s type=app", pc.Name)
+		hubLogger(pc.Name).Info("register channel type=app")
 		if err := router.RegisterChannel(imapp.New()); err != nil {
-			logger.Error("hub: register channel failed project=%s type=app err=%v", pc.Name, err)
+			hubLogger(pc.Name).Error("register channel failed type=app err=%v", err)
 			_ = c.Close()
 			return nil, err
 		}
 	}
 	c.SetIMRouter(router)
-	logger.Info("hub: starting client project=%s", pc.Name)
+	hubLogger(pc.Name).Info("starting client")
 	if err := c.Start(ctx); err != nil {
-		logger.Error("hub: start client failed project=%s err=%v", pc.Name, err)
+		hubLogger(pc.Name).Error("start client failed err=%v", err)
 		_ = c.Close()
 		return nil, fmt.Errorf("start: %w", err)
 	}
-	logger.Info("hub: client started project=%s", pc.Name)
+	hubLogger(pc.Name).Info("client started")
 	return c, nil
 }
 
@@ -144,7 +144,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			if err := h.regSync.Run(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("wheelmaker: registry sync error: %v", err)
+				registryLogger("").Error("sync error: %v", err)
 			}
 		}()
 	}
@@ -153,7 +153,7 @@ func (h *Hub) Run(ctx context.Context) error {
 		go func(c *client.Client) {
 			defer wg.Done()
 			if err := c.Run(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("wheelmaker: project run error: %v", err)
+				hubLogger("").Error("project run error: %v", err)
 			}
 		}(c)
 	}
@@ -237,7 +237,7 @@ func (h *Hub) monitorRegistryProjectState(ctx context.Context) {
 				continue
 			}
 			if err := h.regSync.UpdateProject(project); err != nil {
-				logger.Warn("hub registry: updateProject failed name=%s err=%v", project.Name, err)
+				registryLogger(project.Name).Warn("updateProject failed err=%v", err)
 			}
 		}
 	}
