@@ -185,21 +185,21 @@ func filterNotifySessionUpdateBody(body []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	result := make(map[string]any, len(update))
+	updateBody := make(map[string]any, len(update))
 	for k, v := range update {
 		if k == "sessionUpdate" {
 			continue
 		}
-		result[k] = v
+		updateBody[k] = v
 	}
-	resultBytes, err := json.Marshal(result)
+	updateBytes, err := json.Marshal(updateBody)
 	if err != nil {
 		return nil, false
 	}
 
 	sessionID, _ := m["sessionId"].(string)
 	sessionID = shortenSessionID(sessionID)
-	return []byte(fmt.Sprintf("%s, %s {result:%s}", sessionID, updateKind, string(resultBytes))), true
+	return []byte(fmt.Sprintf("%s, %s %s", sessionID, updateKind, string(updateBytes))), true
 }
 
 func shortenSessionID(sessionID string) string {

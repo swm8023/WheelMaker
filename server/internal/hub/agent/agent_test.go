@@ -112,7 +112,7 @@ func TestFormatACPLogLine_NotifySessionUpdateFilter(t *testing.T) {
 	if !strings.Contains(line, "[acp] <[copilot] [Notify session/update]") {
 		t.Fatalf("line=%q", line)
 	}
-	if !strings.Contains(line, "sessio...7890, tool_call_update {result:") {
+	if !strings.Contains(line, "sessio...7890, tool_call_update {") {
 		t.Fatalf("filtered body missing: %q", line)
 	}
 	if strings.Contains(line, `"sessionId":"session-1234567890"`) {
