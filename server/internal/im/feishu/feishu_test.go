@@ -400,7 +400,7 @@ func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
 	}
 }
 
-func TestPublishSessionUpdate_UsageUpdateRendersInlineText(t *testing.T) {
+func TestPublishSessionUpdate_UsageUpdateDoesNotSyncRealtime(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
 	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
@@ -418,14 +418,40 @@ func TestPublishSessionUpdate_UsageUpdateRendersInlineText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublishSessionUpdate(usage): %v", err)
 	}
-	if len(ft.cards) != 0 {
-		t.Fatalf("usage update should not render card, cards=%+v", ft.cards)
+	if len(ft.cards) != 0 || len(ft.sends) != 0 {
+		t.Fatalf("usage update should not sync in realtime, sends=%+v cards=%+v", ft.sends, ft.cards)
+	}
+}
+
+func TestPublishPromptResult_AppendsPendingUsageBeforeDone(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+
+	size := int64(258400)
+	used := int64(183223)
+	err := ch.PublishSessionUpdate(context.Background(), target, acp.SessionUpdateParams{
+		SessionID: "s1",
+		Update: acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateUsageUpdate,
+			Size:          &size,
+			Used:          &used,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PublishSessionUpdate(usage): %v", err)
+	}
+	if err := ch.PublishPromptResult(context.Background(), target, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}); err != nil {
+		t.Fatalf("PublishPromptResult(end_turn): %v", err)
 	}
 	if len(ft.sends) != 1 {
 		t.Fatalf("sends=%+v, want 1", ft.sends)
 	}
-	if ft.sends[0].kind != TextNormal || ft.sends[0].text != "context usage 71%" {
-		t.Fatalf("usage send=%+v", ft.sends[0])
+	if ft.sends[0].kind != TextNormal || ft.sends[0].text != "\ncontext usage 71%" {
+		t.Fatalf("usage append send=%+v", ft.sends[0])
+	}
+	if len(ft.done) != 1 || ft.done[0] != "chat-a" {
+		t.Fatalf("done=%+v", ft.done)
 	}
 }
 

@@ -43,6 +43,7 @@ type Channel struct {
 	pendingByChat       map[string]PendingPermission
 	helpCards           map[string]string
 	pendingPromptByChat map[string][]acp.ContentBlock
+	pendingUsageByChat  map[string]string
 	closed              map[int64]time.Time
 }
 
@@ -62,6 +63,7 @@ func newWithTransportConfig(inner transport, cfg Config) *Channel {
 		pendingByChat:       map[string]PendingPermission{},
 		helpCards:           map[string]string{},
 		pendingPromptByChat: map[string][]acp.ContentBlock{},
+		pendingUsageByChat:  map[string]string{},
 		closed:              map[int64]time.Time{},
 	}
 	inner.OnMessage(c.handleMessage)
@@ -213,8 +215,9 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 		}
 	case acp.SessionUpdateUsageUpdate:
 		if text := renderUsageStreamText(params.Update); text != "" {
-			return c.inner.Send(chatID, text, TextNormal)
+			c.rememberPendingUsage(chatID, text)
 		}
+		return nil
 	case acp.SessionUpdateAvailableCommandsUpdate:
 		// Silenced: command list updates are noisy and rarely useful to the user.
 	case acp.SessionUpdateUserMessageChunk:
@@ -228,11 +231,17 @@ func (c *Channel) renderSessionUpdate(chatID string, params acp.SessionUpdatePar
 }
 
 func (c *Channel) renderPromptResult(chatID string, result acp.SessionPromptResult) error {
+	usageLine := c.takePendingUsage(chatID)
 	if c.isBlocked("prompt_result") {
 		return nil
 	}
 	stopReason := strings.TrimSpace(result.StopReason)
 	if stopReason == "" || stopReason == acp.StopReasonEndTurn {
+		if usageLine != "" {
+			if err := c.inner.Send(chatID, "\n"+usageLine, TextNormal); err != nil {
+				return err
+			}
+		}
 		return c.inner.MarkDone(chatID)
 	}
 	return c.inner.Send(chatID, renderPromptResultText(result), TextSystem)
@@ -372,6 +381,33 @@ func (c *Channel) takePendingPromptBlocks(chatID string) []acp.ContentBlock {
 	copied := append([]acp.ContentBlock(nil), blocks...)
 	delete(c.pendingPromptByChat, chatID)
 	return copied
+}
+
+func (c *Channel) rememberPendingUsage(chatID string, usage string) {
+	chatID = strings.TrimSpace(chatID)
+	usage = strings.TrimSpace(usage)
+	if chatID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if usage == "" {
+		delete(c.pendingUsageByChat, chatID)
+		return
+	}
+	c.pendingUsageByChat[chatID] = usage
+}
+
+func (c *Channel) takePendingUsage(chatID string) string {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	usage := strings.TrimSpace(c.pendingUsageByChat[chatID])
+	delete(c.pendingUsageByChat, chatID)
+	return usage
 }
 
 func (c *Channel) handleCardAction(evt CardActionEvent) {
