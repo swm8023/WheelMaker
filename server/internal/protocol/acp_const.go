@@ -17,25 +17,57 @@ const (
 	SessionUpdateCurrentModeUpdate       = "current_mode_update"
 )
 
+// --- ACP update types ---
+
+const (
+	// UpdateText is an agent reply text chunk (agent_message_chunk).
+	UpdateText UpdateType = "text"
+	// UpdateThought is an agent thought chunk (agent_thought_chunk).
+	UpdateThought UpdateType = "thought"
+	// UpdateToolCall is a tool invocation event (tool_call / tool_call_update).
+	UpdateToolCall UpdateType = "tool_call"
+	// UpdateToolCallCancelled is emitted by Cancel() for each tool call that was
+	// pending or in_progress at the time of cancellation. Content holds the toolCallId.
+	UpdateToolCallCancelled UpdateType = "tool_call_cancelled"
+	// UpdatePlan is a plan update from the agent.
+	UpdatePlan UpdateType = "plan"
+	// UpdateConfigOption is emitted when the agent sends config_option_update.
+	UpdateConfigOption UpdateType = UpdateType(SessionUpdateConfigOptionUpdate)
+	// UpdateAvailableCommands is emitted when the agent sends available_commands_update.
+	UpdateAvailableCommands UpdateType = UpdateType(SessionUpdateAvailableCommandsUpdate)
+	// UpdateSessionInfo is emitted when the agent sends session_info_update.
+	UpdateSessionInfo UpdateType = UpdateType(SessionUpdateSessionInfoUpdate)
+	// UpdateUserChunk is a user message reflection chunk (user_message_chunk).
+	// Most integrations can ignore this; it is exposed for completeness.
+	UpdateUserChunk UpdateType = UpdateType(SessionUpdateUserMessageChunk)
+	// UpdateModeChange is a legacy mode switch notification
+	// (current_mode_update). New integrations should use UpdateConfigOption.
+	UpdateModeChange UpdateType = "mode_change"
+	// UpdateDone signals the end of a prompt; Content holds the stopReason.
+	UpdateDone UpdateType = "done"
+	// UpdateError signals a transport or protocol error; Err is non-nil.
+	UpdateError UpdateType = "error"
+)
+
 // --- ACP method names ---
 
 const (
-	MethodInitialize          = "initialize"
-	MethodSessionNew          = "session/new"
-	MethodSessionPrompt       = "session/prompt"
-	MethodSessionCancel       = "session/cancel"
-	MethodSessionLoad         = "session/load"
-	MethodSessionList         = "session/list"
-	MethodSetConfigOption     = "session/set_config_option"
-	MethodRequestPermission   = "session/request_permission"
-	MethodFSRead              = "fs/read_text_file"
-	MethodFSWrite             = "fs/write_text_file"
-	MethodTerminalCreate      = "terminal/create"
-	MethodTerminalOutput      = "terminal/output"
-	MethodTerminalWaitExit    = "terminal/wait_for_exit"
-	MethodTerminalKill        = "terminal/kill"
-	MethodTerminalRelease     = "terminal/release"
-	MethodSessionUpdate       = "session/update"
+	MethodInitialize        = "initialize"
+	MethodSessionNew        = "session/new"
+	MethodSessionPrompt     = "session/prompt"
+	MethodSessionCancel     = "session/cancel"
+	MethodSessionLoad       = "session/load"
+	MethodSessionList       = "session/list"
+	MethodSetConfigOption   = "session/set_config_option"
+	MethodRequestPermission = "session/request_permission"
+	MethodFSRead            = "fs/read_text_file"
+	MethodFSWrite           = "fs/write_text_file"
+	MethodTerminalCreate    = "terminal/create"
+	MethodTerminalOutput    = "terminal/output"
+	MethodTerminalWaitExit  = "terminal/wait_for_exit"
+	MethodTerminalKill      = "terminal/kill"
+	MethodTerminalRelease   = "terminal/release"
+	MethodSessionUpdate     = "session/update"
 )
 
 // --- ACP statuses ---
@@ -43,8 +75,8 @@ const (
 const (
 	ToolCallStatusPending    = "pending"
 	ToolCallStatusInProgress = "in_progress"
-	ToolCallStatusCompleted = "completed"
-	ToolCallStatusFailed    = "failed"
+	ToolCallStatusCompleted  = "completed"
+	ToolCallStatusFailed     = "failed"
 )
 
 // --- ACP tool kinds ---
@@ -76,11 +108,11 @@ const (
 // --- ACP stop reasons ---
 
 const (
-	StopReasonEndTurn        = "end_turn"
-	StopReasonMaxTokens      = "max_tokens"
+	StopReasonEndTurn         = "end_turn"
+	StopReasonMaxTokens       = "max_tokens"
 	StopReasonMaxTurnRequests = "max_turn_requests"
-	StopReasonRefusal        = "refusal"
-	StopReasonCancelled      = "cancelled"
+	StopReasonRefusal         = "refusal"
+	StopReasonCancelled       = "cancelled"
 )
 
 // ACPProvider identifies a built-in ACP provider preset.

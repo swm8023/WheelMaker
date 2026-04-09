@@ -10,7 +10,7 @@ import (
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
-type ClientIMBridge interface {
+type IMRouter interface {
 	Bind(ctx context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error
 	PublishSessionUpdate(ctx context.Context, target im.SendTarget, params acp.SessionUpdateParams) error
 	PublishPromptResult(ctx context.Context, target im.SendTarget, result acp.SessionPromptResult) error
@@ -19,11 +19,11 @@ type ClientIMBridge interface {
 	Run(ctx context.Context) error
 }
 
-func (c *Client) SetIMRouter(router ClientIMBridge) {
+func (c *Client) SetIMRouter(router IMRouter) {
 	c.mu.Lock()
-	c.imBridge = router
+	c.imRouter = router
 	for _, sess := range c.sessions {
-		sess.imBridge = router
+		sess.imRouter = router
 	}
 	c.mu.Unlock()
 }
@@ -31,18 +31,7 @@ func (c *Client) SetIMRouter(router ClientIMBridge) {
 func (c *Client) HasIMRouter() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.imBridge != nil
-}
-
-// IMRouter is kept as a compatibility alias while callers migrate to ClientIMBridge.
-type IMRouter = ClientIMBridge
-
-func (c *Client) SetClientIMBridge(bridge ClientIMBridge) {
-	c.SetIMRouter(bridge)
-}
-
-func (c *Client) HasClientIMBridge() bool {
-	return c.HasIMRouter()
+	return c.imRouter != nil
 }
 
 func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {
@@ -103,7 +92,7 @@ func (c *Client) HandleIMInbound(ctx context.Context, event im.InboundEvent) err
 
 func (c *Client) bindIM(ctx context.Context, source im.ChatRef, sessionID string) error {
 	c.mu.Lock()
-	router := c.imBridge
+	router := c.imRouter
 	c.mu.Unlock()
 	if router == nil {
 		return nil
@@ -113,7 +102,7 @@ func (c *Client) bindIM(ctx context.Context, source im.ChatRef, sessionID string
 
 func (c *Client) sendIMDirect(ctx context.Context, source im.ChatRef, text string) error {
 	c.mu.Lock()
-	router := c.imBridge
+	router := c.imRouter
 	c.mu.Unlock()
 	if router == nil {
 		return nil
@@ -265,7 +254,7 @@ func parseHelpArgs(args string) (menuID string, page int) {
 
 func (c *Client) sendHelpCard(ctx context.Context, source im.ChatRef, model im.HelpModel, menuID string, page int) error {
 	c.mu.Lock()
-	router := c.imBridge
+	router := c.imRouter
 	c.mu.Unlock()
 	if router == nil {
 		return nil

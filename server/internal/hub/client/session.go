@@ -84,7 +84,7 @@ type Session struct {
 	yolo        bool
 	registry    *agent.ACPFactory
 	store       Store
-	imBridge    ClientIMBridge
+	imRouter    IMRouter
 	imSource    *im.ChatRef
 
 	createdAt    time.Time
@@ -232,13 +232,13 @@ func (s *Session) setIMSource(source im.ChatRef) {
 	s.mu.Unlock()
 }
 
-func (s *Session) imContext() (ClientIMBridge, im.ChatRef, bool) {
+func (s *Session) imContext() (IMRouter, im.ChatRef, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.imBridge == nil || s.imSource == nil || s.imSource.ChannelID == "" || s.imSource.ChatID == "" {
+	if s.imRouter == nil || s.imSource == nil || s.imSource.ChannelID == "" || s.imSource.ChatID == "" {
 		return nil, im.ChatRef{}, false
 	}
-	return s.imBridge, *s.imSource, true
+	return s.imRouter, *s.imSource, true
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the

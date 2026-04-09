@@ -40,7 +40,7 @@ type Client struct {
 	registry *agent.ACPFactory
 
 	store    Store
-	imBridge ClientIMBridge
+	imRouter IMRouter
 
 	mu sync.Mutex
 
@@ -118,8 +118,8 @@ func (c *Client) Start(ctx context.Context) error {
 // Run blocks until ctx is cancelled, delegating to the IM router's Run loop.
 // Returns an error if no IM router is configured.
 func (c *Client) Run(ctx context.Context) error {
-	if c.imBridge != nil {
-		return c.imBridge.Run(ctx)
+	if c.imRouter != nil {
+		return c.imRouter.Run(ctx)
 	}
 	return errors.New("no IM router configured")
 }
@@ -224,7 +224,7 @@ func (c *Client) newWiredSession(id string) *Session {
 func (c *Client) wireSession(sess *Session) {
 	sess.projectName = c.projectName
 	sess.registry = c.registry
-	sess.imBridge = c.imBridge
+	sess.imRouter = c.imRouter
 	sess.yolo = c.yolo
 	sess.store = c.store
 	if strings.TrimSpace(sess.activeAgent) == "" {
@@ -561,7 +561,7 @@ func (s *Session) handlePrompt(text string) {
 		s.mu.Unlock()
 
 		var buf strings.Builder
-		imBridge, imSource, hasIMEmitter := s.imContext()
+		imRouter, imSource, hasIMEmitter := s.imContext()
 		s.mu.Lock()
 		acpSessionID := s.acpSessionID
 		s.mu.Unlock()
@@ -616,11 +616,11 @@ func (s *Session) handlePrompt(text string) {
 					var emitErr error
 					switch u.Type {
 					case acp.UpdateDone:
-						emitErr = imBridge.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
+						emitErr = imRouter.PublishPromptResult(ctx, target, acp.SessionPromptResult{StopReason: u.Content})
 					default:
 						params, ok := sessionUpdateParamsFromUpdate(acpSessionID, u)
 						if ok {
-							emitErr = imBridge.PublishSessionUpdate(ctx, target, params)
+							emitErr = imRouter.PublishSessionUpdate(ctx, target, params)
 						}
 					}
 					if emitErr != nil {
