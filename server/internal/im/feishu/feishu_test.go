@@ -429,8 +429,8 @@ func TestPublishSessionUpdate_UsageUpdateDoesNotSyncRealtime(t *testing.T) {
 	if len(ft.cards) != 0 || len(ft.sends) != 0 {
 		t.Fatalf("usage update should not sync in realtime, sends=%+v cards=%+v", ft.sends, ft.cards)
 	}
-	if got := ft.usage["chat-a"]; got != "context usage 71%" {
-		t.Fatalf("usage=%q, want context usage 71%%", got)
+	if got := ft.usage["chat-a"]; got != "Context" {
+		t.Fatalf("usage=%q, want Context", got)
 	}
 }
 
