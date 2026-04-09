@@ -18,12 +18,15 @@ import (
 
 func TestFormatACPLogLine_MinimalShape(t *testing.T) {
 	payload := []byte(`{"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"sess-1","token":"abc","prompt":"hello"}}`)
-	line := formatACPLogLine('>', payload)
-	if !strings.HasPrefix(line, "[acp] > {sess-1 session/prompt} ") {
+	line := formatACPLogLine('>', "codex", payload)
+	if !strings.HasPrefix(line, "[acp] >[codex] [Req 3 session/prompt] ") {
 		t.Fatalf("line=%q", line)
 	}
 	if strings.Contains(line, "jsonrpc") {
 		t.Fatalf("line contains verbose metadata: %q", line)
+	}
+	if strings.Contains(line, `"token":"abc"`) {
+		t.Fatalf("line should redact sensitive fields: %q", line)
 	}
 }
 
@@ -59,7 +62,7 @@ func TestLogOutboundACPDebugLine(t *testing.T) {
 	}
 
 	raw := []byte(`{"method":"session/prompt","params":{"sessionId":"sess-1","token":"abc"}}`)
-	defaultACPLogSink.Frame('>', raw)
+	newACPProcessLogSink("codex").Frame('>', raw)
 	logger.Close()
 
 	data, err := os.ReadFile(debugLog)
@@ -68,7 +71,7 @@ func TestLogOutboundACPDebugLine(t *testing.T) {
 	}
 
 	got := string(data)
-	if got == "" || !strings.Contains(got, "[acp] > {sess-1 session/prompt}") {
+	if got == "" || !strings.Contains(got, "[acp] >[codex] [Notify session/prompt]") {
 		t.Fatalf("unexpected outbound log: %q", got)
 	}
 	if strings.Contains(got, "abc") {
@@ -85,10 +88,35 @@ func TestLogACPStderrLineAsError(t *testing.T) {
 	logger.SetOutput(&buf)
 	defer logger.SetOutput(os.Stderr)
 
-	defaultACPLogSink.StderrLine("panic: worker crashed")
+	newACPProcessLogSink("codex").StderrLine("panic: worker crashed")
 	got := buf.String()
-	if !strings.Contains(got, "[acp] ! {- -} panic: worker crashed") {
+	if !strings.Contains(got, "[acp] ![codex] panic: worker crashed") {
 		t.Fatalf("unexpected stderr log: %q", got)
+	}
+}
+
+func TestFormatACPLogLine_ResponseShape(t *testing.T) {
+	payload := []byte(`{"jsonrpc":"2.0","id":7,"result":{"ok":true}}`)
+	line := formatACPLogLine('<', "claude", payload)
+	if !strings.Contains(line, "[acp] <[claude] [Resp 7]") {
+		t.Fatalf("line=%q", line)
+	}
+	if strings.Contains(line, "jsonrpc") {
+		t.Fatalf("line contains verbose metadata: %q", line)
+	}
+}
+
+func TestFormatACPLogLine_NotifySessionUpdateFilter(t *testing.T) {
+	payload := []byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1234567890","update":{"sessionUpdate":"tool_call_update","status":"completed","title":"Edit file"}}}`)
+	line := formatACPLogLine('<', "copilot", payload)
+	if !strings.Contains(line, "[acp] <[copilot] [Notify session/update]") {
+		t.Fatalf("line=%q", line)
+	}
+	if !strings.Contains(line, "sessio...7890, tool_call_update {result:") {
+		t.Fatalf("filtered body missing: %q", line)
+	}
+	if strings.Contains(line, `"sessionId":"session-1234567890"`) {
+		t.Fatalf("session/update filter should replace raw params: %q", line)
 	}
 }
 

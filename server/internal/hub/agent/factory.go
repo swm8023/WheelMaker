@@ -127,7 +127,7 @@ func newOwnedProviderConn(provider ACPProvider) (Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw := NewACPProcess(exe, env, args...)
+	raw := NewACPProcess(provider.Name(), exe, env, args...)
 	if err := raw.Start(); err != nil {
 		return nil, err
 	}

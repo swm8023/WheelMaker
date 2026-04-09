@@ -6,10 +6,31 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
-const acpDebugPayloadMaxBytes = 64 * 1024
+const (
+	acpDebugPayloadMaxBytes = 64 * 1024
+	acpSessionIDShortHead   = 6
+	acpSessionIDShortTail   = 4
+)
+
+type acpRPCMessageType string
+
+const (
+	acpRPCMessageTypeRequest  acpRPCMessageType = "request"
+	acpRPCMessageTypeNotify   acpRPCMessageType = "notify"
+	acpRPCMessageTypeResponse acpRPCMessageType = "response"
+	acpRPCMessageTypeRaw      acpRPCMessageType = "raw"
+)
+
+type acpLogEnvelope struct {
+	msgType acpRPCMessageType
+	method  string
+	header  string
+	payload []byte
+}
 
 type acpProcessLogSink interface {
 	Frame(dir rune, raw []byte)
@@ -17,24 +38,33 @@ type acpProcessLogSink interface {
 	Errorf(format string, args ...any)
 }
 
-type defaultACPProcessLogSink struct{}
-
-var defaultACPLogSink acpProcessLogSink = defaultACPProcessLogSink{}
-
-func (defaultACPProcessLogSink) Frame(dir rune, raw []byte) {
-	logger.Debug("%s", formatACPLogLine(dir, raw))
+type defaultACPProcessLogSink struct {
+	provider string
 }
 
-func (defaultACPProcessLogSink) StderrLine(line string) {
+var defaultACPLogSink acpProcessLogSink = newACPProcessLogSink("-")
+
+func newACPProcessLogSink(provider string) acpProcessLogSink {
+	return defaultACPProcessLogSink{provider: normalizeACPProvider(provider)}
+}
+
+func (s defaultACPProcessLogSink) Frame(dir rune, raw []byte) {
+	logger.Debug("%s", formatACPLogLine(dir, s.provider, raw))
+}
+
+func (s defaultACPProcessLogSink) StderrLine(line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
 	}
-	logger.Error("[acp] ! {- -} %s", string(redactAndTrimACPPayload([]byte(line))))
+	logger.Error("[acp] ![%s] %s", s.provider, string(redactAndTrimACPPayload([]byte(line))))
 }
 
-func (defaultACPProcessLogSink) Errorf(format string, args ...any) {
-	logger.Error("[acp] ! {- -} "+format, args...)
+func (s defaultACPProcessLogSink) Errorf(format string, args ...any) {
+	allArgs := make([]any, 0, len(args)+1)
+	allArgs = append(allArgs, s.provider)
+	allArgs = append(allArgs, args...)
+	logger.Error("[acp] ![%s] "+format, allArgs...)
 }
 
 var acpSensitiveKeys = map[string]struct{}{
@@ -48,70 +78,158 @@ var acpSensitiveKeys = map[string]struct{}{
 	"password":      {},
 }
 
-func formatACPLogLine(dir rune, raw []byte) string {
-	sessionID, method := extractACPLogSessionMethod(raw)
-	payload := string(redactAndTrimACPPayload(extractACPLogPayload(raw)))
-	return fmt.Sprintf("[acp] %c {%s %s} %s", dir, sessionID, method, payload)
+func formatACPLogLine(dir rune, provider string, raw []byte) string {
+	envelope := buildACPLogEnvelope(raw)
+	payload := "-"
+	if len(envelope.payload) > 0 {
+		payload = string(redactAndTrimACPPayload(envelope.payload))
+	}
+	return fmt.Sprintf("[acp] %c[%s] %s %s", dir, normalizeACPProvider(provider), envelope.header, payload)
 }
 
-func extractACPLogSessionMethod(raw []byte) (string, string) {
-	sessionID := "-"
-	method := "-"
-
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return sessionID, method
+func normalizeACPProvider(provider string) string {
+	name := strings.ToLower(strings.TrimSpace(provider))
+	if name == "" {
+		return "-"
 	}
-
-	if v, ok := m["method"].(string); ok {
-		v = strings.TrimSpace(v)
-		if v != "" {
-			method = v
-		}
-	}
-
-	if params, ok := m["params"].(map[string]any); ok {
-		if sid, ok := params["sessionId"].(string); ok {
-			sid = strings.TrimSpace(sid)
-			if sid != "" {
-				sessionID = sid
-			}
-		}
-	}
-	if sessionID == "-" {
-		if sid, ok := m["sessionId"].(string); ok {
-			sid = strings.TrimSpace(sid)
-			if sid != "" {
-				sessionID = sid
-			}
-		}
-	}
-
-	return sessionID, method
+	return name
 }
 
-func extractACPLogPayload(raw []byte) []byte {
+func buildACPLogEnvelope(raw []byte) acpLogEnvelope {
+	rawNoRPC := stripJSONRPCField(raw)
+
+	var msg protocol.ACPRPCRawMessage
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return acpLogEnvelope{
+			msgType: acpRPCMessageTypeRaw,
+			header:  "[Raw]",
+			payload: rawNoRPC,
+		}
+	}
+
+	method := strings.TrimSpace(msg.Method)
+	switch {
+	case msg.ID != nil && method != "":
+		return acpLogEnvelope{
+			msgType: acpRPCMessageTypeRequest,
+			method:  method,
+			header:  fmt.Sprintf("[Req %d %s]", *msg.ID, method),
+			payload: filterACPBody(acpRPCMessageTypeRequest, method, selectRequestPayload(msg.Params, rawNoRPC)),
+		}
+	case method != "":
+		return acpLogEnvelope{
+			msgType: acpRPCMessageTypeNotify,
+			method:  method,
+			header:  fmt.Sprintf("[Notify %s]", method),
+			payload: filterACPBody(acpRPCMessageTypeNotify, method, selectRequestPayload(msg.Params, rawNoRPC)),
+		}
+	case msg.ID != nil:
+		return acpLogEnvelope{
+			msgType: acpRPCMessageTypeResponse,
+			header:  fmt.Sprintf("[Resp %d]", *msg.ID),
+			payload: filterACPBody(acpRPCMessageTypeResponse, "", selectResponsePayload(msg.Result, msg.Error, rawNoRPC)),
+		}
+	default:
+		return acpLogEnvelope{
+			msgType: acpRPCMessageTypeRaw,
+			header:  "[Raw]",
+			payload: rawNoRPC,
+		}
+	}
+}
+
+func selectRequestPayload(params json.RawMessage, fallback []byte) []byte {
+	trimmed := bytes.TrimSpace(params)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return fallback
+	}
+	return stripJSONRPCField(trimmed)
+}
+
+func selectResponsePayload(result json.RawMessage, rpcErr *protocol.ACPRPCError, fallback []byte) []byte {
+	trimmed := bytes.TrimSpace(result)
+	if len(trimmed) != 0 && !bytes.Equal(trimmed, []byte("null")) {
+		return stripJSONRPCField(trimmed)
+	}
+	if rpcErr != nil {
+		if b, err := json.Marshal(rpcErr); err == nil {
+			return stripJSONRPCField(b)
+		}
+	}
+	return fallback
+}
+
+func filterACPBody(msgType acpRPCMessageType, method string, body []byte) []byte {
+	body = stripJSONRPCField(body)
+	if msgType == acpRPCMessageTypeNotify && method == protocol.MethodSessionUpdate {
+		if filtered, ok := filterNotifySessionUpdateBody(body); ok {
+			return filtered
+		}
+	}
+	return body
+}
+
+func filterNotifySessionUpdateBody(body []byte) ([]byte, bool) {
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := json.Unmarshal(body, &m); err != nil {
+		return nil, false
+	}
+
+	update, ok := m["update"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	updateKind, _ := update["sessionUpdate"].(string)
+	updateKind = strings.TrimSpace(updateKind)
+	if updateKind == "" {
+		return nil, false
+	}
+
+	result := make(map[string]any, len(update))
+	for k, v := range update {
+		if k == "sessionUpdate" {
+			continue
+		}
+		result[k] = v
+	}
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return nil, false
+	}
+
+	sessionID, _ := m["sessionId"].(string)
+	sessionID = shortenSessionID(sessionID)
+	return []byte(fmt.Sprintf("%s, %s {result:%s}", sessionID, updateKind, string(resultBytes))), true
+}
+
+func shortenSessionID(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "-"
+	}
+	if len(sessionID) <= acpSessionIDShortHead+acpSessionIDShortTail+3 {
+		return sessionID
+	}
+	return sessionID[:acpSessionIDShortHead] + "..." + sessionID[len(sessionID)-acpSessionIDShortTail:]
+}
+
+func stripJSONRPCField(raw []byte) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
 		return raw
 	}
 
-	if params, ok := m["params"]; ok {
-		if b, err := json.Marshal(params); err == nil {
-			return b
-		}
+	var m map[string]any
+	if err := json.Unmarshal(trimmed, &m); err != nil {
+		return raw
 	}
-	if result, ok := m["result"]; ok {
-		if b, err := json.Marshal(result); err == nil {
-			return b
-		}
+	delete(m, "jsonrpc")
+
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
 	}
-	if errObj, ok := m["error"]; ok {
-		if b, err := json.Marshal(errObj); err == nil {
-			return b
-		}
-	}
-	return raw
+	return b
 }
 
 func redactAndTrimACPPayload(raw []byte) []byte {

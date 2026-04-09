@@ -40,13 +40,13 @@ type ACPProcess struct {
 }
 
 // NewACPProcess creates a subprocess-backed ACP transport.
-func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
+func NewACPProcess(providerName, exePath string, env []string, args ...string) *ACPProcess {
 	return &ACPProcess{
 		exePath: exePath,
 		exeArgs: append([]string(nil), args...),
 		env:     env,
 		done:    make(chan struct{}),
-		log:     defaultACPLogSink,
+		log:     newACPProcessLogSink(providerName),
 	}
 }
 
