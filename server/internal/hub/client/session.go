@@ -246,19 +246,43 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		return nil
 	}
 	name := s.currentAgentNameLocked()
-	if name == "" {
-		name = defaultAgentName
+	if name == "" && s.registry != nil {
+		name = strings.TrimSpace(s.registry.PreferredName())
 	}
+	name = strings.TrimSpace(name)
 	savedSID := ""
 	if as := s.agents[name]; as != nil && strings.TrimSpace(as.ACPSessionID) != "" {
 		savedSID = strings.TrimSpace(as.ACPSessionID)
 	}
 	s.mu.Unlock()
 
+	if name == "" {
+		return fmt.Errorf("no available ACP provider")
+	}
+
 	creator := s.registry.CreatorByName(name)
 	if creator == nil {
-		return fmt.Errorf("no agent registered for %q", name)
+		fallback := ""
+		if s.registry != nil {
+			fallback = strings.TrimSpace(s.registry.PreferredName())
+		}
+		if fallback == "" {
+			return fmt.Errorf("no available ACP provider")
+		}
+		if !strings.EqualFold(fallback, name) {
+			logger.Warn("client: requested agent unavailable requested=%s fallback=%s", name, fallback)
+		}
+		name = fallback
+		creator = s.registry.CreatorByName(name)
+		if creator == nil {
+			return fmt.Errorf("no agent registered for %q", name)
+		}
 	}
+	s.mu.Lock()
+	if as := s.agents[name]; as != nil && strings.TrimSpace(as.ACPSessionID) != "" {
+		savedSID = strings.TrimSpace(as.ACPSessionID)
+	}
+	s.mu.Unlock()
 
 	inst, err := creator(ctx)
 	if err != nil {

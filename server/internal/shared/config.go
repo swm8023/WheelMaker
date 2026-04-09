@@ -21,7 +21,9 @@ type rawAppConfig struct {
 }
 
 type rawProjectConfig struct {
-	Debug json.RawMessage `json:"debug,omitempty"`
+	Debug  json.RawMessage `json:"debug,omitempty"`
+	IM     json.RawMessage `json:"im,omitempty"`
+	Client json.RawMessage `json:"client,omitempty"`
 }
 
 // LogConfig controls the operational log system.
@@ -32,24 +34,11 @@ type LogConfig struct {
 
 // ProjectConfig describes one WheelMaker project.
 type ProjectConfig struct {
-	Name   string     `json:"name"`
-	Path   string     `json:"path"`
-	YOLO   bool       `json:"yolo,omitempty"`
-	IM     IMConfig   `json:"im"`
-	Client ClientConf `json:"client"`
-}
-
-// IMConfig describes the IM transport for a project.
-type IMConfig struct {
-	Type      string `json:"type"`
-	AppID     string `json:"appID,omitempty"`
-	AppSecret string `json:"appSecret,omitempty"`
-}
-
-// ClientConf describes the AI agent side for a project.
-type ClientConf struct {
-	Agent    string       `json:"agent,omitempty"`
-	IMFilter IMFilterConf `json:"imFilter,omitempty"`
+	Name     string        `json:"name"`
+	Path     string        `json:"path"`
+	YOLO     bool          `json:"yolo,omitempty"`
+	Feishu   *FeishuConfig `json:"feishu,omitempty"`
+	IMFilter IMFilterConf  `json:"imFilter,omitempty"`
 }
 
 // IMFilterConf controls which IM-visible events the IM adapter suppresses.
@@ -59,6 +48,41 @@ type IMFilterConf struct {
 	// thought, tool/tool_call, text, system, plan, config_option_update,
 	// available_commands_update, done/prompt_result.
 	Block []string `json:"block,omitempty"`
+}
+
+// FeishuConfig describes Feishu transport config.
+type FeishuConfig struct {
+	AppID     string `json:"app_id,omitempty"`
+	AppSecret string `json:"app_secret,omitempty"`
+}
+
+type rawFeishuConfig struct {
+	AppIDLegacy     string `json:"appID,omitempty"`
+	AppSecretLegacy string `json:"appSecret,omitempty"`
+	AppIDSnake      string `json:"app_id,omitempty"`
+	AppSecretSnake  string `json:"app_secret,omitempty"`
+	AppSecretTypo   string `json:"app_secrect,omitempty"`
+}
+
+func (c *FeishuConfig) UnmarshalJSON(data []byte) error {
+	var raw rawFeishuConfig
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.AppID = firstNonEmpty(raw.AppIDSnake, raw.AppIDLegacy)
+	c.AppSecret = firstNonEmpty(raw.AppSecretSnake, raw.AppSecretTypo, raw.AppSecretLegacy)
+	return nil
+}
+
+func (p ProjectConfig) IMType() string {
+	if p.HasFeishu() {
+		return "feishu"
+	}
+	return "app"
+}
+
+func (p ProjectConfig) HasFeishu() bool {
+	return p.Feishu != nil && strings.TrimSpace(p.Feishu.AppID) != "" && strings.TrimSpace(p.Feishu.AppSecret) != ""
 }
 
 // MonitorConfig configures the wheelmaker-monitor web dashboard.
@@ -93,6 +117,12 @@ func LoadConfig(path string) (*AppConfig, error) {
 			if len(project.Debug) != 0 {
 				return nil, fmt.Errorf("parse config %s: projects[].debug has been removed", path)
 			}
+			if len(project.IM) != 0 {
+				return nil, fmt.Errorf("parse config %s: projects[].im has been removed; use projects[].feishu instead", path)
+			}
+			if len(project.Client) != 0 {
+				return nil, fmt.Errorf("parse config %s: projects[].client has been removed; provider is auto-detected", path)
+			}
 		}
 	}
 	var cfg AppConfig
@@ -102,11 +132,22 @@ func LoadConfig(path string) (*AppConfig, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	for _, project := range cfg.Projects {
-		switch strings.ToLower(strings.TrimSpace(project.IM.Type)) {
-		case "feishu", "app":
-		default:
-			return nil, fmt.Errorf("parse config %s: unsupported im.type %q (supported: feishu, app)", path, project.IM.Type)
+		if project.Feishu != nil {
+			appID := strings.TrimSpace(project.Feishu.AppID)
+			appSecret := strings.TrimSpace(project.Feishu.AppSecret)
+			if appID == "" || appSecret == "" {
+				return nil, fmt.Errorf("parse config %s: projects[].feishu requires both app_id and app_secret", path)
+			}
 		}
 	}
 	return &cfg, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

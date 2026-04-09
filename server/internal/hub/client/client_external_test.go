@@ -24,7 +24,7 @@ func newTestClient(t *testing.T, mock *mockSession) *client.Client {
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
-	c := client.New(store, mock.agentName, "test", t.TempDir())
+	c := client.New(store, "test", t.TempDir())
 	c.InjectForwarder(mock.agentName, mock.sessionID, func(_ context.Context, text string) (<-chan acp.Update, error) {
 		mock.promptCalls = append(mock.promptCalls, text)
 		if mock.promptFn != nil {
@@ -75,7 +75,7 @@ func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
 		t.Fatalf("SaveSession() error = %v", err)
 	}
 
-	c := client.New(store, "claude", "proj-a", dir)
+	c := client.New(store, "proj-a", dir)
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -95,7 +95,7 @@ func TestResolveSession_RejectsEmptyRouteKey(t *testing.T) {
 	}
 	defer store.Close()
 
-	c := client.New(store, "claude", "proj-a", t.TempDir())
+	c := client.New(store, "proj-a", t.TempDir())
 	if _, err := c.ResolveSessionForTest(""); err == nil {
 		t.Fatal(`ResolveSessionForTest("") should fail`)
 	}

@@ -27,7 +27,14 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 	switch cmd {
 	case "/use":
 		if args == "" {
-			sess.reply("Usage: /use <agent-name> [--continue]  (e.g. /use claude, /use copilot)")
+			example := "Usage: /use <agent-name> [--continue]"
+			if sess.registry != nil {
+				names := sess.registry.Names()
+				if len(names) > 0 {
+					example += fmt.Sprintf("  (available: %s)", strings.Join(names, ", "))
+				}
+			}
+			sess.reply(example)
 			return
 		}
 		parts := strings.Fields(args)

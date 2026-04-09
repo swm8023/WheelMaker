@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
 	im "github.com/swm8023/wheelmaker/internal/im"
 	imapp "github.com/swm8023/wheelmaker/internal/im/app"
@@ -51,7 +52,7 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 func (h *Hub) Start(ctx context.Context) error {
 	logger.Info("hub: start projects=%d", len(h.cfg.Projects))
 	for _, pc := range h.cfg.Projects {
-		logger.Info("hub: build client project=%s im=%s", pc.Name, pc.IM.Type)
+		logger.Info("hub: build client project=%s im=%s", pc.Name, pc.IMType())
 		c, err := h.buildClient(ctx, pc)
 		if err != nil {
 			logger.Error("hub: build client failed project=%s err=%v", pc.Name, err)
@@ -86,36 +87,36 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 		logger.Error("hub: open store failed project=%s err=%v", pc.Name, err)
 		return nil, fmt.Errorf("new store: %w", err)
 	}
-	c := client.New(store, pc.Client.Agent, pc.Name, cwd)
+	c := client.New(store, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
 
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())
-	switch pc.IM.Type {
-	case "feishu":
+	if pc.Feishu != nil && !pc.HasFeishu() {
+		logger.Error("hub: build client failed project=%s err=invalid feishu config", pc.Name)
+		_ = c.Close()
+		return nil, fmt.Errorf("invalid feishu config: both app_id and app_secret are required")
+	}
+	if pc.HasFeishu() {
 		logger.Info("hub: register channel project=%s type=feishu", pc.Name)
 		if err := router.RegisterChannel(imfeishu.New(imfeishu.Config{
-			AppID:             pc.IM.AppID,
-			AppSecret:         pc.IM.AppSecret,
+			AppID:             pc.Feishu.AppID,
+			AppSecret:         pc.Feishu.AppSecret,
 			VerificationToken: feishuVerificationToken,
 			EncryptKey:        feishuEncryptKey,
 			YOLO:              pc.YOLO,
-			BlockedUpdates:    pc.Client.IMFilter.Block,
+			BlockedUpdates:    pc.IMFilter.Block,
 		})); err != nil {
 			logger.Error("hub: register channel failed project=%s type=feishu err=%v", pc.Name, err)
 			_ = c.Close()
 			return nil, err
 		}
-	case "app":
+	} else {
 		logger.Info("hub: register channel project=%s type=app", pc.Name)
 		if err := router.RegisterChannel(imapp.New()); err != nil {
 			logger.Error("hub: register channel failed project=%s type=app err=%v", pc.Name, err)
 			_ = c.Close()
 			return nil, err
 		}
-	default:
-		logger.Error("hub: build client failed project=%s err=unsupported im.type %q", pc.Name, pc.IM.Type)
-		_ = c.Close()
-		return nil, fmt.Errorf("unsupported im.type %q (supported: feishu, app)", pc.IM.Type)
 	}
 	c.SetIMRouter(router)
 	logger.Info("hub: starting client project=%s", pc.Name)
@@ -269,8 +270,11 @@ func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
 		Name:   cfgProject.Name,
 		Path:   path,
 		Online: true,
-		Agent:  cfgProject.Client.Agent,
-		IMType: cfgProject.IM.Type,
+		Agent:  "auto",
+		IMType: cfgProject.IMType(),
+	}
+	if preferred := strings.TrimSpace(agent.DefaultACPFactory().PreferredName()); preferred != "" {
+		info.Agent = preferred
 	}
 	gitState := collectGitState(path)
 	info.Git = gitState

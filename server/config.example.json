@@ -4,30 +4,20 @@
       "name": "local-dev",
       "path": "/path/to/your/project",
       "yolo": true,
-      "im": {
-        "type": "app"
-      },
-      "client": {
-        "agent": "claude",
-        "imFilter": {
-          "block": ["thought", "tool_call"]
-        }
+      "imFilter": {
+        "block": ["thought", "tool_call"]
       }
     },
     {
       "name": "feishu-prod",
       "path": "/path/to/other/project",
       "yolo": false,
-      "im": {
-        "type": "feishu",
-        "appID": "cli_xxx",
-        "appSecret": "yyy"
+      "feishu": {
+        "app_id": "cli_xxx",
+        "app_secret": "yyy"
       },
-      "client": {
-        "agent": "claude",
-        "imFilter": {
-          "block": ["thought", "tool"]
-        }
+      "imFilter": {
+        "block": ["thought", "tool"]
       }
     }
   ],

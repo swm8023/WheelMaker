@@ -78,7 +78,7 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 
 	name := strings.TrimSpace(agentName)
 	if name == "" {
-		name = defaultAgentName
+		name = string(acp.ACPProviderClaude)
 	}
 	runtime := &testInjectedInstance{
 		name:      name,
@@ -501,7 +501,7 @@ func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
 }
 
 func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
-	c := New(&noopStore{}, nil, "test", "/tmp")
+	c := New(&noopStore{}, "test", "/tmp")
 	fake := &fakeIMRouter{}
 	c.SetIMRouter(fake)
 	if err := c.Start(context.Background()); err != nil {
@@ -519,7 +519,7 @@ func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
 }
 
 func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
-	c := New(&noopStore{}, nil, "test", "/tmp")
+	c := New(&noopStore{}, "test", "/tmp")
 	fake := &fakeIMRouter{}
 	c.SetIMRouter(fake)
 	c.InjectAgentFactory(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
@@ -601,7 +601,7 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	}
 	defer store.Close()
 
-	c := New(store, nil, "proj1", "/tmp")
+	c := New(store, "proj1", "/tmp")
 	ctx := context.Background()
 	if err := store.SaveSession(ctx, &SessionRecord{
 		ID:           "restore-me",
@@ -640,7 +640,7 @@ func TestEvictSuspendedSessions(t *testing.T) {
 	}
 	defer store.Close()
 
-	c := New(store, nil, "proj1", "/tmp")
+	c := New(store, "proj1", "/tmp")
 	c.suspendTimeout = 0
 
 	c.mu.Lock()

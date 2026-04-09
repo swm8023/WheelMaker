@@ -18,8 +18,6 @@ import (
 
 const commandTimeout = 30 * time.Second
 
-const defaultAgentName = string(acp.ACPProviderClaude)
-
 const acpClientProtocolVersion = 1
 
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
@@ -36,10 +34,9 @@ type promptState struct {
 // Agent initialization is lazy: the first incoming message triggers ensureInstance(),
 // which connects the active agent and creates the ACP forwarder.
 type Client struct {
-	projectName     string
-	cwd             string
-	yolo            bool
-	configuredAgent string
+	projectName string
+	cwd         string
+	yolo        bool
 
 	registry *agent.ACPFactory
 
@@ -62,18 +59,16 @@ type Client struct {
 }
 
 // New creates a Client for the given project.
-// The second argument is kept only to avoid broad call-site churn while IM1 is removed.
-func New(store Store, preferredAgent any, projectName string, cwd string) *Client {
+func New(store Store, projectName string, cwd string) *Client {
 	return &Client{
-		projectName:     projectName,
-		cwd:             cwd,
-		configuredAgent: normalizePreferredAgent(preferredAgent),
-		registry:        agent.DefaultACPFactory(),
-		store:           store,
-		sessions:        make(map[string]*Session),
-		routeMap:        make(map[string]string),
-		suspendTimeout:  5 * time.Minute,
-		stopPersistCh:   make(chan struct{}),
+		projectName:    projectName,
+		cwd:            cwd,
+		registry:       agent.DefaultACPFactory(),
+		store:          store,
+		sessions:       make(map[string]*Session),
+		routeMap:       make(map[string]string),
+		suspendTimeout: 5 * time.Minute,
+		stopPersistCh:  make(chan struct{}),
 	}
 }
 
@@ -119,26 +114,6 @@ func (c *Client) Start(ctx context.Context) error {
 	c.mu.Unlock()
 	go c.persistLoop()
 	return nil
-}
-
-func normalizePreferredAgent(value any) string {
-	var name string
-	switch v := value.(type) {
-	case string:
-		name = v
-	case acp.ACPProvider:
-		name = string(v)
-	default:
-		return ""
-	}
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" {
-		return ""
-	}
-	if provider, ok := acp.ParseACPProvider(name); ok {
-		return string(provider)
-	}
-	return name
 }
 
 // Run blocks until ctx is cancelled, delegating to the IM router's Run loop.
@@ -254,13 +229,16 @@ func (c *Client) wireSession(sess *Session) {
 	sess.yolo = c.yolo
 	sess.store = c.store
 	if strings.TrimSpace(sess.activeAgent) == "" {
-		if strings.TrimSpace(c.configuredAgent) != "" {
-			sess.activeAgent = c.configuredAgent
-		} else {
-			sess.activeAgent = defaultAgentName
-		}
+		sess.activeAgent = c.preferredAvailableAgent()
 	}
 	sess.permRouter = newPermissionRouter(sess)
+}
+
+func (c *Client) preferredAvailableAgent() string {
+	if c.registry == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.registry.PreferredName())
 }
 
 func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
@@ -762,7 +740,13 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 func (s *Session) connectHint() string {
 	agentName := s.preferredAgentName()
 	if agentName == "" {
-		return "Run `/use claude`, `/use codex`, or `/use copilot` to connect."
+		if s.registry != nil {
+			names := s.registry.Names()
+			if len(names) > 0 {
+				return fmt.Sprintf("Run `/use <agent>` to connect. Available: %s", strings.Join(names, ", "))
+			}
+		}
+		return "No available ACP provider. Check environment and restart wheelmaker."
 	}
 	return fmt.Sprintf("Run `%s` to connect.", "/use "+agentName)
 }
@@ -776,7 +760,10 @@ func (s *Session) preferredAgentName() string {
 	if strings.TrimSpace(s.activeAgent) != "" {
 		return strings.TrimSpace(s.activeAgent)
 	}
-	return defaultAgentName
+	if s.registry != nil {
+		return strings.TrimSpace(s.registry.PreferredName())
+	}
+	return ""
 }
 
 type instanceLivenessProbe interface {

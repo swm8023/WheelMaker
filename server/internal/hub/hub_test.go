@@ -13,9 +13,9 @@ import (
 func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
-		Name: "p",
-		Path: ".",
-		IM:   logger.IMConfig{Type: "feishu"},
+		Name:   "p",
+		Path:   ".",
+		Feishu: &logger.FeishuConfig{AppID: "cli_xxx", AppSecret: "yyy"},
 	})
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
@@ -31,7 +31,6 @@ func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 	c, err := h.buildClient(context.Background(), logger.ProjectConfig{
 		Name: "p",
 		Path: ".",
-		IM:   logger.IMConfig{Type: "app"},
 	})
 	if err != nil {
 		t.Fatalf("buildClient: %v", err)
@@ -42,19 +41,19 @@ func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 	t.Cleanup(func() { _ = c.Close() })
 }
 
-func TestBuildClient_RejectsRemovedConsoleType(t *testing.T) {
+func TestBuildClient_RejectsInvalidFeishuConfig(t *testing.T) {
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	_, err := h.buildClient(context.Background(), logger.ProjectConfig{
-		Name: "p",
-		Path: ".",
-		IM:   logger.IMConfig{Type: "console"},
+		Name:   "p",
+		Path:   ".",
+		Feishu: &logger.FeishuConfig{AppID: "cli_xxx"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported im.type") {
-		t.Fatalf("err=%v, want unsupported im.type", err)
+	if err == nil || !strings.Contains(err.Error(), "invalid feishu config") {
+		t.Fatalf("err=%v, want invalid feishu config", err)
 	}
 }
 
-func TestBuildClient_UnsupportedTypeLogsError(t *testing.T) {
+func TestBuildClient_InvalidFeishuLogsError(t *testing.T) {
 	var buf bytes.Buffer
 	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelInfo}); err != nil {
 		t.Fatalf("setup logger: %v", err)
@@ -65,9 +64,9 @@ func TestBuildClient_UnsupportedTypeLogsError(t *testing.T) {
 
 	h := New(&logger.AppConfig{}, t.TempDir()+"/db/client.sqlite3")
 	_, _ = h.buildClient(context.Background(), logger.ProjectConfig{
-		Name: "p",
-		Path: ".",
-		IM:   logger.IMConfig{Type: "console"},
+		Name:   "p",
+		Path:   ".",
+		Feishu: &logger.FeishuConfig{AppID: "cli_xxx"},
 	})
 	if !strings.Contains(buf.String(), "hub: build client failed") {
 		t.Fatalf("missing startup error log: %s", buf.String())

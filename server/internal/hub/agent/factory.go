@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // InstanceCreator creates one runtime instance.
@@ -35,9 +36,24 @@ func DefaultACPFactory() *ACPFactory {
 
 func newACPFactoryWithDefaults() *ACPFactory {
 	f := &ACPFactory{creators: map[protocol.ACPProvider]InstanceCreator{}}
-	f.Register(protocol.ACPProviderCodex, providerInstanceCreator(NewCodexProvider()))
-	f.Register(protocol.ACPProviderClaude, providerInstanceCreator(NewClaudeProvider()))
-	f.Register(protocol.ACPProviderCopilot, providerInstanceCreator(NewCopilotProvider()))
+	candidates := []struct {
+		provider protocol.ACPProvider
+		build    func() ACPProvider
+	}{
+		{provider: protocol.ACPProviderCodex, build: func() ACPProvider { return NewCodexProvider() }},
+		{provider: protocol.ACPProviderClaude, build: func() ACPProvider { return NewClaudeProvider() }},
+		{provider: protocol.ACPProviderCopilot, build: func() ACPProvider { return NewCopilotProvider() }},
+	}
+	for _, candidate := range candidates {
+		prov := candidate.build()
+		if !isProviderAvailable(prov) {
+			continue
+		}
+		f.Register(candidate.provider, providerInstanceCreator(prov))
+	}
+	if len(f.Names()) == 0 {
+		logger.Warn("agent factory: no available ACP providers detected")
+	}
 	return f
 }
 
@@ -66,6 +82,7 @@ func (f *ACPFactory) Register(provider protocol.ACPProvider, creator InstanceCre
 	}
 	f.creators[provider] = creator
 	f.mu.Unlock()
+	logger.Info("agent factory: registered provider=%s", provider)
 }
 
 // Creator returns a creator by provider enum.
@@ -103,6 +120,26 @@ func (f *ACPFactory) Names() []string {
 	return names
 }
 
+// PreferredName returns the preferred available provider name.
+func (f *ACPFactory) PreferredName() string {
+	if f == nil {
+		return ""
+	}
+	ordered := []protocol.ACPProvider{
+		protocol.ACPProviderCodex,
+		protocol.ACPProviderClaude,
+		protocol.ACPProviderCopilot,
+	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	for _, provider := range ordered {
+		if f.creators[provider] != nil {
+			return string(provider)
+		}
+	}
+	return ""
+}
+
 // CreateInstance creates one runtime instance by provider enum.
 func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPProvider) (Instance, error) {
 	creator := f.Creator(provider)
@@ -132,4 +169,16 @@ func newOwnedProviderConn(provider ACPProvider) (Conn, error) {
 		return nil, err
 	}
 	return NewOwnedConn(raw), nil
+}
+
+func isProviderAvailable(provider ACPProvider) bool {
+	if provider == nil {
+		return false
+	}
+	_, _, _, err := provider.Launch()
+	if err != nil {
+		logger.Warn("agent factory: skip provider=%s reason=%v", provider.Name(), err)
+		return false
+	}
+	return true
 }

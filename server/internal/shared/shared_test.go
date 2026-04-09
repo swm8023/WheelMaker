@@ -24,7 +24,7 @@ func TestLoadConfig_RejectsRemovedIMVersion(t *testing.T) {
 
 func TestLoadConfig_RejectsRemovedProjectDebug(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	data := []byte(`{"projects":[{"name":"p","debug":true,"path":".","im":{"type":"app"}}]}`)
+	data := []byte(`{"projects":[{"name":"p","debug":true,"path":"."}]}`)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestLoadConfig_RejectsRemovedProjectDebug(t *testing.T) {
 
 func TestLoadConfig_AllowsDebugLogLevel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	data := []byte(`{"log":{"level":"debug"},"projects":[{"name":"p","path":".","im":{"type":"app"}}]}`)
+	data := []byte(`{"log":{"level":"debug"},"projects":[{"name":"p","path":"."}]}`)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -48,6 +48,38 @@ func TestLoadConfig_AllowsDebugLogLevel(t *testing.T) {
 	}
 	if cfg.Log.Level != "debug" {
 		t.Fatalf("log level=%q, want %q", cfg.Log.Level, "debug")
+	}
+}
+
+func TestLoadConfig_RejectsRemovedProjectClient(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{"projects":[{"name":"p","path":".","client":{"agent":"codex"}}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := LoadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "projects[].client has been removed") {
+		t.Fatalf("err=%v, want removed projects[].client error", err)
+	}
+}
+
+func TestLoadConfig_FeishuSupportsSnakeAndTypoSecretField(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{"projects":[{"name":"p","path":".","feishu":{"app_id":"cli_xxx","app_secrect":"secret"}}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if len(cfg.Projects) != 1 || cfg.Projects[0].Feishu == nil {
+		t.Fatalf("unexpected feishu config: %+v", cfg.Projects)
+	}
+	if cfg.Projects[0].Feishu.AppID != "cli_xxx" || cfg.Projects[0].Feishu.AppSecret != "secret" {
+		t.Fatalf("unexpected feishu values: %+v", cfg.Projects[0].Feishu)
 	}
 }
 
