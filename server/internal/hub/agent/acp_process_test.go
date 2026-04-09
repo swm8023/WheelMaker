@@ -17,7 +17,7 @@ func TestLogOutboundACPDebugLine(t *testing.T) {
 	}
 
 	raw := []byte(`{"method":"session/prompt","params":{"sessionId":"sess-1","token":"abc"}}`)
-	logACPDebugRaw('>', raw)
+	defaultACPLogSink.Frame('>', raw)
 	logger.Close()
 
 	data, err := os.ReadFile(debugLog)
@@ -43,7 +43,7 @@ func TestLogACPStderrLineAsError(t *testing.T) {
 	logger.SetOutput(&buf)
 	defer logger.SetOutput(os.Stderr)
 
-	logACPStderrLine("panic: worker crashed")
+	defaultACPLogSink.StderrLine("panic: worker crashed")
 	got := buf.String()
 	if !strings.Contains(got, "[acp] ! {- -} panic: worker crashed") {
 		t.Fatalf("unexpected stderr log: %q", got)

@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"strings"
 	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 // ACPProcess is a transport-only subprocess channel for newline-delimited ACP JSON messages.
@@ -38,6 +36,7 @@ type ACPProcess struct {
 
 	lifecycleMu sync.Mutex
 	closing     bool
+	log         acpProcessLogSink
 }
 
 // NewACPProcess creates a subprocess-backed ACP transport.
@@ -47,6 +46,7 @@ func NewACPProcess(exePath string, env []string, args ...string) *ACPProcess {
 		exeArgs: append([]string(nil), args...),
 		env:     env,
 		done:    make(chan struct{}),
+		log:     defaultACPLogSink,
 	}
 }
 
@@ -92,7 +92,7 @@ func (p *ACPProcess) SendMessage(v any) error {
 		return fmt.Errorf("agent acp process: encoder is not ready")
 	}
 	if raw, err := json.Marshal(v); err == nil {
-		logACPDebugRaw('>', raw)
+		p.logSink().Frame('>', raw)
 	}
 	if err := p.enc.Encode(v); err != nil {
 		return fmt.Errorf("agent acp process: encode message: %w", err)
@@ -143,7 +143,7 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 		}
 		raw := make([]byte, len(line))
 		copy(raw, line)
-		logACPDebugRaw('<', raw)
+		p.logSink().Frame('<', raw)
 
 		p.hMu.RLock()
 		h := p.onMessage
@@ -157,23 +157,23 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		logger.Error("[acp] ! {- -} stdout read failed: %v", err)
+		p.logSink().Errorf("stdout read failed: %v", err)
 		return
 	}
-	logger.Error("[acp] ! {- -} process stdout closed")
+	p.logSink().Errorf("process stdout closed")
 }
 
 func (p *ACPProcess) readStderrLoop(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
 	for scanner.Scan() {
-		logACPStderrLine(scanner.Text())
+		p.logSink().StderrLine(scanner.Text())
 	}
 	if p.isClosing() {
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		logger.Error("[acp] ! {- -} stderr read failed: %v", err)
+		p.logSink().Errorf("stderr read failed: %v", err)
 	}
 }
 
@@ -215,18 +215,6 @@ func (p *ACPProcess) markDone() {
 	})
 }
 
-func logACPDebugRaw(dir rune, raw []byte) {
-	logger.Debug("%s", formatACPLogLine(dir, raw))
-}
-
-func logACPStderrLine(line string) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return
-	}
-	logger.Error("[acp] ! {- -} %s", string(redactAndTrimACPPayload([]byte(line))))
-}
-
 func (p *ACPProcess) setClosing(v bool) {
 	p.lifecycleMu.Lock()
 	p.closing = v
@@ -237,4 +225,11 @@ func (p *ACPProcess) isClosing() bool {
 	p.lifecycleMu.Lock()
 	defer p.lifecycleMu.Unlock()
 	return p.closing
+}
+
+func (p *ACPProcess) logSink() acpProcessLogSink {
+	if p.log == nil {
+		return defaultACPLogSink
+	}
+	return p.log
 }

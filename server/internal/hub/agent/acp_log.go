@@ -5,9 +5,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const acpDebugPayloadMaxBytes = 64 * 1024
+
+type acpProcessLogSink interface {
+	Frame(dir rune, raw []byte)
+	StderrLine(line string)
+	Errorf(format string, args ...any)
+}
+
+type defaultACPProcessLogSink struct{}
+
+var defaultACPLogSink acpProcessLogSink = defaultACPProcessLogSink{}
+
+func (defaultACPProcessLogSink) Frame(dir rune, raw []byte) {
+	logger.Debug("%s", formatACPLogLine(dir, raw))
+}
+
+func (defaultACPProcessLogSink) StderrLine(line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	logger.Error("[acp] ! {- -} %s", string(redactAndTrimACPPayload([]byte(line))))
+}
+
+func (defaultACPProcessLogSink) Errorf(format string, args ...any) {
+	logger.Error("[acp] ! {- -} "+format, args...)
+}
 
 var acpSensitiveKeys = map[string]struct{}{
 	"token":         {},
@@ -141,4 +169,3 @@ func redactPlainText(s string) string {
 	}
 	return out
 }
-
