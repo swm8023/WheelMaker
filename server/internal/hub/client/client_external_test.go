@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ type mockSession struct {
 	cancelCalls int
 	agentName   string
 	sessionID   string
-	promptFn    func(string) (<-chan acp.Update, error)
+	promptFn    func(string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error)
 }
 
 func newTestClient(t *testing.T, mock *mockSession) *client.Client {
@@ -25,15 +26,14 @@ func newTestClient(t *testing.T, mock *mockSession) *client.Client {
 		t.Fatalf("NewStore: %v", err)
 	}
 	c := client.New(store, "test", t.TempDir())
-	c.InjectForwarder(mock.agentName, mock.sessionID, func(_ context.Context, text string) (<-chan acp.Update, error) {
+	c.InjectForwarder(mock.agentName, mock.sessionID, func(_ context.Context, text string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
 		mock.promptCalls = append(mock.promptCalls, text)
 		if mock.promptFn != nil {
 			return mock.promptFn(text)
 		}
-		ch := make(chan acp.Update, 1)
-		ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
+		ch := make(chan acp.SessionUpdateParams)
 		close(ch)
-		return ch, nil
+		return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
 	}, func() error {
 		mock.cancelCalls++
 		return nil
@@ -136,13 +136,14 @@ func TestHandleMessage_PromptTextStreaming(t *testing.T) {
 	mock := &mockSession{
 		agentName: "codex",
 		sessionID: "sess-1",
-		promptFn: func(_ string) (<-chan acp.Update, error) {
-			ch := make(chan acp.Update, 3)
-			ch <- acp.Update{Type: acp.UpdateText, Content: "hello "}
-			ch <- acp.Update{Type: acp.UpdateText, Content: "world"}
-			ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
+		promptFn: func(_ string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
+			ch := make(chan acp.SessionUpdateParams, 2)
+			content1, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello "})
+			content2, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})
+			ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content1}}
+			ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content2}}
 			close(ch)
-			return ch, nil
+			return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
 		},
 	}
 	c := newTestClient(t, mock)

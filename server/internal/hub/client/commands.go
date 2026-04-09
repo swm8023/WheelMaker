@@ -264,11 +264,11 @@ func (s *Session) handleConfigCommand(
 }
 
 func resolveModeArg(input string, st *SessionAgentState) (configID, value string, err error) {
-	return resolveConfigSelectArg("mode", "mode", input, st)
+	return resolveConfigSelectArg(acp.ConfigOptionIDMode, acp.ConfigOptionCategoryMode, input, st)
 }
 
 func resolveModelArg(input string, st *SessionAgentState) (configID, value string, err error) {
-	return resolveConfigSelectArg("model", "model", input, st)
+	return resolveConfigSelectArg(acp.ConfigOptionIDModel, acp.ConfigOptionCategoryModel, input, st)
 }
 
 func resolveConfigArg(input string, st *SessionAgentState) (configID, value string, err error) {
@@ -652,10 +652,10 @@ func formatConfigOptionUpdateMessage(raw []byte) string {
 	mode := ""
 	model := ""
 	for _, opt := range opts {
-		if mode == "" && (opt.ID == "mode" || strings.EqualFold(opt.Category, "mode")) {
+		if mode == "" && (opt.ID == acp.ConfigOptionIDMode || strings.EqualFold(opt.Category, acp.ConfigOptionCategoryMode)) {
 			mode = strings.TrimSpace(opt.CurrentValue)
 		}
-		if model == "" && (opt.ID == "model" || strings.EqualFold(opt.Category, "model")) {
+		if model == "" && (opt.ID == acp.ConfigOptionIDModel || strings.EqualFold(opt.Category, acp.ConfigOptionCategoryModel)) {
 			model = strings.TrimSpace(opt.CurrentValue)
 		}
 	}

@@ -32,7 +32,7 @@ type testInjectedInstance struct {
 	sessionID  string
 	alive      bool
 	callbacks  agent.Callbacks
-	promptFn   func(context.Context, string) (<-chan acp.Update, error)
+	promptFn   func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error)
 	lastPrompt []acp.ContentBlock
 	cancelFn   func() error
 }
@@ -67,7 +67,7 @@ type TestCaptureRouter struct {
 	textBuffers map[string]string
 }
 
-func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.Update, error), cancelFn func() error) {
+func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error), cancelFn func() error) {
 	c.mu.Lock()
 	sess := c.sessions[c.routeMap[testRouteKey]]
 	if sess == nil {
@@ -251,7 +251,7 @@ func (r *TestCaptureRouter) PublishSessionUpdate(_ context.Context, target im.Se
 		r.Messages = append(r.Messages, formatConfigOptionUpdateMessage(mustJSON(params.Update)))
 		r.ChatIDs = append(r.ChatIDs, chatID)
 	default:
-		if strings.HasPrefix(params.Update.SessionUpdate, "tool_call") {
+		if strings.HasPrefix(params.Update.SessionUpdate, acp.SessionUpdateToolCall) {
 			r.CardCount++
 		}
 	}
@@ -337,33 +337,31 @@ func (i *testInjectedInstance) SessionList(context.Context, acp.SessionListParam
 func (i *testInjectedInstance) SessionPrompt(ctx context.Context, p acp.SessionPromptParams) (acp.SessionPromptResult, error) {
 	i.lastPrompt = append([]acp.ContentBlock(nil), p.Prompt...)
 	if i.promptFn == nil {
-		return acp.SessionPromptResult{StopReason: "end_turn"}, nil
+		return acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
 	}
 	text := ""
 	for _, b := range p.Prompt {
-		if b.Type == "text" {
+		if b.Type == acp.ContentBlockTypeText {
 			text = b.Text
 			break
 		}
 	}
-	updates, err := i.promptFn(ctx, text)
+	updates, result, err := i.promptFn(ctx, text)
 	if err != nil {
 		return acp.SessionPromptResult{}, err
 	}
-	stopReason := "end_turn"
-	for u := range updates {
-		if u.Err != nil {
-			return acp.SessionPromptResult{}, u.Err
+	for params := range updates {
+		if strings.TrimSpace(params.SessionID) == "" {
+			params.SessionID = p.SessionID
 		}
-		if u.Done {
-			if strings.TrimSpace(u.Content) != "" {
-				stopReason = strings.TrimSpace(u.Content)
-			}
-			break
+		if i.callbacks != nil {
+			i.callbacks.SessionUpdate(params)
 		}
-		i.emitUpdate(p.SessionID, u)
 	}
-	return acp.SessionPromptResult{StopReason: stopReason}, nil
+	if strings.TrimSpace(result.StopReason) == "" {
+		result.StopReason = acp.StopReasonEndTurn
+	}
+	return result, nil
 }
 func (i *testInjectedInstance) SessionCancel(_ string) error {
 	if i.cancelFn != nil {
@@ -375,28 +373,6 @@ func (i *testInjectedInstance) SessionSetConfigOption(_ context.Context, p acp.S
 	return []acp.ConfigOption{{ID: p.ConfigID, CurrentValue: p.Value}}, nil
 }
 func (i *testInjectedInstance) Close() error { return nil }
-
-func (i *testInjectedInstance) emitUpdate(sessionID string, u acp.Update) {
-	if i.callbacks == nil {
-		return
-	}
-	update := acp.SessionUpdate{}
-	switch u.Type {
-	case acp.UpdateText:
-		content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: u.Content})
-		update = acp.SessionUpdate{SessionUpdate: "agent_message_chunk", Content: content}
-	case acp.UpdateThought:
-		content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: u.Content})
-		update = acp.SessionUpdate{SessionUpdate: "agent_thought_chunk", Content: content}
-	case acp.UpdateToolCall, acp.UpdateConfigOption, acp.UpdateAvailableCommands, acp.UpdateSessionInfo, acp.UpdatePlan, acp.UpdateModeChange:
-		if len(u.Raw) == 0 || json.Unmarshal(u.Raw, &update) != nil {
-			return
-		}
-	default:
-		return
-	}
-	i.callbacks.SessionUpdate(acp.SessionUpdateParams{SessionID: sessionID, Update: update})
-}
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
 var _ IMRouter = (*TestCaptureRouter)(nil)
@@ -473,9 +449,9 @@ func TestSessionShouldReconnectOnRecoverableErr_RequiresDeadProcess(t *testing.T
 	}
 }
 
-func TestHasSandboxRefreshError(t *testing.T) {
-	u := acp.Update{Type: acp.UpdateToolCall, Content: "tool failed: windows sandbox: spawn setup refresh"}
-	if !hasSandboxRefreshError(u) {
+func TestHasSandboxRefreshUpdate(t *testing.T) {
+	u := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateToolCallUpdate, Content: json.RawMessage(`"tool failed: windows sandbox: spawn setup refresh"`)}
+	if !hasSandboxRefreshUpdate(u) {
 		t.Fatal("expected sandbox refresh detection")
 	}
 }
@@ -528,12 +504,12 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 		return &testInjectedInstance{
 			name:      "claude",
 			sessionID: "acp-1",
-			promptFn: func(context.Context, string) (<-chan acp.Update, error) {
-				ch := make(chan acp.Update, 2)
-				ch <- acp.Update{Type: acp.UpdateText, Content: "hello back"}
-				ch <- acp.Update{Type: acp.UpdateDone, Content: "end_turn", Done: true}
+			promptFn: func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
+				ch := make(chan acp.SessionUpdateParams, 1)
+				content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello back"})
+				ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}}
 				close(ch)
-				return ch, nil
+				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
 			},
 		}, nil
 	})
@@ -667,7 +643,7 @@ func TestEvictSuspendedSessions(t *testing.T) {
 
 func TestSessionUpdate_NoPromptContext_DoesNotBlockWhenChannelFull(t *testing.T) {
 	s := newSession("sess", "/tmp")
-	content, _ := json.Marshal(acp.ContentBlock{Type: "text", Text: "chunk"})
+	content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "chunk"})
 
 	ch := make(chan acp.SessionUpdateParams, 1)
 	ch <- acp.SessionUpdateParams{SessionID: "acp-1", Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk}}
@@ -683,7 +659,7 @@ func TestSessionUpdate_NoPromptContext_DoesNotBlockWhenChannelFull(t *testing.T)
 		s.SessionUpdate(acp.SessionUpdateParams{
 			SessionID: "acp-1",
 			Update: acp.SessionUpdate{
-				SessionUpdate: "agent_message_chunk",
+				SessionUpdate: acp.SessionUpdateAgentMessageChunk,
 				Content:       content,
 			},
 		})

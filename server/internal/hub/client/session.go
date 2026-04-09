@@ -392,8 +392,8 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 			hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", err)
 		} else {
 			for u := range ch {
-				if u.Err != nil {
-					hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", u.Err)
+				if u.err != nil {
+					hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", u.err)
 				}
 			}
 		}
@@ -519,7 +519,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 
 	modeID := ""
 	for _, opt := range newResult.ConfigOptions {
-		if opt.ID == "mode" || opt.Category == "mode" {
+		if opt.ID == acp.ConfigOptionIDMode || strings.EqualFold(opt.Category, acp.ConfigOptionCategoryMode) {
 			modeID = opt.CurrentValue
 			break
 		}
@@ -563,7 +563,7 @@ func (s *Session) sessionConfigSnapshot() acp.SessionConfigSnapshot {
 }
 
 // promptStream sends a prompt and returns a channel of streaming updates.
-func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (<-chan acp.Update, error) {
+func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (<-chan promptStreamEvent, error) {
 	s.mu.Lock()
 	s.lastReply = ""
 	s.mu.Unlock()
@@ -579,7 +579,7 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 	s.prompt.cancel = promptCancel
 	s.mu.Unlock()
 
-	updates := make(chan acp.Update, 32)
+	updates := make(chan promptStreamEvent, 32)
 	interceptCh := make(chan acp.SessionUpdateParams, 32)
 
 	s.mu.Lock()
@@ -614,48 +614,17 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 		}()
 
 		drain := func(params acp.SessionUpdateParams) bool {
-			update := params.Update
-			u := acp.Update{}
-			switch update.SessionUpdate {
-			case acp.SessionUpdateAgentMessageChunk:
+			copied := params
+			if copied.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
 				var content acp.ContentBlock
-				if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil && content.Type == acp.ContentBlockTypeText {
-					u = acp.Update{Type: acp.UpdateText, Content: content.Text}
-				} else {
-					u = acp.Update{Type: acp.UpdateText}
+				if len(copied.Update.Content) > 0 && json.Unmarshal(copied.Update.Content, &content) == nil && content.Type == acp.ContentBlockTypeText {
+					replyMu.Lock()
+					replyBuf.WriteString(content.Text)
+					replyMu.Unlock()
 				}
-			case acp.SessionUpdateUserMessageChunk:
-				u = acp.Update{Type: acp.UpdateUserChunk}
-			case acp.SessionUpdateAgentThoughtChunk:
-				var content acp.ContentBlock
-				if len(update.Content) > 0 && json.Unmarshal(update.Content, &content) == nil {
-					u = acp.Update{Type: acp.UpdateThought, Content: content.Text}
-				} else {
-					u = acp.Update{Type: acp.UpdateThought}
-				}
-			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-				raw, _ := json.Marshal(update)
-				u = acp.Update{Type: acp.UpdateToolCall, Raw: raw}
-			case acp.SessionUpdatePlan:
-				raw, _ := json.Marshal(update)
-				u = acp.Update{Type: acp.UpdatePlan, Raw: raw}
-			case acp.SessionUpdateConfigOptionUpdate:
-				raw, _ := json.Marshal(update)
-				u = acp.Update{Type: acp.UpdateConfigOption, Raw: raw}
-			case acp.SessionUpdateCurrentModeUpdate:
-				raw, _ := json.Marshal(update)
-				u = acp.Update{Type: acp.UpdateModeChange, Raw: raw}
-			default:
-				raw, _ := json.Marshal(update)
-				u = acp.Update{Type: acp.UpdateType(update.SessionUpdate), Raw: raw}
-			}
-			if u.Type == acp.UpdateText {
-				replyMu.Lock()
-				replyBuf.WriteString(u.Content)
-				replyMu.Unlock()
 			}
 			select {
-			case updates <- u:
+			case updates <- promptStreamEvent{update: &copied}:
 				return true
 			case <-ctx.Done():
 				return false
@@ -700,15 +669,17 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 		s.lastReply = reply
 		s.mu.Unlock()
 
-		var finalUpdate acp.Update
 		if err != nil {
-			finalUpdate = acp.Update{Type: acp.UpdateError, Err: err, Done: true}
+			select {
+			case updates <- promptStreamEvent{err: err}:
+			case <-ctx.Done():
+			}
 		} else {
-			finalUpdate = acp.Update{Type: acp.UpdateDone, Content: result.StopReason, Done: true}
-		}
-		select {
-		case updates <- finalUpdate:
-		case <-ctx.Done():
+			final := result
+			select {
+			case updates <- promptStreamEvent{result: &final}:
+			case <-ctx.Done():
+			}
 		}
 		close(updates)
 	}()
@@ -740,7 +711,7 @@ func (s *Session) cancelPrompt() error {
 			Update: acp.SessionUpdate{
 				SessionUpdate: acp.SessionUpdateToolCallUpdate,
 				ToolCallID:    id,
-				Status:        "cancelled",
+				Status:        acp.ToolCallStatusCancelled,
 			},
 		}
 		if ch != nil {
