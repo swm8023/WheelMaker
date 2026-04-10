@@ -7,7 +7,7 @@
     "allowSyntheticDefaultImports": true,
     "jsx": "react-jsx",
     "strict": true,
-    "lib": ["ES2021", "DOM"],
+    "lib": ["ES2021", "DOM", "ESNext"],
     "types": ["react", "react-dom"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]

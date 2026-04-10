@@ -1,22 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import ReactDiffViewer, {DiffMethod} from 'react-diff-viewer-continued';
-import {PrismLight as SyntaxHighlighter} from 'react-syntax-highlighter';
-import oneDark from 'react-syntax-highlighter/dist/cjs/styles/prism/one-dark';
-import prismMarkup from 'react-syntax-highlighter/dist/cjs/languages/prism/markup';
-import prismClike from 'react-syntax-highlighter/dist/cjs/languages/prism/clike';
-import prismJavascript from 'react-syntax-highlighter/dist/cjs/languages/prism/javascript';
-import prismTypescript from 'react-syntax-highlighter/dist/cjs/languages/prism/typescript';
-import prismJsx from 'react-syntax-highlighter/dist/cjs/languages/prism/jsx';
-import prismTsx from 'react-syntax-highlighter/dist/cjs/languages/prism/tsx';
-import prismJson from 'react-syntax-highlighter/dist/cjs/languages/prism/json';
-import prismGo from 'react-syntax-highlighter/dist/cjs/languages/prism/go';
-import prismC from 'react-syntax-highlighter/dist/cjs/languages/prism/c';
-import prismCpp from 'react-syntax-highlighter/dist/cjs/languages/prism/cpp';
-import prismRust from 'react-syntax-highlighter/dist/cjs/languages/prism/rust';
-import prismBash from 'react-syntax-highlighter/dist/cjs/languages/prism/bash';
-import prismYaml from 'react-syntax-highlighter/dist/cjs/languages/prism/yaml';
-import prismMarkdown from 'react-syntax-highlighter/dist/cjs/languages/prism/markdown';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
 import '@vscode/codicons/dist/codicon.css';
@@ -26,6 +10,7 @@ import '@fontsource/ibm-plex-sans/600.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
+import {renderShikiHtml} from './services/shikiRenderer';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
 import type {
@@ -137,21 +122,6 @@ const workspaceController = new WorkspaceController(service, workspaceStore);
 const setiTheme = setiThemeJson as SetiTheme;
 const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
 const MAX_AUTO_RENDER_DIFF_CHARS = 200000;
-
-SyntaxHighlighter.registerLanguage('markup', prismMarkup);
-SyntaxHighlighter.registerLanguage('clike', prismClike);
-SyntaxHighlighter.registerLanguage('javascript', prismJavascript);
-SyntaxHighlighter.registerLanguage('typescript', prismTypescript);
-SyntaxHighlighter.registerLanguage('jsx', prismJsx);
-SyntaxHighlighter.registerLanguage('tsx', prismTsx);
-SyntaxHighlighter.registerLanguage('json', prismJson);
-SyntaxHighlighter.registerLanguage('go', prismGo);
-SyntaxHighlighter.registerLanguage('c', prismC);
-SyntaxHighlighter.registerLanguage('cpp', prismCpp);
-SyntaxHighlighter.registerLanguage('rust', prismRust);
-SyntaxHighlighter.registerLanguage('bash', prismBash);
-SyntaxHighlighter.registerLanguage('yaml', prismYaml);
-SyntaxHighlighter.registerLanguage('markdown', prismMarkdown);
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
@@ -450,36 +420,68 @@ type PrismCodeBlockProps = {
   language: string;
   wrap: boolean;
   lineNumbers: boolean;
+  themeMode: ThemeMode;
 };
 
-function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockProps) {
+function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode}: PrismCodeBlockProps) {
+  const [html, setHtml] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const nextHtml = await renderShikiHtml({
+        code: content,
+        language,
+        themeMode,
+        wrap,
+        lineNumbers,
+        mode: 'block',
+      });
+      if (!cancelled) {
+        setHtml(nextHtml);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [content, language, themeMode, wrap, lineNumbers]);
+
   return (
-    <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
-      <SyntaxHighlighter
-        language={language}
-        style={oneDark}
-        showLineNumbers={lineNumbers}
-        showInlineLineNumbers={true}
-        wrapLongLines={wrap}
-        wrapLines={wrap}
-        lineProps={wrap && lineNumbers ? {style: {display: 'block'}} : undefined}>
-        {content || ' '}
-      </SyntaxHighlighter>
-    </div>
+    <div
+      className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}
+      dangerouslySetInnerHTML={{__html: html || '<pre><code> </code></pre>'}}
+    />
   );
 }
 
-function PrismInlineCode({content, language, wrap}: {content: string; language: string; wrap: boolean}) {
+function PrismInlineCode({content, language, wrap, themeMode}: {content: string; language: string; wrap: boolean; themeMode: ThemeMode}) {
+  const [html, setHtml] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const nextHtml = await renderShikiHtml({
+        code: content,
+        language,
+        themeMode,
+        wrap,
+        lineNumbers: false,
+        mode: 'inline',
+      });
+      if (!cancelled) {
+        setHtml(nextHtml);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [content, language, themeMode, wrap]);
+
   return (
-    <SyntaxHighlighter
-      PreTag="span"
-      CodeTag="span"
-      language={language}
-      style={oneDark}
-      wrapLongLines={wrap}
-      wrapLines={wrap}>
-      {content || ' '}
-    </SyntaxHighlighter>
+    <span
+      style={wrap ? {whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere'} : {whiteSpace: 'pre'}}
+      dangerouslySetInnerHTML={{__html: html || ' '}}
+    />
   );
 }
 
@@ -1381,7 +1383,7 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
-    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
+    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} themeMode={themeMode} />;
   };
 
   const renderViewTools = () => (
@@ -1436,7 +1438,7 @@ function App() {
           disableWordDiff={true}
           compareMethod={DiffMethod.LINES}
           linesOffset={linesOffset}
-          renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} />}
+          renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} themeMode={themeMode} />}
           hideLineNumbers={!showLineNumbers}
           useDarkTheme={themeMode === 'dark'}
           styles={getDiffViewerStyles(wrapLines)}
