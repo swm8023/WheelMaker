@@ -8,6 +8,8 @@ import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/jetbrains-mono/400.css';
 
+declare const require: (id: string) => any;
+
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {
@@ -71,8 +73,21 @@ type SetiResolvedIcon = {
   glyph: string;
   color: string;
 };
+type GitDiffChange =
+  | {type: 'insert'; content: string; lineNumber: number}
+  | {type: 'delete'; content: string; lineNumber: number}
+  | {type: 'normal'; content: string; oldLineNumber: number; newLineNumber: number};
+type GitDiffFile = {
+  hunks?: Array<{
+    changes?: GitDiffChange[];
+  }>;
+};
+type GitDiffParser = {
+  parse: (source: string) => GitDiffFile[];
+};
 
 const WORKING_TREE_COMMIT_ID = '__WORKING_TREE__';
+const gitdiffParser = require('gitdiff-parser') as GitDiffParser;
 
 type ThinkingBlockProps = {
   content: string;
@@ -253,85 +268,88 @@ type UnifiedDiffRow = {
   kind: 'context' | 'added' | 'removed';
   oldLineNumber: number | null;
   newLineNumber: number | null;
-  oldText: string;
-  newText: string;
+  text: string;
 };
 
 function parseUnifiedDiffRows(content: string): UnifiedDiffRow[] {
-  const lines = content.split('\n');
   const rows: UnifiedDiffRow[] = [];
-  let oldLineNumber = 1;
-  let newLineNumber = 1;
-  let inHunk = false;
-
-  for (const raw of lines) {
-    const hunkMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
-    if (hunkMatch) {
-      oldLineNumber = Number.parseInt(hunkMatch[1], 10);
-      newLineNumber = Number.parseInt(hunkMatch[2], 10);
-      inHunk = true;
-      continue;
+  try {
+    const files = gitdiffParser.parse(content);
+    for (const file of files) {
+      for (const hunk of file.hunks || []) {
+        for (const change of hunk.changes || []) {
+          if (change.type === 'insert') {
+            rows.push({
+              kind: 'added',
+              oldLineNumber: null,
+              newLineNumber: change.lineNumber,
+              text: change.content,
+            });
+            continue;
+          }
+          if (change.type === 'delete') {
+            rows.push({
+              kind: 'removed',
+              oldLineNumber: change.lineNumber,
+              newLineNumber: null,
+              text: change.content,
+            });
+            continue;
+          }
+          rows.push({
+            kind: 'context',
+            oldLineNumber: change.oldLineNumber,
+            newLineNumber: change.newLineNumber,
+            text: change.content,
+          });
+        }
+      }
     }
-    if (!inHunk || raw.startsWith('\\ No newline at end of file')) continue;
+  } catch {
+    // fall through to fallback parser for non-standard diff snippets
+  }
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  // Fallback for non-standard patches: keep a readable inline rendering.
+  const lines = content.split('\n');
+  for (const raw of lines) {
     if (raw.startsWith('+')) {
       rows.push({
         kind: 'added',
         oldLineNumber: null,
-        newLineNumber,
-        oldText: '',
-        newText: raw.slice(1),
+        newLineNumber: null,
+        text: raw.slice(1),
       });
-      newLineNumber += 1;
       continue;
     }
     if (raw.startsWith('-')) {
       rows.push({
         kind: 'removed',
-        oldLineNumber,
+        oldLineNumber: null,
         newLineNumber: null,
-        oldText: raw.slice(1),
-        newText: '',
+        text: raw.slice(1),
       });
-      oldLineNumber += 1;
       continue;
     }
-
-    const text = raw.startsWith(' ') ? raw.slice(1) : raw;
     rows.push({
       kind: 'context',
-      oldLineNumber,
-      newLineNumber,
-      oldText: text,
-      newText: text,
+      oldLineNumber: null,
+      newLineNumber: null,
+      text: raw.startsWith(' ') ? raw.slice(1) : raw,
     });
-    oldLineNumber += 1;
-    newLineNumber += 1;
   }
-
   return rows;
 }
 
-function buildDiffRenderLines(rows: UnifiedDiffRow[]): {oldLines: DiffRenderLine[]; newLines: DiffRenderLine[]} {
-  return {
-    oldLines: rows.map(row => (
-      row.kind === 'added'
-        ? {code: '', lineNumber: null, kind: 'empty'}
-        : {
-            code: row.oldText,
-            lineNumber: row.oldLineNumber,
-            kind: row.kind === 'removed' ? 'removed' : 'context',
-          }
-    )),
-    newLines: rows.map(row => (
-      row.kind === 'removed'
-        ? {code: '', lineNumber: null, kind: 'empty'}
-        : {
-            code: row.newText,
-            lineNumber: row.newLineNumber,
-            kind: row.kind === 'added' ? 'added' : 'context',
-          }
-    )),
-  };
+function buildInlineDiffRenderLines(rows: UnifiedDiffRow[]): DiffRenderLine[] {
+  return rows.map(row => ({
+    code: row.text,
+    lineNumber: row.newLineNumber ?? row.oldLineNumber,
+    kind: row.kind,
+  }));
 }
 function toSetiGlyph(fontCharacter?: string): string {
   if (!fontCharacter) return '?';
@@ -492,65 +510,46 @@ function PrismDiffPane({
   codeLineHeight,
   codeTabSize,
 }: PrismDiffPaneProps) {
-  const [oldHtml, setOldHtml] = useState('');
-  const [newHtml, setNewHtml] = useState('');
+  const [diffHtml, setDiffHtml] = useState('');
   const rows = useMemo(() => parseUnifiedDiffRows(content), [content]);
-  const {oldLines, newLines} = useMemo(() => buildDiffRenderLines(rows), [rows]);
+  const lines = useMemo(() => buildInlineDiffRenderLines(rows), [rows]);
 
   useEffect(() => {
     let cancelled = false;
     if (rows.length === 0) {
-      setOldHtml('');
-      setNewHtml('');
+      setDiffHtml('');
       return () => {
         cancelled = true;
       };
     }
 
-    setOldHtml('');
-    setNewHtml('');
+    setDiffHtml('');
     (async () => {
-      const [nextOldHtml, nextNewHtml] = await Promise.all([
-        renderShikiDiffHtml({
-          lines: oldLines,
-          language,
-          themeMode,
-          codeTheme,
-          codeFont,
-          codeFontSize,
-          codeLineHeight,
-          codeTabSize,
-          wrap,
-          lineNumbers,
-        }),
-        renderShikiDiffHtml({
-          lines: newLines,
-          language,
-          themeMode,
-          codeTheme,
-          codeFont,
-          codeFontSize,
-          codeLineHeight,
-          codeTabSize,
-          wrap,
-          lineNumbers,
-        }),
-      ]);
+      const nextDiffHtml = await renderShikiDiffHtml({
+        lines,
+        language,
+        themeMode,
+        codeTheme,
+        codeFont,
+        codeFontSize,
+        codeLineHeight,
+        codeTabSize,
+        wrap,
+        lineNumbers,
+      });
       if (!cancelled) {
-        setOldHtml(nextOldHtml);
-        setNewHtml(nextNewHtml);
+        setDiffHtml(nextDiffHtml);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [oldLines, newLines, rows.length, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap, lineNumbers]);
+  }, [lines, rows.length, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap, lineNumbers]);
 
   if (rows.length === 0) return <div className="muted block">No diff hunks available</div>;
 
-  const html = oldHtml;
-  const sideStyle = {
+  const diffStyle = {
     fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
     fontSize: `${codeFontSize}px`,
     lineHeight: String(codeLineHeight),
@@ -559,18 +558,11 @@ function PrismDiffPane({
 
   return (
     <div className={`code-wrap diff-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
-      <div className={`diff-grid ${wrap ? 'wrap' : 'nowrap'}`}>
-        <div
-          className={`diff-side diff-old ${wrap ? 'wrap' : 'nowrap'}`}
-          style={sideStyle}
-          dangerouslySetInnerHTML={{__html: html || '<pre><code> </code></pre>'}}
-        />
-        <div
-          className={`diff-side diff-new ${wrap ? 'wrap' : 'nowrap'}`}
-          style={sideStyle}
-          dangerouslySetInnerHTML={{__html: newHtml || '<pre><code> </code></pre>'}}
-        />
-      </div>
+      <div
+        className={`diff-inline ${wrap ? 'wrap' : 'nowrap'}`}
+        style={diffStyle}
+        dangerouslySetInnerHTML={{__html: diffHtml || '<pre><code> </code></pre>'}}
+      />
     </div>
   );
 }
