@@ -65,22 +65,13 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 
 	case "/status":
 		sess.mu.Lock()
-		agentName := ""
-		if sess.instance != nil {
-			agentName = sess.instance.Name()
-		}
-		sid := sess.acpSessionID
 		active := sess.instance != nil
 		sess.mu.Unlock()
 		if !active {
 			sess.reply("No active session.")
 			return
 		}
-		status := fmt.Sprintf("Active agent: %s", agentName)
-		if sid != "" {
-			status += fmt.Sprintf("\nACP session: %s", sid)
-		}
-		sess.reply(status)
+		sess.reply(sess.sessionInfoLine())
 
 	case "/list":
 		c.handleListCommand(sess)

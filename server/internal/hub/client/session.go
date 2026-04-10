@@ -212,6 +212,46 @@ func newSessionID() string {
 	)
 }
 
+// shortSessionID returns a compact display form of a session ID.
+// e.g. "sess-12345678-1234-1234-1234-123456789012" -> "sess-12345678"
+func shortSessionID(id string) string {
+	const prefix = "sess-"
+	if strings.HasPrefix(id, prefix) {
+		rest := id[len(prefix):]
+		if idx := strings.Index(rest, "-"); idx > 0 {
+			return prefix + rest[:idx]
+		}
+	}
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// sessionInfoLine returns a compact one-line summary: [sess-XXXXXXXX | agent: X | mode: X | model: X]
+func (s *Session) sessionInfoLine() string {
+	s.mu.Lock()
+	agentName := s.currentAgentNameLocked()
+	acpSID := s.acpSessionID
+	var configOpts []acp.ConfigOption
+	if state := s.agents[agentName]; state != nil {
+		configOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
+	}
+	s.mu.Unlock()
+
+	snap := acp.SessionConfigSnapshotFromOptions(configOpts)
+	sid := shortSessionID(acpSID)
+	if sid == "" {
+		sid = "none"
+	}
+	return fmt.Sprintf("[%s | agent: %s | mode: %s | model: %s]",
+		sid,
+		renderUnknown(agentName),
+		renderUnknown(snap.Mode),
+		renderUnknown(snap.Model),
+	)
+}
+
 // reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
 	if router, source, ok := s.imContext(); ok {
@@ -401,12 +441,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	}
 	s.persistSessionBestEffort()
 
-	s.reply(fmt.Sprintf("Switched to agent: %s", name))
-	snap := s.sessionConfigSnapshot()
-	if snap.Mode != "" || snap.Model != "" {
-		s.reply(fmt.Sprintf("Session ready: mode=%s model=%s",
-			renderUnknown(snap.Mode), renderUnknown(snap.Model)))
-	}
+	s.reply(fmt.Sprintf("Switched to %s", s.sessionInfoLine()))
 	return nil
 }
 
@@ -541,13 +576,7 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	}
 
 	if !wasReady {
-		snap := s.sessionConfigSnapshot()
-		if snap.Mode != "" || snap.Model != "" {
-			s.reply(fmt.Sprintf("Session ready: mode=%s model=%s",
-				renderUnknown(snap.Mode), renderUnknown(snap.Model)))
-		} else {
-			s.reply("Session ready.")
-		}
+		s.reply(fmt.Sprintf("Session ready: %s", s.sessionInfoLine()))
 		s.persistSessionBestEffort()
 	}
 	return nil
