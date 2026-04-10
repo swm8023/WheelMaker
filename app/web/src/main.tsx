@@ -25,7 +25,6 @@ import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
-import {buildPrismCodeBlockConfig} from './codeBlockConfig';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
@@ -446,30 +445,14 @@ function pickPreferredPath<T extends {path: string}>(items: T[]): string {
   return (preferred ?? items[0]).path;
 }
 
-const DEFAULT_CODE_TAB_SIZE = 4;
-
-function resolveCodeTabSize(value: number | undefined): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return DEFAULT_CODE_TAB_SIZE;
-  }
-  const normalized = Math.trunc(value);
-  if (normalized < 1 || normalized > 12) {
-    return DEFAULT_CODE_TAB_SIZE;
-  }
-  return normalized;
-}
-
 type PrismCodeBlockProps = {
   content: string;
   language: string;
   wrap: boolean;
   lineNumbers: boolean;
-  tabSize: number;
-  highlightLine?: number | null;
 };
 
-function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highlightLine = null}: PrismCodeBlockProps) {
-  const syntaxHighlighterConfig = buildPrismCodeBlockConfig({tabSize, highlightLine});
+function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockProps) {
   return (
     <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
       <SyntaxHighlighter
@@ -477,14 +460,8 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highligh
         language={language}
         style={oneDark}
         showLineNumbers={lineNumbers}
-        showInlineLineNumbers={syntaxHighlighterConfig.showInlineLineNumbers}
         wrapLongLines={wrap}
-        wrapLines={true}
-        codeTagProps={syntaxHighlighterConfig.codeTagProps}
-        lineProps={syntaxHighlighterConfig.lineProps}
-        customStyle={syntaxHighlighterConfig.customStyle}
-        lineNumberContainerStyle={syntaxHighlighterConfig.lineNumberContainerStyle}
-        lineNumberStyle={syntaxHighlighterConfig.lineNumberStyle}>
+        wrapLines={true}>
         {content || ' '}
       </SyntaxHighlighter>
     </div>
@@ -581,9 +558,7 @@ function App() {
   const [gotoLineInput, setGotoLineInput] = useState('');
   const [searchToolsOpen, setSearchToolsOpen] = useState(false);
   const [gotoToolsOpen, setGotoToolsOpen] = useState(false);
-  const [temporaryHighlightLine, setTemporaryHighlightLine] = useState<number | null>(null);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
-  const highlightTimerRef = useRef<number | null>(null);
   const liveRefreshTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const dirHashRef = useRef<Record<string, string>>({});
@@ -797,14 +772,11 @@ function App() {
     if (!query || fileSearchMatches.length === 0) return;
     setCurrentMatchIndex(0);
     window.requestAnimationFrame(() => {
-      scrollToFileLine(fileSearchMatches[0], true);
+      scrollToFileLine(fileSearchMatches[0]);
     });
   }, [fileSearchMatches, fileSearchQuery, searchToolsOpen]);
 
   useEffect(() => () => {
-    if (highlightTimerRef.current !== null) {
-      window.clearTimeout(highlightTimerRef.current);
-    }
     if (liveRefreshTimerRef.current !== null) {
       window.clearTimeout(liveRefreshTimerRef.current);
     }
@@ -813,7 +785,7 @@ function App() {
     }
   }, []);
 
-  const scrollToFileLine = (line: number, highlight = false) => {
+  const scrollToFileLine = (line: number) => {
     const container = fileScrollRef.current;
     if (!container) return;
     const lineElement = container.querySelector(`.code-wrap [data-line-number="${line}"]`) as HTMLElement | null;
@@ -827,20 +799,13 @@ function App() {
       const lineHeight = codeElement ? Number.parseFloat(window.getComputedStyle(codeElement).lineHeight) || 20 : 20;
       container.scrollTo({top: Math.max(0, (line - 1) * lineHeight), behavior: 'smooth'});
     }
-    if (highlight) {
-      setTemporaryHighlightLine(line);
-      if (highlightTimerRef.current !== null) {
-        window.clearTimeout(highlightTimerRef.current);
-      }
-      highlightTimerRef.current = window.setTimeout(() => setTemporaryHighlightLine(null), 2000);
-    }
   };
 
   const navigateSearchMatch = (delta: 1 | -1) => {
     if (fileSearchMatches.length === 0) return;
     const next = (currentMatchIndex + delta + fileSearchMatches.length) % fileSearchMatches.length;
     setCurrentMatchIndex(next);
-    scrollToFileLine(fileSearchMatches[next], true);
+    scrollToFileLine(fileSearchMatches[next]);
   };
 
   const triggerGoToLine = () => {
@@ -857,7 +822,7 @@ function App() {
     const line = Math.max(1, Math.min(fileLines.length, parsed));
     setGotoLineInput(String(line));
     window.requestAnimationFrame(() => {
-      scrollToFileLine(line, true);
+      scrollToFileLine(line);
     });
   };
 
@@ -1437,8 +1402,7 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
-    const codeTabSize = resolveCodeTabSize(fileInfo?.tabSize);
-    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} tabSize={codeTabSize} highlightLine={temporaryHighlightLine} />;
+    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} />;
   };
 
   const renderViewTools = () => (
