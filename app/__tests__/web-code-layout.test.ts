@@ -22,7 +22,7 @@ describe('web code layout', () => {
     expect(mainTsx).toContain("style={wrap ? {whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere'} : {whiteSpace: 'pre'}}");
     expect(shikiRenderer).toContain('buildLineTransformer(wrap, lineNumbers)');
     expect(shikiRenderer).toContain("hast.properties['data-line-number'] = String(line);");
-    expect(shikiRenderer).toContain("transformerRenderWhitespace({position: 'boundary'})");
+    expect(shikiRenderer).toContain("transformers: [buildLineTransformer(wrap, lineNumbers)]");
     expect(mainTsx).toContain("const VS_CODE_EDITOR_FONT_FAMILY = \"Consolas, 'Courier New', monospace\";");
     expect(mainTsx).toContain('fontFamily: VS_CODE_EDITOR_FONT_FAMILY');
     expect(mainTsx).not.toContain("@fontsource/jetbrains-mono");

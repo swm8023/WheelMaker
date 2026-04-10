@@ -1,5 +1,4 @@
 import {createHighlighter, createJavaScriptRegexEngine, type Highlighter, type ShikiTransformer} from 'shiki';
-import {transformerRenderWhitespace} from '@shikijs/transformers';
 
 type ThemeMode = 'dark' | 'light';
 type RenderMode = 'block' | 'inline';
@@ -71,7 +70,7 @@ function buildLineTransformer(wrap: boolean, lineNumbers: boolean): ShikiTransfo
     name: 'wm-line-layout',
     pre(hast) {
       this.addClassToHast(hast, ['wm-shiki-pre', wrap ? 'wm-shiki-wrap' : 'wm-shiki-nowrap']);
-      appendStyle(hast, `margin:0;padding:0;border-radius:0;overflow-x:${wrap ? 'hidden' : 'auto'};`);
+      appendStyle(hast, `margin:0;padding:0;border-radius:0;white-space:normal;overflow-x:${wrap ? 'hidden' : 'auto'};`);
     },
     code(hast) {
       this.addClassToHast(hast, 'wm-shiki-code');
@@ -154,20 +153,18 @@ function renderWithHighlighter(
   mode: RenderMode,
 ): string {
   const normalizedCode = code || ' ';
-  const whitespaceTransformer = transformerRenderWhitespace({position: 'boundary'});
   if (mode === 'inline') {
     return highlighter.codeToHtml(normalizedCode, {
       lang,
       theme,
       structure: 'inline',
-      transformers: [whitespaceTransformer],
     });
   }
   return highlighter.codeToHtml(normalizedCode, {
     lang,
     theme,
     structure: 'classic',
-    transformers: [whitespaceTransformer, buildLineTransformer(wrap, lineNumbers)],
+    transformers: [buildLineTransformer(wrap, lineNumbers)],
   });
 }
 
