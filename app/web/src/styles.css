@@ -1081,7 +1081,7 @@ body,
   border-right: 1px solid rgba(127, 127, 127, 0.22);
   user-select: none;
   color: var(--muted);
-  background: var(--panel);
+  background: transparent;
 }
 
 .diff-inline .wm-shiki-diff-gutter .wm-shiki-line-number {
