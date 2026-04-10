@@ -153,11 +153,7 @@ func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payloa
 	}
 	if payload.Kind == "help_card" && payload.HelpCard != nil {
 		card := buildHelpCard(chatID, payload.HelpCard.Model, payload.HelpCard.MenuID, payload.HelpCard.Page)
-		messageID := c.helpCardMessageID(chatID)
-		sentID, err := c.inner.SendCard(chatID, messageID, card)
-		if err != nil && messageID != "" {
-			sentID, err = c.inner.SendCard(chatID, "", card)
-		}
+		sentID, err := c.inner.SendCard(chatID, "", card)
 		if err != nil {
 			return err
 		}

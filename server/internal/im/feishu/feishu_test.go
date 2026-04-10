@@ -377,7 +377,7 @@ func TestPermissionTextReply_ResolvesWithPendingRequest(t *testing.T) {
 	}
 }
 
-func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
+func TestSystemNotify_HelpCardAlwaysCreatesNewMessage(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
 	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
@@ -404,8 +404,8 @@ func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
 	if ft.cards[0].messageID == "" {
 		t.Fatal("first help card should produce a message id")
 	}
-	if ft.cards[1].messageID != ft.cards[0].messageID {
-		t.Fatalf("second help update should reuse messageID %q, got %q", ft.cards[0].messageID, ft.cards[1].messageID)
+	if ft.cards[1].messageID == ft.cards[0].messageID {
+		t.Fatalf("second help card should create a new message, got reused messageID %q", ft.cards[1].messageID)
 	}
 }
 
