@@ -14,6 +14,7 @@ import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
+  CODE_THEME_OPTION_GROUPS,
   DEFAULT_CODE_FONT,
   DEFAULT_CODE_FONT_SIZE,
   DEFAULT_CODE_LINE_HEIGHT,
@@ -1495,8 +1496,13 @@ function App() {
                     const next = event.target.value;
                     if (isCodeThemeId(next)) setCodeTheme(next);
                   }}>
-                  {CODE_THEME_OPTIONS.map(item => (
-                    <option key={item.id} value={item.id}>{item.label}</option>
+                  <option key={CODE_THEME_OPTIONS[0].id} value={CODE_THEME_OPTIONS[0].id}>{CODE_THEME_OPTIONS[0].label}</option>
+                  {CODE_THEME_OPTION_GROUPS.map(group => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map(item => (
+                        <option key={item.id} value={item.id}>{item.label}</option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </label>
@@ -1984,3 +1990,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+

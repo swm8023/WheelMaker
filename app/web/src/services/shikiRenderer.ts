@@ -1,17 +1,10 @@
-import {createHighlighter, createJavaScriptRegexEngine, type Highlighter, type ShikiTransformer} from 'shiki';
+import {bundledThemesInfo, createHighlighter, createJavaScriptRegexEngine, type BundledTheme, type Highlighter, type ShikiTransformer} from 'shiki';
 
 type ThemeMode = 'dark' | 'light';
 type RenderMode = 'block' | 'inline';
-export type CodeThemeId =
-  | 'auto-plus'
-  | 'dark-plus'
-  | 'light-plus'
-  | 'material-theme-darker'
-  | 'github-dark'
-  | 'github-light'
-  | 'nord'
-  | 'vitesse-dark'
-  | 'vitesse-light';
+type CodeThemeAppearance = 'auto' | 'dark' | 'light';
+
+export type CodeThemeId = 'auto-plus' | BundledTheme;
 
 export type CodeFontId =
   | 'consolas'
@@ -22,6 +15,12 @@ export type CodeFontId =
 export type CodeThemeOption = {
   id: CodeThemeId;
   label: string;
+  appearance: CodeThemeAppearance;
+};
+
+export type CodeThemeOptionGroup = {
+  label: string;
+  options: CodeThemeOption[];
 };
 
 export type CodeFontOption = {
@@ -30,16 +29,28 @@ export type CodeFontOption = {
   fontFamily: string;
 };
 
-export const CODE_THEME_OPTIONS: CodeThemeOption[] = [
-  {id: 'auto-plus', label: 'Auto (Dark+/Light+)'},
-  {id: 'dark-plus', label: 'Dark Plus'},
-  {id: 'light-plus', label: 'Light Plus'},
-  {id: 'material-theme-darker', label: 'Material Theme Darker'},
-  {id: 'github-dark', label: 'GitHub Dark'},
-  {id: 'github-light', label: 'GitHub Light'},
-  {id: 'nord', label: 'Nord'},
-  {id: 'vitesse-dark', label: 'Vitesse Dark'},
-  {id: 'vitesse-light', label: 'Vitesse Light'},
+const AUTO_CODE_THEME_OPTION: CodeThemeOption = {
+  id: 'auto-plus',
+  label: 'Auto (Dark+/Light+)',
+  appearance: 'auto',
+};
+
+const BUNDLED_CODE_THEME_OPTIONS: CodeThemeOption[] = bundledThemesInfo.map(info => ({
+  id: info.id as BundledTheme,
+  label: info.displayName,
+  appearance: info.type,
+}));
+
+export const CODE_THEME_OPTIONS: CodeThemeOption[] = [AUTO_CODE_THEME_OPTION, ...BUNDLED_CODE_THEME_OPTIONS];
+export const CODE_THEME_OPTION_GROUPS: CodeThemeOptionGroup[] = [
+  {
+    label: 'Dark Themes',
+    options: BUNDLED_CODE_THEME_OPTIONS.filter(item => item.appearance === 'dark'),
+  },
+  {
+    label: 'Light Themes',
+    options: BUNDLED_CODE_THEME_OPTIONS.filter(item => item.appearance === 'light'),
+  },
 ];
 export const DEFAULT_CODE_THEME: CodeThemeId = 'auto-plus';
 export const DEFAULT_CODE_FONT: CodeFontId = 'consolas';
@@ -52,6 +63,8 @@ export const CODE_FONT_OPTIONS: CodeFontOption[] = [
   {id: 'cascadia', label: 'Cascadia Mono', fontFamily: "'Cascadia Mono', Consolas, 'Courier New', monospace"},
   {id: 'menlo', label: 'Menlo / Monaco', fontFamily: "Menlo, Monaco, Consolas, 'Courier New', monospace"},
 ];
+
+const VALID_CODE_THEME_IDS = new Set<string>(CODE_THEME_OPTIONS.map(item => item.id));
 
 type RenderShikiOptions = {
   code: string;
@@ -67,8 +80,8 @@ type RenderShikiOptions = {
   mode: RenderMode;
 };
 
-const SHIKI_THEME_DARK = 'dark-plus';
-const SHIKI_THEME_LIGHT = 'light-plus';
+const SHIKI_THEME_DARK: BundledTheme = 'dark-plus';
+const SHIKI_THEME_LIGHT: BundledTheme = 'light-plus';
 const SHIKI_LANGS = [
   'text',
   'plaintext',
@@ -94,7 +107,7 @@ const loadedThemes = new Set<string>([SHIKI_THEME_DARK, SHIKI_THEME_LIGHT]);
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
-function resolveTheme(themeMode: ThemeMode, codeTheme: CodeThemeId): string {
+function resolveTheme(themeMode: ThemeMode, codeTheme: CodeThemeId): BundledTheme {
   if (codeTheme === 'auto-plus') {
     return themeMode === 'light' ? SHIKI_THEME_LIGHT : SHIKI_THEME_DARK;
   }
@@ -102,7 +115,7 @@ function resolveTheme(themeMode: ThemeMode, codeTheme: CodeThemeId): string {
 }
 
 export function isCodeThemeId(value: string): value is CodeThemeId {
-  return CODE_THEME_OPTIONS.some(item => item.id === value);
+  return VALID_CODE_THEME_IDS.has(value);
 }
 
 export function isCodeFontId(value: string): value is CodeFontId {
@@ -309,3 +322,7 @@ export async function renderShikiHtml(options: RenderShikiOptions): Promise<stri
 
   return `<span>${escapeHtml(options.code || ' ')}</span>`;
 }
+
+
+
+
