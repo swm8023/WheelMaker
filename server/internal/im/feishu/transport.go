@@ -52,10 +52,10 @@ type transportChannel struct {
 
 	imageFetcher func(context.Context, string, string) (acp.ContentBlock, error)
 
-	textMu          sync.Mutex
-	unifiedStreams  map[string]*unifiedStream
-	promptStartAt   map[string]time.Time // chatID -> time when current prompt's first text arrived
-	usageByChat     map[string]string    // chatID -> latest context usage (set by usage_update)
+	textMu         sync.Mutex
+	unifiedStreams map[string]*unifiedStream
+	promptStartAt  map[string]time.Time // chatID -> time when current prompt's first text arrived
+	usageByChat    map[string]string    // chatID -> latest context usage (set by usage_update)
 	toolMu         sync.Mutex
 	toolRenderMu   sync.Mutex
 	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -880,8 +880,11 @@ func isMarkdownDividerElement(element map[string]any) bool {
 }
 
 func buildSystemStreamCard(title, content string) RawCard {
+	title = strings.TrimSpace(title)
 	if title == "" {
 		title = "📣 System Message"
+	} else if !strings.Contains(title, "📣") {
+		title = "📣 " + title
 	}
 	return RawCard{
 		"schema": "2.0",

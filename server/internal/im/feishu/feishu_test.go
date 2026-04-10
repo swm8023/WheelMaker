@@ -3,6 +3,7 @@ package feishu
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/swm8023/wheelmaker/internal/im"
@@ -405,6 +406,51 @@ func TestSystemNotify_HelpCardReusesExistingMessage(t *testing.T) {
 	}
 	if ft.cards[1].messageID != ft.cards[0].messageID {
 		t.Fatalf("second help update should reuse messageID %q, got %q", ft.cards[0].messageID, ft.cards[1].messageID)
+	}
+}
+
+func TestSystemNotify_TitleKeepsEmojiAndBodyNoDuplicate(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+	payload := im.SystemPayload{
+		Title: "Switched",
+		Body:  "Session Ready",
+	}
+
+	if err := ch.SystemNotify(context.Background(), target, payload); err != nil {
+		t.Fatalf("SystemNotify: %v", err)
+	}
+	if len(ft.cards) != 1 {
+		t.Fatalf("cards=%+v, want 1", ft.cards)
+	}
+	raw, ok := ft.cards[0].card.(RawCard)
+	if !ok {
+		t.Fatalf("card type=%T, want RawCard", ft.cards[0].card)
+	}
+	header, ok := raw["header"].(map[string]any)
+	if !ok {
+		t.Fatalf("header missing in card: %+v", raw)
+	}
+	titleMap, ok := header["title"].(map[string]any)
+	if !ok {
+		t.Fatalf("title missing in header: %+v", header)
+	}
+	title, _ := titleMap["content"].(string)
+	if !strings.Contains(title, "📣") {
+		t.Fatalf("title should keep loudspeaker emoji, got %q", title)
+	}
+	body, ok := raw["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("body missing in card: %+v", raw)
+	}
+	elements, ok := body["elements"].([]map[string]any)
+	if !ok || len(elements) == 0 {
+		t.Fatalf("body elements missing in card: %+v", raw)
+	}
+	content, _ := elements[0]["content"].(string)
+	if content != "Session Ready" {
+		t.Fatalf("content=%q, want %q", content, "Session Ready")
 	}
 }
 

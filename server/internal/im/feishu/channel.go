@@ -169,7 +169,11 @@ func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payloa
 		return nil
 	}
 	if title := strings.TrimSpace(payload.Title); title != "" {
-		card := buildSystemStreamCard(title, text)
+		content := strings.TrimSpace(payload.Body)
+		if content == "" {
+			content = title
+		}
+		card := buildSystemStreamCard(title, content)
 		_, err := c.inner.SendCard(chatID, "", card)
 		return err
 	}
