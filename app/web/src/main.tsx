@@ -191,6 +191,8 @@ function detectCodeLanguage(path: string): string {
     case 'tsx':
       return 'tsx';
     case 'js':
+    case 'cjs':
+    case 'mjs':
       return 'javascript';
     case 'jsx':
       return 'jsx';
@@ -211,7 +213,12 @@ function detectCodeLanguage(path: string): string {
       return 'rust';
     case 'sh':
     case 'bash':
-      return 'bash';
+      return 'shellscript';
+    case 'ps1':
+    case 'psm1':
+      return 'powershell';
+    case 'py':
+      return 'python';
     case 'yml':
     case 'yaml':
       return 'yaml';

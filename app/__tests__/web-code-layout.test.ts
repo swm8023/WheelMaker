@@ -30,7 +30,13 @@ describe('web code layout', () => {
     expect(shikiRenderer).toContain('data-line-kind');
     expect(shikiRenderer).toContain('wm-shiki-diff-line');
     expect(shikiRenderer).toContain("hast.properties['data-line-number'] = String(line);");
-    expect(shikiRenderer).toContain('bundledThemesInfo');
+    expect(shikiRenderer).toContain('createHighlighterCore');
+    expect(shikiRenderer).toContain('SHIKI_THEME_LOADERS');
+    expect(shikiRenderer).toContain('SHIKI_LANG_LOADERS');
+    expect(mainTsx).toContain("case 'py':");
+    expect(mainTsx).toContain("return 'python';");
+    expect(mainTsx).toContain("case 'ps1':");
+    expect(mainTsx).toContain("return 'powershell';");
     expect(shikiRenderer).toContain('CODE_FONT_OPTIONS');
     expect(shikiRenderer).toContain('resolveCodeFontFamily');
     expect(mainTsx).toContain("const VS_CODE_EDITOR_FONT_FAMILY = \"Consolas, 'Courier New', monospace\";");

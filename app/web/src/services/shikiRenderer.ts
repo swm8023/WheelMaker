@@ -1,10 +1,20 @@
-import {bundledThemesInfo, createHighlighter, createJavaScriptRegexEngine, type BundledTheme, type Highlighter, type ShikiTransformer} from 'shiki';
+import {createHighlighterCore} from 'shiki/core';
+import {createJavaScriptRegexEngine} from 'shiki/engine/javascript';
+import type {HighlighterCore, LanguageInput, ShikiTransformer, ThemeInput} from '@shikijs/types';
 
 type ThemeMode = 'dark' | 'light';
 type RenderMode = 'block' | 'inline';
 type CodeThemeAppearance = 'auto' | 'dark' | 'light';
 
-export type CodeThemeId = 'auto-plus' | BundledTheme;
+type CuratedCodeThemeId =
+  | 'dark-plus'
+  | 'light-plus'
+  | 'material-theme-darker'
+  | 'material-theme-lighter'
+  | 'monokai'
+  | 'tokyo-night';
+
+export type CodeThemeId = 'auto-plus' | CuratedCodeThemeId;
 
 export type CodeFontId =
   | 'consolas'
@@ -43,21 +53,24 @@ const AUTO_CODE_THEME_OPTION: CodeThemeOption = {
   appearance: 'auto',
 };
 
-const BUNDLED_CODE_THEME_OPTIONS: CodeThemeOption[] = bundledThemesInfo.map(info => ({
-  id: info.id as BundledTheme,
-  label: info.displayName,
-  appearance: info.type,
-}));
+const CURATED_CODE_THEME_OPTIONS: CodeThemeOption[] = [
+  {id: 'dark-plus', label: 'Dark Plus', appearance: 'dark'},
+  {id: 'light-plus', label: 'Light Plus', appearance: 'light'},
+  {id: 'material-theme-darker', label: 'Material Theme Darker', appearance: 'dark'},
+  {id: 'material-theme-lighter', label: 'Material Theme Lighter', appearance: 'light'},
+  {id: 'tokyo-night', label: 'Tokyo Night', appearance: 'dark'},
+  {id: 'monokai', label: 'Monokai', appearance: 'dark'},
+];
 
-export const CODE_THEME_OPTIONS: CodeThemeOption[] = [AUTO_CODE_THEME_OPTION, ...BUNDLED_CODE_THEME_OPTIONS];
+export const CODE_THEME_OPTIONS: CodeThemeOption[] = [AUTO_CODE_THEME_OPTION, ...CURATED_CODE_THEME_OPTIONS];
 export const CODE_THEME_OPTION_GROUPS: CodeThemeOptionGroup[] = [
   {
     label: 'Dark Themes',
-    options: BUNDLED_CODE_THEME_OPTIONS.filter(item => item.appearance === 'dark'),
+    options: CURATED_CODE_THEME_OPTIONS.filter(item => item.appearance === 'dark'),
   },
   {
     label: 'Light Themes',
-    options: BUNDLED_CODE_THEME_OPTIONS.filter(item => item.appearance === 'light'),
+    options: CURATED_CODE_THEME_OPTIONS.filter(item => item.appearance === 'light'),
   },
 ];
 export const DEFAULT_CODE_THEME: CodeThemeId = 'auto-plus';
@@ -96,34 +109,41 @@ type RenderShikiDiffOptions = RenderShikiBaseOptions & {
   lineNumbers: boolean;
 };
 
-const SHIKI_THEME_DARK: BundledTheme = 'dark-plus';
-const SHIKI_THEME_LIGHT: BundledTheme = 'light-plus';
-const SHIKI_LANGS = [
-  'text',
-  'plaintext',
-  'typescript',
-  'tsx',
-  'javascript',
-  'jsx',
-  'json',
-  'go',
-  'c',
-  'cpp',
-  'rust',
-  'bash',
-  'shellscript',
-  'yaml',
-  'markdown',
-  'diff',
-  'html',
-];
+const SHIKI_THEME_DARK: CuratedCodeThemeId = 'dark-plus';
+const SHIKI_THEME_LIGHT: CuratedCodeThemeId = 'light-plus';
+const SHIKI_THEME_LOADERS: Record<CuratedCodeThemeId, () => Promise<ThemeInput>> = {
+  'dark-plus': async () => (await import('@shikijs/themes/dark-plus')).default,
+  'light-plus': async () => (await import('@shikijs/themes/light-plus')).default,
+  'material-theme-darker': async () => (await import('@shikijs/themes/material-theme-darker')).default,
+  'material-theme-lighter': async () => (await import('@shikijs/themes/material-theme-lighter')).default,
+  monokai: async () => (await import('@shikijs/themes/monokai')).default,
+  'tokyo-night': async () => (await import('@shikijs/themes/tokyo-night')).default,
+};
+const SHIKI_LANG_LOADERS: Record<string, () => Promise<LanguageInput>> = {
+  typescript: async () => (await import('@shikijs/langs/typescript')).default,
+  tsx: async () => (await import('@shikijs/langs/tsx')).default,
+  javascript: async () => (await import('@shikijs/langs/javascript')).default,
+  jsx: async () => (await import('@shikijs/langs/jsx')).default,
+  json: async () => (await import('@shikijs/langs/json')).default,
+  go: async () => (await import('@shikijs/langs/go')).default,
+  c: async () => (await import('@shikijs/langs/c')).default,
+  cpp: async () => (await import('@shikijs/langs/cpp')).default,
+  shellscript: async () => (await import('@shikijs/langs/shellscript')).default,
+  yaml: async () => (await import('@shikijs/langs/yaml')).default,
+  markdown: async () => (await import('@shikijs/langs/markdown')).default,
+  diff: async () => (await import('@shikijs/langs/diff')).default,
+  html: async () => (await import('@shikijs/langs/html')).default,
+  python: async () => (await import('@shikijs/langs/python')).default,
+  powershell: async () => (await import('@shikijs/langs/powershell')).default,
+};
 const INLINE_CACHE_LIMIT = 4000;
 const inlineCache = new Map<string, string>();
-const loadedThemes = new Set<string>([SHIKI_THEME_DARK, SHIKI_THEME_LIGHT]);
+const loadedThemes = new Set<string>();
+const loadedLanguages = new Set<string>(['text']);
 
-let highlighterPromise: Promise<Highlighter> | null = null;
+let highlighterPromise: Promise<HighlighterCore> | null = null;
 
-function resolveTheme(themeMode: ThemeMode, codeTheme: CodeThemeId): BundledTheme {
+function resolveTheme(themeMode: ThemeMode, codeTheme: CodeThemeId): CuratedCodeThemeId {
   if (codeTheme === 'auto-plus') {
     return themeMode === 'light' ? SHIKI_THEME_LIGHT : SHIKI_THEME_DARK;
   }
@@ -303,21 +323,41 @@ function escapeHtml(raw: string): string {
     .replaceAll('>', '&gt;');
 }
 
-async function getHighlighter(): Promise<Highlighter> {
+async function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
-    highlighterPromise = createHighlighter({
-      engine: createJavaScriptRegexEngine(),
-      themes: [SHIKI_THEME_DARK, SHIKI_THEME_LIGHT],
-      langs: SHIKI_LANGS,
-    });
+    highlighterPromise = (async () => {
+      const [darkTheme, lightTheme] = await Promise.all([
+        SHIKI_THEME_LOADERS['dark-plus'](),
+        SHIKI_THEME_LOADERS['light-plus'](),
+      ]);
+      loadedThemes.add('dark-plus');
+      loadedThemes.add('light-plus');
+      return createHighlighterCore({
+        engine: createJavaScriptRegexEngine(),
+        themes: [darkTheme, lightTheme],
+        langs: [],
+      });
+    })();
   }
   return highlighterPromise;
 }
 
-async function ensureThemeLoaded(highlighter: Highlighter, theme: string): Promise<void> {
+async function ensureThemeLoaded(highlighter: HighlighterCore, theme: CuratedCodeThemeId): Promise<void> {
   if (loadedThemes.has(theme)) return;
-  await highlighter.loadTheme(theme as any);
+  const loader = SHIKI_THEME_LOADERS[theme];
+  if (!loader) return;
+  const registration = await loader();
+  await highlighter.loadTheme(registration);
   loadedThemes.add(theme);
+}
+
+async function ensureLanguageLoaded(highlighter: HighlighterCore, language: string): Promise<void> {
+  if (loadedLanguages.has(language)) return;
+  const loader = SHIKI_LANG_LOADERS[language];
+  if (!loader) return;
+  const registration = await loader();
+  await highlighter.loadLanguage(registration);
+  loadedLanguages.add(language);
 }
 
 function getInlineCacheKey(options: RenderShikiOptions, lang: string, theme: string): string {
@@ -332,7 +372,7 @@ function setInlineCache(key: string, value: string): void {
 }
 
 function renderWithHighlighter(
-  highlighter: Highlighter,
+  highlighter: HighlighterCore,
   code: string,
   lang: string,
   theme: string,
@@ -389,6 +429,7 @@ export async function renderShikiHtml(options: RenderShikiOptions): Promise<stri
 
   for (const lang of langCandidates) {
     try {
+      await ensureLanguageLoaded(highlighter, lang);
       const html = renderWithHighlighter(
         highlighter,
         options.code,
@@ -431,6 +472,7 @@ export async function renderShikiDiffHtml(options: RenderShikiDiffOptions): Prom
 
   for (const lang of langCandidates) {
     try {
+      await ensureLanguageLoaded(highlighter, lang);
       return renderWithHighlighter(
         highlighter,
         code,

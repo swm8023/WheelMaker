@@ -20,15 +20,19 @@
     "@codingame/monaco-vscode-theme-seti-default-extension": "^28.4.1",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
+    "@shikijs/core": "^4.0.2",
+    "@shikijs/engine-javascript": "^4.0.2",
+    "@shikijs/langs": "^4.0.2",
+    "@shikijs/themes": "^4.0.2",
     "@shikijs/transformers": "^4.0.2",
+    "@shikijs/types": "^4.0.2",
     "@vscode/codicons": "^0.0.45",
     "gitdiff-parser": "^0.3.1",
     "react": "19.2.3",
     "react-dom": "^19.2.3",
     "react-native": "0.84.1",
     "react-native-safe-area-context": "^5.5.2",
-    "react-native-webview": "^13.16.1",
-    "shiki": "^4.0.2"
+    "react-native-webview": "^13.16.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

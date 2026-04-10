@@ -2,21 +2,22 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web shiki theme settings', () => {
-  test('uses bundled Shiki theme metadata and grouped theme settings UI', () => {
+  test('uses curated Shiki theme metadata and grouped theme settings UI', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const shikiRenderer = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'shikiRenderer.ts'), 'utf8');
     const workspacePersistence = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'workspacePersistence.ts'), 'utf8');
-    const shikiThemes = fs.readFileSync(path.join(projectRoot, 'node_modules', 'shiki', 'dist', 'themes.mjs'), 'utf8');
 
-    expect(shikiRenderer).toContain('bundledThemesInfo');
-    expect(shikiRenderer).toContain('type BundledTheme');
-    expect(shikiRenderer).toContain("export type CodeThemeId = 'auto-plus' | BundledTheme;");
+    expect(shikiRenderer).toContain("createHighlighterCore");
+    expect(shikiRenderer).toContain("'material-theme-darker'");
+    expect(shikiRenderer).toContain("'material-theme-lighter'");
+    expect(shikiRenderer).toContain("'tokyo-night'");
+    expect(shikiRenderer).toContain("'monokai'");
+    expect(shikiRenderer).toContain("export type CodeThemeId = 'auto-plus' | CuratedCodeThemeId;");
     expect(shikiRenderer).toContain('export const CODE_THEME_OPTION_GROUPS');
     expect(shikiRenderer).toContain('label: \'Dark Themes\'');
     expect(shikiRenderer).toContain('label: \'Light Themes\'');
-    expect(shikiRenderer).toContain('appearance: info.type');
-    expect(shikiThemes).toContain('"id": "material-theme-darker"');
+    expect(shikiRenderer).toContain('CURATED_CODE_THEME_OPTIONS');
 
     expect(mainTsx).toContain('CODE_THEME_OPTION_GROUPS');
     expect(mainTsx).toContain('<optgroup key={group.label} label={group.label}>');
