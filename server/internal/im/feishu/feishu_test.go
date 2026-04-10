@@ -409,6 +409,51 @@ func TestSystemNotify_HelpCardAlwaysCreatesNewMessage(t *testing.T) {
 	}
 }
 
+func TestSystemNotify_HelpCardCardActionUpdatesExistingMessage(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
+	payload := im.SystemPayload{
+		Kind: "help_card",
+		HelpCard: &im.HelpCardPayload{
+			Model: im.HelpModel{
+				Title: "Help",
+				Body:  "body",
+			},
+		},
+	}
+
+	ch.handleHelpMenuAction(CardActionEvent{
+		ChatID:    "chat-a",
+		MessageID: "card-existing",
+		Tag:       "help_menu",
+		Value: map[string]string{
+			"chat_id": "chat-a",
+			"menu_id": "sessions",
+		},
+	})
+
+	if err := ch.SystemNotify(context.Background(), target, payload); err != nil {
+		t.Fatalf("SystemNotify(update): %v", err)
+	}
+	if len(ft.cards) != 1 {
+		t.Fatalf("cards=%+v, want 1 update", ft.cards)
+	}
+	if ft.cards[0].messageID != "card-existing" {
+		t.Fatalf("help card should update action source messageID, got %q", ft.cards[0].messageID)
+	}
+
+	if err := ch.SystemNotify(context.Background(), target, payload); err != nil {
+		t.Fatalf("SystemNotify(new): %v", err)
+	}
+	if len(ft.cards) != 2 {
+		t.Fatalf("cards=%+v, want 2 sends", ft.cards)
+	}
+	if ft.cards[1].messageID == "card-existing" {
+		t.Fatalf("typed /help should create a new message instead of reusing %q", ft.cards[1].messageID)
+	}
+}
+
 func TestSystemNotify_TitleKeepsEmojiAndBodyNoDuplicate(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)

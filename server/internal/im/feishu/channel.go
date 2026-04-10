@@ -43,6 +43,7 @@ type Channel struct {
 	pendingByRequestID  map[int64]PendingPermission
 	pendingByChat       map[string]PendingPermission
 	helpCards           map[string]string
+	helpCardUpdateOnce  map[string]string
 	pendingPromptByChat map[string][]acp.ContentBlock
 	closed              map[int64]time.Time
 }
@@ -62,6 +63,7 @@ func newWithTransportConfig(inner transport, cfg Config) *Channel {
 		pendingByRequestID:  map[int64]PendingPermission{},
 		pendingByChat:       map[string]PendingPermission{},
 		helpCards:           map[string]string{},
+		helpCardUpdateOnce:  map[string]string{},
 		pendingPromptByChat: map[string][]acp.ContentBlock{},
 		closed:              map[int64]time.Time{},
 	}
@@ -153,7 +155,11 @@ func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payloa
 	}
 	if payload.Kind == "help_card" && payload.HelpCard != nil {
 		card := buildHelpCard(chatID, payload.HelpCard.Model, payload.HelpCard.MenuID, payload.HelpCard.Page)
-		sentID, err := c.inner.SendCard(chatID, "", card)
+		messageID := c.consumeHelpCardUpdate(chatID)
+		sentID, err := c.inner.SendCard(chatID, messageID, card)
+		if err != nil && messageID != "" {
+			sentID, err = c.inner.SendCard(chatID, "", card)
+		}
 		if err != nil {
 			return err
 		}
@@ -438,7 +444,7 @@ func (c *Channel) handleHelpMenuAction(evt CardActionEvent) {
 	if chatID == "" {
 		return
 	}
-	c.rememberHelpCard(chatID, evt.MessageID)
+	c.queueHelpCardUpdate(chatID, evt.MessageID)
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
 	args := menuID
 	c.mu.Lock()
@@ -459,7 +465,7 @@ func (c *Channel) handleHelpPageAction(evt CardActionEvent) {
 	if chatID == "" {
 		return
 	}
-	c.rememberHelpCard(chatID, evt.MessageID)
+	c.queueHelpCardUpdate(chatID, evt.MessageID)
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
 	args := menuID + " " + pageStr
 	c.mu.Lock()
@@ -480,7 +486,7 @@ func (c *Channel) handleHelpOptionAction(evt CardActionEvent) {
 	if cmd == "" || chatID == "" {
 		return
 	}
-	c.rememberHelpCard(chatID, evt.MessageID)
+	c.queueHelpCardUpdate(chatID, evt.MessageID)
 	source := im.ChatRef{ChannelID: c.ID(), ChatID: chatID}
 	text := cmd
 	if val != "" {
@@ -585,6 +591,29 @@ func (c *Channel) rememberHelpCard(chatID, messageID string) {
 	c.mu.Lock()
 	c.helpCards[chatID] = messageID
 	c.mu.Unlock()
+}
+
+func (c *Channel) queueHelpCardUpdate(chatID, messageID string) {
+	chatID = strings.TrimSpace(chatID)
+	messageID = strings.TrimSpace(messageID)
+	if chatID == "" || messageID == "" {
+		return
+	}
+	c.mu.Lock()
+	c.helpCardUpdateOnce[chatID] = messageID
+	c.mu.Unlock()
+}
+
+func (c *Channel) consumeHelpCardUpdate(chatID string) string {
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return ""
+	}
+	c.mu.Lock()
+	messageID := strings.TrimSpace(c.helpCardUpdateOnce[chatID])
+	delete(c.helpCardUpdateOnce, chatID)
+	c.mu.Unlock()
+	return messageID
 }
 
 func resolveChatID(target im.SendTarget) string {
