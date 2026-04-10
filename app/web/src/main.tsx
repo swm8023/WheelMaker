@@ -468,6 +468,7 @@ type PrismCodeBlockProps = {
 };
 
 function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highlightLine = null}: PrismCodeBlockProps) {
+  const tabSizeStyle = String(tabSize);
   return (
     <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
       <SyntaxHighlighter
@@ -477,7 +478,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highligh
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
         wrapLines={true}
-        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize}}}
+        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: tabSizeStyle}}}
         lineProps={lineNumber => ({
           'data-line-number': String(lineNumber),
           style: {
@@ -485,10 +486,10 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highligh
             whiteSpace: wrap ? 'pre-wrap' : 'pre',
             wordBreak: 'normal',
             overflowWrap: wrap ? 'break-word' : 'normal',
-            tabSize,
+            tabSize: tabSizeStyle,
           },
         })}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize}}
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: tabSizeStyle}}
         lineNumberStyle={{
           fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
           fontWeight: 400,
