@@ -459,7 +459,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         language={language}
         style={oneDark}
         showLineNumbers={lineNumbers}
-        showInlineLineNumbers={false}
+        showInlineLineNumbers={true}
         wrapLongLines={wrap}
         wrapLines={true}>
         {content || ' '}
@@ -473,32 +473,10 @@ function PrismInlineCode({content, language, wrap}: {content: string; language: 
     <SyntaxHighlighter
       PreTag="span"
       CodeTag="span"
-      className="diff-inline-code"
       language={language}
       style={oneDark}
       wrapLongLines={wrap}
-      wrapLines={wrap}
-      codeTagProps={{
-        style: {
-          whiteSpace: wrap ? 'pre-wrap' : 'pre',
-          background: 'transparent',
-          fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
-          fontWeight: 400,
-          fontVariantLigatures: 'none',
-          fontFeatureSettings: '"liga" 0, "calt" 0',
-        },
-      }}
-      lineProps={{style: {background: 'transparent', whiteSpace: wrap ? 'pre-wrap' : 'pre', wordBreak: wrap ? 'break-word' : 'normal', overflowWrap: wrap ? 'anywhere' : 'normal'}}}
-      customStyle={{
-        margin: 0,
-        padding: 0,
-        display: 'inline',
-        background: 'transparent',
-        fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
-        fontWeight: 400,
-        fontVariantLigatures: 'none',
-        fontFeatureSettings: '"liga" 0, "calt" 0',
-      }}>
+      wrapLines={wrap}>
       {content || ' '}
     </SyntaxHighlighter>
   );
