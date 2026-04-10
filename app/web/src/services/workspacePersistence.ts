@@ -1,4 +1,5 @@
 import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
+import {DEFAULT_CODE_THEME, isCodeThemeId, type CodeThemeId} from './shikiRenderer';
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
@@ -27,6 +28,7 @@ export type PersistedGlobalState = {
   address: string;
   token: string;
   themeMode: PersistedThemeMode;
+  codeTheme: CodeThemeId;
   wrapLines: boolean;
   showLineNumbers: boolean;
   tab: PersistedTab;
@@ -47,6 +49,7 @@ function defaultGlobalState(): PersistedGlobalState {
     address: '',
     token: '',
     themeMode: 'dark',
+    codeTheme: DEFAULT_CODE_THEME,
     wrapLines: false,
     showLineNumbers: true,
     tab: 'file',
@@ -101,6 +104,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     address: typeof input.address === 'string' ? input.address : base.address,
     token: typeof input.token === 'string' ? input.token : base.token,
     themeMode: input.themeMode === 'light' ? 'light' : 'dark',
+    codeTheme: typeof input.codeTheme === 'string' && isCodeThemeId(input.codeTheme) ? input.codeTheme : base.codeTheme,
     wrapLines: typeof input.wrapLines === 'boolean' ? input.wrapLines : base.wrapLines,
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',

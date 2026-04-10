@@ -2,11 +2,38 @@ import {createHighlighter, createJavaScriptRegexEngine, type Highlighter, type S
 
 type ThemeMode = 'dark' | 'light';
 type RenderMode = 'block' | 'inline';
+export type CodeThemeId =
+  | 'auto-plus'
+  | 'dark-plus'
+  | 'light-plus'
+  | 'github-dark'
+  | 'github-light'
+  | 'nord'
+  | 'vitesse-dark'
+  | 'vitesse-light';
+
+export type CodeThemeOption = {
+  id: CodeThemeId;
+  label: string;
+};
+
+export const CODE_THEME_OPTIONS: CodeThemeOption[] = [
+  {id: 'auto-plus', label: 'Auto (Dark+/Light+)'},
+  {id: 'dark-plus', label: 'Dark Plus'},
+  {id: 'light-plus', label: 'Light Plus'},
+  {id: 'github-dark', label: 'GitHub Dark'},
+  {id: 'github-light', label: 'GitHub Light'},
+  {id: 'nord', label: 'Nord'},
+  {id: 'vitesse-dark', label: 'Vitesse Dark'},
+  {id: 'vitesse-light', label: 'Vitesse Light'},
+];
+export const DEFAULT_CODE_THEME: CodeThemeId = 'auto-plus';
 
 type RenderShikiOptions = {
   code: string;
   language: string;
   themeMode: ThemeMode;
+  codeTheme: CodeThemeId;
   wrap: boolean;
   lineNumbers: boolean;
   mode: RenderMode;
@@ -35,11 +62,19 @@ const SHIKI_LANGS = [
 ];
 const INLINE_CACHE_LIMIT = 4000;
 const inlineCache = new Map<string, string>();
+const loadedThemes = new Set<string>([SHIKI_THEME_DARK, SHIKI_THEME_LIGHT]);
 
 let highlighterPromise: Promise<Highlighter> | null = null;
 
-function resolveTheme(themeMode: ThemeMode): string {
-  return themeMode === 'light' ? SHIKI_THEME_LIGHT : SHIKI_THEME_DARK;
+function resolveTheme(themeMode: ThemeMode, codeTheme: CodeThemeId): string {
+  if (codeTheme === 'auto-plus') {
+    return themeMode === 'light' ? SHIKI_THEME_LIGHT : SHIKI_THEME_DARK;
+  }
+  return codeTheme;
+}
+
+export function isCodeThemeId(value: string): value is CodeThemeId {
+  return CODE_THEME_OPTIONS.some(item => item.id === value);
 }
 
 function resolveLanguage(language: string): string {
@@ -132,6 +167,12 @@ async function getHighlighter(): Promise<Highlighter> {
   return highlighterPromise;
 }
 
+async function ensureThemeLoaded(highlighter: Highlighter, theme: string): Promise<void> {
+  if (loadedThemes.has(theme)) return;
+  await highlighter.loadTheme(theme as any);
+  loadedThemes.add(theme);
+}
+
 function getInlineCacheKey(options: RenderShikiOptions, lang: string, theme: string): string {
   return `${theme}|${lang}|${options.wrap ? 1 : 0}|${options.code}`;
 }
@@ -170,8 +211,13 @@ function renderWithHighlighter(
 
 export async function renderShikiHtml(options: RenderShikiOptions): Promise<string> {
   const language = resolveLanguage(options.language);
-  const theme = resolveTheme(options.themeMode);
+  const theme = resolveTheme(options.themeMode, options.codeTheme);
   const highlighter = await getHighlighter();
+  try {
+    await ensureThemeLoaded(highlighter, theme);
+  } catch {
+    // fall through with already loaded default themes
+  }
   const langCandidates = language === 'text' ? ['text'] : [language, 'text'];
 
   let inlineCacheKey = '';

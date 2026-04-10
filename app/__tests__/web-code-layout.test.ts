@@ -7,16 +7,18 @@ describe('web code layout', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const shikiRenderer = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'shikiRenderer.ts'), 'utf8');
 
-    expect(mainTsx).toContain("import {renderShikiHtml} from './services/shikiRenderer'");
+    expect(mainTsx).toContain("from './services/shikiRenderer'");
+    expect(mainTsx).toContain('renderShikiHtml');
     expect(mainTsx).toContain("from 'react-diff-viewer-continued'");
     expect(mainTsx).toContain("mode: 'block'");
     expect(mainTsx).toContain("mode: 'inline'");
     expect(mainTsx).toContain('themeMode={themeMode}');
+    expect(mainTsx).toContain('codeTheme={codeTheme}');
     expect(mainTsx).toContain('styles={getDiffViewerStyles(wrapLines)}');
     expect(mainTsx).toContain('disableWordDiff={true}');
     expect(mainTsx).toContain('compareMethod={DiffMethod.LINES}');
     expect(mainTsx).toContain('linesOffset={linesOffset}');
-    expect(mainTsx).toContain('renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} themeMode={themeMode} />}');
+    expect(mainTsx).toContain('renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} themeMode={themeMode} codeTheme={codeTheme} />}');
     expect(mainTsx).toContain('showDiffOnly={false}');
     expect(mainTsx).toContain("dangerouslySetInnerHTML={{__html: html || '<pre><code> </code></pre>'}}");
     expect(mainTsx).toContain("style={wrap ? {whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere'} : {whiteSpace: 'pre'}}");

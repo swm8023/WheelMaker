@@ -10,7 +10,7 @@ import '@fontsource/ibm-plex-sans/600.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
-import {renderShikiHtml} from './services/shikiRenderer';
+import {CODE_THEME_OPTIONS, DEFAULT_CODE_THEME, isCodeThemeId, renderShikiHtml, type CodeThemeId} from './services/shikiRenderer';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
 import type {
@@ -421,9 +421,10 @@ type PrismCodeBlockProps = {
   wrap: boolean;
   lineNumbers: boolean;
   themeMode: ThemeMode;
+  codeTheme: CodeThemeId;
 };
 
-function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode}: PrismCodeBlockProps) {
+function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode, codeTheme}: PrismCodeBlockProps) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
@@ -433,6 +434,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode}: Prism
         code: content,
         language,
         themeMode,
+        codeTheme,
         wrap,
         lineNumbers,
         mode: 'block',
@@ -444,7 +446,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode}: Prism
     return () => {
       cancelled = true;
     };
-  }, [content, language, themeMode, wrap, lineNumbers]);
+  }, [content, language, themeMode, codeTheme, wrap, lineNumbers]);
 
   return (
     <div
@@ -454,7 +456,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode}: Prism
   );
 }
 
-function PrismInlineCode({content, language, wrap, themeMode}: {content: string; language: string; wrap: boolean; themeMode: ThemeMode}) {
+function PrismInlineCode({content, language, wrap, themeMode, codeTheme}: {content: string; language: string; wrap: boolean; themeMode: ThemeMode; codeTheme: CodeThemeId}) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
@@ -464,6 +466,7 @@ function PrismInlineCode({content, language, wrap, themeMode}: {content: string;
         code: content,
         language,
         themeMode,
+        codeTheme,
         wrap,
         lineNumbers: false,
         mode: 'inline',
@@ -475,7 +478,7 @@ function PrismInlineCode({content, language, wrap, themeMode}: {content: string;
     return () => {
       cancelled = true;
     };
-  }, [content, language, themeMode, wrap]);
+  }, [content, language, themeMode, codeTheme, wrap]);
 
   return (
     <span
@@ -497,6 +500,11 @@ function App() {
   const autoConnectTriedRef = useRef(false);
 
   const [themeMode, setThemeMode] = useState<ThemeMode>(persistedGlobal.themeMode === 'light' ? 'light' : 'dark');
+  const [codeTheme, setCodeTheme] = useState<CodeThemeId>(
+    typeof persistedGlobal.codeTheme === 'string' && isCodeThemeId(persistedGlobal.codeTheme)
+      ? persistedGlobal.codeTheme
+      : DEFAULT_CODE_THEME,
+  );
   const [wrapLines, setWrapLines] = useState(!!persistedGlobal.wrapLines);
   const [showLineNumbers, setShowLineNumbers] = useState(
     typeof persistedGlobal.showLineNumbers === 'boolean' ? persistedGlobal.showLineNumbers : true,
@@ -617,12 +625,13 @@ function App() {
       address,
       token,
       themeMode,
+      codeTheme,
       wrapLines,
       showLineNumbers,
       tab,
       selectedProjectId: projectId,
     });
-  }, [address, token, themeMode, wrapLines, showLineNumbers, tab, projectId]);
+  }, [address, token, themeMode, codeTheme, wrapLines, showLineNumbers, tab, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1363,6 +1372,20 @@ function App() {
                 <span>Dark Mode</span>
                 <input type="checkbox" checked={themeMode === 'dark'} onChange={e => setThemeMode(e.target.checked ? 'dark' : 'light')} />
               </label>
+              <label className="switch-row sidebar-setting-row">
+                <span>Code Theme</span>
+                <select
+                  className="sidebar-setting-select"
+                  value={codeTheme}
+                  onChange={event => {
+                    const next = event.target.value;
+                    if (isCodeThemeId(next)) setCodeTheme(next);
+                  }}>
+                  {CODE_THEME_OPTIONS.map(item => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
             </div>
           </>
         ) : renderSidebarMain()}
@@ -1383,7 +1406,7 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
-    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} themeMode={themeMode} />;
+    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} themeMode={themeMode} codeTheme={codeTheme} />;
   };
 
   const renderViewTools = () => (
@@ -1438,7 +1461,7 @@ function App() {
           disableWordDiff={true}
           compareMethod={DiffMethod.LINES}
           linesOffset={linesOffset}
-          renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} themeMode={themeMode} />}
+          renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} themeMode={themeMode} codeTheme={codeTheme} />}
           hideLineNumbers={!showLineNumbers}
           useDarkTheme={themeMode === 'dark'}
           styles={getDiffViewerStyles(wrapLines)}

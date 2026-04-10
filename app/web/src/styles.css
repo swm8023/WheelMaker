@@ -384,6 +384,17 @@ body,
   background: var(--panel);
 }
 
+.sidebar-setting-select {
+  max-width: 170px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-3);
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+}
+
 .header-spacer {
   flex: 1;
   min-width: 8px;
