@@ -564,8 +564,9 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	return nil
 }
 
-// ensureReadyAndNotify calls ensureReady and sends a "Session ready" message
-// when this call is the one that first transitions to ready.
+// ensureReadyAndNotify calls ensureReady and sends a session info message.
+// On first connect it prefixes "Session ready:"; on subsequent prompts it
+// sends just the session info line so the user always sees the current state.
 func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	s.mu.Lock()
 	wasReady := s.ready
@@ -578,6 +579,8 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	if !wasReady {
 		s.reply(fmt.Sprintf("Session ready: %s", s.sessionInfoLine()))
 		s.persistSessionBestEffort()
+	} else {
+		s.reply(s.sessionInfoLine())
 	}
 	return nil
 }

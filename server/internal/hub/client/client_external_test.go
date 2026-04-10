@@ -154,8 +154,16 @@ func TestHandleMessage_PromptTextStreaming(t *testing.T) {
 	if len(mock.promptCalls) != 1 || mock.promptCalls[0] != "hi there" {
 		t.Fatalf("Prompt called with %v, want [hi there]", mock.promptCalls)
 	}
-	if len(*msgs) == 0 || (*msgs)[0] != "hello world" {
-		t.Fatalf("reply = %v, want hello world", *msgs)
+	// msgs[0] is the session-info system message; the streamed text follows.
+	found := false
+	for _, m := range *msgs {
+		if m == "hello world" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("reply = %v, want a message containing 'hello world'", *msgs)
 	}
 }
 

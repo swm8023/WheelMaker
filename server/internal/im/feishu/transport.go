@@ -52,9 +52,10 @@ type transportChannel struct {
 
 	imageFetcher func(context.Context, string, string) (acp.ContentBlock, error)
 
-	textMu         sync.Mutex
-	unifiedStreams map[string]*unifiedStream
-	usageByChat    map[string]string // chatID -> latest context usage (set by usage_update)
+	textMu          sync.Mutex
+	unifiedStreams  map[string]*unifiedStream
+	promptStartAt   map[string]time.Time // chatID -> time when current prompt's first text arrived
+	usageByChat     map[string]string    // chatID -> latest context usage (set by usage_update)
 	toolMu         sync.Mutex
 	toolRenderMu   sync.Mutex
 	toolCards      map[string]map[string]*toolCardState // chatID -> toolCallID -> state
@@ -142,6 +143,7 @@ func newTransport(cfg Config) *transportChannel {
 	t := &transportChannel{
 		cfg:            cfg,
 		unifiedStreams: map[string]*unifiedStream{},
+		promptStartAt:  map[string]time.Time{},
 		usageByChat:    map[string]string{},
 		seenMessageID:  map[string]time.Time{},
 		toolCards:      map[string]map[string]*toolCardState{},
@@ -194,7 +196,8 @@ func (f *transportChannel) sendText(chatID, text string) error {
 
 	us := f.unifiedStreams[chatID]
 	if us == nil {
-		us = &unifiedStream{startedAt: time.Now()}
+		f.promptStartAt[chatID] = time.Now()
+		us = &unifiedStream{startedAt: f.promptStartAt[chatID]}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -204,9 +207,18 @@ func (f *transportChannel) sendText(chatID, text string) error {
 			us.timer.Stop()
 			us.timer = nil
 		}
-		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterThinking)
-		us = &unifiedStream{startedAt: time.Now()}
+		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterNone)
+		us = &unifiedStream{startedAt: f.promptStartAt[chatID]}
 		f.unifiedStreams[chatID] = us
+	}
+
+	// Strip leading newlines from the very first chunk of a fresh stream to
+	// prevent a blank leading line in the new card.
+	if len(us.segments) == 0 {
+		text = strings.TrimLeft(text, "\n")
+		if text == "" {
+			return nil
+		}
 	}
 
 	// Append to last text segment, or create new one
@@ -234,7 +246,8 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 
 	us := f.unifiedStreams[chatID]
 	if us == nil {
-		us = &unifiedStream{startedAt: time.Now()}
+		f.promptStartAt[chatID] = time.Now()
+		us = &unifiedStream{startedAt: f.promptStartAt[chatID]}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -243,8 +256,8 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 			us.timer.Stop()
 			us.timer = nil
 		}
-		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterThinking)
-		us = &unifiedStream{startedAt: time.Now()}
+		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterNone)
+		us = &unifiedStream{startedAt: f.promptStartAt[chatID]}
 		f.unifiedStreams[chatID] = us
 	}
 
@@ -428,6 +441,7 @@ func (f *transportChannel) resetUnifiedStream(chatID string) {
 	}
 	delete(f.unifiedStreams, chatID)
 	delete(f.usageByChat, chatID)
+	delete(f.promptStartAt, chatID)
 	f.textMu.Unlock()
 }
 
