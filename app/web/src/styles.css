@@ -1072,17 +1072,13 @@ body,
   min-width: 100%;
 }
 
-.diff-inline .wm-shiki-diff-line {
-  border-bottom: 1px solid rgba(127, 127, 127, 0.08);
-}
-
 .diff-inline .wm-shiki-diff-gutter {
   display: grid;
-  grid-template-columns: 1.3em 4.2em 4.2em;
-  column-gap: 0.35em;
+  grid-template-columns: 0.9em 3.2em 3.2em;
+  column-gap: 0.2em;
   align-items: center;
-  padding: 0 0.8em 0 0.45em;
-  border-right: 1px solid var(--border);
+  padding: 0 0.45em 0 0.25em;
+  border-right: 1px solid rgba(127, 127, 127, 0.22);
   user-select: none;
   color: var(--muted);
   background: var(--panel);
@@ -1098,9 +1094,9 @@ body,
 
 .diff-inline .wm-shiki-diff-marker {
   display: inline-block;
-  width: 1.2em;
+  width: 0.9em;
   text-align: center;
-  opacity: 0.85;
+  opacity: 0.75;
   user-select: none;
 }
 
@@ -1311,9 +1307,9 @@ body,
   }
 
   .diff-inline .wm-shiki-diff-gutter {
-    grid-template-columns: 1.1em 3.5em 3.5em;
-    column-gap: 0.25em;
-    padding-right: 0.55em;
+    grid-template-columns: 0.8em 2.8em 2.8em;
+    column-gap: 0.15em;
+    padding: 0 0.35em 0 0.2em;
   }
 }
 
