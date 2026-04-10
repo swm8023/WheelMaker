@@ -87,11 +87,12 @@ func buildConfigCard(update acp.SessionUpdate) RawCard {
 }
 
 func renderUsageStreamText(update acp.SessionUpdate) string {
-	_, _, ok := usageMetricsFromUpdate(update)
+	size, used, ok := usageMetricsFromUpdate(update)
 	if !ok {
 		return ""
 	}
-	return "Context"
+	percent := (float64(used) / float64(size)) * 100
+	return fmt.Sprintf("Context %.0f%%", percent)
 }
 
 func usageMetricsFromUpdate(update acp.SessionUpdate) (size int64, used int64, ok bool) {
