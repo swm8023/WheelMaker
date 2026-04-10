@@ -122,15 +122,6 @@ var acpSensitiveKeys = map[string]struct{}{
 	"password":      {},
 }
 
-func formatACPLogLine(dir rune, provider string, raw []byte) string {
-	envelope := buildACPLogEnvelope(raw)
-	payload := "-"
-	if len(envelope.payload) > 0 {
-		payload = string(redactAndTrimACPPayload(envelope.payload))
-	}
-	return fmt.Sprintf("[acp] %c[%s] %s %s", dir, normalizeACPProvider(provider), envelope.header, payload)
-}
-
 func normalizeACPProvider(provider string) string {
 	name := strings.ToLower(strings.TrimSpace(provider))
 	if name == "" {
