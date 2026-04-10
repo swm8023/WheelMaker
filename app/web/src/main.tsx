@@ -1276,6 +1276,7 @@ function App() {
             setSelectedFile(entry.path);
             if (!isWide) setDrawerOpen(false);
           }}>
+          <span className="caret placeholder" aria-hidden="true" />
           <span
             className="node-icon seti-icon"
             style={{color: fileIcon.color}}
@@ -1823,4 +1824,3 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
