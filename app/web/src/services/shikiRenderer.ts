@@ -63,8 +63,8 @@ function appendStyle(node: any, styleText: string): void {
 
 function buildLineTransformer(wrap: boolean, lineNumbers: boolean): ShikiTransformer {
   const lineContentStyle = wrap
-    ? 'display:block;min-width:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;'
-    : 'display:block;min-width:0;white-space:pre;';
+    ? 'display:block;min-width:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:2;'
+    : 'display:block;min-width:0;white-space:pre;tab-size:2;';
 
   return {
     name: 'wm-line-layout',
@@ -74,7 +74,7 @@ function buildLineTransformer(wrap: boolean, lineNumbers: boolean): ShikiTransfo
     },
     code(hast) {
       this.addClassToHast(hast, 'wm-shiki-code');
-      appendStyle(hast, wrap ? 'display:block;min-width:100%;' : 'display:block;min-width:100%;width:max-content;');
+      appendStyle(hast, wrap ? 'display:block;min-width:100%;tab-size:2;' : 'display:block;min-width:100%;width:max-content;tab-size:2;');
     },
     line(hast, line) {
       const originalChildren = Array.isArray(hast.children) ? hast.children : [];
