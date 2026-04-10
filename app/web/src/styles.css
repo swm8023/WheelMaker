@@ -1074,7 +1074,7 @@ body,
 
 .diff-inline .wm-shiki-diff-gutter {
   display: grid;
-  grid-template-columns: 0.9em 3.2em 3.2em;
+  grid-template-columns: 3.2em 3.2em;
   column-gap: 0.2em;
   align-items: center;
   padding: 0 0.45em 0 0.25em;
@@ -1093,11 +1093,7 @@ body,
 }
 
 .diff-inline .wm-shiki-diff-marker {
-  display: inline-block;
-  width: 0.9em;
-  text-align: center;
-  opacity: 0.75;
-  user-select: none;
+  display: none;
 }
 
 .diff-inline .wm-shiki-diff-marker-added {
@@ -1307,7 +1303,7 @@ body,
   }
 
   .diff-inline .wm-shiki-diff-gutter {
-    grid-template-columns: 0.8em 2.8em 2.8em;
+    grid-template-columns: 2.8em 2.8em;
     column-gap: 0.15em;
     padding: 0 0.35em 0 0.2em;
   }
