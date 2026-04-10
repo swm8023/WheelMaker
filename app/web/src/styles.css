@@ -1056,6 +1056,65 @@ body,
   padding: 0;
 }
 
+.diff-wrap {
+  min-width: 100%;
+}
+
+.diff-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 100%;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-grid.nowrap {
+  width: 100%;
+}
+
+.diff-side {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--panel-3);
+}
+
+.diff-side.diff-new {
+  border-left: 1px solid var(--border);
+}
+
+.diff-side .wm-shiki-pre,
+.diff-side .wm-shiki-code {
+  min-width: 100%;
+}
+
+.diff-side .wm-shiki-diff-line {
+  border-bottom: 1px solid rgba(127, 127, 127, 0.08);
+}
+
+.diff-side .wm-shiki-diff-line[data-line-kind='added'] {
+  background: rgba(46, 160, 67, 0.16);
+}
+
+.diff-side .wm-shiki-diff-line[data-line-kind='removed'] {
+  background: rgba(248, 81, 73, 0.16);
+}
+
+.diff-side .wm-shiki-diff-line[data-line-kind='empty'] {
+  background: rgba(127, 127, 127, 0.06);
+}
+
+.theme-light .diff-side .wm-shiki-diff-line[data-line-kind='added'] {
+  background: rgba(46, 160, 67, 0.1);
+}
+
+.theme-light .diff-side .wm-shiki-diff-line[data-line-kind='removed'] {
+  background: rgba(207, 34, 46, 0.1);
+}
+
+.theme-light .diff-side .wm-shiki-diff-line[data-line-kind='empty'] {
+  background: rgba(127, 127, 127, 0.04);
+}
+
 .drawer-overlay {
   position: fixed;
   inset: 46px 0 0 0;
@@ -1225,6 +1284,15 @@ body,
   .pinned-open {
     max-width: 120px;
   }
+
+  .diff-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .diff-side.diff-new {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
 }
 
 @keyframes wmFadeIn {
@@ -1246,3 +1314,4 @@ body,
     transform: translateX(0);
   }
 }
+

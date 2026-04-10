@@ -29,6 +29,12 @@ export type CodeFontOption = {
   fontFamily: string;
 };
 
+export type DiffRenderLine = {
+  code: string;
+  lineNumber: number | null;
+  kind: 'context' | 'added' | 'removed' | 'empty';
+};
+
 const AUTO_CODE_THEME_OPTION: CodeThemeOption = {
   id: 'auto-plus',
   label: 'Auto (Dark+/Light+)',
@@ -66,8 +72,7 @@ export const CODE_FONT_OPTIONS: CodeFontOption[] = [
 
 const VALID_CODE_THEME_IDS = new Set<string>(CODE_THEME_OPTIONS.map(item => item.id));
 
-type RenderShikiOptions = {
-  code: string;
+type RenderShikiBaseOptions = {
   language: string;
   themeMode: ThemeMode;
   codeTheme: CodeThemeId;
@@ -76,8 +81,17 @@ type RenderShikiOptions = {
   codeLineHeight: number;
   codeTabSize: number;
   wrap: boolean;
+};
+
+type RenderShikiOptions = RenderShikiBaseOptions & {
+  code: string;
   lineNumbers: boolean;
   mode: RenderMode;
+};
+
+type RenderShikiDiffOptions = RenderShikiBaseOptions & {
+  lines: DiffRenderLine[];
+  lineNumbers: boolean;
 };
 
 const SHIKI_THEME_DARK: BundledTheme = 'dark-plus';
@@ -152,6 +166,7 @@ function buildLineTransformer(
   codeFontSize: number,
   codeLineHeight: number,
   codeTabSize: number,
+  diffLines?: DiffRenderLine[],
 ): ShikiTransformer {
   const fontFamily = resolveCodeFontFamily(codeFont);
   const fontSize = `${codeFontSize}px`;
@@ -170,6 +185,7 @@ function buildLineTransformer(
       appendStyle(hast, wrap ? `display:block;min-width:100%;tab-size:${codeTabSize};` : `display:block;min-width:100%;width:max-content;tab-size:${codeTabSize};`);
     },
     line(hast, line) {
+      const diffLine = diffLines?.[line - 1];
       const originalChildren = Array.isArray(hast.children) ? hast.children : [];
       const contentNode = {
         type: 'element' as const,
@@ -182,10 +198,19 @@ function buildLineTransformer(
       };
 
       hast.properties = hast.properties || {};
-      hast.properties['data-line'] = String(line);
-      hast.properties['data-line-number'] = String(line);
+      if (diffLine) {
+        const renderedLineNumber = diffLine.lineNumber === null ? '' : String(diffLine.lineNumber);
+        this.addClassToHast(hast, ['wm-shiki-diff-line', `wm-shiki-diff-${diffLine.kind}`]);
+        hast.properties['data-line'] = renderedLineNumber;
+        hast.properties['data-line-kind'] = diffLine.kind;
+        hast.properties['data-line-number'] = renderedLineNumber;
+      } else {
+        hast.properties['data-line'] = String(line);
+        hast.properties['data-line-number'] = String(line);
+      }
 
       if (lineNumbers) {
+        const lineLabel = diffLine?.lineNumber === null ? '' : String(diffLine?.lineNumber ?? line);
         const lineNumberNode = {
           type: 'element' as const,
           tagName: 'span',
@@ -194,7 +219,7 @@ function buildLineTransformer(
             'aria-hidden': 'true',
             style: 'display:inline-block;min-width:3.5em;padding-right:1em;text-align:right;user-select:none;color:var(--muted);opacity:0.75;',
           },
-          children: [{type: 'text' as const, value: String(line)}],
+          children: [{type: 'text' as const, value: lineLabel}],
         };
         hast.children = [lineNumberNode as any, contentNode as any];
         appendStyle(hast, 'display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;');
@@ -254,6 +279,7 @@ function renderWithHighlighter(
   codeLineHeight: number,
   codeTabSize: number,
   mode: RenderMode,
+  diffLines?: DiffRenderLine[],
 ): string {
   const normalizedCode = code || ' ';
   if (mode === 'inline') {
@@ -274,6 +300,7 @@ function renderWithHighlighter(
       codeFontSize,
       codeLineHeight,
       codeTabSize,
+      diffLines,
     )],
   });
 }
@@ -323,6 +350,41 @@ export async function renderShikiHtml(options: RenderShikiOptions): Promise<stri
   return `<span>${escapeHtml(options.code || ' ')}</span>`;
 }
 
+export async function renderShikiDiffHtml(options: RenderShikiDiffOptions): Promise<string> {
+  const language = resolveLanguage(options.language);
+  const theme = resolveTheme(options.themeMode, options.codeTheme);
+  const highlighter = await getHighlighter();
+  try {
+    await ensureThemeLoaded(highlighter, theme);
+  } catch {
+    // fall through with already loaded default themes
+  }
 
+  const langCandidates = language === 'text' ? ['text'] : [language, 'text'];
+  const code = options.lines.length > 0
+    ? options.lines.map(line => (line.code.length > 0 ? line.code : ' ')).join('\n')
+    : ' ';
 
+  for (const lang of langCandidates) {
+    try {
+      return renderWithHighlighter(
+        highlighter,
+        code,
+        lang,
+        theme,
+        options.wrap,
+        options.lineNumbers,
+        options.codeFont,
+        options.codeFontSize,
+        options.codeLineHeight,
+        options.codeTabSize,
+        'block',
+        options.lines,
+      );
+    } catch {
+      // Try fallback language.
+    }
+  }
 
+  return `<pre><code>${escapeHtml(code)}</code></pre>`;
+}

@@ -1,6 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import ReactDiffViewer, {DiffMethod} from 'react-diff-viewer-continued';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
 import '@vscode/codicons/dist/codicon.css';
@@ -22,10 +21,12 @@ import {
   DEFAULT_CODE_THEME,
   isCodeFontId,
   isCodeThemeId,
+  renderShikiDiffHtml,
   renderShikiHtml,
   resolveCodeFontFamily,
   type CodeFontId,
   type CodeThemeId,
+  type DiffRenderLine,
 } from './services/shikiRenderer';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
@@ -248,144 +249,90 @@ function resolveInitialRegistryAddress(savedAddress: string, defaultAddress: str
   return savedAddress || defaultAddress;
 }
 
-type UnifiedDiffSides = {
+type UnifiedDiffRow = {
+  kind: 'context' | 'added' | 'removed';
+  oldLineNumber: number | null;
+  newLineNumber: number | null;
   oldText: string;
   newText: string;
-  hasContent: boolean;
-  oldStart: number;
-  newStart: number;
 };
 
-function parseUnifiedDiff(content: string): UnifiedDiffSides {
+function parseUnifiedDiffRows(content: string): UnifiedDiffRow[] {
   const lines = content.split('\n');
-  const oldLines: string[] = [];
-  const newLines: string[] = [];
+  const rows: UnifiedDiffRow[] = [];
+  let oldLineNumber = 1;
+  let newLineNumber = 1;
   let inHunk = false;
-  let firstOldStart = 1;
-  let firstNewStart = 1;
-  let hasSeenHunk = false;
 
   for (const raw of lines) {
     const hunkMatch = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
     if (hunkMatch) {
-      const oldStart = Number.parseInt(hunkMatch[1], 10);
-      const newStart = Number.parseInt(hunkMatch[2], 10);
-      if (!hasSeenHunk) {
-        firstOldStart = oldStart;
-        firstNewStart = newStart;
-        hasSeenHunk = true;
-      }
+      oldLineNumber = Number.parseInt(hunkMatch[1], 10);
+      newLineNumber = Number.parseInt(hunkMatch[2], 10);
       inHunk = true;
       continue;
     }
-    if (!inHunk) continue;
-    if (raw.startsWith('\\ No newline at end of file')) continue;
+    if (!inHunk || raw.startsWith('\\ No newline at end of file')) continue;
     if (raw.startsWith('+')) {
-      newLines.push(raw.slice(1));
+      rows.push({
+        kind: 'added',
+        oldLineNumber: null,
+        newLineNumber,
+        oldText: '',
+        newText: raw.slice(1),
+      });
+      newLineNumber += 1;
       continue;
     }
     if (raw.startsWith('-')) {
-      oldLines.push(raw.slice(1));
+      rows.push({
+        kind: 'removed',
+        oldLineNumber,
+        newLineNumber: null,
+        oldText: raw.slice(1),
+        newText: '',
+      });
+      oldLineNumber += 1;
       continue;
     }
-    if (raw.startsWith(' ')) {
-      const text = raw.slice(1);
-      oldLines.push(text);
-      newLines.push(text);
-      continue;
-    }
-    oldLines.push(raw);
-    newLines.push(raw);
+
+    const text = raw.startsWith(' ') ? raw.slice(1) : raw;
+    rows.push({
+      kind: 'context',
+      oldLineNumber,
+      newLineNumber,
+      oldText: text,
+      newText: text,
+    });
+    oldLineNumber += 1;
+    newLineNumber += 1;
   }
 
-  return {
-    oldText: oldLines.join('\n'),
-    newText: newLines.join('\n'),
-    hasContent: oldLines.length > 0 || newLines.length > 0,
-    oldStart: firstOldStart,
-    newStart: firstNewStart,
-  };
+  return rows;
 }
 
-function getDiffViewerStyles(
-  wrap: boolean,
-  codeFontFamily: string,
-  codeFontSize: number,
-  codeLineHeight: number,
-  codeTabSize: number,
-): any {
-  const size = `${codeFontSize}px`;
-  const lineHeight = String(codeLineHeight);
+function buildDiffRenderLines(rows: UnifiedDiffRow[]): {oldLines: DiffRenderLine[]; newLines: DiffRenderLine[]} {
   return {
-    variables: {
-      dark: {
-        diffViewerBackground: 'var(--panel-3)',
-        gutterBackground: 'var(--panel)',
-        gutterBackgroundDark: 'var(--panel-2)',
-      },
-      light: {
-        diffViewerBackground: 'var(--panel-3)',
-        gutterBackground: 'var(--panel)',
-        gutterBackgroundDark: 'var(--panel-2)',
-      },
-    },
-    diffContainer: {
-      width: '100%',
-      minWidth: '100%',
-      tableLayout: 'auto',
-      fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
-      fontWeight: 400,
-      fontVariantLigatures: 'none',
-      fontFeatureSettings: '"liga" 0, "calt" 0',
-      fontSize: size,
-      lineHeight,
-      tabSize: String(codeTabSize),
-      overflowX: wrap ? 'hidden' : 'auto',
-      pre: {
-        whiteSpace: wrap ? 'pre-wrap' : 'pre',
-        width: '100%',
-      },
-    },
-    content: {
-      width: '100%',
-      overflow: 'visible',
-    },
-    line: {
-      verticalAlign: 'top',
-    },
-    lineContent: {
-      overflow: 'visible',
-      width: 'auto',
-    },
-    contentText: {
-      display: 'block',
-      width: '100%',
-      background: 'transparent',
-      fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
-      fontWeight: 400,
-      fontSize: size,
-      lineHeight,
-      tabSize: String(codeTabSize),
-      whiteSpace: wrap ? 'pre-wrap' : 'pre',
-      wordBreak: wrap ? 'break-word' : 'normal',
-      overflowWrap: wrap ? 'anywhere' : 'normal',
-    },
-    wordAdded: {
-      background: 'transparent',
-    },
-    wordRemoved: {
-      background: 'transparent',
-    },
-    lineNumber: {
-      fontWeight: 400,
-      color: 'var(--muted)',
-    },
-    marker: {
-      userSelect: 'none',
-    },
+    oldLines: rows.map(row => (
+      row.kind === 'added'
+        ? {code: '', lineNumber: null, kind: 'empty'}
+        : {
+            code: row.oldText,
+            lineNumber: row.oldLineNumber,
+            kind: row.kind === 'removed' ? 'removed' : 'context',
+          }
+    )),
+    newLines: rows.map(row => (
+      row.kind === 'removed'
+        ? {code: '', lineNumber: null, kind: 'empty'}
+        : {
+            code: row.newText,
+            lineNumber: row.newLineNumber,
+            kind: row.kind === 'added' ? 'added' : 'context',
+          }
+    )),
   };
 }
-
 function toSetiGlyph(fontCharacter?: string): string {
   if (!fontCharacter) return '?';
   const hex = fontCharacter.replace('\\', '');
@@ -518,78 +465,115 @@ function PrismCodeBlock({
   );
 }
 
-function PrismInlineCode({
-  content,
-  language,
-  wrap,
-  themeMode,
-  codeTheme,
-  codeFont,
-  codeFontSize,
-  codeLineHeight,
-  codeTabSize,
-}: {
+type PrismDiffPaneProps = {
   content: string;
   language: string;
   wrap: boolean;
+  lineNumbers: boolean;
   themeMode: ThemeMode;
   codeTheme: CodeThemeId;
   codeFont: CodeFontId;
+  codeFontFamily: string;
   codeFontSize: number;
   codeLineHeight: number;
   codeTabSize: number;
-}) {
-  const [html, setHtml] = useState('');
+};
+
+function PrismDiffPane({
+  content,
+  language,
+  wrap,
+  lineNumbers,
+  themeMode,
+  codeTheme,
+  codeFont,
+  codeFontFamily,
+  codeFontSize,
+  codeLineHeight,
+  codeTabSize,
+}: PrismDiffPaneProps) {
+  const [oldHtml, setOldHtml] = useState('');
+  const [newHtml, setNewHtml] = useState('');
+  const rows = useMemo(() => parseUnifiedDiffRows(content), [content]);
+  const {oldLines, newLines} = useMemo(() => buildDiffRenderLines(rows), [rows]);
 
   useEffect(() => {
     let cancelled = false;
+    if (rows.length === 0) {
+      setOldHtml('');
+      setNewHtml('');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setOldHtml('');
+    setNewHtml('');
     (async () => {
-      const nextHtml = await renderShikiHtml({
-        code: content,
-        language,
-        themeMode,
-        codeTheme,
-        codeFont,
-        codeFontSize,
-        codeLineHeight,
-        codeTabSize,
-        wrap,
-        lineNumbers: false,
-        mode: 'inline',
-      });
+      const [nextOldHtml, nextNewHtml] = await Promise.all([
+        renderShikiDiffHtml({
+          lines: oldLines,
+          language,
+          themeMode,
+          codeTheme,
+          codeFont,
+          codeFontSize,
+          codeLineHeight,
+          codeTabSize,
+          wrap,
+          lineNumbers,
+        }),
+        renderShikiDiffHtml({
+          lines: newLines,
+          language,
+          themeMode,
+          codeTheme,
+          codeFont,
+          codeFontSize,
+          codeLineHeight,
+          codeTabSize,
+          wrap,
+          lineNumbers,
+        }),
+      ]);
       if (!cancelled) {
-        setHtml(nextHtml);
+        setOldHtml(nextOldHtml);
+        setNewHtml(nextNewHtml);
       }
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [content, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap]);
+  }, [oldLines, newLines, rows.length, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap, lineNumbers]);
+
+  if (rows.length === 0) return <div className="muted block">No diff hunks available</div>;
+
+  const html = oldHtml;
+  const sideStyle = {
+    fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
+    fontSize: `${codeFontSize}px`,
+    lineHeight: String(codeLineHeight),
+    tabSize: String(codeTabSize),
+  };
 
   return (
-    <span
-      style={wrap
-        ? {
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            overflowWrap: 'anywhere',
-            fontFamily: resolveCodeFontFamily(codeFont),
-            fontSize: `${codeFontSize}px`,
-            lineHeight: String(codeLineHeight),
-            tabSize: String(codeTabSize),
-          }
-        : {
-            whiteSpace: 'pre',
-            fontFamily: resolveCodeFontFamily(codeFont),
-            fontSize: `${codeFontSize}px`,
-            lineHeight: String(codeLineHeight),
-            tabSize: String(codeTabSize),
-          }}
-      dangerouslySetInnerHTML={{__html: html || ' '}}
-    />
+    <div className={`code-wrap diff-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
+      <div className={`diff-grid ${wrap ? 'wrap' : 'nowrap'}`}>
+        <div
+          className={`diff-side diff-old ${wrap ? 'wrap' : 'nowrap'}`}
+          style={sideStyle}
+          dangerouslySetInnerHTML={{__html: html || '<pre><code> </code></pre>'}}
+        />
+        <div
+          className={`diff-side diff-new ${wrap ? 'wrap' : 'nowrap'}`}
+          style={sideStyle}
+          dangerouslySetInnerHTML={{__html: newHtml || '<pre><code> </code></pre>'}}
+        />
+      </div>
+    </div>
   );
 }
-
 function App() {
   const defaultRegistryAddress = useMemo(() => getDefaultRegistryAddress(), []);
   const persistedGlobal = useMemo(() => workspaceStore.getGlobalState(defaultRegistryAddress), [defaultRegistryAddress]);
@@ -1632,42 +1616,24 @@ function App() {
         </div>
       );
     }
-    const {oldText, newText, hasContent, oldStart, newStart} = parseUnifiedDiff(content);
-    if (!hasContent) return <div className="muted block">No diff hunks available</div>;
-    const linesOffset = Math.max(0, Math.min(oldStart, newStart) - 1);
-    const language = detectCodeLanguage(selectedDiff || selectedFile);
 
+    const language = detectCodeLanguage(selectedDiff || selectedFile);
     return (
-      <div className={`code-wrap diff-wrap ${wrapLines ? 'wrap' : 'nowrap'}`}>
-        <ReactDiffViewer
-          oldValue={oldText}
-          newValue={newText}
-          splitView={false}
-          showDiffOnly={false}
-          disableWordDiff={true}
-          compareMethod={DiffMethod.LINES}
-          linesOffset={linesOffset}
-          renderContent={line => (
-            <PrismInlineCode
-              content={line}
-              language={language}
-              wrap={wrapLines}
-              themeMode={themeMode}
-              codeTheme={codeTheme}
-              codeFont={codeFont}
-              codeFontSize={codeFontSize}
-              codeLineHeight={codeLineHeight}
-              codeTabSize={codeTabSize}
-            />
-          )}
-          hideLineNumbers={!showLineNumbers}
-          useDarkTheme={themeMode === 'dark'}
-          styles={getDiffViewerStyles(wrapLines, codeFontFamily, codeFontSize, codeLineHeight, codeTabSize)}
-        />
-      </div>
+      <PrismDiffPane
+        content={content}
+        language={language}
+        wrap={wrapLines}
+        lineNumbers={showLineNumbers}
+        themeMode={themeMode}
+        codeTheme={codeTheme}
+        codeFont={codeFont}
+        codeFontFamily={codeFontFamily}
+        codeFontSize={codeFontSize}
+        codeLineHeight={codeLineHeight}
+        codeTabSize={codeTabSize}
+      />
     );
   };
-
   const renderMain = () => {
     const heavyDiffDeferred = !!selectedDiff && isHeavyGeneratedDiffPath(selectedDiff) && !allowHeavyDiffLoad;
 
@@ -1990,4 +1956,5 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
