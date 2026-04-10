@@ -348,6 +348,8 @@ function buildInlineDiffRenderLines(rows: UnifiedDiffRow[]): DiffRenderLine[] {
   return rows.map(row => ({
     code: row.text,
     lineNumber: row.newLineNumber ?? row.oldLineNumber,
+    oldLineNumber: row.oldLineNumber,
+    newLineNumber: row.newLineNumber,
     kind: row.kind,
   }));
 }

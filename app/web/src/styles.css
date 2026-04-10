@@ -1076,43 +1076,52 @@ body,
   border-bottom: 1px solid rgba(127, 127, 127, 0.08);
 }
 
-.diff-inline .wm-shiki-diff-line .wm-shiki-line-content {
-  position: relative;
-  padding-left: 1.2em;
+.diff-inline .wm-shiki-diff-gutter {
+  display: grid;
+  grid-template-columns: 1.3em 4.2em 4.2em;
+  column-gap: 0.35em;
+  align-items: center;
+  padding: 0 0.8em 0 0.45em;
+  border-right: 1px solid var(--border);
+  user-select: none;
+  color: var(--muted);
+  background: var(--panel);
 }
 
-.diff-inline .wm-shiki-diff-line .wm-shiki-line-content::before {
-  position: absolute;
-  left: 0;
-  width: 1em;
+.diff-inline .wm-shiki-diff-gutter .wm-shiki-line-number {
+  min-width: 0;
+  padding: 0;
+  text-align: right;
+  opacity: 0.75;
+  color: var(--muted);
+}
+
+.diff-inline .wm-shiki-diff-marker {
+  display: inline-block;
+  width: 1.2em;
   text-align: center;
-  opacity: 0.7;
+  opacity: 0.85;
+  user-select: none;
 }
 
-.diff-inline .wm-shiki-diff-line[data-line-kind='context'] .wm-shiki-line-content::before {
-  content: ' ';
-}
-
-.diff-inline .wm-shiki-diff-line[data-line-kind='added'] .wm-shiki-line-content::before {
-  content: '+';
+.diff-inline .wm-shiki-diff-marker-added {
   color: #2ea043;
+}
+
+.diff-inline .wm-shiki-diff-marker-removed {
+  color: #f85149;
+}
+
+.diff-inline .wm-shiki-diff-marker-context {
+  color: transparent;
 }
 
 .diff-inline .wm-shiki-diff-line[data-line-kind='added'] {
   background: rgba(46, 160, 67, 0.16);
 }
 
-.diff-inline .wm-shiki-diff-line[data-line-kind='removed'] .wm-shiki-line-content::before {
-  content: '-';
-  color: #f85149;
-}
-
 .diff-inline .wm-shiki-diff-line[data-line-kind='removed'] {
   background: rgba(248, 81, 73, 0.16);
-}
-
-.diff-inline .wm-shiki-diff-line[data-line-kind='empty'] .wm-shiki-line-content::before {
-  content: ' ';
 }
 
 .diff-inline .wm-shiki-diff-line[data-line-kind='empty'] {
@@ -1301,8 +1310,10 @@ body,
     max-width: 120px;
   }
 
-  .diff-inline .wm-shiki-diff-line .wm-shiki-line-content {
-    padding-left: 1em;
+  .diff-inline .wm-shiki-diff-gutter {
+    grid-template-columns: 1.1em 3.5em 3.5em;
+    column-gap: 0.25em;
+    padding-right: 0.55em;
   }
 }
 

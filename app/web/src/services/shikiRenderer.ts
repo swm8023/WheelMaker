@@ -32,6 +32,8 @@ export type CodeFontOption = {
 export type DiffRenderLine = {
   code: string;
   lineNumber: number | null;
+  oldLineNumber?: number | null;
+  newLineNumber?: number | null;
   kind: 'context' | 'added' | 'removed' | 'empty';
 };
 
@@ -199,7 +201,8 @@ function buildLineTransformer(
 
       hast.properties = hast.properties || {};
       if (diffLine) {
-        const renderedLineNumber = diffLine.lineNumber === null ? '' : String(diffLine.lineNumber);
+        const normalizedLineNumber = diffLine.newLineNumber ?? diffLine.oldLineNumber ?? diffLine.lineNumber;
+        const renderedLineNumber = normalizedLineNumber === null ? '' : String(normalizedLineNumber);
         this.addClassToHast(hast, ['wm-shiki-diff-line', `wm-shiki-diff-${diffLine.kind}`]);
         hast.properties['data-line'] = renderedLineNumber;
         hast.properties['data-line-kind'] = diffLine.kind;
@@ -210,21 +213,82 @@ function buildLineTransformer(
       }
 
       if (lineNumbers) {
-        const lineLabel = diffLine?.lineNumber === null ? '' : String(diffLine?.lineNumber ?? line);
-        const lineNumberNode = {
-          type: 'element' as const,
-          tagName: 'span',
-          properties: {
-            className: ['wm-shiki-line-number'],
-            'aria-hidden': 'true',
-            style: 'display:inline-block;min-width:3.5em;padding-right:1em;text-align:right;user-select:none;color:var(--muted);opacity:0.75;',
-          },
-          children: [{type: 'text' as const, value: lineLabel}],
-        };
-        hast.children = [lineNumberNode as any, contentNode as any];
-        appendStyle(hast, 'display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;');
+        if (diffLine) {
+          const oldLineLabel = diffLine.oldLineNumber === null || diffLine.oldLineNumber === undefined ? '' : String(diffLine.oldLineNumber);
+          const newLineLabel = diffLine.newLineNumber === null || diffLine.newLineNumber === undefined ? '' : String(diffLine.newLineNumber);
+          const marker = diffLine.kind === 'added' ? '+' : diffLine.kind === 'removed' ? '-' : ' ';
+          const markerClassName = diffLine.kind === 'added'
+            ? 'wm-shiki-diff-marker-added'
+            : diffLine.kind === 'removed'
+              ? 'wm-shiki-diff-marker-removed'
+              : 'wm-shiki-diff-marker-context';
+          const diffGutterNode = {
+            type: 'element' as const,
+            tagName: 'span',
+            properties: {
+              className: ['wm-shiki-diff-gutter'],
+              'aria-hidden': 'true',
+            },
+            children: [
+              {
+                type: 'element' as const,
+                tagName: 'span',
+                properties: {className: ['wm-shiki-diff-marker', markerClassName]},
+                children: [{type: 'text' as const, value: marker}],
+              },
+              {
+                type: 'element' as const,
+                tagName: 'span',
+                properties: {className: ['wm-shiki-line-number', 'wm-shiki-diff-line-number-old']},
+                children: [{type: 'text' as const, value: oldLineLabel}],
+              },
+              {
+                type: 'element' as const,
+                tagName: 'span',
+                properties: {className: ['wm-shiki-line-number', 'wm-shiki-diff-line-number-new']},
+                children: [{type: 'text' as const, value: newLineLabel}],
+              },
+            ],
+          };
+          hast.children = [diffGutterNode as any, contentNode as any];
+          appendStyle(hast, 'display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;');
+        } else {
+          const lineLabel = String(line);
+          const lineNumberNode = {
+            type: 'element' as const,
+            tagName: 'span',
+            properties: {
+              className: ['wm-shiki-line-number'],
+              'aria-hidden': 'true',
+              style: 'display:inline-block;min-width:3.5em;padding-right:1em;text-align:right;user-select:none;color:var(--muted);opacity:0.75;',
+            },
+            children: [{type: 'text' as const, value: lineLabel}],
+          };
+          hast.children = [lineNumberNode as any, contentNode as any];
+          appendStyle(hast, 'display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;');
+        }
       } else {
-        hast.children = [contentNode as any];
+        if (diffLine) {
+          const marker = diffLine.kind === 'added' ? '+' : diffLine.kind === 'removed' ? '-' : ' ';
+          const markerClassName = diffLine.kind === 'added'
+            ? 'wm-shiki-diff-marker-added'
+            : diffLine.kind === 'removed'
+              ? 'wm-shiki-diff-marker-removed'
+              : 'wm-shiki-diff-marker-context';
+          const diffMarkerNode = {
+            type: 'element' as const,
+            tagName: 'span',
+            properties: {
+              className: ['wm-shiki-diff-marker', markerClassName],
+              'aria-hidden': 'true',
+            },
+            children: [{type: 'text' as const, value: marker}],
+          };
+          hast.children = [diffMarkerNode as any, contentNode as any];
+          appendStyle(hast, 'display:grid;grid-template-columns:1.5em minmax(0,1fr);align-items:start;');
+        } else {
+          hast.children = [contentNode as any];
+        }
       }
 
       return hast;
