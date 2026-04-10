@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
@@ -25,11 +26,26 @@ const (
 	acpRPCMessageTypeRaw      acpRPCMessageType = "raw"
 )
 
+// chunkUpdateKinds lists session update types that flood the log when streamed.
+// Only the first frame of each consecutive same-kind run is logged.
+var chunkUpdateKinds = map[string]struct{}{
+	protocol.SessionUpdateAgentMessageChunk: {},
+	protocol.SessionUpdateAgentThoughtChunk: {},
+}
+
 type acpLogEnvelope struct {
-	msgType acpRPCMessageType
-	method  string
-	header  string
-	payload []byte
+	msgType    acpRPCMessageType
+	method     string
+	header     string
+	payload    []byte
+	updateKind string // non-empty for session/update notifications
+	skip       bool   // true when this frame should not be logged
+}
+
+// acpLastRecord tracks the last-logged frame kind for chunk deduplication.
+type acpLastRecord struct {
+	updateKind string
+	dir        rune
 }
 
 type acpProcessLogSink interface {
@@ -39,20 +55,48 @@ type acpProcessLogSink interface {
 }
 
 type defaultACPProcessLogSink struct {
-	provider string
+	mu         sync.Mutex
+	provider   string
+	lastRecord acpLastRecord
 }
 
 var defaultACPLogSink acpProcessLogSink = newACPProcessLogSink("-")
 
 func newACPProcessLogSink(provider string) acpProcessLogSink {
-	return defaultACPProcessLogSink{provider: normalizeACPProvider(provider)}
+	return &defaultACPProcessLogSink{provider: normalizeACPProvider(provider)}
 }
 
-func (s defaultACPProcessLogSink) Frame(dir rune, raw []byte) {
-	logger.Debug("%s", formatACPLogLine(dir, s.provider, raw))
+// applyChunkFilter sets envelope.skip for consecutive chunk frames and updates
+// lastRecord. Non-chunk frames reset the record so the next chunk is logged.
+func (s *defaultACPProcessLogSink) applyChunkFilter(dir rune, envelope *acpLogEnvelope) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, isChunk := chunkUpdateKinds[envelope.updateKind]; isChunk {
+		if s.lastRecord.updateKind == envelope.updateKind && s.lastRecord.dir == dir {
+			envelope.skip = true
+			return
+		}
+		s.lastRecord = acpLastRecord{updateKind: envelope.updateKind, dir: dir}
+	} else {
+		s.lastRecord = acpLastRecord{}
+	}
 }
 
-func (s defaultACPProcessLogSink) StderrLine(line string) {
+func (s *defaultACPProcessLogSink) Frame(dir rune, raw []byte) {
+	envelope := buildACPLogEnvelope(raw)
+	s.applyChunkFilter(dir, &envelope)
+	if envelope.skip {
+		return
+	}
+	payload := "-"
+	if len(envelope.payload) > 0 {
+		payload = string(redactAndTrimACPPayload(envelope.payload))
+	}
+	logger.Debug("%s", fmt.Sprintf("[acp] %c[%s] %s %s", dir, normalizeACPProvider(s.provider), envelope.header, payload))
+}
+
+func (s *defaultACPProcessLogSink) StderrLine(line string) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		return
@@ -60,7 +104,7 @@ func (s defaultACPProcessLogSink) StderrLine(line string) {
 	logger.Error("[acp] ![%s] %s", s.provider, string(redactAndTrimACPPayload([]byte(line))))
 }
 
-func (s defaultACPProcessLogSink) Errorf(format string, args ...any) {
+func (s *defaultACPProcessLogSink) Errorf(format string, args ...any) {
 	allArgs := make([]any, 0, len(args)+1)
 	allArgs = append(allArgs, s.provider)
 	allArgs = append(allArgs, args...)
@@ -110,24 +154,29 @@ func buildACPLogEnvelope(raw []byte) acpLogEnvelope {
 	method := strings.TrimSpace(msg.Method)
 	switch {
 	case msg.ID != nil && method != "":
+		requestPayload, _ := filterACPBody(acpRPCMessageTypeRequest, method, selectRequestPayload(msg.Params, rawNoRPC))
 		return acpLogEnvelope{
 			msgType: acpRPCMessageTypeRequest,
 			method:  method,
 			header:  fmt.Sprintf("[Req %d %s]", *msg.ID, method),
-			payload: filterACPBody(acpRPCMessageTypeRequest, method, selectRequestPayload(msg.Params, rawNoRPC)),
+			payload: requestPayload,
 		}
 	case method != "":
-		return acpLogEnvelope{
+		env := acpLogEnvelope{
 			msgType: acpRPCMessageTypeNotify,
 			method:  method,
 			header:  fmt.Sprintf("[Notify %s]", method),
-			payload: filterACPBody(acpRPCMessageTypeNotify, method, selectRequestPayload(msg.Params, rawNoRPC)),
 		}
+		filtered, filterPayload := filterACPBody(acpRPCMessageTypeNotify, method, selectRequestPayload(msg.Params, rawNoRPC))
+		env.payload = filtered
+		env.updateKind = filterPayload
+		return env
 	case msg.ID != nil:
+		filtered, _ := filterACPBody(acpRPCMessageTypeResponse, "", selectResponsePayload(msg.Result, msg.Error, rawNoRPC))
 		return acpLogEnvelope{
 			msgType: acpRPCMessageTypeResponse,
 			header:  fmt.Sprintf("[Resp %d]", *msg.ID),
-			payload: filterACPBody(acpRPCMessageTypeResponse, "", selectResponsePayload(msg.Result, msg.Error, rawNoRPC)),
+			payload: filtered,
 		}
 	default:
 		return acpLogEnvelope{
@@ -159,30 +208,30 @@ func selectResponsePayload(result json.RawMessage, rpcErr *protocol.ACPRPCError,
 	return fallback
 }
 
-func filterACPBody(msgType acpRPCMessageType, method string, body []byte) []byte {
+func filterACPBody(msgType acpRPCMessageType, method string, body []byte) ([]byte, string) {
 	body = stripJSONRPCField(body)
 	if msgType == acpRPCMessageTypeNotify && method == protocol.MethodSessionUpdate {
-		if filtered, ok := filterNotifySessionUpdateBody(body); ok {
-			return filtered
+		if filtered, kind, ok := filterNotifySessionUpdateBody(body); ok {
+			return filtered, kind
 		}
 	}
-	return body
+	return body, ""
 }
 
-func filterNotifySessionUpdateBody(body []byte) ([]byte, bool) {
+func filterNotifySessionUpdateBody(body []byte) ([]byte, string, bool) {
 	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
-		return nil, false
+		return nil, "", false
 	}
 
 	update, ok := m["update"].(map[string]any)
 	if !ok {
-		return nil, false
+		return nil, "", false
 	}
 	updateKind, _ := update["sessionUpdate"].(string)
 	updateKind = strings.TrimSpace(updateKind)
 	if updateKind == "" {
-		return nil, false
+		return nil, "", false
 	}
 
 	updateBody := make(map[string]any, len(update))
@@ -194,12 +243,12 @@ func filterNotifySessionUpdateBody(body []byte) ([]byte, bool) {
 	}
 	updateBytes, err := json.Marshal(updateBody)
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
 
 	sessionID, _ := m["sessionId"].(string)
 	sessionID = shortenSessionID(sessionID)
-	return []byte(fmt.Sprintf("%s, %s %s", sessionID, updateKind, string(updateBytes))), true
+	return []byte(fmt.Sprintf("%s, %s %s", sessionID, updateKind, string(updateBytes))), updateKind, true
 }
 
 func shortenSessionID(sessionID string) string {
