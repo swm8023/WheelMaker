@@ -456,11 +456,10 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
   return (
     <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
       <SyntaxHighlighter
-        className={`code-block prism-code ${wrap ? 'wrap' : 'nowrap'}`}
         language={language}
         style={oneDark}
         showLineNumbers={lineNumbers}
-        showInlineLineNumbers={!wrap}
+        showInlineLineNumbers={false}
         wrapLongLines={wrap}
         wrapLines={true}>
         {content || ' '}
@@ -796,7 +795,7 @@ function App() {
       const delta = (lineRect.top - containerRect.top) - (container.clientHeight / 2) + (lineRect.height / 2);
       container.scrollTo({top: container.scrollTop + delta, behavior: 'smooth'});
     } else {
-      const codeElement = container.querySelector('.code-block code') as HTMLElement | null;
+      const codeElement = container.querySelector('.code-wrap pre code') as HTMLElement | null;
       const lineHeight = codeElement ? Number.parseFloat(window.getComputedStyle(codeElement).lineHeight) || 20 : 20;
       container.scrollTo({top: Math.max(0, (line - 1) * lineHeight), behavior: 'smooth'});
     }
