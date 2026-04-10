@@ -1,5 +1,15 @@
 import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
-import {DEFAULT_CODE_THEME, isCodeThemeId, type CodeThemeId} from './shikiRenderer';
+import {
+  DEFAULT_CODE_FONT,
+  DEFAULT_CODE_FONT_SIZE,
+  DEFAULT_CODE_LINE_HEIGHT,
+  DEFAULT_CODE_TAB_SIZE,
+  DEFAULT_CODE_THEME,
+  isCodeFontId,
+  isCodeThemeId,
+  type CodeFontId,
+  type CodeThemeId,
+} from './shikiRenderer';
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
@@ -29,6 +39,10 @@ export type PersistedGlobalState = {
   token: string;
   themeMode: PersistedThemeMode;
   codeTheme: CodeThemeId;
+  codeFont: CodeFontId;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeTabSize: number;
   wrapLines: boolean;
   showLineNumbers: boolean;
   tab: PersistedTab;
@@ -50,6 +64,10 @@ function defaultGlobalState(): PersistedGlobalState {
     token: '',
     themeMode: 'dark',
     codeTheme: DEFAULT_CODE_THEME,
+    codeFont: DEFAULT_CODE_FONT,
+    codeFontSize: DEFAULT_CODE_FONT_SIZE,
+    codeLineHeight: DEFAULT_CODE_LINE_HEIGHT,
+    codeTabSize: DEFAULT_CODE_TAB_SIZE,
     wrapLines: false,
     showLineNumbers: true,
     tab: 'file',
@@ -105,6 +123,10 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     token: typeof input.token === 'string' ? input.token : base.token,
     themeMode: input.themeMode === 'light' ? 'light' : 'dark',
     codeTheme: typeof input.codeTheme === 'string' && isCodeThemeId(input.codeTheme) ? input.codeTheme : base.codeTheme,
+    codeFont: typeof input.codeFont === 'string' && isCodeFontId(input.codeFont) ? input.codeFont : base.codeFont,
+    codeFontSize: typeof input.codeFontSize === 'number' && Number.isFinite(input.codeFontSize) ? input.codeFontSize : base.codeFontSize,
+    codeLineHeight: typeof input.codeLineHeight === 'number' && Number.isFinite(input.codeLineHeight) ? input.codeLineHeight : base.codeLineHeight,
+    codeTabSize: typeof input.codeTabSize === 'number' && Number.isFinite(input.codeTabSize) ? input.codeTabSize : base.codeTabSize,
     wrapLines: typeof input.wrapLines === 'boolean' ? input.wrapLines : base.wrapLines,
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',

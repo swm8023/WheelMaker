@@ -28,13 +28,19 @@ type Message struct {
 }
 
 type testInjectedInstance struct {
-	name       string
-	sessionID  string
-	alive      bool
-	callbacks  agent.Callbacks
-	promptFn   func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error)
-	lastPrompt []acp.ContentBlock
-	cancelFn   func() error
+	name        string
+	sessionID   string
+	alive       bool
+	callbacks   agent.Callbacks
+	promptFn    func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error)
+	lastPrompt  []acp.ContentBlock
+	cancelFn    func() error
+	initResult  acp.InitializeResult
+	loadResult  acp.SessionLoadResult
+	loadErr     error
+	newResult   *acp.SessionNewResult
+	setConfigFn func(context.Context, acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error)
+	setCalls    []acp.SessionSetConfigOptionParams
 }
 
 type fakeIMRouter struct {
@@ -313,6 +319,9 @@ func (i *testInjectedInstance) HandleACPRequest(context.Context, int64, string, 
 }
 func (i *testInjectedInstance) HandleACPResponse(context.Context, string, json.RawMessage) {}
 func (i *testInjectedInstance) Initialize(context.Context, acp.InitializeParams) (acp.InitializeResult, error) {
+	if i.initResult.ProtocolVersion != "" || i.initResult.AgentInfo != nil || i.initResult.AgentCapabilities.LoadSession {
+		return i.initResult, nil
+	}
 	return acp.InitializeResult{
 		ProtocolVersion: "0.1",
 		AgentCapabilities: acp.AgentCapabilities{
@@ -322,6 +331,9 @@ func (i *testInjectedInstance) Initialize(context.Context, acp.InitializeParams)
 	}, nil
 }
 func (i *testInjectedInstance) SessionNew(context.Context, acp.SessionNewParams) (acp.SessionNewResult, error) {
+	if i.newResult != nil {
+		return *i.newResult, nil
+	}
 	sid := strings.TrimSpace(i.sessionID)
 	if sid == "" {
 		sid = "sess-1"
@@ -329,7 +341,7 @@ func (i *testInjectedInstance) SessionNew(context.Context, acp.SessionNewParams)
 	return acp.SessionNewResult{SessionID: sid}, nil
 }
 func (i *testInjectedInstance) SessionLoad(context.Context, acp.SessionLoadParams) (acp.SessionLoadResult, error) {
-	return acp.SessionLoadResult{}, nil
+	return i.loadResult, i.loadErr
 }
 func (i *testInjectedInstance) SessionList(context.Context, acp.SessionListParams) (acp.SessionListResult, error) {
 	return acp.SessionListResult{}, nil
@@ -370,6 +382,10 @@ func (i *testInjectedInstance) SessionCancel(_ string) error {
 	return nil
 }
 func (i *testInjectedInstance) SessionSetConfigOption(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+	i.setCalls = append(i.setCalls, p)
+	if i.setConfigFn != nil {
+		return i.setConfigFn(context.Background(), p)
+	}
 	return []acp.ConfigOption{{ID: p.ConfigID, CurrentValue: p.Value}}, nil
 }
 func (i *testInjectedInstance) Close() error { return nil }
@@ -607,6 +623,127 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	}
 	if sess.lastReply != "previous reply" {
 		t.Fatalf("lastReply = %q, want previous reply", sess.lastReply)
+	}
+}
+
+func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testing.T) {
+	s := newSession("restore-mode", "/tmp")
+	s.projectName = "proj1"
+	s.activeAgent = "claude"
+	s.acpSessionID = "acp-keep"
+	s.agents = map[string]*SessionAgentState{
+		"claude": {
+			ACPSessionID: "acp-keep",
+			ConfigOptions: []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+			},
+		},
+	}
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+		return &testInjectedInstance{
+			name:      "claude",
+			sessionID: "acp-keep",
+			initResult: acp.InitializeResult{
+				ProtocolVersion: "0.1",
+				AgentCapabilities: acp.AgentCapabilities{
+					LoadSession: true,
+				},
+				AgentInfo: &acp.AgentInfo{Name: "test-injected-agent"},
+			},
+			loadResult: acp.SessionLoadResult{},
+		}, nil
+	})
+
+	if err := s.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
+	}
+	if err := s.ensureReady(context.Background()); err != nil {
+		t.Fatalf("ensureReady: %v", err)
+	}
+
+	snap := s.sessionConfigSnapshot()
+	if snap.Mode != "code" {
+		t.Fatalf("mode = %q, want %q", snap.Mode, "code")
+	}
+	if snap.Model != "gpt-5" {
+		t.Fatalf("model = %q, want %q", snap.Model, "gpt-5")
+	}
+}
+
+func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T) {
+	s := newSession("restore-fallback", "/tmp")
+	s.projectName = "proj1"
+	s.activeAgent = "claude"
+	s.acpSessionID = "acp-old"
+	s.agents = map[string]*SessionAgentState{
+		"claude": {
+			ACPSessionID: "acp-old",
+			ConfigOptions: []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+			},
+		},
+	}
+
+	inst := &testInjectedInstance{
+		name:      "claude",
+		sessionID: "acp-new",
+		initResult: acp.InitializeResult{
+			ProtocolVersion: "0.1",
+			AgentCapabilities: acp.AgentCapabilities{
+				LoadSession: true,
+			},
+			AgentInfo: &acp.AgentInfo{Name: "test-injected-agent"},
+		},
+		loadErr: errors.New("session not found"),
+		newResult: &acp.SessionNewResult{
+			SessionID: "acp-new",
+			ConfigOptions: []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "ask"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
+			},
+		},
+		setConfigFn: func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+			switch p.ConfigID {
+			case acp.ConfigOptionIDMode:
+				return []acp.ConfigOption{
+					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: p.Value},
+					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
+				}, nil
+			case acp.ConfigOptionIDModel:
+				return []acp.ConfigOption{
+					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: p.Value},
+				}, nil
+			default:
+				return nil, errors.New("unexpected config id")
+			}
+		},
+	}
+
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+		return inst, nil
+	})
+
+	if err := s.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
+	}
+	if err := s.ensureReady(context.Background()); err != nil {
+		t.Fatalf("ensureReady: %v", err)
+	}
+
+	snap := s.sessionConfigSnapshot()
+	if snap.Mode != "code" {
+		t.Fatalf("mode = %q, want %q", snap.Mode, "code")
+	}
+	if snap.Model != "gpt-5" {
+		t.Fatalf("model = %q, want %q", snap.Model, "gpt-5")
+	}
+	if len(inst.setCalls) < 2 {
+		t.Fatalf("set config calls = %d, want at least 2 (mode+model)", len(inst.setCalls))
 	}
 }
 

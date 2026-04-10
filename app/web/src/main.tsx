@@ -7,10 +7,25 @@ import '@vscode/codicons/dist/codicon.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/jetbrains-mono/400.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
-import {CODE_THEME_OPTIONS, DEFAULT_CODE_THEME, isCodeThemeId, renderShikiHtml, type CodeThemeId} from './services/shikiRenderer';
+import {
+  CODE_FONT_OPTIONS,
+  CODE_THEME_OPTIONS,
+  DEFAULT_CODE_FONT,
+  DEFAULT_CODE_FONT_SIZE,
+  DEFAULT_CODE_LINE_HEIGHT,
+  DEFAULT_CODE_TAB_SIZE,
+  DEFAULT_CODE_THEME,
+  isCodeFontId,
+  isCodeThemeId,
+  renderShikiHtml,
+  resolveCodeFontFamily,
+  type CodeFontId,
+  type CodeThemeId,
+} from './services/shikiRenderer';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
 import type {
@@ -122,6 +137,21 @@ const workspaceController = new WorkspaceController(service, workspaceStore);
 const setiTheme = setiThemeJson as SetiTheme;
 const VS_CODE_EDITOR_FONT_FAMILY = "Consolas, 'Courier New', monospace";
 const MAX_AUTO_RENDER_DIFF_CHARS = 200000;
+const CODE_FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16] as const;
+const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
+const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
+
+function clampCodeFontSize(value: number): number {
+  return Math.min(20, Math.max(11, Number.isFinite(value) ? value : DEFAULT_CODE_FONT_SIZE));
+}
+
+function clampCodeLineHeight(value: number): number {
+  return Math.min(2, Math.max(1.2, Number.isFinite(value) ? value : DEFAULT_CODE_LINE_HEIGHT));
+}
+
+function clampCodeTabSize(value: number): number {
+  return Math.min(8, Math.max(1, Number.isFinite(value) ? value : DEFAULT_CODE_TAB_SIZE));
+}
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
@@ -276,7 +306,15 @@ function parseUnifiedDiff(content: string): UnifiedDiffSides {
   };
 }
 
-function getDiffViewerStyles(wrap: boolean): any {
+function getDiffViewerStyles(
+  wrap: boolean,
+  codeFontFamily: string,
+  codeFontSize: number,
+  codeLineHeight: number,
+  codeTabSize: number,
+): any {
+  const size = `${codeFontSize}px`;
+  const lineHeight = String(codeLineHeight);
   return {
     variables: {
       dark: {
@@ -294,12 +332,13 @@ function getDiffViewerStyles(wrap: boolean): any {
       width: '100%',
       minWidth: '100%',
       tableLayout: 'auto',
-      fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+      fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
       fontWeight: 400,
       fontVariantLigatures: 'none',
       fontFeatureSettings: '"liga" 0, "calt" 0',
-      fontSize: '13px',
-      lineHeight: '1.5',
+      fontSize: size,
+      lineHeight,
+      tabSize: String(codeTabSize),
       overflowX: wrap ? 'hidden' : 'auto',
       pre: {
         whiteSpace: wrap ? 'pre-wrap' : 'pre',
@@ -321,8 +360,11 @@ function getDiffViewerStyles(wrap: boolean): any {
       display: 'block',
       width: '100%',
       background: 'transparent',
-      fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
+      fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
       fontWeight: 400,
+      fontSize: size,
+      lineHeight,
+      tabSize: String(codeTabSize),
       whiteSpace: wrap ? 'pre-wrap' : 'pre',
       wordBreak: wrap ? 'break-word' : 'normal',
       overflowWrap: wrap ? 'anywhere' : 'normal',
@@ -422,9 +464,24 @@ type PrismCodeBlockProps = {
   lineNumbers: boolean;
   themeMode: ThemeMode;
   codeTheme: CodeThemeId;
+  codeFont: CodeFontId;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeTabSize: number;
 };
 
-function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode, codeTheme}: PrismCodeBlockProps) {
+function PrismCodeBlock({
+  content,
+  language,
+  wrap,
+  lineNumbers,
+  themeMode,
+  codeTheme,
+  codeFont,
+  codeFontSize,
+  codeLineHeight,
+  codeTabSize,
+}: PrismCodeBlockProps) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
@@ -435,6 +492,10 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode, codeTh
         language,
         themeMode,
         codeTheme,
+        codeFont,
+        codeFontSize,
+        codeLineHeight,
+        codeTabSize,
         wrap,
         lineNumbers,
         mode: 'block',
@@ -446,7 +507,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode, codeTh
     return () => {
       cancelled = true;
     };
-  }, [content, language, themeMode, codeTheme, wrap, lineNumbers]);
+  }, [content, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap, lineNumbers]);
 
   return (
     <div
@@ -456,7 +517,27 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, themeMode, codeTh
   );
 }
 
-function PrismInlineCode({content, language, wrap, themeMode, codeTheme}: {content: string; language: string; wrap: boolean; themeMode: ThemeMode; codeTheme: CodeThemeId}) {
+function PrismInlineCode({
+  content,
+  language,
+  wrap,
+  themeMode,
+  codeTheme,
+  codeFont,
+  codeFontSize,
+  codeLineHeight,
+  codeTabSize,
+}: {
+  content: string;
+  language: string;
+  wrap: boolean;
+  themeMode: ThemeMode;
+  codeTheme: CodeThemeId;
+  codeFont: CodeFontId;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeTabSize: number;
+}) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
@@ -467,6 +548,10 @@ function PrismInlineCode({content, language, wrap, themeMode, codeTheme}: {conte
         language,
         themeMode,
         codeTheme,
+        codeFont,
+        codeFontSize,
+        codeLineHeight,
+        codeTabSize,
         wrap,
         lineNumbers: false,
         mode: 'inline',
@@ -478,11 +563,27 @@ function PrismInlineCode({content, language, wrap, themeMode, codeTheme}: {conte
     return () => {
       cancelled = true;
     };
-  }, [content, language, themeMode, codeTheme, wrap]);
+  }, [content, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap]);
 
   return (
     <span
-      style={wrap ? {whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere'} : {whiteSpace: 'pre'}}
+      style={wrap
+        ? {
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            overflowWrap: 'anywhere',
+            fontFamily: resolveCodeFontFamily(codeFont),
+            fontSize: `${codeFontSize}px`,
+            lineHeight: String(codeLineHeight),
+            tabSize: String(codeTabSize),
+          }
+        : {
+            whiteSpace: 'pre',
+            fontFamily: resolveCodeFontFamily(codeFont),
+            fontSize: `${codeFontSize}px`,
+            lineHeight: String(codeLineHeight),
+            tabSize: String(codeTabSize),
+          }}
       dangerouslySetInnerHTML={{__html: html || ' '}}
     />
   );
@@ -505,10 +606,19 @@ function App() {
       ? persistedGlobal.codeTheme
       : DEFAULT_CODE_THEME,
   );
+  const [codeFont, setCodeFont] = useState<CodeFontId>(
+    typeof persistedGlobal.codeFont === 'string' && isCodeFontId(persistedGlobal.codeFont)
+      ? persistedGlobal.codeFont
+      : DEFAULT_CODE_FONT,
+  );
+  const [codeFontSize, setCodeFontSize] = useState<number>(clampCodeFontSize(Number(persistedGlobal.codeFontSize)));
+  const [codeLineHeight, setCodeLineHeight] = useState<number>(clampCodeLineHeight(Number(persistedGlobal.codeLineHeight)));
+  const [codeTabSize, setCodeTabSize] = useState<number>(clampCodeTabSize(Number(persistedGlobal.codeTabSize)));
   const [wrapLines, setWrapLines] = useState(!!persistedGlobal.wrapLines);
   const [showLineNumbers, setShowLineNumbers] = useState(
     typeof persistedGlobal.showLineNumbers === 'boolean' ? persistedGlobal.showLineNumbers : true,
   );
+  const codeFontFamily = useMemo(() => resolveCodeFontFamily(codeFont), [codeFont]);
   const setiFontCss = useMemo(() => setiFontFaceCss(), []);
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
@@ -626,12 +736,16 @@ function App() {
       token,
       themeMode,
       codeTheme,
+      codeFont,
+      codeFontSize,
+      codeLineHeight,
+      codeTabSize,
       wrapLines,
       showLineNumbers,
       tab,
       selectedProjectId: projectId,
     });
-  }, [address, token, themeMode, codeTheme, wrapLines, showLineNumbers, tab, projectId]);
+  }, [address, token, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrapLines, showLineNumbers, tab, projectId]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -1386,6 +1500,59 @@ function App() {
                   ))}
                 </select>
               </label>
+              <label className="switch-row sidebar-setting-row">
+                <span>Code Font</span>
+                <select
+                  className="sidebar-setting-select"
+                  value={codeFont}
+                  onChange={event => {
+                    const next = event.target.value;
+                    if (isCodeFontId(next)) setCodeFont(next);
+                  }}>
+                  {CODE_FONT_OPTIONS.map(item => (
+                    <option key={item.id} value={item.id}>{item.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="switch-row sidebar-setting-row">
+                <span>Font Size</span>
+                <select
+                  className="sidebar-setting-select"
+                  value={String(codeFontSize)}
+                  onChange={event => {
+                    setCodeFontSize(clampCodeFontSize(Number(event.target.value)));
+                  }}>
+                  {CODE_FONT_SIZE_OPTIONS.map(size => (
+                    <option key={size} value={size}>{size}px</option>
+                  ))}
+                </select>
+              </label>
+              <label className="switch-row sidebar-setting-row">
+                <span>Line Height</span>
+                <select
+                  className="sidebar-setting-select"
+                  value={String(codeLineHeight)}
+                  onChange={event => {
+                    setCodeLineHeight(clampCodeLineHeight(Number(event.target.value)));
+                  }}>
+                  {CODE_LINE_HEIGHT_OPTIONS.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="switch-row sidebar-setting-row">
+                <span>Tab Size</span>
+                <select
+                  className="sidebar-setting-select"
+                  value={String(codeTabSize)}
+                  onChange={event => {
+                    setCodeTabSize(clampCodeTabSize(Number(event.target.value)));
+                  }}>
+                  {CODE_TAB_SIZE_OPTIONS.map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
             </div>
           </>
         ) : renderSidebarMain()}
@@ -1406,7 +1573,20 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
-    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} themeMode={themeMode} codeTheme={codeTheme} />;
+    return (
+      <PrismCodeBlock
+        content={content}
+        language={language}
+        wrap={wrapLines}
+        lineNumbers={numbersOn}
+        themeMode={themeMode}
+        codeTheme={codeTheme}
+        codeFont={codeFont}
+        codeFontSize={codeFontSize}
+        codeLineHeight={codeLineHeight}
+        codeTabSize={codeTabSize}
+      />
+    );
   };
 
   const renderViewTools = () => (
@@ -1461,10 +1641,22 @@ function App() {
           disableWordDiff={true}
           compareMethod={DiffMethod.LINES}
           linesOffset={linesOffset}
-          renderContent={line => <PrismInlineCode content={line} language={language} wrap={wrapLines} themeMode={themeMode} codeTheme={codeTheme} />}
+          renderContent={line => (
+            <PrismInlineCode
+              content={line}
+              language={language}
+              wrap={wrapLines}
+              themeMode={themeMode}
+              codeTheme={codeTheme}
+              codeFont={codeFont}
+              codeFontSize={codeFontSize}
+              codeLineHeight={codeLineHeight}
+              codeTabSize={codeTabSize}
+            />
+          )}
           hideLineNumbers={!showLineNumbers}
           useDarkTheme={themeMode === 'dark'}
-          styles={getDiffViewerStyles(wrapLines)}
+          styles={getDiffViewerStyles(wrapLines, codeFontFamily, codeFontSize, codeLineHeight, codeTabSize)}
         />
       </div>
     );

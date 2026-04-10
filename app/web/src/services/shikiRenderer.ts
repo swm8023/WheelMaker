@@ -6,21 +6,35 @@ export type CodeThemeId =
   | 'auto-plus'
   | 'dark-plus'
   | 'light-plus'
+  | 'material-theme-darker'
   | 'github-dark'
   | 'github-light'
   | 'nord'
   | 'vitesse-dark'
   | 'vitesse-light';
 
+export type CodeFontId =
+  | 'consolas'
+  | 'jetbrains-mono'
+  | 'cascadia'
+  | 'menlo';
+
 export type CodeThemeOption = {
   id: CodeThemeId;
   label: string;
+};
+
+export type CodeFontOption = {
+  id: CodeFontId;
+  label: string;
+  fontFamily: string;
 };
 
 export const CODE_THEME_OPTIONS: CodeThemeOption[] = [
   {id: 'auto-plus', label: 'Auto (Dark+/Light+)'},
   {id: 'dark-plus', label: 'Dark Plus'},
   {id: 'light-plus', label: 'Light Plus'},
+  {id: 'material-theme-darker', label: 'Material Theme Darker'},
   {id: 'github-dark', label: 'GitHub Dark'},
   {id: 'github-light', label: 'GitHub Light'},
   {id: 'nord', label: 'Nord'},
@@ -28,12 +42,26 @@ export const CODE_THEME_OPTIONS: CodeThemeOption[] = [
   {id: 'vitesse-light', label: 'Vitesse Light'},
 ];
 export const DEFAULT_CODE_THEME: CodeThemeId = 'auto-plus';
+export const DEFAULT_CODE_FONT: CodeFontId = 'consolas';
+export const DEFAULT_CODE_FONT_SIZE = 13;
+export const DEFAULT_CODE_LINE_HEIGHT = 1.5;
+export const DEFAULT_CODE_TAB_SIZE = 2;
+export const CODE_FONT_OPTIONS: CodeFontOption[] = [
+  {id: 'consolas', label: 'Consolas', fontFamily: "Consolas, 'Courier New', monospace"},
+  {id: 'jetbrains-mono', label: 'JetBrains Mono', fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace"},
+  {id: 'cascadia', label: 'Cascadia Mono', fontFamily: "'Cascadia Mono', Consolas, 'Courier New', monospace"},
+  {id: 'menlo', label: 'Menlo / Monaco', fontFamily: "Menlo, Monaco, Consolas, 'Courier New', monospace"},
+];
 
 type RenderShikiOptions = {
   code: string;
   language: string;
   themeMode: ThemeMode;
   codeTheme: CodeThemeId;
+  codeFont: CodeFontId;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeTabSize: number;
   wrap: boolean;
   lineNumbers: boolean;
   mode: RenderMode;
@@ -77,6 +105,14 @@ export function isCodeThemeId(value: string): value is CodeThemeId {
   return CODE_THEME_OPTIONS.some(item => item.id === value);
 }
 
+export function isCodeFontId(value: string): value is CodeFontId {
+  return CODE_FONT_OPTIONS.some(item => item.id === value);
+}
+
+export function resolveCodeFontFamily(codeFont: CodeFontId): string {
+  return CODE_FONT_OPTIONS.find(item => item.id === codeFont)?.fontFamily ?? CODE_FONT_OPTIONS[0].fontFamily;
+}
+
 function resolveLanguage(language: string): string {
   const normalized = (language || '').trim().toLowerCase();
   switch (normalized) {
@@ -96,20 +132,29 @@ function appendStyle(node: any, styleText: string): void {
   node.properties.style = current ? `${current};${styleText}` : styleText;
 }
 
-function buildLineTransformer(wrap: boolean, lineNumbers: boolean): ShikiTransformer {
+function buildLineTransformer(
+  wrap: boolean,
+  lineNumbers: boolean,
+  codeFont: CodeFontId,
+  codeFontSize: number,
+  codeLineHeight: number,
+  codeTabSize: number,
+): ShikiTransformer {
+  const fontFamily = resolveCodeFontFamily(codeFont);
+  const fontSize = `${codeFontSize}px`;
   const lineContentStyle = wrap
-    ? 'display:block;min-width:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:2;'
-    : 'display:block;min-width:0;white-space:pre;tab-size:2;';
+    ? `display:block;min-width:0;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;tab-size:${codeTabSize};font-family:${fontFamily};font-size:${fontSize};line-height:${codeLineHeight};`
+    : `display:block;min-width:0;white-space:pre;tab-size:${codeTabSize};font-family:${fontFamily};font-size:${fontSize};line-height:${codeLineHeight};`;
 
   return {
     name: 'wm-line-layout',
     pre(hast) {
       this.addClassToHast(hast, ['wm-shiki-pre', wrap ? 'wm-shiki-wrap' : 'wm-shiki-nowrap']);
-      appendStyle(hast, `margin:0;padding:0;border-radius:0;white-space:normal;overflow-x:${wrap ? 'hidden' : 'auto'};`);
+      appendStyle(hast, `margin:0;padding:0;border-radius:0;white-space:normal;overflow-x:${wrap ? 'hidden' : 'auto'};font-family:${fontFamily};font-size:${fontSize};line-height:${codeLineHeight};`);
     },
     code(hast) {
       this.addClassToHast(hast, 'wm-shiki-code');
-      appendStyle(hast, wrap ? 'display:block;min-width:100%;tab-size:2;' : 'display:block;min-width:100%;width:max-content;tab-size:2;');
+      appendStyle(hast, wrap ? `display:block;min-width:100%;tab-size:${codeTabSize};` : `display:block;min-width:100%;width:max-content;tab-size:${codeTabSize};`);
     },
     line(hast, line) {
       const originalChildren = Array.isArray(hast.children) ? hast.children : [];
@@ -174,7 +219,7 @@ async function ensureThemeLoaded(highlighter: Highlighter, theme: string): Promi
 }
 
 function getInlineCacheKey(options: RenderShikiOptions, lang: string, theme: string): string {
-  return `${theme}|${lang}|${options.wrap ? 1 : 0}|${options.code}`;
+  return `${theme}|${lang}|${options.wrap ? 1 : 0}|${options.codeFont}|${options.codeFontSize}|${options.codeLineHeight}|${options.codeTabSize}|${options.code}`;
 }
 
 function setInlineCache(key: string, value: string): void {
@@ -191,6 +236,10 @@ function renderWithHighlighter(
   theme: string,
   wrap: boolean,
   lineNumbers: boolean,
+  codeFont: CodeFontId,
+  codeFontSize: number,
+  codeLineHeight: number,
+  codeTabSize: number,
   mode: RenderMode,
 ): string {
   const normalizedCode = code || ' ';
@@ -205,7 +254,14 @@ function renderWithHighlighter(
     lang,
     theme,
     structure: 'classic',
-    transformers: [buildLineTransformer(wrap, lineNumbers)],
+    transformers: [buildLineTransformer(
+      wrap,
+      lineNumbers,
+      codeFont,
+      codeFontSize,
+      codeLineHeight,
+      codeTabSize,
+    )],
   });
 }
 
@@ -236,6 +292,10 @@ export async function renderShikiHtml(options: RenderShikiOptions): Promise<stri
         theme,
         options.wrap,
         options.lineNumbers,
+        options.codeFont,
+        options.codeFontSize,
+        options.codeLineHeight,
+        options.codeTabSize,
         options.mode,
       );
       if (options.mode === 'inline') {

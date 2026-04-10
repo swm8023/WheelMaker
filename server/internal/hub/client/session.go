@@ -478,6 +478,10 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	agentName := inst.Name()
 	savedSID := s.acpSessionID
 	cwd := s.cwd
+	var persistedConfigOptions []acp.ConfigOption
+	if state := s.agents[agentName]; state != nil {
+		persistedConfigOptions = append([]acp.ConfigOption(nil), state.ConfigOptions...)
+	}
 	s.mu.Unlock()
 
 	notifyDone := func() {
@@ -506,7 +510,10 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 
 	// Step 2: attempt session/load if possible.
+	loadAttempted := false
+	loadFailed := false
 	if savedSID != "" && initResult.AgentCapabilities.LoadSession {
+		loadAttempted = true
 		loadResult, loadErr := inst.SessionLoad(ctx, acp.SessionLoadParams{
 			SessionID:  savedSID,
 			CWD:        cwd,
@@ -516,7 +523,10 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			s.mu.Lock()
 			state := s.agentStateLocked(agentName)
 			state.ACPSessionID = savedSID
-			state.ConfigOptions = loadResult.ConfigOptions
+			// Keep persisted config snapshot when agent returns no configOptions on session/load.
+			if len(loadResult.ConfigOptions) > 0 {
+				state.ConfigOptions = loadResult.ConfigOptions
+			}
 			state.ProtocolVersion = initResult.ProtocolVersion.String()
 			state.AgentCapabilities = initResult.AgentCapabilities
 			state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
@@ -531,6 +541,9 @@ func (s *Session) ensureReady(ctx context.Context) error {
 				inst.Name(), savedSID)
 			return nil
 		}
+		loadFailed = true
+		hubLogger(s.projectName).Warn("session/load failed agent=%s session=%s err=%v; fallback to session/new",
+			inst.Name(), savedSID, loadErr)
 	}
 
 	// Step 3: create a new session.
@@ -570,7 +583,102 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 	hubLogger(s.projectName).Info("connected agent=%s session=%s mode=%s",
 		inst.Name(), newResult.SessionID, modeID)
+
+	if loadAttempted && loadFailed {
+		persistedSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
+		updated := reapplyPersistedModeModel(ctx, s.projectName, inst, newResult.SessionID, newResult.ConfigOptions, persistedSnap)
+		if len(updated) > 0 {
+			s.mu.Lock()
+			state := s.agentStateLocked(agentName)
+			state.ConfigOptions = append([]acp.ConfigOption(nil), updated...)
+			s.mu.Unlock()
+		}
+	}
 	return nil
+}
+
+func findConfigOptionID(options []acp.ConfigOption, id, category string) string {
+	id = strings.TrimSpace(id)
+	category = strings.TrimSpace(category)
+	for _, opt := range options {
+		if strings.EqualFold(strings.TrimSpace(opt.ID), id) && strings.TrimSpace(opt.ID) != "" {
+			return strings.TrimSpace(opt.ID)
+		}
+	}
+	for _, opt := range options {
+		if strings.EqualFold(strings.TrimSpace(opt.Category), category) && strings.TrimSpace(opt.ID) != "" {
+			return strings.TrimSpace(opt.ID)
+		}
+	}
+	return ""
+}
+
+func reapplyPersistedModeModel(
+	ctx context.Context,
+	projectName string,
+	inst agent.Instance,
+	sessionID string,
+	current []acp.ConfigOption,
+	persisted acp.SessionConfigSnapshot,
+) []acp.ConfigOption {
+	options := append([]acp.ConfigOption(nil), current...)
+	type desiredConfig struct {
+		label    string
+		id       string
+		category string
+		value    string
+	}
+	targets := []desiredConfig{
+		{
+			label:    "mode",
+			id:       acp.ConfigOptionIDMode,
+			category: acp.ConfigOptionCategoryMode,
+			value:    strings.TrimSpace(persisted.Mode),
+		},
+		{
+			label:    "model",
+			id:       acp.ConfigOptionIDModel,
+			category: acp.ConfigOptionCategoryModel,
+			value:    strings.TrimSpace(persisted.Model),
+		},
+	}
+
+	for _, target := range targets {
+		if target.value == "" {
+			continue
+		}
+		snap := acp.SessionConfigSnapshotFromOptions(options)
+		currentValue := ""
+		if target.label == "mode" {
+			currentValue = strings.TrimSpace(snap.Mode)
+		} else {
+			currentValue = strings.TrimSpace(snap.Model)
+		}
+		if strings.EqualFold(currentValue, target.value) {
+			continue
+		}
+
+		configID := findConfigOptionID(options, target.id, target.category)
+		if configID == "" {
+			hubLogger(projectName).Warn("skip reapply %s: config option not found", target.label)
+			continue
+		}
+
+		updated, err := inst.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+			SessionID: sessionID,
+			ConfigID:  configID,
+			Value:     target.value,
+		})
+		if err != nil {
+			hubLogger(projectName).Warn("reapply %s failed session=%s value=%s err=%v",
+				target.label, sessionID, target.value, err)
+			continue
+		}
+		if len(updated) > 0 {
+			options = append([]acp.ConfigOption(nil), updated...)
+		}
+	}
+	return options
 }
 
 // ensureReadyAndNotify calls ensureReady and sends a session info message.
