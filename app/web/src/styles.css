@@ -1113,16 +1113,6 @@ body,
   color: #dcdcaa;
 }
 
-.nowrap.code-block {
-  white-space: pre;
-}
-
-.wrap.code-block {
-  white-space: pre-wrap;
-  word-break: normal;
-  overflow-wrap: break-word;
-}
-
 .drawer-overlay {
   position: fixed;
   inset: 46px 0 0 0;

@@ -25,6 +25,7 @@ import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
+import {buildPrismCodeBlockConfig} from './codeBlockConfig';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
@@ -468,7 +469,7 @@ type PrismCodeBlockProps = {
 };
 
 function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highlightLine = null}: PrismCodeBlockProps) {
-  const tabSizeStyle = String(tabSize);
+  const syntaxHighlighterConfig = buildPrismCodeBlockConfig({tabSize, highlightLine});
   return (
     <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
       <SyntaxHighlighter
@@ -478,30 +479,10 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highligh
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
         wrapLines={true}
-        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: tabSizeStyle}}}
-        lineProps={lineNumber => ({
-          'data-line-number': String(lineNumber),
-          style: {
-            background: highlightLine === lineNumber ? 'rgba(0, 122, 204, 0.24)' : 'transparent',
-            whiteSpace: wrap ? 'pre-wrap' : 'pre',
-            wordBreak: 'normal',
-            overflowWrap: wrap ? 'break-word' : 'normal',
-            tabSize: tabSizeStyle,
-          },
-        })}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: tabSizeStyle}}
-        lineNumberStyle={{
-          fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
-          fontWeight: 400,
-          color: 'var(--muted)',
-          paddingRight: '10px',
-          borderRight: '1px solid rgba(127, 127, 127, 0.18)',
-          marginRight: '10px',
-          textAlign: 'right',
-          userSelect: 'none',
-          fontVariantNumeric: 'tabular-nums',
-          fontFeatureSettings: '"tnum" 1',
-        }}>
+        codeTagProps={syntaxHighlighterConfig.codeTagProps}
+        lineProps={syntaxHighlighterConfig.lineProps}
+        customStyle={syntaxHighlighterConfig.customStyle}
+        lineNumberStyle={syntaxHighlighterConfig.lineNumberStyle}>
         {content || ' '}
       </SyntaxHighlighter>
     </div>
