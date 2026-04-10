@@ -1093,23 +1093,19 @@ body,
 }
 
 .diff-inline .wm-shiki-diff-marker {
-  display: inline-block;
-  width: 0.9em;
-  text-align: center;
-  user-select: none;
+  display: none;
 }
 
 .diff-inline .wm-shiki-diff-marker-added {
-  color: transparent;
+  color: #2ea043;
 }
 
 .diff-inline .wm-shiki-diff-marker-removed {
-  color: transparent;
+  color: #f85149;
 }
 
 .diff-inline .wm-shiki-diff-marker-context {
-  color: var(--muted);
-  opacity: 0.55;
+  color: transparent;
 }
 
 .diff-inline .wm-shiki-diff-line[data-line-kind='added'] {

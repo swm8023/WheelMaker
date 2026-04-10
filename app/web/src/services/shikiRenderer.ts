@@ -216,7 +216,7 @@ function buildLineTransformer(
         if (diffLine) {
           const oldLineLabel = diffLine.oldLineNumber === null || diffLine.oldLineNumber === undefined ? '' : String(diffLine.oldLineNumber);
           const newLineLabel = diffLine.newLineNumber === null || diffLine.newLineNumber === undefined ? '' : String(diffLine.newLineNumber);
-          const marker = diffLine.kind === 'added' ? '+' : diffLine.kind === 'removed' ? '-' : '%';
+          const marker = diffLine.kind === 'added' ? '+' : diffLine.kind === 'removed' ? '-' : ' ';
           const markerClassName = diffLine.kind === 'added'
             ? 'wm-shiki-diff-marker-added'
             : diffLine.kind === 'removed'
@@ -269,7 +269,7 @@ function buildLineTransformer(
         }
       } else {
         if (diffLine) {
-          const marker = diffLine.kind === 'added' ? '+' : diffLine.kind === 'removed' ? '-' : '%';
+          const marker = diffLine.kind === 'added' ? '+' : diffLine.kind === 'removed' ? '-' : ' ';
           const markerClassName = diffLine.kind === 'added'
             ? 'wm-shiki-diff-marker-added'
             : diffLine.kind === 'removed'
