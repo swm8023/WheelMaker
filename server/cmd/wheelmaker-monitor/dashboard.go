@@ -461,6 +461,7 @@ html, body {
   letter-spacing: .3px;
 }
 .json-cell-btn:hover { border-color: var(--accent); color: var(--text-hi); }
+.tbl-muted { color: var(--text-lo); font-size: 11px; }
 
 .json-modal {
   position: fixed;
@@ -831,6 +832,28 @@ function closeJSONModal() {
   document.body.style.overflow = '';
 }
 
+// Resolve a config option's current value to a human-readable string.
+// Prefers a matching entry in opt.options; falls back to URI fragment / last
+// path segment so URLs like https://example.com/modes#agent become "agent".
+function resolveOptValue(opt) {
+  if (!opt || opt.currentValue == null) return '-';
+  const v = String(opt.currentValue);
+  if (!v) return '-';
+  const options = Array.isArray(opt.options) ? opt.options : [];
+  for (const o of options) {
+    if (o && o.value === v && o.name) return o.name;
+  }
+  if (v.includes('#')) {
+    const frag = v.slice(v.lastIndexOf('#') + 1);
+    if (frag) return frag;
+  }
+  if (v.includes('/')) {
+    const seg = v.slice(v.lastIndexOf('/') + 1);
+    if (seg) return seg;
+  }
+  return v;
+}
+
 function renderAgentsJSONContent(raw) {
   let parsed;
   try {
@@ -863,9 +886,9 @@ function renderAgentsJSONContent(raw) {
       '<div class="json-k">Commands</div><div class="json-v">' + String(commands.length) + '</div>' +
       '</div>';
     if (configOptions.length > 0) {
-      html += '<div class="json-subsection"><div class="json-subtitle">Config Options</div><div class="json-table-wrap"><table class="json-mini-table"><thead><tr><th>ID</th><th>Name</th><th>Current</th></tr></thead><tbody>';
+      html += '<div class="json-subsection"><div class="json-subtitle">Config Options</div><div class="json-table-wrap"><table class="json-mini-table"><thead><tr><th>Name</th><th>Current</th></tr></thead><tbody>';
       for (const opt of configOptions) {
-        html += '<tr><td>' + esc(opt && opt.id ? opt.id : '-') + '</td><td>' + esc(opt && opt.name ? opt.name : '-') + '</td><td>' + esc(opt && opt.currentValue != null ? String(opt.currentValue) : '-') + '</td></tr>';
+        html += '<tr><td>' + esc(opt && opt.name ? opt.name : (opt && opt.id ? opt.id : '-')) + '</td><td>' + esc(resolveOptValue(opt)) + '</td></tr>';
       }
       html += '</tbody></table></div></div>';
     }
@@ -1021,10 +1044,26 @@ function renderDBTables(db) {
         for (let i = 0; i < row.length; i++) {
           const val = row[i];
           const col = i < t.columns.length ? String(t.columns[i] || '') : '';
-          const isAgentsJSON = String(t.name || '').toLowerCase() === 'sessions' && col.toLowerCase() === 'agents_json';
+          const isSessionsTable = String(t.name || '').toLowerCase() === 'sessions';
+          const isAgentsJSON = isSessionsTable && col.toLowerCase() === 'agents_json';
+          const isStatus = isSessionsTable && col.toLowerCase() === 'status';
           if (isAgentsJSON) {
-            const key = stashJSONCellValue(val == null ? '' : String(val));
-            html += '<td><button type="button" class="json-cell-btn" onclick="openAgentsJSONModal(\'' + key + '\')">View JSON</button></td>';
+            const raw = val == null ? '' : String(val);
+            const key = stashJSONCellValue(raw);
+            let agentNames = '';
+            try {
+              const parsed = JSON.parse(raw);
+              const names = Object.keys(parsed || {});
+              agentNames = names.length ? names.join(', ') : '-';
+            } catch (_) { agentNames = '?'; }
+            html += '<td><span class="tbl-muted">' + esc(agentNames) + '</span> <button type="button" class="json-cell-btn" onclick="openAgentsJSONModal(\'' + key + '\')">View JSON</button></td>';
+            continue;
+          }
+          if (isStatus) {
+            const statusMap = { '0': 'active', '1': 'suspended', '2': 'persisted' };
+            const label = statusMap[String(val)] || String(val);
+            const cls = val === 0 || val === '0' ? 'badge-green' : 'badge-red';
+            html += '<td><span class="badge ' + cls + '">' + esc(label) + '</span></td>';
             continue;
           }
           const s = val == null ? '' : String(val);
