@@ -213,8 +213,8 @@ func TestBuildUnifiedStreamCard_ThoughtDoneCollapsible(t *testing.T) {
 		t.Fatalf("collapsible_panel header missing title: %+v", header)
 	}
 	titleContent, _ := titleMap["content"].(string)
-	if !strings.Contains(titleContent, "🧠") {
-		t.Fatalf("thought title should contain brain emoji, got %q", titleContent)
+	if !strings.Contains(titleContent, "deep thought") {
+		t.Fatalf("thought collapsible title should contain content preview, got %q", titleContent)
 	}
 	innerElements, ok := first["elements"].([]map[string]any)
 	if !ok || len(innerElements) == 0 {
@@ -654,7 +654,8 @@ func TestBuildUnifiedStreamCard_DividerBetweenText(t *testing.T) {
 }
 
 func TestBuildUnifiedStreamCard_DividerBetweenDifferentKinds(t *testing.T) {
-	// ABC pattern: text + divider + thought (different kinds) → visible divider.
+	// Dividers are now invisible — ABC pattern (text+divider+thought) should
+	// render as 2 elements (text + thought collapsible), no horizontal rule.
 	seg1 := streamSegment{kind: segText, content: "reply text"}
 	seg2 := streamSegment{kind: segDivider}
 	seg3 := streamSegment{kind: segThought, content: "inner thought"}
@@ -665,15 +666,14 @@ func TestBuildUnifiedStreamCard_DividerBetweenDifferentKinds(t *testing.T) {
 	}
 	body := card["body"].(map[string]any)
 	elements := body["elements"].([]map[string]any)
-	if len(elements) != 3 {
-		t.Fatalf("expected 3 elements (text+divider+thought), got %d", len(elements))
+	if len(elements) != 2 {
+		t.Fatalf("expected 2 elements (text+thought, no divider), got %d", len(elements))
 	}
-	if tag, _ := elements[1]["tag"].(string); tag != "markdown" {
-		t.Fatalf("middle element should be markdown divider, got %q", tag)
+	if tag, _ := elements[0]["tag"].(string); tag != "markdown" {
+		t.Fatalf("first element should be markdown text, got %q", tag)
 	}
-	content, _ := elements[1]["content"].(string)
-	if strings.TrimSpace(content) != "---" {
-		t.Fatalf("middle element divider content=%q, want %q", content, "---")
+	if tag, _ := elements[1]["tag"].(string); tag != "collapsible_panel" {
+		t.Fatalf("second element should be collapsible_panel thought, got %q", tag)
 	}
 }
 
@@ -730,21 +730,32 @@ func TestSendText_AutoSplitAt10K(t *testing.T) {
 	}
 	us.timer.Stop()
 
-	// Now send another chunk; since totalRunes > 10K, it should trigger auto-split
-	// (which calls pushUnifiedCardLocked and creates a new stream).
-	// Because we don't have a bot, push will fail silently.
-	// The key check: after sendText, a new stream is created.
-	_ = f.sendText("chat-1", "more")
+	// Sending more text of the same type does NOT split (deferred split waits
+	// for a segment boundary). The pendingSplit flag should be set.
+	_ = f.sendText("chat-1", "still text")
+	us = f.unifiedStreams["chat-1"]
+	if !us.pendingSplit {
+		t.Fatal("pendingSplit should be true after exceeding threshold")
+	}
+	if us.timer != nil {
+		us.timer.Stop()
+	}
+
+	// Sending a thought starts a new segment type → split triggers now.
+	// Because we don't have a bot, pushUnifiedCardLocked will fail silently.
+	_ = f.sendThought("chat-1", "thinking")
 
 	usNew := f.unifiedStreams["chat-1"]
 	if usNew == nil {
-		t.Fatal("new unified stream should exist after auto-split")
+		t.Fatal("new unified stream should exist after deferred auto-split")
 	}
 	if len(usNew.segments) != 1 {
-		t.Fatalf("new stream should have 1 segment, got %d", len(usNew.segments))
+		t.Fatalf("new stream should have 1 segment after split, got %d", len(usNew.segments))
 	}
-	if got := usNew.segments[0].content; got != "more" {
-		t.Fatalf("new stream content=%q, want %q", got, "more")
+	if usNew.segments[0].kind != segThought {
+		t.Fatalf("new stream segment should be thought, got %v", usNew.segments[0].kind)
 	}
-	usNew.timer.Stop()
+	if usNew.timer != nil {
+		usNew.timer.Stop()
+	}
 }

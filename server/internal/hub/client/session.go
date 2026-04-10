@@ -228,7 +228,7 @@ func shortSessionID(id string) string {
 	return id
 }
 
-// sessionInfoLine returns a compact one-line summary: [sess-XXXXXXXX | agent: X | mode: X | model: X]
+// sessionInfoLine returns a multi-line summary of the current session state.
 func (s *Session) sessionInfoLine() string {
 	s.mu.Lock()
 	agentName := s.currentAgentNameLocked()
@@ -244,7 +244,7 @@ func (s *Session) sessionInfoLine() string {
 	if sid == "" {
 		sid = "none"
 	}
-	return fmt.Sprintf("[%s | agent: %s | mode: %s | model: %s]",
+	return fmt.Sprintf("session: %s\nagent: %s\nmode: %s\nmodel: %s",
 		sid,
 		renderUnknown(agentName),
 		renderUnknown(snap.Mode),
@@ -441,7 +441,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	}
 	s.persistSessionBestEffort()
 
-	s.reply(fmt.Sprintf("Switched to %s", s.sessionInfoLine()))
+	s.reply("Switched\n" + s.sessionInfoLine())
 	return nil
 }
 
@@ -577,7 +577,7 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	}
 
 	if !wasReady {
-		s.reply(fmt.Sprintf("Session ready: %s", s.sessionInfoLine()))
+		s.reply("Session ready\n" + s.sessionInfoLine())
 		s.persistSessionBestEffort()
 	} else {
 		s.reply(s.sessionInfoLine())

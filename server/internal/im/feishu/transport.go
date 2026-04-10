@@ -96,13 +96,14 @@ const (
 )
 
 type unifiedStream struct {
-	messageID   string
-	startedAt   time.Time
-	segments    []streamSegment
-	totalRunes  int // running rune count across all segments
-	pushedRunes int // totalRunes at last push (dirty check)
-	lastPush    time.Time
-	timer       *time.Timer
+	messageID    string
+	startedAt    time.Time
+	segments     []streamSegment
+	totalRunes   int  // running rune count across all segments
+	pushedRunes  int  // totalRunes at last push (dirty check)
+	pendingSplit bool // set when totalRunes exceeds threshold; split on next segment boundary
+	lastPush     time.Time
+	timer        *time.Timer
 }
 
 type toolCardState struct {
@@ -201,8 +202,17 @@ func (f *transportChannel) sendText(chatID, text string) error {
 		f.unifiedStreams[chatID] = us
 	}
 
-	// Auto-split: if content exceeds threshold, finalize and start new card
-	if us.totalRunes > unifiedStreamMaxRunes && len(us.segments) > 0 {
+	// Mark pending split once threshold is exceeded; defer the actual split to
+	// the next segment boundary so we never cut mid-chunk.
+	if us.totalRunes > unifiedStreamMaxRunes {
+		us.pendingSplit = true
+	}
+
+	// Perform deferred split at segment boundary: only when the incoming chunk
+	// would start a new segment (i.e., the last segment is not text).
+	n := len(us.segments)
+	wouldStartNew := n == 0 || us.segments[n-1].kind != segText
+	if us.pendingSplit && wouldStartNew && n > 0 {
 		if us.timer != nil {
 			us.timer.Stop()
 			us.timer = nil
@@ -210,6 +220,7 @@ func (f *transportChannel) sendText(chatID, text string) error {
 		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterNone)
 		us = &unifiedStream{startedAt: f.promptStartAt[chatID]}
 		f.unifiedStreams[chatID] = us
+		n = 0
 	}
 
 	// Strip leading newlines from the very first chunk of a fresh stream to
@@ -222,7 +233,7 @@ func (f *transportChannel) sendText(chatID, text string) error {
 	}
 
 	// Append to last text segment, or create new one
-	n := len(us.segments)
+	n = len(us.segments)
 	if n > 0 && us.segments[n-1].kind == segText {
 		us.segments[n-1].content += text
 	} else {
@@ -251,7 +262,13 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 		f.unifiedStreams[chatID] = us
 	}
 
-	if us.totalRunes > unifiedStreamMaxRunes && len(us.segments) > 0 {
+	if us.totalRunes > unifiedStreamMaxRunes {
+		us.pendingSplit = true
+	}
+
+	n := len(us.segments)
+	wouldStartNew := n == 0 || us.segments[n-1].kind != segThought
+	if us.pendingSplit && wouldStartNew && n > 0 {
 		if us.timer != nil {
 			us.timer.Stop()
 			us.timer = nil
@@ -259,9 +276,8 @@ func (f *transportChannel) sendThought(chatID, text string) error {
 		_ = f.pushUnifiedCardLocked(chatID, us, true, unifiedFooterNone)
 		us = &unifiedStream{startedAt: f.promptStartAt[chatID]}
 		f.unifiedStreams[chatID] = us
+		n = 0
 	}
-
-	n := len(us.segments)
 	if n > 0 && us.segments[n-1].kind == segThought {
 		us.segments[n-1].content += text
 	} else {
@@ -764,24 +780,16 @@ func buildUnifiedStreamCard(segments []streamSegment, done bool) RawCard {
 			if thoughtDone {
 				elements = append(elements, buildThoughtCollapsible(content))
 			} else {
-				md := "**🧠 Thinking**\n\n" + normalizeStreamMarkdown(content)
+				md := "**Thinking**\n\n" + normalizeStreamMarkdown(content)
 				elements = append(elements, map[string]any{
 					"tag":     "markdown",
 					"content": md,
 				})
 			}
 		case segDivider:
-			// Only render a visible divider between segments of different
-			// kinds (ABC pattern). When both sides are the same kind (ABA),
-			// the separate segments already produce a paragraph break.
-			prevKind := findAdjacentKind(segments, i, -1)
-			nextKind := findAdjacentKind(segments, i, 1)
-			if prevKind != nextKind && prevKind != segDivider && nextKind != segDivider {
-				elements = append(elements, map[string]any{
-					"tag":     "markdown",
-					"content": "---",
-				})
-			}
+			// Dividers are used as segment separators internally but produce
+			// no visible element — adjacent segments of different types flow
+			// naturally without a horizontal rule.
 		}
 	}
 	// Strip leading/trailing dividers
@@ -834,7 +842,7 @@ func buildThoughtCollapsible(content string) map[string]any {
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": "🧠 " + summary,
+				"content": summary,
 			},
 			"vertical_align": "center",
 		},
