@@ -461,7 +461,8 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         showLineNumbers={lineNumbers}
         showInlineLineNumbers={true}
         wrapLongLines={wrap}
-        wrapLines={wrap}>
+        wrapLines={wrap}
+        lineProps={wrap && lineNumbers ? {style: {display: 'block'}} : undefined}>
         {content || ' '}
       </SyntaxHighlighter>
     </div>
