@@ -460,6 +460,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers}: PrismCodeBlockPr
         language={language}
         style={oneDark}
         showLineNumbers={lineNumbers}
+        showInlineLineNumbers={false}
         wrapLongLines={wrap}
         wrapLines={true}>
         {content || ' '}
