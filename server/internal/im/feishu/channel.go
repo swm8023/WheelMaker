@@ -168,6 +168,11 @@ func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payloa
 	if text == "" {
 		return nil
 	}
+	if title := strings.TrimSpace(payload.Title); title != "" {
+		card := buildSystemStreamCard(title, text)
+		_, err := c.inner.SendCard(chatID, "", card)
+		return err
+	}
 	return c.inner.Send(chatID, text, TextSystem)
 }
 

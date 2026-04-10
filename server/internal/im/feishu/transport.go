@@ -407,7 +407,7 @@ func (f *transportChannel) sendSystem(chatID, text string) error {
 	f.resetCompactToolStream(chatID)
 	// Finalize unified stream so system message is visually separate.
 	f.finalizeUnifiedStream(chatID)
-	card := buildSystemStreamCard(text)
+	card := buildSystemStreamCard("", text)
 	raw, err := json.Marshal(card)
 	if err != nil {
 		return fmt.Errorf("feishu: marshal system stream card: %w", err)
@@ -879,14 +879,17 @@ func isMarkdownDividerElement(element map[string]any) bool {
 	return strings.TrimSpace(content) == "---"
 }
 
-func buildSystemStreamCard(content string) RawCard {
+func buildSystemStreamCard(title, content string) RawCard {
+	if title == "" {
+		title = "📣 System Message"
+	}
 	return RawCard{
 		"schema": "2.0",
 		"config": map[string]any{"update_multi": true},
 		"header": map[string]any{
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": "📣 System Message",
+				"content": title,
 			},
 		},
 		"body": map[string]any{

@@ -227,7 +227,7 @@ func TestBuildUnifiedStreamCard_ThoughtDoneCollapsible(t *testing.T) {
 }
 
 func TestBuildSystemStreamCard_HasEmojiHeader(t *testing.T) {
-	card := buildSystemStreamCard("status ok")
+	card := buildSystemStreamCard("", "status ok")
 	if schema, _ := card["schema"].(string); schema != "2.0" {
 		t.Fatalf("system stream card should use schema 2.0, got %q", schema)
 	}

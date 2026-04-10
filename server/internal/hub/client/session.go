@@ -232,7 +232,7 @@ func shortSessionID(id string) string {
 func (s *Session) sessionInfoLine() string {
 	s.mu.Lock()
 	agentName := s.currentAgentNameLocked()
-	acpSID := s.acpSessionID
+	clientSID := s.ID
 	var configOpts []acp.ConfigOption
 	if state := s.agents[agentName]; state != nil {
 		configOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
@@ -240,7 +240,7 @@ func (s *Session) sessionInfoLine() string {
 	s.mu.Unlock()
 
 	snap := acp.SessionConfigSnapshotFromOptions(configOpts)
-	sid := shortSessionID(acpSID)
+	sid := shortSessionID(clientSID)
 	if sid == "" {
 		sid = "none"
 	}
@@ -254,14 +254,23 @@ func (s *Session) sessionInfoLine() string {
 
 // reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
+	s.replyWithTitle("", text)
+}
+
+// replyWithTitle sends a system message with an optional card title.
+func (s *Session) replyWithTitle(title, body string) {
 	if router, source, ok := s.imContext(); ok {
 		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.SystemPayload{
-			Kind: "message",
-			Body: text,
+			Kind:  "message",
+			Title: title,
+			Body:  body,
 		})
 		return
 	}
-	fmt.Println(text)
+	if title != "" {
+		fmt.Println(title)
+	}
+	fmt.Println(body)
 }
 
 func (s *Session) setIMSource(source im.ChatRef) {
@@ -441,7 +450,7 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	}
 	s.persistSessionBestEffort()
 
-	s.reply("Switched\n" + s.sessionInfoLine())
+	s.replyWithTitle("Switched", s.sessionInfoLine())
 	return nil
 }
 
@@ -577,10 +586,10 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	}
 
 	if !wasReady {
-		s.reply("Session ready\n" + s.sessionInfoLine())
+		s.replyWithTitle("Session ready", s.sessionInfoLine())
 		s.persistSessionBestEffort()
 	} else {
-		s.reply(s.sessionInfoLine())
+		s.replyWithTitle("Session info", s.sessionInfoLine())
 	}
 	return nil
 }

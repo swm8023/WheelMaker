@@ -127,8 +127,11 @@ func TestHandleMessage_Status(t *testing.T) {
 		t.Fatal("no reply received")
 	}
 	reply := (*msgs)[0]
-	if !strings.Contains(reply, "codex") || !strings.Contains(reply, "sess-abc") {
-		t.Fatalf("status reply %q missing expected data", reply)
+	if !strings.Contains(reply, "codex") {
+		t.Fatalf("status reply %q missing agent name", reply)
+	}
+	if !strings.Contains(reply, "session:") {
+		t.Fatalf("status reply %q missing session field", reply)
 	}
 }
 
