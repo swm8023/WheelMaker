@@ -432,7 +432,7 @@ function pickPreferredPath<T extends {path: string}>(items: T[]): string {
   return (preferred ?? items[0]).path;
 }
 
-type PrismCodeBlockProps = {
+type ShikiCodeBlockProps = {
   content: string;
   language: string;
   wrap: boolean;
@@ -445,7 +445,7 @@ type PrismCodeBlockProps = {
   codeTabSize: number;
 };
 
-function PrismCodeBlock({
+function ShikiCodeBlock({
   content,
   language,
   wrap,
@@ -456,7 +456,7 @@ function PrismCodeBlock({
   codeFontSize,
   codeLineHeight,
   codeTabSize,
-}: PrismCodeBlockProps) {
+}: ShikiCodeBlockProps) {
   const [html, setHtml] = useState('');
 
   useEffect(() => {
@@ -492,7 +492,7 @@ function PrismCodeBlock({
   );
 }
 
-type PrismDiffPaneProps = {
+type ShikiDiffPaneProps = {
   content: string;
   language: string;
   wrap: boolean;
@@ -506,7 +506,7 @@ type PrismDiffPaneProps = {
   codeTabSize: number;
 };
 
-function PrismDiffPane({
+function ShikiDiffPane({
   content,
   language,
   wrap,
@@ -518,7 +518,7 @@ function PrismDiffPane({
   codeFontSize,
   codeLineHeight,
   codeTabSize,
-}: PrismDiffPaneProps) {
+}: ShikiDiffPaneProps) {
   const [diffHtml, setDiffHtml] = useState('');
   const rows = useMemo(() => parseUnifiedDiffRows(content), [content]);
   const lines = useMemo(() => buildInlineDiffRenderLines(rows), [rows]);
@@ -1565,7 +1565,7 @@ function App() {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
     return (
-      <PrismCodeBlock
+      <ShikiCodeBlock
         content={content}
         language={language}
         wrap={wrapLines}
@@ -1620,7 +1620,7 @@ function App() {
 
     const language = detectCodeLanguage(selectedDiff || selectedFile);
     return (
-      <PrismDiffPane
+      <ShikiDiffPane
         content={content}
         language={language}
         wrap={wrapLines}

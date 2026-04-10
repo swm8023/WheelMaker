@@ -43,6 +43,5 @@ describe('web code layout', () => {
     expect(mainTsx).toContain('codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY');
     expect(mainTsx).not.toContain("from 'react-diff-viewer-continued'");
     expect(mainTsx).not.toContain('ReactDiffViewer');
-    expect(mainTsx).not.toContain('<PrismInlineCode');
   });
 });

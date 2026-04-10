@@ -30,7 +30,7 @@ Add a switchable theme system with a default style close to VS Code Modern Dark,
 
 ## Highlight Strategy
 
-- Use `react-native-syntax-highlighter` for broad language coverage (Highlight.js style set).
+- Use `shiki` for syntax highlighting with curated themes and language loading.
 - Resolve language from extension/filename.
 - Unknown files fallback to `plaintext` without crash.
 
