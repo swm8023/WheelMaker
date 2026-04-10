@@ -94,6 +94,9 @@ export class RegistryRepository {
       payload: {path},
     });
     const payload = (resp.payload ?? {}) as RegistryFsInfo;
+    const tabSize = typeof payload.tabSize === 'number' && Number.isFinite(payload.tabSize)
+      ? Math.max(1, Math.min(12, Math.trunc(payload.tabSize)))
+      : undefined;
     return {
       path: payload.path ?? path,
       kind: payload.kind ?? 'file',
@@ -101,6 +104,7 @@ export class RegistryRepository {
       isBinary: payload.isBinary ?? false,
       mimeType: payload.mimeType ?? '',
       totalLines: payload.totalLines ?? 0,
+      tabSize,
       entryCount: payload.entryCount ?? 0,
       hash: payload.hash ?? '',
     };

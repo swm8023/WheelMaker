@@ -84,6 +84,7 @@ export interface RegistryFsInfo {
   isBinary?: boolean;
   mimeType?: string;
   totalLines?: number;
+  tabSize?: number;
   entryCount?: number;
   hash?: string;
 }

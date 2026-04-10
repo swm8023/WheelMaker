@@ -445,15 +445,29 @@ function pickPreferredPath<T extends {path: string}>(items: T[]): string {
   return (preferred ?? items[0]).path;
 }
 
+const DEFAULT_CODE_TAB_SIZE = 4;
+
+function resolveCodeTabSize(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return DEFAULT_CODE_TAB_SIZE;
+  }
+  const normalized = Math.trunc(value);
+  if (normalized < 1 || normalized > 12) {
+    return DEFAULT_CODE_TAB_SIZE;
+  }
+  return normalized;
+}
+
 type PrismCodeBlockProps = {
   content: string;
   language: string;
   wrap: boolean;
   lineNumbers: boolean;
+  tabSize: number;
   highlightLine?: number | null;
 };
 
-function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = null}: PrismCodeBlockProps) {
+function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highlightLine = null}: PrismCodeBlockProps) {
   return (
     <div className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}>
       <SyntaxHighlighter
@@ -463,7 +477,7 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = n
         showLineNumbers={lineNumbers}
         wrapLongLines={wrap}
         wrapLines={true}
-        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: 4}}}
+        codeTagProps={{style: {whiteSpace: wrap ? 'pre-wrap' : 'pre', background: 'transparent', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize}}}
         lineProps={lineNumber => ({
           'data-line-number': String(lineNumber),
           style: {
@@ -471,9 +485,10 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, highlightLine = n
             whiteSpace: wrap ? 'pre-wrap' : 'pre',
             wordBreak: 'normal',
             overflowWrap: wrap ? 'break-word' : 'normal',
+            tabSize,
           },
         })}
-        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize: 4}}
+        customStyle={{margin: 0, minWidth: '100%', background: 'transparent', padding: '0 10px', fontFamily: VS_CODE_EDITOR_FONT_FAMILY, fontWeight: 400, fontVariantLigatures: 'none', fontFeatureSettings: '"liga" 0, "calt" 0', tabSize}}
         lineNumberStyle={{
           fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
           fontWeight: 400,
@@ -1438,7 +1453,8 @@ function App() {
   const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
-    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} highlightLine={temporaryHighlightLine} />;
+    const codeTabSize = resolveCodeTabSize(fileInfo?.tabSize);
+    return <PrismCodeBlock content={content} language={language} wrap={wrapLines} lineNumbers={numbersOn} tabSize={codeTabSize} highlightLine={temporaryHighlightLine} />;
   };
 
   const renderViewTools = () => (
