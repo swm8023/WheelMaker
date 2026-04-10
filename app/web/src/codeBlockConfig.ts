@@ -31,16 +31,20 @@ export function buildPrismCodeBlockConfig({tabSize, highlightLine = null}: Build
     fontFamily: VS_CODE_EDITOR_FONT_FAMILY,
     fontWeight: 400,
     color: 'var(--muted)',
-    paddingRight: '10px',
-    borderRight: '1px solid rgba(127, 127, 127, 0.18)',
-    marginRight: '10px',
     textAlign: 'right',
     userSelect: 'none',
     fontVariantNumeric: 'tabular-nums',
     fontFeatureSettings: '"tnum" 1',
   };
+  const lineNumberContainerStyle: CSSProperties = {
+    float: 'left',
+    borderRight: '1px solid rgba(127, 127, 127, 0.18)',
+    marginRight: '10px',
+    paddingRight: '10px',
+  };
 
   return {
+    showInlineLineNumbers: false,
     codeTagProps: {
       style: codeStyle,
     },
@@ -51,6 +55,7 @@ export function buildPrismCodeBlockConfig({tabSize, highlightLine = null}: Build
       } as CSSProperties,
     }),
     customStyle,
+    lineNumberContainerStyle,
     lineNumberStyle,
   };
 }

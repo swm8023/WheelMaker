@@ -20,4 +20,19 @@ describe('buildPrismCodeBlockConfig', () => {
       background: 'transparent',
     });
   });
+
+  it('uses a dedicated gutter instead of inline line numbers', () => {
+    const config = buildPrismCodeBlockConfig({
+      tabSize: 4,
+      highlightLine: null,
+    });
+
+    expect(config.showInlineLineNumbers).toBe(false);
+    expect(config.lineNumberContainerStyle).toMatchObject({
+      float: 'left',
+      borderRight: '1px solid rgba(127, 127, 127, 0.18)',
+      marginRight: '10px',
+      paddingRight: '10px',
+    });
+  });
 });

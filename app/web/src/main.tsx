@@ -477,11 +477,13 @@ function PrismCodeBlock({content, language, wrap, lineNumbers, tabSize, highligh
         language={language}
         style={oneDark}
         showLineNumbers={lineNumbers}
+        showInlineLineNumbers={syntaxHighlighterConfig.showInlineLineNumbers}
         wrapLongLines={wrap}
         wrapLines={true}
         codeTagProps={syntaxHighlighterConfig.codeTagProps}
         lineProps={syntaxHighlighterConfig.lineProps}
         customStyle={syntaxHighlighterConfig.customStyle}
+        lineNumberContainerStyle={syntaxHighlighterConfig.lineNumberContainerStyle}
         lineNumberStyle={syntaxHighlighterConfig.lineNumberStyle}>
         {content || ' '}
       </SyntaxHighlighter>
