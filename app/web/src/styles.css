@@ -1046,7 +1046,7 @@ body,
   display: block;
   width: 100%;
   min-width: 100%;
-  padding: 6px 0;
+  padding: 0;
 }
 
 .code-block {
