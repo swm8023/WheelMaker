@@ -31,6 +31,8 @@ const (
 	wheelmakerServiceName = "WheelMaker"
 	monitorServiceName    = "WheelMakerMonitor"
 	updaterServiceName    = "WheelMakerUpdater"
+	manualSignalFileName  = "update-now.signal"
+	fullUpdateSignalToken = "full-update"
 )
 
 var errServiceNotInstalled = errors.New("service not installed")
@@ -617,6 +619,23 @@ func (m *Monitor) StartService() error {
 	cmd.Dir = filepath.Dir(wheelmakerExe)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start wheelmaker failed: %w", err)
+	}
+	return nil
+}
+
+// TriggerUpdatePublish requests updater to run a full update/build/publish round.
+// It only writes a signal file and does not start/stop updater process or service.
+func (m *Monitor) TriggerUpdatePublish() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	signalPath := filepath.Join(m.baseDir, manualSignalFileName)
+	if err := os.MkdirAll(filepath.Dir(signalPath), 0o755); err != nil {
+		return fmt.Errorf("create signal directory: %w", err)
+	}
+	payload := fullUpdateSignalToken + "\n" + time.Now().UTC().Format(time.RFC3339)
+	if err := os.WriteFile(signalPath, []byte(payload), 0o644); err != nil {
+		return fmt.Errorf("write update signal: %w", err)
 	}
 	return nil
 }

@@ -23,6 +23,7 @@ func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/api/action/restart-monitor", handleAction(mon, "restart-monitor"))
 	mux.HandleFunc("POST "+prefix+"/api/action/stop", handleAction(mon, "stop"))
 	mux.HandleFunc("POST "+prefix+"/api/action/start", handleAction(mon, "start"))
+	mux.HandleFunc("POST "+prefix+"/api/action/update-publish", handleAction(mon, "update-publish"))
 
 	// PWA resources
 	mux.HandleFunc("GET "+prefix+"/manifest.webmanifest", handleManifest())
@@ -116,6 +117,8 @@ func handleAction(mon *Monitor, action string) http.HandlerFunc {
 			err = mon.StopService()
 		case "start":
 			err = mon.StartService()
+		case "update-publish":
+			err = mon.TriggerUpdatePublish()
 		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

@@ -134,12 +134,15 @@ func TestConsumeManualSignal(t *testing.T) {
 		t.Fatalf("write signal: %v", err)
 	}
 
-	ok, err := consumeManualSignal(signalPath)
+	reason, ok, err := consumeManualSignal(signalPath)
 	if err != nil {
 		t.Fatalf("consumeManualSignal error: %v", err)
 	}
 	if !ok {
 		t.Fatalf("expected signal consumed")
+	}
+	if reason != triggerReasonManualSignal {
+		t.Fatalf("reason=%q, want=%q", reason, triggerReasonManualSignal)
 	}
 	if _, err := os.Stat(signalPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected signal file removed, stat err=%v", err)
@@ -147,11 +150,45 @@ func TestConsumeManualSignal(t *testing.T) {
 }
 
 func TestConsumeManualSignal_MissingFile(t *testing.T) {
-	ok, err := consumeManualSignal(filepath.Join(t.TempDir(), "missing.signal"))
+	reason, ok, err := consumeManualSignal(filepath.Join(t.TempDir(), "missing.signal"))
 	if err != nil {
 		t.Fatalf("consumeManualSignal error: %v", err)
 	}
 	if ok {
 		t.Fatalf("expected no signal when file is missing")
+	}
+	if reason != "" {
+		t.Fatalf("expected empty reason for missing signal, got: %q", reason)
+	}
+}
+
+func TestConsumeManualSignal_FullUpdateMode(t *testing.T) {
+	dir := t.TempDir()
+	signalPath := filepath.Join(dir, "update-now.signal")
+	if err := os.WriteFile(signalPath, []byte("full-update\n"), 0o644); err != nil {
+		t.Fatalf("write signal: %v", err)
+	}
+
+	reason, ok, err := consumeManualSignal(signalPath)
+	if err != nil {
+		t.Fatalf("consumeManualSignal error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected signal consumed")
+	}
+	if reason != triggerReasonManualFullUpdate {
+		t.Fatalf("reason=%q, want=%q", reason, triggerReasonManualFullUpdate)
+	}
+}
+
+func TestParseManualSignalReason_DefaultManualSignal(t *testing.T) {
+	if got := parseManualSignalReason("2026-04-11T03:00:00Z"); got != triggerReasonManualSignal {
+		t.Fatalf("reason=%q, want=%q", got, triggerReasonManualSignal)
+	}
+}
+
+func TestParseManualSignalReason_FullUpdateSignal(t *testing.T) {
+	if got := parseManualSignalReason("full-update"); got != triggerReasonManualFullUpdate {
+		t.Fatalf("reason=%q, want=%q", got, triggerReasonManualFullUpdate)
 	}
 }

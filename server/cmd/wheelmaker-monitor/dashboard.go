@@ -664,6 +664,7 @@ html, body {
       <div class="sbar-section">
         <div class="sbar-title"><span class="ttl-accent"></span>Actions</div>
         <div class="action-btns">
+          <button class="abtn abtn-accent" onclick="doAction('update-publish')">Update+Publish</button>
           <button class="abtn abtn-green"  onclick="doAction('start')">Start</button>
           <button class="abtn abtn-accent" onclick="doAction('restart')">Restart</button>
           <button class="abtn abtn-red"    onclick="doAction('stop')">Stop</button>

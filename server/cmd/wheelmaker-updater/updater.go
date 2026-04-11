@@ -18,6 +18,13 @@ const updaterSignalPollInterval = 5 * time.Second
 const updaterWaitHeartbeatInterval = 60 * time.Second
 const updaterRoundTimeout = 20 * time.Minute
 
+const (
+	triggerReasonScheduled        = "scheduled"
+	triggerReasonManualSignal     = "manual-signal"
+	triggerReasonManualFullUpdate = "manual-full-update"
+	fullUpdateSignalToken         = "full-update"
+)
+
 type UpdaterConfig struct {
 	RepoDir    string
 	InstallDir string
@@ -75,7 +82,7 @@ func RunUpdater(ctx context.Context, cfg UpdaterConfig) error {
 		}
 		logger.Info("[updater] trigger=%s", triggerReason)
 
-		skipUpdate := triggerReason == "manual-signal"
+		skipUpdate := triggerReason == triggerReasonManualSignal
 		roundCtx, cancelRound := context.WithTimeout(ctx, updaterRoundTimeout)
 		err = runUpdateRound(roundCtx, cfg, runner, skipUpdate)
 		cancelRound()
@@ -111,7 +118,7 @@ func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (str
 		case <-ctx.Done():
 			return "", nil
 		case <-timer.C:
-			return "scheduled", nil
+			return triggerReasonScheduled, nil
 		case <-heartbeat.C:
 			remaining := time.Until(next).Round(time.Second)
 			if remaining < 0 {
@@ -119,38 +126,49 @@ func waitForTrigger(ctx context.Context, signalPath string, next time.Time) (str
 			}
 			logger.Info("[updater] waiting for next run (remaining=%s)", remaining.String())
 		case <-ticker.C:
-			triggered, err := consumeManualSignal(signalPath)
+			reason, triggered, err := consumeManualSignal(signalPath)
 			if err != nil {
 				logger.Warn("[updater] manual trigger check failed: %v", err)
 				continue
 			}
 			if triggered {
 				logger.Info("[updater] manual trigger signal consumed: %s", signalPath)
-				return "manual-signal", nil
+				return reason, nil
 			}
 		}
 	}
 }
 
-func consumeManualSignal(path string) (bool, error) {
+func consumeManualSignal(path string) (string, bool, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return false, nil
+		return "", false, nil
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+			return "", false, nil
 		}
-		return false, err
+		return "", false, err
 	}
 	if info.IsDir() {
-		return false, fmt.Errorf("manual signal path is a directory: %s", path)
+		return "", false, fmt.Errorf("manual signal path is a directory: %s", path)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, err
 	}
 	if err := os.Remove(path); err != nil {
-		return false, err
+		return "", false, err
 	}
-	return true, nil
+	return parseManualSignalReason(string(raw)), true, nil
+}
+
+func parseManualSignalReason(raw string) string {
+	if strings.Contains(strings.ToLower(raw), fullUpdateSignalToken) {
+		return triggerReasonManualFullUpdate
+	}
+	return triggerReasonManualSignal
 }
 
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner, skipUpdate bool) error {

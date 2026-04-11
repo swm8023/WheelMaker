@@ -80,3 +80,9 @@ func TestDashboardHTML_HasGenericJSONCellViewHook(t *testing.T) {
 		t.Fatalf("dashboard should define generic openJSONModal hook")
 	}
 }
+
+func TestDashboardHTML_HasUpdatePublishAction(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "doAction('update-publish')") {
+		t.Fatalf("dashboard should provide update-publish action button")
+	}
+}
