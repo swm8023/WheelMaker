@@ -395,6 +395,41 @@ func TestCompactStatusEmoji(t *testing.T) {
 	}
 }
 
+func TestBuildUnifiedFooterLine_ThinkingEmojiAndElapsed(t *testing.T) {
+	f := newTransport(Config{})
+	us := &unifiedStream{startedAt: time.Now().Add(-65 * time.Second)}
+	got := f.buildUnifiedFooterLine("chat-1", us, unifiedFooterThinking)
+	if !strings.HasPrefix(got, "⏳") {
+		t.Fatalf("thinking footer=%q, want prefix ⏳", got)
+	}
+	if got == "⏳" {
+		t.Fatalf("thinking footer should include elapsed time, got %q", got)
+	}
+	for _, forbidden := range []string{"思考中", "已完成", "耗时", " · "} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("thinking footer should not contain %q, got %q", forbidden, got)
+		}
+	}
+}
+
+func TestBuildUnifiedFooterLine_DoneEmojiElapsedAndUsage(t *testing.T) {
+	f := newTransport(Config{})
+	f.usageByChat["chat-1"] = "tokens=123"
+	us := &unifiedStream{startedAt: time.Now().Add(-2 * time.Second)}
+	got := f.buildUnifiedFooterLine("chat-1", us, unifiedFooterDone)
+	if !strings.HasPrefix(got, "✅") {
+		t.Fatalf("done footer=%q, want prefix ✅", got)
+	}
+	if !strings.Contains(got, "tokens=123") {
+		t.Fatalf("done footer should include usage, got %q", got)
+	}
+	for _, forbidden := range []string{"思考中", "已完成", "耗时", " · "} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("done footer should not contain %q, got %q", forbidden, got)
+		}
+	}
+}
+
 func TestBuildCompactToolCard(t *testing.T) {
 	card := buildCompactToolCard(
 		[]string{"✅ go test ./...", "⏳ rg -n tool", "❌ go vet ./..."},

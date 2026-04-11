@@ -1183,20 +1183,17 @@ func (f *transportChannel) buildUnifiedFooterLine(chatID string, us *unifiedStre
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
-	stateLabel := "思考中"
+	stateLabel := "⏳"
 	if state == unifiedFooterDone {
-		stateLabel = "已完成"
+		stateLabel = "✅"
 	}
-	parts := []string{
-		stateLabel,
-		"耗时 " + formatUnifiedElapsed(time.Since(startedAt)),
-	}
+	footer := stateLabel + formatUnifiedElapsed(time.Since(startedAt))
 	if state == unifiedFooterDone {
 		if usage := strings.TrimSpace(f.usageByChat[chatID]); usage != "" {
-			parts = append(parts, usage)
+			footer += " " + usage
 		}
 	}
-	return strings.Join(parts, " · ")
+	return footer
 }
 
 func appendUnifiedFooter(card RawCard, footer string) {
