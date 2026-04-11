@@ -271,9 +271,11 @@ func (c *Client) ClientNewSession(routeKey string) (*Session, error) {
 	oldSess := c.sessions[oldSessID]
 	c.mu.Unlock()
 
+	inheritedAgent := ""
 	// Suspend old session if it is active and has an agent.
 	if oldSess != nil {
 		oldSess.mu.Lock()
+		inheritedAgent = oldSess.currentAgentNameLocked()
 		hasInst := oldSess.instance != nil
 		oldSess.mu.Unlock()
 		if hasInst {
@@ -288,6 +290,11 @@ func (c *Client) ClientNewSession(routeKey string) (*Session, error) {
 	}
 
 	sess := c.newWiredSession("")
+	if strings.TrimSpace(inheritedAgent) != "" {
+		sess.mu.Lock()
+		sess.activeAgent = inheritedAgent
+		sess.mu.Unlock()
+	}
 	if err := c.persistBoundSession(routeKey, sess); err != nil {
 		return nil, err
 	}

@@ -242,12 +242,18 @@ func (s *Session) handleConfigCommand(
 		return
 	}
 	// Apply returned config options immediately so the help menu reflects the new value.
+	agentName := ""
+	commands := []acp.AvailableCommand(nil)
 	if len(updatedOpts) > 0 {
 		s.mu.Lock()
-		if state := s.agentStateLocked(s.currentAgentNameLocked()); state != nil {
+		agentName = s.currentAgentNameLocked()
+		if state := s.agentStateLocked(agentName); state != nil {
 			state.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
+			updatedOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
+			commands = append([]acp.AvailableCommand(nil), state.Commands...)
 		}
 		s.mu.Unlock()
+		s.persistProjectAgentState(agentName, updatedOpts, commands)
 	}
 
 	s.persistSessionBestEffort()

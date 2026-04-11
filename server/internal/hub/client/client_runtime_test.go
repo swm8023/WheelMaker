@@ -894,8 +894,17 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	}
 	c.registry = agent.DefaultACPFactory().Clone()
 	c.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) { return inst, nil })
+	c.mu.Lock()
+	oldSess := c.newWiredSession("sess-old")
+	oldSess.activeAgent = "claude"
+	c.sessions[oldSess.ID] = oldSess
+	c.routeMap["route-1"] = oldSess.ID
+	c.mu.Unlock()
 
-	sess := c.newWiredSession("sess-1")
+	sess, err := c.ClientNewSession("route-1")
+	if err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
 	if err := sess.ensureInstance(context.Background()); err != nil {
 		t.Fatalf("ensureInstance: %v", err)
 	}
@@ -903,9 +912,14 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 		t.Fatalf("ensureReady: %v", err)
 	}
 
+	if got := sess.preferredAgentName(); got != "claude" {
+		t.Fatalf("preferred agent = %q, want claude", got)
+	}
+
 	if got := len(inst.setCalls); got != 3 {
 		t.Fatalf("set calls = %d, want 3", got)
 	}
+
 }
 
 func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *testing.T) {
@@ -988,5 +1002,81 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 	}
 	if got := len(inst.setCalls); got != 3 {
 		t.Fatalf("set calls = %d, want 3", got)
+	}
+}
+func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
+	s := newSession("cancel-keep-config", "/tmp")
+	s.ready = true
+	s.acpSessionID = "acp-1"
+	s.activeAgent = "claude"
+	s.agents = map[string]*SessionAgentState{
+		"claude": {
+			ConfigOptions: []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
+			},
+		},
+	}
+	s.instance = &testInjectedInstance{name: "claude"}
+
+	if err := s.cancelPrompt(); err != nil {
+		t.Fatalf("cancelPrompt: %v", err)
+	}
+
+	snap := s.sessionConfigSnapshot()
+	if snap.Mode != "code" || snap.Model != "gpt-5" || snap.ThoughtLevel != "high" {
+		t.Fatalf("snapshot after cancel = %+v", snap)
+	}
+}
+
+func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *testing.T) {
+	s := newSession("commands-load", "/tmp")
+	s.projectName = "proj1"
+	s.activeAgent = "claude"
+	s.acpSessionID = "acp-1"
+	s.agents = map[string]*SessionAgentState{
+		"claude": {
+			ACPSessionID: "acp-1",
+			Commands:     []acp.AvailableCommand{{Name: "/cached"}},
+		},
+	}
+
+	inst := &testInjectedInstance{
+		name:      "claude",
+		sessionID: "acp-1",
+		initResult: acp.InitializeResult{
+			ProtocolVersion:   "0.1",
+			AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+		},
+		loadResult: acp.SessionLoadResult{ConfigOptions: []acp.ConfigOption{{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"}}},
+	}
+
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+		return inst, nil
+	})
+
+	if err := s.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
+	}
+
+	s.SessionUpdate(acp.SessionUpdateParams{
+		SessionID: "acp-1",
+		Update: acp.SessionUpdate{
+			SessionUpdate:     acp.SessionUpdateAvailableCommandsUpdate,
+			AvailableCommands: []acp.AvailableCommand{{Name: "/agent"}},
+		},
+	})
+
+	state, _ := s.currentAgentStateSnapshot()
+	if state == nil {
+		t.Fatal("currentAgentStateSnapshot returned nil state")
+	}
+	if got := len(state.Commands); got != 1 {
+		t.Fatalf("commands = %d, want 1", got)
+	}
+	if got := state.Commands[0].Name; got != "/agent" {
+		t.Fatalf("command = %q, want /agent", got)
 	}
 }

@@ -479,8 +479,10 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	savedSID := s.acpSessionID
 	cwd := s.cwd
 	var persistedConfigOptions []acp.ConfigOption
+	var persistedCommands []acp.AvailableCommand
 	if state := s.agents[agentName]; state != nil {
 		persistedConfigOptions = append([]acp.ConfigOption(nil), state.ConfigOptions...)
+		persistedCommands = append([]acp.AvailableCommand(nil), state.Commands...)
 	}
 	s.mu.Unlock()
 
@@ -491,7 +493,6 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		s.initCond.Broadcast()
 	}
 
-	// Step 1: initialize handshake.
 	clientCaps := acp.ClientCapabilities{
 		FS: &acp.FSCapabilities{
 			ReadTextFile:  true,
@@ -509,44 +510,70 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
-	// Step 2: attempt session/load if possible.
-	loadAttempted := false
-	loadFailed := false
+	baseline := s.loadProjectAgentState(agentName)
+	baselineSnap := acp.SessionConfigSnapshotFromOptions(baseline.ConfigOptions)
+	baselineCommands := append([]acp.AvailableCommand(nil), baseline.AvailableCommands...)
+
 	if savedSID != "" && initResult.AgentCapabilities.LoadSession {
-		loadAttempted = true
 		loadResult, loadErr := inst.SessionLoad(ctx, acp.SessionLoadParams{
 			SessionID:  savedSID,
 			CWD:        cwd,
 			MCPServers: emptyMCPServers(),
 		})
 		if loadErr == nil {
+			resolved := append([]acp.ConfigOption(nil), loadResult.ConfigOptions...)
+			savedSessionSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
+			if len(resolved) > 0 {
+				resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, savedSID, resolved, savedSessionSnap)
+			} else if len(persistedConfigOptions) > 0 {
+				resolved = append([]acp.ConfigOption(nil), persistedConfigOptions...)
+			}
+			resolvedCommands := append([]acp.AvailableCommand(nil), persistedCommands...)
+			if len(resolvedCommands) == 0 && len(baselineCommands) > 0 {
+				resolvedCommands = append([]acp.AvailableCommand(nil), baselineCommands...)
+			}
+
+			resolvedSnap := acp.SessionConfigSnapshotFromOptions(resolved)
+			missing := acp.SessionConfigSnapshot{}
+			if strings.TrimSpace(resolvedSnap.Mode) == "" {
+				missing.Mode = strings.TrimSpace(baselineSnap.Mode)
+			}
+			if strings.TrimSpace(resolvedSnap.Model) == "" {
+				missing.Model = strings.TrimSpace(baselineSnap.Model)
+			}
+			if strings.TrimSpace(resolvedSnap.ThoughtLevel) == "" {
+				missing.ThoughtLevel = strings.TrimSpace(baselineSnap.ThoughtLevel)
+			}
+			if missing.Mode != "" || missing.Model != "" || missing.ThoughtLevel != "" {
+				resolved = mergeConfigOptions(resolved, baseline.ConfigOptions)
+				resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, savedSID, resolved, missing)
+			}
+
 			s.mu.Lock()
 			state := s.agentStateLocked(agentName)
 			state.ACPSessionID = savedSID
-			// Keep persisted config snapshot when agent returns no configOptions on session/load.
-			if len(loadResult.ConfigOptions) > 0 {
-				state.ConfigOptions = loadResult.ConfigOptions
+			if len(resolved) > 0 {
+				state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
 			}
 			state.ProtocolVersion = initResult.ProtocolVersion.String()
 			state.AgentCapabilities = initResult.AgentCapabilities
 			state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
 			state.AuthMethods = initResult.AuthMethods
+			state.Commands = append([]acp.AvailableCommand(nil), resolvedCommands...)
+			commands := append([]acp.AvailableCommand(nil), state.Commands...)
 			s.activeAgent = agentName
 			s.acpSessionID = savedSID
 			s.ready = true
 			s.initializing = false
 			s.mu.Unlock()
 			s.initCond.Broadcast()
-			hubLogger(s.projectName).Info("connected agent=%s session=%s resumed",
-				inst.Name(), savedSID)
+			s.persistProjectAgentState(agentName, resolved, commands)
+			hubLogger(s.projectName).Info("connected agent=%s session=%s resumed", inst.Name(), savedSID)
 			return nil
 		}
-		loadFailed = true
-		hubLogger(s.projectName).Warn("session/load failed agent=%s session=%s err=%v; fallback to session/new",
-			inst.Name(), savedSID, loadErr)
+		hubLogger(s.projectName).Warn("session/load failed agent=%s session=%s err=%v; fallback to session/new", inst.Name(), savedSID, loadErr)
 	}
 
-	// Step 3: create a new session.
 	newResult, err := inst.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        cwd,
 		MCPServers: emptyMCPServers(),
@@ -556,17 +583,27 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: session/new: %w", err)
 	}
 
+	resolved := append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
+	if len(baseline.ConfigOptions) > 0 {
+		resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, newResult.SessionID, resolved, baselineSnap)
+	}
+	resolvedCommands := append([]acp.AvailableCommand(nil), persistedCommands...)
+	if len(resolvedCommands) == 0 && len(baselineCommands) > 0 {
+		resolvedCommands = append([]acp.AvailableCommand(nil), baselineCommands...)
+	}
+
 	s.mu.Lock()
 	state := s.agentStateLocked(agentName)
 	state.ACPSessionID = newResult.SessionID
-	state.ConfigOptions = newResult.ConfigOptions
-	state.Commands = nil
+	state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
+	state.Commands = append([]acp.AvailableCommand(nil), resolvedCommands...)
 	state.Title = ""
 	state.UpdatedAt = ""
 	state.ProtocolVersion = initResult.ProtocolVersion.String()
 	state.AgentCapabilities = initResult.AgentCapabilities
 	state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
 	state.AuthMethods = initResult.AuthMethods
+	commands := append([]acp.AvailableCommand(nil), state.Commands...)
 	s.activeAgent = agentName
 	s.acpSessionID = newResult.SessionID
 	s.ready = true
@@ -575,28 +612,16 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	s.initCond.Broadcast()
 
 	modeID := ""
-	for _, opt := range newResult.ConfigOptions {
+	for _, opt := range resolved {
 		if opt.ID == acp.ConfigOptionIDMode || strings.EqualFold(opt.Category, acp.ConfigOptionCategoryMode) {
 			modeID = opt.CurrentValue
 			break
 		}
 	}
-	hubLogger(s.projectName).Info("connected agent=%s session=%s mode=%s",
-		inst.Name(), newResult.SessionID, modeID)
-
-	if loadAttempted && loadFailed {
-		persistedSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
-		updated := applyReplayableConfigBaseline(ctx, s.projectName, inst, newResult.SessionID, newResult.ConfigOptions, persistedSnap)
-		if len(updated) > 0 {
-			s.mu.Lock()
-			state := s.agentStateLocked(agentName)
-			state.ConfigOptions = append([]acp.ConfigOption(nil), updated...)
-			s.mu.Unlock()
-		}
-	}
+	hubLogger(s.projectName).Info("connected agent=%s session=%s mode=%s", inst.Name(), newResult.SessionID, modeID)
+	s.persistProjectAgentState(agentName, resolved, commands)
 	return nil
 }
-
 func findConfigOptionID(options []acp.ConfigOption, id, category string) string {
 	id = strings.TrimSpace(id)
 	category = strings.TrimSpace(category)
@@ -611,6 +636,29 @@ func findConfigOptionID(options []acp.ConfigOption, id, category string) string 
 		}
 	}
 	return ""
+}
+
+func mergeConfigOptions(current []acp.ConfigOption, updated []acp.ConfigOption) []acp.ConfigOption {
+	if len(updated) == 0 {
+		return append([]acp.ConfigOption(nil), current...)
+	}
+	merged := append([]acp.ConfigOption(nil), current...)
+	for _, next := range updated {
+		replaced := false
+		for i, existing := range merged {
+			sameID := strings.TrimSpace(next.ID) != "" && strings.EqualFold(strings.TrimSpace(existing.ID), strings.TrimSpace(next.ID))
+			sameCategory := strings.TrimSpace(next.ID) == "" && strings.TrimSpace(next.Category) != "" && strings.EqualFold(strings.TrimSpace(existing.Category), strings.TrimSpace(next.Category))
+			if sameID || sameCategory {
+				merged[i] = next
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			merged = append(merged, next)
+		}
+	}
+	return merged
 }
 
 type replayableConfigTarget struct {
@@ -941,6 +989,43 @@ func (s *Session) persistSessionBestEffort() {
 	}
 }
 
+func (s *Session) loadProjectAgentState(agentName string) ProjectAgentState {
+	if s.store == nil || strings.TrimSpace(agentName) == "" {
+		return ProjectAgentState{}
+	}
+	cfg, err := s.store.LoadProject(context.Background(), s.projectName)
+	if err != nil || cfg == nil || cfg.AgentState == nil {
+		return ProjectAgentState{}
+	}
+	return cfg.AgentState[strings.TrimSpace(agentName)]
+}
+
+func (s *Session) persistProjectAgentState(agentName string, configOptions []acp.ConfigOption, commands []acp.AvailableCommand) {
+	if s.store == nil || strings.TrimSpace(agentName) == "" {
+		return
+	}
+	cfg, err := s.store.LoadProject(context.Background(), s.projectName)
+	if err != nil {
+		hubLogger(s.projectName).Warn("load project baseline failed agent=%s err=%v", agentName, err)
+		return
+	}
+	if cfg.AgentState == nil {
+		cfg.AgentState = map[string]ProjectAgentState{}
+	}
+	next := cfg.AgentState[agentName]
+	if configOptions != nil {
+		next.ConfigOptions = append([]acp.ConfigOption(nil), configOptions...)
+	}
+	if commands != nil {
+		next.AvailableCommands = append([]acp.AvailableCommand(nil), commands...)
+	}
+	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	cfg.AgentState[agentName] = next
+	if err := s.store.SaveProject(context.Background(), s.projectName, *cfg); err != nil {
+		hubLogger(s.projectName).Warn("save project baseline failed agent=%s err=%v", agentName, err)
+	}
+}
+
 // Suspend cancels any in-progress prompt, closes the agent, and marks
 // this session as suspended.
 func (s *Session) Suspend(ctx context.Context) error {
@@ -1023,6 +1108,13 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		s.mu.Unlock()
 	}
 	if changed {
+		s.mu.Lock()
+		agentName := s.currentAgentNameLocked()
+		state := cloneSessionAgentState(s.agents[agentName])
+		s.mu.Unlock()
+		if state != nil {
+			s.persistProjectAgentState(agentName, state.ConfigOptions, state.Commands)
+		}
 		s.persistSessionBestEffort()
 	}
 
