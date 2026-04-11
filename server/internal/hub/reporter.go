@@ -38,6 +38,10 @@ type ProjectInfo = rp.ProjectInfo
 type envelope = rp.Envelope
 type errorPayload = rp.ErrorPayload
 
+type ChatHandler interface {
+	HandleChatRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
+}
+
 // ReporterConfig controls hub->registry connection behavior.
 type ReporterConfig struct {
 	Server            string
@@ -57,6 +61,7 @@ type Reporter struct {
 	mu           sync.RWMutex
 	projects     []ProjectInfo
 	projectsByID map[string]ProjectInfo
+	chatByID     map[string]ChatHandler
 	conn         *websocket.Conn
 	pending      map[int64]chan envelope
 	requestSeq   atomic.Int64
@@ -98,6 +103,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		cfg:          cfg,
 		projects:     cp,
 		projectsByID: byID,
+		chatByID:     make(map[string]ChatHandler),
 		pending:      make(map[int64]chan envelope),
 	}
 	r.requestSeq.Store(2)
@@ -121,6 +127,20 @@ func (r *Reporter) Run(ctx context.Context) error {
 // SetDebugLogger sets an optional writer for debug logging of registry envelopes.
 func (r *Reporter) SetDebugLogger(w io.Writer) {
 	r.debugLog = w
+}
+
+func (r *Reporter) RegisterChatHandler(projectID string, handler ChatHandler) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if handler == nil {
+		delete(r.chatByID, projectID)
+		return
+	}
+	r.chatByID[projectID] = handler
 }
 
 func (r *Reporter) UpdateProject(project ProjectInfo) error {
@@ -244,6 +264,8 @@ func (r *Reporter) runSession(ctx context.Context) error {
 			continue
 		}
 		switch in.Method {
+		case "chat.session.list", "chat.session.read", "chat.send", "chat.permission.respond":
+			r.replyChat(conn, in)
 		case "fs.list":
 			r.replyFSList(conn, in)
 		case "fs.info":
@@ -397,6 +419,59 @@ func (r *Reporter) handshake(conn *websocket.Conn) error {
 	return nil
 }
 
+func (r *Reporter) PublishChatMessage(projectID string, payload any) error {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return fmt.Errorf("projectId is required")
+	}
+
+	r.mu.RLock()
+	conn := r.conn
+	r.mu.RUnlock()
+	if conn == nil {
+		return nil
+	}
+
+	requestID := r.requestSeq.Add(1)
+	waitCh := make(chan envelope, 1)
+	r.mu.Lock()
+	r.pending[requestID] = waitCh
+	r.mu.Unlock()
+
+	if err := r.writeJSON(conn, "->", envelope{
+		RequestID: requestID,
+		Type:      "request",
+		Method:    "registry.chat.message",
+		ProjectID: projectID,
+		Payload:   rp.MustRaw(payload),
+	}); err != nil {
+		r.mu.Lock()
+		delete(r.pending, requestID)
+		r.mu.Unlock()
+		return err
+	}
+
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			return fmt.Errorf("registry connection closed")
+		}
+		if resp.Type == "error" {
+			var payload errorPayload
+			if err := decodePayload(resp.Payload, &payload); err == nil {
+				return fmt.Errorf("%s: %s", payload.Code, payload.Message)
+			}
+			return fmt.Errorf("registry chat publish failed")
+		}
+		return nil
+	case <-time.After(10 * time.Second):
+		r.mu.Lock()
+		delete(r.pending, requestID)
+		r.mu.Unlock()
+		return fmt.Errorf("registry chat publish timeout")
+	}
+}
+
 func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 	type fsListPayload struct {
 		Path      string `json:"path,omitempty"`
@@ -462,6 +537,36 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 			"notModified": false,
 			"entries":     outEntries,
 		}),
+	})
+}
+
+func (r *Reporter) replyChat(conn *websocket.Conn, req envelope) {
+	projectID := strings.TrimSpace(req.ProjectID)
+	if projectID == "" {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "projectId is required")
+		return
+	}
+
+	r.mu.RLock()
+	handler := r.chatByID[projectID]
+	r.mu.RUnlock()
+	if handler == nil {
+		_ = r.writeError(conn, req.RequestID, codeNotFound, "chat unavailable for project")
+		return
+	}
+
+	payload, err := handler.HandleChatRequest(context.Background(), req.Method, projectID, req.Payload)
+	if err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+
+	_ = r.writeJSON(conn, "->", envelope{
+		RequestID: req.RequestID,
+		Type:      "response",
+		Method:    req.Method,
+		ProjectID: projectID,
+		Payload:   rp.MustRaw(payload),
 	})
 }
 

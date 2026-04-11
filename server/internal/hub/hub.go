@@ -35,6 +35,7 @@ type Hub struct {
 	regSync  *Reporter
 	regMu    sync.Mutex
 	lastProj map[string]ProjectInfo
+	appIM    map[string]*imapp.Channel
 }
 
 // New creates a Hub from the given config and client DB path.
@@ -44,6 +45,7 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 		cfg:      cfg,
 		dbPath:   dbPath,
 		lastProj: map[string]ProjectInfo{},
+		appIM:    map[string]*imapp.Channel{},
 	}
 }
 
@@ -112,11 +114,13 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 		}
 	} else {
 		hubLogger(pc.Name).Info("register channel type=app")
-		if err := router.RegisterChannel(imapp.New()); err != nil {
+		appChannel := imapp.New()
+		if err := router.RegisterChannel(appChannel); err != nil {
 			hubLogger(pc.Name).Error("register channel failed type=app err=%v", err)
 			_ = c.Close()
 			return nil, err
 		}
+		h.appIM[pc.Name] = appChannel
 	}
 	c.SetIMRouter(router)
 	hubLogger(pc.Name).Info("starting client")
@@ -211,6 +215,15 @@ func (h *Hub) setupRegistrySync() {
 		HubID:             hubID,
 		ReconnectInterval: 2 * time.Second,
 	}, projects)
+	for _, project := range projects {
+		appChannel := h.appIM[project.Name]
+		if appChannel == nil {
+			continue
+		}
+		projectID := rp.ProjectID(hubID, project.Name)
+		appChannel.SetEventPublisher(projectID, rep.PublishChatMessage)
+		rep.RegisterChatHandler(projectID, appChannel)
+	}
 	h.regSync = rep
 	h.regMu.Lock()
 	for _, project := range projects {

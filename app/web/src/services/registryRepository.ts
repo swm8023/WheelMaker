@@ -1,7 +1,9 @@
 import { RegistryClient } from './registryClient';
 import type {
+  RegistryChatMessageEventPayload,
+  RegistryChatSession,
+  RegistryChatSessionReadResponse,
   RegistryEnvelope,
-  RegistryFsEntry,
   RegistryFsInfo,
   RegistryFsListResponse,
   RegistryFsReadResponse,
@@ -239,6 +241,65 @@ export class RegistryRepository {
     };
   }
 
+  async listChatSessions(projectId: string): Promise<RegistryChatSession[]> {
+    const resp = await this.client.request({
+      method: 'chat.session.list',
+      projectId,
+      payload: {},
+      timeoutMs: 15000,
+    });
+    const payload = (resp.payload ?? {}) as {sessions?: RegistryChatSession[]};
+    return (payload.sessions ?? []).filter(session => !!session.chatId);
+  }
+
+  async readChatSession(projectId: string, chatId: string): Promise<RegistryChatSessionReadResponse> {
+    const resp = await this.client.request({
+      method: 'chat.session.read',
+      projectId,
+      payload: {chatId},
+      timeoutMs: 15000,
+    });
+    const payload = (resp.payload ?? {}) as Partial<RegistryChatSessionReadResponse>;
+    return {
+      session: payload.session ?? {
+        chatId,
+        sessionId: '',
+        title: chatId,
+        preview: '',
+        updatedAt: '',
+        messageCount: 0,
+      },
+      messages: payload.messages ?? [],
+    };
+  }
+
+  async sendChatMessage(projectId: string, payload: {chatId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; chatId: string}> {
+    const resp = await this.client.request({
+      method: 'chat.send',
+      projectId,
+      payload,
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; chatId?: string};
+    return {
+      ok: body.ok ?? false,
+      chatId: body.chatId ?? payload.chatId,
+    };
+  }
+
+  async respondToChatPermission(projectId: string, payload: {chatId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
+    const resp = await this.client.request({
+      method: 'chat.permission.respond',
+      projectId,
+      payload,
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean};
+    return {
+      ok: body.ok ?? false,
+    };
+  }
+
   close(): void {
     this.client.close();
   }
@@ -246,6 +307,7 @@ export class RegistryRepository {
   onEvent(
     listener: (
       event:
+        | RegistryEnvelope<RegistryChatMessageEventPayload>
         | RegistryEnvelope<RegistryProjectEventPayload>
         | RegistryEnvelope<RegistryGitWorkspaceChangedPayload>
         | RegistryEnvelope<Record<string, never>>,

@@ -2,8 +2,11 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +25,17 @@ type testEnvelope struct {
 	Method    string         `json:"method,omitempty"`
 	ProjectID string         `json:"projectId,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
+}
+
+type stubChatHandler struct {
+	lastMethod string
+	lastBody   string
+}
+
+func (s *stubChatHandler) HandleChatRequest(_ context.Context, method string, _ string, payload json.RawMessage) (any, error) {
+	s.lastMethod = method
+	s.lastBody = string(payload)
+	return map[string]any{"ok": true}, nil
 }
 
 func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
@@ -308,6 +322,121 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 	diffText, _ := diffResp.Payload["diff"].(string)
 	if !strings.Contains(diffText, "+gamma") {
 		t.Fatalf("unexpected working tree diff: %q", diffText)
+	}
+}
+
+func TestReporterRespondsToChatSendRequests(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	reqSeen := make(chan testEnvelope, 1)
+	respSeen := make(chan testEnvelope, 1)
+	errSeen := make(chan error, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			errSeen <- err
+			return
+		}
+		defer ws.Close()
+
+		initReq := mustReadEnvelope(t, ws)
+		if initReq.Method != "connect.init" {
+			errSeen <- fmt.Errorf("init method=%q", initReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: initReq.RequestID,
+			Type:      "response",
+			Method:    "connect.init",
+			Payload: map[string]any{
+				"ok": true,
+				"principal": map[string]any{
+					"role":            "hub",
+					"hubId":           "hub-chat",
+					"connectionEpoch": 1,
+				},
+				"serverInfo": map[string]any{
+					"serverVersion":   "test",
+					"protocolVersion": rp.DefaultProtocolVersion,
+				},
+				"features":       map[string]any{},
+				"hashAlgorithms": []string{"sha256"},
+			},
+		})
+
+		reportReq := mustReadEnvelope(t, ws)
+		if reportReq.Method != "registry.reportProjects" {
+			errSeen <- fmt.Errorf("report method=%q", reportReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: reportReq.RequestID,
+			Type:      "response",
+			Method:    "registry.reportProjects",
+			Payload: map[string]any{
+				"ok": true,
+			},
+		})
+
+		request := testEnvelope{
+			RequestID: 100,
+			Type:      "request",
+			Method:    "chat.send",
+			ProjectID: "hub-chat:proj1",
+			Payload: map[string]any{
+				"chatId": "chat-1",
+				"text":   "hello",
+			},
+		}
+		mustWriteJSON(t, ws, request)
+		reqSeen <- request
+
+		_ = ws.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+		respSeen <- mustReadEnvelope(t, ws)
+	}))
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter := NewReporter(ReporterConfig{
+		Server:            strings.TrimPrefix(ts.URL, "http://"),
+		HubID:             "hub-chat",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, []ProjectInfo{{Name: "proj1", Path: t.TempDir(), Online: true}})
+	handler := &stubChatHandler{}
+	reporter.RegisterChatHandler(rp.ProjectID("hub-chat", "proj1"), handler)
+
+	done := make(chan error, 1)
+	go func() { done <- reporter.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case <-reqSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive chat request")
+	}
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case resp := <-respSeen:
+		if resp.Type != "response" || resp.Method != "chat.send" {
+			t.Fatalf("unexpected chat.send response: %#v", resp)
+		}
+		if handler.lastMethod != "chat.send" || !strings.Contains(handler.lastBody, "\"chatId\":\"chat-1\"") {
+			t.Fatalf("handler saw method=%q body=%q", handler.lastMethod, handler.lastBody)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive chat.send response from reporter")
 	}
 }
 

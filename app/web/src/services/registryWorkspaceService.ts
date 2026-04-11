@@ -1,6 +1,8 @@
 import {createRegistryRepository, type RegistryRepository} from './registryRepository';
 import {RegistryRequestError} from './registryClient';
 import type {
+  RegistryChatMessage,
+  RegistryChatSession,
   RegistryEnvelope,
   RegistryFsInfo,
   RegistryFsEntry,
@@ -198,6 +200,37 @@ export class RegistryWorkspaceService {
       this.session = {...this.session, projects};
     }
     return projects;
+  }
+
+  async listChatSessions(): Promise<RegistryChatSession[]> {
+    if (!this.session || !this.repository) {
+      return [];
+    }
+    return this.repository.listChatSessions(this.session.selectedProjectId);
+  }
+
+  async readChatSession(chatId: string): Promise<{session: RegistryChatSession; messages: RegistryChatMessage[]}> {
+    if (!this.session || !this.repository) {
+      return {
+        session: {chatId, title: chatId, preview: '', updatedAt: '', messageCount: 0},
+        messages: [],
+      };
+    }
+    return this.repository.readChatSession(this.session.selectedProjectId, chatId);
+  }
+
+  async sendChatMessage(payload: {chatId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; chatId: string}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.sendChatMessage(this.session.selectedProjectId, payload);
+  }
+
+  async respondToChatPermission(payload: {chatId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.respondToChatPermission(this.session.selectedProjectId, payload);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

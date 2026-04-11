@@ -33,6 +33,10 @@ import {
 import {WorkspaceController} from './services/workspaceController';
 import {WorkspaceStore} from './services/workspaceStore';
 import type {
+  RegistryChatContentBlock,
+  RegistryChatMessage,
+  RegistryChatMessageEventPayload,
+  RegistryChatSession,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -48,6 +52,11 @@ type Tab = 'chat' | 'file' | 'git';
 type ThemeMode = 'dark' | 'light';
 type DirEntries = Record<string, RegistryFsEntry[]>;
 type GitDiffSource = 'commit' | 'worktree';
+type ChatAttachment = {
+  name: string;
+  mimeType: string;
+  data: string;
+};
 type WorkingTreeFileEntry = {
   path: string;
   status: string;
@@ -159,6 +168,32 @@ const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
+
+function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
+  return [...items].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+}
+
+function mergeChatSession(list: RegistryChatSession[], next: RegistryChatSession): RegistryChatSession[] {
+  const filtered = list.filter(item => item.chatId !== next.chatId);
+  return sortChatSessions([next, ...filtered]);
+}
+
+function upsertChatMessage(list: RegistryChatMessage[], next: RegistryChatMessage): RegistryChatMessage[] {
+  const index = list.findIndex(item => item.messageId === next.messageId);
+  if (index < 0) {
+    return [...list, next].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  }
+  const copy = [...list];
+  copy[index] = next;
+  return copy;
+}
+
+function formatChatTimestamp(value: string): string {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+}
 
 function clampCodeFontSize(value: number): number {
   return Math.min(20, Math.max(11, Number.isFinite(value) ? value : DEFAULT_CODE_FONT_SIZE));
@@ -655,9 +690,15 @@ function App() {
   const fileCacheRef = useRef<Record<string, string>>({});
   const fileReadSeqRef = useRef(0);
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
-
-  const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);
-  const [chatSessionIndex, setChatSessionIndex] = useState(0);
+  const chatFileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatSelectedIdRef = useRef('');
+  const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
+  const [selectedChatId, setSelectedChatId] = useState('');
+  const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSending, setChatSending] = useState(false);
+  const [chatComposerText, setChatComposerText] = useState('');
+  const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(null);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -680,6 +721,10 @@ function App() {
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  useEffect(() => {
+    chatSelectedIdRef.current = selectedChatId;
+  }, [selectedChatId]);
 
   useEffect(() => {
     setAllowHeavyDiffLoad(false);
@@ -1130,6 +1175,121 @@ function App() {
     }, RECONNECT_RETRY_DELAY_MS);
   };
 
+  const loadChatSession = async (chatId: string, activeProjectId = projectIdRef.current) => {
+    if (!activeProjectId || !chatId) return;
+    setChatLoading(true);
+    try {
+      const result = await service.readChatSession(chatId);
+      setChatMessages(result.messages);
+      setChatSessions(prev => mergeChatSession(prev, result.session));
+      setSelectedChatId(result.session.chatId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const loadChatSessions = async (preferredChatId = '', activeProjectId = projectIdRef.current) => {
+    if (!activeProjectId) return;
+    try {
+      const sessions = sortChatSessions(await service.listChatSessions());
+      setChatSessions(sessions);
+      const fallbackChatId = preferredChatId || chatSelectedIdRef.current || sessions[0]?.chatId || '';
+      if (!fallbackChatId) {
+        setSelectedChatId('');
+        setChatMessages([]);
+        return;
+      }
+      await loadChatSession(fallbackChatId, activeProjectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const sendChatMessage = async () => {
+    const trimmedText = chatComposerText.trim();
+    if (!trimmedText && !chatAttachment) return;
+    const chatId = selectedChatId || `chat-${Date.now()}`;
+    const blocks: RegistryChatContentBlock[] = [];
+    if (trimmedText) {
+      blocks.push({type: 'text', text: trimmedText});
+    }
+    if (chatAttachment) {
+      blocks.push({type: 'image', mimeType: chatAttachment.mimeType, data: chatAttachment.data});
+    }
+
+    setChatSending(true);
+    try {
+      const result = await service.sendChatMessage({
+        chatId,
+        text: trimmedText,
+        blocks,
+      });
+      const nextChatId = result.chatId || chatId;
+      setSelectedChatId(nextChatId);
+      if (!chatSessions.find(item => item.chatId === nextChatId)) {
+        setChatSessions(prev => mergeChatSession(prev, {
+          chatId: nextChatId,
+          sessionId: '',
+          title: trimmedText || chatAttachment?.name || nextChatId,
+          preview: trimmedText || chatAttachment?.name || '',
+          updatedAt: new Date().toISOString(),
+          messageCount: 0,
+        }));
+      }
+      setChatComposerText('');
+      setChatAttachment(null);
+      if (chatFileInputRef.current) {
+        chatFileInputRef.current.value = '';
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  const respondToChatPermission = async (message: RegistryChatMessage, optionId: string) => {
+    if (!message.chatId || !message.requestId) return;
+    try {
+      await service.respondToChatPermission({
+        chatId: message.chatId,
+        requestId: message.requestId,
+        optionId,
+      });
+      setChatMessages(prev =>
+        prev.map(item =>
+          item.messageId === message.messageId
+            ? {...item, status: 'done'}
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleChatFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setChatAttachment(null);
+      return;
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to read image file'));
+      reader.readAsDataURL(file);
+    });
+    const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+    setChatAttachment({
+      name: file.name,
+      mimeType: file.type || 'image/png',
+      data: base64,
+    });
+  };
+
   const connect = async ({silentReconnect = false}: {silentReconnect?: boolean} = {}) => {
     const trimmedToken = token.trim();
     setError('');
@@ -1150,6 +1310,11 @@ function App() {
       reconnectStartedAtRef.current = null;
       setReconnecting(false);
       setConnected(true);
+      setChatMessages([]);
+      setChatSessions([]);
+      setSelectedChatId('');
+      chatSelectedIdRef.current = '';
+      await loadChatSessions('', result.hydrated.projectId);
       workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
         if (projectIdRef.current !== result.hydrated.projectId) return;
         setDirEntries(validated.dirEntries);
@@ -1195,6 +1360,11 @@ function App() {
       const result = await workspaceController.switchProject(nextProjectId);
       setProjects(result.projects);
       applyHydratedProjectState(result.hydrated);
+      setChatMessages([]);
+      setChatSessions([]);
+      setSelectedChatId('');
+      chatSelectedIdRef.current = '';
+      await loadChatSessions('', result.hydrated.projectId);
       workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
         if (projectIdRef.current !== result.hydrated.projectId) return;
         setDirEntries(validated.dirEntries);
@@ -1260,6 +1430,23 @@ function App() {
             item.projectId === eventProjectId ? {...item, online: event.method === 'project.online'} : item,
           ),
         );
+      }
+      if (event.method === 'chat.message') {
+        if (eventProjectId && eventProjectId !== projectIdRef.current) {
+          return;
+        }
+        const payload = (event.payload ?? {}) as RegistryChatMessageEventPayload;
+        if (payload.session?.chatId) {
+          setChatSessions(prev => mergeChatSession(prev, payload.session));
+        }
+        if (payload.message?.chatId && payload.message.chatId === chatSelectedIdRef.current) {
+          setChatMessages(prev => upsertChatMessage(prev, payload.message));
+        }
+        if (!chatSelectedIdRef.current && payload.session?.chatId) {
+          setSelectedChatId(payload.session.chatId);
+          setChatMessages(prev => upsertChatMessage(prev, payload.message));
+        }
+        return;
       }
       if (eventProjectId && eventProjectId !== projectIdRef.current) {
         return;
@@ -1388,16 +1575,20 @@ function App() {
         <>
           <div className="section-title">CHAT SESSIONS</div>
           <div className="list">
-            {chatSessions.map((session, index) => (
+            {chatSessions.length === 0 ? <div className="muted block">No chat sessions yet</div> : null}
+            {chatSessions.map(session => (
               <div
-                key={session}
-                className={`item ${chatSessionIndex === index ? 'selected' : ''}`}
+                key={session.chatId}
+                className={`item ${selectedChatId === session.chatId ? 'selected' : ''}`}
                 onClick={() => {
-                  setChatSessionIndex(index);
+                  loadChatSession(session.chatId).catch(() => undefined);
                   if (!isWide) setDrawerOpen(false);
                 }}>
                 <span className="file-dot codicon codicon-comment-discussion" />
-                <span className="label">{session}</span>
+                <span className="label" style={{display: 'flex', flexDirection: 'column', gap: 2}}>
+                  <span>{session.title || session.chatId}</span>
+                  <span className="muted" style={{fontSize: 11}}>{session.preview || 'No messages yet'}</span>
+                </span>
               </div>
             ))}
           </div>
@@ -1674,26 +1865,101 @@ function App() {
       />
     );
   };
+
+  const renderChatMessage = (message: RegistryChatMessage) => {
+    if (message.kind === 'thought') {
+      return <ThinkingBlock content={message.text} isStreaming={message.status === 'streaming'} />;
+    }
+    return (
+      <div className={`chat-message ${message.role} ${message.status === 'streaming' ? 'streaming' : ''}`}>
+        <div className="chat-message-meta">
+          <span className="chat-message-role">{message.role}</span>
+          <span className="chat-message-time">{formatChatTimestamp(message.updatedAt || message.createdAt)}</span>
+        </div>
+        <div className="chat-message-body">{message.text}</div>
+        {message.kind === 'permission' && message.status === 'needs_action' && message.options && message.options.length > 0 ? (
+          <div className="chat-permission-actions">
+            {message.options.map(option => (
+              <button
+                key={`${message.messageId}:${option.optionId}`}
+                type="button"
+                className="chat-permission-button"
+                onClick={() => respondToChatPermission(message, option.optionId).catch(() => undefined)}
+              >
+                {option.name || option.optionId}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {message.blocks?.some(block => block.type === 'image' && block.data) ? (
+          <div className="chat-image-strip">
+            {message.blocks
+              .filter(block => block.type === 'image' && block.data)
+              .map((block, index) => (
+                <img
+                  key={`${message.messageId}:${index}`}
+                  className="chat-inline-image"
+                  src={`data:${block.mimeType || 'image/png'};base64,${block.data}`}
+                  alt="chat attachment"
+                />
+              ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderMain = () => {
     const heavyDiffDeferred = !!selectedDiff && isHeavyGeneratedDiffPath(selectedDiff) && !allowHeavyDiffLoad;
+    const selectedChatSession = chatSessions.find(item => item.chatId === selectedChatId);
 
     if (tab === 'chat') {
       return (
         <div className="content">
-          <div className="block-title">CHAT - {chatSessions[chatSessionIndex]}</div>
+          <div className="block-title">CHAT - {selectedChatSession?.title || 'New Session'}</div>
           <div className="scroll-panel chat-block">
-            <ThinkingBlock
-              content={"Now I have a good understanding of the codebase structure. The server uses a Go daemon with ACP bridge and IM adapters, the app is built with React/React Native for cross-platform support.\n\nThe key files are:\n- server/internal/protocol/update.go — streaming update types\n- app/web/src/main.tsx — main web entry point\n- app/web/src/styles.css — all styles\n\nI'll proceed to implement the thinking block component with the collapsible UI pattern the user requested."}
-              isStreaming={false}
+            {chatLoading ? <div className="muted block">Loading chat...</div> : null}
+            {!chatLoading && chatMessages.length === 0 ? (
+              <div className="empty-card">
+                <div className="empty-title">Start chatting</div>
+                <div className="empty-subtitle">Messages stream here for the current project.</div>
+              </div>
+            ) : null}
+            {chatMessages.map(message => (
+              <div key={message.messageId}>{renderChatMessage(message)}</div>
+            ))}
+          </div>
+          <div className="chat-composer">
+            <input
+              ref={chatFileInputRef}
+              type="file"
+              accept="image/*"
+              style={{display: 'none'}}
+              onChange={event => {
+                handleChatFileChange(event).catch(err => setError(err instanceof Error ? err.message : String(err)));
+              }}
             />
-            <ThinkingBlock
-              content={"Let me analyze the protocol definitions to understand how thought chunks are structured and streamed from the agent..."}
-              isStreaming={true}
+            {chatAttachment ? <div className="chat-attachment-pill">{chatAttachment.name}</div> : null}
+            <textarea
+              className="chat-composer-input"
+              value={chatComposerText}
+              onChange={event => setChatComposerText(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  sendChatMessage().catch(() => undefined);
+                }
+              }}
+              placeholder="Send a message..."
             />
-            <ThinkingBlock
-              content={"The user wants better information density for thinking blocks. Currently the thinking block takes too much space when collapsed. I should redesign it so the title bar shows a summary of the thinking content after streaming completes, and clicking expands to show full content.\n\nKey design decisions:\n1. Use the first meaningful line as summary text\n2. Chevron icon to indicate expandability\n3. Smooth height animation for expand/collapse\n4. Distinct visual treatment for streaming vs completed states"}
-              isStreaming={false}
-            />
+            <div className="chat-composer-actions">
+              <button type="button" className="chat-action-button" onClick={() => chatFileInputRef.current?.click()}>
+                <span className="codicon codicon-device-camera" />
+              </button>
+              <button type="button" className="button chat-send-button" onClick={() => sendChatMessage().catch(() => undefined)}>
+                {chatSending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
           </div>
         </div>
       );

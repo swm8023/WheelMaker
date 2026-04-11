@@ -22,6 +22,57 @@ export interface RegistryProjectEventPayload {
   changedPaths?: string[];
 }
 
+export type RegistryChatMessageRole = 'user' | 'assistant' | 'system';
+export type RegistryChatMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'permission' | 'prompt_result' | 'message';
+export type RegistryChatMessageStatus = 'streaming' | 'done' | 'needs_action';
+
+export interface RegistryChatContentBlock {
+  type: 'text' | 'image';
+  text?: string;
+  mimeType?: string;
+  data?: string;
+}
+
+export interface RegistryChatPermissionOption {
+  optionId: string;
+  name: string;
+  kind: string;
+}
+
+export interface RegistryChatMessage {
+  messageId: string;
+  chatId: string;
+  sessionId?: string;
+  role: RegistryChatMessageRole;
+  kind: RegistryChatMessageKind;
+  text: string;
+  status: RegistryChatMessageStatus;
+  createdAt: string;
+  updatedAt: string;
+  requestId?: number;
+  blocks?: RegistryChatContentBlock[];
+  options?: RegistryChatPermissionOption[];
+}
+
+export interface RegistryChatSession {
+  chatId: string;
+  sessionId?: string;
+  title: string;
+  preview: string;
+  updatedAt: string;
+  messageCount: number;
+}
+
+export interface RegistryChatSessionReadResponse {
+  session: RegistryChatSession;
+  messages: RegistryChatMessage[];
+}
+
+export interface RegistryChatMessageEventPayload {
+  session: RegistryChatSession;
+  message: RegistryChatMessage;
+}
+
 export interface RegistryGitWorkspaceChangedPayload {
   gitRev?: string;
   worktreeRev?: string;

@@ -908,6 +908,134 @@ body,
   gap: 8px;
 }
 
+.chat-message {
+  align-self: flex-start;
+  max-width: min(760px, 92%);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 10px 12px;
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  background: rgba(0, 122, 204, 0.12);
+  border-color: rgba(0, 122, 204, 0.35);
+}
+
+.chat-message.system {
+  background: var(--panel-2);
+}
+
+.chat-message.streaming {
+  box-shadow: 0 0 0 1px rgba(0, 122, 204, 0.18) inset;
+}
+
+.chat-message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-message-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-image-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-permission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-permission-button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.chat-inline-image {
+  max-width: min(280px, 100%);
+  max-height: 240px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.chat-composer {
+  border-top: 1px solid var(--border);
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-composer-input {
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 10px 12px;
+  resize: vertical;
+  font: inherit;
+}
+
+.chat-composer-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.chat-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-action-button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chat-send-button {
+  margin-top: 0;
+}
+
+.chat-attachment-pill {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ── Thinking Block ── */
 .thinking-block {
   border: 1px solid var(--border);
