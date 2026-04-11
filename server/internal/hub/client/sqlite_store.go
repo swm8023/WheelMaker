@@ -107,7 +107,67 @@ func NewStore(dbPath string) (Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	if err := migrateProjectsTable(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &sqliteStore{db: db}, nil
+}
+
+func migrateProjectsTable(db *sql.DB) error {
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{
+			name: "yolo",
+			ddl:  `ALTER TABLE projects ADD COLUMN yolo INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
+			name: "agent_state_json",
+			ddl:  `ALTER TABLE projects ADD COLUMN agent_state_json TEXT NOT NULL DEFAULT '{}'`,
+		},
+	}
+	for _, column := range columns {
+		exists, err := sqliteColumnExists(db, "projects", column.name)
+		if err != nil {
+			return fmt.Errorf("check projects.%s column: %w", column.name, err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.Exec(column.ddl); err != nil {
+			return fmt.Errorf("migrate projects.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+func sqliteColumnExists(db *sql.DB, tableName, columnName string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var dataType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(columnName)) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func (s *sqliteStore) LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error) {
