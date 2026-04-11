@@ -812,15 +812,28 @@ function stashJSONCellValue(raw) {
   return key;
 }
 
-function openAgentsJSONModal(key) {
+function openJSONModal(key, columnName) {
   const body = $('json-modal-body');
   const modal = $('json-modal');
+  const title = $('json-modal-title');
   if (!body || !modal) return;
   const raw = jsonCellStore[key];
   if (raw == null) return;
-  body.innerHTML = renderAgentsJSONContent(raw);
+  const col = String(columnName || '').trim();
+  if (title) {
+    title.textContent = col ? (col + ' JSON') : 'JSON Details';
+  }
+  if (col.toLowerCase() === 'agents_json') {
+    body.innerHTML = renderAgentsJSONContent(raw);
+  } else {
+    body.innerHTML = renderGenericJSONContent(raw);
+  }
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
+}
+
+function openAgentsJSONModal(key) {
+  openJSONModal(key, 'agents_json');
 }
 
 function closeJSONModal() {
@@ -852,6 +865,16 @@ function resolveOptValue(opt) {
     if (seg) return seg;
   }
   return v;
+}
+
+function renderGenericJSONContent(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    return '<pre class="json-code">' + esc(raw) + '</pre>';
+  }
+  return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
 }
 
 function renderAgentsJSONContent(raw) {
@@ -1045,18 +1068,39 @@ function renderDBTables(db) {
           const val = row[i];
           const col = i < t.columns.length ? String(t.columns[i] || '') : '';
           const isSessionsTable = String(t.name || '').toLowerCase() === 'sessions';
-          const isAgentsJSON = isSessionsTable && col.toLowerCase() === 'agents_json';
-          const isStatus = isSessionsTable && col.toLowerCase() === 'status';
-          if (isAgentsJSON) {
+          const colName = col.toLowerCase();
+          const isAgentsJSON = isSessionsTable && colName === 'agents_json';
+          const isJSONColumn = colName.endsWith('_json');
+          const isStatus = isSessionsTable && colName === 'status';
+          if (isJSONColumn) {
             const raw = val == null ? '' : String(val);
             const key = stashJSONCellValue(raw);
-            let agentNames = '';
-            try {
-              const parsed = JSON.parse(raw);
-              const names = Object.keys(parsed || {});
-              agentNames = names.length ? names.join(', ') : '-';
-            } catch (_) { agentNames = '?'; }
-            html += '<td><span class="tbl-muted">' + esc(agentNames) + '</span> <button type="button" class="json-cell-btn" onclick="openAgentsJSONModal(\'' + key + '\')">View JSON</button></td>';
+            let summary = '-';
+            if (isAgentsJSON) {
+              try {
+                const parsed = JSON.parse(raw);
+                const names = Object.keys(parsed || {});
+                summary = names.length ? names.join(', ') : '-';
+              } catch (_) {
+                summary = raw.trim() ? '?' : '-';
+              }
+            } else if (raw.trim()) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                  summary = 'array(' + String(parsed.length) + ')';
+                } else if (parsed && typeof parsed === 'object') {
+                  const keys = Object.keys(parsed);
+                  summary = keys.length ? (keys.slice(0, 3).join(', ') + (keys.length > 3 ? ', ...' : '')) : '{}';
+                } else {
+                  summary = String(parsed);
+                }
+              } catch (_) {
+                summary = 'invalid json';
+              }
+            }
+            const safeCol = col.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            html += '<td><span class="tbl-muted">' + esc(summary) + '</span> <button type="button" class="json-cell-btn" onclick="openJSONModal(\'' + key + '\', \'' + safeCol + '\')">View JSON</button></td>';
             continue;
           }
           if (isStatus) {

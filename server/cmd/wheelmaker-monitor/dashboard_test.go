@@ -72,3 +72,11 @@ func TestDashboardHTML_HasAgentsJSONModalScriptHooks(t *testing.T) {
 		t.Fatalf("dashboard should include json-cell-btn class hook")
 	}
 }
+func TestDashboardHTML_HasGenericJSONCellViewHook(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "colName.endsWith('_json')") {
+		t.Fatalf("dashboard should apply View JSON button to generic *_json columns")
+	}
+	if !strings.Contains(dashboardHTML, "openJSONModal(") {
+		t.Fatalf("dashboard should define generic openJSONModal hook")
+	}
+}
