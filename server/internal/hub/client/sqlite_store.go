@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	_ "modernc.org/sqlite"
 )
 
@@ -17,6 +18,7 @@ const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS projects (
 	project_name TEXT PRIMARY KEY,
 	yolo INTEGER NOT NULL DEFAULT 0,
+	agent_state_json TEXT NOT NULL DEFAULT '{}',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
 );
@@ -42,8 +44,15 @@ CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_
 CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC);
 `
 
+type ProjectAgentState struct {
+	ConfigOptions     []acp.ConfigOption     `json:"configOptions,omitempty"`
+	AvailableCommands []acp.AvailableCommand `json:"availableCommands,omitempty"`
+	UpdatedAt         string                 `json:"updatedAt,omitempty"`
+}
+
 type ProjectConfig struct {
-	YOLO bool
+	YOLO       bool
+	AgentState map[string]ProjectAgentState
 }
 
 type SessionRecord struct {
@@ -102,16 +111,24 @@ func NewStore(dbPath string) (Store, error) {
 }
 
 func (s *sqliteStore) LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT yolo FROM projects WHERE project_name = ?`, strings.TrimSpace(projectName))
+	row := s.db.QueryRowContext(ctx, `SELECT yolo, agent_state_json FROM projects WHERE project_name = ?`, strings.TrimSpace(projectName))
 
 	var yolo int
-	if err := row.Scan(&yolo); err != nil {
+	var agentStateJSON string
+	if err := row.Scan(&yolo, &agentStateJSON); err != nil {
 		if err == sql.ErrNoRows {
-			return &ProjectConfig{}, nil
+			return &ProjectConfig{AgentState: map[string]ProjectAgentState{}}, nil
 		}
 		return nil, fmt.Errorf("load project: %w", err)
 	}
-	return &ProjectConfig{YOLO: yolo != 0}, nil
+
+	cfg := &ProjectConfig{YOLO: yolo != 0, AgentState: map[string]ProjectAgentState{}}
+	if strings.TrimSpace(agentStateJSON) != "" {
+		if err := json.Unmarshal([]byte(agentStateJSON), &cfg.AgentState); err != nil {
+			return nil, fmt.Errorf("unmarshal agent_state_json: %w", err)
+		}
+	}
+	return cfg, nil
 }
 
 func (s *sqliteStore) SaveProject(ctx context.Context, projectName string, cfg ProjectConfig) error {
@@ -124,13 +141,21 @@ func (s *sqliteStore) SaveProject(ctx context.Context, projectName string, cfg P
 	if cfg.YOLO {
 		yolo = 1
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO projects (project_name, yolo, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
+	if cfg.AgentState == nil {
+		cfg.AgentState = map[string]ProjectAgentState{}
+	}
+	raw, err := json.Marshal(cfg.AgentState)
+	if err != nil {
+		return fmt.Errorf("marshal agent_state_json: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO projects (project_name, yolo, agent_state_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(project_name) DO UPDATE SET
 			yolo=excluded.yolo,
+			agent_state_json=excluded.agent_state_json,
 			updated_at=excluded.updated_at
-	`, projectName, yolo, now, now)
+	`, projectName, yolo, string(raw), now, now)
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}
