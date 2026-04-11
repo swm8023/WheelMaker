@@ -157,6 +157,8 @@ const MAX_AUTO_RENDER_DIFF_CHARS = 200000;
 const CODE_FONT_SIZE_OPTIONS = [12, 13, 14, 15, 16] as const;
 const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
+const RECONNECT_RETRY_DELAY_MS = 1000;
+const RECONNECT_GRACE_PERIOD_MS = 30_000;
 
 function clampCodeFontSize(value: number): number {
   return Math.min(20, Math.max(11, Number.isFinite(value) ? value : DEFAULT_CODE_FONT_SIZE));
@@ -584,6 +586,7 @@ function App() {
   const [token, setToken] = useState(persistedGlobal.token || '');
   const [error, setError] = useState('');
   const [autoConnecting, setAutoConnecting] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const autoConnectTriedRef = useRef(false);
 
   const [themeMode, setThemeMode] = useState<ThemeMode>(persistedGlobal.themeMode === 'light' ? 'light' : 'dark');
@@ -646,6 +649,7 @@ function App() {
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
   const liveRefreshTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectStartedAtRef = useRef<number | null>(null);
   const dirHashRef = useRef<Record<string, string>>({});
   const fileHashRef = useRef<Record<string, string>>({});
   const fileCacheRef = useRef<Record<string, string>>({});
@@ -1110,21 +1114,41 @@ function App() {
     run().catch(() => undefined);
   }, [projectId, selectedCommit, selectedDiff, selectedDiffSource, selectedDiffScope, allowHeavyDiffLoad]);
 
-  const connect = async () => {
-    setError('');
+  const clearReconnectTimer = () => {
     if (reconnectTimerRef.current !== null) {
       window.clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
+  };
+
+  const scheduleReconnectAttempt = () => {
+    clearReconnectTimer();
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      setAutoConnecting(true);
+      connect({silentReconnect: true}).catch(() => undefined);
+    }, RECONNECT_RETRY_DELAY_MS);
+  };
+
+  const connect = async ({silentReconnect = false}: {silentReconnect?: boolean} = {}) => {
+    const trimmedToken = token.trim();
+    setError('');
+    clearReconnectTimer();
+    if (!silentReconnect) {
+      reconnectStartedAtRef.current = null;
+      setReconnecting(false);
+    }
     try {
       const ws = toRegistryWsUrl(address);
-      const result = await workspaceController.connect(ws, token.trim());
+      const result = await workspaceController.connect(ws, trimmedToken);
       setProjects(result.projects);
       dirHashRef.current = {};
       fileHashRef.current = {};
       fileCacheRef.current = {};
       applyHydratedProjectState(result.hydrated);
       setGitDirty(Boolean(result.projects.find(item => item.projectId === result.hydrated.projectId)?.git?.dirty));
+      reconnectStartedAtRef.current = null;
+      setReconnecting(false);
       setConnected(true);
       workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
         if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -1132,13 +1156,23 @@ function App() {
         setExpandedDirs(validated.expandedDirs);
       }).catch(() => undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      if (projects.length > 0) {
-        reconnectTimerRef.current = window.setTimeout(() => {
-          setAutoConnecting(true);
-          connect().catch(() => undefined);
-        }, 1000);
+      const message = err instanceof Error ? err.message : String(err);
+      if (silentReconnect) {
+        const reconnectStartedAt = reconnectStartedAtRef.current ?? Date.now();
+        reconnectStartedAtRef.current = reconnectStartedAt;
+        const elapsed = Date.now() - reconnectStartedAt;
+        if (elapsed < RECONNECT_GRACE_PERIOD_MS) {
+          setError('');
+          setReconnecting(true);
+          scheduleReconnectAttempt();
+          return;
+        }
+        reconnectStartedAtRef.current = null;
+        setReconnecting(false);
+        setError(`Registry reconnect failed for ${Math.floor(RECONNECT_GRACE_PERIOD_MS / 1000)}s. Please reconnect manually.`);
+        return;
       }
+      setError(message);
     } finally {
       setAutoConnecting(false);
     }
@@ -1153,7 +1187,7 @@ function App() {
     connect().catch(() => {
       setAutoConnecting(false);
     });
-  }, [address, autoConnecting, connected, projects.length]);
+  }, [address, autoConnecting, connected]);
 
   const switchProject = async (nextProjectId: string) => {
     setLoadingProject(true);
@@ -1172,7 +1206,7 @@ function App() {
   };
 
   const refreshProject = async () => {
-    if (!projectId) return;
+    if (!connected || !projectId) return;
     const latestProject = currentProjectRef.current;
     const latestExpandedDirs = expandedDirsRef.current;
     const latestSelectedFile = selectedFileRef.current;
@@ -1281,21 +1315,26 @@ function App() {
 
     const unsubscribeClose = service.onClose(() => {
       setConnected(false);
-      setError('Registry connection closed. Reconnect to resume live updates.');
-      if (reconnectTimerRef.current !== null) {
-        window.clearTimeout(reconnectTimerRef.current);
+      const canSilentReconnect = !!token.trim() && !!projectIdRef.current;
+      if (!canSilentReconnect) {
+        reconnectStartedAtRef.current = null;
+        setReconnecting(false);
+        setError('Registry connection closed. Reconnect to resume live updates.');
+        return;
       }
-      reconnectTimerRef.current = window.setTimeout(() => {
-        setAutoConnecting(true);
-        connect().catch(() => undefined);
-      }, 1000);
+      if (reconnectStartedAtRef.current === null) {
+        reconnectStartedAtRef.current = Date.now();
+      }
+      setError('');
+      setReconnecting(true);
+      scheduleReconnectAttempt();
     });
 
     return () => {
       unsubscribeEvent();
       unsubscribeClose();
     };
-  }, [connected, projectId]);
+  }, [connected, projectId, token]);
 
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
@@ -1805,7 +1844,10 @@ function App() {
     );
   };
 
-  if (!connected) {
+  const hasCachedWorkspace = projects.length > 0 || !!projectId;
+  const keepWorkspaceVisible = reconnecting && !!token.trim() && hasCachedWorkspace;
+
+  if (!connected && !keepWorkspaceVisible) {
     return (
       <div className={`page theme-${themeMode}`}>
         <style>{setiFontCss}</style>
@@ -1849,7 +1891,7 @@ function App() {
             <span className="project-name" title={currentProjectName}>{currentProjectName}</span>
             <span className={`project-presence ${currentProject?.online ? 'online' : 'offline'}`} />
             {gitDirty ? <span className="project-dirty">dirty</span> : null}
-            {(loadingProject || refreshingProject) ? <span className="muted">...</span> : null}
+            {(loadingProject || refreshingProject || reconnecting) ? <span className="muted">...</span> : null}
           </button>
           {projectMenuOpen ? (
             <div className="project-menu">
@@ -1872,8 +1914,16 @@ function App() {
           ) : null}
         </div>
 
-        <button className="header-btn refresh-btn" onClick={() => refreshProject().catch(() => undefined)} title="Refresh project">
-          {refreshingProject ? '...' : <span className="codicon codicon-refresh" />}
+        <button
+          className="header-btn refresh-btn"
+          onClick={() => refreshProject().catch(() => undefined)}
+          title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
+          disabled={refreshingProject || reconnecting}>
+          {refreshingProject
+            ? '...'
+            : reconnecting
+              ? <span className="codicon codicon-loading codicon-modifier-spin" />
+              : <span className="codicon codicon-refresh" />}
         </button>
 
         <div className="header-spacer" />
