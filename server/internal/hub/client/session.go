@@ -586,7 +586,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 
 	if loadAttempted && loadFailed {
 		persistedSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
-		updated := reapplyPersistedModeModel(ctx, s.projectName, inst, newResult.SessionID, newResult.ConfigOptions, persistedSnap)
+		updated := applyReplayableConfigBaseline(ctx, s.projectName, inst, newResult.SessionID, newResult.ConfigOptions, persistedSnap)
 		if len(updated) > 0 {
 			s.mu.Lock()
 			state := s.agentStateLocked(agentName)
@@ -613,48 +613,49 @@ func findConfigOptionID(options []acp.ConfigOption, id, category string) string 
 	return ""
 }
 
-func reapplyPersistedModeModel(
+type replayableConfigTarget struct {
+	label    string
+	id       string
+	category string
+	value    string
+}
+
+func replayableTargetsFromSnapshot(snap acp.SessionConfigSnapshot) []replayableConfigTarget {
+	return []replayableConfigTarget{
+		{label: "mode", id: acp.ConfigOptionIDMode, category: acp.ConfigOptionCategoryMode, value: strings.TrimSpace(snap.Mode)},
+		{label: "model", id: acp.ConfigOptionIDModel, category: acp.ConfigOptionCategoryModel, value: strings.TrimSpace(snap.Model)},
+		{label: "thought_level", id: acp.ConfigOptionIDThoughtLevel, category: acp.ConfigOptionCategoryThoughtLv, value: strings.TrimSpace(snap.ThoughtLevel)},
+	}
+}
+
+func currentReplayableValue(label string, snap acp.SessionConfigSnapshot) string {
+	switch label {
+	case "mode":
+		return strings.TrimSpace(snap.Mode)
+	case "model":
+		return strings.TrimSpace(snap.Model)
+	case "thought_level":
+		return strings.TrimSpace(snap.ThoughtLevel)
+	default:
+		return ""
+	}
+}
+
+func applyReplayableConfigBaseline(
 	ctx context.Context,
 	projectName string,
 	inst agent.Instance,
 	sessionID string,
 	current []acp.ConfigOption,
-	persisted acp.SessionConfigSnapshot,
+	desired acp.SessionConfigSnapshot,
 ) []acp.ConfigOption {
 	options := append([]acp.ConfigOption(nil), current...)
-	type desiredConfig struct {
-		label    string
-		id       string
-		category string
-		value    string
-	}
-	targets := []desiredConfig{
-		{
-			label:    "mode",
-			id:       acp.ConfigOptionIDMode,
-			category: acp.ConfigOptionCategoryMode,
-			value:    strings.TrimSpace(persisted.Mode),
-		},
-		{
-			label:    "model",
-			id:       acp.ConfigOptionIDModel,
-			category: acp.ConfigOptionCategoryModel,
-			value:    strings.TrimSpace(persisted.Model),
-		},
-	}
-
-	for _, target := range targets {
+	for _, target := range replayableTargetsFromSnapshot(desired) {
 		if target.value == "" {
 			continue
 		}
-		snap := acp.SessionConfigSnapshotFromOptions(options)
-		currentValue := ""
-		if target.label == "mode" {
-			currentValue = strings.TrimSpace(snap.Mode)
-		} else {
-			currentValue = strings.TrimSpace(snap.Model)
-		}
-		if strings.EqualFold(currentValue, target.value) {
+		currentSnap := acp.SessionConfigSnapshotFromOptions(options)
+		if strings.EqualFold(currentReplayableValue(target.label, currentSnap), target.value) {
 			continue
 		}
 

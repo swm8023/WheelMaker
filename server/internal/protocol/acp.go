@@ -401,8 +401,9 @@ type SessionListResult struct {
 
 // SessionConfigSnapshot is a compact view of session-level mode/model values.
 type SessionConfigSnapshot struct {
-	Mode  string
-	Model string
+	Mode         string
+	Model        string
+	ThoughtLevel string
 }
 
 // resolveOptionDisplayValue resolves a config option's current value to a
@@ -431,7 +432,7 @@ func resolveOptionDisplayValue(opt ConfigOption) string {
 	return v
 }
 
-// SessionConfigSnapshotFromOptions extracts mode/model from a ConfigOption list.
+// SessionConfigSnapshotFromOptions extracts mode/model/thought_level from a ConfigOption list.
 func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
 	snap := SessionConfigSnapshot{}
 	for _, opt := range opts {
@@ -440,6 +441,9 @@ func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot
 		}
 		if snap.Model == "" && (opt.ID == ConfigOptionIDModel || opt.Category == ConfigOptionCategoryModel) {
 			snap.Model = resolveOptionDisplayValue(opt)
+		}
+		if snap.ThoughtLevel == "" && (opt.ID == ConfigOptionIDThoughtLevel || opt.Category == ConfigOptionCategoryThoughtLv) {
+			snap.ThoughtLevel = resolveOptionDisplayValue(opt)
 		}
 	}
 	return snap
