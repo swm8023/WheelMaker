@@ -1,5 +1,5 @@
-import {createHighlighterCore} from 'shiki/core';
-import {createJavaScriptRegexEngine} from 'shiki/engine/javascript';
+import {createHighlighterCore} from '@shikijs/core';
+import {createJavaScriptRegexEngine} from '@shikijs/engine-javascript';
 import type {HighlighterCore, LanguageInput, ShikiTransformer, ThemeInput} from '@shikijs/types';
 
 type ThemeMode = 'dark' | 'light';
