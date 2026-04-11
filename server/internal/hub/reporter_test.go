@@ -38,6 +38,17 @@ func (s *stubChatHandler) HandleChatRequest(_ context.Context, method string, _ 
 	return map[string]any{"ok": true}, nil
 }
 
+type stubSessionHandler struct {
+	lastMethod string
+	lastBody   string
+}
+
+func (s *stubSessionHandler) HandleSessionRequest(_ context.Context, method string, _ string, payload json.RawMessage) (any, error) {
+	s.lastMethod = method
+	s.lastBody = string(payload)
+	return map[string]any{"ok": true, "sessionId": "sess-1"}, nil
+}
+
 func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
 
@@ -100,6 +111,122 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	if readResp.Payload["content"] != "hello registry" {
 		t.Fatalf("content=%v, want hello registry", readResp.Payload["content"])
 	}
+}
+
+func TestReporterRespondsToSessionRequests(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	reqSeen := make(chan testEnvelope, 1)
+	respSeen := make(chan testEnvelope, 1)
+	errSeen := make(chan error, 1)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ws, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			errSeen <- err
+			return
+		}
+		defer ws.Close()
+
+		initReq := mustReadEnvelope(t, ws)
+		if initReq.Method != "connect.init" {
+			errSeen <- fmt.Errorf("init method=%q", initReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: initReq.RequestID,
+			Type:      "response",
+			Method:    "connect.init",
+			Payload: map[string]any{
+				"ok": true,
+				"principal": map[string]any{
+					"role":            "hub",
+					"hubId":           "hub-session",
+					"connectionEpoch": 1,
+				},
+				"serverInfo": map[string]any{
+					"serverVersion":   "test",
+					"protocolVersion": rp.DefaultProtocolVersion,
+				},
+				"features":       map[string]any{},
+				"hashAlgorithms": []string{"sha256"},
+			},
+		})
+
+		reportReq := mustReadEnvelope(t, ws)
+		if reportReq.Method != "registry.reportProjects" {
+			errSeen <- fmt.Errorf("report method=%q", reportReq.Method)
+			return
+		}
+		mustWriteJSON(t, ws, testEnvelope{
+			RequestID: reportReq.RequestID,
+			Type:      "response",
+			Method:    "registry.reportProjects",
+			Payload: map[string]any{
+				"ok": true,
+			},
+		})
+
+		request := testEnvelope{
+			RequestID: 100,
+			Type:      "request",
+			Method:    "session.send",
+			ProjectID: "hub-session:proj1",
+			Payload: map[string]any{
+				"sessionId": "sess-1",
+				"text":      "hello session",
+			},
+		}
+		mustWriteJSON(t, ws, request)
+		reqSeen <- request
+
+		_ = ws.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+		respSeen <- mustReadEnvelope(t, ws)
+	}))
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reporter := NewReporter(ReporterConfig{
+		Server:            strings.TrimPrefix(ts.URL, "http://"),
+		HubID:             "hub-session",
+		ReconnectInterval: 50 * time.Millisecond,
+	}, []ProjectInfo{{Name: "proj1", Path: t.TempDir(), Online: true}})
+	handler := &stubSessionHandler{}
+	reporter.RegisterSessionHandler(rp.ProjectID("hub-session", "proj1"), handler)
+
+	done := make(chan error, 1)
+	go func() { done <- reporter.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case <-reqSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive session request")
+	}
+
+	select {
+	case err := <-errSeen:
+		t.Fatalf("fake registry error: %v", err)
+	case resp := <-respSeen:
+		if resp.Type != "response" || resp.Method != "session.send" {
+			t.Fatalf("unexpected session.send response: %#v", resp)
+		}
+		if handler.lastMethod != "session.send" || !strings.Contains(handler.lastBody, "\"sessionId\":\"sess-1\"") {
+			t.Fatalf("handler saw method=%q body=%q", handler.lastMethod, handler.lastBody)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive session.send response from reporter")
+	}
+
 }
 
 func TestReporterRunReturnsOnContextCancel(t *testing.T) {

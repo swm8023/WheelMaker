@@ -265,6 +265,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleHubUpdateProject(state.peer, state, in)
 		case "registry.chat.message":
 			s.handleHubChatMessage(state.peer, state, in)
+		case "registry.session.updated":
+			s.handleHubSessionEvent(state.peer, state, in, "session.updated")
+		case "registry.session.message":
+			s.handleHubSessionEvent(state.peer, state, in, "session.message")
 		case "project.list":
 			s.handleProjectList(state.peer, state, in)
 		case "project.syncCheck":
@@ -274,6 +278,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "hub.ping":
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 		case "chat.session.list", "chat.session.read", "chat.send", "chat.permission.respond",
+			"session.list", "session.read", "session.new", "session.send", "session.markRead",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
 			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
 			"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":
@@ -317,10 +322,10 @@ func readEnvelope(ws *websocket.Conn) (envelope, bool, error) {
 func methodAllowed(role string, method string) bool {
 	switch role {
 	case "hub":
-		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.chat.message" || method == "hub.ping"
+		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.chat.message" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
-			strings.HasPrefix(method, "chat.") ||
+			strings.HasPrefix(method, "chat.") || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	default:
 		return false
@@ -565,6 +570,33 @@ func (s *Server) handleHubChatMessage(peer *peerConn, state *connectionState, in
 	_ = s.writeResponse(peer, in.RequestID, in.Method, projectID, map[string]any{
 		"ok": true,
 	})
+}
+
+func (s *Server) handleHubSessionEvent(peer *peerConn, state *connectionState, in envelope, eventMethod string) {
+	projectID := strings.TrimSpace(in.ProjectID)
+	if projectID == "" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "projectId is required", nil)
+		return
+	}
+	if state.hubID != "" && !strings.HasPrefix(projectID, state.hubID+":") {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeForbidden, "project out of hub scope", map[string]any{"projectId": projectID})
+		return
+	}
+
+	s.mu.RLock()
+	hubID := s.projectToHub[projectID]
+	s.mu.RUnlock()
+	if hubID == "" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeNotFound, "project not found", map[string]any{"projectId": projectID})
+		return
+	}
+	if state.hubID != "" && hubID != state.hubID {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeForbidden, "project not owned by connected hub", map[string]any{"projectId": projectID})
+		return
+	}
+
+	s.broadcastProjectEvent(hubID, projectID, eventMethod, json.RawMessage(in.Payload))
+	_ = s.writeResponse(peer, in.RequestID, in.Method, projectID, map[string]any{"ok": true})
 }
 
 func (s *Server) handleProjectList(peer *peerConn, state *connectionState, in envelope) {

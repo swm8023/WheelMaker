@@ -84,6 +84,7 @@ type Session struct {
 	registry    *agent.ACPFactory
 	store       Store
 	imRouter    IMRouter
+	viewSink    SessionViewSink
 	imSource    *im.ChatRef
 
 	createdAt    time.Time
@@ -259,6 +260,15 @@ func (s *Session) reply(text string) {
 
 // replyWithTitle sends a system message with an optional card title.
 func (s *Session) replyWithTitle(title, body string) {
+	messageText := strings.TrimSpace(body)
+	if strings.TrimSpace(title) != "" && strings.TrimSpace(body) != "" {
+		messageText = strings.TrimSpace(title) + "\n" + strings.TrimSpace(body)
+	} else if strings.TrimSpace(title) != "" {
+		messageText = strings.TrimSpace(title)
+	}
+	if messageText != "" {
+		s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventSystemMessage, Role: "system", Kind: "message", Text: messageText, Status: "done"})
+	}
 	if router, source, ok := s.imContext(); ok {
 		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.SystemPayload{
 			Kind:  "message",
@@ -287,6 +297,26 @@ func (s *Session) imContext() (IMRouter, im.ChatRef, bool) {
 		return nil, im.ChatRef{}, false
 	}
 	return s.imRouter, *s.imSource, true
+}
+
+func (s *Session) recordSessionViewEvent(event SessionViewEvent) {
+	if s.viewSink == nil {
+		return
+	}
+	if strings.TrimSpace(event.SessionID) == "" {
+		event.SessionID = s.ID
+	}
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	}
+	if event.UpdatedAt.IsZero() {
+		event.UpdatedAt = event.CreatedAt
+	}
+	if router, source, ok := s.imContext(); ok && router != nil {
+		event.SourceChannel = source.ChannelID
+		event.SourceChatID = source.ChatID
+	}
+	_ = s.viewSink.RecordEvent(context.Background(), event)
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the

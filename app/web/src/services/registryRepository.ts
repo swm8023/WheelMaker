@@ -1,8 +1,5 @@
 import { RegistryClient } from './registryClient';
 import type {
-  RegistryChatMessageEventPayload,
-  RegistryChatSession,
-  RegistryChatSessionReadResponse,
   RegistryEnvelope,
   RegistryFsInfo,
   RegistryFsListResponse,
@@ -14,6 +11,9 @@ import type {
   RegistryGitWorkspaceChangedPayload,
   RegistryProject,
   RegistryProjectEventPayload,
+  RegistrySessionMessageEventPayload,
+  RegistrySessionReadResponse,
+  RegistrySessionSummary,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryWorkingTreeFileDiff,
@@ -241,30 +241,29 @@ export class RegistryRepository {
     };
   }
 
-  async listChatSessions(projectId: string): Promise<RegistryChatSession[]> {
+  async listSessions(projectId: string): Promise<RegistrySessionSummary[]> {
     const resp = await this.client.request({
-      method: 'chat.session.list',
+      method: 'session.list',
       projectId,
       payload: {},
       timeoutMs: 15000,
     });
-    const payload = (resp.payload ?? {}) as {sessions?: RegistryChatSession[]};
-    return (payload.sessions ?? []).filter(session => !!session.chatId);
+    const payload = (resp.payload ?? {}) as {sessions?: RegistrySessionSummary[]};
+    return (payload.sessions ?? []).filter(session => !!session.sessionId);
   }
 
-  async readChatSession(projectId: string, chatId: string): Promise<RegistryChatSessionReadResponse> {
+  async readSession(projectId: string, sessionId: string): Promise<RegistrySessionReadResponse> {
     const resp = await this.client.request({
-      method: 'chat.session.read',
+      method: 'session.read',
       projectId,
-      payload: {chatId},
+      payload: {sessionId},
       timeoutMs: 15000,
     });
-    const payload = (resp.payload ?? {}) as Partial<RegistryChatSessionReadResponse>;
+    const payload = (resp.payload ?? {}) as Partial<RegistrySessionReadResponse>;
     return {
       session: payload.session ?? {
-        chatId,
-        sessionId: '',
-        title: chatId,
+        sessionId,
+        title: sessionId,
         preview: '',
         updatedAt: '',
         messageCount: 0,
@@ -273,25 +272,62 @@ export class RegistryRepository {
     };
   }
 
-  async sendChatMessage(projectId: string, payload: {chatId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; chatId: string}> {
+  async createSession(projectId: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
     const resp = await this.client.request({
-      method: 'chat.send',
+      method: 'session.new',
+      projectId,
+      payload: title?.trim() ? {title: title.trim()} : {},
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; session?: RegistrySessionSummary};
+    return {
+      ok: body.ok ?? false,
+      session: body.session ?? {
+        sessionId: '',
+        title: title?.trim() || '',
+        preview: '',
+        updatedAt: '',
+        messageCount: 0,
+      },
+    };
+  }
+
+  async sendSessionMessage(projectId: string, payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
+    const resp = await this.client.request({
+      method: 'session.send',
       projectId,
       payload,
       timeoutMs: 30000,
     });
-    const body = (resp.payload ?? {}) as {ok?: boolean; chatId?: string};
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string};
     return {
       ok: body.ok ?? false,
-      chatId: body.chatId ?? payload.chatId,
+      sessionId: body.sessionId ?? payload.sessionId,
     };
   }
 
-  async respondToChatPermission(projectId: string, payload: {chatId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
+  async markSessionRead(projectId: string, sessionId: string): Promise<{ok: boolean}> {
+    const resp = await this.client.request({
+      method: 'session.markRead',
+      projectId,
+      payload: {sessionId},
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean};
+    return {
+      ok: body.ok ?? false,
+    };
+  }
+
+  async respondToSessionPermission(projectId: string, payload: {sessionId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
     const resp = await this.client.request({
       method: 'chat.permission.respond',
       projectId,
-      payload,
+      payload: {
+        chatId: payload.sessionId,
+        requestId: payload.requestId,
+        optionId: payload.optionId,
+      },
       timeoutMs: 15000,
     });
     const body = (resp.payload ?? {}) as {ok?: boolean};
@@ -307,7 +343,7 @@ export class RegistryRepository {
   onEvent(
     listener: (
       event:
-        | RegistryEnvelope<RegistryChatMessageEventPayload>
+        | RegistryEnvelope<RegistrySessionMessageEventPayload>
         | RegistryEnvelope<RegistryProjectEventPayload>
         | RegistryEnvelope<RegistryGitWorkspaceChangedPayload>
         | RegistryEnvelope<Record<string, never>>,

@@ -174,7 +174,7 @@ function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
 }
 
 function mergeChatSession(list: RegistryChatSession[], next: RegistryChatSession): RegistryChatSession[] {
-  const filtered = list.filter(item => item.chatId !== next.chatId);
+  const filtered = list.filter(item => item.sessionId !== next.sessionId);
   return sortChatSessions([next, ...filtered]);
 }
 
@@ -1175,14 +1175,15 @@ function App() {
     }, RECONNECT_RETRY_DELAY_MS);
   };
 
-  const loadChatSession = async (chatId: string, activeProjectId = projectIdRef.current) => {
-    if (!activeProjectId || !chatId) return;
+  const loadChatSession = async (sessionId: string, activeProjectId = projectIdRef.current) => {
+    if (!activeProjectId || !sessionId) return;
     setChatLoading(true);
     try {
-      const result = await service.readChatSession(chatId);
+      const result = await service.readSession(sessionId);
       setChatMessages(result.messages);
       setChatSessions(prev => mergeChatSession(prev, result.session));
-      setSelectedChatId(result.session.chatId);
+      setSelectedChatId(result.session.sessionId);
+      await service.markSessionRead(result.session.sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1190,27 +1191,42 @@ function App() {
     }
   };
 
-  const loadChatSessions = async (preferredChatId = '', activeProjectId = projectIdRef.current) => {
+  const loadChatSessions = async (preferredSessionId = '', activeProjectId = projectIdRef.current) => {
     if (!activeProjectId) return;
     try {
-      const sessions = sortChatSessions(await service.listChatSessions());
+      const sessions = sortChatSessions(await service.listSessions());
       setChatSessions(sessions);
-      const fallbackChatId = preferredChatId || chatSelectedIdRef.current || sessions[0]?.chatId || '';
-      if (!fallbackChatId) {
+      const fallbackSessionId = preferredSessionId || chatSelectedIdRef.current || sessions[0]?.sessionId || '';
+      if (!fallbackSessionId) {
         setSelectedChatId('');
         setChatMessages([]);
         return;
       }
-      await loadChatSession(fallbackChatId, activeProjectId);
+      await loadChatSession(fallbackSessionId, activeProjectId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const createChatSession = async (title = '') => {
+    try {
+      const result = await service.createSession(title);
+      if (!result.session.sessionId) {
+        throw new Error('Session was created without a sessionId');
+      }
+      setChatSessions(prev => mergeChatSession(prev, result.session));
+      setSelectedChatId(result.session.sessionId);
+      setChatMessages([]);
+      return result.session.sessionId;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return '';
     }
   };
 
   const sendChatMessage = async () => {
     const trimmedText = chatComposerText.trim();
     if (!trimmedText && !chatAttachment) return;
-    const chatId = selectedChatId || `chat-${Date.now()}`;
     const blocks: RegistryChatContentBlock[] = [];
     if (trimmedText) {
       blocks.push({type: 'text', text: trimmedText});
@@ -1221,18 +1237,21 @@ function App() {
 
     setChatSending(true);
     try {
-      const result = await service.sendChatMessage({
-        chatId,
+      const sessionId = selectedChatId || await createChatSession(trimmedText || chatAttachment?.name || '');
+      if (!sessionId) {
+        return;
+      }
+      const result = await service.sendSessionMessage({
+        sessionId,
         text: trimmedText,
         blocks,
       });
-      const nextChatId = result.chatId || chatId;
-      setSelectedChatId(nextChatId);
-      if (!chatSessions.find(item => item.chatId === nextChatId)) {
+      const nextSessionId = result.sessionId || sessionId;
+      setSelectedChatId(nextSessionId);
+      if (!chatSessions.find(item => item.sessionId === nextSessionId)) {
         setChatSessions(prev => mergeChatSession(prev, {
-          chatId: nextChatId,
-          sessionId: '',
-          title: trimmedText || chatAttachment?.name || nextChatId,
+          sessionId: nextSessionId,
+          title: trimmedText || chatAttachment?.name || nextSessionId,
           preview: trimmedText || chatAttachment?.name || '',
           updatedAt: new Date().toISOString(),
           messageCount: 0,
@@ -1251,10 +1270,10 @@ function App() {
   };
 
   const respondToChatPermission = async (message: RegistryChatMessage, optionId: string) => {
-    if (!message.chatId || !message.requestId) return;
+    if (!message.sessionId || !message.requestId) return;
     try {
-      await service.respondToChatPermission({
-        chatId: message.chatId,
+      await service.respondToSessionPermission({
+        sessionId: message.sessionId,
         requestId: message.requestId,
         optionId,
       });
@@ -1431,20 +1450,32 @@ function App() {
           ),
         );
       }
-      if (event.method === 'chat.message') {
+      if (event.method === 'session.updated') {
+        if (eventProjectId && eventProjectId !== projectIdRef.current) {
+          return;
+        }
+        const payload = (event.payload ?? {}) as {session?: RegistryChatSession};
+        if (payload.session?.sessionId) {
+          setChatSessions(prev => mergeChatSession(prev, payload.session!));
+        }
+        return;
+      }
+      if (event.method === 'session.message') {
         if (eventProjectId && eventProjectId !== projectIdRef.current) {
           return;
         }
         const payload = (event.payload ?? {}) as RegistryChatMessageEventPayload;
-        if (payload.session?.chatId) {
+        if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session));
         }
-        if (payload.message?.chatId && payload.message.chatId === chatSelectedIdRef.current) {
+        if (payload.message?.sessionId && payload.message.sessionId === chatSelectedIdRef.current) {
           setChatMessages(prev => upsertChatMessage(prev, payload.message));
+          service.markSessionRead(payload.message.sessionId).catch(() => undefined);
         }
-        if (!chatSelectedIdRef.current && payload.session?.chatId) {
-          setSelectedChatId(payload.session.chatId);
+        if (!chatSelectedIdRef.current && payload.session?.sessionId) {
+          setSelectedChatId(payload.session.sessionId);
           setChatMessages(prev => upsertChatMessage(prev, payload.message));
+          service.markSessionRead(payload.session.sessionId).catch(() => undefined);
         }
         return;
       }
@@ -1576,17 +1607,28 @@ function App() {
           <div className="section-title">CHAT SESSIONS</div>
           <div className="list">
             {chatSessions.length === 0 ? <div className="muted block">No chat sessions yet</div> : null}
+            <button
+              type="button"
+              className="button"
+              style={{marginBottom: 10}}
+              onClick={() => {
+                createChatSession().catch(() => undefined);
+                if (!isWide) setDrawerOpen(false);
+              }}
+            >
+              New Session
+            </button>
             {chatSessions.map(session => (
               <div
-                key={session.chatId}
-                className={`item ${selectedChatId === session.chatId ? 'selected' : ''}`}
+                key={session.sessionId}
+                className={`item ${selectedChatId === session.sessionId ? 'selected' : ''}`}
                 onClick={() => {
-                  loadChatSession(session.chatId).catch(() => undefined);
+                  loadChatSession(session.sessionId).catch(() => undefined);
                   if (!isWide) setDrawerOpen(false);
                 }}>
                 <span className="file-dot codicon codicon-comment-discussion" />
                 <span className="label" style={{display: 'flex', flexDirection: 'column', gap: 2}}>
-                  <span>{session.title || session.chatId}</span>
+                  <span>{session.title || session.sessionId}</span>
                   <span className="muted" style={{fontSize: 11}}>{session.preview || 'No messages yet'}</span>
                 </span>
               </div>
@@ -1911,7 +1953,7 @@ function App() {
 
   const renderMain = () => {
     const heavyDiffDeferred = !!selectedDiff && isHeavyGeneratedDiffPath(selectedDiff) && !allowHeavyDiffLoad;
-    const selectedChatSession = chatSessions.find(item => item.chatId === selectedChatId);
+    const selectedChatSession = chatSessions.find(item => item.sessionId === selectedChatId);
 
     if (tab === 'chat') {
       return (

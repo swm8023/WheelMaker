@@ -39,12 +39,23 @@ func (s *Session) decidePermission(ctx context.Context, requestID int64, params 
 		hubLogger(s.projectName).Error("permission publish failed session=%s request=%d err=%v", s.ID, requestID, err)
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
+	s.recordSessionViewEvent(SessionViewEvent{
+		Type:      SessionViewEventPermissionRequested,
+		Role:      "system",
+		Kind:      "permission",
+		Text:      strings.TrimSpace(params.ToolCall.Title),
+		Options:   cloneSessionPermissionOptions(params.Options),
+		Status:    "needs_action",
+		RequestID: requestID,
+	})
 
 	select {
 	case <-ctx.Done():
 		hubLogger(s.projectName).Warn("permission request timeout/cancelled session=%s request=%d", s.ID, requestID)
+		s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventPermissionResolved, Status: "cancelled", RequestID: requestID})
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	case result := <-waitCh:
+		s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventPermissionResolved, Status: firstNonEmpty(strings.TrimSpace(result.Outcome), "done"), RequestID: requestID})
 		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
 			return result, nil
 		}

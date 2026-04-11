@@ -1,8 +1,6 @@
 import {createRegistryRepository, type RegistryRepository} from './registryRepository';
 import {RegistryRequestError} from './registryClient';
 import type {
-  RegistryChatMessage,
-  RegistryChatSession,
   RegistryEnvelope,
   RegistryFsInfo,
   RegistryFsEntry,
@@ -11,6 +9,8 @@ import type {
   RegistryGitFileDiff,
   RegistryGitStatus,
   RegistryProject,
+  RegistrySessionMessage,
+  RegistrySessionSummary,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryWorkingTreeFileDiff,
@@ -202,35 +202,49 @@ export class RegistryWorkspaceService {
     return projects;
   }
 
-  async listChatSessions(): Promise<RegistryChatSession[]> {
+  async listSessions(): Promise<RegistrySessionSummary[]> {
     if (!this.session || !this.repository) {
       return [];
     }
-    return this.repository.listChatSessions(this.session.selectedProjectId);
+    return this.repository.listSessions(this.session.selectedProjectId);
   }
 
-  async readChatSession(chatId: string): Promise<{session: RegistryChatSession; messages: RegistryChatMessage[]}> {
+  async readSession(sessionId: string): Promise<{session: RegistrySessionSummary; messages: RegistrySessionMessage[]}> {
     if (!this.session || !this.repository) {
       return {
-        session: {chatId, title: chatId, preview: '', updatedAt: '', messageCount: 0},
+        session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0},
         messages: [],
       };
     }
-    return this.repository.readChatSession(this.session.selectedProjectId, chatId);
+    return this.repository.readSession(this.session.selectedProjectId, sessionId);
   }
 
-  async sendChatMessage(payload: {chatId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; chatId: string}> {
+  async createSession(title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    return this.repository.sendChatMessage(this.session.selectedProjectId, payload);
+    return this.repository.createSession(this.session.selectedProjectId, title);
   }
 
-  async respondToChatPermission(payload: {chatId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
+  async sendSessionMessage(payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    return this.repository.respondToChatPermission(this.session.selectedProjectId, payload);
+    return this.repository.sendSessionMessage(this.session.selectedProjectId, payload);
+  }
+
+  async markSessionRead(sessionId: string): Promise<{ok: boolean}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.markSessionRead(this.session.selectedProjectId, sessionId);
+  }
+
+  async respondToSessionPermission(payload: {sessionId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.respondToSessionPermission(this.session.selectedProjectId, payload);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

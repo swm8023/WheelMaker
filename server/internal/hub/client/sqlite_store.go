@@ -37,11 +37,34 @@ CREATE TABLE IF NOT EXISTS sessions (
 	last_reply TEXT NOT NULL DEFAULT '',
 	acp_session_id TEXT NOT NULL DEFAULT '',
 	agents_json TEXT NOT NULL DEFAULT '{}',
+	title TEXT NOT NULL DEFAULT '',
+	last_message_preview TEXT NOT NULL DEFAULT '',
+	last_message_at TEXT NOT NULL DEFAULT '',
+	message_count INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
 	last_active_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS session_messages (
+	message_id TEXT PRIMARY KEY,
+	project_name TEXT NOT NULL,
+	session_id TEXT NOT NULL,
+	role TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	body TEXT NOT NULL DEFAULT '',
+	blocks_json TEXT NOT NULL DEFAULT '[]',
+	options_json TEXT NOT NULL DEFAULT '[]',
+	status TEXT NOT NULL DEFAULT 'done',
+	source_channel TEXT NOT NULL DEFAULT '',
+	source_chat_id TEXT NOT NULL DEFAULT '',
+	request_id INTEGER NOT NULL DEFAULT 0,
+	aggregate_key TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
+	updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC);
+CREATE INDEX IF NOT EXISTS idx_session_messages_project_session ON session_messages(project_name, session_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_session_messages_aggregate_key ON session_messages(project_name, session_id, aggregate_key);
 `
 
 type ProjectAgentState struct {
@@ -56,23 +79,48 @@ type ProjectConfig struct {
 }
 
 type SessionRecord struct {
-	ID           string
-	ProjectName  string
-	Status       SessionStatus
-	LastReply    string
-	ACPSessionID string
-	AgentsJSON   string
-	CreatedAt    time.Time
-	LastActiveAt time.Time
+	ID                 string
+	ProjectName        string
+	Status             SessionStatus
+	LastReply          string
+	ACPSessionID       string
+	AgentsJSON         string
+	Title              string
+	LastMessagePreview string
+	LastMessageAt      time.Time
+	MessageCount       int
+	CreatedAt          time.Time
+	LastActiveAt       time.Time
 }
 
 type SessionListEntry struct {
-	ID           string
-	Agent        string
-	Title        string
-	Status       SessionStatus
-	CreatedAt    time.Time
-	LastActiveAt time.Time
+	ID            string
+	Agent         string
+	Title         string
+	Preview       string
+	Status        SessionStatus
+	MessageCount  int
+	CreatedAt     time.Time
+	LastActiveAt  time.Time
+	LastMessageAt time.Time
+}
+
+type SessionMessageRecord struct {
+	MessageID     string
+	SessionID     string
+	ProjectName   string
+	Role          string
+	Kind          string
+	Body          string
+	Blocks        []acp.ContentBlock
+	Options       []acp.PermissionOption
+	Status        string
+	SourceChannel string
+	SourceChatID  string
+	RequestID     int64
+	AggregateKey  string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type Store interface {
@@ -86,6 +134,10 @@ type Store interface {
 	LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error)
 	SaveSession(ctx context.Context, rec *SessionRecord) error
 	ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error)
+	AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error
+	UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error
+	ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error)
+	HasSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
 
 	Close() error
@@ -108,6 +160,10 @@ func NewStore(dbPath string) (Store, error) {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
 	if err := migrateProjectsTable(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := migrateSessionsTable(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -138,6 +194,69 @@ func migrateProjectsTable(db *sql.DB) error {
 		}
 		if _, err := db.Exec(column.ddl); err != nil {
 			return fmt.Errorf("migrate projects.%s column: %w", column.name, err)
+		}
+	}
+	return nil
+}
+
+func migrateSessionsTable(db *sql.DB) error {
+	messageColumns := []struct {
+		name string
+		ddl  string
+	}{
+		{
+			name: "blocks_json",
+			ddl:  `ALTER TABLE session_messages ADD COLUMN blocks_json TEXT NOT NULL DEFAULT '[]'`,
+		},
+		{
+			name: "options_json",
+			ddl:  `ALTER TABLE session_messages ADD COLUMN options_json TEXT NOT NULL DEFAULT '[]'`,
+		},
+	}
+	for _, column := range messageColumns {
+		exists, err := sqliteColumnExists(db, "session_messages", column.name)
+		if err != nil {
+			return fmt.Errorf("check session_messages.%s column: %w", column.name, err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.Exec(column.ddl); err != nil {
+			return fmt.Errorf("migrate session_messages.%s column: %w", column.name, err)
+		}
+	}
+
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{
+			name: "title",
+			ddl:  `ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "last_message_preview",
+			ddl:  `ALTER TABLE sessions ADD COLUMN last_message_preview TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "last_message_at",
+			ddl:  `ALTER TABLE sessions ADD COLUMN last_message_at TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "message_count",
+			ddl:  `ALTER TABLE sessions ADD COLUMN message_count INTEGER NOT NULL DEFAULT 0`,
+		},
+	}
+	for _, column := range columns {
+		exists, err := sqliteColumnExists(db, "sessions", column.name)
+		if err != nil {
+			return fmt.Errorf("check sessions.%s column: %w", column.name, err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := db.Exec(column.ddl); err != nil {
+			return fmt.Errorf("migrate sessions.%s column: %w", column.name, err)
 		}
 	}
 	return nil
@@ -287,13 +406,14 @@ func (s *sqliteStore) DeleteRouteBinding(ctx context.Context, projectName, route
 
 func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, status, last_reply, acp_session_id, agents_json, created_at, last_active_at
+		SELECT id, status, last_reply, acp_session_id, agents_json, title, last_message_preview, last_message_at, message_count, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
 
 	rec := &SessionRecord{}
 	var status int
+	var lastMessageAt string
 	var createdAt string
 	var lastActiveAt string
 	if err := row.Scan(
@@ -302,6 +422,10 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 		&rec.LastReply,
 		&rec.ACPSessionID,
 		&rec.AgentsJSON,
+		&rec.Title,
+		&rec.LastMessagePreview,
+		&lastMessageAt,
+		&rec.MessageCount,
 		&createdAt,
 		&lastActiveAt,
 	); err != nil {
@@ -313,6 +437,7 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 
 	rec.ProjectName = strings.TrimSpace(projectName)
 	rec.Status = SessionStatus(status)
+	rec.LastMessageAt = parseStoreTime(lastMessageAt)
 	rec.CreatedAt = parseStoreTime(createdAt)
 	rec.LastActiveAt = parseStoreTime(lastActiveAt)
 	return rec, nil
@@ -339,19 +464,27 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if rec.LastActiveAt.IsZero() {
 		rec.LastActiveAt = rec.CreatedAt
 	}
+	if rec.LastMessageAt.IsZero() && strings.TrimSpace(rec.LastMessagePreview) != "" {
+		rec.LastMessageAt = rec.LastActiveAt
+	}
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, project_name, status, last_reply, acp_session_id, agents_json, created_at, last_active_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			id, project_name, status, last_reply, acp_session_id, agents_json, title, last_message_preview, last_message_at, message_count, created_at, last_active_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_name=excluded.project_name,
 			status=excluded.status,
 			last_reply=excluded.last_reply,
 			acp_session_id=excluded.acp_session_id,
 			agents_json=excluded.agents_json,
+			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
+			last_message_preview=CASE WHEN excluded.last_message_preview != '' THEN excluded.last_message_preview ELSE sessions.last_message_preview END,
+			last_message_at=CASE WHEN excluded.last_message_at != '' THEN excluded.last_message_at ELSE sessions.last_message_at END,
+			message_count=CASE WHEN excluded.message_count > 0 THEN excluded.message_count ELSE sessions.message_count END,
 			last_active_at=excluded.last_active_at
-	`, rec.ID, rec.ProjectName, int(rec.Status), rec.LastReply, rec.ACPSessionID, rec.AgentsJSON,
+	`, rec.ID, rec.ProjectName, int(rec.Status), rec.LastReply, rec.ACPSessionID, rec.AgentsJSON, rec.Title, rec.LastMessagePreview,
+		rec.LastMessageAt.UTC().Format(time.RFC3339Nano), rec.MessageCount,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.LastActiveAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -362,10 +495,10 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, status, acp_session_id, agents_json, created_at, last_active_at
+		SELECT id, status, acp_session_id, agents_json, title, last_message_preview, message_count, created_at, last_active_at, last_message_at
 		FROM sessions
 		WHERE project_name = ?
-		ORDER BY last_active_at DESC
+		ORDER BY CASE WHEN last_message_at = '' THEN last_active_at ELSE last_message_at END DESC, last_active_at DESC
 	`, strings.TrimSpace(projectName))
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -378,18 +511,145 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		var status int
 		var acpSessionID string
 		var agentsJSON string
+		var storedTitle string
+		var preview string
+		var messageCount int
 		var createdAt string
 		var lastActiveAt string
-		if err := rows.Scan(&entry.ID, &status, &acpSessionID, &agentsJSON, &createdAt, &lastActiveAt); err != nil {
+		var lastMessageAt string
+		if err := rows.Scan(&entry.ID, &status, &acpSessionID, &agentsJSON, &storedTitle, &preview, &messageCount, &createdAt, &lastActiveAt, &lastMessageAt); err != nil {
 			return nil, fmt.Errorf("scan session list entry: %w", err)
 		}
 		entry.Status = SessionStatus(status)
 		entry.CreatedAt = parseStoreTime(createdAt)
 		entry.LastActiveAt = parseStoreTime(lastActiveAt)
+		entry.LastMessageAt = parseStoreTime(lastMessageAt)
+		entry.MessageCount = messageCount
 		entry.Agent, entry.Title = inferSessionListMetadata(acpSessionID, agentsJSON)
+		if strings.TrimSpace(storedTitle) != "" {
+			entry.Title = strings.TrimSpace(storedTitle)
+		}
+		entry.Preview = strings.TrimSpace(preview)
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
+}
+
+func (s *sqliteStore) AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
+	return s.insertOrUpdateSessionMessage(ctx, rec, false)
+}
+
+func (s *sqliteStore) UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
+	return s.insertOrUpdateSessionMessage(ctx, rec, true)
+}
+
+func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec SessionMessageRecord, update bool) error {
+	rec.MessageID = strings.TrimSpace(rec.MessageID)
+	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
+	rec.SessionID = strings.TrimSpace(rec.SessionID)
+	rec.Role = strings.TrimSpace(rec.Role)
+	rec.Kind = strings.TrimSpace(rec.Kind)
+	rec.Status = strings.TrimSpace(rec.Status)
+	rec.AggregateKey = strings.TrimSpace(rec.AggregateKey)
+	if rec.MessageID == "" {
+		return fmt.Errorf("message id is required")
+	}
+	if rec.ProjectName == "" {
+		return fmt.Errorf("project name is required")
+	}
+	if rec.SessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if rec.CreatedAt.IsZero() {
+		rec.CreatedAt = time.Now().UTC()
+	}
+	if rec.UpdatedAt.IsZero() {
+		rec.UpdatedAt = rec.CreatedAt
+	}
+	blocksJSON, err := marshalSessionContentBlocks(rec.Blocks)
+	if err != nil {
+		return err
+	}
+	optionsJSON, err := marshalSessionPermissionOptions(rec.Options)
+	if err != nil {
+		return err
+	}
+	query := `
+		INSERT INTO session_messages (
+			message_id, project_name, session_id, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	if update {
+		query += `
+		ON CONFLICT(message_id) DO UPDATE SET
+			project_name=excluded.project_name,
+			session_id=excluded.session_id,
+			role=excluded.role,
+			kind=excluded.kind,
+			body=excluded.body,
+			blocks_json=excluded.blocks_json,
+			options_json=excluded.options_json,
+			status=excluded.status,
+			source_channel=excluded.source_channel,
+			source_chat_id=excluded.source_chat_id,
+			request_id=excluded.request_id,
+			aggregate_key=excluded.aggregate_key,
+			updated_at=excluded.updated_at`
+	}
+	_, err = s.db.ExecContext(ctx, query,
+		rec.MessageID, rec.ProjectName, rec.SessionID, rec.Role, rec.Kind, rec.Body, blocksJSON, optionsJSON, rec.Status, rec.SourceChannel, rec.SourceChatID, rec.RequestID, rec.AggregateKey,
+		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("save session message: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT message_id, project_name, session_id, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
+		FROM session_messages
+		WHERE project_name = ? AND session_id = ?
+		ORDER BY created_at ASC, updated_at ASC
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, fmt.Errorf("list session messages: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionMessageRecord
+	for rows.Next() {
+		var rec SessionMessageRecord
+		var blocksJSON string
+		var optionsJSON string
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(&rec.MessageID, &rec.ProjectName, &rec.SessionID, &rec.Role, &rec.Kind, &rec.Body, &blocksJSON, &optionsJSON, &rec.Status, &rec.SourceChannel, &rec.SourceChatID, &rec.RequestID, &rec.AggregateKey, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan session message: %w", err)
+		}
+		rec.Blocks = unmarshalSessionContentBlocks(blocksJSON)
+		rec.Options = unmarshalSessionPermissionOptions(optionsJSON)
+		rec.CreatedAt = parseStoreTime(createdAt)
+		rec.UpdatedAt = parseStoreTime(updatedAt)
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) HasSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT 1 FROM session_messages
+		WHERE project_name = ? AND session_id = ? AND message_id = ?
+		LIMIT 1
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), strings.TrimSpace(messageID)).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("has session message: %w", err)
+	}
+	return true, nil
 }
 
 func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID string) error {
@@ -447,4 +707,50 @@ func inferSessionListMetadata(acpSessionID, agentsJSON string) (string, string) 
 		}
 	}
 	return "", ""
+}
+
+func marshalSessionContentBlocks(blocks []acp.ContentBlock) (string, error) {
+	if len(blocks) == 0 {
+		return "[]", nil
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		return "", fmt.Errorf("marshal session content blocks: %w", err)
+	}
+	return string(raw), nil
+}
+
+func marshalSessionPermissionOptions(options []acp.PermissionOption) (string, error) {
+	if len(options) == 0 {
+		return "[]", nil
+	}
+	raw, err := json.Marshal(options)
+	if err != nil {
+		return "", fmt.Errorf("marshal session permission options: %w", err)
+	}
+	return string(raw), nil
+}
+
+func unmarshalSessionContentBlocks(raw string) []acp.ContentBlock {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var blocks []acp.ContentBlock
+	if err := json.Unmarshal([]byte(raw), &blocks); err != nil {
+		return nil
+	}
+	return blocks
+}
+
+func unmarshalSessionPermissionOptions(raw string) []acp.PermissionOption {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var options []acp.PermissionOption
+	if err := json.Unmarshal([]byte(raw), &options); err != nil {
+		return nil
+	}
+	return options
 }

@@ -5,13 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/swm8023/wheelmaker/internal/hub/agent"
-	"github.com/swm8023/wheelmaker/internal/hub/client"
-	im "github.com/swm8023/wheelmaker/internal/im"
-	imapp "github.com/swm8023/wheelmaker/internal/im/app"
-	imfeishu "github.com/swm8023/wheelmaker/internal/im/feishu"
-	rp "github.com/swm8023/wheelmaker/internal/protocol"
-	logger "github.com/swm8023/wheelmaker/internal/shared"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +12,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
+	"github.com/swm8023/wheelmaker/internal/hub/client"
+	"github.com/swm8023/wheelmaker/internal/hub/sessionview"
+	im "github.com/swm8023/wheelmaker/internal/im"
+	imapp "github.com/swm8023/wheelmaker/internal/im/app"
+	imfeishu "github.com/swm8023/wheelmaker/internal/im/feishu"
+	rp "github.com/swm8023/wheelmaker/internal/protocol"
+	logger "github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const (
@@ -36,6 +38,7 @@ type Hub struct {
 	regMu    sync.Mutex
 	lastProj map[string]ProjectInfo
 	appIM    map[string]*imapp.Channel
+	views    map[string]*sessionview.Service
 }
 
 // New creates a Hub from the given config and client DB path.
@@ -46,6 +49,7 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 		dbPath:   dbPath,
 		lastProj: map[string]ProjectInfo{},
 		appIM:    map[string]*imapp.Channel{},
+		views:    map[string]*sessionview.Service{},
 	}
 }
 
@@ -91,6 +95,9 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 	}
 	c := client.New(store, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
+	view := sessionview.New(pc.Name, store, c)
+	c.SetSessionViewSink(view)
+	h.views[pc.Name] = view
 
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())
 	if pc.Feishu != nil && !pc.HasFeishu() {
@@ -112,16 +119,15 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 			_ = c.Close()
 			return nil, err
 		}
-	} else {
-		hubLogger(pc.Name).Info("register channel type=app")
-		appChannel := imapp.New()
-		if err := router.RegisterChannel(appChannel); err != nil {
-			hubLogger(pc.Name).Error("register channel failed type=app err=%v", err)
-			_ = c.Close()
-			return nil, err
-		}
-		h.appIM[pc.Name] = appChannel
 	}
+	hubLogger(pc.Name).Info("register channel type=app")
+	appChannel := imapp.New()
+	if err := router.RegisterChannel(appChannel); err != nil {
+		hubLogger(pc.Name).Error("register channel failed type=app err=%v", err)
+		_ = c.Close()
+		return nil, err
+	}
+	h.appIM[pc.Name] = appChannel
 	c.SetIMRouter(router)
 	hubLogger(pc.Name).Info("starting client")
 	if err := c.Start(ctx); err != nil {
@@ -216,13 +222,19 @@ func (h *Hub) setupRegistrySync() {
 		ReconnectInterval: 2 * time.Second,
 	}, projects)
 	for _, project := range projects {
+		view := h.views[project.Name]
 		appChannel := h.appIM[project.Name]
-		if appChannel == nil {
-			continue
-		}
 		projectID := rp.ProjectID(hubID, project.Name)
-		appChannel.SetEventPublisher(projectID, rep.PublishChatMessage)
-		rep.RegisterChatHandler(projectID, appChannel)
+		if view != nil {
+			view.SetEventPublisher(func(method string, payload any) error {
+				return rep.PublishProjectEvent(projectID, method, payload)
+			})
+			rep.RegisterSessionHandler(projectID, view)
+		}
+		if appChannel != nil {
+			appChannel.SetEventPublisher(projectID, rep.PublishChatMessage)
+			rep.RegisterChatHandler(projectID, appChannel)
+		}
 	}
 	h.regSync = rep
 	h.regMu.Lock()

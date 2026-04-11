@@ -22,56 +22,64 @@ export interface RegistryProjectEventPayload {
   changedPaths?: string[];
 }
 
-export type RegistryChatMessageRole = 'user' | 'assistant' | 'system';
-export type RegistryChatMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'permission' | 'prompt_result' | 'message';
-export type RegistryChatMessageStatus = 'streaming' | 'done' | 'needs_action';
+export type RegistrySessionMessageRole = 'user' | 'assistant' | 'system';
+export type RegistrySessionMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'permission' | 'prompt_result' | 'message';
+export type RegistrySessionMessageStatus = 'streaming' | 'done' | 'needs_action';
 
-export interface RegistryChatContentBlock {
+export interface RegistrySessionContentBlock {
   type: 'text' | 'image';
   text?: string;
   mimeType?: string;
   data?: string;
 }
 
-export interface RegistryChatPermissionOption {
+export interface RegistrySessionPermissionOption {
   optionId: string;
   name: string;
   kind: string;
 }
 
-export interface RegistryChatMessage {
+export interface RegistrySessionMessage {
   messageId: string;
-  chatId: string;
-  sessionId?: string;
-  role: RegistryChatMessageRole;
-  kind: RegistryChatMessageKind;
+  sessionId: string;
+  role: RegistrySessionMessageRole;
+  kind: RegistrySessionMessageKind;
   text: string;
-  status: RegistryChatMessageStatus;
+  status: RegistrySessionMessageStatus;
   createdAt: string;
   updatedAt: string;
   requestId?: number;
-  blocks?: RegistryChatContentBlock[];
-  options?: RegistryChatPermissionOption[];
+  blocks?: RegistrySessionContentBlock[];
+  options?: RegistrySessionPermissionOption[];
 }
 
-export interface RegistryChatSession {
-  chatId: string;
-  sessionId?: string;
+export interface RegistrySessionSummary {
+  sessionId: string;
   title: string;
   preview: string;
   updatedAt: string;
   messageCount: number;
+  unreadCount?: number;
+  agent?: string;
+  status?: string;
 }
 
-export interface RegistryChatSessionReadResponse {
-  session: RegistryChatSession;
-  messages: RegistryChatMessage[];
+export interface RegistrySessionReadResponse {
+  session: RegistrySessionSummary;
+  messages: RegistrySessionMessage[];
 }
 
-export interface RegistryChatMessageEventPayload {
-  session: RegistryChatSession;
-  message: RegistryChatMessage;
+export interface RegistrySessionMessageEventPayload {
+  session: RegistrySessionSummary;
+  message: RegistrySessionMessage;
 }
+
+export type RegistryChatContentBlock = RegistrySessionContentBlock;
+export type RegistryChatPermissionOption = RegistrySessionPermissionOption;
+export type RegistryChatMessage = RegistrySessionMessage;
+export type RegistryChatSession = RegistrySessionSummary;
+export type RegistryChatSessionReadResponse = RegistrySessionReadResponse;
+export type RegistryChatMessageEventPayload = RegistrySessionMessageEventPayload;
 
 export interface RegistryGitWorkspaceChangedPayload {
   gitRev?: string;

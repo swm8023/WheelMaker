@@ -411,6 +411,14 @@ func (s *noopStore) SaveSession(context.Context, *SessionRecord) error { return 
 func (s *noopStore) ListSessions(context.Context, string) ([]SessionListEntry, error) {
 	return nil, nil
 }
+func (s *noopStore) AppendSessionMessage(context.Context, SessionMessageRecord) error { return nil }
+func (s *noopStore) UpsertSessionMessage(context.Context, SessionMessageRecord) error { return nil }
+func (s *noopStore) ListSessionMessages(context.Context, string, string) ([]SessionMessageRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) HasSessionMessage(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
 func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
 func (s *noopStore) Close() error                                        { return nil }
 

@@ -662,6 +662,159 @@ func TestChatSendForwardingAndChatMessageBroadcast(t *testing.T) {
 	}
 }
 
+func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hub := dialWS(t, ts.URL+"/ws")
+	defer hub.Close()
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "hub",
+			"hubId":           "hub-a",
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-a",
+			"connectionEpoch": int64(connectionEpoch),
+			"projects": []map[string]any{
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "app", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
+			},
+		},
+	})
+	_ = mustReadEnvelope(t, hub)
+
+	client := dialWS(t, ts.URL+"/ws")
+	defer client.Close()
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-web",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "client",
+		},
+	})
+	_ = mustReadEnvelope(t, client)
+
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "session.send",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+			"text":      "hello registry session",
+		},
+	})
+
+	forwarded := mustReadEnvelope(t, hub)
+	if forwarded.Method != "session.send" {
+		t.Fatalf("forwarded.method=%q, want session.send", forwarded.Method)
+	}
+	if forwarded.ProjectID != "hub-a:server" {
+		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwarded.ProjectID)
+	}
+	forwardPayload := forwarded.Payload
+	if forwardPayload["sessionId"] != "sess-1" || forwardPayload["text"] != "hello registry session" {
+		t.Fatalf("forwarded payload=%v", forwardPayload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwarded.RequestID,
+		Type:      "response",
+		Method:    "session.send",
+		ProjectID: forwarded.ProjectID,
+		Payload: map[string]any{
+			"ok": true,
+		},
+	})
+	sendResp := mustReadEnvelope(t, client)
+	if sendResp.Type != "response" || sendResp.Method != "session.send" {
+		t.Fatalf("unexpected session.send response: %#v", sendResp)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "registry.session.updated",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"session": map[string]any{
+				"sessionId":    "sess-1",
+				"title":        "General",
+				"preview":      "hello registry session",
+				"updatedAt":    "2026-04-11T09:50:00Z",
+				"messageCount": 1,
+			},
+		},
+	})
+
+	updatedAck := mustReadEnvelope(t, hub)
+	if updatedAck.Type != "response" || updatedAck.Method != "registry.session.updated" {
+		t.Fatalf("unexpected session.updated ack: %#v", updatedAck)
+	}
+
+	updatedEvent := mustReadEnvelope(t, client)
+	if updatedEvent.Type != "event" || updatedEvent.Method != "session.updated" {
+		t.Fatalf("unexpected session.updated event: %#v", updatedEvent)
+	}
+	session, _ := updatedEvent.Payload["session"].(map[string]any)
+	if session["sessionId"] != "sess-1" {
+		t.Fatalf("updated session=%v", session)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 4,
+		Type:      "request",
+		Method:    "registry.session.message",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+			"message": map[string]any{
+				"messageId": "msg-1",
+				"sessionId": "sess-1",
+				"role":      "assistant",
+				"kind":      "text",
+				"text":      "hello from assistant",
+				"status":    "done",
+				"createdAt": "2026-04-11T09:50:00Z",
+				"updatedAt": "2026-04-11T09:50:00Z",
+			},
+		},
+	})
+
+	messageAck := mustReadEnvelope(t, hub)
+	if messageAck.Type != "response" || messageAck.Method != "registry.session.message" {
+		t.Fatalf("unexpected session.message ack: %#v", messageAck)
+	}
+
+	messageEvent := mustReadEnvelope(t, client)
+	if messageEvent.Type != "event" || messageEvent.Method != "session.message" {
+		t.Fatalf("unexpected session.message event: %#v", messageEvent)
+	}
+	message, _ := messageEvent.Payload["message"].(map[string]any)
+	if message["text"] != "hello from assistant" {
+		t.Fatalf("event message=%v", message)
+	}
+}
+
 func dialWS(t *testing.T, rawURL string) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(rawURL, "http")

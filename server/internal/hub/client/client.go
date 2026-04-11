@@ -47,6 +47,7 @@ type Client struct {
 
 	store    Store
 	imRouter IMRouter
+	viewSink SessionViewSink
 
 	mu sync.Mutex
 
@@ -231,6 +232,7 @@ func (c *Client) wireSession(sess *Session) {
 	sess.projectName = c.projectName
 	sess.registry = c.registry
 	sess.imRouter = c.imRouter
+	sess.viewSink = c.viewSink
 	sess.yolo = c.yolo
 	sess.store = c.store
 	if strings.TrimSpace(sess.activeAgent) == "" {
@@ -571,6 +573,13 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 	if len(blocks) == 0 {
 		return
 	}
+	s.recordSessionViewEvent(SessionViewEvent{
+		Type:   SessionViewEventUserMessageAccepted,
+		Role:   "user",
+		Kind:   "text",
+		Text:   PromptPreview(blocks),
+		Blocks: cloneSessionContentBlocks(blocks),
+	})
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 
@@ -660,6 +669,23 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 				}
 				if ev.update != nil {
 					params := *ev.update
+					switch params.Update.SessionUpdate {
+					case acp.SessionUpdateAgentMessageChunk:
+						text := extractTextChunk(params.Update.Content)
+						if strings.TrimSpace(text) != "" {
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming"})
+						}
+					case acp.SessionUpdateAgentThoughtChunk:
+						text := extractTextChunk(params.Update.Content)
+						if strings.TrimSpace(text) != "" {
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming"})
+						}
+					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+						statusText := renderSessionToolStatus(params.Update)
+						if strings.TrimSpace(statusText) != "" {
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", AggregateKey: params.Update.ToolCallID})
+						}
+					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
 						if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {
@@ -685,6 +711,10 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					}
 				}
 				if ev.result != nil {
+					s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventPromptFinished, Status: ev.result.StopReason})
+					if strings.TrimSpace(ev.result.StopReason) != "" && ev.result.StopReason != acp.StopReasonEndTurn {
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventSystemMessage, Role: "system", Kind: "prompt_result", Text: ev.result.StopReason, Status: "done"})
+					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
 						if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
@@ -745,6 +775,21 @@ func extractTextChunk(raw json.RawMessage) string {
 		return ""
 	}
 	return block.Text
+}
+
+func renderSessionToolStatus(update acp.SessionUpdate) string {
+	title := strings.TrimSpace(update.Title)
+	if title == "" {
+		title = strings.TrimSpace(update.Kind)
+	}
+	status := strings.TrimSpace(update.Status)
+	if title == "" {
+		return status
+	}
+	if status == "" {
+		return title
+	}
+	return title + " - " + status
 }
 func normalizeRouteKey(routeKey string) (string, error) {
 	routeKey = strings.TrimSpace(routeKey)
