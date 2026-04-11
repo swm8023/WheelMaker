@@ -848,3 +848,145 @@ func TestTimeoutNotifyLimiter_Cooldown(t *testing.T) {
 		t.Fatal("report after cooldown should be allowed")
 	}
 }
+
+func findCurrentValue(options []acp.ConfigOption, id string) string {
+	for _, opt := range options {
+		if strings.EqualFold(opt.ID, id) {
+			return strings.TrimSpace(opt.CurrentValue)
+		}
+	}
+	return ""
+}
+
+func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SaveProject(context.Background(), "proj1", ProjectConfig{
+		AgentState: map[string]ProjectAgentState{
+			"claude": {
+				ConfigOptions: []acp.ConfigOption{
+					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+					{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveProject: %v", err)
+	}
+
+	c := New(store, "proj1", "/tmp")
+	inst := &testInjectedInstance{
+		name: "claude",
+		initResult: acp.InitializeResult{
+			ProtocolVersion:   "0.1",
+			AgentCapabilities: acp.AgentCapabilities{},
+		},
+		newResult: &acp.SessionNewResult{SessionID: "acp-new", ConfigOptions: []acp.ConfigOption{
+			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "ask"},
+			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
+			{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "low"},
+		}},
+	}
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) { return inst, nil })
+
+	sess := c.newWiredSession("sess-1")
+	if err := sess.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
+	}
+	if err := sess.ensureReady(context.Background()); err != nil {
+		t.Fatalf("ensureReady: %v", err)
+	}
+
+	if got := len(inst.setCalls); got != 3 {
+		t.Fatalf("set calls = %d, want 3", got)
+	}
+}
+
+func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *testing.T) {
+	s := newSession("restore-load-success", "/tmp")
+	s.projectName = "proj1"
+	s.activeAgent = "claude"
+	s.acpSessionID = "acp-old"
+	s.agents = map[string]*SessionAgentState{
+		"claude": {
+			ACPSessionID: "acp-old",
+			ConfigOptions: []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
+				{ID: "custom_toggle", CurrentValue: "persisted-custom"},
+			},
+		},
+	}
+
+	inst := &testInjectedInstance{
+		name:      "claude",
+		sessionID: "acp-old",
+		initResult: acp.InitializeResult{
+			ProtocolVersion:   "0.1",
+			AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+		},
+		loadResult: acp.SessionLoadResult{ConfigOptions: []acp.ConfigOption{
+			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "ask"},
+			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
+			{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "low"},
+			{ID: "custom_toggle", CurrentValue: "agent-custom"},
+		}},
+	}
+	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+		switch p.ConfigID {
+		case acp.ConfigOptionIDMode:
+			return []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: p.Value},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "low"},
+				{ID: "custom_toggle", CurrentValue: "agent-custom"},
+			}, nil
+		case acp.ConfigOptionIDModel:
+			return []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: p.Value},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "low"},
+				{ID: "custom_toggle", CurrentValue: "agent-custom"},
+			}, nil
+		case acp.ConfigOptionIDThoughtLevel:
+			return []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: p.Value},
+				{ID: "custom_toggle", CurrentValue: "agent-custom"},
+			}, nil
+		default:
+			return nil, errors.New("unexpected config id")
+		}
+	}
+
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+		return inst, nil
+	})
+
+	if err := s.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
+	}
+	if err := s.ensureReady(context.Background()); err != nil {
+		t.Fatalf("ensureReady: %v", err)
+	}
+
+	state, _ := s.currentAgentStateSnapshot()
+	if state == nil {
+		t.Fatal("currentAgentStateSnapshot returned nil state")
+	}
+	if findCurrentValue(state.ConfigOptions, "custom_toggle") != "agent-custom" {
+		t.Fatalf("custom_toggle should stay agent-owned")
+	}
+	if got := len(inst.setCalls); got != 3 {
+		t.Fatalf("set calls = %d, want 3", got)
+	}
+}
