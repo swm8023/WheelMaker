@@ -4,15 +4,34 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/swm8023/wheelmaker/internal/hub/client"
+	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 type stubRuntime struct{}
 
 func (stubRuntime) CreateSession(context.Context, string) (*client.Session, error) { return nil, nil }
-func (stubRuntime) SendToSession(context.Context, string, any, any) error          { return nil }
+func (stubRuntime) SendToSession(context.Context, string, im.ChatRef, []acp.ContentBlock) error {
+	return nil
+}
+func (stubRuntime) ListSessions(context.Context) ([]client.SessionListEntry, error) {
+	return nil, nil
+}
+
+type stubListRuntime struct {
+	entries []client.SessionListEntry
+}
+
+func (s stubListRuntime) CreateSession(context.Context, string) (*client.Session, error) { return nil, nil }
+func (s stubListRuntime) SendToSession(context.Context, string, im.ChatRef, []acp.ContentBlock) error {
+	return nil
+}
+func (s stubListRuntime) ListSessions(context.Context) ([]client.SessionListEntry, error) {
+	return s.entries, nil
+}
 
 func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 	store, err := client.NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
@@ -78,6 +97,107 @@ func TestSessionViewListIncludesProjectionFields(t *testing.T) {
 	if sessions[0].MessageCount != 1 {
 		t.Fatalf("sessions[0].MessageCount = %d, want 1", sessions[0].MessageCount)
 	}
+}
+
+func TestSessionViewListIncludesRuntimeClientSessions(t *testing.T) {
+	store, err := client.NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	svc := New("proj1", store, stubListRuntime{entries: []client.SessionListEntry{{
+		ID:           "sess-runtime-1",
+		Title:        "Runtime Session",
+		Agent:        "claude",
+		Status:       client.SessionActive,
+		CreatedAt:    mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
+		InMemory:     true,
+	}}})
+
+	sessions, err := svc.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	if sessions[0].SessionID != "sess-runtime-1" {
+		t.Fatalf("sessions[0].SessionID = %q, want %q", sessions[0].SessionID, "sess-runtime-1")
+	}
+	if sessions[0].Title != "Runtime Session" {
+		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Runtime Session")
+	}
+	if sessions[0].Status != "active" {
+		t.Fatalf("sessions[0].Status = %q, want %q", sessions[0].Status, "active")
+	}
+	if sessions[0].Agent != "claude" {
+		t.Fatalf("sessions[0].Agent = %q, want %q", sessions[0].Agent, "claude")
+	}
+}
+
+func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *testing.T) {
+	store, err := client.NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	lastMessageAt := mustRFC3339Time(t, "2026-04-12T10:08:00Z")
+	if err := store.SaveSession(ctx, &client.SessionRecord{
+		ID:                 "sess-runtime-1",
+		ProjectName:        "proj1",
+		Status:             client.SessionSuspended,
+		Title:              "Persisted Title",
+		LastMessagePreview: "persisted preview",
+		LastMessageAt:      lastMessageAt,
+		MessageCount:       7,
+		CreatedAt:          mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
+		LastActiveAt:       mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	svc := New("proj1", store, stubListRuntime{entries: []client.SessionListEntry{{
+		ID:           "sess-runtime-1",
+		Title:        "Runtime Session",
+		Agent:        "claude",
+		Status:       client.SessionActive,
+		CreatedAt:    mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
+		InMemory:     true,
+	}}})
+
+	sessions, err := svc.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	if sessions[0].Title != "Runtime Session" {
+		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Runtime Session")
+	}
+	if sessions[0].Preview != "persisted preview" {
+		t.Fatalf("sessions[0].Preview = %q, want %q", sessions[0].Preview, "persisted preview")
+	}
+	if sessions[0].MessageCount != 7 {
+		t.Fatalf("sessions[0].MessageCount = %d, want 7", sessions[0].MessageCount)
+	}
+	if sessions[0].UpdatedAt != lastMessageAt.Format(time.RFC3339) {
+		t.Fatalf("sessions[0].UpdatedAt = %q, want %q", sessions[0].UpdatedAt, lastMessageAt.Format(time.RFC3339))
+	}
+}
+
+func mustRFC3339Time(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("time.Parse(%q): %v", value, err)
+	}
+	return parsed
 }
 
 func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {

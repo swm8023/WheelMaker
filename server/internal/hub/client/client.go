@@ -402,9 +402,9 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 // clientListSessions returns a merged list of in-memory and persisted sessions,
 // sorted by last active time (most recent first). Duplicates are deduplicated
 // favoring in-memory sessions.
-func (c *Client) clientListSessions() ([]sessionListEntry, error) {
+func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 	c.mu.Lock()
-	memEntries := make([]sessionListEntry, 0, len(c.sessions))
+	memEntries := make([]SessionListEntry, 0, len(c.sessions))
 	memIDs := make(map[string]bool, len(c.sessions))
 	for _, sess := range c.sessions {
 		sess.mu.Lock()
@@ -413,7 +413,7 @@ func (c *Client) clientListSessions() ([]sessionListEntry, error) {
 		if state := sess.agents[agentName]; state != nil {
 			title = state.Title
 		}
-		e := sessionListEntry{
+		e := SessionListEntry{
 			ID:           sess.ID,
 			Agent:        agentName,
 			Title:        title,
@@ -431,41 +431,57 @@ func (c *Client) clientListSessions() ([]sessionListEntry, error) {
 
 	entries := memEntries
 
-	// Merge persisted sessions.
-	stored, err := store.ListSessions(context.Background(), c.projectName)
+	stored, err := store.ListSessions(ctx, c.projectName)
 	if err != nil {
 		return nil, fmt.Errorf("list persisted sessions: %w", err)
+	}
+	storedByID := make(map[string]SessionListEntry, len(stored))
+	for _, s := range stored {
+		storedByID[s.ID] = s
+	}
+	for i := range entries {
+		storedEntry, ok := storedByID[entries[i].ID]
+		if !ok {
+			continue
+		}
+		if entries[i].Agent == "" {
+			entries[i].Agent = storedEntry.Agent
+		}
+		if entries[i].Title == "" {
+			entries[i].Title = storedEntry.Title
+		}
+		entries[i].Preview = storedEntry.Preview
+		entries[i].MessageCount = storedEntry.MessageCount
+		entries[i].LastMessageAt = storedEntry.LastMessageAt
 	}
 	for _, s := range stored {
 		if memIDs[s.ID] {
 			continue
 		}
-		entries = append(entries, sessionListEntry{
-			ID:           s.ID,
-			Agent:        s.Agent,
-			Title:        s.Title,
-			Status:       SessionPersisted,
-			CreatedAt:    s.CreatedAt,
-			LastActiveAt: s.LastActiveAt,
-			InMemory:     false,
-		})
+		s.InMemory = false
+		s.Status = SessionPersisted
+		entries = append(entries, s)
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].LastActiveAt.After(entries[j].LastActiveAt)
+		left := entries[i].LastMessageAt
+		if left.IsZero() {
+			left = entries[i].LastActiveAt
+		}
+		right := entries[j].LastMessageAt
+		if right.IsZero() {
+			right = entries[j].LastActiveAt
+		}
+		if left.Equal(right) {
+			return entries[i].LastActiveAt.After(entries[j].LastActiveAt)
+		}
+		return left.After(right)
 	})
 	return entries, nil
 }
 
-// sessionListEntry holds merged in-memory + persisted session information.
-type sessionListEntry struct {
-	ID           string
-	Agent        string
-	Title        string
-	Status       SessionStatus
-	CreatedAt    time.Time
-	LastActiveAt time.Time
-	InMemory     bool
+func (c *Client) clientListSessions() ([]SessionListEntry, error) {
+	return c.ListSessions(context.Background())
 }
 
 // persistLoop periodically scans for Suspended sessions and evicts old ones from memory.

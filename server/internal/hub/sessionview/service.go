@@ -17,6 +17,7 @@ import (
 type Runtime interface {
 	CreateSession(ctx context.Context, title string) (*client.Session, error)
 	SendToSession(ctx context.Context, sessionID string, source im.ChatRef, blocks []acp.ContentBlock) error
+	ListSessions(ctx context.Context) ([]client.SessionListEntry, error)
 }
 
 type PublishFunc func(method string, payload any) error
@@ -286,9 +287,36 @@ func (s *Service) HandleSessionRequest(ctx context.Context, method string, _ str
 }
 
 func (s *Service) ListSessions(ctx context.Context) ([]SessionSummary, error) {
-	entries, err := s.store.ListSessions(ctx, s.projectName)
+	storeEntries, err := s.store.ListSessions(ctx, s.projectName)
 	if err != nil {
 		return nil, err
+	}
+	entries := storeEntries
+	if s.runtime != nil {
+		runtimeEntries, err := s.runtime.ListSessions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		entries = runtimeEntries
+		storeByID := make(map[string]client.SessionListEntry, len(storeEntries))
+		for _, entry := range storeEntries {
+			storeByID[entry.ID] = entry
+		}
+		for i := range entries {
+			stored, ok := storeByID[entries[i].ID]
+			if !ok {
+				continue
+			}
+			if entries[i].Agent == "" {
+				entries[i].Agent = stored.Agent
+			}
+			if entries[i].Title == "" {
+				entries[i].Title = stored.Title
+			}
+			entries[i].Preview = stored.Preview
+			entries[i].MessageCount = stored.MessageCount
+			entries[i].LastMessageAt = stored.LastMessageAt
+		}
 	}
 	out := make([]SessionSummary, 0, len(entries))
 	for _, entry := range entries {

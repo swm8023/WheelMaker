@@ -634,6 +634,116 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	}
 }
 
+func TestListSessions_DiskOnlySessionsAreMarkedPersisted(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	createdAt := time.Now().Add(-2 * time.Hour).UTC()
+	lastMessageAt := time.Now().Add(-5 * time.Minute).UTC()
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:                 "persisted-only",
+		ProjectName:        "proj1",
+		Status:             SessionSuspended,
+		AgentsJSON:         `{"claude":{"title":"Persisted Title"}}`,
+		LastMessagePreview: "persisted preview",
+		LastMessageAt:      lastMessageAt,
+		MessageCount:       4,
+		CreatedAt:          createdAt,
+		LastActiveAt:       lastMessageAt,
+	}); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	c := New(store, "proj1", "/tmp")
+	entries, err := c.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	if entries[0].Status != SessionPersisted {
+		t.Fatalf("entries[0].Status = %v, want %v", entries[0].Status, SessionPersisted)
+	}
+	if entries[0].Preview != "persisted preview" {
+		t.Fatalf("entries[0].Preview = %q, want %q", entries[0].Preview, "persisted preview")
+	}
+	if entries[0].MessageCount != 4 {
+		t.Fatalf("entries[0].MessageCount = %d, want 4", entries[0].MessageCount)
+	}
+	if entries[0].InMemory {
+		t.Fatal("entries[0].InMemory = true, want false")
+	}
+}
+
+func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	createdAt := time.Now().Add(-2 * time.Hour).UTC()
+	lastMessageAt := time.Now().Add(-3 * time.Minute).UTC()
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:                 "sess-1",
+		ProjectName:        "proj1",
+		Status:             SessionSuspended,
+		Title:              "Persisted Title",
+		LastMessagePreview: "hello from store",
+		LastMessageAt:      lastMessageAt,
+		MessageCount:       3,
+		CreatedAt:          createdAt,
+		LastActiveAt:       lastMessageAt,
+	}); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	c := New(store, "proj1", "/tmp")
+	c.mu.Lock()
+	sess := c.newWiredSession("sess-1")
+	sess.createdAt = createdAt
+	sess.lastActiveAt = time.Now().UTC()
+	sess.Status = SessionActive
+	sess.activeAgent = "claude"
+	sess.agents = map[string]*SessionAgentState{
+		"claude": {Title: "Runtime Title"},
+	}
+	c.sessions[sess.ID] = sess
+	c.mu.Unlock()
+
+	entries, err := c.ListSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	if entries[0].Title != "Runtime Title" {
+		t.Fatalf("entries[0].Title = %q, want %q", entries[0].Title, "Runtime Title")
+	}
+	if entries[0].Preview != "hello from store" {
+		t.Fatalf("entries[0].Preview = %q, want %q", entries[0].Preview, "hello from store")
+	}
+	if entries[0].MessageCount != 3 {
+		t.Fatalf("entries[0].MessageCount = %d, want 3", entries[0].MessageCount)
+	}
+	if entries[0].Status != SessionActive {
+		t.Fatalf("entries[0].Status = %v, want %v", entries[0].Status, SessionActive)
+	}
+	if !entries[0].InMemory {
+		t.Fatal("entries[0].InMemory = false, want true")
+	}
+	if !entries[0].LastMessageAt.Equal(lastMessageAt) {
+		t.Fatalf("entries[0].LastMessageAt = %v, want %v", entries[0].LastMessageAt, lastMessageAt)
+	}
+}
+
 func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testing.T) {
 	s := newSession("restore-mode", "/tmp")
 	s.projectName = "proj1"

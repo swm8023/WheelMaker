@@ -103,6 +103,7 @@ type SessionListEntry struct {
 	CreatedAt     time.Time
 	LastActiveAt  time.Time
 	LastMessageAt time.Time
+	InMemory      bool
 }
 
 type SessionMessageRecord struct {
