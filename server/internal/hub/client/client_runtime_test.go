@@ -39,6 +39,8 @@ type testInjectedInstance struct {
 	loadResult  acp.SessionLoadResult
 	loadErr     error
 	newResult   *acp.SessionNewResult
+	listResult  acp.SessionListResult
+	listErr     error
 	setConfigFn func(context.Context, acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error)
 	setCalls    []acp.SessionSetConfigOptionParams
 }
@@ -344,7 +346,7 @@ func (i *testInjectedInstance) SessionLoad(context.Context, acp.SessionLoadParam
 	return i.loadResult, i.loadErr
 }
 func (i *testInjectedInstance) SessionList(context.Context, acp.SessionListParams) (acp.SessionListResult, error) {
-	return acp.SessionListResult{}, nil
+	return i.listResult, i.listErr
 }
 func (i *testInjectedInstance) SessionPrompt(ctx context.Context, p acp.SessionPromptParams) (acp.SessionPromptResult, error) {
 	i.lastPrompt = append([]acp.ContentBlock(nil), p.Prompt...)

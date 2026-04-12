@@ -513,6 +513,9 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		_ = s.ensureInstance(ctx)
 	}
 	_ = s.ensureReady(ctx)
+	// Try to refresh session summaries from agent runtime before rendering menu.
+	// If session/list is unsupported or fails, we silently fall back to cached state.
+	_, _ = s.listSessions(ctx)
 
 	state, currentAgent := s.currentAgentStateSnapshot()
 	opts := []acp.ConfigOption(nil)
@@ -591,7 +594,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		model.Menus[menuID] = cfgMenu
 	}
 
-	// 3. Session List — submenu from cached sessions, clicking loads the session
+	// 3. Session List — submenu from latest/cached sessions, clicking loads the session
 	sessionMenuID := "menu:sessions"
 	model.Options = append(model.Options, HelpOption{
 		Label:  "Session List",
@@ -615,7 +618,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		})
 	}
 	if len(sessionMenu.Options) == 0 {
-		sessionMenu.Body = "No cached sessions. Send a message first to populate the list."
+		sessionMenu.Body = "No sessions available."
 	}
 	model.Menus[sessionMenuID] = sessionMenu
 
