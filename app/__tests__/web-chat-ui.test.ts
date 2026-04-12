@@ -15,7 +15,9 @@ describe('web chat integration', () => {
     expect(registryTypes).toContain('syncIndex');
     expect(registryTypes).toContain('lastIndex');
     expect(repositoryTs).toContain("method: 'session.list'");
+    expect(repositoryTs).toContain("'chat.session.list'");
     expect(repositoryTs).toContain("method: 'session.read'");
+    expect(repositoryTs).toContain("'chat.session.read'");
     expect(repositoryTs).toContain('afterIndex');
     expect(repositoryTs).toContain("method: 'session.new'");
     expect(repositoryTs).toContain("method: 'session.send'");

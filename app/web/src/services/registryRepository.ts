@@ -11,6 +11,7 @@ import type {
   RegistryGitWorkspaceChangedPayload,
   RegistryProject,
   RegistryProjectEventPayload,
+  RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
   RegistrySessionReadResponse,
   RegistrySessionSummary,
@@ -21,6 +22,119 @@ import type {
 
 export class RegistryRepository {
   constructor(private readonly client: RegistryClient) {}
+
+  private normalizeSessionSummary(raw: unknown): RegistrySessionSummary | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const sessionId = typeof input.sessionId === 'string'
+      ? input.sessionId.trim()
+      : (typeof input.chatId === 'string' ? input.chatId.trim() : '');
+    if (!sessionId) {
+      return null;
+    }
+    return {
+      sessionId,
+      title: typeof input.title === 'string' ? input.title : sessionId,
+      preview: typeof input.preview === 'string' ? input.preview : '',
+      updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
+      messageCount: typeof input.messageCount === 'number' && Number.isFinite(input.messageCount) ? input.messageCount : 0,
+      unreadCount: typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount) ? input.unreadCount : undefined,
+      agent: typeof input.agent === 'string' ? input.agent : undefined,
+      status: typeof input.status === 'string' ? input.status : undefined,
+    };
+  }
+
+  private normalizeSessionMessage(raw: unknown, fallbackSessionId: string): RegistrySessionMessage | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const messageId = typeof input.messageId === 'string' ? input.messageId : '';
+    if (!messageId) {
+      return null;
+    }
+    const sessionId = typeof input.sessionId === 'string'
+      ? input.sessionId
+      : (typeof input.chatId === 'string' ? input.chatId : fallbackSessionId);
+    const syncIndex = typeof input.syncIndex === 'number' && Number.isFinite(input.syncIndex)
+      ? input.syncIndex
+      : undefined;
+    const role = input.role === 'user' || input.role === 'assistant' || input.role === 'system'
+      ? input.role
+      : 'assistant';
+    const kind = input.kind === 'text' || input.kind === 'image' || input.kind === 'thought' || input.kind === 'tool' || input.kind === 'permission' || input.kind === 'prompt_result' || input.kind === 'message'
+      ? input.kind
+      : 'text';
+    const status = input.status === 'streaming' || input.status === 'done' || input.status === 'needs_action'
+      ? input.status
+      : 'done';
+    return {
+      messageId,
+      sessionId,
+      syncIndex,
+      role,
+      kind,
+      text: typeof input.text === 'string' ? input.text : '',
+      status,
+      createdAt: typeof input.createdAt === 'string' ? input.createdAt : '',
+      updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
+      requestId: typeof input.requestId === 'number' && Number.isFinite(input.requestId) ? input.requestId : undefined,
+      blocks: Array.isArray(input.blocks) ? input.blocks as RegistrySessionMessage['blocks'] : undefined,
+      options: Array.isArray(input.options) ? input.options as RegistrySessionMessage['options'] : undefined,
+    };
+  }
+
+  private async listSessionsByMethod(projectId: string, method: 'session.list' | 'chat.session.list'): Promise<RegistrySessionSummary[]> {
+    const resp = await this.client.request({
+      method,
+      projectId,
+      payload: {},
+      timeoutMs: 15000,
+    });
+    const payload = (resp.payload ?? {}) as {sessions?: unknown[]};
+    return (payload.sessions ?? [])
+      .map(item => this.normalizeSessionSummary(item))
+      .filter((item): item is RegistrySessionSummary => !!item);
+  }
+
+  private async readSessionByMethod(
+    projectId: string,
+    sessionId: string,
+    afterIndex: number,
+    method: 'session.read' | 'chat.session.read',
+  ): Promise<RegistrySessionReadResponse> {
+    const resp = await this.client.request({
+      method,
+      projectId,
+      payload: method === 'session.read'
+        ? (afterIndex > 0 ? {sessionId, afterIndex} : {sessionId})
+        : {chatId: sessionId},
+      timeoutMs: 15000,
+    });
+    const payload = (resp.payload ?? {}) as {
+      session?: unknown;
+      messages?: unknown[];
+      lastIndex?: number;
+    };
+    const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
+      sessionId,
+      title: sessionId,
+      preview: '',
+      updatedAt: '',
+      messageCount: 0,
+    };
+    const normalizedMessages = (payload.messages ?? [])
+      .map(item => this.normalizeSessionMessage(item, normalizedSession.sessionId))
+      .filter((item): item is RegistrySessionMessage => !!item);
+    const maxSyncIndex = normalizedMessages.reduce((max, message) => Math.max(max, message.syncIndex ?? 0), 0);
+    return {
+      session: normalizedSession,
+      messages: normalizedMessages,
+      lastIndex: typeof payload.lastIndex === 'number' ? payload.lastIndex : maxSyncIndex,
+    };
+  }
 
   async initialize(url: string, token?: string): Promise<void> {
     await this.client.connect(url);
@@ -242,35 +356,43 @@ export class RegistryRepository {
   }
 
   async listSessions(projectId: string): Promise<RegistrySessionSummary[]> {
-    const resp = await this.client.request({
-      method: 'session.list',
-      projectId,
-      payload: {},
-      timeoutMs: 15000,
-    });
-    const payload = (resp.payload ?? {}) as {sessions?: RegistrySessionSummary[]};
-    return (payload.sessions ?? []).filter(session => !!session.sessionId);
+    let primaryError: unknown = null;
+    let primarySessions: RegistrySessionSummary[] = [];
+    try {
+      primarySessions = await this.listSessionsByMethod(projectId, 'session.list');
+      if (primarySessions.length > 0) {
+        return primarySessions;
+      }
+    } catch (err) {
+      primaryError = err;
+    }
+    try {
+      const fallbackSessions = await this.listSessionsByMethod(projectId, 'chat.session.list');
+      if (fallbackSessions.length > 0) {
+        return fallbackSessions;
+      }
+      if (primaryError) {
+        return fallbackSessions;
+      }
+    } catch (fallbackErr) {
+      if (primaryError) {
+        throw primaryError;
+      }
+      throw fallbackErr;
+    }
+    return primarySessions;
   }
 
   async readSession(projectId: string, sessionId: string, afterIndex = 0): Promise<RegistrySessionReadResponse> {
-    const resp = await this.client.request({
-      method: 'session.read',
-      projectId,
-      payload: afterIndex > 0 ? {sessionId, afterIndex} : {sessionId},
-      timeoutMs: 15000,
-    });
-    const payload = (resp.payload ?? {}) as Partial<RegistrySessionReadResponse>;
-    return {
-      session: payload.session ?? {
-        sessionId,
-        title: sessionId,
-        preview: '',
-        updatedAt: '',
-        messageCount: 0,
-      },
-      messages: payload.messages ?? [],
-      lastIndex: typeof payload.lastIndex === 'number' ? payload.lastIndex : 0,
-    };
+    try {
+      return await this.readSessionByMethod(projectId, sessionId, afterIndex, 'session.read');
+    } catch (primaryError) {
+      try {
+        return await this.readSessionByMethod(projectId, sessionId, afterIndex, 'chat.session.read');
+      } catch {
+        throw primaryError;
+      }
+    }
   }
 
   async createSession(projectId: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
