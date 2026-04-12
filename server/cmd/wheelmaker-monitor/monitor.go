@@ -64,19 +64,29 @@ type ServiceInfo struct {
 	Installed bool   `json:"installed"`
 	Status    string `json:"status"`
 	StartType string `json:"startType"`
+	Mode      string `json:"mode,omitempty"`
+}
+
+type runtimeProcessState struct {
+	WheelMaker bool
+	Monitor    bool
+	Updater    bool
 }
 
 // GetServiceStatus returns the current wheelmaker process status.
 func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
-	svcInfos, err := listManagedServices()
-	if err != nil {
-		return nil, err
-	}
-
 	procs, err := listWheelmakerProcesses()
 	if err != nil {
 		return nil, err
 	}
+
+	svcInfos, err := listManagedServices(m.baseDir, runtimeProcessState{
+		WheelMaker: len(procs) > 0,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	running := len(procs) > 0
 	if runtime.GOOS == "windows" && len(svcInfos) > 0 {
 		for _, svc := range svcInfos {
@@ -94,7 +104,7 @@ func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
 	}, nil
 }
 
-func listManagedServices() ([]ServiceInfo, error) {
+func listManagedServices(baseDir string, procState runtimeProcessState) ([]ServiceInfo, error) {
 	if runtime.GOOS != "windows" {
 		return nil, nil
 	}
@@ -107,7 +117,14 @@ func listManagedServices() ([]ServiceInfo, error) {
 		}
 		out = append(out, info)
 	}
-	return out, nil
+	if shouldUseUserModeServices(baseDir, out) {
+		var err error
+		procState, err = enrichRuntimeProcessState(procState)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return normalizeManagedServices(baseDir, out, procState), nil
 }
 
 func getWindowsServiceInfo(name string) (ServiceInfo, error) {
@@ -133,6 +150,104 @@ $obj | ConvertTo-Json -Compress`, name, name)
 		return ServiceInfo{}, fmt.Errorf("parse service info %s: %w", name, err)
 	}
 	return info, nil
+}
+
+func normalizeManagedServices(baseDir string, services []ServiceInfo, procState runtimeProcessState) []ServiceInfo {
+	if !shouldUseUserModeServices(baseDir, services) {
+		return services
+	}
+	return []ServiceInfo{
+		{
+			Name:      wheelmakerServiceName,
+			Installed: false,
+			Status:    runtimeStatus(procState.WheelMaker),
+			StartType: "Login",
+			Mode:      "user",
+		},
+		{
+			Name:      monitorServiceName,
+			Installed: false,
+			Status:    runtimeStatus(procState.Monitor),
+			StartType: "Login",
+			Mode:      "user",
+		},
+		{
+			Name:      updaterServiceName,
+			Installed: false,
+			Status:    runtimeStatus(procState.Updater),
+			StartType: "Login",
+			Mode:      "user",
+		},
+	}
+}
+
+func shouldUseUserModeServices(baseDir string, services []ServiceInfo) bool {
+	if !hasUserModeSetup(baseDir) || len(services) == 0 {
+		return false
+	}
+	for _, svc := range services {
+		if svc.Installed || !strings.EqualFold(svc.Status, "NotInstalled") {
+			return false
+		}
+	}
+	return true
+}
+
+func hasUserModeSetup(baseDir string) bool {
+	if baseDir == "" {
+		return false
+	}
+	return fileExists(filepath.Join(baseDir, "start_user_mode.ps1"))
+}
+
+func runtimeStatus(running bool) string {
+	if running {
+		return "Running"
+	}
+	return "Stopped"
+}
+
+func enrichRuntimeProcessState(state runtimeProcessState) (runtimeProcessState, error) {
+	if runtime.GOOS != "windows" {
+		return state, nil
+	}
+	monitorRunning, err := processRunningByName("wheelmaker-monitor.exe")
+	if err != nil {
+		return runtimeProcessState{}, err
+	}
+	updaterRunning, err := processRunningByName("wheelmaker-updater.exe")
+	if err != nil {
+		return runtimeProcessState{}, err
+	}
+	state.Monitor = monitorRunning
+	state.Updater = updaterRunning
+	return state, nil
+}
+
+func processRunningByName(name string) (bool, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false, nil
+	}
+	if runtime.GOOS != "windows" {
+		out, err := exec.Command("ps", "aux").Output()
+		if err != nil {
+			return false, fmt.Errorf("list processes for %s: %w", name, err)
+		}
+		return strings.Contains(string(out), name), nil
+	}
+
+	script := fmt.Sprintf(`$p = @(Get-CimInstance Win32_Process -Filter "Name='%s'")
+if ($p.Count -gt 0) { exit 0 }
+exit 3`, name)
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script)
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 3 {
+			return false, nil
+		}
+		return false, fmt.Errorf("check process %s: %w", name, err)
+	}
+	return true, nil
 }
 
 func listWheelmakerProcesses() ([]ProcessInfo, error) {

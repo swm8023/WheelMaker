@@ -977,9 +977,15 @@ function renderStatus(svc) {
   } else {
     $('svc-list').innerHTML = services.map(s => {
       const status = String(s.status || 'Unknown');
-      const cls = !s.installed ? 'off'
-                : status.toLowerCase() === 'running' ? 'on' : 'warn';
-      const stateText = status.toLowerCase() === 'running' ? '' : status;
+      const mode = String(s.mode || 'service');
+      const isUser = mode.toLowerCase() === 'user';
+      const isRunning = status.toLowerCase() === 'running';
+      const cls = isRunning ? 'on'
+                : isUser ? 'warn' : (!s.installed ? 'off' : 'warn');
+      const stateBits = [];
+      if (!isRunning) stateBits.push(status);
+      if (isUser) stateBits.push('UserMode');
+      const stateText = stateBits.join(' · ');
       return '<div class="svc-row ' + cls + '">' +
         '<div class="svc-dot"></div>' +
         '<div class="svc-name">' + esc(s.name || '-') + '</div>' +

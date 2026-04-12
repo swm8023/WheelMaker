@@ -86,3 +86,15 @@ func TestDashboardHTML_HasUpdatePublishAction(t *testing.T) {
 		t.Fatalf("dashboard should provide update-publish action button")
 	}
 }
+
+func TestDashboardHTML_RendersUserModeServices(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "const mode = String(s.mode || 'service')") {
+		t.Fatalf("dashboard should inspect service mode when rendering status")
+	}
+	if !strings.Contains(dashboardHTML, "stateBits.push('UserMode')") {
+		t.Fatalf("dashboard should label user-mode services")
+	}
+	if !strings.Contains(dashboardHTML, "isUser ? 'warn' : (!s.installed ? 'off' : 'warn')") {
+		t.Fatalf("dashboard should avoid rendering user-mode services as NotInstalled errors")
+	}
+}

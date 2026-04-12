@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -78,5 +79,51 @@ func TestGetLogs_DebugOmitsTimeLevelAndDedupsSessionID(t *testing.T) {
 	}
 	if !strings.Contains(entry.Message, "{019d6db0..6f8a session/update}") {
 		t.Fatalf("session id should be shortened in debug prefix: %q", entry.Message)
+	}
+}
+
+func TestNormalizeManagedServices_UserModeReplacesNotInstalledServices(t *testing.T) {
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, "start_user_mode.ps1"), []byte("start"), 0o644); err != nil {
+		t.Fatalf("write start_user_mode.ps1: %v", err)
+	}
+
+	services := []ServiceInfo{
+		{Name: wheelmakerServiceName, Installed: false, Status: "NotInstalled", StartType: "-"},
+		{Name: monitorServiceName, Installed: false, Status: "NotInstalled", StartType: "-"},
+		{Name: updaterServiceName, Installed: false, Status: "NotInstalled", StartType: "-"},
+	}
+
+	got := normalizeManagedServices(base, services, runtimeProcessState{
+		WheelMaker: true,
+		Monitor:    true,
+		Updater:    false,
+	})
+
+	want := []ServiceInfo{
+		{Name: wheelmakerServiceName, Installed: false, Status: "Running", StartType: "Login", Mode: "user"},
+		{Name: monitorServiceName, Installed: false, Status: "Running", StartType: "Login", Mode: "user"},
+		{Name: updaterServiceName, Installed: false, Status: "Stopped", StartType: "Login", Mode: "user"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeManagedServices()=%#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeManagedServices_KeepsServiceModeWhenNoUserModeSetup(t *testing.T) {
+	services := []ServiceInfo{
+		{Name: wheelmakerServiceName, Installed: false, Status: "NotInstalled", StartType: "-"},
+		{Name: monitorServiceName, Installed: false, Status: "NotInstalled", StartType: "-"},
+		{Name: updaterServiceName, Installed: false, Status: "NotInstalled", StartType: "-"},
+	}
+
+	got := normalizeManagedServices(t.TempDir(), services, runtimeProcessState{
+		WheelMaker: true,
+		Monitor:    true,
+		Updater:    true,
+	})
+
+	if !reflect.DeepEqual(got, services) {
+		t.Fatalf("normalizeManagedServices() should keep original services when user mode is not configured")
 	}
 }
