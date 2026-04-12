@@ -692,6 +692,7 @@ function App() {
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatSelectedIdRef = useRef('');
+  const chatSyncIndexRef = useRef<Record<string, number>>({});
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [selectedChatId, setSelectedChatId] = useState('');
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
@@ -1175,12 +1176,41 @@ function App() {
     }, RECONNECT_RETRY_DELAY_MS);
   };
 
-  const loadChatSession = async (sessionId: string, activeProjectId = projectIdRef.current) => {
+  const loadChatSession = async (
+    sessionId: string,
+    activeProjectId = projectIdRef.current,
+    options?: {incremental?: boolean; preserveUserSelection?: boolean; selectionSnapshot?: string},
+  ) => {
     if (!activeProjectId || !sessionId) return;
     setChatLoading(true);
     try {
-      const result = await service.readSession(sessionId);
-      setChatMessages(result.messages);
+      const afterIndex = options?.incremental ? (chatSyncIndexRef.current[sessionId] ?? 0) : 0;
+      const result = await service.readSession(sessionId, afterIndex);
+      if (options?.preserveUserSelection && chatSelectedIdRef.current !== (options.selectionSnapshot ?? '') && chatSelectedIdRef.current !== sessionId) {
+        return;
+      }
+      if (options?.incremental && afterIndex > 0 && result.lastIndex < afterIndex) {
+        chatSyncIndexRef.current[sessionId] = 0;
+        await loadChatSession(sessionId, activeProjectId, {
+          incremental: false,
+          preserveUserSelection: options.preserveUserSelection,
+          selectionSnapshot: options.selectionSnapshot,
+        });
+        return;
+      }
+      if (options?.incremental && chatSelectedIdRef.current && chatSelectedIdRef.current !== sessionId) {
+        return;
+      }
+      if (afterIndex > 0) {
+        setChatMessages(prev => result.messages.reduce((items, message) => upsertChatMessage(items, message), prev));
+      } else {
+        setChatMessages(result.messages);
+      }
+      chatSyncIndexRef.current[result.session.sessionId] = Math.max(
+        chatSyncIndexRef.current[result.session.sessionId] ?? 0,
+        result.lastIndex,
+        ...result.messages.map(message => message.syncIndex ?? 0),
+      );
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
       await service.markSessionRead(result.session.sessionId);
@@ -1191,18 +1221,34 @@ function App() {
     }
   };
 
-  const loadChatSessions = async (preferredSessionId = '', activeProjectId = projectIdRef.current) => {
+  const loadChatSessions = async (
+    preferredSessionId = '',
+    activeProjectId = projectIdRef.current,
+    options?: {incremental?: boolean; preserveUserSelection?: boolean},
+  ) => {
     if (!activeProjectId) return;
     try {
+      const selectionSnapshot = chatSelectedIdRef.current;
       const sessions = sortChatSessions(await service.listSessions());
       setChatSessions(sessions);
-      const fallbackSessionId = preferredSessionId || chatSelectedIdRef.current || sessions[0]?.sessionId || '';
+      const preferredSelection = preferredSessionId && sessions.some(session => session.sessionId === preferredSessionId)
+        ? preferredSessionId
+        : '';
+      const currentSelection = chatSelectedIdRef.current && sessions.some(session => session.sessionId === chatSelectedIdRef.current)
+        ? chatSelectedIdRef.current
+        : '';
+      const fallbackSessionId = currentSelection || preferredSelection || sessions[0]?.sessionId || '';
+      const shouldIncrementallySync = Boolean(options?.incremental && fallbackSessionId && (fallbackSessionId === preferredSelection || fallbackSessionId === currentSelection));
       if (!fallbackSessionId) {
         setSelectedChatId('');
         setChatMessages([]);
         return;
       }
-      await loadChatSession(fallbackSessionId, activeProjectId);
+      await loadChatSession(fallbackSessionId, activeProjectId, {
+        incremental: shouldIncrementallySync,
+        preserveUserSelection: options?.preserveUserSelection,
+        selectionSnapshot,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -1311,6 +1357,7 @@ function App() {
 
   const connect = async ({silentReconnect = false}: {silentReconnect?: boolean} = {}) => {
     const trimmedToken = token.trim();
+    const previousSelectedChatId = chatSelectedIdRef.current;
     setError('');
     clearReconnectTimer();
     if (!silentReconnect) {
@@ -1329,11 +1376,17 @@ function App() {
       reconnectStartedAtRef.current = null;
       setReconnecting(false);
       setConnected(true);
-      setChatMessages([]);
-      setChatSessions([]);
-      setSelectedChatId('');
-      chatSelectedIdRef.current = '';
-      await loadChatSessions('', result.hydrated.projectId);
+      if (!silentReconnect) {
+        setChatMessages([]);
+        setChatSessions([]);
+        setSelectedChatId('');
+        chatSelectedIdRef.current = '';
+        chatSyncIndexRef.current = {};
+      }
+      await loadChatSessions(previousSelectedChatId, result.hydrated.projectId, {
+        incremental: silentReconnect && !!previousSelectedChatId,
+        preserveUserSelection: silentReconnect,
+      });
       workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
         if (projectIdRef.current !== result.hydrated.projectId) return;
         setDirEntries(validated.dirEntries);
@@ -1383,6 +1436,7 @@ function App() {
       setChatSessions([]);
       setSelectedChatId('');
       chatSelectedIdRef.current = '';
+      chatSyncIndexRef.current = {};
       await loadChatSessions('', result.hydrated.projectId);
       workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
         if (projectIdRef.current !== result.hydrated.projectId) return;
@@ -1429,8 +1483,6 @@ function App() {
   };
 
   useEffect(() => {
-    if (!connected) return;
-
     const scheduleRefresh = () => {
       if (liveRefreshTimerRef.current !== null) {
         return;
@@ -1467,6 +1519,12 @@ function App() {
         const payload = (event.payload ?? {}) as RegistryChatMessageEventPayload;
         if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session));
+        }
+        if (payload.message?.sessionId) {
+          chatSyncIndexRef.current[payload.message.sessionId] = Math.max(
+            chatSyncIndexRef.current[payload.message.sessionId] ?? 0,
+            payload.message.syncIndex ?? 0,
+          );
         }
         if (payload.message?.sessionId && payload.message.sessionId === chatSelectedIdRef.current) {
           setChatMessages(prev => upsertChatMessage(prev, payload.message));
@@ -1552,7 +1610,7 @@ function App() {
       unsubscribeEvent();
       unsubscribeClose();
     };
-  }, [connected, projectId, token]);
+  }, [token]);
 
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
@@ -1623,6 +1681,8 @@ function App() {
                 key={session.sessionId}
                 className={`item ${selectedChatId === session.sessionId ? 'selected' : ''}`}
                 onClick={() => {
+                  chatSelectedIdRef.current = session.sessionId;
+                  setSelectedChatId(session.sessionId);
                   loadChatSession(session.sessionId).catch(() => undefined);
                   if (!isWide) setDrawerOpen(false);
                 }}>

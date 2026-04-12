@@ -2,6 +2,7 @@ package sessionview
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -54,7 +55,7 @@ func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, err := svc.ReadSession(context.Background(), "sess-1")
+	_, messages, _, err := svc.ReadSession(context.Background(), "sess-1", 0)
 	if err != nil {
 		t.Fatalf("ReadSession: %v", err)
 	}
@@ -233,7 +234,7 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
-	summary, messages, err := svc.ReadSession(context.Background(), "sess-1")
+	summary, messages, _, err := svc.ReadSession(context.Background(), "sess-1", 0)
 	if err != nil {
 		t.Fatalf("ReadSession: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 		t.Fatalf("RecordEvent tool updated #2: %v", err)
 	}
 
-	summary, messages, err := svc.ReadSession(context.Background(), "sess-1")
+	summary, messages, _, err := svc.ReadSession(context.Background(), "sess-1", 0)
 	if err != nil {
 		t.Fatalf("ReadSession: %v", err)
 	}
@@ -284,5 +285,83 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	}
 	if messages[0].Text != "Build finished" {
 		t.Fatalf("messages[0].Text = %q, want %q", messages[0].Text, "Build finished")
+	}
+}
+
+func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
+	store, err := client.NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	svc := New("proj1", store, nil)
+	if err := svc.RecordEvent(context.Background(), client.SessionViewEvent{Type: client.SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Task"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := svc.RecordEvent(context.Background(), client.SessionViewEvent{Type: client.SessionViewEventPermissionRequested, SessionID: "sess-1", Role: "system", Kind: "permission", Text: "Run tool?", RequestID: 42}); err != nil {
+		t.Fatalf("RecordEvent permission requested: %v", err)
+	}
+	if err := svc.RecordEvent(context.Background(), client.SessionViewEvent{Type: client.SessionViewEventPermissionResolved, SessionID: "sess-1", RequestID: 42, Status: "done", UpdatedAt: mustRFC3339Time(t, "2026-04-12T10:02:00Z")}); err != nil {
+		t.Fatalf("RecordEvent permission resolved: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := svc.HandleSessionRequest(context.Background(), "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	messages := body["messages"].([]SessionMessage)
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
+	}
+	if messages[0].Status != "done" {
+		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
+	}
+	if messages[0].SyncIndex != 2 {
+		t.Fatalf("messages[0].SyncIndex = %d, want 2", messages[0].SyncIndex)
+	}
+	if got := body["lastIndex"].(int64); got != 2 {
+		t.Fatalf("lastIndex = %d, want 2", got)
+	}
+}
+
+func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
+	store, err := client.NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	svc := New("proj1", store, nil)
+	if err := svc.RecordEvent(context.Background(), client.SessionViewEvent{Type: client.SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Stream"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := svc.RecordEvent(context.Background(), client.SessionViewEvent{Type: client.SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Text: "hello", Status: "streaming"}); err != nil {
+		t.Fatalf("RecordEvent chunk: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := svc.HandleSessionRequest(context.Background(), "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	messages := body["messages"].([]SessionMessage)
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
+	}
+	if messages[0].Status != "streaming" {
+		t.Fatalf("messages[0].Status = %q, want streaming", messages[0].Status)
+	}
+	if messages[0].SyncIndex != 1 {
+		t.Fatalf("messages[0].SyncIndex = %d, want 1", messages[0].SyncIndex)
 	}
 }

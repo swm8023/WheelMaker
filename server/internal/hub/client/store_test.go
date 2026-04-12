@@ -111,6 +111,89 @@ func TestStoreMigratesLegacyProjectsTable(t *testing.T) {
 	}
 }
 
+func TestStoreBackfillsSyncIndicesForLegacySessionMessages(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			project_name TEXT NOT NULL,
+			status INTEGER NOT NULL,
+			last_reply TEXT NOT NULL DEFAULT '',
+			acp_session_id TEXT NOT NULL DEFAULT '',
+			agents_json TEXT NOT NULL DEFAULT '{}',
+			title TEXT NOT NULL DEFAULT '',
+			last_message_preview TEXT NOT NULL DEFAULT '',
+			last_message_at TEXT NOT NULL DEFAULT '',
+			message_count INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			last_active_at TEXT NOT NULL
+		);
+		CREATE TABLE session_messages (
+			message_id TEXT PRIMARY KEY,
+			project_name TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			role TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			body TEXT NOT NULL DEFAULT '',
+			blocks_json TEXT NOT NULL DEFAULT '[]',
+			options_json TEXT NOT NULL DEFAULT '[]',
+			status TEXT NOT NULL DEFAULT 'done',
+			source_channel TEXT NOT NULL DEFAULT '',
+			source_chat_id TEXT NOT NULL DEFAULT '',
+			request_id INTEGER NOT NULL DEFAULT 0,
+			aggregate_key TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
+	`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("create legacy tables: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+		INSERT INTO sessions (id, project_name, status, title, last_message_preview, message_count, created_at, last_active_at)
+		VALUES ('sess-1', 'proj1', 1, 'Legacy', 'second', 2, '2026-04-12T10:00:00Z', '2026-04-12T10:02:00Z');
+		INSERT INTO session_messages (message_id, project_name, session_id, role, kind, body, created_at, updated_at)
+		VALUES
+			('msg-1', 'proj1', 'sess-1', 'user', 'text', 'first', '2026-04-12T10:01:00Z', '2026-04-12T10:01:00Z'),
+			('msg-2', 'proj1', 'sess-1', 'assistant', 'text', 'second', '2026-04-12T10:02:00Z', '2026-04-12T10:02:00Z');
+	`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("insert legacy rows: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	rec, err := store.LoadSession(context.Background(), "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if rec == nil || rec.LastSyncIndex != 2 {
+		t.Fatalf("LoadSession().LastSyncIndex = %#v, want 2", rec)
+	}
+	messages, err := store.ListSessionMessagesAfterIndex(context.Background(), "proj1", "sess-1", 0)
+	if err != nil {
+		t.Fatalf("ListSessionMessagesAfterIndex: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("ListSessionMessagesAfterIndex() len = %d, want 2", len(messages))
+	}
+	if messages[0].SyncIndex != 1 || messages[1].SyncIndex != 2 {
+		t.Fatalf("sync indexes = [%d, %d], want [1, 2]", messages[0].SyncIndex, messages[1].SyncIndex)
+	}
+}
+
 func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -176,6 +259,15 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("NewStore: %v", err)
 	}
 	defer store.Close()
+	if err := store.SaveSession(context.Background(), &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
 
 	msg := SessionMessageRecord{
 		MessageID:    "msg-1",
@@ -211,5 +303,68 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 	}
 	if len(messages[0].Options) != 1 || messages[0].Options[0].OptionID != "allow" {
 		t.Fatalf("ListSessionMessages()[0].Options = %#v, want allow option", messages[0].Options)
+	}
+}
+
+func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	msg := SessionMessageRecord{
+		MessageID:   "msg-1",
+		SessionID:   "sess-1",
+		ProjectName: "proj1",
+		Role:        "system",
+		Kind:        "permission",
+		Body:        "Run tool?",
+		Status:      "needs_action",
+		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		RequestID:   42,
+	}
+
+	if err := store.AppendSessionMessage(ctx, msg); err != nil {
+		t.Fatalf("AppendSessionMessage: %v", err)
+	}
+	msg.Status = "done"
+	msg.UpdatedAt = time.Date(2026, 4, 12, 10, 2, 0, 0, time.UTC)
+	if err := store.UpsertSessionMessage(ctx, msg); err != nil {
+		t.Fatalf("UpsertSessionMessage: %v", err)
+	}
+
+	messages, err := store.ListSessionMessagesAfterIndex(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionMessagesAfterIndex: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("ListSessionMessagesAfterIndex() len = %d, want 1", len(messages))
+	}
+	if messages[0].Status != "done" {
+		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
+	}
+	if messages[0].SyncIndex != 2 {
+		t.Fatalf("messages[0].SyncIndex = %d, want 2", messages[0].SyncIndex)
+	}
+
+	rec, err := store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if rec == nil || rec.LastSyncIndex != 2 {
+		t.Fatalf("LoadSession().LastSyncIndex = %v, want 2", rec)
 	}
 }

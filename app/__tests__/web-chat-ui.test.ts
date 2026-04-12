@@ -12,8 +12,11 @@ describe('web chat integration', () => {
 
     expect(registryTypes).toContain('export interface RegistrySessionSummary');
     expect(registryTypes).toContain('export interface RegistrySessionMessage');
+    expect(registryTypes).toContain('syncIndex');
+    expect(registryTypes).toContain('lastIndex');
     expect(repositoryTs).toContain("method: 'session.list'");
     expect(repositoryTs).toContain("method: 'session.read'");
+    expect(repositoryTs).toContain('afterIndex');
     expect(repositoryTs).toContain("method: 'session.new'");
     expect(repositoryTs).toContain("method: 'session.send'");
     expect(repositoryTs).toContain("method: 'chat.permission.respond'");
@@ -22,9 +25,17 @@ describe('web chat integration', () => {
     expect(workspaceServiceTs).toContain('async createSession(');
     expect(workspaceServiceTs).toContain('async sendSessionMessage(');
     expect(workspaceServiceTs).toContain('async respondToSessionPermission(');
+    expect(workspaceServiceTs).toContain('private eventListeners = new Set');
+    expect(workspaceServiceTs).toContain('private closeListeners = new Set');
     expect(mainTsx).toContain('chatComposerText');
     expect(mainTsx).toContain('chatMessages');
     expect(mainTsx).toContain('session.message');
+    expect(mainTsx).toContain('chatSyncIndexRef');
+    expect(mainTsx).toContain('sessions.some(session => session.sessionId === preferredSessionId)');
+    expect(mainTsx).toContain('result.lastIndex < afterIndex');
+    expect(mainTsx).toContain('preserveUserSelection');
+    expect(mainTsx).toContain('selectionSnapshot');
+    expect(mainTsx).toContain('chatSelectedIdRef.current = session.sessionId');
     expect(mainTsx).toContain('sessionId');
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");

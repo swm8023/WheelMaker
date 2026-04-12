@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	title TEXT NOT NULL DEFAULT '',
 	last_message_preview TEXT NOT NULL DEFAULT '',
 	last_message_at TEXT NOT NULL DEFAULT '',
+	last_sync_index INTEGER NOT NULL DEFAULT 0,
 	message_count INTEGER NOT NULL DEFAULT 0,
 	created_at TEXT NOT NULL,
 	last_active_at TEXT NOT NULL
@@ -48,6 +50,7 @@ CREATE TABLE IF NOT EXISTS session_messages (
 	message_id TEXT PRIMARY KEY,
 	project_name TEXT NOT NULL,
 	session_id TEXT NOT NULL,
+	sync_index INTEGER NOT NULL DEFAULT 0,
 	role TEXT NOT NULL,
 	kind TEXT NOT NULL,
 	body TEXT NOT NULL DEFAULT '',
@@ -88,6 +91,7 @@ type SessionRecord struct {
 	Title              string
 	LastMessagePreview string
 	LastMessageAt      time.Time
+	LastSyncIndex      int64
 	MessageCount       int
 	CreatedAt          time.Time
 	LastActiveAt       time.Time
@@ -119,6 +123,7 @@ type SessionMessageRecord struct {
 	SourceChannel string
 	SourceChatID  string
 	RequestID     int64
+	SyncIndex     int64
 	AggregateKey  string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -137,7 +142,9 @@ type Store interface {
 	ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error)
 	AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error
 	UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error
+	LoadSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionMessageRecord, error)
 	ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error)
+	ListSessionMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionMessageRecord, error)
 	HasSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
 
@@ -145,7 +152,8 @@ type Store interface {
 }
 
 type sqliteStore struct {
-	db *sql.DB
+	db      *sql.DB
+	writeMu sync.Mutex
 }
 
 func NewStore(dbPath string) (Store, error) {
@@ -168,7 +176,114 @@ func NewStore(dbPath string) (Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_messages_sync_index ON session_messages(project_name, session_id, sync_index ASC)`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("init sync index: %w", err)
+	}
+	if err := backfillSessionSyncIndices(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return &sqliteStore{db: db}, nil
+}
+
+func backfillSessionSyncIndices(db *sql.DB) error {
+	rows, err := db.Query(`
+		SELECT project_name, session_id
+		FROM session_messages
+		GROUP BY project_name, session_id
+	`)
+	if err != nil {
+		return fmt.Errorf("query session message groups: %w", err)
+	}
+	defer rows.Close()
+
+	type sessionKey struct {
+		projectName string
+		sessionID   string
+	}
+	var sessions []sessionKey
+	for rows.Next() {
+		var key sessionKey
+		if err := rows.Scan(&key.projectName, &key.sessionID); err != nil {
+			return fmt.Errorf("scan session message group: %w", err)
+		}
+		sessions = append(sessions, key)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate session message groups: %w", err)
+	}
+
+	for _, key := range sessions {
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("begin backfill tx for %s/%s: %w", key.projectName, key.sessionID, err)
+		}
+		rollback := true
+		defer func() {
+			if rollback {
+				_ = tx.Rollback()
+			}
+		}()
+
+		var maxSyncIndex int64
+		var zeroCount int64
+		if err := tx.QueryRow(`
+			SELECT COALESCE(MAX(sync_index), 0), SUM(CASE WHEN sync_index = 0 THEN 1 ELSE 0 END)
+			FROM session_messages
+			WHERE project_name = ? AND session_id = ?
+		`, key.projectName, key.sessionID).Scan(&maxSyncIndex, &zeroCount); err != nil {
+			return fmt.Errorf("load sync index stats for %s/%s: %w", key.projectName, key.sessionID, err)
+		}
+
+		if zeroCount > 0 {
+			messageRows, err := tx.Query(`
+				SELECT message_id
+				FROM session_messages
+				WHERE project_name = ? AND session_id = ?
+				ORDER BY created_at ASC, updated_at ASC, message_id ASC
+			`, key.projectName, key.sessionID)
+			if err != nil {
+				return fmt.Errorf("query legacy messages for %s/%s: %w", key.projectName, key.sessionID, err)
+			}
+			var messageIDs []string
+			for messageRows.Next() {
+				var messageID string
+				if err := messageRows.Scan(&messageID); err != nil {
+					_ = messageRows.Close()
+					return fmt.Errorf("scan legacy message id: %w", err)
+				}
+				messageIDs = append(messageIDs, messageID)
+			}
+			if err := messageRows.Err(); err != nil {
+				_ = messageRows.Close()
+				return fmt.Errorf("iterate legacy messages: %w", err)
+			}
+			_ = messageRows.Close()
+			for idx, messageID := range messageIDs {
+				if _, err := tx.Exec(`
+					UPDATE session_messages
+					SET sync_index = ?
+					WHERE project_name = ? AND session_id = ? AND message_id = ?
+				`, idx+1, key.projectName, key.sessionID, messageID); err != nil {
+					return fmt.Errorf("backfill sync index for message %s: %w", messageID, err)
+				}
+			}
+			maxSyncIndex = int64(len(messageIDs))
+		}
+		if _, err := tx.Exec(`
+			UPDATE sessions
+			SET last_sync_index = ?
+			WHERE project_name = ? AND id = ?
+		`, maxSyncIndex, key.projectName, key.sessionID); err != nil {
+			return fmt.Errorf("backfill session last_sync_index for %s/%s: %w", key.projectName, key.sessionID, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit backfill tx for %s/%s: %w", key.projectName, key.sessionID, err)
+		}
+		rollback = false
+	}
+	return nil
 }
 
 func migrateProjectsTable(db *sql.DB) error {
@@ -206,6 +321,10 @@ func migrateSessionsTable(db *sql.DB) error {
 		ddl  string
 	}{
 		{
+			name: "sync_index",
+			ddl:  `ALTER TABLE session_messages ADD COLUMN sync_index INTEGER NOT NULL DEFAULT 0`,
+		},
+		{
 			name: "blocks_json",
 			ddl:  `ALTER TABLE session_messages ADD COLUMN blocks_json TEXT NOT NULL DEFAULT '[]'`,
 		},
@@ -242,6 +361,10 @@ func migrateSessionsTable(db *sql.DB) error {
 		{
 			name: "last_message_at",
 			ddl:  `ALTER TABLE sessions ADD COLUMN last_message_at TEXT NOT NULL DEFAULT ''`,
+		},
+		{
+			name: "last_sync_index",
+			ddl:  `ALTER TABLE sessions ADD COLUMN last_sync_index INTEGER NOT NULL DEFAULT 0`,
 		},
 		{
 			name: "message_count",
@@ -407,7 +530,7 @@ func (s *sqliteStore) DeleteRouteBinding(ctx context.Context, projectName, route
 
 func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, status, last_reply, acp_session_id, agents_json, title, last_message_preview, last_message_at, message_count, created_at, last_active_at
+		SELECT id, status, last_reply, acp_session_id, agents_json, title, last_message_preview, last_message_at, last_sync_index, message_count, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
@@ -426,6 +549,7 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 		&rec.Title,
 		&rec.LastMessagePreview,
 		&lastMessageAt,
+		&rec.LastSyncIndex,
 		&rec.MessageCount,
 		&createdAt,
 		&lastActiveAt,
@@ -471,8 +595,8 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, project_name, status, last_reply, acp_session_id, agents_json, title, last_message_preview, last_message_at, message_count, created_at, last_active_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, project_name, status, last_reply, acp_session_id, agents_json, title, last_message_preview, last_message_at, last_sync_index, message_count, created_at, last_active_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_name=excluded.project_name,
 			status=excluded.status,
@@ -482,10 +606,11 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
 			last_message_preview=CASE WHEN excluded.last_message_preview != '' THEN excluded.last_message_preview ELSE sessions.last_message_preview END,
 			last_message_at=CASE WHEN excluded.last_message_at != '' THEN excluded.last_message_at ELSE sessions.last_message_at END,
+			last_sync_index=CASE WHEN excluded.last_sync_index > sessions.last_sync_index THEN excluded.last_sync_index ELSE sessions.last_sync_index END,
 			message_count=CASE WHEN excluded.message_count > 0 THEN excluded.message_count ELSE sessions.message_count END,
 			last_active_at=excluded.last_active_at
 	`, rec.ID, rec.ProjectName, int(rec.Status), rec.LastReply, rec.ACPSessionID, rec.AgentsJSON, rec.Title, rec.LastMessagePreview,
-		rec.LastMessageAt.UTC().Format(time.RFC3339Nano), rec.MessageCount,
+		rec.LastMessageAt.UTC().Format(time.RFC3339Nano), rec.LastSyncIndex, rec.MessageCount,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.LastActiveAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -545,6 +670,9 @@ func (s *sqliteStore) UpsertSessionMessage(ctx context.Context, rec SessionMessa
 }
 
 func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec SessionMessageRecord, update bool) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	rec.MessageID = strings.TrimSpace(rec.MessageID)
 	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
 	rec.SessionID = strings.TrimSpace(rec.SessionID)
@@ -567,6 +695,34 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	if rec.UpdatedAt.IsZero() {
 		rec.UpdatedAt = rec.CreatedAt
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin session message tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var lastSyncIndex int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT last_sync_index
+		FROM sessions
+		WHERE project_name = ? AND id = ?
+	`, rec.ProjectName, rec.SessionID).Scan(&lastSyncIndex)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("session %q not found for message %q", rec.SessionID, rec.MessageID)
+	}
+	if err != nil {
+		return fmt.Errorf("load session sync index: %w", err)
+	}
+	rec.SyncIndex = lastSyncIndex + 1
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE sessions
+		SET last_sync_index = ?
+		WHERE project_name = ? AND id = ?
+	`, rec.SyncIndex, rec.ProjectName, rec.SessionID); err != nil {
+		return fmt.Errorf("update session sync index: %w", err)
+	}
 	blocksJSON, err := marshalSessionContentBlocks(rec.Blocks)
 	if err != nil {
 		return err
@@ -577,13 +733,14 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	}
 	query := `
 		INSERT INTO session_messages (
-			message_id, project_name, session_id, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			message_id, project_name, session_id, sync_index, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	if update {
 		query += `
 		ON CONFLICT(message_id) DO UPDATE SET
 			project_name=excluded.project_name,
 			session_id=excluded.session_id,
+			sync_index=excluded.sync_index,
 			role=excluded.role,
 			kind=excluded.kind,
 			body=excluded.body,
@@ -596,19 +753,22 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 			aggregate_key=excluded.aggregate_key,
 			updated_at=excluded.updated_at`
 	}
-	_, err = s.db.ExecContext(ctx, query,
-		rec.MessageID, rec.ProjectName, rec.SessionID, rec.Role, rec.Kind, rec.Body, blocksJSON, optionsJSON, rec.Status, rec.SourceChannel, rec.SourceChatID, rec.RequestID, rec.AggregateKey,
+	_, err = tx.ExecContext(ctx, query,
+		rec.MessageID, rec.ProjectName, rec.SessionID, rec.SyncIndex, rec.Role, rec.Kind, rec.Body, blocksJSON, optionsJSON, rec.Status, rec.SourceChannel, rec.SourceChatID, rec.RequestID, rec.AggregateKey,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return fmt.Errorf("save session message: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session message tx: %w", err)
 	}
 	return nil
 }
 
 func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT message_id, project_name, session_id, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
+		SELECT message_id, project_name, session_id, sync_index, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
 		FROM session_messages
 		WHERE project_name = ? AND session_id = ?
 		ORDER BY created_at ASC, updated_at ASC
@@ -625,8 +785,64 @@ func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sess
 		var optionsJSON string
 		var createdAt string
 		var updatedAt string
-		if err := rows.Scan(&rec.MessageID, &rec.ProjectName, &rec.SessionID, &rec.Role, &rec.Kind, &rec.Body, &blocksJSON, &optionsJSON, &rec.Status, &rec.SourceChannel, &rec.SourceChatID, &rec.RequestID, &rec.AggregateKey, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&rec.MessageID, &rec.ProjectName, &rec.SessionID, &rec.SyncIndex, &rec.Role, &rec.Kind, &rec.Body, &blocksJSON, &optionsJSON, &rec.Status, &rec.SourceChannel, &rec.SourceChatID, &rec.RequestID, &rec.AggregateKey, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan session message: %w", err)
+		}
+		rec.Blocks = unmarshalSessionContentBlocks(blocksJSON)
+		rec.Options = unmarshalSessionPermissionOptions(optionsJSON)
+		rec.CreatedAt = parseStoreTime(createdAt)
+		rec.UpdatedAt = parseStoreTime(updatedAt)
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+func (s *sqliteStore) LoadSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionMessageRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT message_id, project_name, session_id, sync_index, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
+		FROM session_messages
+		WHERE project_name = ? AND session_id = ? AND message_id = ?
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
+
+	var rec SessionMessageRecord
+	var blocksJSON string
+	var optionsJSON string
+	var createdAt string
+	var updatedAt string
+	if err := row.Scan(&rec.MessageID, &rec.ProjectName, &rec.SessionID, &rec.SyncIndex, &rec.Role, &rec.Kind, &rec.Body, &blocksJSON, &optionsJSON, &rec.Status, &rec.SourceChannel, &rec.SourceChatID, &rec.RequestID, &rec.AggregateKey, &createdAt, &updatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load session message: %w", err)
+	}
+	rec.Blocks = unmarshalSessionContentBlocks(blocksJSON)
+	rec.Options = unmarshalSessionPermissionOptions(optionsJSON)
+	rec.CreatedAt = parseStoreTime(createdAt)
+	rec.UpdatedAt = parseStoreTime(updatedAt)
+	return &rec, nil
+}
+
+func (s *sqliteStore) ListSessionMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionMessageRecord, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT message_id, project_name, session_id, sync_index, role, kind, body, blocks_json, options_json, status, source_channel, source_chat_id, request_id, aggregate_key, created_at, updated_at
+		FROM session_messages
+		WHERE project_name = ? AND session_id = ? AND sync_index > ?
+		ORDER BY sync_index ASC
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), afterIndex)
+	if err != nil {
+		return nil, fmt.Errorf("list session messages after index: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionMessageRecord
+	for rows.Next() {
+		var rec SessionMessageRecord
+		var blocksJSON string
+		var optionsJSON string
+		var createdAt string
+		var updatedAt string
+		if err := rows.Scan(&rec.MessageID, &rec.ProjectName, &rec.SessionID, &rec.SyncIndex, &rec.Role, &rec.Kind, &rec.Body, &blocksJSON, &optionsJSON, &rec.Status, &rec.SourceChannel, &rec.SourceChatID, &rec.RequestID, &rec.AggregateKey, &createdAt, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan session message after index: %w", err)
 		}
 		rec.Blocks = unmarshalSessionContentBlocks(blocksJSON)
 		rec.Options = unmarshalSessionPermissionOptions(optionsJSON)

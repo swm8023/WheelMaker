@@ -36,6 +36,7 @@ type SessionSummary struct {
 type SessionMessage struct {
 	MessageID string                 `json:"messageId"`
 	SessionID string                 `json:"sessionId"`
+	SyncIndex int64                  `json:"syncIndex,omitempty"`
 	Role      string                 `json:"role"`
 	Kind      string                 `json:"kind"`
 	Text      string                 `json:"text"`
@@ -108,6 +109,11 @@ func (s *Service) RecordEvent(ctx context.Context, event client.SessionViewEvent
 		if err := s.store.AppendSessionMessage(ctx, message); err != nil {
 			return err
 		}
+		storedMessage, err := s.loadStoredMessage(ctx, event.SessionID, message.MessageID)
+		if err != nil {
+			return err
+		}
+		message = storedMessage
 		if err := s.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), message.Body, message.UpdatedAt, true); err != nil {
 			return err
 		}
@@ -115,6 +121,24 @@ func (s *Service) RecordEvent(ctx context.Context, event client.SessionViewEvent
 		return nil
 	case client.SessionViewEventAssistantChunk, client.SessionViewEventThoughtChunk:
 		message := s.aggregator.appendChunk(s.projectName, event)
+		existed, err := s.store.HasSessionMessage(ctx, s.projectName, event.SessionID, message.MessageID)
+		if err != nil {
+			return err
+		}
+		if err := s.store.UpsertSessionMessage(ctx, message); err != nil {
+			return err
+		}
+		storedMessage, err := s.loadStoredMessage(ctx, event.SessionID, message.MessageID)
+		if err != nil {
+			return err
+		}
+		message = storedMessage
+		if err := s.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), message.Body, message.UpdatedAt, !existed); err != nil {
+			return err
+		}
+		if !existed {
+			s.incrementUnread(event.SessionID)
+		}
 		s.publishSessionMessage(message)
 		return nil
 	case client.SessionViewEventPromptFinished:
@@ -141,6 +165,11 @@ func (s *Service) RecordEvent(ctx context.Context, event client.SessionViewEvent
 		if err := s.store.UpsertSessionMessage(ctx, message); err != nil {
 			return err
 		}
+		storedMessage, err := s.loadStoredMessage(ctx, event.SessionID, message.MessageID)
+		if err != nil {
+			return err
+		}
+		message = storedMessage
 		if err := s.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), message.Body, message.UpdatedAt, !existed); err != nil {
 			return err
 		}
@@ -163,6 +192,11 @@ func (s *Service) RecordEvent(ctx context.Context, event client.SessionViewEvent
 			if err := s.store.UpsertSessionMessage(ctx, message); err != nil {
 				return err
 			}
+			storedMessage, err := s.loadStoredMessage(ctx, event.SessionID, message.MessageID)
+			if err != nil {
+				return err
+			}
+			message = storedMessage
 			s.publishSessionMessage(message)
 			break
 		}
@@ -192,6 +226,11 @@ func (s *Service) RecordEvent(ctx context.Context, event client.SessionViewEvent
 		if err := s.store.UpsertSessionMessage(ctx, message); err != nil {
 			return err
 		}
+		storedMessage, err := s.loadStoredMessage(ctx, event.SessionID, message.MessageID)
+		if err != nil {
+			return err
+		}
+		message = storedMessage
 		if err := s.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), message.Body, message.UpdatedAt, !existed); err != nil {
 			return err
 		}
@@ -215,16 +254,17 @@ func (s *Service) HandleSessionRequest(ctx context.Context, method string, _ str
 		return map[string]any{"sessions": sessions}, nil
 	case "session.read":
 		var req struct {
-			SessionID string `json:"sessionId"`
+			SessionID  string `json:"sessionId"`
+			AfterIndex int64  `json:"afterIndex,omitempty"`
 		}
 		if err := decodePayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.read payload: %w", err)
 		}
-		summary, messages, err := s.ReadSession(ctx, req.SessionID)
+		summary, messages, lastIndex, err := s.ReadSession(ctx, req.SessionID, req.AfterIndex)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"session": summary, "messages": messages}, nil
+		return map[string]any{"session": summary, "messages": messages, "lastIndex": lastIndex}, nil
 	case "session.new":
 		var req struct {
 			Title string `json:"title,omitempty"`
@@ -239,7 +279,7 @@ func (s *Service) HandleSessionRequest(ctx context.Context, method string, _ str
 		if err := s.RecordEvent(ctx, client.SessionViewEvent{Type: client.SessionViewEventSessionCreated, SessionID: sess.ID, Title: firstNonEmpty(req.Title, sess.ID)}); err != nil {
 			return nil, err
 		}
-		summary, _, err := s.ReadSession(ctx, sess.ID)
+		summary, _, _, err := s.ReadSession(ctx, sess.ID, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -328,38 +368,65 @@ func (s *Service) ListSessions(ctx context.Context) ([]SessionSummary, error) {
 	return out, nil
 }
 
-func (s *Service) ReadSession(ctx context.Context, sessionID string) (SessionSummary, []SessionMessage, error) {
+func (s *Service) ReadSession(ctx context.Context, sessionID string, afterIndex int64) (SessionSummary, []SessionMessage, int64, error) {
 	rec, err := s.store.LoadSession(ctx, s.projectName, strings.TrimSpace(sessionID))
 	if err != nil {
-		return SessionSummary{}, nil, err
+		return SessionSummary{}, nil, 0, err
 	}
 	if rec == nil {
-		return SessionSummary{}, nil, fmt.Errorf("session not found: %s", sessionID)
+		return SessionSummary{}, nil, 0, fmt.Errorf("session not found: %s", sessionID)
 	}
-	messages, err := s.store.ListSessionMessages(ctx, s.projectName, strings.TrimSpace(sessionID))
+	var messages []client.SessionMessageRecord
+	if afterIndex > 0 {
+		messages, err = s.store.ListSessionMessagesAfterIndex(ctx, s.projectName, strings.TrimSpace(sessionID), afterIndex)
+	} else {
+		messages, err = s.store.ListSessionMessages(ctx, s.projectName, strings.TrimSpace(sessionID))
+	}
 	if err != nil {
-		return SessionSummary{}, nil, err
+		return SessionSummary{}, nil, 0, err
 	}
 	out := make([]SessionMessage, 0, len(messages))
 	for _, message := range messages {
 		out = append(out, toSessionMessage(message))
 	}
-	return s.summaryFromRecord(*rec), out, nil
+	return s.summaryFromRecord(*rec), out, rec.LastSyncIndex, nil
 }
 
 func (s *Service) flushSession(ctx context.Context, sessionID string) error {
 	flushed := s.aggregator.flushSession(sessionID)
 	for _, message := range flushed {
+		existed, err := s.store.HasSessionMessage(ctx, s.projectName, sessionID, message.MessageID)
+		if err != nil {
+			return err
+		}
 		if err := s.store.UpsertSessionMessage(ctx, message); err != nil {
 			return err
 		}
-		if err := s.upsertSessionProjection(ctx, sessionID, "", message.Body, message.UpdatedAt, true); err != nil {
+		storedMessage, err := s.loadStoredMessage(ctx, sessionID, message.MessageID)
+		if err != nil {
 			return err
 		}
-		s.incrementUnread(sessionID)
+		message = storedMessage
+		if err := s.upsertSessionProjection(ctx, sessionID, "", message.Body, message.UpdatedAt, !existed); err != nil {
+			return err
+		}
+		if !existed {
+			s.incrementUnread(sessionID)
+		}
 		s.publishSessionMessage(message)
 	}
 	return nil
+}
+
+func (s *Service) loadStoredMessage(ctx context.Context, sessionID, messageID string) (client.SessionMessageRecord, error) {
+	message, err := s.store.LoadSessionMessage(ctx, s.projectName, strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
+	if err != nil {
+		return client.SessionMessageRecord{}, err
+	}
+	if message != nil {
+		return *message, nil
+	}
+	return client.SessionMessageRecord{}, fmt.Errorf("session message not found: %s", messageID)
 }
 
 func (s *Service) upsertSessionProjection(ctx context.Context, sessionID, title, preview string, updatedAt time.Time, incrementMessageCount bool) error {
@@ -466,6 +533,7 @@ func toSessionMessage(message client.SessionMessageRecord) SessionMessage {
 	return SessionMessage{
 		MessageID: message.MessageID,
 		SessionID: message.SessionID,
+		SyncIndex: message.SyncIndex,
 		Role:      message.Role,
 		Kind:      message.Kind,
 		Text:      message.Body,

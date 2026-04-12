@@ -252,11 +252,11 @@ export class RegistryRepository {
     return (payload.sessions ?? []).filter(session => !!session.sessionId);
   }
 
-  async readSession(projectId: string, sessionId: string): Promise<RegistrySessionReadResponse> {
+  async readSession(projectId: string, sessionId: string, afterIndex = 0): Promise<RegistrySessionReadResponse> {
     const resp = await this.client.request({
       method: 'session.read',
       projectId,
-      payload: {sessionId},
+      payload: afterIndex > 0 ? {sessionId, afterIndex} : {sessionId},
       timeoutMs: 15000,
     });
     const payload = (resp.payload ?? {}) as Partial<RegistrySessionReadResponse>;
@@ -269,6 +269,7 @@ export class RegistryRepository {
         messageCount: 0,
       },
       messages: payload.messages ?? [],
+      lastIndex: typeof payload.lastIndex === 'number' ? payload.lastIndex : 0,
     };
   }
 

@@ -42,6 +42,7 @@ export interface RegistrySessionPermissionOption {
 export interface RegistrySessionMessage {
   messageId: string;
   sessionId: string;
+  syncIndex?: number;
   role: RegistrySessionMessageRole;
   kind: RegistrySessionMessageKind;
   text: string;
@@ -67,6 +68,7 @@ export interface RegistrySessionSummary {
 export interface RegistrySessionReadResponse {
   session: RegistrySessionSummary;
   messages: RegistrySessionMessage[];
+  lastIndex: number;
 }
 
 export interface RegistrySessionMessageEventPayload {

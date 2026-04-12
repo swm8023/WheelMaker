@@ -25,24 +25,48 @@ export type WorkspaceSession = {
 export class RegistryWorkspaceService {
   private repository: RegistryRepository | null = null;
   private session: WorkspaceSession | null = null;
+  private eventListeners = new Set<(event: RegistryEnvelope) => void>();
+  private closeListeners = new Set<() => void>();
+  private unsubscribeRepositoryEvent: (() => void) | null = null;
+  private unsubscribeRepositoryClose: (() => void) | null = null;
 
   async connect(wsUrl: string, token: string): Promise<WorkspaceSession> {
     const repository = createRegistryRepository();
     try {
       await repository.initialize(wsUrl, token);
+      const previousRepository = this.repository;
+      this.bindRepository(repository);
       const projects = await this.listProjectsWithRetry(repository);
       if (projects.length === 0) {
         throw new Error('No projects available. Please ensure at least one project is online and retry.');
       }
       const {selectedProjectId, fileEntries} = await this.selectFirstReachableProject(repository, projects);
-      this.repository?.close();
+      previousRepository?.close();
       this.repository = repository;
       this.session = {projects, selectedProjectId, fileEntries};
       return this.session;
     } catch (error) {
+      this.unbindRepository();
       repository.close();
       throw error;
     }
+  }
+
+  private bindRepository(repository: RegistryRepository): void {
+    this.unbindRepository();
+    this.unsubscribeRepositoryEvent = repository.onEvent(event => {
+      this.eventListeners.forEach(listener => listener(event));
+    });
+    this.unsubscribeRepositoryClose = repository.onClose(() => {
+      this.closeListeners.forEach(listener => listener());
+    });
+  }
+
+  private unbindRepository(): void {
+    this.unsubscribeRepositoryEvent?.();
+    this.unsubscribeRepositoryEvent = null;
+    this.unsubscribeRepositoryClose?.();
+    this.unsubscribeRepositoryClose = null;
   }
 
   private async listProjectsWithRetry(repository: RegistryRepository): Promise<RegistryProject[]> {
@@ -209,14 +233,15 @@ export class RegistryWorkspaceService {
     return this.repository.listSessions(this.session.selectedProjectId);
   }
 
-  async readSession(sessionId: string): Promise<{session: RegistrySessionSummary; messages: RegistrySessionMessage[]}> {
+  async readSession(sessionId: string, afterIndex = 0): Promise<{session: RegistrySessionSummary; messages: RegistrySessionMessage[]; lastIndex: number}> {
     if (!this.session || !this.repository) {
       return {
         session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0},
         messages: [],
+        lastIndex: 0,
       };
     }
-    return this.repository.readSession(this.session.selectedProjectId, sessionId);
+    return this.repository.readSession(this.session.selectedProjectId, sessionId, afterIndex);
   }
 
   async createSession(title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
@@ -248,16 +273,16 @@ export class RegistryWorkspaceService {
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {
-    if (!this.repository) {
-      return () => undefined;
-    }
-    return this.repository.onEvent(listener);
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
   }
 
   onClose(listener: () => void): () => void {
-    if (!this.repository) {
-      return () => undefined;
-    }
-    return this.repository.onClose(listener);
+    this.closeListeners.add(listener);
+    return () => {
+      this.closeListeners.delete(listener);
+    };
   }
 }

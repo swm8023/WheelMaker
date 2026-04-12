@@ -416,6 +416,12 @@ func (s *noopStore) UpsertSessionMessage(context.Context, SessionMessageRecord) 
 func (s *noopStore) ListSessionMessages(context.Context, string, string) ([]SessionMessageRecord, error) {
 	return nil, nil
 }
+func (s *noopStore) LoadSessionMessage(context.Context, string, string, string) (*SessionMessageRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) ListSessionMessagesAfterIndex(context.Context, string, string, int64) ([]SessionMessageRecord, error) {
+	return nil, nil
+}
 func (s *noopStore) HasSessionMessage(context.Context, string, string, string) (bool, error) {
 	return false, nil
 }
