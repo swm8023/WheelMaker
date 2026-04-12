@@ -1372,6 +1372,10 @@ function App() {
       fileHashRef.current = {};
       fileCacheRef.current = {};
       applyHydratedProjectState(result.hydrated);
+      const selectedFileToReload = result.hydrated.selectedFile || selectedFileRef.current;
+      if (selectedFileToReload) {
+        readSelectedFile(selectedFileToReload).catch(() => undefined);
+      }
       setGitDirty(Boolean(result.projects.find(item => item.projectId === result.hydrated.projectId)?.git?.dirty));
       reconnectStartedAtRef.current = null;
       setReconnecting(false);

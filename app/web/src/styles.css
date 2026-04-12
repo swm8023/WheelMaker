@@ -465,6 +465,7 @@ body,
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  overscroll-behavior-x: none;
   background: var(--panel-3);
   animation: wmFadeIn 180ms ease-out;
 }
@@ -852,6 +853,7 @@ body,
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior-x: contain;
 }
 
 .file-code-area .scroll-panel {

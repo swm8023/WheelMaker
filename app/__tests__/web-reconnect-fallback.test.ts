@@ -13,6 +13,14 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('if (!connected && !keepWorkspaceVisible) {');
   });
 
+  test('reloads selected file after reconnect success', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain('const selectedFileToReload = result.hydrated.selectedFile || selectedFileRef.current;');
+    expect(mainTsx).toContain('readSelectedFile(selectedFileToReload).catch(() => undefined);');
+  });
+
   test('shows reconnecting state through refresh button while recovering', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
