@@ -1430,6 +1430,13 @@ function App() {
     });
   }, [address, autoConnecting, connected]);
 
+  const clearLocalCache = () => {
+    const confirmed = window.confirm('Clear all local cache data except token?');
+    if (!confirmed) return;
+    workspaceStore.clearLocalCachePreservingToken();
+    window.location.reload();
+  };
+
   const switchProject = async (nextProjectId: string) => {
     setLoadingProject(true);
     try {
@@ -1880,6 +1887,12 @@ function App() {
                   ))}
                 </select>
               </label>
+              <button
+                type="button"
+                className="sidebar-clear-cache-btn"
+                onClick={clearLocalCache}>
+                Clear Local Cache (Keep Token)
+              </button>
             </div>
           </>
         ) : renderSidebarMain()}
@@ -2379,5 +2392,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
 

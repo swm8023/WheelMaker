@@ -231,4 +231,11 @@ export class WorkspacePersistenceRepository {
     project.diffCacheByKey = trimmed;
     this.save();
   }
+
+  clearCachePreservingToken(): void {
+    const preservedToken = this.state.global.token;
+    this.state = defaultWorkspaceState();
+    this.state.global.token = preservedToken;
+    this.save();
+  }
 }

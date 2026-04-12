@@ -395,6 +395,25 @@ body,
   outline: none;
 }
 
+.sidebar-clear-cache-btn {
+  width: calc(100% - 16px);
+  margin: 8px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger);
+  min-height: 32px;
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sidebar-clear-cache-btn:hover {
+  background: rgba(244, 135, 113, 0.14);
+}
+
+
 .header-spacer {
   flex: 1;
   min-width: 8px;
@@ -1458,4 +1477,3 @@ body,
     transform: translateX(0);
   }
 }
-

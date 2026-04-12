@@ -114,4 +114,8 @@ export class WorkspaceStore {
       truncated,
     });
   }
+
+  clearLocalCachePreservingToken(): void {
+    this.persistence.clearCachePreservingToken();
+  }
 }
