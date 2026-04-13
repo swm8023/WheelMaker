@@ -47,6 +47,9 @@ type SessionViewSink interface {
 }
 
 func (c *Client) SetSessionViewSink(sink SessionViewSink) {
+	if sink == nil {
+		sink = c
+	}
 	c.mu.Lock()
 	c.viewSink = sink
 	for _, sess := range c.sessions {

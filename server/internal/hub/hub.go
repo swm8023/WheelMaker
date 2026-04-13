@@ -15,7 +15,6 @@ import (
 
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/hub/client"
-	"github.com/swm8023/wheelmaker/internal/hub/sessionview"
 	im "github.com/swm8023/wheelmaker/internal/im"
 	imapp "github.com/swm8023/wheelmaker/internal/im/app"
 	imfeishu "github.com/swm8023/wheelmaker/internal/im/feishu"
@@ -31,25 +30,25 @@ const (
 // Hub orchestrates one or more WheelMaker project clients.
 // Each project has its own IM channel, agent session, and state partition.
 type Hub struct {
-	cfg      *logger.AppConfig
-	dbPath   string
-	clients  []*client.Client
-	regSync  *Reporter
-	regMu    sync.Mutex
-	lastProj map[string]ProjectInfo
-	appIM    map[string]*imapp.Channel
-	views    map[string]*sessionview.Service
+	cfg           *logger.AppConfig
+	dbPath        string
+	clients       []*client.Client
+	regSync       *Reporter
+	regMu         sync.Mutex
+	lastProj      map[string]ProjectInfo
+	appIM         map[string]*imapp.Channel
+	clientsByName map[string]*client.Client
 }
 
 // New creates a Hub from the given config and client DB path.
 // hub.Start() must be called before hub.Run().
 func New(cfg *logger.AppConfig, dbPath string) *Hub {
 	return &Hub{
-		cfg:      cfg,
-		dbPath:   dbPath,
-		lastProj: map[string]ProjectInfo{},
-		appIM:    map[string]*imapp.Channel{},
-		views:    map[string]*sessionview.Service{},
+		cfg:           cfg,
+		dbPath:        dbPath,
+		lastProj:      map[string]ProjectInfo{},
+		appIM:         map[string]*imapp.Channel{},
+		clientsByName: map[string]*client.Client{},
 	}
 }
 
@@ -95,9 +94,8 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 	}
 	c := client.New(store, pc.Name, cwd)
 	c.SetYOLO(pc.YOLO)
-	view := sessionview.New(pc.Name, store, c)
-	c.SetSessionViewSink(view)
-	h.views[pc.Name] = view
+	c.SetSessionViewSink(c)
+	h.clientsByName[pc.Name] = c
 
 	router := im.NewRouter(c, im.NewMemoryHistoryStore())
 	if pc.Feishu != nil && !pc.HasFeishu() {
@@ -222,14 +220,14 @@ func (h *Hub) setupRegistrySync() {
 		ReconnectInterval: 2 * time.Second,
 	}, projects)
 	for _, project := range projects {
-		view := h.views[project.Name]
+		projectClient := h.clientsByName[project.Name]
 		appChannel := h.appIM[project.Name]
 		projectID := rp.ProjectID(hubID, project.Name)
-		if view != nil {
-			view.SetEventPublisher(func(method string, payload any) error {
+		if projectClient != nil {
+			projectClient.SetSessionEventPublisher(func(method string, payload any) error {
 				return rep.PublishProjectEvent(projectID, method, payload)
 			})
-			rep.RegisterSessionHandler(projectID, view)
+			rep.RegisterSessionHandler(projectID, projectClient)
 		}
 		if appChannel != nil {
 			appChannel.SetEventPublisher(projectID, rep.PublishChatMessage)

@@ -62,20 +62,31 @@ type Client struct {
 	// being persisted to SQLite and evicted. Default: 5 minutes.
 	suspendTimeout time.Duration
 	stopPersistCh  chan struct{} // closed to stop the persist timer goroutine
+
+	sessionEventPublish func(method string, payload any) error
+	sessionUnreadCount  map[string]int
+	sessionAggregator   *sessionProjectionAggregator
 }
 
 // New creates a Client for the given project.
 func New(store Store, projectName string, cwd string) *Client {
-	return &Client{
-		projectName:    projectName,
-		cwd:            cwd,
-		registry:       agent.DefaultACPFactory(),
-		store:          store,
-		sessions:       make(map[string]*Session),
-		routeMap:       make(map[string]string),
-		suspendTimeout: 5 * time.Minute,
-		stopPersistCh:  make(chan struct{}),
+	c := &Client{
+		projectName:        projectName,
+		cwd:                cwd,
+		registry:           agent.DefaultACPFactory(),
+		store:              store,
+		sessions:           make(map[string]*Session),
+		routeMap:           make(map[string]string),
+		suspendTimeout:     5 * time.Minute,
+		stopPersistCh:      make(chan struct{}),
+		sessionUnreadCount: map[string]int{},
+		sessionAggregator:  newSessionProjectionAggregator(),
 	}
+	return c
+}
+
+func (c *Client) ProjectName() string {
+	return c.projectName
 }
 
 // SetYOLO enables/disables always-approve permission mode for this project.

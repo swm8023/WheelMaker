@@ -614,8 +614,18 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 
 	resolved := append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
-	if len(baseline.ConfigOptions) > 0 {
-		resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, newResult.SessionID, resolved, baselineSnap)
+	desiredSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
+	if strings.TrimSpace(desiredSnap.Mode) == "" {
+		desiredSnap.Mode = strings.TrimSpace(baselineSnap.Mode)
+	}
+	if strings.TrimSpace(desiredSnap.Model) == "" {
+		desiredSnap.Model = strings.TrimSpace(baselineSnap.Model)
+	}
+	if strings.TrimSpace(desiredSnap.ThoughtLevel) == "" {
+		desiredSnap.ThoughtLevel = strings.TrimSpace(baselineSnap.ThoughtLevel)
+	}
+	if desiredSnap.Mode != "" || desiredSnap.Model != "" || desiredSnap.ThoughtLevel != "" {
+		resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, newResult.SessionID, resolved, desiredSnap)
 	}
 	resolvedCommands := append([]acp.AvailableCommand(nil), persistedCommands...)
 	if len(resolvedCommands) == 0 && len(baselineCommands) > 0 {
@@ -754,7 +764,7 @@ func applyReplayableConfigBaseline(
 			continue
 		}
 		if len(updated) > 0 {
-			options = append([]acp.ConfigOption(nil), updated...)
+			options = mergeConfigOptions(options, updated)
 		}
 	}
 	return options
