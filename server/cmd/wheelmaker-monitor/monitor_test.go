@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveLogFilePath_PrefersLogDir(t *testing.T) {
@@ -79,4 +82,48 @@ func TestGetLogs_DebugOmitsTimeLevelAndDedupsSessionID(t *testing.T) {
 	if !strings.Contains(entry.Message, "{019d6db0..6f8a session/update}") {
 		t.Fatalf("session id should be shortened in debug prefix: %q", entry.Message)
 	}
+}
+
+func TestGetDBTablesIncludesSessionMessages(t *testing.T) {
+	base := t.TempDir()
+	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.SaveSession(ctx, &clientpkg.SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       clientpkg.SessionActive,
+		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := store.AppendSessionMessage(ctx, clientpkg.SessionMessageRecord{
+		MessageID:   "msg-1",
+		ProjectName: "proj1",
+		SessionID:   "sess-1",
+		Role:        "user",
+		Kind:        "text",
+		Body:        "hello",
+		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("AppendSessionMessage: %v", err)
+	}
+
+	mon := NewMonitor(base)
+	res := mon.GetDBTables()
+	if res.Error != "" {
+		t.Fatalf("GetDBTables error: %s", res.Error)
+	}
+	for _, table := range res.Tables {
+		if table.Name == "session_messages" {
+			return
+		}
+	}
+	t.Fatalf("session_messages table missing: %#v", res.Tables)
 }

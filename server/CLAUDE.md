@@ -50,6 +50,7 @@ Full design: [../docs/architecture-3.0.md](../docs/architecture-3.0.md)
 - Agent subprocess is lazy: created on first message (`ensureInstance`)
 - Slash commands: `/use` `/cancel` `/status` `/mode` `/model` `/list` `/new` `/load` `/config`
 - Code comments and identifiers: **English only**
+- Prefer extending existing `*_test.go` files instead of adding new test files unless separation is clearly justified
 - Completion gate is defined in repo root `CLAUDE.md`
 
 ## Local Dev

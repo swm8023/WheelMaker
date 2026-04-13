@@ -65,7 +65,6 @@ type sessionViewMessage struct {
 	MessageID string                 `json:"messageId"`
 	SessionID string                 `json:"sessionId"`
 	Index     int64                  `json:"index,omitempty"`
-	SyncIndex int64                  `json:"syncIndex,omitempty"`
 	SubIndex  int64                  `json:"subIndex,omitempty"`
 	Role      string                 `json:"role"`
 	Kind      string                 `json:"kind"`
@@ -169,11 +168,11 @@ type SessionRecorder struct {
 
 func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionListEntry, error)) *SessionRecorder {
 	return &SessionRecorder{
-		projectName:      projectName,
-		store:            store,
-		listSessions:     listSessions,
-		unreadCount:      map[string]int{},
-		chunkAggregator:  newSessionProjectionAggregator(),
+		projectName:     projectName,
+		store:           store,
+		listSessions:    listSessions,
+		unreadCount:     map[string]int{},
+		chunkAggregator: newSessionProjectionAggregator(),
 	}
 }
 
@@ -360,6 +359,7 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	if err != nil {
 		return nil, err
 	}
+	r.pruneUnreadCounts(entries)
 	out := make([]sessionViewSummary, 0, len(entries))
 	for _, entry := range entries {
 		out = append(out, r.sessionViewSummaryFromEntry(entry))
@@ -466,6 +466,7 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 func (r *SessionRecorder) currentSessionViewSummary(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
 	rec, err := r.store.LoadSession(ctx, r.projectName, strings.TrimSpace(sessionID))
 	if err != nil || rec == nil {
+		r.resetSessionUnread(sessionID)
 		return sessionViewSummary{}, false
 	}
 	return r.sessionViewSummaryFromRecord(*rec), true
@@ -522,8 +523,29 @@ func (r *SessionRecorder) resetSessionUnread(sessionID string) {
 		return
 	}
 	r.mu.Lock()
-	r.unreadCount[sessionID] = 0
+	delete(r.unreadCount, sessionID)
 	r.mu.Unlock()
+}
+
+func (r *SessionRecorder) pruneUnreadCounts(entries []SessionListEntry) {
+	activeSessionIDs := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		sessionID := strings.TrimSpace(entry.ID)
+		if sessionID != "" {
+			activeSessionIDs[sessionID] = struct{}{}
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for sessionID, count := range r.unreadCount {
+		if count <= 0 {
+			delete(r.unreadCount, sessionID)
+			continue
+		}
+		if _, ok := activeSessionIDs[sessionID]; !ok {
+			delete(r.unreadCount, sessionID)
+		}
+	}
 }
 
 func (r *SessionRecorder) sessionUnread(sessionID string) int {
@@ -671,7 +693,6 @@ func toSessionViewMessage(message SessionMessageRecord) sessionViewMessage {
 		MessageID: message.MessageID,
 		SessionID: message.SessionID,
 		Index:     message.SyncIndex,
-		SyncIndex: message.SyncIndex,
 		SubIndex:  message.SyncSubIndex,
 		Role:      message.Role,
 		Kind:      message.Kind,

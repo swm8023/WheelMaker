@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 func registerRoutes(mux *http.ServeMux, mon *Monitor) {
@@ -100,7 +101,11 @@ func handleSessions(mon *Monitor) http.HandlerFunc {
 
 func handleSessionMessages(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sessionID := r.PathValue("sessionID")
+		sessionID := strings.TrimSpace(r.PathValue("sessionID"))
+		if sessionID == "" {
+			writeError(w, http.StatusBadRequest, "sessionID is required")
+			return
+		}
 		projectName := r.URL.Query().Get("project")
 		limit := 200
 		if raw := r.URL.Query().Get("limit"); raw != "" {
