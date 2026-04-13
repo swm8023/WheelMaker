@@ -994,7 +994,13 @@ function App() {
     }
     setExpandedDirs(prev => [...prev, path]);
     if (!dirEntries[path]) {
-      await loadDirectory(path);
+      try {
+        await loadDirectory(path);
+      } catch (err) {
+        setExpandedDirs(prev => prev.filter(item => item !== path));
+        const reason = err instanceof Error ? err.message : String(err);
+        setError(`Failed to load directory "${path}": ${reason}`);
+      }
     }
   };
 
@@ -1480,7 +1486,14 @@ function App() {
         setExpandedDirs(validated.expandedDirs);
         dirHashRef.current = {};
       } else {
-        await Promise.all(latestExpandedDirs.map(path => loadDirectory(path)));
+        for (const path of latestExpandedDirs) {
+          try {
+            await loadDirectory(path);
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            setError(`Failed to refresh directory "${path}": ${reason}`);
+          }
+        }
       }
       if (latestSelectedFile && sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
         await readSelectedFile(latestSelectedFile);
@@ -1634,7 +1647,7 @@ function App() {
               className="item"
               style={{paddingLeft: 10 + depth * 14}}
               onClick={() => {
-                toggleDirectory(entry.path).catch(() => undefined);
+                toggleDirectory(entry.path);
               }}>
               <span className={`caret codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} />
               <span className={`node-icon codicon ${expanded ? 'codicon-folder-opened' : 'codicon-folder'}`} />

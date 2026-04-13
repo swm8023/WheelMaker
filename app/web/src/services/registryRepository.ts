@@ -181,6 +181,7 @@ export class RegistryRepository {
       method: 'fs.list',
       projectId,
       payload: knownHash ? {path, knownHash} : {path},
+      timeoutMs: 20000,
     });
     const payload = (resp.payload ?? {}) as RegistryFsListResponse;
     const basePath = payload.path ?? path;
@@ -485,3 +486,4 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+
