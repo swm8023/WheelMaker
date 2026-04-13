@@ -257,7 +257,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"projects", "route_bindings", "sessions"}
+	tableNames := []string{"projects", "route_bindings", "sessions", "session_messages"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {
@@ -274,6 +274,156 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 
 	return &DBTablesResult{Tables: tables}
+}
+
+type MonitorSessionSummary struct {
+	SessionID      string `json:"sessionId"`
+	ProjectName    string `json:"projectName"`
+	Title          string `json:"title"`
+	Preview        string `json:"preview"`
+	Status         string `json:"status"`
+	MessageCount   int    `json:"messageCount"`
+	LastIndex      int64  `json:"lastIndex"`
+	LastSubIndex   int64  `json:"lastSubIndex"`
+	CreatedAt      string `json:"createdAt"`
+	LastActiveAt   string `json:"lastActiveAt"`
+	LastMessageAt  string `json:"lastMessageAt,omitempty"`
+	EffectiveAt    string `json:"updatedAt"`
+}
+
+type MonitorSessionMessage struct {
+	MessageID    string `json:"messageId"`
+	ProjectName  string `json:"projectName"`
+	SessionID    string `json:"sessionId"`
+	Index        int64  `json:"index"`
+	SubIndex     int64  `json:"subIndex"`
+	Role         string `json:"role"`
+	Kind         string `json:"kind"`
+	Body         string `json:"body"`
+	Status       string `json:"status"`
+	RequestID    int64  `json:"requestId,omitempty"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+}
+
+func (m *Monitor) openClientDB() (*sql.DB, error) {
+	dbPath := filepath.Join(m.baseDir, "db", "client.sqlite3")
+	if !fileExists(dbPath) {
+		return nil, fmt.Errorf("database not found")
+	}
+	return sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
+}
+
+func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionSummary, error) {
+	db, err := m.openClientDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	query := `
+		SELECT id, project_name, status, title, last_message_preview, last_message_at, last_sync_index, last_sync_subindex, message_count, created_at, last_active_at
+		FROM sessions`
+	args := []any{}
+	projectName = strings.TrimSpace(projectName)
+	if projectName != "" {
+		query += ` WHERE project_name = ?`
+		args = append(args, projectName)
+	}
+	query += ` ORDER BY CASE WHEN last_message_at = '' THEN last_active_at ELSE last_message_at END DESC, last_active_at DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []MonitorSessionSummary{}
+	for rows.Next() {
+		var item MonitorSessionSummary
+		var status int
+		if err := rows.Scan(&item.SessionID, &item.ProjectName, &status, &item.Title, &item.Preview, &item.LastMessageAt, &item.LastIndex, &item.LastSubIndex, &item.MessageCount, &item.CreatedAt, &item.LastActiveAt); err != nil {
+			return nil, err
+		}
+		item.Status = monitorSessionStatusLabel(status)
+		item.Title = firstNonEmpty(strings.TrimSpace(item.Title), item.SessionID)
+		item.EffectiveAt = strings.TrimSpace(item.LastMessageAt)
+		if item.EffectiveAt == "" {
+			item.EffectiveAt = strings.TrimSpace(item.LastActiveAt)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, afterSubIndex int64, limit int) ([]MonitorSessionMessage, error) {
+	db, err := m.openClientDB()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	query := `
+		SELECT message_id, project_name, session_id, sync_index, sync_subindex, role, kind, body, status, request_id, created_at, updated_at
+		FROM session_messages
+		WHERE session_id = ?`
+	args := []any{strings.TrimSpace(sessionID)}
+	projectName = strings.TrimSpace(projectName)
+	if projectName != "" {
+		query += ` AND project_name = ?`
+		args = append(args, projectName)
+	}
+	if afterIndex > 0 || afterSubIndex > 0 {
+		query += ` AND (sync_index > ? OR (sync_index = ? AND sync_subindex > ?))`
+		args = append(args, afterIndex, afterIndex, afterSubIndex)
+	}
+	query += ` ORDER BY sync_index ASC, sync_subindex ASC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []MonitorSessionMessage{}
+	for rows.Next() {
+		var item MonitorSessionMessage
+		if err := rows.Scan(&item.MessageID, &item.ProjectName, &item.SessionID, &item.Index, &item.SubIndex, &item.Role, &item.Kind, &item.Body, &item.Status, &item.RequestID, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func monitorSessionStatusLabel(status int) string {
+	switch status {
+	case 0:
+		return "active"
+	case 1:
+		return "suspended"
+	case 2:
+		return "persisted"
+	default:
+		return "unknown"
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func queryTable(db *sql.DB, name string) (*DBTable, error) {

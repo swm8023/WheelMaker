@@ -17,6 +17,8 @@ func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
 	mux.HandleFunc("GET "+prefix+"/api/status", handleStatus(mon))
 	mux.HandleFunc("GET "+prefix+"/api/config", handleConfig(mon))
 	mux.HandleFunc("GET "+prefix+"/api/db", handleDBTables(mon))
+	mux.HandleFunc("GET "+prefix+"/api/sessions", handleSessions(mon))
+	mux.HandleFunc("GET "+prefix+"/api/sessions/{sessionID}/messages", handleSessionMessages(mon))
 	mux.HandleFunc("GET "+prefix+"/api/logs", handleLogs(mon))
 	mux.HandleFunc("GET "+prefix+"/api/registry", handleRegistry(mon))
 	mux.HandleFunc("POST "+prefix+"/api/action/restart", handleAction(mon, "restart"))
@@ -75,6 +77,55 @@ func handleDBTables(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		data := mon.GetDBTables()
 		writeJSON(w, data)
+	}
+}
+
+func handleSessions(mon *Monitor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := r.URL.Query().Get("project")
+		limit := 200
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		sessions, err := mon.ListSessions(projectName, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"sessions": sessions})
+	}
+}
+
+func handleSessionMessages(mon *Monitor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sessionID := r.PathValue("sessionID")
+		projectName := r.URL.Query().Get("project")
+		limit := 200
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				limit = n
+			}
+		}
+		var afterIndex int64
+		if raw := r.URL.Query().Get("afterIndex"); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n >= 0 {
+				afterIndex = n
+			}
+		}
+		var afterSubIndex int64
+		if raw := r.URL.Query().Get("afterSubIndex"); raw != "" {
+			if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n >= 0 {
+				afterSubIndex = n
+			}
+		}
+		messages, err := mon.GetSessionMessages(sessionID, projectName, afterIndex, afterSubIndex, limit)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"messages": messages})
 	}
 }
 

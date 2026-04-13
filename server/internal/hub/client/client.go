@@ -2,10 +2,10 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +35,15 @@ type promptStreamEvent struct {
 	err    error
 }
 
+type IMRouter interface {
+	Bind(ctx context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error
+	PublishSessionUpdate(ctx context.Context, target im.SendTarget, params acp.SessionUpdateParams) error
+	PublishPromptResult(ctx context.Context, target im.SendTarget, result acp.SessionPromptResult) error
+	PublishPermissionRequest(ctx context.Context, target im.SendTarget, requestID int64, params acp.PermissionRequestParams) error
+	SystemNotify(ctx context.Context, target im.SendTarget, payload im.SystemPayload) error
+	Run(ctx context.Context) error
+}
+
 // Client is the top-level coordinator for a single WheelMaker project.
 // Agent initialization is lazy: the first incoming message triggers ensureInstance(),
 // which connects the active agent and creates the ACP forwarder.
@@ -47,7 +56,6 @@ type Client struct {
 
 	store    Store
 	imRouter IMRouter
-	viewSink SessionViewSink
 
 	mu sync.Mutex
 
@@ -63,25 +71,26 @@ type Client struct {
 	suspendTimeout time.Duration
 	stopPersistCh  chan struct{} // closed to stop the persist timer goroutine
 
-	sessionEventPublish func(method string, payload any) error
-	sessionUnreadCount  map[string]int
-	sessionAggregator   *sessionProjectionAggregator
+	sessionRecorder *SessionRecorder
+	viewSink        SessionViewSink
 }
 
 // New creates a Client for the given project.
 func New(store Store, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName:        projectName,
-		cwd:                cwd,
-		registry:           agent.DefaultACPFactory(),
-		store:              store,
-		sessions:           make(map[string]*Session),
-		routeMap:           make(map[string]string),
-		suspendTimeout:     5 * time.Minute,
-		stopPersistCh:      make(chan struct{}),
-		sessionUnreadCount: map[string]int{},
-		sessionAggregator:  newSessionProjectionAggregator(),
+		projectName:    projectName,
+		cwd:            cwd,
+		registry:       agent.DefaultACPFactory(),
+		store:          store,
+		sessions:       make(map[string]*Session),
+		routeMap:       make(map[string]string),
+		suspendTimeout: 5 * time.Minute,
+		stopPersistCh:  make(chan struct{}),
 	}
+	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionListEntry, error) {
+		return c.ListSessions(ctx)
+	})
+	c.viewSink = c.sessionRecorder
 	return c
 }
 
@@ -178,6 +187,402 @@ func (c *Client) Close() error {
 		return store.Close()
 	}
 	return nil
+}
+
+func (c *Client) CreateSession(ctx context.Context, title string) (*Session, error) {
+	sess := c.newWiredSession("")
+	if strings.TrimSpace(title) != "" {
+		sess.mu.Lock()
+		state := sess.agentStateLocked(sess.currentAgentNameLocked())
+		if state != nil {
+			state.Title = strings.TrimSpace(title)
+		}
+		sess.mu.Unlock()
+	}
+	if err := sess.persistSession(ctx); err != nil {
+		return nil, fmt.Errorf("save session: %w", err)
+	}
+	c.mu.Lock()
+	c.sessions[sess.ID] = sess
+	c.mu.Unlock()
+	return sess, nil
+}
+
+func (c *Client) SessionByID(ctx context.Context, sessionID string) (*Session, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("session id is required")
+	}
+	c.mu.Lock()
+	if sess := c.sessions[sessionID]; sess != nil {
+		c.mu.Unlock()
+		return sess, nil
+	}
+	store := c.store
+	c.mu.Unlock()
+
+	rec, err := store.LoadSession(ctx, c.projectName, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session %q: %w", sessionID, err)
+	}
+	if rec == nil {
+		return nil, fmt.Errorf("session %q not found", sessionID)
+	}
+	restored, err := sessionFromRecord(rec, c.cwd)
+	if err != nil {
+		return nil, err
+	}
+	c.wireSession(restored)
+	restored.Status = SessionActive
+	restored.lastActiveAt = time.Now().UTC()
+	c.mu.Lock()
+	c.sessions[restored.ID] = restored
+	c.mu.Unlock()
+	return restored, nil
+}
+
+func (c *Client) SendToSession(ctx context.Context, sessionID string, source im.ChatRef, blocks []acp.ContentBlock) error {
+	sess, err := c.SessionByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(source.ChannelID) != "" && strings.TrimSpace(source.ChatID) != "" {
+		sess.setIMSource(source)
+		if err := c.bindIM(ctx, source, sess.ID); err != nil {
+			return err
+		}
+		if err := c.store.SaveRouteBinding(ctx, c.projectName, imRouteKey(source), sess.ID); err != nil {
+			return fmt.Errorf("save route binding: %w", err)
+		}
+	}
+	sess.handlePromptBlocks(blocks)
+	return nil
+}
+
+func flattenPromptText(blocks []acp.ContentBlock) string {
+	parts := make([]string, 0, len(blocks))
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Type) == acp.ContentBlockTypeText && strings.TrimSpace(block.Text) != "" {
+			parts = append(parts, strings.TrimSpace(block.Text))
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func PromptPreview(blocks []acp.ContentBlock) string {
+	text := flattenPromptText(blocks)
+	if text != "" {
+		return text
+	}
+	for _, block := range blocks {
+		if strings.TrimSpace(block.Type) == acp.ContentBlockTypeImage {
+			return "Sent an image"
+		}
+	}
+	return ""
+}
+
+func cloneSessionContentBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]acp.ContentBlock, len(blocks))
+	copy(out, blocks)
+	return out
+}
+
+func cloneSessionPermissionOptions(options []acp.PermissionOption) []acp.PermissionOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]acp.PermissionOption, len(options))
+	copy(out, options)
+	return out
+}
+
+func (c *Client) SetIMRouter(router IMRouter) {
+	c.mu.Lock()
+	c.imRouter = router
+	for _, sess := range c.sessions {
+		sess.imRouter = router
+	}
+	c.mu.Unlock()
+}
+
+func (c *Client) HasIMRouter() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.imRouter != nil
+}
+
+func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {
+	return c.handleIMPromptBlocks(ctx, source, params.Prompt)
+}
+
+func (c *Client) HandleIMCommand(ctx context.Context, source im.ChatRef, cmd im.Command) error {
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("client im: invalid source")
+	}
+	return c.handleIMCommand(ctx, source, cmd.Name, cmd.Args)
+}
+
+func (c *Client) HandleIMPermissionResponse(_ context.Context, source im.ChatRef, requestID int64, result acp.PermissionResponse) error {
+	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("client im: invalid source")
+	}
+	routeKey := imRouteKey(source)
+
+	c.mu.Lock()
+	sessID := c.routeMap[routeKey]
+	sess := c.sessions[sessID]
+	all := make([]*Session, 0, len(c.sessions))
+	for _, s := range c.sessions {
+		all = append(all, s)
+	}
+	c.mu.Unlock()
+
+	if sess != nil && sess.resolvePermission(requestID, result) {
+		return nil
+	}
+	for _, candidate := range all {
+		if candidate == nil || candidate == sess {
+			continue
+		}
+		if candidate.resolvePermission(requestID, result) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (c *Client) HandleIMInbound(ctx context.Context, event im.InboundEvent) error {
+	source := im.ChatRef{ChannelID: strings.TrimSpace(event.ChannelID), ChatID: strings.TrimSpace(event.ChatID)}
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("client im: invalid source")
+	}
+	if cmd, ok := im.ParseCommand(event.Text); ok {
+		return c.HandleIMCommand(ctx, source, cmd)
+	}
+	return c.HandleIMPrompt(ctx, source, acp.SessionPromptParams{
+		Prompt: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: event.Text}},
+	})
+}
+
+func (c *Client) bindIM(ctx context.Context, source im.ChatRef, sessionID string) error {
+	c.mu.Lock()
+	router := c.imRouter
+	c.mu.Unlock()
+	if router == nil {
+		return nil
+	}
+	return router.Bind(ctx, source, sessionID, im.BindOptions{})
+}
+
+func (c *Client) sendIMDirect(ctx context.Context, source im.ChatRef, text string) error {
+	c.mu.Lock()
+	router := c.imRouter
+	c.mu.Unlock()
+	if router == nil {
+		return nil
+	}
+	return router.SystemNotify(ctx, im.SendTarget{ChannelID: source.ChannelID, ChatID: source.ChatID}, im.SystemPayload{
+		Kind: "message",
+		Body: text,
+	})
+}
+
+func (c *Client) loadSessionForIM(ctx context.Context, source im.ChatRef, routeKey, args string) (*Session, error) {
+	idxStr := strings.TrimSpace(args)
+	if idxStr == "" {
+		return nil, fmt.Errorf("Usage: /load <index>  (see /list)")
+	}
+	idx, err := parsePositiveIndex(idxStr)
+	if err != nil {
+		return nil, err
+	}
+	loaded, err := c.ClientLoadSession(routeKey, idx)
+	if err != nil {
+		return nil, err
+	}
+	return loaded, c.bindIM(ctx, source, loaded.ID)
+}
+
+func imRouteKey(source im.ChatRef) string {
+	return "im:" + strings.ToLower(strings.TrimSpace(source.ChannelID)) + ":" + strings.TrimSpace(source.ChatID)
+}
+
+func normalizeIMPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]acp.ContentBlock, 0, len(blocks))
+	for _, block := range blocks {
+		kind := strings.TrimSpace(block.Type)
+		if kind == "" {
+			continue
+		}
+		if kind == acp.ContentBlockTypeText {
+			text := strings.TrimSpace(block.Text)
+			if text == "" {
+				continue
+			}
+			block.Text = text
+		}
+		block.Type = kind
+		out = append(out, block)
+	}
+	return out
+}
+
+func singleTextIMPrompt(blocks []acp.ContentBlock) (string, bool) {
+	if len(blocks) != 1 || blocks[0].Type != acp.ContentBlockTypeText {
+		return "", false
+	}
+	text := strings.TrimSpace(blocks[0].Text)
+	if text == "" {
+		return "", false
+	}
+	return text, true
+}
+
+func (c *Client) handleIMPromptBlocks(ctx context.Context, source im.ChatRef, blocks []acp.ContentBlock) error {
+	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+	if source.ChannelID == "" || source.ChatID == "" {
+		return fmt.Errorf("client im: invalid source")
+	}
+	blocks = normalizeIMPromptBlocks(blocks)
+	if len(blocks) == 0 {
+		return nil
+	}
+	if text, ok := singleTextIMPrompt(blocks); ok {
+		if cmd, parsed := im.ParseCommand(text); parsed {
+			return c.handleIMCommand(ctx, source, cmd.Name, cmd.Args)
+		}
+	}
+	routeKey := imRouteKey(source)
+	sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
+	if sess == nil {
+		return nil
+	}
+	sess.setIMSource(source)
+	sess.handlePromptBlocks(blocks)
+	return nil
+}
+
+func (c *Client) handleIMText(ctx context.Context, source im.ChatRef, text string) error {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	return c.handleIMPromptBlocks(ctx, source, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}})
+}
+
+func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, args string) error {
+	routeKey := imRouteKey(source)
+
+	if cmd == "/list" {
+		body, err := c.formatSessionList("")
+		if err != nil {
+			body = fmt.Sprintf("List error: %v", err)
+		}
+		return c.sendIMDirect(ctx, source, body)
+	}
+	if cmd == "/new" {
+		sess, err := c.ClientNewSession(routeKey)
+		if err != nil {
+			return c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
+		}
+		if err := c.bindIM(ctx, source, sess.ID); err != nil {
+			return err
+		}
+		sess.setIMSource(source)
+		sess.reply(fmt.Sprintf("Created new session: %s", sess.ID))
+		return nil
+	}
+	if cmd == "/load" {
+		loaded, err := c.loadSessionForIM(ctx, source, routeKey, args)
+		if err != nil {
+			return c.sendIMDirect(ctx, source, fmt.Sprintf("Load error: %v", err))
+		}
+		loaded.setIMSource(source)
+		loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))
+		return nil
+	}
+	if cmd == "/help" {
+		sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
+		if sess == nil {
+			return nil
+		}
+		sess.setIMSource(source)
+		menuID, page := parseHelpArgs(args)
+		model, err := sess.resolveHelpModel(ctx, source.ChatID)
+		if err != nil {
+			return c.sendIMDirect(ctx, source, fmt.Sprintf("Help error: %v", err))
+		}
+		return c.sendHelpCard(ctx, source, model, menuID, page)
+	}
+
+	sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
+	if sess == nil {
+		return nil
+	}
+	sess.setIMSource(source)
+	c.handleCommand(sess, routeKey, cmd, args)
+	return nil
+}
+
+func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef, routeKey string) *Session {
+	c.mu.Lock()
+	sessID := c.routeMap[routeKey]
+	c.mu.Unlock()
+	if sessID != "" {
+		sess, err := c.resolveSession(routeKey)
+		if err != nil {
+			_ = c.sendIMDirect(ctx, source, fmt.Sprintf("Route error: %v", err))
+			return nil
+		}
+		return sess
+	}
+	sess, err := c.ClientNewSession(routeKey)
+	if err != nil {
+		_ = c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
+		return nil
+	}
+	if err := c.bindIM(ctx, source, sess.ID); err != nil {
+		return nil
+	}
+	return sess
+}
+
+func parseHelpArgs(args string) (menuID string, page int) {
+	parts := strings.Fields(args)
+	if len(parts) >= 1 {
+		menuID = parts[0]
+	}
+	if len(parts) >= 2 {
+		if n, err := strconv.Atoi(parts[1]); err == nil {
+			page = n
+		}
+	}
+	return
+}
+
+func (c *Client) sendHelpCard(ctx context.Context, source im.ChatRef, model im.HelpModel, menuID string, page int) error {
+	c.mu.Lock()
+	router := c.imRouter
+	c.mu.Unlock()
+	if router == nil {
+		return nil
+	}
+	return router.SystemNotify(ctx, im.SendTarget{ChannelID: source.ChannelID, ChatID: source.ChatID}, im.SystemPayload{
+		Kind: "help_card",
+		HelpCard: &im.HelpCardPayload{
+			Model:  model,
+			MenuID: menuID,
+			Page:   page,
+		},
+	})
 }
 
 // --- internal ---
@@ -559,539 +964,10 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 	}
 	return
 }
-
-func normalizeSessionPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
-	if len(blocks) == 0 {
-		return nil
-	}
-	out := make([]acp.ContentBlock, 0, len(blocks))
-	for _, block := range blocks {
-		kind := strings.TrimSpace(block.Type)
-		if kind == "" {
-			continue
-		}
-		if kind == acp.ContentBlockTypeText {
-			text := strings.TrimSpace(block.Text)
-			if text == "" {
-				continue
-			}
-			block.Text = text
-		}
-		block.Type = kind
-		out = append(out, block)
-	}
-	return out
-}
-
-// handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
-// promptMu is held for the full duration, serializing with switchAgent.
-func (s *Session) handlePrompt(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	s.handlePromptBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}})
-}
-
-// handlePromptBlocks sends content blocks to the active (or lazily initialized) session.
-// promptMu is held for the full duration, serializing with switchAgent.
-func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
-	blocks = normalizeSessionPromptBlocks(blocks)
-	if len(blocks) == 0 {
-		return
-	}
-	s.recordSessionViewEvent(SessionViewEvent{
-		Type:   SessionViewEventUserMessageAccepted,
-		Role:   "user",
-		Kind:   "text",
-		Text:   PromptPreview(blocks),
-		Blocks: cloneSessionContentBlocks(blocks),
-	})
-	s.promptMu.Lock()
-	defer s.promptMu.Unlock()
-
-	ctx := context.Background()
-	for attempt := 1; attempt <= 2; attempt++ {
-		// Lazily initialize the agent if no forwarder exists yet.
-		if err := s.ensureInstance(ctx); err != nil {
-			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
-			return
-		}
-
-		if err := s.ensureReadyAndNotify(ctx); err != nil {
-			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
-				s.reply("Agent init failed transiently, reconnecting and retrying once...")
-				s.forceReconnect()
-				continue
-			}
-			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
-			return
-		}
-
-		updates, err := s.promptStream(ctx, blocks)
-		if err != nil {
-			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
-				s.reply("Agent disconnected, reconnecting and retrying once...")
-				s.forceReconnect()
-				continue
-			}
-			if isAgentExitError(err) && !s.agentProcessAlive() {
-				_ = s.resetDeadConnection(err)
-			}
-			s.reply(fmt.Sprintf("Prompt error: %v", err))
-			return
-		}
-
-		s.mu.Lock()
-		s.prompt.currentCh = updates
-		s.mu.Unlock()
-
-		var buf strings.Builder
-		imRouter, imSource, hasIMEmitter := s.imContext()
-
-		sawSandboxRefresh := false
-		sawText := false
-		observe := newPromptObserveState(time.Now())
-		observeTicker := time.NewTicker(promptObserveInterval)
-
-		retryStream := false
-		streamDone := false
-		for !streamDone {
-			select {
-			case ev, ok := <-updates:
-				if !ok {
-					streamDone = true
-					break
-				}
-				observe.MarkActivity(time.Now(), true)
-				if ev.err != nil {
-					if attempt == 1 && isUnsupportedReasoningEffortError(ev.err) && s.tryCopilotReasoningFallback(ctx) {
-						s.reply("Detected incompatible reasoning settings, switched model and retrying once...")
-						retryStream = true
-						break
-					}
-					if attempt == 1 && !sawText && s.shouldReconnectOnRecoverableErr(ev.err) {
-						s.reply("Agent disconnected during stream, reconnecting and retrying once...")
-						s.forceReconnect()
-						retryStream = true
-						break
-					}
-					recovered := false
-					if !s.agentProcessAlive() && s.resetDeadConnection(ev.err) {
-						if recErr := s.ensureInstance(ctx); recErr == nil {
-							_ = s.ensureReadyAndNotify(ctx)
-							recovered = true
-						}
-					}
-					if recovered {
-						s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
-					} else {
-						s.reply(fmt.Sprintf("Agent error: %v", ev.err))
-					}
-					s.mu.Lock()
-					s.prompt.currentCh = nil
-					s.mu.Unlock()
-					observeTicker.Stop()
-					return
-				}
-				if ev.update != nil {
-					params := *ev.update
-					switch params.Update.SessionUpdate {
-					case acp.SessionUpdateAgentMessageChunk:
-						text := extractTextChunk(params.Update.Content)
-						if strings.TrimSpace(text) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming"})
-						}
-					case acp.SessionUpdateAgentThoughtChunk:
-						text := extractTextChunk(params.Update.Content)
-						if strings.TrimSpace(text) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming"})
-						}
-					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-						statusText := renderSessionToolStatus(params.Update)
-						if strings.TrimSpace(statusText) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", AggregateKey: params.Update.ToolCallID})
-						}
-					}
-					if hasIMEmitter {
-						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
-						if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {
-							s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
-						}
-					}
-					if hasSandboxRefreshUpdate(params.Update) {
-						sawSandboxRefresh = true
-					}
-					if params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-						text := extractTextChunk(params.Update.Content)
-						if strings.TrimSpace(text) != "" {
-							sawText = true
-							if !hasIMEmitter {
-								buf.WriteString(text)
-							}
-						}
-					}
-					if params.Update.SessionUpdate == acp.SessionUpdateConfigOptionUpdate && !hasIMEmitter {
-						raw, _ := json.Marshal(params.Update)
-						s.reply(formatConfigOptionUpdateMessage(raw))
-						s.persistSessionBestEffort()
-					}
-				}
-				if ev.result != nil {
-					s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventPromptFinished, Status: ev.result.StopReason})
-					if strings.TrimSpace(ev.result.StopReason) != "" && ev.result.StopReason != acp.StopReasonEndTurn {
-						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventSystemMessage, Role: "system", Kind: "prompt_result", Text: ev.result.StopReason, Status: "done"})
-					}
-					if hasIMEmitter {
-						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
-						if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
-							s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
-						}
-					}
-					streamDone = true
-				}
-			case <-observeTicker.C:
-				ev := observe.Eval(time.Now(), observe.Started())
-				if ev.WarnFirstWait {
-					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=first_wait session=%s", s.ID)
-				}
-				if ev.ErrorFirstWait {
-					s.reportTimeoutError("stream", "first_wait")
-				}
-				if ev.WarnSilence {
-					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=silence session=%s", s.ID)
-				}
-				if ev.ErrorSilence {
-					s.reportTimeoutError("stream", "silence")
-				}
-			}
-		}
-		observeTicker.Stop()
-		if retryStream {
-			continue
-		}
-
-		s.mu.Lock()
-		s.prompt.currentCh = nil
-		s.mu.Unlock()
-
-		s.persistSessionBestEffort()
-
-		if !hasIMEmitter && buf.Len() > 0 {
-			s.reply(buf.String())
-		}
-
-		if attempt == 1 && sawSandboxRefresh && !sawText && !s.agentProcessAlive() {
-			s.reply("Detected sandbox refresh failure, reconnecting and retrying once...")
-			s.forceReconnect()
-			continue
-		}
-		return
-	}
-}
-
-func extractTextChunk(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var block acp.ContentBlock
-	if err := json.Unmarshal(raw, &block); err != nil {
-		return ""
-	}
-	if block.Type != acp.ContentBlockTypeText {
-		return ""
-	}
-	return block.Text
-}
-
-func renderSessionToolStatus(update acp.SessionUpdate) string {
-	title := strings.TrimSpace(update.Title)
-	if title == "" {
-		title = strings.TrimSpace(update.Kind)
-	}
-	status := strings.TrimSpace(update.Status)
-	if title == "" {
-		return status
-	}
-	if status == "" {
-		return title
-	}
-	return title + " - " + status
-}
 func normalizeRouteKey(routeKey string) (string, error) {
 	routeKey = strings.TrimSpace(routeKey)
 	if routeKey == "" {
 		return "", fmt.Errorf("route key is required")
 	}
 	return routeKey, nil
-}
-
-func renderUnknown(v string) string {
-	if strings.TrimSpace(v) == "" {
-		return "unknown"
-	}
-	return v
-}
-
-func (s *Session) reportTimeoutError(stage string, kind string) {
-	now := time.Now()
-	s.mu.Lock()
-	agent := s.currentAgentNameLocked()
-	sid := s.acpSessionID
-	allow := true
-	if s.timeoutLimiter != nil {
-		allow = s.timeoutLimiter.Allow(kind, now)
-	}
-	s.mu.Unlock()
-
-	hubLogger(s.projectName).Error("timeout error category=timeout stage=%s kind=%s agent=%s session=%s",
-		stage, kind, renderUnknown(agent), renderUnknown(sid))
-	if !allow {
-		return
-	}
-
-	router, source, ok := s.imContext()
-	if !ok {
-		return
-	}
-	body := fmt.Sprintf(
-		"category=timeout stage=%s agent=%s sessionID=%s action=check /status then retry",
-		stage,
-		renderUnknown(agent),
-		renderUnknown(sid),
-	)
-	if err := router.SystemNotify(
-		context.Background(),
-		im.SendTarget{SessionID: s.ID, Source: &source},
-		im.SystemPayload{Kind: "message", Body: body},
-	); err != nil {
-		hubLogger(s.projectName).Error("timeout im notify failed stage=%s kind=%s session=%s err=%v",
-			stage, kind, s.ID, err)
-	}
-}
-
-func (s *Session) connectHint() string {
-	agentName := s.preferredAgentName()
-	if agentName == "" {
-		if s.registry != nil {
-			names := s.registry.Names()
-			if len(names) > 0 {
-				return fmt.Sprintf("Run `/use <agent>` to connect. Available: %s", strings.Join(names, ", "))
-			}
-		}
-		return "No available ACP provider. Check environment and restart wheelmaker."
-	}
-	return fmt.Sprintf("Run `%s` to connect.", "/use "+agentName)
-}
-
-func (s *Session) preferredAgentName() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
-		return strings.TrimSpace(s.instance.Name())
-	}
-	if strings.TrimSpace(s.activeAgent) != "" {
-		return strings.TrimSpace(s.activeAgent)
-	}
-	if s.registry != nil {
-		return strings.TrimSpace(s.registry.PreferredName())
-	}
-	return ""
-}
-
-type instanceLivenessProbe interface {
-	Alive() bool
-}
-
-func (s *Session) agentProcessAlive() bool {
-	s.mu.Lock()
-	inst := s.instance
-	s.mu.Unlock()
-	if inst == nil {
-		return false
-	}
-	probe, ok := inst.(instanceLivenessProbe)
-	if !ok {
-		// Backward-compatible fallback for instances without explicit liveness support.
-		return true
-	}
-	return probe.Alive()
-}
-
-func (s *Session) shouldReconnectOnRecoverableErr(err error) bool {
-	if !isAgentRecoverableRuntimeErr(err) {
-		return false
-	}
-	return !s.agentProcessAlive()
-}
-
-func isAgentExitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(strings.TrimSpace(err.Error()))
-	if s == "" {
-		return false
-	}
-	// Network handshake EOF from remote APIs does not necessarily imply the local ACP
-	// subprocess died; treat it as non-exit so we don't restart blindly.
-	if strings.Contains(s, "tls handshake eof") {
-		return false
-	}
-	if s == "eof" || strings.HasSuffix(s, ": eof") {
-		return true
-	}
-	return strings.Contains(s, "agent process exited") ||
-		strings.Contains(s, "process exited") ||
-		strings.Contains(s, "conn is closed") ||
-		strings.Contains(s, "broken pipe") ||
-		strings.Contains(s, "connection reset") ||
-		strings.Contains(s, "process stdout closed")
-}
-
-func isAgentRecoverableRuntimeErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return isAgentExitError(err) || isSandboxRefreshErr(err)
-}
-
-func isUnsupportedReasoningEffortError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	if msg == "" || !strings.Contains(msg, "reasoning_effort") {
-		return false
-	}
-	hints := []string{
-		"unrecognized request argument",
-		"unknown field",
-		"not supported",
-		"unsupported",
-		"invalid request",
-	}
-	for _, hint := range hints {
-		if strings.Contains(msg, hint) {
-			return true
-		}
-	}
-	return false
-}
-
-func pickAlternativeModelValue(opt *acp.ConfigOption) string {
-	if opt == nil || len(opt.Options) == 0 {
-		return ""
-	}
-	current := strings.TrimSpace(opt.CurrentValue)
-	for _, candidate := range opt.Options {
-		value := strings.TrimSpace(candidate.Value)
-		if value == "" || strings.EqualFold(value, current) {
-			continue
-		}
-		return value
-	}
-	return ""
-}
-
-func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
-	s.mu.Lock()
-	if s.instance == nil || !strings.EqualFold(strings.TrimSpace(s.instance.Name()), string(acp.ACPProviderCopilot)) {
-		s.mu.Unlock()
-		return false
-	}
-	sid := strings.TrimSpace(s.acpSessionID)
-	configOptions := []acp.ConfigOption(nil)
-	if state := s.agents[s.currentAgentNameLocked()]; state != nil {
-		configOptions = append(configOptions, state.ConfigOptions...)
-	}
-	s.mu.Unlock()
-
-	if sid == "" {
-		return false
-	}
-
-	var modelOpt *acp.ConfigOption
-	for i := range configOptions {
-		opt := &configOptions[i]
-		if strings.EqualFold(strings.TrimSpace(opt.ID), acp.ConfigOptionIDModel) || strings.EqualFold(strings.TrimSpace(opt.Category), acp.ConfigOptionCategoryModel) {
-			modelOpt = opt
-			break
-		}
-	}
-	target := pickAlternativeModelValue(modelOpt)
-	if target == "" {
-		return false
-	}
-
-	updatedOpts, err := s.instance.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
-		SessionID: sid,
-		ConfigID:  modelOpt.ID,
-		Value:     target,
-	})
-	if err != nil {
-		return false
-	}
-
-	s.mu.Lock()
-	if len(updatedOpts) > 0 {
-		if state := s.agentStateLocked(s.currentAgentNameLocked()); state != nil {
-			state.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
-		}
-	}
-	s.mu.Unlock()
-	s.persistSessionBestEffort()
-	return true
-}
-
-// resetDeadConnection clears the current agent connection when it is known-dead.
-func (s *Session) resetDeadConnection(err error) bool {
-	if !isAgentExitError(err) {
-		return false
-	}
-	s.mu.Lock()
-	old := s.instance
-	s.instance = nil
-	s.ready = false
-	s.initializing = false
-	s.prompt.ctx = nil
-	s.prompt.cancel = nil
-	s.prompt.updatesCh = nil
-	s.prompt.currentCh = nil
-	s.prompt.activeTCs = make(map[string]struct{})
-	s.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-	return true
-}
-
-func (s *Session) forceReconnect() {
-	s.mu.Lock()
-	old := s.instance
-	s.instance = nil
-	s.ready = false
-	s.initializing = false
-	s.prompt.ctx = nil
-	s.prompt.cancel = nil
-	s.prompt.updatesCh = nil
-	s.prompt.currentCh = nil
-	s.prompt.activeTCs = make(map[string]struct{})
-	s.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-}
-
-func hasSandboxRefreshUpdate(update acp.SessionUpdate) bool {
-	raw, _ := json.Marshal(update)
-	s := strings.ToLower(string(raw))
-	return strings.Contains(s, "windows sandbox: spawn setup refresh")
-}
-
-func isSandboxRefreshErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "windows sandbox: spawn setup refresh")
 }

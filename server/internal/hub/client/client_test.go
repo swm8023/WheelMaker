@@ -426,6 +426,9 @@ func (s *noopStore) LoadSessionMessage(context.Context, string, string, string) 
 func (s *noopStore) ListSessionMessagesAfterIndex(context.Context, string, string, int64) ([]SessionMessageRecord, error) {
 	return nil, nil
 }
+func (s *noopStore) ListSessionMessagesAfterCursor(context.Context, string, string, int64, int64) ([]SessionMessageRecord, error) {
+	return nil, nil
+}
 func (s *noopStore) HasSessionMessage(context.Context, string, string, string) (bool, error) {
 	return false, nil
 }
@@ -1621,16 +1624,19 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	if messages[0].Status != "done" {
 		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
 	}
-	if messages[0].SyncIndex != 2 {
-		t.Fatalf("messages[0].SyncIndex = %d, want 2", messages[0].SyncIndex)
+	if messages[0].SyncIndex != 1 {
+		t.Fatalf("messages[0].SyncIndex = %d, want 1", messages[0].SyncIndex)
+	}
+	if messages[0].SyncSubIndex != 1 {
+		t.Fatalf("messages[0].SyncSubIndex = %d, want 1", messages[0].SyncSubIndex)
 	}
 
 	rec, err := store.LoadSession(ctx, "proj1", "sess-1")
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
-	if rec == nil || rec.LastSyncIndex != 2 {
-		t.Fatalf("LoadSession().LastSyncIndex = %v, want 2", rec)
+	if rec == nil || rec.LastSyncIndex != 1 || rec.LastSyncSubIndex != 1 {
+		t.Fatalf("LoadSession() cursor = %#v, want index=1 subindex=1", rec)
 	}
 }
 
@@ -1895,7 +1901,7 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 		t.Fatalf("RecordEvent permission resolved: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 0})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -1911,11 +1917,17 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	if messages[0].Status != "done" {
 		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
 	}
-	if messages[0].SyncIndex != 2 {
-		t.Fatalf("messages[0].SyncIndex = %d, want 2", messages[0].SyncIndex)
+	if messages[0].SyncIndex != 1 {
+		t.Fatalf("messages[0].SyncIndex = %d, want 1", messages[0].SyncIndex)
 	}
-	if got := body["lastIndex"].(int64); got != 2 {
-		t.Fatalf("lastIndex = %d, want 2", got)
+	if messages[0].SubIndex != 1 {
+		t.Fatalf("messages[0].SubIndex = %d, want 1", messages[0].SubIndex)
+	}
+	if got := body["lastIndex"].(int64); got != 1 {
+		t.Fatalf("lastIndex = %d, want 1", got)
+	}
+	if got := body["lastSubIndex"].(int64); got != 1 {
+		t.Fatalf("lastSubIndex = %d, want 1", got)
 	}
 }
 
