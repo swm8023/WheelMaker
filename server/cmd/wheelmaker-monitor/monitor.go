@@ -257,7 +257,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"projects", "route_bindings", "sessions", "session_messages"}
+	tableNames := []string{"projects", "route_bindings", "sessions", "session_records"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {
@@ -277,33 +277,34 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 }
 
 type MonitorSessionSummary struct {
-	SessionID      string `json:"sessionId"`
-	ProjectName    string `json:"projectName"`
-	Title          string `json:"title"`
-	Preview        string `json:"preview"`
-	Status         string `json:"status"`
-	MessageCount   int    `json:"messageCount"`
-	LastIndex      int64  `json:"lastIndex"`
-	LastSubIndex   int64  `json:"lastSubIndex"`
-	CreatedAt      string `json:"createdAt"`
-	LastActiveAt   string `json:"lastActiveAt"`
-	LastMessageAt  string `json:"lastMessageAt,omitempty"`
-	EffectiveAt    string `json:"updatedAt"`
+	SessionID     string `json:"sessionId"`
+	ProjectName   string `json:"projectName"`
+	Title         string `json:"title"`
+	Status        string `json:"status"`
+	LastIndex     int64  `json:"lastIndex"`
+	LastSubIndex  int64  `json:"lastSubIndex"`
+	CreatedAt     string `json:"createdAt"`
+	LastActiveAt  string `json:"lastActiveAt"`
+	LastMessageAt string `json:"lastMessageAt,omitempty"`
+	EffectiveAt   string `json:"updatedAt"`
 }
 
 type MonitorSessionMessage struct {
-	MessageID    string `json:"messageId"`
-	ProjectName  string `json:"projectName"`
-	SessionID    string `json:"sessionId"`
-	Index        int64  `json:"index"`
-	SubIndex     int64  `json:"subIndex"`
-	Role         string `json:"role"`
-	Kind         string `json:"kind"`
-	Body         string `json:"body"`
-	Status       string `json:"status"`
-	RequestID    int64  `json:"requestId,omitempty"`
-	CreatedAt    string `json:"createdAt"`
-	UpdatedAt    string `json:"updatedAt"`
+	MessageID   string `json:"messageId"`
+	ProjectName string `json:"projectName"`
+	SessionID   string `json:"sessionId"`
+	Index       int64  `json:"index"`
+	SubIndex    int64  `json:"subIndex"`
+	Method      string `json:"method"`
+	Role        string `json:"role"`
+	Kind        string `json:"kind"`
+	Body        string `json:"body"`
+	Status      string `json:"status"`
+	RequestID   int64  `json:"requestId,omitempty"`
+	Source      string `json:"source,omitempty"`
+	EventTime   string `json:"eventTime,omitempty"`
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
 }
 
 func (m *Monitor) openClientDB() (*sql.DB, error) {
@@ -322,7 +323,7 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 	defer db.Close()
 
 	query := `
-		SELECT id, project_name, status, title, last_message_preview, last_message_at, last_sync_index, last_sync_subindex, message_count, created_at, last_active_at
+		SELECT id, project_name, status, title, last_message_at, last_sync_index, last_sync_subindex, created_at, last_active_at
 		FROM sessions`
 	args := []any{}
 	projectName = strings.TrimSpace(projectName)
@@ -346,7 +347,7 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 	for rows.Next() {
 		var item MonitorSessionSummary
 		var status int
-		if err := rows.Scan(&item.SessionID, &item.ProjectName, &status, &item.Title, &item.Preview, &item.LastMessageAt, &item.LastIndex, &item.LastSubIndex, &item.MessageCount, &item.CreatedAt, &item.LastActiveAt); err != nil {
+		if err := rows.Scan(&item.SessionID, &item.ProjectName, &status, &item.Title, &item.LastMessageAt, &item.LastIndex, &item.LastSubIndex, &item.CreatedAt, &item.LastActiveAt); err != nil {
 			return nil, err
 		}
 		item.Status = monitorSessionStatusLabel(status)
@@ -368,20 +369,21 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT message_id, project_name, session_id, sync_index, sync_subindex, role, kind, body, status, request_id, created_at, updated_at
-		FROM session_messages
-		WHERE session_id = ?`
+		SELECT r.message_id, s.project_name, r.session_id, r.sync_index, r.sync_subindex, r.event_time, r.source, r.content_json, r.meta_json, r.created_at, r.updated_at
+		FROM session_records r
+		JOIN sessions s ON s.id = r.session_id
+		WHERE r.session_id = ?`
 	args := []any{strings.TrimSpace(sessionID)}
 	projectName = strings.TrimSpace(projectName)
 	if projectName != "" {
-		query += ` AND project_name = ?`
+		query += ` AND s.project_name = ?`
 		args = append(args, projectName)
 	}
 	if afterIndex > 0 || afterSubIndex > 0 {
-		query += ` AND (sync_index > ? OR (sync_index = ? AND sync_subindex > ?))`
+		query += ` AND (r.sync_index > ? OR (r.sync_index = ? AND r.sync_subindex > ?))`
 		args = append(args, afterIndex, afterIndex, afterSubIndex)
 	}
-	query += ` ORDER BY sync_index ASC, sync_subindex ASC`
+	query += ` ORDER BY r.sync_index ASC, r.sync_subindex ASC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
@@ -396,14 +398,46 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	out := []MonitorSessionMessage{}
 	for rows.Next() {
 		var item MonitorSessionMessage
-		if err := rows.Scan(&item.MessageID, &item.ProjectName, &item.SessionID, &item.Index, &item.SubIndex, &item.Role, &item.Kind, &item.Body, &item.Status, &item.RequestID, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var contentJSON string
+		var metaJSON string
+		if err := rows.Scan(&item.MessageID, &item.ProjectName, &item.SessionID, &item.Index, &item.SubIndex, &item.EventTime, &item.Source, &contentJSON, &metaJSON, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
+		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID = parseMonitorSessionRecord(contentJSON, metaJSON)
 		out = append(out, item)
 	}
 	return out, rows.Err()
 }
 
+func parseMonitorSessionRecord(contentJSON, metaJSON string) (method, role, kind, body, status string, requestID int64) {
+	contentJSON = strings.TrimSpace(contentJSON)
+	if contentJSON != "" {
+		var content struct {
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal([]byte(contentJSON), &content); err == nil {
+			method = strings.TrimSpace(content.Method)
+		}
+	}
+	metaJSON = strings.TrimSpace(metaJSON)
+	if metaJSON != "" {
+		var meta struct {
+			Role      string `json:"role"`
+			Kind      string `json:"kind"`
+			Text      string `json:"text"`
+			Status    string `json:"status"`
+			RequestID int64  `json:"requestId"`
+		}
+		if err := json.Unmarshal([]byte(metaJSON), &meta); err == nil {
+			role = strings.TrimSpace(meta.Role)
+			kind = strings.TrimSpace(meta.Kind)
+			body = meta.Text
+			status = strings.TrimSpace(meta.Status)
+			requestID = meta.RequestID
+		}
+	}
+	return method, role, kind, body, status, requestID
+}
 func monitorSessionStatusLabel(status int) string {
 	switch status {
 	case 0:

@@ -84,7 +84,7 @@ func TestGetLogs_DebugOmitsTimeLevelAndDedupsSessionID(t *testing.T) {
 	}
 }
 
-func TestGetDBTablesIncludesSessionMessages(t *testing.T) {
+func TestGetDBTablesIncludesSessionRecords(t *testing.T) {
 	base := t.TempDir()
 	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
 	if err != nil {
@@ -121,9 +121,9 @@ func TestGetDBTablesIncludesSessionMessages(t *testing.T) {
 		t.Fatalf("GetDBTables error: %s", res.Error)
 	}
 	for _, table := range res.Tables {
-		if table.Name == "session_messages" {
+		if table.Name == "session_records" {
 			return
 		}
 	}
-	t.Fatalf("session_messages table missing: %#v", res.Tables)
+	t.Fatalf("session_records table missing: %#v", res.Tables)
 }
