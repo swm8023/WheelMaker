@@ -658,15 +658,13 @@ func TestListSessions_DiskOnlySessionsAreMarkedPersisted(t *testing.T) {
 	createdAt := time.Now().Add(-2 * time.Hour).UTC()
 	lastMessageAt := time.Now().Add(-5 * time.Minute).UTC()
 	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:                 "persisted-only",
-		ProjectName:        "proj1",
-		Status:             SessionSuspended,
-		AgentsJSON:         `{"claude":{"title":"Persisted Title"}}`,
-		LastMessagePreview: "persisted preview",
-		LastMessageAt:      lastMessageAt,
-		MessageCount:       4,
-		CreatedAt:          createdAt,
-		LastActiveAt:       lastMessageAt,
+		ID:            "persisted-only",
+		ProjectName:   "proj1",
+		Status:        SessionSuspended,
+		AgentsJSON:    `{"claude":{"title":"Persisted Title"}}`,
+		LastMessageAt: lastMessageAt,
+		CreatedAt:     createdAt,
+		LastActiveAt:  lastMessageAt,
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
@@ -681,12 +679,6 @@ func TestListSessions_DiskOnlySessionsAreMarkedPersisted(t *testing.T) {
 	}
 	if entries[0].Status != SessionPersisted {
 		t.Fatalf("entries[0].Status = %v, want %v", entries[0].Status, SessionPersisted)
-	}
-	if entries[0].Preview != "persisted preview" {
-		t.Fatalf("entries[0].Preview = %q, want %q", entries[0].Preview, "persisted preview")
-	}
-	if entries[0].MessageCount != 4 {
-		t.Fatalf("entries[0].MessageCount = %d, want 4", entries[0].MessageCount)
 	}
 	if entries[0].InMemory {
 		t.Fatal("entries[0].InMemory = true, want false")
@@ -704,15 +696,13 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	createdAt := time.Now().Add(-2 * time.Hour).UTC()
 	lastMessageAt := time.Now().Add(-3 * time.Minute).UTC()
 	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:                 "sess-1",
-		ProjectName:        "proj1",
-		Status:             SessionSuspended,
-		Title:              "Persisted Title",
-		LastMessagePreview: "hello from store",
-		LastMessageAt:      lastMessageAt,
-		MessageCount:       3,
-		CreatedAt:          createdAt,
-		LastActiveAt:       lastMessageAt,
+		ID:            "sess-1",
+		ProjectName:   "proj1",
+		Status:        SessionSuspended,
+		Title:         "Persisted Title",
+		LastMessageAt: lastMessageAt,
+		CreatedAt:     createdAt,
+		LastActiveAt:  lastMessageAt,
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
@@ -739,12 +729,6 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	}
 	if entries[0].Title != "Runtime Title" {
 		t.Fatalf("entries[0].Title = %q, want %q", entries[0].Title, "Runtime Title")
-	}
-	if entries[0].Preview != "hello from store" {
-		t.Fatalf("entries[0].Preview = %q, want %q", entries[0].Preview, "hello from store")
-	}
-	if entries[0].MessageCount != 3 {
-		t.Fatalf("entries[0].MessageCount = %d, want 3", entries[0].MessageCount)
 	}
 	if entries[0].Status != SessionActive {
 		t.Fatalf("entries[0].Status = %v, want %v", entries[0].Status, SessionActive)
@@ -1379,7 +1363,7 @@ func TestStoreMigratesLegacyProjectsTable(t *testing.T) {
 	}
 }
 
-func TestStoreBackfillsSyncIndicesForLegacySessionMessages(t *testing.T) {
+func TestStoreDropsLegacySessionMessagesTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
 
 	legacyDB, err := sql.Open("sqlite", dbPath)
@@ -1408,13 +1392,6 @@ func TestStoreBackfillsSyncIndicesForLegacySessionMessages(t *testing.T) {
 			role TEXT NOT NULL,
 			kind TEXT NOT NULL,
 			body TEXT NOT NULL DEFAULT '',
-			blocks_json TEXT NOT NULL DEFAULT '[]',
-			options_json TEXT NOT NULL DEFAULT '[]',
-			status TEXT NOT NULL DEFAULT 'done',
-			source_channel TEXT NOT NULL DEFAULT '',
-			source_chat_id TEXT NOT NULL DEFAULT '',
-			request_id INTEGER NOT NULL DEFAULT 0,
-			aggregate_key TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
@@ -1447,21 +1424,34 @@ func TestStoreBackfillsSyncIndicesForLegacySessionMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
-	if rec == nil || rec.LastSyncIndex != 2 {
-		t.Fatalf("LoadSession().LastSyncIndex = %#v, want 2", rec)
+	if rec == nil {
+		t.Fatal("LoadSession returned nil")
 	}
+	if rec.LastSyncIndex != 0 || rec.LastSyncSubIndex != 0 {
+		t.Fatalf("cursor = (%d,%d), want (0,0)", rec.LastSyncIndex, rec.LastSyncSubIndex)
+	}
+
 	messages, err := store.ListSessionMessagesAfterIndex(context.Background(), "proj1", "sess-1", 0)
 	if err != nil {
 		t.Fatalf("ListSessionMessagesAfterIndex: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("ListSessionMessagesAfterIndex() len = %d, want 2", len(messages))
+	if len(messages) != 0 {
+		t.Fatalf("ListSessionMessagesAfterIndex() len = %d, want 0", len(messages))
 	}
-	if messages[0].SyncIndex != 1 || messages[1].SyncIndex != 2 {
-		t.Fatalf("sync indexes = [%d, %d], want [1, 2]", messages[0].SyncIndex, messages[1].SyncIndex)
+
+	checkDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open migrated db: %v", err)
+	}
+	defer checkDB.Close()
+	var legacyTableCount int
+	if err := checkDB.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='session_messages'`).Scan(&legacyTableCount); err != nil {
+		t.Fatalf("check session_messages table: %v", err)
+	}
+	if legacyTableCount != 0 {
+		t.Fatalf("session_messages table count = %d, want 0", legacyTableCount)
 	}
 }
-
 func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -1470,16 +1460,14 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	defer store.Close()
 
 	rec := &SessionRecord{
-		ID:                 "sess-1",
-		ProjectName:        "proj1",
-		Status:             SessionActive,
-		LastReply:          "legacy",
-		CreatedAt:          time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
-		LastActiveAt:       time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
-		Title:              "Fix app sessions",
-		LastMessagePreview: "hello world",
-		LastMessageAt:      time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
-		MessageCount:       3,
+		ID:            "sess-1",
+		ProjectName:   "proj1",
+		Status:        SessionActive,
+		LastReply:     "legacy",
+		CreatedAt:     time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt:  time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
+		Title:         "Fix app sessions",
+		LastMessageAt: time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
 	}
 
 	if err := store.SaveSession(context.Background(), rec); err != nil {
@@ -1496,12 +1484,6 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	if loaded.Title != "Fix app sessions" {
 		t.Fatalf("LoadSession().Title = %q, want %q", loaded.Title, "Fix app sessions")
 	}
-	if loaded.LastMessagePreview != "hello world" {
-		t.Fatalf("LoadSession().LastMessagePreview = %q, want %q", loaded.LastMessagePreview, "hello world")
-	}
-	if loaded.MessageCount != 3 {
-		t.Fatalf("LoadSession().MessageCount = %d, want 3", loaded.MessageCount)
-	}
 
 	entries, err := store.ListSessions(context.Background(), "proj1")
 	if err != nil {
@@ -1512,12 +1494,6 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	}
 	if entries[0].Title != "Fix app sessions" {
 		t.Fatalf("ListSessions()[0].Title = %q, want %q", entries[0].Title, "Fix app sessions")
-	}
-	if entries[0].Preview != "hello world" {
-		t.Fatalf("ListSessions()[0].Preview = %q, want %q", entries[0].Preview, "hello world")
-	}
-	if entries[0].MessageCount != 3 {
-		t.Fatalf("ListSessions()[0].MessageCount = %d, want 3", entries[0].MessageCount)
 	}
 }
 
@@ -1721,12 +1697,6 @@ func TestSessionViewListIncludesProjectionFields(t *testing.T) {
 	if sessions[0].Title != "Task" {
 		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Task")
 	}
-	if sessions[0].Preview != "hello" {
-		t.Fatalf("sessions[0].Preview = %q, want %q", sessions[0].Preview, "hello")
-	}
-	if sessions[0].MessageCount != 1 {
-		t.Fatalf("sessions[0].MessageCount = %d, want 1", sessions[0].MessageCount)
-	}
 }
 
 func TestSessionViewListIncludesRuntimeClientSessions(t *testing.T) {
@@ -1768,15 +1738,13 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 	ctx := context.Background()
 	lastMessageAt := mustRFC3339Time(t, "2026-04-12T10:08:00Z")
 	if err := c.store.SaveSession(ctx, &SessionRecord{
-		ID:                 "sess-runtime-1",
-		ProjectName:        "proj1",
-		Status:             SessionSuspended,
-		Title:              "Persisted Title",
-		LastMessagePreview: "persisted preview",
-		LastMessageAt:      lastMessageAt,
-		MessageCount:       7,
-		CreatedAt:          mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
-		LastActiveAt:       mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
+		ID:            "sess-runtime-1",
+		ProjectName:   "proj1",
+		Status:        SessionSuspended,
+		Title:         "Persisted Title",
+		LastMessageAt: lastMessageAt,
+		CreatedAt:     mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
+		LastActiveAt:  mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
@@ -1799,12 +1767,6 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 	}
 	if sessions[0].Title != "Runtime Session" {
 		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Runtime Session")
-	}
-	if sessions[0].Preview != "persisted preview" {
-		t.Fatalf("sessions[0].Preview = %q, want %q", sessions[0].Preview, "persisted preview")
-	}
-	if sessions[0].MessageCount != 7 {
-		t.Fatalf("sessions[0].MessageCount = %d, want 7", sessions[0].MessageCount)
 	}
 	if sessions[0].UpdatedAt != lastMessageAt.Format(time.RFC3339) {
 		t.Fatalf("sessions[0].UpdatedAt = %q, want %q", sessions[0].UpdatedAt, lastMessageAt.Format(time.RFC3339))
@@ -1839,12 +1801,9 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
-	summary, messages, _, err := c.readSessionView(context.Background(), "sess-1", 0)
+	_, messages, _, err := c.readSessionView(context.Background(), "sess-1", 0)
 	if err != nil {
 		t.Fatalf("readSessionView: %v", err)
-	}
-	if summary.MessageCount != 2 {
-		t.Fatalf("summary.MessageCount = %d, want 2", summary.MessageCount)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
@@ -1872,13 +1831,13 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Build finished", AggregateKey: "tool-1"}); err != nil {
 		t.Fatalf("RecordEvent tool updated #2: %v", err)
 	}
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
 
-	summary, messages, _, err := c.readSessionView(context.Background(), "sess-1", 0)
+	_, messages, _, err := c.readSessionView(context.Background(), "sess-1", 0)
 	if err != nil {
 		t.Fatalf("readSessionView: %v", err)
-	}
-	if summary.MessageCount != 1 {
-		t.Fatalf("summary.MessageCount = %d, want 1", summary.MessageCount)
 	}
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(messages))

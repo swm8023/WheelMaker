@@ -114,6 +114,9 @@ func (c *Client) SetYOLO(enabled bool) {
 		sess.yolo = enabled
 		sess.mu.Unlock()
 	}
+	if c.sessionRecorder != nil {
+		c.sessionRecorder.Close()
+	}
 	if store != nil {
 		if err := store.SaveProject(context.Background(), projectName, ProjectConfig{YOLO: enabled}); err != nil {
 			hubLogger(projectName).Warn("save project config failed err=%v", err)
@@ -182,6 +185,9 @@ func (c *Client) Close() error {
 		if err := sess.persistSession(ctx); err != nil {
 			hubLogger(c.projectName).Warn("persist session during close session=%s err=%v", sess.ID, err)
 		}
+	}
+	if c.sessionRecorder != nil {
+		c.sessionRecorder.Close()
 	}
 	if store != nil {
 		return store.Close()
@@ -866,8 +872,6 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 		if entries[i].Title == "" {
 			entries[i].Title = storedEntry.Title
 		}
-		entries[i].Preview = storedEntry.Preview
-		entries[i].MessageCount = storedEntry.MessageCount
 		entries[i].LastMessageAt = storedEntry.LastMessageAt
 	}
 	for _, s := range stored {

@@ -50,17 +50,14 @@ type SessionViewSink interface {
 }
 
 type sessionViewSummary struct {
-	SessionID    string `json:"sessionId"`
-	Title        string `json:"title"`
-	Preview      string `json:"preview"`
-	UpdatedAt    string `json:"updatedAt"`
-	MessageCount int    `json:"messageCount"`
-	UnreadCount  int    `json:"unreadCount"`
-	Agent        string `json:"agent,omitempty"`
-	Status       string `json:"status,omitempty"`
-	ProjectName  string `json:"projectName,omitempty"`
+	SessionID   string `json:"sessionId"`
+	Title       string `json:"title"`
+	UpdatedAt   string `json:"updatedAt"`
+	UnreadCount int    `json:"unreadCount"`
+	Agent       string `json:"agent,omitempty"`
+	Status      string `json:"status,omitempty"`
+	ProjectName string `json:"projectName,omitempty"`
 }
-
 type sessionViewMessage struct {
 	MessageID string                 `json:"messageId"`
 	SessionID string                 `json:"sessionId"`
@@ -77,82 +74,14 @@ type sessionViewMessage struct {
 	RequestID int64                  `json:"requestId,omitempty"`
 }
 
-type sessionProjectionAggregateState struct {
-	message SessionMessageRecord
-}
+const sessionUpdateFlushInterval = 5 * time.Second
 
-type sessionProjectionAggregator struct {
-	mu     sync.Mutex
-	nextID int64
-	active map[string]*sessionProjectionAggregateState
-}
-
-func newSessionProjectionAggregator() *sessionProjectionAggregator {
-	return &sessionProjectionAggregator{active: map[string]*sessionProjectionAggregateState{}}
-}
-
-func sessionProjectionAggregateKey(sessionID, kind string) string {
-	return strings.TrimSpace(sessionID) + ":" + strings.TrimSpace(kind)
-}
-
-func (a *sessionProjectionAggregator) appendChunk(projectName string, event SessionViewEvent) SessionMessageRecord {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	key := strings.TrimSpace(event.AggregateKey)
-	if key == "" {
-		key = sessionProjectionAggregateKey(event.SessionID, event.Kind)
-	}
-	state := a.active[key]
-	now := event.UpdatedAt
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	if state == nil {
-		a.nextID += 1
-		messageID := fmt.Sprintf("msg-agg-%d", a.nextID)
-		state = &sessionProjectionAggregateState{message: SessionMessageRecord{
-			MessageID:     messageID,
-			ProjectName:   projectName,
-			SessionID:     strings.TrimSpace(event.SessionID),
-			Role:          strings.TrimSpace(event.Role),
-			Kind:          strings.TrimSpace(event.Kind),
-			Status:        firstNonEmpty(strings.TrimSpace(event.Status), "streaming"),
-			AggregateKey:  key,
-			SourceChannel: strings.TrimSpace(event.SourceChannel),
-			SourceChatID:  strings.TrimSpace(event.SourceChatID),
-			RequestID:     event.RequestID,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}}
-		a.active[key] = state
-	}
-	state.message.Body += event.Text
-	state.message.UpdatedAt = now
-	state.message.Status = firstNonEmpty(strings.TrimSpace(event.Status), state.message.Status)
-	if state.message.Role == "" {
-		state.message.Role = strings.TrimSpace(event.Role)
-	}
-	if state.message.Kind == "" {
-		state.message.Kind = strings.TrimSpace(event.Kind)
-	}
-	return state.message
-}
-
-func (a *sessionProjectionAggregator) flushSession(sessionID string) []SessionMessageRecord {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	var out []SessionMessageRecord
-	for key, state := range a.active {
-		if state == nil || strings.TrimSpace(state.message.SessionID) != strings.TrimSpace(sessionID) {
-			continue
-		}
-		state.message.Status = "done"
-		state.message.UpdatedAt = time.Now().UTC()
-		out = append(out, state.message)
-		delete(a.active, key)
-	}
-	return out
+type bufferedSessionUpdate struct {
+	message         SessionMessageRecord
+	variant         string
+	persisted       bool
+	dirty           bool
+	lastPersistedAt time.Time
 }
 
 type SessionRecorder struct {
@@ -160,22 +89,57 @@ type SessionRecorder struct {
 	store        Store
 	listSessions func(context.Context) ([]SessionListEntry, error)
 
-	mu              sync.Mutex
-	publish         func(method string, payload any) error
-	unreadCount     map[string]int
-	chunkAggregator *sessionProjectionAggregator
+	mu          sync.Mutex
+	publish     func(method string, payload any) error
+	unreadCount map[string]int
+
+	updateMu sync.Mutex
+	updates  map[string]*bufferedSessionUpdate
+	stopCh   chan struct{}
+	doneCh   chan struct{}
 }
 
 func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionListEntry, error)) *SessionRecorder {
-	return &SessionRecorder{
-		projectName:     projectName,
-		store:           store,
-		listSessions:    listSessions,
-		unreadCount:     map[string]int{},
-		chunkAggregator: newSessionProjectionAggregator(),
+	r := &SessionRecorder{
+		projectName:  projectName,
+		store:        store,
+		listSessions: listSessions,
+		unreadCount:  map[string]int{},
+		updates:      map[string]*bufferedSessionUpdate{},
+		stopCh:       make(chan struct{}),
+		doneCh:       make(chan struct{}),
 	}
+	go r.runFlushLoop()
+	return r
 }
 
+func (r *SessionRecorder) Close() {
+	if r == nil {
+		return
+	}
+	select {
+	case <-r.stopCh:
+		return
+	default:
+		close(r.stopCh)
+	}
+	<-r.doneCh
+}
+
+func (r *SessionRecorder) runFlushLoop() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	defer close(r.doneCh)
+	for {
+		select {
+		case <-r.stopCh:
+			r.flushAllBufferedUpdates(context.Background())
+			return
+		case <-ticker.C:
+			r.flushDueBufferedUpdates(context.Background(), time.Now().UTC())
+		}
+	}
+}
 func (r *SessionRecorder) SetEventPublisher(publish func(method string, payload any) error) {
 	r.mu.Lock()
 	r.publish = publish
@@ -202,15 +166,16 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 
 	switch event.Type {
 	case SessionViewEventSessionCreated:
-		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), "", event.UpdatedAt, false)
+		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), event.UpdatedAt)
 	case SessionViewEventUserMessageAccepted:
-		if err := r.flushSessionProjection(ctx, event.SessionID); err != nil {
+		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
 		}
 		message := SessionMessageRecord{
 			MessageID:    fmt.Sprintf("msg-user-%d", event.CreatedAt.UnixNano()),
 			ProjectName:  r.projectName,
 			SessionID:    event.SessionID,
+			Method:       "session.prompt",
 			Role:         firstNonEmpty(event.Role, "user"),
 			Kind:         firstNonEmpty(event.Kind, "text"),
 			Body:         strings.TrimSpace(event.Text),
@@ -218,8 +183,10 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			Status:       firstNonEmpty(event.Status, "done"),
 			CreatedAt:    event.CreatedAt,
 			UpdatedAt:    event.UpdatedAt,
+			EventTime:    event.UpdatedAt,
 			RequestID:    event.RequestID,
 			AggregateKey: firstNonEmpty(event.AggregateKey, fmt.Sprintf("user:%s:%d", event.SessionID, event.CreatedAt.UnixNano())),
+			Source:       normalizeRecorderEventSource(event),
 		}
 		if err := r.store.AppendSessionMessage(ctx, message); err != nil {
 			return err
@@ -228,39 +195,24 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err != nil {
 			return err
 		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.Body, stored.UpdatedAt, true); err != nil {
+		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.UpdatedAt); err != nil {
 			return err
 		}
 		r.publishSessionMessage(stored)
 		return nil
-	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk:
-		message := r.chunkAggregator.appendChunk(r.projectName, event)
-		existed, err := r.store.HasSessionMessage(ctx, r.projectName, event.SessionID, message.MessageID)
-		if err != nil {
-			return err
-		}
-		if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
-			return err
-		}
-		stored, err := r.loadStoredSessionMessage(ctx, event.SessionID, message.MessageID)
-		if err != nil {
-			return err
-		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.Body, stored.UpdatedAt, !existed); err != nil {
-			return err
-		}
-		if !existed {
-			r.incrementSessionUnread(event.SessionID)
-		}
-		r.publishSessionMessage(stored)
-		return nil
+	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk, SessionViewEventToolUpdated, SessionViewEventSystemMessage:
+		return r.recordBufferedSessionUpdate(ctx, event)
 	case SessionViewEventPromptFinished:
-		return r.flushSessionProjection(ctx, event.SessionID)
+		return r.flushBufferedSessionUpdate(ctx, event.SessionID)
 	case SessionViewEventPermissionRequested:
+		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
+			return err
+		}
 		message := SessionMessageRecord{
 			MessageID:    fmt.Sprintf("msg-permission-%s-%d", event.SessionID, event.RequestID),
 			ProjectName:  r.projectName,
 			SessionID:    event.SessionID,
+			Method:       "session.permission",
 			Role:         firstNonEmpty(event.Role, "system"),
 			Kind:         firstNonEmpty(event.Kind, "permission"),
 			Body:         strings.TrimSpace(event.Text),
@@ -268,8 +220,10 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			Status:       firstNonEmpty(event.Status, "needs_action"),
 			CreatedAt:    event.CreatedAt,
 			UpdatedAt:    event.UpdatedAt,
+			EventTime:    event.UpdatedAt,
 			RequestID:    event.RequestID,
 			AggregateKey: fmt.Sprintf("permission:%s:%d", event.SessionID, event.RequestID),
+			Source:       normalizeRecorderEventSource(event),
 		}
 		existed, err := r.store.HasSessionMessage(ctx, r.projectName, event.SessionID, message.MessageID)
 		if err != nil {
@@ -282,7 +236,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err != nil {
 			return err
 		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.Body, stored.UpdatedAt, !existed); err != nil {
+		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.UpdatedAt); err != nil {
 			return err
 		}
 		if !existed {
@@ -291,6 +245,9 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		r.publishSessionMessage(stored)
 		return nil
 	case SessionViewEventPermissionResolved:
+		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
+			return err
+		}
 		messages, err := r.store.ListSessionMessages(ctx, r.projectName, event.SessionID)
 		if err != nil {
 			return err
@@ -301,6 +258,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			}
 			message.Status = firstNonEmpty(event.Status, "done")
 			message.UpdatedAt = event.UpdatedAt
+			message.EventTime = event.UpdatedAt
 			if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
 				return err
 			}
@@ -312,48 +270,207 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			break
 		}
 		return nil
-	case SessionViewEventSystemMessage, SessionViewEventToolUpdated:
-		messageID := fmt.Sprintf("msg-system-%d", event.CreatedAt.UnixNano())
-		if strings.TrimSpace(event.AggregateKey) != "" {
-			messageID = sanitizeSessionAggregateMessageID(event.Kind, event.AggregateKey)
-		}
-		message := SessionMessageRecord{
-			MessageID:    messageID,
-			ProjectName:  r.projectName,
-			SessionID:    event.SessionID,
-			Role:         firstNonEmpty(event.Role, "system"),
-			Kind:         firstNonEmpty(event.Kind, "system"),
-			Body:         strings.TrimSpace(event.Text),
-			Status:       firstNonEmpty(event.Status, "done"),
-			CreatedAt:    event.CreatedAt,
-			UpdatedAt:    event.UpdatedAt,
-			RequestID:    event.RequestID,
-			AggregateKey: firstNonEmpty(event.AggregateKey, fmt.Sprintf("system:%s:%d", event.SessionID, event.CreatedAt.UnixNano())),
-		}
-		existed, err := r.store.HasSessionMessage(ctx, r.projectName, event.SessionID, message.MessageID)
-		if err != nil {
-			return err
-		}
-		if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
-			return err
-		}
-		stored, err := r.loadStoredSessionMessage(ctx, event.SessionID, message.MessageID)
-		if err != nil {
-			return err
-		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.Body, stored.UpdatedAt, !existed); err != nil {
-			return err
-		}
-		if !existed {
-			r.incrementSessionUnread(event.SessionID)
-		}
-		r.publishSessionMessage(stored)
-		return nil
 	default:
 		return nil
 	}
 }
 
+func normalizeRecorderEventSource(event SessionViewEvent) string {
+	channel := strings.TrimSpace(event.SourceChannel)
+	chatID := strings.TrimSpace(event.SourceChatID)
+	if channel == "" && chatID == "" {
+		return ""
+	}
+	if channel == "" {
+		return chatID
+	}
+	if chatID == "" {
+		return channel
+	}
+	return channel + ":" + chatID
+}
+
+func recorderUpdateVariant(event SessionViewEvent) string {
+	variant := string(event.Type)
+	if strings.TrimSpace(event.Kind) != "" {
+		variant += ":" + strings.TrimSpace(event.Kind)
+	}
+	if strings.TrimSpace(event.AggregateKey) != "" {
+		variant += ":" + strings.TrimSpace(event.AggregateKey)
+	}
+	return variant
+}
+
+func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionMessageRecord {
+	return SessionMessageRecord{
+		MessageID:     fmt.Sprintf("msg-update-%s-%d", strings.TrimSpace(event.SessionID), event.CreatedAt.UnixNano()),
+		ProjectName:   projectName,
+		SessionID:     strings.TrimSpace(event.SessionID),
+		Method:        "session.update",
+		Role:          firstNonEmpty(strings.TrimSpace(event.Role), "assistant"),
+		Kind:          firstNonEmpty(strings.TrimSpace(event.Kind), "text"),
+		Body:          strings.TrimSpace(event.Text),
+		Status:        firstNonEmpty(strings.TrimSpace(event.Status), "streaming"),
+		AggregateKey:  strings.TrimSpace(event.AggregateKey),
+		RequestID:     event.RequestID,
+		Source:        normalizeRecorderEventSource(event),
+		SourceChannel: strings.TrimSpace(event.SourceChannel),
+		SourceChatID:  strings.TrimSpace(event.SourceChatID),
+		CreatedAt:     event.CreatedAt,
+		UpdatedAt:     event.UpdatedAt,
+		EventTime:     event.UpdatedAt,
+	}
+}
+
+func mergeBufferedSessionUpdateMessage(msg *SessionMessageRecord, event SessionViewEvent) {
+	if msg == nil {
+		return
+	}
+	rawText := event.Text
+	switch event.Type {
+	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk:
+		msg.Body += rawText
+	default:
+		msg.Body = strings.TrimSpace(rawText)
+	}
+	msg.Role = firstNonEmpty(strings.TrimSpace(msg.Role), strings.TrimSpace(event.Role))
+	msg.Kind = firstNonEmpty(strings.TrimSpace(event.Kind), msg.Kind)
+	msg.Status = firstNonEmpty(strings.TrimSpace(event.Status), msg.Status)
+	msg.RequestID = firstNonZeroInt64(event.RequestID, msg.RequestID)
+	if strings.TrimSpace(event.AggregateKey) != "" {
+		msg.AggregateKey = strings.TrimSpace(event.AggregateKey)
+	}
+	if strings.TrimSpace(event.SourceChannel) != "" || strings.TrimSpace(event.SourceChatID) != "" {
+		msg.Source = normalizeRecorderEventSource(event)
+		msg.SourceChannel = strings.TrimSpace(event.SourceChannel)
+		msg.SourceChatID = strings.TrimSpace(event.SourceChatID)
+	}
+	if event.CreatedAt.Before(msg.CreatedAt) {
+		msg.CreatedAt = event.CreatedAt
+	}
+	msg.UpdatedAt = event.UpdatedAt
+	msg.EventTime = event.UpdatedAt
+}
+
+func firstNonZeroInt64(v int64, fallback int64) int64 {
+	if v != 0 {
+		return v
+	}
+	return fallback
+}
+
+func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event SessionViewEvent) error {
+	r.updateMu.Lock()
+	defer r.updateMu.Unlock()
+
+	sessionID := strings.TrimSpace(event.SessionID)
+	variant := recorderUpdateVariant(event)
+	state := r.updates[sessionID]
+	if state != nil && state.variant != variant {
+		if err := r.flushBufferedSessionUpdateLocked(ctx, sessionID, true); err != nil {
+			return err
+		}
+		state = nil
+	}
+	if state == nil {
+		msg := newBufferedSessionUpdateMessage(r.projectName, event)
+		state = &bufferedSessionUpdate{message: msg, variant: variant, dirty: true}
+		r.updates[sessionID] = state
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, true); err != nil {
+			return err
+		}
+		return nil
+	}
+	mergeBufferedSessionUpdateMessage(&state.message, event)
+	state.dirty = true
+	if state.lastPersistedAt.IsZero() || event.UpdatedAt.Sub(state.lastPersistedAt) >= sessionUpdateFlushInterval {
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *SessionRecorder) flushBufferedSessionUpdate(ctx context.Context, sessionID string) error {
+	r.updateMu.Lock()
+	defer r.updateMu.Unlock()
+	return r.flushBufferedSessionUpdateLocked(ctx, strings.TrimSpace(sessionID), true)
+}
+
+func (r *SessionRecorder) flushBufferedSessionUpdateLocked(ctx context.Context, sessionID string, force bool) error {
+	state := r.updates[strings.TrimSpace(sessionID)]
+	if state == nil {
+		return nil
+	}
+	if !state.persisted {
+		return r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, true)
+	}
+	if !state.dirty && !force {
+		return nil
+	}
+	return r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false)
+}
+
+func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context, sessionID string, state *bufferedSessionUpdate, appendMode bool) error {
+	if state == nil {
+		return nil
+	}
+	msg := state.message
+	if appendMode {
+		if err := r.store.AppendSessionMessage(ctx, msg); err != nil {
+			return err
+		}
+	} else {
+		if err := r.store.UpsertSessionMessage(ctx, msg); err != nil {
+			return err
+		}
+	}
+	stored, err := r.loadStoredSessionMessage(ctx, sessionID, msg.MessageID)
+	if err != nil {
+		return err
+	}
+	if err := r.upsertSessionProjection(ctx, sessionID, "", stored.UpdatedAt); err != nil {
+		return err
+	}
+	if appendMode {
+		r.incrementSessionUnread(sessionID)
+	}
+	r.publishSessionMessage(stored)
+	state.message = stored
+	state.persisted = true
+	state.dirty = false
+	state.lastPersistedAt = stored.UpdatedAt
+	r.updates[sessionID] = state
+	return nil
+}
+
+func (r *SessionRecorder) flushDueBufferedUpdates(ctx context.Context, now time.Time) {
+	r.updateMu.Lock()
+	defer r.updateMu.Unlock()
+	for sessionID, state := range r.updates {
+		if state == nil || !state.persisted || !state.dirty {
+			continue
+		}
+		if now.Sub(state.lastPersistedAt) < sessionUpdateFlushInterval {
+			continue
+		}
+		_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false)
+	}
+}
+
+func (r *SessionRecorder) flushAllBufferedUpdates(ctx context.Context) {
+	r.updateMu.Lock()
+	defer r.updateMu.Unlock()
+	for sessionID, state := range r.updates {
+		if state == nil {
+			continue
+		}
+		if state.persisted && !state.dirty {
+			continue
+		}
+		_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, !state.persisted)
+	}
+}
 func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
 	entries, err := r.listSessions(ctx)
 	if err != nil {
@@ -399,31 +516,6 @@ func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string)
 	return r.currentSessionViewSummary(ctx, sessionID)
 }
 
-func (r *SessionRecorder) flushSessionProjection(ctx context.Context, sessionID string) error {
-	flushed := r.chunkAggregator.flushSession(sessionID)
-	for _, message := range flushed {
-		existed, err := r.store.HasSessionMessage(ctx, r.projectName, sessionID, message.MessageID)
-		if err != nil {
-			return err
-		}
-		if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
-			return err
-		}
-		stored, err := r.loadStoredSessionMessage(ctx, sessionID, message.MessageID)
-		if err != nil {
-			return err
-		}
-		if err := r.upsertSessionProjection(ctx, sessionID, "", stored.Body, stored.UpdatedAt, !existed); err != nil {
-			return err
-		}
-		if !existed {
-			r.incrementSessionUnread(sessionID)
-		}
-		r.publishSessionMessage(stored)
-	}
-	return nil
-}
-
 func (r *SessionRecorder) loadStoredSessionMessage(ctx context.Context, sessionID, messageID string) (SessionMessageRecord, error) {
 	message, err := r.store.LoadSessionMessage(ctx, r.projectName, strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
 	if err != nil {
@@ -435,10 +527,13 @@ func (r *SessionRecorder) loadStoredSessionMessage(ctx context.Context, sessionI
 	return SessionMessageRecord{}, fmt.Errorf("session message not found: %s", messageID)
 }
 
-func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title, preview string, updatedAt time.Time, incrementMessageCount bool) error {
+func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time) error {
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
 		return err
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
 	}
 	if rec == nil {
 		rec = &SessionRecord{ID: sessionID, ProjectName: r.projectName, Status: SessionActive, CreatedAt: updatedAt, LastActiveAt: updatedAt}
@@ -446,13 +541,9 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 	if strings.TrimSpace(title) != "" {
 		rec.Title = strings.TrimSpace(title)
 	}
-	if strings.TrimSpace(preview) != "" {
-		rec.LastMessagePreview = strings.TrimSpace(preview)
-		rec.LastMessageAt = updatedAt
-	}
 	rec.LastActiveAt = updatedAt
-	if incrementMessageCount {
-		rec.MessageCount += 1
+	if rec.LastMessageAt.IsZero() || updatedAt.After(rec.LastMessageAt) {
+		rec.LastMessageAt = updatedAt
 	}
 	if err := r.store.SaveSession(ctx, rec); err != nil {
 		return err
@@ -478,15 +569,13 @@ func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) se
 		updatedAt = entry.LastActiveAt
 	}
 	return sessionViewSummary{
-		SessionID:    entry.ID,
-		Title:        firstNonEmpty(entry.Title, entry.ID),
-		Preview:      entry.Preview,
-		UpdatedAt:    updatedAt.UTC().Format(time.RFC3339),
-		MessageCount: entry.MessageCount,
-		UnreadCount:  r.sessionUnread(entry.ID),
-		Agent:        entry.Agent,
-		Status:       sessionStatusLabel(entry.Status),
-		ProjectName:  entry.ProjectName,
+		SessionID:   entry.ID,
+		Title:       firstNonEmpty(entry.Title, entry.ID),
+		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
+		UnreadCount: r.sessionUnread(entry.ID),
+		Agent:       entry.Agent,
+		Status:      sessionStatusLabel(entry.Status),
+		ProjectName: entry.ProjectName,
 	}
 }
 
@@ -496,14 +585,12 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 		updatedAt = rec.LastActiveAt
 	}
 	return sessionViewSummary{
-		SessionID:    rec.ID,
-		Title:        firstNonEmpty(rec.Title, rec.ID),
-		Preview:      rec.LastMessagePreview,
-		UpdatedAt:    updatedAt.UTC().Format(time.RFC3339),
-		MessageCount: rec.MessageCount,
-		UnreadCount:  r.sessionUnread(rec.ID),
-		Status:       sessionStatusLabel(rec.Status),
-		ProjectName:  rec.ProjectName,
+		SessionID:   rec.ID,
+		Title:       firstNonEmpty(rec.Title, rec.ID),
+		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
+		UnreadCount: r.sessionUnread(rec.ID),
+		Status:      sessionStatusLabel(rec.Status),
+		ProjectName: rec.ProjectName,
 	}
 }
 
@@ -574,7 +661,7 @@ func (r *SessionRecorder) publishSessionMessage(message SessionMessageRecord) {
 	ctx := context.Background()
 	summary, ok := r.currentSessionViewSummary(ctx, message.SessionID)
 	if !ok {
-		summary = sessionViewSummary{SessionID: message.SessionID, Title: message.SessionID, Preview: message.Body, UpdatedAt: message.UpdatedAt.UTC().Format(time.RFC3339), ProjectName: message.ProjectName}
+		summary = sessionViewSummary{SessionID: message.SessionID, Title: message.SessionID, UpdatedAt: message.UpdatedAt.UTC().Format(time.RFC3339), ProjectName: message.ProjectName}
 	}
 	_ = publish("registry.session.message", map[string]any{"session": summary, "message": toSessionViewMessage(message)})
 }
