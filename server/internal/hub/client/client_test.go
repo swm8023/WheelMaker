@@ -537,7 +537,7 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	c := New(&noopStore{}, "test", "/tmp")
 	fake := &fakeIMRouter{}
 	c.SetIMRouter(fake)
-	factory := func(context.Context) (agent.Instance, error) {
+	factory := func(context.Context, string) (agent.Instance, error) {
 		return &testInjectedInstance{
 			name:      "claude",
 			sessionID: "acp-1",
@@ -758,7 +758,7 @@ func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testi
 		},
 	}
 	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return &testInjectedInstance{
 			name:      "claude",
 			sessionID: "acp-keep",
@@ -841,7 +841,7 @@ func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T
 	}
 
 	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return inst, nil
 	})
 
@@ -1010,7 +1010,7 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 		}},
 	}
 	c.registry = agent.DefaultACPFactory().Clone()
-	c.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) { return inst, nil })
+	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
 	c.mu.Lock()
 	oldSess := c.newWiredSession("sess-old")
 	oldSess.activeAgent = "claude"
@@ -1099,7 +1099,7 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 	}
 
 	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return inst, nil
 	})
 
@@ -1170,7 +1170,7 @@ func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *t
 	}
 
 	s.registry = agent.DefaultACPFactory().Clone()
-	s.registry.Register(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return inst, nil
 	})
 

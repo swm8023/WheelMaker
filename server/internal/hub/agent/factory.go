@@ -11,7 +11,10 @@ import (
 )
 
 // InstanceCreator creates one runtime instance.
-type InstanceCreator func(ctx context.Context) (Instance, error)
+// The cwd parameter is the project working directory; providers that
+// need the subprocess to start in the project directory should use it.
+// Providers that ignore cwd can receive an empty string.
+type InstanceCreator func(ctx context.Context, cwd string) (Instance, error)
 
 // ACPFactory resolves one provider enum to one instance creator.
 // A creator map contains both default built-ins and optional overrides.
@@ -151,12 +154,12 @@ func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPPr
 	if creator == nil {
 		return nil, fmt.Errorf("unknown provider: %q", provider)
 	}
-	return creator(ctx)
+	return creator(ctx, "")
 }
 
 func providerInstanceCreator(provider ACPProvider) InstanceCreator {
-	return func(_ context.Context) (Instance, error) {
-		conn, err := newOwnedProviderConn(provider)
+	return func(_ context.Context, cwd string) (Instance, error) {
+		conn, err := newOwnedProviderConn(provider, cwd)
 		if err != nil {
 			return nil, fmt.Errorf("connect %q: %w", provider.Name(), err)
 		}
@@ -164,12 +167,13 @@ func providerInstanceCreator(provider ACPProvider) InstanceCreator {
 	}
 }
 
-func newOwnedProviderConn(provider ACPProvider) (Conn, error) {
+func newOwnedProviderConn(provider ACPProvider, cwd string) (Conn, error) {
 	exe, args, env, err := provider.Launch()
 	if err != nil {
 		return nil, err
 	}
 	raw := NewACPProcess(provider.Name(), exe, env, args...)
+	raw.SetDir(cwd)
 	if err := raw.Start(); err != nil {
 		return nil, err
 	}

@@ -336,6 +336,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	if as := s.agents[name]; as != nil && strings.TrimSpace(as.ACPSessionID) != "" {
 		savedSID = strings.TrimSpace(as.ACPSessionID)
 	}
+	cwd := s.cwd
 	s.mu.Unlock()
 
 	if name == "" {
@@ -366,7 +367,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	}
 	s.mu.Unlock()
 
-	inst, err := creator(ctx)
+	inst, err := creator(ctx, cwd)
 	if err != nil {
 		return err
 	}
@@ -438,10 +439,11 @@ func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode)
 	if as := s.agents[name]; as != nil {
 		savedSID = strings.TrimSpace(as.ACPSessionID)
 	}
+	cwd := s.cwd
 	s.mu.Unlock()
 
 	// Connect new agent via factory.
-	newInst, err := creator(ctx)
+	newInst, err := creator(ctx, cwd)
 	if err != nil {
 		return fmt.Errorf("connect %q: %w", name, err)
 	}

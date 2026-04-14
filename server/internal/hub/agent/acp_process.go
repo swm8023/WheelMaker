@@ -19,6 +19,7 @@ type ACPProcess struct {
 	exePath string
 	exeArgs []string
 	env     []string
+	dir     string
 
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
@@ -50,10 +51,20 @@ func NewACPProcess(providerName, exePath string, env []string, args ...string) *
 	}
 }
 
+// SetDir sets the working directory for the subprocess.
+// Must be called before Start. An empty string means the subprocess
+// inherits the parent's working directory (the default).
+func (p *ACPProcess) SetDir(dir string) {
+	p.dir = dir
+}
+
 // Start starts the subprocess transport.
 func (p *ACPProcess) Start() error {
 	cmd := exec.Command(p.exePath, p.exeArgs...)
 	cmd.Env = append(cmd.Environ(), p.env...)
+	if p.dir != "" {
+		cmd.Dir = p.dir
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
