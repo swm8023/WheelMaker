@@ -46,6 +46,18 @@ var (
 		Args:                   []string{"acp"},
 		MissingPathErrTemplate: "codeflicker: binary not found in PATH: %v",
 	}
+	OpenCodeACPProviderPreset = ACPProviderPreset{
+		Name:                   "opencode",
+		BinaryName:             "opencode",
+		Args:                   []string{"acp"},
+		MissingPathErrTemplate: "opencode: binary not found in PATH: %v",
+	}
+	CodeBuddyACPProviderPreset = ACPProviderPreset{
+		Name:                   "codebuddy",
+		BinaryName:             "codebuddy",
+		Args:                   []string{"--acp"},
+		MissingPathErrTemplate: "codebuddy: binary not found in PATH: %v",
+	}
 )
 
 // acpProvider is the unified implementation for all ACP providers.
@@ -79,6 +91,14 @@ func NewCopilotProvider() *acpProvider {
 
 func NewCodeflickerProvider() *acpProvider {
 	return NewACPProvider(CodeflickerACPProviderPreset)
+}
+
+func NewOpenCodeProvider() *acpProvider {
+	return NewACPProvider(OpenCodeACPProviderPreset)
+}
+
+func NewCodeBuddyProvider() *acpProvider {
+	return NewACPProvider(CodeBuddyACPProviderPreset)
 }
 
 func (p *acpProvider) Name() string { return p.preset.Name }

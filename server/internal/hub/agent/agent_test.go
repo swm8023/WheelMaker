@@ -200,6 +200,60 @@ func TestCopilotACPProvider_LaunchArgs(t *testing.T) {
 	}
 }
 
+func TestOpenCodeACPProvider_LaunchArgs(t *testing.T) {
+	p := NewOpenCodeProvider()
+	p.resolveBinary = func(name string, configuredPath string) (string, error) {
+		if name != "opencode" {
+			t.Fatalf("resolveBinary name=%q, want opencode", name)
+		}
+		if configuredPath != "" {
+			t.Fatalf("resolveBinary configuredPath=%q, want empty", configuredPath)
+		}
+		return "/usr/bin/opencode", nil
+	}
+
+	exe, args, env, err := p.Launch()
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if exe != "/usr/bin/opencode" {
+		t.Fatalf("exe=%q", exe)
+	}
+	if !reflect.DeepEqual(args, []string{"acp"}) {
+		t.Fatalf("args=%v", args)
+	}
+	if len(env) != 0 {
+		t.Fatalf("env=%v, want empty", env)
+	}
+}
+
+func TestCodeBuddyACPProvider_LaunchArgs(t *testing.T) {
+	p := NewCodeBuddyProvider()
+	p.resolveBinary = func(name string, configuredPath string) (string, error) {
+		if name != "codebuddy" {
+			t.Fatalf("resolveBinary name=%q, want codebuddy", name)
+		}
+		if configuredPath != "" {
+			t.Fatalf("resolveBinary configuredPath=%q, want empty", configuredPath)
+		}
+		return "/usr/bin/codebuddy", nil
+	}
+
+	exe, args, env, err := p.Launch()
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if exe != "/usr/bin/codebuddy" {
+		t.Fatalf("exe=%q", exe)
+	}
+	if !reflect.DeepEqual(args, []string{"--acp"}) {
+		t.Fatalf("args=%v", args)
+	}
+	if len(env) != 0 {
+		t.Fatalf("env=%v, want empty", env)
+	}
+}
+
 func TestOwnedConn_SendMatchesResponse(t *testing.T) {
 	tr := newFakeOwnedTransport()
 	tr.onSend = func(v any) {
