@@ -40,6 +40,12 @@ var (
 		Args:                   []string{"--acp", "--stdio"},
 		MissingPathErrTemplate: "copilot: binary not found in PATH (install GitHub Copilot CLI): %v",
 	}
+	CodeflickerACPProviderPreset = ACPProviderPreset{
+		Name:                   "codeflicker",
+		BinaryName:             "codeflicker",
+		Args:                   []string{"--acp", "--stdio"},
+		MissingPathErrTemplate: "codeflicker: binary not found in PATH: %v",
+	}
 )
 
 // acpProvider is the unified implementation for all ACP providers.
@@ -69,6 +75,10 @@ func NewClaudeProvider() *acpProvider {
 
 func NewCopilotProvider() *acpProvider {
 	return NewACPProvider(CopilotACPProviderPreset)
+}
+
+func NewCodeflickerProvider() *acpProvider {
+	return NewACPProvider(CodeflickerACPProviderPreset)
 }
 
 func (p *acpProvider) Name() string { return p.preset.Name }

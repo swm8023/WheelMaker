@@ -42,6 +42,7 @@ func newACPFactoryWithDefaults() *ACPFactory {
 		{provider: protocol.ACPProviderCodex, build: func() ACPProvider { return NewCodexProvider() }},
 		{provider: protocol.ACPProviderClaude, build: func() ACPProvider { return NewClaudeProvider() }},
 		{provider: protocol.ACPProviderCopilot, build: func() ACPProvider { return NewCopilotProvider() }},
+		{provider: protocol.ACPProviderCodeflicker, build: func() ACPProvider { return NewCodeflickerProvider() }},
 	}
 	for _, candidate := range candidates {
 		prov := candidate.build()
@@ -128,6 +129,7 @@ func (f *ACPFactory) PreferredName() string {
 		protocol.ACPProviderCodex,
 		protocol.ACPProviderClaude,
 		protocol.ACPProviderCopilot,
+		protocol.ACPProviderCodeflicker,
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()

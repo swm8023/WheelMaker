@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/server/internal/protocol/**)",
+      "Edit(/server/internal/hub/agent/**)"
+    ]
+  }
+}
