@@ -537,7 +537,7 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	c := New(&noopStore{}, "test", "/tmp")
 	fake := &fakeIMRouter{}
 	c.SetIMRouter(fake)
-	c.InjectAgentFactory(acp.ACPProviderClaude, func(context.Context) (agent.Instance, error) {
+	factory := func(context.Context) (agent.Instance, error) {
 		return &testInjectedInstance{
 			name:      "claude",
 			sessionID: "acp-1",
@@ -549,7 +549,9 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
 			},
 		}, nil
-	})
+	}
+	c.InjectAgentFactory(acp.ACPProviderClaude, factory)
+	c.InjectAgentFactory(acp.ACPProviderCodex, factory)
 	if err := c.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -1584,8 +1586,18 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	if err := store.AppendSessionMessage(ctx, msg); err != nil {
 		t.Fatalf("AppendSessionMessage: %v", err)
 	}
+	seed, err := store.ListSessionMessages(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionMessages before upsert: %v", err)
+	}
+	if len(seed) != 1 {
+		t.Fatalf("ListSessionMessages before upsert len = %d, want 1", len(seed))
+	}
+	msg.SyncIndex = seed[0].SyncIndex
+	msg.SyncSubIndex = seed[0].SyncSubIndex
 	msg.Status = "done"
 	msg.UpdatedAt = time.Date(2026, 4, 12, 10, 2, 0, 0, time.UTC)
+	msg.Time = msg.UpdatedAt
 	if err := store.UpsertSessionMessage(ctx, msg); err != nil {
 		t.Fatalf("UpsertSessionMessage: %v", err)
 	}

@@ -290,7 +290,6 @@ type MonitorSessionSummary struct {
 }
 
 type MonitorSessionMessage struct {
-	MessageID   string `json:"messageId"`
 	ProjectName string `json:"projectName"`
 	SessionID   string `json:"sessionId"`
 	Index       int64  `json:"index"`
@@ -302,9 +301,7 @@ type MonitorSessionMessage struct {
 	Status      string `json:"status"`
 	RequestID   int64  `json:"requestId,omitempty"`
 	Source      string `json:"source,omitempty"`
-	EventTime   string `json:"eventTime,omitempty"`
-	CreatedAt   string `json:"createdAt"`
-	UpdatedAt   string `json:"updatedAt"`
+	Time        string `json:"time"`
 }
 
 func (m *Monitor) openClientDB() (*sql.DB, error) {
@@ -369,7 +366,7 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT r.message_id, s.project_name, r.session_id, r.sync_index, r.sync_subindex, r.event_time, r.source, r.content_json, r.meta_json, r.created_at, r.updated_at
+		SELECT s.project_name, r.session_id, r.sync_index, r.sync_subindex, r.time, r.source, r.content_json, r.meta_json
 		FROM session_records r
 		JOIN sessions s ON s.id = r.session_id
 		WHERE r.session_id = ?`
@@ -400,7 +397,7 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 		var item MonitorSessionMessage
 		var contentJSON string
 		var metaJSON string
-		if err := rows.Scan(&item.MessageID, &item.ProjectName, &item.SessionID, &item.Index, &item.SubIndex, &item.EventTime, &item.Source, &contentJSON, &metaJSON, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ProjectName, &item.SessionID, &item.Index, &item.SubIndex, &item.Time, &item.Source, &contentJSON, &metaJSON); err != nil {
 			return nil, err
 		}
 		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID = parseMonitorSessionRecord(contentJSON, metaJSON)
@@ -413,14 +410,32 @@ func parseMonitorSessionRecord(contentJSON, metaJSON string) (method, role, kind
 	contentJSON = strings.TrimSpace(contentJSON)
 	if contentJSON != "" {
 		var content struct {
-			Method string `json:"method"`
+			Method  string `json:"method"`
+			Payload struct {
+				Role         string `json:"role"`
+				Kind         string `json:"kind"`
+				UpdateMethod string `json:"updateMethod"`
+				Text         string `json:"text"`
+				Status       string `json:"status"`
+				RequestID    int64  `json:"requestId"`
+			} `json:"payload"`
 		}
 		if err := json.Unmarshal([]byte(contentJSON), &content); err == nil {
 			method = strings.TrimSpace(content.Method)
+			role = strings.TrimSpace(content.Payload.Role)
+			if method == "session.update" && strings.TrimSpace(content.Payload.UpdateMethod) != "" {
+				kind = strings.TrimSpace(content.Payload.UpdateMethod)
+			} else {
+				kind = strings.TrimSpace(content.Payload.Kind)
+			}
+			body = content.Payload.Text
+			status = strings.TrimSpace(content.Payload.Status)
+			requestID = content.Payload.RequestID
 		}
 	}
+
 	metaJSON = strings.TrimSpace(metaJSON)
-	if metaJSON != "" {
+	if metaJSON != "" && metaJSON != "{}" {
 		var meta struct {
 			Role      string `json:"role"`
 			Kind      string `json:"kind"`
@@ -429,11 +444,21 @@ func parseMonitorSessionRecord(contentJSON, metaJSON string) (method, role, kind
 			RequestID int64  `json:"requestId"`
 		}
 		if err := json.Unmarshal([]byte(metaJSON), &meta); err == nil {
-			role = strings.TrimSpace(meta.Role)
-			kind = strings.TrimSpace(meta.Kind)
-			body = meta.Text
-			status = strings.TrimSpace(meta.Status)
-			requestID = meta.RequestID
+			if role == "" {
+				role = strings.TrimSpace(meta.Role)
+			}
+			if kind == "" {
+				kind = strings.TrimSpace(meta.Kind)
+			}
+			if body == "" {
+				body = meta.Text
+			}
+			if status == "" {
+				status = strings.TrimSpace(meta.Status)
+			}
+			if requestID == 0 {
+				requestID = meta.RequestID
+			}
 		}
 	}
 	return method, role, kind, body, status, requestID

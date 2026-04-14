@@ -1068,9 +1068,12 @@ function renderDBTables(db) {
         for (let i = 0; i < row.length; i++) {
           const val = row[i];
           const col = i < t.columns.length ? String(t.columns[i] || '') : '';
-          const isSessionsTable = String(t.name || '').toLowerCase() === 'sessions';
+          const tableName = String(t.name || '').toLowerCase();
+          const isSessionsTable = tableName === 'sessions';
+          const isSessionRecordsTable = tableName === 'session_records';
           const colName = col.toLowerCase();
           const isAgentsJSON = isSessionsTable && colName === 'agents_json';
+          const isRecordContentJSON = isSessionRecordsTable && colName === 'content_json';
           const isJSONColumn = colName.endsWith('_json');
           const isStatus = isSessionsTable && colName === 'status';
           if (isJSONColumn) {
@@ -1084,6 +1087,20 @@ function renderDBTables(db) {
                 summary = names.length ? names.join(', ') : '-';
               } catch (_) {
                 summary = raw.trim() ? '?' : '-';
+              }
+            } else if (isRecordContentJSON && raw.trim()) {
+              try {
+                const parsed = JSON.parse(raw);
+                const method = parsed && typeof parsed.method === 'string' ? parsed.method.trim() : '';
+                const payload = parsed && typeof parsed.payload === 'object' ? parsed.payload : null;
+                const updateMethod = payload && typeof payload.updateMethod === 'string' ? payload.updateMethod.trim() : '';
+                if (method === 'session.update') {
+                  summary = updateMethod || method || '-';
+                } else {
+                  summary = method || '-';
+                }
+              } catch (_) {
+                summary = 'invalid json';
               }
             } else if (raw.trim()) {
               try {
@@ -1099,8 +1116,7 @@ function renderDBTables(db) {
               } catch (_) {
                 summary = 'invalid json';
               }
-            }
-            const safeCol = col.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            }            const safeCol = col.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             html += '<td><span class="tbl-muted">' + esc(summary) + '</span> <button type="button" class="json-cell-btn" onclick="openJSONModal(\'' + key + '\', \'' + safeCol + '\')">View JSON</button></td>';
             continue;
           }

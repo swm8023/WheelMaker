@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -46,22 +47,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 	last_active_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS session_records (
-	message_id TEXT NOT NULL DEFAULT '',
 	session_id TEXT NOT NULL,
 	sync_index INTEGER NOT NULL,
 	sync_subindex INTEGER NOT NULL DEFAULT 0,
-	event_time TEXT NOT NULL,
+	time TEXT NOT NULL,
 	source TEXT NOT NULL DEFAULT '',
 	content_json TEXT NOT NULL,
 	meta_json TEXT NOT NULL DEFAULT '{}',
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL,
 	PRIMARY KEY (session_id, sync_index)
 );
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS idx_session_records_session_cursor ON session_records(session_id, sync_index, sync_subindex);
-CREATE INDEX IF NOT EXISTS idx_session_records_message_id ON session_records(session_id, message_id);
 `
 
 type ProjectAgentState struct {
@@ -110,6 +107,7 @@ type SessionMessageRecord struct {
 	ContentJSON   string
 	MetaJSON      string
 	Source        string
+	Time          time.Time
 	EventTime     time.Time
 	Role          string
 	Kind          string
@@ -257,29 +255,57 @@ func migrateSessionRecordsTable(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("check session_messages table: %w", err)
 	}
-	if legacyExists {
+
+	shouldRecreate := legacyExists
+	if recordsExists {
+		requiredColumns := []string{"session_id", "sync_index", "sync_subindex", "time", "source", "content_json", "meta_json"}
+		for _, column := range requiredColumns {
+			exists, colErr := sqliteColumnExists(db, "session_records", column)
+			if colErr != nil {
+				return fmt.Errorf("check session_records.%s column: %w", column, colErr)
+			}
+			if !exists {
+				shouldRecreate = true
+				break
+			}
+		}
+		legacyColumns := []string{"message_id", "event_time", "created_at", "updated_at"}
+		for _, column := range legacyColumns {
+			exists, colErr := sqliteColumnExists(db, "session_records", column)
+			if colErr != nil {
+				return fmt.Errorf("check session_records.%s column: %w", column, colErr)
+			}
+			if exists {
+				shouldRecreate = true
+				break
+			}
+		}
+	}
+
+	if shouldRecreate {
 		if _, err := db.Exec(`DROP TABLE IF EXISTS session_messages`); err != nil {
 			return fmt.Errorf("drop legacy session_messages: %w", err)
+		}
+		if _, err := db.Exec(`DROP INDEX IF EXISTS idx_session_records_message_id`); err != nil {
+			return fmt.Errorf("drop legacy session_records message index: %w", err)
+		}
+		if _, err := db.Exec(`DROP TABLE IF EXISTS session_records`); err != nil {
+			return fmt.Errorf("drop legacy session_records table: %w", err)
 		}
 		if _, err := db.Exec(`UPDATE sessions SET last_sync_index = 0, last_sync_subindex = 0`); err != nil {
 			return fmt.Errorf("reset session cursor after destructive message migration: %w", err)
 		}
 	}
-	if recordsExists {
-		return nil
-	}
+
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS session_records (
-			message_id TEXT NOT NULL DEFAULT '',
 			session_id TEXT NOT NULL,
 			sync_index INTEGER NOT NULL,
 			sync_subindex INTEGER NOT NULL DEFAULT 0,
-			event_time TEXT NOT NULL,
+			time TEXT NOT NULL,
 			source TEXT NOT NULL DEFAULT '',
 			content_json TEXT NOT NULL,
 			meta_json TEXT NOT NULL DEFAULT '{}',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
 			PRIMARY KEY (session_id, sync_index)
 		)
 	`); err != nil {
@@ -288,8 +314,8 @@ func migrateSessionRecordsTable(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_records_session_cursor ON session_records(session_id, sync_index, sync_subindex)`); err != nil {
 		return fmt.Errorf("create session_records cursor index: %w", err)
 	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_records_message_id ON session_records(session_id, message_id)`); err != nil {
-		return fmt.Errorf("create session_records message index: %w", err)
+	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_session_records_message_id`); err != nil {
+		return fmt.Errorf("drop legacy session_records message index: %w", err)
 	}
 	return nil
 }
@@ -633,8 +659,7 @@ func normalizeJSONDoc(raw string, fallback string) string {
 
 func buildSessionRecordContentJSON(rec SessionMessageRecord) (string, string, error) {
 	method := inferSessionRecordMethod(rec)
-	hasPayloadFields := strings.TrimSpace(rec.Role) != "" || strings.TrimSpace(rec.Kind) != "" || strings.TrimSpace(rec.Body) != "" || len(rec.Blocks) > 0 || len(rec.Options) > 0 || strings.TrimSpace(rec.Status) != "" || rec.RequestID != 0 || strings.TrimSpace(rec.AggregateKey) != ""
-	if strings.TrimSpace(rec.ContentJSON) != "" && !hasPayloadFields {
+	if strings.TrimSpace(rec.ContentJSON) != "" {
 		normalized := normalizeJSONDoc(rec.ContentJSON, `{"method":"`+method+`"}`)
 		var doc map[string]any
 		if err := json.Unmarshal([]byte(normalized), &doc); err == nil {
@@ -650,7 +675,37 @@ func buildSessionRecordContentJSON(rec SessionMessageRecord) (string, string, er
 		}
 		return normalized, method, nil
 	}
-	raw, err := json.Marshal(map[string]any{"method": method})
+	payload := map[string]any{}
+	if strings.TrimSpace(rec.Role) != "" {
+		payload["role"] = strings.TrimSpace(rec.Role)
+	}
+	if strings.TrimSpace(rec.Kind) != "" {
+		if method == "session.update" {
+			payload["updateMethod"] = strings.TrimSpace(rec.Kind)
+		} else {
+			payload["kind"] = strings.TrimSpace(rec.Kind)
+		}
+	}
+	if strings.TrimSpace(rec.Body) != "" {
+		payload["text"] = rec.Body
+	}
+	if len(rec.Blocks) > 0 {
+		payload["blocks"] = rec.Blocks
+	}
+	if len(rec.Options) > 0 {
+		payload["options"] = rec.Options
+	}
+	if strings.TrimSpace(rec.Status) != "" {
+		payload["status"] = strings.TrimSpace(rec.Status)
+	}
+	if rec.RequestID != 0 {
+		payload["requestId"] = rec.RequestID
+	}
+	doc := map[string]any{"method": method}
+	if len(payload) > 0 {
+		doc["payload"] = payload
+	}
+	raw, err := json.Marshal(doc)
 	if err != nil {
 		return "", "", fmt.Errorf("marshal session record content: %w", err)
 	}
@@ -658,49 +713,10 @@ func buildSessionRecordContentJSON(rec SessionMessageRecord) (string, string, er
 }
 
 func buildSessionRecordMetaJSON(rec SessionMessageRecord) (string, error) {
-	hasMetaFields := strings.TrimSpace(rec.Role) != "" || strings.TrimSpace(rec.Kind) != "" || strings.TrimSpace(rec.Body) != "" || len(rec.Blocks) > 0 || len(rec.Options) > 0 || strings.TrimSpace(rec.Status) != "" || strings.TrimSpace(rec.AggregateKey) != "" || rec.RequestID != 0 || strings.TrimSpace(rec.SourceChannel) != "" || strings.TrimSpace(rec.SourceChatID) != ""
-	if strings.TrimSpace(rec.MetaJSON) != "" && !hasMetaFields {
+	if strings.TrimSpace(rec.MetaJSON) != "" {
 		return normalizeJSONDoc(rec.MetaJSON, "{}"), nil
 	}
-	meta := map[string]any{}
-	if strings.TrimSpace(rec.Role) != "" {
-		meta["role"] = strings.TrimSpace(rec.Role)
-	}
-	if strings.TrimSpace(rec.Kind) != "" {
-		meta["kind"] = strings.TrimSpace(rec.Kind)
-	}
-	if strings.TrimSpace(rec.Body) != "" {
-		meta["text"] = rec.Body
-	}
-	if len(rec.Blocks) > 0 {
-		meta["blocks"] = rec.Blocks
-	}
-	if len(rec.Options) > 0 {
-		meta["options"] = rec.Options
-	}
-	if strings.TrimSpace(rec.Status) != "" {
-		meta["status"] = strings.TrimSpace(rec.Status)
-	}
-	if strings.TrimSpace(rec.AggregateKey) != "" {
-		meta["aggregateKey"] = strings.TrimSpace(rec.AggregateKey)
-	}
-	if rec.RequestID != 0 {
-		meta["requestId"] = rec.RequestID
-	}
-	if strings.TrimSpace(rec.SourceChannel) != "" {
-		meta["sourceChannel"] = strings.TrimSpace(rec.SourceChannel)
-	}
-	if strings.TrimSpace(rec.SourceChatID) != "" {
-		meta["sourceChatId"] = strings.TrimSpace(rec.SourceChatID)
-	}
-	if len(meta) == 0 {
-		return "{}", nil
-	}
-	raw, err := json.Marshal(meta)
-	if err != nil {
-		return "", fmt.Errorf("marshal session record meta: %w", err)
-	}
-	return string(raw), nil
+	return "{}", nil
 }
 
 func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
@@ -711,48 +727,36 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 	rec.MetaJSON = normalizeJSONDoc(rec.MetaJSON, "{}")
 
 	var content struct {
-		Method string `json:"method"`
+		Method  string `json:"method"`
+		Payload struct {
+			Role         string                 `json:"role"`
+			Kind         string                 `json:"kind"`
+			UpdateMethod string                 `json:"updateMethod"`
+			Text         string                 `json:"text"`
+			Blocks       []acp.ContentBlock     `json:"blocks"`
+			Options      []acp.PermissionOption `json:"options"`
+			Status       string                 `json:"status"`
+			RequestID    int64                  `json:"requestId"`
+			AggregateKey string                 `json:"aggregateKey"`
+		} `json:"payload"`
 	}
 	if err := json.Unmarshal([]byte(rec.ContentJSON), &content); err == nil {
 		rec.Method = strings.TrimSpace(content.Method)
+		rec.Role = strings.TrimSpace(content.Payload.Role)
+		if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
+			rec.Kind = strings.TrimSpace(content.Payload.UpdateMethod)
+		} else {
+			rec.Kind = strings.TrimSpace(content.Payload.Kind)
+		}
+		rec.Body = content.Payload.Text
+		rec.Blocks = content.Payload.Blocks
+		rec.Options = content.Payload.Options
+		rec.Status = strings.TrimSpace(content.Payload.Status)
+		rec.RequestID = content.Payload.RequestID
+		rec.AggregateKey = strings.TrimSpace(content.Payload.AggregateKey)
 	}
 	if rec.Method == "" {
 		rec.Method = inferSessionRecordMethod(*rec)
-	}
-
-	var meta struct {
-		Role          string                 `json:"role"`
-		Kind          string                 `json:"kind"`
-		Text          string                 `json:"text"`
-		Blocks        []acp.ContentBlock     `json:"blocks"`
-		Options       []acp.PermissionOption `json:"options"`
-		Status        string                 `json:"status"`
-		RequestID     int64                  `json:"requestId"`
-		AggregateKey  string                 `json:"aggregateKey"`
-		SourceChannel string                 `json:"sourceChannel"`
-		SourceChatID  string                 `json:"sourceChatId"`
-	}
-	if err := json.Unmarshal([]byte(rec.MetaJSON), &meta); err == nil {
-		rec.Role = strings.TrimSpace(meta.Role)
-		rec.Kind = strings.TrimSpace(meta.Kind)
-		rec.Body = meta.Text
-		rec.Blocks = meta.Blocks
-		rec.Options = meta.Options
-		rec.Status = strings.TrimSpace(meta.Status)
-		if meta.RequestID != 0 {
-			rec.RequestID = meta.RequestID
-		}
-		rec.AggregateKey = strings.TrimSpace(meta.AggregateKey)
-		if strings.TrimSpace(meta.SourceChannel) != "" {
-			rec.SourceChannel = strings.TrimSpace(meta.SourceChannel)
-		}
-		if strings.TrimSpace(meta.SourceChatID) != "" {
-			rec.SourceChatID = strings.TrimSpace(meta.SourceChatID)
-		}
-	}
-
-	if strings.TrimSpace(rec.Source) == "" {
-		rec.Source = normalizeSessionRecordSource(*rec)
 	}
 	parts := strings.SplitN(strings.TrimSpace(rec.Source), ":", 2)
 	if len(parts) > 0 {
@@ -767,7 +771,6 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	rec.MessageID = strings.TrimSpace(rec.MessageID)
 	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
 	rec.SessionID = strings.TrimSpace(rec.SessionID)
 	if rec.ProjectName == "" {
@@ -776,15 +779,28 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	if rec.SessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
+
+	now := time.Now().UTC()
+	if rec.Time.IsZero() {
+		switch {
+		case !rec.EventTime.IsZero():
+			rec.Time = rec.EventTime
+		case !rec.UpdatedAt.IsZero():
+			rec.Time = rec.UpdatedAt
+		case !rec.CreatedAt.IsZero():
+			rec.Time = rec.CreatedAt
+		default:
+			rec.Time = now
+		}
+	}
+	rec.Time = rec.Time.UTC()
 	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = time.Now().UTC()
+		rec.CreatedAt = rec.Time
 	}
 	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = rec.CreatedAt
+		rec.UpdatedAt = rec.Time
 	}
-	if rec.EventTime.IsZero() {
-		rec.EventTime = rec.UpdatedAt
-	}
+	rec.EventTime = rec.Time
 
 	contentJSON, method, err := buildSessionRecordContentJSON(rec)
 	if err != nil {
@@ -819,68 +835,40 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 		return fmt.Errorf("load session cursor: %w", err)
 	}
 
-	var rowMessageID string
-	var rowCreatedAt string
 	var rowSubIndex int64
 	hasExisting := false
-	if update {
-		if rec.SyncIndex > 0 {
-			err = tx.QueryRowContext(ctx, `
-				SELECT message_id, created_at, sync_subindex
-				FROM session_records
-				WHERE session_id = ? AND sync_index = ?
-			`, rec.SessionID, rec.SyncIndex).Scan(&rowMessageID, &rowCreatedAt, &rowSubIndex)
-			hasExisting = err == nil
-			if err != nil && err != sql.ErrNoRows {
-				return fmt.Errorf("load session record by index: %w", err)
-			}
-		}
-		if !hasExisting && rec.MessageID != "" {
-			err = tx.QueryRowContext(ctx, `
-				SELECT sync_index, message_id, created_at, sync_subindex
-				FROM session_records
-				WHERE session_id = ? AND message_id = ?
-				ORDER BY sync_index DESC
-				LIMIT 1
-			`, rec.SessionID, rec.MessageID).Scan(&rec.SyncIndex, &rowMessageID, &rowCreatedAt, &rowSubIndex)
-			hasExisting = err == nil
-			if err != nil && err != sql.ErrNoRows {
-				return fmt.Errorf("load session record by message id: %w", err)
-			}
+	if update && rec.SyncIndex > 0 {
+		err = tx.QueryRowContext(ctx, `
+			SELECT sync_subindex
+			FROM session_records
+			WHERE session_id = ? AND sync_index = ?
+		`, rec.SessionID, rec.SyncIndex).Scan(&rowSubIndex)
+		hasExisting = err == nil
+		if err != nil && err != sql.ErrNoRows {
+			return fmt.Errorf("load session record by index: %w", err)
 		}
 	}
 
-	nowCreatedAt := rec.CreatedAt.UTC().Format(time.RFC3339Nano)
 	if hasExisting {
 		rec.SyncSubIndex = rowSubIndex + 1
-		if strings.TrimSpace(rec.MessageID) == "" {
-			rec.MessageID = strings.TrimSpace(rowMessageID)
-		}
-		if strings.TrimSpace(rowCreatedAt) != "" {
-			nowCreatedAt = strings.TrimSpace(rowCreatedAt)
-		}
 	} else {
 		rec.SyncIndex = lastSyncIndex + 1
 		rec.SyncSubIndex = 0
-		if rec.MessageID == "" {
-			rec.MessageID = fmt.Sprintf("idx-%d", rec.SyncIndex)
-		}
 	}
+	rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
+	storedTime := rec.Time.UTC().Format(time.RFC3339Nano)
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO session_records (
-			message_id, session_id, sync_index, sync_subindex, event_time, source, content_json, meta_json, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			session_id, sync_index, sync_subindex, time, source, content_json, meta_json
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, sync_index) DO UPDATE SET
-			message_id=excluded.message_id,
 			sync_subindex=excluded.sync_subindex,
-			event_time=excluded.event_time,
+			time=excluded.time,
 			source=excluded.source,
 			content_json=excluded.content_json,
-			meta_json=excluded.meta_json,
-			updated_at=excluded.updated_at
-	`, rec.MessageID, rec.SessionID, rec.SyncIndex, rec.SyncSubIndex,
-		rec.EventTime.UTC().Format(time.RFC3339Nano), source, contentJSON, metaJSON, nowCreatedAt, rec.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			meta_json=excluded.meta_json
+	`, rec.SessionID, rec.SyncIndex, rec.SyncSubIndex, storedTime, source, contentJSON, metaJSON); err != nil {
 		return fmt.Errorf("save session record: %w", err)
 	}
 
@@ -888,7 +876,7 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 		UPDATE sessions
 		SET last_sync_index = ?, last_sync_subindex = ?, last_active_at = ?
 		WHERE project_name = ? AND id = ?
-	`, rec.SyncIndex, rec.SyncSubIndex, rec.UpdatedAt.UTC().Format(time.RFC3339Nano), rec.ProjectName, rec.SessionID); err != nil {
+	`, rec.SyncIndex, rec.SyncSubIndex, storedTime, rec.ProjectName, rec.SessionID); err != nil {
 		return fmt.Errorf("update session cursor: %w", err)
 	}
 
@@ -900,7 +888,7 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 
 func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT r.message_id, r.session_id, r.sync_index, r.sync_subindex, r.event_time, r.source, r.content_json, r.meta_json, r.created_at, r.updated_at
+		SELECT r.session_id, r.sync_index, r.sync_subindex, r.time, r.source, r.content_json, r.meta_json
 		FROM session_records r
 		JOIN sessions s ON s.id = r.session_id
 		WHERE s.project_name = ? AND r.session_id = ?
@@ -914,16 +902,16 @@ func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sess
 	var out []SessionMessageRecord
 	for rows.Next() {
 		var rec SessionMessageRecord
-		var eventTime string
-		var createdAt string
-		var updatedAt string
-		if err := rows.Scan(&rec.MessageID, &rec.SessionID, &rec.SyncIndex, &rec.SyncSubIndex, &eventTime, &rec.Source, &rec.ContentJSON, &rec.MetaJSON, &createdAt, &updatedAt); err != nil {
+		var storedTime string
+		if err := rows.Scan(&rec.SessionID, &rec.SyncIndex, &rec.SyncSubIndex, &storedTime, &rec.Source, &rec.ContentJSON, &rec.MetaJSON); err != nil {
 			return nil, fmt.Errorf("scan session record: %w", err)
 		}
 		rec.ProjectName = strings.TrimSpace(projectName)
-		rec.EventTime = parseStoreTime(eventTime)
-		rec.CreatedAt = parseStoreTime(createdAt)
-		rec.UpdatedAt = parseStoreTime(updatedAt)
+		rec.Time = parseStoreTime(storedTime)
+		rec.EventTime = rec.Time
+		rec.CreatedAt = rec.Time
+		rec.UpdatedAt = rec.Time
+		rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
 		hydrateSessionRecordLegacyFields(&rec)
 		out = append(out, rec)
 	}
@@ -931,31 +919,28 @@ func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sess
 }
 
 func (s *sqliteStore) LoadSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionMessageRecord, error) {
-	row := s.db.QueryRowContext(ctx, `
-		SELECT r.message_id, r.session_id, r.sync_index, r.sync_subindex, r.event_time, r.source, r.content_json, r.meta_json, r.created_at, r.updated_at
-		FROM session_records r
-		JOIN sessions s ON s.id = r.session_id
-		WHERE s.project_name = ? AND r.session_id = ? AND r.message_id = ?
-		ORDER BY r.sync_index DESC
-		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
-
-	var rec SessionMessageRecord
-	var eventTime string
-	var createdAt string
-	var updatedAt string
-	if err := row.Scan(&rec.MessageID, &rec.SessionID, &rec.SyncIndex, &rec.SyncSubIndex, &eventTime, &rec.Source, &rec.ContentJSON, &rec.MetaJSON, &createdAt, &updatedAt); err != nil {
-		if err == sql.ErrNoRows {
+	idx, _, ok := parseSessionRecordSeq(messageID)
+	if !ok {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(messageID), 10, 64)
+		if err != nil {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("load session record: %w", err)
+		idx = parsed
 	}
-	rec.ProjectName = strings.TrimSpace(projectName)
-	rec.EventTime = parseStoreTime(eventTime)
-	rec.CreatedAt = parseStoreTime(createdAt)
-	rec.UpdatedAt = parseStoreTime(updatedAt)
-	hydrateSessionRecordLegacyFields(&rec)
-	return &rec, nil
+	if idx <= 0 {
+		return nil, nil
+	}
+	rows, err := s.ListSessionMessagesAfterCursor(ctx, projectName, sessionID, idx-1, -1)
+	if err != nil {
+		return nil, err
+	}
+	for _, rec := range rows {
+		if rec.SyncIndex == idx {
+			copyRec := rec
+			return &copyRec, nil
+		}
+	}
+	return nil, nil
 }
 
 func (s *sqliteStore) ListSessionMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionMessageRecord, error) {
@@ -964,7 +949,7 @@ func (s *sqliteStore) ListSessionMessagesAfterIndex(ctx context.Context, project
 
 func (s *sqliteStore) ListSessionMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionMessageRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT r.message_id, r.session_id, r.sync_index, r.sync_subindex, r.event_time, r.source, r.content_json, r.meta_json, r.created_at, r.updated_at
+		SELECT r.session_id, r.sync_index, r.sync_subindex, r.time, r.source, r.content_json, r.meta_json
 		FROM session_records r
 		JOIN sessions s ON s.id = r.session_id
 		WHERE s.project_name = ? AND r.session_id = ? AND (r.sync_index > ? OR (r.sync_index = ? AND r.sync_subindex > ?))
@@ -978,16 +963,16 @@ func (s *sqliteStore) ListSessionMessagesAfterCursor(ctx context.Context, projec
 	var out []SessionMessageRecord
 	for rows.Next() {
 		var rec SessionMessageRecord
-		var eventTime string
-		var createdAt string
-		var updatedAt string
-		if err := rows.Scan(&rec.MessageID, &rec.SessionID, &rec.SyncIndex, &rec.SyncSubIndex, &eventTime, &rec.Source, &rec.ContentJSON, &rec.MetaJSON, &createdAt, &updatedAt); err != nil {
+		var storedTime string
+		if err := rows.Scan(&rec.SessionID, &rec.SyncIndex, &rec.SyncSubIndex, &storedTime, &rec.Source, &rec.ContentJSON, &rec.MetaJSON); err != nil {
 			return nil, fmt.Errorf("scan session record after cursor: %w", err)
 		}
 		rec.ProjectName = strings.TrimSpace(projectName)
-		rec.EventTime = parseStoreTime(eventTime)
-		rec.CreatedAt = parseStoreTime(createdAt)
-		rec.UpdatedAt = parseStoreTime(updatedAt)
+		rec.Time = parseStoreTime(storedTime)
+		rec.EventTime = rec.Time
+		rec.CreatedAt = rec.Time
+		rec.UpdatedAt = rec.Time
+		rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
 		hydrateSessionRecordLegacyFields(&rec)
 		out = append(out, rec)
 	}
@@ -995,14 +980,25 @@ func (s *sqliteStore) ListSessionMessagesAfterCursor(ctx context.Context, projec
 }
 
 func (s *sqliteStore) HasSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error) {
+	idx, _, ok := parseSessionRecordSeq(messageID)
+	if !ok {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(messageID), 10, 64)
+		if err != nil {
+			return false, nil
+		}
+		idx = parsed
+	}
+	if idx <= 0 {
+		return false, nil
+	}
 	var exists int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT 1
 		FROM session_records r
 		JOIN sessions s ON s.id = r.session_id
-		WHERE s.project_name = ? AND r.session_id = ? AND r.message_id = ?
+		WHERE s.project_name = ? AND r.session_id = ? AND r.sync_index = ?
 		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), strings.TrimSpace(messageID)).Scan(&exists)
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), idx).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return false, nil
 	}
@@ -1033,6 +1029,26 @@ func validateRouteKey(routeKey string) error {
 	return nil
 }
 
+func formatSessionRecordSeq(index, subIndex int64) string {
+	return fmt.Sprintf("%d.%d", index, subIndex)
+}
+
+func parseSessionRecordSeq(seq string) (int64, int64, bool) {
+	seq = strings.TrimSpace(seq)
+	parts := strings.Split(seq, ".")
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	idx, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	sub, err := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return idx, sub, true
+}
 func parseStoreTime(raw string) time.Time {
 	if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 		return ts

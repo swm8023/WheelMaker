@@ -172,7 +172,6 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return err
 		}
 		message := SessionMessageRecord{
-			MessageID:    fmt.Sprintf("msg-user-%d", event.CreatedAt.UnixNano()),
 			ProjectName:  r.projectName,
 			SessionID:    event.SessionID,
 			Method:       "session.prompt",
@@ -183,7 +182,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			Status:       firstNonEmpty(event.Status, "done"),
 			CreatedAt:    event.CreatedAt,
 			UpdatedAt:    event.UpdatedAt,
-			EventTime:    event.UpdatedAt,
+			Time:         event.UpdatedAt,
 			RequestID:    event.RequestID,
 			AggregateKey: firstNonEmpty(event.AggregateKey, fmt.Sprintf("user:%s:%d", event.SessionID, event.CreatedAt.UnixNano())),
 			Source:       normalizeRecorderEventSource(event),
@@ -191,7 +190,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := r.store.AppendSessionMessage(ctx, message); err != nil {
 			return err
 		}
-		stored, err := r.loadStoredSessionMessage(ctx, event.SessionID, message.MessageID)
+		stored, err := r.loadLatestStoredSessionMessage(ctx, event.SessionID)
 		if err != nil {
 			return err
 		}
@@ -209,7 +208,6 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return err
 		}
 		message := SessionMessageRecord{
-			MessageID:    fmt.Sprintf("msg-permission-%s-%d", event.SessionID, event.RequestID),
 			ProjectName:  r.projectName,
 			SessionID:    event.SessionID,
 			Method:       "session.permission",
@@ -220,19 +218,33 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			Status:       firstNonEmpty(event.Status, "needs_action"),
 			CreatedAt:    event.CreatedAt,
 			UpdatedAt:    event.UpdatedAt,
-			EventTime:    event.UpdatedAt,
+			Time:         event.UpdatedAt,
 			RequestID:    event.RequestID,
 			AggregateKey: fmt.Sprintf("permission:%s:%d", event.SessionID, event.RequestID),
 			Source:       normalizeRecorderEventSource(event),
 		}
-		existed, err := r.store.HasSessionMessage(ctx, r.projectName, event.SessionID, message.MessageID)
+		existing, err := r.findPermissionMessageByRequestID(ctx, event.SessionID, event.RequestID)
 		if err != nil {
 			return err
 		}
-		if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
-			return err
+		existed := existing != nil
+		if existed {
+			message.SyncIndex = existing.SyncIndex
+			message.SyncSubIndex = existing.SyncSubIndex
+			if !existing.CreatedAt.IsZero() {
+				message.CreatedAt = existing.CreatedAt
+			}
+			message.ContentJSON = ""
+			message.MetaJSON = "{}"
+			if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
+				return err
+			}
+		} else {
+			if err := r.store.AppendSessionMessage(ctx, message); err != nil {
+				return err
+			}
 		}
-		stored, err := r.loadStoredSessionMessage(ctx, event.SessionID, message.MessageID)
+		stored, err := r.loadLatestStoredSessionMessage(ctx, event.SessionID)
 		if err != nil {
 			return err
 		}
@@ -258,11 +270,13 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			}
 			message.Status = firstNonEmpty(event.Status, "done")
 			message.UpdatedAt = event.UpdatedAt
-			message.EventTime = event.UpdatedAt
+			message.Time = event.UpdatedAt
+			message.ContentJSON = ""
+			message.MetaJSON = "{}"
 			if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
 				return err
 			}
-			stored, err := r.loadStoredSessionMessage(ctx, event.SessionID, message.MessageID)
+			stored, err := r.loadStoredSessionMessageByIndex(ctx, event.SessionID, message.SyncIndex)
 			if err != nil {
 				return err
 			}
@@ -303,7 +317,7 @@ func recorderUpdateVariant(event SessionViewEvent) string {
 
 func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionMessageRecord {
 	return SessionMessageRecord{
-		MessageID:     fmt.Sprintf("msg-update-%s-%d", strings.TrimSpace(event.SessionID), event.CreatedAt.UnixNano()),
+
 		ProjectName:   projectName,
 		SessionID:     strings.TrimSpace(event.SessionID),
 		Method:        "session.update",
@@ -318,7 +332,7 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 		SourceChatID:  strings.TrimSpace(event.SourceChatID),
 		CreatedAt:     event.CreatedAt,
 		UpdatedAt:     event.UpdatedAt,
-		EventTime:     event.UpdatedAt,
+		Time:          event.UpdatedAt,
 	}
 }
 
@@ -349,7 +363,7 @@ func mergeBufferedSessionUpdateMessage(msg *SessionMessageRecord, event SessionV
 		msg.CreatedAt = event.CreatedAt
 	}
 	msg.UpdatedAt = event.UpdatedAt
-	msg.EventTime = event.UpdatedAt
+	msg.Time = event.UpdatedAt
 }
 
 func firstNonZeroInt64(v int64, fallback int64) int64 {
@@ -421,13 +435,25 @@ func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context
 			return err
 		}
 	} else {
+		msg.ContentJSON = ""
+		msg.MetaJSON = "{}"
 		if err := r.store.UpsertSessionMessage(ctx, msg); err != nil {
 			return err
 		}
 	}
-	stored, err := r.loadStoredSessionMessage(ctx, sessionID, msg.MessageID)
-	if err != nil {
-		return err
+	stored := SessionMessageRecord{}
+	if msg.SyncIndex > 0 {
+		storedByIndex, err := r.loadStoredSessionMessageByIndex(ctx, sessionID, msg.SyncIndex)
+		if err != nil {
+			return err
+		}
+		stored = storedByIndex
+	} else {
+		latest, err := r.loadLatestStoredSessionMessage(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		stored = latest
 	}
 	if err := r.upsertSessionProjection(ctx, sessionID, "", stored.UpdatedAt); err != nil {
 		return err
@@ -516,15 +542,63 @@ func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string)
 	return r.currentSessionViewSummary(ctx, sessionID)
 }
 
-func (r *SessionRecorder) loadStoredSessionMessage(ctx context.Context, sessionID, messageID string) (SessionMessageRecord, error) {
-	message, err := r.store.LoadSessionMessage(ctx, r.projectName, strings.TrimSpace(sessionID), strings.TrimSpace(messageID))
+func (r *SessionRecorder) loadLatestStoredSessionMessage(ctx context.Context, sessionID string) (SessionMessageRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return SessionMessageRecord{}, fmt.Errorf("session id is required")
+	}
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
 		return SessionMessageRecord{}, err
 	}
-	if message != nil {
-		return *message, nil
+	if rec == nil || rec.LastSyncIndex <= 0 {
+		return SessionMessageRecord{}, fmt.Errorf("session message not found for session %s", sessionID)
 	}
-	return SessionMessageRecord{}, fmt.Errorf("session message not found: %s", messageID)
+	return r.loadStoredSessionMessageByIndex(ctx, sessionID, rec.LastSyncIndex)
+}
+
+func (r *SessionRecorder) loadStoredSessionMessageByIndex(ctx context.Context, sessionID string, index int64) (SessionMessageRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return SessionMessageRecord{}, fmt.Errorf("session id is required")
+	}
+	if index <= 0 {
+		return SessionMessageRecord{}, fmt.Errorf("invalid session index: %d", index)
+	}
+	messages, err := r.store.ListSessionMessagesAfterCursor(ctx, r.projectName, sessionID, index-1, -1)
+	if err != nil {
+		return SessionMessageRecord{}, err
+	}
+	for _, message := range messages {
+		if message.SyncIndex == index {
+			return message, nil
+		}
+	}
+	return SessionMessageRecord{}, fmt.Errorf("session message not found: %s@%d", sessionID, index)
+}
+
+func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, sessionID string, requestID int64) (*SessionMessageRecord, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || requestID == 0 {
+		return nil, nil
+	}
+	messages, err := r.store.ListSessionMessages(ctx, r.projectName, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.RequestID != requestID {
+			continue
+		}
+		method := strings.TrimSpace(msg.Method)
+		if method != "session.permission" && !(method == "" && strings.EqualFold(strings.TrimSpace(msg.Kind), "permission")) {
+			continue
+		}
+		copyMsg := msg
+		return &copyMsg, nil
+	}
+	return nil, nil
 }
 
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time) error {
