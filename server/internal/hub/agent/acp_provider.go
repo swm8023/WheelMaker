@@ -43,7 +43,7 @@ var (
 	CodeflickerACPProviderPreset = ACPProviderPreset{
 		Name:                   "codeflicker",
 		BinaryName:             "codeflicker",
-		Args:                   []string{"--acp", "--stdio"},
+		Args:                   []string{"acp"},
 		MissingPathErrTemplate: "codeflicker: binary not found in PATH: %v",
 	}
 )
