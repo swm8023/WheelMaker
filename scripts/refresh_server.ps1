@@ -543,6 +543,67 @@ function Wait-ServiceDeleted {
   return $false
 }
 
+function Get-ServiceChangeReturnMessage {
+  param([int]$Code)
+  switch ($Code) {
+    0 { return "success" }
+    1 { return "request not supported" }
+    2 { return "access denied" }
+    3 { return "dependent services running" }
+    4 { return "invalid service control" }
+    5 { return "service cannot accept control" }
+    6 { return "service not active" }
+    7 { return "service request timeout" }
+    8 { return "unknown failure" }
+    9 { return "service executable path not found" }
+    10 { return "service already running" }
+    11 { return "service database locked" }
+    12 { return "service dependency deleted" }
+    13 { return "service dependency failure" }
+    14 { return "service disabled" }
+    15 { return "service logon failed (password incorrect or log on as a service right missing)" }
+    16 { return "service marked for deletion" }
+    17 { return "service has no execution thread" }
+    18 { return "circular dependency detected" }
+    19 { return "duplicate service name" }
+    20 { return "invalid service name" }
+    21 { return "invalid parameter" }
+    22 { return "invalid service account or missing required rights" }
+    23 { return "service already exists" }
+    24 { return "service already paused" }
+    default { return ("win32 error {0}" -f $Code) }
+  }
+}
+
+function Set-ServiceCredentials {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][string]$Account,
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Password
+  )
+  try {
+    $svc = Get-CimInstance -ClassName Win32_Service -Filter ("Name='{0}'" -f $Name) -ErrorAction Stop
+  } catch {
+    throw ("service account lookup failed: {0}: {1}" -f $Name, $_.Exception.Message)
+  }
+  if ($null -eq $svc) {
+    throw ("service account lookup failed: {0}: service not found" -f $Name)
+  }
+  try {
+    $result = Invoke-CimMethod -InputObject $svc -MethodName Change -Arguments @{
+      StartName = $Account
+      StartPassword = $Password
+    } -ErrorAction Stop
+  } catch {
+    throw ("service account config failed: {0}: {1}" -f $Name, $_.Exception.Message)
+  }
+  $returnCode = if ($null -ne $result -and $null -ne $result.ReturnValue) { [int]$result.ReturnValue } else { -1 }
+  if ($returnCode -ne 0) {
+    $message = Get-ServiceChangeReturnMessage -Code $returnCode
+    throw ("service account config failed: {0}: {1}" -f $Name, $message)
+  }
+}
+
 function Ensure-Service {
   param([Parameter(Mandatory = $true)][string]$Name, [Parameter(Mandatory = $true)][string]$BinaryPath, [string]$Arguments = "")
   $binPath = ('"{0}" {1}' -f $BinaryPath, $Arguments).Trim()
@@ -570,7 +631,7 @@ function Ensure-Service {
   Invoke-Checked -FilePath "sc.exe" -Arguments @("create", $Name, "binPath=", $binPath, "start=", "auto") -FailureMessage ("service create failed: {0}" -f $Name)
   $builtinServiceAccounts = @('LocalSystem', 'NT AUTHORITY\LocalService', 'NT AUTHORITY\NetworkService')
   if (-not [string]::IsNullOrWhiteSpace($ServiceUser) -and ($builtinServiceAccounts -notcontains $ServiceUser)) {
-    Invoke-Checked -FilePath "sc.exe" -Arguments @("config", $Name, "obj=", $ServiceUser, "password=", $script:ServicePasswordPlain) -FailureMessage ("service account config failed: {0}" -f $Name)
+    Set-ServiceCredentials -Name $Name -Account $ServiceUser -Password $script:ServicePasswordPlain
   }
 }
 
