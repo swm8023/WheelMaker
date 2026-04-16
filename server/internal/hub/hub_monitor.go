@@ -1,4 +1,4 @@
-package hub_monitor
+package hub
 
 import (
 	"database/sql"
@@ -14,12 +14,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-type Core struct {
+type MonitorCore struct {
 	BaseDir string
 }
 
-func New(baseDir string) *Core {
-	return &Core{BaseDir: strings.TrimSpace(baseDir)}
+func NewMonitorCore(baseDir string) *MonitorCore {
+	return &MonitorCore{BaseDir: strings.TrimSpace(baseDir)}
 }
 
 type ProcessInfo struct {
@@ -34,7 +34,7 @@ type ServiceStatus struct {
 	Timestamp string        `json:"timestamp"`
 }
 
-func (c *Core) GetServiceStatus() (*ServiceStatus, error) {
+func (c *MonitorCore) GetServiceStatus() (*ServiceStatus, error) {
 	procs, err := listWheelmakerProcesses()
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ type LogResult struct {
 	Total   int        `json:"total"`
 }
 
-func (c *Core) GetLogs(file string, level string, tail int) (*LogResult, error) {
+func (c *MonitorCore) GetLogs(file string, level string, tail int) (*LogResult, error) {
 	logPath := c.resolveLogFilePath(file)
 	key := normalizeLogFileKey(file)
 	data, err := os.ReadFile(logPath)
@@ -200,7 +200,7 @@ func logFileNameForKey(file string) string {
 	}
 }
 
-func (c *Core) resolveLogFilePath(file string) string {
+func (c *MonitorCore) resolveLogFilePath(file string) string {
 	name := logFileNameForKey(file)
 	preferred := filepath.Join(c.BaseDir, "log", name)
 	if fileExists(preferred) {
@@ -261,7 +261,7 @@ type DBTable struct {
 	Rows    [][]any  `json:"rows"`
 }
 
-func (c *Core) GetDBTables() *DBTablesResult {
+func (c *MonitorCore) GetDBTables() *DBTablesResult {
 	dbPath := filepath.Join(c.BaseDir, "db", "client.sqlite3")
 	if !fileExists(dbPath) {
 		return &DBTablesResult{Error: "database not found"}
@@ -301,7 +301,7 @@ func (c *Core) GetDBTables() *DBTablesResult {
 	return &DBTablesResult{Tables: tables}
 }
 
-func (c *Core) ExecuteAction(action string) error {
+func (c *MonitorCore) ExecuteAction(action string) error {
 	switch strings.TrimSpace(strings.ToLower(action)) {
 	case "update-publish":
 		signalPath := filepath.Join(c.BaseDir, "update-now.signal")

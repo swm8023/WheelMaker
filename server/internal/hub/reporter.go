@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/swm8023/wheelmaker/internal/hub/hub_monitor"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
@@ -77,7 +76,7 @@ type Reporter struct {
 	updateSeq    atomic.Int64
 
 	connectionEpoch int64
-	monitorCore     *hub_monitor.Core
+	monitorCore     *MonitorCore
 }
 
 // NewReporter creates a Reporter.
@@ -122,7 +121,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		chatByID:     make(map[string]ChatHandler),
 		sessionByID:  make(map[string]SessionHandler),
 		pending:      make(map[int64]chan envelope),
-		monitorCore:  hub_monitor.New(monitorBase),
+		monitorCore:  NewMonitorCore(monitorBase),
 	}
 	r.requestSeq.Store(2)
 	return r
