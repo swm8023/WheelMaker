@@ -815,6 +815,110 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 	}
 }
 
+
+func TestConnectInitMonitorRole(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	ws := dialWS(t, ts.URL+"/ws")
+	defer ws.Close()
+
+	mustWriteJSON(t, ws, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-monitor",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "monitor",
+			"token":           "",
+		},
+	})
+	resp := mustReadEnvelope(t, ws)
+	if resp.Type != "response" || resp.Method != "connect.init" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	principal, _ := resp.Payload["principal"].(map[string]any)
+	if principal["role"] != "monitor" {
+		t.Fatalf("principal.role=%v, want monitor", principal["role"])
+	}
+}
+
+func TestMonitorListHubAndMonitorStatusForwarding(t *testing.T) {
+	s := New(Config{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	hub := dialWS(t, ts.URL+"/ws")
+	defer hub.Close()
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-hub",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "hub",
+			"hubId":           "hub-a",
+		},
+	})
+	initResp := mustReadEnvelope(t, hub)
+	principal, _ := initResp.Payload["principal"].(map[string]any)
+	connectionEpoch, _ := principal["connectionEpoch"].(float64)
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: 2,
+		Type:      "request",
+		Method:    "registry.reportProjects",
+		Payload: map[string]any{
+			"hubId":           "hub-a",
+			"connectionEpoch": int64(connectionEpoch),
+			"projects": []map[string]any{
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "", "git": map[string]any{}},
+			},
+		},
+	})
+	_ = mustReadEnvelope(t, hub)
+
+	monitor := dialWS(t, ts.URL+"/ws")
+	defer monitor.Close()
+	mustWriteJSON(t, monitor, testEnvelope{
+		RequestID: 1,
+		Type:      "request",
+		Method:    "connect.init",
+		Payload: map[string]any{
+			"clientName":      "wm-monitor",
+			"clientVersion":   "0.1.0",
+			"protocolVersion": "2.1",
+			"role":            "monitor",
+		},
+	})
+	_ = mustReadEnvelope(t, monitor)
+
+	mustWriteJSON(t, monitor, testEnvelope{RequestID: 2, Type: "request", Method: "monitor.listHub", Payload: map[string]any{}})
+	listResp := mustReadEnvelope(t, monitor)
+	if listResp.Type != "response" || listResp.Method != "monitor.listHub" {
+		t.Fatalf("unexpected monitor.listHub response: %#v", listResp)
+	}
+	hubs, _ := listResp.Payload["hubs"].([]any)
+	if len(hubs) != 1 {
+		t.Fatalf("hubs=%v, want 1", listResp.Payload["hubs"])
+	}
+
+	mustWriteJSON(t, monitor, testEnvelope{RequestID: 3, Type: "request", Method: "monitor.status", Payload: map[string]any{"hubId": "hub-a"}})
+	forwarded := mustReadEnvelope(t, hub)
+	if forwarded.Method != "monitor.status" {
+		t.Fatalf("forwarded.method=%q, want monitor.status", forwarded.Method)
+	}
+	mustWriteJSON(t, hub, testEnvelope{RequestID: forwarded.RequestID, Type: "response", Method: "monitor.status", Payload: map[string]any{"running": true}})
+	statusResp := mustReadEnvelope(t, monitor)
+	if statusResp.Type != "response" || statusResp.Method != "monitor.status" {
+		t.Fatalf("unexpected monitor.status response: %#v", statusResp)
+	}
+}
+
 func dialWS(t *testing.T, rawURL string) *websocket.Conn {
 	t.Helper()
 	wsURL := "ws" + strings.TrimPrefix(rawURL, "http")
@@ -840,3 +944,6 @@ func mustReadEnvelope(t *testing.T, ws *websocket.Conn) testEnvelope {
 	}
 	return out
 }
+
+
+

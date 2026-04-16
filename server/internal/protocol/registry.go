@@ -135,6 +135,23 @@ type ProjectListItem struct {
 	Git        ProjectGitState `json:"git"`
 }
 
+
+type MonitorHubRefPayload struct {
+	HubID string `json:"hubId"`
+}
+
+type MonitorActionPayload struct {
+	HubID  string `json:"hubId"`
+	Action string `json:"action"`
+}
+
+type MonitorLogPayload struct {
+	HubID string `json:"hubId"`
+	File  string `json:"file,omitempty"`
+	Level string `json:"level,omitempty"`
+	Tail  int    `json:"tail,omitempty"`
+}
+
 func ProjectID(hubID, projectName string) string {
 	hubID = strings.TrimSpace(hubID)
 	projectName = strings.TrimSpace(projectName)
@@ -151,3 +168,6 @@ func MustRaw(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
 }
+
+
+

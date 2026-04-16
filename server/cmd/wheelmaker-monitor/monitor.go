@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -23,8 +24,10 @@ import (
 
 // Monitor holds the base directory and provides all monitoring operations.
 type Monitor struct {
-	baseDir string
-	mu      sync.RWMutex
+	baseDir      string
+	mu           sync.RWMutex
+	transport    HubTransport
+	defaultHubID string
 }
 
 const (
@@ -40,7 +43,107 @@ var debugSessionPrefixRe = regexp.MustCompile(`\{([0-9a-fA-F-]{36})\s+([^}]*)\}`
 
 // NewMonitor creates a Monitor for the given WheelMaker home directory.
 func NewMonitor(baseDir string) *Monitor {
-	return &Monitor{baseDir: baseDir}
+	baseDir = strings.TrimSpace(baseDir)
+	cfgPath := filepath.Join(baseDir, "config.json")
+	cfg := shared.AppConfig{}
+	if loaded, err := shared.LoadConfig(cfgPath); err == nil && loaded != nil {
+		cfg = *loaded
+	}
+	defaultHubID := strings.TrimSpace(cfg.Registry.HubID)
+	if defaultHubID == "" {
+		defaultHubID = "local"
+	}
+	m := &Monitor{
+		baseDir:      baseDir,
+		defaultHubID: defaultHubID,
+	}
+	m.transport = newHubTransport(monitorTransportConfig{
+		BaseDir:      baseDir,
+		Registry:     cfg.Registry,
+		Projects:     cfg.Projects,
+		DefaultHubID: defaultHubID,
+	})
+	return m
+}
+
+func (m *Monitor) resolveHubID(ctx context.Context, hubID string) (string, error) {
+	hubID = strings.TrimSpace(hubID)
+	if hubID != "" {
+		return hubID, nil
+	}
+	if m.transport == nil {
+		return m.defaultHubID, nil
+	}
+	hubs, err := m.transport.ListHub(ctx)
+	if err == nil && len(hubs) > 0 {
+		return strings.TrimSpace(hubs[0].HubID), nil
+	}
+	if m.defaultHubID != "" {
+		return m.defaultHubID, nil
+	}
+	return "", errors.New("hubId is required")
+}
+
+func (m *Monitor) ListHubs(ctx context.Context) ([]HubInfo, error) {
+	if m.transport == nil {
+		return []HubInfo{{HubID: m.defaultHubID, Online: true}}, nil
+	}
+	return m.transport.ListHub(ctx)
+}
+
+func (m *Monitor) GetServiceStatusByHub(ctx context.Context, hubID string) (*ServiceStatus, error) {
+	resolved, err := m.resolveHubID(ctx, hubID)
+	if err != nil {
+		return nil, err
+	}
+	if m.transport == nil {
+		return m.GetServiceStatus()
+	}
+	return m.transport.MonitorStatus(ctx, resolved)
+}
+
+func (m *Monitor) GetLogsByHub(ctx context.Context, hubID string, file string, level string, tail int) (*LogResult, error) {
+	resolved, err := m.resolveHubID(ctx, hubID)
+	if err != nil {
+		return nil, err
+	}
+	if m.transport == nil {
+		return m.GetLogs(file, level, tail)
+	}
+	return m.transport.MonitorLog(ctx, MonitorLogRequest{HubID: resolved, File: file, Level: level, Tail: tail})
+}
+
+func (m *Monitor) GetDBTablesByHub(ctx context.Context, hubID string) (*DBTablesResult, error) {
+	resolved, err := m.resolveHubID(ctx, hubID)
+	if err != nil {
+		return nil, err
+	}
+	if m.transport == nil {
+		return m.GetDBTables(), nil
+	}
+	return m.transport.MonitorDB(ctx, resolved)
+}
+
+func (m *Monitor) ExecuteActionByHub(ctx context.Context, hubID string, action string) error {
+	resolved, err := m.resolveHubID(ctx, hubID)
+	if err != nil {
+		return err
+	}
+	if m.transport == nil {
+		return fmt.Errorf("transport unavailable")
+	}
+	return m.transport.MonitorAction(ctx, resolved, action)
+}
+
+func (m *Monitor) GetProjectsByHub(ctx context.Context, hubID string) ([]RegistryProject, error) {
+	resolved, err := m.resolveHubID(ctx, hubID)
+	if err != nil {
+		return nil, err
+	}
+	if m.transport == nil {
+		return nil, nil
+	}
+	return m.transport.ProjectList(ctx, resolved)
 }
 
 // ---------- process monitoring ----------

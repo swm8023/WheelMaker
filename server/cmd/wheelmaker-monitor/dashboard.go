@@ -104,6 +104,11 @@ html, body {
 }
 .topbar-brand span { color: var(--accent); }
 
+.topbar-hub { display:flex; align-items:center; gap:6px; margin-left: 10px; }
+.topbar-hub-label { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
+.topbar-hub-select { font-family: var(--mono); font-size: 11px; padding: 3px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 2px; color: var(--text); min-width: 140px; }
+.topbar-hub-select:focus { border-color: var(--accent); outline: none; }
+
 .topbar-sep { flex: 1; }
 
 .topbar-status { display: flex; align-items: center; gap: 6px; }
@@ -638,6 +643,10 @@ html, body {
 
   <div class="topbar">
     <div class="topbar-brand">wheel<span>maker</span>&#x2011;monitor</div>
+    <div class="topbar-hub">
+      <span class="topbar-hub-label">Hub</span>
+      <select id="hub-select" class="topbar-hub-select" onchange="onHubChanged()"></select>
+    </div>
     <div class="topbar-sep"></div>
     <div class="topbar-status">
       <div id="hdr-dot" class="dot"></div>
@@ -767,6 +776,8 @@ const appBasePath = (() => {
 })();
 const jsonCellStore = {};
 let jsonCellSeq = 0;
+let selectedHubId = "";
+let appConfig = null;
 
 function appURL(rel) {
   const clean = String(rel || '').replace(/^\/+/, '');
@@ -797,10 +808,38 @@ function switchTab(tab) {
 }
 
 async function api(path) {
-  const res = await fetch(window.location.origin + appURL('api/' + path));
+  let fullPath = String(path || '');
+  if (selectedHubId && fullPath !== 'hubs' && fullPath.indexOf('hubId=') < 0) {
+    fullPath += (fullPath.includes('?') ? '&' : '?') + 'hubId=' + encodeURIComponent(selectedHubId);
+  }
+  const res = await fetch(window.location.origin + appURL('api/' + fullPath));
   return res.json();
 }
 
+
+async function loadHubOptions() {
+  const sel = $('hub-select');
+  if (!sel) return;
+  let hubs = [];
+  try {
+    const data = await api('hubs');
+    hubs = Array.isArray(data.hubs) ? data.hubs : [];
+  } catch (_) {}
+  if (hubs.length === 0) {
+    hubs = [{ hubId: 'local', online: false }];
+  }
+  if (!selectedHubId || !hubs.some(h => h.hubId === selectedHubId)) {
+    selectedHubId = String(hubs[0].hubId || '');
+  }
+  sel.innerHTML = hubs.map(h => '<option value="' + esc(h.hubId) + '">' + esc(h.hubId) + (h.online ? '' : ' (offline)') + '</option>').join('');
+  sel.value = selectedHubId;
+}
+
+function onHubChanged() {
+  const sel = $('hub-select');
+  selectedHubId = sel ? String(sel.value || '') : '';
+  refresh();
+}
 function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -939,25 +978,48 @@ function renderAgentsJSONContent(raw) {
 }
 
 async function refresh() {
-  try {
-    const ov = await api('overview');
-    renderStatus(ov.service);
-    renderSidebar(ov.config);
-    renderDBTables(ov.db);
-  } catch(e) {
-    $('hdr-dot').className = 'dot offline';
-    $('hdr-label').textContent = 'error';
-    $('hdr-label').className = 'topbar-label';
-  }
-  loadLogs();
-  loadRegistryStatus();
+  await Promise.all([refreshStatusOnly(), loadLogs(), loadDBTables(), loadProjectsByHub(), loadRegistryStatus()]);
 }
 
 async function refreshStatusOnly() {
   try {
-    const svc = await api('status');
+    const svc = await apiHub('status');
     renderStatus(svc);
   } catch(_) {}
+}
+
+async function loadDBTables() {
+  try {
+    const db = await apiHub('db');
+    renderDBTables(db);
+  } catch (_) {
+    renderDBTables({ error: 'Failed to load DB' });
+  }
+}
+
+async function loadHubList() {
+  const sel = $('hub-select');
+  if (!sel) return;
+  let hubs = [];
+  try {
+    const data = await api('hubs');
+    hubs = Array.isArray(data.hubs) ? data.hubs : [];
+  } catch (_) {}
+  if (hubs.length === 0) {
+    hubs = [{ hubId: 'local', online: false }];
+  }
+  const wanted = selectedHubId && hubs.some(h => h.hubId === selectedHubId) ? selectedHubId : String(hubs[0].hubId || '');
+  selectedHubId = wanted;
+  sel.innerHTML = hubs.map(h => '<option value="' + esc(h.hubId) + '">' + esc(h.hubId) + (h.online ? '' : ' (offline)') + '</option>').join('');
+  sel.value = selectedHubId;
+  $('hub-id').innerHTML = 'ID: <span>' + esc(selectedHubId || '—') + '</span>';
+}
+
+function onHubChanged() {
+  const sel = $('hub-select');
+  selectedHubId = sel ? String(sel.value || '') : '';
+  $('hub-id').innerHTML = 'ID: <span>' + esc(selectedHubId || '—') + '</span>';
+  refresh();
 }
 
 function renderStatus(svc) {
@@ -1002,25 +1064,24 @@ function renderStatus(svc) {
   }
 }
 
-function renderSidebar(cfg) {
+function renderSidebar(cfg, projects) {
   if (!cfg) return;
   const r = cfg.registry || {};
 
-  $('hub-id').innerHTML = 'ID: <span>' + esc(r.hubId || '&#x2014;') + '</span>';
+  $('hub-id').innerHTML = 'ID: <span>' + esc(selectedHubId || r.hubId || '—') + '</span>';
 
-  const projects = Array.isArray(cfg.projects) ? cfg.projects : [];
-  if (projects.length === 0) {
+  const list = Array.isArray(projects) ? projects : [];
+  if (list.length === 0) {
     $('proj-list').innerHTML = '<div class="empty-state">No projects</div>';
   } else {
-    $('proj-list').innerHTML = projects.map(p => {
-      const yoloCls = p.yolo ? 'badge-green' : 'badge-red';
+    $('proj-list').innerHTML = list.map(p => {
       return '<div class="proj-item">' +
-        '<div class="proj-name">' + esc(p.name) + '</div>' +
+        '<div class="proj-name">' + esc(p.name || p.projectId || '-') + '</div>' +
         '<div class="proj-path">' + esc(p.path || '') + '</div>' +
         '<div class="proj-badges">' +
-          '<span class="badge badge-blue">' + esc(p.client && p.client.agent ? p.client.agent : 'none') + '</span>' +
-          '<span class="badge badge-yellow">' + esc(p.im && p.im.type ? p.im.type : 'none') + '</span>' +
-          '<span class="badge ' + yoloCls + '">' + (p.yolo ? 'yolo' : 'safe') + '</span>' +
+          '<span class="badge badge-blue">' + esc(p.agent || 'none') + '</span>' +
+          '<span class="badge badge-yellow">' + esc(p.imType || 'none') + '</span>' +
+          '<span class="badge ' + (p.online ? 'badge-green' : 'badge-red') + '">' + (p.online ? 'online' : 'offline') + '</span>' +
         '</div>' +
         '</div>';
     }).join('');
@@ -1034,6 +1095,16 @@ function renderSidebar(cfg) {
     regHtml = '<div class="empty-state">No registry configured</div>';
   }
   $('reg-cfg').innerHTML = regHtml;
+}
+
+async function loadProjectsByHub() {
+  try {
+    const data = await apiHub('projects');
+    const projects = Array.isArray(data.projects) ? data.projects : [];
+    renderSidebar(appConfig || {}, projects);
+  } catch (_) {
+    renderSidebar(appConfig || {}, []);
+  }
 }
 
 function cfgRow(label, value) {
@@ -1188,7 +1259,7 @@ async function loadLogs() {
   const tail  = $('log-tail').value;
   const el    = $('log-scroll');
   try {
-    const data = await api('logs?file=' + file + '&level=' + level + '&tail=' + tail);
+    const data = await apiHub('logs?file=' + file + '&level=' + level + '&tail=' + tail);
     if (!data.entries || data.entries.length === 0) {
       el.innerHTML = '<div class="empty-state">No log entries</div>';
       return;
@@ -1212,7 +1283,8 @@ async function doAction(action) {
   msg.textContent = action + '\u2026';
   msg.style.color = 'var(--text-dim)';
   try {
-    const res  = await fetch(window.location.origin + appURL('api/action/' + action), { method: 'POST' });
+    const path = action === 'restart-monitor' ? 'api/action/' + action : hubPath('api/action/' + action);
+    const res  = await fetch(window.location.origin + appURL(path), { method: 'POST' });
     const data = await res.json();
     if (data.error) {
       msg.textContent = 'Error: ' + data.error;
@@ -1232,21 +1304,16 @@ initPWA();
 
 (async function init() {
   try {
-    const ov = await api('overview');
-    renderStatus(ov.service);
-    renderSidebar(ov.config);
-    renderDBTables(ov.db);
-  } catch(e) {
-    $('hdr-dot').className = 'dot offline';
-    $('hdr-label').textContent = 'error';
-    $('hdr-label').className = 'topbar-label';
+    appConfig = await api('config');
+  } catch (_) {
+    appConfig = {};
   }
-  loadLogs();
-  loadRegistryStatus();
+  await loadHubList();
+  await refresh();
 })();
 
 setInterval(() => { if (!document.hidden) refreshStatusOnly(); }, 5000);
-setInterval(loadLogs, 15000);
+setInterval(() => { if (!document.hidden) { loadLogs(); loadDBTables(); } }, 15000);
 setInterval(loadRegistryStatus, 15000);
 window.addEventListener('visibilitychange', () => { if (!document.hidden) refreshStatusOnly(); });
 window.addEventListener('keydown', (e) => {

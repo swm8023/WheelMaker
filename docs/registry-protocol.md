@@ -140,7 +140,7 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 
 ### 3.3 校验与安全约束
 
-- `role` 必填，仅允许 `hub` 或 `client`。
+- `role` 必填，仅允许 `hub`、`client`、`monitor`。
 - `role=hub` 时 `hubId` 必填。
 - `role=client` 时 `hubId` 可选：
   - 携带 `hubId`：连接绑定到该 hub，`project.list` 仅返回该 hub 的项目。
@@ -156,6 +156,7 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 |------|---------------|
 | `hub` | `registry.reportProjects`、`registry.updateProject`、`hub.ping` |
 | `client` | `project.list`、`project.syncCheck`、`fs.*`、`git.*`、`batch` |
+| `monitor` | `project.list`、`monitor.listHub`、`monitor.status`、`monitor.log`、`monitor.db`、`monitor.action`、`batch` |
 
 - 方法与角色不匹配返回 `FORBIDDEN`。
 - **事件方法**（`project.changed`、`git.workspace.changed`、`project.offline`、`project.online`等）是服务端→客户端推送，不受白名单约束。
@@ -1250,6 +1251,43 @@ else:
 - 批量内不允许嵌套 `batch`。
 - 批量内不允许 `connect.init`。
 
+### 5.11 Monitor 侧方法（hub 作用域）
+
+`monitor` 角色用于 monitor 页面与 registry 交互。monitor 相关方法全部按 `payload.hubId` 作用到目标 hub。
+
+#### 5.11.1 `monitor.listHub`
+
+返回 monitor 当前可见 hub 列表。
+
+响应 payload 结构：
+
+```json
+{
+  "hubs": [
+    {
+      "hubId": "local-hub",
+      "online": true
+    }
+  ]
+}
+```
+
+#### 5.11.2 `monitor.status` / `monitor.log` / `monitor.db` / `monitor.action`
+
+请求约束：
+
+- `payload.hubId` 必填。
+- `projectId` 不参与 monitor 路由。
+- 当目标 hub 不在线时，返回 `UNAVAILABLE`。
+
+方法语义：
+
+- `monitor.status`：查询 hub 对应 monitor service/process 状态。
+- `monitor.log`：查询 hub monitor 日志（可带 `file`/`level`/`tail`）。
+- `monitor.db`：查询 hub monitor db 表快照。
+- `monitor.action`：执行 hub monitor 动作（如 `start`/`stop`/`restart`/`update-publish`）。
+
+`project.list` 在 `monitor` 角色下仍可用；用于展示当前选中 hub 下 project 列表（客户端按 `projectId` 的 `hubId:` 前缀过滤）。
 ## 6. Hash 规范（统一算法）
 
 统一约定：
@@ -1473,3 +1511,4 @@ Registry 即将关闭客户端连接时提前通知：
    - 补齐统一错误码规范（含 `FORBIDDEN/NOT_FOUND/UNAVAILABLE/RATE_LIMITED/TIMEOUT`）。
    - 增加连接级限速、重连退避与审计字段要求。
    - 当前版本不强制协议层 `wss`，由后续网络安全专项推进。
+

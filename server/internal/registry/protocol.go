@@ -30,3 +30,9 @@ type projectListItem = rp.ProjectListItem
 type syncCheckPayload = rp.SyncCheckPayload
 
 type syncCheckResponsePayload = rp.SyncCheckResponsePayload
+type monitorHubRefPayload = rp.MonitorHubRefPayload
+
+type monitorActionPayload = rp.MonitorActionPayload
+
+type monitorLogPayload = rp.MonitorLogPayload
+

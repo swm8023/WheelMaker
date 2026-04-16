@@ -126,3 +126,81 @@ func TestSessionMessagesRequiresSessionID(t *testing.T) {
 		t.Fatalf("body=%q, want sessionID error", rr.Body.String())
 	}
 }
+
+type stubHubTransport struct {
+	lastStatusHub string
+	lastActionHub string
+	lastAction    string
+}
+
+func (s *stubHubTransport) ListHub(context.Context) ([]HubInfo, error) {
+	return []HubInfo{{HubID: "hub-a", Online: true}}, nil
+}
+
+func (s *stubHubTransport) MonitorStatus(_ context.Context, hubID string) (*ServiceStatus, error) {
+	s.lastStatusHub = hubID
+	return &ServiceStatus{Running: true, Timestamp: "2026-04-16T00:00:00Z"}, nil
+}
+
+func (s *stubHubTransport) MonitorLog(context.Context, MonitorLogRequest) (*LogResult, error) {
+	return &LogResult{}, nil
+}
+
+func (s *stubHubTransport) MonitorDB(context.Context, string) (*DBTablesResult, error) {
+	return &DBTablesResult{}, nil
+}
+
+func (s *stubHubTransport) MonitorAction(_ context.Context, hubID string, action string) error {
+	s.lastActionHub = hubID
+	s.lastAction = action
+	return nil
+}
+
+func (s *stubHubTransport) ProjectList(context.Context, string) ([]RegistryProject, error) {
+	return nil, nil
+}
+
+func TestRoutes_StatusByHubID(t *testing.T) {
+	mon := NewMonitor(t.TempDir())
+	stub := &stubHubTransport{}
+	mon.transport = stub
+	mon.defaultHubID = "hub-a"
+
+	mux := http.NewServeMux()
+	registerRoutes(mux, mon)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/status?hubId=hub-2", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if stub.lastStatusHub != "hub-2" {
+		t.Fatalf("status hub=%q want hub-2", stub.lastStatusHub)
+	}
+}
+
+func TestRoutes_ActionByHubID(t *testing.T) {
+	mon := NewMonitor(t.TempDir())
+	stub := &stubHubTransport{}
+	mon.transport = stub
+	mon.defaultHubID = "hub-a"
+
+	mux := http.NewServeMux()
+	registerRoutes(mux, mon)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/action/restart?hubId=hub-9", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if stub.lastActionHub != "hub-9" {
+		t.Fatalf("action hub=%q want hub-9", stub.lastActionHub)
+	}
+	if stub.lastAction != "restart" {
+		t.Fatalf("action=%q want restart", stub.lastAction)
+	}
+}

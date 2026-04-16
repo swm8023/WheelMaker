@@ -86,3 +86,21 @@ func TestDashboardHTML_HasUpdatePublishAction(t *testing.T) {
 		t.Fatalf("dashboard should provide update-publish action button")
 	}
 }
+
+func TestDashboardHTML_HasHubSelectorUnderTopbar(t *testing.T) {
+	if !strings.Contains(dashboardHTML, `id="hub-select"`) {
+		t.Fatalf("dashboard should include hub selector")
+	}
+	if !strings.Contains(dashboardHTML, "onHubChanged()") {
+		t.Fatalf("dashboard should wire hub selector change handler")
+	}
+}
+
+func TestDashboardHTML_LoadsHubListAndHubScopedAPIs(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "api('hubs')") {
+		t.Fatalf("dashboard should load hub list from api/hubs")
+	}
+	if !strings.Contains(dashboardHTML, "hubId=") {
+		t.Fatalf("dashboard should attach selected hubId to hub-scoped API calls")
+	}
+}

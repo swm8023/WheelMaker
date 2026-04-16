@@ -15,6 +15,8 @@ func registerRoutes(mux *http.ServeMux, mon *Monitor) {
 func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
 	// API endpoints
 	mux.HandleFunc("GET "+prefix+"/api/overview", handleOverview(mon))
+	mux.HandleFunc("GET "+prefix+"/api/hubs", handleHubs(mon))
+	mux.HandleFunc("GET "+prefix+"/api/projects", handleProjects(mon))
 	mux.HandleFunc("GET "+prefix+"/api/status", handleStatus(mon))
 	mux.HandleFunc("GET "+prefix+"/api/config", handleConfig(mon))
 	mux.HandleFunc("GET "+prefix+"/api/db", handleDBTables(mon))
@@ -43,20 +45,70 @@ func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
 
 func handleOverview(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, err := mon.GetOverview()
+		hubID := strings.TrimSpace(r.URL.Query().Get("hubId"))
+		service, err := mon.GetServiceStatusByHub(r.Context(), hubID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		cfgRaw, err := mon.GetConfig()
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		writeJSON(w, data)
+		cfgObj := map[string]any{}
+		if len(cfgRaw) > 0 && string(cfgRaw) != "null" {
+			_ = json.Unmarshal(cfgRaw, &cfgObj)
+		}
+		projects, projErr := mon.GetProjectsByHub(r.Context(), hubID)
+		if projErr == nil {
+			cfgObj["projects"] = projects
+		}
+
+		db, dbErr := mon.GetDBTablesByHub(r.Context(), hubID)
+		if dbErr != nil {
+			writeError(w, http.StatusBadRequest, dbErr.Error())
+			return
+		}
+
+		writeJSON(w, map[string]any{
+			"service": service,
+			"config":  cfgObj,
+			"db":      db,
+		})
+	}
+}
+
+func handleHubs(mon *Monitor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hubs, err := mon.ListHubs(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"hubs": hubs})
+	}
+}
+
+func handleProjects(mon *Monitor) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hubID := strings.TrimSpace(r.URL.Query().Get("hubId"))
+		items, err := mon.GetProjectsByHub(r.Context(), hubID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, map[string]any{"projects": items})
 	}
 }
 
 func handleStatus(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data, err := mon.GetServiceStatus()
+		hubID := strings.TrimSpace(r.URL.Query().Get("hubId"))
+		data, err := mon.GetServiceStatusByHub(r.Context(), hubID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeJSON(w, data)
@@ -76,7 +128,12 @@ func handleConfig(mon *Monitor) http.HandlerFunc {
 
 func handleDBTables(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		data := mon.GetDBTables()
+		hubID := strings.TrimSpace(r.URL.Query().Get("hubId"))
+		data, err := mon.GetDBTablesByHub(r.Context(), hubID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		writeJSON(w, data)
 	}
 }
@@ -136,6 +193,7 @@ func handleSessionMessages(mon *Monitor) http.HandlerFunc {
 
 func handleLogs(mon *Monitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		hubID := strings.TrimSpace(r.URL.Query().Get("hubId"))
 		file := r.URL.Query().Get("file")
 		level := r.URL.Query().Get("level")
 		tailStr := r.URL.Query().Get("tail")
@@ -145,9 +203,9 @@ func handleLogs(mon *Monitor) http.HandlerFunc {
 				tail = n
 			}
 		}
-		data, err := mon.GetLogs(file, level, tail)
+		data, err := mon.GetLogsByHub(r.Context(), hubID, file, level, tail)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeJSON(w, data)
@@ -165,19 +223,14 @@ func handleAction(mon *Monitor, action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch action {
-		case "restart":
-			err = mon.RestartService()
 		case "restart-monitor":
 			err = mon.RestartMonitor()
-		case "stop":
-			err = mon.StopService()
-		case "start":
-			err = mon.StartService()
-		case "update-publish":
-			err = mon.TriggerUpdatePublish()
+		default:
+			hubID := strings.TrimSpace(r.URL.Query().Get("hubId"))
+			err = mon.ExecuteActionByHub(r.Context(), hubID, action)
 		}
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		writeJSON(w, map[string]string{"status": "ok", "action": action})

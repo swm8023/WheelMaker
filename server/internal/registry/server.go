@@ -188,7 +188,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	var idleTimer *time.Timer
 	resetIdleTimer := func() {
-		if !state.initialized || state.role != "client" {
+		if !state.initialized || (state.role != "client" && state.role != "monitor") {
 			return
 		}
 		if idleTimer == nil {
@@ -273,10 +273,14 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleProjectList(state.peer, state, in)
 		case "project.syncCheck":
 			s.handleProjectSyncCheck(state.peer, state, in)
+		case "monitor.listHub":
+			s.handleMonitorListHub(state.peer, state, in)
 		case "batch":
 			s.handleBatch(state.peer, state, in)
 		case "hub.ping":
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
+		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
+			s.handleMonitorForwardRequest(state.peer, state, in)
 		case "chat.session.list", "chat.session.read", "chat.send", "chat.permission.respond",
 			"session.list", "session.read", "session.new", "session.send", "session.markRead",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
@@ -327,11 +331,12 @@ func methodAllowed(role string, method string) bool {
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
 			strings.HasPrefix(method, "chat.") || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
+	case "monitor":
+		return method == "project.list" || method == "monitor.listHub" || method == "batch" || strings.HasPrefix(method, "monitor.")
 	default:
 		return false
 	}
 }
-
 func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in envelope) bool {
 	var payload connectInitPayload
 	if err := decodePayload(in.Payload, &payload); err != nil {
@@ -339,8 +344,8 @@ func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in en
 		return true
 	}
 	role := strings.TrimSpace(payload.Role)
-	if role != "hub" && role != "client" {
-		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "role must be hub or client", nil)
+	if role != "hub" && role != "client" && role != "monitor" {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "role must be hub, client, or monitor", nil)
 		return true
 	}
 	if role == "hub" && strings.TrimSpace(payload.HubID) == "" {
@@ -357,7 +362,7 @@ func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in en
 	state.hubID = strings.TrimSpace(payload.HubID)
 	state.scopeHubID = strings.TrimSpace(payload.HubID)
 	state.connectionEpoch = s.nextConnEpoch.Add(1)
-	if state.role == "client" {
+	if state.role == "client" || state.role == "monitor" {
 		s.mu.Lock()
 		s.clientPeers[state.id] = state
 		s.mu.Unlock()
@@ -604,6 +609,80 @@ func (s *Server) handleProjectList(peer *peerConn, state *connectionState, in en
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
 		"projects": items,
 	})
+}
+
+
+func (s *Server) handleMonitorListHub(peer *peerConn, state *connectionState, in envelope) {
+	hubs := s.snapshotHubs()
+	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{"hubs": hubs})
+}
+
+func (s *Server) snapshotHubs() []map[string]any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]map[string]any, 0, len(s.hubs))
+	for hubID := range s.hubs {
+		_, online := s.hubPeers[hubID]
+		items = append(items, map[string]any{
+			"hubId":  hubID,
+			"online": online,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		li, _ := items[i]["hubId"].(string)
+		lj, _ := items[j]["hubId"].(string)
+		return li < lj
+	})
+	return items
+}
+
+func (s *Server) handleMonitorForwardRequest(clientPeer *peerConn, state *connectionState, in envelope) {
+	resp := s.executeMonitorRequest(state, in)
+	resp.RequestID = in.RequestID
+	_ = clientPeer.write(resp)
+}
+
+func (s *Server) executeMonitorRequest(_ *connectionState, in envelope) envelope {
+	var payload monitorHubRefPayload
+	if err := decodePayload(in.Payload, &payload); err != nil {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "invalid monitor payload", nil)
+	}
+	hubID := strings.TrimSpace(payload.HubID)
+	if hubID == "" {
+		return s.errorEnvelope(in.Method, codeInvalidArgument, "hubId is required", nil)
+	}
+
+	s.mu.RLock()
+	hubPeer := s.hubPeers[hubID]
+	s.mu.RUnlock()
+	if hubPeer == nil {
+		return s.errorEnvelope(in.Method, codeUnavailable, "hub offline", map[string]any{"hubId": hubID})
+	}
+
+	forwardID := s.nextForwardID.Add(1)
+	waitCh := hubPeer.registerPending(forwardID)
+	err := hubPeer.write(envelope{
+		RequestID: forwardID,
+		Type:      "request",
+		Method:    in.Method,
+		Payload:   in.Payload,
+	})
+	if err != nil {
+		hubPeer.resolvePending(forwardID, envelope{})
+		return s.errorEnvelope(in.Method, codeInternal, "forward request write failed", nil)
+	}
+
+	select {
+	case resp, ok := <-waitCh:
+		if !ok {
+			return s.errorEnvelope(in.Method, codeInternal, "hub disconnected", nil)
+		}
+		return resp
+	case <-time.After(defaultRequestTimeout):
+		hubPeer.resolvePending(forwardID, envelope{})
+		return s.errorEnvelope(in.Method, codeTimeout, "hub response timeout", nil)
+	}
 }
 
 func (s *Server) handleProjectSyncCheck(peer *peerConn, state *connectionState, in envelope) {
@@ -957,7 +1036,7 @@ func (s *Server) unregisterHub(peer *peerConn, state *connectionState) {
 }
 
 func (s *Server) unregisterClient(state *connectionState) {
-	if state == nil || state.role != "client" {
+	if state == nil || (state.role != "client" && state.role != "monitor") {
 		return
 	}
 	s.mu.Lock()
@@ -992,3 +1071,12 @@ func (s *Server) errorEnvelope(method, code, message string, details map[string]
 		}),
 	}
 }
+
+
+
+
+
+
+
+
+

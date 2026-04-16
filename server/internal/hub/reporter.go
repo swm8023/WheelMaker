@@ -25,6 +25,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
+	"github.com/swm8023/wheelmaker/internal/monitorcore"
 )
 
 const (
@@ -37,6 +38,8 @@ const (
 type ProjectInfo = rp.ProjectInfo
 type envelope = rp.Envelope
 type errorPayload = rp.ErrorPayload
+type monitorActionPayload = rp.MonitorActionPayload
+type monitorLogPayload = rp.MonitorLogPayload
 
 type ChatHandler interface {
 	HandleChatRequest(ctx context.Context, method string, projectID string, payload json.RawMessage) (any, error)
@@ -55,6 +58,7 @@ type ReporterConfig struct {
 	ReconnectInterval time.Duration
 	PingInterval      time.Duration
 	PongTimeout       time.Duration
+	MonitorBaseDir    string
 }
 
 // Reporter keeps a long-lived hub connection and serves local project queries.
@@ -73,6 +77,7 @@ type Reporter struct {
 	updateSeq    atomic.Int64
 
 	connectionEpoch int64
+	monitorCore     *monitorcore.Core
 }
 
 // NewReporter creates a Reporter.
@@ -104,6 +109,12 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		byID[publicID] = p
 		byID[name] = p
 	}
+	monitorBase := strings.TrimSpace(cfg.MonitorBaseDir)
+	if monitorBase == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			monitorBase = filepath.Join(home, ".wheelmaker")
+		}
+	}
 	r := &Reporter{
 		cfg:          cfg,
 		projects:     cp,
@@ -111,6 +122,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		chatByID:     make(map[string]ChatHandler),
 		sessionByID:  make(map[string]SessionHandler),
 		pending:      make(map[int64]chan envelope),
+		monitorCore:  monitorcore.New(monitorBase),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -288,6 +300,14 @@ func (r *Reporter) runSession(ctx context.Context) error {
 			r.replyChat(conn, in)
 		case "session.list", "session.read", "session.new", "session.send", "session.markRead":
 			r.replySession(conn, in)
+		case "monitor.status":
+			r.replyMonitorStatus(conn, in)
+		case "monitor.log":
+			r.replyMonitorLog(conn, in)
+		case "monitor.db":
+			r.replyMonitorDB(conn, in)
+		case "monitor.action":
+			r.replyMonitorAction(conn, in)
 		case "fs.list":
 			r.replyFSList(conn, in)
 		case "fs.info":
@@ -568,6 +588,53 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 			"entries":     outEntries,
 		}),
 	})
+}
+
+
+func (r *Reporter) replyMonitorStatus(conn *websocket.Conn, req envelope) {
+	status, err := r.monitorCore.GetServiceStatus()
+	if err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{RequestID: req.RequestID, Type: "response", Method: req.Method, Payload: rp.MustRaw(status)})
+}
+
+func (r *Reporter) replyMonitorLog(conn *websocket.Conn, req envelope) {
+	var payload monitorLogPayload
+	if err := decodePayload(req.Payload, &payload); err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid monitor.log payload")
+		return
+	}
+	result, err := r.monitorCore.GetLogs(payload.File, payload.Level, payload.Tail)
+	if err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{RequestID: req.RequestID, Type: "response", Method: req.Method, Payload: rp.MustRaw(result)})
+}
+
+func (r *Reporter) replyMonitorDB(conn *websocket.Conn, req envelope) {
+	result := r.monitorCore.GetDBTables()
+	_ = r.writeJSON(conn, "->", envelope{RequestID: req.RequestID, Type: "response", Method: req.Method, Payload: rp.MustRaw(result)})
+}
+
+func (r *Reporter) replyMonitorAction(conn *websocket.Conn, req envelope) {
+	var payload monitorActionPayload
+	if err := decodePayload(req.Payload, &payload); err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "invalid monitor.action payload")
+		return
+	}
+	action := strings.TrimSpace(payload.Action)
+	if action == "" {
+		_ = r.writeError(conn, req.RequestID, codeInvalidArgument, "action is required")
+		return
+	}
+	if err := r.monitorCore.ExecuteAction(action); err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	_ = r.writeJSON(conn, "->", envelope{RequestID: req.RequestID, Type: "response", Method: req.Method, Payload: rp.MustRaw(map[string]any{"ok": true, "action": action})})
 }
 
 func (r *Reporter) replyChat(conn *websocket.Conn, req envelope) {
@@ -1821,3 +1888,13 @@ func runGit(root string, args ...string) (string, error) {
 	}
 	return string(out), nil
 }
+
+
+
+
+
+
+
+
+
+

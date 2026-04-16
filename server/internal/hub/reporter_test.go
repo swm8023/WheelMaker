@@ -611,6 +611,41 @@ func TestReporterDebugEnvelope_OneLineWithDirection(t *testing.T) {
 	}
 }
 
+
+func TestReporterRespondsToMonitorStatusRequests(t *testing.T) {
+	ts := newRegistryServer(t, registry.New(registry.Config{}).Handler())
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := NewReporter(ReporterConfig{Server: ts, HubID: "hub-monitor", ReconnectInterval: 50 * time.Millisecond, MonitorBaseDir: t.TempDir()}, []ProjectInfo{{Name: "proj1", Path: t.TempDir(), Online: true}})
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("reporter did not stop")
+		}
+	}()
+
+	waitForProjectOnline(t, ts, rp.ProjectID("hub-monitor", "proj1"), "")
+
+	monitor := dialWS(t, "http://"+ts+"/ws")
+	defer monitor.Close()
+	mustWriteJSON(t, monitor, testEnvelope{RequestID: 1, Type: "request", Method: "connect.init", Payload: map[string]any{"clientName": "wm-monitor", "clientVersion": "0.1.0", "protocolVersion": "2.1", "role": "monitor"}})
+	_ = mustReadEnvelope(t, monitor)
+
+	mustWriteJSON(t, monitor, testEnvelope{RequestID: 2, Type: "request", Method: "monitor.status", Payload: map[string]any{"hubId": "hub-monitor"}})
+	resp := mustReadEnvelope(t, monitor)
+	if resp.Type != "response" || resp.Method != "monitor.status" {
+		t.Fatalf("unexpected monitor.status response: %#v", resp)
+	}
+	if _, ok := resp.Payload["running"]; !ok {
+		t.Fatalf("missing running field: %#v", resp.Payload)
+	}
+}
+
 func newRegistryServer(t *testing.T, h http.Handler) string {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -713,3 +748,5 @@ func mustReadEnvelope(t *testing.T, ws *websocket.Conn) testEnvelope {
 	}
 	return out
 }
+
+

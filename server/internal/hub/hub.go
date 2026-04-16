@@ -218,6 +218,7 @@ func (h *Hub) setupRegistrySync() {
 		Token:             cfg.Token,
 		HubID:             hubID,
 		ReconnectInterval: 2 * time.Second,
+		MonitorBaseDir:    filepath.Dir(filepath.Dir(h.dbPath)),
 	}, projects)
 	for _, project := range projects {
 		projectClient := h.clientsByName[project.Name]
@@ -379,3 +380,6 @@ func sameProjectInfo(a, b ProjectInfo) bool {
 		a.Git.GitRev == b.Git.GitRev &&
 		a.Git.WorktreeRev == b.Git.WorktreeRev
 }
+
+
+
