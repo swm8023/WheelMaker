@@ -23,6 +23,11 @@ describe('web runtime setup', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     expect(mainTsx).toContain("import {initializePWAFoundation} from './pwa';");
     expect(mainTsx).toContain('initializePWAFoundation();');
+    expect(mainTsx).toContain('PWA Debug');
+    expect(mainTsx).toContain('Check Capabilities');
+    expect(mainTsx).toContain('Test Storage');
+    expect(mainTsx).toContain('Test Push Notification');
+    expect(mainTsx).toContain('Start Connection Probe');
   });
 
   test('service worker handles push and demo notification messages', () => {
