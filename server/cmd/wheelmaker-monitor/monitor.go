@@ -337,7 +337,7 @@ func listWheelmakerProcesses() ([]ProcessInfo, error) {
 }
 
 func listProcessesWindows() ([]ProcessInfo, error) {
-	script := `Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" | Select-Object ProcessId,CommandLine,@{Name='StartedAt';Expression={[Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate).ToString('MM-dd HH:mm')}} | ConvertTo-Json -Compress`
+	script := `Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" | Select-Object ProcessId,CommandLine,@{Name='StartedAt';Expression={[System.Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate).ToString('MM-dd HH:mm')}} | ConvertTo-Json -Compress`
 	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)

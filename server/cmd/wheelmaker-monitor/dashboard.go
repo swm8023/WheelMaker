@@ -1073,8 +1073,8 @@ function renderStatus(svc) {
                 : p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
       const roleLabel = String(p.role || '').replace('-worker', '');
       const startedAt = String(p.startedAt || '').trim() || '--';
-      return '<div class="proc-chip"><span class="pid">PID#' + esc(String(p.pid)) + '</span>' +
-             '<span class="badge ' + cls + '">' + esc(roleLabel) + '</span>' +
+      return '<div class="proc-chip">' +
+             '<span class="badge ' + cls + '">' + esc(roleLabel) + '#' + esc(String(p.pid)) + '</span>' +
              '<span class="ptime">Started ' + esc(startedAt) + '</span></div>';
     }).join('');
   }

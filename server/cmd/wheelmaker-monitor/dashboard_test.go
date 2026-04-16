@@ -131,3 +131,9 @@ func TestDashboardHTML_ShowsProcessStartedAt(t *testing.T) {
 		t.Fatalf("dashboard should render Started label for process time")
 	}
 }
+
+func TestDashboardHTML_UsesSingleProcessRolePIDTag(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "esc(roleLabel) + '#' + esc(String(p.pid))") {
+		t.Fatalf("dashboard should combine role and pid in one tag")
+	}
+}
