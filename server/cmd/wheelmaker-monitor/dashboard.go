@@ -228,6 +228,7 @@ html, body {
 .proc-chip {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 3px 6px;
   border: 1px solid var(--border);
@@ -235,6 +236,7 @@ html, body {
   font-size: 11px;
 }
 .proc-chip .pid { color: var(--text-dim); font-size: 10px; }
+.proc-chip .ptime { color: var(--text-dim); font-size: 10px; margin-left: auto; }
 
 /* Badges */
 .badge {
@@ -1070,8 +1072,10 @@ function renderStatus(svc) {
                 : p.role === 'hub-worker'      ? 'badge-green'
                 : p.role === 'registry-worker' ? 'badge-yellow' : 'badge-red';
       const roleLabel = String(p.role || '').replace('-worker', '');
+      const startedAt = String(p.startedAt || '').trim() || '--';
       return '<div class="proc-chip"><span class="pid">PID#' + esc(String(p.pid)) + '</span>' +
-             '<span class="badge ' + cls + '">' + esc(roleLabel) + '</span></div>';
+             '<span class="badge ' + cls + '">' + esc(roleLabel) + '</span>' +
+             '<span class="ptime">Started ' + esc(startedAt) + '</span></div>';
     }).join('');
   }
 }
@@ -1335,5 +1339,3 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 `
-
-

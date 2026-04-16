@@ -122,3 +122,12 @@ func TestDashboardHTML_ShowsActionHintFromAPI(t *testing.T) {
 		t.Fatalf("dashboard should read data.hint from action response")
 	}
 }
+
+func TestDashboardHTML_ShowsProcessStartedAt(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "p.startedAt") {
+		t.Fatalf("dashboard should read process startedAt field")
+	}
+	if !strings.Contains(dashboardHTML, "Started ") {
+		t.Fatalf("dashboard should render Started label for process time")
+	}
+}

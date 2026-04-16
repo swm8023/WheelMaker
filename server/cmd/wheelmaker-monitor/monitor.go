@@ -240,8 +240,9 @@ func (m *Monitor) GetProjectsByHub(ctx context.Context, hubID string) ([]Registr
 
 // ProcessInfo describes one running wheelmaker process.
 type ProcessInfo struct {
-	PID  int    `json:"pid"`
-	Role string `json:"role"` // "guardian", "hub-worker", "registry-worker", "unknown"
+	PID       int    `json:"pid"`
+	Role      string `json:"role"` // "guardian", "hub-worker", "registry-worker", "unknown"
+	StartedAt string `json:"startedAt,omitempty"`
 }
 
 // ServiceStatus is an aggregated view of all wheelmaker processes.
@@ -336,7 +337,7 @@ func listWheelmakerProcesses() ([]ProcessInfo, error) {
 }
 
 func listProcessesWindows() ([]ProcessInfo, error) {
-	script := `Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress`
+	script := `Get-CimInstance Win32_Process -Filter "Name='wheelmaker.exe'" | Select-Object ProcessId,CommandLine,@{Name='StartedAt';Expression={[Management.ManagementDateTimeConverter]::ToDateTime($_.CreationDate).ToString('MM-dd HH:mm')}} | ConvertTo-Json -Compress`
 	out, err := exec.Command("powershell", "-NoProfile", "-Command", script).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
@@ -349,6 +350,7 @@ func listProcessesWindows() ([]ProcessInfo, error) {
 	type psEntry struct {
 		ProcessId   int    `json:"ProcessId"`
 		CommandLine string `json:"CommandLine"`
+		StartedAt   string `json:"StartedAt"`
 	}
 
 	var entries []psEntry
@@ -367,13 +369,17 @@ func listProcessesWindows() ([]ProcessInfo, error) {
 	var procs []ProcessInfo
 	for _, e := range entries {
 		role := classifyRole(e.CommandLine)
-		procs = append(procs, ProcessInfo{PID: e.ProcessId, Role: role})
+		procs = append(procs, ProcessInfo{
+			PID:       e.ProcessId,
+			Role:      role,
+			StartedAt: strings.TrimSpace(e.StartedAt),
+		})
 	}
 	return procs, nil
 }
 
 func listProcessesUnix() ([]ProcessInfo, error) {
-	out, err := exec.Command("ps", "aux").Output()
+	out, err := exec.Command("ps", "-eo", "pid=,lstart=,args=").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
@@ -383,17 +389,30 @@ func listProcessesUnix() ([]ProcessInfo, error) {
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 2 {
+		if len(fields) < 7 {
 			continue
 		}
 		var pid int
-		if _, err := fmt.Sscanf(fields[1], "%d", &pid); err != nil {
+		if _, err := fmt.Sscanf(fields[0], "%d", &pid); err != nil {
 			continue
 		}
-		role := classifyRole(line)
-		procs = append(procs, ProcessInfo{PID: pid, Role: role})
+		startedAt := formatUnixStartedAt(fields[1:6])
+		cmdline := strings.Join(fields[6:], " ")
+		role := classifyRole(cmdline)
+		procs = append(procs, ProcessInfo{PID: pid, Role: role, StartedAt: startedAt})
 	}
 	return procs, nil
+}
+
+func formatUnixStartedAt(parts []string) string {
+	if len(parts) != 5 {
+		return ""
+	}
+	startedAt, err := time.Parse("Mon Jan 2 15:04:05 2006", strings.Join(parts, " "))
+	if err != nil {
+		return ""
+	}
+	return startedAt.Format("01-02 15:04")
 }
 
 func classifyRole(cmdline string) string {

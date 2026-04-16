@@ -115,7 +115,11 @@ func mapProcessInfo(in []monitorcore.ProcessInfo) []ProcessInfo {
 	}
 	out := make([]ProcessInfo, 0, len(in))
 	for _, item := range in {
-		out = append(out, ProcessInfo{PID: item.PID, Role: item.Role})
+		out = append(out, ProcessInfo{
+			PID:       item.PID,
+			Role:      item.Role,
+			StartedAt: item.StartedAt,
+		})
 	}
 	return out
 }
