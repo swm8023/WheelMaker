@@ -654,10 +654,6 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
-  const [pwaDebugResult, setPwaDebugResult] = useState('');
-  const [pwaDebugRunning, setPwaDebugRunning] = useState(false);
-  const [pwaProbeRunning, setPwaProbeRunning] = useState(false);
-  const pwaConnectionSupervisorRef = useRef<{start: () => void; stop: () => void} | null>(null);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
@@ -1441,105 +1437,6 @@ function App() {
     });
   }, [address, autoConnecting, connected]);
 
-  const appendPWADebugLine = (line: string) => {
-    const stamp = new Date().toLocaleTimeString();
-    setPwaDebugResult(prev => `[${stamp}] ${line}${prev ? `\n${prev}` : ''}`);
-  };
-
-  const withPWADebugAction = async (run: () => Promise<void>) => {
-    setPwaDebugRunning(true);
-    try {
-      await run();
-    } catch (err) {
-      appendPWADebugLine(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPwaDebugRunning(false);
-    }
-  };
-
-  const runPWACapabilityCheck = async () => {
-    await withPWADebugAction(async () => {
-      const foundation = window.__WHEELMAKER_PWA__;
-      if (!foundation) {
-        appendPWADebugLine('PWA foundation is not initialized.');
-        return;
-      }
-      appendPWADebugLine(`capabilities: ${JSON.stringify(foundation.capabilities)}`);
-    });
-  };
-
-  const runPWAStorageCheck = async () => {
-    await withPWADebugAction(async () => {
-      const foundation = window.__WHEELMAKER_PWA__;
-      if (!foundation) {
-        appendPWADebugLine('PWA foundation is not initialized.');
-        return;
-      }
-      const store = await foundation.storageReady;
-      const key = 'settings.debug.sample';
-      const value = JSON.stringify({at: new Date().toISOString()});
-      await store.set(key, value);
-      const loaded = await store.get(key);
-      await store.remove(key);
-      appendPWADebugLine(`storage(${store.kind}): ${loaded === value ? 'ok' : 'mismatch'}`);
-    });
-  };
-
-  const runPWAPushDemo = async () => {
-    await withPWADebugAction(async () => {
-      const foundation = window.__WHEELMAKER_PWA__;
-      if (!foundation) {
-        appendPWADebugLine('PWA foundation is not initialized.');
-        return;
-      }
-      const ok = await foundation.pushDemo.showDemoNotification('WheelMaker PWA', 'Settings push demo test');
-      appendPWADebugLine(ok ? 'push demo notification sent' : 'push demo not available or permission denied');
-    });
-  };
-
-  const togglePWAConnectionProbe = async () => {
-    await withPWADebugAction(async () => {
-      if (pwaConnectionSupervisorRef.current) {
-        pwaConnectionSupervisorRef.current.stop();
-        pwaConnectionSupervisorRef.current = null;
-        setPwaProbeRunning(false);
-        appendPWADebugLine('connection probe stopped');
-        return;
-      }
-
-      const foundation = window.__WHEELMAKER_PWA__;
-      if (!foundation) {
-        appendPWADebugLine('PWA foundation is not initialized.');
-        return;
-      }
-
-      const supervisor = foundation.createConnectionSupervisor(
-        {
-          connect: async () => {
-            appendPWADebugLine('probe connect tick');
-          },
-          disconnect: reason => {
-            appendPWADebugLine(`probe disconnect: ${reason}`);
-          },
-        },
-        {reconnectDelayMs: 1500},
-      );
-
-      pwaConnectionSupervisorRef.current = supervisor;
-      supervisor.start();
-      setPwaProbeRunning(true);
-      appendPWADebugLine('connection probe started');
-    });
-  };
-
-  useEffect(() => {
-    return () => {
-      if (pwaConnectionSupervisorRef.current) {
-        pwaConnectionSupervisorRef.current.stop();
-        pwaConnectionSupervisorRef.current = null;
-      }
-    };
-  }, []);
   const clearLocalCache = () => {
     const confirmed = window.confirm('Clear all local cache data except token?');
     if (!confirmed) return;
@@ -2003,36 +1900,7 @@ function App() {
                     <option key={v} value={v}>{v}</option>
                   ))}
                 </select>
-              </label>`r`n              <div className="sidebar-pwa-heading">PWA Debug</div>
-              <button
-                type="button"
-                className="sidebar-pwa-btn"
-                disabled={pwaDebugRunning}
-                onClick={() => runPWACapabilityCheck().catch(() => undefined)}>
-                Check Capabilities
-              </button>
-              <button
-                type="button"
-                className="sidebar-pwa-btn"
-                disabled={pwaDebugRunning}
-                onClick={() => runPWAStorageCheck().catch(() => undefined)}>
-                Test Storage
-              </button>
-              <button
-                type="button"
-                className="sidebar-pwa-btn"
-                disabled={pwaDebugRunning}
-                onClick={() => runPWAPushDemo().catch(() => undefined)}>
-                Test Push Notification
-              </button>
-              <button
-                type="button"
-                className="sidebar-pwa-btn"
-                disabled={pwaDebugRunning}
-                onClick={() => togglePWAConnectionProbe().catch(() => undefined)}>
-                {pwaProbeRunning ? 'Stop Connection Probe' : 'Start Connection Probe'}
-              </button>
-              {pwaDebugResult ? <pre className="sidebar-pwa-log">{pwaDebugResult}</pre> : null}
+              </label>
 
               <button
                 type="button"

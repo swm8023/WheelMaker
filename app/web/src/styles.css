@@ -410,52 +410,10 @@ body,
 }
 
 
-.sidebar-pwa-heading {
-  margin: 12px 8px 4px;
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
 
-.sidebar-pwa-btn {
-  width: calc(100% - 16px);
-  margin: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  color: var(--text);
-  min-height: 32px;
-  padding: 0 10px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-}
 
-.sidebar-pwa-btn:hover {
-  background: var(--hover);
-}
 
-.sidebar-pwa-btn:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
 
-.sidebar-pwa-log {
-  margin: 8px;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 180px;
-  overflow: auto;
-}
 
 
 .header-spacer {
