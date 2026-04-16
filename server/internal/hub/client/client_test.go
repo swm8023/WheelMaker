@@ -864,6 +864,45 @@ func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T
 	}
 }
 
+func TestEnsureReadyAndNotify_DoesNotSendSessionInfoAfterReady(t *testing.T) {
+	s := newSession("no-session-info", "/tmp")
+	s.projectName = "proj1"
+	s.activeAgent = "claude"
+	s.agents = map[string]*SessionAgentState{
+		"claude": {},
+	}
+	router := &fakeIMRouter{}
+	s.imRouter = router
+	s.imSource = &im.ChatRef{ChannelID: "feishu", ChatID: "chat-1"}
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{
+			name:      "claude",
+			sessionID: "acp-1",
+		}, nil
+	})
+
+	if err := s.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
+	}
+	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
+		t.Fatalf("ensureReadyAndNotify(first): %v", err)
+	}
+	if got := len(router.systems); got != 1 {
+		t.Fatalf("system notify count after first ensureReadyAndNotify = %d, want 1", got)
+	}
+	if got := router.systems[0].payload.Title; got != "Session ready" {
+		t.Fatalf("first title = %q, want %q", got, "Session ready")
+	}
+
+	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
+		t.Fatalf("ensureReadyAndNotify(second): %v", err)
+	}
+	if got := len(router.systems); got != 1 {
+		t.Fatalf("system notify count after second ensureReadyAndNotify = %d, want 1", got)
+	}
+}
+
 func TestEvictSuspendedSessions(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -2264,3 +2303,4 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
+

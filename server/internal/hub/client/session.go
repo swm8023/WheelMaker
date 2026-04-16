@@ -772,9 +772,8 @@ func applyReplayableConfigBaseline(
 	return options
 }
 
-// ensureReadyAndNotify calls ensureReady and sends a session info message.
-// On first connect it prefixes "Session ready:"; on subsequent prompts it
-// sends just the session info line so the user always sees the current state.
+// ensureReadyAndNotify calls ensureReady and only emits a ready message when
+// transitioning from not-ready to ready.
 func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	s.mu.Lock()
 	wasReady := s.ready
@@ -787,8 +786,6 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	if !wasReady {
 		s.replyWithTitle("Session ready", s.sessionInfoLine())
 		s.persistSessionBestEffort()
-	} else {
-		s.replyWithTitle("Session info", s.sessionInfoLine())
 	}
 	return nil
 }
@@ -1727,3 +1724,4 @@ func isSandboxRefreshErr(err error) bool {
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "windows sandbox: spawn setup refresh")
 }
+
