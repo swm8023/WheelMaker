@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 	"net/http"
 	"net/http/httptest"
@@ -131,6 +132,8 @@ type stubHubTransport struct {
 	lastStatusHub string
 	lastActionHub string
 	lastAction    string
+	actionErr     error
+	actionCalls   int
 }
 
 func (s *stubHubTransport) ListHub(context.Context) ([]HubInfo, error) {
@@ -153,7 +156,8 @@ func (s *stubHubTransport) MonitorDB(context.Context, string) (*DBTablesResult, 
 func (s *stubHubTransport) MonitorAction(_ context.Context, hubID string, action string) error {
 	s.lastActionHub = hubID
 	s.lastAction = action
-	return nil
+	s.actionCalls++
+	return s.actionErr
 }
 
 func (s *stubHubTransport) ProjectList(context.Context, string) ([]RegistryProject, error) {
@@ -202,5 +206,31 @@ func TestRoutes_ActionByHubID(t *testing.T) {
 	}
 	if stub.lastAction != "restart" {
 		t.Fatalf("action=%q want restart", stub.lastAction)
+	}
+}
+
+func TestRoutes_LocalActionBypassesTransport(t *testing.T) {
+	baseDir := t.TempDir()
+	mon := NewMonitor(baseDir)
+	stub := &stubHubTransport{actionErr: errors.New("registry down")}
+	mon.transport = stub
+	mon.defaultHubID = "local-hub"
+
+	mux := http.NewServeMux()
+	registerRoutes(mux, mon)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/action/update-publish?hubId=local-hub", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if stub.actionCalls != 0 {
+		t.Fatalf("transport should not be called for local action, got calls=%d", stub.actionCalls)
+	}
+	signalPath := filepath.Join(baseDir, "update-now.signal")
+	if _, err := os.Stat(signalPath); err != nil {
+		t.Fatalf("expected local signal file, err=%v", err)
 	}
 }

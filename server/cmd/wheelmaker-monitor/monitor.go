@@ -84,11 +84,26 @@ func (m *Monitor) resolveHubID(ctx context.Context, hubID string) (string, error
 	return "", errors.New("hubId is required")
 }
 
+func (m *Monitor) isLocalHub(hubID string) bool {
+	h := strings.TrimSpace(hubID)
+	if h == "" {
+		return true
+	}
+	if strings.EqualFold(h, "local") {
+		return true
+	}
+	return h == strings.TrimSpace(m.defaultHubID)
+}
+
 func (m *Monitor) ListHubs(ctx context.Context) ([]HubInfo, error) {
 	if m.transport == nil {
 		return []HubInfo{{HubID: m.defaultHubID, Online: true}}, nil
 	}
-	return m.transport.ListHub(ctx)
+	hubs, err := m.transport.ListHub(ctx)
+	if err == nil {
+		return hubs, nil
+	}
+	return []HubInfo{{HubID: m.defaultHubID, Online: true}}, nil
 }
 
 func (m *Monitor) GetServiceStatusByHub(ctx context.Context, hubID string) (*ServiceStatus, error) {
@@ -96,7 +111,7 @@ func (m *Monitor) GetServiceStatusByHub(ctx context.Context, hubID string) (*Ser
 	if err != nil {
 		return nil, err
 	}
-	if m.transport == nil {
+	if m.transport == nil || m.isLocalHub(resolved) {
 		return m.GetServiceStatus()
 	}
 	return m.transport.MonitorStatus(ctx, resolved)
@@ -107,7 +122,7 @@ func (m *Monitor) GetLogsByHub(ctx context.Context, hubID string, file string, l
 	if err != nil {
 		return nil, err
 	}
-	if m.transport == nil {
+	if m.transport == nil || m.isLocalHub(resolved) {
 		return m.GetLogs(file, level, tail)
 	}
 	return m.transport.MonitorLog(ctx, MonitorLogRequest{HubID: resolved, File: file, Level: level, Tail: tail})
@@ -118,10 +133,25 @@ func (m *Monitor) GetDBTablesByHub(ctx context.Context, hubID string) (*DBTables
 	if err != nil {
 		return nil, err
 	}
-	if m.transport == nil {
+	if m.transport == nil || m.isLocalHub(resolved) {
 		return m.GetDBTables(), nil
 	}
 	return m.transport.MonitorDB(ctx, resolved)
+}
+
+func (m *Monitor) executeLocalAction(action string) error {
+	switch strings.TrimSpace(action) {
+	case "restart":
+		return m.RestartService()
+	case "stop":
+		return m.StopService()
+	case "start":
+		return m.StartService()
+	case "update-publish":
+		return m.TriggerUpdatePublish()
+	default:
+		return fmt.Errorf("unsupported local action: %s", action)
+	}
 }
 
 func (m *Monitor) ExecuteActionByHub(ctx context.Context, hubID string, action string) error {
@@ -129,10 +159,33 @@ func (m *Monitor) ExecuteActionByHub(ctx context.Context, hubID string, action s
 	if err != nil {
 		return err
 	}
-	if m.transport == nil {
-		return fmt.Errorf("transport unavailable")
+	if m.transport == nil || m.isLocalHub(resolved) {
+		return m.executeLocalAction(action)
 	}
 	return m.transport.MonitorAction(ctx, resolved, action)
+}
+
+func (m *Monitor) localProjectsByHub(hubID string) ([]RegistryProject, error) {
+	cfgRaw, err := m.GetConfig()
+	if err != nil || string(cfgRaw) == "null" {
+		return nil, err
+	}
+	var cfg shared.AppConfig
+	if err := json.Unmarshal(cfgRaw, &cfg); err != nil {
+		return nil, err
+	}
+	items := make([]RegistryProject, 0, len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		items = append(items, RegistryProject{
+			ProjectID: rp.ProjectID(hubID, p.Name),
+			Name:      p.Name,
+			Path:      p.Path,
+			Online:    true,
+			Agent:     "unknown",
+			IMType:    p.IMType(),
+		})
+	}
+	return items, nil
 }
 
 func (m *Monitor) GetProjectsByHub(ctx context.Context, hubID string) ([]RegistryProject, error) {
@@ -140,8 +193,8 @@ func (m *Monitor) GetProjectsByHub(ctx context.Context, hubID string) ([]Registr
 	if err != nil {
 		return nil, err
 	}
-	if m.transport == nil {
-		return nil, nil
+	if m.transport == nil || m.isLocalHub(resolved) {
+		return m.localProjectsByHub(resolved)
 	}
 	return m.transport.ProjectList(ctx, resolved)
 }
