@@ -816,6 +816,18 @@ async function api(path) {
   return res.json();
 }
 
+function hubPath(path) {
+  let fullPath = String(path || '');
+  if (selectedHubId && fullPath.indexOf('hubId=') < 0) {
+    fullPath += (fullPath.includes('?') ? '&' : '?') + 'hubId=' + encodeURIComponent(selectedHubId);
+  }
+  return fullPath;
+}
+
+async function apiHub(path) {
+  return api(hubPath(path));
+}
+
 
 async function loadHubOptions() {
   const sel = $('hub-select');

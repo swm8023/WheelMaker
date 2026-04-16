@@ -104,3 +104,12 @@ func TestDashboardHTML_LoadsHubListAndHubScopedAPIs(t *testing.T) {
 		t.Fatalf("dashboard should attach selected hubId to hub-scoped API calls")
 	}
 }
+
+func TestDashboardHTML_DefinesHubScopedHelpers(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "function hubPath(") {
+		t.Fatalf("dashboard should define hubPath helper")
+	}
+	if !strings.Contains(dashboardHTML, "function apiHub(") {
+		t.Fatalf("dashboard should define apiHub helper")
+	}
+}
