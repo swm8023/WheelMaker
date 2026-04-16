@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -230,6 +231,17 @@ func handleAction(mon *Monitor, action string) http.HandlerFunc {
 			err = mon.ExecuteActionByHub(r.Context(), hubID, action)
 		}
 		if err != nil {
+			var actionErr *ActionError
+			if errors.As(err, &actionErr) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": actionErr.Message,
+					"code":  actionErr.Code,
+					"hint":  actionErr.Hint,
+				})
+				return
+			}
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

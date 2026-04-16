@@ -1299,7 +1299,7 @@ async function doAction(action) {
     const res  = await fetch(window.location.origin + appURL(path), { method: 'POST' });
     const data = await res.json();
     if (data.error) {
-      msg.textContent = 'Error: ' + data.error;
+      msg.textContent = 'Error: ' + data.error + (data.hint ? ' | Hint: ' + data.hint : '');
       msg.style.color = 'var(--red)';
     } else {
       msg.textContent = action + ' triggered';
@@ -1335,3 +1335,5 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 `
+
+

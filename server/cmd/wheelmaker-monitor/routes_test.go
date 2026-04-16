@@ -234,3 +234,34 @@ func TestRoutes_LocalActionBypassesTransport(t *testing.T) {
 		t.Fatalf("expected local signal file, err=%v", err)
 	}
 }
+
+func TestRoutes_RemoteStartReturnsStructuredPolicyError(t *testing.T) {
+	mon := NewMonitor(t.TempDir())
+	stub := &stubHubTransport{}
+	mon.transport = stub
+	mon.defaultHubID = "local-hub"
+
+	mux := http.NewServeMux()
+	registerRoutes(mux, mon)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/action/start?hubId=remote-hub", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["code"] != "REMOTE_START_UNSUPPORTED" {
+		t.Fatalf("code=%q", body["code"])
+	}
+	if strings.TrimSpace(body["hint"]) == "" {
+		t.Fatalf("hint should not be empty")
+	}
+	if stub.actionCalls != 0 {
+		t.Fatalf("transport should not be called for remote start policy rejection")
+	}
+}

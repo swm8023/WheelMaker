@@ -41,6 +41,22 @@ const (
 var errServiceNotInstalled = errors.New("service not installed")
 var debugSessionPrefixRe = regexp.MustCompile(`\{([0-9a-fA-F-]{36})\s+([^}]*)\}`)
 
+type ActionError struct {
+	Code    string
+	Message string
+	Hint    string
+}
+
+func (e *ActionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if strings.TrimSpace(e.Message) != "" {
+		return e.Message
+	}
+	return "action failed"
+}
+
 // NewMonitor creates a Monitor for the given WheelMaker home directory.
 func NewMonitor(baseDir string) *Monitor {
 	baseDir = strings.TrimSpace(baseDir)
@@ -162,7 +178,28 @@ func (m *Monitor) ExecuteActionByHub(ctx context.Context, hubID string, action s
 	if m.transport == nil || m.isLocalHub(resolved) {
 		return m.executeLocalAction(action)
 	}
-	return m.transport.MonitorAction(ctx, resolved, action)
+
+	action = strings.TrimSpace(action)
+	if action == "start" {
+		return &ActionError{
+			Code:    "REMOTE_START_UNSUPPORTED",
+			Message: "remote hub start is not supported from this monitor",
+			Hint:    "请在远端机器启动 hub，或切换到本地 hub 使用 Start。",
+		}
+	}
+
+	if err := m.transport.MonitorAction(ctx, resolved, action); err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "hub offline") || strings.Contains(msg, "unavailable") {
+			return &ActionError{
+				Code:    "HUB_OFFLINE",
+				Message: "target hub is offline",
+				Hint:    "远端 hub 离线时无法执行该操作；Start 仅支持本地 hub 直启。",
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func (m *Monitor) localProjectsByHub(hubID string) ([]RegistryProject, error) {

@@ -113,3 +113,12 @@ func TestDashboardHTML_DefinesHubScopedHelpers(t *testing.T) {
 		t.Fatalf("dashboard should define apiHub helper")
 	}
 }
+
+func TestDashboardHTML_ShowsActionHintFromAPI(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "Hint:") {
+		t.Fatalf("dashboard should surface action hint from backend response")
+	}
+	if !strings.Contains(dashboardHTML, "data.hint") {
+		t.Fatalf("dashboard should read data.hint from action response")
+	}
+}
