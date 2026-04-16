@@ -11,6 +11,7 @@ import '@fontsource/jetbrains-mono/400.css';
 declare const require: (id: string) => any;
 
 import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
+import {initializePWAFoundation} from './pwa';
 import {RegistryWorkspaceService} from './services/registryWorkspaceService';
 import {
   CODE_FONT_OPTIONS,
@@ -2379,6 +2380,8 @@ function App() {
     </div>
   );
 }
+
+initializePWAFoundation();
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {

@@ -42,7 +42,65 @@ async function cacheFirst(request) {
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
+    return;
   }
+
+  if (event.data?.type === 'WM_PWA_DEMO_NOTIFY') {
+    const payload = event.data.payload || {};
+    const title = payload.title || 'WheelMaker PWA';
+    const body = payload.body || 'Demo notification';
+    const url = payload.url || '/';
+    event.waitUntil(
+      self.registration.showNotification(title, {
+        body,
+        icon: '/icons/icon.svg',
+        badge: '/icons/icon.svg',
+        data: {url},
+      }),
+    );
+  }
+});
+
+self.addEventListener('push', event => {
+  const payload = (() => {
+    try {
+      return event.data ? event.data.json() : {};
+    } catch {
+      return {body: event.data ? event.data.text() : ''};
+    }
+  })();
+
+  const title = payload.title || 'WheelMaker';
+  const body = payload.body || 'You have new updates';
+  const url = payload.url || '/';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: payload.icon || '/icons/icon.svg',
+      badge: payload.badge || '/icons/icon.svg',
+      data: {url},
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const targetUrl = event.notification?.data?.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
+      for (const client of windowClients) {
+        if (client.url === targetUrl && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl);
+      }
+      return undefined;
+    }),
+  );
 });
 
 self.addEventListener('fetch', event => {
