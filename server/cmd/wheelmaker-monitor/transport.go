@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/swm8023/wheelmaker/internal/monitorcore"
+	"github.com/swm8023/wheelmaker/internal/hub/hub_monitor"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -67,7 +67,7 @@ func newHubTransport(cfg monitorTransportConfig) HubTransport {
 	}
 	return &directHubTransport{
 		hubID:    hubID,
-		core:     monitorcore.New(cfg.BaseDir),
+		core:     hub_monitor.New(cfg.BaseDir),
 		projects: cfg.Projects,
 	}
 }
@@ -78,7 +78,7 @@ func shouldUseRegistryTransport(cfg shared.RegistryConfig) bool {
 
 type directHubTransport struct {
 	hubID    string
-	core     *monitorcore.Core
+	core     *hub_monitor.Core
 	projects []shared.ProjectConfig
 }
 
@@ -109,7 +109,7 @@ func (d *directHubTransport) MonitorStatus(_ context.Context, hubID string) (*Se
 	}, nil
 }
 
-func mapProcessInfo(in []monitorcore.ProcessInfo) []ProcessInfo {
+func mapProcessInfo(in []hub_monitor.ProcessInfo) []ProcessInfo {
 	if len(in) == 0 {
 		return nil
 	}
@@ -139,7 +139,7 @@ func (d *directHubTransport) MonitorLog(_ context.Context, req MonitorLogRequest
 	}, nil
 }
 
-func mapLogEntries(in []monitorcore.LogEntry) []LogEntry {
+func mapLogEntries(in []hub_monitor.LogEntry) []LogEntry {
 	if len(in) == 0 {
 		return nil
 	}
@@ -166,7 +166,7 @@ func (d *directHubTransport) MonitorDB(_ context.Context, hubID string) (*DBTabl
 	}, nil
 }
 
-func mapDBTables(in []monitorcore.DBTable) []DBTable {
+func mapDBTables(in []hub_monitor.DBTable) []DBTable {
 	if len(in) == 0 {
 		return nil
 	}

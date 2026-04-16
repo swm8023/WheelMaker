@@ -1,4 +1,4 @@
-package monitorcore
+package hub_monitor
 
 import (
 	"os"

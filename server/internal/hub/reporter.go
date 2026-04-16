@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/swm8023/wheelmaker/internal/hub/hub_monitor"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
-	"github.com/swm8023/wheelmaker/internal/monitorcore"
 )
 
 const (
@@ -77,7 +77,7 @@ type Reporter struct {
 	updateSeq    atomic.Int64
 
 	connectionEpoch int64
-	monitorCore     *monitorcore.Core
+	monitorCore     *hub_monitor.Core
 }
 
 // NewReporter creates a Reporter.
@@ -122,7 +122,7 @@ func NewReporter(cfg ReporterConfig, projects []ProjectInfo) *Reporter {
 		chatByID:     make(map[string]ChatHandler),
 		sessionByID:  make(map[string]SessionHandler),
 		pending:      make(map[int64]chan envelope),
-		monitorCore:  monitorcore.New(monitorBase),
+		monitorCore:  hub_monitor.New(monitorBase),
 	}
 	r.requestSeq.Store(2)
 	return r
@@ -589,7 +589,6 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 		}),
 	})
 }
-
 
 func (r *Reporter) replyMonitorStatus(conn *websocket.Conn, req envelope) {
 	status, err := r.monitorCore.GetServiceStatus()
@@ -1888,13 +1887,3 @@ func runGit(root string, args ...string) (string, error) {
 	}
 	return string(out), nil
 }
-
-
-
-
-
-
-
-
-
-
