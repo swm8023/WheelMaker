@@ -2,7 +2,7 @@ export type PushDemoOptions = {
   serviceWorkerPath?: string;
 };
 
-function urlBase64ToUint8Array(value: string): Uint8Array {
+function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   const padding = '='.repeat((4 - (value.length % 4)) % 4);
   const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(base64);
@@ -10,7 +10,7 @@ function urlBase64ToUint8Array(value: string): Uint8Array {
   for (let i = 0; i < raw.length; i += 1) {
     bytes[i] = raw.charCodeAt(i);
   }
-  return bytes;
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 export class PWAPushDemo {
@@ -67,7 +67,7 @@ export class PWAPushDemo {
     }
     return registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+      applicationServerKey: urlBase64ToArrayBuffer(vapidPublicKey),
     });
   }
 
