@@ -820,7 +820,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if len(blocks) == 0 {
 			return nil, fmt.Errorf("session prompt is empty")
 		}
-		if err := c.SendToSession(ctx, req.SessionID, im.ChatRef{ChannelID: "app", ChatID: strings.TrimSpace(req.SessionID)}, blocks); err != nil {
+		if err := c.PromptToSession(ctx, req.SessionID, im.ChatRef{ChannelID: "app", ChatID: strings.TrimSpace(req.SessionID)}, blocks); err != nil {
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil

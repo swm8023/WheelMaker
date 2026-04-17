@@ -1253,6 +1253,40 @@ func TestNormalizeIMPromptBlocks_PreservesImageAndText(t *testing.T) {
 	}
 }
 
+func TestNormalizeChatRef_TrimsFields(t *testing.T) {
+	got := normalizeChatRef(im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "})
+	if got.ChannelID != "feishu" || got.ChatID != "chat-1" {
+		t.Fatalf("normalizeChatRef() = %#v", got)
+	}
+}
+
+func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	c := New(store, "proj1", "/tmp")
+	sess, err := c.ClientNewSession("route:test")
+	if err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
+
+	err = c.PromptToSession(context.Background(), sess.ID, im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
+	if err != nil {
+		t.Fatalf("PromptToSession: %v", err)
+	}
+
+	bindings, err := store.LoadRouteBindings(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("LoadRouteBindings: %v", err)
+	}
+	if got := bindings["im:feishu:chat-1"]; got != sess.ID {
+		t.Fatalf("route binding = %q, want %q", got, sess.ID)
+	}
+}
+
 func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 	s := newSession("sess-local", ".")
 	inst := &testInjectedInstance{
@@ -2303,4 +2337,3 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
-

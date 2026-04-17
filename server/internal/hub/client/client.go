@@ -247,12 +247,21 @@ func (c *Client) SessionByID(ctx context.Context, sessionID string) (*Session, e
 	return restored, nil
 }
 
-func (c *Client) SendToSession(ctx context.Context, sessionID string, source im.ChatRef, blocks []acp.ContentBlock) error {
+func normalizeChatRef(source im.ChatRef) im.ChatRef {
+	return im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+}
+
+func hasChatRef(source im.ChatRef) bool {
+	return source.ChannelID != "" && source.ChatID != ""
+}
+
+func (c *Client) PromptToSession(ctx context.Context, sessionID string, source im.ChatRef, blocks []acp.ContentBlock) error {
 	sess, err := c.SessionByID(ctx, sessionID)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(source.ChannelID) != "" && strings.TrimSpace(source.ChatID) != "" {
+	source = normalizeChatRef(source)
+	if hasChatRef(source) {
 		sess.setIMSource(source)
 		if err := c.bindIM(ctx, source, sess.ID); err != nil {
 			return err
@@ -333,7 +342,7 @@ func (c *Client) HandleIMCommand(ctx context.Context, source im.ChatRef, cmd im.
 }
 
 func (c *Client) HandleIMPermissionResponse(_ context.Context, source im.ChatRef, requestID int64, result acp.PermissionResponse) error {
-	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+	source = normalizeChatRef(source)
 	if source.ChannelID == "" || source.ChatID == "" {
 		return fmt.Errorf("client im: invalid source")
 	}
@@ -363,7 +372,7 @@ func (c *Client) HandleIMPermissionResponse(_ context.Context, source im.ChatRef
 }
 
 func (c *Client) HandleIMInbound(ctx context.Context, event im.InboundEvent) error {
-	source := im.ChatRef{ChannelID: strings.TrimSpace(event.ChannelID), ChatID: strings.TrimSpace(event.ChatID)}
+	source := normalizeChatRef(im.ChatRef{ChannelID: event.ChannelID, ChatID: event.ChatID})
 	if source.ChannelID == "" || source.ChatID == "" {
 		return fmt.Errorf("client im: invalid source")
 	}
@@ -415,9 +424,9 @@ func (c *Client) loadSessionForIM(ctx context.Context, source im.ChatRef, routeK
 }
 
 func imRouteKey(source im.ChatRef) string {
-	return "im:" + strings.ToLower(strings.TrimSpace(source.ChannelID)) + ":" + strings.TrimSpace(source.ChatID)
+	source = normalizeChatRef(source)
+	return "im:" + strings.ToLower(source.ChannelID) + ":" + source.ChatID
 }
-
 func normalizeIMPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
 	if len(blocks) == 0 {
 		return nil
@@ -453,7 +462,7 @@ func singleTextIMPrompt(blocks []acp.ContentBlock) (string, bool) {
 }
 
 func (c *Client) handleIMPromptBlocks(ctx context.Context, source im.ChatRef, blocks []acp.ContentBlock) error {
-	source = im.ChatRef{ChannelID: strings.TrimSpace(source.ChannelID), ChatID: strings.TrimSpace(source.ChatID)}
+	source = normalizeChatRef(source)
 	if source.ChannelID == "" || source.ChatID == "" {
 		return fmt.Errorf("client im: invalid source")
 	}
