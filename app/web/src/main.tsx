@@ -591,16 +591,30 @@ function splitPathForDisplay(path: string): {
   };
 }
 
-function formatGitPathLabel(path: string): string {
-  const { fileName, parentPath } = splitPathForDisplay(path);
-  return parentPath ? `${fileName} (${parentPath})` : fileName;
-}
-
 function formatGitCommitDateTime(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString();
+}
+
+function formatRelativeTime(value: string): string {
+  if (!value) return 'just now';
+  const parsed = new Date(value);
+  const ts = parsed.getTime();
+  if (Number.isNaN(ts)) return 'just now';
+  const deltaMs = Date.now() - ts;
+  const deltaMin = Math.max(0, Math.floor(deltaMs / 60000));
+  if (deltaMin < 1) return 'just now';
+  if (deltaMin < 60) return `${deltaMin}m ago`;
+  const deltaHour = Math.floor(deltaMin / 60);
+  if (deltaHour < 24) return `${deltaHour}h ago`;
+  const deltaDay = Math.floor(deltaHour / 24);
+  if (deltaDay < 30) return `${deltaDay}d ago`;
+  const deltaMonth = Math.floor(deltaDay / 30);
+  if (deltaMonth < 12) return `${deltaMonth}mo ago`;
+  const deltaYear = Math.floor(deltaMonth / 12);
+  return `${deltaYear}y ago`;
 }
 type ShikiCodeBlockProps = {
   content: string;
@@ -2267,10 +2281,31 @@ function App() {
       );
     }
 
+    const popoverFiles = commitPopover
+      ? commitFilesBySha[commitPopover.commit.sha] ?? []
+      : [];
+    const popoverFileCount = popoverFiles.length;
+    const popoverAdditions = popoverFiles.reduce(
+      (sum, item) => sum + (item.additions || 0),
+      0,
+    );
+    const popoverDeletions = popoverFiles.reduce(
+      (sum, item) => sum + (item.deletions || 0),
+      0,
+    );
+    const graphItemsCount =
+      commits.length + (workingTreeFiles.length > 0 ? 1 : 0);
+
     return (
       <>
-        <div className="section-title">
-          SOURCE CONTROL {gitCurrentBranch ? `(${gitCurrentBranch})` : ''}
+        <div className="section-title git-section-title">
+          <span className="git-section-main">GRAPH</span>
+          <span className="git-section-meta">{`${graphItemsCount} items`}</span>
+          <span className="git-section-actions" aria-hidden="true">
+            <span className="codicon codicon-target" />
+            <span className="codicon codicon-refresh" />
+            <span className="codicon codicon-ellipsis" />
+          </span>
         </div>
         <div className="list half">
           {gitLoading ? (
@@ -2281,7 +2316,9 @@ function App() {
           {workingTreeFiles.length > 0 ? (
             <>
               <div
-                className={`item ${worktreeActive ? 'selected' : ''}`}
+                className={`item git-row git-worktree-row ${
+                  worktreeActive ? 'selected' : ''
+                }`}
                 onClick={() => {
                   setSelectedDiffSource('worktree');
                   setExpandedCommitShas([]);
@@ -2298,6 +2335,10 @@ function App() {
                   }
                 }}
               >
+                <span className="git-graph-lane" aria-hidden="true">
+                  <span className="git-graph-line" />
+                  <span className={`git-graph-dot ${worktreeActive ? 'active' : ''}`} />
+                </span>
                 <span
                   className={`caret codicon ${
                     worktreeExpanded
@@ -2306,36 +2347,50 @@ function App() {
                   }`}
                 />
                 <span className="file-dot codicon codicon-source-control" />
-                <span className="label">
-                  {`Working Tree (${workingTreeFiles.length})`}
+                <span className="label git-commit-label">
+                  <span className="git-commit-title">Working Tree</span>
+                  <span className="git-commit-sha">
+                    {`${workingTreeFiles.length} files`}
+                  </span>
                 </span>
               </div>
               {worktreeExpanded
-                ? workingTreeFiles.map(file => (
-                    <div
-                      key={`${WORKING_TREE_COMMIT_ID}:${file.scope}:${file.path}`}
-                      className={`item git-tree-child ${
-                        selectedDiff === file.path &&
-                        selectedDiffScope === file.scope &&
-                        selectedDiffSource === 'worktree'
-                          ? 'selected'
-                          : ''
-                      }`}
-                      onClick={() => {
-                        setSelectedDiff(file.path);
-                        setSelectedDiffSource('worktree');
-                        setSelectedDiffScope(file.scope);
-                        if (!isWide) setDrawerOpen(false);
-                      }}
-                    >
-                      <span className="caret placeholder" aria-hidden="true" />
-                      <span className={`status-tag status-git-${file.status}`}>
-                        {file.status}
-                      </span>
-                      <span className="muted git-file-scope">{file.scope}</span>
-                      <span className="label">{formatGitPathLabel(file.path)}</span>
-                    </div>
-                  ))
+                ? workingTreeFiles.map(file => {
+                    const { fileName, parentPath } = splitPathForDisplay(file.path);
+                    return (
+                      <div
+                        key={`${WORKING_TREE_COMMIT_ID}:${file.scope}:${file.path}`}
+                        className={`item git-row git-file-row git-tree-child ${
+                          selectedDiff === file.path &&
+                          selectedDiffScope === file.scope &&
+                          selectedDiffSource === 'worktree'
+                            ? 'selected'
+                            : ''
+                        }`}
+                        onClick={() => {
+                          setSelectedDiff(file.path);
+                          setSelectedDiffSource('worktree');
+                          setSelectedDiffScope(file.scope);
+                          if (!isWide) setDrawerOpen(false);
+                        }}
+                      >
+                        <span className="git-graph-lane child" aria-hidden="true">
+                          <span className="git-graph-line" />
+                        </span>
+                        <span className="caret placeholder" aria-hidden="true" />
+                        <span className={`status-tag status-git-${file.status}`}>
+                          {file.status}
+                        </span>
+                        <span className="muted git-file-scope">{file.scope}</span>
+                        <span className="label git-file-label">
+                          <span className="git-file-name">{fileName || file.path}</span>
+                          {parentPath ? (
+                            <span className="git-file-path">{parentPath}</span>
+                          ) : null}
+                        </span>
+                      </div>
+                    );
+                  })
                 : null}
             </>
           ) : !gitLoading ? (
@@ -2353,7 +2408,9 @@ function App() {
             return (
               <React.Fragment key={commit.sha}>
                 <div
-                  className={`item ${selected ? 'selected' : ''}`}
+                  className={`item git-row git-commit-row ${
+                    selected ? 'selected' : ''
+                  }`}
                   onClick={event => {
                     const nextExpanded = !expanded;
                     const currentFiles = commitFilesBySha[commit.sha] ?? [];
@@ -2373,73 +2430,95 @@ function App() {
                     const rect = (
                       event.currentTarget as HTMLDivElement
                     ).getBoundingClientRect();
-                    const popoverWidth = 360;
-                    const popoverHeight = 220;
+                    const popoverWidth = 440;
+                    const popoverHeight = 250;
                     const x = Math.max(
                       8,
                       Math.min(
                         window.innerWidth - popoverWidth - 8,
-                        rect.right + 10,
+                        rect.right + 12,
                       ),
                     );
                     const y = Math.max(
                       52,
-                      Math.min(window.innerHeight - popoverHeight - 8, rect.top),
+                      Math.min(window.innerHeight - popoverHeight - 8, rect.top - 8),
                     );
                     setCommitPopover({ commit, x, y });
                   }}
                 >
+                  <span className="git-graph-lane" aria-hidden="true">
+                    <span className="git-graph-line" />
+                    <span className={`git-graph-dot ${selected ? 'active' : ''}`} />
+                  </span>
                   <span
                     className={`caret codicon ${
                       expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'
                     }`}
                   />
                   <span className="file-dot codicon codicon-git-commit" />
-                  <span className="label">
-                    {commit.title || commit.sha.slice(0, 7)}
+                  <span className="label git-commit-label">
+                    <span className="git-commit-title">
+                      {commit.title || commit.sha.slice(0, 7)}
+                    </span>
+                    <span className="git-commit-sha">{commit.sha.slice(0, 7)}</span>
                   </span>
                 </div>
                 {expanded ? (
                   filesLoaded ? (
                     files.length > 0 ? (
-                      files.map(file => (
-                        <div
-                          key={`${commit.sha}:${file.path}`}
-                          className={`item git-tree-child ${
-                            selectedDiffSource === 'commit' &&
-                            selectedCommit === commit.sha &&
-                            selectedDiff === file.path
-                              ? 'selected'
-                              : ''
-                          }`}
-                          onClick={() => {
-                            setSelectedCommit(commit.sha);
-                            setSelectedDiff(file.path);
-                            setSelectedDiffSource('commit');
-                            setSelectedDiffScope('unstaged');
-                            if (!isWide) setDrawerOpen(false);
-                          }}
-                        >
-                          <span
-                            className="caret placeholder"
-                            aria-hidden="true"
-                          />
-                          <span className={`status-tag status-git-${file.status}`}>
-                            {file.status}
-                          </span>
-                          <span className="label">
-                            {formatGitPathLabel(file.path)}
-                          </span>
-                        </div>
-                      ))
+                      files.map(file => {
+                        const { fileName, parentPath } = splitPathForDisplay(file.path);
+                        return (
+                          <div
+                            key={`${commit.sha}:${file.path}`}
+                            className={`item git-row git-file-row git-tree-child ${
+                              selectedDiffSource === 'commit' &&
+                              selectedCommit === commit.sha &&
+                              selectedDiff === file.path
+                                ? 'selected'
+                                : ''
+                            }`}
+                            onClick={() => {
+                              setSelectedCommit(commit.sha);
+                              setSelectedDiff(file.path);
+                              setSelectedDiffSource('commit');
+                              setSelectedDiffScope('unstaged');
+                              if (!isWide) setDrawerOpen(false);
+                            }}
+                          >
+                            <span className="git-graph-lane child" aria-hidden="true">
+                              <span className="git-graph-line" />
+                            </span>
+                            <span
+                              className="caret placeholder"
+                              aria-hidden="true"
+                            />
+                            <span className={`status-tag status-git-${file.status}`}>
+                              {file.status}
+                            </span>
+                            <span className="label git-file-label">
+                              <span className="git-file-name">{fileName || file.path}</span>
+                              {parentPath ? (
+                                <span className="git-file-path">{parentPath}</span>
+                              ) : null}
+                            </span>
+                          </div>
+                        );
+                      })
                     ) : (
-                      <div className="item git-tree-child muted">
+                      <div className="item git-row git-file-row git-tree-child muted">
+                        <span className="git-graph-lane child" aria-hidden="true">
+                          <span className="git-graph-line" />
+                        </span>
                         <span className="caret placeholder" aria-hidden="true" />
                         <span className="label">No changed files</span>
                       </div>
                     )
                   ) : (
-                    <div className="item git-tree-child muted">
+                    <div className="item git-row git-file-row git-tree-child muted">
+                      <span className="git-graph-lane child" aria-hidden="true">
+                        <span className="git-graph-line" />
+                      </span>
                       <span className="caret placeholder" aria-hidden="true" />
                       <span className="label">Loading files...</span>
                     </div>
@@ -2461,7 +2540,16 @@ function App() {
             style={{ left: `${commitPopover.x}px`, top: `${commitPopover.y}px` }}
           >
             <div className="git-commit-popover-header">
-              <span className="git-commit-popover-title">Commit Details</span>
+              <div className="git-commit-popover-meta">
+                <span className="git-commit-popover-avatar">
+                  {(commitPopover.commit.author || 'U').slice(0, 1).toLowerCase()}
+                </span>
+                <span className="git-commit-popover-meta-line">
+                  {commitPopover.commit.author || 'Unknown'}, {' '}
+                  {formatRelativeTime(commitPopover.commit.time)}
+                  {' '}({formatGitCommitDateTime(commitPopover.commit.time)})
+                </span>
+              </div>
               <button
                 type="button"
                 className="git-commit-popover-close"
@@ -2472,26 +2560,27 @@ function App() {
               </button>
             </div>
             <div className="git-commit-popover-body">
-              <div className="git-commit-popover-field">
-                <span className="muted">Title</span>
-                <span>{commitPopover.commit.title || '(no title)'}</span>
+              <div className="git-commit-popover-title-text">
+                {commitPopover.commit.title || '(no title)'}
               </div>
-              <div className="git-commit-popover-field">
-                <span className="muted">SHA</span>
+              <div className="git-commit-popover-stats">
+                <span>{`${popoverFileCount} files changed,`}</span>
+                <span className="insertions">{`${popoverAdditions} insertions(+)`}</span>
+                <span className="deletions">{`${popoverDeletions} deletions(-)`}</span>
+              </div>
+              <div className="git-commit-popover-branches">
+                {gitCurrentBranch ? (
+                  <span className="git-branch-pill local">{gitCurrentBranch}</span>
+                ) : null}
+                {gitCurrentBranch ? (
+                  <span className="git-branch-pill remote">
+                    {`origin/${gitCurrentBranch}`}
+                  </span>
+                ) : null}
+              </div>
+              <div className="git-commit-popover-sha">
+                <span className="codicon codicon-git-commit" />
                 <code>{commitPopover.commit.sha}</code>
-              </div>
-              <div className="git-commit-popover-field">
-                <span className="muted">Author</span>
-                <span>
-                  {commitPopover.commit.author || 'Unknown'}
-                  {commitPopover.commit.email
-                    ? ` <${commitPopover.commit.email}>`
-                    : ''}
-                </span>
-              </div>
-              <div className="git-commit-popover-field">
-                <span className="muted">Time</span>
-                <span>{formatGitCommitDateTime(commitPopover.commit.time)}</span>
               </div>
             </div>
           </div>
@@ -3351,4 +3440,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
 
