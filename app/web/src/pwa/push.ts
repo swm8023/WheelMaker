@@ -2,6 +2,14 @@ export type PushDemoOptions = {
   serviceWorkerPath?: string;
 };
 
+type LocalNotificationPayload = {
+  title: string;
+  body?: string;
+  url?: string;
+  icon?: string;
+  badge?: string;
+};
+
 function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   const padding = '='.repeat((4 - (value.length % 4)) % 4);
   const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -10,7 +18,10 @@ function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   for (let i = 0; i < raw.length; i += 1) {
     bytes[i] = raw.charCodeAt(i);
   }
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  );
 }
 
 export class PWAPushDemo {
@@ -34,7 +45,9 @@ export class PWAPushDemo {
     if (!this.isSupported()) {
       return null;
     }
-    const existing = await navigator.serviceWorker.getRegistration(this.serviceWorkerPath);
+    const existing = await navigator.serviceWorker.getRegistration(
+      this.serviceWorkerPath,
+    );
     if (existing) {
       return existing;
     }
@@ -79,7 +92,20 @@ export class PWAPushDemo {
     return sub.unsubscribe();
   }
 
-  async showDemoNotification(title = 'WheelMaker PWA', body = 'PWA push demo ready'): Promise<boolean> {
+  async showDemoNotification(
+    title = 'WheelMaker PWA',
+    body = 'PWA push demo ready',
+  ): Promise<boolean> {
+    return this.showLocalNotification({
+      title,
+      body,
+      url: '/',
+    });
+  }
+
+  async showLocalNotification(
+    payload: LocalNotificationPayload,
+  ): Promise<boolean> {
     const permission = await this.requestPermission();
     if (permission !== 'granted') {
       return false;
@@ -88,11 +114,13 @@ export class PWAPushDemo {
     const registration = await this.ensureServiceWorkerRegistration();
     if (registration?.active) {
       registration.active.postMessage({
-        type: 'WM_PWA_DEMO_NOTIFY',
+        type: 'WM_PWA_NOTIFY',
         payload: {
-          title,
-          body,
-          url: '/',
+          title: payload.title,
+          body: payload.body || '',
+          url: payload.url || '/',
+          icon: payload.icon,
+          badge: payload.badge,
         },
       });
       return true;
@@ -100,7 +128,7 @@ export class PWAPushDemo {
 
     if (typeof Notification !== 'undefined') {
       // Fallback when worker is not ready yet.
-      new Notification(title, {body});
+      new Notification(payload.title, { body: payload.body || '' });
       return true;
     }
 

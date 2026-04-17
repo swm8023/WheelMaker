@@ -1,9 +1,23 @@
 const CACHE_NAME = 'wheelmaker-web-pwa-v2';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon.svg'];
+function showLocalNotification(payload = {}) {
+  const title = payload.title || 'WheelMaker';
+  const body = payload.body || 'You have new updates';
+  const url = payload.url || '/';
+  return self.registration.showNotification(title, {
+    body,
+    icon: payload.icon || '/icons/icon.svg',
+    badge: payload.badge || '/icons/icon.svg',
+    data: { url },
+  });
+}
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()),
+    caches
+      .open(CACHE_NAME)
+      .then(cache => cache.addAll(SHELL))
+      .then(() => self.skipWaiting()),
   );
 });
 
@@ -11,7 +25,13 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches
       .keys()
-      .then(keys => Promise.all(keys.map(key => (key !== CACHE_NAME ? caches.delete(key) : Promise.resolve()))))
+      .then(keys =>
+        Promise.all(
+          keys.map(key =>
+            key !== CACHE_NAME ? caches.delete(key) : Promise.resolve(),
+          ),
+        ),
+      )
       .then(() => self.clients.claim()),
   );
 });
@@ -45,19 +65,12 @@ self.addEventListener('message', event => {
     return;
   }
 
-  if (event.data?.type === 'WM_PWA_DEMO_NOTIFY') {
+  if (
+    event.data?.type === 'WM_PWA_DEMO_NOTIFY' ||
+    event.data?.type === 'WM_PWA_NOTIFY'
+  ) {
     const payload = event.data.payload || {};
-    const title = payload.title || 'WheelMaker PWA';
-    const body = payload.body || 'Demo notification';
-    const url = payload.url || '/';
-    event.waitUntil(
-      self.registration.showNotification(title, {
-        body,
-        icon: '/icons/icon.svg',
-        badge: '/icons/icon.svg',
-        data: {url},
-      }),
-    );
+    event.waitUntil(showLocalNotification(payload));
   }
 });
 
@@ -66,22 +79,11 @@ self.addEventListener('push', event => {
     try {
       return event.data ? event.data.json() : {};
     } catch {
-      return {body: event.data ? event.data.text() : ''};
+      return { body: event.data ? event.data.text() : '' };
     }
   })();
 
-  const title = payload.title || 'WheelMaker';
-  const body = payload.body || 'You have new updates';
-  const url = payload.url || '/';
-
-  event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      icon: payload.icon || '/icons/icon.svg',
-      badge: payload.badge || '/icons/icon.svg',
-      data: {url},
-    }),
-  );
+  event.waitUntil(showLocalNotification(payload));
 });
 
 self.addEventListener('notificationclick', event => {
@@ -89,17 +91,19 @@ self.addEventListener('notificationclick', event => {
   const targetUrl = event.notification?.data?.url || '/';
 
   event.waitUntil(
-    clients.matchAll({type: 'window', includeUncontrolled: true}).then(windowClients => {
-      for (const client of windowClients) {
-        if (client.url === targetUrl && 'focus' in client) {
-          return client.focus();
+    clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then(windowClients => {
+        for (const client of windowClients) {
+          if (client.url === targetUrl && 'focus' in client) {
+            return client.focus();
+          }
         }
-      }
-      if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
-      }
-      return undefined;
-    }),
+        if (clients.openWindow) {
+          return clients.openWindow(targetUrl);
+        }
+        return undefined;
+      }),
   );
 });
 

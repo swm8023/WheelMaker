@@ -1,5 +1,5 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {createRoot} from 'react-dom/client';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
 import '@vscode/codicons/dist/codicon.css';
@@ -10,9 +10,9 @@ import '@fontsource/jetbrains-mono/400.css';
 
 declare const require: (id: string) => any;
 
-import {getDefaultRegistryAddress, toRegistryWsUrl} from './runtime';
-import {initializePWAFoundation} from './pwa';
-import {RegistryWorkspaceService} from './services/registryWorkspaceService';
+import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
+import { initializePWAFoundation } from './pwa';
+import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
@@ -31,8 +31,8 @@ import {
   type CodeThemeId,
   type DiffRenderLine,
 } from './services/shikiRenderer';
-import {WorkspaceController} from './services/workspaceController';
-import {WorkspaceStore} from './services/workspaceStore';
+import { WorkspaceController } from './services/workspaceController';
+import { WorkspaceStore } from './services/workspaceStore';
 import type {
   RegistryChatContentBlock,
   RegistryChatMessage,
@@ -84,9 +84,14 @@ type SetiResolvedIcon = {
   color: string;
 };
 type GitDiffChange =
-  | {type: 'insert'; content: string; lineNumber: number}
-  | {type: 'delete'; content: string; lineNumber: number}
-  | {type: 'normal'; content: string; oldLineNumber: number; newLineNumber: number};
+  | { type: 'insert'; content: string; lineNumber: number }
+  | { type: 'delete'; content: string; lineNumber: number }
+  | {
+      type: 'normal';
+      content: string;
+      oldLineNumber: number;
+      newLineNumber: number;
+    };
 type GitDiffFile = {
   hunks?: Array<{
     changes?: GitDiffChange[];
@@ -104,7 +109,7 @@ type ThinkingBlockProps = {
   isStreaming: boolean;
 };
 
-function ThinkingBlock({content, isStreaming}: ThinkingBlockProps) {
+function ThinkingBlock({ content, isStreaming }: ThinkingBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentHeight, setContentHeight] = useState(0);
@@ -131,7 +136,11 @@ function ThinkingBlock({content, isStreaming}: ThinkingBlockProps) {
   }, [content, isStreaming]);
 
   return (
-    <div className={`thinking-block ${isStreaming ? 'streaming' : 'done'} ${expanded ? 'expanded' : ''}`}>
+    <div
+      className={`thinking-block ${isStreaming ? 'streaming' : 'done'} ${
+        expanded ? 'expanded' : ''
+      }`}
+    >
       <button
         className="thinking-header"
         onClick={() => !isStreaming && setExpanded(v => !v)}
@@ -140,19 +149,32 @@ function ThinkingBlock({content, isStreaming}: ThinkingBlockProps) {
       >
         <span className="thinking-icon codicon codicon-sparkle" />
         {isStreaming ? (
-          <span className="thinking-title streaming-text">Thinking<span className="thinking-dots"><span>.</span><span>.</span><span>.</span></span></span>
+          <span className="thinking-title streaming-text">
+            Thinking
+            <span className="thinking-dots">
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </span>
+          </span>
         ) : (
           <span className="thinking-title summary-text">{summaryText}</span>
         )}
         {!isStreaming && (
-          <span className={`thinking-chevron codicon ${expanded ? 'codicon-chevron-up' : 'codicon-chevron-down'}`} />
+          <span
+            className={`thinking-chevron codicon ${
+              expanded ? 'codicon-chevron-up' : 'codicon-chevron-down'
+            }`}
+          />
         )}
       </button>
       <div
         className="thinking-body"
-        style={{maxHeight: expanded ? contentHeight + 16 : 0}}
+        style={{ maxHeight: expanded ? contentHeight + 16 : 0 }}
       >
-        <div className="thinking-content" ref={contentRef}>{content}</div>
+        <div className="thinking-content" ref={contentRef}>
+          {content}
+        </div>
       </div>
     </div>
   );
@@ -172,18 +194,28 @@ const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
 
 function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
-  return [...items].sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  return [...items].sort((a, b) =>
+    (b.updatedAt || '').localeCompare(a.updatedAt || ''),
+  );
 }
 
-function mergeChatSession(list: RegistryChatSession[], next: RegistryChatSession): RegistryChatSession[] {
+function mergeChatSession(
+  list: RegistryChatSession[],
+  next: RegistryChatSession,
+): RegistryChatSession[] {
   const filtered = list.filter(item => item.sessionId !== next.sessionId);
   return sortChatSessions([next, ...filtered]);
 }
 
-function upsertChatMessage(list: RegistryChatMessage[], next: RegistryChatMessage): RegistryChatMessage[] {
+function upsertChatMessage(
+  list: RegistryChatMessage[],
+  next: RegistryChatMessage,
+): RegistryChatMessage[] {
   const index = list.findIndex(item => item.messageId === next.messageId);
   if (index < 0) {
-    return [...list, next].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+    return [...list, next].sort((a, b) =>
+      (a.createdAt || '').localeCompare(b.createdAt || ''),
+    );
   }
   const copy = [...list];
   copy[index] = next;
@@ -194,19 +226,28 @@ function formatChatTimestamp(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function clampCodeFontSize(value: number): number {
-  return Math.min(20, Math.max(11, Number.isFinite(value) ? value : DEFAULT_CODE_FONT_SIZE));
+  return Math.min(
+    20,
+    Math.max(11, Number.isFinite(value) ? value : DEFAULT_CODE_FONT_SIZE),
+  );
 }
 
 function clampCodeLineHeight(value: number): number {
-  return Math.min(2, Math.max(1.2, Number.isFinite(value) ? value : DEFAULT_CODE_LINE_HEIGHT));
+  return Math.min(
+    2,
+    Math.max(1.2, Number.isFinite(value) ? value : DEFAULT_CODE_LINE_HEIGHT),
+  );
 }
 
 function clampCodeTabSize(value: number): number {
-  return Math.min(8, Math.max(1, Number.isFinite(value) ? value : DEFAULT_CODE_TAB_SIZE));
+  return Math.min(
+    8,
+    Math.max(1, Number.isFinite(value) ? value : DEFAULT_CODE_TAB_SIZE),
+  );
 }
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
@@ -302,7 +343,10 @@ function isLoopbackAddress(address: string): boolean {
   return isLoopbackHost(host);
 }
 
-function resolveInitialRegistryAddress(savedAddress: string, defaultAddress: string): string {
+function resolveInitialRegistryAddress(
+  savedAddress: string,
+  defaultAddress: string,
+): string {
   const pageHost = window.location.hostname;
   if (!isLoopbackHost(pageHost) && isLoopbackAddress(savedAddress)) {
     return defaultAddress;
@@ -408,9 +452,18 @@ function toSetiGlyph(fontCharacter?: string): string {
 }
 
 function resolveSetiIcon(name: string, mode: ThemeMode): SetiResolvedIcon {
-  const section: SetiThemeSection = mode === 'light' && setiTheme.light
-    ? {file: setiTheme.light.file, fileExtensions: setiTheme.light.fileExtensions, fileNames: setiTheme.light.fileNames}
-    : {file: setiTheme.file, fileExtensions: setiTheme.fileExtensions, fileNames: setiTheme.fileNames};
+  const section: SetiThemeSection =
+    mode === 'light' && setiTheme.light
+      ? {
+          file: setiTheme.light.file,
+          fileExtensions: setiTheme.light.fileExtensions,
+          fileNames: setiTheme.light.fileNames,
+        }
+      : {
+          file: setiTheme.file,
+          fileExtensions: setiTheme.fileExtensions,
+          fileNames: setiTheme.fileNames,
+        };
 
   const lowerName = name.toLowerCase();
   let iconId = section.file;
@@ -428,7 +481,10 @@ function resolveSetiIcon(name: string, mode: ThemeMode): SetiResolvedIcon {
     }
   }
 
-  const definition = setiTheme.iconDefinitions[iconId] ?? setiTheme.iconDefinitions[section.file] ?? {};
+  const definition =
+    setiTheme.iconDefinitions[iconId] ??
+    setiTheme.iconDefinitions[section.file] ??
+    {};
   return {
     glyph: toSetiGlyph(definition.fontCharacter),
     color: definition.fontColor ?? '#d4d7d6',
@@ -439,19 +495,25 @@ function setiFontFaceCss(): string {
   return `@font-face { font-family: 'wm-seti'; src: url('${setiFontUrl}') format('woff'); font-weight: normal; font-style: normal; }`;
 }
 
-function buildWorkingTreeFiles(status: RegistryGitStatus): WorkingTreeFileEntry[] {
+function buildWorkingTreeFiles(
+  status: RegistryGitStatus,
+): WorkingTreeFileEntry[] {
   const rows: WorkingTreeFileEntry[] = [];
   for (const item of status.unstaged ?? []) {
     if (!item.path) continue;
-    rows.push({path: item.path, status: item.status, scope: 'unstaged'});
+    rows.push({ path: item.path, status: item.status, scope: 'unstaged' });
   }
   for (const item of status.staged ?? []) {
     if (!item.path) continue;
-    rows.push({path: item.path, status: item.status, scope: 'staged'});
+    rows.push({ path: item.path, status: item.status, scope: 'staged' });
   }
   for (const item of status.untracked ?? []) {
     if (!item.path) continue;
-    rows.push({path: item.path, status: item.status || 'U', scope: 'untracked'});
+    rows.push({
+      path: item.path,
+      status: item.status || 'U',
+      scope: 'untracked',
+    });
   }
   return rows;
 }
@@ -465,7 +527,7 @@ function isHeavyGeneratedDiffPath(path: string): boolean {
   );
 }
 
-function pickPreferredPath<T extends {path: string}>(items: T[]): string {
+function pickPreferredPath<T extends { path: string }>(items: T[]): string {
   if (items.length === 0) return '';
   const preferred = items.find(item => !isHeavyGeneratedDiffPath(item.path));
   return (preferred ?? items[0]).path;
@@ -521,12 +583,23 @@ function ShikiCodeBlock({
     return () => {
       cancelled = true;
     };
-  }, [content, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap, lineNumbers]);
+  }, [
+    content,
+    language,
+    themeMode,
+    codeTheme,
+    codeFont,
+    codeFontSize,
+    codeLineHeight,
+    codeTabSize,
+    wrap,
+    lineNumbers,
+  ]);
 
   return (
     <div
       className={`code-wrap ${wrap ? 'wrap' : 'nowrap'}`}
-      dangerouslySetInnerHTML={{__html: html || '<pre><code> </code></pre>'}}
+      dangerouslySetInnerHTML={{ __html: html || '<pre><code> </code></pre>' }}
     />
   );
 }
@@ -593,9 +666,22 @@ function ShikiDiffPane({
     return () => {
       cancelled = true;
     };
-  }, [lines, rows.length, language, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrap, lineNumbers]);
+  }, [
+    lines,
+    rows.length,
+    language,
+    themeMode,
+    codeTheme,
+    codeFont,
+    codeFontSize,
+    codeLineHeight,
+    codeTabSize,
+    wrap,
+    lineNumbers,
+  ]);
 
-  if (rows.length === 0) return <div className="muted block">No diff hunks available</div>;
+  if (rows.length === 0)
+    return <div className="muted block">No diff hunks available</div>;
 
   const diffStyle = {
     fontFamily: codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY,
@@ -609,15 +695,23 @@ function ShikiDiffPane({
       <div
         className={`diff-inline ${wrap ? 'wrap' : 'nowrap'}`}
         style={diffStyle}
-        dangerouslySetInnerHTML={{__html: diffHtml || '<pre><code> </code></pre>'}}
+        dangerouslySetInnerHTML={{
+          __html: diffHtml || '<pre><code> </code></pre>',
+        }}
       />
     </div>
   );
 }
 function App() {
   const defaultRegistryAddress = useMemo(() => getDefaultRegistryAddress(), []);
-  const persistedGlobal = useMemo(() => workspaceStore.getGlobalState(defaultRegistryAddress), [defaultRegistryAddress]);
-  const initialRegistryAddress = resolveInitialRegistryAddress(persistedGlobal.address || '', defaultRegistryAddress);
+  const persistedGlobal = useMemo(
+    () => workspaceStore.getGlobalState(defaultRegistryAddress),
+    [defaultRegistryAddress],
+  );
+  const initialRegistryAddress = resolveInitialRegistryAddress(
+    persistedGlobal.address || '',
+    defaultRegistryAddress,
+  );
   const [connected, setConnected] = useState(false);
   const [address, setAddress] = useState(initialRegistryAddress);
   const addressRef = useRef(initialRegistryAddress);
@@ -628,25 +722,40 @@ function App() {
   const [reconnecting, setReconnecting] = useState(false);
   const autoConnectTriedRef = useRef(false);
 
-  const [themeMode, setThemeMode] = useState<ThemeMode>(persistedGlobal.themeMode === 'light' ? 'light' : 'dark');
+  const [themeMode, setThemeMode] = useState<ThemeMode>(
+    persistedGlobal.themeMode === 'light' ? 'light' : 'dark',
+  );
   const [codeTheme, setCodeTheme] = useState<CodeThemeId>(
-    typeof persistedGlobal.codeTheme === 'string' && isCodeThemeId(persistedGlobal.codeTheme)
+    typeof persistedGlobal.codeTheme === 'string' &&
+      isCodeThemeId(persistedGlobal.codeTheme)
       ? persistedGlobal.codeTheme
       : DEFAULT_CODE_THEME,
   );
   const [codeFont, setCodeFont] = useState<CodeFontId>(
-    typeof persistedGlobal.codeFont === 'string' && isCodeFontId(persistedGlobal.codeFont)
+    typeof persistedGlobal.codeFont === 'string' &&
+      isCodeFontId(persistedGlobal.codeFont)
       ? persistedGlobal.codeFont
       : DEFAULT_CODE_FONT,
   );
-  const [codeFontSize, setCodeFontSize] = useState<number>(clampCodeFontSize(Number(persistedGlobal.codeFontSize)));
-  const [codeLineHeight, setCodeLineHeight] = useState<number>(clampCodeLineHeight(Number(persistedGlobal.codeLineHeight)));
-  const [codeTabSize, setCodeTabSize] = useState<number>(clampCodeTabSize(Number(persistedGlobal.codeTabSize)));
+  const [codeFontSize, setCodeFontSize] = useState<number>(
+    clampCodeFontSize(Number(persistedGlobal.codeFontSize)),
+  );
+  const [codeLineHeight, setCodeLineHeight] = useState<number>(
+    clampCodeLineHeight(Number(persistedGlobal.codeLineHeight)),
+  );
+  const [codeTabSize, setCodeTabSize] = useState<number>(
+    clampCodeTabSize(Number(persistedGlobal.codeTabSize)),
+  );
   const [wrapLines, setWrapLines] = useState(!!persistedGlobal.wrapLines);
   const [showLineNumbers, setShowLineNumbers] = useState(
-    typeof persistedGlobal.showLineNumbers === 'boolean' ? persistedGlobal.showLineNumbers : true,
+    typeof persistedGlobal.showLineNumbers === 'boolean'
+      ? persistedGlobal.showLineNumbers
+      : true,
   );
-  const codeFontFamily = useMemo(() => resolveCodeFontFamily(codeFont), [codeFont]);
+  const codeFontFamily = useMemo(
+    () => resolveCodeFontFamily(codeFont),
+    [codeFont],
+  );
   const setiFontCss = useMemo(() => setiFontFaceCss(), []);
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
@@ -670,7 +779,7 @@ function App() {
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
 
-  const [dirEntries, setDirEntries] = useState<DirEntries>({'.': []});
+  const [dirEntries, setDirEntries] = useState<DirEntries>({ '.': [] });
   const [expandedDirs, setExpandedDirs] = useState<string[]>(['.']);
   const expandedDirsRef = useRef<string[]>(['.']);
   const [loadingDirs, setLoadingDirs] = useState<Record<string, boolean>>({});
@@ -699,26 +808,40 @@ function App() {
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
+  const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [selectedChatId, setSelectedChatId] = useState('');
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
   const [chatComposerText, setChatComposerText] = useState('');
-  const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(null);
+  const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
+    null,
+  );
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
   const [gitCurrentBranch, setGitCurrentBranch] = useState('');
   const [gitDirty, setGitDirty] = useState(false);
-  const [gitStatusSummary, setGitStatusSummary] = useState({staged: 0, unstaged: 0, untracked: 0});
+  const [gitStatusSummary, setGitStatusSummary] = useState({
+    staged: 0,
+    unstaged: 0,
+    untracked: 0,
+  });
   const [gitLoadedProjectId, setGitLoadedProjectId] = useState('');
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
-  const [commitFilesBySha, setCommitFilesBySha] = useState<Record<string, RegistryGitCommitFile[]>>({});
-  const [workingTreeFiles, setWorkingTreeFiles] = useState<WorkingTreeFileEntry[]>([]);
-  const [selectedDiffSource, setSelectedDiffSource] = useState<GitDiffSource>('commit');
-  const [selectedDiffScope, setSelectedDiffScope] = useState<'staged' | 'unstaged' | 'untracked'>('unstaged');
+  const [commitFilesBySha, setCommitFilesBySha] = useState<
+    Record<string, RegistryGitCommitFile[]>
+  >({});
+  const [workingTreeFiles, setWorkingTreeFiles] = useState<
+    WorkingTreeFileEntry[]
+  >([]);
+  const [selectedDiffSource, setSelectedDiffSource] =
+    useState<GitDiffSource>('commit');
+  const [selectedDiffScope, setSelectedDiffScope] = useState<
+    'staged' | 'unstaged' | 'untracked'
+  >('unstaged');
   const [selectedDiff, setSelectedDiff] = useState('');
   const [allowHeavyDiffLoad, setAllowHeavyDiffLoad] = useState(false);
   const [allowLargeDiffRender, setAllowLargeDiffRender] = useState(false);
@@ -795,7 +918,20 @@ function App() {
       tab,
       selectedProjectId: projectId,
     });
-  }, [address, token, themeMode, codeTheme, codeFont, codeFontSize, codeLineHeight, codeTabSize, wrapLines, showLineNumbers, tab, projectId]);
+  }, [
+    address,
+    token,
+    themeMode,
+    codeTheme,
+    codeFont,
+    codeFontSize,
+    codeLineHeight,
+    codeTabSize,
+    wrapLines,
+    showLineNumbers,
+    tab,
+    projectId,
+  ]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -824,7 +960,8 @@ function App() {
   ]);
 
   const currentProjectName = useMemo(
-    () => projects.find(item => item.projectId === projectId)?.name ?? 'Project',
+    () =>
+      projects.find(item => item.projectId === projectId)?.name ?? 'Project',
     [projectId, projects],
   );
   const currentProject = useMemo(
@@ -851,7 +988,9 @@ function App() {
   const worktreeActive = selectedDiffSource === 'worktree';
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
-  const isSelectedFilePinned = selectedFile ? pinnedFiles.includes(selectedFile) : false;
+  const isSelectedFilePinned = selectedFile
+    ? pinnedFiles.includes(selectedFile)
+    : false;
   const hasPinnedFiles = pinnedFiles.length > 0;
   const fileLines = useMemo(() => fileContent.split('\n'), [fileContent]);
   const fileSearchMatches = useMemo(() => {
@@ -866,21 +1005,19 @@ function App() {
     return matches;
   }, [fileContent, fileLines, fileSearchQuery]);
 
-  const applyHydratedProjectState = (
-    hydrated: {
-      projectId: string;
-      dirEntries: Record<string, RegistryFsEntry[]>;
-      expandedDirs: string[];
-      selectedFile: string;
-      pinnedFiles: string[];
-      gitCurrentBranch: string;
-      commits: RegistryGitCommit[];
-      selectedCommit: string;
-      commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
-      selectedDiff: string;
-      cachedDiffText: string;
-    },
-  ) => {
+  const applyHydratedProjectState = (hydrated: {
+    projectId: string;
+    dirEntries: Record<string, RegistryFsEntry[]>;
+    expandedDirs: string[];
+    selectedFile: string;
+    pinnedFiles: string[];
+    gitCurrentBranch: string;
+    commits: RegistryGitCommit[];
+    selectedCommit: string;
+    commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
+    selectedDiff: string;
+    cachedDiffText: string;
+  }) => {
     fileReadSeqRef.current += 1;
     fileHashRef.current = {};
     fileCacheRef.current = {};
@@ -909,7 +1046,11 @@ function App() {
 
   const togglePinSelectedFile = () => {
     if (!selectedFile) return;
-    setPinnedFiles(prev => prev.includes(selectedFile) ? prev.filter(path => path !== selectedFile) : [...prev, selectedFile]);
+    setPinnedFiles(prev =>
+      prev.includes(selectedFile)
+        ? prev.filter(path => path !== selectedFile)
+        : [...prev, selectedFile],
+    );
   };
 
   useEffect(() => {
@@ -930,34 +1071,56 @@ function App() {
     });
   }, [fileSearchMatches, fileSearchQuery, searchToolsOpen]);
 
-  useEffect(() => () => {
-    if (liveRefreshTimerRef.current !== null) {
-      window.clearTimeout(liveRefreshTimerRef.current);
-    }
-    if (reconnectTimerRef.current !== null) {
-      window.clearTimeout(reconnectTimerRef.current);
-    }
-  }, []);
+  useEffect(
+    () => () => {
+      if (liveRefreshTimerRef.current !== null) {
+        window.clearTimeout(liveRefreshTimerRef.current);
+      }
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const scrollToFileLine = (line: number) => {
     const container = fileScrollRef.current;
     if (!container) return;
-    const lineElement = container.querySelector(`.code-wrap [data-line-number="${line}"]`) as HTMLElement | null;
+    const lineElement = container.querySelector(
+      `.code-wrap [data-line-number="${line}"]`,
+    ) as HTMLElement | null;
     if (lineElement) {
       const containerRect = container.getBoundingClientRect();
       const lineRect = lineElement.getBoundingClientRect();
-      const delta = (lineRect.top - containerRect.top) - (container.clientHeight / 2) + (lineRect.height / 2);
-      container.scrollTo({top: container.scrollTop + delta, behavior: 'smooth'});
+      const delta =
+        lineRect.top -
+        containerRect.top -
+        container.clientHeight / 2 +
+        lineRect.height / 2;
+      container.scrollTo({
+        top: container.scrollTop + delta,
+        behavior: 'smooth',
+      });
     } else {
-      const codeElement = container.querySelector('.code-wrap pre code') as HTMLElement | null;
-      const lineHeight = codeElement ? Number.parseFloat(window.getComputedStyle(codeElement).lineHeight) || 20 : 20;
-      container.scrollTo({top: Math.max(0, (line - 1) * lineHeight), behavior: 'smooth'});
+      const codeElement = container.querySelector(
+        '.code-wrap pre code',
+      ) as HTMLElement | null;
+      const lineHeight = codeElement
+        ? Number.parseFloat(window.getComputedStyle(codeElement).lineHeight) ||
+          20
+        : 20;
+      container.scrollTo({
+        top: Math.max(0, (line - 1) * lineHeight),
+        behavior: 'smooth',
+      });
     }
   };
 
   const navigateSearchMatch = (delta: 1 | -1) => {
     if (fileSearchMatches.length === 0) return;
-    const next = (currentMatchIndex + delta + fileSearchMatches.length) % fileSearchMatches.length;
+    const next =
+      (currentMatchIndex + delta + fileSearchMatches.length) %
+      fileSearchMatches.length;
     setCurrentMatchIndex(next);
     scrollToFileLine(fileSearchMatches[next]);
   };
@@ -982,19 +1145,22 @@ function App() {
 
   const loadDirectory = async (path: string) => {
     if (loadingDirs[path]) return;
-    setLoadingDirs(prev => ({...prev, [path]: true}));
+    setLoadingDirs(prev => ({ ...prev, [path]: true }));
     try {
-      const result = await service.listDirectory(path, dirHashRef.current[path]);
+      const result = await service.listDirectory(
+        path,
+        dirHashRef.current[path],
+      );
       if (!result.notModified) {
         const entries = sortEntries(result.entries);
-        setDirEntries(prev => ({...prev, [path]: entries}));
+        setDirEntries(prev => ({ ...prev, [path]: entries }));
         if (result.hash) {
           dirHashRef.current[path] = result.hash;
         }
       }
     } finally {
       setLoadingDirs(prev => {
-        const next = {...prev};
+        const next = { ...prev };
         delete next[path];
         return next;
       });
@@ -1097,7 +1263,8 @@ function App() {
       if (!selectedDiff) {
         if (working[0]) {
           const preferredPath = pickPreferredPath(working);
-          const preferredFile = working.find(item => item.path === preferredPath) ?? working[0];
+          const preferredFile =
+            working.find(item => item.path === preferredPath) ?? working[0];
           setSelectedDiff(preferredFile.path);
           setSelectedDiffSource('worktree');
           setSelectedDiffScope(preferredFile.scope);
@@ -1141,13 +1308,15 @@ function App() {
       if (!selectedCommit) return;
       if (commitFilesBySha[selectedCommit]) return;
       const files = await service.listGitCommitFiles(selectedCommit);
-      setCommitFilesBySha(prev => ({...prev, [selectedCommit]: files}));
+      setCommitFilesBySha(prev => ({ ...prev, [selectedCommit]: files }));
       if (!selectedDiff && files[0]) {
         setSelectedDiff(pickPreferredPath(files));
         setSelectedDiffSource('commit');
       }
     };
-    run().catch(err => setGitError(err instanceof Error ? err.message : String(err)));
+    run().catch(err =>
+      setGitError(err instanceof Error ? err.message : String(err)),
+    );
   }, [selectedCommit, commitFilesBySha, selectedDiff]);
 
   useEffect(() => {
@@ -1157,20 +1326,38 @@ function App() {
         setDiffText('');
         return;
       }
-      const cacheScope = selectedDiffSource === 'worktree' ? `WORKTREE:${selectedDiffScope}` : selectedCommit;
+      const cacheScope =
+        selectedDiffSource === 'worktree'
+          ? `WORKTREE:${selectedDiffScope}`
+          : selectedCommit;
       if (!cacheScope) return;
-      const cachedDiff = workspaceStore.getCachedDiff(projectId, cacheScope, selectedDiff);
+      const cachedDiff = workspaceStore.getCachedDiff(
+        projectId,
+        cacheScope,
+        selectedDiff,
+      );
       if (cachedDiff !== null) {
         setDiffText(cachedDiff);
         return;
       }
       setDiffLoading(true);
       try {
-        const diff = selectedDiffSource === 'worktree'
-          ? await service.readWorkingTreeFileDiff(selectedDiff, selectedDiffScope)
-          : await service.readGitFileDiff(selectedCommit, selectedDiff);
+        const diff =
+          selectedDiffSource === 'worktree'
+            ? await service.readWorkingTreeFileDiff(
+                selectedDiff,
+                selectedDiffScope,
+              )
+            : await service.readGitFileDiff(selectedCommit, selectedDiff);
         setDiffText(diff.diff || '');
-        workspaceStore.cacheDiff(projectId, cacheScope, selectedDiff, diff.diff || '', !!diff.isBinary, !!diff.truncated);
+        workspaceStore.cacheDiff(
+          projectId,
+          cacheScope,
+          selectedDiff,
+          diff.diff || '',
+          !!diff.isBinary,
+          !!diff.truncated,
+        );
       } catch (err) {
         setGitError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -1178,7 +1365,14 @@ function App() {
       }
     };
     run().catch(() => undefined);
-  }, [projectId, selectedCommit, selectedDiff, selectedDiffSource, selectedDiffScope, allowHeavyDiffLoad]);
+  }, [
+    projectId,
+    selectedCommit,
+    selectedDiff,
+    selectedDiffSource,
+    selectedDiffScope,
+    allowHeavyDiffLoad,
+  ]);
 
   const clearReconnectTimer = () => {
     if (reconnectTimerRef.current !== null) {
@@ -1192,24 +1386,38 @@ function App() {
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       setAutoConnecting(true);
-      connect({silentReconnect: true}).catch(() => undefined);
+      connect({ silentReconnect: true }).catch(() => undefined);
     }, RECONNECT_RETRY_DELAY_MS);
   };
 
   const loadChatSession = async (
     sessionId: string,
     activeProjectId = projectIdRef.current,
-    options?: {incremental?: boolean; preserveUserSelection?: boolean; selectionSnapshot?: string},
+    options?: {
+      incremental?: boolean;
+      preserveUserSelection?: boolean;
+      selectionSnapshot?: string;
+    },
   ) => {
     if (!activeProjectId || !sessionId) return;
     setChatLoading(true);
     try {
-      const afterIndex = options?.incremental ? (chatSyncIndexRef.current[sessionId] ?? 0) : 0;
+      const afterIndex = options?.incremental
+        ? chatSyncIndexRef.current[sessionId] ?? 0
+        : 0;
       const result = await service.readSession(sessionId, afterIndex);
-      if (options?.preserveUserSelection && chatSelectedIdRef.current !== (options.selectionSnapshot ?? '') && chatSelectedIdRef.current !== sessionId) {
+      if (
+        options?.preserveUserSelection &&
+        chatSelectedIdRef.current !== (options.selectionSnapshot ?? '') &&
+        chatSelectedIdRef.current !== sessionId
+      ) {
         return;
       }
-      if (options?.incremental && afterIndex > 0 && result.lastIndex < afterIndex) {
+      if (
+        options?.incremental &&
+        afterIndex > 0 &&
+        result.lastIndex < afterIndex
+      ) {
         chatSyncIndexRef.current[sessionId] = 0;
         await loadChatSession(sessionId, activeProjectId, {
           incremental: false,
@@ -1218,11 +1426,20 @@ function App() {
         });
         return;
       }
-      if (options?.incremental && chatSelectedIdRef.current && chatSelectedIdRef.current !== sessionId) {
+      if (
+        options?.incremental &&
+        chatSelectedIdRef.current &&
+        chatSelectedIdRef.current !== sessionId
+      ) {
         return;
       }
       if (afterIndex > 0) {
-        setChatMessages(prev => result.messages.reduce((items, message) => upsertChatMessage(items, message), prev));
+        setChatMessages(prev =>
+          result.messages.reduce(
+            (items, message) => upsertChatMessage(items, message),
+            prev,
+          ),
+        );
       } else {
         setChatMessages(result.messages);
       }
@@ -1244,21 +1461,33 @@ function App() {
   const loadChatSessions = async (
     preferredSessionId = '',
     activeProjectId = projectIdRef.current,
-    options?: {incremental?: boolean; preserveUserSelection?: boolean},
+    options?: { incremental?: boolean; preserveUserSelection?: boolean },
   ) => {
     if (!activeProjectId) return;
     try {
       const selectionSnapshot = chatSelectedIdRef.current;
       const sessions = sortChatSessions(await service.listSessions());
       setChatSessions(sessions);
-      const preferredSelection = preferredSessionId && sessions.some(session => session.sessionId === preferredSessionId)
-        ? preferredSessionId
-        : '';
-      const currentSelection = chatSelectedIdRef.current && sessions.some(session => session.sessionId === chatSelectedIdRef.current)
-        ? chatSelectedIdRef.current
-        : '';
-      const fallbackSessionId = currentSelection || preferredSelection || sessions[0]?.sessionId || '';
-      const shouldIncrementallySync = Boolean(options?.incremental && fallbackSessionId && (fallbackSessionId === preferredSelection || fallbackSessionId === currentSelection));
+      const preferredSelection =
+        preferredSessionId &&
+        sessions.some(session => session.sessionId === preferredSessionId)
+          ? preferredSessionId
+          : '';
+      const currentSelection =
+        chatSelectedIdRef.current &&
+        sessions.some(
+          session => session.sessionId === chatSelectedIdRef.current,
+        )
+          ? chatSelectedIdRef.current
+          : '';
+      const fallbackSessionId =
+        currentSelection || preferredSelection || sessions[0]?.sessionId || '';
+      const shouldIncrementallySync = Boolean(
+        options?.incremental &&
+          fallbackSessionId &&
+          (fallbackSessionId === preferredSelection ||
+            fallbackSessionId === currentSelection),
+      );
       if (!fallbackSessionId) {
         setSelectedChatId('');
         setChatMessages([]);
@@ -1295,15 +1524,21 @@ function App() {
     if (!trimmedText && !chatAttachment) return;
     const blocks: RegistryChatContentBlock[] = [];
     if (trimmedText) {
-      blocks.push({type: 'text', text: trimmedText});
+      blocks.push({ type: 'text', text: trimmedText });
     }
     if (chatAttachment) {
-      blocks.push({type: 'image', mimeType: chatAttachment.mimeType, data: chatAttachment.data});
+      blocks.push({
+        type: 'image',
+        mimeType: chatAttachment.mimeType,
+        data: chatAttachment.data,
+      });
     }
 
     setChatSending(true);
     try {
-      const sessionId = selectedChatId || await createChatSession(trimmedText || chatAttachment?.name || '');
+      const sessionId =
+        selectedChatId ||
+        (await createChatSession(trimmedText || chatAttachment?.name || ''));
       if (!sessionId) {
         return;
       }
@@ -1315,13 +1550,15 @@ function App() {
       const nextSessionId = result.sessionId || sessionId;
       setSelectedChatId(nextSessionId);
       if (!chatSessions.find(item => item.sessionId === nextSessionId)) {
-        setChatSessions(prev => mergeChatSession(prev, {
-          sessionId: nextSessionId,
-          title: trimmedText || chatAttachment?.name || nextSessionId,
-          preview: trimmedText || chatAttachment?.name || '',
-          updatedAt: new Date().toISOString(),
-          messageCount: 0,
-        }));
+        setChatSessions(prev =>
+          mergeChatSession(prev, {
+            sessionId: nextSessionId,
+            title: trimmedText || chatAttachment?.name || nextSessionId,
+            preview: trimmedText || chatAttachment?.name || '',
+            updatedAt: new Date().toISOString(),
+            messageCount: 0,
+          }),
+        );
       }
       setChatComposerText('');
       setChatAttachment(null);
@@ -1335,7 +1572,10 @@ function App() {
     }
   };
 
-  const respondToChatPermission = async (message: RegistryChatMessage, optionId: string) => {
+  const respondToChatPermission = async (
+    message: RegistryChatMessage,
+    optionId: string,
+  ) => {
     if (!message.sessionId || !message.requestId) return;
     try {
       await service.respondToSessionPermission({
@@ -1346,7 +1586,7 @@ function App() {
       setChatMessages(prev =>
         prev.map(item =>
           item.messageId === message.messageId
-            ? {...item, status: 'done'}
+            ? { ...item, status: 'done' }
             : item,
         ),
       );
@@ -1355,7 +1595,9 @@ function App() {
     }
   };
 
-  const handleChatFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChatFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.target.files?.[0];
     if (!file) {
       setChatAttachment(null);
@@ -1363,11 +1605,15 @@ function App() {
     }
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-      reader.onerror = () => reject(reader.error ?? new Error('Failed to read image file'));
+      reader.onload = () =>
+        resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () =>
+        reject(reader.error ?? new Error('Failed to read image file'));
       reader.readAsDataURL(file);
     });
-    const base64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+    const base64 = dataUrl.includes(',')
+      ? dataUrl.slice(dataUrl.indexOf(',') + 1)
+      : dataUrl;
     setChatAttachment({
       name: file.name,
       mimeType: file.type || 'image/png',
@@ -1375,7 +1621,9 @@ function App() {
     });
   };
 
-  const connect = async ({silentReconnect = false}: {silentReconnect?: boolean} = {}) => {
+  const connect = async ({
+    silentReconnect = false,
+  }: { silentReconnect?: boolean } = {}) => {
     if (connectInFlightRef.current) {
       return;
     }
@@ -1397,11 +1645,18 @@ function App() {
       fileHashRef.current = {};
       fileCacheRef.current = {};
       applyHydratedProjectState(result.hydrated);
-      const selectedFileToReload = result.hydrated.selectedFile || selectedFileRef.current;
+      const selectedFileToReload =
+        result.hydrated.selectedFile || selectedFileRef.current;
       if (selectedFileToReload) {
         readSelectedFile(selectedFileToReload).catch(() => undefined);
       }
-      setGitDirty(Boolean(result.projects.find(item => item.projectId === result.hydrated.projectId)?.git?.dirty));
+      setGitDirty(
+        Boolean(
+          result.projects.find(
+            item => item.projectId === result.hydrated.projectId,
+          )?.git?.dirty,
+        ),
+      );
       reconnectStartedAtRef.current = null;
       setReconnecting(false);
       setConnected(true);
@@ -1412,15 +1667,25 @@ function App() {
         chatSelectedIdRef.current = '';
         chatSyncIndexRef.current = {};
       }
-      await loadChatSessions(previousSelectedChatId, result.hydrated.projectId, {
-        incremental: silentReconnect && !!previousSelectedChatId,
-        preserveUserSelection: silentReconnect,
-      });
-      workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
-        if (projectIdRef.current !== result.hydrated.projectId) return;
-        setDirEntries(validated.dirEntries);
-        setExpandedDirs(validated.expandedDirs);
-      }).catch(() => undefined);
+      await loadChatSessions(
+        previousSelectedChatId,
+        result.hydrated.projectId,
+        {
+          incremental: silentReconnect && !!previousSelectedChatId,
+          preserveUserSelection: silentReconnect,
+        },
+      );
+      workspaceController
+        .validateExpandedDirectories(
+          result.rootEntries,
+          result.hydrated.expandedDirs,
+        )
+        .then(validated => {
+          if (projectIdRef.current !== result.hydrated.projectId) return;
+          setDirEntries(validated.dirEntries);
+          setExpandedDirs(validated.expandedDirs);
+        })
+        .catch(() => undefined);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (silentReconnect) {
@@ -1435,7 +1700,11 @@ function App() {
         }
         reconnectStartedAtRef.current = null;
         setReconnecting(false);
-        setError(`Registry reconnect failed for ${Math.floor(RECONNECT_GRACE_PERIOD_MS / 1000)}s. Please reconnect manually.`);
+        setError(
+          `Registry reconnect failed for ${Math.floor(
+            RECONNECT_GRACE_PERIOD_MS / 1000,
+          )}s. Please reconnect manually.`,
+        );
         return;
       }
       setError(message);
@@ -1445,7 +1714,9 @@ function App() {
     }
   };
 
-  const disconnectForSupervisor = (reason: 'background' | 'offline' | 'stop') => {
+  const disconnectForSupervisor = (
+    reason: 'background' | 'offline' | 'stop',
+  ) => {
     supervisorManagedCloseRef.current = true;
     clearReconnectTimer();
     reconnectStartedAtRef.current = null;
@@ -1458,14 +1729,58 @@ function App() {
     service.close();
   };
 
+  const maybeNotifyChatMessage = (
+    message: RegistryChatMessage,
+    session?: RegistryChatSession,
+  ) => {
+    if (!message?.messageId || message.role === 'user') {
+      return;
+    }
+    if (notifiedChatMessageIdsRef.current.has(message.messageId)) {
+      return;
+    }
+    const isVisible =
+      typeof document !== 'undefined' && document.visibilityState === 'visible';
+    if (isVisible && message.sessionId === chatSelectedIdRef.current) {
+      return;
+    }
+
+    const text = (message.text || '').trim();
+    const body = text
+      ? text.length > 120
+        ? `${text.slice(0, 120)}...`
+        : text
+      : message.kind === 'permission'
+      ? 'New permission request'
+      : 'New chat message';
+
+    notifiedChatMessageIdsRef.current.add(message.messageId);
+    if (notifiedChatMessageIdsRef.current.size > 500) {
+      const first = notifiedChatMessageIdsRef.current.values().next().value;
+      if (first) {
+        notifiedChatMessageIdsRef.current.delete(first);
+      }
+    }
+
+    const title = session?.title?.trim()
+      ? `Chat: ${session.title}`
+      : 'WheelMaker Chat';
+    pwaFoundation.pushDemo
+      .showLocalNotification({ title, body, url: '/' })
+      .catch(() => undefined);
+  };
+
   useEffect(() => {
     const supervisor = pwaFoundation.createConnectionSupervisor({
       connect: async () => {
-        const canSilentReconnect = !!tokenRef.current.trim() && !!addressRef.current.trim() && !!projectIdRef.current;
+        const canSilentReconnect =
+          !!tokenRef.current.trim() &&
+          !!addressRef.current.trim() &&
+          !!projectIdRef.current;
         if (!canSilentReconnect) {
           return;
         }
-        await connect({silentReconnect: true});
+        await connect({ silentReconnect: true });
       },
       disconnect: reason => {
         disconnectForSupervisor(reason);
@@ -1489,7 +1804,9 @@ function App() {
   }, [address, autoConnecting, connected]);
 
   const clearLocalCache = () => {
-    const confirmed = window.confirm('Clear all local cache data except token?');
+    const confirmed = window.confirm(
+      'Clear all local cache data except token?',
+    );
     if (!confirmed) return;
     workspaceStore.clearLocalCachePreservingToken();
     window.location.reload();
@@ -1507,11 +1824,17 @@ function App() {
       chatSelectedIdRef.current = '';
       chatSyncIndexRef.current = {};
       await loadChatSessions('', result.hydrated.projectId);
-      workspaceController.validateExpandedDirectories(result.rootEntries, result.hydrated.expandedDirs).then(validated => {
-        if (projectIdRef.current !== result.hydrated.projectId) return;
-        setDirEntries(validated.dirEntries);
-        setExpandedDirs(validated.expandedDirs);
-      }).catch(() => undefined);
+      workspaceController
+        .validateExpandedDirectories(
+          result.rootEntries,
+          result.hydrated.expandedDirs,
+        )
+        .then(validated => {
+          if (projectIdRef.current !== result.hydrated.projectId) return;
+          setDirEntries(validated.dirEntries);
+          setExpandedDirs(validated.expandedDirs);
+        })
+        .catch(() => undefined);
     } finally {
       setLoadingProject(false);
     }
@@ -1532,8 +1855,14 @@ function App() {
       if (sync.staleDomains.includes('project') || !latestProject) {
         setProjects(await service.listProjects());
       }
-      if (sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
-        const validated = await workspaceController.refreshProject(projectId, [...latestExpandedDirs]);
+      if (
+        sync.staleDomains.some(
+          domain => domain === 'fs' || domain === 'project',
+        )
+      ) {
+        const validated = await workspaceController.refreshProject(projectId, [
+          ...latestExpandedDirs,
+        ]);
         setDirEntries(validated.dirEntries);
         setExpandedDirs(validated.expandedDirs);
         dirHashRef.current = {};
@@ -1547,10 +1876,20 @@ function App() {
           }
         }
       }
-      if (latestSelectedFile && sync.staleDomains.some(domain => domain === 'fs' || domain === 'project')) {
+      if (
+        latestSelectedFile &&
+        sync.staleDomains.some(
+          domain => domain === 'fs' || domain === 'project',
+        )
+      ) {
         await readSelectedFile(latestSelectedFile);
       }
-      if (sync.staleDomains.some(domain => domain === 'git' || domain === 'worktree' || domain === 'project')) {
+      if (
+        sync.staleDomains.some(
+          domain =>
+            domain === 'git' || domain === 'worktree' || domain === 'project',
+        )
+      ) {
         await loadGit();
       }
     } finally {
@@ -1571,10 +1910,15 @@ function App() {
 
     const unsubscribeEvent = service.onEvent(event => {
       const eventProjectId = event.projectId ?? '';
-      if (event.method === 'project.online' || event.method === 'project.offline') {
+      if (
+        event.method === 'project.online' ||
+        event.method === 'project.offline'
+      ) {
         setProjects(prev =>
           prev.map(item =>
-            item.projectId === eventProjectId ? {...item, online: event.method === 'project.online'} : item,
+            item.projectId === eventProjectId
+              ? { ...item, online: event.method === 'project.online' }
+              : item,
           ),
         );
       }
@@ -1582,7 +1926,9 @@ function App() {
         if (eventProjectId && eventProjectId !== projectIdRef.current) {
           return;
         }
-        const payload = (event.payload ?? {}) as {session?: RegistryChatSession};
+        const payload = (event.payload ?? {}) as {
+          session?: RegistryChatSession;
+        };
         if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session!));
         }
@@ -1592,9 +1938,13 @@ function App() {
         if (eventProjectId && eventProjectId !== projectIdRef.current) {
           return;
         }
-        const payload = (event.payload ?? {}) as RegistryChatMessageEventPayload;
+        const payload = (event.payload ??
+          {}) as RegistryChatMessageEventPayload;
         if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session));
+        }
+        if (payload.message?.messageId) {
+          maybeNotifyChatMessage(payload.message, payload.session);
         }
         if (payload.message?.sessionId) {
           chatSyncIndexRef.current[payload.message.sessionId] = Math.max(
@@ -1602,14 +1952,21 @@ function App() {
             payload.message.syncIndex ?? 0,
           );
         }
-        if (payload.message?.sessionId && payload.message.sessionId === chatSelectedIdRef.current) {
+        if (
+          payload.message?.sessionId &&
+          payload.message.sessionId === chatSelectedIdRef.current
+        ) {
           setChatMessages(prev => upsertChatMessage(prev, payload.message));
-          service.markSessionRead(payload.message.sessionId).catch(() => undefined);
+          service
+            .markSessionRead(payload.message.sessionId)
+            .catch(() => undefined);
         }
         if (!chatSelectedIdRef.current && payload.session?.sessionId) {
           setSelectedChatId(payload.session.sessionId);
           setChatMessages(prev => upsertChatMessage(prev, payload.message));
-          service.markSessionRead(payload.session.sessionId).catch(() => undefined);
+          service
+            .markSessionRead(payload.session.sessionId)
+            .catch(() => undefined);
         }
         return;
       }
@@ -1617,10 +1974,16 @@ function App() {
         return;
       }
       if (event.method === 'git.workspace.changed') {
-        const payload = (event.payload ?? {}) as RegistryGitWorkspaceChangedPayload;
-        const gitRevChanged = !!payload.gitRev && payload.gitRev !== knownGitRevRef.current;
+        const payload = (event.payload ??
+          {}) as RegistryGitWorkspaceChangedPayload;
+        const gitRevChanged =
+          !!payload.gitRev && payload.gitRev !== knownGitRevRef.current;
         if (payload.gitRev) knownGitRevRef.current = payload.gitRev;
-        if (!gitRevChanged && payload.worktreeRev && payload.worktreeRev === knownWorktreeRevRef.current) {
+        if (
+          !gitRevChanged &&
+          payload.worktreeRev &&
+          payload.worktreeRev === knownWorktreeRevRef.current
+        ) {
           return;
         }
         if (gitRevChanged) {
@@ -1652,7 +2015,11 @@ function App() {
           refreshGitStatusOnly().catch(() => undefined);
           return;
         }
-        if (changedDomains.length > 0 && !changedDomains.includes('project') && !changedDomains.includes('fs')) {
+        if (
+          changedDomains.length > 0 &&
+          !changedDomains.includes('project') &&
+          !changedDomains.includes('fs')
+        ) {
           return;
         }
       }
@@ -1671,11 +2038,14 @@ function App() {
         supervisorManagedCloseRef.current = false;
         return;
       }
-      const canSilentReconnect = !!tokenRef.current.trim() && !!projectIdRef.current;
+      const canSilentReconnect =
+        !!tokenRef.current.trim() && !!projectIdRef.current;
       if (!canSilentReconnect) {
         reconnectStartedAtRef.current = null;
         setReconnecting(false);
-        setError('Registry connection closed. Reconnect to resume live updates.');
+        setError(
+          'Registry connection closed. Reconnect to resume live updates.',
+        );
         return;
       }
       if (reconnectStartedAtRef.current === null) {
@@ -1700,14 +2070,25 @@ function App() {
           <div key={entry.path}>
             <div
               className="item"
-              style={{paddingLeft: 10 + depth * 14}}
+              style={{ paddingLeft: 10 + depth * 14 }}
               onClick={() => {
                 toggleDirectory(entry.path);
-              }}>
-              <span className={`caret codicon ${expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} />
-              <span className={`node-icon codicon ${expanded ? 'codicon-folder-opened' : 'codicon-folder'}`} />
+              }}
+            >
+              <span
+                className={`caret codicon ${
+                  expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'
+                }`}
+              />
+              <span
+                className={`node-icon codicon ${
+                  expanded ? 'codicon-folder-opened' : 'codicon-folder'
+                }`}
+              />
               <span className="label">{entry.name}</span>
-              {loadingDirs[entry.path] ? <span className="muted">...</span> : null}
+              {loadingDirs[entry.path] ? (
+                <span className="muted">...</span>
+              ) : null}
             </div>
             {expanded ? renderFileTree(entry.path, depth + 1) : null}
           </div>
@@ -1719,15 +2100,16 @@ function App() {
         <div
           key={entry.path}
           className={`item ${selectedFile === entry.path ? 'selected' : ''}`}
-          style={{paddingLeft: 10 + depth * 14}}
+          style={{ paddingLeft: 10 + depth * 14 }}
           onClick={() => {
             setSelectedFile(entry.path);
             if (!isWide) setDrawerOpen(false);
-          }}>
+          }}
+        >
           <span className="caret placeholder" aria-hidden="true" />
           <span
             className="node-icon seti-icon"
-            style={{color: fileIcon.color}}
+            style={{ color: fileIcon.color }}
           >
             <span className="seti-glyph">{fileIcon.glyph}</span>
           </span>
@@ -1743,11 +2125,13 @@ function App() {
         <>
           <div className="section-title">CHAT SESSIONS</div>
           <div className="list">
-            {chatSessions.length === 0 ? <div className="muted block">No chat sessions yet</div> : null}
+            {chatSessions.length === 0 ? (
+              <div className="muted block">No chat sessions yet</div>
+            ) : null}
             <button
               type="button"
               className="button"
-              style={{marginBottom: 10}}
+              style={{ marginBottom: 10 }}
               onClick={() => {
                 createChatSession().catch(() => undefined);
                 if (!isWide) setDrawerOpen(false);
@@ -1758,17 +2142,25 @@ function App() {
             {chatSessions.map(session => (
               <div
                 key={session.sessionId}
-                className={`item ${selectedChatId === session.sessionId ? 'selected' : ''}`}
+                className={`item ${
+                  selectedChatId === session.sessionId ? 'selected' : ''
+                }`}
                 onClick={() => {
                   chatSelectedIdRef.current = session.sessionId;
                   setSelectedChatId(session.sessionId);
                   loadChatSession(session.sessionId).catch(() => undefined);
                   if (!isWide) setDrawerOpen(false);
-                }}>
+                }}
+              >
                 <span className="file-dot codicon codicon-comment-discussion" />
-                <span className="label" style={{display: 'flex', flexDirection: 'column', gap: 2}}>
+                <span
+                  className="label"
+                  style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+                >
                   <span>{session.title || session.sessionId}</span>
-                  <span className="muted" style={{fontSize: 11}}>{session.preview || 'No messages yet'}</span>
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    {session.preview || 'No messages yet'}
+                  </span>
                 </span>
               </div>
             ))}
@@ -1788,9 +2180,13 @@ function App() {
 
     return (
       <>
-        <div className="section-title">COMMITS {gitCurrentBranch ? `(${gitCurrentBranch})` : ''}</div>
+        <div className="section-title">
+          COMMITS {gitCurrentBranch ? `(${gitCurrentBranch})` : ''}
+        </div>
         <div className="list half">
-          {gitLoading ? <div className="muted block">Loading commits...</div> : null}
+          {gitLoading ? (
+            <div className="muted block">Loading commits...</div>
+          ) : null}
           {gitError ? <div className="error block">{gitError}</div> : null}
           {workingTreeFiles.length > 0 ? (
             <div
@@ -1799,12 +2195,16 @@ function App() {
                 setSelectedDiffSource('worktree');
                 if (workingTreeFiles[0]) {
                   const preferredPath = pickPreferredPath(workingTreeFiles);
-                  const preferredFile = workingTreeFiles.find(item => item.path === preferredPath) ?? workingTreeFiles[0];
+                  const preferredFile =
+                    workingTreeFiles.find(
+                      item => item.path === preferredPath,
+                    ) ?? workingTreeFiles[0];
                   setSelectedDiff(preferredFile.path);
                   setSelectedDiffScope(preferredFile.scope);
                 }
                 if (!isWide) setDrawerOpen(false);
-              }}>
+              }}
+            >
               <span className="file-dot codicon codicon-source-control" />
               <span className="label">Working Tree</span>
             </div>
@@ -1812,7 +2212,11 @@ function App() {
           {commits.map(commit => (
             <div
               key={commit.sha}
-              className={`item ${!worktreeActive && selectedCommit === commit.sha ? 'selected' : ''}`}
+              className={`item ${
+                !worktreeActive && selectedCommit === commit.sha
+                  ? 'selected'
+                  : ''
+              }`}
               onClick={() => {
                 setSelectedCommit(commit.sha);
                 setSelectedDiffSource('commit');
@@ -1824,9 +2228,12 @@ function App() {
                 }
                 setSelectedDiffScope('unstaged');
                 if (!isWide) setDrawerOpen(false);
-              }}>
+              }}
+            >
               <span className="file-dot codicon codicon-git-commit" />
-              <span className="label">{commit.title || commit.sha.slice(0, 7)}</span>
+              <span className="label">
+                {commit.title || commit.sha.slice(0, 7)}
+              </span>
             </div>
           ))}
         </div>
@@ -1839,15 +2246,25 @@ function App() {
               workingTreeFiles.map(file => (
                 <div
                   key={`${WORKING_TREE_COMMIT_ID}:${file.scope}:${file.path}`}
-                  className={`item ${selectedDiff === file.path && selectedDiffScope === file.scope ? 'selected' : ''}`}
+                  className={`item ${
+                    selectedDiff === file.path &&
+                    selectedDiffScope === file.scope
+                      ? 'selected'
+                      : ''
+                  }`}
                   onClick={() => {
                     setSelectedDiff(file.path);
                     setSelectedDiffSource('worktree');
                     setSelectedDiffScope(file.scope);
                     if (!isWide) setDrawerOpen(false);
-                  }}>
-                  <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
-                  <span className="muted" style={{marginRight: 6}}>{file.scope}</span>
+                  }}
+                >
+                  <span className={`status-tag status-git-${file.status}`}>
+                    {file.status}
+                  </span>
+                  <span className="muted" style={{ marginRight: 6 }}>
+                    {file.scope}
+                  </span>
                   <span className="label">{file.path}</span>
                 </div>
               ))
@@ -1856,13 +2273,20 @@ function App() {
             currentCommitFiles.map(file => (
               <div
                 key={file.path}
-                className={`item ${selectedDiffSource === 'commit' && selectedDiff === file.path ? 'selected' : ''}`}
+                className={`item ${
+                  selectedDiffSource === 'commit' && selectedDiff === file.path
+                    ? 'selected'
+                    : ''
+                }`}
                 onClick={() => {
                   setSelectedDiff(file.path);
                   setSelectedDiffSource('commit');
                   if (!isWide) setDrawerOpen(false);
-                }}>
-                <span className={`status-tag status-git-${file.status}`}>{file.status}</span>
+                }}
+              >
+                <span className={`status-tag status-git-${file.status}`}>
+                  {file.status}
+                </span>
                 <span className="label">{file.path}</span>
               </div>
             ))
@@ -1881,7 +2305,13 @@ function App() {
             <div className="list">
               <label className="switch-row sidebar-setting-row">
                 <span>Dark Mode</span>
-                <input type="checkbox" checked={themeMode === 'dark'} onChange={e => setThemeMode(e.target.checked ? 'dark' : 'light')} />
+                <input
+                  type="checkbox"
+                  checked={themeMode === 'dark'}
+                  onChange={e =>
+                    setThemeMode(e.target.checked ? 'dark' : 'light')
+                  }
+                />
               </label>
               <label className="switch-row sidebar-setting-row">
                 <span>Code Theme</span>
@@ -1891,12 +2321,20 @@ function App() {
                   onChange={event => {
                     const next = event.target.value;
                     if (isCodeThemeId(next)) setCodeTheme(next);
-                  }}>
-                  <option key={CODE_THEME_OPTIONS[0].id} value={CODE_THEME_OPTIONS[0].id}>{CODE_THEME_OPTIONS[0].label}</option>
+                  }}
+                >
+                  <option
+                    key={CODE_THEME_OPTIONS[0].id}
+                    value={CODE_THEME_OPTIONS[0].id}
+                  >
+                    {CODE_THEME_OPTIONS[0].label}
+                  </option>
                   {CODE_THEME_OPTION_GROUPS.map(group => (
                     <optgroup key={group.label} label={group.label}>
                       {group.options.map(item => (
-                        <option key={item.id} value={item.id}>{item.label}</option>
+                        <option key={item.id} value={item.id}>
+                          {item.label}
+                        </option>
                       ))}
                     </optgroup>
                   ))}
@@ -1910,9 +2348,12 @@ function App() {
                   onChange={event => {
                     const next = event.target.value;
                     if (isCodeFontId(next)) setCodeFont(next);
-                  }}>
+                  }}
+                >
                   {CODE_FONT_OPTIONS.map(item => (
-                    <option key={item.id} value={item.id}>{item.label}</option>
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -1922,10 +2363,15 @@ function App() {
                   className="sidebar-setting-select"
                   value={String(codeFontSize)}
                   onChange={event => {
-                    setCodeFontSize(clampCodeFontSize(Number(event.target.value)));
-                  }}>
+                    setCodeFontSize(
+                      clampCodeFontSize(Number(event.target.value)),
+                    );
+                  }}
+                >
                   {CODE_FONT_SIZE_OPTIONS.map(size => (
-                    <option key={size} value={size}>{size}px</option>
+                    <option key={size} value={size}>
+                      {size}px
+                    </option>
                   ))}
                 </select>
               </label>
@@ -1935,10 +2381,15 @@ function App() {
                   className="sidebar-setting-select"
                   value={String(codeLineHeight)}
                   onChange={event => {
-                    setCodeLineHeight(clampCodeLineHeight(Number(event.target.value)));
-                  }}>
+                    setCodeLineHeight(
+                      clampCodeLineHeight(Number(event.target.value)),
+                    );
+                  }}
+                >
                   {CODE_LINE_HEIGHT_OPTIONS.map(v => (
-                    <option key={v} value={v}>{v}</option>
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -1948,10 +2399,15 @@ function App() {
                   className="sidebar-setting-select"
                   value={String(codeTabSize)}
                   onChange={event => {
-                    setCodeTabSize(clampCodeTabSize(Number(event.target.value)));
-                  }}>
+                    setCodeTabSize(
+                      clampCodeTabSize(Number(event.target.value)),
+                    );
+                  }}
+                >
                   {CODE_TAB_SIZE_OPTIONS.map(v => (
-                    <option key={v} value={v}>{v}</option>
+                    <option key={v} value={v}>
+                      {v}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -1959,27 +2415,41 @@ function App() {
               <button
                 type="button"
                 className="sidebar-clear-cache-btn"
-                onClick={clearLocalCache}>
+                onClick={clearLocalCache}
+              >
                 Clear Local Cache (Keep Token)
               </button>
             </div>
           </>
-        ) : renderSidebarMain()}
+        ) : (
+          renderSidebarMain()
+        )}
       </div>
       <div className="sidebar-footer">
         <button
           type="button"
           className="sidebar-settings-btn"
           onClick={() => setSidebarSettingsOpen(value => !value)}
-          title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}>
-          <span className={`codicon ${sidebarSettingsOpen ? 'codicon-arrow-left' : 'codicon-settings-gear'}`} />
+          title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
+        >
+          <span
+            className={`codicon ${
+              sidebarSettingsOpen
+                ? 'codicon-arrow-left'
+                : 'codicon-settings-gear'
+            }`}
+          />
           <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
         </button>
       </div>
     </>
   );
 
-  const renderCodePane = (content: string, forceLineNumbers = false, languageHint = '') => {
+  const renderCodePane = (
+    content: string,
+    forceLineNumbers = false,
+    languageHint = '',
+  ) => {
     const numbersOn = forceLineNumbers || showLineNumbers;
     const language = languageHint || detectCodeLanguage(selectedFile);
     return (
@@ -2005,7 +2475,8 @@ function App() {
         className={`view-tool ${wrapLines ? 'active' : ''}`}
         onClick={() => setWrapLines(value => !value)}
         title="Toggle wrap line"
-        aria-label="Toggle wrap line">
+        aria-label="Toggle wrap line"
+      >
         <span className="codicon codicon-word-wrap view-tool-icon" />
       </button>
       <button
@@ -2013,7 +2484,8 @@ function App() {
         className={`view-tool ${showLineNumbers ? 'active' : ''}`}
         onClick={() => setShowLineNumbers(value => !value)}
         title="Toggle line number"
-        aria-label="Toggle line number">
+        aria-label="Toggle line number"
+      >
         <span className="codicon codicon-list-ordered view-tool-icon" />
       </button>
     </>
@@ -2028,9 +2500,16 @@ function App() {
     if (shouldDelayLargeRender) {
       return (
         <div className="muted block">
-          Large generated diff detected ({(content.length / 1024).toFixed(0)} KB). Click to render when needed.
-          <div style={{marginTop: 10}}>
-            <button type="button" className="button" onClick={() => setAllowLargeDiffRender(true)}>Render Diff</button>
+          Large generated diff detected ({(content.length / 1024).toFixed(0)}{' '}
+          KB). Click to render when needed.
+          <div style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="button"
+              onClick={() => setAllowLargeDiffRender(true)}
+            >
+              Render Diff
+            </button>
           </div>
         </div>
       );
@@ -2056,23 +2535,41 @@ function App() {
 
   const renderChatMessage = (message: RegistryChatMessage) => {
     if (message.kind === 'thought') {
-      return <ThinkingBlock content={message.text} isStreaming={message.status === 'streaming'} />;
+      return (
+        <ThinkingBlock
+          content={message.text}
+          isStreaming={message.status === 'streaming'}
+        />
+      );
     }
     return (
-      <div className={`chat-message ${message.role} ${message.status === 'streaming' ? 'streaming' : ''}`}>
+      <div
+        className={`chat-message ${message.role} ${
+          message.status === 'streaming' ? 'streaming' : ''
+        }`}
+      >
         <div className="chat-message-meta">
           <span className="chat-message-role">{message.role}</span>
-          <span className="chat-message-time">{formatChatTimestamp(message.updatedAt || message.createdAt)}</span>
+          <span className="chat-message-time">
+            {formatChatTimestamp(message.updatedAt || message.createdAt)}
+          </span>
         </div>
         <div className="chat-message-body">{message.text}</div>
-        {message.kind === 'permission' && message.status === 'needs_action' && message.options && message.options.length > 0 ? (
+        {message.kind === 'permission' &&
+        message.status === 'needs_action' &&
+        message.options &&
+        message.options.length > 0 ? (
           <div className="chat-permission-actions">
             {message.options.map(option => (
               <button
                 key={`${message.messageId}:${option.optionId}`}
                 type="button"
                 className="chat-permission-button"
-                onClick={() => respondToChatPermission(message, option.optionId).catch(() => undefined)}
+                onClick={() =>
+                  respondToChatPermission(message, option.optionId).catch(
+                    () => undefined,
+                  )
+                }
               >
                 {option.name || option.optionId}
               </button>
@@ -2087,7 +2584,9 @@ function App() {
                 <img
                   key={`${message.messageId}:${index}`}
                   className="chat-inline-image"
-                  src={`data:${block.mimeType || 'image/png'};base64,${block.data}`}
+                  src={`data:${block.mimeType || 'image/png'};base64,${
+                    block.data
+                  }`}
                   alt="chat attachment"
                 />
               ))}
@@ -2098,19 +2597,30 @@ function App() {
   };
 
   const renderMain = () => {
-    const heavyDiffDeferred = !!selectedDiff && isHeavyGeneratedDiffPath(selectedDiff) && !allowHeavyDiffLoad;
-    const selectedChatSession = chatSessions.find(item => item.sessionId === selectedChatId);
+    const heavyDiffDeferred =
+      !!selectedDiff &&
+      isHeavyGeneratedDiffPath(selectedDiff) &&
+      !allowHeavyDiffLoad;
+    const selectedChatSession = chatSessions.find(
+      item => item.sessionId === selectedChatId,
+    );
 
     if (tab === 'chat') {
       return (
         <div className="content">
-          <div className="block-title">CHAT - {selectedChatSession?.title || 'New Session'}</div>
+          <div className="block-title">
+            CHAT - {selectedChatSession?.title || 'New Session'}
+          </div>
           <div className="scroll-panel chat-block">
-            {chatLoading ? <div className="muted block">Loading chat...</div> : null}
+            {chatLoading ? (
+              <div className="muted block">Loading chat...</div>
+            ) : null}
             {!chatLoading && chatMessages.length === 0 ? (
               <div className="empty-card">
                 <div className="empty-title">Start chatting</div>
-                <div className="empty-subtitle">Messages stream here for the current project.</div>
+                <div className="empty-subtitle">
+                  Messages stream here for the current project.
+                </div>
               </div>
             ) : null}
             {chatMessages.map(message => (
@@ -2122,12 +2632,16 @@ function App() {
               ref={chatFileInputRef}
               type="file"
               accept="image/*"
-              style={{display: 'none'}}
+              style={{ display: 'none' }}
               onChange={event => {
-                handleChatFileChange(event).catch(err => setError(err instanceof Error ? err.message : String(err)));
+                handleChatFileChange(event).catch(err =>
+                  setError(err instanceof Error ? err.message : String(err)),
+                );
               }}
             />
-            {chatAttachment ? <div className="chat-attachment-pill">{chatAttachment.name}</div> : null}
+            {chatAttachment ? (
+              <div className="chat-attachment-pill">{chatAttachment.name}</div>
+            ) : null}
             <textarea
               className="chat-composer-input"
               value={chatComposerText}
@@ -2141,10 +2655,18 @@ function App() {
               placeholder="Send a message..."
             />
             <div className="chat-composer-actions">
-              <button type="button" className="chat-action-button" onClick={() => chatFileInputRef.current?.click()}>
+              <button
+                type="button"
+                className="chat-action-button"
+                onClick={() => chatFileInputRef.current?.click()}
+              >
                 <span className="codicon codicon-device-camera" />
               </button>
-              <button type="button" className="button chat-send-button" onClick={() => sendChatMessage().catch(() => undefined)}>
+              <button
+                type="button"
+                className="button chat-send-button"
+                onClick={() => sendChatMessage().catch(() => undefined)}
+              >
                 {chatSending ? 'Sending...' : 'Send'}
               </button>
             </div>
@@ -2157,7 +2679,9 @@ function App() {
       return (
         <div className="content">
           <div className="block-title with-tools file-title-bar">
-            <span className="title-text">{selectedFile || 'Select a file'}</span>
+            <span className="title-text">
+              {selectedFile || 'Select a file'}
+            </span>
             <div className="view-tools">{renderViewTools()}</div>
           </div>
           <div className="file-pane">
@@ -2166,15 +2690,30 @@ function App() {
                 <div className="pinned-strip">
                   <span className="pinned-label">Pinned</span>
                   {pinnedFiles.map(path => (
-                    <div key={path} className={`pinned-entry ${selectedFile === path ? 'active' : ''}`}>
-                      <button type="button" className="pinned-open" onClick={() => setSelectedFile(path)} title={path}>
+                    <div
+                      key={path}
+                      className={`pinned-entry ${
+                        selectedFile === path ? 'active' : ''
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        className="pinned-open"
+                        onClick={() => setSelectedFile(path)}
+                        title={path}
+                      >
                         {path.split('/').pop() || path}
                       </button>
                       <button
                         type="button"
                         className="pinned-close"
-                        onClick={() => setPinnedFiles(prev => prev.filter(item => item !== path))}
-                      aria-label={`Unpin ${path}`}>
+                        onClick={() =>
+                          setPinnedFiles(prev =>
+                            prev.filter(item => item !== path),
+                          )
+                        }
+                        aria-label={`Unpin ${path}`}
+                      >
                         x
                       </button>
                     </div>
@@ -2185,11 +2724,22 @@ function App() {
                 <div ref={fileSideActionsRef} className="file-side-actions">
                   <button
                     type="button"
-                    className={`pinned-pin-toggle file-pin-floating ${isSelectedFilePinned ? 'active' : ''}`}
+                    className={`pinned-pin-toggle file-pin-floating ${
+                      isSelectedFilePinned ? 'active' : ''
+                    }`}
                     onClick={togglePinSelectedFile}
                     disabled={!selectedFile}
-                    title={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}
-                    aria-label={isSelectedFilePinned ? 'Unpin current file' : 'Pin current file'}>
+                    title={
+                      isSelectedFilePinned
+                        ? 'Unpin current file'
+                        : 'Pin current file'
+                    }
+                    aria-label={
+                      isSelectedFilePinned
+                        ? 'Unpin current file'
+                        : 'Pin current file'
+                    }
+                  >
                     <span className="codicon codicon-pinned view-tool-icon" />
                   </button>
                   <div className="file-action-group side-action-group">
@@ -2204,10 +2754,15 @@ function App() {
                         });
                       }}
                       title="Toggle go to line"
-                      aria-label="Toggle go to line">
+                      aria-label="Toggle go to line"
+                    >
                       <span className="codicon codicon-symbol-number view-tool-icon" />
                     </button>
-                    <div className={`file-action-panel side-action-panel ${gotoToolsOpen ? 'open' : ''}`}>
+                    <div
+                      className={`file-action-panel side-action-panel ${
+                        gotoToolsOpen ? 'open' : ''
+                      }`}
+                    >
                       <input
                         className="goto-input"
                         value={gotoLineInput}
@@ -2221,7 +2776,12 @@ function App() {
                         inputMode="numeric"
                         placeholder="Line"
                       />
-                      <button type="button" className="view-tool goto-trigger" title="Go to line" onClick={triggerGoToLine}>
+                      <button
+                        type="button"
+                        className="view-tool goto-trigger"
+                        title="Go to line"
+                        onClick={triggerGoToLine}
+                      >
                         <span className="codicon codicon-arrow-right view-tool-icon" />
                       </button>
                     </div>
@@ -2238,14 +2798,21 @@ function App() {
                         });
                       }}
                       title="Toggle search"
-                      aria-label="Toggle search">
+                      aria-label="Toggle search"
+                    >
                       <span className="codicon codicon-search view-tool-icon" />
                     </button>
-                    <div className={`file-action-panel side-action-panel ${searchToolsOpen ? 'open' : ''}`}>
+                    <div
+                      className={`file-action-panel side-action-panel ${
+                        searchToolsOpen ? 'open' : ''
+                      }`}
+                    >
                       <input
                         className="search-input"
                         value={fileSearchQuery}
-                        onChange={event => setFileSearchQuery(event.target.value)}
+                        onChange={event =>
+                          setFileSearchQuery(event.target.value)
+                        }
                         onKeyDown={event => {
                           if (event.key === 'Enter') {
                             event.preventDefault();
@@ -2254,18 +2821,42 @@ function App() {
                         }}
                         placeholder="Find in file"
                       />
-                      <button type="button" className="view-tool search-nav" title="Previous match" onClick={() => navigateSearchMatch(-1)}>
+                      <button
+                        type="button"
+                        className="view-tool search-nav"
+                        title="Previous match"
+                        onClick={() => navigateSearchMatch(-1)}
+                      >
                         <span className="codicon codicon-chevron-up view-tool-icon" />
                       </button>
-                      <button type="button" className="view-tool search-nav" title="Next match" onClick={() => navigateSearchMatch(1)}>
+                      <button
+                        type="button"
+                        className="view-tool search-nav"
+                        title="Next match"
+                        onClick={() => navigateSearchMatch(1)}
+                      >
                         <span className="codicon codicon-chevron-down view-tool-icon" />
                       </button>
-                      <span className="search-count">{fileSearchMatches.length === 0 ? '0/0' : `${currentMatchIndex + 1}/${fileSearchMatches.length}`}</span>
+                      <span className="search-count">
+                        {fileSearchMatches.length === 0
+                          ? '0/0'
+                          : `${currentMatchIndex + 1}/${
+                              fileSearchMatches.length
+                            }`}
+                      </span>
                     </div>
                   </div>
                 </div>
                 <div ref={fileScrollRef} className="scroll-panel">
-                  {fileLoading ? <div className="muted block">Loading file...</div> : renderCodePane(fileContent, false, detectCodeLanguage(selectedFile))}
+                  {fileLoading ? (
+                    <div className="muted block">Loading file...</div>
+                  ) : (
+                    renderCodePane(
+                      fileContent,
+                      false,
+                      detectCodeLanguage(selectedFile),
+                    )
+                  )}
                 </div>
               </div>
             </div>
@@ -2277,15 +2868,24 @@ function App() {
     return (
       <div className="content">
         <div className="block-title with-tools">
-          <span className="title-text">{selectedDiff || 'Select a changed file'}</span>
+          <span className="title-text">
+            {selectedDiff || 'Select a changed file'}
+          </span>
           <div className="view-tools">{renderViewTools()}</div>
         </div>
         <div className="scroll-panel">
           {heavyDiffDeferred ? (
             <div className="muted block">
-              Heavy generated file selected. Diff loading is paused to keep UI responsive.
-              <div style={{marginTop: 10}}>
-                <button type="button" className="button" onClick={() => setAllowHeavyDiffLoad(true)}>Load Diff</button>
+              Heavy generated file selected. Diff loading is paused to keep UI
+              responsive.
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setAllowHeavyDiffLoad(true)}
+                >
+                  Load Diff
+                </button>
               </div>
             </div>
           ) : diffLoading ? (
@@ -2299,7 +2899,8 @@ function App() {
   };
 
   const hasCachedWorkspace = projects.length > 0 || !!projectId;
-  const keepWorkspaceVisible = reconnecting && !!token.trim() && hasCachedWorkspace;
+  const keepWorkspaceVisible =
+    reconnecting && !!token.trim() && hasCachedWorkspace;
 
   if (!connected && !keepWorkspaceVisible) {
     return (
@@ -2313,8 +2914,16 @@ function App() {
             onChange={e => setAddress(e.target.value)}
             placeholder="127.0.0.1:9630 or ws://127.0.0.1:9630/ws"
           />
-          <input className="input" value={token} onChange={e => setToken(e.target.value)} placeholder="Token (optional)" />
-          <button className="button" onClick={() => connect().catch(() => undefined)}>
+          <input
+            className="input"
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            placeholder="Token (optional)"
+          />
+          <button
+            className="button"
+            onClick={() => connect().catch(() => undefined)}
+          >
             {autoConnecting ? 'Connecting...' : 'Connect'}
           </button>
           {error ? <div className="error">{error}</div> : null}
@@ -2335,33 +2944,72 @@ function App() {
             } else {
               setDrawerOpen(value => !value);
             }
-          }}>
-          <span className={`codicon ${isWide ? (sidebarCollapsed ? 'codicon-layout-sidebar-left-off' : 'codicon-layout-sidebar-left') : 'codicon-menu'}`} />
+          }}
+        >
+          <span
+            className={`codicon ${
+              isWide
+                ? sidebarCollapsed
+                  ? 'codicon-layout-sidebar-left-off'
+                  : 'codicon-layout-sidebar-left'
+                : 'codicon-menu'
+            }`}
+          />
         </button>
 
-        <div className="project-wrap" onPointerDown={event => event.stopPropagation()}>
-          <button className="project-btn" onClick={() => setProjectMenuOpen(value => !value)}>
+        <div
+          className="project-wrap"
+          onPointerDown={event => event.stopPropagation()}
+        >
+          <button
+            className="project-btn"
+            onClick={() => setProjectMenuOpen(value => !value)}
+          >
             <span className="project-arrow codicon codicon-chevron-down" />
-            <span className="project-name" title={currentProjectName}>{currentProjectName}</span>
-            <span className={`project-presence ${currentProject?.online ? 'online' : 'offline'}`} />
+            <span className="project-name" title={currentProjectName}>
+              {currentProjectName}
+            </span>
+            <span
+              className={`project-presence ${
+                currentProject?.online ? 'online' : 'offline'
+              }`}
+            />
             {gitDirty ? <span className="project-dirty">dirty</span> : null}
-            {(loadingProject || refreshingProject || reconnecting) ? <span className="muted">...</span> : null}
+            {loadingProject || refreshingProject || reconnecting ? (
+              <span className="muted">...</span>
+            ) : null}
           </button>
           {projectMenuOpen ? (
             <div className="project-menu">
               {projects.map(project => (
                 <div
                   key={project.projectId}
-                  className={`item project-menu-item ${project.projectId === projectId ? 'selected' : ''}`}
-                  onClick={() => switchProject(project.projectId).catch(() => undefined)}>
+                  className={`item project-menu-item ${
+                    project.projectId === projectId ? 'selected' : ''
+                  }`}
+                  onClick={() =>
+                    switchProject(project.projectId).catch(() => undefined)
+                  }
+                >
                   <div className="project-menu-main">
                     <span className="project-menu-name">{project.name}</span>
-                    <span className="project-menu-path" title={project.path || ''}>{project.path || '-'}</span>
+                    <span
+                      className="project-menu-path"
+                      title={project.path || ''}
+                    >
+                      {project.path || '-'}
+                    </span>
                   </div>
-                  <span className={`project-menu-state ${project.online ? 'online' : 'offline'}`}>
+                  <span
+                    className={`project-menu-state ${
+                      project.online ? 'online' : 'offline'
+                    }`}
+                  >
                     {project.online ? 'online' : 'offline'}
                   </span>
-                  <span className="project-menu-hub">{project.hubId || 'local-hub'}</span>
+                  <span className="project-menu-hub">
+                    {project.hubId || 'local-hub'}
+                  </span>
                 </div>
               ))}
             </div>
@@ -2372,26 +3020,38 @@ function App() {
           className="header-btn refresh-btn"
           onClick={() => refreshProject().catch(() => undefined)}
           title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
-          disabled={refreshingProject || reconnecting}>
-          {refreshingProject
-            ? '...'
-            : reconnecting
-              ? <span className="codicon codicon-loading codicon-modifier-spin" />
-              : <span className="codicon codicon-refresh" />}
+          disabled={refreshingProject || reconnecting}
+        >
+          {refreshingProject ? (
+            '...'
+          ) : reconnecting ? (
+            <span className="codicon codicon-loading codicon-modifier-spin" />
+          ) : (
+            <span className="codicon codicon-refresh" />
+          )}
         </button>
 
         <div className="header-spacer" />
 
         <div className="tabs">
-          <button className={`tab ${tab === 'chat' ? 'active' : ''}`} onClick={() => setTab('chat')}>
+          <button
+            className={`tab ${tab === 'chat' ? 'active' : ''}`}
+            onClick={() => setTab('chat')}
+          >
             <span className="codicon codicon-comment-discussion tab-icon" />
             <span className="tab-label">CHAT</span>
           </button>
-          <button className={`tab ${tab === 'file' ? 'active' : ''}`} onClick={() => setTab('file')}>
+          <button
+            className={`tab ${tab === 'file' ? 'active' : ''}`}
+            onClick={() => setTab('file')}
+          >
             <span className="codicon codicon-files tab-icon" />
             <span className="tab-label">FILE</span>
           </button>
-          <button className={`tab ${tab === 'git' ? 'active' : ''}`} onClick={() => setTab('git')}>
+          <button
+            className={`tab ${tab === 'git' ? 'active' : ''}`}
+            onClick={() => setTab('git')}
+          >
             <span className="codicon codicon-source-control tab-icon" />
             <span className="tab-label">GIT</span>
           </button>
@@ -2399,7 +3059,9 @@ function App() {
       </header>
 
       <div className="body">
-        {isWide && !sidebarCollapsed ? <aside className="workspace-left">{renderSidebar()}</aside> : null}
+        {isWide && !sidebarCollapsed ? (
+          <aside className="workspace-left">{renderSidebar()}</aside>
+        ) : null}
         <main className="workspace-right">{renderMain()}</main>
       </div>
 
@@ -2408,14 +3070,26 @@ function App() {
           {selectedFile ? (
             <span className="statusbar-item">
               <span className="codicon codicon-file" />
-              <span className="statusbar-text">{selectedFile.split('/').pop()}</span>
+              <span className="statusbar-text">
+                {selectedFile.split('/').pop()}
+              </span>
             </span>
           ) : null}
           {selectedFile && fileContent.length > 0 ? (
-            <span className="statusbar-muted">{fileInfo?.isBinary ? `${fileInfo.size ?? 0} bytes` : `${fileInfo?.totalLines ?? fileContent.split('\n').length} lines`}</span>
+            <span className="statusbar-muted">
+              {fileInfo?.isBinary
+                ? `${fileInfo.size ?? 0} bytes`
+                : `${
+                    fileInfo?.totalLines ?? fileContent.split('\n').length
+                  } lines`}
+            </span>
           ) : null}
           <span className="statusbar-spacer" />
-          <span className="statusbar-muted">{gitDirty ? `dirty ${gitStatusSummary.staged}/${gitStatusSummary.unstaged}/${gitStatusSummary.untracked}` : 'clean'}</span>
+          <span className="statusbar-muted">
+            {gitDirty
+              ? `dirty ${gitStatusSummary.staged}/${gitStatusSummary.unstaged}/${gitStatusSummary.untracked}`
+              : 'clean'}
+          </span>
           {gitCurrentBranch ? (
             <span className="statusbar-item">
               <span className="codicon codicon-git-branch" />
@@ -2426,8 +3100,14 @@ function App() {
       ) : null}
 
       {!isWide ? (
-        <div className={`drawer-overlay ${drawerOpen ? 'show' : ''}`} onClick={() => setDrawerOpen(false)}>
-          <aside className={`drawer ${drawerOpen ? 'show' : ''}`} onClick={event => event.stopPropagation()}>
+        <div
+          className={`drawer-overlay ${drawerOpen ? 'show' : ''}`}
+          onClick={() => setDrawerOpen(false)}
+        >
+          <aside
+            className={`drawer ${drawerOpen ? 'show' : ''}`}
+            onClick={event => event.stopPropagation()}
+          >
             {renderSidebar()}
           </aside>
         </div>
@@ -2438,27 +3118,32 @@ function App() {
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').then(registration => {
-      window.setTimeout(() => {
-        registration.update().catch(() => undefined);
-      }, 1500);
+    navigator.serviceWorker
+      .register('/service-worker.js')
+      .then(registration => {
+        window.setTimeout(() => {
+          registration.update().catch(() => undefined);
+        }, 1500);
 
-      if (registration.waiting) {
-        registration.waiting.postMessage('SKIP_WAITING');
-      }
+        if (registration.waiting) {
+          registration.waiting.postMessage('SKIP_WAITING');
+        }
 
-      registration.addEventListener('updatefound', () => {
-        const installing = registration.installing;
-        if (!installing) return;
-        installing.addEventListener('statechange', () => {
-          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-            registration.waiting?.postMessage('SKIP_WAITING');
-          }
+        registration.addEventListener('updatefound', () => {
+          const installing = registration.installing;
+          if (!installing) return;
+          installing.addEventListener('statechange', () => {
+            if (
+              installing.state === 'installed' &&
+              navigator.serviceWorker.controller
+            ) {
+              registration.waiting?.postMessage('SKIP_WAITING');
+            }
+          });
         });
-      });
-    }).catch(() => undefined);
+      })
+      .catch(() => undefined);
   });
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
