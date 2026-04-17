@@ -2448,7 +2448,6 @@ function App() {
                     <span className="git-commit-title">
                       {commit.title || commit.sha.slice(0, 7)}
                     </span>
-                    <span className="git-commit-sha">{commit.sha.slice(0, 7)}</span>
                   </span>
                 </div>
                 {expanded ? (
@@ -3425,4 +3424,5 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
