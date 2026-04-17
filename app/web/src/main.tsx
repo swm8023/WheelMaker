@@ -158,6 +158,7 @@ function ThinkingBlock({content, isStreaming}: ThinkingBlockProps) {
   );
 }
 
+const pwaFoundation = initializePWAFoundation();
 const service = new RegistryWorkspaceService();
 const workspaceStore = new WorkspaceStore();
 const workspaceController = new WorkspaceController(service, workspaceStore);
@@ -619,7 +620,9 @@ function App() {
   const initialRegistryAddress = resolveInitialRegistryAddress(persistedGlobal.address || '', defaultRegistryAddress);
   const [connected, setConnected] = useState(false);
   const [address, setAddress] = useState(initialRegistryAddress);
+  const addressRef = useRef(initialRegistryAddress);
   const [token, setToken] = useState(persistedGlobal.token || '');
+  const tokenRef = useRef(persistedGlobal.token || '');
   const [error, setError] = useState('');
   const [autoConnecting, setAutoConnecting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -686,6 +689,8 @@ function App() {
   const liveRefreshTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectStartedAtRef = useRef<number | null>(null);
+  const connectInFlightRef = useRef(false);
+  const supervisorManagedCloseRef = useRef(false);
   const dirHashRef = useRef<Record<string, string>>({});
   const fileHashRef = useRef<Record<string, string>>({});
   const fileCacheRef = useRef<Record<string, string>>({});
@@ -723,6 +728,14 @@ function App() {
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  useEffect(() => {
+    addressRef.current = address;
+  }, [address]);
+
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
 
   useEffect(() => {
     chatSelectedIdRef.current = selectedChatId;
@@ -1363,7 +1376,12 @@ function App() {
   };
 
   const connect = async ({silentReconnect = false}: {silentReconnect?: boolean} = {}) => {
-    const trimmedToken = token.trim();
+    if (connectInFlightRef.current) {
+      return;
+    }
+    connectInFlightRef.current = true;
+    const trimmedToken = tokenRef.current.trim();
+    const nextAddress = addressRef.current.trim();
     const previousSelectedChatId = chatSelectedIdRef.current;
     setError('');
     clearReconnectTimer();
@@ -1372,7 +1390,7 @@ function App() {
       setReconnecting(false);
     }
     try {
-      const ws = toRegistryWsUrl(address);
+      const ws = toRegistryWsUrl(nextAddress);
       const result = await workspaceController.connect(ws, trimmedToken);
       setProjects(result.projects);
       dirHashRef.current = {};
@@ -1422,9 +1440,42 @@ function App() {
       }
       setError(message);
     } finally {
+      connectInFlightRef.current = false;
       setAutoConnecting(false);
     }
   };
+
+  const disconnectForSupervisor = (reason: 'background' | 'offline' | 'stop') => {
+    supervisorManagedCloseRef.current = true;
+    clearReconnectTimer();
+    reconnectStartedAtRef.current = null;
+    setReconnecting(false);
+    setAutoConnecting(false);
+    setConnected(false);
+    if (reason !== 'stop') {
+      setError('');
+    }
+    service.close();
+  };
+
+  useEffect(() => {
+    const supervisor = pwaFoundation.createConnectionSupervisor({
+      connect: async () => {
+        const canSilentReconnect = !!tokenRef.current.trim() && !!addressRef.current.trim() && !!projectIdRef.current;
+        if (!canSilentReconnect) {
+          return;
+        }
+        await connect({silentReconnect: true});
+      },
+      disconnect: reason => {
+        disconnectForSupervisor(reason);
+      },
+    });
+    supervisor.start();
+    return () => {
+      supervisor.stop();
+    };
+  }, []);
 
   useEffect(() => {
     if (connected || autoConnecting) return;
@@ -1616,7 +1667,11 @@ function App() {
 
     const unsubscribeClose = service.onClose(() => {
       setConnected(false);
-      const canSilentReconnect = !!token.trim() && !!projectIdRef.current;
+      if (supervisorManagedCloseRef.current) {
+        supervisorManagedCloseRef.current = false;
+        return;
+      }
+      const canSilentReconnect = !!tokenRef.current.trim() && !!projectIdRef.current;
       if (!canSilentReconnect) {
         reconnectStartedAtRef.current = null;
         setReconnecting(false);
@@ -1635,8 +1690,7 @@ function App() {
       unsubscribeEvent();
       unsubscribeClose();
     };
-  }, [token]);
-
+  }, []);
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
     return entries.map(entry => {
@@ -2381,8 +2435,6 @@ function App() {
     </div>
   );
 }
-
-initializePWAFoundation();
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {

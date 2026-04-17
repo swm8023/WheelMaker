@@ -7,12 +7,21 @@ describe('web reconnect fallback behavior', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
     expect(mainTsx).toContain('const RECONNECT_GRACE_PERIOD_MS = 30_000;');
-    expect(mainTsx).toContain("const canSilentReconnect = !!token.trim() && !!projectIdRef.current;");
+    expect(mainTsx).toContain("const canSilentReconnect = !!tokenRef.current.trim() && !!projectIdRef.current;");
     expect(mainTsx).toContain('if (elapsed < RECONNECT_GRACE_PERIOD_MS) {');
     expect(mainTsx).toContain('connect({silentReconnect: true}).catch(() => undefined);');
     expect(mainTsx).toContain('if (!connected && !keepWorkspaceVisible) {');
   });
 
+  test('uses pwa foreground supervisor for background suspend and resume reconnect', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain('const pwaFoundation = initializePWAFoundation();');
+    expect(mainTsx).toContain('const supervisor = pwaFoundation.createConnectionSupervisor({');
+    expect(mainTsx).toContain("disconnectForSupervisor(reason);");
+    expect(mainTsx).toContain('await connect({silentReconnect: true});');
+  });
   test('reloads selected file after reconnect success', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
@@ -30,3 +39,4 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('codicon-loading codicon-modifier-spin');
   });
 });
+
