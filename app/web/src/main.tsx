@@ -355,18 +355,48 @@ function resolveInitialRegistryAddress(
 }
 
 type UnifiedDiffRow = {
-  kind: 'context' | 'added' | 'removed';
+  kind: 'context' | 'added' | 'removed' | 'separator';
   oldLineNumber: number | null;
   newLineNumber: number | null;
   text: string;
+  separator?: 'hunk' | 'file';
 };
+
+function pushUnifiedDiffSeparator(
+  rows: UnifiedDiffRow[],
+  separator: 'hunk' | 'file',
+  text: string,
+): void {
+  if (rows.length === 0) return;
+  const last = rows[rows.length - 1];
+  if (last.kind === 'separator') return;
+  rows.push({
+    kind: 'separator',
+    oldLineNumber: null,
+    newLineNumber: null,
+    text,
+    separator,
+  });
+}
 
 function parseUnifiedDiffRows(content: string): UnifiedDiffRow[] {
   const rows: UnifiedDiffRow[] = [];
   try {
     const files = gitdiffParser.parse(content);
-    for (const file of files) {
-      for (const hunk of file.hunks || []) {
+    for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
+      const file = files[fileIndex];
+      const hunks = file.hunks || [];
+      if (hunks.length === 0) continue;
+
+      if (rows.length > 0) {
+        pushUnifiedDiffSeparator(rows, 'file', '... next file ...');
+      }
+
+      for (let hunkIndex = 0; hunkIndex < hunks.length; hunkIndex += 1) {
+        const hunk = hunks[hunkIndex];
+        if (hunkIndex > 0) {
+          pushUnifiedDiffSeparator(rows, 'hunk', '... skipped unchanged lines ...');
+        }
         for (const change of hunk.changes || []) {
           if (change.type === 'insert') {
             rows.push({
@@ -435,14 +465,27 @@ function parseUnifiedDiffRows(content: string): UnifiedDiffRow[] {
 }
 
 function buildInlineDiffRenderLines(rows: UnifiedDiffRow[]): DiffRenderLine[] {
-  return rows.map(row => ({
-    code: row.text,
-    lineNumber: row.newLineNumber ?? row.oldLineNumber,
-    oldLineNumber: row.oldLineNumber,
-    newLineNumber: row.newLineNumber,
-    kind: row.kind,
-  }));
+  return rows.map(row => {
+    if (row.kind === 'separator') {
+      return {
+        code: row.text,
+        lineNumber: null,
+        oldLineNumber: null,
+        newLineNumber: null,
+        kind: 'empty',
+        separator: row.separator ?? 'hunk',
+      };
+    }
+    return {
+      code: row.text,
+      lineNumber: row.newLineNumber ?? row.oldLineNumber,
+      oldLineNumber: row.oldLineNumber,
+      newLineNumber: row.newLineNumber,
+      kind: row.kind,
+    };
+  });
 }
+
 function toSetiGlyph(fontCharacter?: string): string {
   if (!fontCharacter) return '?';
   const hex = fontCharacter.replace('\\', '');
@@ -533,6 +576,32 @@ function pickPreferredPath<T extends { path: string }>(items: T[]): string {
   return (preferred ?? items[0]).path;
 }
 
+function splitPathForDisplay(path: string): {
+  fileName: string;
+  parentPath: string;
+} {
+  const normalized = (path || '').replaceAll('\\', '/');
+  const separator = normalized.lastIndexOf('/');
+  if (separator < 0) {
+    return { fileName: normalized, parentPath: '' };
+  }
+  return {
+    fileName: normalized.slice(separator + 1),
+    parentPath: normalized.slice(0, separator),
+  };
+}
+
+function formatGitPathLabel(path: string): string {
+  const { fileName, parentPath } = splitPathForDisplay(path);
+  return parentPath ? `${fileName} (${parentPath})` : fileName;
+}
+
+function formatGitCommitDateTime(value: string): string {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString();
+}
 type ShikiCodeBlockProps = {
   content: string;
   language: string;
@@ -805,6 +874,7 @@ function App() {
   const fileCacheRef = useRef<Record<string, string>>({});
   const fileReadSeqRef = useRef(0);
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
+  const commitPopoverRef = useRef<HTMLDivElement | null>(null);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
@@ -831,12 +901,19 @@ function App() {
   const [gitLoadedProjectId, setGitLoadedProjectId] = useState('');
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
+  const [expandedCommitShas, setExpandedCommitShas] = useState<string[]>([]);
   const [commitFilesBySha, setCommitFilesBySha] = useState<
     Record<string, RegistryGitCommitFile[]>
   >({});
   const [workingTreeFiles, setWorkingTreeFiles] = useState<
     WorkingTreeFileEntry[]
   >([]);
+  const [worktreeExpanded, setWorktreeExpanded] = useState(true);
+  const [commitPopover, setCommitPopover] = useState<{
+    commit: RegistryGitCommit;
+    x: number;
+    y: number;
+  } | null>(null);
   const [selectedDiffSource, setSelectedDiffSource] =
     useState<GitDiffSource>('commit');
   const [selectedDiffScope, setSelectedDiffScope] = useState<
@@ -902,6 +979,16 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [searchToolsOpen, gotoToolsOpen]);
+  useEffect(() => {
+    if (!commitPopover) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && commitPopoverRef.current?.contains(target)) return;
+      setCommitPopover(null);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [commitPopover]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -979,12 +1066,6 @@ function App() {
       knownWorktreeRevRef.current = currentProject.git.worktreeRev;
     }
   }, [currentProject]);
-
-  const currentCommitFiles = useMemo(
-    () => commitFilesBySha[selectedCommit] ?? [],
-    [commitFilesBySha, selectedCommit],
-  );
-
   const worktreeActive = selectedDiffSource === 'worktree';
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
@@ -1034,7 +1115,10 @@ function App() {
     setGitCurrentBranch(hydrated.gitCurrentBranch);
     setCommits(hydrated.commits);
     setSelectedCommit(hydrated.selectedCommit);
+    setExpandedCommitShas(hydrated.selectedCommit ? [hydrated.selectedCommit] : []);
     setCommitFilesBySha(hydrated.commitFilesBySha);
+    setWorktreeExpanded(true);
+    setCommitPopover(null);
     setSelectedDiff(hydrated.selectedDiff);
     setDiffText(hydrated.cachedDiffText);
     setWorkingTreeFiles([]);
@@ -1260,6 +1344,11 @@ function App() {
       setGitLoadedProjectId(targetProjectId);
       const firstCommit = commitData[0]?.sha ?? '';
       setSelectedCommit(prev => prev || firstCommit);
+      setExpandedCommitShas(prev =>
+        prev.length > 0 ? prev : firstCommit ? [firstCommit] : [],
+      );
+      setWorktreeExpanded(working.length > 0);
+      setCommitPopover(null);
       if (!selectedDiff) {
         if (working[0]) {
           const preferredPath = pickPreferredPath(working);
@@ -2181,117 +2270,232 @@ function App() {
     return (
       <>
         <div className="section-title">
-          COMMITS {gitCurrentBranch ? `(${gitCurrentBranch})` : ''}
+          SOURCE CONTROL {gitCurrentBranch ? `(${gitCurrentBranch})` : ''}
         </div>
         <div className="list half">
           {gitLoading ? (
             <div className="muted block">Loading commits...</div>
           ) : null}
           {gitError ? <div className="error block">{gitError}</div> : null}
+
           {workingTreeFiles.length > 0 ? (
-            <div
-              className={`item ${worktreeActive ? 'selected' : ''}`}
-              onClick={() => {
-                setSelectedDiffSource('worktree');
-                if (workingTreeFiles[0]) {
-                  const preferredPath = pickPreferredPath(workingTreeFiles);
-                  const preferredFile =
-                    workingTreeFiles.find(
-                      item => item.path === preferredPath,
-                    ) ?? workingTreeFiles[0];
-                  setSelectedDiff(preferredFile.path);
-                  setSelectedDiffScope(preferredFile.scope);
-                }
-                if (!isWide) setDrawerOpen(false);
-              }}
-            >
-              <span className="file-dot codicon codicon-source-control" />
-              <span className="label">Working Tree</span>
-            </div>
-          ) : null}
-          {commits.map(commit => (
-            <div
-              key={commit.sha}
-              className={`item ${
-                !worktreeActive && selectedCommit === commit.sha
-                  ? 'selected'
-                  : ''
-              }`}
-              onClick={() => {
-                setSelectedCommit(commit.sha);
-                setSelectedDiffSource('commit');
-                const files = commitFilesBySha[commit.sha] ?? [];
-                if (files[0]) {
-                  setSelectedDiff(pickPreferredPath(files));
-                } else {
-                  setSelectedDiff('');
-                }
-                setSelectedDiffScope('unstaged');
-                if (!isWide) setDrawerOpen(false);
-              }}
-            >
-              <span className="file-dot codicon codicon-git-commit" />
-              <span className="label">
-                {commit.title || commit.sha.slice(0, 7)}
-              </span>
-            </div>
-          ))}
-        </div>
-        <div className="section-title">FILES</div>
-        <div className="list half">
-          {worktreeActive ? (
-            workingTreeFiles.length === 0 ? (
-              <div className="muted block">No local changes</div>
-            ) : (
-              workingTreeFiles.map(file => (
-                <div
-                  key={`${WORKING_TREE_COMMIT_ID}:${file.scope}:${file.path}`}
-                  className={`item ${
-                    selectedDiff === file.path &&
-                    selectedDiffScope === file.scope
-                      ? 'selected'
-                      : ''
-                  }`}
-                  onClick={() => {
-                    setSelectedDiff(file.path);
-                    setSelectedDiffSource('worktree');
-                    setSelectedDiffScope(file.scope);
-                    if (!isWide) setDrawerOpen(false);
-                  }}
-                >
-                  <span className={`status-tag status-git-${file.status}`}>
-                    {file.status}
-                  </span>
-                  <span className="muted" style={{ marginRight: 6 }}>
-                    {file.scope}
-                  </span>
-                  <span className="label">{file.path}</span>
-                </div>
-              ))
-            )
-          ) : (
-            currentCommitFiles.map(file => (
+            <>
               <div
-                key={file.path}
-                className={`item ${
-                  selectedDiffSource === 'commit' && selectedDiff === file.path
-                    ? 'selected'
-                    : ''
-                }`}
+                className={`item ${worktreeActive ? 'selected' : ''}`}
                 onClick={() => {
-                  setSelectedDiff(file.path);
-                  setSelectedDiffSource('commit');
-                  if (!isWide) setDrawerOpen(false);
+                  setSelectedDiffSource('worktree');
+                  setExpandedCommitShas([]);
+                  setCommitPopover(null);
+                  setWorktreeExpanded(prev => !prev);
+                  if (workingTreeFiles[0]) {
+                    const preferredPath = pickPreferredPath(workingTreeFiles);
+                    const preferredFile =
+                      workingTreeFiles.find(
+                        item => item.path === preferredPath,
+                      ) ?? workingTreeFiles[0];
+                    setSelectedDiff(preferredFile.path);
+                    setSelectedDiffScope(preferredFile.scope);
+                  }
                 }}
               >
-                <span className={`status-tag status-git-${file.status}`}>
-                  {file.status}
+                <span
+                  className={`caret codicon ${
+                    worktreeExpanded
+                      ? 'codicon-chevron-down'
+                      : 'codicon-chevron-right'
+                  }`}
+                />
+                <span className="file-dot codicon codicon-source-control" />
+                <span className="label">
+                  {`Working Tree (${workingTreeFiles.length})`}
                 </span>
-                <span className="label">{file.path}</span>
               </div>
-            ))
-          )}
+              {worktreeExpanded
+                ? workingTreeFiles.map(file => (
+                    <div
+                      key={`${WORKING_TREE_COMMIT_ID}:${file.scope}:${file.path}`}
+                      className={`item git-tree-child ${
+                        selectedDiff === file.path &&
+                        selectedDiffScope === file.scope &&
+                        selectedDiffSource === 'worktree'
+                          ? 'selected'
+                          : ''
+                      }`}
+                      onClick={() => {
+                        setSelectedDiff(file.path);
+                        setSelectedDiffSource('worktree');
+                        setSelectedDiffScope(file.scope);
+                        if (!isWide) setDrawerOpen(false);
+                      }}
+                    >
+                      <span className="caret placeholder" aria-hidden="true" />
+                      <span className={`status-tag status-git-${file.status}`}>
+                        {file.status}
+                      </span>
+                      <span className="muted git-file-scope">{file.scope}</span>
+                      <span className="label">{formatGitPathLabel(file.path)}</span>
+                    </div>
+                  ))
+                : null}
+            </>
+          ) : !gitLoading ? (
+            <div className="muted block">No local changes</div>
+          ) : null}
+
+          {commits.map(commit => {
+            const expanded = expandedCommitShas.includes(commit.sha);
+            const selected = !worktreeActive && selectedCommit === commit.sha;
+            const filesLoaded = Object.prototype.hasOwnProperty.call(
+              commitFilesBySha,
+              commit.sha,
+            );
+            const files = commitFilesBySha[commit.sha] ?? [];
+            return (
+              <React.Fragment key={commit.sha}>
+                <div
+                  className={`item ${selected ? 'selected' : ''}`}
+                  onClick={event => {
+                    const nextExpanded = !expanded;
+                    const currentFiles = commitFilesBySha[commit.sha] ?? [];
+                    setSelectedCommit(commit.sha);
+                    setSelectedDiffSource('commit');
+                    setSelectedDiffScope('unstaged');
+                    setWorktreeExpanded(false);
+                    setExpandedCommitShas(nextExpanded ? [commit.sha] : []);
+                    if (nextExpanded) {
+                      if (currentFiles[0]) {
+                        setSelectedDiff(pickPreferredPath(currentFiles));
+                      } else {
+                        setSelectedDiff('');
+                      }
+                    }
+
+                    const rect = (
+                      event.currentTarget as HTMLDivElement
+                    ).getBoundingClientRect();
+                    const popoverWidth = 360;
+                    const popoverHeight = 220;
+                    const x = Math.max(
+                      8,
+                      Math.min(
+                        window.innerWidth - popoverWidth - 8,
+                        rect.right + 10,
+                      ),
+                    );
+                    const y = Math.max(
+                      52,
+                      Math.min(window.innerHeight - popoverHeight - 8, rect.top),
+                    );
+                    setCommitPopover({ commit, x, y });
+                  }}
+                >
+                  <span
+                    className={`caret codicon ${
+                      expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'
+                    }`}
+                  />
+                  <span className="file-dot codicon codicon-git-commit" />
+                  <span className="label">
+                    {commit.title || commit.sha.slice(0, 7)}
+                  </span>
+                </div>
+                {expanded ? (
+                  filesLoaded ? (
+                    files.length > 0 ? (
+                      files.map(file => (
+                        <div
+                          key={`${commit.sha}:${file.path}`}
+                          className={`item git-tree-child ${
+                            selectedDiffSource === 'commit' &&
+                            selectedCommit === commit.sha &&
+                            selectedDiff === file.path
+                              ? 'selected'
+                              : ''
+                          }`}
+                          onClick={() => {
+                            setSelectedCommit(commit.sha);
+                            setSelectedDiff(file.path);
+                            setSelectedDiffSource('commit');
+                            setSelectedDiffScope('unstaged');
+                            if (!isWide) setDrawerOpen(false);
+                          }}
+                        >
+                          <span
+                            className="caret placeholder"
+                            aria-hidden="true"
+                          />
+                          <span className={`status-tag status-git-${file.status}`}>
+                            {file.status}
+                          </span>
+                          <span className="label">
+                            {formatGitPathLabel(file.path)}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="item git-tree-child muted">
+                        <span className="caret placeholder" aria-hidden="true" />
+                        <span className="label">No changed files</span>
+                      </div>
+                    )
+                  ) : (
+                    <div className="item git-tree-child muted">
+                      <span className="caret placeholder" aria-hidden="true" />
+                      <span className="label">Loading files...</span>
+                    </div>
+                  )
+                ) : null}
+              </React.Fragment>
+            );
+          })}
+
+          {commits.length === 0 && !gitLoading ? (
+            <div className="muted block">No commits found</div>
+          ) : null}
         </div>
+
+        {commitPopover ? (
+          <div
+            ref={commitPopoverRef}
+            className="git-commit-popover"
+            style={{ left: `${commitPopover.x}px`, top: `${commitPopover.y}px` }}
+          >
+            <div className="git-commit-popover-header">
+              <span className="git-commit-popover-title">Commit Details</span>
+              <button
+                type="button"
+                className="git-commit-popover-close"
+                onClick={() => setCommitPopover(null)}
+                aria-label="Close commit details"
+              >
+                <span className="codicon codicon-close" />
+              </button>
+            </div>
+            <div className="git-commit-popover-body">
+              <div className="git-commit-popover-field">
+                <span className="muted">Title</span>
+                <span>{commitPopover.commit.title || '(no title)'}</span>
+              </div>
+              <div className="git-commit-popover-field">
+                <span className="muted">SHA</span>
+                <code>{commitPopover.commit.sha}</code>
+              </div>
+              <div className="git-commit-popover-field">
+                <span className="muted">Author</span>
+                <span>
+                  {commitPopover.commit.author || 'Unknown'}
+                  {commitPopover.commit.email
+                    ? ` <${commitPopover.commit.email}>`
+                    : ''}
+                </span>
+              </div>
+              <div className="git-commit-popover-field">
+                <span className="muted">Time</span>
+                <span>{formatGitCommitDateTime(commitPopover.commit.time)}</span>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </>
     );
   };
@@ -3147,3 +3351,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+

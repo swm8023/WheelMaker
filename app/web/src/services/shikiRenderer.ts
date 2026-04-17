@@ -45,6 +45,7 @@ export type DiffRenderLine = {
   oldLineNumber?: number | null;
   newLineNumber?: number | null;
   kind: 'context' | 'added' | 'removed' | 'empty';
+  separator?: 'hunk' | 'file';
 };
 
 const AUTO_CODE_THEME_OPTION: CodeThemeOption = {
@@ -227,6 +228,9 @@ function buildLineTransformer(
         hast.properties['data-line'] = renderedLineNumber;
         hast.properties['data-line-kind'] = diffLine.kind;
         hast.properties['data-line-number'] = renderedLineNumber;
+        if (diffLine.separator) {
+          hast.properties['data-separator'] = diffLine.separator;
+        }
       } else {
         hast.properties['data-line'] = String(line);
         hast.properties['data-line-number'] = String(line);
@@ -494,3 +498,4 @@ export async function renderShikiDiffHtml(options: RenderShikiDiffOptions): Prom
 
   return `<pre><code>${escapeHtml(code)}</code></pre>`;
 }
+

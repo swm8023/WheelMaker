@@ -603,6 +603,79 @@ body,
 .status-git-R { color: #73c991; }
 .status-git-C { color: #73c991; }
 .status-git-U { color: #569cd6; }
+.git-tree-child {
+  padding-left: 28px;
+}
+
+.git-file-scope {
+  margin-right: 4px;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.git-commit-popover {
+  position: fixed;
+  width: min(420px, 42vw);
+  min-width: 280px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--soft-shadow);
+  z-index: 40;
+}
+
+.git-commit-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.git-commit-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.git-commit-popover-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.git-commit-popover-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.git-commit-popover-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.git-commit-popover-field {
+  display: grid;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.git-commit-popover-field code {
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .block,
 .muted {
@@ -1270,7 +1343,6 @@ body,
 .diff-inline .wm-shiki-diff-line[data-line-kind='empty'] {
   background: rgba(127, 127, 127, 0.06);
 }
-
 .theme-light .diff-inline .wm-shiki-diff-line[data-line-kind='added'] {
   background: rgba(46, 160, 67, 0.1);
 }
@@ -1281,6 +1353,35 @@ body,
 
 .theme-light .diff-inline .wm-shiki-diff-line[data-line-kind='empty'] {
   background: rgba(127, 127, 127, 0.04);
+}
+
+.diff-inline .wm-shiki-diff-line[data-separator='hunk'],
+.diff-inline .wm-shiki-diff-line[data-separator='file'] {
+  position: relative;
+  border-top: 1px dashed rgba(127, 127, 127, 0.45);
+  border-bottom: 1px dashed rgba(127, 127, 127, 0.45);
+  background: linear-gradient(
+    90deg,
+    rgba(127, 127, 127, 0.1),
+    rgba(127, 127, 127, 0.04)
+  );
+}
+
+.diff-inline .wm-shiki-diff-line[data-separator='hunk'] .wm-shiki-line-content,
+.diff-inline .wm-shiki-diff-line[data-separator='file'] .wm-shiki-line-content {
+  color: var(--muted);
+  font-style: italic;
+  letter-spacing: 0.03em;
+}
+
+.diff-inline .wm-shiki-diff-line[data-separator='hunk'] .wm-shiki-diff-gutter,
+.diff-inline .wm-shiki-diff-line[data-separator='file'] .wm-shiki-diff-gutter {
+  opacity: 0.45;
+}
+
+.diff-inline .wm-shiki-diff-line[data-separator='file'] {
+  border-top-width: 2px;
+  border-bottom-width: 2px;
 }
 
 .drawer-overlay {
@@ -1479,3 +1580,4 @@ body,
     transform: translateX(0);
   }
 }
+

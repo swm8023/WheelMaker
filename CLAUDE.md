@@ -14,6 +14,7 @@ WheelMaker/
 ## 全局约定
 - 代码注释和标识符用英文
 - 测试改动优先合并到现有 `*_test.go` 文件；只有在现有文件明显不适合承载时才新增 test 文件
+- 禁止扫描 dist 产物目录（例如检索时使用 rg --glob '!**/dist/**'）
 
 ## Completion Gate (Highest Priority)
 Before the final user-facing completion message in any implementation task, execute this exact tail sequence:
