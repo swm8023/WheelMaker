@@ -2423,15 +2423,31 @@ function App() {
                     const rect = (
                       event.currentTarget as HTMLDivElement
                     ).getBoundingClientRect();
-                    const popoverWidth = 440;
-                    const popoverHeight = 250;
-                    const x = Math.max(
-                      8,
-                      Math.min(
-                        window.innerWidth - popoverWidth - 8,
-                        rect.right + 12,
-                      ),
+                    const popoverWidth = Math.min(
+                      460,
+                      Math.max(320, Math.round(window.innerWidth * 0.42)),
                     );
+                    const popoverHeight = 250;
+                    const sidebar = document.querySelector('.workspace-left');
+                    const sidebarRect =
+                      sidebar instanceof HTMLElement
+                        ? sidebar.getBoundingClientRect()
+                        : null;
+                    const minX = sidebarRect
+                      ? Math.min(window.innerWidth - 8, sidebarRect.right + 12)
+                      : 8;
+                    const maxX = window.innerWidth - popoverWidth - 8;
+                    const rightCandidate = rect.right + 12;
+                    const leftCandidate = rect.left - popoverWidth - 12;
+                    let x = rightCandidate;
+                    if (x > maxX) {
+                      x = leftCandidate >= minX ? leftCandidate : maxX;
+                    }
+                    if (maxX >= minX) {
+                      x = Math.max(minX, Math.min(maxX, x));
+                    } else {
+                      x = Math.max(8, maxX);
+                    }
                     const y = Math.max(
                       52,
                       Math.min(window.innerHeight - popoverHeight - 8, rect.top - 8),

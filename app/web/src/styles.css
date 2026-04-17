@@ -604,7 +604,7 @@ body,
 .status-git-C { color: #73c991; }
 .status-git-U { color: #569cd6; }
 .git-tree-child {
-  padding-left: 18px;
+  padding-left: 0;
 }
 
 .git-section-title {
@@ -635,12 +635,18 @@ body,
 .git-row {
   min-height: 24px;
   border-left: 2px solid transparent;
+  gap: 4px;
 }
 
 .git-row-spacer {
-  width: 12px;
-  min-width: 12px;
+  width: 8px;
+  min-width: 8px;
   height: 1px;
+}
+
+.git-tree-child .git-row-spacer {
+  width: 14px;
+  min-width: 14px;
 }
 
 .git-row.selected {
@@ -702,7 +708,7 @@ body,
 .git-commit-label {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
 }
 
 .git-commit-title {
@@ -727,7 +733,7 @@ body,
 .git-file-label {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
