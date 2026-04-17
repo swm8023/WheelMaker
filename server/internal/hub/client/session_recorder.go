@@ -39,6 +39,7 @@ type SessionViewEvent struct {
 	Status        string
 	AggregateKey  string
 	RequestID     int64
+	Update        *acp.SessionUpdate
 	SourceChannel string
 	SourceChatID  string
 	CreatedAt     time.Time
@@ -199,7 +200,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		}
 		r.publishSessionMessage(stored)
 		return nil
-	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk, SessionViewEventToolUpdated, SessionViewEventSystemMessage:
+	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk, SessionViewEventToolUpdated:
 		return r.recordBufferedSessionUpdate(ctx, event)
 	case SessionViewEventPromptFinished:
 		return r.flushBufferedSessionUpdate(ctx, event.SessionID)
@@ -305,6 +306,16 @@ func normalizeRecorderEventSource(event SessionViewEvent) string {
 }
 
 func recorderUpdateVariant(event SessionViewEvent) string {
+	if update, ok := sessionUpdateFromEvent(event); ok {
+		variant := strings.TrimSpace(update.SessionUpdate)
+		if variant == "" {
+			variant = string(event.Type)
+		}
+		if strings.TrimSpace(update.ToolCallID) != "" {
+			variant += ":" + strings.TrimSpace(update.ToolCallID)
+		}
+		return variant
+	}
 	variant := string(event.Type)
 	if strings.TrimSpace(event.Kind) != "" {
 		variant += ":" + strings.TrimSpace(event.Kind)
@@ -315,9 +326,75 @@ func recorderUpdateVariant(event SessionViewEvent) string {
 	return variant
 }
 
-func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionMessageRecord {
-	return SessionMessageRecord{
+func sessionUpdateFromEvent(event SessionViewEvent) (acp.SessionUpdate, bool) {
+	if event.Update == nil {
+		return acp.SessionUpdate{}, false
+	}
+	update := *event.Update
+	if strings.TrimSpace(update.SessionUpdate) == "" {
+		return acp.SessionUpdate{}, false
+	}
+	return update, true
+}
 
+func mergeSessionUpdateContent(base, incoming acp.SessionUpdate) acp.SessionUpdate {
+	merged := incoming
+	if strings.TrimSpace(base.SessionUpdate) == "" || !strings.EqualFold(strings.TrimSpace(base.SessionUpdate), strings.TrimSpace(incoming.SessionUpdate)) {
+		return merged
+	}
+	if base.ToolCallID != "" && merged.ToolCallID == "" {
+		merged.ToolCallID = base.ToolCallID
+	}
+	switch strings.TrimSpace(incoming.SessionUpdate) {
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		text := extractTextChunk(base.Content) + extractTextChunk(incoming.Content)
+		if strings.TrimSpace(text) != "" {
+			raw, err := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: text})
+			if err == nil {
+				merged.Content = raw
+			}
+		}
+	}
+	return merged
+}
+
+func sessionUpdateText(update acp.SessionUpdate) string {
+	raw := extractTextChunk(update.Content)
+	if strings.TrimSpace(raw) != "" {
+		return raw
+	}
+	return ""
+}
+
+func sessionUpdateContentJSONHasParamsUpdate(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	var doc struct {
+		Params struct {
+			Update acp.SessionUpdate `json:"update"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return false
+	}
+	return strings.TrimSpace(doc.Params.Update.SessionUpdate) != ""
+}
+func buildSessionUpdateContentJSON(update acp.SessionUpdate) string {
+	doc := map[string]any{
+		"method": "session.update",
+		"params": map[string]any{"update": update},
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return `{"method":"session.update"}`
+	}
+	return string(raw)
+}
+
+func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionMessageRecord {
+	message := SessionMessageRecord{
 		ProjectName:   projectName,
 		SessionID:     strings.TrimSpace(event.SessionID),
 		Method:        "session.update",
@@ -334,26 +411,62 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 		UpdatedAt:     event.UpdatedAt,
 		Time:          event.UpdatedAt,
 	}
+	if update, ok := sessionUpdateFromEvent(event); ok {
+		message.Kind = firstNonEmpty(strings.TrimSpace(message.Kind), strings.TrimSpace(update.SessionUpdate))
+		message.Body = firstNonEmpty(strings.TrimSpace(message.Body), sessionUpdateText(update))
+		message.Status = firstNonEmpty(strings.TrimSpace(update.Status), message.Status)
+		if strings.TrimSpace(update.ToolCallID) != "" {
+			message.AggregateKey = strings.TrimSpace(update.ToolCallID)
+		}
+		message.ContentJSON = buildSessionUpdateContentJSON(update)
+	}
+	return message
 }
 
 func mergeBufferedSessionUpdateMessage(msg *SessionMessageRecord, event SessionViewEvent) {
 	if msg == nil {
 		return
 	}
-	rawText := event.Text
-	switch event.Type {
-	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk:
-		msg.Body += rawText
-	default:
-		msg.Body = strings.TrimSpace(rawText)
+	if update, ok := sessionUpdateFromEvent(event); ok {
+		rawText := sessionUpdateText(update)
+		switch strings.TrimSpace(update.SessionUpdate) {
+		case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+			msg.Body += rawText
+		default:
+			msg.Body = firstNonEmpty(strings.TrimSpace(rawText), strings.TrimSpace(event.Text))
+		}
+		msg.Kind = firstNonEmpty(strings.TrimSpace(msg.Kind), strings.TrimSpace(update.SessionUpdate), strings.TrimSpace(event.Kind))
+		msg.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(event.Status), msg.Status)
+		if strings.TrimSpace(update.ToolCallID) != "" {
+			msg.AggregateKey = strings.TrimSpace(update.ToolCallID)
+		}
+		if strings.TrimSpace(msg.ContentJSON) != "" {
+			var existing struct {
+				Params struct {
+					Update acp.SessionUpdate `json:"update"`
+				} `json:"params"`
+			}
+			if err := json.Unmarshal([]byte(msg.ContentJSON), &existing); err == nil {
+				update = mergeSessionUpdateContent(existing.Params.Update, update)
+			}
+		}
+		msg.ContentJSON = buildSessionUpdateContentJSON(update)
+	} else {
+		rawText := event.Text
+		switch event.Type {
+		case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk:
+			msg.Body += rawText
+		default:
+			msg.Body = strings.TrimSpace(rawText)
+		}
+		msg.Kind = firstNonEmpty(strings.TrimSpace(event.Kind), msg.Kind)
+		msg.Status = firstNonEmpty(strings.TrimSpace(event.Status), msg.Status)
+		if strings.TrimSpace(event.AggregateKey) != "" {
+			msg.AggregateKey = strings.TrimSpace(event.AggregateKey)
+		}
 	}
 	msg.Role = firstNonEmpty(strings.TrimSpace(msg.Role), strings.TrimSpace(event.Role))
-	msg.Kind = firstNonEmpty(strings.TrimSpace(event.Kind), msg.Kind)
-	msg.Status = firstNonEmpty(strings.TrimSpace(event.Status), msg.Status)
 	msg.RequestID = firstNonZeroInt64(event.RequestID, msg.RequestID)
-	if strings.TrimSpace(event.AggregateKey) != "" {
-		msg.AggregateKey = strings.TrimSpace(event.AggregateKey)
-	}
 	if strings.TrimSpace(event.SourceChannel) != "" || strings.TrimSpace(event.SourceChatID) != "" {
 		msg.Source = normalizeRecorderEventSource(event)
 		msg.SourceChannel = strings.TrimSpace(event.SourceChannel)
@@ -435,7 +548,9 @@ func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context
 			return err
 		}
 	} else {
-		msg.ContentJSON = ""
+		if !sessionUpdateContentJSONHasParamsUpdate(msg.ContentJSON) {
+			msg.ContentJSON = ""
+		}
 		msg.MetaJSON = "{}"
 		if err := r.store.UpsertSessionMessage(ctx, msg); err != nil {
 			return err

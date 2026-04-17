@@ -1932,6 +1932,159 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	}
 }
 
+func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Raw Update"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	updateChunk1 := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+	}
+	updateChunk2 := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: " world"}),
+	}
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{
+		Type:      SessionViewEventAssistantChunk,
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Kind:      "text",
+		Update:    &updateChunk1,
+	}); err != nil {
+		t.Fatalf("RecordEvent chunk #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{
+		Type:      SessionViewEventAssistantChunk,
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Kind:      "text",
+		Update:    &updateChunk2,
+	}); err != nil {
+		t.Fatalf("RecordEvent chunk #2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	stored, err := c.store.ListSessionMessages(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionMessages: %v", err)
+	}
+	if len(stored) != 1 {
+		t.Fatalf("stored len = %d, want 1", len(stored))
+	}
+	if stored[0].Method != "session.update" {
+		t.Fatalf("stored[0].Method = %q, want %q", stored[0].Method, "session.update")
+	}
+	if stored[0].Body != "hello world" {
+		t.Fatalf("stored[0].Body = %q, want %q", stored[0].Body, "hello world")
+	}
+
+	var doc struct {
+		Method string `json:"method"`
+		Params struct {
+			Update acp.SessionUpdate `json:"update"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(stored[0].ContentJSON), &doc); err != nil {
+		t.Fatalf("unmarshal content_json: %v", err)
+	}
+	if doc.Method != "session.update" {
+		t.Fatalf("doc.Method = %q, want %q", doc.Method, "session.update")
+	}
+	if doc.Params.Update.SessionUpdate != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("doc.Params.Update.SessionUpdate = %q, want %q", doc.Params.Update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
+	}
+	if got := extractTextChunk(doc.Params.Update.Content); got != "hello world" {
+		t.Fatalf("doc.Params.Update.Content text = %q, want %q", got, "hello world")
+	}
+}
+
+func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Merge"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	userChunk := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateUserMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "user says hi"}),
+	}
+	agentChunk := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "assistant says hi"}),
+	}
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{
+		Type:      SessionViewEventAssistantChunk,
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Kind:      "text",
+		Update:    &userChunk,
+	}); err != nil {
+		t.Fatalf("RecordEvent user chunk: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{
+		Type:      SessionViewEventAssistantChunk,
+		SessionID: "sess-1",
+		Role:      "assistant",
+		Kind:      "text",
+		Update:    &agentChunk,
+	}); err != nil {
+		t.Fatalf("RecordEvent agent chunk: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	_, messages, _, err := c.readSessionView(ctx, "sess-1", 0)
+	if err != nil {
+		t.Fatalf("readSessionView: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
+	}
+	if messages[0].Text != "user says hi" {
+		t.Fatalf("messages[0].Text = %q, want %q", messages[0].Text, "user says hi")
+	}
+	if messages[1].Text != "assistant says hi" {
+		t.Fatalf("messages[1].Text = %q, want %q", messages[1].Text, "assistant says hi")
+	}
+}
+
+func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "No System"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{
+		Type:      SessionViewEventSystemMessage,
+		SessionID: "sess-1",
+		Role:      "system",
+		Kind:      "prompt_result",
+		Text:      "max_output_tokens",
+		Status:    "done",
+	}); err != nil {
+		t.Fatalf("RecordEvent system message: %v", err)
+	}
+
+	messages, err := c.store.ListSessionMessages(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionMessages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("messages len = %d, want 0", len(messages))
+	}
+}
 func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	c := newSessionViewTestClient(t)
 

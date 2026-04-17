@@ -719,6 +719,40 @@ func buildSessionRecordMetaJSON(rec SessionMessageRecord) (string, error) {
 	return "{}", nil
 }
 
+func deriveSessionRecordBodyFromUpdate(update acp.SessionUpdate) string {
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		return extractTextChunk(update.Content)
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		return renderSessionToolStatus(update)
+	default:
+		return extractTextChunk(update.Content)
+	}
+}
+
+func hydrateSessionRecordFromUpdate(rec *SessionMessageRecord, update acp.SessionUpdate) {
+	if rec == nil {
+		return
+	}
+	rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(update.SessionUpdate))
+	body := deriveSessionRecordBodyFromUpdate(update)
+	if strings.TrimSpace(body) != "" {
+		rec.Body = body
+	}
+	rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(update.Status))
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "assistant")
+	case acp.SessionUpdateUserMessageChunk:
+		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "user")
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
+		rec.AggregateKey = firstNonEmpty(strings.TrimSpace(rec.AggregateKey), strings.TrimSpace(update.ToolCallID))
+	default:
+		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
+	}
+}
+
 func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 	if rec == nil {
 		return
@@ -727,7 +761,10 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 	rec.MetaJSON = normalizeJSONDoc(rec.MetaJSON, "{}")
 
 	var content struct {
-		Method  string `json:"method"`
+		Method string `json:"method"`
+		Params struct {
+			Update acp.SessionUpdate `json:"update"`
+		} `json:"params"`
 		Payload struct {
 			Role         string                 `json:"role"`
 			Kind         string                 `json:"kind"`
@@ -742,18 +779,24 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 	}
 	if err := json.Unmarshal([]byte(rec.ContentJSON), &content); err == nil {
 		rec.Method = strings.TrimSpace(content.Method)
-		rec.Role = strings.TrimSpace(content.Payload.Role)
-		if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
-			rec.Kind = strings.TrimSpace(content.Payload.UpdateMethod)
+		if strings.TrimSpace(content.Params.Update.SessionUpdate) != "" {
+			hydrateSessionRecordFromUpdate(rec, content.Params.Update)
 		} else {
-			rec.Kind = strings.TrimSpace(content.Payload.Kind)
+			rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), strings.TrimSpace(content.Payload.Role))
+			if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
+				rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.UpdateMethod))
+			} else {
+				rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.Kind))
+			}
+			if strings.TrimSpace(content.Payload.Text) != "" {
+				rec.Body = content.Payload.Text
+			}
+			rec.Blocks = content.Payload.Blocks
+			rec.Options = content.Payload.Options
+			rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(content.Payload.Status))
+			rec.RequestID = firstNonZeroInt64(rec.RequestID, content.Payload.RequestID)
+			rec.AggregateKey = firstNonEmpty(strings.TrimSpace(rec.AggregateKey), strings.TrimSpace(content.Payload.AggregateKey))
 		}
-		rec.Body = content.Payload.Text
-		rec.Blocks = content.Payload.Blocks
-		rec.Options = content.Payload.Options
-		rec.Status = strings.TrimSpace(content.Payload.Status)
-		rec.RequestID = content.Payload.RequestID
-		rec.AggregateKey = strings.TrimSpace(content.Payload.AggregateKey)
 	}
 	if rec.Method == "" {
 		rec.Method = inferSessionRecordMethod(*rec)
@@ -766,7 +809,6 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 		rec.SourceChatID = strings.TrimSpace(parts[1])
 	}
 }
-
 func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec SessionMessageRecord, update bool) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()

@@ -1350,17 +1350,17 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					case acp.SessionUpdateAgentMessageChunk:
 						text := extractTextChunk(params.Update.Content)
 						if strings.TrimSpace(text) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming"})
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming", Update: &params.Update})
 						}
 					case acp.SessionUpdateAgentThoughtChunk:
 						text := extractTextChunk(params.Update.Content)
 						if strings.TrimSpace(text) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming"})
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming", Update: &params.Update})
 						}
 					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 						statusText := renderSessionToolStatus(params.Update)
 						if strings.TrimSpace(statusText) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", AggregateKey: params.Update.ToolCallID})
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", AggregateKey: params.Update.ToolCallID, Update: &params.Update})
 						}
 					}
 					if hasIMEmitter {
@@ -1724,4 +1724,3 @@ func isSandboxRefreshErr(err error) bool {
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "windows sandbox: spawn setup refresh")
 }
-
