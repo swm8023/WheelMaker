@@ -34,8 +34,6 @@ type Hub struct {
 	dbPath        string
 	clients       []*client.Client
 	regSync       *Reporter
-	regMu         sync.Mutex
-	lastProj      map[string]ProjectInfo
 	appIM         map[string]*imapp.Channel
 	clientsByName map[string]*client.Client
 }
@@ -46,7 +44,6 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 	return &Hub{
 		cfg:           cfg,
 		dbPath:        dbPath,
-		lastProj:      map[string]ProjectInfo{},
 		appIM:         map[string]*imapp.Channel{},
 		clientsByName: map[string]*client.Client{},
 	}
@@ -146,11 +143,6 @@ func (h *Hub) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			h.monitorRegistryProjectState(ctx)
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
 			if err := h.regSync.Run(ctx); err != nil && ctx.Err() == nil {
 				registryLogger("").Error("sync error: %v", err)
 			}
@@ -236,45 +228,6 @@ func (h *Hub) setupRegistrySync() {
 		}
 	}
 	h.regSync = rep
-	h.regMu.Lock()
-	for _, project := range projects {
-		h.lastProj[project.Name] = project
-	}
-	h.regMu.Unlock()
-}
-
-func (h *Hub) monitorRegistryProjectState(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	checkAndReport := func() {
-		for _, cfgProject := range h.cfg.Projects {
-			project := h.collectProjectInfo(cfgProject)
-			h.regMu.Lock()
-			previous := h.lastProj[project.Name]
-			same := sameProjectInfo(previous, project)
-			if !same {
-				h.lastProj[project.Name] = project
-			}
-			h.regMu.Unlock()
-			if same {
-				continue
-			}
-			if err := h.regSync.UpdateProject(project); err != nil {
-				registryLogger(project.Name).Warn("updateProject failed err=%v", err)
-			}
-		}
-	}
-
-	checkAndReport()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			checkAndReport()
-		}
-	}
 }
 
 func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
@@ -366,20 +319,3 @@ func hubHashBytes(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
-
-func sameProjectInfo(a, b ProjectInfo) bool {
-	return a.Name == b.Name &&
-		a.Path == b.Path &&
-		a.Online == b.Online &&
-		a.Agent == b.Agent &&
-		a.IMType == b.IMType &&
-		a.ProjectRev == b.ProjectRev &&
-		a.Git.Branch == b.Git.Branch &&
-		a.Git.HeadSHA == b.Git.HeadSHA &&
-		a.Git.Dirty == b.Git.Dirty &&
-		a.Git.GitRev == b.Git.GitRev &&
-		a.Git.WorktreeRev == b.Git.WorktreeRev
-}
-
-
-
