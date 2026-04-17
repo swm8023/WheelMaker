@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web git graph popover layout', () => {
-  test('uses centered graph axis and responsive desktop/mobile popover policy', () => {
+  test('uses centered/stretched graph axis and responsive desktop/mobile popover policy', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -11,10 +11,14 @@ describe('web git graph popover layout', () => {
     expect(mainTsx).toContain('Math.max(320, Math.round(window.innerWidth * 0.42))');
     expect(mainTsx).toContain('Math.round(window.innerWidth * 0.92)');
     expect(mainTsx).toContain('const preferBelow = clickMidY <= viewportMidY;');
+    expect(mainTsx).toContain('? window.innerHeight - popoverHeight - safePadding');
+    expect(mainTsx).toContain(': 52;');
 
-    expect(stylesCss).toMatch(/\.git-row-spacer\s*\{\s*width:\s*6px;/);
-    expect(stylesCss).toMatch(/\.git-tree-child \.git-row-spacer\s*\{\s*width:\s*12px;/);
-    expect(stylesCss).toMatch(/\.git-graph-line\s*\{[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\);/);
+    expect(stylesCss).toMatch(/\.git-worktree-row\s*\{\s*margin-top:\s*0;/);
+    expect(stylesCss).toMatch(/\.git-commit-row\s*\{\s*margin-top:\s*0;/);
+    expect(stylesCss).toContain('align-self: stretch;');
+    expect(stylesCss).toContain('min-height: 24px;');
+    expect(stylesCss).toMatch(/\.git-graph-line\s*\{[^}]*top:\s*-1px;[^}]*bottom:\s*-1px;[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\);/);
   });
 });
 

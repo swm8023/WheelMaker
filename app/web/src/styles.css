@@ -655,11 +655,11 @@ body,
 }
 
 .git-worktree-row {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .git-commit-row {
-  margin-top: 1px;
+  margin-top: 0;
 }
 
 .git-file-row {
@@ -671,20 +671,21 @@ body,
   position: relative;
   width: 12px;
   min-width: 12px;
-  height: 24px;
+  min-height: 24px;
+  align-self: stretch;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .git-graph-lane.child {
-  height: 24px;
+  min-height: 24px;
 }
 
 .git-graph-line {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: -1px;
+  bottom: -1px;
   left: 50%;
   width: 1px;
   transform: translateX(-50%);

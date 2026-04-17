@@ -2464,11 +2464,9 @@ function App() {
                       const clickMidY = rect.top + rect.height / 2;
                       const viewportMidY = window.innerHeight / 2;
                       const preferBelow = clickMidY <= viewportMidY;
-                      y = preferBelow ? rect.bottom + 8 : rect.top - popoverHeight - 8;
-                      y = Math.max(
-                        52,
-                        Math.min(window.innerHeight - popoverHeight - safePadding, y),
-                      );
+                      y = preferBelow
+                        ? window.innerHeight - popoverHeight - safePadding
+                        : 52;
                     }
 
                     setCommitPopover({ commit, x, y, width: popoverWidth });
