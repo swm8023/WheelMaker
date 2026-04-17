@@ -2339,14 +2339,7 @@ function App() {
                   <span className="git-graph-line" />
                   <span className={`git-graph-dot ${worktreeActive ? 'active' : ''}`} />
                 </span>
-                <span
-                  className={`caret codicon ${
-                    worktreeExpanded
-                      ? 'codicon-chevron-down'
-                      : 'codicon-chevron-right'
-                  }`}
-                />
-                <span className="file-dot codicon codicon-source-control" />
+                <span className="git-row-spacer" aria-hidden="true" />
                 <span className="label git-commit-label">
                   <span className="git-commit-title">Working Tree</span>
                   <span className="git-commit-sha">
@@ -2377,7 +2370,7 @@ function App() {
                         <span className="git-graph-lane child" aria-hidden="true">
                           <span className="git-graph-line" />
                         </span>
-                        <span className="caret placeholder" aria-hidden="true" />
+                        <span className="git-row-spacer" aria-hidden="true" />
                         <span className={`status-tag status-git-${file.status}`}>
                           {file.status}
                         </span>
@@ -2450,12 +2443,7 @@ function App() {
                     <span className="git-graph-line" />
                     <span className={`git-graph-dot ${selected ? 'active' : ''}`} />
                   </span>
-                  <span
-                    className={`caret codicon ${
-                      expanded ? 'codicon-chevron-down' : 'codicon-chevron-right'
-                    }`}
-                  />
-                  <span className="file-dot codicon codicon-git-commit" />
+                  <span className="git-row-spacer" aria-hidden="true" />
                   <span className="label git-commit-label">
                     <span className="git-commit-title">
                       {commit.title || commit.sha.slice(0, 7)}
@@ -2489,10 +2477,7 @@ function App() {
                             <span className="git-graph-lane child" aria-hidden="true">
                               <span className="git-graph-line" />
                             </span>
-                            <span
-                              className="caret placeholder"
-                              aria-hidden="true"
-                            />
+                            <span className="git-row-spacer" aria-hidden="true" />
                             <span className={`status-tag status-git-${file.status}`}>
                               {file.status}
                             </span>
@@ -2510,7 +2495,7 @@ function App() {
                         <span className="git-graph-lane child" aria-hidden="true">
                           <span className="git-graph-line" />
                         </span>
-                        <span className="caret placeholder" aria-hidden="true" />
+                        <span className="git-row-spacer" aria-hidden="true" />
                         <span className="label">No changed files</span>
                       </div>
                     )
@@ -2519,7 +2504,7 @@ function App() {
                       <span className="git-graph-lane child" aria-hidden="true">
                         <span className="git-graph-line" />
                       </span>
-                      <span className="caret placeholder" aria-hidden="true" />
+                      <span className="git-row-spacer" aria-hidden="true" />
                       <span className="label">Loading files...</span>
                     </div>
                   )
@@ -3440,6 +3425,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
 

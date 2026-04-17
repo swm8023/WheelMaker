@@ -637,6 +637,12 @@ body,
   border-left: 2px solid transparent;
 }
 
+.git-row-spacer {
+  width: 12px;
+  min-width: 12px;
+  height: 1px;
+}
+
 .git-row.selected {
   background: rgba(47, 129, 247, 0.24);
   border-left-color: #4ea1ff;
@@ -651,14 +657,14 @@ body,
 }
 
 .git-file-row {
-  min-height: 22px;
+  min-height: 24px;
   opacity: 0.96;
 }
 
 .git-graph-lane {
   position: relative;
-  width: 14px;
-  min-width: 14px;
+  width: 12px;
+  min-width: 12px;
   height: 24px;
   display: inline-flex;
   align-items: center;
@@ -666,35 +672,33 @@ body,
 }
 
 .git-graph-lane.child {
-  height: 22px;
+  height: 24px;
 }
 
 .git-graph-line {
   position: absolute;
-  top: -8px;
-  bottom: -8px;
+  top: 0;
+  bottom: 0;
   left: 50%;
-  width: 2px;
+  width: 1px;
   transform: translateX(-50%);
-  background: rgba(107, 156, 212, 0.45);
+  background: rgba(107, 156, 212, 0.5);
 }
 
 .git-graph-dot {
   position: relative;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  border: 1px solid #7db7f7;
-  background: #1b2f49;
-  box-shadow: 0 0 0 1px rgba(18, 28, 42, 0.6);
+  border: none;
+  background: #7db7f7;
+  box-shadow: none;
 }
 
 .git-graph-dot.active {
   background: #4ea1ff;
-  border-color: #b4dcff;
-  box-shadow: 0 0 0 2px rgba(78, 161, 255, 0.24);
+  box-shadow: 0 0 0 2px rgba(78, 161, 255, 0.26);
 }
-
 .git-commit-label {
   display: flex;
   align-items: baseline;
@@ -1805,5 +1809,4 @@ body,
     transform: translateX(0);
   }
 }
-
 
