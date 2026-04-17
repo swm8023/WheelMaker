@@ -685,9 +685,9 @@ body,
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 6px;
+  left: 50%;
   width: 1px;
-  transform: none;
+  transform: translateX(-50%);
   background: rgba(107, 156, 212, 0.5);
 }
 

@@ -2424,56 +2424,53 @@ function App() {
                     const rect = (
                       event.currentTarget as HTMLDivElement
                     ).getBoundingClientRect();
-                    const panel = document.querySelector(
-                      '.workspace-left, .drawer.show',
-                    );
-                    const panelRect =
-                      panel instanceof HTMLElement
-                        ? panel.getBoundingClientRect()
-                        : null;
-                    const popoverWidthBase = Math.min(
-                      460,
-                      Math.max(260, Math.round(window.innerWidth * 0.42)),
-                    );
-                    const minPopoverWidth = 220;
-                    const popoverWidth = panelRect
-                      ? Math.max(
-                          minPopoverWidth,
-                          Math.min(
-                            popoverWidthBase,
-                            Math.max(
-                              minPopoverWidth,
-                              window.innerWidth - panelRect.right - 20,
-                            ),
-                          ),
-                        )
-                      : popoverWidthBase;
                     const popoverHeight = 250;
                     const safePadding = 8;
-                    const panelRightBound = panelRect
-                      ? Math.min(window.innerWidth - safePadding, panelRect.right + 12)
-                      : safePadding;
-                    const maxX = window.innerWidth - popoverWidth - safePadding;
-                    const rightCandidate = rect.right + 12;
-                    const leftCandidate = rect.left - popoverWidth - 12;
-                    let x = panelRect
-                      ? Math.max(panelRightBound, rightCandidate)
-                      : rightCandidate;
-                    if (x > maxX) {
-                      x = leftCandidate >= panelRightBound ? leftCandidate : maxX;
-                    }
-                    if (maxX >= panelRightBound) {
-                      x = Math.max(panelRightBound, Math.min(maxX, x));
-                    } else {
-                      x = Math.max(safePadding, maxX);
-                    }
-                    const y = Math.max(
-                      52,
-                      Math.min(
-                        window.innerHeight - popoverHeight - safePadding,
-                        rect.top - 8,
-                      ),
+                    let popoverWidth = Math.min(
+                      460,
+                      Math.max(320, Math.round(window.innerWidth * 0.42)),
                     );
+                    let x = safePadding;
+                    let y = safePadding;
+
+                    if (isWide) {
+                      const maxX = window.innerWidth - popoverWidth - safePadding;
+                      const rightCandidate = rect.right + 12;
+                      const leftCandidate = rect.left - popoverWidth - 12;
+                      x = rightCandidate;
+                      if (x > maxX) {
+                        x = leftCandidate >= safePadding ? leftCandidate : maxX;
+                      }
+                      x = Math.max(safePadding, Math.min(maxX, x));
+                      y = Math.max(
+                        52,
+                        Math.min(
+                          window.innerHeight - popoverHeight - safePadding,
+                          rect.top - 8,
+                        ),
+                      );
+                    } else {
+                      popoverWidth = Math.max(
+                        260,
+                        Math.min(
+                          window.innerWidth - safePadding * 2,
+                          Math.round(window.innerWidth * 0.92),
+                        ),
+                      );
+                      x = Math.max(
+                        safePadding,
+                        Math.round((window.innerWidth - popoverWidth) / 2),
+                      );
+                      const clickMidY = rect.top + rect.height / 2;
+                      const viewportMidY = window.innerHeight / 2;
+                      const preferBelow = clickMidY <= viewportMidY;
+                      y = preferBelow ? rect.bottom + 8 : rect.top - popoverHeight - 8;
+                      y = Math.max(
+                        52,
+                        Math.min(window.innerHeight - popoverHeight - safePadding, y),
+                      );
+                    }
+
                     setCommitPopover({ commit, x, y, width: popoverWidth });
                   }}
                 >
