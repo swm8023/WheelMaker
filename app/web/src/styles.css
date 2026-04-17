@@ -635,18 +635,18 @@ body,
 .git-row {
   min-height: 24px;
   border-left: 2px solid transparent;
-  gap: 4px;
+  gap: 3px;
 }
 
 .git-row-spacer {
-  width: 8px;
-  min-width: 8px;
+  width: 6px;
+  min-width: 6px;
   height: 1px;
 }
 
 .git-tree-child .git-row-spacer {
-  width: 14px;
-  min-width: 14px;
+  width: 12px;
+  min-width: 12px;
 }
 
 .git-row.selected {
@@ -685,16 +685,16 @@ body,
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
+  left: 6px;
   width: 1px;
-  transform: translateX(-50%);
+  transform: none;
   background: rgba(107, 156, 212, 0.5);
 }
 
 .git-graph-dot {
   position: relative;
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
   border: none;
   background: #7db7f7;
@@ -703,12 +703,12 @@ body,
 
 .git-graph-dot.active {
   background: #4ea1ff;
-  box-shadow: 0 0 0 2px rgba(78, 161, 255, 0.26);
+  box-shadow: none;
 }
 .git-commit-label {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 4px;
 }
 
 .git-commit-title {
@@ -733,7 +733,7 @@ body,
 .git-file-label {
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -753,8 +753,8 @@ body,
 
 .git-commit-popover {
   position: fixed;
-  width: min(460px, 46vw);
-  min-width: 320px;
+  width: min(460px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
   border: 1px solid #2c3950;
   border-radius: 10px;
   background: linear-gradient(180deg, #181d27 0%, #10141c 100%);

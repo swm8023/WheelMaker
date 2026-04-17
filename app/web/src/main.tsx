@@ -927,6 +927,7 @@ function App() {
     commit: RegistryGitCommit;
     x: number;
     y: number;
+    width: number;
   } | null>(null);
   const [selectedDiffSource, setSelectedDiffSource] =
     useState<GitDiffSource>('commit');
@@ -2423,36 +2424,57 @@ function App() {
                     const rect = (
                       event.currentTarget as HTMLDivElement
                     ).getBoundingClientRect();
-                    const popoverWidth = Math.min(
-                      460,
-                      Math.max(320, Math.round(window.innerWidth * 0.42)),
+                    const panel = document.querySelector(
+                      '.workspace-left, .drawer.show',
                     );
-                    const popoverHeight = 250;
-                    const sidebar = document.querySelector('.workspace-left');
-                    const sidebarRect =
-                      sidebar instanceof HTMLElement
-                        ? sidebar.getBoundingClientRect()
+                    const panelRect =
+                      panel instanceof HTMLElement
+                        ? panel.getBoundingClientRect()
                         : null;
-                    const minX = sidebarRect
-                      ? Math.min(window.innerWidth - 8, sidebarRect.right + 12)
-                      : 8;
-                    const maxX = window.innerWidth - popoverWidth - 8;
+                    const popoverWidthBase = Math.min(
+                      460,
+                      Math.max(260, Math.round(window.innerWidth * 0.42)),
+                    );
+                    const minPopoverWidth = 220;
+                    const popoverWidth = panelRect
+                      ? Math.max(
+                          minPopoverWidth,
+                          Math.min(
+                            popoverWidthBase,
+                            Math.max(
+                              minPopoverWidth,
+                              window.innerWidth - panelRect.right - 20,
+                            ),
+                          ),
+                        )
+                      : popoverWidthBase;
+                    const popoverHeight = 250;
+                    const safePadding = 8;
+                    const panelRightBound = panelRect
+                      ? Math.min(window.innerWidth - safePadding, panelRect.right + 12)
+                      : safePadding;
+                    const maxX = window.innerWidth - popoverWidth - safePadding;
                     const rightCandidate = rect.right + 12;
                     const leftCandidate = rect.left - popoverWidth - 12;
-                    let x = rightCandidate;
+                    let x = panelRect
+                      ? Math.max(panelRightBound, rightCandidate)
+                      : rightCandidate;
                     if (x > maxX) {
-                      x = leftCandidate >= minX ? leftCandidate : maxX;
+                      x = leftCandidate >= panelRightBound ? leftCandidate : maxX;
                     }
-                    if (maxX >= minX) {
-                      x = Math.max(minX, Math.min(maxX, x));
+                    if (maxX >= panelRightBound) {
+                      x = Math.max(panelRightBound, Math.min(maxX, x));
                     } else {
-                      x = Math.max(8, maxX);
+                      x = Math.max(safePadding, maxX);
                     }
                     const y = Math.max(
                       52,
-                      Math.min(window.innerHeight - popoverHeight - 8, rect.top - 8),
+                      Math.min(
+                        window.innerHeight - popoverHeight - safePadding,
+                        rect.top - 8,
+                      ),
                     );
-                    setCommitPopover({ commit, x, y });
+                    setCommitPopover({ commit, x, y, width: popoverWidth });
                   }}
                 >
                   <span className="git-graph-lane" aria-hidden="true">
@@ -2537,7 +2559,11 @@ function App() {
           <div
             ref={commitPopoverRef}
             className="git-commit-popover"
-            style={{ left: `${commitPopover.x}px`, top: `${commitPopover.y}px` }}
+            style={{
+              left: `${commitPopover.x}px`,
+              top: `${commitPopover.y}px`,
+              width: `${commitPopover.width}px`,
+            }}
           >
             <div className="git-commit-popover-header">
               <div className="git-commit-popover-meta">
@@ -3440,5 +3466,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
 
