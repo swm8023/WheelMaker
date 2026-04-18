@@ -19,6 +19,7 @@ describe('web git graph popover layout', () => {
     expect(stylesCss).toMatch(/\.git-worktree-row\s*\{\s*margin-top:\s*0;/);
     expect(stylesCss).toMatch(/\.git-commit-row\s*\{\s*margin-top:\s*0;/);
     expect(stylesCss).toContain('border-left-color: transparent;');
+    expect(stylesCss).toContain('padding-left: 10px;');
     expect(stylesCss).toContain('align-self: stretch;');
     expect(stylesCss).toContain('--git-graph-axis: 6px;');
     expect(stylesCss).toContain('left: var(--git-graph-axis);');

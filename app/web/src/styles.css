@@ -604,7 +604,7 @@ body,
 .status-git-C { color: #73c991; }
 .status-git-U { color: #569cd6; }
 .git-tree-child {
-  padding-left: 0;
+  padding-left: 10px;
 }
 
 .git-section-title {
