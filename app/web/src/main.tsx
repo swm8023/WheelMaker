@@ -576,6 +576,38 @@ function pickPreferredPath<T extends { path: string }>(items: T[]): string {
   return (preferred ?? items[0]).path;
 }
 
+function normalizeGitBranches(branches: string[], current: string): string[] {
+  const merged: string[] = [];
+  if (current.trim()) {
+    merged.push(current.trim());
+  }
+  for (const branch of branches) {
+    const trimmed = branch.trim();
+    if (!trimmed) continue;
+    merged.push(trimmed);
+  }
+  return [...new Set(merged)];
+}
+
+function pickGitSelectedBranches(
+  previous: string[],
+  available: string[],
+  current: string,
+): string[] {
+  const validPrevious = previous.filter(item => available.includes(item));
+  if (validPrevious.length > 0) {
+    return validPrevious;
+  }
+  const normalizedCurrent = current.trim();
+  if (normalizedCurrent && available.includes(normalizedCurrent)) {
+    return [normalizedCurrent];
+  }
+  if (available.length > 0) {
+    return [available[0]];
+  }
+  return [];
+}
+
 function splitPathForDisplay(path: string): {
   fileName: string;
   parentPath: string;
@@ -889,6 +921,8 @@ function App() {
   const fileReadSeqRef = useRef(0);
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
   const commitPopoverRef = useRef<HTMLDivElement | null>(null);
+  const gitBranchMenuRef = useRef<HTMLDivElement | null>(null);
+  const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
@@ -906,6 +940,9 @@ function App() {
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
   const [gitCurrentBranch, setGitCurrentBranch] = useState('');
+  const [gitBranches, setGitBranches] = useState<string[]>([]);
+  const [gitSelectedBranches, setGitSelectedBranches] = useState<string[]>([]);
+  const [gitBranchPickerOpen, setGitBranchPickerOpen] = useState(false);
   const [gitDirty, setGitDirty] = useState(false);
   const [gitStatusSummary, setGitStatusSummary] = useState({
     staged: 0,
@@ -957,6 +994,10 @@ function App() {
   }, [selectedChatId]);
 
   useEffect(() => {
+    gitSelectedBranchesRef.current = gitSelectedBranches;
+  }, [gitSelectedBranches]);
+
+  useEffect(() => {
     setAllowHeavyDiffLoad(false);
     setAllowLargeDiffRender(false);
   }, [selectedDiff, selectedCommit, selectedDiffSource, selectedDiffScope]);
@@ -1004,6 +1045,17 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [commitPopover]);
+
+  useEffect(() => {
+    if (!gitBranchPickerOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && gitBranchMenuRef.current?.contains(target)) return;
+      setGitBranchPickerOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [gitBranchPickerOpen]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -1128,6 +1180,10 @@ function App() {
     setFileContent('');
     setFileInfo(null);
     setGitCurrentBranch(hydrated.gitCurrentBranch);
+    setGitBranches([]);
+    setGitSelectedBranches([]);
+    gitSelectedBranchesRef.current = [];
+    setGitBranchPickerOpen(false);
     setCommits(hydrated.commits);
     setSelectedCommit(hydrated.selectedCommit);
     setExpandedCommitShas(hydrated.selectedCommit ? [hydrated.selectedCommit] : []);
@@ -1334,18 +1390,32 @@ function App() {
     readSelectedFile(selectedFile).catch(() => undefined);
   }, [projectId, selectedFile]);
 
-  const loadGit = async () => {
+  const loadGit = async (preferredRefs?: string[]) => {
     const targetProjectId = projectId;
     if (!targetProjectId) return;
     setGitLoading(true);
     setGitError('');
     try {
-      const [branchData, commitData, statusData] = await Promise.all([
+      const [branchData, statusData] = await Promise.all([
         service.listGitBranches(),
-        service.listGitCommits('HEAD'),
         service.getGitStatus(),
       ]);
-      setGitCurrentBranch(branchData.current || '');
+      const currentBranch = branchData.current || '';
+      const availableBranches = normalizeGitBranches(
+        branchData.branches ?? [],
+        currentBranch,
+      );
+      const selectedBranches = pickGitSelectedBranches(
+        preferredRefs ?? gitSelectedBranchesRef.current,
+        availableBranches,
+        currentBranch,
+      );
+      const commitData = await service.listGitCommits('HEAD', selectedBranches);
+
+      setGitCurrentBranch(currentBranch);
+      setGitBranches(availableBranches);
+      setGitSelectedBranches(selectedBranches);
+      gitSelectedBranchesRef.current = selectedBranches;
       setGitDirty(statusData.dirty);
       setGitStatusSummary({
         staged: statusData.staged.length,
@@ -1358,10 +1428,17 @@ function App() {
       setCommits(commitData);
       setGitLoadedProjectId(targetProjectId);
       const firstCommit = commitData[0]?.sha ?? '';
-      setSelectedCommit(prev => prev || firstCommit);
-      setExpandedCommitShas(prev =>
-        prev.length > 0 ? prev : firstCommit ? [firstCommit] : [],
-      );
+      setSelectedCommit(prev => {
+        if (prev && commitData.some(item => item.sha === prev)) {
+          return prev;
+        }
+        return firstCommit;
+      });
+      setExpandedCommitShas(prev => {
+        const expanded = prev.find(sha => commitData.some(item => item.sha === sha));
+        if (expanded) return [expanded];
+        return firstCommit ? [firstCommit] : [];
+      });
       setWorktreeExpanded(working.length > 0);
       setCommitPopover(null);
       if (!selectedDiff) {
@@ -1381,6 +1458,24 @@ function App() {
     } finally {
       setGitLoading(false);
     }
+  };
+
+  const toggleGitBranchSelection = (branch: string) => {
+    const normalizedBranch = branch.trim();
+    if (!normalizedBranch) return;
+    const currentSelection = gitSelectedBranchesRef.current;
+    const nextSelection = currentSelection.includes(normalizedBranch)
+      ? currentSelection.filter(item => item !== normalizedBranch)
+      : [...currentSelection, normalizedBranch];
+    const fallbackBranch = gitCurrentBranch.trim() || normalizedBranch;
+    const effectiveSelection =
+      nextSelection.length > 0 ? nextSelection : [fallbackBranch];
+    setGitSelectedBranches(effectiveSelection);
+    gitSelectedBranchesRef.current = effectiveSelection;
+    setGitLoadedProjectId('');
+    loadGit(effectiveSelection).catch(err =>
+      setGitError(err instanceof Error ? err.message : String(err)),
+    );
   };
 
   const refreshGitStatusOnly = async () => {
@@ -2296,17 +2391,78 @@ function App() {
     );
     const graphItemsCount =
       commits.length + (workingTreeFiles.length > 0 ? 1 : 0);
+    const branchOptions =
+      gitBranches.length > 0
+        ? gitBranches
+        : gitCurrentBranch
+        ? [gitCurrentBranch]
+        : [];
+    const branchFilterLabel =
+      gitSelectedBranches.length <= 1
+        ? gitSelectedBranches[0] ?? gitCurrentBranch ?? 'branch'
+        : `${gitSelectedBranches.length} branches`;
 
     return (
       <>
         <div className="section-title git-section-title">
           <span className="git-section-main">GRAPH</span>
           <span className="git-section-meta">{`${graphItemsCount} items`}</span>
-          <span className="git-section-actions" aria-hidden="true">
-            <span className="codicon codicon-target" />
-            <span className="codicon codicon-refresh" />
-            <span className="codicon codicon-ellipsis" />
-          </span>
+          <div className="git-section-actions">
+            <div className="git-branch-picker" ref={gitBranchMenuRef}>
+              <button
+                type="button"
+                className={`git-section-btn git-branch-picker-btn ${
+                  gitBranchPickerOpen ? 'open' : ''
+                }`}
+                onClick={() => setGitBranchPickerOpen(prev => !prev)}
+                title="Select branches to display"
+              >
+                <span className="codicon codicon-git-branch" />
+                <span className="git-branch-picker-btn-text">{branchFilterLabel}</span>
+                <span className="codicon codicon-chevron-down" />
+              </button>
+              {gitBranchPickerOpen ? (
+                <div className="git-branch-picker-menu">
+                  {branchOptions.length === 0 ? (
+                    <div className="git-branch-picker-empty">No branches</div>
+                  ) : (
+                    branchOptions.map(branch => {
+                      const selected = gitSelectedBranches.includes(branch);
+                      return (
+                        <button
+                          key={branch}
+                          type="button"
+                          className={`git-branch-picker-item ${
+                            selected ? 'selected' : ''
+                          }`}
+                          onClick={() => toggleGitBranchSelection(branch)}
+                        >
+                          <span className="git-branch-picker-check" aria-hidden="true">
+                            {selected ? '✓' : ''}
+                          </span>
+                          <span className="git-branch-picker-name">{branch}</span>
+                          {branch === gitCurrentBranch ? (
+                            <span className="git-branch-picker-current">current</span>
+                          ) : null}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              className="git-section-btn"
+              onClick={() => {
+                setCommitPopover(null);
+                loadGit().catch(() => undefined);
+              }}
+              title="Refresh git view"
+            >
+              <span className="codicon codicon-refresh" />
+            </button>
+          </div>
         </div>
         <div className="list half">
           {gitLoading ? (

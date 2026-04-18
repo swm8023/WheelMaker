@@ -259,11 +259,22 @@ export class RegistryRepository {
     };
   }
 
-  async gitLog(projectId: string, ref = 'HEAD', cursor = '', limit = 50): Promise<RegistryGitCommit[]> {
+  async gitLog(
+    projectId: string,
+    ref = 'HEAD',
+    cursor = '',
+    limit = 50,
+    refs: string[] = [],
+  ): Promise<RegistryGitCommit[]> {
+    const normalizedRefs = refs
+      .map(item => item.trim())
+      .filter(item => item.length > 0);
     const resp = await this.client.request({
       method: 'git.log',
       projectId,
-      payload: { ref, cursor, limit },
+      payload: normalizedRefs.length > 0
+        ? {ref, refs: normalizedRefs, cursor, limit}
+        : {ref, cursor, limit},
       timeoutMs: 30000,
     });
     const payload = (resp.payload ?? {}) as { commits?: RegistryGitCommit[] };

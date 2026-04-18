@@ -1138,9 +1138,10 @@ func (r *Reporter) replyGitRefs(conn *websocket.Conn, req envelope) {
 
 func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 	type gitLogPayload struct {
-		Ref    string `json:"ref,omitempty"`
-		Cursor string `json:"cursor,omitempty"`
-		Limit  int    `json:"limit,omitempty"`
+		Ref    string   `json:"ref,omitempty"`
+		Refs   []string `json:"refs,omitempty"`
+		Cursor string   `json:"cursor,omitempty"`
+		Limit  int      `json:"limit,omitempty"`
 	}
 	var payload gitLogPayload
 	if err := decodePayload(req.Payload, &payload); err != nil {
@@ -1152,10 +1153,31 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 		_ = r.writeError(conn, req.RequestID, codeNotFound, err.Error())
 		return
 	}
-	ref := strings.TrimSpace(payload.Ref)
-	if ref == "" {
-		ref = "HEAD"
+
+	requestedRefs := make([]string, 0, len(payload.Refs)+1)
+	if ref := strings.TrimSpace(payload.Ref); ref != "" {
+		requestedRefs = append(requestedRefs, ref)
 	}
+	for _, candidate := range payload.Refs {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		requestedRefs = append(requestedRefs, candidate)
+	}
+	if len(requestedRefs) == 0 {
+		requestedRefs = append(requestedRefs, "HEAD")
+	}
+	refs := make([]string, 0, len(requestedRefs))
+	seenRefs := make(map[string]struct{}, len(requestedRefs))
+	for _, ref := range requestedRefs {
+		if _, ok := seenRefs[ref]; ok {
+			continue
+		}
+		seenRefs[ref] = struct{}{}
+		refs = append(refs, ref)
+	}
+
 	limit := payload.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -1166,7 +1188,11 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 			offset = v
 		}
 	}
-	raw, err := runGit(root, "log", ref, "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s")
+
+	args := []string{"log"}
+	args = append(args, refs...)
+	args = append(args, "--date=iso-strict", "--pretty=format:%H%x1f%an%x1f%ae%x1f%aI%x1f%s")
+	raw, err := runGit(root, args...)
 	if err != nil {
 		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
 		return
@@ -1208,13 +1234,13 @@ func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
 		Payload: rp.MustRaw(map[string]any{
-			"ref":        ref,
+			"ref":        refs[0],
+			"refs":       refs,
 			"commits":    commits,
 			"nextCursor": nextCursor,
 		}),
 	})
 }
-
 func (r *Reporter) replyGitCommitFiles(conn *websocket.Conn, req envelope) {
 	type payload struct {
 		SHA string `json:"sha"`

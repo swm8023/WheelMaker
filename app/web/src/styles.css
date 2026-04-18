@@ -628,8 +628,128 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+}
+
+.git-section-btn {
+  height: 22px;
+  min-width: 22px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.git-section-btn:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.git-section-btn.open {
+  border-color: rgba(86, 156, 214, 0.45);
+  color: var(--text);
+}
+
+.git-branch-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.git-branch-picker-btn {
+  max-width: min(40vw, 220px);
+}
+
+.git-branch-picker-btn-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.git-branch-picker-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-width: min(74vw, 320px);
+  max-height: min(44vh, 300px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--soft-shadow);
+  z-index: 35;
+  padding: 6px;
+}
+
+.git-branch-picker-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.git-branch-picker-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  min-height: 26px;
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+
+.git-branch-picker-item:hover {
+  background: var(--hover);
+}
+
+.git-branch-picker-item.selected {
+  background: rgba(47, 129, 247, 0.2);
+}
+
+.git-branch-picker-check {
+  width: 14px;
+  text-align: center;
+  color: #7db7f7;
+}
+
+.git-branch-picker-name {
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-branch-picker-current {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 900px) {
+  .git-branch-picker-btn {
+    max-width: 54vw;
+  }
+
+  .git-branch-picker-menu {
+    right: auto;
+    left: 0;
+    min-width: min(78vw, 320px);
+    max-width: calc(100vw - 26px);
+  }
 }
 
 .git-row {

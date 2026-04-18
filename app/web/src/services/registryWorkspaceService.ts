@@ -167,9 +167,9 @@ export class RegistryWorkspaceService {
     };
   }
 
-  async listGitCommits(ref = 'HEAD'): Promise<RegistryGitCommit[]> {
+  async listGitCommits(ref = 'HEAD', refs: string[] = []): Promise<RegistryGitCommit[]> {
     if (!this.session || !this.repository) return [];
-    return this.repository.gitLog(this.session.selectedProjectId, ref, '', 50);
+    return this.repository.gitLog(this.session.selectedProjectId, ref, '', 50, refs);
   }
 
   async listGitBranches(): Promise<{current: string; branches: string[]}> {
@@ -286,3 +286,4 @@ export class RegistryWorkspaceService {
     };
   }
 }
+
