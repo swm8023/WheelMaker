@@ -17,8 +17,10 @@ describe('web git graph popover layout', () => {
     expect(stylesCss).toMatch(/\.git-worktree-row\s*\{\s*margin-top:\s*0;/);
     expect(stylesCss).toMatch(/\.git-commit-row\s*\{\s*margin-top:\s*0;/);
     expect(stylesCss).toContain('align-self: stretch;');
-    expect(stylesCss).toContain('min-height: 24px;');
-    expect(stylesCss).toMatch(/\.git-graph-line\s*\{[^}]*top:\s*-1px;[^}]*bottom:\s*-1px;[^}]*left:\s*50%;[^}]*transform:\s*translateX\(-50%\);/);
+    expect(stylesCss).toContain('--git-graph-axis: 6px;');
+    expect(stylesCss).toContain('left: var(--git-graph-axis);');
+    expect(stylesCss).toContain('transform: translate(-50%, -50%);');
+    expect(stylesCss).toMatch(/\.git-graph-line\s*\{[^}]*top:\s*-1px;[^}]*bottom:\s*-1px;[^}]*left:\s*var\(--git-graph-axis\);/);
   });
 });
 

@@ -674,8 +674,7 @@ body,
   min-height: 24px;
   align-self: stretch;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  --git-graph-axis: 6px;
 }
 
 .git-graph-lane.child {
@@ -686,20 +685,23 @@ body,
   position: absolute;
   top: -1px;
   bottom: -1px;
-  left: 50%;
+  left: var(--git-graph-axis);
   width: 1px;
   transform: translateX(-50%);
   background: rgba(107, 156, 212, 0.5);
 }
 
 .git-graph-dot {
-  position: relative;
+  position: absolute;
+  left: var(--git-graph-axis);
+  top: 50%;
   width: 6px;
   height: 6px;
   border-radius: 999px;
   border: none;
   background: #7db7f7;
   box-shadow: none;
+  transform: translate(-50%, -50%);
 }
 
 .git-graph-dot.active {
