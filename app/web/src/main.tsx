@@ -7,6 +7,12 @@ import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/jetbrains-mono/400.css';
+import ReactMarkdown from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
+import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import mermaid from 'mermaid';
+import 'katex/dist/katex.min.css';
 
 declare const require: (id: string) => any;
 
@@ -192,6 +198,13 @@ const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
+let mermaidRenderSequence = 0;
+
+function nextMermaidRenderId(): string {
+  mermaidRenderSequence += 1;
+  return `wm-mermaid-${mermaidRenderSequence}`;
+}
+
 
 function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
   return [...items].sort((a, b) =>
@@ -261,6 +274,11 @@ function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
 function getFileExtension(path: string): string {
   const match = /\.([a-z0-9]+)$/i.exec(path);
   return match ? match[1].toLowerCase() : '';
+}
+
+function isMarkdownPath(path: string): boolean {
+  const ext = getFileExtension(path);
+  return ext === 'md' || ext === 'markdown';
 }
 
 function detectCodeLanguage(path: string): string {
@@ -719,6 +737,134 @@ function ShikiCodeBlock({
   );
 }
 
+type MermaidBlockProps = {
+  content: string;
+  themeMode: ThemeMode;
+};
+
+function MermaidBlock({ content, themeMode }: MermaidBlockProps) {
+  const [svg, setSvg] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const source = content.trim();
+    if (!source) {
+      setSvg('');
+      setError('Empty mermaid diagram');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setSvg('');
+    setError('');
+
+    (async () => {
+      try {
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: themeMode === 'light' ? 'default' : 'dark',
+        });
+        const renderId = nextMermaidRenderId();
+        const { svg: nextSvg } = await mermaid.render(renderId, source);
+        if (!cancelled) {
+          setSvg(nextSvg || '');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [content, themeMode]);
+
+  if (error) {
+    return <div className="mermaid-error">{error}</div>;
+  }
+
+  if (!svg) {
+    return <div className="muted block">Rendering mermaid diagram...</div>;
+  }
+
+  return (
+    <div className="mermaid-block" dangerouslySetInnerHTML={{ __html: svg }} />
+  );
+}
+
+type MarkdownPreviewProps = {
+  content: string;
+  themeMode: ThemeMode;
+  codeTheme: CodeThemeId;
+  codeFont: CodeFontId;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeTabSize: number;
+  wrap: boolean;
+  lineNumbers: boolean;
+};
+
+function MarkdownPreview({
+  content,
+  themeMode,
+  codeTheme,
+  codeFont,
+  codeFontSize,
+  codeLineHeight,
+  codeTabSize,
+  wrap,
+  lineNumbers,
+}: MarkdownPreviewProps) {
+  return (
+    <div className="markdown-preview">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{
+          pre({ children }) {
+            return <>{children}</>;
+          },
+          code({ className, children }) {
+            const languageMatch = /language-([\w-]+)/.exec(className || '');
+            const language = (languageMatch?.[1] || '').toLowerCase();
+            const codeText = String(children ?? '').replace(/\n$/, '');
+
+            if (language === "mermaid") {
+              return <MermaidBlock content={codeText} themeMode={themeMode} />;
+            }
+
+            if (language || codeText.includes('\n')) {
+              return (
+                <ShikiCodeBlock
+                  content={codeText}
+                  language={language || 'text'}
+                  wrap={wrap}
+                  lineNumbers={lineNumbers}
+                  themeMode={themeMode}
+                  codeTheme={codeTheme}
+                  codeFont={codeFont}
+                  codeFontSize={codeFontSize}
+                  codeLineHeight={codeLineHeight}
+                  codeTabSize={codeTabSize}
+                />
+              );
+            }
+
+            return <code className={className}>{children}</code>;
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 type ShikiDiffPaneProps = {
   content: string;
   language: string;
@@ -810,9 +956,7 @@ function ShikiDiffPane({
       <div
         className={`diff-inline ${wrap ? 'wrap' : 'nowrap'}`}
         style={diffStyle}
-        dangerouslySetInnerHTML={{
-          __html: diffHtml || '<pre><code> </code></pre>',
-        }}
+        dangerouslySetInnerHTML={{__html: diffHtml || '<pre><code> </code></pre>'}}
       />
     </div>
   );
@@ -909,6 +1053,7 @@ function App() {
   const [gotoLineInput, setGotoLineInput] = useState('');
   const [searchToolsOpen, setSearchToolsOpen] = useState(false);
   const [gotoToolsOpen, setGotoToolsOpen] = useState(false);
+  const [markdownPreviewEnabled, setMarkdownPreviewEnabled] = useState(false);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
   const liveRefreshTimerRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -996,6 +1141,12 @@ function App() {
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
   }, [gitSelectedBranches]);
+
+  useEffect(() => {
+    if (!isMarkdownPath(selectedFile)) {
+      setMarkdownPreviewEnabled(false);
+    }
+  }, [selectedFile]);
 
   useEffect(() => {
     setAllowHeavyDiffLoad(false);
@@ -1136,6 +1287,7 @@ function App() {
   const worktreeActive = selectedDiffSource === 'worktree';
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
+  const selectedFileIsMarkdown = isMarkdownPath(selectedFile);
   const isSelectedFilePinned = selectedFile
     ? pinnedFiles.includes(selectedFile)
     : false;
@@ -3413,9 +3565,40 @@ function App() {
                     </div>
                   </div>
                 </div>
+                {selectedFileIsMarkdown ? (
+                  <button
+                    type="button"
+                    className={`view-tool markdown-preview-toggle ${
+                      markdownPreviewEnabled ? 'active' : ''
+                    }`}
+                    onClick={() => setMarkdownPreviewEnabled(value => !value)}
+                    title={
+                      markdownPreviewEnabled
+                        ? 'Switch to source mode'
+                        : 'Switch to markdown preview'
+                    }
+                    aria-label="Toggle markdown preview"
+                  >
+                    <span className="markdown-preview-toggle-text">
+                      {markdownPreviewEnabled ? 'SRC' : 'MD'}
+                    </span>
+                  </button>
+                ) : null}
                 <div ref={fileScrollRef} className="scroll-panel">
                   {fileLoading ? (
                     <div className="muted block">Loading file...</div>
+                  ) : selectedFileIsMarkdown && markdownPreviewEnabled ? (
+                    <MarkdownPreview
+                      content={fileContent}
+                      themeMode={themeMode}
+                      codeTheme={codeTheme}
+                      codeFont={codeFont}
+                      codeFontSize={codeFontSize}
+                      codeLineHeight={codeLineHeight}
+                      codeTabSize={codeTabSize}
+                      wrap={wrapLines}
+                      lineNumbers={showLineNumbers}
+                    />
                   ) : (
                     renderCodePane(
                       fileContent,
@@ -3713,4 +3896,3 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
