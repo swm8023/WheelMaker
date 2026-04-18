@@ -2462,11 +2462,37 @@ function App() {
                         Math.round((window.innerWidth - popoverWidth) / 2),
                       );
                       const clickMidY = rect.top + rect.height / 2;
-                      const viewportMidY = window.innerHeight / 2;
-                      const preferBelow = clickMidY <= viewportMidY;
-                      y = preferBelow
-                        ? window.innerHeight - popoverHeight - safePadding
+                      const listPanel = (
+                        event.currentTarget as HTMLDivElement
+                      ).closest('.list');
+                      const panelRect =
+                        listPanel instanceof HTMLElement
+                          ? listPanel.getBoundingClientRect()
+                          : null;
+                      const panelMidY = panelRect
+                        ? panelRect.top + panelRect.height / 2
+                        : window.innerHeight / 2;
+                      const preferBelow = clickMidY <= panelMidY;
+                      const topZoneY = panelRect
+                        ? Math.max(52, Math.round(panelRect.top + 8))
                         : 52;
+                      const bottomZoneY = panelRect
+                        ? Math.min(
+                            window.innerHeight - popoverHeight - safePadding,
+                            Math.round(panelRect.bottom - popoverHeight - 8),
+                          )
+                        : window.innerHeight - popoverHeight - safePadding;
+                      if (bottomZoneY <= topZoneY) {
+                        y = Math.max(
+                          52,
+                          Math.min(
+                            window.innerHeight - popoverHeight - safePadding,
+                            topZoneY,
+                          ),
+                        );
+                      } else {
+                        y = preferBelow ? bottomZoneY : topZoneY;
+                      }
                     }
 
                     setCommitPopover({ commit, x, y, width: popoverWidth });

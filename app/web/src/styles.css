@@ -651,7 +651,7 @@ body,
 
 .git-row.selected {
   background: rgba(47, 129, 247, 0.24);
-  border-left-color: #4ea1ff;
+  border-left-color: transparent;
 }
 
 .git-worktree-row {

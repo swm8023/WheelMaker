@@ -10,12 +10,15 @@ describe('web git graph popover layout', () => {
     expect(mainTsx).toContain('if (isWide) {');
     expect(mainTsx).toContain('Math.max(320, Math.round(window.innerWidth * 0.42))');
     expect(mainTsx).toContain('Math.round(window.innerWidth * 0.92)');
-    expect(mainTsx).toContain('const preferBelow = clickMidY <= viewportMidY;');
-    expect(mainTsx).toContain('? window.innerHeight - popoverHeight - safePadding');
-    expect(mainTsx).toContain(': 52;');
+    expect(mainTsx).toContain(").closest('.list');");
+    expect(mainTsx).toContain('const panelMidY = panelRect');
+    expect(mainTsx).toContain('const topZoneY = panelRect');
+    expect(mainTsx).toContain('const bottomZoneY = panelRect');
+    expect(mainTsx).toContain('y = preferBelow ? bottomZoneY : topZoneY;');
 
     expect(stylesCss).toMatch(/\.git-worktree-row\s*\{\s*margin-top:\s*0;/);
     expect(stylesCss).toMatch(/\.git-commit-row\s*\{\s*margin-top:\s*0;/);
+    expect(stylesCss).toContain('border-left-color: transparent;');
     expect(stylesCss).toContain('align-self: stretch;');
     expect(stylesCss).toContain('--git-graph-axis: 6px;');
     expect(stylesCss).toContain('left: var(--git-graph-axis);');
