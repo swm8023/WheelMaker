@@ -937,6 +937,15 @@ else:
 
 #### 5.9.2 `git.log`
 
+说明：
+
+- `payload.refs` 为可选分支数组；用于一次查询多个分支可见的提交。
+- `payload.ref` 保留兼容：
+  - 仅传 `ref`：等价于单分支查询。
+  - 同时传 `ref` 与 `refs`：服务端会合并并去重（顺序保留）。
+- `ref` / `refs` 都为空时，默认按 `HEAD` 查询。
+- `cursor` / `nextCursor` 使用偏移量字符串（例如 `"0"`、`"50"`）。
+
 请求：
 
 ```json
@@ -947,8 +956,9 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "ref": "main",
+    "refs": ["main", "release/1.2"],
     "limit": 50,
-    "cursor": ""
+    "cursor": "0"
   }
 }
 ```
@@ -962,6 +972,8 @@ else:
   "method": "git.log",
   "projectId": "local-hub:WheelMaker",
   "payload": {
+    "ref": "main",
+    "refs": ["main", "release/1.2"],
     "commits": [
       {
         "sha": "abc123...",
@@ -969,20 +981,12 @@ else:
         "email": "john@example.com",
         "time": "2026-03-30T09:00:00Z",
         "title": "feat: add registry protocol v2"
-      },
-      {
-        "sha": "def456...",
-        "author": "Jane Smith",
-        "email": "jane@example.com",
-        "time": "2026-03-29T18:30:00Z",
-        "title": "fix: handle connection timeout"
       }
     ],
-    "nextCursor": "after:def456"
+    "nextCursor": "50"
   }
 }
 ```
-
 #### 5.9.3 `git.commit.files`
 
 请求：
@@ -1511,4 +1515,5 @@ Registry 即将关闭客户端连接时提前通知：
    - 补齐统一错误码规范（含 `FORBIDDEN/NOT_FOUND/UNAVAILABLE/RATE_LIMITED/TIMEOUT`）。
    - 增加连接级限速、重连退避与审计字段要求。
    - 当前版本不强制协议层 `wss`，由后续网络安全专项推进。
+
 

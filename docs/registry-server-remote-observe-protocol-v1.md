@@ -313,6 +313,13 @@
 
 ### 7.2 提交记录：`git.log`
 
+说明：
+
+- 支持 `payload.refs`（可选数组）用于多分支合并查询。
+- `payload.ref` 保留兼容；与 `refs` 同时存在时按顺序合并并去重。
+- 若 `ref` 和 `refs` 均未提供，默认查询 `HEAD`。
+- `cursor` / `nextCursor` 为偏移量字符串。
+
 请求：
 
 ```json
@@ -322,7 +329,8 @@
   "projectId": "server",
   "payload": {
     "ref": "main",
-    "cursor": "",
+    "refs": ["main", "release/1.2"],
+    "cursor": "0",
     "limit": 50
   }
 }
@@ -337,6 +345,7 @@
   "projectId": "server",
   "payload": {
     "ref": "main",
+    "refs": ["main", "release/1.2"],
     "commits": [
       {
         "sha": "abc123",
@@ -346,11 +355,10 @@
         "title": "commit subject"
       }
     ],
-    "nextCursor": "opaque-cursor"
+    "nextCursor": "50"
   }
 }
 ```
-
 ### 7.3 提交文件列表：`git.commit.files`
 
 请求：
@@ -466,4 +474,5 @@
 ---
 
 本稿为协议草案 V1，适合先做后端能力与协议稳定，再接入 App/Web 客户端。
+
 
