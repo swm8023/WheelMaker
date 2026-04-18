@@ -1047,7 +1047,7 @@ function App() {
   }, [commitPopover]);
 
   useEffect(() => {
-    if (!gitBranchPickerOpen) return;
+    if (!gitBranchPickerOpen || !isWide) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (target && gitBranchMenuRef.current?.contains(target)) return;
@@ -1055,7 +1055,7 @@ function App() {
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [gitBranchPickerOpen]);
+  }, [gitBranchPickerOpen, isWide]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -2391,6 +2391,7 @@ function App() {
     );
     const graphItemsCount =
       commits.length + (workingTreeFiles.length > 0 ? 1 : 0);
+    const headCommitSha = commits[0]?.sha ?? '';
     const branchOptions =
       gitBranches.length > 0
         ? gitBranches
@@ -2401,7 +2402,6 @@ function App() {
       gitSelectedBranches.length <= 1
         ? gitSelectedBranches[0] ?? gitCurrentBranch ?? 'branch'
         : `${gitSelectedBranches.length} branches`;
-
     return (
       <>
         <div className="section-title git-section-title">
@@ -2421,7 +2421,7 @@ function App() {
                 <span className="git-branch-picker-btn-text">{branchFilterLabel}</span>
                 <span className="codicon codicon-chevron-down" />
               </button>
-              {gitBranchPickerOpen ? (
+              {gitBranchPickerOpen && isWide ? (
                 <div className="git-branch-picker-menu">
                   {branchOptions.length === 0 ? (
                     <div className="git-branch-picker-empty">No branches</div>
@@ -2555,6 +2555,11 @@ function App() {
               commit.sha,
             );
             const files = commitFilesBySha[commit.sha] ?? [];
+            const showBranchTags =
+              headCommitSha !== '' && commit.sha === headCommitSha;
+            const inlineBranchTags = showBranchTags
+              ? gitSelectedBranches.slice(0, 2)
+              : [];
             return (
               <React.Fragment key={commit.sha}>
                 <div
@@ -2663,6 +2668,23 @@ function App() {
                     <span className="git-commit-title">
                       {commit.title || commit.sha.slice(0, 7)}
                     </span>
+                    <span className="git-commit-meta">
+                      {formatRelativeTime(commit.time)}
+                    </span>
+                    {inlineBranchTags.length > 0 ? (
+                      <span className="git-commit-tags">
+                        {inlineBranchTags.map(branch => (
+                          <span key={`${commit.sha}:${branch}`} className="git-commit-tag">
+                            {branch}
+                          </span>
+                        ))}
+                        {gitSelectedBranches.length > inlineBranchTags.length ? (
+                          <span className="git-commit-tag git-commit-tag-muted">
+                            +{gitSelectedBranches.length - inlineBranchTags.length}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
                   </span>
                 </div>
                 {expanded ? (
@@ -2784,6 +2806,54 @@ function App() {
               <div className="git-commit-popover-sha">
                 <span className="codicon codicon-git-commit" />
                 <code>{commitPopover.commit.sha}</code>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {gitBranchPickerOpen && !isWide ? (
+          <div className="git-branch-sheet-backdrop" onClick={() => setGitBranchPickerOpen(false)}>
+            <div
+              className="git-branch-sheet"
+              onClick={event => event.stopPropagation()}
+            >
+              <div className="git-branch-sheet-header">
+                <span>Select Branches</span>
+                <button
+                  type="button"
+                  className="git-section-btn"
+                  onClick={() => setGitBranchPickerOpen(false)}
+                  aria-label="Close branch selector"
+                >
+                  <span className="codicon codicon-close" />
+                </button>
+              </div>
+              <div className="git-branch-sheet-body">
+                {branchOptions.length === 0 ? (
+                  <div className="git-branch-picker-empty">No branches</div>
+                ) : (
+                  branchOptions.map(branch => {
+                    const selected = gitSelectedBranches.includes(branch);
+                    return (
+                      <button
+                        key={`sheet:${branch}`}
+                        type="button"
+                        className={`git-branch-picker-item ${
+                          selected ? 'selected' : ''
+                        }`}
+                        onClick={() => toggleGitBranchSelection(branch)}
+                      >
+                        <span className="git-branch-picker-check" aria-hidden="true">
+                          {selected ? '✓' : ''}
+                        </span>
+                        <span className="git-branch-picker-name">{branch}</span>
+                        {branch === gitCurrentBranch ? (
+                          <span className="git-branch-picker-current">current</span>
+                        ) : null}
+                      </button>
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
