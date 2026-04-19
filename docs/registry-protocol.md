@@ -145,7 +145,8 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 - `role=client` 时 `hubId` 可选：
   - 携带 `hubId`：连接绑定到该 hub，`project.list` 仅返回该 hub 的项目。
   - 省略 `hubId`：全局范围，`project.list` 返回 token 有权访问的所有 hub 的项目。
-- `token` 必填，必须在 `connect.init` 中携带。
+- 当 Registry 配置了 `token` 时，`connect.init.payload.token` 必须携带且必须匹配。
+- 当 Registry 未配置 `token` 时，`token` 字段可省略。
 - 所有业务方法必须在 `connect.init.ok=true` 后调用。
 - 失败响应统一为 `UNAUTHORIZED`，认证失败后立即断连。
 - 建议 `connect.init` 使用 `ts + nonce`，服务端做时间窗校验与 nonce 去重。
@@ -154,12 +155,12 @@ Hub 上报（`reportProjects`、`updateProject`）和 Client 查询（`project.l
 
 | 角色 | 允许的请求方法 |
 |------|---------------|
-| `hub` | `registry.reportProjects`、`registry.updateProject`、`hub.ping` |
-| `client` | `project.list`、`project.syncCheck`、`fs.*`、`git.*`、`batch` |
+| `hub` | `registry.reportProjects`、`registry.updateProject`、`registry.chat.message`、`registry.session.updated`、`registry.session.message`、`hub.ping` |
+| `client` | `project.list`、`project.syncCheck`、`chat.*`、`session.*`、`fs.*`、`git.*`、`batch` |
 | `monitor` | `project.list`、`monitor.listHub`、`monitor.status`、`monitor.log`、`monitor.db`、`monitor.action`、`batch` |
 
 - 方法与角色不匹配返回 `FORBIDDEN`。
-- **事件方法**（`project.changed`、`git.workspace.changed`、`project.offline`、`project.online`等）是服务端→客户端推送，不受白名单约束。
+- **事件方法**（`project.changed`、`git.workspace.changed`、`project.offline`、`project.online`、`chat.message`、`session.updated`、`session.message`、`connection.closing`）是服务端→客户端推送，不受白名单约束。
 
 ### 3.5 projectId 反查与路由
 
@@ -320,7 +321,21 @@ else:
 - 建议 Hub 每 `15s` 发送 ping，`45s` 无 pong 判定失活。
 - 失活后断开并触发重连。
 
-### 4.5 Hub 侧可观测性
+### 4.5 Hub 侧事件发布方法
+
+Hub 可通过以下方法向 Registry 发布事件，由 Registry 转推给对应 project 的 client：
+
+- `registry.chat.message` -> 事件 `chat.message`
+- `registry.session.updated` -> 事件 `session.updated`
+- `registry.session.message` -> 事件 `session.message`
+
+约束：
+
+- 三个方法均要求携带 `projectId`。
+- `projectId` 必须属于当前已认证 hub 的作用域（`hubId:` 前缀）。
+- 目标 project 不存在时返回 `NOT_FOUND`。
+
+### 4.6 Hub 侧可观测性
 
 建议指标：
 
@@ -334,7 +349,7 @@ else:
 ### 5.1 Client 连接行为
 
 - Client 不要求 ping/pong。
-- Registry 对空闲 Client 连接做超时清理（建议 5 分钟无任何请求/事件交互）。清理前发送 `connection.closing` 事件 `reason: "idle_timeout"`。
+- Registry 对空闲 `client` 与 `monitor` 连接做超时清理（建议 5 分钟无任何请求/事件交互）。清理前发送 `connection.closing` 事件 `reason: "idle_timeout"`。
 - 发起业务请求前若连接不可用，先重连并重新执行 `connect.init`。
 - 重连后使用 `project.syncCheck` 高效恢复状态（见 5.3）。
 
@@ -415,12 +430,12 @@ else:
     "projectRev": "sha256:...",
     "gitRev": "sha256:...",
     "worktreeRev": "sha256:...",
-    "staleDomains": ["git", "worktree"]
+    "staleDomains": ["project", "git", "worktree"]
   }
 }
 ```
 
-客户端按 `staleDomains` 进行增量刷新，逻辑与 `project.changed` 事件处理相同（见第 8 节）。
+客户端按 `staleDomains` 进行增量刷新。当前实现返回集合为 `project`、`git`、`worktree`。
 
 ### 5.4 `fs.list`（目录）
 
@@ -490,7 +505,7 @@ else:
 | `notModified` | — | 必返回 |
 | `entries` | — | `notModified=false` 时返回 |
 
-> **目录 `hash`** 仅覆盖直接子项的名称与类型（`kind|name`），不反映文件内容变化，也不递归反映子目录内部变化。文件内容的变化通过 `project.changed` 事件的 `changedPaths` 推送，客户端对已打开文件单独发起 `fs.read`。
+> **目录 `hash`** 仅覆盖直接子项的名称与类型（`kind|name`），不反映文件内容变化，也不递归反映子目录内部变化。文件内容变化需通过 `project.changed` / `git.workspace.changed` 事件提示，并对已打开文件单独发起 `fs.read`。
 
 ### 5.5 `fs.info`（路径元信息查询）
 
@@ -823,10 +838,8 @@ else:
   "payload": {
     "query": "registry protocol",
     "root": ".",
-    "mode": "fuzzy",
     "caseSensitive": false,
-    "limit": 50,
-    "cursor": ""
+    "limit": 50
   }
 }
 ```
@@ -840,6 +853,7 @@ else:
   "method": "fs.search",
   "projectId": "local-hub:WheelMaker",
   "payload": {
+    "root": ".",
     "results": [
       { "path": "docs/registry-protocol.md", "name": "registry-protocol.md", "kind": "file", "score": 0.97 },
       { "path": "docs/superpowers", "name": "superpowers", "kind": "dir", "score": 0.42 }
@@ -866,8 +880,7 @@ else:
     "caseSensitive": false,
     "includeGlob": "*.go",
     "contextLines": 2,
-    "limit": 50,
-    "cursor": ""
+    "limit": 50
   }
 }
 ```
@@ -881,6 +894,7 @@ else:
   "method": "fs.grep",
   "projectId": "local-hub:WheelMaker",
   "payload": {
+    "root": ".",
     "results": [
       {
         "path": "internal/registry/auth.go",
@@ -1069,9 +1083,7 @@ else:
   "projectId": "local-hub:WheelMaker",
   "payload": {
     "base": "main",
-    "head": "feature/x",
-    "limit": 100,
-    "cursor": ""
+    "head": "feature/x"
   }
 }
 ```
@@ -1254,6 +1266,7 @@ else:
 - 子响应的 `type` 可以是 `response` 或 `error`。
 - 批量内不允许嵌套 `batch`。
 - 批量内不允许 `connect.init`。
+- 当前实现中，`batch` 的转发子请求走 `projectId` 路由；`monitor.*` 不建议放入 `batch`。
 
 ### 5.11 Monitor 侧方法（hub 作用域）
 
@@ -1292,6 +1305,15 @@ else:
 - `monitor.action`：执行 hub monitor 动作（如 `start`/`stop`/`restart`/`update-publish`）。
 
 `project.list` 在 `monitor` 角色下仍可用；用于展示当前选中 hub 下 project 列表（客户端按 `projectId` 的 `hubId:` 前缀过滤）。
+
+### 5.12 Chat / Session 透传方法
+
+Registry 对以下 client 请求按 `projectId` 转发到 hub，并把 hub 响应原样返回：
+
+- Chat: `chat.session.list`、`chat.session.read`、`chat.send`、`chat.permission.respond`
+- Session: `session.list`、`session.read`、`session.new`、`session.send`、`session.markRead`
+
+Hub 还可通过 `registry.chat.message`、`registry.session.updated`、`registry.session.message` 触发服务端事件推送（见第 7 节）。
 ## 6. Hash 规范（统一算法）
 
 统一约定：
@@ -1341,7 +1363,7 @@ else:
 1. **有缓存、不确定是否过期 → 携带 `knownHash`**。服务端校验 hash：未变则返回 `notModified=true`（不含数据体），变了则返回新数据 + 新 `hash`。
 2. **无缓存 → 不传 `knownHash`**。服务端直接返回完整数据。无缓存的场景包括：首次请求、缓存已驱逐、仅从事件推送获知 hash 但从未拉取过数据。
 3. 对 `fs.read`：文件级 hash 未变 ⟹ 全部内容未变 ⟹ 任意 `offset`/`count` 范围的缓存均有效。hash 变化后，客户端应失效该文件所有已缓存的范围。
-4. 对 `fs.list`：目录 `hash` 仅覆盖 `kind|name`。文件内容变化不影响目录 hash，客户端通过 `changedPaths` 事件判断已打开文件是否需要刷新。
+4. 对 `fs.list`：目录 `hash` 仅覆盖 `kind|name`。文件内容变化不影响目录 hash，客户端通过 `project.changed` / `git.workspace.changed` 事件决定是否对可见路径执行 `fs.read`。
 
 ## 7. 同步策略（Push Hint + Pull Data）
 
@@ -1358,13 +1380,10 @@ else:
     "projectRev": "sha256:...",
     "gitRev": "sha256:...",
     "worktreeRev": "sha256:...",
-    "changedDomains": ["git", "worktree"],
-    "changedPaths": ["src/auth/", "docs/registry-protocol.md"]
+    "changedDomains": ["project", "git", "worktree"]
   }
 }
 ```
-
-`changedPaths` 为可选字段。存在时，客户端仅刷新与之交集的可见路径；不存在时，刷新所有可见路径。
 
 #### `git.workspace.changed`
 
@@ -1374,11 +1393,21 @@ else:
   "method": "git.workspace.changed",
   "projectId": "local-hub:WheelMaker",
   "payload": {
-    "dirty": true,
-    "worktreeRev": "sha256:..."
+    "gitRev": "sha256:...",
+    "worktreeRev": "sha256:...",
+    "headSha": "abc123...",
+    "dirty": true
   }
 }
 ```
+
+#### `chat.message`
+
+由 Hub 调用 `registry.chat.message` 触发，Registry 按 project 作用域转推给 client。
+
+#### `session.updated` / `session.message`
+
+由 Hub 调用 `registry.session.updated`、`registry.session.message` 触发，Registry 按 project 作用域转推给 client。
 
 #### `project.offline` / `project.online`
 
@@ -1426,7 +1455,7 @@ Registry 即将关闭客户端连接时提前通知：
 
 ### 8.1 触发源
 
-- 收到 `project.changed` / `git.workspace.changed` / `fs.changed` 事件。
+- 收到 `project.changed` / `git.workspace.changed` 事件。
 - 或轮询发现 `projectRev/gitRev/worktreeRev` 与本地缓存不一致。
 - 或重连后 `project.syncCheck` 返回的 `staleDomains`。
 
@@ -1434,17 +1463,16 @@ Registry 即将关闭客户端连接时提前通知：
 
 1. 先刷新 `project.list` 中该 project 的元信息缓存。
 2. 按 `changedDomains` / `staleDomains` 分流：
+   - 包含 `project`：刷新 project 元信息；按可见范围执行 `fs.list` / `fs.read`。
    - 包含 `git`：拉 `git.log`，按当前选中项继续拉 `git.commit.files` / `git.commit.fileDiff`。
    - 包含 `worktree`：拉 `git.status`。
-   - 包含 `fs` 或未提供 `changedDomains`：按可见范围执行 `fs.list` / `fs.read`。
 
 ### 8.3 可见范围拉取规则（FS）
 
 - 已展开目录：`fs.list(path, knownHash)` — 目录 hash 仅反映条目名称和类型变化。
 - 当前打开文件和 Pin 文件：`fs.read(path, knownHash, offset, count)` — 获取文件内容、hash、size 等详细信息。
 - 非可见目录与文件不主动拉取。
-- 若 `changedPaths` 存在，仅对交集路径做刷新。
-- 文件内容变化不改变父目录 hash，需依赖 `changedPaths` 或 `fs.read` 单独检测。
+- 文件内容变化不改变父目录 hash，需要对可见文件单独 `fs.read` 检测。
 
 ### 8.4 幂等与去重
 
@@ -1478,9 +1506,9 @@ Registry 即将关闭客户端连接时提前通知：
 
 7. **共享 ProjectObject**：统一 Hub 上报与 Client 查询的 project 结构，补齐 `agent`/`imType` 字段。
 
-8. **新增方法**：`fs.info`、`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status` 枚举补全、`project.syncCheck`、`fs.grep`、`batch`。
+8. **新增/收敛方法**：`fs.info`、`git.refs`、`git.diff`/`git.diff.fileDiff`、`git.workingTree.fileDiff`、`git.status`、`project.syncCheck`、`fs.grep`、`batch`，并补齐 `chat.*`/`session.*` 的 project 透传约定。
 
-9. **连接管理增强**：`project.offline`/`project.online`/`connection.closing` 事件；方法白名单；Client hub 作用域模型。
+9. **连接管理增强**：`project.offline`/`project.online`/`connection.closing` 事件；新增 `chat.message`/`session.updated`/`session.message` 事件流；方法白名单；Client hub 作用域模型。
 
 ### 2.0 相比 1.0 的修正内容
 
