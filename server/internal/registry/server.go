@@ -859,9 +859,6 @@ func (s *Server) projectSyncCheckEnvelope(state *connectionState, in envelope) e
 	if payload.KnownWorktreeRev != project.Git.WorktreeRev {
 		stale = append(stale, "worktree")
 	}
-	if payload.KnownProjectRev != project.ProjectRev && len(stale) == 0 {
-		stale = append(stale, "fs")
-	}
 
 	return envelope{
 		Type:      "response",

@@ -102,7 +102,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 		Type:      "request",
 		Method:    "fs.read",
 		ProjectID: rp.ProjectID("hub-test", "proj1"),
-		Payload:   map[string]any{"path": "hello.txt", "offset": 0, "limit": 1024},
+		Payload:   map[string]any{"path": "hello.txt"},
 	})
 	readResp := mustReadEnvelope(t, app)
 	if readResp.Type != "response" || readResp.Method != "fs.read" {
@@ -402,7 +402,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		Type:      "request",
 		Method:    "fs.read",
 		ProjectID: rp.ProjectID("hub-hash", "proj1"),
-		Payload:   map[string]any{"path": "hello.txt", "offset": 1, "count": 20},
+		Payload:   map[string]any{"path": "hello.txt"},
 	})
 	readResp := mustReadEnvelope(t, app)
 	readHash, _ := readResp.Payload["hash"].(string)
@@ -415,7 +415,7 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 		Type:      "request",
 		Method:    "fs.read",
 		ProjectID: rp.ProjectID("hub-hash", "proj1"),
-		Payload:   map[string]any{"path": "hello.txt", "knownHash": readHash, "offset": 1, "count": 20},
+		Payload:   map[string]any{"path": "hello.txt", "knownHash": readHash},
 	})
 	readCached := mustReadEnvelope(t, app)
 	if readCached.Payload["notModified"] != true {
@@ -803,4 +803,3 @@ func writeMonitorFile(path string, content string) error {
 	}
 	return os.WriteFile(path, []byte(content), 0o644)
 }
-
