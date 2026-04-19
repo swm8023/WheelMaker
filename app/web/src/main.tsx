@@ -7,7 +7,7 @@ import '@fontsource/ibm-plex-sans/400.css';
 import '@fontsource/ibm-plex-sans/500.css';
 import '@fontsource/ibm-plex-sans/600.css';
 import '@fontsource/jetbrains-mono/400.css';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -809,7 +809,76 @@ type MarkdownPreviewProps = {
   lineNumbers: boolean;
 };
 
-function MarkdownPreview({
+const markdownPreRenderer: NonNullable<Components['pre']> = ({ children }) => (
+  <>{children}</>
+);
+
+const markdownCodeRenderer = ({
+  className,
+  children,
+  themeMode,
+  codeTheme,
+  codeFont,
+  codeFontSize,
+  codeLineHeight,
+  codeTabSize,
+  wrap,
+  lineNumbers,
+}: {
+  className?: string;
+  children?: React.ReactNode;
+  themeMode: ThemeMode;
+  codeTheme: CodeThemeId;
+  codeFont: CodeFontId;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeTabSize: number;
+  wrap: boolean;
+  lineNumbers: boolean;
+}) => {
+  const languageMatch = /language-([\w-]+)/.exec(className || '');
+  const language = (languageMatch?.[1] || '').toLowerCase();
+  const codeText = String(children ?? '').replace(/\n$/, '');
+
+  if (language === "mermaid") {
+    return <MermaidBlock content={codeText} themeMode={themeMode} />;
+  }
+
+  if (language || codeText.includes('\n')) {
+    return (
+      <ShikiCodeBlock
+        content={codeText}
+        language={language || 'text'}
+        wrap={wrap}
+        lineNumbers={lineNumbers}
+        themeMode={themeMode}
+        codeTheme={codeTheme}
+        codeFont={codeFont}
+        codeFontSize={codeFontSize}
+        codeLineHeight={codeLineHeight}
+        codeTabSize={codeTabSize}
+      />
+    );
+  }
+
+  return <code className={className}>{children}</code>;
+};
+
+const markdownPreviewPropsEqual = (
+  prev: MarkdownPreviewProps,
+  next: MarkdownPreviewProps,
+) =>
+  prev.content === next.content &&
+  prev.themeMode === next.themeMode &&
+  prev.codeTheme === next.codeTheme &&
+  prev.codeFont === next.codeFont &&
+  prev.codeFontSize === next.codeFontSize &&
+  prev.codeLineHeight === next.codeLineHeight &&
+  prev.codeTabSize === next.codeTabSize &&
+  prev.wrap === next.wrap &&
+  prev.lineNumbers === next.lineNumbers;
+
+const MarkdownPreview = React.memo(function MarkdownPreview({
   content,
   themeMode,
   codeTheme,
@@ -820,51 +889,47 @@ function MarkdownPreview({
   wrap,
   lineNumbers,
 }: MarkdownPreviewProps) {
+  const markdownComponents = useMemo<Components>(
+    () => ({
+      pre: markdownPreRenderer,
+      code: ({ className, children }) =>
+        markdownCodeRenderer({
+          className,
+          children,
+          themeMode,
+          codeTheme,
+          codeFont,
+          codeFontSize,
+          codeLineHeight,
+          codeTabSize,
+          wrap,
+          lineNumbers,
+        }),
+    }),
+    [
+      themeMode,
+      codeTheme,
+      codeFont,
+      codeFontSize,
+      codeLineHeight,
+      codeTabSize,
+      wrap,
+      lineNumbers,
+    ],
+  );
+
   return (
     <div className="markdown-preview">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
-        components={{
-          pre({ children }) {
-            return <>{children}</>;
-          },
-          code({ className, children }) {
-            const languageMatch = /language-([\w-]+)/.exec(className || '');
-            const language = (languageMatch?.[1] || '').toLowerCase();
-            const codeText = String(children ?? '').replace(/\n$/, '');
-
-            if (language === "mermaid") {
-              return <MermaidBlock content={codeText} themeMode={themeMode} />;
-            }
-
-            if (language || codeText.includes('\n')) {
-              return (
-                <ShikiCodeBlock
-                  content={codeText}
-                  language={language || 'text'}
-                  wrap={wrap}
-                  lineNumbers={lineNumbers}
-                  themeMode={themeMode}
-                  codeTheme={codeTheme}
-                  codeFont={codeFont}
-                  codeFontSize={codeFontSize}
-                  codeLineHeight={codeLineHeight}
-                  codeTabSize={codeTabSize}
-                />
-              );
-            }
-
-            return <code className={className}>{children}</code>;
-          },
-        }}
+        components={markdownComponents}
       >
         {content}
       </ReactMarkdown>
     </div>
   );
-}
-
+}, markdownPreviewPropsEqual);
 type ShikiDiffPaneProps = {
   content: string;
   language: string;

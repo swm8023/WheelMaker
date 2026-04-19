@@ -7,7 +7,8 @@ describe('web markdown preview mode', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
-    expect(mainTsx).toContain("import ReactMarkdown from 'react-markdown';");
+    expect(mainTsx).toContain("import ReactMarkdown");
+    expect(mainTsx).toContain("from 'react-markdown';");
     expect(mainTsx).toContain("import remarkGfm from 'remark-gfm';");
     expect(mainTsx).toContain("import remarkMath from 'remark-math';");
     expect(mainTsx).toContain("import rehypeKatex from 'rehype-katex';");
