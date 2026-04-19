@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web markdown preview mode', () => {
-  test('shows markdown preview toggle under search and wires markdown+mermaid+latex pipeline', () => {
+  test('shows markdown preview toggle before wrap and wires markdown+mermaid+latex pipeline', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -21,17 +21,18 @@ describe('web markdown preview mode', () => {
 
     expect(mainTsx).toContain('aria-label="Toggle markdown preview"');
     expect(mainTsx).toContain('className={`view-tool markdown-preview-toggle ${');
+    expect(mainTsx).toContain('<span className="markdown-preview-toggle-text">MD</span>');
     expect(mainTsx).toContain('{selectedFileIsMarkdown ? (');
 
-    const searchIndex = mainTsx.indexOf('aria-label="Toggle search"');
     const previewIndex = mainTsx.indexOf('aria-label="Toggle markdown preview"');
-    expect(searchIndex).toBeGreaterThan(-1);
-    expect(previewIndex).toBeGreaterThan(searchIndex);
+    const wrapIndex = mainTsx.indexOf('aria-label="Toggle wrap line"');
+    expect(previewIndex).toBeGreaterThan(-1);
+    expect(wrapIndex).toBeGreaterThan(previewIndex);
 
     expect(mainTsx).toContain('<MarkdownPreview');
     expect(mainTsx).toContain('remarkPlugins={[remarkGfm, remarkMath]}');
     expect(mainTsx).toContain('rehypePlugins={[rehypeKatex]}');
-    expect(mainTsx).toContain('if (language === \"mermaid\") {');
+    expect(mainTsx).toContain('if (language === "mermaid") {');
     expect(mainTsx).toContain('<MermaidBlock content={codeText} themeMode={themeMode} />');
 
     expect(stylesCss).toContain('.markdown-preview {');
@@ -40,4 +41,3 @@ describe('web markdown preview mode', () => {
     expect(stylesCss).toContain('.mermaid-error {');
   });
 });
-

@@ -3185,6 +3185,23 @@ function App() {
 
   const renderViewTools = () => (
     <>
+      {selectedFileIsMarkdown ? (
+        <button
+          type="button"
+          className={`view-tool markdown-preview-toggle ${
+            markdownPreviewEnabled ? 'active' : ''
+          }`}
+          onClick={() => setMarkdownPreviewEnabled(value => !value)}
+          title={
+            markdownPreviewEnabled
+              ? 'Switch to source mode'
+              : 'Switch to markdown preview'
+          }
+          aria-label="Toggle markdown preview"
+        >
+          <span className="markdown-preview-toggle-text">MD</span>
+        </button>
+      ) : null}
       <button
         type="button"
         className={`view-tool ${wrapLines ? 'active' : ''}`}
@@ -3562,25 +3579,6 @@ function App() {
                     </div>
                   </div>
                 </div>
-                {selectedFileIsMarkdown ? (
-                  <button
-                    type="button"
-                    className={`view-tool markdown-preview-toggle ${
-                      markdownPreviewEnabled ? 'active' : ''
-                    }`}
-                    onClick={() => setMarkdownPreviewEnabled(value => !value)}
-                    title={
-                      markdownPreviewEnabled
-                        ? 'Switch to source mode'
-                        : 'Switch to markdown preview'
-                    }
-                    aria-label="Toggle markdown preview"
-                  >
-                    <span className="markdown-preview-toggle-text">
-                      {markdownPreviewEnabled ? 'SRC' : 'MD'}
-                    </span>
-                  </button>
-                ) : null}
                 <div ref={fileScrollRef} className="scroll-panel">
                   {fileLoading ? (
                     <div className="muted block">Loading file...</div>
