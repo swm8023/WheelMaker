@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	DefaultProtocolVersion = "2.1"
+	DefaultProtocolVersion = "2.2"
 
 	CodeUnauthorized    = "UNAUTHORIZED"
 	CodeInvalidArgument = "INVALID_ARGUMENT"
@@ -135,7 +135,6 @@ type ProjectListItem struct {
 	Git        ProjectGitState `json:"git"`
 }
 
-
 type MonitorHubRefPayload struct {
 	HubID string `json:"hubId"`
 }
@@ -168,6 +167,3 @@ func MustRaw(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
 }
-
-
-

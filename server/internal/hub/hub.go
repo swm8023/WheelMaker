@@ -223,7 +223,6 @@ func (h *Hub) setupRegistrySync() {
 			rep.RegisterSessionHandler(projectID, projectClient)
 		}
 		if appChannel != nil {
-			appChannel.SetEventPublisher(projectID, rep.PublishChatMessage)
 			rep.RegisterChatHandler(projectID, appChannel)
 		}
 	}

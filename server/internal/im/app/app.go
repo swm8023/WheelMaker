@@ -153,18 +153,6 @@ func (c *Channel) HandleChatRequest(ctx context.Context, method string, projectI
 			}
 		}
 		return map[string]any{"ok": true, "chatId": chatID}, nil
-	case "chat.session.list":
-		return map[string]any{"sessions": c.snapshotSessions()}, nil
-	case "chat.session.read":
-		var req chatSessionReadPayload
-		if err := decodePayload(payload, &req); err != nil {
-			return nil, fmt.Errorf("invalid chat.session.read payload: %w", err)
-		}
-		session, messages, err := c.snapshotSession(strings.TrimSpace(req.ChatID))
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"session": session, "messages": messages}, nil
 	case "chat.permission.respond":
 		var req chatPermissionResponsePayload
 		if err := decodePayload(payload, &req); err != nil {

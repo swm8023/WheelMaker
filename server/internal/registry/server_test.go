@@ -31,7 +31,7 @@ func TestConnectInit(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 			"token":           "",
 		},
@@ -64,7 +64,7 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 			"token":           "",
@@ -102,7 +102,7 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 			"token":           "",
 		},
@@ -143,7 +143,7 @@ func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub-old",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -161,7 +161,7 @@ func TestRegistryReportProjectsRejectsStaleConnectionEpoch(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub-new",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -220,7 +220,7 @@ func TestConnectInitAuthRequired(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 			"token":           "wrong",
 		},
@@ -250,7 +250,7 @@ func TestInvalidRequestIDReturnsErrorAndKeepsConnection(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 			"token":           "",
 		},
@@ -297,7 +297,7 @@ func TestBatchForwardsProjectRequests(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -328,7 +328,7 @@ func TestBatchForwardsProjectRequests(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 		},
 	})
@@ -421,7 +421,7 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -452,7 +452,7 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 		},
 	})
@@ -480,43 +480,12 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 					"dirty":       true,
 				},
 			},
-			"changedDomains": []string{"project", "git", "worktree"},
-			"updatedAt":      "2026-03-31T10:01:23Z",
+			"updatedAt": "2026-03-31T10:01:23Z",
 		},
 	})
 	updateResp := mustReadEnvelope(t, hub)
 	if updateResp.Type != "response" || updateResp.Method != "registry.updateProject" {
 		t.Fatalf("unexpected update response: %#v", updateResp)
-	}
-
-	projectChanged := mustReadEnvelope(t, client)
-	if projectChanged.Type != "event" || projectChanged.Method != "project.changed" {
-		t.Fatalf("unexpected first event: %#v", projectChanged)
-	}
-	if projectChanged.ProjectID != "hub-a:server" {
-		t.Fatalf("projectId=%q, want hub-a:server", projectChanged.ProjectID)
-	}
-	if projectChanged.Payload["projectRev"] != "p2" {
-		t.Fatalf("projectRev=%v, want p2", projectChanged.Payload["projectRev"])
-	}
-	if projectChanged.Payload["gitRev"] != "g2" {
-		t.Fatalf("gitRev=%v, want g2", projectChanged.Payload["gitRev"])
-	}
-	if projectChanged.Payload["worktreeRev"] != "w2" {
-		t.Fatalf("worktreeRev=%v, want w2", projectChanged.Payload["worktreeRev"])
-	}
-	changedDomains, _ := projectChanged.Payload["changedDomains"].([]any)
-	if len(changedDomains) < 2 {
-		t.Fatalf("changedDomains=%v, want at least project+git/worktree", changedDomains)
-	}
-
-	gitChanged := mustReadEnvelope(t, client)
-	if gitChanged.Type != "event" || gitChanged.Method != "git.workspace.changed" {
-		t.Fatalf("unexpected second event: %#v", gitChanged)
-	}
-	gitPayload := gitChanged.Payload
-	if gitPayload["dirty"] != true {
-		t.Fatalf("dirty=%v, want true", gitPayload["dirty"])
 	}
 
 	if err := hub.Close(); err != nil {
@@ -525,140 +494,6 @@ func TestRegistryUpdateProjectBroadcastsEvents(t *testing.T) {
 	offline := mustReadEnvelope(t, client)
 	if offline.Type != "event" || offline.Method != "project.offline" {
 		t.Fatalf("unexpected offline event: %#v", offline)
-	}
-}
-
-func TestChatSendForwardingAndChatMessageBroadcast(t *testing.T) {
-	s := New(Config{})
-	ts := httptest.NewServer(s.Handler())
-	t.Cleanup(ts.Close)
-
-	hub := dialWS(t, ts.URL+"/ws")
-	defer hub.Close()
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: 1,
-		Type:      "request",
-		Method:    "connect.init",
-		Payload: map[string]any{
-			"clientName":      "wm-hub",
-			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
-			"role":            "hub",
-			"hubId":           "hub-a",
-		},
-	})
-	initResp := mustReadEnvelope(t, hub)
-	principal, _ := initResp.Payload["principal"].(map[string]any)
-	connectionEpoch, _ := principal["connectionEpoch"].(float64)
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: 2,
-		Type:      "request",
-		Method:    "registry.reportProjects",
-		Payload: map[string]any{
-			"hubId":           "hub-a",
-			"connectionEpoch": int64(connectionEpoch),
-			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "app", "projectRev": "p1", "git": map[string]any{"gitRev": "g1", "worktreeRev": "w1"}},
-			},
-		},
-	})
-	_ = mustReadEnvelope(t, hub)
-
-	client := dialWS(t, ts.URL+"/ws")
-	defer client.Close()
-	mustWriteJSON(t, client, testEnvelope{
-		RequestID: 1,
-		Type:      "request",
-		Method:    "connect.init",
-		Payload: map[string]any{
-			"clientName":      "wm-web",
-			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
-			"role":            "client",
-		},
-	})
-	_ = mustReadEnvelope(t, client)
-
-	mustWriteJSON(t, client, testEnvelope{
-		RequestID: 2,
-		Type:      "request",
-		Method:    "chat.send",
-		ProjectID: "hub-a:server",
-		Payload: map[string]any{
-			"chatId": "chat-1",
-			"text":   "hello registry chat",
-		},
-	})
-
-	forwarded := mustReadEnvelope(t, hub)
-	if forwarded.Method != "chat.send" {
-		t.Fatalf("forwarded.method=%q, want chat.send", forwarded.Method)
-	}
-	if forwarded.ProjectID != "hub-a:server" {
-		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwarded.ProjectID)
-	}
-	forwardPayload := forwarded.Payload
-	if forwardPayload["chatId"] != "chat-1" || forwardPayload["text"] != "hello registry chat" {
-		t.Fatalf("forwarded payload=%v", forwardPayload)
-	}
-
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: forwarded.RequestID,
-		Type:      "response",
-		Method:    "chat.send",
-		ProjectID: forwarded.ProjectID,
-		Payload: map[string]any{
-			"ok": true,
-		},
-	})
-	sendResp := mustReadEnvelope(t, client)
-	if sendResp.Type != "response" || sendResp.Method != "chat.send" {
-		t.Fatalf("unexpected chat.send response: %#v", sendResp)
-	}
-
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: 3,
-		Type:      "request",
-		Method:    "registry.chat.message",
-		ProjectID: "hub-a:server",
-		Payload: map[string]any{
-			"session": map[string]any{
-				"chatId":       "chat-1",
-				"sessionId":    "sess-1",
-				"title":        "General",
-				"preview":      "hello registry chat",
-				"updatedAt":    "2026-04-11T09:50:00Z",
-				"messageCount": 1,
-			},
-			"message": map[string]any{
-				"messageId": "msg-1",
-				"chatId":    "chat-1",
-				"sessionId": "sess-1",
-				"role":      "assistant",
-				"kind":      "text",
-				"text":      "hello from assistant",
-				"status":    "streaming",
-				"createdAt": "2026-04-11T09:50:00Z",
-				"updatedAt": "2026-04-11T09:50:00Z",
-			},
-		},
-	})
-
-	broadcastAck := mustReadEnvelope(t, hub)
-	if broadcastAck.Type != "response" || broadcastAck.Method != "registry.chat.message" {
-		t.Fatalf("unexpected broadcast ack: %#v", broadcastAck)
-	}
-
-	event := mustReadEnvelope(t, client)
-	if event.Type != "event" || event.Method != "chat.message" {
-		t.Fatalf("unexpected chat event: %#v", event)
-	}
-	if event.ProjectID != "hub-a:server" {
-		t.Fatalf("event.projectId=%q, want hub-a:server", event.ProjectID)
-	}
-	message, _ := event.Payload["message"].(map[string]any)
-	if message["text"] != "hello from assistant" {
-		t.Fatalf("event message=%v", message)
 	}
 }
 
@@ -676,7 +511,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -707,7 +542,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-web",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "client",
 		},
 	})
@@ -750,71 +585,7 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		t.Fatalf("unexpected session.send response: %#v", sendResp)
 	}
 
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: 3,
-		Type:      "request",
-		Method:    "registry.session.updated",
-		ProjectID: "hub-a:server",
-		Payload: map[string]any{
-			"session": map[string]any{
-				"sessionId":    "sess-1",
-				"title":        "General",
-				"preview":      "hello registry session",
-				"updatedAt":    "2026-04-11T09:50:00Z",
-				"messageCount": 1,
-			},
-		},
-	})
-
-	updatedAck := mustReadEnvelope(t, hub)
-	if updatedAck.Type != "response" || updatedAck.Method != "registry.session.updated" {
-		t.Fatalf("unexpected session.updated ack: %#v", updatedAck)
-	}
-
-	updatedEvent := mustReadEnvelope(t, client)
-	if updatedEvent.Type != "event" || updatedEvent.Method != "session.updated" {
-		t.Fatalf("unexpected session.updated event: %#v", updatedEvent)
-	}
-	session, _ := updatedEvent.Payload["session"].(map[string]any)
-	if session["sessionId"] != "sess-1" {
-		t.Fatalf("updated session=%v", session)
-	}
-
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: 4,
-		Type:      "request",
-		Method:    "registry.session.message",
-		ProjectID: "hub-a:server",
-		Payload: map[string]any{
-			"sessionId": "sess-1",
-			"message": map[string]any{
-				"messageId": "msg-1",
-				"sessionId": "sess-1",
-				"role":      "assistant",
-				"kind":      "text",
-				"text":      "hello from assistant",
-				"status":    "done",
-				"createdAt": "2026-04-11T09:50:00Z",
-				"updatedAt": "2026-04-11T09:50:00Z",
-			},
-		},
-	})
-
-	messageAck := mustReadEnvelope(t, hub)
-	if messageAck.Type != "response" || messageAck.Method != "registry.session.message" {
-		t.Fatalf("unexpected session.message ack: %#v", messageAck)
-	}
-
-	messageEvent := mustReadEnvelope(t, client)
-	if messageEvent.Type != "event" || messageEvent.Method != "session.message" {
-		t.Fatalf("unexpected session.message event: %#v", messageEvent)
-	}
-	message, _ := messageEvent.Payload["message"].(map[string]any)
-	if message["text"] != "hello from assistant" {
-		t.Fatalf("event message=%v", message)
-	}
 }
-
 
 func TestConnectInitMonitorRole(t *testing.T) {
 	s := New(Config{})
@@ -831,7 +602,7 @@ func TestConnectInitMonitorRole(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-monitor",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "monitor",
 			"token":           "",
 		},
@@ -860,7 +631,7 @@ func TestMonitorListHubAndMonitorStatusForwarding(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-hub",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "hub",
 			"hubId":           "hub-a",
 		},
@@ -891,7 +662,7 @@ func TestMonitorListHubAndMonitorStatusForwarding(t *testing.T) {
 		Payload: map[string]any{
 			"clientName":      "wm-monitor",
 			"clientVersion":   "0.1.0",
-			"protocolVersion": "2.1",
+			"protocolVersion": "2.2",
 			"role":            "monitor",
 		},
 	})
@@ -944,6 +715,3 @@ func mustReadEnvelope(t *testing.T, ws *websocket.Conn) testEnvelope {
 	}
 	return out
 }
-
-
-

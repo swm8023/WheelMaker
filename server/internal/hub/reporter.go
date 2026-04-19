@@ -295,7 +295,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 			continue
 		}
 		switch in.Method {
-		case "chat.session.list", "chat.session.read", "chat.send", "chat.permission.respond":
+		case "chat.send", "chat.permission.respond":
 			r.replyChat(conn, in)
 		case "session.list", "session.read", "session.new", "session.send", "session.markRead":
 			r.replySession(conn, in)
@@ -515,10 +515,6 @@ func (r *Reporter) PublishProjectEvent(projectID string, method string, payload 
 		r.mu.Unlock()
 		return fmt.Errorf("registry event publish timeout")
 	}
-}
-
-func (r *Reporter) PublishChatMessage(projectID string, payload any) error {
-	return r.PublishProjectEvent(projectID, "registry.chat.message", payload)
 }
 
 func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
@@ -770,9 +766,6 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 	type fsReadPayload struct {
 		Path      string `json:"path"`
 		KnownHash string `json:"knownHash,omitempty"`
-		Offset    int64  `json:"offset,omitempty"`
-		Count     int64  `json:"count,omitempty"`
-		Limit     int64  `json:"limit,omitempty"`
 	}
 	var payload fsReadPayload
 	if err := decodePayload(req.Payload, &payload); err != nil {
@@ -810,35 +803,17 @@ func (r *Reporter) replyFSRead(conn *websocket.Conn, req envelope) {
 		return
 	}
 	isBinary, mimeType := detectBinaryAndMime(data)
-	count := payload.Count
-	if count <= 0 {
-		count = payload.Limit
-	}
 	if isBinary {
-		r.replyFSReadBinary(conn, req, rel, data, hash, mimeType, payload.Offset, count)
+		r.replyFSReadBinary(conn, req, rel, data, hash, mimeType)
 		return
 	}
-	r.replyFSReadText(conn, req, rel, data, hash, mimeType, payload.Offset, count)
+	r.replyFSReadText(conn, req, rel, data, hash, mimeType)
 }
 
-func (r *Reporter) replyFSReadText(conn *websocket.Conn, req envelope, rel string, data []byte, hash string, mimeType string, offset int64, count int64) {
+func (r *Reporter) replyFSReadText(conn *websocket.Conn, req envelope, rel string, data []byte, hash string, mimeType string) {
 	lines := splitFileLines(data)
 	total := len(lines)
-	if offset <= 0 {
-		offset = 1
-	}
-	if count <= 0 || count > 2000 {
-		count = 500
-	}
-	start := int(offset - 1)
-	if start > total {
-		start = total
-	}
-	end := start + int(count)
-	if end > total {
-		end = total
-	}
-	content := strings.Join(lines[start:end], "\n")
+	content := strings.Join(lines, "\n")
 	_ = r.writeJSON(conn, "->", envelope{
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -854,36 +829,12 @@ func (r *Reporter) replyFSReadText(conn *websocket.Conn, req envelope, rel strin
 			"content":     content,
 			"size":        len(data),
 			"total":       total,
-			"offset":      offset,
-			"returned":    end - start,
-			"hasMore":     end < total,
+			"returned":    total,
 		}),
 	})
 }
 
-func (r *Reporter) replyFSReadBinary(conn *websocket.Conn, req envelope, rel string, data []byte, hash string, mimeType string, offset int64, count int64) {
-	if offset < 0 {
-		offset = 0
-	}
-	if count <= 0 || count > 1<<20 {
-		count = 64 * 1024
-	}
-	if offset > int64(len(data)) {
-		offset = int64(len(data))
-	}
-	end := offset + count
-	if end > int64(len(data)) {
-		end = int64(len(data))
-	}
-	encoding := "base64"
-	var content any = base64.StdEncoding.EncodeToString(data[offset:end])
-	returned := int(end - offset)
-	if len(data) >= 2<<20 {
-		encoding = "none"
-		content = nil
-		returned = 0
-		end = int64(len(data))
-	}
+func (r *Reporter) replyFSReadBinary(conn *websocket.Conn, req envelope, rel string, data []byte, hash string, mimeType string) {
 	_ = r.writeJSON(conn, "->", envelope{
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -895,17 +846,14 @@ func (r *Reporter) replyFSReadBinary(conn *websocket.Conn, req envelope, rel str
 			"notModified": false,
 			"isBinary":    true,
 			"mimeType":    mimeType,
-			"encoding":    encoding,
-			"content":     content,
+			"encoding":    "base64",
+			"content":     base64.StdEncoding.EncodeToString(data),
 			"size":        len(data),
 			"total":       len(data),
-			"offset":      offset,
-			"returned":    returned,
-			"hasMore":     end < int64(len(data)),
+			"returned":    len(data),
 		}),
 	})
 }
-
 func (r *Reporter) replyFSSearch(conn *websocket.Conn, req envelope) {
 	type payload struct {
 		Query         string `json:"query"`
@@ -1103,6 +1051,19 @@ func (r *Reporter) replyGitRefs(conn *websocket.Conn, req envelope) {
 			branches = append(branches, line)
 		}
 	}
+	remoteRaw, err := runGit(root, "for-each-ref", "--format=%(refname:short)", "refs/remotes")
+	if err != nil {
+		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
+		return
+	}
+	remoteBranches := make([]string, 0)
+	for _, line := range strings.Split(strings.TrimSpace(remoteRaw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasSuffix(line, "/HEAD") {
+			continue
+		}
+		remoteBranches = append(remoteBranches, line)
+	}
 	tagsRaw, err := runGit(root, "tag", "--list")
 	if err != nil {
 		_ = r.writeError(conn, req.RequestID, codeInternal, err.Error())
@@ -1129,13 +1090,13 @@ func (r *Reporter) replyGitRefs(conn *websocket.Conn, req envelope) {
 		Method:    req.Method,
 		ProjectID: req.ProjectID,
 		Payload: rp.MustRaw(map[string]any{
-			"current":  strings.TrimSpace(current),
-			"branches": branches,
-			"tags":     tags,
+			"current":        strings.TrimSpace(current),
+			"branches":       branches,
+			"remoteBranches": remoteBranches,
+			"tags":           tags,
 		}),
 	})
 }
-
 func (r *Reporter) replyGitLog(conn *websocket.Conn, req envelope) {
 	type gitLogPayload struct {
 		Ref    string   `json:"ref,omitempty"`

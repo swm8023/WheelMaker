@@ -14,14 +14,6 @@ export interface RegistryEnvelope<TPayload = unknown> {
   payload?: TPayload;
 }
 
-export interface RegistryProjectEventPayload {
-  projectRev?: string;
-  gitRev?: string;
-  worktreeRev?: string;
-  changedDomains?: string[];
-  changedPaths?: string[];
-}
-
 export type RegistrySessionMessageRole = 'user' | 'assistant' | 'system';
 export type RegistrySessionMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'permission' | 'prompt_result' | 'message';
 export type RegistrySessionMessageStatus = 'streaming' | 'done' | 'needs_action';
@@ -82,13 +74,6 @@ export type RegistryChatMessage = RegistrySessionMessage;
 export type RegistryChatSession = RegistrySessionSummary;
 export type RegistryChatSessionReadResponse = RegistrySessionReadResponse;
 export type RegistryChatMessageEventPayload = RegistrySessionMessageEventPayload;
-
-export interface RegistryGitWorkspaceChangedPayload {
-  gitRev?: string;
-  worktreeRev?: string;
-  headSha?: string;
-  dirty?: boolean;
-}
 
 export interface RegistrySyncCheckPayload {
   knownProjectRev?: string;
@@ -160,9 +145,7 @@ export interface RegistryFsReadResponse {
   content?: string | null;
   size?: number;
   total?: number;
-  offset?: number;
   returned?: number;
-  hasMore?: boolean;
 }
 
 export interface RegistryGitCommit {
@@ -219,3 +202,4 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
+

@@ -8,9 +8,7 @@ import type {
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryGitStatus,
-  RegistryGitWorkspaceChangedPayload,
   RegistryProject,
-  RegistryProjectEventPayload,
   RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
   RegistrySessionReadResponse,
@@ -86,7 +84,7 @@ export class RegistryRepository {
     };
   }
 
-  private async listSessionsByMethod(projectId: string, method: 'session.list' | 'chat.session.list'): Promise<RegistrySessionSummary[]> {
+  private async listSessionsByMethod(projectId: string, method: 'session.list'): Promise<RegistrySessionSummary[]> {
     const resp = await this.client.request({
       method,
       projectId,
@@ -103,14 +101,12 @@ export class RegistryRepository {
     projectId: string,
     sessionId: string,
     afterIndex: number,
-    method: 'session.read' | 'chat.session.read',
+    method: 'session.read',
   ): Promise<RegistrySessionReadResponse> {
     const resp = await this.client.request({
       method,
       projectId,
-      payload: method === 'session.read'
-        ? (afterIndex > 0 ? {sessionId, afterIndex} : {sessionId})
-        : {chatId: sessionId},
+      payload: afterIndex > 0 ? {sessionId, afterIndex} : {sessionId},
       timeoutMs: 15000,
     });
     const payload = (resp.payload ?? {}) as {
@@ -141,7 +137,7 @@ export class RegistryRepository {
     await this.client.connectInit({
       clientName: 'wheelmaker-web',
       clientVersion: '0.1.0',
-      protocolVersion: '2.1',
+      protocolVersion: '2.2',
       role: 'client',
       token: token?.trim() ?? '',
     });
@@ -230,7 +226,7 @@ export class RegistryRepository {
   async readFile(
     projectId: string,
     path: string,
-    options?: {knownHash?: string; offset?: number; count?: number},
+    options?: {knownHash?: string},
   ): Promise<RegistryFsReadResponse> {
     const resp = await this.client.request({
       method: 'fs.read',
@@ -238,8 +234,6 @@ export class RegistryRepository {
       payload: {
         path,
         ...(options?.knownHash ? {knownHash: options.knownHash} : {}),
-        ...(options?.offset !== undefined ? {offset: options.offset} : {}),
-        ...(options?.count !== undefined ? {count: options.count} : {}),
       },
     });
     const payload = (resp.payload ?? {}) as RegistryFsReadResponse;
@@ -253,9 +247,7 @@ export class RegistryRepository {
       content: payload.content ?? '',
       size: payload.size ?? 0,
       total: payload.total ?? 0,
-      offset: payload.offset ?? options?.offset ?? 1,
       returned: payload.returned ?? 0,
-      hasMore: payload.hasMore ?? false,
     };
   }
 
@@ -281,17 +273,18 @@ export class RegistryRepository {
     return (payload.commits ?? []).filter(commit => !!commit.sha);
   }
 
-  async gitBranches(projectId: string): Promise<{current: string; branches: string[]}> {
+  async gitBranches(projectId: string): Promise<{current: string; branches: string[]; remoteBranches: string[]}> {
     const resp = await this.client.request({
       method: 'git.refs',
       projectId,
       payload: {},
       timeoutMs: 20000,
     });
-    const payload = (resp.payload ?? {}) as {current?: string; branches?: string[]};
+    const payload = (resp.payload ?? {}) as {current?: string; branches?: string[]; remoteBranches?: string[]};
     return {
       current: payload.current ?? '',
       branches: payload.branches ?? [],
+      remoteBranches: payload.remoteBranches ?? [],
     };
   }
 
@@ -368,43 +361,11 @@ export class RegistryRepository {
   }
 
   async listSessions(projectId: string): Promise<RegistrySessionSummary[]> {
-    let primaryError: unknown = null;
-    let primarySessions: RegistrySessionSummary[] = [];
-    try {
-      primarySessions = await this.listSessionsByMethod(projectId, 'session.list');
-      if (primarySessions.length > 0) {
-        return primarySessions;
-      }
-    } catch (err) {
-      primaryError = err;
-    }
-    try {
-      const fallbackSessions = await this.listSessionsByMethod(projectId, 'chat.session.list');
-      if (fallbackSessions.length > 0) {
-        return fallbackSessions;
-      }
-      if (primaryError) {
-        return fallbackSessions;
-      }
-    } catch (fallbackErr) {
-      if (primaryError) {
-        throw primaryError;
-      }
-      throw fallbackErr;
-    }
-    return primarySessions;
+    return this.listSessionsByMethod(projectId, 'session.list');
   }
 
   async readSession(projectId: string, sessionId: string, afterIndex = 0): Promise<RegistrySessionReadResponse> {
-    try {
-      return await this.readSessionByMethod(projectId, sessionId, afterIndex, 'session.read');
-    } catch (primaryError) {
-      try {
-        return await this.readSessionByMethod(projectId, sessionId, afterIndex, 'chat.session.read');
-      } catch {
-        throw primaryError;
-      }
-    }
+    return this.readSessionByMethod(projectId, sessionId, afterIndex, 'session.read');
   }
 
   async createSession(projectId: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
@@ -479,8 +440,6 @@ export class RegistryRepository {
     listener: (
       event:
         | RegistryEnvelope<RegistrySessionMessageEventPayload>
-        | RegistryEnvelope<RegistryProjectEventPayload>
-        | RegistryEnvelope<RegistryGitWorkspaceChangedPayload>
         | RegistryEnvelope<Record<string, never>>,
     ) => void,
   ): () => void {
@@ -497,4 +456,11 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+
+
+
+
+
+
+
 

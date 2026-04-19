@@ -147,7 +147,7 @@ export class RegistryWorkspaceService {
     return this.repository.getFileInfo(this.session.selectedProjectId, path);
   }
 
-  async readFile(path: string, options?: {knownHash?: string; offset?: number; count?: number}): Promise<{
+  async readFile(path: string, options?: {knownHash?: string}): Promise<{
     content: string;
     hash?: string;
     notModified: boolean;
@@ -172,9 +172,9 @@ export class RegistryWorkspaceService {
     return this.repository.gitLog(this.session.selectedProjectId, ref, '', 50, refs);
   }
 
-  async listGitBranches(): Promise<{current: string; branches: string[]}> {
+  async listGitBranches(): Promise<{current: string; branches: string[]; remoteBranches: string[]}> {
     if (!this.session || !this.repository) {
-      return {current: '', branches: []};
+      return {current: '', branches: [], remoteBranches: []};
     }
     return this.repository.gitBranches(this.session.selectedProjectId);
   }
@@ -286,4 +286,6 @@ export class RegistryWorkspaceService {
     };
   }
 }
+
+
 

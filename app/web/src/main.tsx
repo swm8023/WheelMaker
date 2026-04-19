@@ -49,9 +49,7 @@ import type {
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryGitStatus,
-  RegistryGitWorkspaceChangedPayload,
   RegistryProject,
-  RegistryProjectEventPayload,
 } from './types/registry';
 import './styles.css';
 
@@ -108,6 +106,7 @@ type GitDiffParser = {
 };
 
 const WORKING_TREE_COMMIT_ID = '__WORKING_TREE__';
+const LARGE_FILE_CONFIRM_BYTES = 2 * 1024 * 1024;
 const gitdiffParser = require('gitdiff-parser') as GitDiffParser;
 
 type ThinkingBlockProps = {
@@ -1121,6 +1120,7 @@ function App() {
   const [markdownPreviewEnabled, setMarkdownPreviewEnabled] = useState(false);
   const fileScrollRef = useRef<HTMLDivElement | null>(null);
   const liveRefreshTimerRef = useRef<number | null>(null);
+  const refreshInFlightRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectStartedAtRef = useRef<number | null>(null);
   const connectInFlightRef = useRef(false);
@@ -1562,10 +1562,19 @@ function App() {
       const info = await service.getFileInfo(path);
       if (requestSeq !== fileReadSeqRef.current) return;
       setFileInfo(info);
+      const isFirstLoad = !fileHashRef.current[path];
+      if ((info.size ?? 0) > LARGE_FILE_CONFIRM_BYTES && isFirstLoad) {
+        const sizeMB = ((info.size ?? 0) / (1024 * 1024)).toFixed(1);
+        const confirmed = window.confirm(
+          `This file is ${sizeMB} MB. Load full content now?`,
+        );
+        if (!confirmed) {
+          setFileContent('');
+          return;
+        }
+      }
       const result = await service.readFile(path, {
         knownHash: fileHashRef.current[path],
-        offset: info.isBinary ? 0 : 1,
-        count: info.isBinary ? 65536 : Math.max(1, info.totalLines ?? 500),
       });
       if (requestSeq !== fileReadSeqRef.current) return;
       if (result.notModified) {
@@ -2253,48 +2262,38 @@ function App() {
     }
   };
 
-  const refreshProject = async () => {
+  const refreshProject = async (options?: {silent?: boolean}) => {
     if (!connected || !projectId) return;
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
+    const silent = !!options?.silent;
     const latestProject = currentProjectRef.current;
     const latestExpandedDirs = expandedDirsRef.current;
     const latestSelectedFile = selectedFileRef.current;
-    setRefreshingProject(true);
+    if (!silent) {
+      setRefreshingProject(true);
+    }
     try {
       const sync = await service.syncCheck({
         knownProjectRev: latestProject?.projectRev ?? '',
         knownGitRev: latestProject?.git?.gitRev ?? '',
         knownWorktreeRev: latestProject?.git?.worktreeRev ?? '',
       });
+      const needsProjectOrFsRefresh = sync.staleDomains.some(
+        domain => domain === 'fs' || domain === 'project',
+      );
       if (sync.staleDomains.includes('project') || !latestProject) {
         setProjects(await service.listProjects());
       }
-      if (
-        sync.staleDomains.some(
-          domain => domain === 'fs' || domain === 'project',
-        )
-      ) {
+      if (needsProjectOrFsRefresh) {
         const validated = await workspaceController.refreshProject(projectId, [
           ...latestExpandedDirs,
         ]);
         setDirEntries(validated.dirEntries);
         setExpandedDirs(validated.expandedDirs);
         dirHashRef.current = {};
-      } else {
-        for (const path of latestExpandedDirs) {
-          try {
-            await loadDirectory(path);
-          } catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            setError(`Failed to refresh directory "${path}": ${reason}`);
-          }
-        }
       }
-      if (
-        latestSelectedFile &&
-        sync.staleDomains.some(
-          domain => domain === 'fs' || domain === 'project',
-        )
-      ) {
+      if (latestSelectedFile && needsProjectOrFsRefresh) {
         await readSelectedFile(latestSelectedFile);
       }
       if (
@@ -2306,21 +2305,14 @@ function App() {
         await loadGit();
       }
     } finally {
-      setRefreshingProject(false);
+      refreshInFlightRef.current = false;
+      if (!silent) {
+        setRefreshingProject(false);
+      }
     }
   };
 
   useEffect(() => {
-    const scheduleRefresh = () => {
-      if (liveRefreshTimerRef.current !== null) {
-        return;
-      }
-      liveRefreshTimerRef.current = window.setTimeout(() => {
-        liveRefreshTimerRef.current = null;
-        refreshProject().catch(() => undefined);
-      }, 150);
-    };
-
     const unsubscribeEvent = service.onEvent(event => {
       const eventProjectId = event.projectId ?? '';
       if (
@@ -2381,67 +2373,6 @@ function App() {
             .markSessionRead(payload.session.sessionId)
             .catch(() => undefined);
         }
-        return;
-      }
-      if (eventProjectId && eventProjectId !== projectIdRef.current) {
-        return;
-      }
-      if (event.method === 'git.workspace.changed') {
-        const payload = (event.payload ??
-          {}) as RegistryGitWorkspaceChangedPayload;
-        const gitRevChanged =
-          !!payload.gitRev && payload.gitRev !== knownGitRevRef.current;
-        if (payload.gitRev) knownGitRevRef.current = payload.gitRev;
-        if (
-          !gitRevChanged &&
-          payload.worktreeRev &&
-          payload.worktreeRev === knownWorktreeRevRef.current
-        ) {
-          return;
-        }
-        if (gitRevChanged) {
-          setGitLoadedProjectId('');
-        }
-        refreshGitStatusOnly().catch(() => undefined);
-        return;
-      }
-      if (event.method === 'project.changed') {
-        const payload = (event.payload ?? {}) as RegistryProjectEventPayload;
-        const changedDomains = Array.isArray(payload.changedDomains)
-          ? payload.changedDomains.filter(item => typeof item === 'string')
-          : [];
-        if (payload.projectRev) {
-          knownProjectRevRef.current = payload.projectRev;
-        }
-        if (payload.gitRev) {
-          if (payload.gitRev !== knownGitRevRef.current) {
-            setGitLoadedProjectId('');
-          }
-          knownGitRevRef.current = payload.gitRev;
-        }
-        if (changedDomains.includes('git')) {
-          setGitLoadedProjectId('');
-          refreshGitStatusOnly().catch(() => undefined);
-          return;
-        }
-        if (changedDomains.includes('worktree')) {
-          refreshGitStatusOnly().catch(() => undefined);
-          return;
-        }
-        if (
-          changedDomains.length > 0 &&
-          !changedDomains.includes('project') &&
-          !changedDomains.includes('fs')
-        ) {
-          return;
-        }
-      }
-      if (
-        event.method === 'project.changed' ||
-        event.method === 'project.online' ||
-        event.method === 'project.offline'
-      ) {
-        scheduleRefresh();
       }
     });
 
@@ -2474,6 +2405,18 @@ function App() {
       unsubscribeClose();
     };
   }, []);
+
+  useEffect(() => {
+    if (!connected || !projectId || reconnecting) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refreshProject({silent: true}).catch(() => undefined);
+    }, 3000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [connected, projectId, reconnecting]);
   const renderFileTree = (path: string, depth: number): React.ReactNode => {
     const entries = dirEntries[path] ?? [];
     return entries.map(entry => {
@@ -3956,3 +3899,10 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
+
+
+
+

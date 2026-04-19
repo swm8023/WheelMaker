@@ -263,8 +263,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			s.handleHubReportProjects(state.peer, state, in)
 		case "registry.updateProject":
 			s.handleHubUpdateProject(state.peer, state, in)
-		case "registry.chat.message":
-			s.handleHubChatMessage(state.peer, state, in)
 		case "registry.session.updated":
 			s.handleHubSessionEvent(state.peer, state, in, "session.updated")
 		case "registry.session.message":
@@ -281,7 +279,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
-		case "chat.session.list", "chat.session.read", "chat.send", "chat.permission.respond",
+		case "chat.send", "chat.permission.respond",
 			"session.list", "session.read", "session.new", "session.send", "session.markRead",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
 			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
@@ -326,10 +324,10 @@ func readEnvelope(ws *websocket.Conn) (envelope, bool, error) {
 func methodAllowed(role string, method string) bool {
 	switch role {
 	case "hub":
-		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.chat.message" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
+		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
-			strings.HasPrefix(method, "chat.") || strings.HasPrefix(method, "session.") ||
+			(method == "chat.send" || method == "chat.permission.respond") || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
 		return method == "project.list" || method == "monitor.listHub" || method == "batch" || strings.HasPrefix(method, "monitor.")
@@ -356,6 +354,10 @@ func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in en
 		_ = s.writeError(peer, in.RequestID, in.Method, codeUnauthorized, "invalid token", nil)
 		return false
 	}
+	if strings.TrimSpace(payload.ProtocolVersion) != s.cfg.ProtocolVersion {
+		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "unsupported protocolVersion", map[string]any{"protocolVersion": payload.ProtocolVersion, "supported": s.cfg.ProtocolVersion})
+		return true
+	}
 
 	state.initialized = true
 	state.role = role
@@ -381,7 +383,7 @@ func (s *Server) handleConnectInit(peer *peerConn, state *connectionState, in en
 		},
 		Features: rp.ConnectFeatures{
 			HubReportProjects:       true,
-			PushHint:                true,
+			PushHint:                false,
 			PingPong:                true,
 			SupportsHashNegotiation: true,
 			SupportsBatch:           true,
@@ -548,35 +550,6 @@ func (s *Server) handleHubUpdateProject(peer *peerConn, state *connectionState, 
 	})
 }
 
-func (s *Server) handleHubChatMessage(peer *peerConn, state *connectionState, in envelope) {
-	projectID := strings.TrimSpace(in.ProjectID)
-	if projectID == "" {
-		_ = s.writeError(peer, in.RequestID, in.Method, codeInvalidArgument, "projectId is required", nil)
-		return
-	}
-	if state.hubID != "" && !strings.HasPrefix(projectID, state.hubID+":") {
-		_ = s.writeError(peer, in.RequestID, in.Method, codeForbidden, "project out of hub scope", map[string]any{"projectId": projectID})
-		return
-	}
-
-	s.mu.RLock()
-	hubID := s.projectToHub[projectID]
-	s.mu.RUnlock()
-	if hubID == "" {
-		_ = s.writeError(peer, in.RequestID, in.Method, codeNotFound, "project not found", map[string]any{"projectId": projectID})
-		return
-	}
-	if state.hubID != "" && hubID != state.hubID {
-		_ = s.writeError(peer, in.RequestID, in.Method, codeForbidden, "project not owned by connected hub", map[string]any{"projectId": projectID})
-		return
-	}
-
-	s.broadcastProjectEvent(hubID, projectID, "chat.message", json.RawMessage(in.Payload))
-	_ = s.writeResponse(peer, in.RequestID, in.Method, projectID, map[string]any{
-		"ok": true,
-	})
-}
-
 func (s *Server) handleHubSessionEvent(peer *peerConn, state *connectionState, in envelope, eventMethod string) {
 	projectID := strings.TrimSpace(in.ProjectID)
 	if projectID == "" {
@@ -610,7 +583,6 @@ func (s *Server) handleProjectList(peer *peerConn, state *connectionState, in en
 		"projects": items,
 	})
 }
-
 
 func (s *Server) handleMonitorListHub(peer *peerConn, state *connectionState, in envelope) {
 	hubs := s.snapshotHubs()
@@ -949,29 +921,6 @@ func (s *Server) emitProjectUpdateEvents(hubID string, previous *rp.ProjectInfo,
 	if previous.Online && !current.Online {
 		s.broadcastProjectEvent(hubID, projectID, "project.offline", map[string]any{})
 	}
-	if previous.ProjectRev != current.ProjectRev {
-		changedDomains := []string{"project"}
-		if previous.Git.GitRev != current.Git.GitRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Branch != current.Git.Branch {
-			changedDomains = append(changedDomains, "git")
-		}
-		if previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.Dirty != current.Git.Dirty {
-			changedDomains = append(changedDomains, "worktree")
-		}
-		s.broadcastProjectEvent(hubID, projectID, "project.changed", map[string]any{
-			"projectRev":     current.ProjectRev,
-			"gitRev":         current.Git.GitRev,
-			"worktreeRev":    current.Git.WorktreeRev,
-			"changedDomains": changedDomains,
-		})
-	}
-	if previous.Git.GitRev != current.Git.GitRev || previous.Git.WorktreeRev != current.Git.WorktreeRev || previous.Git.HeadSHA != current.Git.HeadSHA || previous.Git.Dirty != current.Git.Dirty {
-		s.broadcastProjectEvent(hubID, projectID, "git.workspace.changed", map[string]any{
-			"gitRev":      current.Git.GitRev,
-			"worktreeRev": current.Git.WorktreeRev,
-			"headSha":     current.Git.HeadSHA,
-			"dirty":       current.Git.Dirty,
-		})
-	}
 }
 
 func (s *Server) broadcastProjectEvent(hubID, projectID, method string, payload any) {
@@ -1071,12 +1020,3 @@ func (s *Server) errorEnvelope(method, code, message string, details map[string]
 		}),
 	}
 }
-
-
-
-
-
-
-
-
-
