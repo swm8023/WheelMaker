@@ -1143,11 +1143,8 @@ function App() {
   }, [gitSelectedBranches]);
 
   useEffect(() => {
-    if (!isMarkdownPath(selectedFile)) {
-      setMarkdownPreviewEnabled(false);
-    }
+    setMarkdownPreviewEnabled(isMarkdownPath(selectedFile));
   }, [selectedFile]);
-
   useEffect(() => {
     setAllowHeavyDiffLoad(false);
     setAllowLargeDiffRender(false);

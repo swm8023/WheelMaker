@@ -17,8 +17,7 @@ describe('web markdown preview mode', () => {
     expect(mainTsx).toContain('function isMarkdownPath(path: string): boolean {');
     expect(mainTsx).toContain('const selectedFileIsMarkdown = isMarkdownPath(selectedFile);');
     expect(mainTsx).toContain('const [markdownPreviewEnabled, setMarkdownPreviewEnabled] = useState(false);');
-    expect(mainTsx).toContain('if (!isMarkdownPath(selectedFile)) {');
-    expect(mainTsx).toContain('setMarkdownPreviewEnabled(false);');
+    expect(mainTsx).toContain('setMarkdownPreviewEnabled(isMarkdownPath(selectedFile));');
 
     expect(mainTsx).toContain('aria-label="Toggle markdown preview"');
     expect(mainTsx).toContain('className={`view-tool markdown-preview-toggle ${');
@@ -41,3 +40,4 @@ describe('web markdown preview mode', () => {
     expect(stylesCss).toContain('.mermaid-error {');
   });
 });
+
