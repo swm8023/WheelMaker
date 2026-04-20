@@ -467,6 +467,32 @@ func sessionUpdateText(update acp.SessionUpdate) string {
 	return ""
 }
 
+func sessionUpdateBody(update acp.SessionUpdate) string {
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		return renderSessionToolStatus(update)
+	default:
+		return sessionUpdateText(update)
+	}
+}
+
+func sessionUpdateRole(update acp.SessionUpdate) string {
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case acp.SessionUpdateUserMessageChunk:
+		return "user"
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		return "assistant"
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		return "system"
+	default:
+		return ""
+	}
+}
+
+func sessionUpdateKind(update acp.SessionUpdate) string {
+	return strings.TrimSpace(update.SessionUpdate)
+}
+
 func sessionUpdateContentJSONHasParamsUpdate(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -513,9 +539,10 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 		Time:          event.UpdatedAt,
 	}
 	if update, ok := sessionUpdateFromEvent(event); ok {
-		message.Kind = firstNonEmpty(strings.TrimSpace(message.Kind), strings.TrimSpace(update.SessionUpdate))
-		message.Body = firstNonEmpty(strings.TrimSpace(message.Body), sessionUpdateText(update))
-		message.Status = firstNonEmpty(strings.TrimSpace(update.Status), message.Status)
+		message.Role = firstNonEmpty(sessionUpdateRole(update), strings.TrimSpace(message.Role), "assistant")
+		message.Kind = firstNonEmpty(sessionUpdateKind(update), strings.TrimSpace(message.Kind), "text")
+		message.Body = firstNonEmpty(strings.TrimSpace(message.Body), sessionUpdateBody(update))
+		message.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(message.Status), "streaming")
 		message.ContentJSON = buildSessionUpdateContentJSON(update)
 	}
 	return message
@@ -526,14 +553,15 @@ func mergeBufferedSessionUpdateMessage(msg *SessionTurnMessageRecord, event Sess
 		return
 	}
 	if update, ok := sessionUpdateFromEvent(event); ok {
-		rawText := sessionUpdateText(update)
+		rawText := sessionUpdateBody(update)
 		switch strings.TrimSpace(update.SessionUpdate) {
 		case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
 			msg.Body += rawText
 		default:
 			msg.Body = firstNonEmpty(strings.TrimSpace(rawText), strings.TrimSpace(event.Text))
 		}
-		msg.Kind = firstNonEmpty(strings.TrimSpace(msg.Kind), strings.TrimSpace(update.SessionUpdate), strings.TrimSpace(event.Kind))
+		msg.Role = firstNonEmpty(sessionUpdateRole(update), strings.TrimSpace(msg.Role), strings.TrimSpace(event.Role))
+		msg.Kind = firstNonEmpty(sessionUpdateKind(update), strings.TrimSpace(msg.Kind), strings.TrimSpace(event.Kind))
 		msg.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(event.Status), msg.Status)
 		if strings.TrimSpace(msg.ContentJSON) != "" {
 			var existing struct {

@@ -598,6 +598,45 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	}
 }
 
+func TestHandleIMInbound_ViewSinkFailureDoesNotBlockIMUpdates(t *testing.T) {
+	c := New(&noopStore{}, "test", "/tmp")
+	fake := &fakeIMRouter{}
+	c.SetIMRouter(fake)
+	c.SetSessionViewSink(&failingSessionViewSink{})
+	factory := func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{
+			name:      "claude",
+			sessionID: "acp-1",
+			promptFn: func(context.Context, string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
+				ch := make(chan acp.SessionUpdateParams, 1)
+				content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello back"})
+				ch <- acp.SessionUpdateParams{Update: acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: content}}
+				close(ch)
+				return ch, acp.SessionPromptResult{StopReason: acp.StopReasonEndTurn}, nil
+			},
+		}, nil
+	}
+	c.InjectAgentFactory(acp.ACPProviderClaude, factory)
+	c.InjectAgentFactory(acp.ACPProviderCodex, factory)
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "hello"}); err != nil {
+		t.Fatalf("HandleIMInbound: %v", err)
+	}
+
+	foundACP := false
+	for _, update := range fake.updates {
+		if update.params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
+			foundACP = true
+			break
+		}
+	}
+	if !foundACP {
+		t.Fatalf("updates=%+v, want ACP session/update emission even when view sink fails", fake.updates)
+	}
+}
+
 type failingPermissionIMRouter struct{}
 
 func (f *failingPermissionIMRouter) Bind(context.Context, im.ChatRef, string, im.BindOptions) error {
@@ -617,6 +656,11 @@ func (f *failingPermissionIMRouter) SystemNotify(context.Context, im.SendTarget,
 }
 func (f *failingPermissionIMRouter) Run(context.Context) error { return nil }
 
+type failingSessionViewSink struct{}
+
+func (f *failingSessionViewSink) RecordEvent(context.Context, SessionViewEvent) error {
+	return errors.New("session view sink failed")
+}
 func TestPermissionRouter_PublishFailureLogged(t *testing.T) {
 	var buf bytes.Buffer
 	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
@@ -2212,6 +2256,153 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 	}
 }
 
+func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Merge Cursor"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "say hi"}); err != nil {
+		t.Fatalf("RecordEvent user message: %v", err)
+	}
+	chunk1 := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello "}),
+		Status:        "streaming",
+	}
+	chunk2 := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"}),
+		Status:        "done",
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &chunk1}); err != nil {
+		t.Fatalf("RecordEvent chunk1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &chunk2}); err != nil {
+		t.Fatalf("RecordEvent chunk2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	messages, err := c.store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionTurnMessages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2 (prompt + merged assistant turn)", len(messages))
+	}
+	assistant := messages[1]
+	if assistant.SyncIndex != 2 {
+		t.Fatalf("assistant SyncIndex = %d, want 2", assistant.SyncIndex)
+	}
+	if assistant.SyncSubIndex != 1 {
+		t.Fatalf("assistant SyncSubIndex = %d, want 1", assistant.SyncSubIndex)
+	}
+
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
+	}
+	assistantTurn := turns[1]
+	if assistantTurn.UpdateIndex != 2 {
+		t.Fatalf("assistant turn update_index = %d, want 2", assistantTurn.UpdateIndex)
+	}
+	update := decodeTurnSessionUpdate(t, assistantTurn.UpdateJSON)
+	if text := extractTextChunk(update.Content); text != "hello world" {
+		t.Fatalf("assistant turn text = %q, want %q", text, "hello world")
+	}
+	if update.Status != "done" {
+		t.Fatalf("assistant turn status = %q, want done", update.Status)
+	}
+}
+
+func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Role Kind"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "run"}); err != nil {
+		t.Fatalf("RecordEvent user message: %v", err)
+	}
+	msg := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
+		Status:        "streaming",
+	}
+	thought := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentThoughtChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "reason"}),
+		Status:        "streaming",
+	}
+	tool := acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateToolCall,
+		ToolCallID:    "call-1",
+		Status:        acp.ToolCallStatusInProgress,
+		Title:         "build",
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &msg}); err != nil {
+		t.Fatalf("RecordEvent assistant chunk: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventThoughtChunk, SessionID: "sess-1", Update: &thought}); err != nil {
+		t.Fatalf("RecordEvent thought chunk: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Update: &tool}); err != nil {
+		t.Fatalf("RecordEvent tool update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	prompts := body["prompts"].([]sessionViewPrompt)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if len(prompts[0].Turns) != 4 {
+		t.Fatalf("prompts[0].Turns len = %d, want 4 (user + assistant + thought + tool)", len(prompts[0].Turns))
+	}
+
+	seen := map[string]bool{}
+	for _, turn := range prompts[0].Turns {
+		var doc struct {
+			Params struct {
+				Update acp.SessionUpdate
+			}
+		}
+		if err := json.Unmarshal(turn.Update, &doc); err != nil {
+			continue
+		}
+		updateType := strings.TrimSpace(doc.Params.Update.SessionUpdate)
+		if updateType == "" {
+			continue
+		}
+		seen[turn.Role+"|"+updateType] = true
+	}
+	if !seen["assistant|"+acp.SessionUpdateAgentMessageChunk] {
+		t.Fatalf("missing assistant/message chunk turn, turns=%+v", prompts[0].Turns)
+	}
+	if !seen["assistant|"+acp.SessionUpdateAgentThoughtChunk] {
+		t.Fatalf("missing assistant/thought chunk turn, turns=%+v", prompts[0].Turns)
+	}
+	if !seen["system|"+acp.SessionUpdateToolCall] {
+		t.Fatalf("missing system/tool_call turn, turns=%+v", prompts[0].Turns)
+	}
+}
 func TestSessionRecorderMarkReadClearsUnreadEntry(t *testing.T) {
 	c := newSessionViewTestClient(t)
 

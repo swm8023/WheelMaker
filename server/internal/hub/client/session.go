@@ -1348,14 +1348,11 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					params := *ev.update
 					switch params.Update.SessionUpdate {
 					case acp.SessionUpdateAgentMessageChunk:
-						text := extractTextChunk(params.Update.Content)
-						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming", Update: &params.Update})
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Update: &params.Update})
 					case acp.SessionUpdateAgentThoughtChunk:
-						text := extractTextChunk(params.Update.Content)
-						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming", Update: &params.Update})
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Update: &params.Update})
 					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-						statusText := renderSessionToolStatus(params.Update)
-						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: strings.TrimSpace(params.Update.Status), Update: &params.Update})
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Update: &params.Update})
 					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
