@@ -1349,19 +1349,13 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					switch params.Update.SessionUpdate {
 					case acp.SessionUpdateAgentMessageChunk:
 						text := extractTextChunk(params.Update.Content)
-						if strings.TrimSpace(text) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming", Update: &params.Update})
-						}
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventAssistantChunk, Role: "assistant", Kind: "text", Text: text, Status: "streaming", Update: &params.Update})
 					case acp.SessionUpdateAgentThoughtChunk:
 						text := extractTextChunk(params.Update.Content)
-						if strings.TrimSpace(text) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming", Update: &params.Update})
-						}
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventThoughtChunk, Role: "assistant", Kind: "thought", Text: text, Status: "streaming", Update: &params.Update})
 					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 						statusText := renderSessionToolStatus(params.Update)
-						if strings.TrimSpace(statusText) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", Update: &params.Update})
-						}
+						s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: strings.TrimSpace(params.Update.Status), Update: &params.Update})
 					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
@@ -1444,14 +1438,44 @@ func extractTextChunk(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	var block acp.ContentBlock
-	if err := json.Unmarshal(raw, &block); err != nil {
+	var anyValue any
+	if err := json.Unmarshal(raw, &anyValue); err != nil {
 		return ""
 	}
-	if block.Type != acp.ContentBlockTypeText {
+	return extractTextFromAny(anyValue)
+}
+
+func extractTextFromAny(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	case map[string]any:
+		if text, ok := value["text"].(string); ok && strings.TrimSpace(text) != "" {
+			return text
+		}
+		if delta, ok := value["delta"].(string); ok && strings.TrimSpace(delta) != "" {
+			return delta
+		}
+		if content, ok := value["content"]; ok {
+			if text := extractTextFromAny(content); strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+		if resource, ok := value["resource"]; ok {
+			if text := extractTextFromAny(resource); strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+		return ""
+	case []any:
+		var builder strings.Builder
+		for _, item := range value {
+			builder.WriteString(extractTextFromAny(item))
+		}
+		return builder.String()
+	default:
 		return ""
 	}
-	return block.Text
 }
 
 func renderSessionToolStatus(update acp.SessionUpdate) string {

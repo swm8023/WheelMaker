@@ -1988,7 +1988,7 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	}
 	updateChunk2 := acp.SessionUpdate{
 		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
-		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: " world"}),
+		Content:       mustJSON(map[string]any{"text": " world"}),
 	}
 
 	if err := c.RecordEvent(ctx, SessionViewEvent{
@@ -2044,6 +2044,26 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	}
 	if got := extractTextChunk(doc.Params.Update.Content); got != "hello world" {
 		t.Fatalf("doc.Params.Update.Content text = %q, want %q", got, "hello world")
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	prompts := body["prompts"].([]sessionViewPrompt)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if len(prompts[0].Turns) != 1 {
+		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
+	}
+	if prompts[0].Turns[0].Text != "hello world" {
+		t.Fatalf("prompts[0].Turns[0].Text = %q, want %q", prompts[0].Turns[0].Text, "hello world")
 	}
 }
 
@@ -2398,6 +2418,20 @@ func TestSessionViewBufferedUpdatesDoNotLeakAcrossPrompts(t *testing.T) {
 	}
 	if text := extractTextChunk(update2.Content); text != "world" {
 		t.Fatalf("prompt2 assistant text = %q, want %q", text, "world")
+	}
+}
+func TestExtractTextChunkSupportsLooseShapes(t *testing.T) {
+	if got := extractTextChunk(mustJSON(map[string]any{"text": "hello"})); got != "hello" {
+		t.Fatalf("extractTextChunk(map text) = %q, want %q", got, "hello")
+	}
+	if got := extractTextChunk(mustJSON([]any{
+		map[string]any{"type": "text", "text": "hello"},
+		map[string]any{"text": " world"},
+	})); got != "hello world" {
+		t.Fatalf("extractTextChunk(array) = %q, want %q", got, "hello world")
+	}
+	if got := extractTextChunk(mustJSON("!")); got != "!" {
+		t.Fatalf("extractTextChunk(string) = %q, want %q", got, "!")
 	}
 }
 func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {

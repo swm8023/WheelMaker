@@ -1206,7 +1206,10 @@ func toSessionViewTurn(turn SessionTurnRecord) sessionViewTurn {
 		Extra:       json.RawMessage(extraJSON),
 	}
 	var updateDoc struct {
-		Method  string `json:"method"`
+		Method string `json:"method"`
+		Params struct {
+			Update acp.SessionUpdate `json:"update"`
+		} `json:"params"`
 		Payload struct {
 			Role       string                 `json:"role"`
 			Kind       string                 `json:"kind"`
@@ -1227,6 +1230,23 @@ func toSessionViewTurn(turn SessionTurnRecord) sessionViewTurn {
 		out.ToolCallID = strings.TrimSpace(updateDoc.Payload.ToolCallID)
 		out.Blocks = cloneSessionContentBlocks(updateDoc.Payload.Blocks)
 		out.Options = cloneSessionPermissionOptions(updateDoc.Payload.Options)
+
+		if strings.TrimSpace(updateDoc.Params.Update.SessionUpdate) != "" {
+			out.Kind = firstNonEmpty(out.Kind, strings.TrimSpace(updateDoc.Params.Update.SessionUpdate))
+			out.Text = firstNonEmpty(out.Text, sessionUpdateText(updateDoc.Params.Update))
+			out.Status = firstNonEmpty(out.Status, strings.TrimSpace(updateDoc.Params.Update.Status))
+			out.ToolCallID = firstNonEmpty(out.ToolCallID, strings.TrimSpace(updateDoc.Params.Update.ToolCallID))
+			switch strings.TrimSpace(updateDoc.Params.Update.SessionUpdate) {
+			case acp.SessionUpdateUserMessageChunk:
+				out.Role = firstNonEmpty(out.Role, "user")
+			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+				out.Role = firstNonEmpty(out.Role, "assistant")
+			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+				out.Role = firstNonEmpty(out.Role, "system")
+			default:
+				out.Role = firstNonEmpty(out.Role, "assistant")
+			}
+		}
 	}
 	var extraDoc struct {
 		RequestID int64 `json:"requestId"`
