@@ -415,6 +415,28 @@ func (s *noopStore) SaveSession(context.Context, *SessionRecord) error { return 
 func (s *noopStore) ListSessions(context.Context, string) ([]SessionListEntry, error) {
 	return nil, nil
 }
+func (s *noopStore) AppendSessionTurnMessage(context.Context, SessionTurnMessageRecord) error {
+	return nil
+}
+func (s *noopStore) UpsertSessionTurnMessage(context.Context, SessionTurnMessageRecord) error {
+	return nil
+}
+func (s *noopStore) ListSessionTurnMessages(context.Context, string, string) ([]SessionTurnMessageRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) LoadSessionTurnMessage(context.Context, string, string, string) (*SessionTurnMessageRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) ListSessionTurnMessagesAfterIndex(context.Context, string, string, int64) ([]SessionTurnMessageRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) ListSessionTurnMessagesAfterCursor(context.Context, string, string, int64, int64) ([]SessionTurnMessageRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) HasSessionTurnMessage(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
+
 func (s *noopStore) AppendSessionMessage(context.Context, SessionMessageRecord) error { return nil }
 func (s *noopStore) UpsertSessionMessage(context.Context, SessionMessageRecord) error { return nil }
 func (s *noopStore) ListSessionMessages(context.Context, string, string) ([]SessionMessageRecord, error) {
@@ -2267,6 +2289,7 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 	t.Helper()
 	var doc struct {
+		Method string `json:"method"`
 		Params struct {
 			Update acp.SessionUpdate `json:"update"`
 		} `json:"params"`
@@ -2369,6 +2392,155 @@ func TestSessionViewBufferedUpdatesDoNotLeakAcrossPrompts(t *testing.T) {
 		t.Fatalf("turn counts = (%d,%d), want (2,2)", len(turnsPrompt1), len(turnsPrompt2))
 	}
 
+	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1].UpdateJSON)
+	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1].UpdateJSON)
+	if text := extractTextChunk(update1.Content); text != "hello" {
+		t.Fatalf("prompt1 assistant text = %q, want %q", text, "hello")
+	}
+	if text := extractTextChunk(update2.Content); text != "world" {
+		t.Fatalf("prompt2 assistant text = %q, want %q", text, "world")
+	}
+}
+func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Tool Terminal Merge"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "run task"}); err != nil {
+		t.Fatalf("RecordEvent user message: %v", err)
+	}
+
+	updates := []acp.SessionUpdate{
+		{SessionUpdate: acp.SessionUpdateToolCall, ToolCallID: "call-terminal", Status: acp.ToolCallStatusInProgress, Title: "task"},
+		{SessionUpdate: acp.SessionUpdateToolCallUpdate, ToolCallID: "call-terminal", Status: acp.ToolCallStatusFailed, Title: "task"},
+		{SessionUpdate: acp.SessionUpdateToolCallUpdate, ToolCallID: "call-terminal", Status: acp.ToolCallStatusCancelled, Title: "task"},
+	}
+	for i := range updates {
+		u := updates[i]
+		if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Update: &u}); err != nil {
+			t.Fatalf("RecordEvent tool update #%d: %v", i+1, err)
+		}
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged tool)", len(turns))
+	}
+	toolTurn := turns[1]
+	if toolTurn.UpdateIndex != 3 {
+		t.Fatalf("tool turn update_index = %d, want 3", toolTurn.UpdateIndex)
+	}
+	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
+	if update.ToolCallID != "call-terminal" {
+		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-terminal")
+	}
+	if update.Status != acp.ToolCallStatusCancelled {
+		t.Fatalf("tool turn status = %q, want %q", update.Status, acp.ToolCallStatusCancelled)
+	}
+}
+
+func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Permission Turn"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "run protected"}); err != nil {
+		t.Fatalf("RecordEvent user message: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Role: "system", Kind: "permission", Text: "allow?", RequestID: 7}); err != nil {
+		t.Fatalf("RecordEvent permission requested: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPermissionResolved, SessionID: "sess-1", RequestID: 7, Status: "done", UpdatedAt: mustRFC3339Time(t, "2026-04-12T10:02:00Z")}); err != nil {
+		t.Fatalf("RecordEvent permission resolved: %v", err)
+	}
+
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + permission)", len(turns))
+	}
+	permTurn := turns[1]
+	if permTurn.UpdateIndex != 2 {
+		t.Fatalf("permission turn update_index = %d, want 2", permTurn.UpdateIndex)
+	}
+	var doc struct {
+		Method  string `json:"method"`
+		Payload struct {
+			Kind      string `json:"kind"`
+			Status    string `json:"status"`
+			RequestID int64  `json:"requestId"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &doc); err != nil {
+		t.Fatalf("unmarshal permission turn update_json: %v", err)
+	}
+	if doc.Method != "session.permission" {
+		t.Fatalf("permission turn method = %q, want %q", doc.Method, "session.permission")
+	}
+	if doc.Payload.RequestID != 7 {
+		t.Fatalf("permission turn requestId = %d, want 7", doc.Payload.RequestID)
+	}
+	if doc.Payload.Status != "done" {
+		t.Fatalf("permission turn status = %q, want done", doc.Payload.Status)
+	}
+}
+func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Prompt Carry"}); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "first"}); err != nil {
+		t.Fatalf("RecordEvent user prompt #1: %v", err)
+	}
+	chunk1 := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"})}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Update: &chunk1}); err != nil {
+		t.Fatalf("RecordEvent chunk #1: %v", err)
+	}
+
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "second"}); err != nil {
+		t.Fatalf("RecordEvent user prompt #2: %v", err)
+	}
+	chunk2 := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Update: &chunk2}); err != nil {
+		t.Fatalf("RecordEvent chunk #2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
+		t.Fatalf("RecordEvent prompt finished #2: %v", err)
+	}
+
+	prompts, err := c.store.ListSessionPrompts(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionPrompts: %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("prompts len = %d, want 2", len(prompts))
+	}
+
+	turnsPrompt1, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns prompt1: %v", err)
+	}
+	turnsPrompt2, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 2)
+	if err != nil {
+		t.Fatalf("ListSessionTurns prompt2: %v", err)
+	}
+	if len(turnsPrompt1) != 2 || len(turnsPrompt2) != 2 {
+		t.Fatalf("turn counts = (%d,%d), want (2,2)", len(turnsPrompt1), len(turnsPrompt2))
+	}
 	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1].UpdateJSON)
 	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1].UpdateJSON)
 	if text := extractTextChunk(update1.Content); text != "hello" {

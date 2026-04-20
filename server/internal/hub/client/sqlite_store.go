@@ -136,6 +136,10 @@ type SessionMessageRecord struct {
 	UpdatedAt     time.Time
 }
 
+// SessionTurnMessageRecord is the turn-centric semantic alias used by SessionRecorder.
+// The underlying storage schema remains session_prompts/session_turns.
+type SessionTurnMessageRecord = SessionMessageRecord
+
 type SessionPromptRecord struct {
 	PromptID    string
 	SessionID   string
@@ -168,6 +172,15 @@ type Store interface {
 	LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error)
 	SaveSession(ctx context.Context, rec *SessionRecord) error
 	ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error)
+	AppendSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord) error
+	UpsertSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord) error
+	LoadSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionTurnMessageRecord, error)
+	ListSessionTurnMessages(ctx context.Context, projectName, sessionID string) ([]SessionTurnMessageRecord, error)
+	ListSessionTurnMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionTurnMessageRecord, error)
+	ListSessionTurnMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionTurnMessageRecord, error)
+	HasSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error)
+
+	// Deprecated compatibility API. Keep until all callsites migrate to turn terminology.
 	AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error
 	UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error
 	LoadSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionMessageRecord, error)
@@ -636,12 +649,40 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 	return entries, rows.Err()
 }
 
-func (s *sqliteStore) AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
+func (s *sqliteStore) AppendSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord) error {
 	return s.insertOrUpdateSessionMessage(ctx, rec, false)
 }
 
-func (s *sqliteStore) UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
+func (s *sqliteStore) UpsertSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord) error {
 	return s.insertOrUpdateSessionMessage(ctx, rec, true)
+}
+
+func (s *sqliteStore) LoadSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionTurnMessageRecord, error) {
+	return s.LoadSessionMessage(ctx, projectName, sessionID, messageID)
+}
+
+func (s *sqliteStore) ListSessionTurnMessages(ctx context.Context, projectName, sessionID string) ([]SessionTurnMessageRecord, error) {
+	return s.ListSessionMessages(ctx, projectName, sessionID)
+}
+
+func (s *sqliteStore) ListSessionTurnMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionTurnMessageRecord, error) {
+	return s.ListSessionMessagesAfterIndex(ctx, projectName, sessionID, afterIndex)
+}
+
+func (s *sqliteStore) ListSessionTurnMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionTurnMessageRecord, error) {
+	return s.ListSessionMessagesAfterCursor(ctx, projectName, sessionID, afterIndex, afterSubIndex)
+}
+
+func (s *sqliteStore) HasSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error) {
+	return s.HasSessionMessage(ctx, projectName, sessionID, messageID)
+}
+
+func (s *sqliteStore) AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
+	return s.AppendSessionTurnMessage(ctx, rec)
+}
+
+func (s *sqliteStore) UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
+	return s.UpsertSessionTurnMessage(ctx, rec)
 }
 
 func normalizeSessionRecordSource(rec SessionMessageRecord) string {

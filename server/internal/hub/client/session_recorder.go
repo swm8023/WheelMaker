@@ -218,7 +218,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			AggregateKey: firstNonEmpty(event.AggregateKey, fmt.Sprintf("user:%s:%d", event.SessionID, event.CreatedAt.UnixNano())),
 			Source:       normalizeRecorderEventSource(event),
 		}
-		if err := r.store.AppendSessionMessage(ctx, message); err != nil {
+		if err := r.store.AppendSessionTurnMessage(ctx, message); err != nil {
 			return err
 		}
 		stored, err := r.loadLatestStoredSessionMessage(ctx, event.SessionID)
@@ -274,11 +274,11 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			}
 			message.ContentJSON = ""
 			message.MetaJSON = "{}"
-			if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
+			if err := r.store.UpsertSessionTurnMessage(ctx, message); err != nil {
 				return err
 			}
 		} else {
-			if err := r.store.AppendSessionMessage(ctx, message); err != nil {
+			if err := r.store.AppendSessionTurnMessage(ctx, message); err != nil {
 				return err
 			}
 		}
@@ -298,7 +298,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
 		}
-		messages, err := r.store.ListSessionMessages(ctx, r.projectName, event.SessionID)
+		messages, err := r.store.ListSessionTurnMessages(ctx, r.projectName, event.SessionID)
 		if err != nil {
 			return err
 		}
@@ -311,7 +311,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			message.Time = event.UpdatedAt
 			message.ContentJSON = ""
 			message.MetaJSON = "{}"
-			if err := r.store.UpsertSessionMessage(ctx, message); err != nil {
+			if err := r.store.UpsertSessionTurnMessage(ctx, message); err != nil {
 				return err
 			}
 			stored, err := r.loadStoredSessionMessageByIndex(ctx, event.SessionID, message.SyncIndex)
@@ -375,37 +375,64 @@ func normalizeRecorderEventSource(event SessionViewEvent) string {
 	return channel + ":" + chatID
 }
 
-func normalizeRecorderSessionUpdate(updateName string) string {
-	name := strings.TrimSpace(updateName)
-	switch name {
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		return acp.SessionUpdateToolCall
-	default:
-		return name
+type recorderTurnKeyStrategy string
+
+const (
+	recorderTurnKeyBySessionUpdate recorderTurnKeyStrategy = "session_update"
+	recorderTurnKeyByAggregateKey  recorderTurnKeyStrategy = "aggregate_key"
+	recorderTurnKeyByToolCallID    recorderTurnKeyStrategy = "tool_call_id"
+)
+
+var recorderSessionUpdateTurnKeyStrategy = map[string]recorderTurnKeyStrategy{
+	acp.SessionUpdateAgentMessageChunk: recorderTurnKeyByAggregateKey,
+	acp.SessionUpdateUserMessageChunk:  recorderTurnKeyByAggregateKey,
+	acp.SessionUpdateAgentThoughtChunk: recorderTurnKeyByAggregateKey,
+	acp.SessionUpdateToolCall:          recorderTurnKeyByToolCallID,
+	acp.SessionUpdateToolCallUpdate:    recorderTurnKeyByToolCallID,
+}
+
+func recorderTurnKeyStrategyForSessionUpdate(updateName string) recorderTurnKeyStrategy {
+	if strategy, ok := recorderSessionUpdateTurnKeyStrategy[strings.TrimSpace(updateName)]; ok {
+		return strategy
 	}
+	return recorderTurnKeyBySessionUpdate
+}
+
+func recorderCanonicalSessionUpdate(updateName string, strategy recorderTurnKeyStrategy) string {
+	updateName = strings.TrimSpace(updateName)
+	if strategy == recorderTurnKeyByToolCallID {
+		return acp.SessionUpdateToolCall
+	}
+	return updateName
 }
 
 func recorderUpdateTurnKey(event SessionViewEvent) string {
 	if update, ok := sessionUpdateFromEvent(event); ok {
-		normalized := normalizeRecorderSessionUpdate(update.SessionUpdate)
-		if normalized == "" {
-			normalized = string(event.Type)
+		updateName := strings.TrimSpace(update.SessionUpdate)
+		if updateName == "" {
+			updateName = string(event.Type)
 		}
-		if normalized == acp.SessionUpdateToolCall {
+		strategy := recorderTurnKeyStrategyForSessionUpdate(updateName)
+		canonical := recorderCanonicalSessionUpdate(updateName, strategy)
+		switch strategy {
+		case recorderTurnKeyByToolCallID:
 			toolCallID := strings.TrimSpace(update.ToolCallID)
 			if toolCallID == "" {
 				toolCallID = strings.TrimSpace(event.AggregateKey)
 			}
-			if toolCallID != "" {
-				return normalized + ":" + toolCallID
+			if toolCallID == "" {
+				toolCallID = "unknown"
 			}
-			return normalized + ":unknown"
+			return canonical + ":" + toolCallID
+		case recorderTurnKeyByAggregateKey:
+			aggregateKey := strings.TrimSpace(event.AggregateKey)
+			if aggregateKey == "" {
+				return canonical
+			}
+			return canonical + ":" + aggregateKey
+		default:
+			return canonical
 		}
-		aggregateKey := strings.TrimSpace(event.AggregateKey)
-		if aggregateKey != "" {
-			return normalized + ":" + aggregateKey
-		}
-		return normalized
 	}
 	variant := string(event.Type)
 	if strings.TrimSpace(event.Kind) != "" {
@@ -683,7 +710,7 @@ func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context
 	}
 	msg := state.message
 	if appendMode {
-		if err := r.store.AppendSessionMessage(ctx, msg); err != nil {
+		if err := r.store.AppendSessionTurnMessage(ctx, msg); err != nil {
 			return err
 		}
 	} else {
@@ -691,7 +718,7 @@ func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context
 			msg.ContentJSON = ""
 		}
 		msg.MetaJSON = "{}"
-		if err := r.store.UpsertSessionMessage(ctx, msg); err != nil {
+		if err := r.store.UpsertSessionTurnMessage(ctx, msg); err != nil {
 			return err
 		}
 	}
@@ -796,9 +823,9 @@ func (r *SessionRecorder) ReadSessionView(ctx context.Context, sessionID string,
 	}
 	var messages []SessionMessageRecord
 	if afterIndex > 0 || afterSubIndex > 0 {
-		messages, err = r.store.ListSessionMessagesAfterCursor(ctx, r.projectName, strings.TrimSpace(sessionID), afterIndex, afterSubIndex)
+		messages, err = r.store.ListSessionTurnMessagesAfterCursor(ctx, r.projectName, strings.TrimSpace(sessionID), afterIndex, afterSubIndex)
 	} else {
-		messages, err = r.store.ListSessionMessages(ctx, r.projectName, strings.TrimSpace(sessionID))
+		messages, err = r.store.ListSessionTurnMessages(ctx, r.projectName, strings.TrimSpace(sessionID))
 	}
 	if err != nil {
 		return sessionViewSummary{}, nil, 0, 0, err
@@ -873,7 +900,7 @@ func (r *SessionRecorder) loadStoredSessionMessageByIndex(ctx context.Context, s
 	if index <= 0 {
 		return SessionMessageRecord{}, fmt.Errorf("invalid session index: %d", index)
 	}
-	messages, err := r.store.ListSessionMessagesAfterCursor(ctx, r.projectName, sessionID, index-1, -1)
+	messages, err := r.store.ListSessionTurnMessagesAfterCursor(ctx, r.projectName, sessionID, index-1, -1)
 	if err != nil {
 		return SessionMessageRecord{}, err
 	}
@@ -890,7 +917,7 @@ func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, 
 	if sessionID == "" || requestID == 0 {
 		return nil, nil
 	}
-	messages, err := r.store.ListSessionMessages(ctx, r.projectName, sessionID)
+	messages, err := r.store.ListSessionTurnMessages(ctx, r.projectName, sessionID)
 	if err != nil {
 		return nil, err
 	}
