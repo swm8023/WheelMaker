@@ -108,7 +108,7 @@ const sessionUpdateFlushInterval = 5 * time.Second
 
 type bufferedSessionUpdate struct {
 	message         SessionMessageRecord
-	variant         string
+	turnKey         string
 	persisted       bool
 	dirty           bool
 	lastPersistedAt time.Time
@@ -124,7 +124,7 @@ type SessionRecorder struct {
 	unreadCount map[string]int
 
 	updateMu sync.Mutex
-	updates  map[string]*bufferedSessionUpdate
+	updates  map[string]map[string]*bufferedSessionUpdate
 	stopCh   chan struct{}
 	doneCh   chan struct{}
 }
@@ -135,7 +135,7 @@ func newSessionRecorder(projectName string, store Store, listSessions func(conte
 		store:        store,
 		listSessions: listSessions,
 		unreadCount:  map[string]int{},
-		updates:      map[string]*bufferedSessionUpdate{},
+		updates:      map[string]map[string]*bufferedSessionUpdate{},
 		stopCh:       make(chan struct{}),
 		doneCh:       make(chan struct{}),
 	}
@@ -201,6 +201,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
 		}
+		r.clearBufferedSessionUpdates(event.SessionID)
 		message := SessionMessageRecord{
 			ProjectName:  r.projectName,
 			SessionID:    event.SessionID,
@@ -235,6 +236,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
 		}
+		r.clearBufferedSessionUpdates(event.SessionID)
 		if err := r.persistPromptStopReason(ctx, event.SessionID, event.Status, event.UpdatedAt); err != nil {
 			return err
 		}
@@ -373,16 +375,37 @@ func normalizeRecorderEventSource(event SessionViewEvent) string {
 	return channel + ":" + chatID
 }
 
-func recorderUpdateVariant(event SessionViewEvent) string {
+func normalizeRecorderSessionUpdate(updateName string) string {
+	name := strings.TrimSpace(updateName)
+	switch name {
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		return acp.SessionUpdateToolCall
+	default:
+		return name
+	}
+}
+
+func recorderUpdateTurnKey(event SessionViewEvent) string {
 	if update, ok := sessionUpdateFromEvent(event); ok {
-		variant := strings.TrimSpace(update.SessionUpdate)
-		if variant == "" {
-			variant = string(event.Type)
+		normalized := normalizeRecorderSessionUpdate(update.SessionUpdate)
+		if normalized == "" {
+			normalized = string(event.Type)
 		}
-		if strings.TrimSpace(update.ToolCallID) != "" {
-			variant += ":" + strings.TrimSpace(update.ToolCallID)
+		if normalized == acp.SessionUpdateToolCall {
+			toolCallID := strings.TrimSpace(update.ToolCallID)
+			if toolCallID == "" {
+				toolCallID = strings.TrimSpace(event.AggregateKey)
+			}
+			if toolCallID != "" {
+				return normalized + ":" + toolCallID
+			}
+			return normalized + ":unknown"
 		}
-		return variant
+		aggregateKey := strings.TrimSpace(event.AggregateKey)
+		if aggregateKey != "" {
+			return normalized + ":" + aggregateKey
+		}
+		return normalized
 	}
 	variant := string(event.Type)
 	if strings.TrimSpace(event.Kind) != "" {
@@ -554,13 +577,21 @@ func firstNonZeroInt64(v int64, fallback int64) int64 {
 	return fallback
 }
 
+func isBufferedUpdateTerminalStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "needs_action", "completed", "failed", "cancelled", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
 func shouldFlushBufferedSessionUpdateImmediately(event SessionViewEvent) bool {
-	if strings.EqualFold(strings.TrimSpace(event.Status), "done") || strings.EqualFold(strings.TrimSpace(event.Status), "needs_action") {
+	if isBufferedUpdateTerminalStatus(event.Status) {
 		return true
 	}
 	if update, ok := sessionUpdateFromEvent(event); ok {
-		status := strings.TrimSpace(update.Status)
-		if strings.EqualFold(status, "done") || strings.EqualFold(status, "needs_action") {
+		if isBufferedUpdateTerminalStatus(update.Status) {
 			return true
 		}
 	}
@@ -573,19 +604,21 @@ func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event
 	defer r.updateMu.Unlock()
 
 	sessionID := strings.TrimSpace(event.SessionID)
-	variant := recorderUpdateVariant(event)
-	state := r.updates[sessionID]
-	if state != nil && state.variant != variant {
-		if err := r.flushBufferedSessionUpdateLocked(ctx, sessionID, true); err != nil {
-			return err
-		}
-		state = nil
+	turnKey := recorderUpdateTurnKey(event)
+	if turnKey == "" {
+		turnKey = string(event.Type)
 	}
+	sessionUpdates := r.updates[sessionID]
+	if sessionUpdates == nil {
+		sessionUpdates = map[string]*bufferedSessionUpdate{}
+		r.updates[sessionID] = sessionUpdates
+	}
+	state := sessionUpdates[turnKey]
 	if state == nil {
 		msg := newBufferedSessionUpdateMessage(r.projectName, event)
-		state = &bufferedSessionUpdate{message: msg, variant: variant, dirty: true}
-		r.updates[sessionID] = state
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, true); err != nil {
+		state = &bufferedSessionUpdate{message: msg, turnKey: turnKey, dirty: true}
+		sessionUpdates[turnKey] = state
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, true); err != nil {
 			return err
 		}
 		return nil
@@ -593,13 +626,13 @@ func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event
 	mergeBufferedSessionUpdateMessage(&state.message, event)
 	state.dirty = true
 	if shouldFlushBufferedSessionUpdateImmediately(event) {
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false); err != nil {
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false); err != nil {
 			return err
 		}
 		return nil
 	}
 	if state.lastPersistedAt.IsZero() || event.UpdatedAt.Sub(state.lastPersistedAt) >= sessionUpdateFlushInterval {
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false); err != nil {
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false); err != nil {
 			return err
 		}
 	}
@@ -609,24 +642,42 @@ func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event
 func (r *SessionRecorder) flushBufferedSessionUpdate(ctx context.Context, sessionID string) error {
 	r.updateMu.Lock()
 	defer r.updateMu.Unlock()
-	return r.flushBufferedSessionUpdateLocked(ctx, strings.TrimSpace(sessionID), true)
+	return r.flushBufferedSessionUpdateLocked(ctx, strings.TrimSpace(sessionID), false)
 }
 
 func (r *SessionRecorder) flushBufferedSessionUpdateLocked(ctx context.Context, sessionID string, force bool) error {
-	state := r.updates[strings.TrimSpace(sessionID)]
-	if state == nil {
+	sessionID = strings.TrimSpace(sessionID)
+	sessionUpdates := r.updates[sessionID]
+	if len(sessionUpdates) == 0 {
 		return nil
 	}
-	if !state.persisted {
-		return r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, true)
+	keys := make([]string, 0, len(sessionUpdates))
+	for turnKey := range sessionUpdates {
+		keys = append(keys, turnKey)
 	}
-	if !state.dirty && !force {
-		return nil
+	sort.Strings(keys)
+	for _, turnKey := range keys {
+		state := sessionUpdates[turnKey]
+		if state == nil {
+			continue
+		}
+		if !state.persisted {
+			if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, true); err != nil {
+				return err
+			}
+			continue
+		}
+		if !state.dirty && !force {
+			continue
+		}
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false); err != nil {
+			return err
+		}
 	}
-	return r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false)
+	return nil
 }
 
-func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context, sessionID string, state *bufferedSessionUpdate, appendMode bool) error {
+func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context, sessionID, turnKey string, state *bufferedSessionUpdate, appendMode bool) error {
 	if state == nil {
 		return nil
 	}
@@ -669,35 +720,54 @@ func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context
 	state.persisted = true
 	state.dirty = false
 	state.lastPersistedAt = stored.UpdatedAt
-	r.updates[sessionID] = state
+	sessionUpdates := r.updates[sessionID]
+	if sessionUpdates == nil {
+		sessionUpdates = map[string]*bufferedSessionUpdate{}
+		r.updates[sessionID] = sessionUpdates
+	}
+	sessionUpdates[turnKey] = state
 	return nil
+}
+
+func (r *SessionRecorder) clearBufferedSessionUpdates(sessionID string) {
+	r.updateMu.Lock()
+	defer r.updateMu.Unlock()
+	r.clearBufferedSessionUpdatesLocked(sessionID)
+}
+
+func (r *SessionRecorder) clearBufferedSessionUpdatesLocked(sessionID string) {
+	delete(r.updates, strings.TrimSpace(sessionID))
 }
 
 func (r *SessionRecorder) flushDueBufferedUpdates(ctx context.Context, now time.Time) {
 	r.updateMu.Lock()
 	defer r.updateMu.Unlock()
-	for sessionID, state := range r.updates {
-		if state == nil || !state.persisted || !state.dirty {
-			continue
+	for sessionID, sessionUpdates := range r.updates {
+		for turnKey, state := range sessionUpdates {
+			if state == nil || !state.persisted || !state.dirty {
+				continue
+			}
+			if now.Sub(state.lastPersistedAt) < sessionUpdateFlushInterval {
+				continue
+			}
+			_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false)
 		}
-		if now.Sub(state.lastPersistedAt) < sessionUpdateFlushInterval {
-			continue
-		}
-		_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false)
 	}
 }
 
 func (r *SessionRecorder) flushAllBufferedUpdates(ctx context.Context) {
 	r.updateMu.Lock()
 	defer r.updateMu.Unlock()
-	for sessionID, state := range r.updates {
-		if state == nil {
-			continue
+	for sessionID, sessionUpdates := range r.updates {
+		for turnKey, state := range sessionUpdates {
+			if state == nil {
+				continue
+			}
+			if state.persisted && !state.dirty {
+				continue
+			}
+			_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, !state.persisted)
 		}
-		if state.persisted && !state.dirty {
-			continue
-		}
-		_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, !state.persisted)
 	}
 }
 func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
