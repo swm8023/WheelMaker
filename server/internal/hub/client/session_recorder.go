@@ -232,7 +232,13 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk, SessionViewEventToolUpdated:
 		return r.recordBufferedSessionUpdate(ctx, event)
 	case SessionViewEventPromptFinished:
-		return r.flushBufferedSessionUpdate(ctx, event.SessionID)
+		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
+			return err
+		}
+		if err := r.persistPromptStopReason(ctx, event.SessionID, event.Status, event.UpdatedAt); err != nil {
+			return err
+		}
+		return nil
 	case SessionViewEventPermissionRequested:
 		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
@@ -319,6 +325,39 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	}
 }
 
+func (r *SessionRecorder) persistPromptStopReason(ctx context.Context, sessionID, stopReason string, updatedAt time.Time) error {
+	sessionID = strings.TrimSpace(sessionID)
+	stopReason = strings.TrimSpace(stopReason)
+	if sessionID == "" || stopReason == "" {
+		return nil
+	}
+	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	if len(prompts) == 0 {
+		return nil
+	}
+	latest := prompts[len(prompts)-1]
+	if latest.PromptIndex <= 0 {
+		return nil
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	updateIndex := latest.UpdateIndex + 1
+	if updateIndex <= 0 {
+		updateIndex = 1
+	}
+	return r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   sessionID,
+		ProjectName: r.projectName,
+		PromptIndex: latest.PromptIndex,
+		UpdateIndex: updateIndex,
+		StopReason:  stopReason,
+		UpdatedAt:   updatedAt,
+	})
+}
 func normalizeRecorderEventSource(event SessionViewEvent) string {
 	channel := strings.TrimSpace(event.SourceChannel)
 	chatID := strings.TrimSpace(event.SourceChatID)

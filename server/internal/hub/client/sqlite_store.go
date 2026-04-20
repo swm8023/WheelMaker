@@ -884,7 +884,6 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 		return err
 	}
 	rec.MetaJSON = metaJSON
-	source := normalizeSessionRecordSource(rec)
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -908,16 +907,16 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 		return fmt.Errorf("load session cursor: %w", err)
 	}
 
-	var existingTurn *sessionTurnLegacyLookup
+	var existingTurn *sessionTurnLookup
 	if update && rec.SyncIndex > 0 {
-		existingTurn, err = findSessionTurnByLegacySyncIndexTx(ctx, tx, rec.SessionID, rec.SyncIndex)
+		existingTurn, err = findSessionTurnBySyncIndexTx(ctx, tx, rec.SessionID, rec.SyncIndex)
 		if err != nil {
 			return err
 		}
 	}
 
 	if existingTurn != nil {
-		rec.SyncSubIndex = existingTurn.LegacySyncSubIndex + 1
+		rec.SyncSubIndex = maxInt64(existingTurn.UpdateIndex, 0)
 	} else {
 		rec.SyncIndex = lastSyncIndex + 1
 		rec.SyncSubIndex = 0
@@ -925,7 +924,7 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
 	storedTime := rec.Time.UTC().Format(time.RFC3339Nano)
 
-	if err := upsertPromptTurnProjectionTx(ctx, tx, rec, existingTurn, contentJSON, source, storedTime); err != nil {
+	if err := upsertPromptTurnProjectionTx(ctx, tx, rec, existingTurn, contentJSON, storedTime); err != nil {
 		return fmt.Errorf("upsert prompt/turn projection: %w", err)
 	}
 
@@ -943,49 +942,45 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	return nil
 }
 
-type sessionTurnLegacyLookup struct {
-	PromptIndex        int64
-	TurnIndex          int64
-	UpdateIndex        int64
-	LegacySyncSubIndex int64
+type sessionTurnLookup struct {
+	PromptIndex int64
+	TurnIndex   int64
+	UpdateIndex int64
 }
 
-func findSessionTurnByLegacySyncIndexTx(ctx context.Context, tx *sql.Tx, sessionID string, syncIndex int64) (*sessionTurnLegacyLookup, error) {
+func findSessionTurnBySyncIndexTx(ctx context.Context, tx *sql.Tx, sessionID string, syncIndex int64) (*sessionTurnLookup, error) {
 	if syncIndex <= 0 {
 		return nil, nil
 	}
-	legacyPattern := fmt.Sprintf("%%\"legacySyncIndex\":%d%%", syncIndex)
 	rows, err := tx.QueryContext(ctx, `
-		SELECT prompt_index, turn_index, update_index, extra_json
+		SELECT prompt_index, turn_index, update_index
 		FROM session_turns
-		WHERE session_id = ? AND extra_json LIKE ?
+		WHERE session_id = ?
 		ORDER BY prompt_index ASC, turn_index ASC
-	`, sessionID, legacyPattern)
+	`, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("load session_turns by legacy sync index: %w", err)
+		return nil, fmt.Errorf("load session_turns by sync index: %w", err)
 	}
 	defer rows.Close()
 
+	var current int64
 	for rows.Next() {
-		var lookup sessionTurnLegacyLookup
-		var extraJSON string
-		if err := rows.Scan(&lookup.PromptIndex, &lookup.TurnIndex, &lookup.UpdateIndex, &extraJSON); err != nil {
-			return nil, fmt.Errorf("scan session_turn by legacy sync index: %w", err)
+		current++
+		var lookup sessionTurnLookup
+		if err := rows.Scan(&lookup.PromptIndex, &lookup.TurnIndex, &lookup.UpdateIndex); err != nil {
+			return nil, fmt.Errorf("scan session_turn by sync index: %w", err)
 		}
-		extra := parseProjectionTurnExtraJSON(extraJSON)
-		if extra.LegacySyncIndex != syncIndex {
+		if current != syncIndex {
 			continue
 		}
-		lookup.LegacySyncSubIndex = extra.LegacySyncSubIndex
 		return &lookup, nil
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate session_turn by legacy sync index: %w", err)
+		return nil, fmt.Errorf("iterate session_turn by sync index: %w", err)
 	}
 	return nil, nil
 }
-
-func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMessageRecord, existingTurn *sessionTurnLegacyLookup, contentJSON, source, storedTime string) error {
+func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMessageRecord, existingTurn *sessionTurnLookup, contentJSON, storedTime string) error {
 
 	var latestPromptIndex int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(prompt_index), 0) FROM session_prompts WHERE session_id = ?`, rec.SessionID).Scan(&latestPromptIndex); err != nil {
@@ -1060,16 +1055,7 @@ func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMe
 	}
 
 	turnJSON := normalizeJSONDoc(contentJSON, `{"method":"session.update"}`)
-	extraJSONMap := map[string]any{
-		"legacySyncIndex":    rec.SyncIndex,
-		"legacySyncSubIndex": rec.SyncSubIndex,
-		"source":             strings.TrimSpace(source),
-		"time":               storedTime,
-	}
-	extraJSONRaw, err := json.Marshal(extraJSONMap)
-	if err != nil {
-		return fmt.Errorf("marshal projection turn extra json: %w", err)
-	}
+	extraJSONRaw := []byte("{}")
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO session_turns (session_id, prompt_index, turn_index, update_index, update_json, extra_json)
@@ -1084,25 +1070,6 @@ func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMe
 	return nil
 }
 
-type projectionTurnExtra struct {
-	LegacySyncIndex    int64  `json:"legacySyncIndex"`
-	LegacySyncSubIndex int64  `json:"legacySyncSubIndex"`
-	Source             string `json:"source"`
-	Time               string `json:"time"`
-}
-
-func parseProjectionTurnExtraJSON(raw string) projectionTurnExtra {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "{}" {
-		return projectionTurnExtra{}
-	}
-	var out projectionTurnExtra
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		return projectionTurnExtra{}
-	}
-	return out
-}
-
 type sessionTurnMessageRow struct {
 	SessionID       string
 	PromptIndex     int64
@@ -1110,12 +1077,11 @@ type sessionTurnMessageRow struct {
 	UpdateIndex     int64
 	PromptUpdatedAt string
 	UpdateJSON      string
-	ExtraJSON       string
 }
 
 func (s *sqliteStore) listSessionTurnMessageRows(ctx context.Context, projectName, sessionID string) ([]sessionTurnMessageRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, p.updated_at, t.update_json, t.extra_json
+		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, p.updated_at, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		LEFT JOIN session_prompts p ON p.session_id = t.session_id AND p.prompt_index = t.prompt_index
@@ -1130,7 +1096,7 @@ func (s *sqliteStore) listSessionTurnMessageRows(ctx context.Context, projectNam
 	out := make([]sessionTurnMessageRow, 0)
 	for rows.Next() {
 		var row sessionTurnMessageRow
-		if err := rows.Scan(&row.SessionID, &row.PromptIndex, &row.TurnIndex, &row.UpdateIndex, &row.PromptUpdatedAt, &row.UpdateJSON, &row.ExtraJSON); err != nil {
+		if err := rows.Scan(&row.SessionID, &row.PromptIndex, &row.TurnIndex, &row.UpdateIndex, &row.PromptUpdatedAt, &row.UpdateJSON); err != nil {
 			return nil, fmt.Errorf("scan session turn: %w", err)
 		}
 		out = append(out, row)
@@ -1148,31 +1114,23 @@ type hydratedSessionMessage struct {
 }
 
 func hydrateSessionMessageFromTurnRow(projectName string, fallbackSyncIndex int64, row sessionTurnMessageRow) hydratedSessionMessage {
-	extra := parseProjectionTurnExtraJSON(row.ExtraJSON)
 	rec := SessionMessageRecord{
 		SessionID:    strings.TrimSpace(row.SessionID),
 		ProjectName:  strings.TrimSpace(projectName),
 		ContentJSON:  normalizeJSONDoc(row.UpdateJSON, `{"method":"session.update"}`),
 		MetaJSON:     "{}",
 		SyncIndex:    fallbackSyncIndex,
-		SyncSubIndex: 0,
-	}
-	if extra.LegacySyncIndex > 0 {
-		rec.SyncIndex = extra.LegacySyncIndex
-		rec.SyncSubIndex = extra.LegacySyncSubIndex
+		SyncSubIndex: maxInt64(row.UpdateIndex-1, 0),
 	}
 	hydrateSessionRecordLegacyFields(&rec)
-	rec.Source = firstNonEmpty(strings.TrimSpace(extra.Source), strings.TrimSpace(rec.Source))
-	rec.Time = parseStoreTime(strings.TrimSpace(extra.Time))
-	if rec.Time.IsZero() {
-		rec.Time = parseStoreTime(strings.TrimSpace(row.PromptUpdatedAt))
-	}
+	rec.Time = parseStoreTime(strings.TrimSpace(row.PromptUpdatedAt))
 	rec.EventTime = rec.Time
 	rec.CreatedAt = rec.Time
 	rec.UpdatedAt = rec.Time
 	rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
 	return hydratedSessionMessage{Record: rec, PromptIndex: row.PromptIndex, TurnIndex: row.TurnIndex}
 }
+
 func filterAndSortSessionMessages(rows []sessionTurnMessageRow, projectName string, afterIndex, afterSubIndex int64) []SessionMessageRecord {
 	hydrated := make([]hydratedSessionMessage, 0, len(rows))
 	fallback := int64(0)
@@ -1506,6 +1464,12 @@ func parseSessionRecordSeq(seq string) (int64, int64, bool) {
 		return 0, 0, false
 	}
 	return idx, sub, true
+}
+func maxInt64(v int64, fallback int64) int64 {
+	if v > fallback {
+		return v
+	}
+	return fallback
 }
 func parseStoreTime(raw string) time.Time {
 	if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {

@@ -579,7 +579,7 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT s.project_name, t.session_id, t.prompt_index, t.turn_index, p.updated_at, t.update_json, t.extra_json
+		SELECT s.project_name, t.session_id, t.prompt_index, t.turn_index, t.update_index, p.updated_at, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		LEFT JOIN session_prompts p ON p.session_id = t.session_id AND p.prompt_index = t.prompt_index
@@ -609,14 +609,14 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 		var item MonitorSessionMessage
 		var promptIndex int64
 		var turnIndex int64
+		var turnUpdateIndex int64
 		var promptUpdatedAt string
 		var updateJSON string
-		var extraJSON string
-		if err := rows.Scan(&item.ProjectName, &item.SessionID, &promptIndex, &turnIndex, &promptUpdatedAt, &updateJSON, &extraJSON); err != nil {
+		if err := rows.Scan(&item.ProjectName, &item.SessionID, &promptIndex, &turnIndex, &turnUpdateIndex, &promptUpdatedAt, &updateJSON); err != nil {
 			return nil, err
 		}
 		fallbackIndex++
-		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt, fallbackIndex)
+		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, turnUpdateIndex, fallbackIndex)
 		all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: turnIndex})
 	}
 	if err := rows.Err(); err != nil {
@@ -652,28 +652,11 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	return out, nil
 }
 
-type monitorTurnExtra struct {
-	LegacySyncIndex    int64  `json:"legacySyncIndex"`
-	LegacySyncSubIndex int64  `json:"legacySyncSubIndex"`
-	RequestID          int64  `json:"requestId"`
-	Source             string `json:"source"`
-	Time               string `json:"time"`
-}
-
-func parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt string, fallbackIndex int64) (method, role, kind, body, status string, requestID, index, subIndex int64, source, ts string) {
+func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex, fallbackIndex int64) (method, role, kind, body, status string, requestID, index, subIndex int64, source, ts string) {
 	method = "session.update"
 	index = fallbackIndex
-	extraJSON = strings.TrimSpace(extraJSON)
-	extra := monitorTurnExtra{}
-	if extraJSON != "" && extraJSON != "{}" {
-		_ = json.Unmarshal([]byte(extraJSON), &extra)
-		if extra.LegacySyncIndex > 0 {
-			index = extra.LegacySyncIndex
-			subIndex = extra.LegacySyncSubIndex
-		}
-		source = strings.TrimSpace(extra.Source)
-		ts = strings.TrimSpace(extra.Time)
-	}
+	subIndex = maxInt64(turnUpdateIndex-1, 0)
+	ts = strings.TrimSpace(promptUpdatedAt)
 
 	updateJSON = strings.TrimSpace(updateJSON)
 	if updateJSON != "" {
@@ -708,14 +691,8 @@ func parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt string, fall
 			}
 		}
 	}
-	if requestID == 0 {
-		requestID = extra.RequestID
-	}
 	if strings.TrimSpace(kind) == "" {
 		kind = method
-	}
-	if strings.TrimSpace(ts) == "" {
-		ts = strings.TrimSpace(promptUpdatedAt)
 	}
 	return method, role, kind, body, status, requestID, index, subIndex, source, ts
 }
@@ -784,6 +761,12 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func maxInt64(v int64, fallback int64) int64 {
+	if v > fallback {
+		return v
+	}
+	return fallback
+}
 func queryTable(db *sql.DB, name string) (*DBTable, error) {
 	rows, err := db.Query("SELECT * FROM " + name) //nolint:gosec // table names are hard-coded
 	if err != nil {
