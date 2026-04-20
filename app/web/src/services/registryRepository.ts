@@ -11,6 +11,7 @@ import type {
   RegistryProject,
   RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
+  RegistrySessionPrompt,
   RegistrySessionReadResponse,
   RegistrySessionSummary,
   RegistrySyncCheckPayload,
@@ -59,6 +60,9 @@ export class RegistryRepository {
     const syncIndex = typeof input.syncIndex === 'number' && Number.isFinite(input.syncIndex)
       ? input.syncIndex
       : undefined;
+    const syncSubIndex = typeof input.syncSubIndex === 'number' && Number.isFinite(input.syncSubIndex)
+      ? input.syncSubIndex
+      : undefined;
     const role = input.role === 'user' || input.role === 'assistant' || input.role === 'system'
       ? input.role
       : 'assistant';
@@ -72,6 +76,7 @@ export class RegistryRepository {
       messageId,
       sessionId,
       syncIndex,
+      syncSubIndex,
       role,
       kind,
       text: typeof input.text === 'string' ? input.text : '',
@@ -101,18 +106,23 @@ export class RegistryRepository {
     projectId: string,
     sessionId: string,
     afterIndex: number,
+    afterSubIndex: number,
     method: 'session.read',
   ): Promise<RegistrySessionReadResponse> {
     const resp = await this.client.request({
       method,
       projectId,
-      payload: afterIndex > 0 ? {sessionId, afterIndex} : {sessionId},
+      payload: afterIndex > 0 || afterSubIndex > 0 ? {sessionId, afterIndex, afterSubIndex} : {sessionId},
       timeoutMs: 15000,
     });
     const payload = (resp.payload ?? {}) as {
       session?: unknown;
+      prompts?: unknown[];
       messages?: unknown[];
       lastIndex?: number;
+      lastSubIndex?: number;
+      lastPromptIndex?: number;
+      lastPromptUpdateIndex?: number;
     };
     const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
       sessionId,
@@ -121,14 +131,74 @@ export class RegistryRepository {
       updatedAt: '',
       messageCount: 0,
     };
-    const normalizedMessages = (payload.messages ?? [])
+
+    const normalizedPrompts: RegistrySessionPrompt[] = (Array.isArray(payload.prompts) ? payload.prompts : [])
+      .map(raw => raw as Record<string, unknown>)
+      .map(prompt => ({
+        messageId: typeof prompt?.messageId === 'string' ? prompt.messageId : (typeof prompt?.promptId === 'string' ? prompt.promptId : ''),
+        promptId: typeof prompt?.promptId === 'string' ? prompt.promptId : '',
+        sessionId: typeof prompt?.sessionId === 'string' && prompt.sessionId.trim().length > 0 ? prompt.sessionId : normalizedSession.sessionId,
+        promptIndex: Number(prompt?.promptIndex ?? 0),
+        updateIndex: Number(prompt?.updateIndex ?? 0),
+        title: typeof prompt?.title === 'string' ? prompt.title : '',
+        stopReason: typeof prompt?.stopReason === 'string' ? prompt.stopReason : undefined,
+        status: typeof prompt?.status === 'string' ? prompt.status : 'done',
+        updatedAt: typeof prompt?.updatedAt === 'string' ? prompt.updatedAt : '',
+        turns: (Array.isArray(prompt?.turns) ? prompt.turns : [])
+          .map(turnRaw => turnRaw as Record<string, unknown>)
+          .map(turn => ({
+            turnId: typeof turn?.turnId === 'string' ? turn.turnId : '',
+            promptIndex: Number(turn?.promptIndex ?? prompt?.promptIndex ?? 0),
+            turnIndex: Number(turn?.turnIndex ?? 0),
+            updateIndex: Number(turn?.updateIndex ?? 0),
+            role: turn?.role as RegistrySessionPrompt['turns'][number]['role'],
+            kind: turn?.kind as RegistrySessionPrompt['turns'][number]['kind'],
+            text: typeof turn?.text === 'string' ? turn.text : undefined,
+            status: turn?.status as RegistrySessionPrompt['turns'][number]['status'],
+            requestId: typeof turn?.requestId === 'number' && Number.isFinite(turn.requestId) ? turn.requestId : undefined,
+            toolCallId: typeof turn?.toolCallId === 'string' ? turn.toolCallId : undefined,
+            blocks: Array.isArray(turn?.blocks) ? (turn.blocks as RegistrySessionMessage['blocks']) : undefined,
+            options: Array.isArray(turn?.options) ? (turn.options as RegistrySessionMessage['options']) : undefined,
+          }))
+          .filter(turn => !!turn.turnId && turn.promptIndex > 0 && turn.turnIndex > 0 && turn.updateIndex > 0),
+      }))
+      .filter(prompt => !!prompt.messageId && !!prompt.promptId && prompt.promptIndex > 0 && prompt.updateIndex > 0)
+      .sort((a, b) => a.promptIndex - b.promptIndex);
+
+    const flattenedPromptMessages = normalizedPrompts.flatMap(prompt =>
+      prompt.turns.map(turn => ({
+        messageId: turn.turnId,
+        sessionId: prompt.sessionId,
+        syncIndex: prompt.promptIndex,
+        syncSubIndex: turn.updateIndex,
+        role: turn.role,
+        kind: turn.kind,
+        text: turn.text,
+        status: turn.status,
+        createdAt: prompt.updatedAt,
+        updatedAt: prompt.updatedAt,
+        requestId: turn.requestId,
+        blocks: turn.blocks,
+        options: turn.options,
+      })),
+    );
+    const normalizedMessages = ((Array.isArray(payload.messages) && payload.messages.length > 0) ? payload.messages : flattenedPromptMessages)
       .map(item => this.normalizeSessionMessage(item, normalizedSession.sessionId))
       .filter((item): item is RegistrySessionMessage => !!item);
     const maxSyncIndex = normalizedMessages.reduce((max, message) => Math.max(max, message.syncIndex ?? 0), 0);
+    const maxPromptIndex = normalizedPrompts.reduce((max, prompt) => Math.max(max, prompt.promptIndex), 0);
+    const lastIndex = typeof payload.lastPromptIndex === 'number'
+      ? payload.lastPromptIndex
+      : (typeof payload.lastIndex === 'number' ? payload.lastIndex : Math.max(maxPromptIndex, maxSyncIndex));
+    const lastSubIndex = typeof payload.lastPromptUpdateIndex === 'number'
+      ? payload.lastPromptUpdateIndex
+      : (typeof payload.lastSubIndex === 'number' ? payload.lastSubIndex : 0);
     return {
       session: normalizedSession,
+      prompts: normalizedPrompts,
       messages: normalizedMessages,
-      lastIndex: typeof payload.lastIndex === 'number' ? payload.lastIndex : maxSyncIndex,
+      lastIndex,
+      lastSubIndex,
     };
   }
 
@@ -364,8 +434,8 @@ export class RegistryRepository {
     return this.listSessionsByMethod(projectId, 'session.list');
   }
 
-  async readSession(projectId: string, sessionId: string, afterIndex = 0): Promise<RegistrySessionReadResponse> {
-    return this.readSessionByMethod(projectId, sessionId, afterIndex, 'session.read');
+  async readSession(projectId: string, sessionId: string, afterIndex = 0, afterSubIndex = 0): Promise<RegistrySessionReadResponse> {
+    return this.readSessionByMethod(projectId, sessionId, afterIndex, afterSubIndex, 'session.read');
   }
 
   async createSession(projectId: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
@@ -456,6 +526,14 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+
+
+
+
+
+
+
+
 
 
 

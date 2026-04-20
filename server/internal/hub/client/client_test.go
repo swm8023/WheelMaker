@@ -433,7 +433,28 @@ func (s *noopStore) HasSessionMessage(context.Context, string, string, string) (
 	return false, nil
 }
 func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
-func (s *noopStore) Close() error                                        { return nil }
+func (s *noopStore) UpsertSessionPrompt(context.Context, SessionPromptRecord) error {
+	return nil
+}
+func (s *noopStore) LoadSessionPrompt(context.Context, string, string, int64) (*SessionPromptRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) ListSessionPrompts(context.Context, string, string) ([]SessionPromptRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) ListSessionPromptsAfterIndex(context.Context, string, string, int64) ([]SessionPromptRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) UpsertSessionTurn(context.Context, SessionTurnRecord) error {
+	return nil
+}
+func (s *noopStore) LoadSessionTurn(context.Context, string, string, int64, int64) (*SessionTurnRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) ListSessionTurns(context.Context, string, string, int64) ([]SessionTurnRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) Close() error { return nil }
 
 func TestIsAgentExitError(t *testing.T) {
 	cases := []string{
@@ -2107,34 +2128,30 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	prompts := body["prompts"].([]sessionViewPrompt)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if messages[0].Status != "done" {
-		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
+	if prompts[0].PromptIndex != 1 {
+		t.Fatalf("prompts[0].PromptIndex = %d, want 1", prompts[0].PromptIndex)
 	}
-	if messages[0].Index != 1 {
-		t.Fatalf("messages[0].Index = %d, want 1", messages[0].Index)
+	if prompts[0].UpdateIndex <= 0 {
+		t.Fatalf("prompts[0].UpdateIndex = %d, want > 0", prompts[0].UpdateIndex)
 	}
-	if messages[0].SubIndex != 1 {
-		t.Fatalf("messages[0].SubIndex = %d, want 1", messages[0].SubIndex)
+	if len(prompts[0].Turns) != 1 {
+		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
 	}
-	rawMessage, err := json.Marshal(messages[0])
-	if err != nil {
-		t.Fatalf("json.Marshal(message): %v", err)
+	if prompts[0].Turns[0].Status != "done" {
+		t.Fatalf("prompts[0].Turns[0].Status = %q, want done", prompts[0].Turns[0].Status)
 	}
-	if strings.Contains(string(rawMessage), "\"syncIndex\"") {
-		t.Fatalf("message json should not expose syncIndex twice: %s", string(rawMessage))
+	if prompts[0].Turns[0].RequestID != 42 {
+		t.Fatalf("prompts[0].Turns[0].RequestID = %d, want 42", prompts[0].Turns[0].RequestID)
 	}
-	if !strings.Contains(string(rawMessage), "\"index\":1") {
-		t.Fatalf("message json should expose index cursor: %s", string(rawMessage))
+	if got := body["lastPromptIndex"].(int64); got != 1 {
+		t.Fatalf("lastPromptIndex = %d, want 1", got)
 	}
-	if got := body["lastIndex"].(int64); got != 1 {
-		t.Fatalf("lastIndex = %d, want 1", got)
-	}
-	if got := body["lastSubIndex"].(int64); got != 1 {
-		t.Fatalf("lastSubIndex = %d, want 1", got)
+	if got := body["lastPromptUpdateIndex"].(int64); got < prompts[0].UpdateIndex {
+		t.Fatalf("lastPromptUpdateIndex = %d, want >= %d", got, prompts[0].UpdateIndex)
 	}
 }
 
@@ -2157,15 +2174,18 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	prompts := body["prompts"].([]sessionViewPrompt)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if messages[0].Status != "streaming" {
-		t.Fatalf("messages[0].Status = %q, want streaming", messages[0].Status)
+	if len(prompts[0].Turns) != 1 {
+		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
 	}
-	if messages[0].Index != 1 {
-		t.Fatalf("messages[0].Index = %d, want 1", messages[0].Index)
+	if prompts[0].Turns[0].Status != "streaming" {
+		t.Fatalf("prompts[0].Turns[0].Status = %q, want streaming", prompts[0].Turns[0].Status)
+	}
+	if got := body["lastPromptIndex"].(int64); got != 1 {
+		t.Fatalf("lastPromptIndex = %d, want 1", got)
 	}
 }
 
@@ -2220,24 +2240,27 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	prompts := body["prompts"].([]sessionViewPrompt)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if messages[0].Index != 1 {
-		t.Fatalf("messages[0].Index = %d, want 1", messages[0].Index)
+	if prompts[0].PromptIndex != 1 {
+		t.Fatalf("prompts[0].PromptIndex = %d, want 1", prompts[0].PromptIndex)
 	}
-	if messages[0].SubIndex != 1 {
-		t.Fatalf("messages[0].SubIndex = %d, want 1", messages[0].SubIndex)
+	if prompts[0].UpdateIndex <= 0 {
+		t.Fatalf("prompts[0].UpdateIndex = %d, want > 0", prompts[0].UpdateIndex)
 	}
-	if messages[0].Status != "done" {
-		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
+	if len(prompts[0].Turns) != 1 {
+		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
 	}
-	if got := body["lastIndex"].(int64); got != 1 {
-		t.Fatalf("lastIndex = %d, want 1", got)
+	if prompts[0].Turns[0].Status != "done" {
+		t.Fatalf("prompts[0].Turns[0].Status = %q, want done", prompts[0].Turns[0].Status)
 	}
-	if got := body["lastSubIndex"].(int64); got != 1 {
-		t.Fatalf("lastSubIndex = %d, want 1", got)
+	if got := body["lastPromptIndex"].(int64); got != 1 {
+		t.Fatalf("lastPromptIndex = %d, want 1", got)
+	}
+	if got := body["lastPromptUpdateIndex"].(int64); got < prompts[0].UpdateIndex {
+		t.Fatalf("lastPromptUpdateIndex = %d, want >= %d", got, prompts[0].UpdateIndex)
 	}
 }
 

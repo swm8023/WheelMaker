@@ -233,15 +233,16 @@ export class RegistryWorkspaceService {
     return this.repository.listSessions(this.session.selectedProjectId);
   }
 
-  async readSession(sessionId: string, afterIndex = 0): Promise<{session: RegistrySessionSummary; messages: RegistrySessionMessage[]; lastIndex: number}> {
+  async readSession(sessionId: string, afterIndex = 0, afterSubIndex = 0): Promise<{session: RegistrySessionSummary; messages: RegistrySessionMessage[]; lastIndex: number; lastSubIndex: number}> {
     if (!this.session || !this.repository) {
       return {
         session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0},
         messages: [],
         lastIndex: 0,
+        lastSubIndex: 0,
       };
     }
-    return this.repository.readSession(this.session.selectedProjectId, sessionId, afterIndex);
+    return this.repository.readSession(this.session.selectedProjectId, sessionId, afterIndex, afterSubIndex);
   }
 
   async createSession(title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
@@ -286,6 +287,7 @@ export class RegistryWorkspaceService {
     };
   }
 }
+
 
 
 

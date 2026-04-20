@@ -35,6 +35,7 @@ export interface RegistrySessionMessage {
   messageId: string;
   sessionId: string;
   syncIndex?: number;
+  syncSubIndex?: number;
   role: RegistrySessionMessageRole;
   kind: RegistrySessionMessageKind;
   text: string;
@@ -57,10 +58,39 @@ export interface RegistrySessionSummary {
   status?: string;
 }
 
+export interface RegistrySessionTurn {
+  turnId: string;
+  promptIndex: number;
+  turnIndex: number;
+  updateIndex: number;
+  role?: RegistrySessionMessageRole;
+  kind?: RegistrySessionMessageKind;
+  text?: string;
+  status?: RegistrySessionMessageStatus;
+  requestId?: number;
+  toolCallId?: string;
+  blocks?: RegistrySessionContentBlock[];
+  options?: RegistrySessionPermissionOption[];
+}
+
+export interface RegistrySessionPrompt {
+  messageId: string;
+  promptId: string;
+  sessionId: string;
+  promptIndex: number;
+  updateIndex: number;
+  title: string;
+  stopReason?: string;
+  status: string;
+  updatedAt: string;
+  turns: RegistrySessionTurn[];
+}
 export interface RegistrySessionReadResponse {
   session: RegistrySessionSummary;
+  prompts: RegistrySessionPrompt[];
   messages: RegistrySessionMessage[];
   lastIndex: number;
+  lastSubIndex: number;
 }
 
 export interface RegistrySessionMessageEventPayload {
@@ -202,4 +232,6 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
+
+
 
