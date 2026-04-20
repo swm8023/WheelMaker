@@ -515,6 +515,20 @@ func firstNonZeroInt64(v int64, fallback int64) int64 {
 	return fallback
 }
 
+func shouldFlushBufferedSessionUpdateImmediately(event SessionViewEvent) bool {
+	if strings.EqualFold(strings.TrimSpace(event.Status), "done") || strings.EqualFold(strings.TrimSpace(event.Status), "needs_action") {
+		return true
+	}
+	if update, ok := sessionUpdateFromEvent(event); ok {
+		status := strings.TrimSpace(update.Status)
+		if strings.EqualFold(status, "done") || strings.EqualFold(status, "needs_action") {
+			return true
+		}
+	}
+	return false
+}
+
+// recordBufferedSessionUpdate batches ACP update chunks but flushes terminal statuses immediately.
 func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event SessionViewEvent) error {
 	r.updateMu.Lock()
 	defer r.updateMu.Unlock()
@@ -539,6 +553,12 @@ func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event
 	}
 	mergeBufferedSessionUpdateMessage(&state.message, event)
 	state.dirty = true
+	if shouldFlushBufferedSessionUpdateImmediately(event) {
+		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false); err != nil {
+			return err
+		}
+		return nil
+	}
 	if state.lastPersistedAt.IsZero() || event.UpdatedAt.Sub(state.lastPersistedAt) >= sessionUpdateFlushInterval {
 		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, state, false); err != nil {
 			return err
