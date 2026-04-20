@@ -436,24 +436,6 @@ func (s *noopStore) ListSessionTurnMessagesAfterCursor(context.Context, string, 
 func (s *noopStore) HasSessionTurnMessage(context.Context, string, string, string) (bool, error) {
 	return false, nil
 }
-
-func (s *noopStore) AppendSessionMessage(context.Context, SessionMessageRecord) error { return nil }
-func (s *noopStore) UpsertSessionMessage(context.Context, SessionMessageRecord) error { return nil }
-func (s *noopStore) ListSessionMessages(context.Context, string, string) ([]SessionMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) LoadSessionMessage(context.Context, string, string, string) (*SessionMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) ListSessionMessagesAfterIndex(context.Context, string, string, int64) ([]SessionMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) ListSessionMessagesAfterCursor(context.Context, string, string, int64, int64) ([]SessionMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) HasSessionMessage(context.Context, string, string, string) (bool, error) {
-	return false, nil
-}
 func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
 func (s *noopStore) UpsertSessionPrompt(context.Context, SessionPromptRecord) error {
 	return nil
@@ -1549,12 +1531,12 @@ func TestStoreDropsLegacySessionMessagesTable(t *testing.T) {
 		t.Fatalf("cursor = (%d,%d), want (0,0)", rec.LastSyncIndex, rec.LastSyncSubIndex)
 	}
 
-	messages, err := store.ListSessionMessagesAfterIndex(context.Background(), "proj1", "sess-1", 0)
+	messages, err := store.ListSessionTurnMessagesAfterIndex(context.Background(), "proj1", "sess-1", 0)
 	if err != nil {
-		t.Fatalf("ListSessionMessagesAfterIndex: %v", err)
+		t.Fatalf("ListSessionTurnMessagesAfterIndex: %v", err)
 	}
 	if len(messages) != 0 {
-		t.Fatalf("ListSessionMessagesAfterIndex() len = %d, want 0", len(messages))
+		t.Fatalf("ListSessionTurnMessagesAfterIndex() len = %d, want 0", len(messages))
 	}
 
 	checkDB, err := sql.Open("sqlite", dbPath)
@@ -1631,7 +1613,7 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
-	msg := SessionMessageRecord{
+	msg := SessionTurnMessageRecord{
 		MessageID:   "msg-1",
 		SessionID:   "sess-1",
 		ProjectName: "proj1",
@@ -1645,25 +1627,25 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
 	}
 
-	if err := store.AppendSessionMessage(context.Background(), msg); err != nil {
-		t.Fatalf("AppendSessionMessage: %v", err)
+	if err := store.AppendSessionTurnMessage(context.Background(), msg); err != nil {
+		t.Fatalf("AppendSessionTurnMessage: %v", err)
 	}
 
-	messages, err := store.ListSessionMessages(context.Background(), "proj1", "sess-1")
+	messages, err := store.ListSessionTurnMessages(context.Background(), "proj1", "sess-1")
 	if err != nil {
-		t.Fatalf("ListSessionMessages: %v", err)
+		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
 	if len(messages) != 1 {
-		t.Fatalf("ListSessionMessages() len = %d, want 1", len(messages))
+		t.Fatalf("ListSessionTurnMessages() len = %d, want 1", len(messages))
 	}
 	if messages[0].Body != "aggregated reply" {
-		t.Fatalf("ListSessionMessages()[0].Body = %q, want %q", messages[0].Body, "aggregated reply")
+		t.Fatalf("ListSessionTurnMessages()[0].Body = %q, want %q", messages[0].Body, "aggregated reply")
 	}
 	if len(messages[0].Blocks) != 1 || messages[0].Blocks[0].Type != acp.ContentBlockTypeImage {
-		t.Fatalf("ListSessionMessages()[0].Blocks = %#v, want image block", messages[0].Blocks)
+		t.Fatalf("ListSessionTurnMessages()[0].Blocks = %#v, want image block", messages[0].Blocks)
 	}
 	if len(messages[0].Options) != 1 || messages[0].Options[0].OptionID != "allow" {
-		t.Fatalf("ListSessionMessages()[0].Options = %#v, want allow option", messages[0].Options)
+		t.Fatalf("ListSessionTurnMessages()[0].Options = %#v, want allow option", messages[0].Options)
 	}
 }
 
@@ -1685,7 +1667,7 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
-	msg := SessionMessageRecord{
+	msg := SessionTurnMessageRecord{
 		MessageID:   "msg-1",
 		SessionID:   "sess-1",
 		ProjectName: "proj1",
@@ -1698,31 +1680,31 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 		RequestID:   42,
 	}
 
-	if err := store.AppendSessionMessage(ctx, msg); err != nil {
-		t.Fatalf("AppendSessionMessage: %v", err)
+	if err := store.AppendSessionTurnMessage(ctx, msg); err != nil {
+		t.Fatalf("AppendSessionTurnMessage: %v", err)
 	}
-	seed, err := store.ListSessionMessages(ctx, "proj1", "sess-1")
+	seed, err := store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
 	if err != nil {
-		t.Fatalf("ListSessionMessages before upsert: %v", err)
+		t.Fatalf("ListSessionTurnMessages before upsert: %v", err)
 	}
 	if len(seed) != 1 {
-		t.Fatalf("ListSessionMessages before upsert len = %d, want 1", len(seed))
+		t.Fatalf("ListSessionTurnMessages before upsert len = %d, want 1", len(seed))
 	}
 	msg.SyncIndex = seed[0].SyncIndex
 	msg.SyncSubIndex = seed[0].SyncSubIndex
 	msg.Status = "done"
 	msg.UpdatedAt = time.Date(2026, 4, 12, 10, 2, 0, 0, time.UTC)
 	msg.Time = msg.UpdatedAt
-	if err := store.UpsertSessionMessage(ctx, msg); err != nil {
-		t.Fatalf("UpsertSessionMessage: %v", err)
+	if err := store.UpsertSessionTurnMessage(ctx, msg); err != nil {
+		t.Fatalf("UpsertSessionTurnMessage: %v", err)
 	}
 
-	messages, err := store.ListSessionMessagesAfterIndex(ctx, "proj1", "sess-1", 1)
+	messages, err := store.ListSessionTurnMessagesAfterIndex(ctx, "proj1", "sess-1", 1)
 	if err != nil {
-		t.Fatalf("ListSessionMessagesAfterIndex: %v", err)
+		t.Fatalf("ListSessionTurnMessagesAfterIndex: %v", err)
 	}
 	if len(messages) != 1 {
-		t.Fatalf("ListSessionMessagesAfterIndex() len = %d, want 1", len(messages))
+		t.Fatalf("ListSessionTurnMessagesAfterIndex() len = %d, want 1", len(messages))
 	}
 	if messages[0].Status != "done" {
 		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
@@ -2013,9 +1995,9 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	stored, err := c.store.ListSessionMessages(ctx, "proj1", "sess-1")
+	stored, err := c.store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
 	if err != nil {
-		t.Fatalf("ListSessionMessages: %v", err)
+		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
 	if len(stored) != 1 {
 		t.Fatalf("stored len = %d, want 1", len(stored))
@@ -2139,9 +2121,9 @@ func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
 		t.Fatalf("RecordEvent system message: %v", err)
 	}
 
-	messages, err := c.store.ListSessionMessages(ctx, "proj1", "sess-1")
+	messages, err := c.store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
 	if err != nil {
-		t.Fatalf("ListSessionMessages: %v", err)
+		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
 	if len(messages) != 0 {
 		t.Fatalf("messages len = %d, want 0", len(messages))

@@ -102,7 +102,7 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-	if err := store.AppendSessionMessage(ctx, clientpkg.SessionMessageRecord{
+	if err := store.AppendSessionTurnMessage(ctx, clientpkg.SessionTurnMessageRecord{
 		MessageID:   "msg-1",
 		ProjectName: "proj1",
 		SessionID:   "sess-1",
@@ -112,7 +112,7 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 	}); err != nil {
-		t.Fatalf("AppendSessionMessage: %v", err)
+		t.Fatalf("AppendSessionTurnMessage: %v", err)
 	}
 
 	mon := NewMonitor(base)

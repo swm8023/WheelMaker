@@ -106,7 +106,7 @@ type sessionViewMessage struct {
 const sessionUpdateFlushInterval = 5 * time.Second
 
 type bufferedSessionUpdate struct {
-	message         SessionMessageRecord
+	message         SessionTurnMessageRecord
 	turnKey         string
 	persisted       bool
 	dirty           bool
@@ -201,7 +201,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return err
 		}
 		r.clearBufferedSessionUpdates(event.SessionID)
-		message := SessionMessageRecord{
+		message := SessionTurnMessageRecord{
 			ProjectName: r.projectName,
 			SessionID:   event.SessionID,
 			Method:      "session.prompt",
@@ -244,7 +244,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
 		}
-		message := SessionMessageRecord{
+		message := SessionTurnMessageRecord{
 			ProjectName: r.projectName,
 			SessionID:   event.SessionID,
 			Method:      "session.permission",
@@ -494,8 +494,8 @@ func buildSessionUpdateContentJSON(update acp.SessionUpdate) string {
 	return string(raw)
 }
 
-func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionMessageRecord {
-	message := SessionMessageRecord{
+func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionTurnMessageRecord {
+	message := SessionTurnMessageRecord{
 		ProjectName: projectName,
 		SessionID:   strings.TrimSpace(event.SessionID),
 		Method:      "session.update",
@@ -521,7 +521,7 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 	return message
 }
 
-func mergeBufferedSessionUpdateMessage(msg *SessionMessageRecord, event SessionViewEvent) {
+func mergeBufferedSessionUpdateMessage(msg *SessionTurnMessageRecord, event SessionViewEvent) {
 	if msg == nil {
 		return
 	}
@@ -696,7 +696,7 @@ func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context
 			return err
 		}
 	}
-	stored := SessionMessageRecord{}
+	stored := SessionTurnMessageRecord{}
 	if msg.SyncIndex > 0 {
 		storedByIndex, err := r.loadStoredSessionMessageByIndex(ctx, sessionID, msg.SyncIndex)
 		if err != nil {
@@ -795,7 +795,7 @@ func (r *SessionRecorder) ReadSessionView(ctx context.Context, sessionID string,
 	if rec == nil {
 		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
 	}
-	var messages []SessionMessageRecord
+	var messages []SessionTurnMessageRecord
 	if afterIndex > 0 || afterSubIndex > 0 {
 		messages, err = r.store.ListSessionTurnMessagesAfterCursor(ctx, r.projectName, strings.TrimSpace(sessionID), afterIndex, afterSubIndex)
 	} else {
@@ -851,42 +851,42 @@ func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string)
 	return r.currentSessionViewSummary(ctx, sessionID)
 }
 
-func (r *SessionRecorder) loadLatestStoredSessionMessage(ctx context.Context, sessionID string) (SessionMessageRecord, error) {
+func (r *SessionRecorder) loadLatestStoredSessionMessage(ctx context.Context, sessionID string) (SessionTurnMessageRecord, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return SessionMessageRecord{}, fmt.Errorf("session id is required")
+		return SessionTurnMessageRecord{}, fmt.Errorf("session id is required")
 	}
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
-		return SessionMessageRecord{}, err
+		return SessionTurnMessageRecord{}, err
 	}
 	if rec == nil || rec.LastSyncIndex <= 0 {
-		return SessionMessageRecord{}, fmt.Errorf("session message not found for session %s", sessionID)
+		return SessionTurnMessageRecord{}, fmt.Errorf("session message not found for session %s", sessionID)
 	}
 	return r.loadStoredSessionMessageByIndex(ctx, sessionID, rec.LastSyncIndex)
 }
 
-func (r *SessionRecorder) loadStoredSessionMessageByIndex(ctx context.Context, sessionID string, index int64) (SessionMessageRecord, error) {
+func (r *SessionRecorder) loadStoredSessionMessageByIndex(ctx context.Context, sessionID string, index int64) (SessionTurnMessageRecord, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return SessionMessageRecord{}, fmt.Errorf("session id is required")
+		return SessionTurnMessageRecord{}, fmt.Errorf("session id is required")
 	}
 	if index <= 0 {
-		return SessionMessageRecord{}, fmt.Errorf("invalid session index: %d", index)
+		return SessionTurnMessageRecord{}, fmt.Errorf("invalid session index: %d", index)
 	}
 	messages, err := r.store.ListSessionTurnMessagesAfterCursor(ctx, r.projectName, sessionID, index-1, -1)
 	if err != nil {
-		return SessionMessageRecord{}, err
+		return SessionTurnMessageRecord{}, err
 	}
 	for _, message := range messages {
 		if message.SyncIndex == index {
 			return message, nil
 		}
 	}
-	return SessionMessageRecord{}, fmt.Errorf("session message not found: %s@%d", sessionID, index)
+	return SessionTurnMessageRecord{}, fmt.Errorf("session message not found: %s@%d", sessionID, index)
 }
 
-func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, sessionID string, requestID int64) (*SessionMessageRecord, error) {
+func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, sessionID string, requestID int64) (*SessionTurnMessageRecord, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || requestID == 0 {
 		return nil, nil
@@ -1036,7 +1036,7 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
 }
 
-func (r *SessionRecorder) publishSessionMessage(message SessionMessageRecord) {
+func (r *SessionRecorder) publishSessionMessage(message SessionTurnMessageRecord) {
 	publish := r.eventPublisher()
 	if publish == nil {
 		return
@@ -1265,7 +1265,7 @@ func promptStatusFromStopReason(stopReason string) string {
 	}
 	return "done"
 }
-func toSessionViewMessage(message SessionMessageRecord) sessionViewMessage {
+func toSessionViewMessage(message SessionTurnMessageRecord) sessionViewMessage {
 	return sessionViewMessage{
 		MessageID: message.MessageID,
 		SessionID: message.SessionID,

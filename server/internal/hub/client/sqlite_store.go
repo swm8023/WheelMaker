@@ -110,7 +110,7 @@ type SessionListEntry struct {
 	InMemory      bool
 }
 
-type SessionMessageRecord struct {
+type SessionTurnMessageRecord struct {
 	MessageID     string
 	SessionID     string
 	ProjectName   string
@@ -134,11 +134,6 @@ type SessionMessageRecord struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
-
-// SessionTurnMessageRecord is the turn-centric semantic alias used by SessionRecorder.
-// The underlying storage schema remains session_prompts/session_turns.
-type SessionTurnMessageRecord = SessionMessageRecord
-
 type SessionPromptRecord struct {
 	PromptID    string
 	SessionID   string
@@ -179,14 +174,6 @@ type Store interface {
 	ListSessionTurnMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionTurnMessageRecord, error)
 	HasSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error)
 
-	// Deprecated compatibility API. Keep until all callsites migrate to turn terminology.
-	AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error
-	UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error
-	LoadSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionMessageRecord, error)
-	ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error)
-	ListSessionMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionMessageRecord, error)
-	ListSessionMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionMessageRecord, error)
-	HasSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
 	UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error
 	LoadSessionPrompt(ctx context.Context, projectName, sessionID string, promptIndex int64) (*SessionPromptRecord, error)
@@ -649,42 +636,33 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 }
 
 func (s *sqliteStore) AppendSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord) error {
-	return s.insertOrUpdateSessionMessage(ctx, rec, false)
+	return s.insertOrUpdateSessionTurnMessage(ctx, rec, false)
 }
 
 func (s *sqliteStore) UpsertSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord) error {
-	return s.insertOrUpdateSessionMessage(ctx, rec, true)
+	return s.insertOrUpdateSessionTurnMessage(ctx, rec, true)
 }
 
 func (s *sqliteStore) LoadSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionTurnMessageRecord, error) {
-	return s.LoadSessionMessage(ctx, projectName, sessionID, messageID)
+	return s.loadSessionTurnMessage(ctx, projectName, sessionID, messageID)
 }
 
 func (s *sqliteStore) ListSessionTurnMessages(ctx context.Context, projectName, sessionID string) ([]SessionTurnMessageRecord, error) {
-	return s.ListSessionMessages(ctx, projectName, sessionID)
+	return s.listSessionTurnMessages(ctx, projectName, sessionID)
 }
 
 func (s *sqliteStore) ListSessionTurnMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionTurnMessageRecord, error) {
-	return s.ListSessionMessagesAfterIndex(ctx, projectName, sessionID, afterIndex)
+	return s.listSessionTurnMessagesAfterIndex(ctx, projectName, sessionID, afterIndex)
 }
 
 func (s *sqliteStore) ListSessionTurnMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionTurnMessageRecord, error) {
-	return s.ListSessionMessagesAfterCursor(ctx, projectName, sessionID, afterIndex, afterSubIndex)
+	return s.listSessionTurnMessagesAfterCursor(ctx, projectName, sessionID, afterIndex, afterSubIndex)
 }
 
 func (s *sqliteStore) HasSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error) {
-	return s.HasSessionMessage(ctx, projectName, sessionID, messageID)
+	return s.hasSessionTurnMessage(ctx, projectName, sessionID, messageID)
 }
-
-func (s *sqliteStore) AppendSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
-	return s.AppendSessionTurnMessage(ctx, rec)
-}
-
-func (s *sqliteStore) UpsertSessionMessage(ctx context.Context, rec SessionMessageRecord) error {
-	return s.UpsertSessionTurnMessage(ctx, rec)
-}
-
-func normalizeSessionRecordSource(rec SessionMessageRecord) string {
+func normalizeSessionTurnSource(rec SessionTurnMessageRecord) string {
 	if strings.TrimSpace(rec.Source) != "" {
 		return strings.TrimSpace(rec.Source)
 	}
@@ -702,7 +680,7 @@ func normalizeSessionRecordSource(rec SessionMessageRecord) string {
 	return channel + ":" + chatID
 }
 
-func inferSessionRecordMethod(rec SessionMessageRecord) string {
+func inferSessionTurnMethod(rec SessionTurnMessageRecord) string {
 	if strings.TrimSpace(rec.Method) != "" {
 		return strings.TrimSpace(rec.Method)
 	}
@@ -727,8 +705,8 @@ func normalizeJSONDoc(raw string, fallback string) string {
 	return raw
 }
 
-func buildSessionRecordContentJSON(rec SessionMessageRecord) (string, string, error) {
-	method := inferSessionRecordMethod(rec)
+func buildSessionTurnContentJSON(rec SessionTurnMessageRecord) (string, string, error) {
+	method := inferSessionTurnMethod(rec)
 	if strings.TrimSpace(rec.ContentJSON) != "" {
 		normalized := normalizeJSONDoc(rec.ContentJSON, `{"method":"`+method+`"}`)
 		var doc map[string]any
@@ -782,14 +760,14 @@ func buildSessionRecordContentJSON(rec SessionMessageRecord) (string, string, er
 	return string(raw), method, nil
 }
 
-func buildSessionRecordMetaJSON(rec SessionMessageRecord) (string, error) {
+func buildSessionTurnMetaJSON(rec SessionTurnMessageRecord) (string, error) {
 	if strings.TrimSpace(rec.MetaJSON) != "" {
 		return normalizeJSONDoc(rec.MetaJSON, "{}"), nil
 	}
 	return "{}", nil
 }
 
-func deriveSessionRecordBodyFromUpdate(update acp.SessionUpdate) string {
+func deriveSessionTurnBodyFromUpdate(update acp.SessionUpdate) string {
 	switch strings.TrimSpace(update.SessionUpdate) {
 	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
 		return extractTextChunk(update.Content)
@@ -800,12 +778,12 @@ func deriveSessionRecordBodyFromUpdate(update acp.SessionUpdate) string {
 	}
 }
 
-func hydrateSessionRecordFromUpdate(rec *SessionMessageRecord, update acp.SessionUpdate) {
+func hydrateSessionTurnFromUpdate(rec *SessionTurnMessageRecord, update acp.SessionUpdate) {
 	if rec == nil {
 		return
 	}
 	rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(update.SessionUpdate))
-	body := deriveSessionRecordBodyFromUpdate(update)
+	body := deriveSessionTurnBodyFromUpdate(update)
 	if strings.TrimSpace(body) != "" {
 		rec.Body = body
 	}
@@ -822,7 +800,7 @@ func hydrateSessionRecordFromUpdate(rec *SessionMessageRecord, update acp.Sessio
 	}
 }
 
-func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
+func hydrateSessionTurnLegacyFields(rec *SessionTurnMessageRecord) {
 	if rec == nil {
 		return
 	}
@@ -848,7 +826,7 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 	if err := json.Unmarshal([]byte(rec.ContentJSON), &content); err == nil {
 		rec.Method = strings.TrimSpace(content.Method)
 		if strings.TrimSpace(content.Params.Update.SessionUpdate) != "" {
-			hydrateSessionRecordFromUpdate(rec, content.Params.Update)
+			hydrateSessionTurnFromUpdate(rec, content.Params.Update)
 		} else {
 			rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), strings.TrimSpace(content.Payload.Role))
 			if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
@@ -866,7 +844,7 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 		}
 	}
 	if rec.Method == "" {
-		rec.Method = inferSessionRecordMethod(*rec)
+		rec.Method = inferSessionTurnMethod(*rec)
 	}
 	parts := strings.SplitN(strings.TrimSpace(rec.Source), ":", 2)
 	if len(parts) > 0 {
@@ -876,7 +854,7 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 		rec.SourceChatID = strings.TrimSpace(parts[1])
 	}
 }
-func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec SessionMessageRecord, update bool) error {
+func (s *sqliteStore) insertOrUpdateSessionTurnMessage(ctx context.Context, rec SessionTurnMessageRecord, update bool) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -911,12 +889,12 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 	}
 	rec.EventTime = rec.Time
 
-	contentJSON, method, err := buildSessionRecordContentJSON(rec)
+	contentJSON, method, err := buildSessionTurnContentJSON(rec)
 	if err != nil {
 		return err
 	}
 	rec.Method = method
-	metaJSON, err := buildSessionRecordMetaJSON(rec)
+	metaJSON, err := buildSessionTurnMetaJSON(rec)
 	if err != nil {
 		return err
 	}
@@ -958,10 +936,10 @@ func (s *sqliteStore) insertOrUpdateSessionMessage(ctx context.Context, rec Sess
 		rec.SyncIndex = lastSyncIndex + 1
 		rec.SyncSubIndex = 0
 	}
-	rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
+	rec.MessageID = formatSessionTurnSeq(rec.SyncIndex, rec.SyncSubIndex)
 	storedTime := rec.Time.UTC().Format(time.RFC3339Nano)
 
-	if err := upsertPromptTurnProjectionTx(ctx, tx, rec, existingTurn, contentJSON, storedTime); err != nil {
+	if err := upsertPromptTurnTx(ctx, tx, rec, existingTurn, contentJSON, storedTime); err != nil {
 		return fmt.Errorf("upsert prompt/turn projection: %w", err)
 	}
 
@@ -1017,7 +995,7 @@ func findSessionTurnBySyncIndexTx(ctx context.Context, tx *sql.Tx, sessionID str
 	}
 	return nil, nil
 }
-func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMessageRecord, existingTurn *sessionTurnLookup, contentJSON, storedTime string) error {
+func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageRecord, existingTurn *sessionTurnLookup, contentJSON, storedTime string) error {
 
 	var latestPromptIndex int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(prompt_index), 0) FROM session_prompts WHERE session_id = ?`, rec.SessionID).Scan(&latestPromptIndex); err != nil {
@@ -1107,7 +1085,7 @@ func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMe
 	return nil
 }
 
-type sessionTurnMessageRow struct {
+type sessionTurnRow struct {
 	SessionID       string
 	PromptIndex     int64
 	TurnIndex       int64
@@ -1116,7 +1094,7 @@ type sessionTurnMessageRow struct {
 	UpdateJSON      string
 }
 
-func (s *sqliteStore) listSessionTurnMessageRows(ctx context.Context, projectName, sessionID string) ([]sessionTurnMessageRow, error) {
+func (s *sqliteStore) listSessionTurnRows(ctx context.Context, projectName, sessionID string) ([]sessionTurnRow, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, p.updated_at, t.update_json
 		FROM session_turns t
@@ -1130,9 +1108,9 @@ func (s *sqliteStore) listSessionTurnMessageRows(ctx context.Context, projectNam
 	}
 	defer rows.Close()
 
-	out := make([]sessionTurnMessageRow, 0)
+	out := make([]sessionTurnRow, 0)
 	for rows.Next() {
-		var row sessionTurnMessageRow
+		var row sessionTurnRow
 		if err := rows.Scan(&row.SessionID, &row.PromptIndex, &row.TurnIndex, &row.UpdateIndex, &row.PromptUpdatedAt, &row.UpdateJSON); err != nil {
 			return nil, fmt.Errorf("scan session turn: %w", err)
 		}
@@ -1144,14 +1122,14 @@ func (s *sqliteStore) listSessionTurnMessageRows(ctx context.Context, projectNam
 	return out, nil
 }
 
-type hydratedSessionMessage struct {
-	Record      SessionMessageRecord
+type hydratedSessionTurn struct {
+	Record      SessionTurnMessageRecord
 	PromptIndex int64
 	TurnIndex   int64
 }
 
-func hydrateSessionMessageFromTurnRow(projectName string, fallbackSyncIndex int64, row sessionTurnMessageRow) hydratedSessionMessage {
-	rec := SessionMessageRecord{
+func hydrateSessionTurnFromRow(projectName string, fallbackSyncIndex int64, row sessionTurnRow) hydratedSessionTurn {
+	rec := SessionTurnMessageRecord{
 		SessionID:    strings.TrimSpace(row.SessionID),
 		ProjectName:  strings.TrimSpace(projectName),
 		ContentJSON:  normalizeJSONDoc(row.UpdateJSON, `{"method":"session.update"}`),
@@ -1159,21 +1137,21 @@ func hydrateSessionMessageFromTurnRow(projectName string, fallbackSyncIndex int6
 		SyncIndex:    fallbackSyncIndex,
 		SyncSubIndex: maxInt64(row.UpdateIndex-1, 0),
 	}
-	hydrateSessionRecordLegacyFields(&rec)
+	hydrateSessionTurnLegacyFields(&rec)
 	rec.Time = parseStoreTime(strings.TrimSpace(row.PromptUpdatedAt))
 	rec.EventTime = rec.Time
 	rec.CreatedAt = rec.Time
 	rec.UpdatedAt = rec.Time
-	rec.MessageID = formatSessionRecordSeq(rec.SyncIndex, rec.SyncSubIndex)
-	return hydratedSessionMessage{Record: rec, PromptIndex: row.PromptIndex, TurnIndex: row.TurnIndex}
+	rec.MessageID = formatSessionTurnSeq(rec.SyncIndex, rec.SyncSubIndex)
+	return hydratedSessionTurn{Record: rec, PromptIndex: row.PromptIndex, TurnIndex: row.TurnIndex}
 }
 
-func filterAndSortSessionMessages(rows []sessionTurnMessageRow, projectName string, afterIndex, afterSubIndex int64) []SessionMessageRecord {
-	hydrated := make([]hydratedSessionMessage, 0, len(rows))
+func filterAndSortSessionTurns(rows []sessionTurnRow, projectName string, afterIndex, afterSubIndex int64) []SessionTurnMessageRecord {
+	hydrated := make([]hydratedSessionTurn, 0, len(rows))
 	fallback := int64(0)
 	for _, row := range rows {
 		fallback++
-		hydrated = append(hydrated, hydrateSessionMessageFromTurnRow(projectName, fallback, row))
+		hydrated = append(hydrated, hydrateSessionTurnFromRow(projectName, fallback, row))
 	}
 	sort.Slice(hydrated, func(i, j int) bool {
 		left := hydrated[i]
@@ -1190,7 +1168,7 @@ func filterAndSortSessionMessages(rows []sessionTurnMessageRow, projectName stri
 		return left.TurnIndex < right.TurnIndex
 	})
 
-	out := make([]SessionMessageRecord, 0, len(hydrated))
+	out := make([]SessionTurnMessageRecord, 0, len(hydrated))
 	for _, item := range hydrated {
 		rec := item.Record
 		if rec.SyncIndex > afterIndex || (rec.SyncIndex == afterIndex && rec.SyncSubIndex > afterSubIndex) {
@@ -1200,16 +1178,16 @@ func filterAndSortSessionMessages(rows []sessionTurnMessageRow, projectName stri
 	return out
 }
 
-func (s *sqliteStore) ListSessionMessages(ctx context.Context, projectName, sessionID string) ([]SessionMessageRecord, error) {
-	rows, err := s.listSessionTurnMessageRows(ctx, projectName, sessionID)
+func (s *sqliteStore) listSessionTurnMessages(ctx context.Context, projectName, sessionID string) ([]SessionTurnMessageRecord, error) {
+	rows, err := s.listSessionTurnRows(ctx, projectName, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return filterAndSortSessionMessages(rows, projectName, 0, -1), nil
+	return filterAndSortSessionTurns(rows, projectName, 0, -1), nil
 }
 
-func (s *sqliteStore) LoadSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionMessageRecord, error) {
-	idx, _, ok := parseSessionRecordSeq(messageID)
+func (s *sqliteStore) loadSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (*SessionTurnMessageRecord, error) {
+	idx, _, ok := parseSessionTurnSeq(messageID)
 	if !ok {
 		parsed, err := strconv.ParseInt(strings.TrimSpace(messageID), 10, 64)
 		if err != nil {
@@ -1220,7 +1198,7 @@ func (s *sqliteStore) LoadSessionMessage(ctx context.Context, projectName, sessi
 	if idx <= 0 {
 		return nil, nil
 	}
-	rows, err := s.ListSessionMessagesAfterCursor(ctx, projectName, sessionID, idx-1, -1)
+	rows, err := s.listSessionTurnMessagesAfterCursor(ctx, projectName, sessionID, idx-1, -1)
 	if err != nil {
 		return nil, err
 	}
@@ -1233,20 +1211,20 @@ func (s *sqliteStore) LoadSessionMessage(ctx context.Context, projectName, sessi
 	return nil, nil
 }
 
-func (s *sqliteStore) ListSessionMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionMessageRecord, error) {
-	return s.ListSessionMessagesAfterCursor(ctx, projectName, sessionID, afterIndex, 0)
+func (s *sqliteStore) listSessionTurnMessagesAfterIndex(ctx context.Context, projectName, sessionID string, afterIndex int64) ([]SessionTurnMessageRecord, error) {
+	return s.listSessionTurnMessagesAfterCursor(ctx, projectName, sessionID, afterIndex, 0)
 }
 
-func (s *sqliteStore) ListSessionMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionMessageRecord, error) {
-	rows, err := s.listSessionTurnMessageRows(ctx, projectName, sessionID)
+func (s *sqliteStore) listSessionTurnMessagesAfterCursor(ctx context.Context, projectName, sessionID string, afterIndex, afterSubIndex int64) ([]SessionTurnMessageRecord, error) {
+	rows, err := s.listSessionTurnRows(ctx, projectName, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	return filterAndSortSessionMessages(rows, projectName, afterIndex, afterSubIndex), nil
+	return filterAndSortSessionTurns(rows, projectName, afterIndex, afterSubIndex), nil
 }
 
-func (s *sqliteStore) HasSessionMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error) {
-	rec, err := s.LoadSessionMessage(ctx, projectName, sessionID, messageID)
+func (s *sqliteStore) hasSessionTurnMessage(ctx context.Context, projectName, sessionID, messageID string) (bool, error) {
+	rec, err := s.loadSessionTurnMessage(ctx, projectName, sessionID, messageID)
 	if err != nil {
 		return false, err
 	}
@@ -1482,11 +1460,11 @@ func formatPromptSeq(promptIndex int64) string {
 func formatPromptTurnSeq(promptIndex, turnIndex int64) string {
 	return fmt.Sprintf("p%d.t%d", promptIndex, turnIndex)
 }
-func formatSessionRecordSeq(index, subIndex int64) string {
+func formatSessionTurnSeq(index, subIndex int64) string {
 	return fmt.Sprintf("%d.%d", index, subIndex)
 }
 
-func parseSessionRecordSeq(seq string) (int64, int64, bool) {
+func parseSessionTurnSeq(seq string) (int64, int64, bool) {
 	seq = strings.TrimSpace(seq)
 	parts := strings.Split(seq, ".")
 	if len(parts) != 2 {
