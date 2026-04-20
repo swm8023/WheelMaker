@@ -210,6 +210,9 @@ function buildLineTransformer(
     line(hast, line) {
       const diffLine = diffLines?.[line - 1];
       const originalChildren = Array.isArray(hast.children) ? hast.children : [];
+      const lineContentChildren = originalChildren.length > 0
+        ? originalChildren
+        : [{type: 'text' as const, value: ' '}];
       const contentNode = {
         type: 'element' as const,
         tagName: 'span',
@@ -217,7 +220,7 @@ function buildLineTransformer(
           className: ['wm-shiki-line-content'],
           style: lineContentStyle,
         },
-        children: originalChildren as any[],
+        children: lineContentChildren as any[],
       };
 
       hast.properties = hast.properties || {};
@@ -498,4 +501,3 @@ export async function renderShikiDiffHtml(options: RenderShikiDiffOptions): Prom
 
   return `<pre><code>${escapeHtml(code)}</code></pre>`;
 }
-
