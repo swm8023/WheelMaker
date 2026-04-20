@@ -1157,10 +1157,10 @@ function renderDBTables(db) {
           const col = i < t.columns.length ? String(t.columns[i] || '') : '';
           const tableName = String(t.name || '').toLowerCase();
           const isSessionsTable = tableName === 'sessions';
-          const isSessionRecordsTable = tableName === 'session_records';
+          const isSessionTurnsTable = tableName === 'session_turns';
           const colName = col.toLowerCase();
           const isAgentsJSON = isSessionsTable && colName === 'agents_json';
-          const isRecordContentJSON = isSessionRecordsTable && colName === 'content_json';
+          const isTurnUpdateJSON = isSessionTurnsTable && colName === 'update_json';
           const isJSONColumn = colName.endsWith('_json');
           const isStatus = isSessionsTable && colName === 'status';
           if (isJSONColumn) {
@@ -1175,7 +1175,7 @@ function renderDBTables(db) {
               } catch (_) {
                 summary = raw.trim() ? '?' : '-';
               }
-            } else if (isRecordContentJSON && raw.trim()) {
+            } else if (isTurnUpdateJSON && raw.trim()) {
               try {
                 const parsed = JSON.parse(raw);
                 const method = parsed && typeof parsed.method === 'string' ? parsed.method.trim() : '';
@@ -1339,3 +1339,4 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 `
+

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -469,7 +470,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"projects", "route_bindings", "sessions", "session_records"}
+	tableNames := []string{"projects", "route_bindings", "sessions", "session_prompts", "session_turns"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {
@@ -578,25 +579,18 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT s.project_name, r.session_id, r.sync_index, r.sync_subindex, r.time, r.source, r.content_json, r.meta_json
-		FROM session_records r
-		JOIN sessions s ON s.id = r.session_id
-		WHERE r.session_id = ?`
+		SELECT s.project_name, t.session_id, t.prompt_index, t.turn_index, p.updated_at, t.update_json, t.extra_json
+		FROM session_turns t
+		JOIN sessions s ON s.id = t.session_id
+		LEFT JOIN session_prompts p ON p.session_id = t.session_id AND p.prompt_index = t.prompt_index
+		WHERE t.session_id = ?`
 	args := []any{strings.TrimSpace(sessionID)}
 	projectName = strings.TrimSpace(projectName)
 	if projectName != "" {
 		query += ` AND s.project_name = ?`
 		args = append(args, projectName)
 	}
-	if afterIndex > 0 || afterSubIndex > 0 {
-		query += ` AND (r.sync_index > ? OR (r.sync_index = ? AND r.sync_subindex > ?))`
-		args = append(args, afterIndex, afterIndex, afterSubIndex)
-	}
-	query += ` ORDER BY r.sync_index ASC, r.sync_subindex ASC`
-	if limit > 0 {
-		query += ` LIMIT ?`
-		args = append(args, limit)
-	}
+	query += ` ORDER BY t.prompt_index ASC, t.turn_index ASC`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -604,76 +598,116 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	}
 	defer rows.Close()
 
-	out := []MonitorSessionMessage{}
+	type monitorMessageRow struct {
+		Message     MonitorSessionMessage
+		PromptIndex int64
+		TurnIndex   int64
+	}
+	all := make([]monitorMessageRow, 0)
+	fallbackIndex := int64(0)
 	for rows.Next() {
 		var item MonitorSessionMessage
-		var contentJSON string
-		var metaJSON string
-		if err := rows.Scan(&item.ProjectName, &item.SessionID, &item.Index, &item.SubIndex, &item.Time, &item.Source, &contentJSON, &metaJSON); err != nil {
+		var promptIndex int64
+		var turnIndex int64
+		var promptUpdatedAt string
+		var updateJSON string
+		var extraJSON string
+		if err := rows.Scan(&item.ProjectName, &item.SessionID, &promptIndex, &turnIndex, &promptUpdatedAt, &updateJSON, &extraJSON); err != nil {
 			return nil, err
 		}
-		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID = parseMonitorSessionRecord(contentJSON, metaJSON)
-		out = append(out, item)
+		fallbackIndex++
+		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt, fallbackIndex)
+		all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: turnIndex})
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	sort.Slice(all, func(i, j int) bool {
+		left := all[i]
+		right := all[j]
+		if left.Message.Index != right.Message.Index {
+			return left.Message.Index < right.Message.Index
+		}
+		if left.Message.SubIndex != right.Message.SubIndex {
+			return left.Message.SubIndex < right.Message.SubIndex
+		}
+		if left.PromptIndex != right.PromptIndex {
+			return left.PromptIndex < right.PromptIndex
+		}
+		return left.TurnIndex < right.TurnIndex
+	})
+
+	out := make([]MonitorSessionMessage, 0, len(all))
+	for _, row := range all {
+		item := row.Message
+		if item.Index <= afterIndex && !(item.Index == afterIndex && item.SubIndex > afterSubIndex) {
+			continue
+		}
+		out = append(out, item)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
 }
 
-func parseMonitorSessionRecord(contentJSON, metaJSON string) (method, role, kind, body, status string, requestID int64) {
-	contentJSON = strings.TrimSpace(contentJSON)
-	if contentJSON != "" {
+type monitorTurnExtra struct {
+	LegacySyncIndex    int64  `json:"legacySyncIndex"`
+	LegacySyncSubIndex int64  `json:"legacySyncSubIndex"`
+	RequestID          int64  `json:"requestId"`
+	Source             string `json:"source"`
+	Time               string `json:"time"`
+}
+
+func parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt string, fallbackIndex int64) (method, role, kind, body, status string, requestID, index, subIndex int64, source, ts string) {
+	method = "session.update"
+	index = fallbackIndex
+	extraJSON = strings.TrimSpace(extraJSON)
+	extra := monitorTurnExtra{}
+	if extraJSON != "" && extraJSON != "{}" {
+		_ = json.Unmarshal([]byte(extraJSON), &extra)
+		if extra.LegacySyncIndex > 0 {
+			index = extra.LegacySyncIndex
+			subIndex = extra.LegacySyncSubIndex
+		}
+		source = strings.TrimSpace(extra.Source)
+		ts = strings.TrimSpace(extra.Time)
+	}
+
+	updateJSON = strings.TrimSpace(updateJSON)
+	if updateJSON != "" {
 		var content struct {
 			Method  string `json:"method"`
 			Payload struct {
-				Role         string `json:"role"`
-				Kind         string `json:"kind"`
-				UpdateMethod string `json:"updateMethod"`
-				Text         string `json:"text"`
-				Status       string `json:"status"`
-				RequestID    int64  `json:"requestId"`
+				Role      string `json:"role"`
+				Kind      string `json:"kind"`
+				Text      string `json:"text"`
+				Status    string `json:"status"`
+				RequestID int64  `json:"requestId"`
 			} `json:"payload"`
 		}
-		if err := json.Unmarshal([]byte(contentJSON), &content); err == nil {
-			method = strings.TrimSpace(content.Method)
-			role = strings.TrimSpace(content.Payload.Role)
-			if method == "session.update" && strings.TrimSpace(content.Payload.UpdateMethod) != "" {
-				kind = strings.TrimSpace(content.Payload.UpdateMethod)
-			} else {
-				kind = strings.TrimSpace(content.Payload.Kind)
+		if err := json.Unmarshal([]byte(updateJSON), &content); err == nil {
+			if strings.TrimSpace(content.Method) != "" {
+				method = strings.TrimSpace(content.Method)
 			}
+			role = strings.TrimSpace(content.Payload.Role)
+			kind = strings.TrimSpace(content.Payload.Kind)
 			body = content.Payload.Text
 			status = strings.TrimSpace(content.Payload.Status)
 			requestID = content.Payload.RequestID
 		}
 	}
-
-	metaJSON = strings.TrimSpace(metaJSON)
-	if metaJSON != "" && metaJSON != "{}" {
-		var meta struct {
-			Role      string `json:"role"`
-			Kind      string `json:"kind"`
-			Text      string `json:"text"`
-			Status    string `json:"status"`
-			RequestID int64  `json:"requestId"`
-		}
-		if err := json.Unmarshal([]byte(metaJSON), &meta); err == nil {
-			if role == "" {
-				role = strings.TrimSpace(meta.Role)
-			}
-			if kind == "" {
-				kind = strings.TrimSpace(meta.Kind)
-			}
-			if body == "" {
-				body = meta.Text
-			}
-			if status == "" {
-				status = strings.TrimSpace(meta.Status)
-			}
-			if requestID == 0 {
-				requestID = meta.RequestID
-			}
-		}
+	if requestID == 0 {
+		requestID = extra.RequestID
 	}
-	return method, role, kind, body, status, requestID
+	if strings.TrimSpace(kind) == "" {
+		kind = method
+	}
+	if strings.TrimSpace(ts) == "" {
+		ts = strings.TrimSpace(promptUpdatedAt)
+	}
+	return method, role, kind, body, status, requestID, index, subIndex, source, ts
 }
 func monitorSessionStatusLabel(status int) string {
 	switch status {

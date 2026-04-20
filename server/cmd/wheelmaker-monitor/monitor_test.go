@@ -84,7 +84,7 @@ func TestGetLogs_DebugOmitsTimeLevelAndDedupsSessionID(t *testing.T) {
 	}
 }
 
-func TestGetDBTablesIncludesSessionRecords(t *testing.T) {
+func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 	base := t.TempDir()
 	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
 	if err != nil {
@@ -120,10 +120,17 @@ func TestGetDBTablesIncludesSessionRecords(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("GetDBTables error: %s", res.Error)
 	}
+	foundPrompts := false
+	foundTurns := false
 	for _, table := range res.Tables {
-		if table.Name == "session_records" {
-			return
+		if table.Name == "session_prompts" {
+			foundPrompts = true
+		}
+		if table.Name == "session_turns" {
+			foundTurns = true
 		}
 	}
-	t.Fatalf("session_records table missing: %#v", res.Tables)
+	if !foundPrompts || !foundTurns {
+		t.Fatalf("prompt/turn tables missing: %#v", res.Tables)
+	}
 }
