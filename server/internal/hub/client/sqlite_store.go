@@ -947,7 +947,6 @@ type sessionTurnLegacyLookup struct {
 	PromptIndex        int64
 	TurnIndex          int64
 	UpdateIndex        int64
-	UpdateJSON         string
 	LegacySyncSubIndex int64
 }
 
@@ -957,7 +956,7 @@ func findSessionTurnByLegacySyncIndexTx(ctx context.Context, tx *sql.Tx, session
 	}
 	legacyPattern := fmt.Sprintf("%%\"legacySyncIndex\":%d%%", syncIndex)
 	rows, err := tx.QueryContext(ctx, `
-		SELECT prompt_index, turn_index, update_index, update_json, extra_json
+		SELECT prompt_index, turn_index, update_index, extra_json
 		FROM session_turns
 		WHERE session_id = ? AND extra_json LIKE ?
 		ORDER BY prompt_index ASC, turn_index ASC
@@ -970,7 +969,7 @@ func findSessionTurnByLegacySyncIndexTx(ctx context.Context, tx *sql.Tx, session
 	for rows.Next() {
 		var lookup sessionTurnLegacyLookup
 		var extraJSON string
-		if err := rows.Scan(&lookup.PromptIndex, &lookup.TurnIndex, &lookup.UpdateIndex, &lookup.UpdateJSON, &extraJSON); err != nil {
+		if err := rows.Scan(&lookup.PromptIndex, &lookup.TurnIndex, &lookup.UpdateIndex, &extraJSON); err != nil {
 			return nil, fmt.Errorf("scan session_turn by legacy sync index: %w", err)
 		}
 		extra := parseProjectionTurnExtraJSON(extraJSON)
@@ -987,7 +986,6 @@ func findSessionTurnByLegacySyncIndexTx(ctx context.Context, tx *sql.Tx, session
 }
 
 func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMessageRecord, existingTurn *sessionTurnLegacyLookup, contentJSON, source, storedTime string) error {
-	_ = contentJSON
 
 	var latestPromptIndex int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(prompt_index), 0) FROM session_prompts WHERE session_id = ?`, rec.SessionID).Scan(&latestPromptIndex); err != nil {
@@ -1046,11 +1044,9 @@ func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMe
 
 	turnIndex := int64(0)
 	turnUpdateIndex := int64(0)
-	existingTurnJSON := ""
 	if existingTurn != nil {
 		turnIndex = existingTurn.TurnIndex
 		turnUpdateIndex = existingTurn.UpdateIndex + 1
-		existingTurnJSON = existingTurn.UpdateJSON
 	} else {
 		if rec.Method == "session.prompt" {
 			turnIndex = 1
@@ -1063,16 +1059,12 @@ func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMe
 		turnUpdateIndex = 1
 	}
 
-	turnJSON := buildProjectionTurnJSON(existingTurnJSON, rec)
+	turnJSON := normalizeJSONDoc(contentJSON, `{"method":"session.update"}`)
 	extraJSONMap := map[string]any{
 		"legacySyncIndex":    rec.SyncIndex,
 		"legacySyncSubIndex": rec.SyncSubIndex,
-		"aggregateKey":       strings.TrimSpace(rec.AggregateKey),
-		"requestId":          rec.RequestID,
 		"source":             strings.TrimSpace(source),
 		"time":               storedTime,
-		"legacyContentJSON":  normalizeJSONDoc(contentJSON, `{"method":"session.update"}`),
-		"legacyMetaJSON":     normalizeJSONDoc(rec.MetaJSON, `{}`),
 	}
 	extraJSONRaw, err := json.Marshal(extraJSONMap)
 	if err != nil {
@@ -1095,12 +1087,8 @@ func upsertPromptTurnProjectionTx(ctx context.Context, tx *sql.Tx, rec SessionMe
 type projectionTurnExtra struct {
 	LegacySyncIndex    int64  `json:"legacySyncIndex"`
 	LegacySyncSubIndex int64  `json:"legacySyncSubIndex"`
-	AggregateKey       string `json:"aggregateKey"`
-	RequestID          int64  `json:"requestId"`
 	Source             string `json:"source"`
 	Time               string `json:"time"`
-	LegacyContentJSON  string `json:"legacyContentJSON"`
-	LegacyMetaJSON     string `json:"legacyMetaJSON"`
 }
 
 func parseProjectionTurnExtraJSON(raw string) projectionTurnExtra {
@@ -1113,64 +1101,6 @@ func parseProjectionTurnExtraJSON(raw string) projectionTurnExtra {
 		return projectionTurnExtra{}
 	}
 	return out
-}
-
-func buildProjectionTurnJSON(existingJSON string, rec SessionMessageRecord) string {
-	payload := map[string]any{
-		"role":   strings.TrimSpace(rec.Role),
-		"kind":   strings.TrimSpace(rec.Kind),
-		"status": strings.TrimSpace(rec.Status),
-	}
-	if strings.TrimSpace(rec.Body) != "" {
-		payload["text"] = strings.TrimSpace(rec.Body)
-	}
-	if len(rec.Blocks) > 0 {
-		payload["blocks"] = rec.Blocks
-	}
-	if len(rec.Options) > 0 {
-		payload["options"] = rec.Options
-	}
-	if rec.RequestID > 0 {
-		payload["requestId"] = rec.RequestID
-	}
-	if strings.TrimSpace(rec.AggregateKey) != "" {
-		payload["aggregateKey"] = strings.TrimSpace(rec.AggregateKey)
-	}
-	out := map[string]any{
-		"method":  strings.TrimSpace(rec.Method),
-		"payload": payload,
-	}
-
-	if strings.TrimSpace(existingJSON) != "" && strings.TrimSpace(existingJSON) != "{}" {
-		var prev struct {
-			Payload struct {
-				Text string `json:"text"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal([]byte(existingJSON), &prev); err == nil {
-			if shouldAppendProjectionTurnText(rec) && strings.TrimSpace(prev.Payload.Text) != "" {
-				if text, ok := payload["text"].(string); ok && strings.TrimSpace(text) != "" {
-					payload["text"] = prev.Payload.Text + text
-				} else {
-					payload["text"] = prev.Payload.Text
-				}
-			}
-		}
-	}
-
-	raw, err := json.Marshal(out)
-	if err != nil {
-		return `{"method":"session.turn"}`
-	}
-	return string(raw)
-}
-
-func shouldAppendProjectionTurnText(rec SessionMessageRecord) bool {
-	kind := strings.ToLower(strings.TrimSpace(rec.Kind))
-	if strings.Contains(kind, "message") || strings.Contains(kind, "thought") {
-		return true
-	}
-	return false
 }
 
 type sessionTurnMessageRow struct {
@@ -1219,19 +1149,11 @@ type hydratedSessionMessage struct {
 
 func hydrateSessionMessageFromTurnRow(projectName string, fallbackSyncIndex int64, row sessionTurnMessageRow) hydratedSessionMessage {
 	extra := parseProjectionTurnExtraJSON(row.ExtraJSON)
-	contentJSON := strings.TrimSpace(extra.LegacyContentJSON)
-	if contentJSON == "" {
-		contentJSON = row.UpdateJSON
-	}
-	metaJSON := strings.TrimSpace(extra.LegacyMetaJSON)
-	if metaJSON == "" {
-		metaJSON = "{}"
-	}
 	rec := SessionMessageRecord{
 		SessionID:    strings.TrimSpace(row.SessionID),
 		ProjectName:  strings.TrimSpace(projectName),
-		ContentJSON:  normalizeJSONDoc(contentJSON, `{"method":"session.update"}`),
-		MetaJSON:     normalizeJSONDoc(metaJSON, `{}`),
+		ContentJSON:  normalizeJSONDoc(row.UpdateJSON, `{"method":"session.update"}`),
+		MetaJSON:     "{}",
 		SyncIndex:    fallbackSyncIndex,
 		SyncSubIndex: 0,
 	}
@@ -1240,12 +1162,6 @@ func hydrateSessionMessageFromTurnRow(projectName string, fallbackSyncIndex int6
 		rec.SyncSubIndex = extra.LegacySyncSubIndex
 	}
 	hydrateSessionRecordLegacyFields(&rec)
-	if rec.RequestID == 0 {
-		rec.RequestID = extra.RequestID
-	}
-	if strings.TrimSpace(rec.AggregateKey) == "" {
-		rec.AggregateKey = strings.TrimSpace(extra.AggregateKey)
-	}
 	rec.Source = firstNonEmpty(strings.TrimSpace(extra.Source), strings.TrimSpace(rec.Source))
 	rec.Time = parseStoreTime(strings.TrimSpace(extra.Time))
 	if rec.Time.IsZero() {

@@ -678,7 +678,10 @@ func parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt string, fall
 	updateJSON = strings.TrimSpace(updateJSON)
 	if updateJSON != "" {
 		var content struct {
-			Method  string `json:"method"`
+			Method string `json:"method"`
+			Params struct {
+				Update rp.SessionUpdate `json:"update"`
+			} `json:"params"`
 			Payload struct {
 				Role      string `json:"role"`
 				Kind      string `json:"kind"`
@@ -691,11 +694,18 @@ func parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt string, fall
 			if strings.TrimSpace(content.Method) != "" {
 				method = strings.TrimSpace(content.Method)
 			}
-			role = strings.TrimSpace(content.Payload.Role)
-			kind = strings.TrimSpace(content.Payload.Kind)
-			body = content.Payload.Text
-			status = strings.TrimSpace(content.Payload.Status)
-			requestID = content.Payload.RequestID
+			if strings.TrimSpace(content.Params.Update.SessionUpdate) != "" {
+				kind = strings.TrimSpace(content.Params.Update.SessionUpdate)
+				status = strings.TrimSpace(content.Params.Update.Status)
+				body = monitorSessionUpdateText(content.Params.Update)
+				role = monitorRoleFromSessionUpdate(content.Params.Update.SessionUpdate)
+			} else {
+				role = strings.TrimSpace(content.Payload.Role)
+				kind = strings.TrimSpace(content.Payload.Kind)
+				body = content.Payload.Text
+				status = strings.TrimSpace(content.Payload.Status)
+				requestID = content.Payload.RequestID
+			}
 		}
 	}
 	if requestID == 0 {
@@ -708,6 +718,49 @@ func parseMonitorSessionTurn(updateJSON, extraJSON, promptUpdatedAt string, fall
 		ts = strings.TrimSpace(promptUpdatedAt)
 	}
 	return method, role, kind, body, status, requestID, index, subIndex, source, ts
+}
+
+func monitorRoleFromSessionUpdate(updateKind string) string {
+	switch strings.TrimSpace(updateKind) {
+	case rp.SessionUpdateAgentMessageChunk, rp.SessionUpdateAgentThoughtChunk:
+		return "assistant"
+	case rp.SessionUpdateUserMessageChunk:
+		return "user"
+	default:
+		return "system"
+	}
+}
+
+func monitorSessionUpdateText(update rp.SessionUpdate) string {
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case rp.SessionUpdateToolCall, rp.SessionUpdateToolCallUpdate:
+		if strings.TrimSpace(update.ToolCallID) != "" {
+			return strings.TrimSpace(update.ToolCallID)
+		}
+	}
+	return monitorExtractTextChunk(update.Content)
+}
+
+func monitorExtractTextChunk(raw json.RawMessage) string {
+	rawText := strings.TrimSpace(string(raw))
+	if rawText == "" {
+		return ""
+	}
+	var block rp.ContentBlock
+	if err := json.Unmarshal(raw, &block); err == nil {
+		if strings.EqualFold(strings.TrimSpace(block.Type), rp.ContentBlockTypeText) {
+			return strings.TrimSpace(block.Text)
+		}
+	}
+	var blocks []rp.ContentBlock
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		for _, item := range blocks {
+			if strings.EqualFold(strings.TrimSpace(item.Type), rp.ContentBlockTypeText) && strings.TrimSpace(item.Text) != "" {
+				return strings.TrimSpace(item.Text)
+			}
+		}
+	}
+	return ""
 }
 func monitorSessionStatusLabel(status int) string {
 	switch status {

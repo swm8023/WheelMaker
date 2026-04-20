@@ -1180,7 +1180,9 @@ function renderDBTables(db) {
                 const parsed = JSON.parse(raw);
                 const method = parsed && typeof parsed.method === 'string' ? parsed.method.trim() : '';
                 const payload = parsed && typeof parsed.payload === 'object' ? parsed.payload : null;
-                const updateMethod = payload && typeof payload.updateMethod === 'string' ? payload.updateMethod.trim() : '';
+                const params = parsed && typeof parsed.params === 'object' ? parsed.params : null;
+                const update = params && typeof params.update === 'object' ? params.update : null;
+                const updateMethod = update && typeof update.sessionUpdate === 'string' ? update.sessionUpdate.trim() : '';
                 if (method === 'session.update') {
                   summary = updateMethod || method || '-';
                 } else {
@@ -1339,4 +1341,7 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 `
+
+
+
 
