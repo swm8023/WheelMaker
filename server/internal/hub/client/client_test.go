@@ -1632,18 +1632,17 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 	}
 
 	msg := SessionMessageRecord{
-		MessageID:    "msg-1",
-		SessionID:    "sess-1",
-		ProjectName:  "proj1",
-		Role:         "assistant",
-		Kind:         "text",
-		Body:         "aggregated reply",
-		Blocks:       []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
-		Options:      []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
-		Status:       "done",
-		AggregateKey: "assistant:sess-1:turn-1",
-		CreatedAt:    time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
-		UpdatedAt:    time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
+		MessageID:   "msg-1",
+		SessionID:   "sess-1",
+		ProjectName: "proj1",
+		Role:        "assistant",
+		Kind:        "text",
+		Body:        "aggregated reply",
+		Blocks:      []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
+		Options:     []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
+		Status:      "done",
+		CreatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
+		UpdatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
 	}
 
 	if err := store.AppendSessionMessage(context.Background(), msg); err != nil {
@@ -1953,10 +1952,10 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Tools"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Running build", AggregateKey: "tool-1"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Running build"}); err != nil {
 		t.Fatalf("RecordEvent tool updated #1: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Build finished", AggregateKey: "tool-1"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Build finished"}); err != nil {
 		t.Fatalf("RecordEvent tool updated #2: %v", err)
 	}
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {

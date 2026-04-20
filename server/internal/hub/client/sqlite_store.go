@@ -131,7 +131,6 @@ type SessionMessageRecord struct {
 	RequestID     int64
 	SyncIndex     int64
 	SyncSubIndex  int64
-	AggregateKey  string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -818,7 +817,6 @@ func hydrateSessionRecordFromUpdate(rec *SessionMessageRecord, update acp.Sessio
 		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "user")
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
-		rec.AggregateKey = firstNonEmpty(strings.TrimSpace(rec.AggregateKey), strings.TrimSpace(update.ToolCallID))
 	default:
 		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
 	}
@@ -845,7 +843,6 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 			Options      []acp.PermissionOption `json:"options"`
 			Status       string                 `json:"status"`
 			RequestID    int64                  `json:"requestId"`
-			AggregateKey string                 `json:"aggregateKey"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal([]byte(rec.ContentJSON), &content); err == nil {
@@ -866,7 +863,6 @@ func hydrateSessionRecordLegacyFields(rec *SessionMessageRecord) {
 			rec.Options = content.Payload.Options
 			rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(content.Payload.Status))
 			rec.RequestID = firstNonZeroInt64(rec.RequestID, content.Payload.RequestID)
-			rec.AggregateKey = firstNonEmpty(strings.TrimSpace(rec.AggregateKey), strings.TrimSpace(content.Payload.AggregateKey))
 		}
 	}
 	if rec.Method == "" {

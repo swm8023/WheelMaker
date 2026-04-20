@@ -37,7 +37,6 @@ type SessionViewEvent struct {
 	Blocks        []acp.ContentBlock
 	Options       []acp.PermissionOption
 	Status        string
-	AggregateKey  string
 	RequestID     int64
 	Update        *acp.SessionUpdate
 	SourceChannel string
@@ -203,20 +202,20 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		}
 		r.clearBufferedSessionUpdates(event.SessionID)
 		message := SessionMessageRecord{
-			ProjectName:  r.projectName,
-			SessionID:    event.SessionID,
-			Method:       "session.prompt",
-			Role:         firstNonEmpty(event.Role, "user"),
-			Kind:         firstNonEmpty(event.Kind, "text"),
-			Body:         strings.TrimSpace(event.Text),
-			Blocks:       cloneSessionContentBlocks(event.Blocks),
-			Status:       firstNonEmpty(event.Status, "done"),
-			CreatedAt:    event.CreatedAt,
-			UpdatedAt:    event.UpdatedAt,
-			Time:         event.UpdatedAt,
-			RequestID:    event.RequestID,
-			AggregateKey: firstNonEmpty(event.AggregateKey, fmt.Sprintf("user:%s:%d", event.SessionID, event.CreatedAt.UnixNano())),
-			Source:       normalizeRecorderEventSource(event),
+			ProjectName: r.projectName,
+			SessionID:   event.SessionID,
+			Method:      "session.prompt",
+			Role:        firstNonEmpty(event.Role, "user"),
+			Kind:        firstNonEmpty(event.Kind, "text"),
+			Body:        strings.TrimSpace(event.Text),
+			Blocks:      cloneSessionContentBlocks(event.Blocks),
+			Status:      firstNonEmpty(event.Status, "done"),
+			CreatedAt:   event.CreatedAt,
+			UpdatedAt:   event.UpdatedAt,
+			Time:        event.UpdatedAt,
+			RequestID:   event.RequestID,
+
+			Source: normalizeRecorderEventSource(event),
 		}
 		if err := r.store.AppendSessionTurnMessage(ctx, message); err != nil {
 			return err
@@ -246,20 +245,20 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return err
 		}
 		message := SessionMessageRecord{
-			ProjectName:  r.projectName,
-			SessionID:    event.SessionID,
-			Method:       "session.permission",
-			Role:         firstNonEmpty(event.Role, "system"),
-			Kind:         firstNonEmpty(event.Kind, "permission"),
-			Body:         strings.TrimSpace(event.Text),
-			Options:      cloneSessionPermissionOptions(event.Options),
-			Status:       firstNonEmpty(event.Status, "needs_action"),
-			CreatedAt:    event.CreatedAt,
-			UpdatedAt:    event.UpdatedAt,
-			Time:         event.UpdatedAt,
-			RequestID:    event.RequestID,
-			AggregateKey: fmt.Sprintf("permission:%s:%d", event.SessionID, event.RequestID),
-			Source:       normalizeRecorderEventSource(event),
+			ProjectName: r.projectName,
+			SessionID:   event.SessionID,
+			Method:      "session.permission",
+			Role:        firstNonEmpty(event.Role, "system"),
+			Kind:        firstNonEmpty(event.Kind, "permission"),
+			Body:        strings.TrimSpace(event.Text),
+			Options:     cloneSessionPermissionOptions(event.Options),
+			Status:      firstNonEmpty(event.Status, "needs_action"),
+			CreatedAt:   event.CreatedAt,
+			UpdatedAt:   event.UpdatedAt,
+			Time:        event.UpdatedAt,
+			RequestID:   event.RequestID,
+
+			Source: normalizeRecorderEventSource(event),
 		}
 		existing, err := r.findPermissionMessageByRequestID(ctx, event.SessionID, event.RequestID)
 		if err != nil {
@@ -379,16 +378,12 @@ type recorderTurnKeyStrategy string
 
 const (
 	recorderTurnKeyBySessionUpdate recorderTurnKeyStrategy = "session_update"
-	recorderTurnKeyByAggregateKey  recorderTurnKeyStrategy = "aggregate_key"
 	recorderTurnKeyByToolCallID    recorderTurnKeyStrategy = "tool_call_id"
 )
 
 var recorderSessionUpdateTurnKeyStrategy = map[string]recorderTurnKeyStrategy{
-	acp.SessionUpdateAgentMessageChunk: recorderTurnKeyByAggregateKey,
-	acp.SessionUpdateUserMessageChunk:  recorderTurnKeyByAggregateKey,
-	acp.SessionUpdateAgentThoughtChunk: recorderTurnKeyByAggregateKey,
-	acp.SessionUpdateToolCall:          recorderTurnKeyByToolCallID,
-	acp.SessionUpdateToolCallUpdate:    recorderTurnKeyByToolCallID,
+	acp.SessionUpdateToolCall:       recorderTurnKeyByToolCallID,
+	acp.SessionUpdateToolCallUpdate: recorderTurnKeyByToolCallID,
 }
 
 func recorderTurnKeyStrategyForSessionUpdate(updateName string) recorderTurnKeyStrategy {
@@ -418,18 +413,9 @@ func recorderUpdateTurnKey(event SessionViewEvent) string {
 		case recorderTurnKeyByToolCallID:
 			toolCallID := strings.TrimSpace(update.ToolCallID)
 			if toolCallID == "" {
-				toolCallID = strings.TrimSpace(event.AggregateKey)
-			}
-			if toolCallID == "" {
 				toolCallID = "unknown"
 			}
 			return canonical + ":" + toolCallID
-		case recorderTurnKeyByAggregateKey:
-			aggregateKey := strings.TrimSpace(event.AggregateKey)
-			if aggregateKey == "" {
-				return canonical
-			}
-			return canonical + ":" + aggregateKey
 		default:
 			return canonical
 		}
@@ -437,9 +423,6 @@ func recorderUpdateTurnKey(event SessionViewEvent) string {
 	variant := string(event.Type)
 	if strings.TrimSpace(event.Kind) != "" {
 		variant += ":" + strings.TrimSpace(event.Kind)
-	}
-	if strings.TrimSpace(event.AggregateKey) != "" {
-		variant += ":" + strings.TrimSpace(event.AggregateKey)
 	}
 	return variant
 }
@@ -513,14 +496,14 @@ func buildSessionUpdateContentJSON(update acp.SessionUpdate) string {
 
 func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionMessageRecord {
 	message := SessionMessageRecord{
-		ProjectName:   projectName,
-		SessionID:     strings.TrimSpace(event.SessionID),
-		Method:        "session.update",
-		Role:          firstNonEmpty(strings.TrimSpace(event.Role), "assistant"),
-		Kind:          firstNonEmpty(strings.TrimSpace(event.Kind), "text"),
-		Body:          strings.TrimSpace(event.Text),
-		Status:        firstNonEmpty(strings.TrimSpace(event.Status), "streaming"),
-		AggregateKey:  strings.TrimSpace(event.AggregateKey),
+		ProjectName: projectName,
+		SessionID:   strings.TrimSpace(event.SessionID),
+		Method:      "session.update",
+		Role:        firstNonEmpty(strings.TrimSpace(event.Role), "assistant"),
+		Kind:        firstNonEmpty(strings.TrimSpace(event.Kind), "text"),
+		Body:        strings.TrimSpace(event.Text),
+		Status:      firstNonEmpty(strings.TrimSpace(event.Status), "streaming"),
+
 		RequestID:     event.RequestID,
 		Source:        normalizeRecorderEventSource(event),
 		SourceChannel: strings.TrimSpace(event.SourceChannel),
@@ -533,9 +516,6 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 		message.Kind = firstNonEmpty(strings.TrimSpace(message.Kind), strings.TrimSpace(update.SessionUpdate))
 		message.Body = firstNonEmpty(strings.TrimSpace(message.Body), sessionUpdateText(update))
 		message.Status = firstNonEmpty(strings.TrimSpace(update.Status), message.Status)
-		if strings.TrimSpace(update.ToolCallID) != "" {
-			message.AggregateKey = strings.TrimSpace(update.ToolCallID)
-		}
 		message.ContentJSON = buildSessionUpdateContentJSON(update)
 	}
 	return message
@@ -555,9 +535,6 @@ func mergeBufferedSessionUpdateMessage(msg *SessionMessageRecord, event SessionV
 		}
 		msg.Kind = firstNonEmpty(strings.TrimSpace(msg.Kind), strings.TrimSpace(update.SessionUpdate), strings.TrimSpace(event.Kind))
 		msg.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(event.Status), msg.Status)
-		if strings.TrimSpace(update.ToolCallID) != "" {
-			msg.AggregateKey = strings.TrimSpace(update.ToolCallID)
-		}
 		if strings.TrimSpace(msg.ContentJSON) != "" {
 			var existing struct {
 				Params struct {
@@ -579,9 +556,6 @@ func mergeBufferedSessionUpdateMessage(msg *SessionMessageRecord, event SessionV
 		}
 		msg.Kind = firstNonEmpty(strings.TrimSpace(event.Kind), msg.Kind)
 		msg.Status = firstNonEmpty(strings.TrimSpace(event.Status), msg.Status)
-		if strings.TrimSpace(event.AggregateKey) != "" {
-			msg.AggregateKey = strings.TrimSpace(event.AggregateKey)
-		}
 	}
 	msg.Role = firstNonEmpty(strings.TrimSpace(msg.Role), strings.TrimSpace(event.Role))
 	msg.RequestID = firstNonZeroInt64(event.RequestID, msg.RequestID)
@@ -1234,15 +1208,14 @@ func toSessionViewTurn(turn SessionTurnRecord) sessionViewTurn {
 	var updateDoc struct {
 		Method  string `json:"method"`
 		Payload struct {
-			Role         string                 `json:"role"`
-			Kind         string                 `json:"kind"`
-			Text         string                 `json:"text"`
-			Status       string                 `json:"status"`
-			RequestID    int64                  `json:"requestId"`
-			ToolCallID   string                 `json:"toolCallId"`
-			AggregateKey string                 `json:"aggregateKey"`
-			Blocks       []acp.ContentBlock     `json:"blocks"`
-			Options      []acp.PermissionOption `json:"options"`
+			Role       string                 `json:"role"`
+			Kind       string                 `json:"kind"`
+			Text       string                 `json:"text"`
+			Status     string                 `json:"status"`
+			RequestID  int64                  `json:"requestId"`
+			ToolCallID string                 `json:"toolCallId"`
+			Blocks     []acp.ContentBlock     `json:"blocks"`
+			Options    []acp.PermissionOption `json:"options"`
 		} `json:"payload"`
 	}
 	if err := json.Unmarshal([]byte(updateJSON), &updateDoc); err == nil {
@@ -1251,20 +1224,16 @@ func toSessionViewTurn(turn SessionTurnRecord) sessionViewTurn {
 		out.Text = updateDoc.Payload.Text
 		out.Status = strings.TrimSpace(updateDoc.Payload.Status)
 		out.RequestID = updateDoc.Payload.RequestID
-		out.ToolCallID = firstNonEmpty(strings.TrimSpace(updateDoc.Payload.ToolCallID), strings.TrimSpace(updateDoc.Payload.AggregateKey))
+		out.ToolCallID = strings.TrimSpace(updateDoc.Payload.ToolCallID)
 		out.Blocks = cloneSessionContentBlocks(updateDoc.Payload.Blocks)
 		out.Options = cloneSessionPermissionOptions(updateDoc.Payload.Options)
 	}
 	var extraDoc struct {
-		RequestID    int64  `json:"requestId"`
-		AggregateKey string `json:"aggregateKey"`
+		RequestID int64 `json:"requestId"`
 	}
 	if err := json.Unmarshal([]byte(extraJSON), &extraDoc); err == nil {
 		if out.RequestID == 0 {
 			out.RequestID = extraDoc.RequestID
-		}
-		if strings.TrimSpace(out.ToolCallID) == "" {
-			out.ToolCallID = strings.TrimSpace(extraDoc.AggregateKey)
 		}
 	}
 	return out
@@ -1292,19 +1261,6 @@ func toSessionViewMessage(message SessionMessageRecord) sessionViewMessage {
 		UpdatedAt: message.UpdatedAt.UTC().Format(time.RFC3339),
 		RequestID: message.RequestID,
 	}
-}
-
-func sanitizeSessionAggregateMessageID(kind, aggregateKey string) string {
-	replacer := strings.NewReplacer(":", "-", "/", "-", "\\", "-", " ", "-", ".", "-")
-	cleanKey := strings.Trim(replacer.Replace(strings.TrimSpace(aggregateKey)), "-")
-	if cleanKey == "" {
-		cleanKey = "event"
-	}
-	cleanKind := strings.Trim(replacer.Replace(strings.TrimSpace(kind)), "-")
-	if cleanKind == "" {
-		cleanKind = "system"
-	}
-	return fmt.Sprintf("msg-%s-%s", cleanKind, cleanKey)
 }
 
 func decodeSessionRequestPayload(raw json.RawMessage, out any) error {

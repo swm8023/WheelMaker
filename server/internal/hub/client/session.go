@@ -1360,7 +1360,7 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 						statusText := renderSessionToolStatus(params.Update)
 						if strings.TrimSpace(statusText) != "" {
-							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", AggregateKey: params.Update.ToolCallID, Update: &params.Update})
+							s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventToolUpdated, Role: "system", Kind: "tool", Text: statusText, Status: "done", Update: &params.Update})
 						}
 					}
 					if hasIMEmitter {
