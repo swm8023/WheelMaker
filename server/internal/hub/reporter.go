@@ -1570,11 +1570,18 @@ func resolveDirEntryKind(basePath string, entry os.DirEntry) string {
 	if entry.IsDir() {
 		return "dir"
 	}
+	fullPath := filepath.Join(basePath, entry.Name())
+	if info, err := entry.Info(); err == nil && info.IsDir() {
+		return "dir"
+	}
 	if entry.Type()&os.ModeSymlink != 0 {
-		resolvedInfo, err := os.Stat(filepath.Join(basePath, entry.Name()))
+		resolvedInfo, err := os.Stat(fullPath)
 		if err == nil && resolvedInfo.IsDir() {
 			return "dir"
 		}
+	}
+	if isDirectoryReparsePoint(fullPath) {
+		return "dir"
 	}
 	return "file"
 }

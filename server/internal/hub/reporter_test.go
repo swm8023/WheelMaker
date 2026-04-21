@@ -717,14 +717,16 @@ func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 
 func createDirLink(t *testing.T, target string, link string) {
 	t.Helper()
-	if err := os.Symlink(target, link); err == nil {
-		return
-	}
 	if runtime.GOOS == "windows" {
 		cmd := exec.Command("cmd", "/c", "mklink", "/J", link, target)
 		if _, err := cmd.CombinedOutput(); err == nil {
 			return
 		}
+		t.Skipf("unable to create junction for test")
+		return
+	}
+	if err := os.Symlink(target, link); err == nil {
+		return
 	}
 	t.Skipf("unable to create directory link for test")
 }
