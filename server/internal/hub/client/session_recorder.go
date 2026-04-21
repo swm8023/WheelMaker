@@ -217,6 +217,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 
 			Source: normalizeRecorderEventSource(event),
 		}
+		message.ContentJSON = buildSessionPromptContentJSON(message)
 		if err := r.store.AppendSessionTurnMessage(ctx, message); err != nil {
 			return err
 		}
@@ -260,6 +261,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 
 			Source: normalizeRecorderEventSource(event),
 		}
+		message.ContentJSON = buildSessionPermissionContentJSON(message)
 		existing, err := r.findPermissionMessageByRequestID(ctx, event.SessionID, event.RequestID)
 		if err != nil {
 			return err
@@ -271,8 +273,6 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			if !existing.CreatedAt.IsZero() {
 				message.CreatedAt = existing.CreatedAt
 			}
-			message.ContentJSON = ""
-			message.MetaJSON = "{}"
 			if err := r.store.UpsertSessionTurnMessage(ctx, message); err != nil {
 				return err
 			}
@@ -308,8 +308,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			message.Status = firstNonEmpty(event.Status, "done")
 			message.UpdatedAt = event.UpdatedAt
 			message.Time = event.UpdatedAt
-			message.ContentJSON = ""
-			message.MetaJSON = "{}"
+			message.ContentJSON = buildSessionPermissionContentJSON(message)
 			if err := r.store.UpsertSessionTurnMessage(ctx, message); err != nil {
 				return err
 			}
@@ -428,16 +427,52 @@ func recorderUpdateTurnKey(event SessionViewEvent) string {
 }
 
 func sessionUpdateFromEvent(event SessionViewEvent) (acp.SessionUpdate, bool) {
-	if event.Update == nil {
-		return acp.SessionUpdate{}, false
+	if event.Update != nil {
+		update := *event.Update
+		if strings.TrimSpace(update.SessionUpdate) != "" {
+			return update, true
+		}
 	}
-	update := *event.Update
-	if strings.TrimSpace(update.SessionUpdate) == "" {
-		return acp.SessionUpdate{}, false
-	}
-	return update, true
+	return sessionUpdateFromLegacyEvent(event)
 }
 
+func sessionUpdateFromLegacyEvent(event SessionViewEvent) (acp.SessionUpdate, bool) {
+	var sessionUpdate string
+	switch event.Type {
+	case SessionViewEventAssistantChunk:
+		sessionUpdate = acp.SessionUpdateAgentMessageChunk
+	case SessionViewEventThoughtChunk:
+		sessionUpdate = acp.SessionUpdateAgentThoughtChunk
+	case SessionViewEventToolUpdated:
+		sessionUpdate = firstNonEmpty(strings.TrimSpace(event.Kind), acp.SessionUpdateToolCallUpdate)
+		if sessionUpdate != acp.SessionUpdateToolCall && sessionUpdate != acp.SessionUpdateToolCallUpdate {
+			sessionUpdate = acp.SessionUpdateToolCallUpdate
+		}
+	default:
+		return acp.SessionUpdate{}, false
+	}
+
+	update := acp.SessionUpdate{
+		SessionUpdate: sessionUpdate,
+		Status:        strings.TrimSpace(event.Status),
+		Kind:          strings.TrimSpace(event.Kind),
+		Title:         strings.TrimSpace(event.Title),
+	}
+
+	switch sessionUpdate {
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		raw, err := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: event.Text})
+		if err == nil {
+			update.Content = raw
+		}
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		if strings.TrimSpace(update.Title) == "" && strings.TrimSpace(event.Text) != "" {
+			update.Title = strings.TrimSpace(event.Text)
+		}
+	}
+
+	return update, true
+}
 func mergeSessionUpdateContent(base, incoming acp.SessionUpdate) acp.SessionUpdate {
 	merged := incoming
 	if strings.TrimSpace(base.SessionUpdate) == "" || !strings.EqualFold(strings.TrimSpace(base.SessionUpdate), strings.TrimSpace(incoming.SessionUpdate)) {
@@ -508,6 +543,22 @@ func sessionUpdateContentJSONHasParamsUpdate(raw string) bool {
 	}
 	return strings.TrimSpace(doc.Params.Update.SessionUpdate) != ""
 }
+func buildSessionMethodContentJSON(method string, payload map[string]any) string {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return "{}"
+	}
+	doc := map[string]any{"method": method}
+	if len(payload) > 0 {
+		doc["payload"] = payload
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Sprintf(`{"method":%q}`, method)
+	}
+	return string(raw)
+}
+
 func buildSessionUpdateContentJSON(update acp.SessionUpdate) string {
 	doc := map[string]any{
 		"method": "session.update",
@@ -518,6 +569,38 @@ func buildSessionUpdateContentJSON(update acp.SessionUpdate) string {
 		return `{"method":"session.update"}`
 	}
 	return string(raw)
+}
+
+func buildSessionPromptContentJSON(message SessionTurnMessageRecord) string {
+	payload := map[string]any{
+		"role":   firstNonEmpty(strings.TrimSpace(message.Role), "user"),
+		"kind":   firstNonEmpty(strings.TrimSpace(message.Kind), "text"),
+		"text":   strings.TrimSpace(message.Body),
+		"status": firstNonEmpty(strings.TrimSpace(message.Status), "done"),
+	}
+	if len(message.Blocks) > 0 {
+		payload["blocks"] = message.Blocks
+	}
+	if message.RequestID != 0 {
+		payload["requestId"] = message.RequestID
+	}
+	return buildSessionMethodContentJSON("session.prompt", payload)
+}
+
+func buildSessionPermissionContentJSON(message SessionTurnMessageRecord) string {
+	payload := map[string]any{
+		"role":   firstNonEmpty(strings.TrimSpace(message.Role), "system"),
+		"kind":   firstNonEmpty(strings.TrimSpace(message.Kind), "permission"),
+		"text":   strings.TrimSpace(message.Body),
+		"status": firstNonEmpty(strings.TrimSpace(message.Status), "needs_action"),
+	}
+	if len(message.Options) > 0 {
+		payload["options"] = message.Options
+	}
+	if message.RequestID != 0 {
+		payload["requestId"] = message.RequestID
+	}
+	return buildSessionMethodContentJSON("session.permission", payload)
 }
 
 func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionTurnMessageRecord {

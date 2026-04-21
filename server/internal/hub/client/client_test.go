@@ -1667,6 +1667,7 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 		Blocks:      []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
 		Options:     []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
 		Status:      "done",
+		ContentJSON: "{\"method\":\"session.prompt\",\"payload\":{\"role\":\"assistant\",\"kind\":\"text\",\"text\":\"aggregated reply\",\"status\":\"done\",\"blocks\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"abc123\"}],\"options\":[{\"optionId\":\"allow\",\"name\":\"Allow\",\"kind\":\"allow_once\"}]}}",
 		CreatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
 	}
@@ -1719,6 +1720,7 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 		Kind:        "permission",
 		Body:        "Run tool?",
 		Status:      "needs_action",
+		ContentJSON: "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"needs_action\",\"requestId\":42}}",
 		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 		RequestID:   42,
@@ -1737,6 +1739,7 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	msg.SyncIndex = seed[0].SyncIndex
 	msg.SyncSubIndex = seed[0].SyncSubIndex
 	msg.Status = "done"
+	msg.ContentJSON = "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"done\",\"requestId\":42}}"
 	msg.UpdatedAt = time.Date(2026, 4, 12, 10, 2, 0, 0, time.UTC)
 	msg.Time = msg.UpdatedAt
 	if err := store.UpsertSessionTurnMessage(ctx, msg); err != nil {

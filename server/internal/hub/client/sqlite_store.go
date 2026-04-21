@@ -723,36 +723,7 @@ func buildSessionTurnContentJSON(rec SessionTurnMessageRecord) (string, string, 
 		}
 		return normalized, method, nil
 	}
-	payload := map[string]any{}
-	if strings.TrimSpace(rec.Role) != "" {
-		payload["role"] = strings.TrimSpace(rec.Role)
-	}
-	if strings.TrimSpace(rec.Kind) != "" {
-		if method == "session.update" {
-			payload["updateMethod"] = strings.TrimSpace(rec.Kind)
-		} else {
-			payload["kind"] = strings.TrimSpace(rec.Kind)
-		}
-	}
-	if strings.TrimSpace(rec.Body) != "" {
-		payload["text"] = rec.Body
-	}
-	if len(rec.Blocks) > 0 {
-		payload["blocks"] = rec.Blocks
-	}
-	if len(rec.Options) > 0 {
-		payload["options"] = rec.Options
-	}
-	if strings.TrimSpace(rec.Status) != "" {
-		payload["status"] = strings.TrimSpace(rec.Status)
-	}
-	if rec.RequestID != 0 {
-		payload["requestId"] = rec.RequestID
-	}
 	doc := map[string]any{"method": method}
-	if len(payload) > 0 {
-		doc["payload"] = payload
-	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		return "", "", fmt.Errorf("marshal session record content: %w", err)
