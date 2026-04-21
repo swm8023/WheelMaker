@@ -16,6 +16,11 @@ import (
 type SessionViewEventType string
 
 const (
+	SessionViewEventTypeSystem SessionViewEventType = "system"
+	SessionViewEventTypeACP    SessionViewEventType = "acp"
+)
+
+const (
 	SessionViewMethodCreated            = "session.created"
 	SessionViewMethodPrompt             = "session.prompt"
 	SessionViewMethodUpdate             = "session.update"
@@ -23,33 +28,36 @@ const (
 	SessionViewMethodPermission         = "session.permission"
 	SessionViewMethodPermissionResolved = "session.permission.resolved"
 	SessionViewMethodSystem             = "session.system"
-
-	SessionViewEventSessionCreated      SessionViewEventType = "session_created"
-	SessionViewEventUserMessageAccepted SessionViewEventType = "user_message_accepted"
-	SessionViewEventAssistantChunk      SessionViewEventType = "assistant_chunk"
-	SessionViewEventThoughtChunk        SessionViewEventType = "thought_chunk"
-	SessionViewEventToolUpdated         SessionViewEventType = "tool_updated"
-	SessionViewEventPermissionRequested SessionViewEventType = "permission_requested"
-	SessionViewEventPermissionResolved  SessionViewEventType = "permission_resolved"
-	SessionViewEventPromptFinished      SessionViewEventType = "prompt_finished"
-	SessionViewEventSystemMessage       SessionViewEventType = "system_message"
 )
 
 type SessionViewEvent struct {
-	Type          SessionViewEventType
-	Method        string
-	SessionID     string
-	Title         string
-	Text          string
-	Blocks        []acp.ContentBlock
-	Options       []acp.PermissionOption
-	Status        string
-	RequestID     int64
-	Update        *acp.SessionUpdate
+	Type      SessionViewEventType
+	SessionID string
+	Content   string
+
 	SourceChannel string
 	SourceChatID  string
-	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+type sessionViewEventPayload struct {
+	Title      string                 `json:"title,omitempty"`
+	Role       string                 `json:"role,omitempty"`
+	Kind       string                 `json:"kind,omitempty"`
+	Text       string                 `json:"text,omitempty"`
+	Status     string                 `json:"status,omitempty"`
+	RequestID  int64                  `json:"requestId,omitempty"`
+	ToolCallID string                 `json:"toolCallId,omitempty"`
+	Blocks     []acp.ContentBlock     `json:"blocks,omitempty"`
+	Options    []acp.PermissionOption `json:"options,omitempty"`
+}
+
+type sessionViewEventContentDoc struct {
+	Method  string                  `json:"method"`
+	Payload sessionViewEventPayload `json:"payload,omitempty"`
+	Params  struct {
+		Update acp.SessionUpdate `json:"update"`
+	} `json:"params,omitempty"`
 }
 
 type SessionViewSink interface {
@@ -188,28 +196,47 @@ func (r *SessionRecorder) eventPublisher() func(method string, payload any) erro
 	return r.publish
 }
 
+func decodeSessionViewEventContent(content string) (sessionViewEventContentDoc, bool) {
+	raw := strings.TrimSpace(content)
+	if raw == "" {
+		return sessionViewEventContentDoc{}, false
+	}
+	var doc sessionViewEventContentDoc
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return sessionViewEventContentDoc{}, false
+	}
+	doc.Method = strings.TrimSpace(doc.Method)
+	if doc.Method == "" {
+		return sessionViewEventContentDoc{}, false
+	}
+	return doc, true
+}
+
+func sessionViewContentFromEvent(event SessionViewEvent) (sessionViewEventContentDoc, bool) {
+	if !strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeACP)) {
+		return sessionViewEventContentDoc{}, false
+	}
+	return decodeSessionViewEventContent(event.Content)
+}
+
 func sessionViewMethodFromEvent(event SessionViewEvent) string {
-	if method := strings.TrimSpace(event.Method); method != "" {
-		return method
-	}
-	switch event.Type {
-	case SessionViewEventSessionCreated:
-		return SessionViewMethodCreated
-	case SessionViewEventUserMessageAccepted:
-		return SessionViewMethodPrompt
-	case SessionViewEventAssistantChunk, SessionViewEventThoughtChunk, SessionViewEventToolUpdated:
-		return SessionViewMethodUpdate
-	case SessionViewEventPromptFinished:
-		return SessionViewMethodPromptFinished
-	case SessionViewEventPermissionRequested:
-		return SessionViewMethodPermission
-	case SessionViewEventPermissionResolved:
-		return SessionViewMethodPermissionResolved
-	case SessionViewEventSystemMessage:
+	switch strings.ToLower(strings.TrimSpace(string(event.Type))) {
+	case string(SessionViewEventTypeSystem):
 		return SessionViewMethodSystem
-	default:
-		return ""
+	case string(SessionViewEventTypeACP):
+		if doc, ok := sessionViewContentFromEvent(event); ok {
+			return strings.TrimSpace(doc.Method)
+		}
 	}
+	return ""
+}
+
+func sessionViewPayloadFromEvent(event SessionViewEvent) sessionViewEventPayload {
+	doc, ok := sessionViewContentFromEvent(event)
+	if !ok {
+		return sessionViewEventPayload{}
+	}
+	return doc.Payload
 }
 
 func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEvent) error {
@@ -217,17 +244,15 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	if event.SessionID == "" {
 		return nil
 	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now().UTC()
-	}
 	if event.UpdatedAt.IsZero() {
-		event.UpdatedAt = event.CreatedAt
+		event.UpdatedAt = time.Now().UTC()
 	}
-	event.Method = sessionViewMethodFromEvent(event)
+	method := sessionViewMethodFromEvent(event)
+	payload := sessionViewPayloadFromEvent(event)
 
-	switch event.Method {
+	switch method {
 	case SessionViewMethodCreated:
-		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), event.UpdatedAt)
+		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(payload.Title), event.UpdatedAt)
 	case SessionViewMethodPrompt:
 		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
 			return err
@@ -239,13 +264,13 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			Method:      SessionViewMethodPrompt,
 			Role:        "user",
 			Kind:        "text",
-			Body:        strings.TrimSpace(event.Text),
-			Blocks:      cloneSessionContentBlocks(event.Blocks),
-			Status:      firstNonEmpty(event.Status, "done"),
-			CreatedAt:   event.CreatedAt,
+			Body:        strings.TrimSpace(payload.Text),
+			Blocks:      cloneSessionContentBlocks(payload.Blocks),
+			Status:      firstNonEmpty(strings.TrimSpace(payload.Status), "done"),
+			CreatedAt:   event.UpdatedAt,
 			UpdatedAt:   event.UpdatedAt,
 			Time:        event.UpdatedAt,
-			RequestID:   event.RequestID,
+			RequestID:   payload.RequestID,
 
 			Source: normalizeRecorderEventSource(event),
 		}
@@ -257,7 +282,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err != nil {
 			return err
 		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.UpdatedAt); err != nil {
+		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(payload.Title), stored.UpdatedAt); err != nil {
 			return err
 		}
 		r.publishSessionMessage(stored)
@@ -269,7 +294,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return err
 		}
 		r.clearBufferedSessionUpdates(event.SessionID)
-		if err := r.persistPromptStopReason(ctx, event.SessionID, event.Status, event.UpdatedAt); err != nil {
+		if err := r.persistPromptStopReason(ctx, event.SessionID, payload.Status, event.UpdatedAt); err != nil {
 			return err
 		}
 		return nil
@@ -283,18 +308,18 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			Method:      SessionViewMethodPermission,
 			Role:        "system",
 			Kind:        "permission",
-			Body:        strings.TrimSpace(event.Text),
-			Options:     cloneSessionPermissionOptions(event.Options),
-			Status:      firstNonEmpty(event.Status, "needs_action"),
-			CreatedAt:   event.CreatedAt,
+			Body:        strings.TrimSpace(payload.Text),
+			Options:     cloneSessionPermissionOptions(payload.Options),
+			Status:      firstNonEmpty(strings.TrimSpace(payload.Status), "needs_action"),
+			CreatedAt:   event.UpdatedAt,
 			UpdatedAt:   event.UpdatedAt,
 			Time:        event.UpdatedAt,
-			RequestID:   event.RequestID,
+			RequestID:   payload.RequestID,
 
 			Source: normalizeRecorderEventSource(event),
 		}
 		message.ContentJSON = buildSessionPermissionContentJSON(message)
-		existing, err := r.findPermissionMessageByRequestID(ctx, event.SessionID, event.RequestID)
+		existing, err := r.findPermissionMessageByRequestID(ctx, event.SessionID, payload.RequestID)
 		if err != nil {
 			return err
 		}
@@ -317,7 +342,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err != nil {
 			return err
 		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(event.Title), stored.UpdatedAt); err != nil {
+		if err := r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(payload.Title), stored.UpdatedAt); err != nil {
 			return err
 		}
 		if !existed {
@@ -334,10 +359,10 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return err
 		}
 		for _, message := range messages {
-			if message.RequestID != event.RequestID {
+			if message.RequestID != payload.RequestID {
 				continue
 			}
-			message.Status = firstNonEmpty(event.Status, "done")
+			message.Status = firstNonEmpty(strings.TrimSpace(payload.Status), "done")
 			message.UpdatedAt = event.UpdatedAt
 			message.Time = event.UpdatedAt
 			message.ContentJSON = buildSessionPermissionContentJSON(message)
@@ -457,43 +482,38 @@ func recorderUpdateTurnKey(event SessionViewEvent) string {
 }
 
 func sessionUpdateFromEvent(event SessionViewEvent) (acp.SessionUpdate, bool) {
-	if event.Update != nil {
-		update := *event.Update
-		if strings.TrimSpace(update.SessionUpdate) != "" {
-			return update, true
-		}
-	}
-	return sessionUpdateFromLegacyEvent(event)
-}
-
-func sessionUpdateFromLegacyEvent(event SessionViewEvent) (acp.SessionUpdate, bool) {
-	if sessionViewMethodFromEvent(event) != SessionViewMethodUpdate {
+	doc, ok := sessionViewContentFromEvent(event)
+	if !ok || strings.TrimSpace(doc.Method) != SessionViewMethodUpdate {
 		return acp.SessionUpdate{}, false
 	}
-
-	sessionUpdate := acp.SessionUpdateAgentMessageChunk
-	switch event.Type {
-	case SessionViewEventThoughtChunk:
-		sessionUpdate = acp.SessionUpdateAgentThoughtChunk
-	case SessionViewEventToolUpdated:
-		sessionUpdate = acp.SessionUpdateToolCallUpdate
+	update := doc.Params.Update
+	if strings.TrimSpace(update.SessionUpdate) != "" {
+		return update, true
 	}
+	return sessionUpdateFromPayload(doc.Payload)
+}
 
+func sessionUpdateFromPayload(payload sessionViewEventPayload) (acp.SessionUpdate, bool) {
+	updateName := strings.TrimSpace(payload.Kind)
+	if updateName == "" {
+		updateName = acp.SessionUpdateAgentMessageChunk
+	}
 	update := acp.SessionUpdate{
-		SessionUpdate: sessionUpdate,
-		Status:        strings.TrimSpace(event.Status),
-		Title:         strings.TrimSpace(event.Title),
+		SessionUpdate: updateName,
+		Status:        strings.TrimSpace(payload.Status),
+		Title:         strings.TrimSpace(payload.Title),
+		ToolCallID:    strings.TrimSpace(payload.ToolCallID),
 	}
 
-	switch sessionUpdate {
+	switch updateName {
 	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-		raw, err := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: event.Text})
+		raw, err := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: payload.Text})
 		if err == nil {
 			update.Content = raw
 		}
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		if strings.TrimSpace(update.Title) == "" && strings.TrimSpace(event.Text) != "" {
-			update.Title = strings.TrimSpace(event.Text)
+		if strings.TrimSpace(update.Title) == "" && strings.TrimSpace(payload.Text) != "" {
+			update.Title = strings.TrimSpace(payload.Text)
 		}
 	}
 
@@ -631,20 +651,21 @@ func buildSessionPermissionContentJSON(message SessionTurnMessageRecord) string 
 }
 
 func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionTurnMessageRecord {
+	payload := sessionViewPayloadFromEvent(event)
 	message := SessionTurnMessageRecord{
 		ProjectName: projectName,
 		SessionID:   strings.TrimSpace(event.SessionID),
 		Method:      SessionViewMethodUpdate,
 		Role:        "assistant",
 		Kind:        "text",
-		Body:        strings.TrimSpace(event.Text),
-		Status:      firstNonEmpty(strings.TrimSpace(event.Status), "streaming"),
+		Body:        strings.TrimSpace(payload.Text),
+		Status:      firstNonEmpty(strings.TrimSpace(payload.Status), "streaming"),
 
-		RequestID:     event.RequestID,
+		RequestID:     payload.RequestID,
 		Source:        normalizeRecorderEventSource(event),
 		SourceChannel: strings.TrimSpace(event.SourceChannel),
 		SourceChatID:  strings.TrimSpace(event.SourceChatID),
-		CreatedAt:     event.CreatedAt,
+		CreatedAt:     event.UpdatedAt,
 		UpdatedAt:     event.UpdatedAt,
 		Time:          event.UpdatedAt,
 	}
@@ -662,17 +683,18 @@ func mergeBufferedSessionUpdateMessage(msg *SessionTurnMessageRecord, event Sess
 	if msg == nil {
 		return
 	}
+	payload := sessionViewPayloadFromEvent(event)
 	if update, ok := sessionUpdateFromEvent(event); ok {
 		rawText := sessionUpdateBody(update)
 		switch strings.TrimSpace(update.SessionUpdate) {
 		case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
 			msg.Body += rawText
 		default:
-			msg.Body = firstNonEmpty(strings.TrimSpace(rawText), strings.TrimSpace(event.Text))
+			msg.Body = firstNonEmpty(strings.TrimSpace(rawText), strings.TrimSpace(payload.Text))
 		}
 		msg.Role = firstNonEmpty(sessionUpdateRole(update), strings.TrimSpace(msg.Role), "assistant")
 		msg.Kind = firstNonEmpty(sessionUpdateKind(update), strings.TrimSpace(msg.Kind), "text")
-		msg.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(event.Status), msg.Status)
+		msg.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(payload.Status), msg.Status)
 		if strings.TrimSpace(msg.ContentJSON) != "" {
 			var existing struct {
 				Params struct {
@@ -685,17 +707,17 @@ func mergeBufferedSessionUpdateMessage(msg *SessionTurnMessageRecord, event Sess
 		}
 		msg.ContentJSON = buildSessionUpdateContentJSON(update)
 	} else {
-		msg.Body = firstNonEmpty(strings.TrimSpace(event.Text), msg.Body)
-		msg.Status = firstNonEmpty(strings.TrimSpace(event.Status), msg.Status)
+		msg.Body = firstNonEmpty(strings.TrimSpace(payload.Text), msg.Body)
+		msg.Status = firstNonEmpty(strings.TrimSpace(payload.Status), msg.Status)
 	}
-	msg.RequestID = firstNonZeroInt64(event.RequestID, msg.RequestID)
+	msg.RequestID = firstNonZeroInt64(payload.RequestID, msg.RequestID)
 	if strings.TrimSpace(event.SourceChannel) != "" || strings.TrimSpace(event.SourceChatID) != "" {
 		msg.Source = normalizeRecorderEventSource(event)
 		msg.SourceChannel = strings.TrimSpace(event.SourceChannel)
 		msg.SourceChatID = strings.TrimSpace(event.SourceChatID)
 	}
-	if event.CreatedAt.Before(msg.CreatedAt) {
-		msg.CreatedAt = event.CreatedAt
+	if msg.CreatedAt.IsZero() || event.UpdatedAt.Before(msg.CreatedAt) {
+		msg.CreatedAt = event.UpdatedAt
 	}
 	msg.UpdatedAt = event.UpdatedAt
 	msg.Time = event.UpdatedAt
@@ -718,7 +740,8 @@ func isBufferedUpdateTerminalStatus(status string) bool {
 }
 
 func shouldFlushBufferedSessionUpdateImmediately(event SessionViewEvent) bool {
-	if isBufferedUpdateTerminalStatus(event.Status) {
+	payload := sessionViewPayloadFromEvent(event)
+	if isBufferedUpdateTerminalStatus(payload.Status) {
 		return true
 	}
 	if update, ok := sessionUpdateFromEvent(event); ok {
@@ -1237,7 +1260,13 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err != nil {
 			return nil, err
 		}
-		if err := c.RecordEvent(ctx, SessionViewEvent{Method: SessionViewMethodCreated, SessionID: sess.ID, Title: firstNonEmpty(req.Title, sess.ID)}); err != nil {
+		if err := c.RecordEvent(ctx, SessionViewEvent{
+			Type:      SessionViewEventTypeACP,
+			SessionID: sess.ID,
+			Content: buildSessionMethodContentJSON(SessionViewMethodCreated, map[string]any{
+				"title": firstNonEmpty(req.Title, sess.ID),
+			}),
+		}); err != nil {
 			return nil, err
 		}
 		summary, _, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.ID, 0, 0)

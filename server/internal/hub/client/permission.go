@@ -40,20 +40,36 @@ func (s *Session) decidePermission(ctx context.Context, requestID int64, params 
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 	s.recordSessionViewEvent(SessionViewEvent{
-		Method:    SessionViewMethodPermission,
-		Text:      strings.TrimSpace(params.ToolCall.Title),
-		Options:   cloneSessionPermissionOptions(params.Options),
-		Status:    "needs_action",
-		RequestID: requestID,
+		Type: SessionViewEventTypeACP,
+		Content: buildSessionMethodContentJSON(SessionViewMethodPermission, map[string]any{
+			"role":      "system",
+			"kind":      "permission",
+			"text":      strings.TrimSpace(params.ToolCall.Title),
+			"options":   cloneSessionPermissionOptions(params.Options),
+			"status":    "needs_action",
+			"requestId": requestID,
+		}),
 	})
 
 	select {
 	case <-ctx.Done():
 		hubLogger(s.projectName).Warn("permission request timeout/cancelled session=%s request=%d", s.ID, requestID)
-		s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodPermissionResolved, Status: "cancelled", RequestID: requestID})
+		s.recordSessionViewEvent(SessionViewEvent{
+			Type: SessionViewEventTypeACP,
+			Content: buildSessionMethodContentJSON(SessionViewMethodPermissionResolved, map[string]any{
+				"status":    "cancelled",
+				"requestId": requestID,
+			}),
+		})
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	case result := <-waitCh:
-		s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodPermissionResolved, Status: firstNonEmpty(strings.TrimSpace(result.Outcome), "done"), RequestID: requestID})
+		s.recordSessionViewEvent(SessionViewEvent{
+			Type: SessionViewEventTypeACP,
+			Content: buildSessionMethodContentJSON(SessionViewMethodPermissionResolved, map[string]any{
+				"status":    firstNonEmpty(strings.TrimSpace(result.Outcome), "done"),
+				"requestId": requestID,
+			}),
+		})
 		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
 			return result, nil
 		}

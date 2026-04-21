@@ -267,7 +267,10 @@ func (s *Session) replyWithTitle(title, body string) {
 		messageText = strings.TrimSpace(title)
 	}
 	if messageText != "" {
-		s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodSystem, Text: messageText, Status: "done"})
+		s.recordSessionViewEvent(SessionViewEvent{
+			Type:    SessionViewEventTypeSystem,
+			Content: messageText,
+		})
 	}
 	if router, source, ok := s.imContext(); ok {
 		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.SystemPayload{
@@ -306,11 +309,8 @@ func (s *Session) recordSessionViewEvent(event SessionViewEvent) {
 	if strings.TrimSpace(event.SessionID) == "" {
 		event.SessionID = s.ID
 	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now().UTC()
-	}
 	if event.UpdatedAt.IsZero() {
-		event.UpdatedAt = event.CreatedAt
+		event.UpdatedAt = time.Now().UTC()
 	}
 	if router, source, ok := s.imContext(); ok && router != nil {
 		event.SourceChannel = source.ChannelID
@@ -1252,9 +1252,14 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 		return
 	}
 	s.recordSessionViewEvent(SessionViewEvent{
-		Method: SessionViewMethodPrompt,
-		Text:   PromptPreview(blocks),
-		Blocks: cloneSessionContentBlocks(blocks),
+		Type: SessionViewEventTypeACP,
+		Content: buildSessionMethodContentJSON(SessionViewMethodPrompt, map[string]any{
+			"role":   "user",
+			"kind":   "text",
+			"text":   PromptPreview(blocks),
+			"status": "done",
+			"blocks": cloneSessionContentBlocks(blocks),
+		}),
 	})
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
@@ -1345,11 +1350,20 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					params := *ev.update
 					switch params.Update.SessionUpdate {
 					case acp.SessionUpdateAgentMessageChunk:
-						s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodUpdate, Update: &params.Update})
+						s.recordSessionViewEvent(SessionViewEvent{
+							Type:    SessionViewEventTypeACP,
+							Content: buildSessionUpdateContentJSON(params.Update),
+						})
 					case acp.SessionUpdateAgentThoughtChunk:
-						s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodUpdate, Update: &params.Update})
+						s.recordSessionViewEvent(SessionViewEvent{
+							Type:    SessionViewEventTypeACP,
+							Content: buildSessionUpdateContentJSON(params.Update),
+						})
 					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-						s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodUpdate, Update: &params.Update})
+						s.recordSessionViewEvent(SessionViewEvent{
+							Type:    SessionViewEventTypeACP,
+							Content: buildSessionUpdateContentJSON(params.Update),
+						})
 					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
@@ -1376,9 +1390,17 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					}
 				}
 				if ev.result != nil {
-					s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodPromptFinished, Status: ev.result.StopReason})
+					s.recordSessionViewEvent(SessionViewEvent{
+						Type: SessionViewEventTypeACP,
+						Content: buildSessionMethodContentJSON(SessionViewMethodPromptFinished, map[string]any{
+							"status": ev.result.StopReason,
+						}),
+					})
 					if strings.TrimSpace(ev.result.StopReason) != "" && ev.result.StopReason != acp.StopReasonEndTurn {
-						s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodSystem, Text: ev.result.StopReason, Status: "done"})
+						s.recordSessionViewEvent(SessionViewEvent{
+							Type:    SessionViewEventTypeSystem,
+							Content: ev.result.StopReason,
+						})
 					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
