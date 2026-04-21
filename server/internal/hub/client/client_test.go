@@ -1661,8 +1661,6 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 		MessageID:   "msg-1",
 		SessionID:   "sess-1",
 		ProjectName: "proj1",
-		Role:        "assistant",
-		Kind:        "text",
 		Body:        "aggregated reply",
 		Blocks:      []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
 		Options:     []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
@@ -1716,8 +1714,6 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 		MessageID:   "msg-1",
 		SessionID:   "sess-1",
 		ProjectName: "proj1",
-		Role:        "system",
-		Kind:        "permission",
 		Body:        "Run tool?",
 		Status:      "needs_action",
 		ContentJSON: "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"needs_action\",\"requestId\":42}}",
@@ -1811,10 +1807,10 @@ func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "New Session"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Text: "hello"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Text: "hello"}); err != nil {
 		t.Fatalf("RecordEvent chunk1: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Text: " world"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Text: " world"}); err != nil {
 		t.Fatalf("RecordEvent chunk2: %v", err)
 	}
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
@@ -1839,7 +1835,7 @@ func TestSessionViewListIncludesProjectionFields(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Task"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "hello"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "hello"}); err != nil {
 		t.Fatalf("RecordEvent user message: %v", err)
 	}
 
@@ -1938,8 +1934,6 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{
 		Type:      SessionViewEventUserMessageAccepted,
 		SessionID: "sess-1",
-		Role:      "user",
-		Kind:      "text",
 		Text:      "Sent an image",
 		Blocks:    []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
 	}); err != nil {
@@ -1948,8 +1942,6 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{
 		Type:      SessionViewEventPermissionRequested,
 		SessionID: "sess-1",
-		Role:      "system",
-		Kind:      "permission",
 		Text:      "Run tool?",
 		RequestID: 42,
 		Options:   []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
@@ -1981,10 +1973,10 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Tools"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Running build"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Text: "Running build"}); err != nil {
 		t.Fatalf("RecordEvent tool updated #1: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Text: "Build finished"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Text: "Build finished"}); err != nil {
 		t.Fatalf("RecordEvent tool updated #2: %v", err)
 	}
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
@@ -2023,8 +2015,6 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{
 		Type:      SessionViewEventAssistantChunk,
 		SessionID: "sess-1",
-		Role:      "assistant",
-		Kind:      "text",
 		Update:    &updateChunk1,
 	}); err != nil {
 		t.Fatalf("RecordEvent chunk #1: %v", err)
@@ -2032,8 +2022,6 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{
 		Type:      SessionViewEventAssistantChunk,
 		SessionID: "sess-1",
-		Role:      "assistant",
-		Kind:      "text",
 		Update:    &updateChunk2,
 	}); err != nil {
 		t.Fatalf("RecordEvent chunk #2: %v", err)
@@ -2116,8 +2104,6 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{
 		Type:      SessionViewEventAssistantChunk,
 		SessionID: "sess-1",
-		Role:      "assistant",
-		Kind:      "text",
 		Update:    &userChunk,
 	}); err != nil {
 		t.Fatalf("RecordEvent user chunk: %v", err)
@@ -2125,8 +2111,6 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{
 		Type:      SessionViewEventAssistantChunk,
 		SessionID: "sess-1",
-		Role:      "assistant",
-		Kind:      "text",
 		Update:    &agentChunk,
 	}); err != nil {
 		t.Fatalf("RecordEvent agent chunk: %v", err)
@@ -2160,8 +2144,6 @@ func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{
 		Type:      SessionViewEventSystemMessage,
 		SessionID: "sess-1",
-		Role:      "system",
-		Kind:      "prompt_result",
 		Text:      "max_output_tokens",
 		Status:    "done",
 	}); err != nil {
@@ -2182,7 +2164,7 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Task"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Role: "system", Kind: "permission", Text: "Run tool?", RequestID: 42}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Text: "Run tool?", RequestID: 42}); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionResolved, SessionID: "sess-1", RequestID: 42, Status: "done", UpdatedAt: mustRFC3339Time(t, "2026-04-12T10:02:00Z")}); err != nil {
@@ -2231,7 +2213,7 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Stream"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Text: "hello", Status: "streaming"}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Text: "hello", Status: "streaming"}); err != nil {
 		t.Fatalf("RecordEvent chunk: %v", err)
 	}
 
@@ -2266,7 +2248,7 @@ func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *tes
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Merge Cursor"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "say hi"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "say hi"}); err != nil {
 		t.Fatalf("RecordEvent user message: %v", err)
 	}
 	chunk1 := acp.SessionUpdate{
@@ -2412,7 +2394,7 @@ func TestSessionRecorderMarkReadClearsUnreadEntry(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Task"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Role: "system", Kind: "permission", Text: "Run tool?", RequestID: 42}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Text: "Run tool?", RequestID: 42}); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
@@ -2441,7 +2423,7 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Task"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Role: "system", Kind: "permission", Text: "Run tool?", RequestID: 42}); err != nil {
+	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Text: "Run tool?", RequestID: 42}); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 	if err := c.RecordEvent(context.Background(), SessionViewEvent{Type: SessionViewEventPermissionResolved, SessionID: "sess-1", RequestID: 42, Status: "done", UpdatedAt: mustRFC3339Time(t, "2026-04-12T10:02:00Z")}); err != nil {
@@ -2505,17 +2487,17 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Tool Merge"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "run build"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "run build"}); err != nil {
 		t.Fatalf("RecordEvent user message: %v", err)
 	}
 
 	toolStart := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateToolCall, ToolCallID: "call-1", Status: "in_progress", Title: "build"}
 	toolDone := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateToolCallUpdate, ToolCallID: "call-1", Status: "completed", Title: "build"}
 
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Update: &toolStart}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Update: &toolStart}); err != nil {
 		t.Fatalf("RecordEvent tool start: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Update: &toolDone}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Update: &toolDone}); err != nil {
 		t.Fatalf("RecordEvent tool done: %v", err)
 	}
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
@@ -2553,22 +2535,22 @@ func TestSessionViewBufferedUpdatesDoNotLeakAcrossPrompts(t *testing.T) {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
 
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "p1"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "p1"}); err != nil {
 		t.Fatalf("RecordEvent user prompt #1: %v", err)
 	}
 	chunk1 := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"})}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Update: &chunk1}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &chunk1}); err != nil {
 		t.Fatalf("RecordEvent chunk #1: %v", err)
 	}
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
 		t.Fatalf("RecordEvent prompt finished #1: %v", err)
 	}
 
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "p2"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "p2"}); err != nil {
 		t.Fatalf("RecordEvent user prompt #2: %v", err)
 	}
 	chunk2 := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Update: &chunk2}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &chunk2}); err != nil {
 		t.Fatalf("RecordEvent chunk #2: %v", err)
 	}
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {
@@ -2617,7 +2599,7 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Tool Terminal Merge"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "run task"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "run task"}); err != nil {
 		t.Fatalf("RecordEvent user message: %v", err)
 	}
 
@@ -2628,7 +2610,7 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 	}
 	for i := range updates {
 		u := updates[i]
-		if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Role: "system", Kind: "tool", Update: &u}); err != nil {
+		if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventToolUpdated, SessionID: "sess-1", Update: &u}); err != nil {
 			t.Fatalf("RecordEvent tool update #%d: %v", i+1, err)
 		}
 	}
@@ -2663,10 +2645,10 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Permission Turn"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "run protected"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "run protected"}); err != nil {
 		t.Fatalf("RecordEvent user message: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Role: "system", Kind: "permission", Text: "allow?", RequestID: 7}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPermissionRequested, SessionID: "sess-1", Text: "allow?", RequestID: 7}); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPermissionResolved, SessionID: "sess-1", RequestID: 7, Status: "done", UpdatedAt: mustRFC3339Time(t, "2026-04-12T10:02:00Z")}); err != nil {
@@ -2712,19 +2694,19 @@ func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T)
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventSessionCreated, SessionID: "sess-1", Title: "Prompt Carry"}); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "first"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "first"}); err != nil {
 		t.Fatalf("RecordEvent user prompt #1: %v", err)
 	}
 	chunk1 := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"})}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Update: &chunk1}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &chunk1}); err != nil {
 		t.Fatalf("RecordEvent chunk #1: %v", err)
 	}
 
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Role: "user", Kind: "text", Text: "second"}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventUserMessageAccepted, SessionID: "sess-1", Text: "second"}); err != nil {
 		t.Fatalf("RecordEvent user prompt #2: %v", err)
 	}
 	chunk2 := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})}
-	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Role: "assistant", Kind: "text", Update: &chunk2}); err != nil {
+	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventAssistantChunk, SessionID: "sess-1", Update: &chunk2}); err != nil {
 		t.Fatalf("RecordEvent chunk #2: %v", err)
 	}
 	if err := c.RecordEvent(ctx, SessionViewEvent{Type: SessionViewEventPromptFinished, SessionID: "sess-1"}); err != nil {

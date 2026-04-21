@@ -40,9 +40,7 @@ func (s *Session) decidePermission(ctx context.Context, requestID int64, params 
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 	s.recordSessionViewEvent(SessionViewEvent{
-		Type:      SessionViewEventPermissionRequested,
-		Role:      "system",
-		Kind:      "permission",
+		Method:    SessionViewMethodPermission,
 		Text:      strings.TrimSpace(params.ToolCall.Title),
 		Options:   cloneSessionPermissionOptions(params.Options),
 		Status:    "needs_action",
@@ -52,10 +50,10 @@ func (s *Session) decidePermission(ctx context.Context, requestID int64, params 
 	select {
 	case <-ctx.Done():
 		hubLogger(s.projectName).Warn("permission request timeout/cancelled session=%s request=%d", s.ID, requestID)
-		s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventPermissionResolved, Status: "cancelled", RequestID: requestID})
+		s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodPermissionResolved, Status: "cancelled", RequestID: requestID})
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	case result := <-waitCh:
-		s.recordSessionViewEvent(SessionViewEvent{Type: SessionViewEventPermissionResolved, Status: firstNonEmpty(strings.TrimSpace(result.Outcome), "done"), RequestID: requestID})
+		s.recordSessionViewEvent(SessionViewEvent{Method: SessionViewMethodPermissionResolved, Status: firstNonEmpty(strings.TrimSpace(result.Outcome), "done"), RequestID: requestID})
 		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
 			return result, nil
 		}
