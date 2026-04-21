@@ -545,7 +545,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 	sort.Slice(entries, func(i, j int) bool {
 		return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
 	})
-	hash := hashDirectoryEntries(entries)
+	hash := hashDirectoryEntries(target, entries)
 	if payload.KnownHash != "" && payload.KnownHash == hash {
 		_ = r.writeJSON(conn, "->", envelope{
 			RequestID: req.RequestID,
@@ -562,10 +562,7 @@ func (r *Reporter) replyFSList(conn *websocket.Conn, req envelope) {
 	}
 	outEntries := make([]map[string]any, 0, len(entries))
 	for _, e := range entries {
-		kind := "file"
-		if e.IsDir() {
-			kind = "dir"
-		}
+		kind := resolveDirEntryKind(target, e)
 		outEntries = append(outEntries, map[string]any{
 			"name": e.Name(),
 			"kind": kind,
@@ -730,7 +727,7 @@ func (r *Reporter) replyFSInfo(conn *websocket.Conn, req envelope) {
 				"path":       rel,
 				"kind":       "dir",
 				"entryCount": len(entries),
-				"hash":       hashDirectoryEntries(entries),
+				"hash":       hashDirectoryEntries(target, entries),
 			}),
 		})
 		return
@@ -1569,13 +1566,23 @@ func hashBytes(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func hashDirectoryEntries(entries []os.DirEntry) string {
+func resolveDirEntryKind(basePath string, entry os.DirEntry) string {
+	if entry.IsDir() {
+		return "dir"
+	}
+	if entry.Type()&os.ModeSymlink != 0 {
+		resolvedInfo, err := os.Stat(filepath.Join(basePath, entry.Name()))
+		if err == nil && resolvedInfo.IsDir() {
+			return "dir"
+		}
+	}
+	return "file"
+}
+
+func hashDirectoryEntries(basePath string, entries []os.DirEntry) string {
 	lines := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		kind := "file"
-		if entry.IsDir() {
-			kind = "dir"
-		}
+		kind := resolveDirEntryKind(basePath, entry)
 		lines = append(lines, kind+"|"+entry.Name())
 	}
 	sort.Strings(lines)

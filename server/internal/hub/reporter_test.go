@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,14 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("hello registry"), 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
+	linkedTarget := filepath.Join(root, "linked-target")
+	if err := os.MkdirAll(linkedTarget, 0o755); err != nil {
+		t.Fatalf("mkdir linked target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linkedTarget, "nested.txt"), []byte("nested"), 0o644); err != nil {
+		t.Fatalf("write linked target fixture: %v", err)
+	}
+	createDirLink(t, linkedTarget, filepath.Join(root, "linked-dir"))
 	runGitCmd(t, root, "add", ".")
 	runGitCmd(t, root, "commit", "-m", "init")
 
@@ -96,6 +105,7 @@ func TestReporterRun_RegistersAndServesFSRequests(t *testing.T) {
 	if listResp.Type != "response" || listResp.Method != "fs.list" {
 		t.Fatalf("unexpected list response: %#v", listResp)
 	}
+	assertListEntryKind(t, listResp.Payload, "linked-dir", "dir")
 
 	mustWriteJSON(t, app, testEnvelope{
 		RequestID: 3,
@@ -703,6 +713,44 @@ func waitForProjectOnline(t *testing.T, addr, projectID, token string) {
 		time.Sleep(40 * time.Millisecond)
 	}
 	t.Fatalf("project %q not online before timeout", projectID)
+}
+
+func createDirLink(t *testing.T, target string, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err == nil {
+		return
+	}
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("cmd", "/c", "mklink", "/J", link, target)
+		if _, err := cmd.CombinedOutput(); err == nil {
+			return
+		}
+	}
+	t.Skipf("unable to create directory link for test")
+}
+
+func assertListEntryKind(t *testing.T, payload map[string]any, name string, wantKind string) {
+	t.Helper()
+	entries, ok := payload["entries"].([]any)
+	if !ok {
+		t.Fatalf("entries missing in fs.list payload: %#v", payload)
+	}
+	for _, item := range entries {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		entryName, _ := entry["name"].(string)
+		if entryName != name {
+			continue
+		}
+		kind, _ := entry["kind"].(string)
+		if kind != wantKind {
+			t.Fatalf("entry %q kind=%q want %q (payload=%#v)", name, kind, wantKind, payload)
+		}
+		return
+	}
+	t.Fatalf("entry %q not found in fs.list payload: %#v", name, payload)
 }
 
 func initGitRepo(t *testing.T, dir string) {
