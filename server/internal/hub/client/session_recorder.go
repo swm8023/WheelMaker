@@ -267,21 +267,12 @@ func decodeSessionViewEventUpdate(content string) (acp.SessionUpdate, bool) {
 	return update, true
 }
 
-func sessionViewMethodFromACPEvent(event SessionViewEvent) (string, bool) {
-	if !strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeACP)) {
-		return "", false
-	}
-	return decodeSessionViewEventMethod(event.Content)
-}
-
 func sessionViewMethodFromEvent(event SessionViewEvent) string {
-	switch strings.ToLower(strings.TrimSpace(string(event.Type))) {
-	case string(SessionViewEventTypeSystem):
+	if method, ok := decodeSessionViewEventMethod(event.Content); ok {
+		return method
+	}
+	if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeSystem)) {
 		return SessionViewMethodSystem
-	case string(SessionViewEventTypeACP):
-		if method, ok := sessionViewMethodFromACPEvent(event); ok {
-			return method
-		}
 	}
 	return ""
 }
@@ -1275,7 +1266,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		if err := c.RecordEvent(ctx, SessionViewEvent{
-			Type:      SessionViewEventTypeACP,
+			Type:      SessionViewEventTypeSystem,
 			SessionID: sess.ID,
 			Content: buildSessionMethodContentJSON(SessionViewMethodCreated, map[string]any{
 				"title": firstNonEmpty(req.Title, sess.ID),
