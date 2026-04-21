@@ -1129,6 +1129,8 @@ function App() {
   const fileHashRef = useRef<Record<string, string>>({});
   const fileCacheRef = useRef<Record<string, string>>({});
   const fileReadSeqRef = useRef(0);
+  const fileScrollTopByPathRef = useRef<Record<string, number>>({});
+  const skipNextSelectedFileAutoReadRef = useRef(false);
   const fileSideActionsRef = useRef<HTMLDivElement | null>(null);
   const commitPopoverRef = useRef<HTMLDivElement | null>(null);
   const gitBranchMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1453,6 +1455,36 @@ function App() {
     [],
   );
 
+  const captureSelectedFileScrollPosition = () => {
+    const path = selectedFileRef.current;
+    const container = fileScrollRef.current;
+    if (!path || !container) return;
+    fileScrollTopByPathRef.current[path] = container.scrollTop;
+  };
+
+  const scheduleRestoreSelectedFileScroll = (path: string) => {
+    const savedTop = fileScrollTopByPathRef.current[path];
+    if (!Number.isFinite(savedTop)) return;
+
+    const restoreOnNextFrame = (attempt: number) => {
+      const container = fileScrollRef.current;
+      if (!container) return;
+      if (selectedFileRef.current !== path) return;
+
+      const maxScrollTop = Math.max(
+        0,
+        container.scrollHeight - container.clientHeight,
+      );
+      if (maxScrollTop <= 0 && attempt < 8) {
+        window.requestAnimationFrame(() => restoreOnNextFrame(attempt + 1));
+        return;
+      }
+      container.scrollTop = Math.min(savedTop, maxScrollTop);
+    };
+
+    window.requestAnimationFrame(() => restoreOnNextFrame(0));
+  };
+
   const scrollToFileLine = (line: number) => {
     const container = fileScrollRef.current;
     if (!container) return;
@@ -1554,11 +1586,12 @@ function App() {
     }
   };
 
-  const readSelectedFile = async (path: string) => {
+  const readSelectedFile = async (path: string, options?: {restoreScroll?: boolean}) => {
     if (!path) return;
     const requestSeq = fileReadSeqRef.current + 1;
     fileReadSeqRef.current = requestSeq;
     setFileLoading(true);
+    const shouldRestoreScroll = options?.restoreScroll === true;
     try {
       const info = await service.getFileInfo(path);
       if (requestSeq !== fileReadSeqRef.current) return;
@@ -1584,12 +1617,18 @@ function App() {
         if (result.hash) {
           fileHashRef.current[path] = result.hash;
         }
+        if (shouldRestoreScroll) {
+          scheduleRestoreSelectedFileScroll(path);
+        }
         return;
       }
       setFileContent(result.content);
       fileCacheRef.current[path] = result.content;
       if (result.hash) {
         fileHashRef.current[path] = result.hash;
+      }
+      if (shouldRestoreScroll) {
+        scheduleRestoreSelectedFileScroll(path);
       }
     } catch (err) {
       if (requestSeq !== fileReadSeqRef.current) return;
@@ -1609,6 +1648,10 @@ function App() {
       setFileLoading(false);
       setFileInfo(null);
       setFileContent('');
+      return;
+    }
+    if (skipNextSelectedFileAutoReadRef.current) {
+      skipNextSelectedFileAutoReadRef.current = false;
       return;
     }
     readSelectedFile(selectedFile).catch(() => undefined);
@@ -2078,6 +2121,7 @@ function App() {
       const ws = toRegistryWsUrl(nextAddress);
       const result = await workspaceController.connect(ws, trimmedToken);
       setProjects(result.projects);
+      captureSelectedFileScrollPosition();
       dirHashRef.current = {};
       fileHashRef.current = {};
       fileCacheRef.current = {};
@@ -2085,7 +2129,8 @@ function App() {
       const selectedFileToReload =
         result.hydrated.selectedFile || selectedFileRef.current;
       if (selectedFileToReload) {
-        readSelectedFile(selectedFileToReload).catch(() => undefined);
+        skipNextSelectedFileAutoReadRef.current = true;
+        readSelectedFile(selectedFileToReload, { restoreScroll: true }).catch(() => undefined);
       }
       setGitDirty(
         Boolean(
@@ -3611,7 +3656,15 @@ function App() {
                     </div>
                   </div>
                 </div>
-                <div ref={fileScrollRef} className="scroll-panel">
+                <div
+                  ref={fileScrollRef}
+                  className="scroll-panel"
+                  onScroll={event => {
+                    const path = selectedFileRef.current;
+                    if (!path) return;
+                    fileScrollTopByPathRef.current[path] = event.currentTarget.scrollTop;
+                  }}
+                >
                   {fileLoading ? (
                     <div className="muted block">Loading file...</div>
                   ) : selectedFileIsMarkdown && markdownPreviewEnabled ? (

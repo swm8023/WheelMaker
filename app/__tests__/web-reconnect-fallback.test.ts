@@ -66,10 +66,27 @@ describe('web reconnect fallback behavior', () => {
       'result.hydrated.selectedFile || selectedFileRef.current;',
     );
     expect(mainTsx).toContain(
-      'readSelectedFile(selectedFileToReload).catch(() => undefined);',
+      'readSelectedFile(selectedFileToReload, { restoreScroll: true }).catch(() => undefined);',
     );
   });
+  test('restores selected file scroll position after reconnect success', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
 
+    expect(mainTsx).toContain(
+      'const fileScrollTopByPathRef = useRef<Record<string, number>>({});',
+    );
+    expect(mainTsx).toContain(
+      'readSelectedFile(selectedFileToReload, { restoreScroll: true }).catch(() => undefined);',
+    );
+    expect(mainTsx).toContain('const savedTop = fileScrollTopByPathRef.current[path];');
+    expect(mainTsx).toContain(
+      'fileScrollTopByPathRef.current[path] = event.currentTarget.scrollTop;',
+    );
+  });
   test('shows reconnecting state through refresh button while recovering', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
