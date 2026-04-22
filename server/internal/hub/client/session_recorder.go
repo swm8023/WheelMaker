@@ -115,9 +115,8 @@ type SessionRecorder struct {
 	store        Store
 	listSessions func(context.Context) ([]SessionListEntry, error)
 
-	mu          sync.Mutex
-	publish     func(method string, payload any) error
-	unreadCount map[string]int
+	mu      sync.Mutex
+	publish func(method string, payload any) error
 
 	writeMu     sync.Mutex
 	promptState map[string]sessionPromptState
@@ -128,7 +127,6 @@ func newSessionRecorder(projectName string, store Store, listSessions func(conte
 		projectName:  projectName,
 		store:        store,
 		listSessions: listSessions,
-		unreadCount:  map[string]int{},
 		promptState:  map[string]sessionPromptState{},
 	}
 }
@@ -290,7 +288,6 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	if err := r.upsertSessionProjection(ctx, event.SessionID, promptTitle, event.UpdatedAt, true); err != nil {
 		return err
 	}
-	r.incrementSessionUnread(event.SessionID)
 	r.publishSessionTurn(event.SessionID, turn, event.UpdatedAt)
 	return nil
 }
@@ -505,7 +502,6 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	if err != nil {
 		return nil, err
 	}
-	r.pruneUnreadCounts(entries)
 	out := make([]sessionViewSummary, 0, len(entries))
 	for _, entry := range entries {
 		out = append(out, r.sessionViewSummaryFromEntry(entry))
@@ -582,8 +578,7 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 	return r.sessionViewSummaryFromRecord(*rec), out, lastPromptIndex, lastPromptUpdateIndex, nil
 }
 func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
-	r.resetSessionUnread(strings.TrimSpace(sessionID))
-	return r.currentSessionViewSummary(ctx, sessionID)
+	return r.currentSessionViewSummary(ctx, strings.TrimSpace(sessionID))
 }
 
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time, titleIfEmptyOnly ...bool) error {
@@ -620,7 +615,6 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 func (r *SessionRecorder) currentSessionViewSummary(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
 	rec, err := r.store.LoadSession(ctx, r.projectName, strings.TrimSpace(sessionID))
 	if err != nil || rec == nil {
-		r.resetSessionUnread(sessionID)
 		return sessionViewSummary{}, false
 	}
 	return r.sessionViewSummaryFromRecord(*rec), true
@@ -632,7 +626,7 @@ func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) se
 		SessionID:   entry.ID,
 		Title:       firstNonEmpty(entry.Title, entry.ID),
 		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
-		UnreadCount: r.sessionUnread(entry.ID),
+		UnreadCount: 0,
 		Agent:       entry.Agent,
 		Status:      sessionStatusLabel(entry.Status),
 		ProjectName: entry.ProjectName,
@@ -645,61 +639,10 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 		SessionID:   rec.ID,
 		Title:       firstNonEmpty(rec.Title, rec.ID),
 		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
-		UnreadCount: r.sessionUnread(rec.ID),
+		UnreadCount: 0,
 		Status:      sessionStatusLabel(rec.Status),
 		ProjectName: rec.ProjectName,
 	}
-}
-
-func (r *SessionRecorder) incrementSessionUnread(sessionID string) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return
-	}
-	r.mu.Lock()
-	r.unreadCount[sessionID] += 1
-	r.mu.Unlock()
-}
-
-func (r *SessionRecorder) resetSessionUnread(sessionID string) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return
-	}
-	r.mu.Lock()
-	delete(r.unreadCount, sessionID)
-	r.mu.Unlock()
-}
-
-func (r *SessionRecorder) pruneUnreadCounts(entries []SessionListEntry) {
-	activeSessionIDs := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		sessionID := strings.TrimSpace(entry.ID)
-		if sessionID != "" {
-			activeSessionIDs[sessionID] = struct{}{}
-		}
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for sessionID, count := range r.unreadCount {
-		if count <= 0 {
-			delete(r.unreadCount, sessionID)
-			continue
-		}
-		if _, ok := activeSessionIDs[sessionID]; !ok {
-			delete(r.unreadCount, sessionID)
-		}
-	}
-}
-
-func (r *SessionRecorder) sessionUnread(sessionID string) int {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return 0
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.unreadCount[sessionID]
 }
 
 func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {

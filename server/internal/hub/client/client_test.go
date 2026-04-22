@@ -2418,7 +2418,7 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 		t.Fatalf("missing system/tool_call turn, turns=%+v", prompts[0].Turns)
 	}
 }
-func TestSessionRecorderMarkReadClearsUnreadEntry(t *testing.T) {
+func TestSessionRecorderMarkReadReturnsSummaryWithoutUnreadState(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
@@ -2431,22 +2431,12 @@ func TestSessionRecorderMarkReadClearsUnreadEntry(t *testing.T) {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
-	c.sessionRecorder.mu.Lock()
-	_, existsBefore := c.sessionRecorder.unreadCount["sess-1"]
-	c.sessionRecorder.mu.Unlock()
-	if !existsBefore {
-		t.Fatalf("unread entry missing before mark read")
-	}
-
-	if _, ok := c.sessionRecorder.MarkSessionRead(context.Background(), "sess-1"); !ok {
+	summary, ok := c.sessionRecorder.MarkSessionRead(context.Background(), "sess-1")
+	if !ok {
 		t.Fatalf("MarkSessionRead should return current summary")
 	}
-
-	c.sessionRecorder.mu.Lock()
-	_, existsAfter := c.sessionRecorder.unreadCount["sess-1"]
-	c.sessionRecorder.mu.Unlock()
-	if existsAfter {
-		t.Fatalf("unread entry should be removed after mark read")
+	if summary.UnreadCount != 0 {
+		t.Fatalf("summary.UnreadCount = %d, want 0", summary.UnreadCount)
 	}
 }
 
