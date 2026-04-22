@@ -615,7 +615,7 @@ html, body {
 
 /* Mobile portrait (<= 640px) */
 @media (max-width: 640px) {
-  html, body { overflow: auto; height: auto; }
+  html, body { overflow-x: hidden; overflow-y: auto; height: auto; }
   .shell { grid-template-rows: 40px auto; height: auto; min-height: 100dvh; }
   .body {
     grid-template-columns: 1fr;
@@ -635,6 +635,12 @@ html, body {
   .log-scroll { min-height: 300px; }
   .db-view { min-height: 300px; }
   .topbar-label { display: none; }
+  .topbar { height: auto; min-height: 40px; padding: 6px 10px; flex-wrap: wrap; row-gap: 6px; }
+  .topbar-brand { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+  .topbar-hub { margin-left: 0; flex: 1 1 100%; min-width: 0; }
+  .topbar-hub-select { width: 100%; min-width: 0; }
+  .topbar-sep { display: none; }
+  .topbar-status { margin-left: auto; }
   .tbtn { font-size: 10px; padding: 3px 8px; }
 }
 
@@ -1304,6 +1310,22 @@ async function loadLogs() {
   }
 }
 
+
+async function apiErrorFromResponse(res) {
+  const raw = await res.text();
+  const text = String(raw || '').trim();
+  if (!text) {
+    return { error: 'empty response', hint: '', code: '' };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') {
+      return parsed;
+    }
+  } catch (_) {}
+  return { error: text, hint: '', code: '' };
+}
+
 async function doAction(action) {
   const msg = $('action-msg');
   msg.textContent = action + '\u2026';
@@ -1311,7 +1333,7 @@ async function doAction(action) {
   try {
     const path = action === 'restart-monitor' ? 'api/action/' + action : hubPath('api/action/' + action);
     const res  = await fetch(window.location.origin + appURL(path), { method: 'POST' });
-    const data = await res.json();
+    const data = await apiErrorFromResponse(res);
     if (data.error) {
       msg.textContent = 'Error: ' + data.error + (data.hint ? ' | Hint: ' + data.hint : '');
       msg.style.color = 'var(--red)';
@@ -1335,7 +1357,7 @@ async function clearSessionHistory() {
   msg.style.color = 'var(--text-dim)';
   try {
     const res = await fetch(window.location.origin + appURL(hubPath('api/action/clear-session-history')), { method: 'POST' });
-    const data = await res.json();
+    const data = await apiErrorFromResponse(res);
     if (data.error) {
       msg.textContent = 'Error: ' + data.error + (data.hint ? ' | Hint: ' + data.hint : '');
       msg.style.color = 'var(--red)';
@@ -1373,7 +1395,3 @@ window.addEventListener('keydown', (e) => {
 </body>
 </html>
 `
-
-
-
-

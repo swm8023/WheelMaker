@@ -39,6 +39,36 @@ func TestActionUpdatePublishWritesFullUpdateSignal(t *testing.T) {
 	}
 }
 
+func TestActionClearSessionHistoryRoute(t *testing.T) {
+	baseDir := t.TempDir()
+	store, err := clientpkg.NewStore(filepath.Join(baseDir, "db", "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	mon := NewMonitor(baseDir)
+
+	mux := http.NewServeMux()
+	registerRoutes(mux, mon)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/action/clear-session-history", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d, want=%d, body=%s", rr.Code, http.StatusOK, rr.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	if body["action"] != "clear-session-history" {
+		t.Fatalf("action=%q, want clear-session-history", body["action"])
+	}
+}
+
 func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	base := t.TempDir()
 	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))

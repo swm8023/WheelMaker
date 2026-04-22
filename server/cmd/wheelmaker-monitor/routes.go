@@ -30,6 +30,7 @@ func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/api/action/stop", handleAction(mon, "stop"))
 	mux.HandleFunc("POST "+prefix+"/api/action/start", handleAction(mon, "start"))
 	mux.HandleFunc("POST "+prefix+"/api/action/update-publish", handleAction(mon, "update-publish"))
+	mux.HandleFunc("POST "+prefix+"/api/action/clear-session-history", handleAction(mon, "clear-session-history"))
 
 	// PWA resources
 	mux.HandleFunc("GET "+prefix+"/manifest.webmanifest", handleManifest())
