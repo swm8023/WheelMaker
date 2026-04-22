@@ -2120,7 +2120,11 @@ function App() {
   const loadChatSessions = async (
     preferredSessionId = '',
     activeProjectId = projectIdRef.current,
-    options?: { incremental?: boolean; preserveUserSelection?: boolean },
+    options?: {
+      incremental?: boolean;
+      preserveUserSelection?: boolean;
+      hydrateMessages?: boolean;
+    },
   ) => {
     if (!activeProjectId) return;
     try {
@@ -2150,6 +2154,13 @@ function App() {
       if (!fallbackSessionId) {
         setSelectedChatId('');
         setChatMessages([]);
+        return;
+      }
+      setSelectedChatId(fallbackSessionId);
+      if (!options?.hydrateMessages) {
+        if (!options?.preserveUserSelection) {
+          setChatMessages([]);
+        }
         return;
       }
       await loadChatSession(fallbackSessionId, activeProjectId, {
@@ -2335,6 +2346,7 @@ function App() {
         {
           incremental: silentReconnect && !!previousSelectedChatId,
           preserveUserSelection: silentReconnect,
+          hydrateMessages: false,
         },
       );
       workspaceController
@@ -2486,7 +2498,9 @@ function App() {
       chatSelectedIdRef.current = '';
       chatSyncIndexRef.current = {};
         chatSyncSubIndexRef.current = {};
-      await loadChatSessions('', result.hydrated.projectId);
+      await loadChatSessions('', result.hydrated.projectId, {
+        hydrateMessages: false,
+      });
       workspaceController
         .validateExpandedDirectories(
           result.rootEntries,
@@ -4171,6 +4185,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
 
 
