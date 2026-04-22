@@ -286,7 +286,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	if err := r.upsertSessionProjection(ctx, event.SessionID, promptTitle, event.UpdatedAt, true); err != nil {
 		return err
 	}
-	r.publishSessionTurn(event.SessionID, turn, event.UpdatedAt)
+	r.publishSessionTurn(event.SessionID, turn)
 	return nil
 }
 
@@ -312,7 +312,7 @@ func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event Se
 	}
 	state.nextTurnIndex++
 	r.promptState[event.SessionID] = state
-	r.publishSessionTurn(event.SessionID, turn, event.UpdatedAt)
+	r.publishSessionTurn(event.SessionID, turn)
 	return nil
 }
 
@@ -396,50 +396,28 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 	return state, nil
 }
 
-func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord, updatedAt time.Time) {
+func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord) {
 	publish := r.eventPublisher()
 	if publish == nil {
 		return
 	}
-	if updatedAt.IsZero() {
-		updatedAt = time.Now().UTC()
-	}
-	ctx := context.Background()
-	summary, ok := r.currentSessionViewSummary(ctx, sessionID)
-	if !ok {
-		summary = sessionViewSummary{SessionID: sessionID, Title: sessionID, UpdatedAt: updatedAt.UTC().Format(time.RFC3339), ProjectName: r.projectName}
-	}
-	decoded := toSessionViewTurn(turn)
-	message := toSessionViewMessageFromTurn(sessionID, decoded, updatedAt)
-	_ = publish("registry.session.message", map[string]any{
-		"session": summary,
-		"message": message,
-		"turn":    decoded,
-	})
-}
-
-func toSessionViewMessageFromTurn(sessionID string, turn sessionViewTurn, updatedAt time.Time) sessionViewMessage {
 	sessionID = strings.TrimSpace(sessionID)
-	messageID := strings.TrimSpace(turn.TurnID)
-	if messageID == "" {
-		messageID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
+	content := strings.TrimSpace(turn.UpdateJSON)
+	if content == "" {
+		content = "{}"
 	}
-	stamp := updatedAt.UTC().Format(time.RFC3339)
-	return sessionViewMessage{
-		MessageID: messageID,
-		SessionID: sessionID,
-		Index:     turn.PromptIndex,
-		SubIndex:  turn.TurnIndex,
-		Role:      turn.Role,
-		Kind:      turn.Kind,
-		Text:      turn.Text,
-		Blocks:    cloneSessionContentBlocks(turn.Blocks),
-		Options:   cloneSessionPermissionOptions(turn.Options),
-		Status:    turn.Status,
-		CreatedAt: stamp,
-		UpdatedAt: stamp,
-		RequestID: turn.RequestID,
+	turnID := strings.TrimSpace(turn.TurnID)
+	if turnID == "" {
+		turnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
 	}
+	_ = publish("registry.session.message", map[string]any{
+		"sessionId":   sessionID,
+		"turnId":      turnID,
+		"promptIndex": turn.PromptIndex,
+		"turnIndex":   turn.TurnIndex,
+		"updateIndex": turn.UpdateIndex,
+		"content":     content,
+	})
 }
 
 func sessionUpdateText(update acp.SessionUpdate) string {

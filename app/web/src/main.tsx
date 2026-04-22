@@ -234,6 +234,187 @@ function upsertChatMessage(
   return copy;
 }
 
+function normalizeChatRole(value: unknown): RegistryChatMessage['role'] {
+  return value === 'user' || value === 'assistant' || value === 'system'
+    ? value
+    : 'assistant';
+}
+
+function normalizeChatKind(value: unknown): RegistryChatMessage['kind'] {
+  return value === 'text' ||
+    value === 'image' ||
+    value === 'thought' ||
+    value === 'tool' ||
+    value === 'permission' ||
+    value === 'prompt_result' ||
+    value === 'message'
+    ? value
+    : 'message';
+}
+
+function normalizeChatStatus(value: unknown): RegistryChatMessage['status'] {
+  return value === 'streaming' || value === 'done' || value === 'needs_action'
+    ? value
+    : 'done';
+}
+
+function extractTextFromACPContent(content: unknown): string {
+  if (typeof content === 'string') {
+    return content.trim();
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  const chunks: string[] = [];
+  for (const item of content) {
+    if (!item || typeof item !== 'object') continue;
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.text === 'string' && entry.text.trim()) {
+      chunks.push(entry.text.trim());
+    }
+  }
+  return chunks.join('\n').trim();
+}
+
+function decodeSessionMessageFromEventPayload(
+  payload: RegistryChatMessageEventPayload,
+): RegistryChatMessage | null {
+  if (payload.message?.messageId) {
+    return payload.message;
+  }
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
+  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+  if (!sessionId || !content) {
+    return null;
+  }
+
+  const promptIndex = Number(payload.promptIndex ?? 0);
+  const turnIndex = Number(payload.turnIndex ?? 0);
+  const updateIndex = Number(payload.updateIndex ?? 0);
+  const turnId = typeof payload.turnId === 'string' ? payload.turnId.trim() : '';
+  const messageId = turnId || `${sessionId}:${promptIndex}:${turnIndex}:${updateIndex}`;
+  const now = new Date().toISOString();
+
+  const message: RegistryChatMessage = {
+    messageId,
+    sessionId,
+    syncIndex: promptIndex > 0 ? promptIndex : undefined,
+    syncSubIndex: turnIndex > 0 ? turnIndex : (updateIndex > 0 ? updateIndex : undefined),
+    role: 'assistant',
+    kind: 'message',
+    text: '',
+    status: 'done',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  try {
+    const doc = JSON.parse(content) as Record<string, unknown>;
+    const method = typeof doc.method === 'string' ? doc.method.trim() : '';
+    const payloadDoc = (doc.payload && typeof doc.payload === 'object')
+      ? (doc.payload as Record<string, unknown>)
+      : undefined;
+    const params = (doc.params && typeof doc.params === 'object')
+      ? (doc.params as Record<string, unknown>)
+      : undefined;
+    const result = (doc.result && typeof doc.result === 'object')
+      ? (doc.result as Record<string, unknown>)
+      : undefined;
+
+    if (typeof doc.id === 'number' && Number.isFinite(doc.id)) {
+      message.requestId = doc.id;
+    }
+    if (payloadDoc) {
+      message.role = normalizeChatRole(payloadDoc.role);
+      message.kind = normalizeChatKind(payloadDoc.kind);
+      message.status = normalizeChatStatus(payloadDoc.status);
+      if (typeof payloadDoc.text === 'string') {
+        message.text = payloadDoc.text;
+      }
+      if (typeof payloadDoc.requestId === 'number' && Number.isFinite(payloadDoc.requestId)) {
+        message.requestId = payloadDoc.requestId;
+      }
+      if (Array.isArray(payloadDoc.blocks)) {
+        message.blocks = payloadDoc.blocks as RegistryChatMessage['blocks'];
+      }
+      if (Array.isArray(payloadDoc.options)) {
+        message.options = payloadDoc.options as RegistryChatMessage['options'];
+      }
+    }
+
+    if (method === 'session.prompt') {
+      const promptBlocks = Array.isArray(params?.prompt) ? params.prompt : [];
+      message.role = 'user';
+      message.kind = 'message';
+      if (!message.text) {
+        message.text = extractTextFromACPContent(promptBlocks);
+      }
+      if (promptBlocks.length > 0) {
+        message.blocks = promptBlocks as RegistryChatMessage['blocks'];
+      }
+      const stopReason = (result?.stopReason && typeof result.stopReason === 'string')
+        ? result.stopReason.trim()
+        : '';
+      if (!message.text && stopReason) {
+        message.text = stopReason;
+      }
+    }
+
+    if (method === 'session.update') {
+      const update = (params?.update && typeof params.update === 'object')
+        ? (params.update as Record<string, unknown>)
+        : undefined;
+      const updateMethod = typeof update?.sessionUpdate === 'string' ? update.sessionUpdate.trim() : '';
+      const updateText = extractTextFromACPContent(update?.content);
+      if (updateMethod === 'user_message_chunk') {
+        message.role = 'user';
+        message.kind = 'message';
+      } else if (updateMethod === 'agent_message_chunk') {
+        message.role = 'assistant';
+        message.kind = 'message';
+      } else if (updateMethod === 'agent_thought_chunk') {
+        message.role = 'assistant';
+        message.kind = 'thought';
+      } else if (updateMethod === 'tool_call' || updateMethod === 'tool_call_update') {
+        message.role = 'system';
+        message.kind = 'tool';
+      }
+      if (!message.text) {
+        message.text = updateText;
+      }
+      if (typeof update?.status === 'string') {
+        message.status = normalizeChatStatus(update.status);
+      }
+    }
+
+    if (method === 'request_permission') {
+      const toolCall = (params?.toolCall && typeof params.toolCall === 'object')
+        ? (params.toolCall as Record<string, unknown>)
+        : undefined;
+      const outcome = (result?.outcome && typeof result.outcome === 'object')
+        ? (result.outcome as Record<string, unknown>)
+        : undefined;
+      message.role = 'system';
+      message.kind = 'permission';
+      if (!message.text && typeof toolCall?.title === 'string') {
+        message.text = toolCall.title;
+      }
+      if (Array.isArray(params?.options) && (!message.options || message.options.length === 0)) {
+        message.options = params.options as RegistryChatMessage['options'];
+      }
+      if (typeof outcome?.outcome === 'string') {
+        message.status = normalizeChatStatus(outcome.outcome);
+      } else {
+        message.status = 'needs_action';
+      }
+    }
+  } catch {
+    message.text = content;
+  }
+
+  return message;
+}
+
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
@@ -2407,39 +2588,61 @@ function App() {
         }
         const payload = (event.payload ??
           {}) as RegistryChatMessageEventPayload;
-        if (payload.session?.sessionId) {
-          setChatSessions(prev => mergeChatSession(prev, payload.session));
+        const message = decodeSessionMessageFromEventPayload(payload);
+        const messageSessionID = message?.sessionId ?? '';
+        const sessionId = payload.session?.sessionId || messageSessionID;
+
+        const sessionSummary = payload.session;
+        if (sessionSummary?.sessionId) {
+          setChatSessions(prev => mergeChatSession(prev, sessionSummary));
+        } else if (sessionId && message) {
+          setChatSessions(prev => {
+            const existing = prev.find(item => item.sessionId === sessionId);
+            return mergeChatSession(prev, {
+              sessionId,
+              title: existing?.title || sessionId,
+              preview: message.text || existing?.preview || '',
+              updatedAt: message.updatedAt || new Date().toISOString(),
+              messageCount: existing?.messageCount ?? 0,
+              unreadCount: existing?.unreadCount,
+              agent: existing?.agent,
+              status: existing?.status,
+            });
+          });
         }
-        if (payload.message?.messageId) {
-          maybeNotifyChatMessage(payload.message, payload.session);
+        if (message?.messageId) {
+          maybeNotifyChatMessage(message, payload.session);
         }
-        if (payload.message?.sessionId) {
-          const incomingSyncIndex = payload.message.syncIndex ?? 0;
-          const incomingSyncSubIndex = payload.message.syncSubIndex ?? 0;
-          const currentSyncIndex = chatSyncIndexRef.current[payload.message.sessionId] ?? 0;
-          const currentSyncSubIndex = chatSyncSubIndexRef.current[payload.message.sessionId] ?? 0;
+        if (message && messageSessionID) {
+          const incomingSyncIndex = message.syncIndex ?? 0;
+          const incomingSyncSubIndex = message.syncSubIndex ?? 0;
+          const currentSyncIndex = chatSyncIndexRef.current[messageSessionID] ?? 0;
+          const currentSyncSubIndex = chatSyncSubIndexRef.current[messageSessionID] ?? 0;
           if (
             incomingSyncIndex > currentSyncIndex ||
             (incomingSyncIndex === currentSyncIndex && incomingSyncSubIndex > currentSyncSubIndex)
           ) {
-            chatSyncIndexRef.current[payload.message.sessionId] = incomingSyncIndex;
-            chatSyncSubIndexRef.current[payload.message.sessionId] = incomingSyncSubIndex;
+            chatSyncIndexRef.current[messageSessionID] = incomingSyncIndex;
+            chatSyncSubIndexRef.current[messageSessionID] = incomingSyncSubIndex;
           }
         }
         if (
-          payload.message?.sessionId &&
-          payload.message.sessionId === chatSelectedIdRef.current
+          messageSessionID &&
+          messageSessionID === chatSelectedIdRef.current &&
+          message
         ) {
-          setChatMessages(prev => upsertChatMessage(prev, payload.message));
+          setChatMessages(prev => upsertChatMessage(prev, message));
           service
-            .markSessionRead(payload.message.sessionId)
+            .markSessionRead(messageSessionID)
             .catch(() => undefined);
         }
-        if (!chatSelectedIdRef.current && payload.session?.sessionId) {
-          setSelectedChatId(payload.session.sessionId);
-          setChatMessages(prev => upsertChatMessage(prev, payload.message));
+        if (!chatSelectedIdRef.current && sessionId) {
+          setSelectedChatId(sessionId);
+          if (message) {
+            setChatMessages(prev => upsertChatMessage(prev, message));
+          }
           service
-            .markSessionRead(payload.session.sessionId)
+            .markSessionRead(sessionId)
             .catch(() => undefined);
         }
       }
@@ -3976,9 +4179,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
-
 
 
 

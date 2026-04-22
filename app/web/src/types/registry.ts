@@ -94,8 +94,14 @@ export interface RegistrySessionReadResponse {
 }
 
 export interface RegistrySessionMessageEventPayload {
-  session: RegistrySessionSummary;
-  message: RegistrySessionMessage;
+  session?: RegistrySessionSummary;
+  message?: RegistrySessionMessage;
+  sessionId?: string;
+  turnId?: string;
+  promptIndex?: number;
+  turnIndex?: number;
+  updateIndex?: number;
+  content?: string;
 }
 
 export type RegistryChatContentBlock = RegistrySessionContentBlock;
