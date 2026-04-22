@@ -410,25 +410,36 @@ func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnR
 		summary = sessionViewSummary{SessionID: sessionID, Title: sessionID, UpdatedAt: updatedAt.UTC().Format(time.RFC3339), ProjectName: r.projectName}
 	}
 	decoded := toSessionViewTurn(turn)
+	message := toSessionViewMessageFromTurn(sessionID, decoded, updatedAt)
+	_ = publish("registry.session.message", map[string]any{
+		"session": summary,
+		"message": message,
+		"turn":    decoded,
+	})
+}
+
+func toSessionViewMessageFromTurn(sessionID string, turn sessionViewTurn, updatedAt time.Time) sessionViewMessage {
+	sessionID = strings.TrimSpace(sessionID)
 	messageID := strings.TrimSpace(turn.TurnID)
 	if messageID == "" {
 		messageID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
 	}
-	_ = publish("registry.session.message", map[string]any{"session": summary, "message": sessionViewMessage{
+	stamp := updatedAt.UTC().Format(time.RFC3339)
+	return sessionViewMessage{
 		MessageID: messageID,
 		SessionID: sessionID,
 		Index:     turn.PromptIndex,
 		SubIndex:  turn.TurnIndex,
-		Role:      decoded.Role,
-		Kind:      decoded.Kind,
-		Text:      decoded.Text,
-		Blocks:    cloneSessionContentBlocks(decoded.Blocks),
-		Options:   cloneSessionPermissionOptions(decoded.Options),
-		Status:    decoded.Status,
-		CreatedAt: updatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
-		RequestID: decoded.RequestID,
-	}})
+		Role:      turn.Role,
+		Kind:      turn.Kind,
+		Text:      turn.Text,
+		Blocks:    cloneSessionContentBlocks(turn.Blocks),
+		Options:   cloneSessionPermissionOptions(turn.Options),
+		Status:    turn.Status,
+		CreatedAt: stamp,
+		UpdatedAt: stamp,
+		RequestID: turn.RequestID,
+	}
 }
 
 func sessionUpdateText(update acp.SessionUpdate) string {
