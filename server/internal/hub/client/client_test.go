@@ -1918,16 +1918,15 @@ func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
-	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
-		t.Fatalf("messages[0] text = %q, want hello", extractTextChunk(update1.Content))
+	if messages[0].UpdateIndex != 2 {
+		t.Fatalf("messages[0].UpdateIndex = %d, want 2", messages[0].UpdateIndex)
 	}
-	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
-	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
-		t.Fatalf("messages[1] text = %q, want world", extractTextChunk(update2.Content))
+	update := decodeTurnSessionUpdate(t, messages[0].Content)
+	if strings.TrimSpace(extractTextChunk(update.Content)) != "hello world" {
+		t.Fatalf("messages[0] text = %q, want hello world", extractTextChunk(update.Content))
 	}
 }
 
@@ -2244,19 +2243,17 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
-	if len(stored) != 2 {
-		t.Fatalf("stored len = %d, want 2", len(stored))
+	if len(stored) != 1 {
+		t.Fatalf("stored len = %d, want 1", len(stored))
 	}
-	for i := range stored {
-		if stored[i].Method != acp.MethodSessionUpdate {
-			t.Fatalf("stored[%d].Method = %q, want %q", i, stored[i].Method, acp.MethodSessionUpdate)
-		}
+	if stored[0].Method != acp.MethodSessionUpdate {
+		t.Fatalf("stored[0].Method = %q, want %q", stored[0].Method, acp.MethodSessionUpdate)
 	}
-	if strings.TrimSpace(stored[0].Body) != "hello" {
-		t.Fatalf("stored[0].Body = %q, want hello", stored[0].Body)
+	if strings.TrimSpace(stored[0].Body) != "hello world" {
+		t.Fatalf("stored[0].Body = %q, want hello world", stored[0].Body)
 	}
-	if strings.TrimSpace(stored[1].Body) != "world" {
-		t.Fatalf("stored[1].Body = %q, want world", stored[1].Body)
+	if stored[0].SyncSubIndex != 1 {
+		t.Fatalf("stored[0].SyncSubIndex = %d, want 1", stored[0].SyncSubIndex)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
@@ -2269,16 +2266,15 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
-	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
-		t.Fatalf("message[0] text = %q, want hello", extractTextChunk(update1.Content))
+	if messages[0].UpdateIndex != 2 {
+		t.Fatalf("messages[0].UpdateIndex = %d, want 2", messages[0].UpdateIndex)
 	}
-	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
-	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
-		t.Fatalf("message[1] text = %q, want world", extractTextChunk(update2.Content))
+	update := decodeTurnSessionUpdate(t, messages[0].Content)
+	if strings.TrimSpace(extractTextChunk(update.Content)) != "hello world" {
+		t.Fatalf("message[0] text = %q, want hello world", extractTextChunk(update.Content))
 	}
 }
 
@@ -2371,19 +2367,17 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	for i := range messages {
-		if method := decodeTurnMethod(t, messages[i].Content); method != acp.MethodRequestPermission {
-			t.Fatalf("messages[%d] method = %q, want %q", i, method, acp.MethodRequestPermission)
-		}
+	if method := decodeTurnMethod(t, messages[0].Content); method != acp.MethodRequestPermission {
+		t.Fatalf("messages[0] method = %q, want %q", method, acp.MethodRequestPermission)
 	}
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
 	}
-	if got := body["lastSubIndex"].(int64); got != 2 {
-		t.Fatalf("lastSubIndex = %d, want 2", got)
+	if got := body["lastSubIndex"].(int64); got != 1 {
+		t.Fatalf("lastSubIndex = %d, want 1", got)
 	}
 }
 
@@ -2456,27 +2450,27 @@ func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *tes
 	if err != nil {
 		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
-	if len(messages) != 3 {
-		t.Fatalf("messages len = %d, want 3 (prompt + two assistant turns)", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2 (prompt + merged assistant turn)", len(messages))
 	}
 
 	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3 (prompt + two assistant turns)", len(turns))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
 	}
-	update1 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
-	if text := strings.TrimSpace(extractTextChunk(update1.Content)); text != "hello" {
-		t.Fatalf("assistant turn #1 text = %q, want hello", text)
+	assistantTurn := turns[1]
+	if assistantTurn.UpdateIndex != 2 {
+		t.Fatalf("assistant turn updateIndex = %d, want 2", assistantTurn.UpdateIndex)
 	}
-	update2 := decodeTurnSessionUpdate(t, turns[2].UpdateJSON)
-	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "world" {
-		t.Fatalf("assistant turn #2 text = %q, want world", text)
+	update := decodeTurnSessionUpdate(t, assistantTurn.UpdateJSON)
+	if text := strings.TrimSpace(extractTextChunk(update.Content)); text != "hello world" {
+		t.Fatalf("assistant merged text = %q, want hello world", text)
 	}
-	if update2.Status != "done" {
-		t.Fatalf("assistant turn #2 status = %q, want done", update2.Status)
+	if update.Status != "done" {
+		t.Fatalf("assistant merged status = %q, want done", update.Status)
 	}
 }
 
@@ -2598,19 +2592,17 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	for i := range messages {
-		if method := decodeTurnMethod(t, messages[i].Content); method != acp.MethodRequestPermission {
-			t.Fatalf("messages[%d] method = %q, want %q", i, method, acp.MethodRequestPermission)
-		}
+	if method := decodeTurnMethod(t, messages[0].Content); method != acp.MethodRequestPermission {
+		t.Fatalf("messages[0] method = %q, want %q", method, acp.MethodRequestPermission)
 	}
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
 	}
-	if got := body["lastSubIndex"].(int64); got != 2 {
-		t.Fatalf("lastSubIndex = %d, want 2", got)
+	if got := body["lastSubIndex"].(int64); got != 1 {
+		t.Fatalf("lastSubIndex = %d, want 1", got)
 	}
 }
 
@@ -2670,10 +2662,13 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3 (prompt + tool start + tool done)", len(turns))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
 	}
-	toolTurn := turns[2]
+	toolTurn := turns[1]
+	if toolTurn.UpdateIndex != 2 {
+		t.Fatalf("tool turn updateIndex = %d, want 2", toolTurn.UpdateIndex)
+	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
 	if update.ToolCallID != "call-1" {
 		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-1")
@@ -2781,10 +2776,13 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 4 {
-		t.Fatalf("turns len = %d, want 4 (prompt + three tool updates)", len(turns))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
 	}
-	toolTurn := turns[3]
+	toolTurn := turns[1]
+	if toolTurn.UpdateIndex != 3 {
+		t.Fatalf("tool turn updateIndex = %d, want 3", toolTurn.UpdateIndex)
+	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
 	if update.ToolCallID != "call-terminal" {
 		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-terminal")
@@ -2815,30 +2813,57 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3 (prompt + permission request + permission result)", len(turns))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged permission turn)", len(turns))
 	}
-	permTurn := turns[2]
-	var doc struct {
+	permTurn := turns[1]
+	if permTurn.UpdateIndex != 2 {
+		t.Fatalf("permission turn updateIndex = %d, want 2", permTurn.UpdateIndex)
+	}
+
+	var requestDoc struct {
 		ID     int64  `json:"id"`
 		Method string `json:"method"`
-		Result struct {
-			Outcome acp.PermissionResult `json:"outcome"`
-		} `json:"result"`
+		Params struct {
+			ToolCall acp.ToolCallRef `json:"toolCall"`
+		} `json:"params"`
 	}
-	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &doc); err != nil {
+	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &requestDoc); err != nil {
 		t.Fatalf("unmarshal permission turn update_json: %v", err)
 	}
-	if doc.Method != acp.MethodRequestPermission {
-		t.Fatalf("permission turn method = %q, want %q", doc.Method, acp.MethodRequestPermission)
+	if requestDoc.Method != acp.MethodRequestPermission {
+		t.Fatalf("permission turn method = %q, want %q", requestDoc.Method, acp.MethodRequestPermission)
 	}
-	if doc.ID != 7 {
-		t.Fatalf("permission turn requestId = %d, want 7", doc.ID)
+	if requestDoc.ID != 7 {
+		t.Fatalf("permission turn requestId = %d, want 7", requestDoc.ID)
 	}
-	if doc.Result.Outcome.Outcome != "done" {
-		t.Fatalf("permission turn status = %q, want done", doc.Result.Outcome.Outcome)
+	if strings.TrimSpace(requestDoc.Params.ToolCall.ToolCallID) != "call-7" {
+		t.Fatalf("permission toolCallId = %q, want call-7", requestDoc.Params.ToolCall.ToolCallID)
+	}
+
+	var extraDoc struct {
+		ACPUserResult struct {
+			ID     int64  `json:"id"`
+			Method string `json:"method"`
+			Result struct {
+				Outcome acp.PermissionResult `json:"outcome"`
+			} `json:"result"`
+		} `json:"acpUserResult"`
+	}
+	if err := json.Unmarshal([]byte(permTurn.ExtraJSON), &extraDoc); err != nil {
+		t.Fatalf("unmarshal permission turn extra_json: %v", err)
+	}
+	if extraDoc.ACPUserResult.ID != 7 {
+		t.Fatalf("extra.acpUserResult.id = %d, want 7", extraDoc.ACPUserResult.ID)
+	}
+	if extraDoc.ACPUserResult.Method != acp.MethodRequestPermission {
+		t.Fatalf("extra.acpUserResult.method = %q, want %q", extraDoc.ACPUserResult.Method, acp.MethodRequestPermission)
+	}
+	if extraDoc.ACPUserResult.Result.Outcome.Outcome != "done" {
+		t.Fatalf("extra permission outcome = %q, want done", extraDoc.ACPUserResult.Result.Outcome.Outcome)
 	}
 }
+
 func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()

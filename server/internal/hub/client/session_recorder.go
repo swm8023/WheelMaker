@@ -72,6 +72,428 @@ type sessionViewMessage struct {
 type sessionPromptState struct {
 	promptIndex   int64
 	nextTurnIndex int64
+
+	turns                     map[int64]SessionTurnRecord
+	messageTurnByUpdateMethod map[string]int64
+	toolTurnByToolCallID      map[string]int64
+	permissionTurnByRequestID map[int64]int64
+}
+
+func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState {
+	if nextTurnIndex <= 0 {
+		nextTurnIndex = 1
+	}
+	return sessionPromptState{
+		promptIndex:               promptIndex,
+		nextTurnIndex:             nextTurnIndex,
+		turns:                     map[int64]SessionTurnRecord{},
+		messageTurnByUpdateMethod: map[string]int64{},
+		toolTurnByToolCallID:      map[string]int64{},
+		permissionTurnByRequestID: map[int64]int64{},
+	}
+}
+
+func (s *sessionPromptState) ensureMaps() {
+	if s.turns == nil {
+		s.turns = map[int64]SessionTurnRecord{}
+	}
+	if s.messageTurnByUpdateMethod == nil {
+		s.messageTurnByUpdateMethod = map[string]int64{}
+	}
+	if s.toolTurnByToolCallID == nil {
+		s.toolTurnByToolCallID = map[string]int64{}
+	}
+	if s.permissionTurnByRequestID == nil {
+		s.permissionTurnByRequestID = map[int64]int64{}
+	}
+	if s.nextTurnIndex <= 0 {
+		s.nextTurnIndex = 1
+	}
+}
+
+func (s *sessionPromptState) assignTurn(turn SessionTurnRecord) {
+	s.ensureMaps()
+	turn.TurnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
+	turn.UpdateJSON = normalizeJSONDoc(turn.UpdateJSON, `{}`)
+	turn.ExtraJSON = normalizeJSONDoc(turn.ExtraJSON, `{}`)
+	s.turns[turn.TurnIndex] = turn
+	if turn.TurnIndex >= s.nextTurnIndex {
+		s.nextTurnIndex = turn.TurnIndex + 1
+	}
+	if key := sessionTurnUpdateMethodKey(turn.UpdateJSON); key != "" {
+		s.messageTurnByUpdateMethod[key] = turn.TurnIndex
+	}
+	if key := sessionTurnToolCallIDKey(turn.UpdateJSON); key != "" {
+		s.toolTurnByToolCallID[key] = turn.TurnIndex
+	}
+	if requestID := sessionTurnPermissionRequestIDKey(turn.UpdateJSON); requestID > 0 {
+		s.permissionTurnByRequestID[requestID] = turn.TurnIndex
+	}
+}
+
+func (s *sessionPromptState) mergeTargetTurn(plan sessionTurnMergePlan) (SessionTurnRecord, bool) {
+	s.ensureMaps()
+	var turnIndex int64
+	switch plan.kind {
+	case sessionTurnMergeMessage:
+		turnIndex = s.messageTurnByUpdateMethod[strings.TrimSpace(plan.updateMethod)]
+	case sessionTurnMergeTool:
+		turnIndex = s.toolTurnByToolCallID[strings.TrimSpace(plan.toolCallID)]
+	case sessionTurnMergePermission:
+		turnIndex = s.permissionTurnByRequestID[plan.requestID]
+	default:
+		return SessionTurnRecord{}, false
+	}
+	if turnIndex <= 0 {
+		return SessionTurnRecord{}, false
+	}
+	turn, ok := s.turns[turnIndex]
+	if !ok {
+		return SessionTurnRecord{}, false
+	}
+	return turn, true
+}
+
+type sessionTurnMergeKind string
+
+const (
+	sessionTurnMergeNone       sessionTurnMergeKind = ""
+	sessionTurnMergeMessage    sessionTurnMergeKind = "message"
+	sessionTurnMergeTool       sessionTurnMergeKind = "tool"
+	sessionTurnMergePermission sessionTurnMergeKind = "permission"
+)
+
+type sessionTurnMergePlan struct {
+	kind                sessionTurnMergeKind
+	updateMethod        string
+	toolCallID          string
+	requestID           int64
+	hasPermissionResult bool
+}
+
+func isMessageSessionUpdateType(updateMethod string) bool {
+	switch strings.TrimSpace(updateMethod) {
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		return true
+	default:
+		return false
+	}
+}
+
+func isToolSessionUpdateType(updateMethod string) bool {
+	switch strings.TrimSpace(updateMethod) {
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+func buildSessionTurnMergePlan(doc sessionViewACPContentDoc) (sessionTurnMergePlan, error) {
+	plan := sessionTurnMergePlan{kind: sessionTurnMergeNone}
+	switch strings.TrimSpace(doc.Method) {
+	case acp.MethodSessionUpdate:
+		var params acp.SessionUpdateParams
+		if err := decodeSessionViewEventParams(doc, &params); err != nil {
+			if errors.Is(err, errSessionEventPayloadEmpty) {
+				return plan, nil
+			}
+			return plan, err
+		}
+		updateMethod := strings.TrimSpace(params.Update.SessionUpdate)
+		switch {
+		case isMessageSessionUpdateType(updateMethod):
+			plan.kind = sessionTurnMergeMessage
+			plan.updateMethod = updateMethod
+		case isToolSessionUpdateType(updateMethod) && strings.TrimSpace(params.Update.ToolCallID) != "":
+			plan.kind = sessionTurnMergeTool
+			plan.toolCallID = strings.TrimSpace(params.Update.ToolCallID)
+		}
+	case acp.MethodRequestPermission:
+		if doc.ID <= 0 {
+			return plan, nil
+		}
+		plan.kind = sessionTurnMergePermission
+		plan.requestID = doc.ID
+		plan.hasPermissionResult = len(doc.Result) > 0 && strings.TrimSpace(string(doc.Result)) != ""
+	}
+	return plan, nil
+}
+
+func mergeTurnRecord(existing SessionTurnRecord, incomingRaw string, plan sessionTurnMergePlan) (SessionTurnRecord, error) {
+	merged := existing
+	merged.UpdateIndex = maxInt64(existing.UpdateIndex, 0) + 1
+	merged.UpdateJSON = normalizeJSONDoc(existing.UpdateJSON, `{}`)
+	merged.ExtraJSON = normalizeJSONDoc(existing.ExtraJSON, `{}`)
+
+	var err error
+	switch plan.kind {
+	case sessionTurnMergeMessage:
+		merged.UpdateJSON, err = mergeSessionUpdateMessageJSON(existing.UpdateJSON, incomingRaw, plan.updateMethod)
+		if err != nil {
+			return SessionTurnRecord{}, err
+		}
+	case sessionTurnMergeTool:
+		merged.UpdateJSON, err = mergeSessionUpdateToolJSON(existing.UpdateJSON, incomingRaw)
+		if err != nil {
+			return SessionTurnRecord{}, err
+		}
+	case sessionTurnMergePermission:
+		merged.UpdateJSON, merged.ExtraJSON, err = mergeSessionPermissionJSON(existing.UpdateJSON, existing.ExtraJSON, incomingRaw)
+		if err != nil {
+			return SessionTurnRecord{}, err
+		}
+	default:
+		merged.UpdateJSON = normalizeJSONDoc(incomingRaw, merged.UpdateJSON)
+	}
+	return merged, nil
+}
+
+func mergeSessionUpdateMessageJSON(existingRaw, incomingRaw, updateMethod string) (string, error) {
+	return mergeSessionUpdateDoc(existingRaw, incomingRaw, func(base, incoming acp.SessionUpdate) acp.SessionUpdate {
+		merged := mergeSessionUpdateFields(base, incoming)
+		if strings.TrimSpace(updateMethod) != "" {
+			merged.SessionUpdate = strings.TrimSpace(updateMethod)
+		}
+		textMerged := appendSessionUpdateTextContent(base, incoming)
+		if len(textMerged.Content) > 0 {
+			merged.Content = cloneJSONRaw(textMerged.Content)
+		}
+		return merged
+	})
+}
+
+func mergeSessionUpdateToolJSON(existingRaw, incomingRaw string) (string, error) {
+	return mergeSessionUpdateDoc(existingRaw, incomingRaw, func(base, incoming acp.SessionUpdate) acp.SessionUpdate {
+		return mergeSessionUpdateFields(base, incoming)
+	})
+}
+
+func mergeSessionUpdateDoc(existingRaw, incomingRaw string, mergeUpdate func(base, incoming acp.SessionUpdate) acp.SessionUpdate) (string, error) {
+	type sessionUpdateEnvelope struct {
+		Method string `json:"method"`
+		Params struct {
+			SessionID string            `json:"sessionId,omitempty"`
+			Update    acp.SessionUpdate `json:"update"`
+		} `json:"params"`
+	}
+
+	existingRaw = normalizeJSONDoc(existingRaw, `{}`)
+	incomingRaw = normalizeJSONDoc(incomingRaw, existingRaw)
+
+	var existingDoc sessionUpdateEnvelope
+	if err := json.Unmarshal([]byte(existingRaw), &existingDoc); err != nil {
+		return incomingRaw, nil
+	}
+	var incomingDoc sessionUpdateEnvelope
+	if err := json.Unmarshal([]byte(incomingRaw), &incomingDoc); err != nil {
+		return existingRaw, nil
+	}
+	if strings.TrimSpace(existingDoc.Method) != acp.MethodSessionUpdate || strings.TrimSpace(incomingDoc.Method) != acp.MethodSessionUpdate {
+		return incomingRaw, nil
+	}
+	existingDoc.Params.Update = mergeUpdate(existingDoc.Params.Update, incomingDoc.Params.Update)
+	if strings.TrimSpace(incomingDoc.Params.SessionID) != "" {
+		existingDoc.Params.SessionID = strings.TrimSpace(incomingDoc.Params.SessionID)
+	}
+	raw, err := json.Marshal(existingDoc)
+	if err != nil {
+		return "", err
+	}
+	return normalizeJSONDoc(string(raw), incomingRaw), nil
+}
+
+func mergeSessionPermissionJSON(existingUpdateJSON, existingExtraJSON, incomingRaw string) (string, string, error) {
+	incomingRaw = normalizeJSONDoc(incomingRaw, `{}`)
+	incomingDoc, err := decodeSessionViewACPContentDoc(incomingRaw)
+	if err != nil {
+		return normalizeJSONDoc(existingUpdateJSON, incomingRaw), normalizeJSONDoc(existingExtraJSON, `{}`), nil
+	}
+	if strings.TrimSpace(incomingDoc.Method) != acp.MethodRequestPermission {
+		return normalizeJSONDoc(incomingRaw, normalizeJSONDoc(existingUpdateJSON, `{}`)), normalizeJSONDoc(existingExtraJSON, `{}`), nil
+	}
+
+	updateJSON := normalizeJSONDoc(existingUpdateJSON, `{}`)
+	extraJSON := normalizeJSONDoc(existingExtraJSON, `{}`)
+
+	hasParams := len(incomingDoc.Params) > 0 && strings.TrimSpace(string(incomingDoc.Params)) != ""
+	hasResult := len(incomingDoc.Result) > 0 && strings.TrimSpace(string(incomingDoc.Result)) != ""
+
+	if hasParams || strings.TrimSpace(updateJSON) == "" || strings.TrimSpace(updateJSON) == "{}" {
+		updateJSON = normalizeJSONDoc(incomingRaw, updateJSON)
+	}
+	if !hasResult {
+		return updateJSON, extraJSON, nil
+	}
+
+	extraDoc := map[string]any{}
+	_ = json.Unmarshal([]byte(extraJSON), &extraDoc)
+	permissionResult := map[string]any{
+		"id":     incomingDoc.ID,
+		"method": strings.TrimSpace(incomingDoc.Method),
+	}
+	var result any
+	if err := json.Unmarshal(incomingDoc.Result, &result); err == nil {
+		permissionResult["result"] = result
+	}
+	extraDoc["acpUserResult"] = permissionResult
+
+	raw, err := json.Marshal(extraDoc)
+	if err != nil {
+		return updateJSON, extraJSON, nil
+	}
+	return updateJSON, normalizeJSONDoc(string(raw), `{}`), nil
+}
+
+func mergeSessionUpdateFields(base, incoming acp.SessionUpdate) acp.SessionUpdate {
+	merged := base
+	if strings.TrimSpace(incoming.SessionUpdate) != "" {
+		merged.SessionUpdate = strings.TrimSpace(incoming.SessionUpdate)
+	}
+	if len(incoming.Content) > 0 {
+		merged.Content = cloneJSONRaw(incoming.Content)
+	}
+	if len(incoming.AvailableCommands) > 0 {
+		merged.AvailableCommands = append([]acp.AvailableCommand(nil), incoming.AvailableCommands...)
+	}
+	if strings.TrimSpace(incoming.ToolCallID) != "" {
+		merged.ToolCallID = strings.TrimSpace(incoming.ToolCallID)
+	}
+	if strings.TrimSpace(incoming.Title) != "" {
+		merged.Title = strings.TrimSpace(incoming.Title)
+	}
+	if strings.TrimSpace(incoming.Kind) != "" {
+		merged.Kind = strings.TrimSpace(incoming.Kind)
+	}
+	if strings.TrimSpace(incoming.Status) != "" {
+		merged.Status = strings.TrimSpace(incoming.Status)
+	}
+	if len(incoming.Entries) > 0 {
+		merged.Entries = append([]acp.PlanEntry(nil), incoming.Entries...)
+	}
+	if len(incoming.Locations) > 0 {
+		merged.Locations = append([]acp.ToolCallLocation(nil), incoming.Locations...)
+	}
+	if len(incoming.RawInput) > 0 {
+		merged.RawInput = cloneJSONRaw(incoming.RawInput)
+	}
+	if len(incoming.RawOutput) > 0 {
+		merged.RawOutput = cloneJSONRaw(incoming.RawOutput)
+	}
+	if len(incoming.ToolCallContent) > 0 {
+		merged.ToolCallContent = append([]acp.ToolCallContent(nil), incoming.ToolCallContent...)
+	}
+	if strings.TrimSpace(incoming.ModeID) != "" {
+		merged.ModeID = strings.TrimSpace(incoming.ModeID)
+	}
+	if len(incoming.ConfigOptions) > 0 {
+		merged.ConfigOptions = append([]acp.ConfigOption(nil), incoming.ConfigOptions...)
+	}
+	if incoming.Size != nil {
+		merged.Size = cloneInt64Ptr(incoming.Size)
+	}
+	if incoming.Used != nil {
+		merged.Used = cloneInt64Ptr(incoming.Used)
+	}
+	if strings.TrimSpace(incoming.UpdatedAt) != "" {
+		merged.UpdatedAt = strings.TrimSpace(incoming.UpdatedAt)
+	}
+	return merged
+}
+
+func appendSessionUpdateTextContent(base, incoming acp.SessionUpdate) acp.SessionUpdate {
+	merged := base
+	baseText := extractTextChunk(base.Content)
+	incomingText := extractTextChunk(incoming.Content)
+	if strings.TrimSpace(baseText) == "" && strings.TrimSpace(incomingText) == "" {
+		if len(incoming.Content) > 0 {
+			merged.Content = cloneJSONRaw(incoming.Content)
+		}
+		return merged
+	}
+	merged.Content = buildTextContentRaw(baseText + incomingText)
+	return merged
+}
+
+func buildTextContentRaw(text string) json.RawMessage {
+	block := acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: text}
+	raw, err := json.Marshal(block)
+	if err != nil {
+		return json.RawMessage(`{"type":"text","text":""}`)
+	}
+	return raw
+}
+
+func sessionTurnUpdateMethodKey(raw string) string {
+	type sessionUpdateEnvelope struct {
+		Method string `json:"method"`
+		Params struct {
+			Update acp.SessionUpdate `json:"update"`
+		} `json:"params"`
+	}
+	var doc sessionUpdateEnvelope
+	if err := json.Unmarshal([]byte(normalizeJSONDoc(raw, `{}`)), &doc); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(doc.Method) != acp.MethodSessionUpdate {
+		return ""
+	}
+	updateMethod := strings.TrimSpace(doc.Params.Update.SessionUpdate)
+	if !isMessageSessionUpdateType(updateMethod) {
+		return ""
+	}
+	return updateMethod
+}
+
+func sessionTurnToolCallIDKey(raw string) string {
+	type sessionUpdateEnvelope struct {
+		Method string `json:"method"`
+		Params struct {
+			Update acp.SessionUpdate `json:"update"`
+		} `json:"params"`
+	}
+	var doc sessionUpdateEnvelope
+	if err := json.Unmarshal([]byte(normalizeJSONDoc(raw, `{}`)), &doc); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(doc.Method) != acp.MethodSessionUpdate {
+		return ""
+	}
+	if !isToolSessionUpdateType(doc.Params.Update.SessionUpdate) {
+		return ""
+	}
+	return strings.TrimSpace(doc.Params.Update.ToolCallID)
+}
+
+func sessionTurnPermissionRequestIDKey(raw string) int64 {
+	var doc sessionViewACPContentDoc
+	if err := json.Unmarshal([]byte(normalizeJSONDoc(raw, `{}`)), &doc); err != nil {
+		return 0
+	}
+	if strings.TrimSpace(doc.Method) != acp.MethodRequestPermission {
+		return 0
+	}
+	if doc.ID <= 0 {
+		return 0
+	}
+	return doc.ID
+}
+
+func cloneJSONRaw(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return json.RawMessage(out)
+}
+
+func cloneInt64Ptr(v *int64) *int64 {
+	if v == nil {
+		return nil
+	}
+	cp := *v
+	return &cp
 }
 
 type SessionRecorder struct {
@@ -227,7 +649,14 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		}
 		return r.handlePromptStartedLocked(ctx, event, params)
 	case acp.MethodSessionUpdate:
-		return r.appendACPEventTurnLocked(ctx, event)
+		var params acp.SessionUpdateParams
+		if err := decodeSessionViewEventParams(doc, &params); err != nil {
+			return fmt.Errorf("decode session.update params: %w", err)
+		}
+		if strings.TrimSpace(params.SessionID) != "" {
+			event.SessionID = strings.TrimSpace(params.SessionID)
+		}
+		return r.appendACPEventTurnLocked(ctx, event, doc)
 	case acp.MethodRequestPermission:
 		var params acp.PermissionRequestParams
 		if err := decodeSessionViewEventParams(doc, &params); err == nil {
@@ -237,7 +666,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
 			return fmt.Errorf("decode request_permission params: %w", err)
 		}
-		return r.appendACPEventTurnLocked(ctx, event)
+		return r.appendACPEventTurnLocked(ctx, event, doc)
 	case sessionViewMethodSystem:
 		return nil
 	default:
@@ -265,7 +694,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 		return err
 	}
 
-	state.nextTurnIndex = 2
+	state.assignTurn(turn)
 	r.promptState[event.SessionID] = state
 	if err := r.upsertSessionProjection(ctx, event.SessionID, promptTitle, event.UpdatedAt, true); err != nil {
 		return err
@@ -274,24 +703,53 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	return nil
 }
 
-func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event SessionViewEvent) error {
+func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event SessionViewEvent, doc sessionViewACPContentDoc) error {
 	state, err := r.ensurePromptStateLocked(ctx, event.SessionID, event.UpdatedAt)
 	if err != nil {
 		return err
 	}
-	if state.nextTurnIndex <= 0 {
-		state.nextTurnIndex = 1
+	state.ensureMaps()
+
+	plan, err := buildSessionTurnMergePlan(doc)
+	if err != nil {
+		return err
 	}
-	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, event.Content, acp.MethodSessionUpdate)
+	if existingTurn, ok := state.mergeTargetTurn(plan); ok {
+		mergedTurn, err := mergeTurnRecord(existingTurn, event.Content, plan)
+		if err != nil {
+			return err
+		}
+		if err := r.appendSessionTurnLocked(ctx, mergedTurn); err != nil {
+			return err
+		}
+		state.assignTurn(mergedTurn)
+		r.promptState[event.SessionID] = state
+		return nil
+	}
+
+	fallbackMethod := strings.TrimSpace(doc.Method)
+	if fallbackMethod == "" {
+		fallbackMethod = acp.MethodSessionUpdate
+	}
+	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, event.Content, fallbackMethod)
+	if plan.kind == sessionTurnMergePermission && plan.hasPermissionResult {
+		turn.UpdateJSON, turn.ExtraJSON, err = mergeSessionPermissionJSON(`{}`, `{}`, event.Content)
+		if err != nil {
+			return err
+		}
+	}
 	if err := r.appendSessionTurnLocked(ctx, turn); err != nil {
 		return err
 	}
-	state.nextTurnIndex++
+	state.assignTurn(turn)
 	r.promptState[event.SessionID] = state
 	return nil
 }
 
 func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawContent, fallbackMethod string) SessionTurnRecord {
+	if turnIndex <= 0 {
+		turnIndex = 1
+	}
 	return SessionTurnRecord{
 		TurnID:      formatPromptTurnSeq(promptIndex, turnIndex),
 		SessionID:   strings.TrimSpace(sessionID),
@@ -340,9 +798,9 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 		}
 		if prompt == nil {
 			delete(r.promptState, sessionID)
-			return sessionPromptState{promptIndex: 1, nextTurnIndex: 1}, nil
+			return newSessionPromptState(1, 1), nil
 		}
-		return sessionPromptState{promptIndex: current.promptIndex + 1, nextTurnIndex: 1}, nil
+		return newSessionPromptState(current.promptIndex+1, 1), nil
 	}
 	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
 	if err != nil {
@@ -352,7 +810,7 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 	if len(prompts) > 0 && prompts[len(prompts)-1].PromptIndex > 0 {
 		promptIndex = prompts[len(prompts)-1].PromptIndex + 1
 	}
-	return sessionPromptState{promptIndex: promptIndex, nextTurnIndex: 1}, nil
+	return newSessionPromptState(promptIndex, 1), nil
 }
 
 func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (sessionPromptState, error) {
@@ -368,9 +826,7 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 		if prompt == nil {
 			delete(r.promptState, sessionID)
 		} else {
-			if state.nextTurnIndex <= 0 {
-				state.nextTurnIndex = 1
-			}
+			state.ensureMaps()
 			return state, nil
 		}
 	}
@@ -379,7 +835,7 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 		return sessionPromptState{}, err
 	}
 	if len(prompts) == 0 {
-		state := sessionPromptState{promptIndex: 1, nextTurnIndex: 1}
+		state := newSessionPromptState(1, 1)
 		if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 			SessionID:   sessionID,
 			PromptIndex: 1,
@@ -395,12 +851,13 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 	if err != nil {
 		return sessionPromptState{}, err
 	}
-	nextTurn := int64(len(turns) + 1)
-	state := sessionPromptState{promptIndex: latest.PromptIndex, nextTurnIndex: nextTurn}
+	state := newSessionPromptState(latest.PromptIndex, 1)
+	for i := range turns {
+		state.assignTurn(turns[i])
+	}
 	r.promptState[sessionID] = state
 	return state, nil
 }
-
 func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord) {
 	publish := r.eventPublisher()
 	if publish == nil {
