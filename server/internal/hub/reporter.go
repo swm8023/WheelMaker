@@ -146,6 +146,13 @@ func (r *Reporter) SetDebugLogger(w io.Writer) {
 	r.debugLog = w
 }
 
+func (r *Reporter) SetMonitorResetSessionPromptState(reset func()) {
+	if r == nil || r.monitorCore == nil {
+		return
+	}
+	r.monitorCore.ResetSessionPromptState = reset
+}
+
 func (r *Reporter) RegisterChatHandler(projectID string, handler ChatHandler) {
 	projectID = strings.TrimSpace(projectID)
 	if projectID == "" {

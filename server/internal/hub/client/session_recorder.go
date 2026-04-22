@@ -55,18 +55,14 @@ type SessionViewSink interface {
 }
 
 type sessionViewSummary struct {
-	SessionID   string `json:"sessionId"`
-	Title       string `json:"title"`
-	UpdatedAt   string `json:"updatedAt"`
-	UnreadCount int    `json:"unreadCount"`
-	Agent       string `json:"agent,omitempty"`
-	Status      string `json:"status,omitempty"`
-	ProjectName string `json:"projectName,omitempty"`
+	SessionID string `json:"sessionId"`
+	Title     string `json:"title"`
+	UpdatedAt string `json:"updatedAt"`
+	Agent     string `json:"agent,omitempty"`
 }
 
-type sessionReadMessage struct {
+type sessionViewMessage struct {
 	SessionID   string `json:"sessionId"`
-	TurnID      string `json:"turnId"`
 	PromptIndex int64  `json:"promptIndex"`
 	TurnIndex   int64  `json:"turnIndex"`
 	UpdateIndex int64  `json:"updateIndex"`
@@ -110,6 +106,16 @@ func (r *SessionRecorder) Close() {
 	r.promptState = map[string]sessionPromptState{}
 	r.writeMu.Unlock()
 }
+
+func (r *SessionRecorder) ResetPromptState() {
+	if r == nil {
+		return
+	}
+	r.writeMu.Lock()
+	r.promptState = map[string]sessionPromptState{}
+	r.writeMu.Unlock()
+}
+
 func (r *SessionRecorder) SetEventPublisher(publish func(method string, payload any) error) {
 	r.mu.Lock()
 	r.publish = publish
@@ -328,6 +334,14 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 		return sessionPromptState{}, fmt.Errorf("session id is required")
 	}
 	if current, ok := r.promptState[sessionID]; ok && current.promptIndex > 0 {
+		prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, current.promptIndex)
+		if err != nil {
+			return sessionPromptState{}, err
+		}
+		if prompt == nil {
+			delete(r.promptState, sessionID)
+			return sessionPromptState{promptIndex: 1, nextTurnIndex: 1}, nil
+		}
 		return sessionPromptState{promptIndex: current.promptIndex + 1, nextTurnIndex: 1}, nil
 	}
 	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
@@ -347,10 +361,18 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 		return sessionPromptState{}, fmt.Errorf("session id is required")
 	}
 	if state, ok := r.promptState[sessionID]; ok && state.promptIndex > 0 {
-		if state.nextTurnIndex <= 0 {
-			state.nextTurnIndex = 1
+		prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, state.promptIndex)
+		if err != nil {
+			return sessionPromptState{}, err
 		}
-		return state, nil
+		if prompt == nil {
+			delete(r.promptState, sessionID)
+		} else {
+			if state.nextTurnIndex <= 0 {
+				state.nextTurnIndex = 1
+			}
+			return state, nil
+		}
 	}
 	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
 	if err != nil {
@@ -389,13 +411,8 @@ func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnR
 	if content == "" {
 		content = "{}"
 	}
-	turnID := strings.TrimSpace(turn.TurnID)
-	if turnID == "" {
-		turnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
-	}
 	_ = publish("registry.session.message", map[string]any{
 		"sessionId":   sessionID,
-		"turnId":      turnID,
 		"promptIndex": turn.PromptIndex,
 		"turnIndex":   turn.TurnIndex,
 		"updateIndex": turn.UpdateIndex,
@@ -403,18 +420,13 @@ func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnR
 	})
 }
 
-func toSessionReadMessage(turn SessionTurnRecord) sessionReadMessage {
-	turnID := strings.TrimSpace(turn.TurnID)
-	if turnID == "" {
-		turnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
-	}
+func toSessionViewMessage(turn SessionTurnRecord) sessionViewMessage {
 	content := strings.TrimSpace(turn.UpdateJSON)
 	if content == "" {
 		content = "{}"
 	}
-	return sessionReadMessage{
+	return sessionViewMessage{
 		SessionID:   strings.TrimSpace(turn.SessionID),
-		TurnID:      turnID,
 		PromptIndex: turn.PromptIndex,
 		TurnIndex:   turn.TurnIndex,
 		UpdateIndex: turn.UpdateIndex,
@@ -483,7 +495,7 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	return out, nil
 }
 
-func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionReadMessage, int64, int64, error) {
+func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewMessage, int64, int64, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
@@ -497,7 +509,7 @@ func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID str
 		return sessionViewSummary{}, nil, 0, 0, err
 	}
 
-	out := make([]sessionReadMessage, 0)
+	out := make([]sessionViewMessage, 0)
 	var lastIndex int64
 	var lastSubIndex int64
 	for _, prompt := range prompts {
@@ -516,14 +528,11 @@ func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID str
 			if turn.PromptIndex == afterPromptIndex && turn.TurnIndex <= afterTurnIndex {
 				continue
 			}
-			out = append(out, toSessionReadMessage(turn))
+			out = append(out, toSessionViewMessage(turn))
 		}
 	}
 
 	return r.sessionViewSummaryFromRecord(*rec), out, lastIndex, lastSubIndex, nil
-}
-func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
-	return r.currentSessionViewSummary(ctx, strings.TrimSpace(sessionID))
 }
 
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time, titleIfEmptyOnly ...bool) error {
@@ -571,8 +580,6 @@ func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) se
 		entry.Title,
 		entry.LastActiveAt,
 		entry.Agent,
-		entry.Status,
-		entry.ProjectName,
 	)
 }
 
@@ -582,8 +589,6 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 		rec.Title,
 		rec.LastActiveAt,
 		"",
-		rec.Status,
-		rec.ProjectName,
 	)
 }
 
@@ -595,34 +600,11 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
 }
 
-func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, agent string, status SessionStatus, projectName string) sessionViewSummary {
+func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, agent string) sessionViewSummary {
 	return sessionViewSummary{
-		SessionID:   strings.TrimSpace(sessionID),
-		Title:       firstNonEmpty(strings.TrimSpace(title), strings.TrimSpace(sessionID)),
-		UpdatedAt:   lastActiveAt.UTC().Format(time.RFC3339),
-		UnreadCount: 0,
-		Agent:       strings.TrimSpace(agent),
-		Status:      sessionStatusLabel(status),
-		ProjectName: strings.TrimSpace(projectName),
-	}
-}
-
-func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
-	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" {
-		return nil
-	}
-	return json.Unmarshal(raw, out)
-}
-
-func sessionStatusLabel(status SessionStatus) string {
-	switch status {
-	case SessionActive:
-		return "active"
-	case SessionSuspended:
-		return "suspended"
-	case SessionPersisted:
-		return "persisted"
-	default:
-		return "unknown"
+		SessionID: strings.TrimSpace(sessionID),
+		Title:     firstNonEmpty(strings.TrimSpace(title), strings.TrimSpace(sessionID)),
+		UpdatedAt: lastActiveAt.UTC().Format(time.RFC3339),
+		Agent:     strings.TrimSpace(agent),
 	}
 }

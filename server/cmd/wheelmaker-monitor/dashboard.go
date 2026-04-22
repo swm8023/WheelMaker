@@ -438,6 +438,11 @@ html, body {
   flex: 1; min-height: 0; overflow: auto;
   padding: 10px 14px; background: #050810;
 }
+.db-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 14px 0;
+}
 .db-section { margin-bottom: 14px; }
 .db-table-title {
   font-size: 10px; font-weight: 700;
@@ -748,6 +753,9 @@ html, body {
             <div id="log-scroll" class="log-scroll"><div class="empty-state loading">Loading logs&#x2026;</div></div>
           </div>
           <div id="panel-db" class="log-panel">
+            <div class="db-toolbar">
+              <button class="tbtn" onclick="clearSessionHistory()">Clear Session History</button>
+            </div>
             <div id="db-view" class="db-view"><span class="loading">Loading&#x2026;</span></div>
           </div>
         </div>
@@ -1312,6 +1320,30 @@ async function doAction(action) {
       msg.style.color = 'var(--green)';
       setTimeout(refresh, 3000);
     }
+  } catch(e) {
+    msg.textContent = 'Request failed: ' + e.message;
+    msg.style.color = 'var(--red)';
+  }
+}
+
+async function clearSessionHistory() {
+  if (!confirm('Clear all rows from session_prompts and session_turns?')) {
+    return;
+  }
+  const msg = $('action-msg');
+  msg.textContent = 'clear-session-history\u2026';
+  msg.style.color = 'var(--text-dim)';
+  try {
+    const res = await fetch(window.location.origin + appURL(hubPath('api/action/clear-session-history')), { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      msg.textContent = 'Error: ' + data.error + (data.hint ? ' | Hint: ' + data.hint : '');
+      msg.style.color = 'var(--red)';
+      return;
+    }
+    msg.textContent = 'session history cleared';
+    msg.style.color = 'var(--green)';
+    await loadDBTables();
   } catch(e) {
     msg.textContent = 'Request failed: ' + e.message;
     msg.style.color = 'var(--red)';

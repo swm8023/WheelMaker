@@ -2,12 +2,13 @@ package main
 
 import (
 	"context"
-	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 )
 
 func TestResolveLogFilePath_PrefersLogDir(t *testing.T) {
@@ -130,5 +131,71 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 	}
 	if !foundPrompts || !foundTurns {
 		t.Fatalf("prompt/turn tables missing: %#v", res.Tables)
+	}
+}
+
+func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T) {
+	base := t.TempDir()
+	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	now := time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC)
+	if err := store.SaveSession(ctx, &clientpkg.SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       clientpkg.SessionActive,
+		CreatedAt:    now,
+		LastActiveAt: now,
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		Title:       "hello",
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+	if err := store.UpsertSessionTurn(ctx, clientpkg.SessionTurnRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		TurnIndex:   1,
+		UpdateIndex: 1,
+		UpdateJSON:  `{}`,
+		ExtraJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertSessionTurn: %v", err)
+	}
+
+	mon := NewMonitor(base)
+	if err := mon.ExecuteActionByHub(context.Background(), "", "clear-session-history"); err != nil {
+		t.Fatalf("ExecuteActionByHub(clear-session-history): %v", err)
+	}
+
+	prompts, err := store.ListSessionPrompts(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionPrompts: %v", err)
+	}
+	if len(prompts) != 0 {
+		t.Fatalf("prompts len = %d, want 0", len(prompts))
+	}
+	turns, err := store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 0 {
+		t.Fatalf("turns len = %d, want 0", len(turns))
+	}
+	rec, err := store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if rec == nil {
+		t.Fatalf("LoadSession returned nil, want existing session record")
 	}
 }

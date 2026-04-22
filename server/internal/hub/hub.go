@@ -212,6 +212,13 @@ func (h *Hub) setupRegistrySync() {
 		ReconnectInterval: 2 * time.Second,
 		MonitorBaseDir:    filepath.Dir(filepath.Dir(h.dbPath)),
 	}, projects)
+	rep.SetMonitorResetSessionPromptState(func() {
+		for _, projectClient := range h.clientsByName {
+			if projectClient != nil {
+				projectClient.ResetSessionPromptState()
+			}
+		}
+	})
 	for _, project := range projects {
 		projectClient := h.clientsByName[project.Name]
 		appChannel := h.appIM[project.Name]

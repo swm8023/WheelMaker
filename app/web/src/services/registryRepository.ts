@@ -41,7 +41,6 @@ export class RegistryRepository {
       messageCount: typeof input.messageCount === 'number' && Number.isFinite(input.messageCount) ? input.messageCount : 0,
       unreadCount: typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount) ? input.unreadCount : undefined,
       agent: typeof input.agent === 'string' ? input.agent : undefined,
-      status: typeof input.status === 'string' ? input.status : undefined,
     };
   }
 
@@ -122,7 +121,6 @@ export class RegistryRepository {
     if (!sessionId) {
       return null;
     }
-    const turnId = typeof input.turnId === 'string' ? input.turnId.trim() : '';
     const promptIndex = typeof input.promptIndex === 'number' && Number.isFinite(input.promptIndex)
       ? Math.trunc(input.promptIndex)
       : 0;
@@ -133,7 +131,7 @@ export class RegistryRepository {
       ? Math.trunc(input.updateIndex)
       : 0;
     const content = typeof input.content === 'string' ? input.content.trim() : '';
-    const messageId = turnId || `${sessionId}:${promptIndex}:${turnIndex}:${updateIndex}`;
+    const messageId = `${sessionId}:${promptIndex}:${turnIndex}:${updateIndex}`;
     const now = new Date().toISOString();
     const out: RegistrySessionMessage = {
       messageId,
@@ -328,28 +326,32 @@ export class RegistryRepository {
         updatedAt: typeof prompt?.updatedAt === 'string' ? prompt.updatedAt : '',
         turns: (Array.isArray(prompt?.turns) ? prompt.turns : [])
           .map(turnRaw => turnRaw as Record<string, unknown>)
-          .map(turn => ({
-            turnId: typeof turn?.turnId === 'string' ? turn.turnId : '',
-            promptIndex: Number(turn?.promptIndex ?? prompt?.promptIndex ?? 0),
-            turnIndex: Number(turn?.turnIndex ?? 0),
-            updateIndex: Number(turn?.updateIndex ?? 0),
-            role: turn?.role as RegistrySessionPrompt['turns'][number]['role'],
-            kind: turn?.kind as RegistrySessionPrompt['turns'][number]['kind'],
-            text: typeof turn?.text === 'string' ? turn.text : undefined,
-            status: turn?.status as RegistrySessionPrompt['turns'][number]['status'],
-            requestId: typeof turn?.requestId === 'number' && Number.isFinite(turn.requestId) ? turn.requestId : undefined,
-            toolCallId: typeof turn?.toolCallId === 'string' ? turn.toolCallId : undefined,
-            blocks: Array.isArray(turn?.blocks) ? (turn.blocks as RegistrySessionMessage['blocks']) : undefined,
-            options: Array.isArray(turn?.options) ? (turn.options as RegistrySessionMessage['options']) : undefined,
-          }))
-          .filter(turn => !!turn.turnId && turn.promptIndex > 0 && turn.turnIndex > 0 && turn.updateIndex > 0),
+          .map(turn => {
+            const promptIndex = Number(turn?.promptIndex ?? prompt?.promptIndex ?? 0);
+            const turnIndex = Number(turn?.turnIndex ?? 0);
+            const updateIndex = Number(turn?.updateIndex ?? 0);
+            return {
+              promptIndex,
+              turnIndex,
+              updateIndex,
+              role: turn?.role as RegistrySessionPrompt['turns'][number]['role'],
+              kind: turn?.kind as RegistrySessionPrompt['turns'][number]['kind'],
+              text: typeof turn?.text === 'string' ? turn.text : undefined,
+              status: turn?.status as RegistrySessionPrompt['turns'][number]['status'],
+              requestId: typeof turn?.requestId === 'number' && Number.isFinite(turn.requestId) ? turn.requestId : undefined,
+              toolCallId: typeof turn?.toolCallId === 'string' ? turn.toolCallId : undefined,
+              blocks: Array.isArray(turn?.blocks) ? (turn.blocks as RegistrySessionMessage['blocks']) : undefined,
+              options: Array.isArray(turn?.options) ? (turn.options as RegistrySessionMessage['options']) : undefined,
+            };
+          })
+          .filter(turn => turn.promptIndex > 0 && turn.turnIndex > 0 && turn.updateIndex > 0),
       }))
       .filter(prompt => !!prompt.messageId && !!prompt.promptId && prompt.promptIndex > 0 && prompt.updateIndex > 0)
       .sort((a, b) => a.promptIndex - b.promptIndex);
 
     const flattenedPromptMessages = normalizedPrompts.flatMap(prompt =>
       prompt.turns.map(turn => ({
-        messageId: turn.turnId,
+        messageId: `${prompt.sessionId}:${turn.promptIndex}:${turn.turnIndex}:${turn.updateIndex}`,
         sessionId: prompt.sessionId,
         syncIndex: prompt.promptIndex,
         syncSubIndex: turn.updateIndex,
@@ -651,19 +653,6 @@ export class RegistryRepository {
     return {
       ok: body.ok ?? false,
       sessionId: body.sessionId ?? payload.sessionId,
-    };
-  }
-
-  async markSessionRead(projectId: string, sessionId: string): Promise<{ok: boolean}> {
-    const resp = await this.client.request({
-      method: 'session.markRead',
-      projectId,
-      payload: {sessionId},
-      timeoutMs: 15000,
-    });
-    const body = (resp.payload ?? {}) as {ok?: boolean};
-    return {
-      ok: body.ok ?? false,
     };
   }
 

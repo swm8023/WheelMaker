@@ -15,11 +15,20 @@ import (
 )
 
 type MonitorCore struct {
-	BaseDir string
+	BaseDir                 string
+	ResetSessionPromptState func()
 }
 
 func NewMonitorCore(baseDir string) *MonitorCore {
 	return &MonitorCore{BaseDir: strings.TrimSpace(baseDir)}
+}
+
+func (c *MonitorCore) openClientDB() (*sql.DB, error) {
+	dbPath := filepath.Join(c.BaseDir, "db", "client.sqlite3")
+	if !fileExists(dbPath) {
+		return nil, fmt.Errorf("database not found")
+	}
+	return sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)")
 }
 
 type ProcessInfo struct {
@@ -303,6 +312,8 @@ func (c *MonitorCore) GetDBTables() *DBTablesResult {
 
 func (c *MonitorCore) ExecuteAction(action string) error {
 	switch strings.TrimSpace(strings.ToLower(action)) {
+	case "clear-session-history":
+		return c.clearSessionHistory()
 	case "update-publish":
 		signalPath := filepath.Join(c.BaseDir, "update-now.signal")
 		payload := "full-update\n" + time.Now().UTC().Format(time.RFC3339)
@@ -315,6 +326,36 @@ func (c *MonitorCore) ExecuteAction(action string) error {
 	default:
 		return fmt.Errorf("unsupported action: %s", action)
 	}
+}
+
+func (c *MonitorCore) clearSessionHistory() error {
+	db, err := c.openClientDB()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if _, err := tx.Exec(`DELETE FROM session_turns`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM session_prompts`); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if c.ResetSessionPromptState != nil {
+		c.ResetSessionPromptState()
+	}
+	return nil
 }
 
 func fileExists(path string) bool {

@@ -259,13 +259,6 @@ export class RegistryWorkspaceService {
     return this.repository.sendSessionMessage(this.session.selectedProjectId, payload);
   }
 
-  async markSessionRead(sessionId: string): Promise<{ok: boolean}> {
-    if (!this.session || !this.repository) {
-      throw new Error('session is not ready');
-    }
-    return this.repository.markSessionRead(this.session.selectedProjectId, sessionId);
-  }
-
   async respondToSessionPermission(payload: {sessionId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');

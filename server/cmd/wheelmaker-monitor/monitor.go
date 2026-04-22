@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	hubpkg "github.com/swm8023/wheelmaker/internal/hub"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"github.com/swm8023/wheelmaker/internal/shared"
 	_ "modernc.org/sqlite"
@@ -166,6 +167,11 @@ func (m *Monitor) executeLocalAction(action string) error {
 		return m.StartService()
 	case "update-publish":
 		return m.TriggerUpdatePublish()
+	case "clear-session-history":
+		if direct, ok := m.transport.(*directHubTransport); ok && direct.core != nil {
+			return direct.core.ExecuteAction(action)
+		}
+		return hubpkg.NewMonitorCore(m.baseDir).ExecuteAction(action)
 	default:
 		return fmt.Errorf("unsupported local action: %s", action)
 	}

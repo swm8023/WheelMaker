@@ -291,8 +291,7 @@ function decodeSessionMessageFromEventPayload(
   const promptIndex = Number(payload.promptIndex ?? 0);
   const turnIndex = Number(payload.turnIndex ?? 0);
   const updateIndex = Number(payload.updateIndex ?? 0);
-  const turnId = typeof payload.turnId === 'string' ? payload.turnId.trim() : '';
-  const messageId = turnId || `${sessionId}:${promptIndex}:${turnIndex}:${updateIndex}`;
+  const messageId = `${sessionId}:${promptIndex}:${turnIndex}:${updateIndex}`;
   const now = new Date().toISOString();
 
   const message: RegistryChatMessage = {
@@ -2111,7 +2110,6 @@ function App() {
       chatSyncSubIndexRef.current[result.session.sessionId] = nextSyncSubIndex;
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
-      await service.markSessionRead(result.session.sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2632,18 +2630,12 @@ function App() {
           message
         ) {
           setChatMessages(prev => upsertChatMessage(prev, message));
-          service
-            .markSessionRead(messageSessionID)
-            .catch(() => undefined);
         }
         if (!chatSelectedIdRef.current && sessionId) {
           setSelectedChatId(sessionId);
           if (message) {
             setChatMessages(prev => upsertChatMessage(prev, message));
           }
-          service
-            .markSessionRead(sessionId)
-            .catch(() => undefined);
         }
       }
     });

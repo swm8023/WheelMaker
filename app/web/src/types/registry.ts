@@ -55,11 +55,9 @@ export interface RegistrySessionSummary {
   messageCount: number;
   unreadCount?: number;
   agent?: string;
-  status?: string;
 }
 
 export interface RegistrySessionTurn {
-  turnId: string;
   promptIndex: number;
   turnIndex: number;
   updateIndex: number;
@@ -97,7 +95,6 @@ export interface RegistrySessionMessageEventPayload {
   session?: RegistrySessionSummary;
   message?: RegistrySessionMessage;
   sessionId?: string;
-  turnId?: string;
   promptIndex?: number;
   turnIndex?: number;
   updateIndex?: number;

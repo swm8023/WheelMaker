@@ -347,6 +347,13 @@ func (c *Client) SetSessionEventPublisher(publish func(method string, payload an
 	c.sessionRecorder.SetEventPublisher(publish)
 }
 
+func (c *Client) ResetSessionPromptState() {
+	if c == nil || c.sessionRecorder == nil {
+		return
+	}
+	c.sessionRecorder.ResetPromptState()
+}
+
 func (c *Client) RecordEvent(ctx context.Context, event SessionViewEvent) error {
 	return c.sessionRecorder.RecordEvent(ctx, event)
 }
@@ -427,17 +434,6 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
-	case "session.markRead":
-		var req struct {
-			SessionID string `json:"sessionId"`
-		}
-		if err := decodeSessionRequestPayload(payload, &req); err != nil {
-			return nil, fmt.Errorf("invalid session.markRead payload: %w", err)
-		}
-		if summary, ok := c.sessionRecorder.MarkSessionRead(ctx, strings.TrimSpace(req.SessionID)); ok {
-			c.sessionRecorder.publishSessionUpdated(summary)
-		}
-		return map[string]any{"ok": true}, nil
 	default:
 		return nil, fmt.Errorf("unsupported session method: %s", method)
 	}
@@ -1093,4 +1089,11 @@ func normalizeRouteKey(routeKey string) (string, error) {
 		return "", fmt.Errorf("route key is required")
 	}
 	return routeKey, nil
+}
+
+func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
+	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" {
+		return nil
+	}
+	return json.Unmarshal(raw, out)
 }
