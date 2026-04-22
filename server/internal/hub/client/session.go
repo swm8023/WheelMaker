@@ -1346,26 +1346,11 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 				}
 				if ev.update != nil {
 					params := *ev.update
-					switch params.Update.SessionUpdate {
-					case acp.SessionUpdateAgentMessageChunk:
-						s.recordSessionViewEvent(SessionViewEvent{
-							Type:      SessionViewEventTypeACP,
-							SessionID: s.ID,
-							Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
-						})
-					case acp.SessionUpdateAgentThoughtChunk:
-						s.recordSessionViewEvent(SessionViewEvent{
-							Type:      SessionViewEventTypeACP,
-							SessionID: s.ID,
-							Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
-						})
-					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-						s.recordSessionViewEvent(SessionViewEvent{
-							Type:      SessionViewEventTypeACP,
-							SessionID: s.ID,
-							Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
-						})
-					}
+					s.recordSessionViewEvent(SessionViewEvent{
+						Type:      SessionViewEventTypeACP,
+						SessionID: s.ID,
+						Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
+					})
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
 						if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -328,6 +329,127 @@ func (c *Client) HasIMRouter() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.imRouter != nil
+}
+
+func (c *Client) SetSessionViewSink(sink SessionViewSink) {
+	if sink == nil {
+		sink = c.sessionRecorder
+	}
+	c.mu.Lock()
+	c.viewSink = sink
+	for _, sess := range c.sessions {
+		sess.viewSink = sink
+	}
+	c.mu.Unlock()
+}
+
+func (c *Client) SetSessionEventPublisher(publish func(method string, payload any) error) {
+	c.sessionRecorder.SetEventPublisher(publish)
+}
+
+func (c *Client) RecordEvent(ctx context.Context, event SessionViewEvent) error {
+	return c.sessionRecorder.RecordEvent(ctx, event)
+}
+
+func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ string, payload json.RawMessage) (any, error) {
+	switch strings.TrimSpace(method) {
+	case "session.list":
+		sessions, err := c.sessionRecorder.ListSessionViews(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"sessions": sessions}, nil
+	case "session.read":
+		var req struct {
+			SessionID        string `json:"sessionId"`
+			AfterPromptIndex int64  `json:"afterPromptIndex,omitempty"`
+			AfterIndex       int64  `json:"afterIndex,omitempty"`
+			AfterSubIndex    int64  `json:"afterSubIndex,omitempty"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.read payload: %w", err)
+		}
+		afterPromptIndex := req.AfterPromptIndex
+		if afterPromptIndex <= 0 {
+			afterPromptIndex = req.AfterIndex
+		}
+		summary, prompts, lastPromptIndex, lastPromptUpdateIndex, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, afterPromptIndex, req.AfterSubIndex)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"session": summary, "prompts": prompts, "lastPromptIndex": lastPromptIndex, "lastPromptUpdateIndex": lastPromptUpdateIndex}, nil
+	case "session.new":
+		var req struct {
+			Title string `json:"title,omitempty"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.new payload: %w", err)
+		}
+		sess, err := c.CreateSession(ctx, req.Title)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.RecordEvent(ctx, SessionViewEvent{
+			Type:      SessionViewEventTypeACP,
+			SessionID: sess.ID,
+			Content: buildACPMethodParamsContent(acp.MethodSessionNew, sessionViewSessionNewParams{
+				SessionID: sess.ID,
+				Title:     firstNonEmpty(req.Title, sess.ID),
+			}),
+		}); err != nil {
+			return nil, err
+		}
+		summary, _, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.ID, 0, 0)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "session": summary}, nil
+	case "session.send":
+		var req struct {
+			SessionID string             `json:"sessionId"`
+			Text      string             `json:"text,omitempty"`
+			Blocks    []acp.ContentBlock `json:"blocks,omitempty"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.send payload: %w", err)
+		}
+		blocks := req.Blocks
+		if len(blocks) == 0 && strings.TrimSpace(req.Text) != "" {
+			blocks = []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: req.Text}}
+		}
+		if strings.TrimSpace(req.SessionID) == "" {
+			return nil, fmt.Errorf("sessionId is required")
+		}
+		if len(blocks) == 0 {
+			return nil, fmt.Errorf("session prompt is empty")
+		}
+		if err := c.PromptToSession(ctx, req.SessionID, im.ChatRef{ChannelID: "app", ChatID: strings.TrimSpace(req.SessionID)}, blocks); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
+	case "session.markRead":
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.markRead payload: %w", err)
+		}
+		if summary, ok := c.sessionRecorder.MarkSessionRead(ctx, strings.TrimSpace(req.SessionID)); ok {
+			c.sessionRecorder.publishSessionUpdated(summary)
+		}
+		return map[string]any{"ok": true}, nil
+	default:
+		return nil, fmt.Errorf("unsupported session method: %s", method)
+	}
+}
+
+func (c *Client) listSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
+	return c.sessionRecorder.ListSessionViews(ctx)
+}
+
+func (c *Client) readSessionView(ctx context.Context, sessionID string, afterIndex int64) (sessionViewSummary, []sessionViewMessage, int64, error) {
+	summary, messages, lastIndex, _, err := c.sessionRecorder.ReadSessionView(ctx, sessionID, afterIndex, 0)
+	return summary, messages, lastIndex, err
 }
 
 func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {
