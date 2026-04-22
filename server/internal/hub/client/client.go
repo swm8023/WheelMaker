@@ -447,11 +447,6 @@ func (c *Client) listSessionViews(ctx context.Context) ([]sessionViewSummary, er
 	return c.sessionRecorder.ListSessionViews(ctx)
 }
 
-func (c *Client) readSessionView(ctx context.Context, sessionID string, afterIndex int64) (sessionViewSummary, []sessionViewMessage, int64, error) {
-	summary, messages, lastIndex, _, err := c.sessionRecorder.ReadSessionView(ctx, sessionID, afterIndex, 0)
-	return summary, messages, lastIndex, err
-}
-
 func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {
 	return c.handleIMPromptBlocks(ctx, source, params.Prompt)
 }

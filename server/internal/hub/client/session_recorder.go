@@ -89,21 +89,6 @@ type sessionViewPrompt struct {
 	UpdatedAt   string            `json:"updatedAt"`
 	Turns       []sessionViewTurn `json:"turns"`
 }
-type sessionViewMessage struct {
-	MessageID string                 `json:"messageId"`
-	SessionID string                 `json:"sessionId"`
-	Index     int64                  `json:"index,omitempty"`
-	SubIndex  int64                  `json:"subIndex,omitempty"`
-	Role      string                 `json:"role"`
-	Kind      string                 `json:"kind"`
-	Text      string                 `json:"text"`
-	Blocks    []acp.ContentBlock     `json:"blocks,omitempty"`
-	Options   []acp.PermissionOption `json:"options,omitempty"`
-	Status    string                 `json:"status"`
-	CreatedAt string                 `json:"createdAt"`
-	UpdatedAt string                 `json:"updatedAt"`
-	RequestID int64                  `json:"requestId,omitempty"`
-}
 
 type sessionPromptState struct {
 	promptIndex   int64
@@ -496,36 +481,6 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	return out, nil
 }
 
-func (r *SessionRecorder) ReadSessionView(ctx context.Context, sessionID string, afterIndex, afterSubIndex int64) (sessionViewSummary, []sessionViewMessage, int64, int64, error) {
-	rec, err := r.store.LoadSession(ctx, r.projectName, strings.TrimSpace(sessionID))
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	if rec == nil {
-		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
-	}
-	var messages []SessionTurnMessageRecord
-	if afterIndex > 0 || afterSubIndex > 0 {
-		messages, err = r.store.ListSessionTurnMessagesAfterCursor(ctx, r.projectName, strings.TrimSpace(sessionID), afterIndex, afterSubIndex)
-	} else {
-		messages, err = r.store.ListSessionTurnMessages(ctx, r.projectName, strings.TrimSpace(sessionID))
-	}
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	out := make([]sessionViewMessage, 0, len(messages))
-	var lastIndex int64
-	var lastSubIndex int64
-	for _, message := range messages {
-		out = append(out, toSessionViewMessage(message))
-		if message.SyncIndex > lastIndex || (message.SyncIndex == lastIndex && message.SyncSubIndex > lastSubIndex) {
-			lastIndex = message.SyncIndex
-			lastSubIndex = message.SyncSubIndex
-		}
-	}
-	return r.sessionViewSummaryFromRecord(*rec), out, lastIndex, lastSubIndex, nil
-}
-
 func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, afterPromptIndex, afterPromptUpdateIndex int64) (sessionViewSummary, []sessionViewPrompt, int64, int64, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
@@ -775,46 +730,6 @@ func promptStatusFromStopReason(stopReason string) string {
 		return "running"
 	}
 	return "done"
-}
-func toSessionViewMessage(message SessionTurnMessageRecord) sessionViewMessage {
-	extraJSON := "{}"
-	if message.RequestID != 0 {
-		extraJSON = fmt.Sprintf(`{"requestId":%d}`, message.RequestID)
-	}
-	decoded := toSessionViewTurn(SessionTurnRecord{
-		TurnID:      strings.TrimSpace(message.MessageID),
-		PromptIndex: 0,
-		TurnIndex:   0,
-		UpdateIndex: message.SyncSubIndex + 1,
-		UpdateJSON:  message.ContentJSON,
-		ExtraJSON:   extraJSON,
-	})
-	text := firstNonEmpty(decoded.Text, message.Body)
-	blocks := cloneSessionContentBlocks(decoded.Blocks)
-	if len(blocks) == 0 {
-		blocks = cloneSessionContentBlocks(message.Blocks)
-	}
-	options := cloneSessionPermissionOptions(decoded.Options)
-	if len(options) == 0 {
-		options = cloneSessionPermissionOptions(message.Options)
-	}
-	requestID := firstNonZeroInt64(decoded.RequestID, message.RequestID)
-
-	return sessionViewMessage{
-		MessageID: message.MessageID,
-		SessionID: message.SessionID,
-		Index:     message.SyncIndex,
-		SubIndex:  message.SyncSubIndex,
-		Role:      decoded.Role,
-		Kind:      decoded.Kind,
-		Text:      text,
-		Blocks:    blocks,
-		Options:   options,
-		Status:    decoded.Status,
-		CreatedAt: message.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt: message.UpdatedAt.UTC().Format(time.RFC3339),
-		RequestID: requestID,
-	}
 }
 
 func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
