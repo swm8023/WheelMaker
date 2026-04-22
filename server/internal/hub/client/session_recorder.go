@@ -90,6 +90,15 @@ type sessionViewPrompt struct {
 	Turns       []sessionViewTurn `json:"turns"`
 }
 
+type sessionReadMessage struct {
+	SessionID   string `json:"sessionId"`
+	TurnID      string `json:"turnId"`
+	PromptIndex int64  `json:"promptIndex"`
+	TurnIndex   int64  `json:"turnIndex"`
+	UpdateIndex int64  `json:"updateIndex"`
+	Content     string `json:"content"`
+}
+
 type sessionPromptState struct {
 	promptIndex   int64
 	nextTurnIndex int64
@@ -405,6 +414,25 @@ func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnR
 	})
 }
 
+func toSessionReadMessage(turn SessionTurnRecord) sessionReadMessage {
+	turnID := strings.TrimSpace(turn.TurnID)
+	if turnID == "" {
+		turnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
+	}
+	content := strings.TrimSpace(turn.UpdateJSON)
+	if content == "" {
+		content = "{}"
+	}
+	return sessionReadMessage{
+		SessionID:   strings.TrimSpace(turn.SessionID),
+		TurnID:      turnID,
+		PromptIndex: turn.PromptIndex,
+		TurnIndex:   turn.TurnIndex,
+		UpdateIndex: turn.UpdateIndex,
+		Content:     content,
+	}
+}
+
 func sessionUpdateText(update acp.SessionUpdate) string {
 	raw := extractTextChunk(update.Content)
 	if strings.TrimSpace(raw) != "" {
@@ -515,6 +543,46 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 		out = append(out, toSessionViewPrompt(prompt, turns))
 	}
 	return r.sessionViewSummaryFromRecord(*rec), out, lastPromptIndex, lastPromptUpdateIndex, nil
+}
+
+func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionReadMessage, int64, int64, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionViewSummary{}, nil, 0, 0, err
+	}
+	if rec == nil {
+		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
+	}
+	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionViewSummary{}, nil, 0, 0, err
+	}
+
+	out := make([]sessionReadMessage, 0)
+	var lastIndex int64
+	var lastSubIndex int64
+	for _, prompt := range prompts {
+		turns, err := r.store.ListSessionTurns(ctx, r.projectName, sessionID, prompt.PromptIndex)
+		if err != nil {
+			return sessionViewSummary{}, nil, 0, 0, err
+		}
+		for _, turn := range turns {
+			if turn.PromptIndex > lastIndex || (turn.PromptIndex == lastIndex && turn.TurnIndex > lastSubIndex) {
+				lastIndex = turn.PromptIndex
+				lastSubIndex = turn.TurnIndex
+			}
+			if turn.PromptIndex < afterPromptIndex {
+				continue
+			}
+			if turn.PromptIndex == afterPromptIndex && turn.TurnIndex <= afterTurnIndex {
+				continue
+			}
+			out = append(out, toSessionReadMessage(turn))
+		}
+	}
+
+	return r.sessionViewSummaryFromRecord(*rec), out, lastIndex, lastSubIndex, nil
 }
 func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
 	return r.currentSessionViewSummary(ctx, strings.TrimSpace(sessionID))

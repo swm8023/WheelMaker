@@ -373,11 +373,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if afterPromptIndex <= 0 {
 			afterPromptIndex = req.AfterIndex
 		}
-		summary, prompts, lastPromptIndex, lastPromptUpdateIndex, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, afterPromptIndex, req.AfterSubIndex)
+		summary, messages, lastIndex, lastSubIndex, err := c.sessionRecorder.ReadSessionMessages(ctx, req.SessionID, afterPromptIndex, req.AfterSubIndex)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"session": summary, "prompts": prompts, "lastPromptIndex": lastPromptIndex, "lastPromptUpdateIndex": lastPromptUpdateIndex}, nil
+		return map[string]any{"session": summary, "messages": messages, "lastIndex": lastIndex, "lastSubIndex": lastSubIndex}, nil
 	case "session.new":
 		var req struct {
 			Title string `json:"title,omitempty"`
@@ -399,7 +399,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}); err != nil {
 			return nil, err
 		}
-		summary, _, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.ID, 0, 0)
+		summary, _, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, sess.ID, 0, 0)
 		if err != nil {
 			return nil, err
 		}
