@@ -193,30 +193,6 @@ func decodeSessionViewEventResult(content string, out any) bool {
 	return json.Unmarshal(doc.Result, out) == nil
 }
 
-func decodeSessionViewEventID(content string) int64 {
-	doc, ok := decodeSessionViewACPContentDoc(content)
-	if !ok {
-		return 0
-	}
-	return doc.ID
-}
-
-func decodeSessionViewEventUpdate(content string) (acp.SessionUpdate, bool) {
-	method, ok := decodeSessionViewEventMethod(content)
-	if !ok || method != acp.MethodSessionUpdate {
-		return acp.SessionUpdate{}, false
-	}
-	var params acp.SessionUpdateParams
-	if !decodeSessionViewEventParams(content, &params) {
-		return acp.SessionUpdate{}, false
-	}
-	update := params.Update
-	if strings.TrimSpace(update.SessionUpdate) == "" {
-		return acp.SessionUpdate{}, false
-	}
-	return update, true
-}
-
 func sessionViewMethodFromEvent(event SessionViewEvent) string {
 	if method, ok := decodeSessionViewEventMethod(event.Content); ok {
 		return method
@@ -462,20 +438,6 @@ func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnR
 		RequestID: decoded.RequestID,
 	}})
 }
-func normalizeRecorderEventSource(event SessionViewEvent) string {
-	channel := strings.TrimSpace(event.SourceChannel)
-	chatID := strings.TrimSpace(event.SourceChatID)
-	if channel == "" && chatID == "" {
-		return ""
-	}
-	if channel == "" {
-		return chatID
-	}
-	if chatID == "" {
-		return channel
-	}
-	return channel + ":" + chatID
-}
 
 func sessionUpdateText(update acp.SessionUpdate) string {
 	raw := extractTextChunk(update.Content)
@@ -538,29 +500,6 @@ func buildACPMethodResponseContent(id int64, method string, result any) string {
 	return buildACPMethodContentJSON(method, doc)
 }
 
-func mergeSessionPermissionResultContentJSON(requestContentJSON, responseContentJSON string) string {
-	requestContentJSON = normalizeJSONDoc(requestContentJSON, `{"method":"`+acp.MethodRequestPermission+`"}`)
-	responseContentJSON = normalizeJSONDoc(responseContentJSON, `{"method":"`+acp.MethodRequestPermission+`"}`)
-	var reqDoc map[string]any
-	var respDoc map[string]any
-	if err := json.Unmarshal([]byte(requestContentJSON), &reqDoc); err != nil {
-		return responseContentJSON
-	}
-	if err := json.Unmarshal([]byte(responseContentJSON), &respDoc); err != nil {
-		return requestContentJSON
-	}
-	if result, ok := respDoc["result"]; ok {
-		reqDoc["result"] = result
-	}
-	if id, ok := respDoc["id"]; ok {
-		reqDoc["id"] = id
-	}
-	raw, err := json.Marshal(reqDoc)
-	if err != nil {
-		return responseContentJSON
-	}
-	return string(raw)
-}
 func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
 	entries, err := r.listSessions(ctx)
 	if err != nil {
@@ -645,65 +584,6 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
 	r.resetSessionUnread(strings.TrimSpace(sessionID))
 	return r.currentSessionViewSummary(ctx, sessionID)
-}
-
-func (r *SessionRecorder) loadLatestStoredSessionMessage(ctx context.Context, sessionID string) (SessionTurnMessageRecord, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return SessionTurnMessageRecord{}, fmt.Errorf("session id is required")
-	}
-	messages, err := r.store.ListSessionTurnMessages(ctx, r.projectName, sessionID)
-	if err != nil {
-		return SessionTurnMessageRecord{}, err
-	}
-	if len(messages) == 0 {
-		return SessionTurnMessageRecord{}, fmt.Errorf("session message not found for session %s", sessionID)
-	}
-	return messages[len(messages)-1], nil
-}
-
-func (r *SessionRecorder) loadStoredSessionMessageByIndex(ctx context.Context, sessionID string, index int64) (SessionTurnMessageRecord, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return SessionTurnMessageRecord{}, fmt.Errorf("session id is required")
-	}
-	if index <= 0 {
-		return SessionTurnMessageRecord{}, fmt.Errorf("invalid session index: %d", index)
-	}
-	messages, err := r.store.ListSessionTurnMessagesAfterCursor(ctx, r.projectName, sessionID, index-1, -1)
-	if err != nil {
-		return SessionTurnMessageRecord{}, err
-	}
-	for _, message := range messages {
-		if message.SyncIndex == index {
-			return message, nil
-		}
-	}
-	return SessionTurnMessageRecord{}, fmt.Errorf("session message not found: %s@%d", sessionID, index)
-}
-
-func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, sessionID string, requestID int64) (*SessionTurnMessageRecord, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || requestID == 0 {
-		return nil, nil
-	}
-	messages, err := r.store.ListSessionTurnMessages(ctx, r.projectName, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.RequestID != requestID {
-			continue
-		}
-		method := strings.TrimSpace(msg.Method)
-		if method != acp.MethodRequestPermission && method != "session.permission" {
-			continue
-		}
-		copyMsg := msg
-		return &copyMsg, nil
-	}
-	return nil, nil
 }
 
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time, titleIfEmptyOnly ...bool) error {
@@ -828,19 +708,6 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 		return
 	}
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
-}
-
-func (r *SessionRecorder) publishSessionMessage(message SessionTurnMessageRecord) {
-	publish := r.eventPublisher()
-	if publish == nil {
-		return
-	}
-	ctx := context.Background()
-	summary, ok := r.currentSessionViewSummary(ctx, message.SessionID)
-	if !ok {
-		summary = sessionViewSummary{SessionID: message.SessionID, Title: message.SessionID, UpdatedAt: message.UpdatedAt.UTC().Format(time.RFC3339), ProjectName: message.ProjectName}
-	}
-	_ = publish("registry.session.message", map[string]any{"session": summary, "message": toSessionViewMessage(message)})
 }
 
 func toSessionViewPrompt(prompt SessionPromptRecord, turns []SessionTurnRecord) sessionViewPrompt {
