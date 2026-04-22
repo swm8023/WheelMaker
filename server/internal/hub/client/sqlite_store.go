@@ -45,7 +45,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS session_prompts (
 	session_id TEXT NOT NULL,
 	prompt_index INTEGER NOT NULL,
-	update_index INTEGER NOT NULL DEFAULT 0,
 	title TEXT NOT NULL DEFAULT '',
 	stop_reason TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL DEFAULT '',
@@ -125,7 +124,6 @@ type SessionPromptRecord struct {
 	PromptID    string
 	SessionID   string
 	PromptIndex int64
-	UpdateIndex int64
 	Title       string
 	StopReason  string
 	UpdatedAt   time.Time
@@ -335,7 +333,6 @@ func migratePromptTurnTables(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS session_prompts (
 			session_id TEXT NOT NULL,
 			prompt_index INTEGER NOT NULL,
-			update_index INTEGER NOT NULL DEFAULT 0,
 			title TEXT NOT NULL DEFAULT '',
 			stop_reason TEXT NOT NULL DEFAULT '',
 			updated_at TEXT NOT NULL DEFAULT '',
@@ -346,6 +343,15 @@ func migratePromptTurnTables(db *sql.DB) error {
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index)`); err != nil {
 		return fmt.Errorf("create session_prompts index: %w", err)
+	}
+	promptUpdateIndexExists, err := sqliteColumnExists(db, "session_prompts", "update_index")
+	if err != nil {
+		return fmt.Errorf("check session_prompts.update_index column: %w", err)
+	}
+	if promptUpdateIndexExists {
+		if err := rebuildSessionPromptsWithoutUpdateIndex(db); err != nil {
+			return fmt.Errorf("drop legacy session_prompts.update_index: %w", err)
+		}
 	}
 
 	turnsExists, err := sqliteTableExists(db, "session_turns")
@@ -369,6 +375,53 @@ func migratePromptTurnTables(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_turns_session_prompt_turn ON session_turns(session_id, prompt_index, turn_index)`); err != nil {
 		return fmt.Errorf("create session_turns index: %w", err)
 	}
+	return nil
+}
+
+func rebuildSessionPromptsWithoutUpdateIndex(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin session_prompts rebuild tx: %w", err)
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.Exec(`
+		CREATE TABLE session_prompts_new (
+			session_id TEXT NOT NULL,
+			prompt_index INTEGER NOT NULL,
+			title TEXT NOT NULL DEFAULT '',
+			stop_reason TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (session_id, prompt_index)
+		)
+	`); err != nil {
+		return fmt.Errorf("create session_prompts_new: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO session_prompts_new (session_id, prompt_index, title, stop_reason, updated_at)
+		SELECT session_id, prompt_index, title, stop_reason, updated_at
+		FROM session_prompts
+	`); err != nil {
+		return fmt.Errorf("copy session_prompts rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE session_prompts`); err != nil {
+		return fmt.Errorf("drop legacy session_prompts: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE session_prompts_new RENAME TO session_prompts`); err != nil {
+		return fmt.Errorf("rename session_prompts_new: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index)`); err != nil {
+		return fmt.Errorf("recreate session_prompts index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit session_prompts rebuild tx: %w", err)
+	}
+	rollback = false
 	return nil
 }
 func sqliteTableExists(db *sql.DB, tableName string) (bool, error) {
@@ -982,20 +1035,15 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 		promptIndex = 1
 	}
 
-	var existingPromptUpdate int64
 	var existingTitle string
 	var existingStopReason string
 	err := tx.QueryRowContext(ctx, `
-		SELECT update_index, title, stop_reason
+		SELECT title, stop_reason
 		FROM session_prompts
 		WHERE session_id = ? AND prompt_index = ?
-	`, rec.SessionID, promptIndex).Scan(&existingPromptUpdate, &existingTitle, &existingStopReason)
+	`, rec.SessionID, promptIndex).Scan(&existingTitle, &existingStopReason)
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("load session prompt projection: %w", err)
-	}
-	promptUpdate := existingPromptUpdate + 1
-	if promptUpdate <= 0 {
-		promptUpdate = 1
 	}
 	title := strings.TrimSpace(existingTitle)
 	if isSessionPromptMethod(rec.Method) {
@@ -1011,14 +1059,13 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 		stopReason = parsed
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO session_prompts (session_id, prompt_index, update_index, title, stop_reason, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index) DO UPDATE SET
-			update_index = excluded.update_index,
 			title = excluded.title,
 			stop_reason = excluded.stop_reason,
 			updated_at = excluded.updated_at
-	`, rec.SessionID, promptIndex, promptUpdate, title, stopReason, storedTime); err != nil {
+	`, rec.SessionID, promptIndex, title, stopReason, storedTime); err != nil {
 		return fmt.Errorf("upsert session_prompts projection: %w", err)
 	}
 
@@ -1228,14 +1275,13 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 	updatedAt := rec.UpdatedAt.UTC().Format(time.RFC3339Nano)
 
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_prompts (session_id, prompt_index, update_index, title, stop_reason, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index) DO UPDATE SET
-			update_index = CASE WHEN excluded.update_index > session_prompts.update_index THEN excluded.update_index ELSE session_prompts.update_index END,
 			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE session_prompts.title END,
 			stop_reason = CASE WHEN excluded.stop_reason != '' THEN excluded.stop_reason ELSE session_prompts.stop_reason END,
 			updated_at = CASE WHEN excluded.updated_at > session_prompts.updated_at THEN excluded.updated_at ELSE session_prompts.updated_at END
-	`, rec.SessionID, rec.PromptIndex, rec.UpdateIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt); err != nil {
+	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt); err != nil {
 		return fmt.Errorf("upsert session prompt: %w", err)
 	}
 	return nil
@@ -1248,12 +1294,12 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 	var rec SessionPromptRecord
 	var updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.update_index, p.title, p.stop_reason, p.updated_at
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index = ?
 		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.UpdateIndex, &rec.Title, &rec.StopReason, &updatedAt)
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -1267,7 +1313,7 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 
 func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.update_index, p.title, p.stop_reason, p.updated_at
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ?
@@ -1282,7 +1328,7 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 	for rows.Next() {
 		var rec SessionPromptRecord
 		var updatedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.UpdateIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan session prompt: %w", err)
 		}
 		rec.UpdatedAt = parseStoreTime(updatedAt)
@@ -1294,7 +1340,7 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 
 func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.update_index, p.title, p.stop_reason, p.updated_at
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index > ?
@@ -1309,7 +1355,7 @@ func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectN
 	for rows.Next() {
 		var rec SessionPromptRecord
 		var updatedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.UpdateIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan session prompt after index: %w", err)
 		}
 		rec.UpdatedAt = parseStoreTime(updatedAt)

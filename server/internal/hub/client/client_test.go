@@ -1913,21 +1913,20 @@ func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, prompts, _, _, err := c.sessionRecorder.ReadSessionPrompts(context.Background(), "sess-1", 0, 0)
+	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(context.Background(), "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionPrompts: %v", err)
+		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if len(prompts[0].Turns) != 2 {
-		t.Fatalf("prompts[0].Turns len = %d, want 2", len(prompts[0].Turns))
+	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
+	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
+		t.Fatalf("messages[0] text = %q, want hello", extractTextChunk(update1.Content))
 	}
-	if strings.TrimSpace(prompts[0].Turns[0].Text) != "hello" {
-		t.Fatalf("prompts[0].Turns[0].Text = %q, want hello", prompts[0].Turns[0].Text)
-	}
-	if strings.TrimSpace(prompts[0].Turns[1].Text) != "world" {
-		t.Fatalf("prompts[0].Turns[1].Text = %q, want world", prompts[0].Turns[1].Text)
+	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
+	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
+		t.Fatalf("messages[1] text = %q, want world", extractTextChunk(update2.Content))
 	}
 }
 
@@ -2040,24 +2039,42 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
-	_, prompts, _, _, err := c.sessionRecorder.ReadSessionPrompts(context.Background(), "sess-1", 0, 0)
+	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(context.Background(), "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionPrompts: %v", err)
+		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if len(prompts[0].Turns) != 2 {
-		t.Fatalf("prompts[0].Turns len = %d, want 2", len(prompts[0].Turns))
+	var promptDoc struct {
+		Method string `json:"method"`
+		Params struct {
+			Prompt []acp.ContentBlock `json:"prompt"`
+		} `json:"params"`
 	}
-	if len(prompts[0].Turns[0].Blocks) != 1 || prompts[0].Turns[0].Blocks[0].Type != acp.ContentBlockTypeImage {
-		t.Fatalf("prompts[0].Turns[0].Blocks = %#v, want image block", prompts[0].Turns[0].Blocks)
+	if err := json.Unmarshal([]byte(messages[0].Content), &promptDoc); err != nil {
+		t.Fatalf("unmarshal prompt content: %v", err)
 	}
-	if len(prompts[0].Turns[1].Options) != 1 || prompts[0].Turns[1].Options[0].OptionID != "allow" {
-		t.Fatalf("prompts[0].Turns[1].Options = %#v, want allow option", prompts[0].Turns[1].Options)
+	if strings.TrimSpace(promptDoc.Method) != acp.MethodSessionPrompt {
+		t.Fatalf("messages[0].method = %q, want %q", promptDoc.Method, acp.MethodSessionPrompt)
 	}
-	if prompts[0].Turns[1].Status != "needs_action" {
-		t.Fatalf("prompts[0].Turns[1].Status = %q, want needs_action", prompts[0].Turns[1].Status)
+	if len(promptDoc.Params.Prompt) != 1 || promptDoc.Params.Prompt[0].Type != acp.ContentBlockTypeImage {
+		t.Fatalf("messages[0].params.prompt = %#v, want image block", promptDoc.Params.Prompt)
+	}
+	var permissionDoc struct {
+		Method string `json:"method"`
+		Params struct {
+			Options []acp.PermissionOption `json:"options"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(messages[1].Content), &permissionDoc); err != nil {
+		t.Fatalf("unmarshal permission content: %v", err)
+	}
+	if strings.TrimSpace(permissionDoc.Method) != acp.MethodRequestPermission {
+		t.Fatalf("messages[1].method = %q, want %q", permissionDoc.Method, acp.MethodRequestPermission)
+	}
+	if len(permissionDoc.Params.Options) != 1 || permissionDoc.Params.Options[0].OptionID != "allow" {
+		t.Fatalf("messages[1].params.options = %#v, want allow option", permissionDoc.Params.Options)
 	}
 }
 
@@ -2188,21 +2205,23 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, prompts, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionPrompts: %v", err)
+		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if len(prompts[0].Turns) != 2 {
-		t.Fatalf("prompts[0].Turns len = %d, want 2", len(prompts[0].Turns))
+	seen := map[string]string{}
+	for _, message := range messages {
+		update := decodeTurnSessionUpdate(t, message.Content)
+		seen[update.SessionUpdate] = extractTextChunk(update.Content)
 	}
-	if prompts[0].Turns[0].Text != "user says hi" {
-		t.Fatalf("prompts[0].Turns[0].Text = %q, want %q", prompts[0].Turns[0].Text, "user says hi")
+	if got := seen[acp.SessionUpdateUserMessageChunk]; got != "user says hi" {
+		t.Fatalf("user chunk text = %q, want %q", got, "user says hi")
 	}
-	if prompts[0].Turns[1].Text != "assistant says hi" {
-		t.Fatalf("prompts[0].Turns[1].Text = %q, want %q", prompts[0].Turns[1].Text, "assistant says hi")
+	if got := seen[acp.SessionUpdateAgentMessageChunk]; got != "assistant says hi" {
+		t.Fatalf("assistant chunk text = %q, want %q", got, "assistant says hi")
 	}
 }
 

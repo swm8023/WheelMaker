@@ -60,35 +60,6 @@ type sessionViewSummary struct {
 	Status      string `json:"status,omitempty"`
 	ProjectName string `json:"projectName,omitempty"`
 }
-type sessionViewTurn struct {
-	TurnID      string                 `json:"turnId"`
-	PromptIndex int64                  `json:"promptIndex"`
-	TurnIndex   int64                  `json:"turnIndex"`
-	UpdateIndex int64                  `json:"updateIndex"`
-	Role        string                 `json:"role,omitempty"`
-	Kind        string                 `json:"kind,omitempty"`
-	Text        string                 `json:"text,omitempty"`
-	Status      string                 `json:"status,omitempty"`
-	RequestID   int64                  `json:"requestId,omitempty"`
-	ToolCallID  string                 `json:"toolCallId,omitempty"`
-	Blocks      []acp.ContentBlock     `json:"blocks,omitempty"`
-	Options     []acp.PermissionOption `json:"options,omitempty"`
-	Update      json.RawMessage        `json:"update,omitempty"`
-	Extra       json.RawMessage        `json:"extra,omitempty"`
-}
-
-type sessionViewPrompt struct {
-	MessageID   string            `json:"messageId"`
-	PromptID    string            `json:"promptId"`
-	SessionID   string            `json:"sessionId"`
-	PromptIndex int64             `json:"promptIndex"`
-	UpdateIndex int64             `json:"updateIndex"`
-	Title       string            `json:"title"`
-	StopReason  string            `json:"stopReason,omitempty"`
-	Status      string            `json:"status"`
-	UpdatedAt   string            `json:"updatedAt"`
-	Turns       []sessionViewTurn `json:"turns"`
-}
 
 type sessionReadMessage struct {
 	SessionID   string `json:"sessionId"`
@@ -255,7 +226,6 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
 		PromptIndex: state.promptIndex,
-		UpdateIndex: 0,
 		Title:       promptTitle,
 		UpdatedAt:   event.UpdatedAt,
 	}); err != nil {
@@ -315,14 +285,9 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, event 
 	if err != nil {
 		return err
 	}
-	finalUpdateIndex := state.nextTurnIndex - 1
-	if finalUpdateIndex < 0 {
-		finalUpdateIndex = 0
-	}
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
 		PromptIndex: state.promptIndex,
-		UpdateIndex: finalUpdateIndex,
 		StopReason:  strings.TrimSpace(stopReason),
 		UpdatedAt:   event.UpdatedAt,
 	}); err != nil {
@@ -371,7 +336,6 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 		if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 			SessionID:   sessionID,
 			PromptIndex: 1,
-			UpdateIndex: 0,
 			UpdatedAt:   updatedAt,
 		}); err != nil {
 			return sessionPromptState{}, err
@@ -431,14 +395,6 @@ func toSessionReadMessage(turn SessionTurnRecord) sessionReadMessage {
 		UpdateIndex: turn.UpdateIndex,
 		Content:     content,
 	}
-}
-
-func sessionUpdateText(update acp.SessionUpdate) string {
-	raw := extractTextChunk(update.Content)
-	if strings.TrimSpace(raw) != "" {
-		return raw
-	}
-	return ""
 }
 
 func firstNonZeroInt64(v int64, fallback int64) int64 {
@@ -507,42 +463,6 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 		return out[i].UpdatedAt > out[j].UpdatedAt
 	})
 	return out, nil
-}
-
-func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, afterPromptIndex, afterPromptUpdateIndex int64) (sessionViewSummary, []sessionViewPrompt, int64, int64, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	if rec == nil {
-		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
-	}
-	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	out := make([]sessionViewPrompt, 0, len(prompts))
-	var lastPromptIndex int64
-	var lastPromptUpdateIndex int64
-	for _, prompt := range prompts {
-		if prompt.PromptIndex > lastPromptIndex {
-			lastPromptIndex = prompt.PromptIndex
-			lastPromptUpdateIndex = prompt.UpdateIndex
-		}
-		if prompt.PromptIndex < afterPromptIndex {
-			continue
-		}
-		if prompt.PromptIndex == afterPromptIndex && prompt.UpdateIndex <= afterPromptUpdateIndex {
-			continue
-		}
-		turns, err := r.store.ListSessionTurns(ctx, r.projectName, sessionID, prompt.PromptIndex)
-		if err != nil {
-			return sessionViewSummary{}, nil, 0, 0, err
-		}
-		out = append(out, toSessionViewPrompt(prompt, turns))
-	}
-	return r.sessionViewSummaryFromRecord(*rec), out, lastPromptIndex, lastPromptUpdateIndex, nil
 }
 
 func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionReadMessage, int64, int64, error) {
@@ -658,146 +578,6 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 		return
 	}
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
-}
-
-func toSessionViewPrompt(prompt SessionPromptRecord, turns []SessionTurnRecord) sessionViewPrompt {
-	promptID := strings.TrimSpace(prompt.PromptID)
-	if promptID == "" {
-		promptID = formatPromptSeq(prompt.PromptIndex)
-	}
-	updatedAt := prompt.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = time.Now().UTC()
-	}
-	out := sessionViewPrompt{
-		MessageID:   promptID,
-		PromptID:    promptID,
-		SessionID:   strings.TrimSpace(prompt.SessionID),
-		PromptIndex: prompt.PromptIndex,
-		UpdateIndex: prompt.UpdateIndex,
-		Title:       strings.TrimSpace(prompt.Title),
-		StopReason:  strings.TrimSpace(prompt.StopReason),
-		Status:      promptStatusFromStopReason(prompt.StopReason),
-		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
-		Turns:       make([]sessionViewTurn, 0, len(turns)),
-	}
-	for _, turn := range turns {
-		out.Turns = append(out.Turns, toSessionViewTurn(turn))
-	}
-	return out
-}
-
-func toSessionViewTurn(turn SessionTurnRecord) sessionViewTurn {
-	updateJSON := normalizeJSONDoc(turn.UpdateJSON, `{}`)
-	extraJSON := normalizeJSONDoc(turn.ExtraJSON, `{}`)
-	turnID := strings.TrimSpace(turn.TurnID)
-	if turnID == "" {
-		turnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
-	}
-	out := sessionViewTurn{
-		TurnID:      turnID,
-		PromptIndex: turn.PromptIndex,
-		TurnIndex:   turn.TurnIndex,
-		UpdateIndex: turn.UpdateIndex,
-		Update:      json.RawMessage(updateJSON),
-		Extra:       json.RawMessage(extraJSON),
-	}
-	var updateDoc struct {
-		Method string `json:"method"`
-		ID     int64  `json:"id"`
-		Params struct {
-			SessionID string                 `json:"sessionId"`
-			Prompt    []acp.ContentBlock     `json:"prompt"`
-			Update    acp.SessionUpdate      `json:"update"`
-			ToolCall  acp.ToolCallRef        `json:"toolCall"`
-			Options   []acp.PermissionOption `json:"options"`
-		} `json:"params"`
-		Result struct {
-			StopReason string               `json:"stopReason"`
-			Outcome    acp.PermissionResult `json:"outcome"`
-		} `json:"result"`
-		Payload struct {
-			Role       string                 `json:"role"`
-			Kind       string                 `json:"kind"`
-			Text       string                 `json:"text"`
-			Status     string                 `json:"status"`
-			RequestID  int64                  `json:"requestId"`
-			ToolCallID string                 `json:"toolCallId"`
-			Blocks     []acp.ContentBlock     `json:"blocks"`
-			Options    []acp.PermissionOption `json:"options"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal([]byte(updateJSON), &updateDoc); err == nil {
-		out.RequestID = updateDoc.ID
-		out.Role = strings.TrimSpace(updateDoc.Payload.Role)
-		out.Kind = firstNonEmpty(strings.TrimSpace(updateDoc.Payload.Kind), strings.TrimSpace(updateDoc.Method))
-		out.Text = updateDoc.Payload.Text
-		out.Status = strings.TrimSpace(updateDoc.Payload.Status)
-		out.RequestID = firstNonZeroInt64(out.RequestID, updateDoc.Payload.RequestID)
-		out.ToolCallID = strings.TrimSpace(updateDoc.Payload.ToolCallID)
-		out.Blocks = cloneSessionContentBlocks(updateDoc.Payload.Blocks)
-		out.Options = cloneSessionPermissionOptions(updateDoc.Payload.Options)
-
-		if strings.TrimSpace(updateDoc.Params.Update.SessionUpdate) != "" {
-			out.Kind = firstNonEmpty(out.Kind, strings.TrimSpace(updateDoc.Params.Update.SessionUpdate))
-			out.Text = firstNonEmpty(out.Text, sessionUpdateText(updateDoc.Params.Update))
-			out.Status = firstNonEmpty(out.Status, strings.TrimSpace(updateDoc.Params.Update.Status))
-			out.ToolCallID = firstNonEmpty(out.ToolCallID, strings.TrimSpace(updateDoc.Params.Update.ToolCallID))
-			switch strings.TrimSpace(updateDoc.Params.Update.SessionUpdate) {
-			case acp.SessionUpdateUserMessageChunk:
-				out.Role = firstNonEmpty(out.Role, "user")
-			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-				out.Role = firstNonEmpty(out.Role, "assistant")
-			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-				out.Role = firstNonEmpty(out.Role, "system")
-			default:
-				out.Role = firstNonEmpty(out.Role, "assistant")
-			}
-		}
-		switch strings.TrimSpace(updateDoc.Method) {
-		case acp.MethodSessionPrompt:
-			if len(updateDoc.Params.Prompt) > 0 {
-				out.Role = firstNonEmpty(out.Role, "user")
-				out.Kind = firstNonEmpty(out.Kind, acp.MethodSessionPrompt)
-				out.Blocks = cloneSessionContentBlocks(updateDoc.Params.Prompt)
-				out.Text = firstNonEmpty(out.Text, PromptPreview(updateDoc.Params.Prompt))
-				out.Status = firstNonEmpty(out.Status, "done")
-			}
-			if strings.TrimSpace(updateDoc.Result.StopReason) != "" {
-				out.Status = firstNonEmpty(out.Status, "done")
-				out.Text = firstNonEmpty(out.Text, strings.TrimSpace(updateDoc.Result.StopReason))
-			}
-		case acp.MethodRequestPermission:
-			out.Role = firstNonEmpty(out.Role, "system")
-			out.Kind = firstNonEmpty(out.Kind, "permission")
-			out.Text = firstNonEmpty(out.Text, strings.TrimSpace(updateDoc.Params.ToolCall.Title))
-			out.ToolCallID = firstNonEmpty(out.ToolCallID, strings.TrimSpace(updateDoc.Params.ToolCall.ToolCallID))
-			if len(out.Options) == 0 {
-				out.Options = cloneSessionPermissionOptions(updateDoc.Params.Options)
-			}
-			if strings.TrimSpace(updateDoc.Result.Outcome.Outcome) != "" {
-				out.Status = strings.TrimSpace(updateDoc.Result.Outcome.Outcome)
-			} else {
-				out.Status = firstNonEmpty(out.Status, "needs_action")
-			}
-		}
-	}
-	var extraDoc struct {
-		RequestID int64 `json:"requestId"`
-	}
-	if err := json.Unmarshal([]byte(extraJSON), &extraDoc); err == nil {
-		if out.RequestID == 0 {
-			out.RequestID = extraDoc.RequestID
-		}
-	}
-	return out
-}
-
-func promptStatusFromStopReason(stopReason string) string {
-	if strings.TrimSpace(stopReason) == "" {
-		return "running"
-	}
-	return "done"
 }
 
 func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
