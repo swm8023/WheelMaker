@@ -120,12 +120,9 @@ type SessionTurnMessageRecord struct {
 	Source        string
 	Time          time.Time
 	EventTime     time.Time
-	Role          string
-	Kind          string
 	Body          string
 	Blocks        []acp.ContentBlock
 	Options       []acp.PermissionOption
-	Status        string
 	SourceChannel string
 	SourceChatID  string
 	RequestID     int64
@@ -694,11 +691,18 @@ func inferSessionTurnMethod(rec SessionTurnMessageRecord) string {
 	if strings.TrimSpace(rec.Method) != "" {
 		return strings.TrimSpace(rec.Method)
 	}
-	if rec.RequestID != 0 || len(rec.Options) > 0 || strings.EqualFold(strings.TrimSpace(rec.Kind), "permission") {
-		return acp.MethodRequestPermission
+	if strings.TrimSpace(rec.ContentJSON) != "" {
+		var doc struct {
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal([]byte(rec.ContentJSON), &doc); err == nil {
+			if strings.TrimSpace(doc.Method) != "" {
+				return strings.TrimSpace(doc.Method)
+			}
+		}
 	}
-	if strings.EqualFold(strings.TrimSpace(rec.Role), "user") {
-		return acp.MethodSessionPrompt
+	if rec.RequestID != 0 || len(rec.Options) > 0 {
+		return acp.MethodRequestPermission
 	}
 	return acp.MethodSessionUpdate
 }
@@ -763,21 +767,9 @@ func hydrateSessionTurnFromUpdate(rec *SessionTurnMessageRecord, update acp.Sess
 	if rec == nil {
 		return
 	}
-	rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(update.SessionUpdate))
 	body := deriveSessionTurnBodyFromUpdate(update)
 	if strings.TrimSpace(body) != "" {
 		rec.Body = body
-	}
-	rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(update.Status))
-	switch strings.TrimSpace(update.SessionUpdate) {
-	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "assistant")
-	case acp.SessionUpdateUserMessageChunk:
-		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "user")
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
-	default:
-		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
 	}
 }
 
@@ -819,25 +811,16 @@ func hydrateSessionTurnLegacyFields(rec *SessionTurnMessageRecord) {
 		switch strings.TrimSpace(content.Method) {
 		case acp.MethodSessionPrompt, "session.prompt":
 			if len(content.Params.Prompt) > 0 {
-				rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "user")
-				rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), acp.MethodSessionPrompt)
 				rec.Blocks = cloneSessionContentBlocks(content.Params.Prompt)
 				rec.Body = firstNonEmpty(rec.Body, PromptPreview(content.Params.Prompt))
-				rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), "done")
 			}
 			if strings.TrimSpace(content.Result.StopReason) != "" {
-				rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), "done")
 				rec.Body = firstNonEmpty(rec.Body, strings.TrimSpace(content.Result.StopReason))
 			}
 		case acp.MethodRequestPermission, "session.permission":
-			rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
-			rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), "permission")
 			rec.Body = firstNonEmpty(rec.Body, strings.TrimSpace(content.Params.ToolCall.Title))
 			if len(rec.Options) == 0 {
 				rec.Options = cloneSessionPermissionOptions(content.Params.Options)
-			}
-			if strings.TrimSpace(content.Result.Outcome.Outcome) != "" {
-				rec.Status = strings.TrimSpace(content.Result.Outcome.Outcome)
 			}
 		}
 
@@ -846,12 +829,6 @@ func hydrateSessionTurnLegacyFields(rec *SessionTurnMessageRecord) {
 		}
 
 		// Legacy payload fallback for pre-ACP wrapped content.
-		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), strings.TrimSpace(content.Payload.Role))
-		if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
-			rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.UpdateMethod))
-		} else {
-			rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.Kind))
-		}
 		if strings.TrimSpace(content.Payload.Text) != "" {
 			rec.Body = content.Payload.Text
 		}
@@ -861,11 +838,7 @@ func hydrateSessionTurnLegacyFields(rec *SessionTurnMessageRecord) {
 		if len(rec.Options) == 0 {
 			rec.Options = cloneSessionPermissionOptions(content.Payload.Options)
 		}
-		rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(content.Payload.Status))
 		rec.RequestID = firstNonZeroInt64(rec.RequestID, content.Payload.RequestID)
-		if isSessionPermissionMethod(rec.Method) {
-			rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), "needs_action")
-		}
 	}
 	if rec.Method == "" {
 		rec.Method = inferSessionTurnMethod(*rec)
@@ -1019,6 +992,27 @@ func findSessionTurnBySyncIndexTx(ctx context.Context, tx *sql.Tx, sessionID str
 	}
 	return nil, nil
 }
+
+func parsePromptStopReasonFromContentJSON(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var doc struct {
+		Method string `json:"method"`
+		Result struct {
+			StopReason string `json:"stopReason"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return ""
+	}
+	if !isSessionPromptMethod(doc.Method) {
+		return ""
+	}
+	return strings.TrimSpace(doc.Result.StopReason)
+}
+
 func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageRecord, existingTurn *sessionTurnLookup, contentJSON, storedTime string) error {
 
 	var latestPromptIndex int64
@@ -1061,8 +1055,8 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 		}
 	}
 	stopReason := strings.TrimSpace(existingStopReason)
-	if strings.EqualFold(strings.TrimSpace(rec.Kind), "prompt_result") && strings.TrimSpace(rec.Body) != "" {
-		stopReason = strings.TrimSpace(rec.Body)
+	if parsed := parsePromptStopReasonFromContentJSON(contentJSON); parsed != "" {
+		stopReason = parsed
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO session_prompts (session_id, prompt_index, update_index, title, stop_reason, updated_at)

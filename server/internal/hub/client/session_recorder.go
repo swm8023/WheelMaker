@@ -305,11 +305,8 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			ProjectName: r.projectName,
 			SessionID:   event.SessionID,
 			Method:      acp.MethodSessionPrompt,
-			Role:        "user",
-			Kind:        "text",
 			Body:        PromptPreview(params.Prompt),
 			Blocks:      cloneSessionContentBlocks(params.Prompt),
-			Status:      "done",
 			CreatedAt:   event.UpdatedAt,
 			UpdatedAt:   event.UpdatedAt,
 			Time:        event.UpdatedAt,
@@ -345,12 +342,10 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			if err != nil {
 				return err
 			}
-			status := firstNonEmpty(strings.TrimSpace(permissionResult.Outcome.Outcome), "done")
 			for _, message := range messages {
 				if message.RequestID != requestID {
 					continue
 				}
-				message.Status = status
 				message.UpdatedAt = event.UpdatedAt
 				message.Time = event.UpdatedAt
 				message.ContentJSON = mergeSessionPermissionResultContentJSON(message.ContentJSON, event.Content)
@@ -381,11 +376,8 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			ProjectName: r.projectName,
 			SessionID:   event.SessionID,
 			Method:      acp.MethodRequestPermission,
-			Role:        "system",
-			Kind:        "permission",
 			Body:        strings.TrimSpace(params.ToolCall.Title),
 			Options:     cloneSessionPermissionOptions(params.Options),
-			Status:      "needs_action",
 			CreatedAt:   event.UpdatedAt,
 			UpdatedAt:   event.UpdatedAt,
 			Time:        event.UpdatedAt,
@@ -574,23 +566,6 @@ func sessionUpdateBody(update acp.SessionUpdate) string {
 	}
 }
 
-func sessionUpdateRole(update acp.SessionUpdate) string {
-	switch strings.TrimSpace(update.SessionUpdate) {
-	case acp.SessionUpdateUserMessageChunk:
-		return "user"
-	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-		return "assistant"
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		return "system"
-	default:
-		return ""
-	}
-}
-
-func sessionUpdateKind(update acp.SessionUpdate) string {
-	return strings.TrimSpace(update.SessionUpdate)
-}
-
 func sessionUpdateContentJSONHasParamsUpdate(raw string) bool {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -681,10 +656,7 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 		ProjectName: projectName,
 		SessionID:   strings.TrimSpace(event.SessionID),
 		Method:      acp.MethodSessionUpdate,
-		Role:        "assistant",
-		Kind:        "text",
 		Body:        "",
-		Status:      "streaming",
 
 		RequestID:     0,
 		Source:        normalizeRecorderEventSource(event),
@@ -695,10 +667,7 @@ func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent)
 		Time:          event.UpdatedAt,
 	}
 	if update, ok := sessionUpdateFromEvent(event); ok {
-		message.Role = firstNonEmpty(sessionUpdateRole(update), strings.TrimSpace(message.Role), "assistant")
-		message.Kind = firstNonEmpty(sessionUpdateKind(update), strings.TrimSpace(message.Kind), "text")
 		message.Body = firstNonEmpty(sessionUpdateBody(update), strings.TrimSpace(message.Body))
-		message.Status = firstNonEmpty(strings.TrimSpace(update.Status), strings.TrimSpace(message.Status), "streaming")
 		message.ContentJSON = buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
 			SessionID: strings.TrimSpace(event.SessionID),
 			Update:    update,
@@ -719,9 +688,6 @@ func mergeBufferedSessionUpdateMessage(msg *SessionTurnMessageRecord, event Sess
 		default:
 			msg.Body = firstNonEmpty(strings.TrimSpace(rawText), msg.Body)
 		}
-		msg.Role = firstNonEmpty(sessionUpdateRole(update), strings.TrimSpace(msg.Role), "assistant")
-		msg.Kind = firstNonEmpty(sessionUpdateKind(update), strings.TrimSpace(msg.Kind), "text")
-		msg.Status = firstNonEmpty(strings.TrimSpace(update.Status), msg.Status)
 		if strings.TrimSpace(msg.ContentJSON) != "" {
 			var existing struct {
 				Params struct {
@@ -1076,7 +1042,7 @@ func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, 
 			continue
 		}
 		method := strings.TrimSpace(msg.Method)
-		if method != acp.MethodRequestPermission && method != "session.permission" && !(method == "" && strings.EqualFold(strings.TrimSpace(msg.Kind), "permission")) {
+		if method != acp.MethodRequestPermission && method != "session.permission" {
 			continue
 		}
 		copyMsg := msg
@@ -1364,20 +1330,43 @@ func promptStatusFromStopReason(stopReason string) string {
 	return "done"
 }
 func toSessionViewMessage(message SessionTurnMessageRecord) sessionViewMessage {
+	extraJSON := "{}"
+	if message.RequestID != 0 {
+		extraJSON = fmt.Sprintf(`{"requestId":%d}`, message.RequestID)
+	}
+	decoded := toSessionViewTurn(SessionTurnRecord{
+		TurnID:      strings.TrimSpace(message.MessageID),
+		PromptIndex: 0,
+		TurnIndex:   0,
+		UpdateIndex: message.SyncSubIndex + 1,
+		UpdateJSON:  message.ContentJSON,
+		ExtraJSON:   extraJSON,
+	})
+	text := firstNonEmpty(decoded.Text, message.Body)
+	blocks := cloneSessionContentBlocks(decoded.Blocks)
+	if len(blocks) == 0 {
+		blocks = cloneSessionContentBlocks(message.Blocks)
+	}
+	options := cloneSessionPermissionOptions(decoded.Options)
+	if len(options) == 0 {
+		options = cloneSessionPermissionOptions(message.Options)
+	}
+	requestID := firstNonZeroInt64(decoded.RequestID, message.RequestID)
+
 	return sessionViewMessage{
 		MessageID: message.MessageID,
 		SessionID: message.SessionID,
 		Index:     message.SyncIndex,
 		SubIndex:  message.SyncSubIndex,
-		Role:      message.Role,
-		Kind:      message.Kind,
-		Text:      message.Body,
-		Blocks:    cloneSessionContentBlocks(message.Blocks),
-		Options:   cloneSessionPermissionOptions(message.Options),
-		Status:    message.Status,
+		Role:      decoded.Role,
+		Kind:      decoded.Kind,
+		Text:      text,
+		Blocks:    blocks,
+		Options:   options,
+		Status:    decoded.Status,
 		CreatedAt: message.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: message.UpdatedAt.UTC().Format(time.RFC3339),
-		RequestID: message.RequestID,
+		RequestID: requestID,
 	}
 }
 

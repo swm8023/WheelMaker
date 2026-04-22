@@ -1665,7 +1665,6 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 		Body:        "aggregated reply",
 		Blocks:      []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
 		Options:     []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
-		Status:      "done",
 		ContentJSON: "{\"method\":\"session.prompt\",\"payload\":{\"role\":\"assistant\",\"kind\":\"text\",\"text\":\"aggregated reply\",\"status\":\"done\",\"blocks\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"abc123\"}],\"options\":[{\"optionId\":\"allow\",\"name\":\"Allow\",\"kind\":\"allow_once\"}]}}",
 		CreatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
@@ -1716,7 +1715,6 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 		SessionID:   "sess-1",
 		ProjectName: "proj1",
 		Body:        "Run tool?",
-		Status:      "needs_action",
 		ContentJSON: "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"needs_action\",\"requestId\":42}}",
 		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
@@ -1735,7 +1733,6 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	}
 	msg.SyncIndex = seed[0].SyncIndex
 	msg.SyncSubIndex = seed[0].SyncSubIndex
-	msg.Status = "done"
 	msg.ContentJSON = "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"done\",\"requestId\":42}}"
 	msg.UpdatedAt = time.Date(2026, 4, 12, 10, 2, 0, 0, time.UTC)
 	msg.Time = msg.UpdatedAt
@@ -1750,8 +1747,9 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("ListSessionTurnMessagesAfterIndex() len = %d, want 1", len(messages))
 	}
-	if messages[0].Status != "done" {
-		t.Fatalf("messages[0].Status = %q, want done", messages[0].Status)
+	viewMsg := toSessionViewMessage(messages[0])
+	if viewMsg.Status != "done" {
+		t.Fatalf("toSessionViewMessage(messages[0]).Status = %q, want done", viewMsg.Status)
 	}
 	if messages[0].SyncIndex != 1 {
 		t.Fatalf("messages[0].SyncIndex = %d, want 1", messages[0].SyncIndex)

@@ -64,8 +64,6 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 		ProjectName: "proj1",
 		SessionID:   "sess-1",
 		Method:      "session.prompt",
-		Role:        "user",
-		Kind:        "text",
 		Body:        "hello",
 		ContentJSON: `{"method":"session.prompt","payload":{"role":"user","kind":"text","text":"hello","status":"done"}}`,
 		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),

@@ -106,8 +106,6 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 		MessageID:   "msg-1",
 		ProjectName: "proj1",
 		SessionID:   "sess-1",
-		Role:        "user",
-		Kind:        "text",
 		Body:        "hello",
 		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
