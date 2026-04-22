@@ -260,7 +260,6 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	promptTitle := strings.TrimSpace(PromptPreview(params.Prompt))
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
-		ProjectName: r.projectName,
 		PromptIndex: state.promptIndex,
 		UpdateIndex: 0,
 		Title:       promptTitle,
@@ -272,7 +271,6 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	turn := SessionTurnRecord{
 		TurnID:      formatPromptTurnSeq(state.promptIndex, 1),
 		SessionID:   event.SessionID,
-		ProjectName: r.projectName,
 		PromptIndex: state.promptIndex,
 		TurnIndex:   1,
 		UpdateIndex: 1,
@@ -303,7 +301,6 @@ func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event Se
 	turn := SessionTurnRecord{
 		TurnID:      formatPromptTurnSeq(state.promptIndex, state.nextTurnIndex),
 		SessionID:   event.SessionID,
-		ProjectName: r.projectName,
 		PromptIndex: state.promptIndex,
 		TurnIndex:   state.nextTurnIndex,
 		UpdateIndex: 1,
@@ -330,7 +327,6 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, event 
 	}
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
-		ProjectName: r.projectName,
 		PromptIndex: state.promptIndex,
 		UpdateIndex: finalUpdateIndex,
 		StopReason:  strings.TrimSpace(stopReason),
@@ -380,7 +376,6 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 		state := sessionPromptState{promptIndex: 1, nextTurnIndex: 1}
 		if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 			SessionID:   sessionID,
-			ProjectName: r.projectName,
 			PromptIndex: 1,
 			UpdateIndex: 0,
 			UpdatedAt:   updatedAt,

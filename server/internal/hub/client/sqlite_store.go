@@ -120,10 +120,10 @@ type SessionTurnMessageRecord struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
+
 type SessionPromptRecord struct {
 	PromptID    string
 	SessionID   string
-	ProjectName string
 	PromptIndex int64
 	UpdateIndex int64
 	Title       string
@@ -134,13 +134,13 @@ type SessionPromptRecord struct {
 type SessionTurnRecord struct {
 	TurnID      string
 	SessionID   string
-	ProjectName string
 	PromptIndex int64
 	TurnIndex   int64
 	UpdateIndex int64
 	UpdateJSON  string
 	ExtraJSON   string
 }
+
 type Store interface {
 	LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error)
 	SaveProject(ctx context.Context, projectName string, cfg ProjectConfig) error
@@ -720,32 +720,6 @@ func normalizeJSONDoc(raw string, fallback string) string {
 	return raw
 }
 
-func buildSessionTurnContentJSON(rec SessionTurnMessageRecord) (string, string, error) {
-	method := inferSessionTurnMethod(rec)
-	if strings.TrimSpace(rec.ContentJSON) != "" {
-		normalized := normalizeJSONDoc(rec.ContentJSON, `{"method":"`+method+`"}`)
-		var doc map[string]any
-		if err := json.Unmarshal([]byte(normalized), &doc); err == nil {
-			if current, ok := doc["method"].(string); ok && strings.TrimSpace(current) != "" {
-				method = strings.TrimSpace(current)
-			} else {
-				doc["method"] = method
-				raw, err := json.Marshal(doc)
-				if err == nil {
-					normalized = string(raw)
-				}
-			}
-		}
-		return normalized, method, nil
-	}
-	doc := map[string]any{"method": method}
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		return "", "", fmt.Errorf("marshal session record content: %w", err)
-	}
-	return string(raw), method, nil
-}
-
 func buildSessionTurnMetaJSON(rec SessionTurnMessageRecord) (string, error) {
 	if strings.TrimSpace(rec.MetaJSON) != "" {
 		return normalizeJSONDoc(rec.MetaJSON, "{}"), nil
@@ -865,33 +839,16 @@ func (s *sqliteStore) insertOrUpdateSessionTurnMessage(ctx context.Context, rec 
 		return fmt.Errorf("session id is required")
 	}
 
-	now := time.Now().UTC()
-	if rec.Time.IsZero() {
-		switch {
-		case !rec.EventTime.IsZero():
-			rec.Time = rec.EventTime
-		case !rec.UpdatedAt.IsZero():
-			rec.Time = rec.UpdatedAt
-		case !rec.CreatedAt.IsZero():
-			rec.Time = rec.CreatedAt
-		default:
-			rec.Time = now
-		}
+	rec.Method = inferSessionTurnMethod(rec)
+	contentJSON := strings.TrimSpace(rec.ContentJSON)
+	if contentJSON == "" {
+		contentJSON = "{}"
 	}
-	rec.Time = rec.Time.UTC()
-	if rec.CreatedAt.IsZero() {
-		rec.CreatedAt = rec.Time
+	storedTime := time.Now().UTC().Format(time.RFC3339Nano)
+	if !rec.UpdatedAt.IsZero() {
+		storedTime = rec.UpdatedAt.UTC().Format(time.RFC3339Nano)
 	}
-	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = rec.Time
-	}
-	rec.EventTime = rec.Time
 
-	contentJSON, method, err := buildSessionTurnContentJSON(rec)
-	if err != nil {
-		return err
-	}
-	rec.Method = method
 	metaJSON, err := buildSessionTurnMetaJSON(rec)
 	if err != nil {
 		return err
@@ -938,7 +895,6 @@ func (s *sqliteStore) insertOrUpdateSessionTurnMessage(ctx context.Context, rec 
 		rec.SyncSubIndex = 0
 	}
 	rec.MessageID = formatSessionTurnSeq(rec.SyncIndex, rec.SyncSubIndex)
-	storedTime := rec.Time.UTC().Format(time.RFC3339Nano)
 
 	if err := upsertPromptTurnTx(ctx, tx, rec, existingTurn, contentJSON, storedTime); err != nil {
 		return fmt.Errorf("upsert prompt/turn projection: %w", err)
@@ -1259,11 +1215,7 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
 	rec.SessionID = strings.TrimSpace(rec.SessionID)
-	if rec.ProjectName == "" {
-		return fmt.Errorf("project name is required")
-	}
 	if rec.SessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
@@ -1308,7 +1260,6 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 	if err != nil {
 		return nil, fmt.Errorf("load session prompt: %w", err)
 	}
-	rec.ProjectName = strings.TrimSpace(projectName)
 	rec.UpdatedAt = parseStoreTime(updatedAt)
 	rec.PromptID = formatPromptSeq(rec.PromptIndex)
 	return &rec, nil
@@ -1334,7 +1285,6 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.UpdateIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan session prompt: %w", err)
 		}
-		rec.ProjectName = strings.TrimSpace(projectName)
 		rec.UpdatedAt = parseStoreTime(updatedAt)
 		rec.PromptID = formatPromptSeq(rec.PromptIndex)
 		out = append(out, rec)
@@ -1362,7 +1312,6 @@ func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectN
 		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.UpdateIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan session prompt after index: %w", err)
 		}
-		rec.ProjectName = strings.TrimSpace(projectName)
 		rec.UpdatedAt = parseStoreTime(updatedAt)
 		rec.PromptID = formatPromptSeq(rec.PromptIndex)
 		out = append(out, rec)
@@ -1374,11 +1323,7 @@ func (s *sqliteStore) UpsertSessionTurn(ctx context.Context, rec SessionTurnReco
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
 	rec.SessionID = strings.TrimSpace(rec.SessionID)
-	if rec.ProjectName == "" {
-		return fmt.Errorf("project name is required")
-	}
 	if rec.SessionID == "" {
 		return fmt.Errorf("session id is required")
 	}
@@ -1422,7 +1367,6 @@ func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionI
 	if err != nil {
 		return nil, fmt.Errorf("load session turn: %w", err)
 	}
-	rec.ProjectName = strings.TrimSpace(projectName)
 	rec.TurnID = formatPromptTurnSeq(rec.PromptIndex, rec.TurnIndex)
 	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
 	rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
@@ -1448,7 +1392,6 @@ func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, session
 		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON, &rec.ExtraJSON); err != nil {
 			return nil, fmt.Errorf("scan session turn: %w", err)
 		}
-		rec.ProjectName = strings.TrimSpace(projectName)
 		rec.TurnID = formatPromptTurnSeq(rec.PromptIndex, rec.TurnIndex)
 		rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
 		rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
