@@ -105,14 +105,9 @@ type sessionViewMessage struct {
 	RequestID int64                  `json:"requestId,omitempty"`
 }
 
-const sessionUpdateFlushInterval = 5 * time.Second
-
-type bufferedSessionUpdate struct {
-	message         SessionTurnMessageRecord
-	turnKey         string
-	persisted       bool
-	dirty           bool
-	lastPersistedAt time.Time
+type sessionPromptState struct {
+	promptIndex   int64
+	nextTurnIndex int64
 }
 
 type SessionRecorder struct {
@@ -124,51 +119,23 @@ type SessionRecorder struct {
 	publish     func(method string, payload any) error
 	unreadCount map[string]int
 
-	updateMu sync.Mutex
-	updates  map[string]map[string]*bufferedSessionUpdate
-	stopCh   chan struct{}
-	doneCh   chan struct{}
+	writeMu     sync.Mutex
+	promptState map[string]sessionPromptState
 }
 
 func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionListEntry, error)) *SessionRecorder {
-	r := &SessionRecorder{
+	return &SessionRecorder{
 		projectName:  projectName,
 		store:        store,
 		listSessions: listSessions,
 		unreadCount:  map[string]int{},
-		updates:      map[string]map[string]*bufferedSessionUpdate{},
-		stopCh:       make(chan struct{}),
-		doneCh:       make(chan struct{}),
+		promptState:  map[string]sessionPromptState{},
 	}
-	go r.runFlushLoop()
-	return r
 }
 
 func (r *SessionRecorder) Close() {
 	if r == nil {
 		return
-	}
-	select {
-	case <-r.stopCh:
-		return
-	default:
-		close(r.stopCh)
-	}
-	<-r.doneCh
-}
-
-func (r *SessionRecorder) runFlushLoop() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	defer close(r.doneCh)
-	for {
-		select {
-		case <-r.stopCh:
-			r.flushAllBufferedUpdates(context.Background())
-			return
-		case <-ticker.C:
-			r.flushDueBufferedUpdates(context.Background(), time.Now().UTC())
-		}
 	}
 }
 func (r *SessionRecorder) SetEventPublisher(publish func(method string, payload any) error) {
@@ -270,6 +237,9 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	}
 	method := sessionViewMethodFromEvent(event)
 
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+
 	switch method {
 	case acp.MethodSessionNew:
 		params := sessionViewSessionNewParams{}
@@ -277,18 +247,11 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if strings.TrimSpace(params.SessionID) != "" {
 			event.SessionID = strings.TrimSpace(params.SessionID)
 		}
-		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(params.Title), event.UpdatedAt)
+		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(params.Title), event.UpdatedAt, false)
 	case acp.MethodSessionPrompt:
 		var promptResult sessionViewPromptResult
 		if decodeSessionViewEventResult(event.Content, &promptResult) {
-			if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
-				return err
-			}
-			r.clearBufferedSessionUpdates(event.SessionID)
-			if err := r.persistPromptStopReason(ctx, event.SessionID, promptResult.StopReason, event.UpdatedAt); err != nil {
-				return err
-			}
-			return nil
+			return r.handlePromptFinishedLocked(ctx, event, strings.TrimSpace(promptResult.StopReason))
 		}
 		var params acp.SessionPromptParams
 		if !decodeSessionViewEventParams(event.Content, &params) {
@@ -297,126 +260,17 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if strings.TrimSpace(params.SessionID) != "" {
 			event.SessionID = strings.TrimSpace(params.SessionID)
 		}
-		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
-			return err
-		}
-		r.clearBufferedSessionUpdates(event.SessionID)
-		message := SessionTurnMessageRecord{
-			ProjectName: r.projectName,
-			SessionID:   event.SessionID,
-			Method:      acp.MethodSessionPrompt,
-			Body:        PromptPreview(params.Prompt),
-			Blocks:      cloneSessionContentBlocks(params.Prompt),
-			CreatedAt:   event.UpdatedAt,
-			UpdatedAt:   event.UpdatedAt,
-			Time:        event.UpdatedAt,
-
-			Source: normalizeRecorderEventSource(event),
-		}
-		message.ContentJSON = normalizeJSONDoc(event.Content, `{"method":"`+acp.MethodSessionPrompt+`"}`)
-		if err := r.store.AppendSessionTurnMessage(ctx, message); err != nil {
-			return err
-		}
-		stored, err := r.loadLatestStoredSessionMessage(ctx, event.SessionID)
-		if err != nil {
-			return err
-		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, "", stored.UpdatedAt); err != nil {
-			return err
-		}
-		r.publishSessionMessage(stored)
-		return nil
+		return r.handlePromptStartedLocked(ctx, event, params)
 	case acp.MethodSessionUpdate:
-		return r.recordBufferedSessionUpdate(ctx, event)
+		return r.appendACPEventTurnLocked(ctx, event)
 	case acp.MethodRequestPermission:
-		var permissionResult acp.PermissionResponse
-		if decodeSessionViewEventResult(event.Content, &permissionResult) {
-			requestID := decodeSessionViewEventID(event.Content)
-			if requestID == 0 {
-				return nil
-			}
-			if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
-				return err
-			}
-			messages, err := r.store.ListSessionTurnMessages(ctx, r.projectName, event.SessionID)
-			if err != nil {
-				return err
-			}
-			for _, message := range messages {
-				if message.RequestID != requestID {
-					continue
-				}
-				message.UpdatedAt = event.UpdatedAt
-				message.Time = event.UpdatedAt
-				message.ContentJSON = mergeSessionPermissionResultContentJSON(message.ContentJSON, event.Content)
-				if err := r.store.UpsertSessionTurnMessage(ctx, message); err != nil {
-					return err
-				}
-				stored, err := r.loadStoredSessionMessageByIndex(ctx, event.SessionID, message.SyncIndex)
-				if err != nil {
-					return err
-				}
-				r.publishSessionMessage(stored)
-				break
-			}
-			return nil
-		}
 		var params acp.PermissionRequestParams
-		if !decodeSessionViewEventParams(event.Content, &params) {
-			return nil
-		}
-		if strings.TrimSpace(params.SessionID) != "" {
-			event.SessionID = strings.TrimSpace(params.SessionID)
-		}
-		requestID := decodeSessionViewEventID(event.Content)
-		if err := r.flushBufferedSessionUpdate(ctx, event.SessionID); err != nil {
-			return err
-		}
-		message := SessionTurnMessageRecord{
-			ProjectName: r.projectName,
-			SessionID:   event.SessionID,
-			Method:      acp.MethodRequestPermission,
-			Body:        strings.TrimSpace(params.ToolCall.Title),
-			Options:     cloneSessionPermissionOptions(params.Options),
-			CreatedAt:   event.UpdatedAt,
-			UpdatedAt:   event.UpdatedAt,
-			Time:        event.UpdatedAt,
-			RequestID:   requestID,
-
-			Source: normalizeRecorderEventSource(event),
-		}
-		message.ContentJSON = normalizeJSONDoc(event.Content, `{"method":"`+acp.MethodRequestPermission+`"}`)
-		existing, err := r.findPermissionMessageByRequestID(ctx, event.SessionID, requestID)
-		if err != nil {
-			return err
-		}
-		existed := existing != nil
-		if existed {
-			message.SyncIndex = existing.SyncIndex
-			message.SyncSubIndex = existing.SyncSubIndex
-			if !existing.CreatedAt.IsZero() {
-				message.CreatedAt = existing.CreatedAt
-			}
-			if err := r.store.UpsertSessionTurnMessage(ctx, message); err != nil {
-				return err
-			}
-		} else {
-			if err := r.store.AppendSessionTurnMessage(ctx, message); err != nil {
-				return err
+		if decodeSessionViewEventParams(event.Content, &params) {
+			if strings.TrimSpace(params.SessionID) != "" {
+				event.SessionID = strings.TrimSpace(params.SessionID)
 			}
 		}
-		stored, err := r.loadLatestStoredSessionMessage(ctx, event.SessionID)
-		if err != nil {
-			return err
-		}
-		if err := r.upsertSessionProjection(ctx, event.SessionID, "", stored.UpdatedAt); err != nil {
-			return err
-		}
-		if !existed {
-			r.incrementSessionUnread(event.SessionID)
-		}
-		r.publishSessionMessage(stored)
-		return nil
+		return r.appendACPEventTurnLocked(ctx, event)
 	case sessionViewMethodSystem:
 		return nil
 	default:
@@ -424,38 +278,189 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	}
 }
 
-func (r *SessionRecorder) persistPromptStopReason(ctx context.Context, sessionID, stopReason string, updatedAt time.Time) error {
-	sessionID = strings.TrimSpace(sessionID)
-	stopReason = strings.TrimSpace(stopReason)
-	if sessionID == "" || stopReason == "" {
-		return nil
-	}
-	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event SessionViewEvent, params acp.SessionPromptParams) error {
+	state, err := r.nextPromptStateLocked(ctx, event.SessionID)
 	if err != nil {
 		return err
 	}
+	promptTitle := strings.TrimSpace(PromptPreview(params.Prompt))
+	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   event.SessionID,
+		ProjectName: r.projectName,
+		PromptIndex: state.promptIndex,
+		UpdateIndex: 0,
+		Title:       promptTitle,
+		UpdatedAt:   event.UpdatedAt,
+	}); err != nil {
+		return err
+	}
+
+	turn := SessionTurnRecord{
+		TurnID:      formatPromptTurnSeq(state.promptIndex, 1),
+		SessionID:   event.SessionID,
+		ProjectName: r.projectName,
+		PromptIndex: state.promptIndex,
+		TurnIndex:   1,
+		UpdateIndex: 1,
+		UpdateJSON:  normalizeJSONDoc(event.Content, `{"method":"`+acp.MethodSessionPrompt+`"}`),
+		ExtraJSON:   "{}",
+	}
+	if err := r.store.UpsertSessionTurn(ctx, turn); err != nil {
+		return err
+	}
+
+	state.nextTurnIndex = 2
+	r.promptState[event.SessionID] = state
+	if err := r.upsertSessionProjection(ctx, event.SessionID, promptTitle, event.UpdatedAt, true); err != nil {
+		return err
+	}
+	r.incrementSessionUnread(event.SessionID)
+	r.publishSessionTurn(event.SessionID, turn, event.UpdatedAt)
+	return nil
+}
+
+func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event SessionViewEvent) error {
+	state, err := r.ensurePromptStateLocked(ctx, event.SessionID, event.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	if state.nextTurnIndex <= 0 {
+		state.nextTurnIndex = 1
+	}
+	turn := SessionTurnRecord{
+		TurnID:      formatPromptTurnSeq(state.promptIndex, state.nextTurnIndex),
+		SessionID:   event.SessionID,
+		ProjectName: r.projectName,
+		PromptIndex: state.promptIndex,
+		TurnIndex:   state.nextTurnIndex,
+		UpdateIndex: 1,
+		UpdateJSON:  normalizeJSONDoc(event.Content, `{"method":"`+acp.MethodSessionUpdate+`"}`),
+		ExtraJSON:   "{}",
+	}
+	if err := r.store.UpsertSessionTurn(ctx, turn); err != nil {
+		return err
+	}
+	state.nextTurnIndex++
+	r.promptState[event.SessionID] = state
+	r.publishSessionTurn(event.SessionID, turn, event.UpdatedAt)
+	return nil
+}
+
+func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, event SessionViewEvent, stopReason string) error {
+	state, err := r.ensurePromptStateLocked(ctx, event.SessionID, event.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	finalUpdateIndex := state.nextTurnIndex - 1
+	if finalUpdateIndex < 0 {
+		finalUpdateIndex = 0
+	}
+	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   event.SessionID,
+		ProjectName: r.projectName,
+		PromptIndex: state.promptIndex,
+		UpdateIndex: finalUpdateIndex,
+		StopReason:  strings.TrimSpace(stopReason),
+		UpdatedAt:   event.UpdatedAt,
+	}); err != nil {
+		return err
+	}
+	delete(r.promptState, event.SessionID)
+	return nil
+}
+
+func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string) (sessionPromptState, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return sessionPromptState{}, fmt.Errorf("session id is required")
+	}
+	if current, ok := r.promptState[sessionID]; ok && current.promptIndex > 0 {
+		return sessionPromptState{promptIndex: current.promptIndex + 1, nextTurnIndex: 1}, nil
+	}
+	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionPromptState{}, err
+	}
+	promptIndex := int64(1)
+	if len(prompts) > 0 && prompts[len(prompts)-1].PromptIndex > 0 {
+		promptIndex = prompts[len(prompts)-1].PromptIndex + 1
+	}
+	return sessionPromptState{promptIndex: promptIndex, nextTurnIndex: 1}, nil
+}
+
+func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (sessionPromptState, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return sessionPromptState{}, fmt.Errorf("session id is required")
+	}
+	if state, ok := r.promptState[sessionID]; ok && state.promptIndex > 0 {
+		if state.nextTurnIndex <= 0 {
+			state.nextTurnIndex = 1
+		}
+		return state, nil
+	}
+	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionPromptState{}, err
+	}
 	if len(prompts) == 0 {
-		return nil
+		state := sessionPromptState{promptIndex: 1, nextTurnIndex: 1}
+		if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+			SessionID:   sessionID,
+			ProjectName: r.projectName,
+			PromptIndex: 1,
+			UpdateIndex: 0,
+			UpdatedAt:   updatedAt,
+		}); err != nil {
+			return sessionPromptState{}, err
+		}
+		r.promptState[sessionID] = state
+		return state, nil
 	}
 	latest := prompts[len(prompts)-1]
-	if latest.PromptIndex <= 0 {
-		return nil
+	turns, err := r.store.ListSessionTurns(ctx, r.projectName, sessionID, latest.PromptIndex)
+	if err != nil {
+		return sessionPromptState{}, err
+	}
+	nextTurn := int64(len(turns) + 1)
+	state := sessionPromptState{promptIndex: latest.PromptIndex, nextTurnIndex: nextTurn}
+	r.promptState[sessionID] = state
+	return state, nil
+}
+
+func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord, updatedAt time.Time) {
+	publish := r.eventPublisher()
+	if publish == nil {
+		return
 	}
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	updateIndex := latest.UpdateIndex + 1
-	if updateIndex <= 0 {
-		updateIndex = 1
+	ctx := context.Background()
+	summary, ok := r.currentSessionViewSummary(ctx, sessionID)
+	if !ok {
+		summary = sessionViewSummary{SessionID: sessionID, Title: sessionID, UpdatedAt: updatedAt.UTC().Format(time.RFC3339), ProjectName: r.projectName}
 	}
-	return r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
-		SessionID:   sessionID,
-		ProjectName: r.projectName,
-		PromptIndex: latest.PromptIndex,
-		UpdateIndex: updateIndex,
-		StopReason:  stopReason,
-		UpdatedAt:   updatedAt,
-	})
+	decoded := toSessionViewTurn(turn)
+	messageID := strings.TrimSpace(turn.TurnID)
+	if messageID == "" {
+		messageID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
+	}
+	_ = publish("registry.session.message", map[string]any{"session": summary, "message": sessionViewMessage{
+		MessageID: messageID,
+		SessionID: sessionID,
+		Index:     turn.PromptIndex,
+		SubIndex:  turn.TurnIndex,
+		Role:      decoded.Role,
+		Kind:      decoded.Kind,
+		Text:      decoded.Text,
+		Blocks:    cloneSessionContentBlocks(decoded.Blocks),
+		Options:   cloneSessionPermissionOptions(decoded.Options),
+		Status:    decoded.Status,
+		CreatedAt: updatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt: updatedAt.UTC().Format(time.RFC3339),
+		RequestID: decoded.RequestID,
+	}})
 }
 func normalizeRecorderEventSource(event SessionViewEvent) string {
 	channel := strings.TrimSpace(event.SourceChannel)
@@ -472,83 +477,6 @@ func normalizeRecorderEventSource(event SessionViewEvent) string {
 	return channel + ":" + chatID
 }
 
-type recorderTurnKeyStrategy string
-
-const (
-	recorderTurnKeyBySessionUpdate recorderTurnKeyStrategy = "session_update"
-	recorderTurnKeyByToolCallID    recorderTurnKeyStrategy = "tool_call_id"
-)
-
-var recorderSessionUpdateTurnKeyStrategy = map[string]recorderTurnKeyStrategy{
-	acp.SessionUpdateToolCall:       recorderTurnKeyByToolCallID,
-	acp.SessionUpdateToolCallUpdate: recorderTurnKeyByToolCallID,
-}
-
-func recorderTurnKeyStrategyForSessionUpdate(updateName string) recorderTurnKeyStrategy {
-	if strategy, ok := recorderSessionUpdateTurnKeyStrategy[strings.TrimSpace(updateName)]; ok {
-		return strategy
-	}
-	return recorderTurnKeyBySessionUpdate
-}
-
-func recorderCanonicalSessionUpdate(updateName string, strategy recorderTurnKeyStrategy) string {
-	updateName = strings.TrimSpace(updateName)
-	if strategy == recorderTurnKeyByToolCallID {
-		return acp.SessionUpdateToolCall
-	}
-	return updateName
-}
-
-func recorderUpdateTurnKey(event SessionViewEvent) string {
-	if update, ok := sessionUpdateFromEvent(event); ok {
-		updateName := strings.TrimSpace(update.SessionUpdate)
-		if updateName == "" {
-			updateName = acp.MethodSessionUpdate
-		}
-		strategy := recorderTurnKeyStrategyForSessionUpdate(updateName)
-		canonical := recorderCanonicalSessionUpdate(updateName, strategy)
-		switch strategy {
-		case recorderTurnKeyByToolCallID:
-			toolCallID := strings.TrimSpace(update.ToolCallID)
-			if toolCallID == "" {
-				toolCallID = "unknown"
-			}
-			return canonical + ":" + toolCallID
-		default:
-			return canonical
-		}
-	}
-	return sessionViewMethodFromEvent(event)
-}
-
-func sessionUpdateFromEvent(event SessionViewEvent) (acp.SessionUpdate, bool) {
-	if !strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeACP)) {
-		return acp.SessionUpdate{}, false
-	}
-	return decodeSessionViewEventUpdate(event.Content)
-}
-
-func mergeSessionUpdateContent(base, incoming acp.SessionUpdate) acp.SessionUpdate {
-	merged := incoming
-	if strings.TrimSpace(base.SessionUpdate) == "" || !strings.EqualFold(strings.TrimSpace(base.SessionUpdate), strings.TrimSpace(incoming.SessionUpdate)) {
-		return merged
-	}
-	if base.ToolCallID != "" && merged.ToolCallID == "" {
-		merged.ToolCallID = base.ToolCallID
-	}
-	switch strings.TrimSpace(incoming.SessionUpdate) {
-	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-		text := extractTextChunk(base.Content) + extractTextChunk(incoming.Content)
-		if strings.TrimSpace(text) != "" {
-			raw, err := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: text})
-			if err == nil {
-				merged.Content = raw
-			}
-		}
-	}
-	return merged
-}
-
 func sessionUpdateText(update acp.SessionUpdate) string {
 	raw := extractTextChunk(update.Content)
 	if strings.TrimSpace(raw) != "" {
@@ -557,30 +485,13 @@ func sessionUpdateText(update acp.SessionUpdate) string {
 	return ""
 }
 
-func sessionUpdateBody(update acp.SessionUpdate) string {
-	switch strings.TrimSpace(update.SessionUpdate) {
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		return renderSessionToolStatus(update)
-	default:
-		return sessionUpdateText(update)
+func firstNonZeroInt64(v int64, fallback int64) int64 {
+	if v != 0 {
+		return v
 	}
+	return fallback
 }
 
-func sessionUpdateContentJSONHasParamsUpdate(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return false
-	}
-	var doc struct {
-		Params struct {
-			Update acp.SessionUpdate `json:"update"`
-		} `json:"params"`
-	}
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		return false
-	}
-	return strings.TrimSpace(doc.Params.Update.SessionUpdate) != ""
-}
 func buildACPMethodContentJSON(method string, body map[string]any) string {
 	method = strings.TrimSpace(method)
 	if method == "" {
@@ -650,268 +561,6 @@ func mergeSessionPermissionResultContentJSON(requestContentJSON, responseContent
 	}
 	return string(raw)
 }
-
-func newBufferedSessionUpdateMessage(projectName string, event SessionViewEvent) SessionTurnMessageRecord {
-	message := SessionTurnMessageRecord{
-		ProjectName: projectName,
-		SessionID:   strings.TrimSpace(event.SessionID),
-		Method:      acp.MethodSessionUpdate,
-		Body:        "",
-
-		RequestID:     0,
-		Source:        normalizeRecorderEventSource(event),
-		SourceChannel: strings.TrimSpace(event.SourceChannel),
-		SourceChatID:  strings.TrimSpace(event.SourceChatID),
-		CreatedAt:     event.UpdatedAt,
-		UpdatedAt:     event.UpdatedAt,
-		Time:          event.UpdatedAt,
-	}
-	if update, ok := sessionUpdateFromEvent(event); ok {
-		message.Body = firstNonEmpty(sessionUpdateBody(update), strings.TrimSpace(message.Body))
-		message.ContentJSON = buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
-			SessionID: strings.TrimSpace(event.SessionID),
-			Update:    update,
-		})
-	}
-	return message
-}
-
-func mergeBufferedSessionUpdateMessage(msg *SessionTurnMessageRecord, event SessionViewEvent) {
-	if msg == nil {
-		return
-	}
-	if update, ok := sessionUpdateFromEvent(event); ok {
-		rawText := sessionUpdateBody(update)
-		switch strings.TrimSpace(update.SessionUpdate) {
-		case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-			msg.Body += rawText
-		default:
-			msg.Body = firstNonEmpty(strings.TrimSpace(rawText), msg.Body)
-		}
-		if strings.TrimSpace(msg.ContentJSON) != "" {
-			var existing struct {
-				Params struct {
-					Update acp.SessionUpdate `json:"update"`
-				} `json:"params"`
-			}
-			if err := json.Unmarshal([]byte(msg.ContentJSON), &existing); err == nil {
-				update = mergeSessionUpdateContent(existing.Params.Update, update)
-			}
-		}
-		msg.ContentJSON = buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
-			SessionID: strings.TrimSpace(msg.SessionID),
-			Update:    update,
-		})
-	}
-	if strings.TrimSpace(event.SourceChannel) != "" || strings.TrimSpace(event.SourceChatID) != "" {
-		msg.Source = normalizeRecorderEventSource(event)
-		msg.SourceChannel = strings.TrimSpace(event.SourceChannel)
-		msg.SourceChatID = strings.TrimSpace(event.SourceChatID)
-	}
-	if msg.CreatedAt.IsZero() || event.UpdatedAt.Before(msg.CreatedAt) {
-		msg.CreatedAt = event.UpdatedAt
-	}
-	msg.UpdatedAt = event.UpdatedAt
-	msg.Time = event.UpdatedAt
-}
-
-func firstNonZeroInt64(v int64, fallback int64) int64 {
-	if v != 0 {
-		return v
-	}
-	return fallback
-}
-
-func isBufferedUpdateTerminalStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "done", "needs_action", "completed", "failed", "cancelled", "canceled":
-		return true
-	default:
-		return false
-	}
-}
-
-func shouldFlushBufferedSessionUpdateImmediately(event SessionViewEvent) bool {
-	if update, ok := sessionUpdateFromEvent(event); ok {
-		if isBufferedUpdateTerminalStatus(update.Status) {
-			return true
-		}
-	}
-	return false
-}
-
-// recordBufferedSessionUpdate batches ACP update chunks but flushes terminal statuses immediately.
-func (r *SessionRecorder) recordBufferedSessionUpdate(ctx context.Context, event SessionViewEvent) error {
-	r.updateMu.Lock()
-	defer r.updateMu.Unlock()
-
-	sessionID := strings.TrimSpace(event.SessionID)
-	turnKey := recorderUpdateTurnKey(event)
-	if turnKey == "" {
-		turnKey = sessionViewMethodFromEvent(event)
-	}
-	sessionUpdates := r.updates[sessionID]
-	if sessionUpdates == nil {
-		sessionUpdates = map[string]*bufferedSessionUpdate{}
-		r.updates[sessionID] = sessionUpdates
-	}
-	state := sessionUpdates[turnKey]
-	if state == nil {
-		msg := newBufferedSessionUpdateMessage(r.projectName, event)
-		state = &bufferedSessionUpdate{message: msg, turnKey: turnKey, dirty: true}
-		sessionUpdates[turnKey] = state
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, true); err != nil {
-			return err
-		}
-		return nil
-	}
-	mergeBufferedSessionUpdateMessage(&state.message, event)
-	state.dirty = true
-	if shouldFlushBufferedSessionUpdateImmediately(event) {
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false); err != nil {
-			return err
-		}
-		return nil
-	}
-	if state.lastPersistedAt.IsZero() || event.UpdatedAt.Sub(state.lastPersistedAt) >= sessionUpdateFlushInterval {
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *SessionRecorder) flushBufferedSessionUpdate(ctx context.Context, sessionID string) error {
-	r.updateMu.Lock()
-	defer r.updateMu.Unlock()
-	return r.flushBufferedSessionUpdateLocked(ctx, strings.TrimSpace(sessionID), false)
-}
-
-func (r *SessionRecorder) flushBufferedSessionUpdateLocked(ctx context.Context, sessionID string, force bool) error {
-	sessionID = strings.TrimSpace(sessionID)
-	sessionUpdates := r.updates[sessionID]
-	if len(sessionUpdates) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(sessionUpdates))
-	for turnKey := range sessionUpdates {
-		keys = append(keys, turnKey)
-	}
-	sort.Strings(keys)
-	for _, turnKey := range keys {
-		state := sessionUpdates[turnKey]
-		if state == nil {
-			continue
-		}
-		if !state.persisted {
-			if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, true); err != nil {
-				return err
-			}
-			continue
-		}
-		if !state.dirty && !force {
-			continue
-		}
-		if err := r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *SessionRecorder) persistBufferedSessionUpdateLocked(ctx context.Context, sessionID, turnKey string, state *bufferedSessionUpdate, appendMode bool) error {
-	if state == nil {
-		return nil
-	}
-	msg := state.message
-	if appendMode {
-		if err := r.store.AppendSessionTurnMessage(ctx, msg); err != nil {
-			return err
-		}
-	} else {
-		if !sessionUpdateContentJSONHasParamsUpdate(msg.ContentJSON) {
-			msg.ContentJSON = ""
-		}
-		msg.MetaJSON = "{}"
-		if err := r.store.UpsertSessionTurnMessage(ctx, msg); err != nil {
-			return err
-		}
-	}
-	stored := SessionTurnMessageRecord{}
-	if msg.SyncIndex > 0 {
-		storedByIndex, err := r.loadStoredSessionMessageByIndex(ctx, sessionID, msg.SyncIndex)
-		if err != nil {
-			return err
-		}
-		stored = storedByIndex
-	} else {
-		latest, err := r.loadLatestStoredSessionMessage(ctx, sessionID)
-		if err != nil {
-			return err
-		}
-		stored = latest
-	}
-	if err := r.upsertSessionProjection(ctx, sessionID, "", stored.UpdatedAt); err != nil {
-		return err
-	}
-	if appendMode {
-		r.incrementSessionUnread(sessionID)
-	}
-	r.publishSessionMessage(stored)
-	state.message = stored
-	state.persisted = true
-	state.dirty = false
-	state.lastPersistedAt = stored.UpdatedAt
-	sessionUpdates := r.updates[sessionID]
-	if sessionUpdates == nil {
-		sessionUpdates = map[string]*bufferedSessionUpdate{}
-		r.updates[sessionID] = sessionUpdates
-	}
-	sessionUpdates[turnKey] = state
-	return nil
-}
-
-func (r *SessionRecorder) clearBufferedSessionUpdates(sessionID string) {
-	r.updateMu.Lock()
-	defer r.updateMu.Unlock()
-	r.clearBufferedSessionUpdatesLocked(sessionID)
-}
-
-func (r *SessionRecorder) clearBufferedSessionUpdatesLocked(sessionID string) {
-	delete(r.updates, strings.TrimSpace(sessionID))
-}
-
-func (r *SessionRecorder) flushDueBufferedUpdates(ctx context.Context, now time.Time) {
-	r.updateMu.Lock()
-	defer r.updateMu.Unlock()
-	for sessionID, sessionUpdates := range r.updates {
-		for turnKey, state := range sessionUpdates {
-			if state == nil || !state.persisted || !state.dirty {
-				continue
-			}
-			if now.Sub(state.lastPersistedAt) < sessionUpdateFlushInterval {
-				continue
-			}
-			_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, false)
-		}
-	}
-}
-
-func (r *SessionRecorder) flushAllBufferedUpdates(ctx context.Context) {
-	r.updateMu.Lock()
-	defer r.updateMu.Unlock()
-	for sessionID, sessionUpdates := range r.updates {
-		for turnKey, state := range sessionUpdates {
-			if state == nil {
-				continue
-			}
-			if state.persisted && !state.dirty {
-				continue
-			}
-			_ = r.persistBufferedSessionUpdateLocked(ctx, sessionID, turnKey, state, !state.persisted)
-		}
-	}
-}
 func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
 	entries, err := r.listSessions(ctx)
 	if err != nil {
@@ -946,10 +595,16 @@ func (r *SessionRecorder) ReadSessionView(ctx context.Context, sessionID string,
 		return sessionViewSummary{}, nil, 0, 0, err
 	}
 	out := make([]sessionViewMessage, 0, len(messages))
+	var lastIndex int64
+	var lastSubIndex int64
 	for _, message := range messages {
 		out = append(out, toSessionViewMessage(message))
+		if message.SyncIndex > lastIndex || (message.SyncIndex == lastIndex && message.SyncSubIndex > lastSubIndex) {
+			lastIndex = message.SyncIndex
+			lastSubIndex = message.SyncSubIndex
+		}
 	}
-	return r.sessionViewSummaryFromRecord(*rec), out, rec.LastSyncIndex, rec.LastSyncSubIndex, nil
+	return r.sessionViewSummaryFromRecord(*rec), out, lastIndex, lastSubIndex, nil
 }
 
 func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, afterPromptIndex, afterPromptUpdateIndex int64) (sessionViewSummary, []sessionViewPrompt, int64, int64, error) {
@@ -997,14 +652,14 @@ func (r *SessionRecorder) loadLatestStoredSessionMessage(ctx context.Context, se
 	if sessionID == "" {
 		return SessionTurnMessageRecord{}, fmt.Errorf("session id is required")
 	}
-	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	messages, err := r.store.ListSessionTurnMessages(ctx, r.projectName, sessionID)
 	if err != nil {
 		return SessionTurnMessageRecord{}, err
 	}
-	if rec == nil || rec.LastSyncIndex <= 0 {
+	if len(messages) == 0 {
 		return SessionTurnMessageRecord{}, fmt.Errorf("session message not found for session %s", sessionID)
 	}
-	return r.loadStoredSessionMessageByIndex(ctx, sessionID, rec.LastSyncIndex)
+	return messages[len(messages)-1], nil
 }
 
 func (r *SessionRecorder) loadStoredSessionMessageByIndex(ctx context.Context, sessionID string, index int64) (SessionTurnMessageRecord, error) {
@@ -1051,7 +706,7 @@ func (r *SessionRecorder) findPermissionMessageByRequestID(ctx context.Context, 
 	return nil, nil
 }
 
-func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time) error {
+func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time, titleIfEmptyOnly ...bool) error {
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
 		return err
@@ -1062,13 +717,17 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 	if rec == nil {
 		rec = &SessionRecord{ID: sessionID, ProjectName: r.projectName, Status: SessionActive, CreatedAt: updatedAt, LastActiveAt: updatedAt}
 	}
-	if strings.TrimSpace(title) != "" {
-		rec.Title = strings.TrimSpace(title)
+	onlyIfEmpty := false
+	if len(titleIfEmptyOnly) > 0 {
+		onlyIfEmpty = titleIfEmptyOnly[0]
+	}
+	title = strings.TrimSpace(title)
+	if title != "" {
+		if !onlyIfEmpty || strings.TrimSpace(rec.Title) == "" {
+			rec.Title = title
+		}
 	}
 	rec.LastActiveAt = updatedAt
-	if rec.LastMessageAt.IsZero() || updatedAt.After(rec.LastMessageAt) {
-		rec.LastMessageAt = updatedAt
-	}
 	if err := r.store.SaveSession(ctx, rec); err != nil {
 		return err
 	}
@@ -1088,10 +747,7 @@ func (r *SessionRecorder) currentSessionViewSummary(ctx context.Context, session
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) sessionViewSummary {
-	updatedAt := entry.LastMessageAt
-	if updatedAt.IsZero() {
-		updatedAt = entry.LastActiveAt
-	}
+	updatedAt := entry.LastActiveAt
 	return sessionViewSummary{
 		SessionID:   entry.ID,
 		Title:       firstNonEmpty(entry.Title, entry.ID),
@@ -1104,10 +760,7 @@ func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) se
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessionViewSummary {
-	updatedAt := rec.LastMessageAt
-	if updatedAt.IsZero() {
-		updatedAt = rec.LastActiveAt
-	}
+	updatedAt := rec.LastActiveAt
 	return sessionViewSummary{
 		SessionID:   rec.ID,
 		Title:       firstNonEmpty(rec.Title, rec.ID),

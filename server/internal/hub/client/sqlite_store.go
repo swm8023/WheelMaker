@@ -36,15 +36,9 @@ CREATE TABLE IF NOT EXISTS route_bindings (
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
 	project_name TEXT NOT NULL,
-	status INTEGER NOT NULL,
-	last_reply TEXT NOT NULL DEFAULT '',
-	acp_session_id TEXT NOT NULL DEFAULT '',
+	status INTEGER NOT NULL,	acp_session_id TEXT NOT NULL DEFAULT '',
 	agents_json TEXT NOT NULL DEFAULT '{}',
-	title TEXT NOT NULL DEFAULT '',
-	last_message_at TEXT NOT NULL DEFAULT '',
-	last_sync_index INTEGER NOT NULL DEFAULT 0,
-	last_sync_subindex INTEGER NOT NULL DEFAULT 0,
-	created_at TEXT NOT NULL,
+	title TEXT NOT NULL DEFAULT '',	created_at TEXT NOT NULL,
 	last_active_at TEXT NOT NULL
 );
 
@@ -84,30 +78,25 @@ type ProjectConfig struct {
 }
 
 type SessionRecord struct {
-	ID               string
-	ProjectName      string
-	Status           SessionStatus
-	LastReply        string
-	ACPSessionID     string
-	AgentsJSON       string
-	Title            string
-	LastMessageAt    time.Time
-	LastSyncIndex    int64
-	LastSyncSubIndex int64
-	CreatedAt        time.Time
-	LastActiveAt     time.Time
+	ID           string
+	ProjectName  string
+	Status       SessionStatus
+	ACPSessionID string
+	AgentsJSON   string
+	Title        string
+	CreatedAt    time.Time
+	LastActiveAt time.Time
 }
 
 type SessionListEntry struct {
-	ID            string
-	ProjectName   string
-	Agent         string
-	Title         string
-	Status        SessionStatus
-	CreatedAt     time.Time
-	LastActiveAt  time.Time
-	LastMessageAt time.Time
-	InMemory      bool
+	ID           string
+	ProjectName  string
+	Agent        string
+	Title        string
+	Status       SessionStatus
+	CreatedAt    time.Time
+	LastActiveAt time.Time
+	InMemory     bool
 }
 
 type SessionTurnMessageRecord struct {
@@ -248,38 +237,74 @@ func migrateProjectsTable(db *sql.DB) error {
 }
 
 func migrateSessionsTable(db *sql.DB) error {
-	columns := []struct {
-		name string
-		ddl  string
-	}{
-		{
-			name: "title",
-			ddl:  `ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''`,
-		},
-		{
-			name: "last_message_at",
-			ddl:  `ALTER TABLE sessions ADD COLUMN last_message_at TEXT NOT NULL DEFAULT ''`,
-		},
-		{
-			name: "last_sync_index",
-			ddl:  `ALTER TABLE sessions ADD COLUMN last_sync_index INTEGER NOT NULL DEFAULT 0`,
-		},
-		{
-			name: "last_sync_subindex",
-			ddl:  `ALTER TABLE sessions ADD COLUMN last_sync_subindex INTEGER NOT NULL DEFAULT 0`,
-		},
+	titleExists, err := sqliteColumnExists(db, "sessions", "title")
+	if err != nil {
+		return fmt.Errorf("check sessions.title column: %w", err)
 	}
-	for _, column := range columns {
-		exists, err := sqliteColumnExists(db, "sessions", column.name)
+	if !titleExists {
+		if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("migrate sessions.title column: %w", err)
+		}
+	}
+
+	legacyColumns := []string{"last_reply", "last_message_at", "last_sync_index", "last_sync_subindex"}
+	hasLegacy := false
+	for _, column := range legacyColumns {
+		exists, err := sqliteColumnExists(db, "sessions", column)
 		if err != nil {
-			return fmt.Errorf("check sessions.%s column: %w", column.name, err)
+			return fmt.Errorf("check sessions.%s column: %w", column, err)
 		}
 		if exists {
-			continue
+			hasLegacy = true
 		}
-		if _, err := db.Exec(column.ddl); err != nil {
-			return fmt.Errorf("migrate sessions.%s column: %w", column.name, err)
-		}
+	}
+	if !hasLegacy {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin sessions migration tx: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS sessions_new (
+			id TEXT PRIMARY KEY,
+			project_name TEXT NOT NULL,
+			status INTEGER NOT NULL,
+			acp_session_id TEXT NOT NULL DEFAULT '',
+			agents_json TEXT NOT NULL DEFAULT '{}',
+			title TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			last_active_at TEXT NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create sessions_new: %w", err)
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO sessions_new (id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at)
+		SELECT id, project_name, status, acp_session_id, agents_json, COALESCE(title, ''), created_at, last_active_at
+		FROM sessions
+	`); err != nil {
+		return fmt.Errorf("copy sessions to sessions_new: %w", err)
+	}
+
+	if _, err := tx.Exec(`DROP TABLE sessions`); err != nil {
+		return fmt.Errorf("drop legacy sessions table: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE sessions_new RENAME TO sessions`); err != nil {
+		return fmt.Errorf("rename sessions_new: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC)`); err != nil {
+		return fmt.Errorf("create sessions index after migration: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit sessions migration tx: %w", err)
 	}
 	return nil
 }
@@ -497,26 +522,21 @@ func (s *sqliteStore) DeleteRouteBinding(ctx context.Context, projectName, route
 
 func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, status, last_reply, acp_session_id, agents_json, title, last_message_at, last_sync_index, last_sync_subindex, created_at, last_active_at
+		SELECT id, status, acp_session_id, agents_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
 
 	rec := &SessionRecord{}
 	var status int
-	var lastMessageAt string
 	var createdAt string
 	var lastActiveAt string
 	if err := row.Scan(
 		&rec.ID,
 		&status,
-		&rec.LastReply,
 		&rec.ACPSessionID,
 		&rec.AgentsJSON,
 		&rec.Title,
-		&lastMessageAt,
-		&rec.LastSyncIndex,
-		&rec.LastSyncSubIndex,
 		&createdAt,
 		&lastActiveAt,
 	); err != nil {
@@ -528,7 +548,6 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 
 	rec.ProjectName = strings.TrimSpace(projectName)
 	rec.Status = SessionStatus(status)
-	rec.LastMessageAt = parseStoreTime(lastMessageAt)
 	rec.CreatedAt = parseStoreTime(createdAt)
 	rec.LastActiveAt = parseStoreTime(lastActiveAt)
 	return rec, nil
@@ -555,35 +574,19 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if rec.LastActiveAt.IsZero() {
 		rec.LastActiveAt = rec.CreatedAt
 	}
-	if rec.LastMessageAt.IsZero() {
-		rec.LastMessageAt = rec.LastActiveAt
-	}
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, project_name, status, last_reply, acp_session_id, agents_json, title, last_message_at, last_sync_index, last_sync_subindex, created_at, last_active_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_name=excluded.project_name,
 			status=excluded.status,
-			last_reply=excluded.last_reply,
 			acp_session_id=excluded.acp_session_id,
 			agents_json=excluded.agents_json,
 			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
-			last_message_at=CASE WHEN excluded.last_message_at != '' THEN excluded.last_message_at ELSE sessions.last_message_at END,
-			last_sync_index=CASE
-				WHEN excluded.last_sync_index > sessions.last_sync_index THEN excluded.last_sync_index
-				WHEN excluded.last_sync_index = sessions.last_sync_index AND excluded.last_sync_subindex > sessions.last_sync_subindex THEN excluded.last_sync_index
-				ELSE sessions.last_sync_index
-			END,
-			last_sync_subindex=CASE
-				WHEN excluded.last_sync_index > sessions.last_sync_index THEN excluded.last_sync_subindex
-				WHEN excluded.last_sync_index = sessions.last_sync_index AND excluded.last_sync_subindex > sessions.last_sync_subindex THEN excluded.last_sync_subindex
-				ELSE sessions.last_sync_subindex
-			END,
 			last_active_at=excluded.last_active_at
-	`, rec.ID, rec.ProjectName, int(rec.Status), rec.LastReply, rec.ACPSessionID, rec.AgentsJSON, rec.Title,
-		rec.LastMessageAt.UTC().Format(time.RFC3339Nano), rec.LastSyncIndex, rec.LastSyncSubIndex,
+	`, rec.ID, rec.ProjectName, int(rec.Status), rec.ACPSessionID, rec.AgentsJSON, rec.Title,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.LastActiveAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -594,10 +597,10 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at, last_message_at
+		SELECT id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ?
-		ORDER BY CASE WHEN last_message_at = '' THEN last_active_at ELSE last_message_at END DESC, last_active_at DESC
+		ORDER BY last_active_at DESC
 	`, strings.TrimSpace(projectName))
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -614,15 +617,13 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		var storedTitle string
 		var createdAt string
 		var lastActiveAt string
-		var lastMessageAt string
-		if err := rows.Scan(&entry.ID, &entryProjectName, &status, &acpSessionID, &agentsJSON, &storedTitle, &createdAt, &lastActiveAt, &lastMessageAt); err != nil {
+		if err := rows.Scan(&entry.ID, &entryProjectName, &status, &acpSessionID, &agentsJSON, &storedTitle, &createdAt, &lastActiveAt); err != nil {
 			return nil, fmt.Errorf("scan session list entry: %w", err)
 		}
 		entry.ProjectName = strings.TrimSpace(entryProjectName)
 		entry.Status = SessionStatus(status)
 		entry.CreatedAt = parseStoreTime(createdAt)
 		entry.LastActiveAt = parseStoreTime(lastActiveAt)
-		entry.LastMessageAt = parseStoreTime(lastMessageAt)
 		entry.Agent, entry.Title = inferSessionListMetadata(acpSessionID, agentsJSON)
 		if strings.TrimSpace(storedTitle) != "" {
 			entry.Title = strings.TrimSpace(storedTitle)
@@ -905,18 +906,17 @@ func (s *sqliteStore) insertOrUpdateSessionTurnMessage(ctx context.Context, rec 
 		_ = tx.Rollback()
 	}()
 
-	var lastSyncIndex int64
-	var lastSyncSubIndex int64
+	var sessionCount int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT last_sync_index, last_sync_subindex
+		SELECT COUNT(1)
 		FROM sessions
 		WHERE project_name = ? AND id = ?
-	`, rec.ProjectName, rec.SessionID).Scan(&lastSyncIndex, &lastSyncSubIndex)
-	if err == sql.ErrNoRows {
-		return fmt.Errorf("session %q not found", rec.SessionID)
-	}
+	`, rec.ProjectName, rec.SessionID).Scan(&sessionCount)
 	if err != nil {
-		return fmt.Errorf("load session cursor: %w", err)
+		return fmt.Errorf("check session exists: %w", err)
+	}
+	if sessionCount == 0 {
+		return fmt.Errorf("session %q not found", rec.SessionID)
 	}
 
 	var existingTurn *sessionTurnLookup
@@ -930,7 +930,11 @@ func (s *sqliteStore) insertOrUpdateSessionTurnMessage(ctx context.Context, rec 
 	if existingTurn != nil {
 		rec.SyncSubIndex = maxInt64(existingTurn.UpdateIndex, 0)
 	} else {
-		rec.SyncIndex = lastSyncIndex + 1
+		var turnCount int64
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(1) FROM session_turns WHERE session_id = ?`, rec.SessionID).Scan(&turnCount); err != nil {
+			return fmt.Errorf("load session turn count: %w", err)
+		}
+		rec.SyncIndex = turnCount + 1
 		rec.SyncSubIndex = 0
 	}
 	rec.MessageID = formatSessionTurnSeq(rec.SyncIndex, rec.SyncSubIndex)
@@ -938,14 +942,6 @@ func (s *sqliteStore) insertOrUpdateSessionTurnMessage(ctx context.Context, rec 
 
 	if err := upsertPromptTurnTx(ctx, tx, rec, existingTurn, contentJSON, storedTime); err != nil {
 		return fmt.Errorf("upsert prompt/turn projection: %w", err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE sessions
-		SET last_sync_index = ?, last_sync_subindex = ?, last_active_at = ?
-		WHERE project_name = ? AND id = ?
-	`, rec.SyncIndex, rec.SyncSubIndex, storedTime, rec.ProjectName, rec.SessionID); err != nil {
-		return fmt.Errorf("update session cursor: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {

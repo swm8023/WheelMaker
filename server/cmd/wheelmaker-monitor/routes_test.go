@@ -49,13 +49,12 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 
 	ctx := context.Background()
 	if err := store.SaveSession(ctx, &clientpkg.SessionRecord{
-		ID:            "sess-1",
-		ProjectName:   "proj1",
-		Status:        clientpkg.SessionActive,
-		Title:         "Task",
-		LastMessageAt: time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
-		CreatedAt:     time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
-		LastActiveAt:  time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       clientpkg.SessionActive,
+		Title:        "Task",
+		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}

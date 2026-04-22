@@ -1003,7 +1003,6 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 		if entries[i].Title == "" {
 			entries[i].Title = storedEntry.Title
 		}
-		entries[i].LastMessageAt = storedEntry.LastMessageAt
 	}
 	for _, s := range stored {
 		if memIDs[s.ID] {
@@ -1015,16 +1014,10 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
-		left := entries[i].LastMessageAt
-		if left.IsZero() {
-			left = entries[i].LastActiveAt
-		}
-		right := entries[j].LastMessageAt
-		if right.IsZero() {
-			right = entries[j].LastActiveAt
-		}
+		left := entries[i].LastActiveAt
+		right := entries[j].LastActiveAt
 		if left.Equal(right) {
-			return entries[i].LastActiveAt.After(entries[j].LastActiveAt)
+			return entries[i].CreatedAt.After(entries[j].CreatedAt)
 		}
 		return left.After(right)
 	})

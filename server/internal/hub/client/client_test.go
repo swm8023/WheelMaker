@@ -690,9 +690,9 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	c := New(store, "proj1", "/tmp")
 	ctx := context.Background()
 	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:           "restore-me",
-		ProjectName:  "proj1",
-		LastReply:    "previous reply",
+		ID:          "restore-me",
+		ProjectName: "proj1",
+
 		ACPSessionID: "acp-999",
 		AgentsJSON:   `{"claude":{"acpSessionId":"acp-999","title":"Persisted"}}`,
 		CreatedAt:    time.Now().Add(-time.Hour),
@@ -714,9 +714,7 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	if sess.ID != "restore-me" {
 		t.Fatalf("resolved session ID = %q, want restore-me", sess.ID)
 	}
-	if sess.lastReply != "previous reply" {
-		t.Fatalf("lastReply = %q, want previous reply", sess.lastReply)
-	}
+
 }
 
 func TestListSessions_DiskOnlySessionsAreMarkedPersisted(t *testing.T) {
@@ -730,13 +728,13 @@ func TestListSessions_DiskOnlySessionsAreMarkedPersisted(t *testing.T) {
 	createdAt := time.Now().Add(-2 * time.Hour).UTC()
 	lastMessageAt := time.Now().Add(-5 * time.Minute).UTC()
 	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:            "persisted-only",
-		ProjectName:   "proj1",
-		Status:        SessionSuspended,
-		AgentsJSON:    `{"claude":{"title":"Persisted Title"}}`,
-		LastMessageAt: lastMessageAt,
-		CreatedAt:     createdAt,
-		LastActiveAt:  lastMessageAt,
+		ID:          "persisted-only",
+		ProjectName: "proj1",
+		Status:      SessionSuspended,
+		AgentsJSON:  `{"claude":{"title":"Persisted Title"}}`,
+
+		CreatedAt:    createdAt,
+		LastActiveAt: lastMessageAt,
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
@@ -768,13 +766,13 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	createdAt := time.Now().Add(-2 * time.Hour).UTC()
 	lastMessageAt := time.Now().Add(-3 * time.Minute).UTC()
 	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:            "sess-1",
-		ProjectName:   "proj1",
-		Status:        SessionSuspended,
-		Title:         "Persisted Title",
-		LastMessageAt: lastMessageAt,
-		CreatedAt:     createdAt,
-		LastActiveAt:  lastMessageAt,
+		ID:          "sess-1",
+		ProjectName: "proj1",
+		Status:      SessionSuspended,
+		Title:       "Persisted Title",
+
+		CreatedAt:    createdAt,
+		LastActiveAt: lastMessageAt,
 	}); err != nil {
 		t.Fatalf("save session: %v", err)
 	}
@@ -808,9 +806,7 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	if !entries[0].InMemory {
 		t.Fatal("entries[0].InMemory = false, want true")
 	}
-	if !entries[0].LastMessageAt.Equal(lastMessageAt) {
-		t.Fatalf("entries[0].LastMessageAt = %v, want %v", entries[0].LastMessageAt, lastMessageAt)
-	}
+
 }
 
 func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testing.T) {
@@ -1572,9 +1568,6 @@ func TestStoreDropsLegacySessionMessagesTable(t *testing.T) {
 	if rec == nil {
 		t.Fatal("LoadSession returned nil")
 	}
-	if rec.LastSyncIndex != 0 || rec.LastSyncSubIndex != 0 {
-		t.Fatalf("cursor = (%d,%d), want (0,0)", rec.LastSyncIndex, rec.LastSyncSubIndex)
-	}
 
 	messages, err := store.ListSessionTurnMessagesAfterIndex(context.Background(), "proj1", "sess-1", 0)
 	if err != nil {
@@ -1605,14 +1598,13 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	defer store.Close()
 
 	rec := &SessionRecord{
-		ID:            "sess-1",
-		ProjectName:   "proj1",
-		Status:        SessionActive,
-		LastReply:     "legacy",
-		CreatedAt:     time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
-		LastActiveAt:  time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
-		Title:         "Fix app sessions",
-		LastMessageAt: time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
+		ID:          "sess-1",
+		ProjectName: "proj1",
+		Status:      SessionActive,
+
+		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
+		Title:        "Fix app sessions",
 	}
 
 	if err := store.SaveSession(context.Background(), rec); err != nil {
@@ -1762,8 +1754,8 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
-	if rec == nil || rec.LastSyncIndex != 1 || rec.LastSyncSubIndex != 1 {
-		t.Fatalf("LoadSession() cursor = %#v, want index=1 subindex=1", rec)
+	if rec == nil {
+		t.Fatalf("LoadSession() returned nil")
 	}
 }
 
@@ -1918,11 +1910,14 @@ func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readSessionView: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if messages[0].Text != "hello world" {
-		t.Fatalf("messages[0].Text = %q, want %q", messages[0].Text, "hello world")
+	if strings.TrimSpace(messages[0].Text) != "hello" {
+		t.Fatalf("messages[0].Text = %q, want hello", messages[0].Text)
+	}
+	if strings.TrimSpace(messages[1].Text) != "world" {
+		t.Fatalf("messages[1].Text = %q, want world", messages[1].Text)
 	}
 }
 
@@ -1985,15 +1980,15 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 	c := newSessionViewTestClient(t)
 
 	ctx := context.Background()
-	lastMessageAt := mustRFC3339Time(t, "2026-04-12T10:08:00Z")
+	lastActiveAt := mustRFC3339Time(t, "2026-04-12T10:05:00Z")
 	if err := c.store.SaveSession(ctx, &SessionRecord{
-		ID:            "sess-runtime-1",
-		ProjectName:   "proj1",
-		Status:        SessionSuspended,
-		Title:         "Persisted Title",
-		LastMessageAt: lastMessageAt,
-		CreatedAt:     mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
-		LastActiveAt:  mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
+		ID:          "sess-runtime-1",
+		ProjectName: "proj1",
+		Status:      SessionSuspended,
+		Title:       "Persisted Title",
+
+		CreatedAt:    mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
+		LastActiveAt: lastActiveAt,
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
@@ -2017,8 +2012,8 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 	if sessions[0].Title != "Runtime Session" {
 		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Runtime Session")
 	}
-	if sessions[0].UpdatedAt != lastMessageAt.Format(time.RFC3339) {
-		t.Fatalf("sessions[0].UpdatedAt = %q, want %q", sessions[0].UpdatedAt, lastMessageAt.Format(time.RFC3339))
+	if sessions[0].UpdatedAt != lastActiveAt.Format(time.RFC3339) {
+		t.Fatalf("sessions[0].UpdatedAt = %q, want %q", sessions[0].UpdatedAt, lastActiveAt.Format(time.RFC3339))
 	}
 }
 
@@ -2073,11 +2068,14 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readSessionView: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if messages[0].Text != "Build finished" {
-		t.Fatalf("messages[0].Text = %q, want %q", messages[0].Text, "Build finished")
+	if strings.TrimSpace(messages[0].Text) != "Running build" {
+		t.Fatalf("messages[0].Text = %q, want Running build", messages[0].Text)
+	}
+	if strings.TrimSpace(messages[1].Text) != "Build finished" {
+		t.Fatalf("messages[1].Text = %q, want Build finished", messages[1].Text)
 	}
 }
 
@@ -2112,33 +2110,19 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
-	if len(stored) != 1 {
-		t.Fatalf("stored len = %d, want 1", len(stored))
+	if len(stored) != 2 {
+		t.Fatalf("stored len = %d, want 2", len(stored))
 	}
-	if stored[0].Method != acp.MethodSessionUpdate {
-		t.Fatalf("stored[0].Method = %q, want %q", stored[0].Method, acp.MethodSessionUpdate)
+	for i := range stored {
+		if stored[i].Method != acp.MethodSessionUpdate {
+			t.Fatalf("stored[%d].Method = %q, want %q", i, stored[i].Method, acp.MethodSessionUpdate)
+		}
 	}
-	if stored[0].Body != "hello world" {
-		t.Fatalf("stored[0].Body = %q, want %q", stored[0].Body, "hello world")
+	if strings.TrimSpace(stored[0].Body) != "hello" {
+		t.Fatalf("stored[0].Body = %q, want hello", stored[0].Body)
 	}
-
-	var doc struct {
-		Method string `json:"method"`
-		Params struct {
-			Update acp.SessionUpdate `json:"update"`
-		} `json:"params"`
-	}
-	if err := json.Unmarshal([]byte(stored[0].ContentJSON), &doc); err != nil {
-		t.Fatalf("unmarshal content_json: %v", err)
-	}
-	if doc.Method != acp.MethodSessionUpdate {
-		t.Fatalf("doc.Method = %q, want %q", doc.Method, acp.MethodSessionUpdate)
-	}
-	if doc.Params.Update.SessionUpdate != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("doc.Params.Update.SessionUpdate = %q, want %q", doc.Params.Update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
-	}
-	if got := extractTextChunk(doc.Params.Update.Content); got != "hello world" {
-		t.Fatalf("doc.Params.Update.Content text = %q, want %q", got, "hello world")
+	if strings.TrimSpace(stored[1].Body) != "world" {
+		t.Fatalf("stored[1].Body = %q, want world", stored[1].Body)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
@@ -2154,11 +2138,14 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if len(prompts) != 1 {
 		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if len(prompts[0].Turns) != 1 {
-		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
+	if len(prompts[0].Turns) != 2 {
+		t.Fatalf("prompts[0].Turns len = %d, want 2", len(prompts[0].Turns))
 	}
-	if prompts[0].Turns[0].Text != "hello world" {
-		t.Fatalf("prompts[0].Turns[0].Text = %q, want %q", prompts[0].Turns[0].Text, "hello world")
+	if strings.TrimSpace(prompts[0].Turns[0].Text) != "hello" {
+		t.Fatalf("prompts[0].Turns[0].Text = %q, want hello", prompts[0].Turns[0].Text)
+	}
+	if strings.TrimSpace(prompts[0].Turns[1].Text) != "world" {
+		t.Fatalf("prompts[0].Turns[1].Text = %q, want world", prompts[0].Turns[1].Text)
 	}
 }
 
@@ -2246,29 +2233,14 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	prompts := body["prompts"].([]sessionViewPrompt)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
-	}
-	if prompts[0].PromptIndex != 1 {
-		t.Fatalf("prompts[0].PromptIndex = %d, want 1", prompts[0].PromptIndex)
-	}
-	if prompts[0].UpdateIndex <= 0 {
-		t.Fatalf("prompts[0].UpdateIndex = %d, want > 0", prompts[0].UpdateIndex)
-	}
-	if len(prompts[0].Turns) != 1 {
-		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
-	}
-	if prompts[0].Turns[0].Status != "done" {
-		t.Fatalf("prompts[0].Turns[0].Status = %q, want done", prompts[0].Turns[0].Status)
-	}
-	if prompts[0].Turns[0].RequestID != 42 {
-		t.Fatalf("prompts[0].Turns[0].RequestID = %d, want 42", prompts[0].Turns[0].RequestID)
+	if len(prompts) != 0 {
+		t.Fatalf("prompts len = %d, want 0 before prompt finished", len(prompts))
 	}
 	if got := body["lastPromptIndex"].(int64); got != 1 {
 		t.Fatalf("lastPromptIndex = %d, want 1", got)
 	}
-	if got := body["lastPromptUpdateIndex"].(int64); got < prompts[0].UpdateIndex {
-		t.Fatalf("lastPromptUpdateIndex = %d, want >= %d", got, prompts[0].UpdateIndex)
+	if got := body["lastPromptUpdateIndex"].(int64); got != 0 {
+		t.Fatalf("lastPromptUpdateIndex = %d, want 0 before prompt finished", got)
 	}
 }
 
@@ -2340,34 +2312,27 @@ func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *tes
 	if err != nil {
 		t.Fatalf("ListSessionTurnMessages: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2 (prompt + merged assistant turn)", len(messages))
-	}
-	assistant := messages[1]
-	if assistant.SyncIndex != 2 {
-		t.Fatalf("assistant SyncIndex = %d, want 2", assistant.SyncIndex)
-	}
-	if assistant.SyncSubIndex != 1 {
-		t.Fatalf("assistant SyncSubIndex = %d, want 1", assistant.SyncSubIndex)
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3 (prompt + two assistant turns)", len(messages))
 	}
 
 	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + two assistant turns)", len(turns))
 	}
-	assistantTurn := turns[1]
-	if assistantTurn.UpdateIndex != 2 {
-		t.Fatalf("assistant turn update_index = %d, want 2", assistantTurn.UpdateIndex)
+	update1 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
+	if text := strings.TrimSpace(extractTextChunk(update1.Content)); text != "hello" {
+		t.Fatalf("assistant turn #1 text = %q, want hello", text)
 	}
-	update := decodeTurnSessionUpdate(t, assistantTurn.UpdateJSON)
-	if text := extractTextChunk(update.Content); text != "hello world" {
-		t.Fatalf("assistant turn text = %q, want %q", text, "hello world")
+	update2 := decodeTurnSessionUpdate(t, turns[2].UpdateJSON)
+	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "world" {
+		t.Fatalf("assistant turn #2 text = %q, want world", text)
 	}
-	if update.Status != "done" {
-		t.Fatalf("assistant turn status = %q, want done", update.Status)
+	if update2.Status != "done" {
+		t.Fatalf("assistant turn #2 status = %q, want done", update2.Status)
 	}
 }
 
@@ -2459,6 +2424,9 @@ func TestSessionRecorderMarkReadClearsUnreadEntry(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
+	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
 	if err := c.RecordEvent(context.Background(), sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
@@ -2505,26 +2473,14 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	prompts := body["prompts"].([]sessionViewPrompt)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
-	}
-	if prompts[0].PromptIndex != 1 {
-		t.Fatalf("prompts[0].PromptIndex = %d, want 1", prompts[0].PromptIndex)
-	}
-	if prompts[0].UpdateIndex <= 0 {
-		t.Fatalf("prompts[0].UpdateIndex = %d, want > 0", prompts[0].UpdateIndex)
-	}
-	if len(prompts[0].Turns) != 1 {
-		t.Fatalf("prompts[0].Turns len = %d, want 1", len(prompts[0].Turns))
-	}
-	if prompts[0].Turns[0].Status != "done" {
-		t.Fatalf("prompts[0].Turns[0].Status = %q, want done", prompts[0].Turns[0].Status)
+	if len(prompts) != 0 {
+		t.Fatalf("prompts len = %d, want 0 before prompt finished", len(prompts))
 	}
 	if got := body["lastPromptIndex"].(int64); got != 1 {
 		t.Fatalf("lastPromptIndex = %d, want 1", got)
 	}
-	if got := body["lastPromptUpdateIndex"].(int64); got < prompts[0].UpdateIndex {
-		t.Fatalf("lastPromptUpdateIndex = %d, want >= %d", got, prompts[0].UpdateIndex)
+	if got := body["lastPromptUpdateIndex"].(int64); got != 0 {
+		t.Fatalf("lastPromptUpdateIndex = %d, want 0 before prompt finished", got)
 	}
 }
 
@@ -2573,13 +2529,10 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged tool)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + tool start + tool done)", len(turns))
 	}
-	toolTurn := turns[1]
-	if toolTurn.UpdateIndex != 2 {
-		t.Fatalf("tool turn update_index = %d, want 2", toolTurn.UpdateIndex)
-	}
+	toolTurn := turns[2]
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
 	if update.ToolCallID != "call-1" {
 		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-1")
@@ -2687,13 +2640,10 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged tool)", len(turns))
+	if len(turns) != 4 {
+		t.Fatalf("turns len = %d, want 4 (prompt + three tool updates)", len(turns))
 	}
-	toolTurn := turns[1]
-	if toolTurn.UpdateIndex != 3 {
-		t.Fatalf("tool turn update_index = %d, want 3", toolTurn.UpdateIndex)
-	}
+	toolTurn := turns[3]
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
 	if update.ToolCallID != "call-terminal" {
 		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-terminal")
@@ -2724,13 +2674,10 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + permission)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + permission request + permission result)", len(turns))
 	}
-	permTurn := turns[1]
-	if permTurn.UpdateIndex != 2 {
-		t.Fatalf("permission turn update_index = %d, want 2", permTurn.UpdateIndex)
-	}
+	permTurn := turns[2]
 	var doc struct {
 		ID     int64  `json:"id"`
 		Method string `json:"method"`

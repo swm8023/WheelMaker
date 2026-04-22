@@ -533,7 +533,7 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 	defer db.Close()
 
 	query := `
-		SELECT id, project_name, status, title, last_message_at, last_sync_index, last_sync_subindex, created_at, last_active_at
+		SELECT id, project_name, status, title, created_at, last_active_at
 		FROM sessions`
 	args := []any{}
 	projectName = strings.TrimSpace(projectName)
@@ -541,7 +541,7 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 		query += ` WHERE project_name = ?`
 		args = append(args, projectName)
 	}
-	query += ` ORDER BY CASE WHEN last_message_at = '' THEN last_active_at ELSE last_message_at END DESC, last_active_at DESC`
+	query += ` ORDER BY last_active_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
@@ -557,15 +557,12 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 	for rows.Next() {
 		var item MonitorSessionSummary
 		var status int
-		if err := rows.Scan(&item.SessionID, &item.ProjectName, &status, &item.Title, &item.LastMessageAt, &item.LastIndex, &item.LastSubIndex, &item.CreatedAt, &item.LastActiveAt); err != nil {
+		if err := rows.Scan(&item.SessionID, &item.ProjectName, &status, &item.Title, &item.CreatedAt, &item.LastActiveAt); err != nil {
 			return nil, err
 		}
 		item.Status = monitorSessionStatusLabel(status)
 		item.Title = firstNonEmpty(strings.TrimSpace(item.Title), item.SessionID)
-		item.EffectiveAt = strings.TrimSpace(item.LastMessageAt)
-		if item.EffectiveAt == "" {
-			item.EffectiveAt = strings.TrimSpace(item.LastActiveAt)
-		}
+		item.EffectiveAt = strings.TrimSpace(item.LastActiveAt)
 		out = append(out, item)
 	}
 	return out, rows.Err()

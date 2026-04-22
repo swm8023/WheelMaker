@@ -969,9 +969,11 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	title := ""
 	if name := s.currentAgentNameLocked(); name != "" {
 		if state := s.agentStateLocked(name); state != nil {
 			state.ACPSessionID = s.acpSessionID
+			title = strings.TrimSpace(state.Title)
 		}
 	}
 
@@ -984,9 +986,9 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 		ID:           s.ID,
 		ProjectName:  s.projectName,
 		Status:       s.Status,
-		LastReply:    s.lastReply,
 		ACPSessionID: s.acpSessionID,
 		AgentsJSON:   string(agentsJSON),
+		Title:        title,
 		CreatedAt:    s.createdAt,
 		LastActiveAt: s.lastActiveAt,
 	}, nil
@@ -995,7 +997,6 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 	s := newSession(rec.ID, cwd)
 	s.Status = rec.Status
-	s.lastReply = rec.LastReply
 	s.acpSessionID = rec.ACPSessionID
 	s.createdAt = rec.CreatedAt
 	s.lastActiveAt = rec.LastActiveAt
@@ -1008,6 +1009,20 @@ func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 		s.agents = map[string]*SessionAgentState{}
 	}
 	s.activeAgent = inferActiveAgent(rec.ACPSessionID, s.agents)
+	if strings.TrimSpace(rec.Title) != "" {
+		name := strings.TrimSpace(s.activeAgent)
+		if name == "" {
+			for n := range s.agents {
+				name = n
+				break
+			}
+		}
+		if name != "" {
+			if state := s.agentStateLocked(name); state != nil && strings.TrimSpace(state.Title) == "" {
+				state.Title = strings.TrimSpace(rec.Title)
+			}
+		}
+	}
 	return s, nil
 }
 
