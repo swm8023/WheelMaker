@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -20,6 +21,8 @@ const (
 )
 
 const sessionViewMethodSystem = "system"
+
+var errSessionEventPayloadEmpty = errors.New("session event payload is empty")
 
 type SessionViewEvent struct {
 	Type      SessionViewEventType
@@ -100,6 +103,12 @@ func (r *SessionRecorder) Close() {
 	if r == nil {
 		return
 	}
+	r.mu.Lock()
+	r.publish = nil
+	r.mu.Unlock()
+	r.writeMu.Lock()
+	r.promptState = map[string]sessionPromptState{}
+	r.writeMu.Unlock()
 }
 func (r *SessionRecorder) SetEventPublisher(publish func(method string, payload any) error) {
 	r.mu.Lock()
@@ -113,52 +122,51 @@ func (r *SessionRecorder) eventPublisher() func(method string, payload any) erro
 	return r.publish
 }
 
-func decodeSessionViewACPContentDoc(content string) (sessionViewACPContentDoc, bool) {
+func decodeSessionViewACPContentDoc(content string) (sessionViewACPContentDoc, error) {
 	raw := strings.TrimSpace(content)
 	if raw == "" {
-		return sessionViewACPContentDoc{}, false
+		return sessionViewACPContentDoc{}, errSessionEventPayloadEmpty
 	}
 	var doc sessionViewACPContentDoc
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		return sessionViewACPContentDoc{}, false
+		return sessionViewACPContentDoc{}, err
 	}
 	doc.Method = strings.TrimSpace(doc.Method)
-	return doc, doc.Method != ""
-}
-
-func decodeSessionViewEventMethod(content string) (string, bool) {
-	doc, ok := decodeSessionViewACPContentDoc(content)
-	if !ok {
-		return "", false
+	if doc.Method == "" {
+		return sessionViewACPContentDoc{}, fmt.Errorf("session event method is required")
 	}
-	return strings.TrimSpace(doc.Method), true
+	return doc, nil
 }
 
-func decodeSessionViewEventParams(content string, out any) bool {
+func decodeSessionViewEventParams(doc sessionViewACPContentDoc, out any) error {
 	if out == nil {
-		return false
+		return fmt.Errorf("params decode target is nil")
 	}
-	doc, ok := decodeSessionViewACPContentDoc(content)
-	if !ok || len(doc.Params) == 0 || strings.TrimSpace(string(doc.Params)) == "" {
-		return false
+	if len(doc.Params) == 0 || strings.TrimSpace(string(doc.Params)) == "" {
+		return errSessionEventPayloadEmpty
 	}
-	return json.Unmarshal(doc.Params, out) == nil
+	if err := json.Unmarshal(doc.Params, out); err != nil {
+		return err
+	}
+	return nil
 }
 
-func decodeSessionViewEventResult(content string, out any) bool {
+func decodeSessionViewEventResult(doc sessionViewACPContentDoc, out any) error {
 	if out == nil {
-		return false
+		return fmt.Errorf("result decode target is nil")
 	}
-	doc, ok := decodeSessionViewACPContentDoc(content)
-	if !ok || len(doc.Result) == 0 || strings.TrimSpace(string(doc.Result)) == "" {
-		return false
+	if len(doc.Result) == 0 || strings.TrimSpace(string(doc.Result)) == "" {
+		return errSessionEventPayloadEmpty
 	}
-	return json.Unmarshal(doc.Result, out) == nil
+	if err := json.Unmarshal(doc.Result, out); err != nil {
+		return err
+	}
+	return nil
 }
 
-func sessionViewMethodFromEvent(event SessionViewEvent) string {
-	if method, ok := decodeSessionViewEventMethod(event.Content); ok {
-		return method
+func sessionViewMethodFromEvent(event SessionViewEvent, doc sessionViewACPContentDoc) string {
+	if strings.TrimSpace(doc.Method) != "" {
+		return strings.TrimSpace(doc.Method)
 	}
 	if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeSystem)) {
 		return sessionViewMethodSystem
@@ -174,7 +182,15 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	if event.UpdatedAt.IsZero() {
 		event.UpdatedAt = time.Now().UTC()
 	}
-	method := sessionViewMethodFromEvent(event)
+	doc := sessionViewACPContentDoc{}
+	if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeACP)) {
+		parsedDoc, err := decodeSessionViewACPContentDoc(event.Content)
+		if err != nil {
+			return fmt.Errorf("decode acp event content: %w", err)
+		}
+		doc = parsedDoc
+	}
+	method := sessionViewMethodFromEvent(event, doc)
 
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
@@ -182,19 +198,23 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	switch method {
 	case acp.MethodSessionNew:
 		params := sessionViewSessionNewParams{}
-		_ = decodeSessionViewEventParams(event.Content, &params)
+		if err := decodeSessionViewEventParams(doc, &params); err != nil && !errors.Is(err, errSessionEventPayloadEmpty) {
+			return fmt.Errorf("decode session.new params: %w", err)
+		}
 		if strings.TrimSpace(params.SessionID) != "" {
 			event.SessionID = strings.TrimSpace(params.SessionID)
 		}
 		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(params.Title), event.UpdatedAt, false)
 	case acp.MethodSessionPrompt:
 		var promptResult sessionViewPromptResult
-		if decodeSessionViewEventResult(event.Content, &promptResult) {
+		if err := decodeSessionViewEventResult(doc, &promptResult); err == nil {
 			return r.handlePromptFinishedLocked(ctx, event, strings.TrimSpace(promptResult.StopReason))
+		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
+			return fmt.Errorf("decode session.prompt result: %w", err)
 		}
 		var params acp.SessionPromptParams
-		if !decodeSessionViewEventParams(event.Content, &params) {
-			return nil
+		if err := decodeSessionViewEventParams(doc, &params); err != nil {
+			return fmt.Errorf("decode session.prompt params: %w", err)
 		}
 		if strings.TrimSpace(params.SessionID) != "" {
 			event.SessionID = strings.TrimSpace(params.SessionID)
@@ -204,10 +224,12 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		return r.appendACPEventTurnLocked(ctx, event)
 	case acp.MethodRequestPermission:
 		var params acp.PermissionRequestParams
-		if decodeSessionViewEventParams(event.Content, &params) {
+		if err := decodeSessionViewEventParams(doc, &params); err == nil {
 			if strings.TrimSpace(params.SessionID) != "" {
 				event.SessionID = strings.TrimSpace(params.SessionID)
 			}
+		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
+			return fmt.Errorf("decode request_permission params: %w", err)
 		}
 		return r.appendACPEventTurnLocked(ctx, event)
 	case sessionViewMethodSystem:
@@ -232,16 +254,8 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 		return err
 	}
 
-	turn := SessionTurnRecord{
-		TurnID:      formatPromptTurnSeq(state.promptIndex, 1),
-		SessionID:   event.SessionID,
-		PromptIndex: state.promptIndex,
-		TurnIndex:   1,
-		UpdateIndex: 1,
-		UpdateJSON:  normalizeJSONDoc(event.Content, `{"method":"`+acp.MethodSessionPrompt+`"}`),
-		ExtraJSON:   "{}",
-	}
-	if err := r.store.UpsertSessionTurn(ctx, turn); err != nil {
+	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, 1, event.Content, acp.MethodSessionPrompt)
+	if err := r.appendSessionTurnLocked(ctx, turn); err != nil {
 		return err
 	}
 
@@ -262,21 +276,32 @@ func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event Se
 	if state.nextTurnIndex <= 0 {
 		state.nextTurnIndex = 1
 	}
-	turn := SessionTurnRecord{
-		TurnID:      formatPromptTurnSeq(state.promptIndex, state.nextTurnIndex),
-		SessionID:   event.SessionID,
-		PromptIndex: state.promptIndex,
-		TurnIndex:   state.nextTurnIndex,
-		UpdateIndex: 1,
-		UpdateJSON:  normalizeJSONDoc(event.Content, `{"method":"`+acp.MethodSessionUpdate+`"}`),
-		ExtraJSON:   "{}",
-	}
-	if err := r.store.UpsertSessionTurn(ctx, turn); err != nil {
+	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, event.Content, acp.MethodSessionUpdate)
+	if err := r.appendSessionTurnLocked(ctx, turn); err != nil {
 		return err
 	}
 	state.nextTurnIndex++
 	r.promptState[event.SessionID] = state
-	r.publishSessionTurn(event.SessionID, turn)
+	return nil
+}
+
+func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawContent, fallbackMethod string) SessionTurnRecord {
+	return SessionTurnRecord{
+		TurnID:      formatPromptTurnSeq(promptIndex, turnIndex),
+		SessionID:   strings.TrimSpace(sessionID),
+		PromptIndex: promptIndex,
+		TurnIndex:   turnIndex,
+		UpdateIndex: 1,
+		UpdateJSON:  normalizeJSONDoc(rawContent, `{"method":"`+strings.TrimSpace(fallbackMethod)+`"}`),
+		ExtraJSON:   "{}",
+	}
+}
+
+func (r *SessionRecorder) appendSessionTurnLocked(ctx context.Context, turn SessionTurnRecord) error {
+	if err := r.store.UpsertSessionTurn(ctx, turn); err != nil {
+		return err
+	}
+	r.publishSessionTurn(turn.SessionID, turn)
 	return nil
 }
 
@@ -395,13 +420,6 @@ func toSessionReadMessage(turn SessionTurnRecord) sessionReadMessage {
 		UpdateIndex: turn.UpdateIndex,
 		Content:     content,
 	}
-}
-
-func firstNonZeroInt64(v int64, fallback int64) int64 {
-	if v != 0 {
-		return v
-	}
-	return fallback
 }
 
 func buildACPMethodContentJSON(method string, body map[string]any) string {
@@ -548,28 +566,25 @@ func (r *SessionRecorder) currentSessionViewSummary(ctx context.Context, session
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) sessionViewSummary {
-	updatedAt := entry.LastActiveAt
-	return sessionViewSummary{
-		SessionID:   entry.ID,
-		Title:       firstNonEmpty(entry.Title, entry.ID),
-		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
-		UnreadCount: 0,
-		Agent:       entry.Agent,
-		Status:      sessionStatusLabel(entry.Status),
-		ProjectName: entry.ProjectName,
-	}
+	return buildSessionViewSummary(
+		entry.ID,
+		entry.Title,
+		entry.LastActiveAt,
+		entry.Agent,
+		entry.Status,
+		entry.ProjectName,
+	)
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessionViewSummary {
-	updatedAt := rec.LastActiveAt
-	return sessionViewSummary{
-		SessionID:   rec.ID,
-		Title:       firstNonEmpty(rec.Title, rec.ID),
-		UpdatedAt:   updatedAt.UTC().Format(time.RFC3339),
-		UnreadCount: 0,
-		Status:      sessionStatusLabel(rec.Status),
-		ProjectName: rec.ProjectName,
-	}
+	return buildSessionViewSummary(
+		rec.ID,
+		rec.Title,
+		rec.LastActiveAt,
+		"",
+		rec.Status,
+		rec.ProjectName,
+	)
 }
 
 func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
@@ -578,6 +593,18 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 		return
 	}
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
+}
+
+func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, agent string, status SessionStatus, projectName string) sessionViewSummary {
+	return sessionViewSummary{
+		SessionID:   strings.TrimSpace(sessionID),
+		Title:       firstNonEmpty(strings.TrimSpace(title), strings.TrimSpace(sessionID)),
+		UpdatedAt:   lastActiveAt.UTC().Format(time.RFC3339),
+		UnreadCount: 0,
+		Agent:       strings.TrimSpace(agent),
+		Status:      sessionStatusLabel(status),
+		ProjectName: strings.TrimSpace(projectName),
+	}
 }
 
 func decodeSessionRequestPayload(raw json.RawMessage, out any) error {

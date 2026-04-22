@@ -1489,6 +1489,14 @@ func maxInt64(v int64, fallback int64) int64 {
 	}
 	return fallback
 }
+
+func firstNonZeroInt64(v int64, fallback int64) int64 {
+	if v != 0 {
+		return v
+	}
+	return fallback
+}
+
 func parseStoreTime(raw string) time.Time {
 	if ts, err := time.Parse(time.RFC3339Nano, raw); err == nil {
 		return ts
