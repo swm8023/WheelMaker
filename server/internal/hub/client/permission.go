@@ -40,34 +40,31 @@ func (s *Session) decidePermission(ctx context.Context, requestID int64, params 
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	}
 	s.recordSessionViewEvent(SessionViewEvent{
-		Type: SessionViewEventTypeACP,
-		Content: buildSessionMethodContentJSON(SessionViewMethodPermission, map[string]any{
-			"role":      "system",
-			"kind":      "permission",
-			"text":      strings.TrimSpace(params.ToolCall.Title),
-			"options":   cloneSessionPermissionOptions(params.Options),
-			"status":    "needs_action",
-			"requestId": requestID,
-		}),
+		Type:      SessionViewEventTypeACP,
+		SessionID: s.ID,
+		Content:   buildACPMethodRequestContent(requestID, acp.MethodRequestPermission, params),
 	})
 
 	select {
 	case <-ctx.Done():
 		hubLogger(s.projectName).Warn("permission request timeout/cancelled session=%s request=%d", s.ID, requestID)
 		s.recordSessionViewEvent(SessionViewEvent{
-			Type: SessionViewEventTypeACP,
-			Content: buildSessionMethodContentJSON(SessionViewMethodPermissionResolved, map[string]any{
-				"status":    "cancelled",
-				"requestId": requestID,
+			Type:      SessionViewEventTypeACP,
+			SessionID: s.ID,
+			Content: buildACPMethodResponseContent(requestID, acp.MethodRequestPermission, acp.PermissionResponse{
+				Outcome: acp.PermissionResult{Outcome: "cancelled"},
 			}),
 		})
 		return acp.PermissionResult{Outcome: "cancelled"}, nil
 	case result := <-waitCh:
 		s.recordSessionViewEvent(SessionViewEvent{
-			Type: SessionViewEventTypeACP,
-			Content: buildSessionMethodContentJSON(SessionViewMethodPermissionResolved, map[string]any{
-				"status":    firstNonEmpty(strings.TrimSpace(result.Outcome), "done"),
-				"requestId": requestID,
+			Type:      SessionViewEventTypeACP,
+			SessionID: s.ID,
+			Content: buildACPMethodResponseContent(requestID, acp.MethodRequestPermission, acp.PermissionResponse{
+				Outcome: acp.PermissionResult{
+					Outcome:  firstNonEmpty(strings.TrimSpace(result.Outcome), "done"),
+					OptionID: strings.TrimSpace(result.OptionID),
+				},
 			}),
 		})
 		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {

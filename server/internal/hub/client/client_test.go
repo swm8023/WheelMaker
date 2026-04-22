@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1805,26 +1806,24 @@ func sessionViewCreatedEvent(sessionID, title string) SessionViewEvent {
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildSessionMethodContentJSON(SessionViewMethodCreated, map[string]any{
-			"title": title,
+		Content: buildACPMethodParamsContent(acp.MethodSessionNew, map[string]any{
+			"sessionId": sessionID,
+			"title":     title,
 		}),
 	}
 }
 
 func sessionViewPromptEvent(sessionID, text string, blocks []acp.ContentBlock) SessionViewEvent {
-	payload := map[string]any{
-		"role":   "user",
-		"kind":   "text",
-		"text":   text,
-		"status": "done",
-	}
+	params := acp.SessionPromptParams{SessionID: sessionID}
 	if len(blocks) > 0 {
-		payload["blocks"] = blocks
+		params.Prompt = cloneSessionContentBlocks(blocks)
+	} else {
+		params.Prompt = []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}}
 	}
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content:   buildSessionMethodContentJSON(SessionViewMethodPrompt, payload),
+		Content:   buildACPMethodParamsContent(acp.MethodSessionPrompt, params),
 	}
 }
 
@@ -1832,7 +1831,10 @@ func sessionViewUpdateEvent(sessionID string, update acp.SessionUpdate) SessionV
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content:   buildSessionUpdateContentJSON(update),
+		Content: buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
+			SessionID: sessionID,
+			Update:    update,
+		}),
 	}
 }
 
@@ -1857,27 +1859,25 @@ func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEve
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildSessionMethodContentJSON(SessionViewMethodPromptFinished, map[string]any{
-			"status": stopReason,
+		Content: buildACPMethodResultContent(acp.MethodSessionPrompt, acp.SessionPromptResult{
+			StopReason: stopReason,
 		}),
 	}
 }
 
 func sessionViewPermissionRequestedEvent(sessionID, text string, requestID int64, options []acp.PermissionOption) SessionViewEvent {
-	payload := map[string]any{
-		"role":      "system",
-		"kind":      "permission",
-		"text":      text,
-		"status":    "needs_action",
-		"requestId": requestID,
-	}
-	if len(options) > 0 {
-		payload["options"] = options
+	params := acp.PermissionRequestParams{
+		SessionID: sessionID,
+		ToolCall: acp.ToolCallRef{
+			ToolCallID: fmt.Sprintf("call-%d", requestID),
+			Title:      text,
+		},
+		Options: cloneSessionPermissionOptions(options),
 	}
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content:   buildSessionMethodContentJSON(SessionViewMethodPermission, payload),
+		Content:   buildACPMethodRequestContent(requestID, acp.MethodRequestPermission, params),
 	}
 }
 
@@ -1885,9 +1885,8 @@ func sessionViewPermissionResolvedEvent(sessionID string, requestID int64, statu
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildSessionMethodContentJSON(SessionViewMethodPermissionResolved, map[string]any{
-			"requestId": requestID,
-			"status":    status,
+		Content: buildACPMethodResponseContent(requestID, acp.MethodRequestPermission, acp.PermissionResponse{
+			Outcome: acp.PermissionResult{Outcome: status},
 		}),
 		UpdatedAt: updatedAt,
 	}
@@ -2118,8 +2117,8 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if len(stored) != 1 {
 		t.Fatalf("stored len = %d, want 1", len(stored))
 	}
-	if stored[0].Method != "session.update" {
-		t.Fatalf("stored[0].Method = %q, want %q", stored[0].Method, "session.update")
+	if stored[0].Method != acp.MethodSessionUpdate {
+		t.Fatalf("stored[0].Method = %q, want %q", stored[0].Method, acp.MethodSessionUpdate)
 	}
 	if stored[0].Body != "hello world" {
 		t.Fatalf("stored[0].Body = %q, want %q", stored[0].Body, "hello world")
@@ -2134,8 +2133,8 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err := json.Unmarshal([]byte(stored[0].ContentJSON), &doc); err != nil {
 		t.Fatalf("unmarshal content_json: %v", err)
 	}
-	if doc.Method != "session.update" {
-		t.Fatalf("doc.Method = %q, want %q", doc.Method, "session.update")
+	if doc.Method != acp.MethodSessionUpdate {
+		t.Fatalf("doc.Method = %q, want %q", doc.Method, acp.MethodSessionUpdate)
 	}
 	if doc.Params.Update.SessionUpdate != acp.SessionUpdateAgentMessageChunk {
 		t.Fatalf("doc.Params.Update.SessionUpdate = %q, want %q", doc.Params.Update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
@@ -2735,24 +2734,23 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 		t.Fatalf("permission turn update_index = %d, want 2", permTurn.UpdateIndex)
 	}
 	var doc struct {
-		Method  string `json:"method"`
-		Payload struct {
-			Kind      string `json:"kind"`
-			Status    string `json:"status"`
-			RequestID int64  `json:"requestId"`
-		} `json:"payload"`
+		ID     int64  `json:"id"`
+		Method string `json:"method"`
+		Result struct {
+			Outcome acp.PermissionResult `json:"outcome"`
+		} `json:"result"`
 	}
 	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &doc); err != nil {
 		t.Fatalf("unmarshal permission turn update_json: %v", err)
 	}
-	if doc.Method != "session.permission" {
-		t.Fatalf("permission turn method = %q, want %q", doc.Method, "session.permission")
+	if doc.Method != acp.MethodRequestPermission {
+		t.Fatalf("permission turn method = %q, want %q", doc.Method, acp.MethodRequestPermission)
 	}
-	if doc.Payload.RequestID != 7 {
-		t.Fatalf("permission turn requestId = %d, want 7", doc.Payload.RequestID)
+	if doc.ID != 7 {
+		t.Fatalf("permission turn requestId = %d, want 7", doc.ID)
 	}
-	if doc.Payload.Status != "done" {
-		t.Fatalf("permission turn status = %q, want done", doc.Payload.Status)
+	if doc.Result.Outcome.Outcome != "done" {
+		t.Fatalf("permission turn status = %q, want done", doc.Result.Outcome.Outcome)
 	}
 }
 func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T) {

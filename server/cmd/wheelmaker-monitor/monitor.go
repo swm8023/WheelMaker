@@ -653,7 +653,7 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 }
 
 func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex, fallbackIndex int64) (method, role, kind, body, status string, requestID, index, subIndex int64, source, ts string) {
-	method = "session.update"
+	method = rp.MethodSessionUpdate
 	index = fallbackIndex
 	subIndex = maxInt64(turnUpdateIndex-1, 0)
 	ts = strings.TrimSpace(promptUpdatedAt)
@@ -662,9 +662,17 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex
 	if updateJSON != "" {
 		var content struct {
 			Method string `json:"method"`
+			ID     int64  `json:"id"`
 			Params struct {
-				Update rp.SessionUpdate `json:"update"`
+				Prompt   []rp.ContentBlock     `json:"prompt"`
+				Update   rp.SessionUpdate      `json:"update"`
+				ToolCall rp.ToolCallRef        `json:"toolCall"`
+				Options  []rp.PermissionOption `json:"options"`
 			} `json:"params"`
+			Result struct {
+				StopReason string              `json:"stopReason"`
+				Outcome    rp.PermissionResult `json:"outcome"`
+			} `json:"result"`
 			Payload struct {
 				Role      string `json:"role"`
 				Kind      string `json:"kind"`
@@ -674,6 +682,7 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex
 			} `json:"payload"`
 		}
 		if err := json.Unmarshal([]byte(updateJSON), &content); err == nil {
+			requestID = content.ID
 			if strings.TrimSpace(content.Method) != "" {
 				method = strings.TrimSpace(content.Method)
 			}
@@ -687,7 +696,33 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex
 				kind = strings.TrimSpace(content.Payload.Kind)
 				body = content.Payload.Text
 				status = strings.TrimSpace(content.Payload.Status)
-				requestID = content.Payload.RequestID
+				if requestID == 0 {
+					requestID = content.Payload.RequestID
+				}
+			}
+			switch strings.TrimSpace(method) {
+			case rp.MethodSessionPrompt:
+				if body == "" && len(content.Params.Prompt) > 0 {
+					parts := make([]string, 0, len(content.Params.Prompt))
+					for _, b := range content.Params.Prompt {
+						if strings.EqualFold(strings.TrimSpace(b.Type), rp.ContentBlockTypeText) && strings.TrimSpace(b.Text) != "" {
+							parts = append(parts, strings.TrimSpace(b.Text))
+						}
+					}
+					body = strings.TrimSpace(strings.Join(parts, " "))
+				}
+				role = firstNonEmpty(role, "user")
+				kind = firstNonEmpty(kind, method)
+				status = firstNonEmpty(status, "done")
+			case rp.MethodRequestPermission:
+				role = firstNonEmpty(role, "system")
+				kind = firstNonEmpty(kind, "permission")
+				body = firstNonEmpty(body, strings.TrimSpace(content.Params.ToolCall.Title))
+				if strings.TrimSpace(content.Result.Outcome.Outcome) != "" {
+					status = strings.TrimSpace(content.Result.Outcome.Outcome)
+				} else {
+					status = firstNonEmpty(status, "needs_action")
+				}
 			}
 		}
 	}

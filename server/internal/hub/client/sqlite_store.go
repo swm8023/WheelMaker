@@ -680,17 +680,27 @@ func normalizeSessionTurnSource(rec SessionTurnMessageRecord) string {
 	return channel + ":" + chatID
 }
 
+func isSessionPromptMethod(method string) bool {
+	method = strings.TrimSpace(method)
+	return method == acp.MethodSessionPrompt || method == "session.prompt"
+}
+
+func isSessionPermissionMethod(method string) bool {
+	method = strings.TrimSpace(method)
+	return method == acp.MethodRequestPermission || method == "session.permission"
+}
+
 func inferSessionTurnMethod(rec SessionTurnMessageRecord) string {
 	if strings.TrimSpace(rec.Method) != "" {
 		return strings.TrimSpace(rec.Method)
 	}
 	if rec.RequestID != 0 || len(rec.Options) > 0 || strings.EqualFold(strings.TrimSpace(rec.Kind), "permission") {
-		return "session.permission"
+		return acp.MethodRequestPermission
 	}
 	if strings.EqualFold(strings.TrimSpace(rec.Role), "user") {
-		return "session.prompt"
+		return acp.MethodSessionPrompt
 	}
-	return "session.update"
+	return acp.MethodSessionUpdate
 }
 
 func normalizeJSONDoc(raw string, fallback string) string {
@@ -775,14 +785,22 @@ func hydrateSessionTurnLegacyFields(rec *SessionTurnMessageRecord) {
 	if rec == nil {
 		return
 	}
-	rec.ContentJSON = normalizeJSONDoc(rec.ContentJSON, `{"method":"session.update"}`)
+	rec.ContentJSON = normalizeJSONDoc(rec.ContentJSON, `{"method":"`+acp.MethodSessionUpdate+`"}`)
 	rec.MetaJSON = normalizeJSONDoc(rec.MetaJSON, "{}")
 
 	var content struct {
+		ID     int64  `json:"id"`
 		Method string `json:"method"`
 		Params struct {
-			Update acp.SessionUpdate `json:"update"`
+			Prompt   []acp.ContentBlock     `json:"prompt"`
+			Update   acp.SessionUpdate      `json:"update"`
+			ToolCall acp.ToolCallRef        `json:"toolCall"`
+			Options  []acp.PermissionOption `json:"options"`
 		} `json:"params"`
+		Result struct {
+			StopReason string               `json:"stopReason"`
+			Outcome    acp.PermissionResult `json:"outcome"`
+		} `json:"result"`
 		Payload struct {
 			Role         string                 `json:"role"`
 			Kind         string                 `json:"kind"`
@@ -796,22 +814,57 @@ func hydrateSessionTurnLegacyFields(rec *SessionTurnMessageRecord) {
 	}
 	if err := json.Unmarshal([]byte(rec.ContentJSON), &content); err == nil {
 		rec.Method = strings.TrimSpace(content.Method)
+		rec.RequestID = firstNonZeroInt64(rec.RequestID, content.ID)
+
+		switch strings.TrimSpace(content.Method) {
+		case acp.MethodSessionPrompt, "session.prompt":
+			if len(content.Params.Prompt) > 0 {
+				rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "user")
+				rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), acp.MethodSessionPrompt)
+				rec.Blocks = cloneSessionContentBlocks(content.Params.Prompt)
+				rec.Body = firstNonEmpty(rec.Body, PromptPreview(content.Params.Prompt))
+				rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), "done")
+			}
+			if strings.TrimSpace(content.Result.StopReason) != "" {
+				rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), "done")
+				rec.Body = firstNonEmpty(rec.Body, strings.TrimSpace(content.Result.StopReason))
+			}
+		case acp.MethodRequestPermission, "session.permission":
+			rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), "system")
+			rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), "permission")
+			rec.Body = firstNonEmpty(rec.Body, strings.TrimSpace(content.Params.ToolCall.Title))
+			if len(rec.Options) == 0 {
+				rec.Options = cloneSessionPermissionOptions(content.Params.Options)
+			}
+			if strings.TrimSpace(content.Result.Outcome.Outcome) != "" {
+				rec.Status = strings.TrimSpace(content.Result.Outcome.Outcome)
+			}
+		}
+
 		if strings.TrimSpace(content.Params.Update.SessionUpdate) != "" {
 			hydrateSessionTurnFromUpdate(rec, content.Params.Update)
+		}
+
+		// Legacy payload fallback for pre-ACP wrapped content.
+		rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), strings.TrimSpace(content.Payload.Role))
+		if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
+			rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.UpdateMethod))
 		} else {
-			rec.Role = firstNonEmpty(strings.TrimSpace(rec.Role), strings.TrimSpace(content.Payload.Role))
-			if strings.TrimSpace(content.Payload.UpdateMethod) != "" {
-				rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.UpdateMethod))
-			} else {
-				rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.Kind))
-			}
-			if strings.TrimSpace(content.Payload.Text) != "" {
-				rec.Body = content.Payload.Text
-			}
-			rec.Blocks = content.Payload.Blocks
-			rec.Options = content.Payload.Options
-			rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(content.Payload.Status))
-			rec.RequestID = firstNonZeroInt64(rec.RequestID, content.Payload.RequestID)
+			rec.Kind = firstNonEmpty(strings.TrimSpace(rec.Kind), strings.TrimSpace(content.Payload.Kind))
+		}
+		if strings.TrimSpace(content.Payload.Text) != "" {
+			rec.Body = content.Payload.Text
+		}
+		if len(rec.Blocks) == 0 {
+			rec.Blocks = cloneSessionContentBlocks(content.Payload.Blocks)
+		}
+		if len(rec.Options) == 0 {
+			rec.Options = cloneSessionPermissionOptions(content.Payload.Options)
+		}
+		rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), strings.TrimSpace(content.Payload.Status))
+		rec.RequestID = firstNonZeroInt64(rec.RequestID, content.Payload.RequestID)
+		if isSessionPermissionMethod(rec.Method) {
+			rec.Status = firstNonEmpty(strings.TrimSpace(rec.Status), "needs_action")
 		}
 	}
 	if rec.Method == "" {
@@ -976,7 +1029,7 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 	promptIndex := latestPromptIndex
 	if existingTurn != nil {
 		promptIndex = existingTurn.PromptIndex
-	} else if rec.Method == "session.prompt" {
+	} else if isSessionPromptMethod(rec.Method) {
 		promptIndex = latestPromptIndex + 1
 	}
 	if promptIndex <= 0 {
@@ -999,7 +1052,7 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 		promptUpdate = 1
 	}
 	title := strings.TrimSpace(existingTitle)
-	if rec.Method == "session.prompt" {
+	if isSessionPromptMethod(rec.Method) {
 		if strings.TrimSpace(rec.Body) != "" {
 			title = strings.TrimSpace(rec.Body)
 			if len([]rune(title)) > 64 {
@@ -1029,7 +1082,7 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 		turnIndex = existingTurn.TurnIndex
 		turnUpdateIndex = existingTurn.UpdateIndex + 1
 	} else {
-		if rec.Method == "session.prompt" {
+		if isSessionPromptMethod(rec.Method) {
 			turnIndex = 1
 		} else {
 			if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(turn_index), 0) FROM session_turns WHERE session_id = ? AND prompt_index = ?`, rec.SessionID, promptIndex).Scan(&turnIndex); err != nil {
@@ -1040,7 +1093,7 @@ func upsertPromptTurnTx(ctx context.Context, tx *sql.Tx, rec SessionTurnMessageR
 		turnUpdateIndex = 1
 	}
 
-	turnJSON := normalizeJSONDoc(contentJSON, `{"method":"session.update"}`)
+	turnJSON := normalizeJSONDoc(contentJSON, `{"method":"`+acp.MethodSessionUpdate+`"}`)
 	extraJSONRaw := []byte("{}")
 
 	if _, err := tx.ExecContext(ctx, `
@@ -1103,7 +1156,7 @@ func hydrateSessionTurnFromRow(projectName string, fallbackSyncIndex int64, row 
 	rec := SessionTurnMessageRecord{
 		SessionID:    strings.TrimSpace(row.SessionID),
 		ProjectName:  strings.TrimSpace(projectName),
-		ContentJSON:  normalizeJSONDoc(row.UpdateJSON, `{"method":"session.update"}`),
+		ContentJSON:  normalizeJSONDoc(row.UpdateJSON, `{"method":"`+acp.MethodSessionUpdate+`"}`),
 		MetaJSON:     "{}",
 		SyncIndex:    fallbackSyncIndex,
 		SyncSubIndex: maxInt64(row.UpdateIndex-1, 0),

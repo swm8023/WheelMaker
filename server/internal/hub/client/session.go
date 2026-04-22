@@ -1252,13 +1252,11 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 		return
 	}
 	s.recordSessionViewEvent(SessionViewEvent{
-		Type: SessionViewEventTypeACP,
-		Content: buildSessionMethodContentJSON(SessionViewMethodPrompt, map[string]any{
-			"role":   "user",
-			"kind":   "text",
-			"text":   PromptPreview(blocks),
-			"status": "done",
-			"blocks": cloneSessionContentBlocks(blocks),
+		Type:      SessionViewEventTypeACP,
+		SessionID: s.ID,
+		Content: buildACPMethodParamsContent(acp.MethodSessionPrompt, acp.SessionPromptParams{
+			SessionID: s.ID,
+			Prompt:    cloneSessionContentBlocks(blocks),
 		}),
 	})
 	s.promptMu.Lock()
@@ -1351,18 +1349,21 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					switch params.Update.SessionUpdate {
 					case acp.SessionUpdateAgentMessageChunk:
 						s.recordSessionViewEvent(SessionViewEvent{
-							Type:    SessionViewEventTypeACP,
-							Content: buildSessionUpdateContentJSON(params.Update),
+							Type:      SessionViewEventTypeACP,
+							SessionID: s.ID,
+							Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
 						})
 					case acp.SessionUpdateAgentThoughtChunk:
 						s.recordSessionViewEvent(SessionViewEvent{
-							Type:    SessionViewEventTypeACP,
-							Content: buildSessionUpdateContentJSON(params.Update),
+							Type:      SessionViewEventTypeACP,
+							SessionID: s.ID,
+							Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
 						})
 					case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 						s.recordSessionViewEvent(SessionViewEvent{
-							Type:    SessionViewEventTypeACP,
-							Content: buildSessionUpdateContentJSON(params.Update),
+							Type:      SessionViewEventTypeACP,
+							SessionID: s.ID,
+							Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
 						})
 					}
 					if hasIMEmitter {
@@ -1391,17 +1392,10 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 				}
 				if ev.result != nil {
 					s.recordSessionViewEvent(SessionViewEvent{
-						Type: SessionViewEventTypeACP,
-						Content: buildSessionMethodContentJSON(SessionViewMethodPromptFinished, map[string]any{
-							"status": ev.result.StopReason,
-						}),
+						Type:      SessionViewEventTypeACP,
+						SessionID: s.ID,
+						Content:   buildACPMethodResultContent(acp.MethodSessionPrompt, *ev.result),
 					})
-					if strings.TrimSpace(ev.result.StopReason) != "" && ev.result.StopReason != acp.StopReasonEndTurn {
-						s.recordSessionViewEvent(SessionViewEvent{
-							Type:    SessionViewEventTypeSystem,
-							Content: ev.result.StopReason,
-						})
-					}
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
 						if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
