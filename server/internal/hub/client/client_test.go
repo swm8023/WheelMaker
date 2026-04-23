@@ -1812,40 +1812,37 @@ func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 	}
 }
 
-func TestSessionViewAssistantChunksPersistAsSeparateMessages(t *testing.T) {
+func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 	c := newSessionViewTestClient(t)
+	ctx := context.Background()
 
-	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "New Session")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "New Session")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewAssistantChunkTextEvent("sess-1", "hello", "")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "say hi", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewAssistantChunkTextEvent("sess-1", "hello", "")); err != nil {
 		t.Fatalf("RecordEvent chunk1: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewAssistantChunkTextEvent("sess-1", " world", "")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewAssistantChunkTextEvent("sess-1", " world", "")); err != nil {
 		t.Fatalf("RecordEvent chunk2: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(context.Background(), "sess-1", 0, 0)
+	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionMessages: %v", err)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if messages[0].UpdateIndex != 1 {
-		t.Fatalf("messages[0].UpdateIndex = %d, want 1", messages[0].UpdateIndex)
+	if messages[1].UpdateIndex != 2 {
+		t.Fatalf("messages[1].UpdateIndex = %d, want 2", messages[1].UpdateIndex)
 	}
-	if messages[1].UpdateIndex != 1 {
-		t.Fatalf("messages[1].UpdateIndex = %d, want 1", messages[1].UpdateIndex)
-	}
-	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
 	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
-	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
-		t.Fatalf("messages[0] text = %q, want hello", extractTextChunk(update1.Content))
-	}
 	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
 		t.Fatalf("messages[1] text = %q, want world", extractTextChunk(update2.Content))
 	}
@@ -2167,29 +2164,33 @@ func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID
 
 func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	c := newSessionViewTestClient(t)
+	ctx := context.Background()
 
-	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Tools")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Tools")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewToolUpdatedTextEvent("sess-1", "Running build")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run build", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewToolUpdatedTextEvent("sess-1", "Running build")); err != nil {
 		t.Fatalf("RecordEvent tool updated #1: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewToolUpdatedTextEvent("sess-1", "Build finished")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewToolUpdatedTextEvent("sess-1", "Build finished")); err != nil {
 		t.Fatalf("RecordEvent tool updated #2: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	turns, err := c.store.ListSessionTurns(context.Background(), "proj1", "sess-1", 1)
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
 	if len(turns) != 2 {
 		t.Fatalf("turns len = %d, want 2", len(turns))
 	}
-	if got := decodeTurnSessionUpdate(t, turns[0].UpdateJSON).Title; strings.TrimSpace(got) != "Running build" {
-		t.Fatalf("turns[0].title = %q, want Running build", got)
+	if turns[1].UpdateIndex != 2 {
+		t.Fatalf("tool turn updateIndex = %d, want 2", turns[1].UpdateIndex)
 	}
 	if got := decodeTurnSessionUpdate(t, turns[1].UpdateJSON).Title; strings.TrimSpace(got) != "Build finished" {
 		t.Fatalf("turns[1].title = %q, want Build finished", got)
@@ -2202,6 +2203,9 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Raw Update")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "say hi", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
 	}
 
 	updateChunk1 := acp.SessionUpdate{
@@ -2230,20 +2234,15 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if len(stored) != 2 {
 		t.Fatalf("stored len = %d, want 2", len(stored))
 	}
-	for i := range stored {
-		updateStored := decodeTurnSessionUpdate(t, stored[i].UpdateJSON)
-		if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
-			t.Fatalf("stored[%d] update kind = %q, want %q", i, updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
-		}
-		if stored[i].UpdateIndex != 1 {
-			t.Fatalf("stored[%d].UpdateIndex = %d, want 1", i, stored[i].UpdateIndex)
-		}
+	updateStored := decodeTurnSessionUpdate(t, stored[1].UpdateJSON)
+	if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("stored assistant update kind = %q, want %q", updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
 	}
-	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, stored[0].UpdateJSON).Content)); text != "hello" {
-		t.Fatalf("stored[0] text = %q, want hello", text)
+	if stored[1].UpdateIndex != 2 {
+		t.Fatalf("stored assistant UpdateIndex = %d, want 2", stored[1].UpdateIndex)
 	}
-	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, stored[1].UpdateJSON).Content)); text != "world" {
-		t.Fatalf("stored[1] text = %q, want world", text)
+	if text := strings.TrimSpace(extractTextChunk(updateStored.Content)); text != "world" {
+		t.Fatalf("stored assistant text = %q, want world", text)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
@@ -2259,17 +2258,10 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if messages[0].UpdateIndex != 1 {
-		t.Fatalf("messages[0].UpdateIndex = %d, want 1", messages[0].UpdateIndex)
+	if messages[1].UpdateIndex != 2 {
+		t.Fatalf("messages[1].UpdateIndex = %d, want 2", messages[1].UpdateIndex)
 	}
-	if messages[1].UpdateIndex != 1 {
-		t.Fatalf("messages[1].UpdateIndex = %d, want 1", messages[1].UpdateIndex)
-	}
-	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
 	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
-	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
-		t.Fatalf("message[0] text = %q, want hello", extractTextChunk(update1.Content))
-	}
 	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
 		t.Fatalf("message[1] text = %q, want world", extractTextChunk(update2.Content))
 	}
@@ -2281,6 +2273,9 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 
 	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Merge")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
 	}
 
 	userChunk := acp.SessionUpdate{
@@ -2306,11 +2301,14 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(messages))
 	}
 	seen := map[string]string{}
 	for _, message := range messages {
+		if decodeTurnMethod(t, message.Content) == acp.MethodSessionPrompt {
+			continue
+		}
 		update := decodeTurnSessionUpdate(t, message.Content)
 		seen[update.SessionUpdate] = extractTextChunk(update.Content)
 	}
@@ -2341,11 +2339,95 @@ func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
 		t.Fatalf("messages len = %d, want 0", len(messages))
 	}
 }
+
+func TestSessionViewUpdateWithoutPromptIsDropped(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "No Prompt")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
+		t.Fatalf("RecordEvent permission requested: %v", err)
+	}
+
+	messages, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("messages len = %d, want 0", len(messages))
+	}
+}
+
+func TestSessionViewMergedTurnPublishesIncomingContentWithMergedIndices(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	var published []map[string]any
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		published = append(published, body)
+		return nil
+	})
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Merge Publish")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "say hi", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+		Status:        "streaming",
+	})); err != nil {
+		t.Fatalf("RecordEvent update1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"}),
+		Status:        "done",
+	})); err != nil {
+		t.Fatalf("RecordEvent update2: %v", err)
+	}
+
+	if len(published) < 3 {
+		t.Fatalf("published len = %d, want at least 3", len(published))
+	}
+	last := published[len(published)-1]
+	if got := last["turnIndex"].(int64); got != 2 {
+		t.Fatalf("published turnIndex = %d, want 2", got)
+	}
+	if got := last["updateIndex"].(int64); got != 2 {
+		t.Fatalf("published updateIndex = %d, want 2", got)
+	}
+	content, _ := last["content"].(string)
+	if text := extractTextChunk(decodeTurnSessionUpdate(t, content).Content); text != "world" {
+		t.Fatalf("published content text = %q, want world", text)
+	}
+}
+
 func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "run protected", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
 	}
 	if err := c.RecordEvent(context.Background(), sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
@@ -2354,7 +2436,7 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 		t.Fatalf("RecordEvent permission resolved: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 0})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -2373,8 +2455,8 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
 	}
-	if got := body["lastSubIndex"].(int64); got != 1 {
-		t.Fatalf("lastSubIndex = %d, want 1", got)
+	if got := body["lastSubIndex"].(int64); got != 2 {
+		t.Fatalf("lastSubIndex = %d, want 2", got)
 	}
 }
 
@@ -2384,11 +2466,14 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Stream")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
+	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
 	if err := c.RecordEvent(context.Background(), sessionViewAssistantChunkTextEvent("sess-1", "hello", "streaming")); err != nil {
 		t.Fatalf("RecordEvent chunk: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -2408,12 +2493,12 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
 	}
-	if got := body["lastSubIndex"].(int64); got != 1 {
-		t.Fatalf("lastSubIndex = %d, want 1", got)
+	if got := body["lastSubIndex"].(int64); got != 2 {
+		t.Fatalf("lastSubIndex = %d, want 2", got)
 	}
 }
 
-func TestSessionViewBufferedUpdatesAppendTurns(t *testing.T) {
+func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
@@ -2447,28 +2532,18 @@ func TestSessionViewBufferedUpdatesAppendTurns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3 (prompt + two assistant turns)", len(turns))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
 	}
-	if turns[1].UpdateIndex != 1 {
-		t.Fatalf("assistant turn #1 updateIndex = %d, want 1", turns[1].UpdateIndex)
+	if turns[1].UpdateIndex != 2 {
+		t.Fatalf("assistant turn updateIndex = %d, want 2", turns[1].UpdateIndex)
 	}
-	if turns[2].UpdateIndex != 1 {
-		t.Fatalf("assistant turn #2 updateIndex = %d, want 1", turns[2].UpdateIndex)
-	}
-	update1 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
-	update2 := decodeTurnSessionUpdate(t, turns[2].UpdateJSON)
-	if text := strings.TrimSpace(extractTextChunk(update1.Content)); text != "hello" {
-		t.Fatalf("assistant #1 text = %q, want hello", text)
-	}
-	if update1.Status != "streaming" {
-		t.Fatalf("assistant #1 status = %q, want streaming", update1.Status)
-	}
+	update2 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
 	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "world" {
-		t.Fatalf("assistant #2 text = %q, want world", text)
+		t.Fatalf("assistant text = %q, want world", text)
 	}
 	if update2.Status != "done" {
-		t.Fatalf("assistant #2 status = %q, want done", update2.Status)
+		t.Fatalf("assistant status = %q, want done", update2.Status)
 	}
 }
 
@@ -2573,6 +2648,9 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
+	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "run protected", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
 	if err := c.RecordEvent(context.Background(), sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
@@ -2580,7 +2658,7 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 		t.Fatalf("RecordEvent permission resolved: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 0})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -2599,8 +2677,8 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
 	}
-	if got := body["lastSubIndex"].(int64); got != 1 {
-		t.Fatalf("lastSubIndex = %d, want 1", got)
+	if got := body["lastSubIndex"].(int64); got != 2 {
+		t.Fatalf("lastSubIndex = %d, want 2", got)
 	}
 }
 
