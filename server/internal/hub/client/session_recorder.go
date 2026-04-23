@@ -688,11 +688,11 @@ func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event Se
 		return nil
 	}
 
-	fallbackMethod := strings.TrimSpace(doc.Method)
-	if fallbackMethod == "" {
-		fallbackMethod = acp.MethodSessionUpdate
+	method := strings.TrimSpace(doc.Method)
+	if method == "" {
+		return fmt.Errorf("session event method is required")
 	}
-	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, event.Content, fallbackMethod)
+	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, event.Content, method)
 	if err := r.appendSessionTurnLocked(ctx, turn, event.Content); err != nil {
 		return err
 	}
@@ -701,7 +701,7 @@ func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event Se
 	return nil
 }
 
-func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawContent, fallbackMethod string) SessionTurnRecord {
+func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawContent, method string) SessionTurnRecord {
 	if turnIndex <= 0 {
 		turnIndex = 1
 	}
@@ -710,7 +710,7 @@ func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawC
 		PromptIndex: promptIndex,
 		TurnIndex:   turnIndex,
 		UpdateIndex: 1,
-		UpdateJSON:  normalizeJSONDoc(rawContent, `{"method":"`+strings.TrimSpace(fallbackMethod)+`"}`),
+		UpdateJSON:  normalizeJSONDoc(rawContent, `{"method":"`+strings.TrimSpace(method)+`"}`),
 		ExtraJSON:   "{}",
 	}
 }
