@@ -684,17 +684,15 @@ func (r *SessionRecorder) appendACPEventTurnLocked(ctx context.Context, event Se
 		return nil
 	}
 
+	if plan.kind == sessionTurnMergePermission && plan.hasPermissionResult {
+		return nil
+	}
+
 	fallbackMethod := strings.TrimSpace(doc.Method)
 	if fallbackMethod == "" {
 		fallbackMethod = acp.MethodSessionUpdate
 	}
 	turn := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, event.Content, fallbackMethod)
-	if plan.kind == sessionTurnMergePermission && plan.hasPermissionResult {
-		turn.UpdateJSON, turn.ExtraJSON, err = mergeSessionPermissionJSON(`{}`, `{}`, event.Content)
-		if err != nil {
-			return err
-		}
-	}
 	if err := r.appendSessionTurnLocked(ctx, turn, event.Content); err != nil {
 		return err
 	}

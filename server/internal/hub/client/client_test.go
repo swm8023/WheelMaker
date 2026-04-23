@@ -2940,6 +2940,28 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 	}
 }
 
+func TestSessionViewDropsOrphanPermissionResult(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Permission Orphan")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run protected", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPermissionResolvedEvent("sess-1", 7, "done", mustRFC3339Time(t, "2026-04-12T10:02:00Z"))); err != nil {
+		t.Fatalf("RecordEvent orphan permission resolved: %v", err)
+	}
+
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("turns len = %d, want 1 (prompt only)", len(turns))
+	}
+}
 func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
