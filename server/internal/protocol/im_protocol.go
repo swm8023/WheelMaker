@@ -1,60 +1,60 @@
 package protocol
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 const (
 	// Shared inbound/outbound methods.
 	IMMethodPrompt     = "prompt"
 	IMMethodPermission = "permission"
-)
 
-type IMRequestType string
-
-const (
-	IMRequestTypeContentBlocks IMRequestType = "content_blocks"
-	IMRequestTypeSelected      IMRequestType = "selected"
-)
-
-type IMResultType string
-
-const (
-	IMResultTypeText       IMResultType = "text"
-	IMResultTypeTool       IMResultType = "tool"
-	IMResultTypeStopReason IMResultType = "stop_reason"
-	IMResultTypePermission IMResultType = "permission"
+	// Outbound session update methods.
+	IMMethodAgentMessage = SessionUpdateAgentMessageChunk
+	IMMethodAgentThought = SessionUpdateAgentThoughtChunk
+	IMMethodAgentPlan    = SessionUpdatePlan
+	IMMethodToolCall     = SessionUpdateToolCall
+	IMMethodPromptDone   = "prompt_done"
 )
 
 // IMMessage is the minimal IM boundary payload.
 //
-// Method and payload mapping:
+// This protocol uses method-driven payload typing:
 //   - method=prompt:
-//     request.type=content_blocks (IM -> Hub)
-//     result.type=text|tool|stop_reason (Hub -> IM)
+//     request is IMPromptRequest
 //   - method=permission:
-//     request.type=selected (IM -> Hub)
-//     result.type=permission (Hub -> IM)
+//     request is IMPermissionRequest (IM -> Hub)
+//     result is IMPermissionResult (Hub -> IM)
+//   - method=agent_message_chunk / agent_thought_chunk:
+//     result is IMTextResult
+//   - method=tool_call:
+//     result is IMToolResult
+//   - method=agent_plan:
+//     result is []IMPlanResult
+//   - method=prompt_done:
+//     result is IMStopReasonResult
 //
-// Index is a string sequence marker used by IM side for ordering/replay.
+// Request and Result are inlined (no extra type wrapper map).
+// Index is a string sequence marker for ordering/replay.
 type IMMessage struct {
-	Method    string     `json:"method"`
-	SessionID string     `json:"sessionId,omitempty"`
-	Index     string     `json:"index,omitempty"`
-	Request   *IMRequest `json:"request,omitempty"`
-	Result    *IMResult  `json:"result,omitempty"`
+	Method  string          `json:"method"`
+	Index   string          `json:"index,omitempty"`
+	Request json.RawMessage `json:"request,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
 }
 
-type IMRequest struct {
-	Type          IMRequestType  `json:"type"`
+type IMPromptRequest struct {
 	ContentBlocks []ContentBlock `json:"contentBlocks,omitempty"`
-	Selected      string         `json:"selected,omitempty"`
 }
 
-type IMResult struct {
-	Type       IMResultType        `json:"type"`
-	Text       *IMTextResult       `json:"text,omitempty"`
-	Tool       *IMToolResult       `json:"tool,omitempty"`
-	StopReason *IMStopReasonResult `json:"stopReason,omitempty"`
-	Permission *IMPermissionResult `json:"permission,omitempty"`
+type IMPermissionRequest struct {
+	Selected string `json:"selected,omitempty"`
+}
+
+type IMRequestOption struct {
+	OptionID string `json:"optionId"`
+	Name     string `json:"name"`
 }
 
 type IMTextResult struct {
@@ -73,17 +73,16 @@ type IMStopReasonResult struct {
 }
 
 type IMPermissionResult struct {
-	ToolCallID string               `json:"toolCallId,omitempty"`
-	Title      string               `json:"title,omitempty"`
-	Kind       string               `json:"kind,omitempty"`
-	Status     string               `json:"status,omitempty"`
-	Options    []IMPermissionOption `json:"options,omitempty"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	Status     string            `json:"status,omitempty"`
+	Options    []IMRequestOption `json:"options,omitempty"`
 }
 
-type IMPermissionOption struct {
-	OptionID string `json:"optionId"`
-	Name     string `json:"name,omitempty"`
-	Kind     string `json:"kind,omitempty"`
+type IMPlanResult struct {
+	Content string `json:"content"`
+	Status  string `json:"status"`
 }
 
 func NormalizeIMMethod(method string) string {
@@ -98,10 +97,15 @@ func IsIMPermissionMethod(method string) bool {
 	return NormalizeIMMethod(method) == IMMethodPermission
 }
 
-func NormalizeIMRequestType(t IMRequestType) IMRequestType {
-	return IMRequestType(strings.TrimSpace(string(t)))
+func IsIMTextResultMethod(method string) bool {
+	switch NormalizeIMMethod(method) {
+	case IMMethodAgentMessage, IMMethodAgentThought:
+		return true
+	default:
+		return false
+	}
 }
 
-func NormalizeIMResultType(t IMResultType) IMResultType {
-	return IMResultType(strings.TrimSpace(string(t)))
+func IsIMToolResultMethod(method string) bool {
+	return NormalizeIMMethod(method) == IMMethodToolCall
 }
