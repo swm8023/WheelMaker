@@ -1762,11 +1762,11 @@ func sessionViewAssistantChunkTextEvent(sessionID, text, status string) SessionV
 func sessionViewToolUpdatedTextEvent(sessionID, title string) SessionViewEvent {
 	update := acp.SessionUpdate{
 		SessionUpdate: acp.SessionUpdateToolCallUpdate,
+		ToolCallID:    "call-shared",
 		Title:         title,
 	}
 	return sessionViewUpdateEvent(sessionID, update)
 }
-
 func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEvent {
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
@@ -2067,38 +2067,37 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	var promptDoc struct {
-		Method string `json:"method"`
-		Params struct {
-			Prompt []acp.ContentBlock `json:"prompt"`
-		} `json:"params"`
+
+	promptMessage := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(messages[0].Content), &promptMessage); err != nil {
+		t.Fatalf("unmarshal prompt message: %v", err)
 	}
-	if err := json.Unmarshal([]byte(messages[0].Content), &promptDoc); err != nil {
-		t.Fatalf("unmarshal prompt content: %v", err)
+	if strings.TrimSpace(promptMessage.Method) != acp.IMMethodPrompt {
+		t.Fatalf("messages[0].method = %q, want %q", promptMessage.Method, acp.IMMethodPrompt)
 	}
-	if strings.TrimSpace(promptDoc.Method) != acp.MethodSessionPrompt {
-		t.Fatalf("messages[0].method = %q, want %q", promptDoc.Method, acp.MethodSessionPrompt)
+	promptRequest := acp.IMPromptRequest{}
+	if err := json.Unmarshal(promptMessage.Request, &promptRequest); err != nil {
+		t.Fatalf("unmarshal prompt request: %v", err)
 	}
-	if len(promptDoc.Params.Prompt) != 1 || promptDoc.Params.Prompt[0].Type != acp.ContentBlockTypeImage {
-		t.Fatalf("messages[0].params.prompt = %#v, want image block", promptDoc.Params.Prompt)
+	if len(promptRequest.ContentBlocks) != 1 || promptRequest.ContentBlocks[0].Type != acp.ContentBlockTypeImage {
+		t.Fatalf("messages[0].request.contentBlocks = %#v, want image block", promptRequest.ContentBlocks)
 	}
-	var permissionDoc struct {
-		Method string `json:"method"`
-		Params struct {
-			Options []acp.PermissionOption `json:"options"`
-		} `json:"params"`
+
+	permissionMessage := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(messages[1].Content), &permissionMessage); err != nil {
+		t.Fatalf("unmarshal permission message: %v", err)
 	}
-	if err := json.Unmarshal([]byte(messages[1].Content), &permissionDoc); err != nil {
-		t.Fatalf("unmarshal permission content: %v", err)
+	if strings.TrimSpace(permissionMessage.Method) != acp.IMMethodPermission {
+		t.Fatalf("messages[1].method = %q, want %q", permissionMessage.Method, acp.IMMethodPermission)
 	}
-	if strings.TrimSpace(permissionDoc.Method) != acp.MethodRequestPermission {
-		t.Fatalf("messages[1].method = %q, want %q", permissionDoc.Method, acp.MethodRequestPermission)
+	permissionResult := acp.IMPermissionResult{}
+	if err := json.Unmarshal(permissionMessage.Result, &permissionResult); err != nil {
+		t.Fatalf("unmarshal permission result: %v", err)
 	}
-	if len(permissionDoc.Params.Options) != 1 || permissionDoc.Params.Options[0].OptionID != "allow" {
-		t.Fatalf("messages[1].params.options = %#v, want allow option", permissionDoc.Params.Options)
+	if len(permissionResult.Options) != 1 || permissionResult.Options[0].OptionID != "allow" {
+		t.Fatalf("messages[1].result.options = %#v, want allow option", permissionResult.Options)
 	}
 }
-
 func TestPromptTitleFromBlocks(t *testing.T) {
 	if got := promptTitleFromBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: " hello "}}); got != "hello" {
 		t.Fatalf("promptTitleFromBlocks(text) = %q, want %q", got, "hello")
@@ -2487,8 +2486,8 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
 	update := decodeTurnSessionUpdate(t, messages[0].Content)
-	if update.Status != "streaming" {
-		t.Fatalf("message status = %q, want streaming", update.Status)
+	if text := strings.TrimSpace(extractTextChunk(update.Content)); text != "hello" {
+		t.Fatalf("message text = %q, want hello", text)
 	}
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
@@ -2542,9 +2541,6 @@ func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "hello world" {
 		t.Fatalf("assistant text = %q, want hello world", text)
 	}
-	if update2.Status != "done" {
-		t.Fatalf("assistant status = %q, want done", update2.Status)
-	}
 }
 
 func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
@@ -2557,27 +2553,15 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
 		t.Fatalf("RecordEvent user message: %v", err)
 	}
-	msg := acp.SessionUpdate{
-		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
-		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
-		Status:        "streaming",
-	}
-	thought := acp.SessionUpdate{
-		SessionUpdate: acp.SessionUpdateAgentThoughtChunk,
-		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "reason"}),
-		Status:        "streaming",
-	}
-	tool := acp.SessionUpdate{
-		SessionUpdate: acp.SessionUpdateToolCall,
-		ToolCallID:    "call-1",
-		Status:        acp.ToolCallStatusInProgress,
-		Title:         "build",
-	}
+	msg := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}), Status: "streaming"}
+	thought := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentThoughtChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "reason"}), Status: "streaming"}
+	tool := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateToolCall, ToolCallID: "call-1", Status: "in_progress", Title: "build"}
+
 	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", msg)); err != nil {
-		t.Fatalf("RecordEvent assistant chunk: %v", err)
+		t.Fatalf("RecordEvent message update: %v", err)
 	}
 	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", thought)); err != nil {
-		t.Fatalf("RecordEvent thought chunk: %v", err)
+		t.Fatalf("RecordEvent thought update: %v", err)
 	}
 	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", tool)); err != nil {
 		t.Fatalf("RecordEvent tool update: %v", err)
@@ -2586,7 +2570,7 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -2602,36 +2586,26 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 
 	seen := map[string]bool{}
 	for _, message := range messages {
-		var doc struct {
-			Method string `json:"method"`
-			Params struct {
-				Update acp.SessionUpdate
-			}
-		}
-		if err := json.Unmarshal([]byte(message.Content), &doc); err != nil {
-			continue
-		}
-		if strings.TrimSpace(doc.Method) == acp.MethodSessionPrompt {
+		if decodeTurnMethod(t, message.Content) == acp.MethodSessionPrompt {
 			seen["prompt"] = true
 			continue
 		}
-		updateType := strings.TrimSpace(doc.Params.Update.SessionUpdate)
-		if updateType == "" {
-			continue
+		update := decodeTurnSessionUpdate(t, message.Content)
+		if strings.TrimSpace(update.SessionUpdate) != "" {
+			seen[update.SessionUpdate] = true
 		}
-		seen[updateType] = true
 	}
 	if !seen["prompt"] {
-		t.Fatalf("missing session.prompt turn, messages=%+v", messages)
+		t.Fatalf("missing prompt message, messages=%+v", messages)
 	}
 	if !seen[acp.SessionUpdateAgentMessageChunk] {
-		t.Fatalf("missing agent message chunk turn, messages=%+v", messages)
+		t.Fatalf("missing agent message chunk, messages=%+v", messages)
 	}
 	if !seen[acp.SessionUpdateAgentThoughtChunk] {
-		t.Fatalf("missing agent thought chunk turn, messages=%+v", messages)
+		t.Fatalf("missing agent thought chunk, messages=%+v", messages)
 	}
-	if !seen[acp.SessionUpdateToolCall] {
-		t.Fatalf("missing tool call turn, messages=%+v", messages)
+	if !seen[acp.SessionUpdateToolCallUpdate] {
+		t.Fatalf("missing tool call update, messages=%+v", messages)
 	}
 }
 func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
@@ -2684,23 +2658,69 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 
 func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 	t.Helper()
-	var doc struct {
+
+	var legacy struct {
 		Method string `json:"method"`
 		Params struct {
 			Update acp.SessionUpdate `json:"update"`
 		} `json:"params"`
 	}
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	if err := json.Unmarshal([]byte(raw), &legacy); err == nil && strings.TrimSpace(legacy.Params.Update.SessionUpdate) != "" {
+		return legacy.Params.Update
+	}
+
+	msg := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("unmarshal turn update_json: %v", err)
 	}
-	if strings.TrimSpace(doc.Params.Update.SessionUpdate) == "" {
-		t.Fatalf("turn update_json has empty params.update.sessionUpdate: %s", raw)
+	switch strings.TrimSpace(msg.Method) {
+	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk:
+		result := acp.IMTextResult{}
+		if err := json.Unmarshal(msg.Result, &result); err != nil {
+			t.Fatalf("unmarshal text result: %v", err)
+		}
+		return acp.SessionUpdate{SessionUpdate: strings.TrimSpace(msg.Method), Content: mustJSON(map[string]any{"text": result.Text})}
+	case acp.IMMethodToolCall:
+		result := acp.IMToolResult{}
+		if err := json.Unmarshal(msg.Result, &result); err != nil {
+			t.Fatalf("unmarshal tool result: %v", err)
+		}
+		return acp.SessionUpdate{
+			SessionUpdate: acp.SessionUpdateToolCallUpdate,
+			Title:         strings.TrimSpace(result.Cmd),
+			Kind:          strings.TrimSpace(result.Kind),
+			Status:        strings.TrimSpace(result.Status),
+			Content:       mustJSON(map[string]any{"text": result.Output}),
+		}
+	case acp.IMMethodAgentPlan:
+		plan := []acp.IMPlanResult{}
+		if err := json.Unmarshal(msg.Result, &plan); err != nil {
+			t.Fatalf("unmarshal plan result: %v", err)
+		}
+		entries := make([]acp.PlanEntry, 0, len(plan))
+		for _, entry := range plan {
+			entries = append(entries, acp.PlanEntry{Content: entry.Content, Status: entry.Status})
+		}
+		return acp.SessionUpdate{SessionUpdate: acp.SessionUpdatePlan, Entries: entries}
+	default:
+		t.Fatalf("turn update_json has unsupported method for update decode: %s", raw)
 	}
-	return doc.Params.Update
+	return acp.SessionUpdate{}
 }
 
 func decodeTurnMethod(t *testing.T, raw string) string {
 	t.Helper()
+	msg := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(raw), &msg); err == nil {
+		switch strings.TrimSpace(msg.Method) {
+		case acp.IMMethodPrompt, acp.IMMethodPromptDone:
+			return acp.MethodSessionPrompt
+		case acp.IMMethodPermission:
+			return acp.MethodRequestPermission
+		default:
+			return strings.TrimSpace(msg.Method)
+		}
+	}
 	var doc struct {
 		Method string `json:"method"`
 	}
@@ -2709,7 +2729,6 @@ func decodeTurnMethod(t *testing.T, raw string) string {
 	}
 	return strings.TrimSpace(doc.Method)
 }
-
 func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
@@ -2746,8 +2765,12 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 		t.Fatalf("tool turn updateIndex = %d, want 2", toolTurn.UpdateIndex)
 	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
-	if update.ToolCallID != "call-1" {
-		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-1")
+	meta := sessionTurnMeta{}
+	if err := json.Unmarshal([]byte(toolTurn.ExtraJSON), &meta); err != nil {
+		t.Fatalf("unmarshal tool turn extra_json: %v", err)
+	}
+	if meta.ToolCallID != "call-1" {
+		t.Fatalf("tool turn meta.toolCallId = %q, want %q", meta.ToolCallID, "call-1")
 	}
 	if update.SessionUpdate != acp.SessionUpdateToolCallUpdate {
 		t.Fatalf("tool turn sessionUpdate = %q, want %q", update.SessionUpdate, acp.SessionUpdateToolCallUpdate)
@@ -2860,8 +2883,12 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 		t.Fatalf("tool turn updateIndex = %d, want 3", toolTurn.UpdateIndex)
 	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
-	if update.ToolCallID != "call-terminal" {
-		t.Fatalf("tool turn toolCallId = %q, want %q", update.ToolCallID, "call-terminal")
+	meta := sessionTurnMeta{}
+	if err := json.Unmarshal([]byte(toolTurn.ExtraJSON), &meta); err != nil {
+		t.Fatalf("unmarshal tool turn extra_json: %v", err)
+	}
+	if meta.ToolCallID != "call-terminal" {
+		t.Fatalf("tool turn meta.toolCallId = %q, want %q", meta.ToolCallID, "call-terminal")
 	}
 	if update.Status != acp.ToolCallStatusCancelled {
 		t.Fatalf("tool turn status = %q, want %q", update.Status, acp.ToolCallStatusCancelled)
@@ -2897,49 +2924,38 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 		t.Fatalf("permission turn updateIndex = %d, want 2", permTurn.UpdateIndex)
 	}
 
-	var requestDoc struct {
-		ID     int64  `json:"id"`
-		Method string `json:"method"`
-		Params struct {
-			ToolCall acp.ToolCallRef `json:"toolCall"`
-		} `json:"params"`
-	}
-	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &requestDoc); err != nil {
+	message := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &message); err != nil {
 		t.Fatalf("unmarshal permission turn update_json: %v", err)
 	}
-	if requestDoc.Method != acp.MethodRequestPermission {
-		t.Fatalf("permission turn method = %q, want %q", requestDoc.Method, acp.MethodRequestPermission)
-	}
-	if requestDoc.ID != 7 {
-		t.Fatalf("permission turn requestId = %d, want 7", requestDoc.ID)
-	}
-	if strings.TrimSpace(requestDoc.Params.ToolCall.ToolCallID) != "call-7" {
-		t.Fatalf("permission toolCallId = %q, want call-7", requestDoc.Params.ToolCall.ToolCallID)
+	if strings.TrimSpace(message.Method) != acp.IMMethodPermission {
+		t.Fatalf("permission turn method = %q, want %q", message.Method, acp.IMMethodPermission)
 	}
 
-	var extraDoc struct {
-		ACPUserResult struct {
-			ID     int64  `json:"id"`
-			Method string `json:"method"`
-			Result struct {
-				Outcome acp.PermissionResult `json:"outcome"`
-			} `json:"result"`
-		} `json:"acpUserResult"`
+	result := acp.IMPermissionResult{}
+	if err := json.Unmarshal(message.Result, &result); err != nil {
+		t.Fatalf("unmarshal permission result: %v", err)
 	}
-	if err := json.Unmarshal([]byte(permTurn.ExtraJSON), &extraDoc); err != nil {
+	if strings.TrimSpace(result.ToolCallID) != "call-7" {
+		t.Fatalf("permission result toolCallId = %q, want call-7", result.ToolCallID)
+	}
+
+	request := acp.IMPermissionRequest{}
+	if err := json.Unmarshal(message.Request, &request); err != nil {
+		t.Fatalf("unmarshal permission request: %v", err)
+	}
+	if strings.TrimSpace(request.Selected) != "done" {
+		t.Fatalf("permission request selected = %q, want done", request.Selected)
+	}
+
+	meta := sessionTurnMeta{}
+	if err := json.Unmarshal([]byte(permTurn.ExtraJSON), &meta); err != nil {
 		t.Fatalf("unmarshal permission turn extra_json: %v", err)
 	}
-	if extraDoc.ACPUserResult.ID != 7 {
-		t.Fatalf("extra.acpUserResult.id = %d, want 7", extraDoc.ACPUserResult.ID)
-	}
-	if extraDoc.ACPUserResult.Method != acp.MethodRequestPermission {
-		t.Fatalf("extra.acpUserResult.method = %q, want %q", extraDoc.ACPUserResult.Method, acp.MethodRequestPermission)
-	}
-	if extraDoc.ACPUserResult.Result.Outcome.Outcome != "done" {
-		t.Fatalf("extra permission outcome = %q, want done", extraDoc.ACPUserResult.Result.Outcome.Outcome)
+	if meta.PermissionRequestID != 7 {
+		t.Fatalf("permission meta.requestId = %d, want 7", meta.PermissionRequestID)
 	}
 }
-
 func TestSessionViewDropsOrphanPermissionResult(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
