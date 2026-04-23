@@ -1812,7 +1812,7 @@ func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 	}
 }
 
-func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
+func TestSessionViewAssistantChunksPersistAsSeparateMessages(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "New Session")); err != nil {
@@ -1832,15 +1832,22 @@ func TestSessionViewAggregatesAssistantChunksIntoSingleMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if messages[0].UpdateIndex != 2 {
-		t.Fatalf("messages[0].UpdateIndex = %d, want 2", messages[0].UpdateIndex)
+	if messages[0].UpdateIndex != 1 {
+		t.Fatalf("messages[0].UpdateIndex = %d, want 1", messages[0].UpdateIndex)
 	}
-	update := decodeTurnSessionUpdate(t, messages[0].Content)
-	if strings.TrimSpace(extractTextChunk(update.Content)) != "hello world" {
-		t.Fatalf("messages[0] text = %q, want hello world", extractTextChunk(update.Content))
+	if messages[1].UpdateIndex != 1 {
+		t.Fatalf("messages[1].UpdateIndex = %d, want 1", messages[1].UpdateIndex)
+	}
+	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
+	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
+	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
+		t.Fatalf("messages[0] text = %q, want hello", extractTextChunk(update1.Content))
+	}
+	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
+		t.Fatalf("messages[1] text = %q, want world", extractTextChunk(update2.Content))
 	}
 }
 
@@ -2157,18 +2164,23 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(stored) != 1 {
-		t.Fatalf("stored len = %d, want 1", len(stored))
+	if len(stored) != 2 {
+		t.Fatalf("stored len = %d, want 2", len(stored))
 	}
-	updateStored := decodeTurnSessionUpdate(t, stored[0].UpdateJSON)
-	if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("stored update kind = %q, want %q", updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
+	for i := range stored {
+		updateStored := decodeTurnSessionUpdate(t, stored[i].UpdateJSON)
+		if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
+			t.Fatalf("stored[%d] update kind = %q, want %q", i, updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
+		}
+		if stored[i].UpdateIndex != 1 {
+			t.Fatalf("stored[%d].UpdateIndex = %d, want 1", i, stored[i].UpdateIndex)
+		}
 	}
-	if strings.TrimSpace(extractTextChunk(updateStored.Content)) != "hello world" {
-		t.Fatalf("stored update text = %q, want hello world", extractTextChunk(updateStored.Content))
+	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, stored[0].UpdateJSON).Content)); text != "hello" {
+		t.Fatalf("stored[0] text = %q, want hello", text)
 	}
-	if stored[0].UpdateIndex != 2 {
-		t.Fatalf("stored[0].UpdateIndex = %d, want 2", stored[0].UpdateIndex)
+	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, stored[1].UpdateJSON).Content)); text != "world" {
+		t.Fatalf("stored[1] text = %q, want world", text)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
@@ -2181,15 +2193,22 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if messages[0].UpdateIndex != 2 {
-		t.Fatalf("messages[0].UpdateIndex = %d, want 2", messages[0].UpdateIndex)
+	if messages[0].UpdateIndex != 1 {
+		t.Fatalf("messages[0].UpdateIndex = %d, want 1", messages[0].UpdateIndex)
 	}
-	update := decodeTurnSessionUpdate(t, messages[0].Content)
-	if strings.TrimSpace(extractTextChunk(update.Content)) != "hello world" {
-		t.Fatalf("message[0] text = %q, want hello world", extractTextChunk(update.Content))
+	if messages[1].UpdateIndex != 1 {
+		t.Fatalf("messages[1].UpdateIndex = %d, want 1", messages[1].UpdateIndex)
+	}
+	update1 := decodeTurnSessionUpdate(t, messages[0].Content)
+	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
+	if strings.TrimSpace(extractTextChunk(update1.Content)) != "hello" {
+		t.Fatalf("message[0] text = %q, want hello", extractTextChunk(update1.Content))
+	}
+	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
+		t.Fatalf("message[1] text = %q, want world", extractTextChunk(update2.Content))
 	}
 }
 
@@ -2331,7 +2350,7 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 	}
 }
 
-func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *testing.T) {
+func TestSessionViewBufferedUpdatesAppendTurns(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
@@ -2365,19 +2384,28 @@ func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *tes
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + two assistant turns)", len(turns))
 	}
-	assistantTurn := turns[1]
-	if assistantTurn.UpdateIndex != 2 {
-		t.Fatalf("assistant turn updateIndex = %d, want 2", assistantTurn.UpdateIndex)
+	if turns[1].UpdateIndex != 1 {
+		t.Fatalf("assistant turn #1 updateIndex = %d, want 1", turns[1].UpdateIndex)
 	}
-	update := decodeTurnSessionUpdate(t, assistantTurn.UpdateJSON)
-	if text := strings.TrimSpace(extractTextChunk(update.Content)); text != "hello world" {
-		t.Fatalf("assistant merged text = %q, want hello world", text)
+	if turns[2].UpdateIndex != 1 {
+		t.Fatalf("assistant turn #2 updateIndex = %d, want 1", turns[2].UpdateIndex)
 	}
-	if update.Status != "done" {
-		t.Fatalf("assistant merged status = %q, want done", update.Status)
+	update1 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
+	update2 := decodeTurnSessionUpdate(t, turns[2].UpdateJSON)
+	if text := strings.TrimSpace(extractTextChunk(update1.Content)); text != "hello" {
+		t.Fatalf("assistant #1 text = %q, want hello", text)
+	}
+	if update1.Status != "streaming" {
+		t.Fatalf("assistant #1 status = %q, want streaming", update1.Status)
+	}
+	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "world" {
+		t.Fatalf("assistant #2 text = %q, want world", text)
+	}
+	if update2.Status != "done" {
+		t.Fatalf("assistant #2 status = %q, want done", update2.Status)
 	}
 }
 

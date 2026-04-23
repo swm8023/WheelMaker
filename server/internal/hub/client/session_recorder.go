@@ -74,7 +74,6 @@ type sessionPromptState struct {
 	nextTurnIndex int64
 
 	turns                     map[int64]SessionTurnRecord
-	messageTurnByUpdateMethod map[string]int64
 	toolTurnByToolCallID      map[string]int64
 	permissionTurnByRequestID map[int64]int64
 }
@@ -87,7 +86,6 @@ func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState 
 		promptIndex:               promptIndex,
 		nextTurnIndex:             nextTurnIndex,
 		turns:                     map[int64]SessionTurnRecord{},
-		messageTurnByUpdateMethod: map[string]int64{},
 		toolTurnByToolCallID:      map[string]int64{},
 		permissionTurnByRequestID: map[int64]int64{},
 	}
@@ -96,9 +94,6 @@ func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState 
 func (s *sessionPromptState) ensureMaps() {
 	if s.turns == nil {
 		s.turns = map[int64]SessionTurnRecord{}
-	}
-	if s.messageTurnByUpdateMethod == nil {
-		s.messageTurnByUpdateMethod = map[string]int64{}
 	}
 	if s.toolTurnByToolCallID == nil {
 		s.toolTurnByToolCallID = map[string]int64{}
@@ -120,9 +115,6 @@ func (s *sessionPromptState) assignTurn(turn SessionTurnRecord) {
 	if turn.TurnIndex >= s.nextTurnIndex {
 		s.nextTurnIndex = turn.TurnIndex + 1
 	}
-	if key := sessionTurnUpdateMethodKey(turn.UpdateJSON); key != "" {
-		s.messageTurnByUpdateMethod[key] = turn.TurnIndex
-	}
 	if key := sessionTurnToolCallIDKey(turn.UpdateJSON); key != "" {
 		s.toolTurnByToolCallID[key] = turn.TurnIndex
 	}
@@ -135,8 +127,6 @@ func (s *sessionPromptState) mergeTargetTurn(plan sessionTurnMergePlan) (Session
 	s.ensureMaps()
 	var turnIndex int64
 	switch plan.kind {
-	case sessionTurnMergeMessage:
-		turnIndex = s.messageTurnByUpdateMethod[strings.TrimSpace(plan.updateMethod)]
 	case sessionTurnMergeTool:
 		turnIndex = s.toolTurnByToolCallID[strings.TrimSpace(plan.toolCallID)]
 	case sessionTurnMergePermission:
@@ -158,26 +148,15 @@ type sessionTurnMergeKind string
 
 const (
 	sessionTurnMergeNone       sessionTurnMergeKind = ""
-	sessionTurnMergeMessage    sessionTurnMergeKind = "message"
 	sessionTurnMergeTool       sessionTurnMergeKind = "tool"
 	sessionTurnMergePermission sessionTurnMergeKind = "permission"
 )
 
 type sessionTurnMergePlan struct {
 	kind                sessionTurnMergeKind
-	updateMethod        string
 	toolCallID          string
 	requestID           int64
 	hasPermissionResult bool
-}
-
-func isMessageSessionUpdateType(updateMethod string) bool {
-	switch strings.TrimSpace(updateMethod) {
-	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentThoughtChunk:
-		return true
-	default:
-		return false
-	}
 }
 
 func isToolSessionUpdateType(updateMethod string) bool {
@@ -202,9 +181,6 @@ func buildSessionTurnMergePlan(doc sessionViewACPContentDoc) (sessionTurnMergePl
 		}
 		updateMethod := strings.TrimSpace(params.Update.SessionUpdate)
 		switch {
-		case isMessageSessionUpdateType(updateMethod):
-			plan.kind = sessionTurnMergeMessage
-			plan.updateMethod = updateMethod
 		case isToolSessionUpdateType(updateMethod) && strings.TrimSpace(params.Update.ToolCallID) != "":
 			plan.kind = sessionTurnMergeTool
 			plan.toolCallID = strings.TrimSpace(params.Update.ToolCallID)
@@ -228,11 +204,6 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingRaw string, plan sessio
 
 	var err error
 	switch plan.kind {
-	case sessionTurnMergeMessage:
-		merged.UpdateJSON, err = mergeSessionUpdateMessageJSON(existing.UpdateJSON, incomingRaw, plan.updateMethod)
-		if err != nil {
-			return SessionTurnRecord{}, err
-		}
 	case sessionTurnMergeTool:
 		merged.UpdateJSON, err = mergeSessionUpdateToolJSON(existing.UpdateJSON, incomingRaw)
 		if err != nil {
@@ -247,20 +218,6 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingRaw string, plan sessio
 		merged.UpdateJSON = normalizeJSONDoc(incomingRaw, merged.UpdateJSON)
 	}
 	return merged, nil
-}
-
-func mergeSessionUpdateMessageJSON(existingRaw, incomingRaw, updateMethod string) (string, error) {
-	return mergeSessionUpdateDoc(existingRaw, incomingRaw, func(base, incoming acp.SessionUpdate) acp.SessionUpdate {
-		merged := mergeSessionUpdateFields(base, incoming)
-		if strings.TrimSpace(updateMethod) != "" {
-			merged.SessionUpdate = strings.TrimSpace(updateMethod)
-		}
-		textMerged := appendSessionUpdateTextContent(base, incoming)
-		if len(textMerged.Content) > 0 {
-			merged.Content = cloneJSONRaw(textMerged.Content)
-		}
-		return merged
-	})
 }
 
 func mergeSessionUpdateToolJSON(existingRaw, incomingRaw string) (string, error) {
@@ -399,50 +356,6 @@ func mergeSessionUpdateFields(base, incoming acp.SessionUpdate) acp.SessionUpdat
 		merged.UpdatedAt = strings.TrimSpace(incoming.UpdatedAt)
 	}
 	return merged
-}
-
-func appendSessionUpdateTextContent(base, incoming acp.SessionUpdate) acp.SessionUpdate {
-	merged := base
-	baseText := extractTextChunk(base.Content)
-	incomingText := extractTextChunk(incoming.Content)
-	if strings.TrimSpace(baseText) == "" && strings.TrimSpace(incomingText) == "" {
-		if len(incoming.Content) > 0 {
-			merged.Content = cloneJSONRaw(incoming.Content)
-		}
-		return merged
-	}
-	merged.Content = buildTextContentRaw(baseText + incomingText)
-	return merged
-}
-
-func buildTextContentRaw(text string) json.RawMessage {
-	block := acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: text}
-	raw, err := json.Marshal(block)
-	if err != nil {
-		return json.RawMessage(`{"type":"text","text":""}`)
-	}
-	return raw
-}
-
-func sessionTurnUpdateMethodKey(raw string) string {
-	type sessionUpdateEnvelope struct {
-		Method string `json:"method"`
-		Params struct {
-			Update acp.SessionUpdate `json:"update"`
-		} `json:"params"`
-	}
-	var doc sessionUpdateEnvelope
-	if err := json.Unmarshal([]byte(normalizeJSONDoc(raw, `{}`)), &doc); err != nil {
-		return ""
-	}
-	if strings.TrimSpace(doc.Method) != acp.MethodSessionUpdate {
-		return ""
-	}
-	updateMethod := strings.TrimSpace(doc.Params.Update.SessionUpdate)
-	if !isMessageSessionUpdateType(updateMethod) {
-		return ""
-	}
-	return updateMethod
 }
 
 func sessionTurnToolCallIDKey(raw string) string {
