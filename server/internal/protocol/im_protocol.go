@@ -18,7 +18,6 @@ const (
 	IMMethodAgentMessageChunk = SessionUpdateAgentMessageChunk
 	IMMethodAgentThoughtChunk = SessionUpdateAgentThoughtChunk
 	IMMethodToolCall          = SessionUpdateToolCall
-	IMMethodToolCallUpdate    = SessionUpdateToolCallUpdate
 
 	// Outbound: Hub -> IM lifecycle/permission
 	IMMethodPromptDone       = "prompt_done"
@@ -33,8 +32,9 @@ const (
 //     request = acp.SessionPromptParams JSON
 //   - method in {agent_message_chunk, agent_thought_chunk}:
 //     text = rendered text
-//   - method in {tool_call, tool_call_update}:
+//   - method=tool_call:
 //     tool = {cmd, kind, status, output}
+//     (both ACP tool_call and tool_call_update should be mapped to this method)
 //   - method=prompt_done:
 //     result = acp.SessionPromptResult JSON
 //   - method=permission_request:
@@ -69,7 +69,7 @@ func NormalizeIMMethod(method string) string {
 
 func IsIMSessionUpdateMethod(method string) bool {
 	switch NormalizeIMMethod(method) {
-	case IMMethodAgentMessageChunk, IMMethodAgentThoughtChunk, IMMethodToolCall, IMMethodToolCallUpdate:
+	case IMMethodAgentMessageChunk, IMMethodAgentThoughtChunk, IMMethodToolCall:
 		return true
 	default:
 		return false
@@ -87,7 +87,7 @@ func IsIMTextMethod(method string) bool {
 
 func IsIMToolMethod(method string) bool {
 	switch NormalizeIMMethod(method) {
-	case IMMethodToolCall, IMMethodToolCallUpdate:
+	case IMMethodToolCall:
 		return true
 	default:
 		return false
