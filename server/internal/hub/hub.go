@@ -53,6 +53,13 @@ func New(cfg *logger.AppConfig, dbPath string) *Hub {
 // Returns an error if any project has an unsupported IM type.
 func (h *Hub) Start(ctx context.Context) error {
 	hubLogger("").Info("start projects=%d", len(h.cfg.Projects))
+	if err := client.CheckStoreSchema(h.dbPath); err != nil {
+		if client.IsStoreSchemaMismatch(err) {
+			dbDir := filepath.Dir(h.dbPath)
+			return fmt.Errorf("hub db schema mismatch: %w; delete local db directory %q and restart server", err, dbDir)
+		}
+		return fmt.Errorf("hub db schema check: %w", err)
+	}
 	for _, pc := range h.cfg.Projects {
 		hubLogger(pc.Name).Info("build client im=%s", pc.IMType())
 		c, err := h.buildClient(ctx, pc)

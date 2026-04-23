@@ -1446,14 +1446,19 @@ func TestStoreProjectAgentStateRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStoreMigratesLegacyProjectsTable(t *testing.T) {
+func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
 
 	legacyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open legacy db: %v", err)
 	}
+	if _, err := legacyDB.Exec(sqliteSchema); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("init schema: %v", err)
+	}
 	if _, err := legacyDB.Exec(`
+		DROP TABLE projects;
 		CREATE TABLE projects (
 			project_name TEXT PRIMARY KEY,
 			yolo INTEGER NOT NULL DEFAULT 0,
@@ -1464,131 +1469,56 @@ func TestStoreMigratesLegacyProjectsTable(t *testing.T) {
 		_ = legacyDB.Close()
 		t.Fatalf("create legacy projects table: %v", err)
 	}
-	if _, err := legacyDB.Exec(`
-		INSERT INTO projects (project_name, yolo, created_at, updated_at)
-		VALUES ('proj1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
-	`); err != nil {
-		_ = legacyDB.Close()
-		t.Fatalf("insert legacy project row: %v", err)
-	}
 	if err := legacyDB.Close(); err != nil {
 		t.Fatalf("close legacy db: %v", err)
 	}
 
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+	err = CheckStoreSchema(dbPath)
+	if err == nil {
+		t.Fatal("CheckStoreSchema() error = nil, want mismatch")
 	}
-	defer store.Close()
-
-	loaded, err := store.LoadProject(context.Background(), "proj1")
-	if err != nil {
-		t.Fatalf("LoadProject after migration: %v", err)
+	if !IsStoreSchemaMismatch(err) {
+		t.Fatalf("IsStoreSchemaMismatch(err) = false, err=%v", err)
 	}
-	if !loaded.YOLO {
-		t.Fatal("YOLO = false, want true")
-	}
-	if got := len(loaded.AgentState); got != 0 {
-		t.Fatalf("agent state size = %d, want 0", got)
-	}
-
-	next := ProjectConfig{
-		YOLO: true,
-		AgentState: map[string]ProjectAgentState{
-			"codex": {
-				AvailableCommands: []acp.AvailableCommand{{Name: "/help"}},
-			},
-		},
-	}
-	if err := store.SaveProject(context.Background(), "proj1", next); err != nil {
-		t.Fatalf("SaveProject after migration: %v", err)
+	if !strings.Contains(err.Error(), `table "projects" columns mismatch`) {
+		t.Fatalf("CheckStoreSchema() err = %v, want projects columns mismatch", err)
 	}
 }
-
-func TestStoreDropsLegacySessionMessagesTable(t *testing.T) {
+func TestCheckStoreSchemaRejectsUnexpectedLegacyTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
 
 	legacyDB, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatalf("open legacy db: %v", err)
 	}
+	if _, err := legacyDB.Exec(sqliteSchema); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("init schema: %v", err)
+	}
 	if _, err := legacyDB.Exec(`
-		CREATE TABLE sessions (
-			id TEXT PRIMARY KEY,
-			project_name TEXT NOT NULL,
-			status INTEGER NOT NULL,
-			last_reply TEXT NOT NULL DEFAULT '',
-			acp_session_id TEXT NOT NULL DEFAULT '',
-			agents_json TEXT NOT NULL DEFAULT '{}',
-			title TEXT NOT NULL DEFAULT '',
-			last_message_preview TEXT NOT NULL DEFAULT '',
-			last_message_at TEXT NOT NULL DEFAULT '',
-			message_count INTEGER NOT NULL DEFAULT 0,
-			created_at TEXT NOT NULL,
-			last_active_at TEXT NOT NULL
-		);
 		CREATE TABLE session_messages (
 			message_id TEXT PRIMARY KEY,
 			project_name TEXT NOT NULL,
 			session_id TEXT NOT NULL,
-			role TEXT NOT NULL,
-			kind TEXT NOT NULL,
-			body TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);
+			body TEXT NOT NULL DEFAULT ''
+		)
 	`); err != nil {
 		_ = legacyDB.Close()
-		t.Fatalf("create legacy tables: %v", err)
-	}
-	if _, err := legacyDB.Exec(`
-		INSERT INTO sessions (id, project_name, status, title, last_message_preview, message_count, created_at, last_active_at)
-		VALUES ('sess-1', 'proj1', 1, 'Legacy', 'second', 2, '2026-04-12T10:00:00Z', '2026-04-12T10:02:00Z');
-		INSERT INTO session_messages (message_id, project_name, session_id, role, kind, body, created_at, updated_at)
-		VALUES
-			('msg-1', 'proj1', 'sess-1', 'user', 'text', 'first', '2026-04-12T10:01:00Z', '2026-04-12T10:01:00Z'),
-			('msg-2', 'proj1', 'sess-1', 'assistant', 'text', 'second', '2026-04-12T10:02:00Z', '2026-04-12T10:02:00Z');
-	`); err != nil {
-		_ = legacyDB.Close()
-		t.Fatalf("insert legacy rows: %v", err)
+		t.Fatalf("create legacy session_messages table: %v", err)
 	}
 	if err := legacyDB.Close(); err != nil {
 		t.Fatalf("close legacy db: %v", err)
 	}
 
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore: %v", err)
+	err = CheckStoreSchema(dbPath)
+	if err == nil {
+		t.Fatal("CheckStoreSchema() error = nil, want mismatch")
 	}
-	defer store.Close()
-
-	rec, err := store.LoadSession(context.Background(), "proj1", "sess-1")
-	if err != nil {
-		t.Fatalf("LoadSession: %v", err)
+	if !IsStoreSchemaMismatch(err) {
+		t.Fatalf("IsStoreSchemaMismatch(err) = false, err=%v", err)
 	}
-	if rec == nil {
-		t.Fatal("LoadSession returned nil")
-	}
-
-	messages, err := store.ListSessionTurnMessagesAfterIndex(context.Background(), "proj1", "sess-1", 0)
-	if err != nil {
-		t.Fatalf("ListSessionTurnMessagesAfterIndex: %v", err)
-	}
-	if len(messages) != 0 {
-		t.Fatalf("ListSessionTurnMessagesAfterIndex() len = %d, want 0", len(messages))
-	}
-
-	checkDB, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open migrated db: %v", err)
-	}
-	defer checkDB.Close()
-	var legacyTableCount int
-	if err := checkDB.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='session_messages'`).Scan(&legacyTableCount); err != nil {
-		t.Fatalf("check session_messages table: %v", err)
-	}
-	if legacyTableCount != 0 {
-		t.Fatalf("session_messages table count = %d, want 0", legacyTableCount)
+	if !strings.Contains(err.Error(), `unexpected table "session_messages"`) {
+		t.Fatalf("CheckStoreSchema() err = %v, want unexpected session_messages", err)
 	}
 }
 func TestStoreSessionProjectionRoundTrip(t *testing.T) {

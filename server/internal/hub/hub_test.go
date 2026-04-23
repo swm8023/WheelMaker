@@ -3,11 +3,14 @@ package hub
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	logger "github.com/swm8023/wheelmaker/internal/shared"
+	_ "modernc.org/sqlite"
 )
 
 func TestBuildClient_FeishuEnablesIMWithoutVersion(t *testing.T) {
@@ -70,5 +73,41 @@ func TestBuildClient_InvalidFeishuLogsError(t *testing.T) {
 	})
 	if !strings.Contains(buf.String(), "[Hub:p] build client failed") {
 		t.Fatalf("missing startup error log: %s", buf.String())
+	}
+}
+
+func TestStartRejectsSchemaMismatchWithDeleteHint(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "db", "client.sqlite3")
+
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatalf("mkdir db dir: %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE projects (
+			project_name TEXT PRIMARY KEY,
+			yolo INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)
+	`); err != nil {
+		_ = db.Close()
+		t.Fatalf("create legacy projects table: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	h := New(&logger.AppConfig{}, dbPath)
+	err = h.Start(context.Background())
+	if err == nil {
+		t.Fatal("Start() error = nil, want schema mismatch")
+	}
+	if !strings.Contains(err.Error(), "delete local db directory") {
+		t.Fatalf("Start() err = %v, want delete local db directory hint", err)
 	}
 }

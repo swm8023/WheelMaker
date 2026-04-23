@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,258 +187,110 @@ func NewStore(dbPath string) (Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
-	if err := migrateProjectsTable(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := migrateSessionsTable(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := migrateSessionRecordsTable(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if err := migratePromptTurnTables(db); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
 	return &sqliteStore{db: db}, nil
 }
 
-func migrateProjectsTable(db *sql.DB) error {
-	columns := []struct {
-		name string
-		ddl  string
-	}{
-		{
-			name: "yolo",
-			ddl:  `ALTER TABLE projects ADD COLUMN yolo INTEGER NOT NULL DEFAULT 0`,
-		},
-		{
-			name: "agent_state_json",
-			ddl:  `ALTER TABLE projects ADD COLUMN agent_state_json TEXT NOT NULL DEFAULT '{}'`,
-		},
-	}
-	for _, column := range columns {
-		exists, err := sqliteColumnExists(db, "projects", column.name)
-		if err != nil {
-			return fmt.Errorf("check projects.%s column: %w", column.name, err)
-		}
-		if exists {
-			continue
-		}
-		if _, err := db.Exec(column.ddl); err != nil {
-			return fmt.Errorf("migrate projects.%s column: %w", column.name, err)
-		}
-	}
-	return nil
+var expectedStoreSchemaColumns = map[string][]string{
+	"projects":        {"project_name", "yolo", "agent_state_json", "created_at", "updated_at"},
+	"route_bindings":  {"project_name", "route_key", "session_id", "created_at", "updated_at"},
+	"sessions":        {"id", "project_name", "status", "acp_session_id", "agents_json", "title", "created_at", "last_active_at"},
+	"session_prompts": {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
+	"session_turns":   {"session_id", "prompt_index", "turn_index", "update_index", "update_json", "extra_json"},
 }
 
-func migrateSessionsTable(db *sql.DB) error {
-	titleExists, err := sqliteColumnExists(db, "sessions", "title")
-	if err != nil {
-		return fmt.Errorf("check sessions.title column: %w", err)
-	}
-	if !titleExists {
-		if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("migrate sessions.title column: %w", err)
-		}
-	}
+type StoreSchemaMismatchError struct {
+	Path   string
+	Issues []string
+}
 
-	legacyColumns := []string{"last_reply", "last_message_at", "last_sync_index", "last_sync_subindex"}
-	hasLegacy := false
-	for _, column := range legacyColumns {
-		exists, err := sqliteColumnExists(db, "sessions", column)
-		if err != nil {
-			return fmt.Errorf("check sessions.%s column: %w", column, err)
-		}
-		if exists {
-			hasLegacy = true
-		}
+func (e *StoreSchemaMismatchError) Error() string {
+	return fmt.Sprintf("store schema mismatch for %q: %s", e.Path, strings.Join(e.Issues, "; "))
+}
+
+func IsStoreSchemaMismatch(err error) bool {
+	var mismatchErr *StoreSchemaMismatchError
+	return errors.As(err, &mismatchErr)
+}
+
+func CheckStoreSchema(dbPath string) error {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir db dir: %w", err)
 	}
-	if !hasLegacy {
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return fmt.Errorf("open sqlite %q: %w", dbPath, err)
+	}
+	defer db.Close()
+
+	existingTables, err := sqliteUserTables(db)
+	if err != nil {
+		return fmt.Errorf("list sqlite tables: %w", err)
+	}
+	if len(existingTables) == 0 {
 		return nil
 	}
 
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin sessions migration tx: %w", err)
+	issues := make([]string, 0)
+	for tableName := range expectedStoreSchemaColumns {
+		if _, ok := existingTables[tableName]; !ok {
+			issues = append(issues, fmt.Sprintf("missing table %q", tableName))
+		}
 	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	if _, err := tx.Exec(`
-		CREATE TABLE IF NOT EXISTS sessions_new (
-			id TEXT PRIMARY KEY,
-			project_name TEXT NOT NULL,
-			status INTEGER NOT NULL,
-			acp_session_id TEXT NOT NULL DEFAULT '',
-			agents_json TEXT NOT NULL DEFAULT '{}',
-			title TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			last_active_at TEXT NOT NULL
-		)
-	`); err != nil {
-		return fmt.Errorf("create sessions_new: %w", err)
+	for tableName := range existingTables {
+		if _, ok := expectedStoreSchemaColumns[tableName]; !ok {
+			issues = append(issues, fmt.Sprintf("unexpected table %q", tableName))
+		}
 	}
 
-	if _, err := tx.Exec(`
-		INSERT INTO sessions_new (id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at)
-		SELECT id, project_name, status, acp_session_id, agents_json, COALESCE(title, ''), created_at, last_active_at
-		FROM sessions
-	`); err != nil {
-		return fmt.Errorf("copy sessions to sessions_new: %w", err)
+	for tableName, expectedColumns := range expectedStoreSchemaColumns {
+		if _, ok := existingTables[tableName]; !ok {
+			continue
+		}
+		actualColumns, err := sqliteTableColumns(db, tableName)
+		if err != nil {
+			return fmt.Errorf("read columns for %s: %w", tableName, err)
+		}
+		if !sameColumnSet(actualColumns, expectedColumns) {
+			issues = append(issues, fmt.Sprintf("table %q columns mismatch (expected=%s actual=%s)", tableName, joinSortedColumns(expectedColumns), joinSortedColumns(actualColumns)))
+		}
 	}
 
-	if _, err := tx.Exec(`DROP TABLE sessions`); err != nil {
-		return fmt.Errorf("drop legacy sessions table: %w", err)
-	}
-	if _, err := tx.Exec(`ALTER TABLE sessions_new RENAME TO sessions`); err != nil {
-		return fmt.Errorf("rename sessions_new: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC)`); err != nil {
-		return fmt.Errorf("create sessions index after migration: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sessions migration tx: %w", err)
+	if len(issues) > 0 {
+		sort.Strings(issues)
+		return &StoreSchemaMismatchError{Path: dbPath, Issues: issues}
 	}
 	return nil
 }
 
-func migrateSessionRecordsTable(db *sql.DB) error {
-	if _, err := db.Exec(`DROP TABLE IF EXISTS session_messages`); err != nil {
-		return fmt.Errorf("drop legacy session_messages: %w", err)
-	}
-	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_session_records_session_cursor`); err != nil {
-		return fmt.Errorf("drop legacy session_records cursor index: %w", err)
-	}
-	if _, err := db.Exec(`DROP INDEX IF EXISTS idx_session_records_message_id`); err != nil {
-		return fmt.Errorf("drop legacy session_records message index: %w", err)
-	}
-	if _, err := db.Exec(`DROP TABLE IF EXISTS session_records`); err != nil {
-		return fmt.Errorf("drop legacy session_records table: %w", err)
-	}
-	return nil
-}
-
-func migratePromptTurnTables(db *sql.DB) error {
-	promptsExists, err := sqliteTableExists(db, "session_prompts")
+func sqliteUserTables(db *sql.DB) (map[string]struct{}, error) {
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`)
 	if err != nil {
-		return fmt.Errorf("check session_prompts table: %w", err)
-	}
-	if !promptsExists {
-		if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS session_prompts (
-			session_id TEXT NOT NULL,
-			prompt_index INTEGER NOT NULL,
-			title TEXT NOT NULL DEFAULT '',
-			stop_reason TEXT NOT NULL DEFAULT '',
-			updated_at TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY (session_id, prompt_index)
-		)`); err != nil {
-			return fmt.Errorf("create session_prompts: %w", err)
-		}
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index)`); err != nil {
-		return fmt.Errorf("create session_prompts index: %w", err)
-	}
-	promptUpdateIndexExists, err := sqliteColumnExists(db, "session_prompts", "update_index")
-	if err != nil {
-		return fmt.Errorf("check session_prompts.update_index column: %w", err)
-	}
-	if promptUpdateIndexExists {
-		if err := rebuildSessionPromptsWithoutUpdateIndex(db); err != nil {
-			return fmt.Errorf("drop legacy session_prompts.update_index: %w", err)
-		}
-	}
-
-	turnsExists, err := sqliteTableExists(db, "session_turns")
-	if err != nil {
-		return fmt.Errorf("check session_turns table: %w", err)
-	}
-	if !turnsExists {
-		if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS session_turns (
-			session_id TEXT NOT NULL,
-			prompt_index INTEGER NOT NULL,
-			turn_index INTEGER NOT NULL,
-			update_index INTEGER NOT NULL DEFAULT 0,
-			update_json TEXT NOT NULL DEFAULT '{}',
-			extra_json TEXT NOT NULL DEFAULT '{}',
-			PRIMARY KEY (session_id, prompt_index, turn_index)
-		)`); err != nil {
-			return fmt.Errorf("create session_turns: %w", err)
-		}
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_session_turns_session_prompt_turn ON session_turns(session_id, prompt_index, turn_index)`); err != nil {
-		return fmt.Errorf("create session_turns index: %w", err)
-	}
-	return nil
-}
-
-func rebuildSessionPromptsWithoutUpdateIndex(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin session_prompts rebuild tx: %w", err)
-	}
-	rollback := true
-	defer func() {
-		if rollback {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if _, err := tx.Exec(`
-		CREATE TABLE session_prompts_new (
-			session_id TEXT NOT NULL,
-			prompt_index INTEGER NOT NULL,
-			title TEXT NOT NULL DEFAULT '',
-			stop_reason TEXT NOT NULL DEFAULT '',
-			updated_at TEXT NOT NULL DEFAULT '',
-			PRIMARY KEY (session_id, prompt_index)
-		)
-	`); err != nil {
-		return fmt.Errorf("create session_prompts_new: %w", err)
-	}
-	if _, err := tx.Exec(`
-		INSERT INTO session_prompts_new (session_id, prompt_index, title, stop_reason, updated_at)
-		SELECT session_id, prompt_index, title, stop_reason, updated_at
-		FROM session_prompts
-	`); err != nil {
-		return fmt.Errorf("copy session_prompts rows: %w", err)
-	}
-	if _, err := tx.Exec(`DROP TABLE session_prompts`); err != nil {
-		return fmt.Errorf("drop legacy session_prompts: %w", err)
-	}
-	if _, err := tx.Exec(`ALTER TABLE session_prompts_new RENAME TO session_prompts`); err != nil {
-		return fmt.Errorf("rename session_prompts_new: %w", err)
-	}
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index)`); err != nil {
-		return fmt.Errorf("recreate session_prompts index: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit session_prompts rebuild tx: %w", err)
-	}
-	rollback = false
-	return nil
-}
-func sqliteTableExists(db *sql.DB, tableName string) (bool, error) {
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = ?`, strings.TrimSpace(tableName)).Scan(&count); err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-func sqliteColumnExists(db *sql.DB, tableName, columnName string) (bool, error) {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
-	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer rows.Close()
 
+	tables := make(map[string]struct{})
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		tables[normalizeStoreSchemaName(name)] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return tables, nil
+}
+
+func sqliteTableColumns(db *sql.DB, tableName string) ([]string, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", tableName))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make([]string, 0)
 	for rows.Next() {
 		var cid int
 		var name string
@@ -446,16 +299,43 @@ func sqliteColumnExists(db *sql.DB, tableName, columnName string) (bool, error) 
 		var defaultValue sql.NullString
 		var primaryKey int
 		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return false, err
+			return nil, err
 		}
-		if strings.EqualFold(strings.TrimSpace(name), strings.TrimSpace(columnName)) {
-			return true, nil
-		}
+		columns = append(columns, normalizeStoreSchemaName(name))
 	}
 	if err := rows.Err(); err != nil {
-		return false, err
+		return nil, err
 	}
-	return false, nil
+	return columns, nil
+}
+
+func sameColumnSet(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	actualSet := make(map[string]struct{}, len(actual))
+	for _, column := range actual {
+		actualSet[normalizeStoreSchemaName(column)] = struct{}{}
+	}
+	for _, column := range expected {
+		if _, ok := actualSet[normalizeStoreSchemaName(column)]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func joinSortedColumns(columns []string) string {
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		out = append(out, normalizeStoreSchemaName(column))
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+func normalizeStoreSchemaName(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }
 
 func (s *sqliteStore) LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error) {
