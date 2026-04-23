@@ -88,7 +88,7 @@ func New(store Store, projectName string, cwd string) *Client {
 		suspendTimeout: 5 * time.Minute,
 		stopPersistCh:  make(chan struct{}),
 	}
-	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionListEntry, error) {
+	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionRecord, error) {
 		return c.ListSessions(ctx)
 	})
 	c.viewSink = c.sessionRecorder
@@ -946,9 +946,9 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 // clientListSessions returns a merged list of in-memory and persisted sessions,
 // sorted by last active time (most recent first). Duplicates are deduplicated
 // favoring in-memory sessions.
-func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
+func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 	c.mu.Lock()
-	memEntries := make([]SessionListEntry, 0, len(c.sessions))
+	memEntries := make([]SessionRecord, 0, len(c.sessions))
 	memIDs := make(map[string]bool, len(c.sessions))
 	for _, sess := range c.sessions {
 		sess.mu.Lock()
@@ -957,8 +957,9 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 		if state := sess.agents[agentName]; state != nil {
 			title = state.Title
 		}
-		e := SessionListEntry{
+		e := SessionRecord{
 			ID:           sess.ID,
+			ProjectName:  c.projectName,
 			Agent:        agentName,
 			Title:        title,
 			Status:       sess.Status,
@@ -979,7 +980,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list persisted sessions: %w", err)
 	}
-	storedByID := make(map[string]SessionListEntry, len(stored))
+	storedByID := make(map[string]SessionRecord, len(stored))
 	for _, s := range stored {
 		storedByID[s.ID] = s
 	}
@@ -1015,7 +1016,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionListEntry, error) {
 	return entries, nil
 }
 
-func (c *Client) clientListSessions() ([]SessionListEntry, error) {
+func (c *Client) clientListSessions() ([]SessionRecord, error) {
 	return c.ListSessions(context.Background())
 }
 

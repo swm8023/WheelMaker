@@ -499,7 +499,7 @@ func cloneInt64Ptr(v *int64) *int64 {
 type SessionRecorder struct {
 	projectName  string
 	store        Store
-	listSessions func(context.Context) ([]SessionListEntry, error)
+	listSessions func(context.Context) ([]SessionRecord, error)
 
 	mu      sync.Mutex
 	publish func(method string, payload any) error
@@ -508,7 +508,7 @@ type SessionRecorder struct {
 	promptState map[string]sessionPromptState
 }
 
-func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionListEntry, error)) *SessionRecorder {
+func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionRecord, error)) *SessionRecorder {
 	return &SessionRecorder{
 		projectName:  projectName,
 		store:        store,
@@ -943,7 +943,7 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	}
 	out := make([]sessionViewSummary, 0, len(entries))
 	for _, entry := range entries {
-		out = append(out, r.sessionViewSummaryFromEntry(entry))
+		out = append(out, r.sessionViewSummaryFromRecord(entry))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].UpdatedAt > out[j].UpdatedAt
@@ -1020,21 +1020,12 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 	return nil
 }
 
-func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) sessionViewSummary {
-	return buildSessionViewSummary(
-		entry.ID,
-		entry.Title,
-		entry.LastActiveAt,
-		entry.Agent,
-	)
-}
-
 func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessionViewSummary {
 	return buildSessionViewSummary(
 		rec.ID,
 		rec.Title,
 		rec.LastActiveAt,
-		"",
+		rec.Agent,
 	)
 }
 

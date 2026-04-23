@@ -83,16 +83,7 @@ type SessionRecord struct {
 	ACPSessionID string
 	AgentsJSON   string
 	Title        string
-	CreatedAt    time.Time
-	LastActiveAt time.Time
-}
-
-type SessionListEntry struct {
-	ID           string
-	ProjectName  string
 	Agent        string
-	Title        string
-	Status       SessionStatus
 	CreatedAt    time.Time
 	LastActiveAt time.Time
 	InMemory     bool
@@ -127,7 +118,7 @@ type Store interface {
 
 	LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error)
 	SaveSession(ctx context.Context, rec *SessionRecord) error
-	ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error)
+	ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
 	UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error
 	LoadSessionPrompt(ctx context.Context, projectName, sessionID string, promptIndex int64) (*SessionPromptRecord, error)
@@ -497,7 +488,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	return nil
 }
 
-func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionListEntry, error) {
+func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at
 		FROM sessions
@@ -509,9 +500,9 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 	}
 	defer rows.Close()
 
-	entries := []SessionListEntry{}
+	entries := []SessionRecord{}
 	for rows.Next() {
-		var entry SessionListEntry
+		var entry SessionRecord
 		var entryProjectName string
 		var status int
 		var acpSessionID string
@@ -524,6 +515,8 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		}
 		entry.ProjectName = strings.TrimSpace(entryProjectName)
 		entry.Status = SessionStatus(status)
+		entry.ACPSessionID = strings.TrimSpace(acpSessionID)
+		entry.AgentsJSON = firstNonEmpty(strings.TrimSpace(agentsJSON), "{}")
 		entry.CreatedAt = parseStoreTime(createdAt)
 		entry.LastActiveAt = parseStoreTime(lastActiveAt)
 		entry.Agent, entry.Title = inferSessionListMetadata(acpSessionID, agentsJSON)

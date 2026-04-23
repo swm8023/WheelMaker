@@ -414,7 +414,7 @@ func (s *noopStore) LoadSession(context.Context, string, string) (*SessionRecord
 	return nil, nil
 }
 func (s *noopStore) SaveSession(context.Context, *SessionRecord) error { return nil }
-func (s *noopStore) ListSessions(context.Context, string) ([]SessionListEntry, error) {
+func (s *noopStore) ListSessions(context.Context, string) ([]SessionRecord, error) {
 	return nil, nil
 }
 func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
