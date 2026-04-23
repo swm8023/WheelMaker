@@ -6,50 +6,36 @@ import (
 )
 
 const (
-	IMSchemaV1  = "wm.im"
-	IMVersionV1 = "1.0-draft"
-)
+	// Inbound/Outbound shared methods
+	IMMethodPrompt     = "prompt"
+	IMMethodPermission = "permission"
 
-const (
-	// Inbound: IM -> Hub
-	IMMethodPrompt = "prompt"
-
-	// Outbound: Hub -> IM (session update flavors)
+	// Outbound session update flavors
 	IMMethodAgentMessageChunk = SessionUpdateAgentMessageChunk
 	IMMethodAgentThoughtChunk = SessionUpdateAgentThoughtChunk
 	IMMethodToolCall          = SessionUpdateToolCall
-
-	// Outbound: Hub -> IM lifecycle/permission
-	IMMethodPromptDone       = "prompt_done"
-	IMMethodPermissionAsk    = "permission_request"
-	IMMethodPermissionResult = "permission_result"
 )
 
-// IMMessage is a lightweight IM boundary payload.
+// IMMessage is a minimal IM boundary payload.
 //
 // Field mapping by method:
 //   - method=prompt:
-//     request = acp.SessionPromptParams JSON
+//     request = acp.SessionPromptParams JSON (IM -> Hub)
+//     result  = acp.SessionPromptResult JSON (Hub -> IM)
+//   - method=permission:
+//     request = acp.PermissionRequestParams JSON (Hub -> IM)
+//     result  = acp.PermissionResponse JSON (IM -> Hub)
 //   - method in {agent_message_chunk, agent_thought_chunk}:
 //     text = rendered text
 //   - method=tool_call:
 //     tool = {cmd, kind, status, output}
 //     (both ACP tool_call and tool_call_update should be mapped to this method)
-//   - method=prompt_done:
-//     result = acp.SessionPromptResult JSON
-//   - method=permission_request:
-//     request = acp.PermissionRequestParams JSON
-//   - method=permission_result:
-//     result = acp.PermissionResponse JSON
 //
-// RequestID is optional and mainly used to correlate permission request/result.
+// Index is a string sequence marker used by IM side for ordering/replay.
 type IMMessage struct {
-	Schema    string          `json:"schema,omitempty"`
-	Version   string          `json:"version,omitempty"`
 	Method    string          `json:"method"`
 	SessionID string          `json:"sessionId,omitempty"`
-	ChatID    string          `json:"chatId,omitempty"`
-	RequestID int64           `json:"requestId,omitempty"`
+	Index     string          `json:"index,omitempty"`
 	Text      string          `json:"text,omitempty"`
 	Tool      *IMToolPayload  `json:"tool,omitempty"`
 	Request   json.RawMessage `json:"request,omitempty"`
