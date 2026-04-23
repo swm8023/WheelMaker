@@ -699,7 +699,6 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	if err := r.upsertSessionProjection(ctx, event.SessionID, promptTitle, event.UpdatedAt, true); err != nil {
 		return err
 	}
-	r.publishSessionTurn(event.SessionID, turn)
 	return nil
 }
 
@@ -1017,18 +1016,8 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 	if err := r.store.SaveSession(ctx, rec); err != nil {
 		return err
 	}
-	if summary, ok := r.currentSessionViewSummary(ctx, sessionID); ok {
-		r.publishSessionUpdated(summary)
-	}
+	r.publishSessionUpdated(r.sessionViewSummaryFromRecord(*rec))
 	return nil
-}
-
-func (r *SessionRecorder) currentSessionViewSummary(ctx context.Context, sessionID string) (sessionViewSummary, bool) {
-	rec, err := r.store.LoadSession(ctx, r.projectName, strings.TrimSpace(sessionID))
-	if err != nil || rec == nil {
-		return sessionViewSummary{}, false
-	}
-	return r.sessionViewSummaryFromRecord(*rec), true
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromEntry(entry SessionListEntry) sessionViewSummary {

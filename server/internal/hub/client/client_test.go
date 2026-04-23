@@ -417,27 +417,6 @@ func (s *noopStore) SaveSession(context.Context, *SessionRecord) error { return 
 func (s *noopStore) ListSessions(context.Context, string) ([]SessionListEntry, error) {
 	return nil, nil
 }
-func (s *noopStore) AppendSessionTurnMessage(context.Context, SessionTurnMessageRecord) error {
-	return nil
-}
-func (s *noopStore) UpsertSessionTurnMessage(context.Context, SessionTurnMessageRecord) error {
-	return nil
-}
-func (s *noopStore) ListSessionTurnMessages(context.Context, string, string) ([]SessionTurnMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) LoadSessionTurnMessage(context.Context, string, string, string) (*SessionTurnMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) ListSessionTurnMessagesAfterIndex(context.Context, string, string, int64) ([]SessionTurnMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) ListSessionTurnMessagesAfterCursor(context.Context, string, string, int64, int64) ([]SessionTurnMessageRecord, error) {
-	return nil, nil
-}
-func (s *noopStore) HasSessionTurnMessage(context.Context, string, string, string) (bool, error) {
-	return false, nil
-}
 func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
 func (s *noopStore) UpsertSessionPrompt(context.Context, SessionPromptRecord) error {
 	return nil
@@ -1565,7 +1544,7 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
+func TestStoreSessionTurnRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -1580,42 +1559,51 @@ func TestStoreSessionMessageHistoryRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-
-	msg := SessionTurnMessageRecord{
-		MessageID:   "msg-1",
+	if err := store.UpsertSessionPrompt(context.Background(), SessionPromptRecord{
 		SessionID:   "sess-1",
-		ProjectName: "proj1",
-		Body:        "aggregated reply",
-		Blocks:      []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}},
-		Options:     []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
-		ContentJSON: "{\"method\":\"session.prompt\",\"payload\":{\"role\":\"assistant\",\"kind\":\"text\",\"text\":\"aggregated reply\",\"status\":\"done\",\"blocks\":[{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"abc123\"}],\"options\":[{\"optionId\":\"allow\",\"name\":\"Allow\",\"kind\":\"allow_once\"}]}}",
-		CreatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
+		PromptIndex: 1,
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
 
-	if err := store.AppendSessionTurnMessage(context.Background(), msg); err != nil {
-		t.Fatalf("AppendSessionTurnMessage: %v", err)
+	turnJSON := `{"method":"session/prompt","params":{"prompt":[{"type":"image","mimeType":"image/png","data":"abc123"}]}}`
+	if err := store.UpsertSessionTurn(context.Background(), SessionTurnRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		TurnIndex:   1,
+		UpdateIndex: 1,
+		UpdateJSON:  turnJSON,
+		ExtraJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertSessionTurn: %v", err)
 	}
 
-	messages, err := store.ListSessionTurnMessages(context.Background(), "proj1", "sess-1")
+	turns, err := store.ListSessionTurns(context.Background(), "proj1", "sess-1", 1)
 	if err != nil {
-		t.Fatalf("ListSessionTurnMessages: %v", err)
+		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("ListSessionTurnMessages() len = %d, want 1", len(messages))
+	if len(turns) != 1 {
+		t.Fatalf("ListSessionTurns() len = %d, want 1", len(turns))
 	}
-	if messages[0].Body != "aggregated reply" {
-		t.Fatalf("ListSessionTurnMessages()[0].Body = %q, want %q", messages[0].Body, "aggregated reply")
+	var doc struct {
+		Method string `json:"method"`
+		Params struct {
+			Prompt []acp.ContentBlock `json:"prompt"`
+		} `json:"params"`
 	}
-	if len(messages[0].Blocks) != 1 || messages[0].Blocks[0].Type != acp.ContentBlockTypeImage {
-		t.Fatalf("ListSessionTurnMessages()[0].Blocks = %#v, want image block", messages[0].Blocks)
+	if err := json.Unmarshal([]byte(turns[0].UpdateJSON), &doc); err != nil {
+		t.Fatalf("unmarshal turn update json: %v", err)
 	}
-	if len(messages[0].Options) != 1 || messages[0].Options[0].OptionID != "allow" {
-		t.Fatalf("ListSessionTurnMessages()[0].Options = %#v, want allow option", messages[0].Options)
+	if strings.TrimSpace(doc.Method) != acp.MethodSessionPrompt {
+		t.Fatalf("turn method = %q, want %q", doc.Method, acp.MethodSessionPrompt)
+	}
+	if len(doc.Params.Prompt) != 1 || doc.Params.Prompt[0].Type != acp.ContentBlockTypeImage {
+		t.Fatalf("turn params.prompt = %#v, want image block", doc.Params.Prompt)
 	}
 }
 
-func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
+func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -1632,60 +1620,56 @@ func TestStoreSessionMessageSyncIndexRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
-
-	msg := SessionTurnMessageRecord{
-		MessageID:   "msg-1",
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   "sess-1",
-		ProjectName: "proj1",
-		Body:        "Run tool?",
-		ContentJSON: "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"needs_action\",\"requestId\":42}}",
-		CreatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		PromptIndex: 1,
 		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
-		RequestID:   42,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+	if err := store.UpsertSessionTurn(ctx, SessionTurnRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		TurnIndex:   1,
+		UpdateIndex: 1,
+		UpdateJSON:  `{"method":"session/request_permission","id":42,"params":{"toolCall":{"title":"Run tool?"}}}`,
+		ExtraJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertSessionTurn initial: %v", err)
+	}
+	if err := store.UpsertSessionTurn(ctx, SessionTurnRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		TurnIndex:   1,
+		UpdateIndex: 2,
+		UpdateJSON:  `{"method":"session/request_permission","id":42,"result":{"outcome":{"outcome":"done"}}}`,
+		ExtraJSON:   `{}`,
+	}); err != nil {
+		t.Fatalf("UpsertSessionTurn merged: %v", err)
 	}
 
-	if err := store.AppendSessionTurnMessage(ctx, msg); err != nil {
-		t.Fatalf("AppendSessionTurnMessage: %v", err)
-	}
-	seed, err := store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
+	turns, err := store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
-		t.Fatalf("ListSessionTurnMessages before upsert: %v", err)
+		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(seed) != 1 {
-		t.Fatalf("ListSessionTurnMessages before upsert len = %d, want 1", len(seed))
+	if len(turns) != 1 {
+		t.Fatalf("ListSessionTurns() len = %d, want 1", len(turns))
 	}
-	msg.SyncIndex = seed[0].SyncIndex
-	msg.SyncSubIndex = seed[0].SyncSubIndex
-	msg.ContentJSON = "{\"method\":\"session.permission\",\"payload\":{\"role\":\"system\",\"kind\":\"permission\",\"text\":\"Run tool?\",\"status\":\"done\",\"requestId\":42}}"
-	msg.UpdatedAt = time.Date(2026, 4, 12, 10, 2, 0, 0, time.UTC)
-	msg.Time = msg.UpdatedAt
-	if err := store.UpsertSessionTurnMessage(ctx, msg); err != nil {
-		t.Fatalf("UpsertSessionTurnMessage: %v", err)
+	if turns[0].UpdateIndex != 2 {
+		t.Fatalf("turn updateIndex = %d, want 2", turns[0].UpdateIndex)
 	}
-
-	messages, err := store.ListSessionTurnMessagesAfterIndex(ctx, "proj1", "sess-1", 1)
-	if err != nil {
-		t.Fatalf("ListSessionTurnMessagesAfterIndex: %v", err)
+	var resultDoc struct {
+		Result struct {
+			Outcome struct {
+				Outcome string `json:"outcome"`
+			} `json:"outcome"`
+		} `json:"result"`
 	}
-	if len(messages) != 1 {
-		t.Fatalf("ListSessionTurnMessagesAfterIndex() len = %d, want 1", len(messages))
+	if err := json.Unmarshal([]byte(turns[0].UpdateJSON), &resultDoc); err != nil {
+		t.Fatalf("unmarshal turn update json: %v", err)
 	}
-	var updateDoc struct {
-		Payload struct {
-			Status string `json:"status"`
-		} `json:"payload"`
-	}
-	if err := json.Unmarshal([]byte(messages[0].ContentJSON), &updateDoc); err != nil {
-		t.Fatalf("unmarshal messages[0].ContentJSON: %v", err)
-	}
-	if strings.TrimSpace(updateDoc.Payload.Status) != "done" {
-		t.Fatalf("messages[0].payload.status = %q, want done", updateDoc.Payload.Status)
-	}
-	if messages[0].SyncIndex != 1 {
-		t.Fatalf("messages[0].SyncIndex = %d, want 1", messages[0].SyncIndex)
-	}
-	if messages[0].SyncSubIndex != 1 {
-		t.Fatalf("messages[0].SyncSubIndex = %d, want 1", messages[0].SyncSubIndex)
+	if strings.TrimSpace(resultDoc.Result.Outcome.Outcome) != "done" {
+		t.Fatalf("turn result outcome = %q, want done", resultDoc.Result.Outcome.Outcome)
 	}
 
 	rec, err := store.LoadSession(ctx, "proj1", "sess-1")
@@ -2127,18 +2111,18 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	messages, err := c.store.ListSessionTurnMessages(context.Background(), "proj1", "sess-1")
+	turns, err := c.store.ListSessionTurns(context.Background(), "proj1", "sess-1", 1)
 	if err != nil {
-		t.Fatalf("ListSessionTurnMessages: %v", err)
+		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2", len(turns))
 	}
-	if strings.TrimSpace(messages[0].Body) != "Running build" {
-		t.Fatalf("messages[0].Body = %q, want Running build", messages[0].Body)
+	if got := decodeTurnSessionUpdate(t, turns[0].UpdateJSON).Title; strings.TrimSpace(got) != "Running build" {
+		t.Fatalf("turns[0].title = %q, want Running build", got)
 	}
-	if strings.TrimSpace(messages[1].Body) != "Build finished" {
-		t.Fatalf("messages[1].Body = %q, want Build finished", messages[1].Body)
+	if got := decodeTurnSessionUpdate(t, turns[1].UpdateJSON).Title; strings.TrimSpace(got) != "Build finished" {
+		t.Fatalf("turns[1].title = %q, want Build finished", got)
 	}
 }
 
@@ -2169,21 +2153,22 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	stored, err := c.store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
+	stored, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
-		t.Fatalf("ListSessionTurnMessages: %v", err)
+		t.Fatalf("ListSessionTurns: %v", err)
 	}
 	if len(stored) != 1 {
 		t.Fatalf("stored len = %d, want 1", len(stored))
 	}
-	if stored[0].Method != acp.MethodSessionUpdate {
-		t.Fatalf("stored[0].Method = %q, want %q", stored[0].Method, acp.MethodSessionUpdate)
+	updateStored := decodeTurnSessionUpdate(t, stored[0].UpdateJSON)
+	if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("stored update kind = %q, want %q", updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
 	}
-	if strings.TrimSpace(stored[0].Body) != "hello world" {
-		t.Fatalf("stored[0].Body = %q, want hello world", stored[0].Body)
+	if strings.TrimSpace(extractTextChunk(updateStored.Content)) != "hello world" {
+		t.Fatalf("stored update text = %q, want hello world", extractTextChunk(updateStored.Content))
 	}
-	if stored[0].SyncSubIndex != 1 {
-		t.Fatalf("stored[0].SyncSubIndex = %d, want 1", stored[0].SyncSubIndex)
+	if stored[0].UpdateIndex != 2 {
+		t.Fatalf("stored[0].UpdateIndex = %d, want 2", stored[0].UpdateIndex)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
@@ -2266,9 +2251,9 @@ func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
 		t.Fatalf("RecordEvent system message: %v", err)
 	}
 
-	messages, err := c.store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
+	messages, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
-		t.Fatalf("ListSessionTurnMessages: %v", err)
+		t.Fatalf("ListSessionTurns: %v", err)
 	}
 	if len(messages) != 0 {
 		t.Fatalf("messages len = %d, want 0", len(messages))
@@ -2374,14 +2359,6 @@ func TestSessionViewMergedBufferedUpdateKeepsSyncIndexAndAdvancesSubIndex(t *tes
 	}
 	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
-	}
-
-	messages, err := c.store.ListSessionTurnMessages(ctx, "proj1", "sess-1")
-	if err != nil {
-		t.Fatalf("ListSessionTurnMessages: %v", err)
-	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2 (prompt + merged assistant turn)", len(messages))
 	}
 
 	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
