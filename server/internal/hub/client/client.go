@@ -275,20 +275,15 @@ func (c *Client) PromptToSession(ctx context.Context, sessionID string, source i
 	return nil
 }
 
-func flattenPromptText(blocks []acp.ContentBlock) string {
+func promptTitleFromBlocks(blocks []acp.ContentBlock) string {
 	parts := make([]string, 0, len(blocks))
 	for _, block := range blocks {
 		if strings.TrimSpace(block.Type) == acp.ContentBlockTypeText && strings.TrimSpace(block.Text) != "" {
 			parts = append(parts, strings.TrimSpace(block.Text))
 		}
 	}
-	return strings.Join(parts, "\n")
-}
-
-func PromptPreview(blocks []acp.ContentBlock) string {
-	text := flattenPromptText(blocks)
-	if text != "" {
-		return text
+	if len(parts) > 0 {
+		return strings.Join(parts, "\n")
 	}
 	for _, block := range blocks {
 		if strings.TrimSpace(block.Type) == acp.ContentBlockTypeImage {

@@ -2102,6 +2102,69 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	}
 }
 
+func TestPromptTitleFromBlocks(t *testing.T) {
+	if got := promptTitleFromBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: " hello "}}); got != "hello" {
+		t.Fatalf("promptTitleFromBlocks(text) = %q, want %q", got, "hello")
+	}
+	if got := promptTitleFromBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: " first "}, {Type: acp.ContentBlockTypeText, Text: "second"}}); got != "first\nsecond" {
+		t.Fatalf("promptTitleFromBlocks(multi-text) = %q, want %q", got, "first\nsecond")
+	}
+	if got := promptTitleFromBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}}); got != "Sent an image" {
+		t.Fatalf("promptTitleFromBlocks(image) = %q, want %q", got, "Sent an image")
+	}
+	if got := promptTitleFromBlocks(nil); got != "" {
+		t.Fatalf("promptTitleFromBlocks(nil) = %q, want empty", got)
+	}
+}
+
+func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("client-1", "Task")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	promptEvent := SessionViewEvent{
+		Type:      SessionViewEventTypeACP,
+		SessionID: "client-1",
+		Content: buildACPMethodParamsContent(acp.MethodSessionPrompt, acp.SessionPromptParams{
+			SessionID: "acp-1",
+			Prompt:    []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "run"}},
+		}),
+	}
+	if err := c.RecordEvent(ctx, promptEvent); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	updateEvent := SessionViewEvent{
+		Type:      SessionViewEventTypeACP,
+		SessionID: "client-1",
+		Content: buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
+			SessionID: "acp-1",
+			Update: acp.SessionUpdate{
+				SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+				Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+			},
+		}),
+	}
+	if err := c.RecordEvent(ctx, updateEvent); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
+
+	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "client-1", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionMessages(client-1): %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("client messages len = %d, want 2", len(messages))
+	}
+
+	if _, _, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "acp-1", 0, 0); err == nil {
+		t.Fatalf("ReadSessionMessages(acp-1) unexpectedly succeeded")
+	}
+}
+
 func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	c := newSessionViewTestClient(t)
 

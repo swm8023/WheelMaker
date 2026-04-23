@@ -99,7 +99,6 @@ type SessionPromptRecord struct {
 }
 
 type SessionTurnRecord struct {
-	TurnID      string
 	SessionID   string
 	PromptIndex int64
 	TurnIndex   int64
@@ -694,7 +693,6 @@ func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionI
 	if err != nil {
 		return nil, fmt.Errorf("load session turn: %w", err)
 	}
-	rec.TurnID = formatPromptTurnSeq(rec.PromptIndex, rec.TurnIndex)
 	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
 	rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
 	return &rec, nil
@@ -719,7 +717,6 @@ func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, session
 		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON, &rec.ExtraJSON); err != nil {
 			return nil, fmt.Errorf("scan session turn: %w", err)
 		}
-		rec.TurnID = formatPromptTurnSeq(rec.PromptIndex, rec.TurnIndex)
 		rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
 		rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
 		out = append(out, rec)

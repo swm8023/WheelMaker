@@ -108,7 +108,6 @@ func (s *sessionPromptState) ensureMaps() {
 
 func (s *sessionPromptState) assignTurn(turn SessionTurnRecord) {
 	s.ensureMaps()
-	turn.TurnID = formatPromptTurnSeq(turn.PromptIndex, turn.TurnIndex)
 	turn.UpdateJSON = normalizeJSONDoc(turn.UpdateJSON, `{}`)
 	turn.ExtraJSON = normalizeJSONDoc(turn.ExtraJSON, `{}`)
 	s.turns[turn.TurnIndex] = turn
@@ -542,9 +541,6 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := decodeSessionViewEventParams(doc, &params); err != nil && !errors.Is(err, errSessionEventPayloadEmpty) {
 			return fmt.Errorf("decode session.new params: %w", err)
 		}
-		if strings.TrimSpace(params.SessionID) != "" {
-			event.SessionID = strings.TrimSpace(params.SessionID)
-		}
 		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(params.Title), event.UpdatedAt, false)
 	case acp.MethodSessionPrompt:
 		var promptResult sessionViewPromptResult
@@ -557,25 +553,16 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
 			return fmt.Errorf("decode session.prompt params: %w", err)
 		}
-		if strings.TrimSpace(params.SessionID) != "" {
-			event.SessionID = strings.TrimSpace(params.SessionID)
-		}
 		return r.handlePromptStartedLocked(ctx, event, params)
 	case acp.MethodSessionUpdate:
 		var params acp.SessionUpdateParams
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
 			return fmt.Errorf("decode session.update params: %w", err)
 		}
-		if strings.TrimSpace(params.SessionID) != "" {
-			event.SessionID = strings.TrimSpace(params.SessionID)
-		}
 		return r.appendACPEventTurnLocked(ctx, event, doc)
 	case acp.MethodRequestPermission:
 		var params acp.PermissionRequestParams
 		if err := decodeSessionViewEventParams(doc, &params); err == nil {
-			if strings.TrimSpace(params.SessionID) != "" {
-				event.SessionID = strings.TrimSpace(params.SessionID)
-			}
 		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
 			return fmt.Errorf("decode request_permission params: %w", err)
 		}
@@ -592,7 +579,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	if err != nil {
 		return err
 	}
-	promptTitle := strings.TrimSpace(PromptPreview(params.Prompt))
+	promptTitle := strings.TrimSpace(promptTitleFromBlocks(params.Prompt))
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
 		PromptIndex: state.promptIndex,
@@ -663,7 +650,6 @@ func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawC
 		turnIndex = 1
 	}
 	return SessionTurnRecord{
-		TurnID:      formatPromptTurnSeq(promptIndex, turnIndex),
 		SessionID:   strings.TrimSpace(sessionID),
 		PromptIndex: promptIndex,
 		TurnIndex:   turnIndex,
