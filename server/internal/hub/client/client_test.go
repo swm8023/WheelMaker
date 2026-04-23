@@ -1843,8 +1843,8 @@ func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 		t.Fatalf("messages[1].UpdateIndex = %d, want 2", messages[1].UpdateIndex)
 	}
 	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
-	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
-		t.Fatalf("messages[1] text = %q, want world", extractTextChunk(update2.Content))
+	if text := extractTextChunk(update2.Content); text != "hello world" {
+		t.Fatalf("messages[1] text = %q, want %q", text, "hello world")
 	}
 }
 
@@ -2241,8 +2241,8 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if stored[1].UpdateIndex != 2 {
 		t.Fatalf("stored assistant UpdateIndex = %d, want 2", stored[1].UpdateIndex)
 	}
-	if text := strings.TrimSpace(extractTextChunk(updateStored.Content)); text != "world" {
-		t.Fatalf("stored assistant text = %q, want world", text)
+	if text := strings.TrimSpace(extractTextChunk(updateStored.Content)); text != "hello world" {
+		t.Fatalf("stored assistant text = %q, want hello world", text)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
@@ -2262,8 +2262,8 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 		t.Fatalf("messages[1].UpdateIndex = %d, want 2", messages[1].UpdateIndex)
 	}
 	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
-	if strings.TrimSpace(extractTextChunk(update2.Content)) != "world" {
-		t.Fatalf("message[1] text = %q, want world", extractTextChunk(update2.Content))
+	if strings.TrimSpace(extractTextChunk(update2.Content)) != "hello world" {
+		t.Fatalf("message[1] text = %q, want hello world", extractTextChunk(update2.Content))
 	}
 }
 
@@ -2539,8 +2539,8 @@ func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 		t.Fatalf("assistant turn updateIndex = %d, want 2", turns[1].UpdateIndex)
 	}
 	update2 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
-	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "world" {
-		t.Fatalf("assistant text = %q, want world", text)
+	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "hello world" {
+		t.Fatalf("assistant text = %q, want hello world", text)
 	}
 	if update2.Status != "done" {
 		t.Fatalf("assistant status = %q, want done", update2.Status)

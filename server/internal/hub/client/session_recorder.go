@@ -206,7 +206,10 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingRaw string, plan sessio
 			return SessionTurnRecord{}, err
 		}
 	default:
-		merged.UpdateJSON = normalizeJSONDoc(incomingRaw, merged.UpdateJSON)
+		merged.UpdateJSON, err = mergeSessionUpdateDefaultJSON(existing.UpdateJSON, incomingRaw)
+		if err != nil {
+			return SessionTurnRecord{}, err
+		}
 	}
 	return merged, nil
 }
@@ -214,6 +217,14 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingRaw string, plan sessio
 func mergeSessionUpdateToolJSON(existingRaw, incomingRaw string) (string, error) {
 	return mergeSessionUpdateDoc(existingRaw, incomingRaw, func(base, incoming acp.SessionUpdate) acp.SessionUpdate {
 		return mergeSessionUpdateFields(base, incoming)
+	})
+}
+
+func mergeSessionUpdateDefaultJSON(existingRaw, incomingRaw string) (string, error) {
+	return mergeSessionUpdateDoc(existingRaw, incomingRaw, func(base, incoming acp.SessionUpdate) acp.SessionUpdate {
+		merged := mergeSessionUpdateFields(base, incoming)
+		merged.Content = mergeSessionUpdateTextContent(base.Content, incoming.Content)
+		return merged
 	})
 }
 
@@ -249,6 +260,37 @@ func mergeSessionUpdateDoc(existingRaw, incomingRaw string, mergeUpdate func(bas
 		return "", err
 	}
 	return normalizeJSONDoc(string(raw), incomingRaw), nil
+}
+
+func mergeSessionUpdateTextContent(baseRaw, incomingRaw json.RawMessage) json.RawMessage {
+	if len(incomingRaw) == 0 {
+		return cloneJSONRaw(baseRaw)
+	}
+	if len(baseRaw) == 0 {
+		return cloneJSONRaw(incomingRaw)
+	}
+
+	var base map[string]any
+	if err := json.Unmarshal(baseRaw, &base); err != nil {
+		return cloneJSONRaw(incomingRaw)
+	}
+	var incoming map[string]any
+	if err := json.Unmarshal(incomingRaw, &incoming); err != nil {
+		return cloneJSONRaw(incomingRaw)
+	}
+
+	baseText, baseOK := base["text"].(string)
+	incomingText, incomingOK := incoming["text"].(string)
+	if !baseOK || !incomingOK {
+		return cloneJSONRaw(incomingRaw)
+	}
+
+	incoming["text"] = baseText + incomingText
+	raw, err := json.Marshal(incoming)
+	if err != nil {
+		return cloneJSONRaw(incomingRaw)
+	}
+	return cloneJSONRaw(raw)
 }
 
 func mergeSessionPermissionJSON(existingUpdateJSON, existingExtraJSON, incomingRaw string) (string, string, error) {
