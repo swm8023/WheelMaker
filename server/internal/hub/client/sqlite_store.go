@@ -55,7 +55,6 @@ CREATE TABLE IF NOT EXISTS session_turns (
 	turn_index INTEGER NOT NULL,
 	update_index INTEGER NOT NULL DEFAULT 0,
 	update_json TEXT NOT NULL DEFAULT '{}',
-	extra_json TEXT NOT NULL DEFAULT '{}',
 	PRIMARY KEY (session_id, prompt_index, turn_index)
 );
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
@@ -102,7 +101,6 @@ type SessionTurnRecord struct {
 	TurnIndex   int64
 	UpdateIndex int64
 	UpdateJSON  string
-	ExtraJSON   string
 }
 
 type Store interface {
@@ -152,7 +150,7 @@ var expectedStoreSchemaColumns = map[string][]string{
 	"route_bindings":  {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":        {"id", "project_name", "status", "acp_session_id", "agents_json", "title", "created_at", "last_active_at"},
 	"session_prompts": {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
-	"session_turns":   {"session_id", "prompt_index", "turn_index", "update_index", "update_json", "extra_json"},
+	"session_turns":   {"session_id", "prompt_index", "turn_index", "update_index", "update_json"},
 }
 
 type StoreSchemaMismatchError struct {
@@ -652,16 +650,14 @@ func (s *sqliteStore) UpsertSessionTurn(ctx context.Context, rec SessionTurnReco
 		return fmt.Errorf("turn index is required")
 	}
 	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
-	rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
 
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_turns (session_id, prompt_index, turn_index, update_index, update_json, extra_json)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO session_turns (session_id, prompt_index, turn_index, update_index, update_json)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index, turn_index) DO UPDATE SET
 			update_index = CASE WHEN excluded.update_index > session_turns.update_index THEN excluded.update_index ELSE session_turns.update_index END,
-			update_json = excluded.update_json,
-			extra_json = excluded.extra_json
-	`, rec.SessionID, rec.PromptIndex, rec.TurnIndex, rec.UpdateIndex, rec.UpdateJSON, rec.ExtraJSON); err != nil {
+			update_json = excluded.update_json
+	`, rec.SessionID, rec.PromptIndex, rec.TurnIndex, rec.UpdateIndex, rec.UpdateJSON); err != nil {
 		return fmt.Errorf("upsert session turn: %w", err)
 	}
 	return nil
@@ -673,12 +669,12 @@ func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionI
 	}
 	var rec SessionTurnRecord
 	err := s.db.QueryRowContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, t.update_json, t.extra_json
+		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		WHERE s.project_name = ? AND t.session_id = ? AND t.prompt_index = ? AND t.turn_index = ?
 		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex, turnIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON, &rec.ExtraJSON)
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex, turnIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -686,13 +682,12 @@ func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionI
 		return nil, fmt.Errorf("load session turn: %w", err)
 	}
 	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
-	rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
 	return &rec, nil
 }
 
 func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, sessionID string, promptIndex int64) ([]SessionTurnRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, t.update_json, t.extra_json
+		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		WHERE s.project_name = ? AND t.session_id = ? AND t.prompt_index = ?
@@ -706,11 +701,10 @@ func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, session
 	out := []SessionTurnRecord{}
 	for rows.Next() {
 		var rec SessionTurnRecord
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON, &rec.ExtraJSON); err != nil {
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON); err != nil {
 			return nil, fmt.Errorf("scan session turn: %w", err)
 		}
 		rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
-		rec.ExtraJSON = normalizeJSONDoc(rec.ExtraJSON, `{}`)
 		out = append(out, rec)
 	}
 	return out, rows.Err()

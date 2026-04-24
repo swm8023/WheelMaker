@@ -101,16 +101,15 @@ func (s *sessionPromptState) ensureMaps() {
 	}
 }
 
-func (s *sessionPromptState) assignTurn(turn SessionTurnRecord) {
+func (s *sessionPromptState) assignTurn(turn SessionTurnRecord, key sessionTurnKey) {
 	s.ensureMaps()
 	turn.UpdateJSON = normalizeJSONDoc(turn.UpdateJSON, `{}`)
-	turn.ExtraJSON = normalizeJSONDoc(turn.ExtraJSON, `{}`)
 	s.turns[turn.TurnIndex] = turn
 	if turn.TurnIndex >= s.nextTurnIndex {
 		s.nextTurnIndex = turn.TurnIndex + 1
 	}
-	if key := sessionTurnToolCallIDKey(turn.ExtraJSON); key != "" {
-		s.toolTurnByToolCallID[key] = turn.TurnIndex
+	if toolCallID := strings.TrimSpace(key.ToolCallID); toolCallID != "" {
+		s.toolTurnByToolCallID[toolCallID] = turn.TurnIndex
 	}
 }
 
@@ -214,7 +213,6 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingMessage acp.IMMessage, 
 	merged := existing
 	merged.UpdateIndex = maxInt64(existing.UpdateIndex, 0) + 1
 	merged.UpdateJSON = normalizeJSONDoc(existing.UpdateJSON, `{}`)
-	merged.ExtraJSON = normalizeJSONDoc(existing.ExtraJSON, `{}`)
 
 	existingMessage, err := decodeIMMessage(merged.UpdateJSON)
 	if err != nil {
@@ -398,24 +396,16 @@ func buildTurnMessageFromSystemText(text string) (sessionViewTurnMessage, bool, 
 	message := acp.IMMessage{Method: acp.IMMethodSystem, Result: cloneJSONRaw(resultRaw)}
 	return sessionViewTurnMessage{IMMessage: message}, true, nil
 }
-func marshalConvertedMessage(message sessionViewTurnMessage) (string, string, error) {
-	metaRaw, err := json.Marshal(sessionTurnMetaFromMergeKey(message.MergeKey))
-	if err != nil {
-		return "", "", err
-	}
-	return marshalIMMessageWithMeta(message.IMMessage, string(metaRaw))
+func marshalConvertedMessage(message sessionViewTurnMessage) (string, error) {
+	return marshalIMMessage(message.IMMessage)
 }
 
-func marshalIMMessage(message acp.IMMessage) (string, string, error) {
-	return marshalIMMessageWithMeta(message, `{}`)
-}
-
-func marshalIMMessageWithMeta(message acp.IMMessage, metaRaw string) (string, string, error) {
+func marshalIMMessage(message acp.IMMessage) (string, error) {
 	raw, err := json.Marshal(message)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	return normalizeJSONDoc(string(raw), `{}`), normalizeJSONDoc(metaRaw, `{}`), nil
+	return normalizeJSONDoc(string(raw), `{}`), nil
 }
 
 func withIMTurnIndex(messageRaw string, promptIndex, turnIndex int64) (string, error) {
@@ -480,22 +470,8 @@ func stringifyRawJSON(raw json.RawMessage) string {
 	return strings.TrimSpace(string(raw))
 }
 
-type sessionTurnMeta struct {
-	ToolCallID string `json:"toolCallId,omitempty"`
-}
-
-func sessionTurnMetaFromMergeKey(key sessionTurnKey) sessionTurnMeta {
-	return sessionTurnMeta{
-		ToolCallID: strings.TrimSpace(key.ToolCallID),
-	}
-}
-
-func sessionTurnToolCallIDKey(raw string) string {
-	meta := sessionTurnMeta{}
-	if err := json.Unmarshal([]byte(normalizeJSONDoc(raw, `{}`)), &meta); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(meta.ToolCallID)
+func sessionTurnKeyFromMergePlan(plan sessionTurnMergePlan) sessionTurnKey {
+	return sessionTurnKey{ToolCallID: strings.TrimSpace(plan.toolCallID)}
 }
 
 func sessionTurnMethodKey(raw string) string {
@@ -752,7 +728,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	if err != nil {
 		return err
 	}
-	messageRaw, _, err := marshalIMMessage(acp.IMMessage{Method: acp.IMMethodPrompt, Request: cloneJSONRaw(requestRaw)})
+	messageRaw, err := marshalIMMessage(acp.IMMessage{Method: acp.IMMethodPrompt, Request: cloneJSONRaw(requestRaw)})
 	if err != nil {
 		return err
 	}
@@ -761,12 +737,12 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 		return err
 	}
 
-	message := buildSessionTurnRecord(event.SessionID, state.promptIndex, 1, indexedRaw, `{}`)
+	message := buildSessionTurnRecord(event.SessionID, state.promptIndex, 1, indexedRaw)
 	if err := r.appendSessionTurnLocked(ctx, message); err != nil {
 		return err
 	}
 
-	state.assignTurn(message)
+	state.assignTurn(message, sessionTurnKey{})
 	r.promptState[event.SessionID] = state
 	if err := r.upsertSessionProjection(ctx, event.SessionID, promptTitle, event.UpdatedAt, true); err != nil {
 		return err
@@ -797,7 +773,7 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		}
 		indexedMessage := converted.IMMessage
 		indexedMessage.Index = formatPromptTurnSeq(state.promptIndex, turnIndex)
-		indexedIncomingRaw, _, err := marshalIMMessage(indexedMessage)
+		indexedIncomingRaw, err := marshalIMMessage(indexedMessage)
 		if err != nil {
 			return err
 		}
@@ -808,27 +784,27 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		if err := r.appendSessionTurnLocked(ctx, mergedTurn, indexedIncomingRaw); err != nil {
 			return err
 		}
-		state.assignTurn(mergedTurn)
+		state.assignTurn(mergedTurn, sessionTurnKeyFromMergePlan(plan))
 		r.promptState[event.SessionID] = state
 		return nil
 	}
 
 	indexed := converted
 	indexed.IMMessage.Index = formatPromptTurnSeq(state.promptIndex, state.nextTurnIndex)
-	indexedIncomingRaw, incomingMetaRaw, err := marshalConvertedMessage(indexed)
+	indexedIncomingRaw, err := marshalConvertedMessage(indexed)
 	if err != nil {
 		return err
 	}
-	message := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, indexedIncomingRaw, incomingMetaRaw)
+	message := buildSessionTurnRecord(event.SessionID, state.promptIndex, state.nextTurnIndex, indexedIncomingRaw)
 	if err := r.appendSessionTurnLocked(ctx, message, indexedIncomingRaw); err != nil {
 		return err
 	}
-	state.assignTurn(message)
+	state.assignTurn(message, indexed.MergeKey)
 	r.promptState[event.SessionID] = state
 	return nil
 }
 
-func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawContent, metaRaw string) SessionTurnRecord {
+func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawContent string) SessionTurnRecord {
 	if turnIndex <= 0 {
 		turnIndex = 1
 	}
@@ -838,7 +814,6 @@ func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawC
 		TurnIndex:   turnIndex,
 		UpdateIndex: 1,
 		UpdateJSON:  normalizeJSONDoc(rawContent, `{}`),
-		ExtraJSON:   normalizeJSONDoc(metaRaw, `{}`),
 	}
 }
 
@@ -933,7 +908,7 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 	}
 	state := newSessionPromptState(latest.PromptIndex, 1)
 	for i := range messages {
-		state.assignTurn(messages[i])
+		state.assignTurn(messages[i], sessionTurnKey{})
 	}
 	r.promptState[sessionID] = state
 	return state, nil
@@ -970,7 +945,7 @@ func (r *SessionRecorder) currentPromptStateLocked(ctx context.Context, sessionI
 	}
 	state := newSessionPromptState(latest.PromptIndex, 1)
 	for i := range messages {
-		state.assignTurn(messages[i])
+		state.assignTurn(messages[i], sessionTurnKey{})
 	}
 	r.promptState[sessionID] = state
 	return state, true, nil

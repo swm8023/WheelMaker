@@ -1511,6 +1511,46 @@ func TestCheckStoreSchemaRejectsUnexpectedLegacyTable(t *testing.T) {
 		t.Fatalf("CheckStoreSchema() err = %v, want unexpected session_messages", err)
 	}
 }
+
+func TestNewStoreSessionTurnsSchemaOmitsExtraJSON(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`PRAGMA table_info(session_turns)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(session_turns): %v", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatalf("scan table_info(session_turns): %v", err)
+		}
+		if strings.EqualFold(strings.TrimSpace(name), "extra_json") {
+			t.Fatal("session_turns unexpectedly contains extra_json column")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table_info(session_turns): %v", err)
+	}
+}
+
 func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -1585,7 +1625,6 @@ func TestStoreSessionTurnRoundTrip(t *testing.T) {
 		TurnIndex:   1,
 		UpdateIndex: 1,
 		UpdateJSON:  turnJSON,
-		ExtraJSON:   `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)
 	}
@@ -1644,7 +1683,6 @@ func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 		TurnIndex:   1,
 		UpdateIndex: 1,
 		UpdateJSON:  `{"method":"session/request_permission","id":42,"params":{"toolCall":{"title":"Run tool?"}}}`,
-		ExtraJSON:   `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn initial: %v", err)
 	}
@@ -1654,7 +1692,6 @@ func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 		TurnIndex:   1,
 		UpdateIndex: 2,
 		UpdateJSON:  `{"method":"session/request_permission","id":42,"result":{"outcome":{"outcome":"done"}}}`,
-		ExtraJSON:   `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn merged: %v", err)
 	}
@@ -2869,13 +2906,6 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 		t.Fatalf("tool turn updateIndex = %d, want 2", toolTurn.UpdateIndex)
 	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
-	meta := sessionTurnMeta{}
-	if err := json.Unmarshal([]byte(toolTurn.ExtraJSON), &meta); err != nil {
-		t.Fatalf("unmarshal tool turn extra_json: %v", err)
-	}
-	if meta.ToolCallID != "call-1" {
-		t.Fatalf("tool turn meta.toolCallId = %q, want %q", meta.ToolCallID, "call-1")
-	}
 	if update.SessionUpdate != acp.SessionUpdateToolCallUpdate {
 		t.Fatalf("tool turn sessionUpdate = %q, want %q", update.SessionUpdate, acp.SessionUpdateToolCallUpdate)
 	}
@@ -2987,13 +3017,6 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 		t.Fatalf("tool turn updateIndex = %d, want 3", toolTurn.UpdateIndex)
 	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
-	meta := sessionTurnMeta{}
-	if err := json.Unmarshal([]byte(toolTurn.ExtraJSON), &meta); err != nil {
-		t.Fatalf("unmarshal tool turn extra_json: %v", err)
-	}
-	if meta.ToolCallID != "call-terminal" {
-		t.Fatalf("tool turn meta.toolCallId = %q, want %q", meta.ToolCallID, "call-terminal")
-	}
 	if update.Status != acp.ToolCallStatusCancelled {
 		t.Fatalf("tool turn status = %q, want %q", update.Status, acp.ToolCallStatusCancelled)
 	}

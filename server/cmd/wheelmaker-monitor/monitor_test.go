@@ -116,7 +116,6 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 		TurnIndex:   1,
 		UpdateIndex: 1,
 		UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
-		ExtraJSON:   `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)
 	}
@@ -174,7 +173,6 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 		TurnIndex:   1,
 		UpdateIndex: 1,
 		UpdateJSON:  `{}`,
-		ExtraJSON:   `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)
 	}
