@@ -113,7 +113,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 			AppSecret:         pc.Feishu.AppSecret,
 			VerificationToken: feishuVerificationToken,
 			EncryptKey:        feishuEncryptKey,
-			BlockedUpdates:    pc.IMFilter.Block,
 		})); err != nil {
 			hubLogger(pc.Name).Error("register channel failed type=feishu err=%v", err)
 			_ = c.Close()

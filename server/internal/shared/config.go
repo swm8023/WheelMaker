@@ -22,9 +22,10 @@ type rawAppConfig struct {
 }
 
 type rawProjectConfig struct {
-	Debug  json.RawMessage `json:"debug,omitempty"`
-	IM     json.RawMessage `json:"im,omitempty"`
-	Client json.RawMessage `json:"client,omitempty"`
+	Debug    json.RawMessage `json:"debug,omitempty"`
+	IM       json.RawMessage `json:"im,omitempty"`
+	Client   json.RawMessage `json:"client,omitempty"`
+	IMFilter json.RawMessage `json:"imFilter,omitempty"`
 }
 
 type rawIMConfig struct {
@@ -42,16 +43,6 @@ type ProjectConfig struct {
 	Name     string        `json:"name"`
 	Path     string        `json:"path"`
 	Feishu   *FeishuConfig `json:"feishu,omitempty"`
-	IMFilter IMFilterConf  `json:"imFilter,omitempty"`
-}
-
-// IMFilterConf controls which IM-visible events the IM adapter suppresses.
-type IMFilterConf struct {
-	// Block contains IM-level event types to suppress.
-	// Supported values depend on the channel implementation and commonly include:
-	// thought, tool/tool_call, text, system, plan, config_option_update,
-	// available_commands_update, done/prompt_result.
-	Block []string `json:"block,omitempty"`
 }
 
 // FeishuConfig describes Feishu transport config.
@@ -153,6 +144,9 @@ func validateRemovedLegacyFields(path string, data []byte) error {
 		}
 		if len(project.Client) != 0 {
 			return fmt.Errorf("parse config %s: projects[].client has been removed; provider is auto-detected", path)
+		}
+		if len(project.IMFilter) != 0 {
+			return fmt.Errorf("parse config %s: projects[].imFilter has been removed; Feishu now uses built-in defaults", path)
 		}
 	}
 	return nil

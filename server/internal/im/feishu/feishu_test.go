@@ -82,7 +82,7 @@ func (f *fakeTransport) Run(context.Context) error { return nil }
 
 func TestPublishSessionUpdate_RendersByUpdateType(t *testing.T) {
 	ft := &fakeTransport{}
-	ch := newWithTransport(ft)
+	ch := newWithTransportConfig(ft, Config{BlockedUpdates: []string{}})
 	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
 
 	textUpdate := acp.SessionUpdateParams{
@@ -156,9 +156,9 @@ func TestPublishSessionUpdate_BlockThoughtAtChannelLevel(t *testing.T) {
 	}
 }
 
-func TestPublishSessionUpdate_BlockToolCardsAtChannelLevel(t *testing.T) {
+func TestPublishSessionUpdate_DefaultBlockToolCardsAtChannelLevel(t *testing.T) {
 	ft := &fakeTransport{}
-	ch := newWithTransportConfig(ft, Config{BlockedUpdates: []string{"tool"}})
+	ch := newWithTransport(ft)
 	target := im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}
 
 	err := ch.PublishSessionUpdate(context.Background(), target, acp.SessionUpdateParams{

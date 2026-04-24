@@ -3,8 +3,9 @@
     {
       "name": "local-dev",
       "path": "/path/to/your/project",
-      "imFilter": {
-        "block": ["thought", "tool_call"]
+      "feishu": {
+        "app_id": "cli_local",
+        "app_secret": "local_secret"
       }
     },
     {
@@ -13,9 +14,6 @@
       "feishu": {
         "app_id": "cli_xxx",
         "app_secret": "yyy"
-      },
-      "imFilter": {
-        "block": ["thought", "tool"]
       }
     }
   ],

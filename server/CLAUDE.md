@@ -41,7 +41,7 @@ Full design: [../docs/architecture-3.0.md](../docs/architecture-3.0.md)
 
 ## Config Files
 
-- `~/.wheelmaker/config.json` - project config (IM type, agent, working dir, filters, registry/monitor settings)
+- `~/.wheelmaker/config.json` - project config (IM type, agent, working dir, registry/monitor settings)
 - `~/.wheelmaker/state.json` - runtime state (session IDs, agent metadata)
 
 ## Dev Conventions

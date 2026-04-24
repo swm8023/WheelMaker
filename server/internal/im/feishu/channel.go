@@ -464,6 +464,9 @@ func resolveChatID(target im.SendTarget) string {
 }
 
 func buildBlockedUpdates(values []string) map[string]struct{} {
+	if values == nil {
+		values = []string{"tool_call"}
+	}
 	blocked := make(map[string]struct{}, len(values))
 	for _, value := range values {
 		if key := canonicalBlockedUpdate(value); key != "" {

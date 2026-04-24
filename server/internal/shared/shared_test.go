@@ -64,6 +64,19 @@ func TestLoadConfig_RejectsRemovedProjectClient(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RejectsRemovedProjectIMFilter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := []byte(`{"projects":[{"name":"p","path":".","imFilter":{"block":["tool"]}}]}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	_, err := LoadConfig(path)
+	if err == nil || !strings.Contains(err.Error(), "projects[].imFilter has been removed") {
+		t.Fatalf("err=%v, want removed projects[].imFilter error", err)
+	}
+}
+
 func TestLoadConfig_FeishuSupportsSnakeAndTypoSecretField(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	data := []byte(`{"projects":[{"name":"p","path":".","feishu":{"app_id":"cli_xxx","app_secrect":"secret"}}]}`)
