@@ -1813,7 +1813,7 @@ func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 }
 
 func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T) {
-	converted, ok, err := buildConvertedMessageFromSessionUpdate(acp.SessionUpdate{
+	converted, ok, err := buildTurnMessageFromSessionUpdate(acp.SessionUpdate{
 		SessionUpdate: acp.SessionUpdateToolCallUpdate,
 		ToolCallID:    "call-1",
 		Title:         "build",
@@ -1852,7 +1852,7 @@ func TestBuildConvertedPermissionMessageIncludesRequestMergeKey(t *testing.T) {
 		}),
 	}
 
-	converted, ok, err := buildConvertedPermissionMessage(doc)
+	converted, ok, err := buildTurnMessageFromPermission(doc)
 	if err != nil {
 		t.Fatalf("buildConvertedPermissionMessage: %v", err)
 	}

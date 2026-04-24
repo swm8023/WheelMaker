@@ -143,7 +143,7 @@ type sessionTurnKey struct {
 	PermissionRequestID int64
 }
 
-type sessionViewConvertedMessage struct {
+type sessionViewTurnMessage struct {
 	IMMessage acp.IMMessage
 	MergeKey  sessionTurnKey
 }
@@ -351,35 +351,35 @@ func mergePermissionMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 	return incoming, nil
 }
 
-func buildConvertedMessageFromACPDoc(doc sessionViewACPContentDoc) (sessionViewConvertedMessage, bool, error) {
+func buildTurnMessageFromACPDoc(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
 	switch strings.TrimSpace(doc.Method) {
 	case acp.MethodSessionUpdate:
 		var params acp.SessionUpdateParams
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
 			if errors.Is(err, errSessionEventPayloadEmpty) {
-				return sessionViewConvertedMessage{}, false, nil
+				return sessionViewTurnMessage{}, false, nil
 			}
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
-		return buildConvertedMessageFromSessionUpdate(params.Update)
+		return buildTurnMessageFromSessionUpdate(params.Update)
 	case acp.MethodRequestPermission:
-		return buildConvertedPermissionMessage(doc)
+		return buildTurnMessageFromPermission(doc)
 	default:
-		return sessionViewConvertedMessage{}, false, nil
+		return sessionViewTurnMessage{}, false, nil
 	}
 }
 
-func buildConvertedMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewConvertedMessage, bool, error) {
+func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTurnMessage, bool, error) {
 	method := strings.TrimSpace(update.SessionUpdate)
 	switch method {
 	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
 		message := acp.IMMessage{Method: method}
 		resultRaw, err := json.Marshal(acp.IMTextResult{Text: extractUpdateText(update.Content)})
 		if err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		message.Result = cloneJSONRaw(resultRaw)
-		return sessionViewConvertedMessage{IMMessage: message}, true, nil
+		return sessionViewTurnMessage{IMMessage: message}, true, nil
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 		output := extractUpdateText(update.Content)
 		if strings.TrimSpace(output) == "" {
@@ -393,10 +393,10 @@ func buildConvertedMessageFromSessionUpdate(update acp.SessionUpdate) (sessionVi
 			Output: output,
 		})
 		if err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		message.Result = cloneJSONRaw(resultRaw)
-		return sessionViewConvertedMessage{
+		return sessionViewTurnMessage{
 			IMMessage: message,
 			MergeKey:  sessionTurnKey{ToolCallID: strings.TrimSpace(update.ToolCallID)},
 		}, true, nil
@@ -408,20 +408,20 @@ func buildConvertedMessageFromSessionUpdate(update acp.SessionUpdate) (sessionVi
 		message := acp.IMMessage{Method: acp.IMMethodAgentPlan}
 		resultRaw, err := json.Marshal(entries)
 		if err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		message.Result = cloneJSONRaw(resultRaw)
-		return sessionViewConvertedMessage{IMMessage: message}, true, nil
+		return sessionViewTurnMessage{IMMessage: message}, true, nil
 	default:
-		return sessionViewConvertedMessage{}, false, nil
+		return sessionViewTurnMessage{}, false, nil
 	}
 }
 
-func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewConvertedMessage, bool, error) {
+func buildTurnMessageFromPermission(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
 	if doc.ID <= 0 {
-		return sessionViewConvertedMessage{}, false, nil
+		return sessionViewTurnMessage{}, false, nil
 	}
-	converted := sessionViewConvertedMessage{
+	converted := sessionViewTurnMessage{
 		IMMessage: acp.IMMessage{Method: acp.IMMethodPermission},
 		MergeKey:  sessionTurnKey{PermissionRequestID: doc.ID},
 	}
@@ -429,7 +429,7 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 	if len(doc.Params) > 0 && strings.TrimSpace(string(doc.Params)) != "" {
 		params := acp.PermissionRequestParams{}
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		converted.MergeKey.ToolCallID = strings.TrimSpace(params.ToolCall.ToolCallID)
 		options := make([]acp.IMRequestOption, 0, len(params.Options))
@@ -441,7 +441,7 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 			Options:    options,
 		})
 		if err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		converted.IMMessage.Request = cloneJSONRaw(requestRaw)
 	}
@@ -449,7 +449,7 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 	if len(doc.Result) > 0 && strings.TrimSpace(string(doc.Result)) != "" {
 		response := acp.PermissionResponse{}
 		if err := decodeSessionViewEventResult(doc, &response); err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		selected := strings.TrimSpace(response.Outcome.OptionID)
 		if selected == "" {
@@ -460,18 +460,18 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 			Selected:   selected,
 		})
 		if err != nil {
-			return sessionViewConvertedMessage{}, false, err
+			return sessionViewTurnMessage{}, false, err
 		}
 		converted.IMMessage.Result = cloneJSONRaw(resultRaw)
 	}
 
 	if len(converted.IMMessage.Request) == 0 && len(converted.IMMessage.Result) == 0 {
-		return sessionViewConvertedMessage{}, false, nil
+		return sessionViewTurnMessage{}, false, nil
 	}
 	return converted, true, nil
 }
 
-func marshalConvertedMessage(message sessionViewConvertedMessage) (string, string, error) {
+func marshalConvertedMessage(message sessionViewTurnMessage) (string, string, error) {
 	metaRaw, err := json.Marshal(sessionTurnMetaFromMergeKey(message.MergeKey))
 	if err != nil {
 		return "", "", err
@@ -725,6 +725,17 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	}
 	method := sessionViewMethodFromEvent(event, doc)
 
+	converted := sessionViewTurnMessage{}
+	hasConverted := false
+	if method == acp.MethodSessionUpdate || method == acp.MethodRequestPermission {
+		parsed, ok, err := buildTurnMessageFromACPDoc(doc)
+		if err != nil {
+			return fmt.Errorf("build %s message: %w", method, err)
+		}
+		converted = parsed
+		hasConverted = ok
+	}
+
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 
@@ -752,14 +763,14 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
 			return fmt.Errorf("decode session.update params: %w", err)
 		}
-		return r.appendACPEventMessageLocked(ctx, event, doc)
+		return r.appendACPEventMessageLocked(ctx, event, doc, converted, hasConverted)
 	case acp.MethodRequestPermission:
 		var params acp.PermissionRequestParams
 		if err := decodeSessionViewEventParams(doc, &params); err == nil {
 		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
 			return fmt.Errorf("decode request_permission params: %w", err)
 		}
-		return r.appendACPEventMessageLocked(ctx, event, doc)
+		return r.appendACPEventMessageLocked(ctx, event, doc, converted, hasConverted)
 	case sessionViewMethodSystem:
 		return nil
 	default:
@@ -808,7 +819,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	return nil
 }
 
-func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event SessionViewEvent, doc sessionViewACPContentDoc) error {
+func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event SessionViewEvent, doc sessionViewACPContentDoc, converted sessionViewTurnMessage, hasConverted bool) error {
 	state, ok, err := r.currentPromptStateLocked(ctx, event.SessionID)
 	if err != nil {
 		return err
@@ -823,11 +834,7 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		return err
 	}
 
-	converted, ok, err := buildConvertedMessageFromACPDoc(doc)
-	if err != nil {
-		return err
-	}
-	if !ok {
+	if !hasConverted {
 		return nil
 	}
 
