@@ -4,132 +4,32 @@ import (
 	"context"
 	"strings"
 
-	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 func (s *Session) decidePermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams, _ string) (acp.PermissionResult, error) {
-	if !s.acquirePermissionDecisionSlot(ctx) {
-		return acp.PermissionResult{Outcome: "cancelled"}, nil
+	_ = ctx
+	_ = requestID
+	if optionID := chooseAutoAllowOption(params.Options); optionID != "" {
+		return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
 	}
-	defer s.releasePermissionDecisionSlot()
-
-	s.mu.Lock()
-	yolo := s.yolo
-	s.mu.Unlock()
-	if yolo {
-		if optionID := chooseAutoAllowOption(params.Options); optionID != "" {
-			return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
-		}
-		return acp.PermissionResult{Outcome: "cancelled"}, nil
-	}
-
-	bridge, source, ok := s.imContext()
-	if !ok {
-		return acp.PermissionResult{Outcome: "cancelled"}, nil
-	}
-
-	waitCh := make(chan acp.PermissionResult, 1)
-	s.permissionMu.Lock()
-	s.permissionPending[requestID] = waitCh
-	s.permissionMu.Unlock()
-	defer s.clearPermissionPending(requestID, waitCh)
-
-	if err := bridge.PublishPermissionRequest(ctx, im.SendTarget{SessionID: s.ID, Source: &source}, requestID, params); err != nil {
-		hubLogger(s.projectName).Error("permission publish failed session=%s request=%d err=%v", s.ID, requestID, err)
-		return acp.PermissionResult{Outcome: "cancelled"}, nil
-	}
-	s.recordSessionViewEvent(SessionViewEvent{
-		Type:      SessionViewEventTypeACP,
-		SessionID: s.ID,
-		Content:   buildACPMethodRequestContent(requestID, acp.MethodRequestPermission, params),
-	})
-
-	select {
-	case <-ctx.Done():
-		hubLogger(s.projectName).Warn("permission request timeout/cancelled session=%s request=%d", s.ID, requestID)
-		s.recordSessionViewEvent(SessionViewEvent{
-			Type:      SessionViewEventTypeACP,
-			SessionID: s.ID,
-			Content: buildACPMethodResponseContent(requestID, acp.MethodRequestPermission, acp.PermissionResponse{
-				Outcome: acp.PermissionResult{Outcome: "cancelled"},
-			}),
-		})
-		return acp.PermissionResult{Outcome: "cancelled"}, nil
-	case result := <-waitCh:
-		s.recordSessionViewEvent(SessionViewEvent{
-			Type:      SessionViewEventTypeACP,
-			SessionID: s.ID,
-			Content: buildACPMethodResponseContent(requestID, acp.MethodRequestPermission, acp.PermissionResponse{
-				Outcome: acp.PermissionResult{
-					Outcome:  firstNonEmpty(strings.TrimSpace(result.Outcome), "done"),
-					OptionID: strings.TrimSpace(result.OptionID),
-				},
-			}),
-		})
-		if result.Outcome == "selected" && strings.TrimSpace(result.OptionID) != "" {
-			return result, nil
-		}
-		return acp.PermissionResult{Outcome: "cancelled"}, nil
-	}
-}
-
-func (s *Session) acquirePermissionDecisionSlot(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-s.permissionDecisionCh:
-		return true
-	}
-}
-
-func (s *Session) releasePermissionDecisionSlot() {
-	select {
-	case s.permissionDecisionCh <- struct{}{}:
-	default:
-	}
-}
-
-func (s *Session) resolvePermission(requestID int64, result acp.PermissionResponse) bool {
-	s.permissionMu.Lock()
-	ch, ok := s.permissionPending[requestID]
-	if ok {
-		delete(s.permissionPending, requestID)
-	}
-	s.permissionMu.Unlock()
-	if !ok {
-		return false
-	}
-	select {
-	case ch <- result.Outcome:
-	default:
-	}
-	return true
-}
-
-func (s *Session) clearPermissionPending(requestID int64, ch chan acp.PermissionResult) {
-	s.permissionMu.Lock()
-	defer s.permissionMu.Unlock()
-	current, ok := s.permissionPending[requestID]
-	if ok && current == ch {
-		delete(s.permissionPending, requestID)
-	}
+	return acp.PermissionResult{Outcome: "cancelled"}, nil
 }
 
 func chooseAutoAllowOption(options []acp.PermissionOption) string {
-	// Prefer allow_always so yolo mode permanently grants the permission.
-	// Fall back to any allow_* option if allow_always is not offered.
+	// Prefer persistent allow semantics, then one-shot allow semantics.
 	fallback := ""
 	for _, o := range options {
 		kind := strings.ToLower(strings.TrimSpace(o.Kind))
 		id := strings.TrimSpace(o.OptionID)
+		name := strings.ToLower(strings.TrimSpace(o.Name))
 		if id == "" {
 			continue
 		}
-		if kind == "allow_always" {
+		if kind == "allow_always" || kind == "always" {
 			return id
 		}
-		if fallback == "" && strings.HasPrefix(kind, "allow") {
+		if fallback == "" && (kind == "allow_once" || kind == "allow" || kind == "once" || strings.HasPrefix(kind, "allow") || strings.EqualFold(id, "allow") || strings.Contains(name, "allow")) {
 			fallback = id
 		}
 	}

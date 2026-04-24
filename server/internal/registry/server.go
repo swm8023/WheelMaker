@@ -279,7 +279,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = s.writeResponse(state.peer, in.RequestID, in.Method, "", map[string]any{"ok": true})
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
-		case "chat.send", "chat.permission.respond",
+		case "chat.send",
 			"session.list", "session.read", "session.new", "session.send", "session.markRead",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
 			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
@@ -327,7 +327,7 @@ func methodAllowed(role string, method string) bool {
 		return method == "registry.reportProjects" || method == "registry.updateProject" || method == "registry.session.updated" || method == "registry.session.message" || method == "hub.ping"
 	case "client":
 		return method == "project.list" || method == "project.syncCheck" || method == "batch" ||
-			(method == "chat.send" || method == "chat.permission.respond") || strings.HasPrefix(method, "session.") ||
+			method == "chat.send" || strings.HasPrefix(method, "session.") ||
 			strings.HasPrefix(method, "fs.") || strings.HasPrefix(method, "git.")
 	case "monitor":
 		return method == "project.list" || method == "monitor.listHub" || method == "batch" || strings.HasPrefix(method, "monitor.")

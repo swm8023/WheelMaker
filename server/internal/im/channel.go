@@ -77,11 +77,9 @@ type Channel interface {
 
 	OnPrompt(func(ctx context.Context, source ChatRef, params acp.SessionPromptParams) error)
 	OnCommand(func(ctx context.Context, source ChatRef, cmd Command) error)
-	OnPermissionResponse(func(ctx context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error)
 
 	PublishSessionUpdate(ctx context.Context, target SendTarget, params acp.SessionUpdateParams) error
 	PublishPromptResult(ctx context.Context, target SendTarget, result acp.SessionPromptResult) error
-	PublishPermissionRequest(ctx context.Context, target SendTarget, requestID int64, params acp.PermissionRequestParams) error
 	SystemNotify(ctx context.Context, target SendTarget, payload SystemPayload) error
 
 	Run(ctx context.Context) error
@@ -90,7 +88,6 @@ type Channel interface {
 type InboundHandler interface {
 	HandleIMPrompt(ctx context.Context, source ChatRef, params acp.SessionPromptParams) error
 	HandleIMCommand(ctx context.Context, source ChatRef, cmd Command) error
-	HandleIMPermissionResponse(ctx context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error
 }
 
 func ParseCommand(text string) (Command, bool) {

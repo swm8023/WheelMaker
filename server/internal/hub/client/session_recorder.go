@@ -73,9 +73,8 @@ type sessionPromptState struct {
 	promptIndex   int64
 	nextTurnIndex int64
 
-	turns                     map[int64]SessionTurnRecord
-	toolTurnByToolCallID      map[string]int64
-	permissionTurnByRequestID map[int64]int64
+	turns                map[int64]SessionTurnRecord
+	toolTurnByToolCallID map[string]int64
 }
 
 func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState {
@@ -83,11 +82,10 @@ func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState 
 		nextTurnIndex = 1
 	}
 	return sessionPromptState{
-		promptIndex:               promptIndex,
-		nextTurnIndex:             nextTurnIndex,
-		turns:                     map[int64]SessionTurnRecord{},
-		toolTurnByToolCallID:      map[string]int64{},
-		permissionTurnByRequestID: map[int64]int64{},
+		promptIndex:          promptIndex,
+		nextTurnIndex:        nextTurnIndex,
+		turns:                map[int64]SessionTurnRecord{},
+		toolTurnByToolCallID: map[string]int64{},
 	}
 }
 
@@ -97,9 +95,6 @@ func (s *sessionPromptState) ensureMaps() {
 	}
 	if s.toolTurnByToolCallID == nil {
 		s.toolTurnByToolCallID = map[string]int64{}
-	}
-	if s.permissionTurnByRequestID == nil {
-		s.permissionTurnByRequestID = map[int64]int64{}
 	}
 	if s.nextTurnIndex <= 0 {
 		s.nextTurnIndex = 1
@@ -117,30 +112,23 @@ func (s *sessionPromptState) assignTurn(turn SessionTurnRecord) {
 	if key := sessionTurnToolCallIDKey(turn.ExtraJSON); key != "" {
 		s.toolTurnByToolCallID[key] = turn.TurnIndex
 	}
-	if requestID := sessionTurnPermissionRequestIDKey(turn.ExtraJSON); requestID > 0 {
-		s.permissionTurnByRequestID[requestID] = turn.TurnIndex
-	}
 }
 
 type sessionTurnMergeKind string
 
 const (
-	sessionTurnMergeNone       sessionTurnMergeKind = ""
-	sessionTurnMergeTool       sessionTurnMergeKind = "tool"
-	sessionTurnMergeText       sessionTurnMergeKind = "text"
-	sessionTurnMergePermission sessionTurnMergeKind = "permission"
+	sessionTurnMergeNone sessionTurnMergeKind = ""
+	sessionTurnMergeTool sessionTurnMergeKind = "tool"
+	sessionTurnMergeText sessionTurnMergeKind = "text"
 )
 
 type sessionTurnMergePlan struct {
-	kind                sessionTurnMergeKind
-	toolCallID          string
-	requestID           int64
-	hasPermissionResult bool
+	kind       sessionTurnMergeKind
+	toolCallID string
 }
 
 type sessionTurnKey struct {
-	ToolCallID          string
-	PermissionRequestID int64
+	ToolCallID string
 }
 
 type sessionViewTurnMessage struct {
@@ -194,16 +182,6 @@ func getMergedTurn(state sessionPromptState, doc sessionViewACPContentDoc) (int6
 				}
 			}
 		}
-	case acp.MethodRequestPermission:
-		if doc.ID <= 0 {
-			return 0, plan, nil
-		}
-		plan.kind = sessionTurnMergePermission
-		plan.requestID = doc.ID
-		plan.hasPermissionResult = len(doc.Result) > 0 && strings.TrimSpace(string(doc.Result)) != ""
-		if turnIndex := state.permissionTurnByRequestID[plan.requestID]; turnIndex > 0 {
-			return turnIndex, plan, nil
-		}
 	}
 	return 0, plan, nil
 }
@@ -229,16 +207,6 @@ func getMergedTurnFromTurnMessage(state sessionPromptState, turn sessionViewTurn
 				return lastTurnIndex, plan
 			}
 		}
-	case acp.IMMethodPermission:
-		if turn.MergeKey.PermissionRequestID <= 0 {
-			return 0, plan
-		}
-		plan.kind = sessionTurnMergePermission
-		plan.requestID = turn.MergeKey.PermissionRequestID
-		plan.hasPermissionResult = len(turn.IMMessage.Result) > 0 && strings.TrimSpace(string(turn.IMMessage.Result)) != ""
-		if turnIndex := state.permissionTurnByRequestID[plan.requestID]; turnIndex > 0 {
-			return turnIndex, plan
-		}
 	}
 	return 0, plan
 }
@@ -257,8 +225,6 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingMessage acp.IMMessage, 
 	switch plan.kind {
 	case sessionTurnMergeTool:
 		mergedMessage, err = mergeToolResultMessage(existingMessage, incomingMessage)
-	case sessionTurnMergePermission:
-		mergedMessage, err = mergePermissionMessage(existingMessage, incomingMessage)
 	case sessionTurnMergeText:
 		mergedMessage, err = mergeTextResultMessage(existingMessage, incomingMessage)
 	default:
@@ -344,47 +310,6 @@ func mergeToolResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 	return incoming, nil
 }
 
-func mergePermissionMessage(existing, incoming acp.IMMessage) (acp.IMMessage, error) {
-	if len(incoming.Request) == 0 {
-		incoming.Request = cloneJSONRaw(existing.Request)
-	}
-	if len(incoming.Result) == 0 {
-		incoming.Result = cloneJSONRaw(existing.Result)
-		return incoming, nil
-	}
-
-	inc := acp.IMPermissionResult{}
-	if err := json.Unmarshal(incoming.Result, &inc); err != nil {
-		return acp.IMMessage{}, err
-	}
-	if strings.TrimSpace(inc.ToolCallID) == "" && len(incoming.Request) > 0 {
-		request := acp.IMPermissionRequest{}
-		if err := json.Unmarshal(incoming.Request, &request); err == nil {
-			inc.ToolCallID = strings.TrimSpace(request.ToolCallID)
-		}
-	}
-
-	if len(existing.Result) > 0 {
-		base := acp.IMPermissionResult{}
-		if err := json.Unmarshal(existing.Result, &base); err != nil {
-			return acp.IMMessage{}, err
-		}
-		if strings.TrimSpace(inc.ToolCallID) == "" {
-			inc.ToolCallID = strings.TrimSpace(base.ToolCallID)
-		}
-		if strings.TrimSpace(inc.Selected) == "" {
-			inc.Selected = strings.TrimSpace(base.Selected)
-		}
-	}
-
-	resultRaw, err := json.Marshal(inc)
-	if err != nil {
-		return acp.IMMessage{}, err
-	}
-	incoming.Result = cloneJSONRaw(resultRaw)
-	return incoming, nil
-}
-
 func buildTurnMessageFromACPDoc(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
 	switch strings.TrimSpace(doc.Method) {
 	case acp.MethodSessionUpdate:
@@ -396,8 +321,6 @@ func buildTurnMessageFromACPDoc(doc sessionViewACPContentDoc) (sessionViewTurnMe
 			return sessionViewTurnMessage{}, false, err
 		}
 		return buildTurnMessageFromSessionUpdate(params.Update)
-	case acp.MethodRequestPermission:
-		return buildTurnMessageFromPermission(doc)
 	case acp.IMMethodSystem:
 		return buildTurnMessageFromSystemDoc(doc)
 	default:
@@ -452,61 +375,6 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTur
 		return sessionViewTurnMessage{}, false, nil
 	}
 }
-
-func buildTurnMessageFromPermission(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
-	if doc.ID <= 0 {
-		return sessionViewTurnMessage{}, false, nil
-	}
-	converted := sessionViewTurnMessage{
-		IMMessage: acp.IMMessage{Method: acp.IMMethodPermission},
-		MergeKey:  sessionTurnKey{PermissionRequestID: doc.ID},
-	}
-
-	if len(doc.Params) > 0 && strings.TrimSpace(string(doc.Params)) != "" {
-		params := acp.PermissionRequestParams{}
-		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return sessionViewTurnMessage{}, false, err
-		}
-		converted.MergeKey.ToolCallID = strings.TrimSpace(params.ToolCall.ToolCallID)
-		options := make([]acp.IMRequestOption, 0, len(params.Options))
-		for _, option := range params.Options {
-			options = append(options, acp.IMRequestOption{OptionID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name)})
-		}
-		requestRaw, err := json.Marshal(acp.IMPermissionRequest{
-			ToolCallID: strings.TrimSpace(params.ToolCall.ToolCallID),
-			Options:    options,
-		})
-		if err != nil {
-			return sessionViewTurnMessage{}, false, err
-		}
-		converted.IMMessage.Request = cloneJSONRaw(requestRaw)
-	}
-
-	if len(doc.Result) > 0 && strings.TrimSpace(string(doc.Result)) != "" {
-		response := acp.PermissionResponse{}
-		if err := decodeSessionViewEventResult(doc, &response); err != nil {
-			return sessionViewTurnMessage{}, false, err
-		}
-		selected := strings.TrimSpace(response.Outcome.OptionID)
-		if selected == "" {
-			selected = strings.TrimSpace(response.Outcome.Outcome)
-		}
-		resultRaw, err := json.Marshal(acp.IMPermissionResult{
-			ToolCallID: strings.TrimSpace(converted.MergeKey.ToolCallID),
-			Selected:   selected,
-		})
-		if err != nil {
-			return sessionViewTurnMessage{}, false, err
-		}
-		converted.IMMessage.Result = cloneJSONRaw(resultRaw)
-	}
-
-	if len(converted.IMMessage.Request) == 0 && len(converted.IMMessage.Result) == 0 {
-		return sessionViewTurnMessage{}, false, nil
-	}
-	return converted, true, nil
-}
-
 func buildTurnMessageFromSystemDoc(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
 	if len(doc.Result) == 0 || strings.TrimSpace(string(doc.Result)) == "" {
 		return sessionViewTurnMessage{}, false, nil
@@ -613,14 +481,12 @@ func stringifyRawJSON(raw json.RawMessage) string {
 }
 
 type sessionTurnMeta struct {
-	ToolCallID          string `json:"toolCallId,omitempty"`
-	PermissionRequestID int64  `json:"permissionRequestId,omitempty"`
+	ToolCallID string `json:"toolCallId,omitempty"`
 }
 
 func sessionTurnMetaFromMergeKey(key sessionTurnKey) sessionTurnMeta {
 	return sessionTurnMeta{
-		ToolCallID:          strings.TrimSpace(key.ToolCallID),
-		PermissionRequestID: key.PermissionRequestID,
+		ToolCallID: strings.TrimSpace(key.ToolCallID),
 	}
 }
 
@@ -630,17 +496,6 @@ func sessionTurnToolCallIDKey(raw string) string {
 		return ""
 	}
 	return strings.TrimSpace(meta.ToolCallID)
-}
-
-func sessionTurnPermissionRequestIDKey(raw string) int64 {
-	meta := sessionTurnMeta{}
-	if err := json.Unmarshal([]byte(normalizeJSONDoc(raw, `{}`)), &meta); err != nil {
-		return 0
-	}
-	if meta.PermissionRequestID <= 0 {
-		return 0
-	}
-	return meta.PermissionRequestID
 }
 
 func sessionTurnMethodKey(raw string) string {
@@ -831,18 +686,6 @@ func parseSessionViewEvent(event SessionViewEvent) (sessionViewParsedEvent, erro
 		}
 		parsed.turnMessage = turn
 		parsed.hasTurnMessage = ok
-	case acp.MethodRequestPermission:
-		var params acp.PermissionRequestParams
-		if err := decodeSessionViewEventParams(doc, &params); err == nil {
-		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
-			return sessionViewParsedEvent{}, fmt.Errorf("decode request_permission params: %w", err)
-		}
-		turn, ok, err := buildTurnMessageFromACPDoc(doc)
-		if err != nil {
-			return sessionViewParsedEvent{}, fmt.Errorf("build request_permission message: %w", err)
-		}
-		parsed.turnMessage = turn
-		parsed.hasTurnMessage = ok
 	case sessionViewMethodSystem:
 		if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeSystem)) {
 			turn, ok, err := buildTurnMessageFromSystemText(event.Content)
@@ -883,7 +726,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 			return r.handlePromptFinishedLocked(ctx, parsed.event, parsed.promptStopReason)
 		}
 		return r.handlePromptStartedLocked(ctx, parsed.event, parsed.promptParams)
-	case acp.MethodSessionUpdate, acp.MethodRequestPermission, sessionViewMethodSystem:
+	case acp.MethodSessionUpdate, sessionViewMethodSystem:
 		return r.appendACPEventMessageLocked(ctx, parsed.event, parsed.turnMessage, parsed.hasTurnMessage)
 	default:
 		return nil
@@ -967,10 +810,6 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		}
 		state.assignTurn(mergedTurn)
 		r.promptState[event.SessionID] = state
-		return nil
-	}
-
-	if plan.kind == sessionTurnMergePermission && plan.hasPermissionResult {
 		return nil
 	}
 

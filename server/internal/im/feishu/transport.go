@@ -36,7 +36,6 @@ type Config struct {
 	AppSecret         string
 	VerificationToken string
 	EncryptKey        string
-	YOLO              bool
 	BlockedUpdates    []string
 }
 
@@ -190,7 +189,7 @@ func (f *transportChannel) sendText(chatID, text string) error {
 	if chatID == "" || text == "" {
 		return nil
 	}
-	// Non-tool text breaks the contiguous tool segment in YOLO mode.
+	// Non-tool text breaks the contiguous compact tool segment.
 	f.resetCompactToolStream(chatID)
 	f.textMu.Lock()
 	defer f.textMu.Unlock()
@@ -951,52 +950,7 @@ func (f *transportChannel) sendToolCall(chatID string, tc ToolCallCard) (string,
 	if chatID == "" || toolCallID == "" {
 		return "", nil
 	}
-	if f.cfg.YOLO {
-		err := f.sendToolCallCompact(chatID, update)
-		if err == nil {
-			f.clearReceiveAck(chatID)
-		}
-		return "", err
-	}
-
-	// Tool updates interrupt the current unified stream.
-	f.finalizeUnifiedStream(chatID)
-
-	f.toolMu.Lock()
-	chatCards := f.toolCards[chatID]
-	if chatCards == nil {
-		chatCards = map[string]*toolCardState{}
-		f.toolCards[chatID] = chatCards
-	}
-	st := chatCards[toolCallID]
-	if st == nil {
-		st = &toolCardState{}
-		chatCards[toolCallID] = st
-	}
-	if strings.TrimSpace(update.Status) == "" && strings.TrimSpace(st.update.Status) != "" {
-		update.Status = st.update.Status
-	}
-	if strings.TrimSpace(update.Status) == "" {
-		update.Status = "pending"
-	}
-	if strings.TrimSpace(update.Title) == "" {
-		update.Title = st.update.Title
-	}
-	if strings.TrimSpace(update.Kind) == "" {
-		update.Kind = st.update.Kind
-	}
-	st.update = update
-	if isToolCallTerminalStatus(update.Status) && st.perm != nil {
-		st.perm.active = false
-	}
-	stCopy := *st
-	if st.perm != nil {
-		permCopy := *st.perm
-		stCopy.perm = &permCopy
-	}
-	f.toolMu.Unlock()
-
-	err := f.upsertToolCard(chatID, toolCallID, &stCopy, false)
+	err := f.sendToolCallCompact(chatID, update)
 	if err == nil {
 		f.clearReceiveAck(chatID)
 	}
@@ -1065,9 +1019,6 @@ func (f *transportChannel) upsertToolCard(chatID, toolCallID string, st *toolCar
 }
 
 func (f *transportChannel) resetCompactToolStream(chatID string) {
-	if !f.cfg.YOLO {
-		return
-	}
 	chatID = strings.TrimSpace(chatID)
 	if chatID == "" {
 		return

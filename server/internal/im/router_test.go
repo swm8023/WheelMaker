@@ -8,9 +8,8 @@ import (
 )
 
 type captureInboundClient struct {
-	prompts             []capturedPrompt
-	commands            []capturedCommand
-	permissionResponses []capturedPermissionResponse
+	prompts  []capturedPrompt
+	commands []capturedCommand
 }
 
 type capturedPrompt struct {
@@ -23,12 +22,6 @@ type capturedCommand struct {
 	cmd    Command
 }
 
-type capturedPermissionResponse struct {
-	source    ChatRef
-	requestID int64
-	result    acp.PermissionResponse
-}
-
 func (c *captureInboundClient) HandleIMPrompt(_ context.Context, source ChatRef, params acp.SessionPromptParams) error {
 	c.prompts = append(c.prompts, capturedPrompt{source: source, params: params})
 	return nil
@@ -39,27 +32,16 @@ func (c *captureInboundClient) HandleIMCommand(_ context.Context, source ChatRef
 	return nil
 }
 
-func (c *captureInboundClient) HandleIMPermissionResponse(_ context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error {
-	c.permissionResponses = append(c.permissionResponses, capturedPermissionResponse{
-		source:    source,
-		requestID: requestID,
-		result:    result,
-	})
-	return nil
-}
-
 type captureChannel struct {
 	id string
 
 	runCalled bool
 
-	onPrompt             func(context.Context, ChatRef, acp.SessionPromptParams) error
-	onCommand            func(context.Context, ChatRef, Command) error
-	onPermissionResponse func(context.Context, ChatRef, int64, acp.PermissionResponse) error
+	onPrompt  func(context.Context, ChatRef, acp.SessionPromptParams) error
+	onCommand func(context.Context, ChatRef, Command) error
 
 	updates       []capturedSessionUpdate
 	promptResults []capturedPromptResult
-	permissions   []capturedPermissionRequest
 	systems       []capturedSystem
 }
 
@@ -71,12 +53,6 @@ type capturedSessionUpdate struct {
 type capturedPromptResult struct {
 	target SendTarget
 	result acp.SessionPromptResult
-}
-
-type capturedPermissionRequest struct {
-	target    SendTarget
-	requestID int64
-	params    acp.PermissionRequestParams
 }
 
 type capturedSystem struct {
@@ -94,10 +70,6 @@ func (c *captureChannel) OnCommand(fn func(context.Context, ChatRef, Command) er
 	c.onCommand = fn
 }
 
-func (c *captureChannel) OnPermissionResponse(fn func(context.Context, ChatRef, int64, acp.PermissionResponse) error) {
-	c.onPermissionResponse = fn
-}
-
 func (c *captureChannel) PublishSessionUpdate(_ context.Context, target SendTarget, params acp.SessionUpdateParams) error {
 	c.updates = append(c.updates, capturedSessionUpdate{target: target, params: params})
 	return nil
@@ -105,11 +77,6 @@ func (c *captureChannel) PublishSessionUpdate(_ context.Context, target SendTarg
 
 func (c *captureChannel) PublishPromptResult(_ context.Context, target SendTarget, result acp.SessionPromptResult) error {
 	c.promptResults = append(c.promptResults, capturedPromptResult{target: target, result: result})
-	return nil
-}
-
-func (c *captureChannel) PublishPermissionRequest(_ context.Context, target SendTarget, requestID int64, params acp.PermissionRequestParams) error {
-	c.permissions = append(c.permissions, capturedPermissionRequest{target: target, requestID: requestID, params: params})
 	return nil
 }
 
@@ -236,25 +203,6 @@ func TestPublishPromptResult_SessionBroadcastSendsAllBoundChats(t *testing.T) {
 	}
 }
 
-func TestPublishPermissionRequest_RoutesOnlyToSourceChat(t *testing.T) {
-	ctx := context.Background()
-	router := NewRouter(nil, nil)
-	ch := &captureChannel{id: "feishu"}
-	_ = router.RegisterChannel(ch)
-	source := ChatRef{ChannelID: "feishu", ChatID: "chat-a"}
-
-	err := router.PublishPermissionRequest(ctx, SendTarget{SessionID: "s1", Source: &source}, 42, acp.PermissionRequestParams{
-		SessionID: "acp-1",
-		ToolCall:  acp.ToolCallRef{ToolCallID: "call-1", Title: "Allow?"},
-	})
-	if err != nil {
-		t.Fatalf("PublishPermissionRequest: %v", err)
-	}
-	if len(ch.permissions) != 1 || ch.permissions[0].target.ChatID != "chat-a" || ch.permissions[0].requestID != 42 {
-		t.Fatalf("permissions=%+v", ch.permissions)
-	}
-}
-
 func TestSystemNotify_DirectChatSendsOnlyTarget(t *testing.T) {
 	ctx := context.Background()
 	router := NewRouter(nil, nil)
@@ -267,22 +215,6 @@ func TestSystemNotify_DirectChatSendsOnlyTarget(t *testing.T) {
 	}
 	if len(ch.systems) != 1 || ch.systems[0].target.ChatID != "chat-a" {
 		t.Fatalf("systems=%+v", ch.systems)
-	}
-}
-
-func TestHandlePermissionResponse_ReachesClient(t *testing.T) {
-	ctx := context.Background()
-	client := &captureInboundClient{}
-	router := NewRouter(client, nil)
-	ch := &captureChannel{id: "feishu"}
-	_ = router.RegisterChannel(ch)
-
-	res := acp.PermissionResponse{Outcome: acp.PermissionResult{Outcome: "selected", OptionID: "allow"}}
-	if err := ch.onPermissionResponse(ctx, ChatRef{ChatID: "chat-a"}, 42, res); err != nil {
-		t.Fatalf("onPermissionResponse: %v", err)
-	}
-	if len(client.permissionResponses) != 1 || client.permissionResponses[0].requestID != 42 {
-		t.Fatalf("responses=%+v", client.permissionResponses)
 	}
 }
 

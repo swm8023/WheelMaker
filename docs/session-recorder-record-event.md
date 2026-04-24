@@ -53,13 +53,12 @@ SessionRecorder.RecordEvent(...)
 
 ## 3. 入口事件从哪里产生
 
-当前 `RecordEvent` 主要有 4 组调用源。
+当前 `RecordEvent` 主要有 3 组调用源。
 
 | 来源 | 入口函数 | `SessionViewEvent.Type` | `Content` 形状 |
 | --- | --- | --- | --- |
 | 新建 session | `Client.HandleSessionRequest("session.new")` | `acp` | `buildACPMethodParamsContent(session.new, ...)` |
 | prompt 开始 / 流式 update / prompt 结束 | `Session.handlePromptBlocks` | `acp` | `session.prompt params` / `session.update params` / `session.prompt result` |
-| permission 请求 / 响应 | `Session.decidePermission` | `acp` | `request_permission params/result` |
 | system 文本 | `Session.replyWithTitle` | `system` | 纯文本 |
 
 辅助构造函数都在 [session_recorder.go](../server/internal/hub/client/session_recorder.go) 底部：
@@ -78,15 +77,7 @@ SessionRecorder.RecordEvent(...)
 }
 ```
 
-或：
-
-```json
-{
-  "id": 42,
-  "method": "request_permission",
-  "result": { ... }
-}
-```
+permission 不再进入 recorder，所以这里不会再出现 `request_permission` 形状的事件文档。
 
 `Session.recordSessionViewEvent` 还会补齐外层字段：
 
@@ -330,7 +321,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
             return r.handlePromptFinishedLocked(...)
         }
         return r.handlePromptStartedLocked(...)
-    case session.update, request_permission, system:
+    case session.update, system:
         return r.appendACPEventMessageLocked(...)
     default:
         return nil
@@ -363,7 +354,6 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 - `session.new`：只解析 params 里的 `title`
 - `session.prompt`：先尝试解 result；如果 result 存在，就认为这是 prompt 完成事件，不再解析 params；否则解析 prompt params
 - `session.update`：把 ACP update 转成 `sessionViewTurnMessage`
-- `request_permission`：把 permission 请求 / 响应转成 `sessionViewTurnMessage`
 - `system`：把 ACP system 或 legacy system 文本转成 `sessionViewTurnMessage`
 
 `parseSessionViewEvent` 只做“识别和转换”，不直接写库。
@@ -494,9 +484,9 @@ prompt 开始时会有两次对外可见效果：
 
 这是一个重要事实：prompt 完成是“更新 prompt 行”，不是“新增 turn”。
 
-## 10. `session.update` / `request_permission` / `system` 分支
+## 10. `session.update` / `system` 分支
 
-这三类事件都会进入 `appendACPEventMessageLocked`。
+这两类事件都会进入 `appendACPEventMessageLocked`。
 
 ### 10.1 共同前置条件
 
@@ -505,7 +495,6 @@ prompt 开始时会有两次对外可见效果：
 所以：
 
 - 没有 prompt 的 `session.update` 会被丢弃
-- 没有 prompt 的 permission 请求也会被丢弃
 - legacy system text 只有发生在 prompt 生命周期内才会落库
 
 测试覆盖：
@@ -569,31 +558,7 @@ IMMessage{
 
 plan turn 不参与 merge。
 
-#### d. permission request / response
-
-`request_permission` 会被转换成：
-
-```go
-IMMessage{
-    Method: "permission",
-    Request: IMPermissionRequest{
-        ToolCallID: params.ToolCall.ToolCallID,
-        Options:    ...,
-    },
-    Result: IMPermissionResult{
-        ToolCallID: same toolCallID,
-        Selected:   response.Outcome.OptionID or response.Outcome.Outcome,
-    },
-}
-MergeKey.PermissionRequestID = doc.ID
-MergeKey.ToolCallID = params.ToolCall.ToolCallID
-```
-
-如果只收到 request 没收到 result，`Result` 为空。
-
-如果只收到 result 没 request，转换后仍会是 permission turn，但后面 merge 阶段可能被判定成 orphan 而丢弃。
-
-#### e. system
+#### d. system
 
 两条路都会落成相同的 IM 形状：
 
@@ -936,8 +901,8 @@ type sessionViewMessage struct {
 2. `session_turns` 一条逻辑 turn 只有一行，后续 update 只能覆盖这行，历史增量不会分行保存。
 3. merge 判定依赖内存 `promptState`；`toolCallId` 和 `requestId` 都要先进入 `ExtraJSON` 才能驱动下一次 merge。
 4. 外层 `event.SessionID` 才是最终持久化 session key，内层 ACP `sessionId` 只作为内容字段存在。
-5. 没有 active prompt 时，`session.update` / `request_permission` / `system` 都可能被静默丢弃。
-6. permission result 如果没有对应 request turn，会被静默丢弃。
+5. 没有 active prompt 时，`session.update` / `system` 都可能被静默丢弃。
+6. permission 不再进入 recorder，因此不会生成 turn，也不存在 permission merge/orphan 逻辑。
 7. prompt finish 不会新增 turn，只会更新 `session_prompts.stop_reason`。
 8. `session.updated` 不是“所有变化都发”；它只在 session projection 被 upsert 时发。
 9. `session.read` 与 `session.message` 的语义不同：前者返回 merged snapshot，后者在 merge 时返回带新索引的增量 content。

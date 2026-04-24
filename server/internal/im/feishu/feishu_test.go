@@ -193,35 +193,6 @@ func TestPublishPromptResult_EndTurnMarksDone(t *testing.T) {
 	}
 }
 
-func TestPublishPermissionRequest_StoresRequestIDAndToolCallID(t *testing.T) {
-	ft := &fakeTransport{}
-	ch := newWithTransport(ft)
-
-	err := ch.PublishPermissionRequest(context.Background(), im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}, 42, acp.PermissionRequestParams{
-		SessionID: "acp-1",
-		ToolCall:  acp.ToolCallRef{ToolCallID: "call-1", Title: "Write file"},
-		Options: []acp.PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("PublishPermissionRequest: %v", err)
-	}
-	if got := ch.pendingByRequestID[42].ToolCallID; got != "call-1" {
-		t.Fatalf("toolCallID=%q, want call-1", got)
-	}
-	if len(ft.cards) != 1 {
-		t.Fatalf("cards=%+v", ft.cards)
-	}
-	card, ok := ft.cards[0].card.(OptionsCard)
-	if !ok {
-		t.Fatalf("card type=%T", ft.cards[0].card)
-	}
-	if card.Meta["request_id"] != "42" || card.Meta["tool_call_id"] != "call-1" {
-		t.Fatalf("card meta=%+v", card.Meta)
-	}
-}
-
 func TestHandleMessage_RoutesPromptAndCommand(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)
@@ -304,79 +275,6 @@ func TestHandleMessage_CommandDoesNotConsumeCachedImage(t *testing.T) {
 		t.Fatalf("cached image should still be merged, got=%+v", gotPrompt)
 	}
 }
-func TestPermissionCardAction_ResolvesWithRequestID(t *testing.T) {
-	ft := &fakeTransport{}
-	ch := newWithTransport(ft)
-
-	var gotRequestID int64
-	var gotResult acp.PermissionResponse
-	ch.OnPermissionResponse(func(_ context.Context, _ im.ChatRef, requestID int64, result acp.PermissionResponse) error {
-		gotRequestID = requestID
-		gotResult = result
-		return nil
-	})
-
-	err := ch.PublishPermissionRequest(context.Background(), im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}, 42, acp.PermissionRequestParams{
-		SessionID: "acp-1",
-		ToolCall:  acp.ToolCallRef{ToolCallID: "call-1", Title: "Write file"},
-		Options: []acp.PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("PublishPermissionRequest: %v", err)
-	}
-
-	ft.onAction(CardActionEvent{
-		ChatID: "chat-a",
-		Value: map[string]string{
-			"kind":       "permission",
-			"request_id": "42",
-			"option_id":  "allow",
-		},
-	})
-
-	if gotRequestID != 42 {
-		t.Fatalf("requestID=%d", gotRequestID)
-	}
-	if gotResult.Outcome.Outcome != "selected" || gotResult.Outcome.OptionID != "allow" {
-		t.Fatalf("result=%+v", gotResult)
-	}
-}
-
-func TestPermissionTextReply_ResolvesWithPendingRequest(t *testing.T) {
-	ft := &fakeTransport{}
-	ch := newWithTransport(ft)
-
-	var gotRequestID int64
-	var gotResult acp.PermissionResponse
-	ch.OnPermissionResponse(func(_ context.Context, _ im.ChatRef, requestID int64, result acp.PermissionResponse) error {
-		gotRequestID = requestID
-		gotResult = result
-		return nil
-	})
-
-	err := ch.PublishPermissionRequest(context.Background(), im.SendTarget{ChannelID: "feishu", ChatID: "chat-a"}, 7, acp.PermissionRequestParams{
-		SessionID: "acp-1",
-		ToolCall:  acp.ToolCallRef{ToolCallID: "call-1", Title: "Write file"},
-		Options: []acp.PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: "allow_once"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("PublishPermissionRequest: %v", err)
-	}
-
-	ft.onMsg(Message{ChatID: "chat-a", Text: "1"})
-
-	if gotRequestID != 7 {
-		t.Fatalf("requestID=%d", gotRequestID)
-	}
-	if gotResult.Outcome.Outcome != "selected" || gotResult.Outcome.OptionID != "allow" {
-		t.Fatalf("result=%+v", gotResult)
-	}
-}
-
 func TestSystemNotify_HelpCardAlwaysCreatesNewMessage(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)

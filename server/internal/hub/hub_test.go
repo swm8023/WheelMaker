@@ -91,6 +91,7 @@ func TestStartRejectsSchemaMismatchWithDeleteHint(t *testing.T) {
 		CREATE TABLE projects (
 			project_name TEXT PRIMARY KEY,
 			yolo INTEGER NOT NULL DEFAULT 0,
+			agent_state_json TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)

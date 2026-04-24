@@ -41,7 +41,6 @@ type LogConfig struct {
 type ProjectConfig struct {
 	Name     string        `json:"name"`
 	Path     string        `json:"path"`
-	YOLO     bool          `json:"yolo,omitempty"`
 	Feishu   *FeishuConfig `json:"feishu,omitempty"`
 	IMFilter IMFilterConf  `json:"imFilter,omitempty"`
 }

@@ -17,15 +17,13 @@ import (
 type Channel struct {
 	mu sync.Mutex
 
-	onPrompt           func(context.Context, im.ChatRef, acp.SessionPromptParams) error
-	onCommand          func(context.Context, im.ChatRef, im.Command) error
-	onPermissionResult func(context.Context, im.ChatRef, int64, acp.PermissionResponse) error
+	onPrompt  func(context.Context, im.ChatRef, acp.SessionPromptParams) error
+	onCommand func(context.Context, im.ChatRef, im.Command) error
 
 	projectID string
 	publish   func(string, any) error
 	seq       atomic.Int64
 	sessions  map[string]*chatSession
-	pending   map[int64]pendingPermission
 }
 
 type chatSession struct {
@@ -40,11 +38,6 @@ type chatSession struct {
 	activeThoughtID   string
 }
 
-type pendingPermission struct {
-	ChatID  string
-	Options []acp.PermissionOption
-}
-
 type chatSendPayload struct {
 	ChatID string             `json:"chatId"`
 	Text   string             `json:"text,omitempty"`
@@ -55,16 +48,9 @@ type chatSessionReadPayload struct {
 	ChatID string `json:"chatId"`
 }
 
-type chatPermissionResponsePayload struct {
-	ChatID    string `json:"chatId"`
-	RequestID int64  `json:"requestId"`
-	OptionID  string `json:"optionId"`
-}
-
 func New() *Channel {
 	return &Channel{
 		sessions: make(map[string]*chatSession),
-		pending:  make(map[int64]pendingPermission),
 	}
 }
 
@@ -79,12 +65,6 @@ func (c *Channel) OnPrompt(handler func(context.Context, im.ChatRef, acp.Session
 func (c *Channel) OnCommand(handler func(context.Context, im.ChatRef, im.Command) error) {
 	c.mu.Lock()
 	c.onCommand = handler
-	c.mu.Unlock()
-}
-
-func (c *Channel) OnPermissionResponse(handler func(context.Context, im.ChatRef, int64, acp.PermissionResponse) error) {
-	c.mu.Lock()
-	c.onPermissionResult = handler
 	c.mu.Unlock()
 }
 
@@ -153,38 +133,6 @@ func (c *Channel) HandleChatRequest(ctx context.Context, method string, projectI
 			}
 		}
 		return map[string]any{"ok": true, "chatId": chatID}, nil
-	case "chat.permission.respond":
-		var req chatPermissionResponsePayload
-		if err := decodePayload(payload, &req); err != nil {
-			return nil, fmt.Errorf("invalid chat.permission.respond payload: %w", err)
-		}
-		chatID := strings.TrimSpace(req.ChatID)
-		optionID := strings.TrimSpace(req.OptionID)
-		if chatID == "" || req.RequestID < 1 || optionID == "" {
-			return nil, fmt.Errorf("chatId, requestId, and optionId are required")
-		}
-		c.mu.Lock()
-		pending := c.pending[req.RequestID]
-		delete(c.pending, req.RequestID)
-		handler := c.onPermissionResult
-		c.mu.Unlock()
-		if pending.ChatID == "" || pending.ChatID != chatID {
-			return nil, fmt.Errorf("permission request not found")
-		}
-		if !hasPermissionOption(pending.Options, optionID) {
-			return nil, fmt.Errorf("permission option not found: %s", optionID)
-		}
-		if handler != nil {
-			if err := handler(ctx, im.ChatRef{ChannelID: c.ID(), ChatID: chatID}, req.RequestID, acp.PermissionResponse{
-				Outcome: acp.PermissionResult{
-					Outcome:  "selected",
-					OptionID: optionID,
-				},
-			}); err != nil {
-				return nil, err
-			}
-		}
-		return map[string]any{"ok": true, "chatId": chatID, "requestId": req.RequestID}, nil
 	default:
 		return nil, fmt.Errorf("unsupported chat method: %s", method)
 	}
@@ -233,31 +181,6 @@ func (c *Channel) PublishPromptResult(ctx context.Context, target im.SendTarget,
 		return fmt.Errorf("im app: chat is empty")
 	}
 	return c.finishStreamingMessages(chatID, target.SessionID, result.StopReason)
-}
-
-func (c *Channel) PublishPermissionRequest(ctx context.Context, target im.SendTarget, requestID int64, params acp.PermissionRequestParams) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	chatID := resolveChatID(target)
-	if chatID == "" {
-		return fmt.Errorf("im app: chat is empty")
-	}
-	c.mu.Lock()
-	c.pending[requestID] = pendingPermission{
-		ChatID:  chatID,
-		Options: append([]acp.PermissionOption(nil), params.Options...),
-	}
-	c.mu.Unlock()
-	return c.appendNewMessage(chatID, map[string]any{
-		"sessionId": target.SessionID,
-		"role":      "system",
-		"kind":      "permission",
-		"text":      fmt.Sprintf("Permission required: %s", strings.TrimSpace(params.ToolCall.Title)),
-		"status":    "needs_action",
-		"requestId": requestID,
-		"options":   params.Options,
-	})
 }
 
 func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payload im.SystemPayload) error {

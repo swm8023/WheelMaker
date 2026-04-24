@@ -302,7 +302,7 @@ func (r *Reporter) runSession(ctx context.Context) error {
 			continue
 		}
 		switch in.Method {
-		case "chat.send", "chat.permission.respond":
+		case "chat.send":
 			r.replyChat(conn, in)
 		case "session.list", "session.read", "session.new", "session.send", "session.markRead":
 			r.replySession(conn, in)

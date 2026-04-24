@@ -15,7 +15,7 @@ export interface RegistryEnvelope<TPayload = unknown> {
 }
 
 export type RegistrySessionMessageRole = 'user' | 'assistant' | 'system';
-export type RegistrySessionMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'permission' | 'prompt_result' | 'message';
+export type RegistrySessionMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'prompt_result' | 'message';
 export type RegistrySessionMessageStatus = 'streaming' | 'done' | 'needs_action';
 
 export interface RegistrySessionContentBlock {
@@ -23,12 +23,6 @@ export interface RegistrySessionContentBlock {
   text?: string;
   mimeType?: string;
   data?: string;
-}
-
-export interface RegistrySessionPermissionOption {
-  optionId: string;
-  name: string;
-  kind: string;
 }
 
 export interface RegistrySessionMessage {
@@ -42,9 +36,7 @@ export interface RegistrySessionMessage {
   status: RegistrySessionMessageStatus;
   createdAt: string;
   updatedAt: string;
-  requestId?: number;
   blocks?: RegistrySessionContentBlock[];
-  options?: RegistrySessionPermissionOption[];
 }
 
 export interface RegistrySessionSummary {
@@ -65,10 +57,8 @@ export interface RegistrySessionTurn {
   kind?: RegistrySessionMessageKind;
   text?: string;
   status?: RegistrySessionMessageStatus;
-  requestId?: number;
   toolCallId?: string;
   blocks?: RegistrySessionContentBlock[];
-  options?: RegistrySessionPermissionOption[];
 }
 
 export interface RegistrySessionPrompt {
@@ -102,7 +92,6 @@ export interface RegistrySessionMessageEventPayload {
 }
 
 export type RegistryChatContentBlock = RegistrySessionContentBlock;
-export type RegistryChatPermissionOption = RegistrySessionPermissionOption;
 export type RegistryChatMessage = RegistrySessionMessage;
 export type RegistryChatSession = RegistrySessionSummary;
 export type RegistryChatSessionReadResponse = RegistrySessionReadResponse;

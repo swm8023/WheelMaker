@@ -245,7 +245,6 @@ function normalizeChatKind(value: unknown): RegistryChatMessage['kind'] {
     value === 'image' ||
     value === 'thought' ||
     value === 'tool' ||
-    value === 'permission' ||
     value === 'prompt_result' ||
     value === 'message'
     ? value
@@ -310,6 +309,9 @@ function decodeSessionMessageFromEventPayload(
   try {
     const doc = JSON.parse(content) as Record<string, unknown>;
     const method = typeof doc.method === 'string' ? doc.method.trim() : '';
+    if (method === 'request_permission') {
+      return null;
+    }
     const payloadDoc = (doc.payload && typeof doc.payload === 'object')
       ? (doc.payload as Record<string, unknown>)
       : undefined;
@@ -320,9 +322,6 @@ function decodeSessionMessageFromEventPayload(
       ? (doc.result as Record<string, unknown>)
       : undefined;
 
-    if (typeof doc.id === 'number' && Number.isFinite(doc.id)) {
-      message.requestId = doc.id;
-    }
     if (payloadDoc) {
       message.role = normalizeChatRole(payloadDoc.role);
       message.kind = normalizeChatKind(payloadDoc.kind);
@@ -330,14 +329,8 @@ function decodeSessionMessageFromEventPayload(
       if (typeof payloadDoc.text === 'string') {
         message.text = payloadDoc.text;
       }
-      if (typeof payloadDoc.requestId === 'number' && Number.isFinite(payloadDoc.requestId)) {
-        message.requestId = payloadDoc.requestId;
-      }
       if (Array.isArray(payloadDoc.blocks)) {
         message.blocks = payloadDoc.blocks as RegistryChatMessage['blocks'];
-      }
-      if (Array.isArray(payloadDoc.options)) {
-        message.options = payloadDoc.options as RegistryChatMessage['options'];
       }
     }
 
@@ -383,28 +376,6 @@ function decodeSessionMessageFromEventPayload(
       }
       if (typeof update?.status === 'string') {
         message.status = normalizeChatStatus(update.status);
-      }
-    }
-
-    if (method === 'request_permission') {
-      const toolCall = (params?.toolCall && typeof params.toolCall === 'object')
-        ? (params.toolCall as Record<string, unknown>)
-        : undefined;
-      const outcome = (result?.outcome && typeof result.outcome === 'object')
-        ? (result.outcome as Record<string, unknown>)
-        : undefined;
-      message.role = 'system';
-      message.kind = 'permission';
-      if (!message.text && typeof toolCall?.title === 'string') {
-        message.text = toolCall.title;
-      }
-      if (Array.isArray(params?.options) && (!message.options || message.options.length === 0)) {
-        message.options = params.options as RegistryChatMessage['options'];
-      }
-      if (typeof outcome?.outcome === 'string') {
-        message.status = normalizeChatStatus(outcome.outcome);
-      } else {
-        message.status = 'needs_action';
       }
     }
   } catch {
@@ -2242,29 +2213,6 @@ function App() {
     }
   };
 
-  const respondToChatPermission = async (
-    message: RegistryChatMessage,
-    optionId: string,
-  ) => {
-    if (!message.sessionId || !message.requestId) return;
-    try {
-      await service.respondToSessionPermission({
-        sessionId: message.sessionId,
-        requestId: message.requestId,
-        optionId,
-      });
-      setChatMessages(prev =>
-        prev.map(item =>
-          item.messageId === message.messageId
-            ? { ...item, status: 'done' }
-            : item,
-        ),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
   const handleChatFileChange = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
@@ -2424,8 +2372,6 @@ function App() {
       ? text.length > 120
         ? `${text.slice(0, 120)}...`
         : text
-      : message.kind === 'permission'
-      ? 'New permission request'
       : 'New chat message';
 
     notifiedChatMessageIdsRef.current.add(message.messageId);
@@ -2618,7 +2564,6 @@ function App() {
               messageCount: existing?.messageCount ?? 0,
               unreadCount: existing?.unreadCount,
               agent: existing?.agent,
-              status: existing?.status,
             });
           });
         }
@@ -3573,27 +3518,6 @@ function App() {
           </span>
         </div>
         <div className="chat-message-body">{message.text}</div>
-        {message.kind === 'permission' &&
-        message.status === 'needs_action' &&
-        message.options &&
-        message.options.length > 0 ? (
-          <div className="chat-permission-actions">
-            {message.options.map(option => (
-              <button
-                key={`${message.messageId}:${option.optionId}`}
-                type="button"
-                className="chat-permission-button"
-                onClick={() =>
-                  respondToChatPermission(message, option.optionId).catch(
-                    () => undefined,
-                  )
-                }
-              >
-                {option.name || option.optionId}
-              </button>
-            ))}
-          </div>
-        ) : null}
         {message.blocks?.some(block => block.type === 'image' && block.data) ? (
           <div className="chat-image-strip">
             {message.blocks

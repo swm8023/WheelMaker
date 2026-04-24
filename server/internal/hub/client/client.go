@@ -40,7 +40,6 @@ type IMRouter interface {
 	Bind(ctx context.Context, chat im.ChatRef, sessionID string, opts im.BindOptions) error
 	PublishSessionUpdate(ctx context.Context, target im.SendTarget, params acp.SessionUpdateParams) error
 	PublishPromptResult(ctx context.Context, target im.SendTarget, result acp.SessionPromptResult) error
-	PublishPermissionRequest(ctx context.Context, target im.SendTarget, requestID int64, params acp.PermissionRequestParams) error
 	SystemNotify(ctx context.Context, target im.SendTarget, payload im.SystemPayload) error
 	Run(ctx context.Context) error
 }
@@ -51,7 +50,6 @@ type IMRouter interface {
 type Client struct {
 	projectName string
 	cwd         string
-	yolo        bool
 
 	registry *agent.ACPFactory
 
@@ -99,32 +97,6 @@ func (c *Client) ProjectName() string {
 	return c.projectName
 }
 
-// SetYOLO enables/disables always-approve permission mode for this project.
-func (c *Client) SetYOLO(enabled bool) {
-	c.mu.Lock()
-	c.yolo = enabled
-	store := c.store
-	projectName := c.projectName
-	sessions := make([]*Session, 0, len(c.sessions))
-	for _, s := range c.sessions {
-		sessions = append(sessions, s)
-	}
-	c.mu.Unlock()
-	for _, sess := range sessions {
-		sess.mu.Lock()
-		sess.yolo = enabled
-		sess.mu.Unlock()
-	}
-	if c.sessionRecorder != nil {
-		c.sessionRecorder.Close()
-	}
-	if store != nil {
-		if err := store.SaveProject(context.Background(), projectName, ProjectConfig{YOLO: enabled}); err != nil {
-			hubLogger(projectName).Warn("save project config failed err=%v", err)
-		}
-	}
-}
-
 // Start loads persisted state.
 // Agent initialization is deferred until the first incoming IM event (lazy init).
 func (c *Client) Start(ctx context.Context) error {
@@ -137,9 +109,7 @@ func (c *Client) Start(ctx context.Context) error {
 		return fmt.Errorf("client: load route bindings: %w", err)
 	}
 	c.mu.Lock()
-	if cfg != nil {
-		c.yolo = cfg.YOLO
-	}
+	_ = cfg
 	c.routeMap = bindings
 	c.mu.Unlock()
 	go c.persistLoop()
@@ -449,36 +419,6 @@ func (c *Client) HandleIMCommand(ctx context.Context, source im.ChatRef, cmd im.
 	return c.handleIMCommand(ctx, source, cmd.Name, cmd.Args)
 }
 
-func (c *Client) HandleIMPermissionResponse(_ context.Context, source im.ChatRef, requestID int64, result acp.PermissionResponse) error {
-	source = normalizeChatRef(source)
-	if source.ChannelID == "" || source.ChatID == "" {
-		return fmt.Errorf("client im: invalid source")
-	}
-	routeKey := imRouteKey(source)
-
-	c.mu.Lock()
-	sessID := c.routeMap[routeKey]
-	sess := c.sessions[sessID]
-	all := make([]*Session, 0, len(c.sessions))
-	for _, s := range c.sessions {
-		all = append(all, s)
-	}
-	c.mu.Unlock()
-
-	if sess != nil && sess.resolvePermission(requestID, result) {
-		return nil
-	}
-	for _, candidate := range all {
-		if candidate == nil || candidate == sess {
-			continue
-		}
-		if candidate.resolvePermission(requestID, result) {
-			return nil
-		}
-	}
-	return nil
-}
-
 func (c *Client) HandleIMInbound(ctx context.Context, event im.InboundEvent) error {
 	source := normalizeChatRef(im.ChatRef{ChannelID: event.ChannelID, ChatID: event.ChatID})
 	if source.ChannelID == "" || source.ChatID == "" {
@@ -772,7 +712,6 @@ func (c *Client) wireSession(sess *Session) {
 	sess.registry = c.registry
 	sess.imRouter = c.imRouter
 	sess.viewSink = c.viewSink
-	sess.yolo = c.yolo
 	sess.store = c.store
 	if strings.TrimSpace(sess.activeAgent) == "" {
 		sess.activeAgent = c.preferredAvailableAgent()

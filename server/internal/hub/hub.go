@@ -97,7 +97,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 		return nil, fmt.Errorf("new store: %w", err)
 	}
 	c := client.New(store, pc.Name, cwd)
-	c.SetYOLO(pc.YOLO)
 	c.SetSessionViewSink(c)
 	h.clientsByName[pc.Name] = c
 
@@ -114,7 +113,6 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 			AppSecret:         pc.Feishu.AppSecret,
 			VerificationToken: feishuVerificationToken,
 			EncryptKey:        feishuEncryptKey,
-			YOLO:              pc.YOLO,
 			BlockedUpdates:    pc.IMFilter.Block,
 		})); err != nil {
 			hubLogger(pc.Name).Error("register channel failed type=feishu err=%v", err)

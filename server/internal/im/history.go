@@ -10,13 +10,11 @@ const (
 	HistoryInbound  = "inbound"
 	HistoryOutbound = "outbound"
 
-	HistoryKindPrompt             = "prompt"
-	HistoryKindCommand            = "command"
-	HistoryKindPermissionResponse = "permission_response"
-	HistoryKindSessionUpdate      = "session_update"
-	HistoryKindPromptResult       = "prompt_result"
-	HistoryKindPermissionRequest  = "permission_request"
-	HistoryKindSystem             = "system"
+	HistoryKindPrompt        = "prompt"
+	HistoryKindCommand       = "command"
+	HistoryKindSessionUpdate = "session_update"
+	HistoryKindPromptResult  = "prompt_result"
+	HistoryKindSystem        = "system"
 )
 
 type HistoryEvent struct {

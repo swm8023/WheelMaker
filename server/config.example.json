@@ -3,7 +3,6 @@
     {
       "name": "local-dev",
       "path": "/path/to/your/project",
-      "yolo": true,
       "imFilter": {
         "block": ["thought", "tool_call"]
       }
@@ -11,7 +10,6 @@
     {
       "name": "feishu-prod",
       "path": "/path/to/other/project",
-      "yolo": false,
       "feishu": {
         "app_id": "cli_xxx",
         "app_secret": "yyy"

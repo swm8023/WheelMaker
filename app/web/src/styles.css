@@ -1584,23 +1584,6 @@ body,
   margin-top: 10px;
 }
 
-.chat-permission-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.chat-permission-button {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  padding: 6px 10px;
-  cursor: pointer;
-  font: inherit;
-}
-
 .chat-inline-image {
   max-width: min(280px, 100%);
   max-height: 240px;

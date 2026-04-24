@@ -101,45 +101,18 @@ func TestChannelPublishSessionUpdateEmitsChatMessageEvent(t *testing.T) {
 	}
 }
 
-func TestChannelHandlePermissionResponseDispatchesSelection(t *testing.T) {
+func TestChannelRejectsPermissionResponseMethod(t *testing.T) {
 	ch := New()
 	handler, ok := any(ch).(chatRequestHandler)
 	if !ok {
 		t.Fatal("Channel does not implement chat request handling")
 	}
 
-	var gotRequestID int64
-	var gotResult acp.PermissionResponse
-	ch.OnPermissionResponse(func(_ context.Context, _ im.ChatRef, requestID int64, result acp.PermissionResponse) error {
-		gotRequestID = requestID
-		gotResult = result
-		return nil
-	})
-
-	err := ch.PublishPermissionRequest(context.Background(), im.SendTarget{ChatID: "chat-1", SessionID: "sess-1"}, 42, acp.PermissionRequestParams{
-		SessionID: "sess-1",
-		ToolCall:  acp.ToolCallRef{ToolCallID: "tool-1", Title: "Edit file"},
-		Options: []acp.PermissionOption{
-			{OptionID: "allow", Name: "Allow", Kind: "allow"},
-			{OptionID: "deny", Name: "Deny", Kind: "deny"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("PublishPermissionRequest() err = %v", err)
+	_, err := handler.HandleChatRequest(context.Background(), "chat.permission.respond", "hub-a:proj1", json.RawMessage(`{"chatId":"chat-1","requestId":42,"optionId":"allow"}`))
+	if err == nil {
+		t.Fatal("HandleChatRequest() error = nil, want unsupported chat method")
 	}
-
-	resp, err := handler.HandleChatRequest(context.Background(), "chat.permission.respond", "hub-a:proj1", json.RawMessage(`{"chatId":"chat-1","requestId":42,"optionId":"allow"}`))
-	if err != nil {
-		t.Fatalf("HandleChatRequest() err = %v", err)
-	}
-	payload, ok := resp.(map[string]any)
-	if !ok || payload["ok"] != true {
-		t.Fatalf("response=%#v, want ok=true map", resp)
-	}
-	if gotRequestID != 42 {
-		t.Fatalf("requestID=%d, want 42", gotRequestID)
-	}
-	if gotResult.Outcome.Outcome != "selected" || gotResult.Outcome.OptionID != "allow" {
-		t.Fatalf("result=%+v", gotResult)
+	if got := err.Error(); got != "unsupported chat method: chat.permission.respond" {
+		t.Fatalf("HandleChatRequest() err = %q, want unsupported chat method", got)
 	}
 }

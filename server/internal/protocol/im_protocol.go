@@ -7,9 +7,8 @@ import (
 
 const (
 	// Shared inbound/outbound methods.
-	IMMethodPrompt     = "prompt"
-	IMMethodPermission = "permission"
-	IMMethodSystem     = "system"
+	IMMethodPrompt = "prompt"
+	IMMethodSystem = "system"
 
 	// Outbound session update methods.
 	IMMethodAgentMessage = SessionUpdateAgentMessageChunk
@@ -24,16 +23,12 @@ const (
 //   - method=prompt:
 //     request is IMPromptRequest
 //     result is IMPromptResult
-//   - method=permission:
-//     request is IMPermissionRequest (IM -> Hub)
-//     result is IMPermissionResult (Hub -> IM)
 //   - method=agent_message_chunk / agent_thought_chunk:
 //     result is IMTextResult
 //   - method=tool_call:
 //     result is IMToolResult
 //   - method=agent_plan:
 //     result is []IMPlanResult
-//   - method=prompt_done:
 //
 // Request and Result are inlined (no extra type wrapper map).
 // Index is a string sequence marker for ordering/replay.
@@ -50,21 +45,6 @@ type IMPromptRequest struct {
 
 type IMPromptResult struct {
 	StopReason string `json:"stopReason"`
-}
-
-type IMRequestOption struct {
-	OptionID string `json:"optionId"`
-	Name     string `json:"name"`
-}
-
-type IMPermissionRequest struct {
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	Options    []IMRequestOption `json:"options,omitempty"`
-}
-
-type IMPermissionResult struct {
-	ToolCallID string `json:"toolCallId,omitempty"`
-	Selected   string `json:"selected,omitempty"`
 }
 
 type IMTextResult struct {
@@ -89,10 +69,6 @@ func NormalizeIMMethod(method string) string {
 
 func IsIMPromptMethod(method string) bool {
 	return NormalizeIMMethod(method) == IMMethodPrompt
-}
-
-func IsIMPermissionMethod(method string) bool {
-	return NormalizeIMMethod(method) == IMMethodPermission
 }
 
 func IsIMTextResultMethod(method string) bool {

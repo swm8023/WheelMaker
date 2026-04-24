@@ -222,10 +222,6 @@ func (f *fakeIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.S
 	return nil
 }
 
-func (f *fakeIMRouter) PublishPermissionRequest(context.Context, im.SendTarget, int64, acp.PermissionRequestParams) error {
-	return nil
-}
-
 func (f *fakeIMRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
 	f.systems = append(f.systems, fakeIMSystem{target: target, payload: payload})
 	return nil
@@ -289,11 +285,6 @@ func (r *TestCaptureRouter) PublishPromptResult(_ context.Context, target im.Sen
 	}
 	return nil
 }
-
-func (r *TestCaptureRouter) PublishPermissionRequest(context.Context, im.SendTarget, int64, acp.PermissionRequestParams) error {
-	return nil
-}
-
 func (r *TestCaptureRouter) SystemNotify(_ context.Context, target im.SendTarget, payload im.SystemPayload) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -629,9 +620,6 @@ func (f *failingPermissionIMRouter) PublishSessionUpdate(context.Context, im.Sen
 func (f *failingPermissionIMRouter) PublishPromptResult(context.Context, im.SendTarget, acp.SessionPromptResult) error {
 	return nil
 }
-func (f *failingPermissionIMRouter) PublishPermissionRequest(context.Context, im.SendTarget, int64, acp.PermissionRequestParams) error {
-	return errors.New("publish fail")
-}
 func (f *failingPermissionIMRouter) SystemNotify(context.Context, im.SendTarget, im.SystemPayload) error {
 	return nil
 }
@@ -642,7 +630,8 @@ type failingSessionViewSink struct{}
 func (f *failingSessionViewSink) RecordEvent(context.Context, SessionViewEvent) error {
 	return errors.New("session view sink failed")
 }
-func TestPermissionRouter_PublishFailureLogged(t *testing.T) {
+
+func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
 		t.Fatalf("setup logger: %v", err)
@@ -654,9 +643,28 @@ func TestPermissionRouter_PublishFailureLogged(t *testing.T) {
 	s := newSession("sess-1", "/tmp")
 	s.imRouter = &failingPermissionIMRouter{}
 	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
-	_, _ = s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{})
-	if got := buf.String(); got == "" || !strings.Contains(got, "permission publish failed") {
-		t.Fatalf("expected permission publish failure log, got: %q", got)
+	result, err := s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{
+		Options: []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}},
+	})
+	if err != nil {
+		t.Fatalf("SessionRequestPermission: %v", err)
+	}
+	if result.Outcome != "selected" || result.OptionID != "allow" {
+		t.Fatalf("permission result = %+v, want selected allow", result)
+	}
+	if got := buf.String(); strings.Contains(got, "permission publish failed") {
+		t.Fatalf("unexpected permission publish failure log: %q", got)
+	}
+}
+
+func TestChooseAutoAllowOptionRecognizesLegacyOnceKind(t *testing.T) {
+	optionID := chooseAutoAllowOption([]acp.PermissionOption{{
+		OptionID: "allow",
+		Name:     "Allow",
+		Kind:     "once",
+	}})
+	if optionID != "allow" {
+		t.Fatalf("chooseAutoAllowOption() = %q, want allow", optionID)
 	}
 }
 
@@ -1392,7 +1400,6 @@ func TestStoreProjectAgentStateRoundTrip(t *testing.T) {
 	defer store.Close()
 
 	cfg := ProjectConfig{
-		YOLO: true,
 		AgentState: map[string]ProjectAgentState{
 			"codex": {
 				ConfigOptions: []acp.ConfigOption{
@@ -1412,9 +1419,6 @@ func TestStoreProjectAgentStateRoundTrip(t *testing.T) {
 	loaded, err := store.LoadProject(context.Background(), "proj1")
 	if err != nil {
 		t.Fatalf("LoadProject: %v", err)
-	}
-	if !loaded.YOLO {
-		t.Fatal("YOLO = false, want true")
 	}
 	codex := loaded.AgentState["codex"]
 	if got := len(codex.ConfigOptions); got != 3 {
@@ -1441,6 +1445,7 @@ func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 		CREATE TABLE projects (
 			project_name TEXT PRIMARY KEY,
 			yolo INTEGER NOT NULL DEFAULT 0,
+			agent_state_json TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
@@ -1454,7 +1459,7 @@ func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 
 	err = CheckStoreSchema(dbPath)
 	if err == nil {
-		t.Fatal("CheckStoreSchema() error = nil, want mismatch")
+		t.Fatal("CheckStoreSchema() error = nil, want mismatch for projects.yolo column")
 	}
 	if !IsStoreSchemaMismatch(err) {
 		t.Fatalf("IsStoreSchemaMismatch(err) = false, err=%v", err)
@@ -1839,12 +1844,9 @@ func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T
 	if converted.MergeKey.ToolCallID != "call-1" {
 		t.Fatalf("mergeKey.toolCallId = %q, want %q", converted.MergeKey.ToolCallID, "call-1")
 	}
-	if converted.MergeKey.PermissionRequestID != 0 {
-		t.Fatalf("mergeKey.permissionRequestId = %d, want 0", converted.MergeKey.PermissionRequestID)
-	}
 }
 
-func TestBuildConvertedPermissionMessageIncludesRequestMergeKey(t *testing.T) {
+func TestBuildTurnMessageFromACPDocIgnoresPermission(t *testing.T) {
 	doc := sessionViewACPContentDoc{
 		ID:     7,
 		Method: acp.MethodRequestPermission,
@@ -1860,37 +1862,15 @@ func TestBuildConvertedPermissionMessageIncludesRequestMergeKey(t *testing.T) {
 		}),
 	}
 
-	converted, ok, err := buildTurnMessageFromPermission(doc)
+	converted, ok, err := buildTurnMessageFromACPDoc(doc)
 	if err != nil {
-		t.Fatalf("buildConvertedPermissionMessage: %v", err)
+		t.Fatalf("buildTurnMessageFromACPDoc: %v", err)
 	}
-	if !ok {
-		t.Fatalf("buildConvertedPermissionMessage ok = false, want true")
+	if ok {
+		t.Fatalf("buildTurnMessageFromACPDoc ok = true, want false")
 	}
-	if strings.TrimSpace(converted.IMMessage.Method) != acp.IMMethodPermission {
-		t.Fatalf("converted method = %q, want %q", converted.IMMessage.Method, acp.IMMethodPermission)
-	}
-	if converted.MergeKey.PermissionRequestID != 7 {
-		t.Fatalf("mergeKey.permissionRequestId = %d, want 7", converted.MergeKey.PermissionRequestID)
-	}
-	if converted.MergeKey.ToolCallID != "call-7" {
-		t.Fatalf("mergeKey.toolCallId = %q, want %q", converted.MergeKey.ToolCallID, "call-7")
-	}
-
-	request := acp.IMPermissionRequest{}
-	if err := json.Unmarshal(converted.IMMessage.Request, &request); err != nil {
-		t.Fatalf("unmarshal converted request: %v", err)
-	}
-	if strings.TrimSpace(request.ToolCallID) != "call-7" {
-		t.Fatalf("converted request toolCallId = %q, want call-7", request.ToolCallID)
-	}
-
-	result := acp.IMPermissionResult{}
-	if err := json.Unmarshal(converted.IMMessage.Result, &result); err != nil {
-		t.Fatalf("unmarshal converted result: %v", err)
-	}
-	if strings.TrimSpace(result.Selected) != "approved" {
-		t.Fatalf("converted result selected = %q, want approved", result.Selected)
+	if strings.TrimSpace(converted.IMMessage.Method) != "" {
+		t.Fatalf("converted method = %q, want empty", converted.IMMessage.Method)
 	}
 }
 
@@ -2129,7 +2109,7 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 	}
 }
 
-func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
+func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Images")); err != nil {
@@ -2138,16 +2118,13 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "Sent an image", []acp.ContentBlock{{Type: acp.ContentBlockTypeImage, MimeType: "image/png", Data: "abc123"}})); err != nil {
 		t.Fatalf("RecordEvent user image message: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, []acp.PermissionOption{{OptionID: "allow", Name: "Allow", Kind: "allow_once"}})); err != nil {
-		t.Fatalf("RecordEvent permission requested: %v", err)
-	}
 
 	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(context.Background(), "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionMessages: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
 
 	promptMessage := acp.IMMessage{}
@@ -2163,21 +2140,6 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	}
 	if len(promptRequest.ContentBlocks) != 1 || promptRequest.ContentBlocks[0].Type != acp.ContentBlockTypeImage {
 		t.Fatalf("messages[0].request.contentBlocks = %#v, want image block", promptRequest.ContentBlocks)
-	}
-
-	permissionMessage := acp.IMMessage{}
-	if err := json.Unmarshal([]byte(messages[1].Content), &permissionMessage); err != nil {
-		t.Fatalf("unmarshal permission message: %v", err)
-	}
-	if strings.TrimSpace(permissionMessage.Method) != acp.IMMethodPermission {
-		t.Fatalf("messages[1].method = %q, want %q", permissionMessage.Method, acp.IMMethodPermission)
-	}
-	permissionRequest := acp.IMPermissionRequest{}
-	if err := json.Unmarshal(permissionMessage.Request, &permissionRequest); err != nil {
-		t.Fatalf("unmarshal permission request: %v", err)
-	}
-	if len(permissionRequest.Options) != 1 || permissionRequest.Options[0].OptionID != "allow" {
-		t.Fatalf("messages[1].request.options = %#v, want allow option", permissionRequest.Options)
 	}
 }
 
@@ -2481,9 +2443,6 @@ func TestSessionViewUpdateWithoutPromptIsDropped(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("RecordEvent update: %v", err)
 	}
-	if err := c.RecordEvent(ctx, sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
-		t.Fatalf("RecordEvent permission requested: %v", err)
-	}
 
 	messages, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
 	if err != nil {
@@ -2557,11 +2516,15 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "run protected", nil)); err != nil {
 		t.Fatalf("RecordEvent prompt: %v", err)
 	}
+	if err := c.RecordEvent(context.Background(), sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+		Status:        "done",
+	})); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
 	if err := c.RecordEvent(context.Background(), sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
 		t.Fatalf("RecordEvent permission requested: %v", err)
-	}
-	if err := c.RecordEvent(context.Background(), sessionViewPermissionResolvedEvent("sess-1", 42, "done", mustRFC3339Time(t, "2026-04-12T10:02:00Z"))); err != nil {
-		t.Fatalf("RecordEvent permission resolved: %v", err)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
@@ -2577,8 +2540,8 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	if method := decodeTurnMethod(t, messages[0].Content); method != acp.MethodRequestPermission {
-		t.Fatalf("messages[0] method = %q, want %q", method, acp.MethodRequestPermission)
+	if method := decodeTurnMethod(t, messages[0].Content); method != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("messages[0] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
 	}
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
@@ -2754,11 +2717,19 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "run protected", nil)); err != nil {
 		t.Fatalf("RecordEvent prompt: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewPermissionRequestedEvent("sess-1", "Run tool?", 42, nil)); err != nil {
-		t.Fatalf("RecordEvent permission requested: %v", err)
+	if err := c.RecordEvent(context.Background(), sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+		Status:        "streaming",
+	})); err != nil {
+		t.Fatalf("RecordEvent update #1: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewPermissionResolvedEvent("sess-1", 42, "done", mustRFC3339Time(t, "2026-04-12T10:02:00Z"))); err != nil {
-		t.Fatalf("RecordEvent permission resolved: %v", err)
+	if err := c.RecordEvent(context.Background(), sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: " world"}),
+		Status:        "done",
+	})); err != nil {
+		t.Fatalf("RecordEvent update #2: %v", err)
 	}
 
 	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
@@ -2774,8 +2745,8 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	if method := decodeTurnMethod(t, messages[0].Content); method != acp.MethodRequestPermission {
-		t.Fatalf("messages[0] method = %q, want %q", method, acp.MethodRequestPermission)
+	if method := decodeTurnMethod(t, messages[0].Content); method != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("messages[0] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
 	}
 	if got := body["lastIndex"].(int64); got != 1 {
 		t.Fatalf("lastIndex = %d, want 1", got)
@@ -2842,10 +2813,8 @@ func decodeTurnMethod(t *testing.T, raw string) string {
 	msg := acp.IMMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err == nil {
 		switch strings.TrimSpace(msg.Method) {
-		case acp.IMMethodPrompt, "prompt_done":
+		case acp.IMMethodPrompt:
 			return acp.MethodSessionPrompt
-		case acp.IMMethodPermission:
-			return acp.MethodRequestPermission
 		default:
 			return strings.TrimSpace(msg.Method)
 		}
@@ -3024,11 +2993,11 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 	}
 }
 
-func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
+func TestSessionViewPermissionEventsAreIgnored(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
-	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Permission Turn")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Permission Ignored")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
 	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run protected", nil)); err != nil {
@@ -3045,47 +3014,8 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged permission turn)", len(turns))
-	}
-	permTurn := turns[1]
-	if permTurn.UpdateIndex != 2 {
-		t.Fatalf("permission turn updateIndex = %d, want 2", permTurn.UpdateIndex)
-	}
-
-	message := acp.IMMessage{}
-	if err := json.Unmarshal([]byte(permTurn.UpdateJSON), &message); err != nil {
-		t.Fatalf("unmarshal permission turn update_json: %v", err)
-	}
-	if strings.TrimSpace(message.Method) != acp.IMMethodPermission {
-		t.Fatalf("permission turn method = %q, want %q", message.Method, acp.IMMethodPermission)
-	}
-
-	result := acp.IMPermissionResult{}
-	if err := json.Unmarshal(message.Result, &result); err != nil {
-		t.Fatalf("unmarshal permission result: %v", err)
-	}
-	if strings.TrimSpace(result.ToolCallID) != "call-7" {
-		t.Fatalf("permission result toolCallId = %q, want call-7", result.ToolCallID)
-	}
-	if strings.TrimSpace(result.Selected) != "done" {
-		t.Fatalf("permission result selected = %q, want done", result.Selected)
-	}
-
-	request := acp.IMPermissionRequest{}
-	if err := json.Unmarshal(message.Request, &request); err != nil {
-		t.Fatalf("unmarshal permission request: %v", err)
-	}
-	if strings.TrimSpace(request.ToolCallID) != "call-7" {
-		t.Fatalf("permission request toolCallId = %q, want call-7", request.ToolCallID)
-	}
-
-	meta := sessionTurnMeta{}
-	if err := json.Unmarshal([]byte(permTurn.ExtraJSON), &meta); err != nil {
-		t.Fatalf("unmarshal permission turn extra_json: %v", err)
-	}
-	if meta.PermissionRequestID != 7 {
-		t.Fatalf("permission meta.requestId = %d, want 7", meta.PermissionRequestID)
+	if len(turns) != 1 {
+		t.Fatalf("turns len = %d, want 1 (prompt only)", len(turns))
 	}
 }
 func TestSessionViewDropsOrphanPermissionResult(t *testing.T) {
@@ -3221,7 +3151,7 @@ func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.SaveProject(ctx, "proj-a", ProjectConfig{YOLO: false}); err != nil {
+	if err := store.SaveProject(ctx, "proj-a", ProjectConfig{}); err != nil {
 		t.Fatalf("SaveProject() error = %v", err)
 	}
 	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
@@ -3343,7 +3273,7 @@ func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.SaveProject(ctx, "proj-a", ProjectConfig{YOLO: true}); err != nil {
+	if err := store.SaveProject(ctx, "proj-a", ProjectConfig{}); err != nil {
 		t.Fatalf("SaveProject() error = %v", err)
 	}
 	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
@@ -3363,8 +3293,8 @@ func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadProject() error = %v", err)
 	}
-	if !cfg.YOLO {
-		t.Fatalf("LoadProject().YOLO = false, want true")
+	if cfg == nil {
+		t.Fatal("LoadProject() = nil, want config")
 	}
 
 	bindings, err := store.LoadRouteBindings(ctx, "proj-a")

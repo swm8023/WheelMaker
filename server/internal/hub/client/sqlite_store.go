@@ -20,7 +20,6 @@ import (
 const sqliteSchema = `
 CREATE TABLE IF NOT EXISTS projects (
 	project_name TEXT PRIMARY KEY,
-	yolo INTEGER NOT NULL DEFAULT 0,
 	agent_state_json TEXT NOT NULL DEFAULT '{}',
 	created_at TEXT NOT NULL,
 	updated_at TEXT NOT NULL
@@ -72,7 +71,6 @@ type ProjectAgentState struct {
 }
 
 type ProjectConfig struct {
-	YOLO       bool
 	AgentState map[string]ProjectAgentState
 }
 
@@ -150,7 +148,7 @@ func NewStore(dbPath string) (Store, error) {
 }
 
 var expectedStoreSchemaColumns = map[string][]string{
-	"projects":        {"project_name", "yolo", "agent_state_json", "created_at", "updated_at"},
+	"projects":        {"project_name", "agent_state_json", "created_at", "updated_at"},
 	"route_bindings":  {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":        {"id", "project_name", "status", "acp_session_id", "agents_json", "title", "created_at", "last_active_at"},
 	"session_prompts": {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
@@ -298,18 +296,17 @@ func normalizeStoreSchemaName(v string) string {
 }
 
 func (s *sqliteStore) LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT yolo, agent_state_json FROM projects WHERE project_name = ?`, strings.TrimSpace(projectName))
+	row := s.db.QueryRowContext(ctx, `SELECT agent_state_json FROM projects WHERE project_name = ?`, strings.TrimSpace(projectName))
 
-	var yolo int
 	var agentStateJSON string
-	if err := row.Scan(&yolo, &agentStateJSON); err != nil {
+	if err := row.Scan(&agentStateJSON); err != nil {
 		if err == sql.ErrNoRows {
 			return &ProjectConfig{AgentState: map[string]ProjectAgentState{}}, nil
 		}
 		return nil, fmt.Errorf("load project: %w", err)
 	}
 
-	cfg := &ProjectConfig{YOLO: yolo != 0, AgentState: map[string]ProjectAgentState{}}
+	cfg := &ProjectConfig{AgentState: map[string]ProjectAgentState{}}
 	if strings.TrimSpace(agentStateJSON) != "" {
 		if err := json.Unmarshal([]byte(agentStateJSON), &cfg.AgentState); err != nil {
 			return nil, fmt.Errorf("unmarshal agent_state_json: %w", err)
@@ -324,10 +321,6 @@ func (s *sqliteStore) SaveProject(ctx context.Context, projectName string, cfg P
 		return fmt.Errorf("project name is required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	yolo := 0
-	if cfg.YOLO {
-		yolo = 1
-	}
 	if cfg.AgentState == nil {
 		cfg.AgentState = map[string]ProjectAgentState{}
 	}
@@ -336,13 +329,12 @@ func (s *sqliteStore) SaveProject(ctx context.Context, projectName string, cfg P
 		return fmt.Errorf("marshal agent_state_json: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO projects (project_name, yolo, agent_state_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO projects (project_name, agent_state_json, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(project_name) DO UPDATE SET
-			yolo=excluded.yolo,
 			agent_state_json=excluded.agent_state_json,
 			updated_at=excluded.updated_at
-	`, projectName, yolo, string(raw), now, now)
+	`, projectName, string(raw), now, now)
 	if err != nil {
 		return fmt.Errorf("save project: %w", err)
 	}

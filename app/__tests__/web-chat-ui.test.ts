@@ -21,13 +21,13 @@ describe('web chat integration', () => {
     expect(repositoryTs).toContain("method: 'session.send'");
     expect(repositoryTs).not.toContain("method: 'session.markRead'");
     expect(repositoryTs).not.toContain('turnId = typeof input.turnId');
-    expect(repositoryTs).toContain("method: 'chat.permission.respond'");
+    expect(repositoryTs).not.toContain("method: 'chat.permission.respond'");
     expect(workspaceServiceTs).toContain('async listSessions(');
     expect(workspaceServiceTs).toContain('async readSession(');
     expect(workspaceServiceTs).toContain('async createSession(');
     expect(workspaceServiceTs).toContain('async sendSessionMessage(');
     expect(workspaceServiceTs).not.toContain('async markSessionRead(');
-    expect(workspaceServiceTs).toContain('async respondToSessionPermission(');
+    expect(workspaceServiceTs).not.toContain('async respondToSessionPermission(');
     expect(workspaceServiceTs).toContain('private eventListeners = new Set');
     expect(workspaceServiceTs).toContain('private closeListeners = new Set');
     expect(registryTypes).not.toContain('status?: string;');
@@ -46,9 +46,11 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatSelectedIdRef.current = session.sessionId');
     expect(mainTsx).toContain('sessionId');
     expect(mainTsx).toContain('type="file"');
+    expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
     expect(stylesCss).toContain('.chat-message');
+    expect(stylesCss).not.toContain('.chat-permission-button');
   });
 });
 

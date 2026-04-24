@@ -65,7 +65,7 @@ export class RegistryRepository {
     const role = input.role === 'user' || input.role === 'assistant' || input.role === 'system'
       ? input.role
       : 'assistant';
-    const kind = input.kind === 'text' || input.kind === 'image' || input.kind === 'thought' || input.kind === 'tool' || input.kind === 'permission' || input.kind === 'prompt_result' || input.kind === 'message'
+    const kind = input.kind === 'text' || input.kind === 'image' || input.kind === 'thought' || input.kind === 'tool' || input.kind === 'prompt_result' || input.kind === 'message'
       ? input.kind
       : 'text';
     const status = input.status === 'streaming' || input.status === 'done' || input.status === 'needs_action'
@@ -82,9 +82,7 @@ export class RegistryRepository {
       status,
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : '',
       updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
-      requestId: typeof input.requestId === 'number' && Number.isFinite(input.requestId) ? input.requestId : undefined,
       blocks: Array.isArray(input.blocks) ? input.blocks as RegistrySessionMessage['blocks'] : undefined,
-      options: Array.isArray(input.options) ? input.options as RegistrySessionMessage['options'] : undefined,
     };
   }
 
@@ -152,6 +150,9 @@ export class RegistryRepository {
     try {
       const doc = JSON.parse(content) as Record<string, unknown>;
       const method = typeof doc.method === 'string' ? doc.method.trim() : '';
+      if (method === 'request_permission') {
+        return null;
+      }
       const payloadDoc = (doc.payload && typeof doc.payload === 'object')
         ? (doc.payload as Record<string, unknown>)
         : undefined;
@@ -162,14 +163,11 @@ export class RegistryRepository {
         ? (doc.result as Record<string, unknown>)
         : undefined;
 
-      if (typeof doc.id === 'number' && Number.isFinite(doc.id)) {
-        out.requestId = doc.id;
-      }
       if (payloadDoc) {
         out.role = payloadDoc.role === 'user' || payloadDoc.role === 'assistant' || payloadDoc.role === 'system'
           ? payloadDoc.role
           : out.role;
-        out.kind = payloadDoc.kind === 'text' || payloadDoc.kind === 'image' || payloadDoc.kind === 'thought' || payloadDoc.kind === 'tool' || payloadDoc.kind === 'permission' || payloadDoc.kind === 'prompt_result' || payloadDoc.kind === 'message'
+        out.kind = payloadDoc.kind === 'text' || payloadDoc.kind === 'image' || payloadDoc.kind === 'thought' || payloadDoc.kind === 'tool' || payloadDoc.kind === 'prompt_result' || payloadDoc.kind === 'message'
           ? payloadDoc.kind
           : out.kind;
         out.status = payloadDoc.status === 'streaming' || payloadDoc.status === 'done' || payloadDoc.status === 'needs_action'
@@ -178,14 +176,8 @@ export class RegistryRepository {
         if (typeof payloadDoc.text === 'string') {
           out.text = payloadDoc.text;
         }
-        if (typeof payloadDoc.requestId === 'number' && Number.isFinite(payloadDoc.requestId)) {
-          out.requestId = payloadDoc.requestId;
-        }
         if (Array.isArray(payloadDoc.blocks)) {
           out.blocks = payloadDoc.blocks as RegistrySessionMessage['blocks'];
-        }
-        if (Array.isArray(payloadDoc.options)) {
-          out.options = payloadDoc.options as RegistrySessionMessage['options'];
         }
       }
 
@@ -225,28 +217,6 @@ export class RegistryRepository {
         }
         if (!out.text) {
           out.text = updateText;
-        }
-      } else if (method === 'request_permission') {
-        const toolCall = (params?.toolCall && typeof params.toolCall === 'object')
-          ? (params.toolCall as Record<string, unknown>)
-          : undefined;
-        const outcome = (result?.outcome && typeof result.outcome === 'object')
-          ? (result.outcome as Record<string, unknown>)
-          : undefined;
-        out.role = 'system';
-        out.kind = 'permission';
-        if (!out.text && typeof toolCall?.title === 'string') {
-          out.text = toolCall.title;
-        }
-        if (Array.isArray(params?.options) && (!out.options || out.options.length === 0)) {
-          out.options = params.options as RegistrySessionMessage['options'];
-        }
-        if (typeof outcome?.outcome === 'string') {
-          out.status = outcome.outcome === 'streaming' || outcome.outcome === 'done' || outcome.outcome === 'needs_action'
-            ? outcome.outcome
-            : out.status;
-        } else {
-          out.status = 'needs_action';
         }
       }
     } catch {
@@ -338,10 +308,8 @@ export class RegistryRepository {
               kind: turn?.kind as RegistrySessionPrompt['turns'][number]['kind'],
               text: typeof turn?.text === 'string' ? turn.text : undefined,
               status: turn?.status as RegistrySessionPrompt['turns'][number]['status'],
-              requestId: typeof turn?.requestId === 'number' && Number.isFinite(turn.requestId) ? turn.requestId : undefined,
               toolCallId: typeof turn?.toolCallId === 'string' ? turn.toolCallId : undefined,
               blocks: Array.isArray(turn?.blocks) ? (turn.blocks as RegistrySessionMessage['blocks']) : undefined,
-              options: Array.isArray(turn?.options) ? (turn.options as RegistrySessionMessage['options']) : undefined,
             };
           })
           .filter(turn => turn.promptIndex > 0 && turn.turnIndex > 0 && turn.updateIndex > 0),
@@ -361,9 +329,7 @@ export class RegistryRepository {
         status: turn.status,
         createdAt: prompt.updatedAt,
         updatedAt: prompt.updatedAt,
-        requestId: turn.requestId,
         blocks: turn.blocks,
-        options: turn.options,
       })),
     );
     const normalizedMessages = ((Array.isArray(payload.messages) && payload.messages.length > 0) ? payload.messages : flattenedPromptMessages)
@@ -653,23 +619,6 @@ export class RegistryRepository {
     return {
       ok: body.ok ?? false,
       sessionId: body.sessionId ?? payload.sessionId,
-    };
-  }
-
-  async respondToSessionPermission(projectId: string, payload: {sessionId: string; requestId: number; optionId: string}): Promise<{ok: boolean}> {
-    const resp = await this.client.request({
-      method: 'chat.permission.respond',
-      projectId,
-      payload: {
-        chatId: payload.sessionId,
-        requestId: payload.requestId,
-        optionId: payload.optionId,
-      },
-      timeoutMs: 15000,
-    });
-    const body = (resp.payload ?? {}) as {ok?: boolean};
-    return {
-      ok: body.ok ?? false,
     };
   }
 

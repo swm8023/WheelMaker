@@ -72,15 +72,11 @@ type Session struct {
 	prompt   promptState
 	initCond *sync.Cond
 
-	permissionMu         sync.Mutex
-	permissionDecisionCh chan struct{}
-	permissionPending    map[int64]chan acp.PermissionResult
-	timeoutLimiter       *timeoutNotifyLimiter
+	timeoutLimiter *timeoutNotifyLimiter
 
 	// Back-references to Client-owned resources needed by Session methods.
 	projectName string
 	cwd         string
-	yolo        bool
 	registry    *agent.ACPFactory
 	store       Store
 	imRouter    IMRouter
@@ -108,12 +104,9 @@ func newSession(id string, cwd string) *Session {
 		prompt: promptState{
 			activeTCs: make(map[string]struct{}),
 		},
-		permissionDecisionCh: make(chan struct{}, 1),
-		permissionPending:    make(map[int64]chan acp.PermissionResult),
-		timeoutLimiter:       newTimeoutNotifyLimiter(timeoutNotifyCooldown),
+		timeoutLimiter: newTimeoutNotifyLimiter(timeoutNotifyCooldown),
 	}
 	s.initCond = sync.NewCond(&s.mu)
-	s.permissionDecisionCh <- struct{}{}
 	return s
 }
 

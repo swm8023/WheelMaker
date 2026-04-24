@@ -54,10 +54,6 @@ func (r *Router) RegisterChannel(ch Channel) error {
 		source.ChannelID = id
 		return r.HandleCommand(ctx, source, cmd)
 	})
-	ch.OnPermissionResponse(func(ctx context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error {
-		source.ChannelID = id
-		return r.HandlePermissionResponse(ctx, source, requestID, result)
-	})
 	return nil
 }
 
@@ -124,28 +120,6 @@ func (r *Router) HandleCommand(ctx context.Context, source ChatRef, cmd Command)
 	return r.client.HandleIMCommand(ctx, source, cmd)
 }
 
-func (r *Router) HandlePermissionResponse(ctx context.Context, source ChatRef, requestID int64, result acp.PermissionResponse) error {
-	source = normalizeChat(source)
-	if source.ChannelID == "" || source.ChatID == "" {
-		return fmt.Errorf("im: permission response source is invalid")
-	}
-	sessionID := r.lookupSessionID(source)
-	_ = r.history.Append(ctx, HistoryEvent{
-		SessionID: sessionID,
-		Direction: HistoryInbound,
-		Source:    &source,
-		Kind:      HistoryKindPermissionResponse,
-		Payload: struct {
-			RequestID int64
-			Result    acp.PermissionResponse
-		}{RequestID: requestID, Result: result},
-	})
-	if r.client == nil {
-		return nil
-	}
-	return r.client.HandleIMPermissionResponse(ctx, source, requestID, result)
-}
-
 func (r *Router) PublishSessionUpdate(ctx context.Context, target SendTarget, params acp.SessionUpdateParams) error {
 	recipients, err := r.recipients(target)
 	if err != nil {
@@ -204,38 +178,6 @@ func (r *Router) PublishPromptResult(ctx context.Context, target SendTarget, res
 		Payload:   result,
 	})
 	return firstErr
-}
-
-func (r *Router) PublishPermissionRequest(ctx context.Context, target SendTarget, requestID int64, params acp.PermissionRequestParams) error {
-	sessionID := strings.TrimSpace(target.SessionID)
-	if sessionID == "" {
-		return fmt.Errorf("im: permission session is empty")
-	}
-	if target.Source == nil {
-		return fmt.Errorf("im: permission source is empty")
-	}
-	source := normalizeChat(*target.Source)
-	if source.ChannelID == "" || source.ChatID == "" {
-		return fmt.Errorf("im: permission source is invalid")
-	}
-	ch, err := r.channel(source.ChannelID)
-	if err != nil {
-		return err
-	}
-	deliver := deliveryTarget(target, source)
-	err = ch.PublishPermissionRequest(ctx, deliver, requestID, params)
-	_ = r.history.Append(ctx, HistoryEvent{
-		SessionID: sessionID,
-		Direction: HistoryOutbound,
-		Source:    &source,
-		Targets:   []ChatRef{source},
-		Kind:      HistoryKindPermissionRequest,
-		Payload: struct {
-			RequestID int64
-			Params    acp.PermissionRequestParams
-		}{RequestID: requestID, Params: params},
-	})
-	return err
 }
 
 func (r *Router) SystemNotify(ctx context.Context, target SendTarget, payload SystemPayload) error {
