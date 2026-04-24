@@ -51,6 +51,74 @@ type sessionViewMessage struct {
 	Content     string `json:"content"`
 }
 
+var errSessionEventPayloadEmpty = errors.New("session event payload is empty")
+
+type sessionMessagePage struct {
+	afterPromptIndex int64
+	afterTurnIndex   int64
+	lastPromptIndex  int64
+	lastTurnIndex    int64
+	messages         []sessionViewMessage
+}
+
+type sessionPromptState struct {
+	promptIndex   int64
+	nextTurnIndex int64
+
+	turns                map[int64]SessionTurnRecord
+	toolTurnByToolCallID map[string]int64
+}
+
+type sessionViewSessionNewParams struct {
+	SessionID string `json:"sessionId,omitempty"`
+	Title     string `json:"title,omitempty"`
+}
+
+type sessionViewPromptResult struct {
+	StopReason string `json:"stopReason,omitempty"`
+}
+
+type sessionViewACPContentDoc struct {
+	ID     int64           `json:"id,omitempty"`
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+}
+
+type sessionViewParsedEvent struct {
+	event            SessionViewEvent
+	skip             bool
+	method           string
+	sessionTitle     string
+	hasPromptResult  bool
+	promptStopReason string
+	promptParams     acp.SessionPromptParams
+	hasTurnMessage   bool
+	turnMessage      sessionViewTurnMessage
+}
+
+type sessionTurnMergeKind string
+
+const (
+	sessionTurnMergeNone sessionTurnMergeKind = ""
+	sessionTurnMergeTool sessionTurnMergeKind = "tool"
+	sessionTurnMergeText sessionTurnMergeKind = "text"
+)
+
+type sessionTurnMergePlan struct {
+	kind       sessionTurnMergeKind
+	toolCallID string
+}
+
+type sessionTurnKey struct {
+	ToolCallID string
+}
+
+type sessionViewTurnMessage struct {
+	IMMessage acp.IMMessage
+	MergeKey  sessionTurnKey
+}
+
 type SessionRecorder struct {
 	projectName  string
 	store        Store
@@ -117,6 +185,44 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 	return r.recordParsedEventLocked(ctx, parsed)
+}
+
+func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
+	entries, err := r.listSessions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sessionViewSummary, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, r.sessionViewSummaryFromRecord(entry))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].UpdatedAt > out[j].UpdatedAt
+	})
+	return out, nil
+}
+
+func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewMessage, int64, int64, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionViewSummary{}, nil, 0, 0, err
+	}
+	if rec == nil {
+		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
+	}
+	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionViewSummary{}, nil, 0, 0, err
+	}
+	page := newSessionMessagePage(afterPromptIndex, afterTurnIndex)
+	for _, prompt := range prompts {
+		if err := r.appendPromptMessages(ctx, sessionID, prompt.PromptIndex, &page); err != nil {
+			return sessionViewSummary{}, nil, 0, 0, err
+		}
+	}
+
+	return r.sessionViewSummaryFromRecord(*rec), page.messages, page.lastPromptIndex, page.lastTurnIndex, nil
 }
 
 func (r *SessionRecorder) recordParsedEventLocked(ctx context.Context, parsed sessionViewParsedEvent) error {
@@ -259,64 +365,6 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, event 
 	return nil
 }
 
-func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord, rawContent string) {
-	publish := r.eventPublisher()
-	if publish == nil {
-		return
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	content := strings.TrimSpace(rawContent)
-	if content == "" {
-		content = "{}"
-	}
-	_ = publish("registry.session.message", map[string]any{
-		"sessionId":   sessionID,
-		"promptIndex": turn.PromptIndex,
-		"turnIndex":   turn.TurnIndex,
-		"updateIndex": turn.UpdateIndex,
-
-		"content": content,
-	})
-}
-
-func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
-	entries, err := r.listSessions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]sessionViewSummary, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, r.sessionViewSummaryFromRecord(entry))
-	}
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].UpdatedAt > out[j].UpdatedAt
-	})
-	return out, nil
-}
-
-func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewMessage, int64, int64, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	if rec == nil {
-		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
-	}
-	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	page := newSessionMessagePage(afterPromptIndex, afterTurnIndex)
-	for _, prompt := range prompts {
-		if err := r.appendPromptMessages(ctx, sessionID, prompt.PromptIndex, &page); err != nil {
-			return sessionViewSummary{}, nil, 0, 0, err
-		}
-	}
-
-	return r.sessionViewSummaryFromRecord(*rec), page.messages, page.lastPromptIndex, page.lastTurnIndex, nil
-}
-
 func (r *SessionRecorder) appendPromptMessages(ctx context.Context, sessionID string, promptIndex int64, page *sessionMessagePage) error {
 	messages, err := r.store.ListSessionTurns(ctx, r.projectName, sessionID, promptIndex)
 	if err != nil {
@@ -362,6 +410,25 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 	)
 }
 
+func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord, rawContent string) {
+	publish := r.eventPublisher()
+	if publish == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	content := strings.TrimSpace(rawContent)
+	if content == "" {
+		content = "{}"
+	}
+	_ = publish("registry.session.message", map[string]any{
+		"sessionId":   sessionID,
+		"promptIndex": turn.PromptIndex,
+		"turnIndex":   turn.TurnIndex,
+		"updateIndex": turn.UpdateIndex,
+		"content":     content,
+	})
+}
+
 func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 	publish := r.eventPublisher()
 	if publish == nil {
@@ -377,14 +444,6 @@ func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, ag
 		UpdatedAt: lastActiveAt.UTC().Format(time.RFC3339),
 		Agent:     strings.TrimSpace(agent),
 	}
-}
-
-type sessionMessagePage struct {
-	afterPromptIndex int64
-	afterTurnIndex   int64
-	lastPromptIndex  int64
-	lastTurnIndex    int64
-	messages         []sessionViewMessage
 }
 
 func newSessionMessagePage(afterPromptIndex, afterTurnIndex int64) sessionMessagePage {
@@ -418,14 +477,6 @@ func (p sessionMessagePage) includes(turn SessionTurnRecord) bool {
 		return false
 	}
 	return true
-}
-
-type sessionPromptState struct {
-	promptIndex   int64
-	nextTurnIndex int64
-
-	turns                map[int64]SessionTurnRecord
-	toolTurnByToolCallID map[string]int64
 }
 
 func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState {
@@ -558,36 +609,6 @@ func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionI
 		state.assignTurn(messages[i], sessionTurnKey{})
 	}
 	return state, nil
-}
-
-var errSessionEventPayloadEmpty = errors.New("session event payload is empty")
-
-type sessionViewSessionNewParams struct {
-	SessionID string `json:"sessionId,omitempty"`
-	Title     string `json:"title,omitempty"`
-}
-
-type sessionViewPromptResult struct {
-	StopReason string `json:"stopReason,omitempty"`
-}
-
-type sessionViewACPContentDoc struct {
-	ID     int64           `json:"id,omitempty"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-}
-
-type sessionViewParsedEvent struct {
-	event            SessionViewEvent
-	skip             bool
-	method           string
-	sessionTitle     string
-	hasPromptResult  bool
-	promptStopReason string
-	promptParams     acp.SessionPromptParams
-	hasTurnMessage   bool
-	turnMessage      sessionViewTurnMessage
 }
 
 func decodeSessionViewACPContentDoc(content string) (sessionViewACPContentDoc, error) {
@@ -759,28 +780,6 @@ func buildACPMethodResponseContent(id int64, method string, result any) string {
 		"result": result,
 	}
 	return buildACPMethodContentJSON(method, doc)
-}
-
-type sessionTurnMergeKind string
-
-const (
-	sessionTurnMergeNone sessionTurnMergeKind = ""
-	sessionTurnMergeTool sessionTurnMergeKind = "tool"
-	sessionTurnMergeText sessionTurnMergeKind = "text"
-)
-
-type sessionTurnMergePlan struct {
-	kind       sessionTurnMergeKind
-	toolCallID string
-}
-
-type sessionTurnKey struct {
-	ToolCallID string
-}
-
-type sessionViewTurnMessage struct {
-	IMMessage acp.IMMessage
-	MergeKey  sessionTurnKey
 }
 
 func getMergedTurnFromTurnMessage(state sessionPromptState, turn sessionViewTurnMessage) (int64, sessionTurnMergePlan) {
