@@ -22,7 +22,7 @@ const (
 // This protocol uses method-driven payload typing:
 //   - method=prompt:
 //     request is IMPromptRequest
-//     result is IMStopReasonResult
+//     result is IMPromptResult
 //   - method=permission:
 //     request is IMPermissionRequest (IM -> Hub)
 //     result is IMPermissionResult (Hub -> IM)
@@ -47,13 +47,23 @@ type IMPromptRequest struct {
 	ContentBlocks []ContentBlock `json:"contentBlocks,omitempty"`
 }
 
-type IMPermissionRequest struct {
-	Selected string `json:"selected,omitempty"`
+type IMPromptResult struct {
+	StopReason string `json:"stopReason"`
 }
 
 type IMRequestOption struct {
 	OptionID string `json:"optionId"`
 	Name     string `json:"name"`
+}
+
+type IMPermissionRequest struct {
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	Options    []IMRequestOption `json:"options,omitempty"`
+}
+
+type IMPermissionResult struct {
+	ToolCallID string `json:"toolCallId,omitempty"`
+	Selected   string `json:"selected,omitempty"`
 }
 
 type IMTextResult struct {
@@ -65,18 +75,6 @@ type IMToolResult struct {
 	Kind   string `json:"kind,omitempty"`
 	Status string `json:"status,omitempty"`
 	Output string `json:"output,omitempty"`
-}
-
-type IMStopReasonResult struct {
-	StopReason string `json:"stopReason"`
-}
-
-type IMPermissionResult struct {
-	ToolCallID string            `json:"toolCallId,omitempty"`
-	Title      string            `json:"title,omitempty"`
-	Kind       string            `json:"kind,omitempty"`
-	Status     string            `json:"status,omitempty"`
-	Options    []IMRequestOption `json:"options,omitempty"`
 }
 
 type IMPlanResult struct {

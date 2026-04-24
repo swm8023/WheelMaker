@@ -1868,6 +1868,22 @@ func TestBuildConvertedPermissionMessageIncludesRequestMergeKey(t *testing.T) {
 	if converted.MergeKey.ToolCallID != "call-7" {
 		t.Fatalf("mergeKey.toolCallId = %q, want %q", converted.MergeKey.ToolCallID, "call-7")
 	}
+
+	request := acp.IMPermissionRequest{}
+	if err := json.Unmarshal(converted.IMMessage.Request, &request); err != nil {
+		t.Fatalf("unmarshal converted request: %v", err)
+	}
+	if strings.TrimSpace(request.ToolCallID) != "call-7" {
+		t.Fatalf("converted request toolCallId = %q, want call-7", request.ToolCallID)
+	}
+
+	result := acp.IMPermissionResult{}
+	if err := json.Unmarshal(converted.IMMessage.Result, &result); err != nil {
+		t.Fatalf("unmarshal converted result: %v", err)
+	}
+	if strings.TrimSpace(result.Selected) != "approved" {
+		t.Fatalf("converted result selected = %q, want approved", result.Selected)
+	}
 }
 
 func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
@@ -2148,12 +2164,12 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 	if strings.TrimSpace(permissionMessage.Method) != acp.IMMethodPermission {
 		t.Fatalf("messages[1].method = %q, want %q", permissionMessage.Method, acp.IMMethodPermission)
 	}
-	permissionResult := acp.IMPermissionResult{}
-	if err := json.Unmarshal(permissionMessage.Result, &permissionResult); err != nil {
-		t.Fatalf("unmarshal permission result: %v", err)
+	permissionRequest := acp.IMPermissionRequest{}
+	if err := json.Unmarshal(permissionMessage.Request, &permissionRequest); err != nil {
+		t.Fatalf("unmarshal permission request: %v", err)
 	}
-	if len(permissionResult.Options) != 1 || permissionResult.Options[0].OptionID != "allow" {
-		t.Fatalf("messages[1].result.options = %#v, want allow option", permissionResult.Options)
+	if len(permissionRequest.Options) != 1 || permissionRequest.Options[0].OptionID != "allow" {
+		t.Fatalf("messages[1].request.options = %#v, want allow option", permissionRequest.Options)
 	}
 }
 func TestPromptTitleFromBlocks(t *testing.T) {
@@ -2997,13 +3013,16 @@ func TestSessionViewPermissionRequestResolveUsesSingleTurn(t *testing.T) {
 	if strings.TrimSpace(result.ToolCallID) != "call-7" {
 		t.Fatalf("permission result toolCallId = %q, want call-7", result.ToolCallID)
 	}
+	if strings.TrimSpace(result.Selected) != "done" {
+		t.Fatalf("permission result selected = %q, want done", result.Selected)
+	}
 
 	request := acp.IMPermissionRequest{}
 	if err := json.Unmarshal(message.Request, &request); err != nil {
 		t.Fatalf("unmarshal permission request: %v", err)
 	}
-	if strings.TrimSpace(request.Selected) != "done" {
-		t.Fatalf("permission request selected = %q, want done", request.Selected)
+	if strings.TrimSpace(request.ToolCallID) != "call-7" {
+		t.Fatalf("permission request toolCallId = %q, want call-7", request.ToolCallID)
 	}
 
 	meta := sessionTurnMeta{}

@@ -138,14 +138,14 @@ type sessionTurnMergePlan struct {
 	hasPermissionResult bool
 }
 
-type sessionTurnMergeKey struct {
+type sessionTurnKey struct {
 	ToolCallID          string
 	PermissionRequestID int64
 }
 
 type sessionViewConvertedMessage struct {
 	IMMessage acp.IMMessage
-	MergeKey  sessionTurnMergeKey
+	MergeKey  sessionTurnKey
 }
 
 func isToolSessionUpdateType(updateMethod string) bool {
@@ -318,37 +318,36 @@ func mergePermissionMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 		incoming.Result = cloneJSONRaw(existing.Result)
 		return incoming, nil
 	}
-	if len(existing.Result) == 0 {
-		return incoming, nil
-	}
-	base := acp.IMPermissionResult{}
-	if err := json.Unmarshal(existing.Result, &base); err != nil {
-		return acp.IMMessage{}, err
-	}
+
 	inc := acp.IMPermissionResult{}
 	if err := json.Unmarshal(incoming.Result, &inc); err != nil {
 		return acp.IMMessage{}, err
 	}
-	if strings.TrimSpace(inc.ToolCallID) == "" {
-		inc.ToolCallID = strings.TrimSpace(base.ToolCallID)
+	if strings.TrimSpace(inc.ToolCallID) == "" && len(incoming.Request) > 0 {
+		request := acp.IMPermissionRequest{}
+		if err := json.Unmarshal(incoming.Request, &request); err == nil {
+			inc.ToolCallID = strings.TrimSpace(request.ToolCallID)
+		}
 	}
-	if strings.TrimSpace(inc.Title) == "" {
-		inc.Title = strings.TrimSpace(base.Title)
+
+	if len(existing.Result) > 0 {
+		base := acp.IMPermissionResult{}
+		if err := json.Unmarshal(existing.Result, &base); err != nil {
+			return acp.IMMessage{}, err
+		}
+		if strings.TrimSpace(inc.ToolCallID) == "" {
+			inc.ToolCallID = strings.TrimSpace(base.ToolCallID)
+		}
+		if strings.TrimSpace(inc.Selected) == "" {
+			inc.Selected = strings.TrimSpace(base.Selected)
+		}
 	}
-	if strings.TrimSpace(inc.Kind) == "" {
-		inc.Kind = strings.TrimSpace(base.Kind)
-	}
-	if strings.TrimSpace(inc.Status) == "" {
-		inc.Status = strings.TrimSpace(base.Status)
-	}
-	if len(inc.Options) == 0 {
-		inc.Options = append([]acp.IMRequestOption(nil), base.Options...)
-	}
-	raw, err := json.Marshal(inc)
+
+	resultRaw, err := json.Marshal(inc)
 	if err != nil {
 		return acp.IMMessage{}, err
 	}
-	incoming.Result = cloneJSONRaw(raw)
+	incoming.Result = cloneJSONRaw(resultRaw)
 	return incoming, nil
 }
 
@@ -399,7 +398,7 @@ func buildConvertedMessageFromSessionUpdate(update acp.SessionUpdate) (sessionVi
 		message.Result = cloneJSONRaw(resultRaw)
 		return sessionViewConvertedMessage{
 			IMMessage: message,
-			MergeKey:  sessionTurnMergeKey{ToolCallID: strings.TrimSpace(update.ToolCallID)},
+			MergeKey:  sessionTurnKey{ToolCallID: strings.TrimSpace(update.ToolCallID)},
 		}, true, nil
 	case acp.SessionUpdatePlan:
 		entries := make([]acp.IMPlanResult, 0, len(update.Entries))
@@ -424,7 +423,7 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 	}
 	converted := sessionViewConvertedMessage{
 		IMMessage: acp.IMMessage{Method: acp.IMMethodPermission},
-		MergeKey:  sessionTurnMergeKey{PermissionRequestID: doc.ID},
+		MergeKey:  sessionTurnKey{PermissionRequestID: doc.ID},
 	}
 
 	if len(doc.Params) > 0 && strings.TrimSpace(string(doc.Params)) != "" {
@@ -437,17 +436,14 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 		for _, option := range params.Options {
 			options = append(options, acp.IMRequestOption{OptionID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name)})
 		}
-		resultRaw, err := json.Marshal(acp.IMPermissionResult{
+		requestRaw, err := json.Marshal(acp.IMPermissionRequest{
 			ToolCallID: strings.TrimSpace(params.ToolCall.ToolCallID),
-			Title:      strings.TrimSpace(params.ToolCall.Title),
-			Kind:       strings.TrimSpace(params.ToolCall.Kind),
-			Status:     strings.TrimSpace(params.ToolCall.Status),
 			Options:    options,
 		})
 		if err != nil {
 			return sessionViewConvertedMessage{}, false, err
 		}
-		converted.IMMessage.Result = cloneJSONRaw(resultRaw)
+		converted.IMMessage.Request = cloneJSONRaw(requestRaw)
 	}
 
 	if len(doc.Result) > 0 && strings.TrimSpace(string(doc.Result)) != "" {
@@ -459,11 +455,14 @@ func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewC
 		if selected == "" {
 			selected = strings.TrimSpace(response.Outcome.Outcome)
 		}
-		requestRaw, err := json.Marshal(acp.IMPermissionRequest{Selected: selected})
+		resultRaw, err := json.Marshal(acp.IMPermissionResult{
+			ToolCallID: strings.TrimSpace(converted.MergeKey.ToolCallID),
+			Selected:   selected,
+		})
 		if err != nil {
 			return sessionViewConvertedMessage{}, false, err
 		}
-		converted.IMMessage.Request = cloneJSONRaw(requestRaw)
+		converted.IMMessage.Result = cloneJSONRaw(resultRaw)
 	}
 
 	if len(converted.IMMessage.Request) == 0 && len(converted.IMMessage.Result) == 0 {
@@ -559,7 +558,7 @@ type sessionTurnMeta struct {
 	PermissionRequestID int64  `json:"permissionRequestId,omitempty"`
 }
 
-func sessionTurnMetaFromMergeKey(key sessionTurnMergeKey) sessionTurnMeta {
+func sessionTurnMetaFromMergeKey(key sessionTurnKey) sessionTurnMeta {
 	return sessionTurnMeta{
 		ToolCallID:          strings.TrimSpace(key.ToolCallID),
 		PermissionRequestID: key.PermissionRequestID,
