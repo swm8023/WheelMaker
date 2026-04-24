@@ -1812,6 +1812,64 @@ func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 	}
 }
 
+func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T) {
+	converted, ok, err := buildConvertedMessageFromSessionUpdate(acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateToolCallUpdate,
+		ToolCallID:    "call-1",
+		Title:         "build",
+		Status:        "completed",
+	})
+	if err != nil {
+		t.Fatalf("buildConvertedMessageFromSessionUpdate: %v", err)
+	}
+	if !ok {
+		t.Fatalf("buildConvertedMessageFromSessionUpdate ok = false, want true")
+	}
+	if strings.TrimSpace(converted.IMMessage.Method) != acp.IMMethodToolCall {
+		t.Fatalf("converted method = %q, want %q", converted.IMMessage.Method, acp.IMMethodToolCall)
+	}
+	if converted.MergeKey.ToolCallID != "call-1" {
+		t.Fatalf("mergeKey.toolCallId = %q, want %q", converted.MergeKey.ToolCallID, "call-1")
+	}
+	if converted.MergeKey.PermissionRequestID != 0 {
+		t.Fatalf("mergeKey.permissionRequestId = %d, want 0", converted.MergeKey.PermissionRequestID)
+	}
+}
+
+func TestBuildConvertedPermissionMessageIncludesRequestMergeKey(t *testing.T) {
+	doc := sessionViewACPContentDoc{
+		ID:     7,
+		Method: acp.MethodRequestPermission,
+		Params: mustJSON(acp.PermissionRequestParams{
+			SessionID: "sess-1",
+			ToolCall: acp.ToolCallRef{
+				ToolCallID: "call-7",
+				Title:      "allow",
+			},
+		}),
+		Result: mustJSON(acp.PermissionResponse{
+			Outcome: acp.PermissionResult{Outcome: "approved"},
+		}),
+	}
+
+	converted, ok, err := buildConvertedPermissionMessage(doc)
+	if err != nil {
+		t.Fatalf("buildConvertedPermissionMessage: %v", err)
+	}
+	if !ok {
+		t.Fatalf("buildConvertedPermissionMessage ok = false, want true")
+	}
+	if strings.TrimSpace(converted.IMMessage.Method) != acp.IMMethodPermission {
+		t.Fatalf("converted method = %q, want %q", converted.IMMessage.Method, acp.IMMethodPermission)
+	}
+	if converted.MergeKey.PermissionRequestID != 7 {
+		t.Fatalf("mergeKey.permissionRequestId = %d, want 7", converted.MergeKey.PermissionRequestID)
+	}
+	if converted.MergeKey.ToolCallID != "call-7" {
+		t.Fatalf("mergeKey.toolCallId = %q, want %q", converted.MergeKey.ToolCallID, "call-7")
+	}
+}
+
 func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
@@ -2713,7 +2771,7 @@ func decodeTurnMethod(t *testing.T, raw string) string {
 	msg := acp.IMMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err == nil {
 		switch strings.TrimSpace(msg.Method) {
-		case acp.IMMethodPrompt, acp.IMMethodPromptDone:
+		case acp.IMMethodPrompt, "prompt_done":
 			return acp.MethodSessionPrompt
 		case acp.IMMethodPermission:
 			return acp.MethodRequestPermission

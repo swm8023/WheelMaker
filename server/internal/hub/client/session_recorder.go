@@ -138,6 +138,16 @@ type sessionTurnMergePlan struct {
 	hasPermissionResult bool
 }
 
+type sessionTurnMergeKey struct {
+	ToolCallID          string
+	PermissionRequestID int64
+}
+
+type sessionViewConvertedMessage struct {
+	IMMessage acp.IMMessage
+	MergeKey  sessionTurnMergeKey
+}
+
 func isToolSessionUpdateType(updateMethod string) bool {
 	switch strings.TrimSpace(updateMethod) {
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
@@ -198,17 +208,13 @@ func getMergedTurn(state sessionPromptState, doc sessionViewACPContentDoc) (int6
 	return 0, plan, nil
 }
 
-func mergeTurnRecord(existing SessionTurnRecord, incomingRaw string, plan sessionTurnMergePlan) (SessionTurnRecord, error) {
+func mergeTurnRecord(existing SessionTurnRecord, incomingMessage acp.IMMessage, plan sessionTurnMergePlan) (SessionTurnRecord, error) {
 	merged := existing
 	merged.UpdateIndex = maxInt64(existing.UpdateIndex, 0) + 1
 	merged.UpdateJSON = normalizeJSONDoc(existing.UpdateJSON, `{}`)
 	merged.ExtraJSON = normalizeJSONDoc(existing.ExtraJSON, `{}`)
 
 	existingMessage, err := decodeIMMessage(merged.UpdateJSON)
-	if err != nil {
-		return SessionTurnRecord{}, err
-	}
-	incomingMessage, err := decodeIMMessage(incomingRaw)
 	if err != nil {
 		return SessionTurnRecord{}, err
 	}
@@ -346,35 +352,35 @@ func mergePermissionMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 	return incoming, nil
 }
 
-func buildIMMessageFromACPDoc(doc sessionViewACPContentDoc) (string, string, error) {
+func buildConvertedMessageFromACPDoc(doc sessionViewACPContentDoc) (sessionViewConvertedMessage, bool, error) {
 	switch strings.TrimSpace(doc.Method) {
 	case acp.MethodSessionUpdate:
 		var params acp.SessionUpdateParams
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
 			if errors.Is(err, errSessionEventPayloadEmpty) {
-				return "", "", nil
+				return sessionViewConvertedMessage{}, false, nil
 			}
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
-		return buildIMMessageFromSessionUpdate(params.Update)
+		return buildConvertedMessageFromSessionUpdate(params.Update)
 	case acp.MethodRequestPermission:
-		return buildIMPermissionMessage(doc)
+		return buildConvertedPermissionMessage(doc)
 	default:
-		return "", "", nil
+		return sessionViewConvertedMessage{}, false, nil
 	}
 }
 
-func buildIMMessageFromSessionUpdate(update acp.SessionUpdate) (string, string, error) {
+func buildConvertedMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewConvertedMessage, bool, error) {
 	method := strings.TrimSpace(update.SessionUpdate)
 	switch method {
 	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
 		message := acp.IMMessage{Method: method}
 		resultRaw, err := json.Marshal(acp.IMTextResult{Text: extractUpdateText(update.Content)})
 		if err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
 		message.Result = cloneJSONRaw(resultRaw)
-		return marshalIMMessage(message)
+		return sessionViewConvertedMessage{IMMessage: message}, true, nil
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 		output := extractUpdateText(update.Content)
 		if strings.TrimSpace(output) == "" {
@@ -388,14 +394,13 @@ func buildIMMessageFromSessionUpdate(update acp.SessionUpdate) (string, string, 
 			Output: output,
 		})
 		if err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
 		message.Result = cloneJSONRaw(resultRaw)
-		metaRaw, err := json.Marshal(sessionTurnMeta{ToolCallID: strings.TrimSpace(update.ToolCallID)})
-		if err != nil {
-			return "", "", err
-		}
-		return marshalIMMessageWithMeta(message, string(metaRaw))
+		return sessionViewConvertedMessage{
+			IMMessage: message,
+			MergeKey:  sessionTurnMergeKey{ToolCallID: strings.TrimSpace(update.ToolCallID)},
+		}, true, nil
 	case acp.SessionUpdatePlan:
 		entries := make([]acp.IMPlanResult, 0, len(update.Entries))
 		for _, entry := range update.Entries {
@@ -404,28 +409,30 @@ func buildIMMessageFromSessionUpdate(update acp.SessionUpdate) (string, string, 
 		message := acp.IMMessage{Method: acp.IMMethodAgentPlan}
 		resultRaw, err := json.Marshal(entries)
 		if err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
 		message.Result = cloneJSONRaw(resultRaw)
-		return marshalIMMessage(message)
+		return sessionViewConvertedMessage{IMMessage: message}, true, nil
 	default:
-		return "", "", nil
+		return sessionViewConvertedMessage{}, false, nil
 	}
 }
 
-func buildIMPermissionMessage(doc sessionViewACPContentDoc) (string, string, error) {
+func buildConvertedPermissionMessage(doc sessionViewACPContentDoc) (sessionViewConvertedMessage, bool, error) {
 	if doc.ID <= 0 {
-		return "", "", nil
+		return sessionViewConvertedMessage{}, false, nil
 	}
-	message := acp.IMMessage{Method: acp.IMMethodPermission}
-	meta := sessionTurnMeta{PermissionRequestID: doc.ID}
+	converted := sessionViewConvertedMessage{
+		IMMessage: acp.IMMessage{Method: acp.IMMethodPermission},
+		MergeKey:  sessionTurnMergeKey{PermissionRequestID: doc.ID},
+	}
 
 	if len(doc.Params) > 0 && strings.TrimSpace(string(doc.Params)) != "" {
 		params := acp.PermissionRequestParams{}
 		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
-		meta.ToolCallID = strings.TrimSpace(params.ToolCall.ToolCallID)
+		converted.MergeKey.ToolCallID = strings.TrimSpace(params.ToolCall.ToolCallID)
 		options := make([]acp.IMRequestOption, 0, len(params.Options))
 		for _, option := range params.Options {
 			options = append(options, acp.IMRequestOption{OptionID: strings.TrimSpace(option.OptionID), Name: strings.TrimSpace(option.Name)})
@@ -438,15 +445,15 @@ func buildIMPermissionMessage(doc sessionViewACPContentDoc) (string, string, err
 			Options:    options,
 		})
 		if err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
-		message.Result = cloneJSONRaw(resultRaw)
+		converted.IMMessage.Result = cloneJSONRaw(resultRaw)
 	}
 
 	if len(doc.Result) > 0 && strings.TrimSpace(string(doc.Result)) != "" {
 		response := acp.PermissionResponse{}
 		if err := decodeSessionViewEventResult(doc, &response); err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
 		selected := strings.TrimSpace(response.Outcome.OptionID)
 		if selected == "" {
@@ -454,19 +461,23 @@ func buildIMPermissionMessage(doc sessionViewACPContentDoc) (string, string, err
 		}
 		requestRaw, err := json.Marshal(acp.IMPermissionRequest{Selected: selected})
 		if err != nil {
-			return "", "", err
+			return sessionViewConvertedMessage{}, false, err
 		}
-		message.Request = cloneJSONRaw(requestRaw)
+		converted.IMMessage.Request = cloneJSONRaw(requestRaw)
 	}
 
-	if len(message.Request) == 0 && len(message.Result) == 0 {
-		return "", "", nil
+	if len(converted.IMMessage.Request) == 0 && len(converted.IMMessage.Result) == 0 {
+		return sessionViewConvertedMessage{}, false, nil
 	}
-	metaRaw, err := json.Marshal(meta)
+	return converted, true, nil
+}
+
+func marshalConvertedMessage(message sessionViewConvertedMessage) (string, string, error) {
+	metaRaw, err := json.Marshal(sessionTurnMetaFromMergeKey(message.MergeKey))
 	if err != nil {
 		return "", "", err
 	}
-	return marshalIMMessageWithMeta(message, string(metaRaw))
+	return marshalIMMessageWithMeta(message.IMMessage, string(metaRaw))
 }
 
 func marshalIMMessage(message acp.IMMessage) (string, string, error) {
@@ -546,6 +557,13 @@ func stringifyRawJSON(raw json.RawMessage) string {
 type sessionTurnMeta struct {
 	ToolCallID          string `json:"toolCallId,omitempty"`
 	PermissionRequestID int64  `json:"permissionRequestId,omitempty"`
+}
+
+func sessionTurnMetaFromMergeKey(key sessionTurnMergeKey) sessionTurnMeta {
+	return sessionTurnMeta{
+		ToolCallID:          strings.TrimSpace(key.ToolCallID),
+		PermissionRequestID: key.PermissionRequestID,
+	}
 }
 
 func sessionTurnToolCallIDKey(raw string) string {
@@ -806,11 +824,11 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		return err
 	}
 
-	incomingRaw, incomingMetaRaw, err := buildIMMessageFromACPDoc(doc)
+	converted, ok, err := buildConvertedMessageFromACPDoc(doc)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(incomingRaw) == "" {
+	if !ok {
 		return nil
 	}
 
@@ -819,11 +837,13 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		if !ok {
 			return nil
 		}
-		indexedIncomingRaw, err := withIMTurnIndex(incomingRaw, state.promptIndex, turnIndex)
+		indexedMessage := converted.IMMessage
+		indexedMessage.Index = formatPromptTurnSeq(state.promptIndex, turnIndex)
+		indexedIncomingRaw, _, err := marshalIMMessage(indexedMessage)
 		if err != nil {
 			return err
 		}
-		mergedTurn, err := mergeTurnRecord(existingTurn, indexedIncomingRaw, plan)
+		mergedTurn, err := mergeTurnRecord(existingTurn, indexedMessage, plan)
 		if err != nil {
 			return err
 		}
@@ -839,7 +859,9 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 		return nil
 	}
 
-	indexedIncomingRaw, err := withIMTurnIndex(incomingRaw, state.promptIndex, state.nextTurnIndex)
+	indexed := converted
+	indexed.IMMessage.Index = formatPromptTurnSeq(state.promptIndex, state.nextTurnIndex)
+	indexedIncomingRaw, incomingMetaRaw, err := marshalConvertedMessage(indexed)
 	if err != nil {
 		return err
 	}

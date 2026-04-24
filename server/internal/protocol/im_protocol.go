@@ -15,7 +15,6 @@ const (
 	IMMethodAgentThought = SessionUpdateAgentThoughtChunk
 	IMMethodAgentPlan    = SessionUpdatePlan
 	IMMethodToolCall     = SessionUpdateToolCall
-	IMMethodPromptDone   = "prompt_done"
 )
 
 // IMMessage is the minimal IM boundary payload.
@@ -23,6 +22,7 @@ const (
 // This protocol uses method-driven payload typing:
 //   - method=prompt:
 //     request is IMPromptRequest
+//     result is IMStopReasonResult
 //   - method=permission:
 //     request is IMPermissionRequest (IM -> Hub)
 //     result is IMPermissionResult (Hub -> IM)
@@ -33,7 +33,6 @@ const (
 //   - method=agent_plan:
 //     result is []IMPlanResult
 //   - method=prompt_done:
-//     result is IMStopReasonResult
 //
 // Request and Result are inlined (no extra type wrapper map).
 // Index is a string sequence marker for ordering/replay.
