@@ -1204,19 +1204,29 @@ func trackToolCallUpdate(update acp.SessionUpdate) (addToolCallID string, doneTo
 
 // SessionRequestPermission responds to session/request_permission agent requests.
 func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
-	s.mu.Lock()
-	pCtx := s.prompt.ctx
-	name := s.currentAgentNameLocked()
-	options := []acp.ConfigOption(nil)
-	if state := s.agents[name]; state != nil {
-		options = append(options, state.ConfigOptions...)
+	_ = ctx
+	_ = requestID
+
+	// Prefer persistent allow semantics, then one-shot allow semantics.
+	fallback := ""
+	for _, option := range params.Options {
+		kind := strings.ToLower(strings.TrimSpace(option.Kind))
+		optionID := strings.TrimSpace(option.OptionID)
+		name := strings.ToLower(strings.TrimSpace(option.Name))
+		if optionID == "" {
+			continue
+		}
+		if kind == "allow_always" || kind == "always" {
+			return acp.PermissionResult{Outcome: "selected", OptionID: optionID}, nil
+		}
+		if fallback == "" && (kind == "allow_once" || kind == "allow" || kind == "once" || strings.HasPrefix(kind, "allow") || strings.EqualFold(optionID, "allow") || strings.Contains(name, "allow")) {
+			fallback = optionID
+		}
 	}
-	s.mu.Unlock()
-	if pCtx != nil {
-		ctx = pCtx
+	if fallback != "" {
+		return acp.PermissionResult{Outcome: "selected", OptionID: fallback}, nil
 	}
-	snap := acp.SessionConfigSnapshotFromOptions(options)
-	return s.decidePermission(ctx, requestID, params, snap.Mode)
+	return acp.PermissionResult{Outcome: "cancelled"}, nil
 }
 
 func normalizeSessionPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {

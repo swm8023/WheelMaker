@@ -657,14 +657,20 @@ func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
 	}
 }
 
-func TestChooseAutoAllowOptionRecognizesLegacyOnceKind(t *testing.T) {
-	optionID := chooseAutoAllowOption([]acp.PermissionOption{{
-		OptionID: "allow",
-		Name:     "Allow",
-		Kind:     "once",
-	}})
-	if optionID != "allow" {
-		t.Fatalf("chooseAutoAllowOption() = %q, want allow", optionID)
+func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
+	s := newSession("sess-1", "/tmp")
+	result, err := s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{
+		Options: []acp.PermissionOption{{
+			OptionID: "allow",
+			Name:     "Allow",
+			Kind:     "once",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("SessionRequestPermission: %v", err)
+	}
+	if result.Outcome != "selected" || result.OptionID != "allow" {
+		t.Fatalf("permission result = %+v, want selected allow", result)
 	}
 }
 
