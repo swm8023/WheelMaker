@@ -2111,6 +2111,23 @@ func TestSessionRecorderResetPromptStateRestartsIndexes(t *testing.T) {
 	}
 }
 
+func TestSessionMessagePageTracksLatestCursorBeyondFilteredTurns(t *testing.T) {
+	page := newSessionMessagePage(2, 2)
+	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateIndex: 1, UpdateJSON: `{}`})
+	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 1, UpdateIndex: 1, UpdateJSON: `{}`})
+	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 2, UpdateIndex: 1, UpdateJSON: `{}`})
+
+	if len(page.messages) != 0 {
+		t.Fatalf("page.messages len = %d, want 0", len(page.messages))
+	}
+	if page.lastPromptIndex != 2 {
+		t.Fatalf("page.lastPromptIndex = %d, want 2", page.lastPromptIndex)
+	}
+	if page.lastTurnIndex != 2 {
+		t.Fatalf("page.lastTurnIndex = %d, want 2", page.lastTurnIndex)
+	}
+}
+
 func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
