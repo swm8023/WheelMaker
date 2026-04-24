@@ -9,10 +9,10 @@ if (-not (Test-Path $dist)) {
 }
 
 if (Test-Path $target) {
-  Remove-Item -Recurse -Force $target
+  Get-ChildItem -LiteralPath $target -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-New-Item -ItemType Directory -Path $target | Out-Null
+New-Item -ItemType Directory -Path $target -Force | Out-Null
 Copy-Item -Path (Join-Path $dist "*") -Destination $target -Recurse -Force
 Get-ChildItem -Path $target -Filter *.map -Recurse | Remove-Item -Force
 

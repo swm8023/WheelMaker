@@ -15,10 +15,10 @@ if (-not (Test-Path $stateRoot)) {
 }
 
 if (Test-Path $target) {
-  Remove-Item -Recurse -Force $target
+  Get-ChildItem -LiteralPath $target -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-New-Item -ItemType Directory -Path $target | Out-Null
+New-Item -ItemType Directory -Path $target -Force | Out-Null
 Copy-Item -Path (Join-Path $dist "*") -Destination $target -Recurse -Force
 
 if (Test-Path (Join-Path $webPublic "manifest.webmanifest")) {
