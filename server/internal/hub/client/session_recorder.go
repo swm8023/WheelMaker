@@ -208,6 +208,40 @@ func getMergedTurn(state sessionPromptState, doc sessionViewACPContentDoc) (int6
 	return 0, plan, nil
 }
 
+func getMergedTurnFromTurnMessage(state sessionPromptState, turn sessionViewTurnMessage) (int64, sessionTurnMergePlan) {
+	plan := sessionTurnMergePlan{kind: sessionTurnMergeNone}
+	method := strings.TrimSpace(turn.IMMessage.Method)
+	switch method {
+	case acp.IMMethodToolCall:
+		if strings.TrimSpace(turn.MergeKey.ToolCallID) == "" {
+			return 0, plan
+		}
+		plan.kind = sessionTurnMergeTool
+		plan.toolCallID = strings.TrimSpace(turn.MergeKey.ToolCallID)
+		if turnIndex := state.toolTurnByToolCallID[plan.toolCallID]; turnIndex > 0 {
+			return turnIndex, plan
+		}
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
+		plan.kind = sessionTurnMergeText
+		lastTurnIndex := state.nextTurnIndex - 1
+		if lastTurnIndex > 0 {
+			if message, ok := state.turns[lastTurnIndex]; ok && strings.TrimSpace(sessionTurnMethodKey(message.UpdateJSON)) == method {
+				return lastTurnIndex, plan
+			}
+		}
+	case acp.IMMethodPermission:
+		if turn.MergeKey.PermissionRequestID <= 0 {
+			return 0, plan
+		}
+		plan.kind = sessionTurnMergePermission
+		plan.requestID = turn.MergeKey.PermissionRequestID
+		plan.hasPermissionResult = len(turn.IMMessage.Result) > 0 && strings.TrimSpace(string(turn.IMMessage.Result)) != ""
+		if turnIndex := state.permissionTurnByRequestID[plan.requestID]; turnIndex > 0 {
+			return turnIndex, plan
+		}
+	}
+	return 0, plan
+}
 func mergeTurnRecord(existing SessionTurnRecord, incomingMessage acp.IMMessage, plan sessionTurnMergePlan) (SessionTurnRecord, error) {
 	merged := existing
 	merged.UpdateIndex = maxInt64(existing.UpdateIndex, 0) + 1
@@ -707,6 +741,66 @@ func sessionViewMethodFromEvent(event SessionViewEvent, doc sessionViewACPConten
 	return ""
 }
 
+type sessionViewParsedEvent struct {
+	method           string
+	sessionTitle     string
+	hasPromptResult  bool
+	promptStopReason string
+	promptParams     acp.SessionPromptParams
+	hasTurnMessage   bool
+	turnMessage      sessionViewTurnMessage
+}
+
+func parseSessionViewEvent(event SessionViewEvent, doc sessionViewACPContentDoc) (sessionViewParsedEvent, error) {
+	parsed := sessionViewParsedEvent{method: sessionViewMethodFromEvent(event, doc)}
+	switch parsed.method {
+	case acp.MethodSessionNew:
+		params := sessionViewSessionNewParams{}
+		if err := decodeSessionViewEventParams(doc, &params); err != nil && !errors.Is(err, errSessionEventPayloadEmpty) {
+			return sessionViewParsedEvent{}, fmt.Errorf("decode session.new params: %w", err)
+		}
+		parsed.sessionTitle = strings.TrimSpace(params.Title)
+	case acp.MethodSessionPrompt:
+		var promptResult sessionViewPromptResult
+		if err := decodeSessionViewEventResult(doc, &promptResult); err == nil {
+			parsed.hasPromptResult = true
+			parsed.promptStopReason = strings.TrimSpace(promptResult.StopReason)
+			return parsed, nil
+		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
+			return sessionViewParsedEvent{}, fmt.Errorf("decode session.prompt result: %w", err)
+		}
+		var params acp.SessionPromptParams
+		if err := decodeSessionViewEventParams(doc, &params); err != nil {
+			return sessionViewParsedEvent{}, fmt.Errorf("decode session.prompt params: %w", err)
+		}
+		parsed.promptParams = params
+	case acp.MethodSessionUpdate:
+		var params acp.SessionUpdateParams
+		if err := decodeSessionViewEventParams(doc, &params); err != nil {
+			return sessionViewParsedEvent{}, fmt.Errorf("decode session.update params: %w", err)
+		}
+		turn, ok, err := buildTurnMessageFromACPDoc(doc)
+		if err != nil {
+			return sessionViewParsedEvent{}, fmt.Errorf("build session.update message: %w", err)
+		}
+		parsed.turnMessage = turn
+		parsed.hasTurnMessage = ok
+	case acp.MethodRequestPermission:
+		var params acp.PermissionRequestParams
+		if err := decodeSessionViewEventParams(doc, &params); err == nil {
+		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
+			return sessionViewParsedEvent{}, fmt.Errorf("decode request_permission params: %w", err)
+		}
+		turn, ok, err := buildTurnMessageFromACPDoc(doc)
+		if err != nil {
+			return sessionViewParsedEvent{}, fmt.Errorf("build request_permission message: %w", err)
+		}
+		parsed.turnMessage = turn
+		parsed.hasTurnMessage = ok
+	}
+	return parsed, nil
+}
+
 func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEvent) error {
 	event.SessionID = strings.TrimSpace(event.SessionID)
 	if event.SessionID == "" {
@@ -723,54 +817,24 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 		}
 		doc = parsedDoc
 	}
-	method := sessionViewMethodFromEvent(event, doc)
-
-	converted := sessionViewTurnMessage{}
-	hasConverted := false
-	if method == acp.MethodSessionUpdate || method == acp.MethodRequestPermission {
-		parsed, ok, err := buildTurnMessageFromACPDoc(doc)
-		if err != nil {
-			return fmt.Errorf("build %s message: %w", method, err)
-		}
-		converted = parsed
-		hasConverted = ok
+	parsed, err := parseSessionViewEvent(event, doc)
+	if err != nil {
+		return err
 	}
 
 	r.writeMu.Lock()
 	defer r.writeMu.Unlock()
 
-	switch method {
+	switch parsed.method {
 	case acp.MethodSessionNew:
-		params := sessionViewSessionNewParams{}
-		if err := decodeSessionViewEventParams(doc, &params); err != nil && !errors.Is(err, errSessionEventPayloadEmpty) {
-			return fmt.Errorf("decode session.new params: %w", err)
-		}
-		return r.upsertSessionProjection(ctx, event.SessionID, strings.TrimSpace(params.Title), event.UpdatedAt, false)
+		return r.upsertSessionProjection(ctx, event.SessionID, parsed.sessionTitle, event.UpdatedAt, false)
 	case acp.MethodSessionPrompt:
-		var promptResult sessionViewPromptResult
-		if err := decodeSessionViewEventResult(doc, &promptResult); err == nil {
-			return r.handlePromptFinishedLocked(ctx, event, strings.TrimSpace(promptResult.StopReason))
-		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
-			return fmt.Errorf("decode session.prompt result: %w", err)
+		if parsed.hasPromptResult {
+			return r.handlePromptFinishedLocked(ctx, event, parsed.promptStopReason)
 		}
-		var params acp.SessionPromptParams
-		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return fmt.Errorf("decode session.prompt params: %w", err)
-		}
-		return r.handlePromptStartedLocked(ctx, event, params)
-	case acp.MethodSessionUpdate:
-		var params acp.SessionUpdateParams
-		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return fmt.Errorf("decode session.update params: %w", err)
-		}
-		return r.appendACPEventMessageLocked(ctx, event, doc, converted, hasConverted)
-	case acp.MethodRequestPermission:
-		var params acp.PermissionRequestParams
-		if err := decodeSessionViewEventParams(doc, &params); err == nil {
-		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
-			return fmt.Errorf("decode request_permission params: %w", err)
-		}
-		return r.appendACPEventMessageLocked(ctx, event, doc, converted, hasConverted)
+		return r.handlePromptStartedLocked(ctx, event, parsed.promptParams)
+	case acp.MethodSessionUpdate, acp.MethodRequestPermission:
+		return r.appendACPEventMessageLocked(ctx, event, parsed.turnMessage, parsed.hasTurnMessage)
 	case sessionViewMethodSystem:
 		return nil
 	default:
@@ -819,7 +883,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	return nil
 }
 
-func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event SessionViewEvent, doc sessionViewACPContentDoc, converted sessionViewTurnMessage, hasConverted bool) error {
+func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event SessionViewEvent, turnMessage sessionViewTurnMessage, hasTurnMessage bool) error {
 	state, ok, err := r.currentPromptStateLocked(ctx, event.SessionID)
 	if err != nil {
 		return err
@@ -829,14 +893,11 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 	}
 	state.ensureMaps()
 
-	turnIndex, plan, err := getMergedTurn(state, doc)
-	if err != nil {
-		return err
-	}
-
-	if !hasConverted {
+	turnIndex, plan := getMergedTurnFromTurnMessage(state, turnMessage)
+	if !hasTurnMessage {
 		return nil
 	}
+	converted := turnMessage
 
 	if turnIndex > 0 {
 		existingTurn, ok := state.turns[turnIndex]
