@@ -1812,6 +1812,14 @@ func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 	}
 }
 
+func sessionViewACPSystemEvent(sessionID, text string) SessionViewEvent {
+	return SessionViewEvent{
+		Type:      SessionViewEventTypeACP,
+		SessionID: sessionID,
+		Content:   buildACPMethodResultContent(acp.IMMethodSystem, text),
+	}
+}
+
 func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T) {
 	converted, ok, err := buildTurnMessageFromSessionUpdate(acp.SessionUpdate{
 		SessionUpdate: acp.SessionUpdateToolCallUpdate,
@@ -2172,6 +2180,53 @@ func TestSessionViewPreservesUserImageBlocksAndPermissionOptions(t *testing.T) {
 		t.Fatalf("messages[1].request.options = %#v, want allow option", permissionRequest.Options)
 	}
 }
+
+func TestSessionViewStoresSystemMethodFromACPAndLegacyEvents(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "System Events")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "start", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewACPSystemEvent("sess-1", "from acp")); err != nil {
+		t.Fatalf("RecordEvent acp system: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewSystemEvent("sess-1", "from legacy")); err != nil {
+		t.Fatalf("RecordEvent legacy system: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + two system turns)", len(turns))
+	}
+
+	for i, want := range []string{"from acp", "from legacy"} {
+		msg := acp.IMMessage{}
+		if err := json.Unmarshal([]byte(turns[i+1].UpdateJSON), &msg); err != nil {
+			t.Fatalf("unmarshal system turn #%d: %v", i+1, err)
+		}
+		if strings.TrimSpace(msg.Method) != acp.IMMethodSystem {
+			t.Fatalf("system turn #%d method = %q, want %q", i+1, msg.Method, acp.IMMethodSystem)
+		}
+		result := acp.IMTextResult{}
+		if err := json.Unmarshal(msg.Result, &result); err != nil {
+			t.Fatalf("unmarshal system turn #%d result: %v", i+1, err)
+		}
+		if strings.TrimSpace(result.Text) != want {
+			t.Fatalf("system turn #%d text = %q, want %q", i+1, result.Text, want)
+		}
+	}
+}
+
 func TestPromptTitleFromBlocks(t *testing.T) {
 	if got := promptTitleFromBlocks([]acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: " hello "}}); got != "hello" {
 		t.Fatalf("promptTitleFromBlocks(text) = %q, want %q", got, "hello")

@@ -9,6 +9,7 @@ const (
 	// Shared inbound/outbound methods.
 	IMMethodPrompt     = "prompt"
 	IMMethodPermission = "permission"
+	IMMethodSystem     = "system"
 
 	// Outbound session update methods.
 	IMMethodAgentMessage = SessionUpdateAgentMessageChunk
