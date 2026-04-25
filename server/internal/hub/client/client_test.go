@@ -2007,6 +2007,71 @@ func TestParseSessionViewEventV2SeparatesControlAndMessageEvents(t *testing.T) {
 	}
 }
 
+func TestParseSessionViewEventV2SilentlyHandlesMissingParams(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         SessionViewEvent
+		wantMessage   bool
+		wantACPMethod string
+		wantMethod    string
+		check         func(*testing.T, parsedSessionViewEvent)
+	}{
+		{
+			name: "prompt without params becomes empty prompt message",
+			event: SessionViewEvent{
+				Type:      SessionViewEventTypeACP,
+				SessionID: "sess-1",
+				Content:   buildACPMethodContentJSON(acp.MethodSessionPrompt, nil),
+			},
+			wantMessage:   true,
+			wantACPMethod: acp.MethodSessionPrompt,
+			wantMethod:    acp.IMMethodPrompt,
+			check: func(t *testing.T, parsed parsedSessionViewEvent) {
+				t.Helper()
+				request := acp.IMPromptRequest{}
+				if err := json.Unmarshal(parsed.message.Request, &request); err != nil {
+					t.Fatalf("json.Unmarshal(prompt request): %v", err)
+				}
+				if len(request.ContentBlocks) != 0 {
+					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
+				}
+			},
+		},
+		{
+			name: "session update without params is ignored without error",
+			event: SessionViewEvent{
+				Type:      SessionViewEventTypeACP,
+				SessionID: "sess-1",
+				Content:   buildACPMethodContentJSON(acp.MethodSessionUpdate, nil),
+			},
+			wantMessage:   false,
+			wantACPMethod: acp.MethodSessionUpdate,
+			wantMethod:    "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := parseSessionViewEventV2(tt.event)
+			if err != nil {
+				t.Fatalf("parseSessionViewEventV2: %v", err)
+			}
+			if parsed.bMessage != tt.wantMessage {
+				t.Fatalf("parsed.bMessage = %v, want %v", parsed.bMessage, tt.wantMessage)
+			}
+			if parsed.acpMethod != tt.wantACPMethod {
+				t.Fatalf("parsed.acpMethod = %q, want %q", parsed.acpMethod, tt.wantACPMethod)
+			}
+			if strings.TrimSpace(parsed.message.Method) != tt.wantMethod {
+				t.Fatalf("parsed.message.Method = %q, want %q", parsed.message.Method, tt.wantMethod)
+			}
+			if tt.check != nil {
+				tt.check(t, parsed)
+			}
+		})
+	}
+}
+
 func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
