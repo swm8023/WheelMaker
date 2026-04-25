@@ -1889,35 +1889,7 @@ func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T
 	}
 }
 
-func TestBuildTurnMessageFromACPDocIgnoresPermission(t *testing.T) {
-	doc := sessionViewACPContentDoc{
-		ID:     7,
-		Method: acp.MethodRequestPermission,
-		Params: mustJSON(acp.PermissionRequestParams{
-			SessionID: "sess-1",
-			ToolCall: acp.ToolCallRef{
-				ToolCallID: "call-7",
-				Title:      "allow",
-			},
-		}),
-		Result: mustJSON(acp.PermissionResponse{
-			Outcome: acp.PermissionResult{Outcome: "approved"},
-		}),
-	}
-
-	converted, ok, err := buildTurnMessageFromACPDoc(doc)
-	if err != nil {
-		t.Fatalf("buildTurnMessageFromACPDoc: %v", err)
-	}
-	if ok {
-		t.Fatalf("buildTurnMessageFromACPDoc ok = true, want false")
-	}
-	if strings.TrimSpace(converted.IMMessage.Method) != "" {
-		t.Fatalf("converted method = %q, want empty", converted.IMMessage.Method)
-	}
-}
-
-func TestParseSessionViewEventV2SeparatesControlAndMessageEvents(t *testing.T) {
+func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 	tests := []struct {
 		name          string
 		event         SessionViewEvent
@@ -1980,13 +1952,19 @@ func TestParseSessionViewEventV2SeparatesControlAndMessageEvents(t *testing.T) {
 			wantMethod:    acp.IMMethodToolCall,
 			wantTurnKey:   "call-1",
 		},
+		{
+			name:          "permission stays ignored control event",
+			event:         sessionViewPermissionRequestedEvent("sess-1", "allow?", 7, nil),
+			wantMessage:   false,
+			wantACPMethod: acp.MethodRequestPermission,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parsed, err := parseSessionViewEventV2(tt.event)
+			parsed, err := parseSessionViewEvent(tt.event)
 			if err != nil {
-				t.Fatalf("parseSessionViewEventV2: %v", err)
+				t.Fatalf("parseSessionViewEvent: %v", err)
 			}
 			if parsed.bMessage != tt.wantMessage {
 				t.Fatalf("parsed.bMessage = %v, want %v", parsed.bMessage, tt.wantMessage)
@@ -2007,7 +1985,7 @@ func TestParseSessionViewEventV2SeparatesControlAndMessageEvents(t *testing.T) {
 	}
 }
 
-func TestParseSessionViewEventV2SilentlyHandlesMissingParams(t *testing.T) {
+func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 	tests := []struct {
 		name          string
 		event         SessionViewEvent
@@ -2084,9 +2062,9 @@ func TestParseSessionViewEventV2SilentlyHandlesMissingParams(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			parsed, err := parseSessionViewEventV2(tt.event)
+			parsed, err := parseSessionViewEvent(tt.event)
 			if err != nil {
-				t.Fatalf("parseSessionViewEventV2: %v", err)
+				t.Fatalf("parseSessionViewEvent: %v", err)
 			}
 			if parsed.bMessage != tt.wantMessage {
 				t.Fatalf("parsed.bMessage = %v, want %v", parsed.bMessage, tt.wantMessage)

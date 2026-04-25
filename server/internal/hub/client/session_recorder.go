@@ -79,25 +79,6 @@ type sessionViewPromptResult struct {
 	StopReason string `json:"stopReason,omitempty"`
 }
 
-type sessionViewACPContentDoc struct {
-	ID     int64           `json:"id,omitempty"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-}
-
-type sessionViewParsedEvent struct {
-	event            SessionViewEvent
-	skip             bool
-	method           string
-	sessionTitle     string
-	hasPromptResult  bool
-	promptStopReason string
-	promptParams     acp.SessionPromptParams
-	hasTurnMessage   bool
-	turnMessage      sessionViewTurnMessage
-}
-
 type parsedSessionViewEvent struct {
 	event     SessionViewEvent
 	bMessage  bool
@@ -183,7 +164,7 @@ func (r *SessionRecorder) eventPublisher() func(method string, payload any) erro
 }
 
 func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEvent) error {
-	parsed, err := parseSessionViewEventV2(event)
+	parsed, err := parseSessionViewEvent(event)
 	if err != nil {
 		return err
 	}
@@ -326,22 +307,6 @@ func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID str
 	}
 
 	return r.sessionViewSummaryFromRecord(*rec), page.messages, page.lastPromptIndex, page.lastTurnIndex, nil
-}
-
-func (r *SessionRecorder) recordParsedEventLocked(ctx context.Context, parsed sessionViewParsedEvent) error {
-	switch parsed.method {
-	case acp.MethodSessionNew:
-		return r.upsertSessionProjection(ctx, parsed.event.SessionID, parsed.sessionTitle, parsed.event.UpdatedAt, false)
-	case acp.MethodSessionPrompt:
-		if parsed.hasPromptResult {
-			return r.handlePromptFinishedLocked(ctx, parsed.event, parsed.promptStopReason)
-		}
-		return r.handlePromptStartedLocked(ctx, parsed.event, parsed.promptParams)
-	case acp.MethodSessionUpdate, sessionViewMethodSystem:
-		return r.appendACPEventMessageLocked(ctx, parsed.event, parsed.turnMessage, parsed.hasTurnMessage)
-	default:
-		return nil
-	}
 }
 
 func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event SessionViewEvent, params acp.SessionPromptParams) error {
@@ -714,50 +679,6 @@ func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionI
 	return state, nil
 }
 
-func decodeSessionViewACPContentDoc(content string) (sessionViewACPContentDoc, error) {
-	raw := strings.TrimSpace(content)
-	if raw == "" {
-		return sessionViewACPContentDoc{}, errSessionEventPayloadEmpty
-	}
-	var doc sessionViewACPContentDoc
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
-		return sessionViewACPContentDoc{}, err
-	}
-	doc.Method = strings.TrimSpace(doc.Method)
-	if doc.Method == "" {
-		return sessionViewACPContentDoc{}, fmt.Errorf("session event method is required")
-	}
-	return doc, nil
-}
-
-func decodeSessionViewEventParams(doc sessionViewACPContentDoc, out any) error {
-	if out == nil {
-		return fmt.Errorf("params decode target is nil")
-	}
-	paramsRaw := bytes.TrimSpace(doc.Params)
-	if len(paramsRaw) == 0 {
-		return errSessionEventPayloadEmpty
-	}
-	if err := json.Unmarshal(paramsRaw, out); err != nil {
-		return err
-	}
-	return nil
-}
-
-func decodeSessionViewEventResult(doc sessionViewACPContentDoc, out any) error {
-	if out == nil {
-		return fmt.Errorf("result decode target is nil")
-	}
-	resultRaw := bytes.TrimSpace(doc.Result)
-	if len(resultRaw) == 0 {
-		return errSessionEventPayloadEmpty
-	}
-	if err := json.Unmarshal(resultRaw, out); err != nil {
-		return err
-	}
-	return nil
-}
-
 func jsonGet(raw json.RawMessage, path string) (json.RawMessage, bool) {
 	current := json.RawMessage(bytes.TrimSpace(raw))
 	if len(current) == 0 {
@@ -803,17 +724,7 @@ func jsonDecodeAt(raw json.RawMessage, path string, out any) bool {
 	return true
 }
 
-func sessionViewMethodFromEvent(event SessionViewEvent, doc sessionViewACPContentDoc) string {
-	if strings.TrimSpace(doc.Method) != "" {
-		return strings.TrimSpace(doc.Method)
-	}
-	if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeSystem)) {
-		return sessionViewMethodSystem
-	}
-	return ""
-}
-
-func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, error) {
+func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, error) {
 	parsed := parsedSessionViewEvent{
 		event: event,
 	}
@@ -918,79 +829,6 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 	default:
 		return parsed, nil
 	}
-}
-
-func parseSessionViewEvent(event SessionViewEvent) (sessionViewParsedEvent, error) {
-	event.SessionID = strings.TrimSpace(event.SessionID)
-	if event.SessionID == "" {
-		return sessionViewParsedEvent{skip: true}, nil
-	}
-	if event.UpdatedAt.IsZero() {
-		event.UpdatedAt = time.Now().UTC()
-	}
-	doc := sessionViewACPContentDoc{}
-	if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeACP)) {
-		parsedDoc, err := decodeSessionViewACPContentDoc(event.Content)
-		if err != nil {
-			return sessionViewParsedEvent{}, fmt.Errorf("decode acp event content: %w", err)
-		}
-		doc = parsedDoc
-	}
-
-	parsed := sessionViewParsedEvent{
-		event:  event,
-		method: sessionViewMethodFromEvent(event, doc),
-	}
-	switch parsed.method {
-	case acp.MethodSessionNew:
-		params := sessionViewSessionNewParams{}
-		if err := decodeSessionViewEventParams(doc, &params); err != nil && !errors.Is(err, errSessionEventPayloadEmpty) {
-			return sessionViewParsedEvent{}, fmt.Errorf("decode session.new params: %w", err)
-		}
-		parsed.sessionTitle = strings.TrimSpace(params.Title)
-	case acp.MethodSessionPrompt:
-		var promptResult sessionViewPromptResult
-		if err := decodeSessionViewEventResult(doc, &promptResult); err == nil {
-			parsed.hasPromptResult = true
-			parsed.promptStopReason = strings.TrimSpace(promptResult.StopReason)
-			return parsed, nil
-		} else if !errors.Is(err, errSessionEventPayloadEmpty) {
-			return sessionViewParsedEvent{}, fmt.Errorf("decode session.prompt result: %w", err)
-		}
-		var params acp.SessionPromptParams
-		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return sessionViewParsedEvent{}, fmt.Errorf("decode session.prompt params: %w", err)
-		}
-		parsed.promptParams = params
-	case acp.MethodSessionUpdate:
-		var params acp.SessionUpdateParams
-		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			return sessionViewParsedEvent{}, fmt.Errorf("decode session.update params: %w", err)
-		}
-		turn, ok, err := buildTurnMessageFromACPDoc(doc)
-		if err != nil {
-			return sessionViewParsedEvent{}, fmt.Errorf("build session.update message: %w", err)
-		}
-		parsed.turnMessage = turn
-		parsed.hasTurnMessage = ok
-	case sessionViewMethodSystem:
-		if strings.EqualFold(strings.TrimSpace(string(event.Type)), string(SessionViewEventTypeSystem)) {
-			turn, ok, err := buildTurnMessageFromSystemText(event.Content)
-			if err != nil {
-				return sessionViewParsedEvent{}, fmt.Errorf("build system message from text: %w", err)
-			}
-			parsed.turnMessage = turn
-			parsed.hasTurnMessage = ok
-		} else {
-			turn, ok, err := buildTurnMessageFromACPDoc(doc)
-			if err != nil {
-				return sessionViewParsedEvent{}, fmt.Errorf("build system message: %w", err)
-			}
-			parsed.turnMessage = turn
-			parsed.hasTurnMessage = ok
-		}
-	}
-	return parsed, nil
 }
 
 func buildACPMethodContentJSON(method string, body map[string]any) string {
@@ -1163,24 +1001,6 @@ func mergeToolResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 	return incoming, nil
 }
 
-func buildTurnMessageFromACPDoc(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
-	switch strings.TrimSpace(doc.Method) {
-	case acp.MethodSessionUpdate:
-		var params acp.SessionUpdateParams
-		if err := decodeSessionViewEventParams(doc, &params); err != nil {
-			if errors.Is(err, errSessionEventPayloadEmpty) {
-				return sessionViewTurnMessage{}, false, nil
-			}
-			return sessionViewTurnMessage{}, false, err
-		}
-		return buildTurnMessageFromSessionUpdate(params.Update)
-	case acp.IMMethodSystem:
-		return buildTurnMessageFromSystemDoc(doc)
-	default:
-		return sessionViewTurnMessage{}, false, nil
-	}
-}
-
 func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTurnMessage, bool, error) {
 	method := strings.TrimSpace(update.SessionUpdate)
 	switch method {
@@ -1227,30 +1047,6 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTur
 	default:
 		return sessionViewTurnMessage{}, false, nil
 	}
-}
-
-func buildTurnMessageFromSystemDoc(doc sessionViewACPContentDoc) (sessionViewTurnMessage, bool, error) {
-	if len(doc.Result) == 0 || strings.TrimSpace(string(doc.Result)) == "" {
-		return sessionViewTurnMessage{}, false, nil
-	}
-	text := strings.TrimSpace(extractUpdateText(doc.Result))
-	if text == "" {
-		text = strings.TrimSpace(stringifyRawJSON(doc.Result))
-	}
-	return buildTurnMessageFromSystemText(text)
-}
-
-func buildTurnMessageFromSystemText(text string) (sessionViewTurnMessage, bool, error) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return sessionViewTurnMessage{}, false, nil
-	}
-	resultRaw, err := json.Marshal(acp.IMTextResult{Text: text})
-	if err != nil {
-		return sessionViewTurnMessage{}, false, err
-	}
-	message := acp.IMMessage{Method: acp.IMMethodSystem, Result: cloneJSONRaw(resultRaw)}
-	return sessionViewTurnMessage{IMMessage: message}, true, nil
 }
 
 func marshalConvertedMessage(message sessionViewTurnMessage) (string, error) {
