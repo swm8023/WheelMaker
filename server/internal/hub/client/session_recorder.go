@@ -745,7 +745,7 @@ func decodeSessionViewEventResult(doc sessionViewACPContentDoc, out any) error {
 func jsonGet(raw json.RawMessage, path string) (json.RawMessage, bool, error) {
 	current := json.RawMessage(bytes.TrimSpace(raw))
 	if len(current) == 0 {
-		return nil, false, nil
+		return nil, false, errSessionEventPayloadEmpty
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -826,15 +826,12 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 	contentRaw := json.RawMessage(parsed.event.Content)
 	switch {
 	case strings.EqualFold(eventType, string(SessionViewEventTypeACP)):
-		if len(contentRaw) == 0 {
-			return parsedSessionViewEvent{}, fmt.Errorf("decode acp event content: %w", errSessionEventPayloadEmpty)
-		}
-		method, ok, err := jsonGetString(contentRaw, "method")
+		method, _, err := jsonGetString(contentRaw, "method")
 		if err != nil {
 			return parsedSessionViewEvent{}, fmt.Errorf("decode acp event content: %w", err)
 		}
 		parsed.acpMethod = strings.TrimSpace(method)
-		if !ok || parsed.acpMethod == "" {
+		if parsed.acpMethod == "" {
 			return parsedSessionViewEvent{}, fmt.Errorf("decode acp event content: %w", fmt.Errorf("session event method is required"))
 		}
 	case strings.EqualFold(eventType, string(SessionViewEventTypeSystem)):
