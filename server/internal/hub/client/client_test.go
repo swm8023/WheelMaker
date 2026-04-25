@@ -1917,6 +1917,96 @@ func TestBuildTurnMessageFromACPDocIgnoresPermission(t *testing.T) {
 	}
 }
 
+func TestParseSessionViewEventV2SeparatesControlAndMessageEvents(t *testing.T) {
+	tests := []struct {
+		name          string
+		event         SessionViewEvent
+		wantMessage   bool
+		wantACPMethod string
+		wantMethod    string
+		wantTurnKey   string
+		check         func(*testing.T, parsedSessionViewEvent)
+	}{
+		{
+			name:          "session new stays control event",
+			event:         sessionViewCreatedEvent("sess-1", "Task"),
+			wantMessage:   false,
+			wantACPMethod: acp.MethodSessionNew,
+		},
+		{
+			name:          "prompt params becomes prompt message",
+			event:         sessionViewPromptEvent("sess-1", "say hi", nil),
+			wantMessage:   true,
+			wantACPMethod: acp.MethodSessionPrompt,
+			wantMethod:    acp.IMMethodPrompt,
+			check: func(t *testing.T, parsed parsedSessionViewEvent) {
+				t.Helper()
+				request := acp.IMPromptRequest{}
+				if err := json.Unmarshal(parsed.message.Request, &request); err != nil {
+					t.Fatalf("json.Unmarshal(prompt request): %v", err)
+				}
+				if len(request.ContentBlocks) != 1 || strings.TrimSpace(request.ContentBlocks[0].Text) != "say hi" {
+					t.Fatalf("request.ContentBlocks = %#v, want single text block", request.ContentBlocks)
+				}
+			},
+		},
+		{
+			name:          "prompt result becomes prompt message",
+			event:         sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn),
+			wantMessage:   true,
+			wantACPMethod: acp.MethodSessionPrompt,
+			wantMethod:    acp.IMMethodPrompt,
+			check: func(t *testing.T, parsed parsedSessionViewEvent) {
+				t.Helper()
+				result := acp.IMPromptResult{}
+				if err := json.Unmarshal(parsed.message.Result, &result); err != nil {
+					t.Fatalf("json.Unmarshal(prompt result): %v", err)
+				}
+				if result.StopReason != acp.StopReasonEndTurn {
+					t.Fatalf("result.StopReason = %q, want %q", result.StopReason, acp.StopReasonEndTurn)
+				}
+			},
+		},
+		{
+			name: "session update becomes turn message",
+			event: sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+				SessionUpdate: acp.SessionUpdateToolCallUpdate,
+				ToolCallID:    "call-1",
+				Title:         "build",
+				Status:        acp.ToolCallStatusCompleted,
+			}),
+			wantMessage:   true,
+			wantACPMethod: acp.MethodSessionUpdate,
+			wantMethod:    acp.IMMethodToolCall,
+			wantTurnKey:   "call-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parsed, err := parseSessionViewEventV2(tt.event)
+			if err != nil {
+				t.Fatalf("parseSessionViewEventV2: %v", err)
+			}
+			if parsed.bMessage != tt.wantMessage {
+				t.Fatalf("parsed.bMessage = %v, want %v", parsed.bMessage, tt.wantMessage)
+			}
+			if parsed.acpMethod != tt.wantACPMethod {
+				t.Fatalf("parsed.acpMethod = %q, want %q", parsed.acpMethod, tt.wantACPMethod)
+			}
+			if strings.TrimSpace(parsed.message.Method) != tt.wantMethod {
+				t.Fatalf("parsed.message.Method = %q, want %q", parsed.message.Method, tt.wantMethod)
+			}
+			if parsed.turnKey != tt.wantTurnKey {
+				t.Fatalf("parsed.turnKey = %q, want %q", parsed.turnKey, tt.wantTurnKey)
+			}
+			if tt.check != nil {
+				tt.check(t, parsed)
+			}
+		})
+	}
+}
+
 func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
