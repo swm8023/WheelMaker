@@ -200,10 +200,8 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 
 	switch parsed.acpMethod {
 	case acp.MethodSessionNew:
-		title, err := jsonGetString(json.RawMessage(parsed.event.Content), "params.title")
-		if err != nil {
-			return fmt.Errorf("decode session.new params: %w", err)
-		}
+		title := ""
+		jsonDecodeAt(json.RawMessage(parsed.event.Content), "params.title", &title)
 		title = strings.TrimSpace(title)
 		return r.upsertSessionProjection(ctx, parsed.event.SessionID, title, parsed.event.UpdatedAt, false)
 	default:
@@ -742,64 +740,49 @@ func decodeSessionViewEventResult(doc sessionViewACPContentDoc, out any) error {
 	return nil
 }
 
-func jsonGet(raw json.RawMessage, path string) (json.RawMessage, bool, error) {
+func jsonGet(raw json.RawMessage, path string) (json.RawMessage, bool) {
 	current := json.RawMessage(bytes.TrimSpace(raw))
 	if len(current) == 0 {
-		return nil, false, errSessionEventPayloadEmpty
+		return nil, false
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return current, true, nil
+		return current, true
 	}
 	for _, key := range strings.Split(path, ".") {
 		key = strings.TrimSpace(key)
 		if key == "" {
-			return nil, false, fmt.Errorf("json path contains empty segment")
+			return nil, false
 		}
 		obj := map[string]json.RawMessage{}
 		if err := json.Unmarshal(current, &obj); err != nil {
-			return nil, false, err
+			return nil, false
 		}
 		next, ok := obj[key]
 		if !ok {
-			return nil, false, nil
+			return nil, false
 		}
 		next = json.RawMessage(bytes.TrimSpace(next))
 		if len(next) == 0 {
-			return nil, false, nil
+			return nil, false
 		}
 		current = next
 	}
-	return current, true, nil
+	return current, true
 }
 
-func jsonGetString(raw json.RawMessage, path string) (string, error) {
-	value, ok, err := jsonGet(raw, path)
-	if err != nil {
-		return "", err
-	}
-	if !ok {
-		return "", nil
-	}
-	text := ""
-	if err := json.Unmarshal(value, &text); err != nil {
-		return "", err
-	}
-	return text, nil
-}
-
-func jsonDecodeAt(raw json.RawMessage, path string, out any) (bool, error) {
+func jsonDecodeAt(raw json.RawMessage, path string, out any) bool {
 	if out == nil {
-		return false, fmt.Errorf("json decode target is nil")
+		return false
 	}
-	value, ok, err := jsonGet(raw, path)
-	if err != nil || !ok {
-		return ok, err
+	value, ok := jsonGet(raw, path)
+	if !ok {
+		return false
 	}
 	if err := json.Unmarshal(value, out); err != nil {
-		return false, err
+		return false
 	}
-	return true, nil
+	return true
 }
 
 func sessionViewMethodFromEvent(event SessionViewEvent, doc sessionViewACPContentDoc) string {
@@ -829,7 +812,7 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 	contentRaw := json.RawMessage(parsed.event.Content)
 	switch {
 	case strings.EqualFold(eventType, string(SessionViewEventTypeACP)):
-		parsed.acpMethod, _ = jsonGetString(contentRaw, "method")
+		jsonDecodeAt(contentRaw, "method", &parsed.acpMethod)
 		parsed.acpMethod = strings.TrimSpace(parsed.acpMethod)
 		if parsed.acpMethod == "" {
 			return parsedSessionViewEvent{}, fmt.Errorf("decode acp event content: %w", fmt.Errorf("session event method is required"))
@@ -845,10 +828,7 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 		return parsed, nil
 	case acp.MethodSessionPrompt:
 		promptResult := sessionViewPromptResult{}
-		ok, err := jsonDecodeAt(contentRaw, "result", &promptResult)
-		if err != nil {
-			return parsedSessionViewEvent{}, fmt.Errorf("decode session.prompt result: %w", err)
-		}
+		ok := jsonDecodeAt(contentRaw, "result", &promptResult)
 		if ok {
 			resultRaw, err := json.Marshal(acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)})
 			if err != nil {
@@ -860,10 +840,7 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 			return parsed, nil
 		}
 		params := acp.SessionPromptParams{}
-		_, err = jsonDecodeAt(contentRaw, "params", &params)
-		if err != nil {
-			return parsedSessionViewEvent{}, fmt.Errorf("decode session.prompt params: %w", err)
-		}
+		jsonDecodeAt(contentRaw, "params", &params)
 		requestRaw, err := json.Marshal(acp.IMPromptRequest{ContentBlocks: cloneSessionContentBlocks(params.Prompt)})
 		if err != nil {
 			return parsedSessionViewEvent{}, err
@@ -874,10 +851,7 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 		return parsed, nil
 	case acp.MethodSessionUpdate:
 		params := acp.SessionUpdateParams{}
-		_, err := jsonDecodeAt(contentRaw, "params", &params)
-		if err != nil {
-			return parsedSessionViewEvent{}, fmt.Errorf("decode session.update params: %w", err)
-		}
+		jsonDecodeAt(contentRaw, "params", &params)
 		update := params.Update
 		updateMethod := strings.TrimSpace(update.SessionUpdate)
 		switch updateMethod {
@@ -928,10 +902,7 @@ func parseSessionViewEventV2(event SessionViewEvent) (parsedSessionViewEvent, er
 	case sessionViewMethodSystem:
 		text := parsed.event.Content
 		if strings.EqualFold(eventType, string(SessionViewEventTypeACP)) {
-			resultRaw, ok, err := jsonGet(contentRaw, "result")
-			if err != nil {
-				return parsedSessionViewEvent{}, fmt.Errorf("build system message: %w", err)
-			}
+			resultRaw, ok := jsonGet(contentRaw, "result")
 			if !ok {
 				return parsed, nil
 			}

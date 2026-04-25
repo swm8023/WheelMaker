@@ -2038,11 +2038,43 @@ func TestParseSessionViewEventV2SilentlyHandlesMissingParams(t *testing.T) {
 			},
 		},
 		{
+			name: "prompt with malformed params becomes empty prompt message",
+			event: SessionViewEvent{
+				Type:      SessionViewEventTypeACP,
+				SessionID: "sess-1",
+				Content:   buildACPMethodContentJSON(acp.MethodSessionPrompt, map[string]any{"params": "oops"}),
+			},
+			wantMessage:   true,
+			wantACPMethod: acp.MethodSessionPrompt,
+			wantMethod:    acp.IMMethodPrompt,
+			check: func(t *testing.T, parsed parsedSessionViewEvent) {
+				t.Helper()
+				request := acp.IMPromptRequest{}
+				if err := json.Unmarshal(parsed.message.Request, &request); err != nil {
+					t.Fatalf("json.Unmarshal(prompt request): %v", err)
+				}
+				if len(request.ContentBlocks) != 0 {
+					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
+				}
+			},
+		},
+		{
 			name: "session update without params is ignored without error",
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
 				Content:   buildACPMethodContentJSON(acp.MethodSessionUpdate, nil),
+			},
+			wantMessage:   false,
+			wantACPMethod: acp.MethodSessionUpdate,
+			wantMethod:    "",
+		},
+		{
+			name: "session update with malformed params is ignored without error",
+			event: SessionViewEvent{
+				Type:      SessionViewEventTypeACP,
+				SessionID: "sess-1",
+				Content:   buildACPMethodContentJSON(acp.MethodSessionUpdate, map[string]any{"params": "oops"}),
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.MethodSessionUpdate,
@@ -2069,6 +2101,30 @@ func TestParseSessionViewEventV2SilentlyHandlesMissingParams(t *testing.T) {
 				tt.check(t, parsed)
 			}
 		})
+	}
+}
+
+func TestSessionViewCreatedEventSilentlyHandlesMalformedTitle(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	event := SessionViewEvent{
+		Type:      SessionViewEventTypeACP,
+		SessionID: "sess-1",
+		Content:   buildACPMethodContentJSON(acp.MethodSessionNew, map[string]any{"params": map[string]any{"title": 123}}),
+	}
+
+	if err := c.RecordEvent(context.Background(), event); err != nil {
+		t.Fatalf("RecordEvent malformed session.new: %v", err)
+	}
+
+	sessions, err := c.listSessionViews(context.Background())
+	if err != nil {
+		t.Fatalf("listSessionViews: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	if sessions[0].Title != "sess-1" {
+		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "sess-1")
 	}
 }
 
