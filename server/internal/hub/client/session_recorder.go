@@ -191,37 +191,42 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 }
 
 func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessionViewEvent) error {
-	method := strings.TrimSpace(event.message.Method)
-	if method == "" {
-		return nil
-	}
-	event.message.Method = method
+	method := event.message.Method
 
 	switch method {
 	case acp.IMMethodPrompt:
 		if len(bytes.TrimSpace(event.message.Result)) > 0 {
-			result, err := decodeIMPromptResult(event.message)
-			if err != nil {
+			resultRaw := bytes.TrimSpace(event.message.Result)
+			if len(resultRaw) == 0 {
+				return fmt.Errorf("decode prompt result: %w", errSessionEventPayloadEmpty)
+			}
+			result := acp.IMPromptResult{}
+			if err := json.Unmarshal(resultRaw, &result); err != nil {
 				return fmt.Errorf("decode prompt result: %w", err)
 			}
+			result.StopReason = strings.TrimSpace(result.StopReason)
 			return r.handlePromptFinishedLocked(ctx, event.event, result.StopReason)
 		}
-		params, err := decodeIMPromptRequest(event.event.SessionID, event.message)
-		if err != nil {
+		requestRaw := bytes.TrimSpace(event.message.Request)
+		if len(requestRaw) == 0 {
+			return fmt.Errorf("decode prompt request: %w", errSessionEventPayloadEmpty)
+		}
+		request := acp.IMPromptRequest{}
+		if err := json.Unmarshal(requestRaw, &request); err != nil {
 			return fmt.Errorf("decode prompt request: %w", err)
+		}
+		params := acp.SessionPromptParams{
+			SessionID: strings.TrimSpace(event.event.SessionID),
+			Prompt:    cloneSessionContentBlocks(request.ContentBlocks),
 		}
 		return r.handlePromptStartedLocked(ctx, event.event, params)
 	case acp.IMMethodSystem, acp.IMMethodAgentThought, acp.IMMethodAgentMessage, acp.SessionUpdateUserMessageChunk, acp.IMMethodAgentPlan, acp.IMMethodToolCall:
-		return r.appendACPEventMessageLocked(ctx, event.event, event.turnMessage(), true)
+		return r.appendACPEventMessageLocked(ctx, event.event, sessionViewTurnMessage{
+			IMMessage: event.message,
+			MergeKey:  sessionTurnKey{ToolCallID: strings.TrimSpace(event.turnKey)},
+		}, true)
 	default:
 		return nil
-	}
-}
-
-func (e parsedSessionViewEvent) turnMessage() sessionViewTurnMessage {
-	return sessionViewTurnMessage{
-		IMMessage: e.message,
-		MergeKey:  sessionTurnKey{ToolCallID: strings.TrimSpace(e.turnKey)},
 	}
 }
 
@@ -241,34 +246,6 @@ func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, requ
 	}
 	e.turnKey = strings.TrimSpace(turnKey)
 	return nil
-}
-
-func decodeIMPromptRequest(sessionID string, message acp.IMMessage) (acp.SessionPromptParams, error) {
-	requestRaw := bytes.TrimSpace(message.Request)
-	if len(requestRaw) == 0 {
-		return acp.SessionPromptParams{}, errSessionEventPayloadEmpty
-	}
-	request := acp.IMPromptRequest{}
-	if err := json.Unmarshal(requestRaw, &request); err != nil {
-		return acp.SessionPromptParams{}, err
-	}
-	return acp.SessionPromptParams{
-		SessionID: strings.TrimSpace(sessionID),
-		Prompt:    cloneSessionContentBlocks(request.ContentBlocks),
-	}, nil
-}
-
-func decodeIMPromptResult(message acp.IMMessage) (acp.IMPromptResult, error) {
-	resultRaw := bytes.TrimSpace(message.Result)
-	if len(resultRaw) == 0 {
-		return acp.IMPromptResult{}, errSessionEventPayloadEmpty
-	}
-	result := acp.IMPromptResult{}
-	if err := json.Unmarshal(resultRaw, &result); err != nil {
-		return acp.IMPromptResult{}, err
-	}
-	result.StopReason = strings.TrimSpace(result.StopReason)
-	return result, nil
 }
 
 func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
@@ -385,14 +362,14 @@ func (r *SessionRecorder) mergeTurnMessageLocked(ctx context.Context, state sess
 	if err := r.appendSessionTurnLocked(ctx, mergedTurn, indexedIncomingRaw); err != nil {
 		return state, err
 	}
-	state.assignTurn(mergedTurn, sessionTurnKeyFromMergePlan(plan))
+	state.assignTurn(mergedTurn, sessionTurnKey{ToolCallID: strings.TrimSpace(plan.toolCallID)})
 	return state, nil
 }
 
 func (r *SessionRecorder) appendTurnMessageLocked(ctx context.Context, sessionID string, state sessionPromptState, turnMessage sessionViewTurnMessage) (sessionPromptState, error) {
 	indexed := turnMessage
 	indexed.IMMessage.Index = formatPromptTurnSeq(state.promptIndex, state.nextTurnIndex)
-	indexedIncomingRaw, err := marshalConvertedMessage(indexed)
+	indexedIncomingRaw, err := marshalIMMessage(indexed.IMMessage)
 	if err != nil {
 		return state, err
 	}
@@ -1049,10 +1026,6 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTur
 	}
 }
 
-func marshalConvertedMessage(message sessionViewTurnMessage) (string, error) {
-	return marshalIMMessage(message.IMMessage)
-}
-
 func marshalIMMessage(message acp.IMMessage) (string, error) {
 	raw, err := json.Marshal(message)
 	if err != nil {
@@ -1118,10 +1091,6 @@ func stringifyRawJSON(raw json.RawMessage) string {
 		}
 	}
 	return strings.TrimSpace(string(raw))
-}
-
-func sessionTurnKeyFromMergePlan(plan sessionTurnMergePlan) sessionTurnKey {
-	return sessionTurnKey{ToolCallID: strings.TrimSpace(plan.toolCallID)}
 }
 
 func sessionTurnMethodKey(raw string) string {
