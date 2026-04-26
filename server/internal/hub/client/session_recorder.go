@@ -21,8 +21,6 @@ const (
 	SessionViewEventTypeACP    SessionViewEventType = "acp"
 )
 
-const sessionViewMethodSystem = "system"
-
 type SessionViewEvent struct {
 	Type      SessionViewEventType
 	SessionID string
@@ -191,35 +189,22 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 }
 
 func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessionViewEvent) error {
-	method := event.message.Method
+	method := strings.TrimSpace(event.message.Method)
+	if method == "" {
+		return nil
+	}
+	event.message.Method = method
 
 	switch method {
 	case acp.IMMethodPrompt:
-		if len(bytes.TrimSpace(event.message.Result)) > 0 {
-			resultRaw := bytes.TrimSpace(event.message.Result)
-			if len(resultRaw) == 0 {
-				return fmt.Errorf("decode prompt result: %w", errSessionEventPayloadEmpty)
-			}
-			result := acp.IMPromptResult{}
-			if err := json.Unmarshal(resultRaw, &result); err != nil {
-				return fmt.Errorf("decode prompt result: %w", err)
-			}
-			result.StopReason = strings.TrimSpace(result.StopReason)
-			return r.handlePromptFinishedLocked(ctx, event.event, result.StopReason)
+		if event.message.Result != nil {
+			return r.handlePromptFinishedLocked(ctx, event)
 		}
-		requestRaw := bytes.TrimSpace(event.message.Request)
-		if len(requestRaw) == 0 {
-			return fmt.Errorf("decode prompt request: %w", errSessionEventPayloadEmpty)
+		if event.message.Request != nil {
+			return r.handlePromptStartedLocked(ctx, event)
 		}
-		request := acp.IMPromptRequest{}
-		if err := json.Unmarshal(requestRaw, &request); err != nil {
-			return fmt.Errorf("decode prompt request: %w", err)
-		}
-		params := acp.SessionPromptParams{
-			SessionID: strings.TrimSpace(event.event.SessionID),
-			Prompt:    cloneSessionContentBlocks(request.ContentBlocks),
-		}
-		return r.handlePromptStartedLocked(ctx, event.event, params)
+		return nil
+
 	case acp.IMMethodSystem, acp.IMMethodAgentThought, acp.IMMethodAgentMessage, acp.SessionUpdateUserMessageChunk, acp.IMMethodAgentPlan, acp.IMMethodToolCall:
 		return r.appendACPEventMessageLocked(ctx, event.event, sessionViewTurnMessage{
 			IMMessage: event.message,
@@ -286,12 +271,23 @@ func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID str
 	return r.sessionViewSummaryFromRecord(*rec), page.messages, page.lastPromptIndex, page.lastTurnIndex, nil
 }
 
-func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event SessionViewEvent, params acp.SessionPromptParams) error {
-	state, err := r.nextPromptStateLocked(ctx, event.SessionID)
+func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, parsedEvent parsedSessionViewEvent) error {
+	event := parsedEvent.event
+	requestRaw := bytes.TrimSpace(parsedEvent.message.Request)
+	if len(requestRaw) == 0 {
+		return fmt.Errorf("decode prompt request: %w", errSessionEventPayloadEmpty)
+	}
+	request := acp.IMPromptRequest{}
+	if err := json.Unmarshal(requestRaw, &request); err != nil {
+		return fmt.Errorf("decode prompt request: %w", err)
+	}
+	prompt := cloneSessionContentBlocks(request.ContentBlocks)
+
+	state, err := r.nextPromptStateLocked(ctx, parsedEvent.event.SessionID)
 	if err != nil {
 		return err
 	}
-	promptTitle := strings.TrimSpace(promptTitleFromBlocks(params.Prompt))
+	promptTitle := strings.TrimSpace(promptTitleFromBlocks(prompt))
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
 		PromptIndex: state.promptIndex,
@@ -300,7 +296,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event S
 	}); err != nil {
 		return err
 	}
-	message, err := buildPromptTurnRecord(event.SessionID, state.promptIndex, params.Prompt)
+	message, err := buildPromptTurnRecord(event.SessionID, state.promptIndex, prompt)
 	if err != nil {
 		return err
 	}
@@ -393,7 +389,19 @@ func (r *SessionRecorder) appendSessionTurnLocked(ctx context.Context, message S
 	return nil
 }
 
-func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, event SessionViewEvent, stopReason string) error {
+
+func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsedEvent parsedSessionViewEvent) error {
+	event := parsedEvent.event
+	resultRaw := bytes.TrimSpace(parsedEvent.message.Result)
+	if len(resultRaw) == 0 {
+		return fmt.Errorf("decode prompt result: %w", errSessionEventPayloadEmpty)
+	}
+	result := acp.IMPromptResult{}
+	if err := json.Unmarshal(resultRaw, &result); err != nil {
+		return fmt.Errorf("decode prompt result: %w", err)
+	}
+	stopReason := strings.TrimSpace(result.StopReason)
+
 	state, err := r.ensurePromptStateLocked(ctx, event.SessionID, event.UpdatedAt)
 	if err != nil {
 		return err
@@ -701,6 +709,24 @@ func jsonDecodeAt(raw json.RawMessage, path string, out any) bool {
 	return true
 }
 
+func extractUpdateText(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	block := struct {
+		Text string `json:"text,omitempty"`
+	}{}
+	if err := json.Unmarshal(raw, &block); err == nil {
+		return block.Text
+	}
+	return ""
+}
+
 func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, error) {
 	parsed := parsedSessionViewEvent{
 		event: event,
@@ -715,97 +741,90 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 	}
 
 	eventType := strings.TrimSpace(string(parsed.event.Type))
-	contentRaw := json.RawMessage(parsed.event.Content)
-	switch {
-	case strings.EqualFold(eventType, string(SessionViewEventTypeACP)):
+	if strings.EqualFold(eventType, string(SessionViewEventTypeACP)) {
+		contentRaw := json.RawMessage(parsed.event.Content)
 		jsonDecodeAt(contentRaw, "method", &parsed.acpMethod)
 		parsed.acpMethod = strings.TrimSpace(parsed.acpMethod)
 		if parsed.acpMethod == "" {
 			return parsedSessionViewEvent{}, fmt.Errorf("decode acp event content: %w", fmt.Errorf("session event method is required"))
 		}
-	case strings.EqualFold(eventType, string(SessionViewEventTypeSystem)):
-		parsed.acpMethod = sessionViewMethodSystem
-	default:
-		return parsed, nil
-	}
-
-	switch parsed.acpMethod {
-	case acp.MethodSessionNew:
-		return parsed, nil
-	case acp.MethodSessionPrompt:
-		promptResult := sessionViewPromptResult{}
-		ok := jsonDecodeAt(contentRaw, "result", &promptResult)
-		if ok {
-			if err := parsed.setJSONMessage(acp.IMMethodPrompt, acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)}, false, ""); err != nil {
+		switch parsed.acpMethod {
+		case acp.MethodSessionNew:
+			return parsed, nil
+		case acp.MethodSessionPrompt:
+			promptResult := sessionViewPromptResult{}
+			ok := jsonDecodeAt(contentRaw, "result", &promptResult)
+			if ok {
+				if err := parsed.setJSONMessage(acp.IMMethodPrompt, acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)}, false, ""); err != nil {
+					return parsedSessionViewEvent{}, err
+				}
+				return parsed, nil
+			}
+			params := acp.SessionPromptParams{}
+			jsonDecodeAt(contentRaw, "params", &params)
+			if err := parsed.setJSONMessage(acp.IMMethodPrompt, acp.IMPromptRequest{ContentBlocks: cloneSessionContentBlocks(params.Prompt)}, true, ""); err != nil {
 				return parsedSessionViewEvent{}, err
 			}
-			return parsed, nil
-		}
-		params := acp.SessionPromptParams{}
-		jsonDecodeAt(contentRaw, "params", &params)
-		if err := parsed.setJSONMessage(acp.IMMethodPrompt, acp.IMPromptRequest{ContentBlocks: cloneSessionContentBlocks(params.Prompt)}, true, ""); err != nil {
-			return parsedSessionViewEvent{}, err
-		}
-		return parsed, nil
-	case acp.MethodSessionUpdate:
-		params := acp.SessionUpdateParams{}
-		jsonDecodeAt(contentRaw, "params", &params)
-		update := params.Update
-		updateMethod := strings.TrimSpace(update.SessionUpdate)
-		switch updateMethod {
-		case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
-			if err := parsed.setJSONMessage(updateMethod, acp.IMTextResult{Text: extractUpdateText(update.Content)}, false, ""); err != nil {
-				return parsedSessionViewEvent{}, err
+		case acp.MethodSessionUpdate:
+			params := acp.SessionUpdateParams{}
+			jsonDecodeAt(contentRaw, "params", &params)
+			update := params.Update
+			updateMethod := strings.TrimSpace(update.SessionUpdate)
+			switch updateMethod {
+			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
+				if err := parsed.setJSONMessage(updateMethod, acp.IMTextResult{Text: extractUpdateText(update.Content)}, false, ""); err != nil {
+					return parsedSessionViewEvent{}, err
+				}
+			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+				output := extractUpdateText(update.Content)
+				if strings.TrimSpace(output) == "" {
+					output = stringifyRawJSON(update.RawOutput)
+				}
+				if err := parsed.setJSONMessage(acp.IMMethodToolCall, acp.IMToolResult{
+					Cmd:    strings.TrimSpace(update.Title),
+					Kind:   strings.TrimSpace(update.Kind),
+					Status: strings.TrimSpace(update.Status),
+					Output: output,
+				}, false, update.ToolCallID); err != nil {
+					return parsedSessionViewEvent{}, err
+				}
+			case acp.SessionUpdatePlan:
+				entries := make([]acp.IMPlanResult, 0, len(update.Entries))
+				for _, entry := range update.Entries {
+					entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
+				}
+				if err := parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, false, ""); err != nil {
+					return parsedSessionViewEvent{}, err
+				}
+			default:
 			}
-			return parsed, nil
-		case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-			output := extractUpdateText(update.Content)
-			if strings.TrimSpace(output) == "" {
-				output = stringifyRawJSON(update.RawOutput)
-			}
-			if err := parsed.setJSONMessage(acp.IMMethodToolCall, acp.IMToolResult{
-				Cmd:    strings.TrimSpace(update.Title),
-				Kind:   strings.TrimSpace(update.Kind),
-				Status: strings.TrimSpace(update.Status),
-				Output: output,
-			}, false, update.ToolCallID); err != nil {
-				return parsedSessionViewEvent{}, err
-			}
-			return parsed, nil
-		case acp.SessionUpdatePlan:
-			entries := make([]acp.IMPlanResult, 0, len(update.Entries))
-			for _, entry := range update.Entries {
-				entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
-			}
-			if err := parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, false, ""); err != nil {
-				return parsedSessionViewEvent{}, err
-			}
-			return parsed, nil
-		default:
-			return parsed, nil
-		}
-	case sessionViewMethodSystem:
-		text := parsed.event.Content
-		if strings.EqualFold(eventType, string(SessionViewEventTypeACP)) {
+		case acp.IMMethodSystem:
 			resultRaw, ok := jsonGet(contentRaw, "result")
 			if !ok {
 				return parsed, nil
 			}
-			text = strings.TrimSpace(extractUpdateText(resultRaw))
+			text := strings.TrimSpace(extractUpdateText(resultRaw))
 			if text == "" {
 				text = strings.TrimSpace(stringifyRawJSON(resultRaw))
 			}
+			if text == "" {
+				return parsed, nil
+			}
+			if err := parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, false, ""); err != nil {
+				return parsedSessionViewEvent{}, err
+			}
 		}
+	} else if strings.EqualFold(eventType, string(SessionViewEventTypeSystem)) {
+		text := strings.TrimSpace(parsed.event.Content)
 		if text == "" {
 			return parsed, nil
 		}
 		if err := parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, false, ""); err != nil {
 			return parsedSessionViewEvent{}, err
 		}
-		return parsed, nil
-	default:
-		return parsed, nil
 	}
+
+	return parsed, nil
 }
 
 func buildACPMethodContentJSON(method string, body map[string]any) string {
@@ -1055,24 +1074,6 @@ func decodeIMMessage(raw string) (acp.IMMessage, error) {
 	}
 	message.Method = strings.TrimSpace(message.Method)
 	return message, nil
-}
-
-func extractUpdateText(raw json.RawMessage) string {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return ""
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return text
-	}
-	block := struct {
-		Text string `json:"text,omitempty"`
-	}{}
-	if err := json.Unmarshal(raw, &block); err == nil {
-		return block.Text
-	}
-	return ""
 }
 
 func stringifyRawJSON(raw json.RawMessage) string {

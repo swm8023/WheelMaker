@@ -1958,6 +1958,17 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			wantMessage:   false,
 			wantACPMethod: acp.MethodRequestPermission,
 		},
+		{
+			name: "ACP event type matching is case-insensitive",
+			event: SessionViewEvent{
+				Type:      SessionViewEventType("ACP"),
+				SessionID: "sess-1",
+				Content:   buildACPMethodParamsContent(acp.MethodSessionPrompt, acp.SessionPromptParams{}),
+			},
+			wantMessage:   true,
+			wantACPMethod: acp.MethodSessionPrompt,
+			wantMethod:    acp.IMMethodPrompt,
+		},
 	}
 
 	for _, tt := range tests {
@@ -2056,6 +2067,17 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.MethodSessionUpdate,
+			wantMethod:    "",
+		},
+		{
+			name: "ACP system without result is ignored without error",
+			event: SessionViewEvent{
+				Type:      SessionViewEventTypeACP,
+				SessionID: "sess-1",
+				Content:   buildACPMethodContentJSON(acp.IMMethodSystem, nil),
+			},
+			wantMessage:   false,
+			wantACPMethod: acp.IMMethodSystem,
 			wantMethod:    "",
 		},
 	}
