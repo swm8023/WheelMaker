@@ -62,6 +62,52 @@ func TestParseMessagePromptBlocks_Image(t *testing.T) {
 		t.Fatalf("block type=%q, want image", blocks[0].Type)
 	}
 }
+
+func TestParseMessagePromptBlocks_Post(t *testing.T) {
+	f := newTransport(Config{})
+	msgType := "post"
+	content := `{"zh_cn":{"title":"","content":[[{"tag":"text","text":"hello "},{"tag":"at","user_id":"ou_bot","user_name":"bot"},{"tag":"text","text":"world"}],[{"tag":"text","text":"line2"}]]}}`
+	blocks := f.parseMessagePromptBlocks(context.Background(), "msg-1", &msgType, &content)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks=%+v, want one text block", blocks)
+	}
+	if blocks[0].Type != acp.ContentBlockTypeText {
+		t.Fatalf("block type=%q, want text", blocks[0].Type)
+	}
+	if blocks[0].Text != "hello world\nline2" {
+		t.Fatalf("block text=%q, want %q", blocks[0].Text, "hello world\nline2")
+	}
+}
+
+func TestParseMessagePromptBlocks_RichText(t *testing.T) {
+	f := newTransport(Config{})
+	msgType := "rich_text"
+	content := `{"title":"","elements":[{"tag":"text","text":"hello"},{"tag":"text","text":" world"}]}`
+	blocks := f.parseMessagePromptBlocks(context.Background(), "msg-1", &msgType, &content)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks=%+v, want one text block", blocks)
+	}
+	if blocks[0].Type != acp.ContentBlockTypeText {
+		t.Fatalf("block type=%q, want text", blocks[0].Type)
+	}
+	if blocks[0].Text != "hello world" {
+		t.Fatalf("block text=%q, want %q", blocks[0].Text, "hello world")
+	}
+}
+
+func TestParseMessagePromptBlocks_PostPrefersZhCN(t *testing.T) {
+	f := newTransport(Config{})
+	msgType := "post"
+	content := `{"zh_cn":{"content":[[{"tag":"text","text":"你好"}]]},"en_us":{"content":[[{"tag":"text","text":"hello"}]]}}`
+	blocks := f.parseMessagePromptBlocks(context.Background(), "msg-1", &msgType, &content)
+	if len(blocks) != 1 {
+		t.Fatalf("blocks=%+v, want one text block", blocks)
+	}
+	if blocks[0].Text != "你好" {
+		t.Fatalf("block text=%q, want %q", blocks[0].Text, "你好")
+	}
+}
+
 func TestBuildUnifiedStreamCard_TextOnly(t *testing.T) {
 	seg := streamSegment{kind: segText, content: "hello"}
 	card := buildUnifiedStreamCard([]streamSegment{seg}, false)

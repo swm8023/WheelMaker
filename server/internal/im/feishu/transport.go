@@ -1793,7 +1793,7 @@ func (f *transportChannel) parseMessagePromptBlocks(ctx context.Context, message
 		return nil
 	}
 	switch strings.ToLower(strings.TrimSpace(*msgType)) {
-	case "text":
+	case "text", "post", "rich_text":
 		text := parseMessageText(msgType, content)
 		if strings.TrimSpace(text) == "" {
 			return nil
@@ -2130,17 +2130,137 @@ func parseMessageText(msgType *string, content *string) string {
 	if msgType == nil || content == nil {
 		return ""
 	}
-	// Only text is supported in MVP.
-	if *msgType != "text" {
+	switch strings.ToLower(strings.TrimSpace(*msgType)) {
+	case "text":
+		var payload struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(*content), &payload); err != nil {
+			return ""
+		}
+		return strings.TrimSpace(payload.Text)
+	case "post", "rich_text":
+		var payload any
+		if err := json.Unmarshal([]byte(*content), &payload); err != nil {
+			return ""
+		}
+		return normalizeExtractedPromptText(extractFeishuPromptText(payload))
+	default:
 		return ""
 	}
-	var payload struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal([]byte(*content), &payload); err != nil {
+}
+
+func extractFeishuPromptText(v any) string {
+	switch value := v.(type) {
+	case map[string]any:
+		for _, key := range []string{"zh_cn", "en_us"} {
+			child, ok := value[key]
+			if !ok {
+				continue
+			}
+			if text := extractFeishuPromptText(child); text != "" {
+				return text
+			}
+		}
+
+		tag, _ := value["tag"].(string)
+		tag = strings.ToLower(strings.TrimSpace(tag))
+		switch tag {
+		case "text", "a":
+			if text, ok := value["text"].(string); ok {
+				return text
+			}
+		case "at":
+			if text, ok := value["text"].(string); ok {
+				return text
+			}
+		}
+
+		parts := make([]string, 0, 5)
+		for _, key := range []string{"content", "elements", "text"} {
+			child, ok := value[key]
+			if !ok {
+				continue
+			}
+			text := extractFeishuPromptText(child)
+			if text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return joinFeishuTextParts(parts, "\n")
+	case []any:
+		parts := make([]string, 0, len(value))
+		allInline := true
+		for _, child := range value {
+			text := extractFeishuPromptText(child)
+			if text != "" {
+				parts = append(parts, text)
+			}
+			if !isInlineFeishuTextNode(child) {
+				allInline = false
+			}
+		}
+		if allInline {
+			return joinFeishuTextParts(parts, "")
+		}
+		return joinFeishuTextParts(parts, "\n")
+	case string:
+		return value
+	default:
 		return ""
 	}
-	return strings.TrimSpace(payload.Text)
+}
+
+func isInlineFeishuTextNode(v any) bool {
+	if _, ok := v.(string); ok {
+		return true
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return false
+	}
+	tag, _ := obj["tag"].(string)
+	tag = strings.ToLower(strings.TrimSpace(tag))
+	switch tag {
+	case "text", "a", "at", "emotion":
+		return true
+	default:
+		return false
+	}
+}
+
+func joinFeishuTextParts(parts []string, sep string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	return strings.Join(filtered, sep)
+}
+
+func normalizeExtractedPromptText(raw string) string {
+	raw = strings.ReplaceAll(raw, "\r", "")
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	clean := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			clean = append(clean, line)
+		}
+	}
+	return strings.Join(clean, "\n")
 }
 
 func firstNonEmpty(v ...string) string {
