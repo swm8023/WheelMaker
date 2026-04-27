@@ -16,7 +16,6 @@ import (
 type SessionViewEventType string
 
 const (
-	SessionViewEventTypeSystem SessionViewEventType = "system"
 	SessionViewEventTypeACP    SessionViewEventType = "acp"
 )
 
@@ -204,7 +203,7 @@ func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessi
 		}
 		return nil
 
-	case acp.IMMethodSystem, acp.IMMethodAgentThought, acp.IMMethodAgentMessage, acp.SessionUpdateUserMessageChunk, acp.IMMethodAgentPlan, acp.IMMethodToolCall:
+	case acp.IMMethodAgentThought, acp.IMMethodAgentMessage, acp.SessionUpdateUserMessageChunk, acp.IMMethodAgentPlan, acp.IMMethodToolCall:
 		return r.appendACPEventMessageLocked(ctx, event.raw, event.turnMessage(), true)
 	default:
 		return nil
@@ -785,27 +784,8 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 				parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, "")
 			default:
 			}
-		case acp.IMMethodSystem:
-			resultRaw, ok := jsonGet(contentRaw, "result")
-			if !ok {
-				return parsed, nil
-			}
-			text := strings.TrimSpace(extractUpdateText(resultRaw))
-			if text == "" {
-				text = strings.TrimSpace(stringifyRawJSON(resultRaw))
-			}
-			if text == "" {
-				return parsed, nil
-			}
-			parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, "")
 		default:
 		}
-	} else if strings.EqualFold(eventType, string(SessionViewEventTypeSystem)) {
-		text := strings.TrimSpace(parsed.raw.Content)
-		if text == "" {
-			return parsed, nil
-		}
-		parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, "")
 	}
 
 	return parsed, nil

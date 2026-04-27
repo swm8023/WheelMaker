@@ -1854,7 +1854,7 @@ func sessionViewPermissionResolvedEvent(sessionID string, requestID int64, statu
 
 func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 	return SessionViewEvent{
-		Type:      SessionViewEventTypeSystem,
+		Type:      SessionViewEventType("system"),
 		SessionID: sessionID,
 		Content:   text,
 	}
@@ -2108,6 +2108,28 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.IMMethodSystem,
+			wantMethod:    "",
+		},
+		{
+			name: "ACP system with result is ignored without error",
+			event: SessionViewEvent{
+				Type:      SessionViewEventTypeACP,
+				SessionID: "sess-1",
+				Content:   buildACPMethodResultContent(acp.IMMethodSystem, "ignored"),
+			},
+			wantMessage:   false,
+			wantACPMethod: acp.IMMethodSystem,
+			wantMethod:    "",
+		},
+		{
+			name: "legacy system event is ignored without error",
+			event: SessionViewEvent{
+				Type:      SessionViewEventType("system"),
+				SessionID: "sess-1",
+				Content:   "ignored",
+			},
+			wantMessage:   false,
+			wantACPMethod: "",
 			wantMethod:    "",
 		},
 	}
@@ -2453,7 +2475,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	}
 }
 
-func TestSessionViewStoresSystemMethodFromACPAndLegacyEvents(t *testing.T) {
+func TestSessionViewIgnoresSystemEventsFromACPAndLegacyPaths(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
@@ -2477,25 +2499,8 @@ func TestSessionViewStoresSystemMethodFromACPAndLegacyEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3 (prompt + two system turns)", len(turns))
-	}
-
-	for i, want := range []string{"from acp", "from legacy"} {
-		msg := acp.IMMessage{}
-		if err := json.Unmarshal([]byte(turns[i+1].UpdateJSON), &msg); err != nil {
-			t.Fatalf("unmarshal system turn #%d: %v", i+1, err)
-		}
-		if strings.TrimSpace(msg.Method) != acp.IMMethodSystem {
-			t.Fatalf("system turn #%d method = %q, want %q", i+1, msg.Method, acp.IMMethodSystem)
-		}
-		result := acp.IMTextResult{}
-		if err := json.Unmarshal(msg.Param, &result); err != nil {
-			t.Fatalf("unmarshal system turn #%d result: %v", i+1, err)
-		}
-		if strings.TrimSpace(result.Text) != want {
-			t.Fatalf("system turn #%d text = %q, want %q", i+1, result.Text, want)
-		}
+	if len(turns) != 1 {
+		t.Fatalf("turns len = %d, want 1 (prompt only)", len(turns))
 	}
 }
 
