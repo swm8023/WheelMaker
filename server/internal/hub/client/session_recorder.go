@@ -188,7 +188,7 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 }
 
 func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessionViewEvent) error {
-	method := event.messageMethod()
+	method := event.method
 	if method == "" {
 		return nil
 	}
@@ -219,13 +219,9 @@ func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, turn
 	e.turnKey = strings.TrimSpace(turnKey)
 }
 
-func (e parsedSessionViewEvent) messageMethod() string {
-	return strings.TrimSpace(e.method)
-}
-
 func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
 	message := acp.IMMessage{
-		Method:  e.messageMethod(),
+		Method:  e.method,
 		Session: strings.TrimSpace(e.raw.SessionID),
 	}
 	if e.payload != nil {
@@ -234,13 +230,9 @@ func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
 	return message
 }
 
-func (m sessionTurnMessage) messageMethod() string {
-	return strings.TrimSpace(m.method)
-}
-
 func (m sessionTurnMessage) imMessage() acp.IMMessage {
 	message := acp.IMMessage{
-		Method:  m.messageMethod(),
+		Method:  m.method,
 		Session: strings.TrimSpace(m.SessionID),
 	}
 	if m.payload != nil {
@@ -348,64 +340,73 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 
 	turn := sessionTurnMessage{
 		SessionID:   strings.TrimSpace(event.raw.SessionID),
-		method:      event.messageMethod(),
+		method:      event.method,
 		payload:     event.payload,
 		PromptIndex: state.promptIndex,
 	}
+	publishContent := ""
 
-	mergeKind, turnIndex := getTurnKindAndIndex(*state, event)
-	if turnIndex > 0 {
-		existingTurn, ok := state.turns[turnIndex]
+	mergeKind, mergedTurnIndex := getTurnKindAndIndex(*state, event)
+	if mergedTurnIndex > 0 {
+		existingTurn, ok := state.turns[mergedTurnIndex]
 
 		if ok {
 			turn.SessionID = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(turn.SessionID), strings.TrimSpace(existingTurn.SessionID)))
 			turn.PromptIndex = state.promptIndex
-			turn.TurnIndex = turnIndex
+			turn.TurnIndex = mergedTurnIndex
 			turn.UpdateIndex = maxInt64(existingTurn.UpdateIndex, 0) + 1
 
-			merged, err := mergeTurnMessage(existingTurn, turn, mergeKind, turnIndex)
+			incomingRaw, err := json.Marshal(turn.imMessage())
 			if err != nil {
 				return err
 			}
-			_, publishContent, err := buildSessionTurnRecordFromMessage(turn)
+			publishContent = normalizeJSONDoc(string(incomingRaw), `{}`)
+
+			merged, err := mergeTurnMessage(existingTurn, turn, mergeKind, mergedTurnIndex)
 			if err != nil {
 				return err
 			}
-			record, _, err := buildSessionTurnRecordFromMessage(merged)
-			if err != nil {
-				return err
-			}
-			if err := r.appendSessionTurnLocked(ctx, record, publishContent); err != nil {
-				return err
-			}
-			state.updateTurn(merged, event.turnKey)
-			return nil
+			turn = merged
 		}
 	}
 
 	turn.PromptIndex = state.promptIndex
-	turn.TurnIndex = state.nextTurnIndex
-	turn.UpdateIndex = 1
-	record, publishContent, err := buildSessionTurnRecordFromMessage(turn)
+	if turn.TurnIndex <= 0 {
+		turn.TurnIndex = state.nextTurnIndex
+	}
+	if turn.UpdateIndex <= 0 {
+		turn.UpdateIndex = 1
+	}
+
+	messageRaw, err := json.Marshal(turn.imMessage())
 	if err != nil {
 		return err
 	}
-	if err := r.appendSessionTurnLocked(ctx, record, publishContent); err != nil {
+	updateJSON := normalizeJSONDoc(string(messageRaw), `{}`)
+	record := SessionTurnRecord{
+		SessionID:   strings.TrimSpace(turn.SessionID),
+		PromptIndex: turn.PromptIndex,
+		TurnIndex:   maxInt64(turn.TurnIndex, 1),
+		UpdateIndex: maxInt64(turn.UpdateIndex, 1),
+		UpdateJSON:  updateJSON,
+	}
+	if err := r.store.UpsertSessionTurn(ctx, record); err != nil {
 		return err
+	}
+	if strings.TrimSpace(publishContent) == "" {
+		publishContent = updateJSON
+	}
+	publish := r.eventPublisher()
+	if publish != nil {
+		_ = publish("registry.session.message", map[string]any{
+			"sessionId":   strings.TrimSpace(turn.SessionID),
+			"promptIndex": turn.PromptIndex,
+			"turnIndex":   turn.TurnIndex,
+			"updateIndex": turn.UpdateIndex,
+			"content":     publishContent,
+		})
 	}
 	state.updateTurn(turn, event.turnKey)
-	return nil
-}
-
-func (r *SessionRecorder) appendSessionTurnLocked(ctx context.Context, message SessionTurnRecord, publishContent ...string) error {
-	if err := r.store.UpsertSessionTurn(ctx, message); err != nil {
-		return err
-	}
-	content := message.UpdateJSON
-	if len(publishContent) > 0 && strings.TrimSpace(publishContent[0]) != "" {
-		content = publishContent[0]
-	}
-	r.publishSessionTurn(message.SessionID, message, content)
 	return nil
 }
 
@@ -476,25 +477,6 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 		rec.LastActiveAt,
 		rec.Agent,
 	)
-}
-
-func (r *SessionRecorder) publishSessionTurn(sessionID string, turn SessionTurnRecord, rawContent string) {
-	publish := r.eventPublisher()
-	if publish == nil {
-		return
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	content := strings.TrimSpace(rawContent)
-	if content == "" {
-		content = "{}"
-	}
-	_ = publish("registry.session.message", map[string]any{
-		"sessionId":   sessionID,
-		"promptIndex": turn.PromptIndex,
-		"turnIndex":   turn.TurnIndex,
-		"updateIndex": turn.UpdateIndex,
-		"content":     content,
-	})
 }
 
 func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
@@ -573,6 +555,9 @@ func (s *sessionPromptState) ensureMaps() {
 
 func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string) {
 	s.ensureMaps()
+	turn.SessionID = strings.TrimSpace(turn.SessionID)
+	turn.method = strings.TrimSpace(turn.method)
+	turn.UpdateIndex = maxInt64(turn.UpdateIndex, 1)
 	s.turns[turn.TurnIndex] = turn
 	if turn.TurnIndex >= s.nextTurnIndex {
 		s.nextTurnIndex = turn.TurnIndex + 1
@@ -583,14 +568,7 @@ func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string)
 }
 
 func (s *sessionPromptState) assignTurn(turn sessionTurnMessage, turnKey string) {
-	s.ensureMaps()
-	s.turns[turn.TurnIndex] = turn
-	if turn.TurnIndex >= s.nextTurnIndex {
-		s.nextTurnIndex = turn.TurnIndex + 1
-	}
-	if turnKey = strings.TrimSpace(turnKey); turnKey != "" {
-		s.turnIndexByKey[turnKey] = turn.TurnIndex
-	}
+	s.updateTurn(turn, turnKey)
 }
 
 func normalizeSessionID(sessionID string) (string, error) {
@@ -798,7 +776,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 				return parsedSessionViewEvent{}, err
 			}
 			if ok {
-				parsed.setJSONMessage(turn.messageMethod(), turn.payload, turnKey)
+				parsed.setJSONMessage(turn.method, turn.payload, turnKey)
 			}
 		default:
 		}
@@ -1121,22 +1099,6 @@ func decodeTurnPayload(message acp.IMMessage) (any, error) {
 	default:
 		return cloneJSONRaw(message.Param), nil
 	}
-}
-
-func buildSessionTurnRecordFromMessage(message sessionTurnMessage) (SessionTurnRecord, string, error) {
-	imMessage := message.imMessage()
-	raw, err := json.Marshal(imMessage)
-	if err != nil {
-		return SessionTurnRecord{}, "", err
-	}
-	content := normalizeJSONDoc(string(raw), `{}`)
-	return SessionTurnRecord{
-		SessionID:   strings.TrimSpace(message.SessionID),
-		PromptIndex: message.PromptIndex,
-		TurnIndex:   maxInt64(message.TurnIndex, 1),
-		UpdateIndex: maxInt64(message.UpdateIndex, 1),
-		UpdateJSON:  content,
-	}, content, nil
 }
 
 func decodeSessionTurnMessage(record SessionTurnRecord) (sessionTurnMessage, error) {

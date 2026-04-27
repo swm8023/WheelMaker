@@ -1928,8 +1928,8 @@ func TestBuildConvertedMessageFromSessionUpdateReturnsToolTurnKey(t *testing.T) 
 	if !ok {
 		t.Fatalf("buildConvertedMessageFromSessionUpdate ok = false, want true")
 	}
-	if strings.TrimSpace(converted.messageMethod()) != acp.IMMethodToolCall {
-		t.Fatalf("converted method = %q, want %q", converted.messageMethod(), acp.IMMethodToolCall)
+	if converted.method != acp.IMMethodToolCall {
+		t.Fatalf("converted method = %q, want %q", converted.method, acp.IMMethodToolCall)
 	}
 	if turnKey != "call-1" {
 		t.Fatalf("turnKey = %q, want %q", turnKey, "call-1")
@@ -1989,8 +1989,8 @@ func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
 	if !ok {
 		t.Fatalf("state.turns[1] missing")
 	}
-	if turn.messageMethod() != acp.IMMethodPromptRequest {
-		t.Fatalf("turn method = %q, want %q", turn.messageMethod(), acp.IMMethodPromptRequest)
+	if turn.method != acp.IMMethodPromptRequest {
+		t.Fatalf("turn method = %q, want %q", turn.method, acp.IMMethodPromptRequest)
 	}
 
 	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
@@ -2121,8 +2121,8 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			if parsed.acpMethod != tt.wantACPMethod {
 				t.Fatalf("parsed.acpMethod = %q, want %q", parsed.acpMethod, tt.wantACPMethod)
 			}
-			if parsed.messageMethod() != tt.wantMethod {
-				t.Fatalf("parsed.messageMethod() = %q, want %q", parsed.messageMethod(), tt.wantMethod)
+			if parsed.method != tt.wantMethod {
+				t.Fatalf("parsed.method = %q, want %q", parsed.method, tt.wantMethod)
 			}
 			if tt.wantMessage {
 				message := parsed.imMessage()
@@ -2273,8 +2273,8 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			if parsed.acpMethod != tt.wantACPMethod {
 				t.Fatalf("parsed.acpMethod = %q, want %q", parsed.acpMethod, tt.wantACPMethod)
 			}
-			if parsed.messageMethod() != tt.wantMethod {
-				t.Fatalf("parsed.messageMethod() = %q, want %q", parsed.messageMethod(), tt.wantMethod)
+			if parsed.method != tt.wantMethod {
+				t.Fatalf("parsed.method = %q, want %q", parsed.method, tt.wantMethod)
 			}
 			if tt.wantMessage {
 				message := parsed.imMessage()
