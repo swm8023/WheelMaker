@@ -323,8 +323,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 	}); err != nil {
 		return err
 	}
-	state, err = r.addMessageTurn(ctx, state, buildPromptTurnMessage(rawEvent.SessionID, request), "")
-	if err != nil {
+	if err := r.addMessageTurn(ctx, &state, event); err != nil {
 		return err
 	}
 	r.promptState[rawEvent.SessionID] = state
@@ -342,17 +341,21 @@ func (r *SessionRecorder) appendACPEventMessageLocked(ctx context.Context, event
 	if !ok {
 		return nil
 	}
-	state, err = r.addMessageTurn(ctx, state, event.turnMessage(), event.turnKey)
-	if err != nil {
+	if err := r.addMessageTurn(ctx, &state, event); err != nil {
 		return err
 	}
 	r.promptState[event.raw.SessionID] = state
 	return nil
 }
 
-func (r *SessionRecorder) addMessageTurn(ctx context.Context, state sessionPromptState, message sessionTurnMessage, turnKey string) (sessionPromptState, error) {
+func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionPromptState, event parsedSessionViewEvent) error {
+	if state == nil {
+		return fmt.Errorf("prompt state is required")
+	}
 	state.ensureMaps()
-	turnIndex, plan := getTurnIndex(state, message, turnKey)
+
+	message := event.turnMessage()
+	turnIndex, plan := getTurnIndex(*state, message, event.turnKey)
 	if turnIndex > 0 {
 		existingTurn, ok := state.turns[turnIndex]
 		if ok {
@@ -364,21 +367,21 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state sessionPromp
 
 			_, publishContent, err := buildSessionTurnRecordFromMessage(incoming)
 			if err != nil {
-				return state, err
+				return err
 			}
 			merged, err := mergeTurnMessage(existingTurn, incoming, plan)
 			if err != nil {
-				return state, err
+				return err
 			}
 			record, _, err := buildSessionTurnRecordFromMessage(merged)
 			if err != nil {
-				return state, err
+				return err
 			}
 			if err := r.appendSessionTurnLocked(ctx, record, publishContent); err != nil {
-				return state, err
+				return err
 			}
 			state.assignTurn(merged, plan.turnKey)
-			return state, nil
+			return nil
 		}
 		if plan.turnKey != "" {
 			delete(state.turnIndexByKey, plan.turnKey)
@@ -391,13 +394,13 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state sessionPromp
 	message.UpdateIndex = maxInt64(message.UpdateIndex, 1)
 	record, publishContent, err := buildSessionTurnRecordFromMessage(message)
 	if err != nil {
-		return state, err
+		return err
 	}
 	if err := r.appendSessionTurnLocked(ctx, record, publishContent); err != nil {
-		return state, err
+		return err
 	}
 	state.assignTurn(message, plan.turnKey)
-	return state, nil
+	return nil
 }
 
 func (r *SessionRecorder) appendSessionTurnLocked(ctx context.Context, message SessionTurnRecord, publishContent ...string) error {

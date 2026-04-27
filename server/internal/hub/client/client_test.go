@@ -1959,6 +1959,55 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	}
 }
 
+func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	now := time.Date(2026, 4, 27, 12, 0, 0, 0, time.UTC)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Task")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	parsed, err := parseSessionViewEvent(sessionViewPromptEvent("sess-1", "say hi", nil))
+	if err != nil {
+		t.Fatalf("parseSessionViewEvent: %v", err)
+	}
+
+	state := newSessionPromptState(1, 1)
+	if err := c.sessionRecorder.addMessageTurn(ctx, &state, parsed); err != nil {
+		t.Fatalf("addMessageTurn: %v", err)
+	}
+
+	if state.nextTurnIndex != 2 {
+		t.Fatalf("state.nextTurnIndex = %d, want 2", state.nextTurnIndex)
+	}
+	turn, ok := state.turns[1]
+	if !ok {
+		t.Fatalf("state.turns[1] missing")
+	}
+	if turn.messageMethod() != acp.IMMethodPromptRequest {
+		t.Fatalf("turn method = %q, want %q", turn.messageMethod(), acp.IMMethodPromptRequest)
+	}
+
+	turns, err := c.store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ListSessionTurns: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("turns len = %d, want 1", len(turns))
+	}
+	if turns[0].TurnIndex != 1 {
+		t.Fatalf("turns[0].TurnIndex = %d, want 1", turns[0].TurnIndex)
+	}
+}
+
 func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 	tests := []struct {
 		name          string
