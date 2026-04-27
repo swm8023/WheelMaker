@@ -1915,8 +1915,8 @@ func sessionViewACPSystemEvent(sessionID, text string) SessionViewEvent {
 	}
 }
 
-func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T) {
-	converted, ok, err := buildTurnMessageFromSessionUpdate(acp.SessionUpdate{
+func TestBuildConvertedMessageFromSessionUpdateReturnsToolTurnKey(t *testing.T) {
+	converted, turnKey, ok, err := buildTurnMessageFromSessionUpdate(acp.SessionUpdate{
 		SessionUpdate: acp.SessionUpdateToolCallUpdate,
 		ToolCallID:    "call-1",
 		Title:         "build",
@@ -1928,11 +1928,34 @@ func TestBuildConvertedMessageFromSessionUpdateIncludesToolMergeKey(t *testing.T
 	if !ok {
 		t.Fatalf("buildConvertedMessageFromSessionUpdate ok = false, want true")
 	}
-	if strings.TrimSpace(converted.IMMessage.Method) != acp.IMMethodToolCall {
-		t.Fatalf("converted method = %q, want %q", converted.IMMessage.Method, acp.IMMethodToolCall)
+	if strings.TrimSpace(converted.messageMethod()) != acp.IMMethodToolCall {
+		t.Fatalf("converted method = %q, want %q", converted.messageMethod(), acp.IMMethodToolCall)
 	}
-	if converted.MergeKey.ToolCallID != "call-1" {
-		t.Fatalf("mergeKey.toolCallId = %q, want %q", converted.MergeKey.ToolCallID, "call-1")
+	if turnKey != "call-1" {
+		t.Fatalf("turnKey = %q, want %q", turnKey, "call-1")
+	}
+}
+
+func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
+	state := sessionPromptState{
+		nextTurnIndex: 3,
+		turns: map[int64]sessionTurnMessage{
+			2: {TurnIndex: 2, method: acp.IMMethodToolCall},
+		},
+		turnIndexByKey: map[string]int64{
+			"merge-key": 2,
+		},
+	}
+
+	turnIndex, plan := getTurnIndex(state, sessionTurnMessage{method: acp.IMMethodToolCall}, "merge-key")
+	if turnIndex != 2 {
+		t.Fatalf("turnIndex = %d, want 2", turnIndex)
+	}
+	if plan.kind != sessionTurnMergeTool {
+		t.Fatalf("plan.kind = %q, want %q", plan.kind, sessionTurnMergeTool)
+	}
+	if plan.turnKey != "merge-key" {
+		t.Fatalf("plan.turnKey = %q, want %q", plan.turnKey, "merge-key")
 	}
 }
 
