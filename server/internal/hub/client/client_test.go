@@ -2041,9 +2041,6 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 				if err := json.Unmarshal(message.Param, &request); err != nil {
 					t.Fatalf("json.Unmarshal(prompt request): %v", err)
 				}
-				if strings.TrimSpace(message.Session) != "sess-1" {
-					t.Fatalf("message.Session = %q, want %q", message.Session, "sess-1")
-				}
 				if len(request.ContentBlocks) != 1 || strings.TrimSpace(request.ContentBlocks[0].Text) != "say hi" {
 					t.Fatalf("request.ContentBlocks = %#v, want single text block", request.ContentBlocks)
 				}
@@ -2068,9 +2065,6 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 				result := acp.IMPromptResult{}
 				if err := json.Unmarshal(message.Param, &result); err != nil {
 					t.Fatalf("json.Unmarshal(prompt result): %v", err)
-				}
-				if strings.TrimSpace(message.Session) != "sess-1" {
-					t.Fatalf("message.Session = %q, want %q", message.Session, "sess-1")
 				}
 				if result.StopReason != acp.StopReasonEndTurn {
 					t.Fatalf("result.StopReason = %q, want %q", result.StopReason, acp.StopReasonEndTurn)
@@ -2587,15 +2581,22 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	if err := json.Unmarshal([]byte(messages[0].Content), &promptMessage); err != nil {
 		t.Fatalf("unmarshal prompt message: %v", err)
 	}
+	var promptDoc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(messages[0].Content), &promptDoc); err != nil {
+		t.Fatalf("unmarshal prompt message doc: %v", err)
+	}
 	if strings.TrimSpace(promptMessage.Method) != acp.IMMethodPromptRequest {
 		t.Fatalf("messages[0].method = %q, want %q", promptMessage.Method, acp.IMMethodPromptRequest)
+	}
+	if _, ok := promptDoc["session"]; ok {
+		t.Fatalf("messages[0].content unexpectedly contains session field")
+	}
+	if _, ok := promptDoc["index"]; ok {
+		t.Fatalf("messages[0].content unexpectedly contains index field")
 	}
 	promptRequest := acp.IMPromptRequest{}
 	if err := json.Unmarshal(promptMessage.Param, &promptRequest); err != nil {
 		t.Fatalf("unmarshal prompt request: %v", err)
-	}
-	if strings.TrimSpace(promptMessage.Session) != "sess-1" {
-		t.Fatalf("messages[0].session = %q, want %q", promptMessage.Session, "sess-1")
 	}
 	if len(promptRequest.ContentBlocks) != 1 || promptRequest.ContentBlocks[0].Type != acp.ContentBlockTypeImage {
 		t.Fatalf("messages[0].request.contentBlocks = %#v, want image block", promptRequest.ContentBlocks)

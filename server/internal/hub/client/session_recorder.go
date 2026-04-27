@@ -79,10 +79,6 @@ type sessionViewSessionNewParams struct {
 	Title     string `json:"title,omitempty"`
 }
 
-type sessionViewPromptResult struct {
-	StopReason string `json:"stopReason,omitempty"`
-}
-
 type parsedSessionViewEvent struct {
 	raw       SessionViewEvent
 	bMessage  bool
@@ -99,11 +95,6 @@ const (
 	sessionTurnMergeTool sessionTurnMergeKind = "tool"
 	sessionTurnMergeText sessionTurnMergeKind = "text"
 )
-
-type sessionTurnMergePlan struct {
-	kind    sessionTurnMergeKind
-	turnKey string
-}
 
 type SessionRecorder struct {
 	projectName  string
@@ -221,8 +212,7 @@ func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, turn
 
 func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
 	message := acp.IMMessage{
-		Method:  e.method,
-		Session: strings.TrimSpace(e.raw.SessionID),
+		Method: e.method,
 	}
 	if e.payload != nil {
 		message.Param = mustJSONRaw(e.payload)
@@ -232,8 +222,7 @@ func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
 
 func (m sessionTurnMessage) imMessage() acp.IMMessage {
 	message := acp.IMMessage{
-		Method:  m.method,
-		Session: strings.TrimSpace(m.SessionID),
+		Method: m.method,
 	}
 	if m.payload != nil {
 		switch value := m.payload.(type) {
@@ -242,9 +231,6 @@ func (m sessionTurnMessage) imMessage() acp.IMMessage {
 		default:
 			message.Param = mustJSONRaw(value)
 		}
-	}
-	if m.PromptIndex > 0 && m.TurnIndex > 0 {
-		message.Index = formatPromptTurnSeq(m.PromptIndex, m.TurnIndex)
 	}
 	return message
 }
@@ -351,16 +337,14 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 		existingTurn, ok := state.turns[mergedTurnIndex]
 
 		if ok {
-			turn.SessionID = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(turn.SessionID), strings.TrimSpace(existingTurn.SessionID)))
-			turn.PromptIndex = state.promptIndex
 			turn.TurnIndex = mergedTurnIndex
-			turn.UpdateIndex = maxInt64(existingTurn.UpdateIndex, 0) + 1
+			turn.UpdateIndex = existingTurn.UpdateIndex + 1
 
-			incomingRaw, err := json.Marshal(turn.imMessage())
+			incomingJSON, err := marshalIMMessage(turn.imMessage())
 			if err != nil {
 				return err
 			}
-			publishContent = normalizeJSONDoc(string(incomingRaw), `{}`)
+			publishContent = incomingJSON
 
 			merged, err := mergeTurnMessage(existingTurn, turn, mergeKind, mergedTurnIndex)
 			if err != nil {
@@ -370,7 +354,6 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 		}
 	}
 
-	turn.PromptIndex = state.promptIndex
 	if turn.TurnIndex <= 0 {
 		turn.TurnIndex = state.nextTurnIndex
 	}
@@ -378,11 +361,10 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 		turn.UpdateIndex = 1
 	}
 
-	messageRaw, err := json.Marshal(turn.imMessage())
+	updateJSON, err := marshalIMMessage(turn.imMessage())
 	if err != nil {
 		return err
 	}
-	updateJSON := normalizeJSONDoc(string(messageRaw), `{}`)
 	record := SessionTurnRecord{
 		SessionID:   strings.TrimSpace(turn.SessionID),
 		PromptIndex: turn.PromptIndex,
@@ -759,7 +741,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 		case acp.MethodSessionNew:
 			return parsed, nil
 		case acp.MethodSessionPrompt:
-			promptResult := sessionViewPromptResult{}
+			promptResult := acp.SessionPromptResult{}
 			ok := jsonDecodeAt(contentRaw, "result", &promptResult)
 			if ok {
 				parsed.setJSONMessage(acp.IMMethodPromptDone, acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)}, "")
@@ -880,7 +862,7 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, mergeKind sessionTu
 		return sessionTurnMessage{}, err
 	}
 	return sessionTurnMessage{
-		SessionID:   strings.TrimSpace(firstNonEmpty(strings.TrimSpace(mergedMessage.Session), strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID))),
+		SessionID:   strings.TrimSpace(firstNonEmpty(strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID))),
 		method:      strings.TrimSpace(mergedMessage.Method),
 		payload:     payload,
 		PromptIndex: existing.PromptIndex,
@@ -911,9 +893,6 @@ func mergeTextResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 		return acp.IMMessage{}, err
 	}
 	incoming.Param = cloneJSONRaw(raw)
-	if strings.TrimSpace(incoming.Session) == "" {
-		incoming.Session = strings.TrimSpace(existing.Session)
-	}
 	return incoming, nil
 }
 
@@ -949,9 +928,6 @@ func mergeToolResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 		return acp.IMMessage{}, err
 	}
 	incoming.Param = cloneJSONRaw(raw)
-	if strings.TrimSpace(incoming.Session) == "" {
-		incoming.Session = strings.TrimSpace(existing.Session)
-	}
 	return incoming, nil
 }
 
@@ -988,19 +964,6 @@ func marshalIMMessage(message acp.IMMessage) (string, error) {
 		return "", err
 	}
 	return normalizeJSONDoc(string(raw), `{}`), nil
-}
-
-func withIMTurnIndex(messageRaw string, promptIndex, turnIndex int64) (string, error) {
-	message, err := decodeIMMessage(messageRaw)
-	if err != nil {
-		return "", err
-	}
-	message.Index = formatPromptTurnSeq(promptIndex, turnIndex)
-	raw, err := json.Marshal(message)
-	if err != nil {
-		return "", err
-	}
-	return normalizeJSONDoc(string(raw), messageRaw), nil
 }
 
 func decodeIMMessage(raw string) (acp.IMMessage, error) {
@@ -1111,7 +1074,7 @@ func decodeSessionTurnMessage(record SessionTurnRecord) (sessionTurnMessage, err
 		return sessionTurnMessage{}, err
 	}
 	return sessionTurnMessage{
-		SessionID:   strings.TrimSpace(firstNonEmpty(strings.TrimSpace(imMessage.Session), strings.TrimSpace(record.SessionID))),
+		SessionID:   strings.TrimSpace(record.SessionID),
 		method:      strings.TrimSpace(imMessage.Method),
 		payload:     payload,
 		PromptIndex: record.PromptIndex,

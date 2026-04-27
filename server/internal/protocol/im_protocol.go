@@ -33,12 +33,10 @@ const (
 //     param is []IMPlanResult
 //
 // Payload is inlined in Param (no extra type wrapper map).
-// Index is a string sequence marker for ordering/replay.
+// Ordering metadata lives in the outer transport or persistence envelope.
 type IMMessage struct {
-	Method  string          `json:"method"`
-	Session string          `json:"session,omitempty"`
-	Index   string          `json:"index,omitempty"`
-	Param   json.RawMessage `json:"param,omitempty"`
+	Method string          `json:"method"`
+	Param  json.RawMessage `json:"param,omitempty"`
 }
 
 type IMPromptRequest struct {
