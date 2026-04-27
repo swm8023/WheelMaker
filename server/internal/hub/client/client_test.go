@@ -1913,8 +1913,16 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			wantMethod:    acp.IMMethodPrompt,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
+				requestPayload, ok := parsed.payload.(acp.IMPromptRequest)
+				if !ok {
+					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.IMPromptRequest{})
+				}
+				if len(requestPayload.ContentBlocks) != 1 || strings.TrimSpace(requestPayload.ContentBlocks[0].Text) != "say hi" {
+					t.Fatalf("payload.ContentBlocks = %#v, want single text block", requestPayload.ContentBlocks)
+				}
+				message := parsed.imMessage()
 				request := acp.IMPromptRequest{}
-				if err := json.Unmarshal(parsed.message.Request, &request); err != nil {
+				if err := json.Unmarshal(message.Request, &request); err != nil {
 					t.Fatalf("json.Unmarshal(prompt request): %v", err)
 				}
 				if len(request.ContentBlocks) != 1 || strings.TrimSpace(request.ContentBlocks[0].Text) != "say hi" {
@@ -1930,8 +1938,16 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			wantMethod:    acp.IMMethodPrompt,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
+				resultPayload, ok := parsed.payload.(acp.IMPromptResult)
+				if !ok {
+					t.Fatalf("parsed.payload type = %T, want %T", parsed.payload, acp.IMPromptResult{})
+				}
+				if resultPayload.StopReason != acp.StopReasonEndTurn {
+					t.Fatalf("payload.StopReason = %q, want %q", resultPayload.StopReason, acp.StopReasonEndTurn)
+				}
+				message := parsed.imMessage()
 				result := acp.IMPromptResult{}
-				if err := json.Unmarshal(parsed.message.Result, &result); err != nil {
+				if err := json.Unmarshal(message.Result, &result); err != nil {
 					t.Fatalf("json.Unmarshal(prompt result): %v", err)
 				}
 				if result.StopReason != acp.StopReasonEndTurn {
@@ -1983,8 +1999,14 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			if parsed.acpMethod != tt.wantACPMethod {
 				t.Fatalf("parsed.acpMethod = %q, want %q", parsed.acpMethod, tt.wantACPMethod)
 			}
-			if strings.TrimSpace(parsed.message.Method) != tt.wantMethod {
-				t.Fatalf("parsed.message.Method = %q, want %q", parsed.message.Method, tt.wantMethod)
+			if parsed.messageMethod() != tt.wantMethod {
+				t.Fatalf("parsed.messageMethod() = %q, want %q", parsed.messageMethod(), tt.wantMethod)
+			}
+			if tt.wantMessage {
+				message := parsed.imMessage()
+				if strings.TrimSpace(message.Method) != tt.wantMethod {
+					t.Fatalf("parsed.imMessage().Method = %q, want %q", message.Method, tt.wantMethod)
+				}
 			}
 			if parsed.turnKey != tt.wantTurnKey {
 				t.Fatalf("parsed.turnKey = %q, want %q", parsed.turnKey, tt.wantTurnKey)
@@ -2017,8 +2039,9 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			wantMethod:    acp.IMMethodPrompt,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
+				message := parsed.imMessage()
 				request := acp.IMPromptRequest{}
-				if err := json.Unmarshal(parsed.message.Request, &request); err != nil {
+				if err := json.Unmarshal(message.Request, &request); err != nil {
 					t.Fatalf("json.Unmarshal(prompt request): %v", err)
 				}
 				if len(request.ContentBlocks) != 0 {
@@ -2038,8 +2061,9 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			wantMethod:    acp.IMMethodPrompt,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
+				message := parsed.imMessage()
 				request := acp.IMPromptRequest{}
-				if err := json.Unmarshal(parsed.message.Request, &request); err != nil {
+				if err := json.Unmarshal(message.Request, &request); err != nil {
 					t.Fatalf("json.Unmarshal(prompt request): %v", err)
 				}
 				if len(request.ContentBlocks) != 0 {
@@ -2094,8 +2118,14 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			if parsed.acpMethod != tt.wantACPMethod {
 				t.Fatalf("parsed.acpMethod = %q, want %q", parsed.acpMethod, tt.wantACPMethod)
 			}
-			if strings.TrimSpace(parsed.message.Method) != tt.wantMethod {
-				t.Fatalf("parsed.message.Method = %q, want %q", parsed.message.Method, tt.wantMethod)
+			if parsed.messageMethod() != tt.wantMethod {
+				t.Fatalf("parsed.messageMethod() = %q, want %q", parsed.messageMethod(), tt.wantMethod)
+			}
+			if tt.wantMessage {
+				message := parsed.imMessage()
+				if strings.TrimSpace(message.Method) != tt.wantMethod {
+					t.Fatalf("parsed.imMessage().Method = %q, want %q", message.Method, tt.wantMethod)
+				}
 			}
 			if tt.check != nil {
 				tt.check(t, parsed)

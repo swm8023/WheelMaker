@@ -267,17 +267,25 @@ func cloneSessionContentBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
 	if len(blocks) == 0 {
 		return nil
 	}
-	out := make([]acp.ContentBlock, len(blocks))
-	copy(out, blocks)
-	return out
+	return cloneJSON(blocks)
 }
 
 func cloneSessionPermissionOptions(options []acp.PermissionOption) []acp.PermissionOption {
 	if len(options) == 0 {
 		return nil
 	}
-	out := make([]acp.PermissionOption, len(options))
-	copy(out, options)
+	return cloneJSON(options)
+}
+
+func cloneJSON[T any](value T) T {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		panic(fmt.Errorf("clone JSON: %w", err))
+	}
+	var out T
+	if err := json.Unmarshal(raw, &out); err != nil {
+		panic(fmt.Errorf("clone JSON: %w", err))
+	}
 	return out
 }
 
