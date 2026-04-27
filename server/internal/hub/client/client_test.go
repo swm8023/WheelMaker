@@ -2283,6 +2283,48 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 	}
 }
 
+func TestJSONDecodeAtSupportsTopLevelAndSingleNestedField(t *testing.T) {
+	raw := mustJSON(map[string]any{
+		"method": "session.update",
+		"params": map[string]any{
+			"title": "hello",
+			"meta":  map[string]any{"title": "too-deep"},
+		},
+	})
+
+	var method string
+	if !jsonDecodeAt(raw, "method", &method) {
+		t.Fatal("jsonDecodeAt(method) = false, want true")
+	}
+	if method != "session.update" {
+		t.Fatalf("method = %q, want %q", method, "session.update")
+	}
+
+	var title string
+	if !jsonDecodeAt(raw, "params.title", &title) {
+		t.Fatal("jsonDecodeAt(params.title) = false, want true")
+	}
+	if title != "hello" {
+		t.Fatalf("title = %q, want %q", title, "hello")
+	}
+
+	if jsonDecodeAt(raw, "params.meta.title", &title) {
+		t.Fatal("jsonDecodeAt(params.meta.title) = true, want false")
+	}
+}
+
+func TestExtractUpdateTextSupportsExpectedShapes(t *testing.T) {
+	if got := extractUpdateText(mustJSON("hello")); got != "hello" {
+		t.Fatalf("extractUpdateText(string) = %q, want %q", got, "hello")
+	}
+	if got := extractUpdateText(mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"})); got != "world" {
+		t.Fatalf("extractUpdateText(content block) = %q, want %q", got, "world")
+	}
+	if got := extractUpdateText(mustJSON(map[string]any{"text": "compat"})); got != "compat" {
+		t.Fatalf("extractUpdateText(text map) = %q, want %q", got, "compat")
+	}
+}
+
 func TestSessionViewCreatedEventSilentlyHandlesMalformedTitle(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	event := SessionViewEvent{

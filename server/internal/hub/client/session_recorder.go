@@ -653,44 +653,52 @@ func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionI
 	return state, nil
 }
 
-func jsonGet(raw json.RawMessage, path string) (json.RawMessage, bool) {
-	current := json.RawMessage(bytes.TrimSpace(raw))
-	if len(current) == 0 {
+func jsonGet(raw json.RawMessage, key string) (json.RawMessage, bool) {
+	raw = json.RawMessage(bytes.TrimSpace(raw))
+	key = strings.TrimSpace(key)
+	if len(raw) == 0 || key == "" {
 		return nil, false
 	}
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return current, true
+	obj := map[string]json.RawMessage{}
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil, false
 	}
-	for _, key := range strings.Split(path, ".") {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return nil, false
-		}
-		obj := map[string]json.RawMessage{}
-		if err := json.Unmarshal(current, &obj); err != nil {
-			return nil, false
-		}
-		next, ok := obj[key]
-		if !ok {
-			return nil, false
-		}
-		next = json.RawMessage(bytes.TrimSpace(next))
-		if len(next) == 0 {
-			return nil, false
-		}
-		current = next
+	value, ok := obj[key]
+	if !ok {
+		return nil, false
 	}
-	return current, true
+	value = json.RawMessage(bytes.TrimSpace(value))
+	if len(value) == 0 {
+		return nil, false
+	}
+	return value, true
 }
 
 func jsonDecodeAt(raw json.RawMessage, path string, out any) bool {
 	if out == nil {
 		return false
 	}
-	value, ok := jsonGet(raw, path)
+	path = strings.TrimSpace(path)
+	if path == "" {
+		raw = json.RawMessage(bytes.TrimSpace(raw))
+		if len(raw) == 0 {
+			return false
+		}
+		return json.Unmarshal(raw, out) == nil
+	}
+	key, child, hasChild := strings.Cut(path, ".")
+	if hasChild && strings.Contains(child, ".") {
+		return false
+	}
+	value, ok := jsonGet(raw, key)
 	if !ok {
 		return false
+	}
+	if hasChild {
+		value, ok = jsonGet(value, child)
+		if !ok {
+			return false
+		}
 	}
 	if err := json.Unmarshal(value, out); err != nil {
 		return false
@@ -699,10 +707,6 @@ func jsonDecodeAt(raw json.RawMessage, path string, out any) bool {
 }
 
 func extractUpdateText(raw json.RawMessage) string {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return ""
-	}
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return text
@@ -1081,16 +1085,6 @@ func decodeSessionTurnMessage(record SessionTurnRecord) (sessionTurnMessage, err
 		TurnIndex:   record.TurnIndex,
 		UpdateIndex: maxInt64(record.UpdateIndex, 1),
 	}, nil
-}
-
-func buildPromptTurnMessage(sessionID string, request acp.IMPromptRequest) sessionTurnMessage {
-	return sessionTurnMessage{
-		SessionID: strings.TrimSpace(sessionID),
-		method:    acp.IMMethodPromptRequest,
-		payload: acp.IMPromptRequest{
-			ContentBlocks: cloneSessionContentBlocks(request.ContentBlocks),
-		},
-	}
 }
 
 func toSessionViewMessage(message SessionTurnRecord) sessionViewMessage {
