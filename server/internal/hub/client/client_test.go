@@ -1947,7 +1947,7 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 		},
 	}
 
-	turnIndex, plan := getTurnIndex(state, sessionTurnMessage{method: acp.IMMethodToolCall}, "merge-key")
+	turnIndex, plan := getTurnKindAndIndex(state, sessionTurnMessage{method: acp.IMMethodToolCall}, "merge-key")
 	if turnIndex != 2 {
 		t.Fatalf("turnIndex = %d, want 2", turnIndex)
 	}
