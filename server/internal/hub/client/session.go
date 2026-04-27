@@ -253,6 +253,18 @@ func (s *Session) reply(text string) {
 
 // replyWithTitle sends a system message with an optional card title.
 func (s *Session) replyWithTitle(title, body string) {
+	messageText := strings.TrimSpace(body)
+	if strings.TrimSpace(title) != "" && strings.TrimSpace(body) != "" {
+		messageText = strings.TrimSpace(title) + "\n" + strings.TrimSpace(body)
+	} else if strings.TrimSpace(title) != "" {
+		messageText = strings.TrimSpace(title)
+	}
+	if messageText != "" {
+		s.recordSessionViewEvent(SessionViewEvent{
+			Type:    SessionViewEventTypeSystem,
+			Content: messageText,
+		})
+	}
 	if router, source, ok := s.imContext(); ok {
 		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.SystemPayload{
 			Kind:  "message",

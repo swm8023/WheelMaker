@@ -631,6 +631,15 @@ func (f *failingSessionViewSink) RecordEvent(context.Context, SessionViewEvent) 
 	return errors.New("session view sink failed")
 }
 
+type recordingSessionViewSink struct {
+	events []SessionViewEvent
+}
+
+func (s *recordingSessionViewSink) RecordEvent(_ context.Context, event SessionViewEvent) error {
+	s.events = append(s.events, event)
+	return nil
+}
+
 func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	if err := logger.Setup(logger.LoggerConfig{Level: logger.LevelWarn}); err != nil {
@@ -671,6 +680,44 @@ func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
 	}
 	if result.Outcome != "selected" || result.OptionID != "allow" {
 		t.Fatalf("permission result = %+v, want selected allow", result)
+	}
+}
+
+func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
+	router := &fakeIMRouter{}
+	sink := &recordingSessionViewSink{}
+	s := newSession("sess-1", "/tmp")
+	s.imRouter = router
+	s.viewSink = sink
+	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
+
+	s.replyWithTitle("Switched", "session: sess-1")
+
+	if len(sink.events) != 1 {
+		t.Fatalf("session view events len = %d, want 1", len(sink.events))
+	}
+	event := sink.events[0]
+	if event.Type != SessionViewEventTypeSystem {
+		t.Fatalf("event.Type = %q, want %q", event.Type, SessionViewEventTypeSystem)
+	}
+	if event.SessionID != "sess-1" {
+		t.Fatalf("event.SessionID = %q, want %q", event.SessionID, "sess-1")
+	}
+	if strings.TrimSpace(event.Content) != "Switched\nsession: sess-1" {
+		t.Fatalf("event.Content = %q, want %q", event.Content, "Switched\nsession: sess-1")
+	}
+	if strings.TrimSpace(event.SourceChannel) != "app" || strings.TrimSpace(event.SourceChatID) != "chat-1" {
+		t.Fatalf("event source = (%q, %q), want (%q, %q)", event.SourceChannel, event.SourceChatID, "app", "chat-1")
+	}
+
+	if len(router.systems) != 1 {
+		t.Fatalf("router system notifications len = %d, want 1", len(router.systems))
+	}
+	if strings.TrimSpace(router.systems[0].payload.Title) != "Switched" {
+		t.Fatalf("system payload title = %q, want %q", router.systems[0].payload.Title, "Switched")
+	}
+	if strings.TrimSpace(router.systems[0].payload.Body) != "session: sess-1" {
+		t.Fatalf("system payload body = %q, want %q", router.systems[0].payload.Body, "session: sess-1")
 	}
 }
 
@@ -1854,7 +1901,7 @@ func sessionViewPermissionResolvedEvent(sessionID string, requestID int64, statu
 
 func sessionViewSystemEvent(sessionID, text string) SessionViewEvent {
 	return SessionViewEvent{
-		Type:      SessionViewEventType("system"),
+		Type:      SessionViewEventTypeSystem,
 		SessionID: sessionID,
 		Content:   text,
 	}
@@ -2124,13 +2171,24 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 		{
 			name: "legacy system event is ignored without error",
 			event: SessionViewEvent{
-				Type:      SessionViewEventType("system"),
+				Type:      SessionViewEventTypeSystem,
 				SessionID: "sess-1",
-				Content:   "ignored",
+				Content:   "legacy system",
 			},
-			wantMessage:   false,
+			wantMessage:   true,
 			wantACPMethod: "",
-			wantMethod:    "",
+			wantMethod:    acp.IMMethodSystem,
+			check: func(t *testing.T, parsed parsedSessionViewEvent) {
+				t.Helper()
+				message := parsed.imMessage()
+				result := acp.IMTextResult{}
+				if err := json.Unmarshal(message.Param, &result); err != nil {
+					t.Fatalf("json.Unmarshal(system result): %v", err)
+				}
+				if strings.TrimSpace(result.Text) != "legacy system" {
+					t.Fatalf("result.Text = %q, want %q", result.Text, "legacy system")
+				}
+			},
 		},
 	}
 
@@ -2475,7 +2533,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	}
 }
 
-func TestSessionViewIgnoresSystemEventsFromACPAndLegacyPaths(t *testing.T) {
+func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
@@ -2499,8 +2557,23 @@ func TestSessionViewIgnoresSystemEventsFromACPAndLegacyPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessionTurns: %v", err)
 	}
-	if len(turns) != 1 {
-		t.Fatalf("turns len = %d, want 1 (prompt only)", len(turns))
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2 (prompt + legacy system)", len(turns))
+	}
+
+	msg := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(turns[1].UpdateJSON), &msg); err != nil {
+		t.Fatalf("unmarshal legacy system turn: %v", err)
+	}
+	if strings.TrimSpace(msg.Method) != acp.IMMethodSystem {
+		t.Fatalf("legacy system turn method = %q, want %q", msg.Method, acp.IMMethodSystem)
+	}
+	result := acp.IMTextResult{}
+	if err := json.Unmarshal(msg.Param, &result); err != nil {
+		t.Fatalf("unmarshal legacy system result: %v", err)
+	}
+	if strings.TrimSpace(result.Text) != "from legacy" {
+		t.Fatalf("legacy system text = %q, want %q", result.Text, "from legacy")
 	}
 }
 
