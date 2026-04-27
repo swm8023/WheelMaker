@@ -353,19 +353,21 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 		PromptIndex: state.promptIndex,
 	}
 
-	turnIndex, plan := getTurnKindAndIndex(*state, turn, event.turnKey)
+	mergeKind, turnIndex := getTurnKindAndIndex(*state, event)
 	if turnIndex > 0 {
 		existingTurn, ok := state.turns[turnIndex]
+
 		if ok {
 			turn.SessionID = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(turn.SessionID), strings.TrimSpace(existingTurn.SessionID)))
+			turn.PromptIndex = state.promptIndex
 			turn.TurnIndex = turnIndex
 			turn.UpdateIndex = maxInt64(existingTurn.UpdateIndex, 0) + 1
 
-			_, publishContent, err := buildSessionTurnRecordFromMessage(turn)
+			merged, err := mergeTurnMessage(existingTurn, turn, mergeKind, turnIndex)
 			if err != nil {
 				return err
 			}
-			merged, err := mergeTurnMessage(existingTurn, turn, plan)
+			_, publishContent, err := buildSessionTurnRecordFromMessage(turn)
 			if err != nil {
 				return err
 			}
@@ -376,14 +378,12 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 			if err := r.appendSessionTurnLocked(ctx, record, publishContent); err != nil {
 				return err
 			}
-			state.updateTurn(merged, plan.turnKey)
+			state.updateTurn(merged, event.turnKey)
 			return nil
-		}
-		if plan.turnKey != "" {
-			delete(state.turnIndexByKey, plan.turnKey)
 		}
 	}
 
+	turn.PromptIndex = state.promptIndex
 	turn.TurnIndex = state.nextTurnIndex
 	turn.UpdateIndex = 1
 	record, publishContent, err := buildSessionTurnRecordFromMessage(turn)
@@ -393,7 +393,7 @@ func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionProm
 	if err := r.appendSessionTurnLocked(ctx, record, publishContent); err != nil {
 		return err
 	}
-	state.updateTurn(turn, plan.turnKey)
+	state.updateTurn(turn, event.turnKey)
 	return nil
 }
 
@@ -573,9 +573,6 @@ func (s *sessionPromptState) ensureMaps() {
 
 func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string) {
 	s.ensureMaps()
-	turn.SessionID = strings.TrimSpace(turn.SessionID)
-	turn.method = strings.TrimSpace(turn.method)
-	turn.UpdateIndex = maxInt64(turn.UpdateIndex, 1)
 	s.turns[turn.TurnIndex] = turn
 	if turn.TurnIndex >= s.nextTurnIndex {
 		s.nextTurnIndex = turn.TurnIndex + 1
@@ -586,7 +583,14 @@ func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string)
 }
 
 func (s *sessionPromptState) assignTurn(turn sessionTurnMessage, turnKey string) {
-	s.updateTurn(turn, turnKey)
+	s.ensureMaps()
+	s.turns[turn.TurnIndex] = turn
+	if turn.TurnIndex >= s.nextTurnIndex {
+		s.nextTurnIndex = turn.TurnIndex + 1
+	}
+	if turnKey = strings.TrimSpace(turnKey); turnKey != "" {
+		s.turnIndexByKey[turnKey] = turn.TurnIndex
+	}
 }
 
 func normalizeSessionID(sessionID string) (string, error) {
@@ -789,12 +793,12 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 		case acp.MethodSessionUpdate:
 			params := acp.SessionUpdateParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
-			turnMessage, turnKey, ok, err := buildTurnMessageFromSessionUpdate(params.Update)
+			turn, turnKey, ok, err := buildTurnMessageFromSessionUpdate(params.Update)
 			if err != nil {
 				return parsedSessionViewEvent{}, err
 			}
 			if ok {
-				parsed.setJSONMessage(turnMessage.messageMethod(), turnMessage.payload, turnKey)
+				parsed.setJSONMessage(turn.messageMethod(), turn.payload, turnKey)
 			}
 		default:
 		}
@@ -855,39 +859,34 @@ func buildACPMethodResponseContent(id int64, method string, result any) string {
 	return buildACPMethodContentJSON(method, doc)
 }
 
-func getTurnKindAndIndex(state sessionPromptState, message sessionTurnMessage, turnKey string) (int64, sessionTurnMergePlan) {
-	plan := sessionTurnMergePlan{kind: sessionTurnMergeNone, turnKey: strings.TrimSpace(turnKey)}
-	method := message.messageMethod()
-	if plan.turnKey != "" {
-		if method == acp.IMMethodToolCall {
-			plan.kind = sessionTurnMergeTool
-		}
-		if turnIndex := state.turnIndexByKey[plan.turnKey]; turnIndex > 0 {
-			return turnIndex, plan
-		}
-		return 0, plan
-	}
-
+func getTurnKindAndIndex(state sessionPromptState, event parsedSessionViewEvent) (sessionTurnMergeKind, int64) {
+	method := event.method
 	switch method {
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk:
-		plan.kind = sessionTurnMergeText
+	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.IMMethodAgentPlan:
 		lastTurnIndex := state.nextTurnIndex - 1
 		if lastTurnIndex > 0 {
-			if existing, ok := state.turns[lastTurnIndex]; ok && existing.messageMethod() == method {
-				return lastTurnIndex, plan
+			if existing, ok := state.turns[lastTurnIndex]; ok && existing.method == method {
+				return sessionTurnMergeText, lastTurnIndex
 			}
 		}
+	case acp.IMMethodToolCall:
+		if event.turnKey == "" {
+			return sessionTurnMergeNone, 0
+		}
+		if turnIndex := state.turnIndexByKey[event.turnKey]; turnIndex > 0 {
+			return sessionTurnMergeTool, turnIndex
+		}
 	}
-	return 0, plan
+	return sessionTurnMergeNone, 0
 }
 
-func mergeTurnMessage(existing, incoming sessionTurnMessage, plan sessionTurnMergePlan) (sessionTurnMessage, error) {
+func mergeTurnMessage(existing, incoming sessionTurnMessage, mergeKind sessionTurnMergeKind, turnIndex int64) (sessionTurnMessage, error) {
 	existingMessage := existing.imMessage()
 	incomingMessage := incoming.imMessage()
 
 	var mergedMessage acp.IMMessage
 	var err error
-	switch plan.kind {
+	switch mergeKind {
 	case sessionTurnMergeTool:
 		mergedMessage, err = mergeToolResultMessage(existingMessage, incomingMessage)
 	case sessionTurnMergeText:
@@ -903,11 +902,11 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, plan sessionTurnMer
 		return sessionTurnMessage{}, err
 	}
 	return sessionTurnMessage{
-		SessionID:   strings.TrimSpace(firstNonEmpty(strings.TrimSpace(mergedMessage.Session), strings.TrimSpace(existing.SessionID))),
+		SessionID:   strings.TrimSpace(firstNonEmpty(strings.TrimSpace(mergedMessage.Session), strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID))),
 		method:      strings.TrimSpace(mergedMessage.Method),
 		payload:     payload,
 		PromptIndex: existing.PromptIndex,
-		TurnIndex:   existing.TurnIndex,
+		TurnIndex:   maxInt64(turnIndex, existing.TurnIndex),
 		UpdateIndex: maxInt64(existing.UpdateIndex, 0) + 1,
 	}, nil
 }

@@ -1947,15 +1947,12 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 		},
 	}
 
-	turnIndex, plan := getTurnKindAndIndex(state, sessionTurnMessage{method: acp.IMMethodToolCall}, "merge-key")
+	mergeKind, turnIndex := getTurnKindAndIndex(state, parsedSessionViewEvent{method: acp.IMMethodToolCall, turnKey: "merge-key"})
 	if turnIndex != 2 {
 		t.Fatalf("turnIndex = %d, want 2", turnIndex)
 	}
-	if plan.kind != sessionTurnMergeTool {
-		t.Fatalf("plan.kind = %q, want %q", plan.kind, sessionTurnMergeTool)
-	}
-	if plan.turnKey != "merge-key" {
-		t.Fatalf("plan.turnKey = %q, want %q", plan.turnKey, "merge-key")
+	if mergeKind != sessionTurnMergeTool {
+		t.Fatalf("mergeKind = %q, want %q", mergeKind, sessionTurnMergeTool)
 	}
 }
 
