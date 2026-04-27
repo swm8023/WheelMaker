@@ -7,8 +7,9 @@ import (
 
 const (
 	// Shared inbound/outbound methods.
-	IMMethodPrompt = "prompt"
-	IMMethodSystem = "system"
+	IMMethodPromptRequest = "prompt_request"
+	IMMethodPromptDone    = "prompt_done"
+	IMMethodSystem        = "system"
 
 	// Outbound session update methods.
 	IMMethodAgentMessage = SessionUpdateAgentMessageChunk
@@ -20,23 +21,24 @@ const (
 // IMMessage is the minimal IM boundary payload.
 //
 // This protocol uses method-driven payload typing:
-//   - method=prompt:
-//     request is IMPromptRequest
-//     result is IMPromptResult
-//   - method=agent_message_chunk / agent_thought_chunk:
-//     result is IMTextResult
+//   - method=prompt_request:
+//     param is IMPromptRequest
+//   - method=prompt_done:
+//     param is IMPromptResult
+//   - method=agent_message_chunk / agent_thought_chunk / user_message_chunk:
+//     param is IMTextResult
 //   - method=tool_call:
-//     result is IMToolResult
+//     param is IMToolResult
 //   - method=agent_plan:
-//     result is []IMPlanResult
+//     param is []IMPlanResult
 //
-// Request and Result are inlined (no extra type wrapper map).
+// Payload is inlined in Param (no extra type wrapper map).
 // Index is a string sequence marker for ordering/replay.
 type IMMessage struct {
 	Method  string          `json:"method"`
+	Session string          `json:"session,omitempty"`
 	Index   string          `json:"index,omitempty"`
-	Request json.RawMessage `json:"request,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Param   json.RawMessage `json:"param,omitempty"`
 }
 
 type IMPromptRequest struct {
@@ -68,7 +70,12 @@ func NormalizeIMMethod(method string) string {
 }
 
 func IsIMPromptMethod(method string) bool {
-	return NormalizeIMMethod(method) == IMMethodPrompt
+	switch NormalizeIMMethod(method) {
+	case IMMethodPromptRequest, IMMethodPromptDone:
+		return true
+	default:
+		return false
+	}
 }
 
 func IsIMTextResultMethod(method string) bool {

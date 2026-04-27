@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -50,8 +49,6 @@ type sessionViewMessage struct {
 	Content     string `json:"content"`
 }
 
-var errSessionEventPayloadEmpty = errors.New("session event payload is empty")
-
 type sessionMessagePage struct {
 	afterPromptIndex int64
 	afterTurnIndex   int64
@@ -81,7 +78,6 @@ type parsedSessionViewEvent struct {
 	raw       SessionViewEvent
 	bMessage  bool
 	method    string
-	request   bool
 	payload   any
 	acpMethod string
 	turnKey   string
@@ -197,12 +193,14 @@ func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessi
 	}
 
 	switch method {
-	case acp.IMMethodPrompt:
-		if !event.request && event.payload != nil {
-			return r.handlePromptFinishedLocked(ctx, event)
-		}
-		if event.request && event.payload != nil {
+	case acp.IMMethodPromptRequest:
+		if event.payload != nil {
 			return r.handlePromptStartedLocked(ctx, event)
+		}
+		return nil
+	case acp.IMMethodPromptDone:
+		if event.payload != nil {
+			return r.handlePromptFinishedLocked(ctx, event)
 		}
 		return nil
 
@@ -213,10 +211,9 @@ func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessi
 	}
 }
 
-func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, request bool, turnKey string) {
+func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, turnKey string) {
 	e.bMessage = true
 	e.method = strings.TrimSpace(method)
-	e.request = request
 	e.payload = payload
 	e.turnKey = strings.TrimSpace(turnKey)
 }
@@ -226,12 +223,12 @@ func (e parsedSessionViewEvent) messageMethod() string {
 }
 
 func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
-	message := acp.IMMessage{Method: e.messageMethod()}
-	raw := mustJSONRaw(e.payload)
-	if e.request {
-		message.Request = raw
-	} else {
-		message.Result = raw
+	message := acp.IMMessage{
+		Method:  e.messageMethod(),
+		Session: strings.TrimSpace(e.raw.SessionID),
+	}
+	if e.payload != nil {
+		message.Param = mustJSONRaw(e.payload)
 	}
 	return message
 }
@@ -287,13 +284,12 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 	if !ok {
 		return fmt.Errorf("decode prompt request: unexpected payload type %T", event.payload)
 	}
-	prompt := cloneSessionContentBlocks(request.ContentBlocks)
 
 	state, err := r.nextPromptStateLocked(ctx, rawEvent.SessionID)
 	if err != nil {
 		return err
 	}
-	promptTitle := strings.TrimSpace(promptTitleFromBlocks(prompt))
+	promptTitle := strings.TrimSpace(promptTitleFromBlocks(request.ContentBlocks))
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   rawEvent.SessionID,
 		PromptIndex: state.promptIndex,
@@ -302,7 +298,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 	}); err != nil {
 		return err
 	}
-	message, err := buildPromptTurnRecord(rawEvent.SessionID, state.promptIndex, prompt)
+	message, err := buildPromptTurnRecord(rawEvent.SessionID, state.promptIndex, request)
 	if err != nil {
 		return err
 	}
@@ -756,12 +752,12 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			promptResult := sessionViewPromptResult{}
 			ok := jsonDecodeAt(contentRaw, "result", &promptResult)
 			if ok {
-				parsed.setJSONMessage(acp.IMMethodPrompt, acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)}, false, "")
+				parsed.setJSONMessage(acp.IMMethodPromptDone, acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)}, "")
 				return parsed, nil
 			}
 			params := acp.SessionPromptParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
-			parsed.setJSONMessage(acp.IMMethodPrompt, acp.IMPromptRequest{ContentBlocks: cloneSessionContentBlocks(params.Prompt)}, true, "")
+			parsed.setJSONMessage(acp.IMMethodPromptRequest, acp.IMPromptRequest{ContentBlocks: cloneJSON(params.Prompt)}, "")
 		case acp.MethodSessionUpdate:
 			params := acp.SessionUpdateParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
@@ -769,7 +765,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			updateMethod := strings.TrimSpace(update.SessionUpdate)
 			switch updateMethod {
 			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
-				parsed.setJSONMessage(updateMethod, acp.IMTextResult{Text: extractUpdateText(update.Content)}, false, "")
+				parsed.setJSONMessage(updateMethod, acp.IMTextResult{Text: extractUpdateText(update.Content)}, "")
 			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 				output := extractUpdateText(update.Content)
 				if strings.TrimSpace(output) == "" {
@@ -780,13 +776,13 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 					Kind:   strings.TrimSpace(update.Kind),
 					Status: strings.TrimSpace(update.Status),
 					Output: output,
-				}, false, update.ToolCallID)
+				}, update.ToolCallID)
 			case acp.SessionUpdatePlan:
 				entries := make([]acp.IMPlanResult, 0, len(update.Entries))
 				for _, entry := range update.Entries {
 					entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
 				}
-				parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, false, "")
+				parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, "")
 			default:
 			}
 		case acp.IMMethodSystem:
@@ -801,14 +797,15 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			if text == "" {
 				return parsed, nil
 			}
-			parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, false, "")
+			parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, "")
+		default:
 		}
 	} else if strings.EqualFold(eventType, string(SessionViewEventTypeSystem)) {
 		text := strings.TrimSpace(parsed.raw.Content)
 		if text == "" {
 			return parsed, nil
 		}
-		parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, false, "")
+		parsed.setJSONMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text}, "")
 	}
 
 	return parsed, nil
@@ -920,14 +917,14 @@ func mergeTurnRecord(existing SessionTurnRecord, incomingMessage acp.IMMessage, 
 
 func mergeTextResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, error) {
 	base := acp.IMTextResult{}
-	if len(existing.Result) > 0 {
-		if err := json.Unmarshal(existing.Result, &base); err != nil {
+	if len(existing.Param) > 0 {
+		if err := json.Unmarshal(existing.Param, &base); err != nil {
 			return acp.IMMessage{}, err
 		}
 	}
 	inc := acp.IMTextResult{}
-	if len(incoming.Result) > 0 {
-		if err := json.Unmarshal(incoming.Result, &inc); err != nil {
+	if len(incoming.Param) > 0 {
+		if err := json.Unmarshal(incoming.Param, &inc); err != nil {
 			return acp.IMMessage{}, err
 		}
 	}
@@ -939,23 +936,23 @@ func mergeTextResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 	if err != nil {
 		return acp.IMMessage{}, err
 	}
-	incoming.Result = cloneJSONRaw(raw)
-	if len(incoming.Request) == 0 {
-		incoming.Request = cloneJSONRaw(existing.Request)
+	incoming.Param = cloneJSONRaw(raw)
+	if strings.TrimSpace(incoming.Session) == "" {
+		incoming.Session = strings.TrimSpace(existing.Session)
 	}
 	return incoming, nil
 }
 
 func mergeToolResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, error) {
 	base := acp.IMToolResult{}
-	if len(existing.Result) > 0 {
-		if err := json.Unmarshal(existing.Result, &base); err != nil {
+	if len(existing.Param) > 0 {
+		if err := json.Unmarshal(existing.Param, &base); err != nil {
 			return acp.IMMessage{}, err
 		}
 	}
 	inc := acp.IMToolResult{}
-	if len(incoming.Result) > 0 {
-		if err := json.Unmarshal(incoming.Result, &inc); err != nil {
+	if len(incoming.Param) > 0 {
+		if err := json.Unmarshal(incoming.Param, &inc); err != nil {
 			return acp.IMMessage{}, err
 		}
 	}
@@ -977,9 +974,9 @@ func mergeToolResultMessage(existing, incoming acp.IMMessage) (acp.IMMessage, er
 	if err != nil {
 		return acp.IMMessage{}, err
 	}
-	incoming.Result = cloneJSONRaw(raw)
-	if len(incoming.Request) == 0 {
-		incoming.Request = cloneJSONRaw(existing.Request)
+	incoming.Param = cloneJSONRaw(raw)
+	if strings.TrimSpace(incoming.Session) == "" {
+		incoming.Session = strings.TrimSpace(existing.Session)
 	}
 	return incoming, nil
 }
@@ -993,7 +990,7 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTur
 		if err != nil {
 			return sessionViewTurnMessage{}, false, err
 		}
-		message.Result = cloneJSONRaw(resultRaw)
+		message.Param = cloneJSONRaw(resultRaw)
 		return sessionViewTurnMessage{IMMessage: message}, true, nil
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 		output := extractUpdateText(update.Content)
@@ -1010,7 +1007,7 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTur
 		if err != nil {
 			return sessionViewTurnMessage{}, false, err
 		}
-		message.Result = cloneJSONRaw(resultRaw)
+		message.Param = cloneJSONRaw(resultRaw)
 		return sessionViewTurnMessage{
 			IMMessage: message,
 			MergeKey:  sessionTurnKey{ToolCallID: strings.TrimSpace(update.ToolCallID)},
@@ -1025,7 +1022,7 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionViewTur
 		if err != nil {
 			return sessionViewTurnMessage{}, false, err
 		}
-		message.Result = cloneJSONRaw(resultRaw)
+		message.Param = cloneJSONRaw(resultRaw)
 		return sessionViewTurnMessage{IMMessage: message}, true, nil
 	default:
 		return sessionViewTurnMessage{}, false, nil
@@ -1119,12 +1116,12 @@ func buildSessionTurnRecord(sessionID string, promptIndex, turnIndex int64, rawC
 	}
 }
 
-func buildPromptTurnRecord(sessionID string, promptIndex int64, prompt []acp.ContentBlock) (SessionTurnRecord, error) {
-	requestRaw, err := json.Marshal(acp.IMPromptRequest{ContentBlocks: cloneSessionContentBlocks(prompt)})
+func buildPromptTurnRecord(sessionID string, promptIndex int64, request acp.IMPromptRequest) (SessionTurnRecord, error) {
+	requestRaw, err := json.Marshal(acp.IMPromptRequest{ContentBlocks: cloneSessionContentBlocks(request.ContentBlocks)})
 	if err != nil {
 		return SessionTurnRecord{}, err
 	}
-	messageRaw, err := marshalIMMessage(acp.IMMessage{Method: acp.IMMethodPrompt, Request: cloneJSONRaw(requestRaw)})
+	messageRaw, err := marshalIMMessage(acp.IMMessage{Method: acp.IMMethodPromptRequest, Session: strings.TrimSpace(sessionID), Param: cloneJSONRaw(requestRaw)})
 	if err != nil {
 		return SessionTurnRecord{}, err
 	}
