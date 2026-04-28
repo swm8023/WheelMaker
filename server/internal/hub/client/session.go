@@ -58,6 +58,8 @@ type Session struct {
 	// instance is the agent runtime bound to this Session.
 	// Created lazily by ensureInstance(). Nil means no agent connected yet.
 	instance agent.Instance
+	agentType string
+	agentState SessionAgentState
 
 	// Per-agent state indexed by agent name.
 	agents      map[string]*SessionAgentState
@@ -157,6 +159,12 @@ func (s *Session) agentStateLocked(name string) *SessionAgentState {
 	if name == "" {
 		return nil
 	}
+	if strings.TrimSpace(s.agentType) == "" && (s.agents == nil || len(s.agents) == 0) {
+		s.agentType = name
+	}
+	if strings.EqualFold(strings.TrimSpace(s.agentType), name) {
+		return &s.agentState
+	}
 	if s.agents == nil {
 		s.agents = map[string]*SessionAgentState{}
 	}
@@ -172,6 +180,9 @@ func (s *Session) currentAgentNameLocked() string {
 	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
 		return strings.TrimSpace(s.instance.Name())
 	}
+	if strings.TrimSpace(s.agentType) != "" {
+		return strings.TrimSpace(s.agentType)
+	}
 	if strings.TrimSpace(s.activeAgent) != "" {
 		return strings.TrimSpace(s.activeAgent)
 	}
@@ -184,6 +195,9 @@ func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
 	name := s.currentAgentNameLocked()
 	if name == "" {
 		return nil, ""
+	}
+	if strings.EqualFold(strings.TrimSpace(s.agentType), name) {
+		return cloneSessionAgentState(&s.agentState), name
 	}
 	return cloneSessionAgentState(s.agents[name]), name
 }
@@ -386,99 +400,6 @@ func emptyMCPServers() []acp.MCPServer {
 	return []acp.MCPServer{}
 }
 
-// SwitchMode controls how an agent switch affects session context.
-type SwitchMode int
-
-const (
-	// SwitchClean discards the current session; new conn is lazily initialized on next prompt.
-	SwitchClean SwitchMode = iota
-	// SwitchWithContext passes the last reply as bootstrap context to the new session.
-	SwitchWithContext
-)
-
-// switchAgent cancels any in-progress prompt, waits for it to finish via
-// promptMu, connects a new agent via AgentFactory, and replaces the instance.
-func (s *Session) switchAgent(ctx context.Context, name string, mode SwitchMode) error {
-	creator := s.registry.CreatorByName(name)
-	if creator == nil {
-		return fmt.Errorf("unknown agent: %q (registered: %v)", name, s.registry.Names())
-	}
-
-	// Cancel in-progress prompt, wait for handlePrompt to release promptMu.
-	_ = s.cancelPrompt()
-	s.promptMu.Lock()
-	defer s.promptMu.Unlock()
-	// Belt-and-suspenders: drain any channel published between cancelPrompt and promptMu.Lock.
-	s.mu.Lock()
-	promptCh := s.prompt.currentCh
-	s.mu.Unlock()
-	if promptCh != nil {
-		for range promptCh {
-		}
-		s.mu.Lock()
-		s.prompt.currentCh = nil
-		s.mu.Unlock()
-	}
-
-	// Capture outgoing state.
-	s.mu.Lock()
-	oldInst := s.instance
-	savedLastReply := s.lastReply
-	s.mu.Unlock()
-
-	// Read saved session ID for incoming agent.
-	s.mu.Lock()
-	var savedSID string
-	if as := s.agents[name]; as != nil {
-		savedSID = strings.TrimSpace(as.ACPSessionID)
-	}
-	cwd := s.cwd
-	s.mu.Unlock()
-
-	// Connect new agent via factory.
-	newInst, err := creator(ctx, cwd)
-	if err != nil {
-		return fmt.Errorf("connect %q: %w", name, err)
-	}
-	newInst.SetCallbacks(s)
-
-	// Replace instance atomically and close old instance.
-	s.mu.Lock()
-	s.instance = newInst
-	s.initializing = false
-	s.prompt.updatesCh = nil
-	s.activeAgent = name
-	s.acpSessionID = savedSID
-	s.lastReply = ""
-	s.prompt.activeTCs = make(map[string]struct{})
-	s.ready = false
-	s.mu.Unlock()
-	s.initCond.Broadcast() // MUST be outside s.mu — never inside the lock
-
-	if oldInst != nil {
-		_ = oldInst.Close()
-	}
-
-	// SwitchWithContext — bootstrap new session with previous reply.
-	if mode == SwitchWithContext && savedLastReply != "" {
-		ch, err := s.promptStream(ctx, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "[context] " + savedLastReply}})
-		if err != nil {
-			hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", err)
-		} else {
-			for u := range ch {
-				if u.err != nil {
-					hubLogger(s.projectName).Warn("switch with context bootstrap prompt failed err=%v", u.err)
-				}
-			}
-		}
-		s.persistSessionBestEffort()
-	}
-	s.persistSessionBestEffort()
-
-	s.replyWithTitle("Switched", s.sessionInfoLine())
-	return nil
-}
-
 // ensureReady performs the ACP handshake if the session is not yet connected:
 //  1. Send "initialize" and store agent capabilities.
 //  2. If caps.LoadSession and a sessionID is stored, attempt session/load.
@@ -535,7 +456,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
-	baseline := s.loadProjectAgentState(agentName)
+	baseline := s.loadAgentPreferenceState(agentName)
 	baselineSnap := acp.SessionConfigSnapshotFromOptions(baseline.ConfigOptions)
 	baselineCommands := append([]acp.AvailableCommand(nil), baseline.AvailableCommands...)
 
@@ -592,7 +513,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			s.initializing = false
 			s.mu.Unlock()
 			s.initCond.Broadcast()
-			s.persistProjectAgentState(agentName, resolved, commands)
+			s.persistAgentPreferenceState(agentName, resolved, commands)
 			hubLogger(s.projectName).Info("connected agent=%s session=%s resumed", inst.Name(), savedSID)
 			return nil
 		}
@@ -639,6 +560,9 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
 	state.AuthMethods = initResult.AuthMethods
 	commands := append([]acp.AvailableCommand(nil), state.Commands...)
+	s.agentType = agentName
+	s.agentState = *cloneSessionAgentState(state)
+	s.ID = newResult.SessionID
 	s.activeAgent = agentName
 	s.acpSessionID = newResult.SessionID
 	s.ready = true
@@ -654,7 +578,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		}
 	}
 	hubLogger(s.projectName).Info("connected agent=%s session=%s mode=%s", inst.Name(), newResult.SessionID, modeID)
-	s.persistProjectAgentState(agentName, resolved, commands)
+	s.persistAgentPreferenceState(agentName, resolved, commands)
 	return nil
 }
 func findConfigOptionID(options []acp.ConfigOption, id, category string) string {
@@ -962,25 +886,36 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	title := ""
-	if name := s.currentAgentNameLocked(); name != "" {
-		if state := s.agentStateLocked(name); state != nil {
-			state.ACPSessionID = s.acpSessionID
-			title = strings.TrimSpace(state.Title)
-		}
+	agentType := strings.TrimSpace(s.agentType)
+	if agentType == "" {
+		agentType = s.currentAgentNameLocked()
+	}
+	if agentType == "" {
+		return nil, fmt.Errorf("session agent type is required")
 	}
 
-	agentsJSON, err := json.Marshal(s.agents)
-	if err != nil {
-		return nil, fmt.Errorf("marshal agents: %w", err)
+	state := cloneSessionAgentState(s.agentStateLocked(agentType))
+	title := ""
+	if state != nil {
+		title = strings.TrimSpace(state.Title)
+	}
+
+	agentJSON := "{}"
+	if state != nil {
+		state.ACPSessionID = ""
+		raw, err := json.Marshal(state)
+		if err != nil {
+			return nil, fmt.Errorf("marshal agent_json: %w", err)
+		}
+		agentJSON = string(raw)
 	}
 
 	return &SessionRecord{
 		ID:           s.ID,
 		ProjectName:  s.projectName,
 		Status:       s.Status,
-		ACPSessionID: s.acpSessionID,
-		AgentsJSON:   string(agentsJSON),
+		AgentType:    agentType,
+		AgentJSON:    agentJSON,
 		Title:        title,
 		CreatedAt:    s.createdAt,
 		LastActiveAt: s.lastActiveAt,
@@ -990,18 +925,29 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 	s := newSession(rec.ID, cwd)
 	s.Status = rec.Status
-	s.acpSessionID = rec.ACPSessionID
+	s.agentType = strings.TrimSpace(rec.AgentType)
+	if s.agentType == "" {
+		return nil, fmt.Errorf("session %q missing agent type", rec.ID)
+	}
+	s.activeAgent = strings.TrimSpace(rec.AgentType)
+	s.acpSessionID = strings.TrimSpace(rec.ID)
 	s.createdAt = rec.CreatedAt
 	s.lastActiveAt = rec.LastActiveAt
-	if strings.TrimSpace(rec.AgentsJSON) != "" {
-		if err := json.Unmarshal([]byte(rec.AgentsJSON), &s.agents); err != nil {
-			return nil, fmt.Errorf("unmarshal agents_json: %w", err)
+	if strings.TrimSpace(rec.AgentJSON) != "" {
+		if err := json.Unmarshal([]byte(rec.AgentJSON), &s.agentState); err != nil {
+			return nil, fmt.Errorf("unmarshal agent_json: %w", err)
 		}
 	}
 	if s.agents == nil {
 		s.agents = map[string]*SessionAgentState{}
 	}
-	s.activeAgent = inferActiveAgent(rec.ACPSessionID, s.agents)
+	s.agentState.ACPSessionID = s.acpSessionID
+	if strings.TrimSpace(s.agentType) != "" {
+		s.agents[s.agentType] = cloneSessionAgentState(&s.agentState)
+	}
+	if state := s.agents[s.agentType]; state != nil {
+		state.ACPSessionID = s.acpSessionID
+	}
 	if strings.TrimSpace(rec.Title) != "" {
 		name := strings.TrimSpace(s.activeAgent)
 		if name == "" {
@@ -1036,30 +982,27 @@ func (s *Session) persistSessionBestEffort() {
 	}
 }
 
-func (s *Session) loadProjectAgentState(agentName string) ProjectAgentState {
+func (s *Session) loadAgentPreferenceState(agentName string) ProjectAgentState {
 	if s.store == nil || strings.TrimSpace(agentName) == "" {
 		return ProjectAgentState{}
 	}
-	cfg, err := s.store.LoadProject(context.Background(), s.projectName)
-	if err != nil || cfg == nil || cfg.AgentState == nil {
+	rec, err := s.store.LoadAgentPreference(context.Background(), s.projectName, strings.TrimSpace(agentName))
+	if err != nil || rec == nil || strings.TrimSpace(rec.PreferenceJSON) == "" {
 		return ProjectAgentState{}
 	}
-	return cfg.AgentState[strings.TrimSpace(agentName)]
+	var pref ProjectAgentState
+	if err := json.Unmarshal([]byte(rec.PreferenceJSON), &pref); err != nil {
+		hubLogger(s.projectName).Warn("decode agent preference failed agent=%s err=%v", agentName, err)
+		return ProjectAgentState{}
+	}
+	return pref
 }
 
-func (s *Session) persistProjectAgentState(agentName string, configOptions []acp.ConfigOption, commands []acp.AvailableCommand) {
+func (s *Session) persistAgentPreferenceState(agentName string, configOptions []acp.ConfigOption, commands []acp.AvailableCommand) {
 	if s.store == nil || strings.TrimSpace(agentName) == "" {
 		return
 	}
-	cfg, err := s.store.LoadProject(context.Background(), s.projectName)
-	if err != nil {
-		hubLogger(s.projectName).Warn("load project baseline failed agent=%s err=%v", agentName, err)
-		return
-	}
-	if cfg.AgentState == nil {
-		cfg.AgentState = map[string]ProjectAgentState{}
-	}
-	next := cfg.AgentState[agentName]
+	next := s.loadAgentPreferenceState(agentName)
 	if configOptions != nil {
 		next.ConfigOptions = append([]acp.ConfigOption(nil), configOptions...)
 	}
@@ -1067,9 +1010,17 @@ func (s *Session) persistProjectAgentState(agentName string, configOptions []acp
 		next.AvailableCommands = append([]acp.AvailableCommand(nil), commands...)
 	}
 	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	cfg.AgentState[agentName] = next
-	if err := s.store.SaveProject(context.Background(), s.projectName, *cfg); err != nil {
-		hubLogger(s.projectName).Warn("save project baseline failed agent=%s err=%v", agentName, err)
+	raw, err := json.Marshal(next)
+	if err != nil {
+		hubLogger(s.projectName).Warn("encode agent preference failed agent=%s err=%v", agentName, err)
+		return
+	}
+	if err := s.store.SaveAgentPreference(context.Background(), AgentPreferenceRecord{
+		ProjectName:    s.projectName,
+		AgentType:      strings.TrimSpace(agentName),
+		PreferenceJSON: string(raw),
+	}); err != nil {
+		hubLogger(s.projectName).Warn("save agent preference failed agent=%s err=%v", agentName, err)
 	}
 }
 
@@ -1160,7 +1111,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		state := cloneSessionAgentState(s.agents[agentName])
 		s.mu.Unlock()
 		if state != nil {
-			s.persistProjectAgentState(agentName, state.ConfigOptions, state.Commands)
+			s.persistAgentPreferenceState(agentName, state.ConfigOptions, state.Commands)
 		}
 		s.persistSessionBestEffort()
 	}
@@ -1562,12 +1513,12 @@ func (s *Session) connectHint() string {
 		if s.registry != nil {
 			names := s.registry.Names()
 			if len(names) > 0 {
-				return fmt.Sprintf("Run `/use <agent>` to connect. Available: %s", strings.Join(names, ", "))
+				return fmt.Sprintf("Run `/new <agent>` to connect. Available: %s", strings.Join(names, ", "))
 			}
 		}
 		return "No available ACP provider. Check environment and restart wheelmaker."
 	}
-	return fmt.Sprintf("Run `%s` to connect.", "/use "+agentName)
+	return fmt.Sprintf("Run `%s` to connect.", "/new "+agentName)
 }
 
 func (s *Session) preferredAgentName() string {

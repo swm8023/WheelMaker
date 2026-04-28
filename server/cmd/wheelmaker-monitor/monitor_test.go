@@ -98,6 +98,8 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 		ID:           "sess-1",
 		ProjectName:  "proj1",
 		Status:       clientpkg.SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
 		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -191,6 +193,8 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 		ID:           "sess-1",
 		ProjectName:  "proj1",
 		Status:       clientpkg.SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
 		CreatedAt:    now,
 		LastActiveAt: now,
 	}); err != nil {

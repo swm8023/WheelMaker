@@ -891,17 +891,13 @@ function openJSONModal(key, columnName) {
   if (title) {
     title.textContent = col ? (col + ' JSON') : 'JSON Details';
   }
-  if (col.toLowerCase() === 'agents_json') {
-    body.innerHTML = renderAgentsJSONContent(raw);
+  if (col.toLowerCase() === 'agent_json') {
+    body.innerHTML = renderAgentJSONContent(raw);
   } else {
     body.innerHTML = renderGenericJSONContent(raw);
   }
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
-}
-
-function openAgentsJSONModal(key) {
-  openJSONModal(key, 'agents_json');
 }
 
 function closeJSONModal() {
@@ -945,7 +941,25 @@ function renderGenericJSONContent(raw) {
   return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
 }
 
-function renderAgentsJSONContent(raw) {
+function summarizeAgentJSON(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return raw.trim() ? '?' : '-';
+    }
+    const looksLikeSingleAgentState = Array.isArray(parsed.configOptions) || Array.isArray(parsed.commands) || !!parsed.agentInfo;
+    if (looksLikeSingleAgentState) {
+      const agentInfo = parsed.agentInfo || {};
+      return agentInfo.name || agentInfo.title || 'session agent';
+    }
+    const names = Object.keys(parsed || {});
+    return names.length ? names.join(', ') : '-';
+  } catch (_) {
+    return raw.trim() ? '?' : '-';
+  }
+}
+
+function renderAgentJSONContent(raw) {
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -955,13 +969,17 @@ function renderAgentsJSONContent(raw) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
   }
-  const agents = Object.keys(parsed);
-  if (agents.length === 0) {
+  const looksLikeSingleAgentState = Array.isArray(parsed.configOptions) || Array.isArray(parsed.commands) || !!parsed.agentInfo;
+  const agentEntries = looksLikeSingleAgentState
+    ? [{ name: parsed.agentInfo && (parsed.agentInfo.name || parsed.agentInfo.title) ? (parsed.agentInfo.name || parsed.agentInfo.title) : 'session agent', info: parsed }]
+    : Object.keys(parsed).map(name => ({ name, info: parsed[name] || {} }));
+  if (agentEntries.length === 0) {
     return '<div class="empty-state">No agent data</div>';
   }
   let html = '';
-  for (const agent of agents) {
-    const info = parsed[agent] || {};
+  for (const entry of agentEntries) {
+    const agent = entry.name;
+    const info = entry.info || {};
     const agentInfo = info.agentInfo || {};
     const configOptions = Array.isArray(info.configOptions) ? info.configOptions : [];
     const commands = Array.isArray(info.commands) ? info.commands : [];
@@ -970,7 +988,6 @@ function renderAgentsJSONContent(raw) {
     html += '<div class="json-card-hd"><div class="json-card-title">' + esc(agent) + '</div>' +
       '<span class="json-pill">' + esc(agentInfo.version || 'unknown') + '</span></div>';
     html += '<div class="json-grid">' +
-      '<div class="json-k">ACP Session</div><div class="json-v">' + esc(info.acpSessionId || '-') + '</div>' +
       '<div class="json-k">Protocol</div><div class="json-v">' + esc(info.protocolVersion || '-') + '</div>' +
       '<div class="json-k">Agent Info</div><div class="json-v">' + esc((agentInfo.title || agentInfo.name || '-') + (agentInfo.name && agentInfo.title ? ' (' + agentInfo.name + ')' : '')) + '</div>' +
       '<div class="json-k">Config Options</div><div class="json-v">' + String(configOptions.length) + '</div>' +
@@ -1173,7 +1190,7 @@ function renderDBTables(db) {
           const isSessionsTable = tableName === 'sessions';
           const isSessionTurnsTable = tableName === 'session_turns';
           const colName = col.toLowerCase();
-          const isAgentsJSON = isSessionsTable && colName === 'agents_json';
+          const isAgentJSON = isSessionsTable && colName === 'agent_json';
           const isTurnUpdateJSON = isSessionTurnsTable && colName === 'update_json';
           const isJSONColumn = colName.endsWith('_json');
           const isStatus = isSessionsTable && colName === 'status';
@@ -1181,14 +1198,8 @@ function renderDBTables(db) {
             const raw = val == null ? '' : String(val);
             const key = stashJSONCellValue(raw);
             let summary = '-';
-            if (isAgentsJSON) {
-              try {
-                const parsed = JSON.parse(raw);
-                const names = Object.keys(parsed || {});
-                summary = names.length ? names.join(', ') : '-';
-              } catch (_) {
-                summary = raw.trim() ? '?' : '-';
-              }
+            if (isAgentJSON) {
+              summary = summarizeAgentJSON(raw);
             } else if (isTurnUpdateJSON && raw.trim()) {
               try {
                 const parsed = JSON.parse(raw);

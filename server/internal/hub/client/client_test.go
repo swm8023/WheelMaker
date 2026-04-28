@@ -103,6 +103,7 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	}
 	sess.mu.Lock()
 	sess.instance = runtime
+	sess.agentType = name
 	sess.activeAgent = name
 	sess.acpSessionID = sessionID
 	sess.ready = true
@@ -127,7 +128,11 @@ func (c *Client) HandleMessage(msg Message) {
 	if cmd, args, ok := parseCommand(text); ok {
 		switch cmd {
 		case "/new":
-			sess, err := c.ClientNewSession(routeKey)
+			agentType := strings.TrimSpace(args)
+			if agentType == "" {
+				return
+			}
+			sess, err := c.ClientNewSession(routeKey, agentType)
 			if err != nil {
 				return
 			}
@@ -392,10 +397,6 @@ var _ IMRouter = (*TestCaptureRouter)(nil)
 
 type noopStore struct{}
 
-func (s *noopStore) LoadProject(context.Context, string) (*ProjectConfig, error) {
-	return &ProjectConfig{}, nil
-}
-func (s *noopStore) SaveProject(context.Context, string, ProjectConfig) error { return nil }
 func (s *noopStore) LoadRouteBindings(context.Context, string) (map[string]string, error) {
 	return map[string]string{}, nil
 }
@@ -408,6 +409,10 @@ func (s *noopStore) SaveSession(context.Context, *SessionRecord) error { return 
 func (s *noopStore) ListSessions(context.Context, string) ([]SessionRecord, error) {
 	return nil, nil
 }
+func (s *noopStore) LoadAgentPreference(context.Context, string, string) (*AgentPreferenceRecord, error) {
+	return nil, nil
+}
+func (s *noopStore) SaveAgentPreference(context.Context, AgentPreferenceRecord) error { return nil }
 func (s *noopStore) DeleteSession(context.Context, string, string) error { return nil }
 func (s *noopStore) UpsertSessionPrompt(context.Context, SessionPromptRecord) error {
 	return nil
@@ -527,6 +532,36 @@ func TestHandleIMInbound_ListDirectDoesNotBind(t *testing.T) {
 	}
 	if len(fake.systems) != 1 {
 		t.Fatalf("systems=%+v, want direct /list response", fake.systems)
+	}
+}
+
+func TestHandleIMInbound_NewWithoutAgentOpensHelpCardAndDoesNotBind(t *testing.T) {
+	c := New(&noopStore{}, "test", "/tmp")
+	fake := &fakeIMRouter{}
+	c.SetIMRouter(fake)
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := c.HandleIMInbound(context.Background(), im.InboundEvent{ChannelID: "feishu", ChatID: "chat-a", Text: "/new"}); err != nil {
+		t.Fatalf("HandleIMInbound: %v", err)
+	}
+
+	if len(fake.binds) != 0 {
+		t.Fatalf("binds=%+v, want none", fake.binds)
+	}
+	if got := c.RouteSessionIDForTest("im:feishu:chat-a"); got != "" {
+		t.Fatalf("route session = %q, want empty", got)
+	}
+	if len(fake.systems) != 1 {
+		t.Fatalf("systems=%+v, want one help card", fake.systems)
+	}
+	system := fake.systems[0]
+	if system.payload.Kind != "help_card" || system.payload.HelpCard == nil {
+		t.Fatalf("system payload = %+v, want help card", system.payload)
+	}
+	if system.payload.HelpCard.MenuID != "menu:new" {
+		t.Fatalf("help menu id = %q, want menu:new", system.payload.HelpCard.MenuID)
 	}
 }
 
@@ -733,9 +768,8 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	if err := store.SaveSession(ctx, &SessionRecord{
 		ID:          "restore-me",
 		ProjectName: "proj1",
-
-		ACPSessionID: "acp-999",
-		AgentsJSON:   `{"claude":{"acpSessionId":"acp-999","title":"Persisted"}}`,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Persisted"}`,
 		CreatedAt:    time.Now().Add(-time.Hour),
 		LastActiveAt: time.Now().Add(-10 * time.Minute),
 	}); err != nil {
@@ -772,7 +806,8 @@ func TestListSessions_DiskOnlySessionsAreMarkedPersisted(t *testing.T) {
 		ID:          "persisted-only",
 		ProjectName: "proj1",
 		Status:      SessionSuspended,
-		AgentsJSON:  `{"claude":{"title":"Persisted Title"}}`,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Persisted Title"}`,
 
 		CreatedAt:    createdAt,
 		LastActiveAt: lastMessageAt,
@@ -810,6 +845,8 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 		ID:          "sess-1",
 		ProjectName: "proj1",
 		Status:      SessionSuspended,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Persisted Title"}`,
 		Title:       "Persisted Title",
 
 		CreatedAt:    createdAt,
@@ -824,7 +861,9 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	sess.createdAt = createdAt
 	sess.lastActiveAt = time.Now().UTC()
 	sess.Status = SessionActive
+	sess.agentType = "claude"
 	sess.activeAgent = "claude"
+	sess.agentState.Title = "Runtime Title"
 	sess.agents = map[string]*SessionAgentState{
 		"claude": {Title: "Runtime Title"},
 	}
@@ -1022,6 +1061,7 @@ func TestEvictSuspendedSessions(t *testing.T) {
 
 	c.mu.Lock()
 	sess := c.newWiredSession("evict-me")
+	sess.agentType = "claude"
 	sess.Status = SessionSuspended
 	sess.lastActiveAt = time.Now().Add(-time.Minute)
 	c.sessions["evict-me"] = sess
@@ -1121,6 +1161,71 @@ func findCurrentValue(options []acp.ConfigOption, id string) string {
 	return ""
 }
 
+func TestSessionFromRecord_RestoresSingleAgentState(t *testing.T) {
+	rec := &SessionRecord{
+		ID:          "sess-restored",
+		ProjectName: "proj1",
+		Status:      SessionPersisted,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Persisted","commands":[{"name":"/status"}]}`,
+		Title:       "Persisted",
+	}
+
+	sess, err := sessionFromRecord(rec, "/tmp")
+	if err != nil {
+		t.Fatalf("sessionFromRecord: %v", err)
+	}
+	if sess.ID != "sess-restored" {
+		t.Fatalf("ID = %q, want sess-restored", sess.ID)
+	}
+	if got := sess.agentType; got != "claude" {
+		t.Fatalf("agentType = %q, want claude", got)
+	}
+	if got := sess.agentState.Title; got != "Persisted" {
+		t.Fatalf("agentState.Title = %q, want Persisted", got)
+	}
+}
+
+func TestCreateSessionWithAgent_UsesACPResultAsUnifiedSessionID(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	inst := &testInjectedInstance{
+		name: "claude",
+		initResult: acp.InitializeResult{
+			ProtocolVersion:   "0.1",
+			AgentCapabilities: acp.AgentCapabilities{},
+		},
+		newResult: &acp.SessionNewResult{SessionID: "sess-from-agent"},
+	}
+
+	c := New(store, "proj1", "/tmp")
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register("claude", func(context.Context, string) (agent.Instance, error) { return inst, nil })
+
+	sess, err := c.CreateSession(context.Background(), "claude", "hello")
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if sess.ID != "sess-from-agent" {
+		t.Fatalf("session ID = %q, want sess-from-agent", sess.ID)
+	}
+	if got := sess.agentType; got != "claude" {
+		t.Fatalf("agentType = %q, want claude", got)
+	}
+
+	loaded, err := store.LoadSession(context.Background(), "proj1", "sess-from-agent")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded == nil || loaded.AgentType != "claude" {
+		t.Fatalf("LoadSession = %+v, want agentType claude", loaded)
+	}
+}
+
 func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -1128,18 +1233,18 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	}
 	defer store.Close()
 
-	if err := store.SaveProject(context.Background(), "proj1", ProjectConfig{
-		AgentState: map[string]ProjectAgentState{
-			"claude": {
-				ConfigOptions: []acp.ConfigOption{
-					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
-					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
-					{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
-				},
+	if err := store.SaveAgentPreference(context.Background(), AgentPreferenceRecord{
+		ProjectName: "proj1",
+		AgentType:   "claude",
+		PreferenceJSON: string(mustJSON(ProjectAgentState{
+			ConfigOptions: []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
 			},
-		},
+		})),
 	}); err != nil {
-		t.Fatalf("SaveProject: %v", err)
+		t.Fatalf("SaveAgentPreference: %v", err)
 	}
 
 	c := New(store, "proj1", "/tmp")
@@ -1164,7 +1269,7 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	c.routeMap["route-1"] = oldSess.ID
 	c.mu.Unlock()
 
-	sess, err := c.ClientNewSession("route-1")
+	sess, err := c.ClientNewSession("route-1", "claude")
 	if err != nil {
 		t.Fatalf("ClientNewSession: %v", err)
 	}
@@ -1375,7 +1480,11 @@ func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
 	defer store.Close()
 
 	c := New(store, "proj1", "/tmp")
-	sess, err := c.ClientNewSession("route:test")
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{name: "claude", sessionID: "acp-route-test", alive: true}, nil
+	})
+	sess, err := c.ClientNewSession("route:test", "claude")
 	if err != nil {
 		t.Fatalf("ClientNewSession: %v", err)
 	}
@@ -1445,35 +1554,90 @@ func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 	}
 }
 
-func TestStoreProjectAgentStateRoundTrip(t *testing.T) {
+func TestResolveHelpModel_RootStartsWithNewConversationMenu(t *testing.T) {
+	s := newSession("sess-help", "/tmp")
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{name: "claude", alive: true}, nil
+	})
+	s.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{name: "codex", alive: true}, nil
+	})
+	s.mu.Lock()
+	s.instance = &testInjectedInstance{name: "claude", alive: true}
+	s.agentType = "claude"
+	s.activeAgent = "claude"
+	s.ready = true
+	s.mu.Unlock()
+
+	model, err := s.resolveHelpModel(context.Background(), "")
+	if err != nil {
+		t.Fatalf("resolveHelpModel: %v", err)
+	}
+	if len(model.Options) == 0 || model.Options[0].Label != "New Conversation" {
+		t.Fatalf("root option[0] = %+v, want New Conversation", model.Options)
+	}
+	newMenu, ok := model.Menus["menu:new"]
+	if !ok {
+		t.Fatalf("menus = %+v, want menu:new", model.Menus)
+	}
+	for _, opt := range model.Options {
+		if strings.Contains(opt.Label, "Switch Agent") || opt.Command == "/use" {
+			t.Fatalf("unexpected switch-agent option: %+v", opt)
+		}
+	}
+	seenAgents := map[string]bool{}
+	for _, opt := range newMenu.Options {
+		if opt.Command != "/new" {
+			t.Fatalf("new menu option = %+v, want /new", opt)
+		}
+		seenAgents[strings.TrimPrefix(opt.Label, "Agent: ")] = true
+	}
+	if !seenAgents["claude"] || !seenAgents["codex"] {
+		t.Fatalf("new menu options = %+v, want claude and codex", newMenu.Options)
+	}
+}
+
+func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
 	}
 	defer store.Close()
 
-	cfg := ProjectConfig{
-		AgentState: map[string]ProjectAgentState{
-			"codex": {
-				ConfigOptions: []acp.ConfigOption{
-					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
-					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
-					{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
-				},
-				AvailableCommands: []acp.AvailableCommand{{Name: "/status"}},
-				UpdatedAt:         "2026-04-11T00:00:00Z",
-			},
+	pref := ProjectAgentState{
+		ConfigOptions: []acp.ConfigOption{
+			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+			{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
 		},
+		AvailableCommands: []acp.AvailableCommand{{Name: "/status"}},
+		UpdatedAt:         "2026-04-11T00:00:00Z",
 	}
-	if err := store.SaveProject(context.Background(), "proj1", cfg); err != nil {
-		t.Fatalf("SaveProject: %v", err)
+	raw, err := json.Marshal(pref)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if err := store.SaveAgentPreference(context.Background(), AgentPreferenceRecord{
+		ProjectName:    "proj1",
+		AgentType:      "codex",
+		PreferenceJSON: string(raw),
+	}); err != nil {
+		t.Fatalf("SaveAgentPreference: %v", err)
 	}
 
-	loaded, err := store.LoadProject(context.Background(), "proj1")
+	loaded, err := store.LoadAgentPreference(context.Background(), "proj1", "codex")
 	if err != nil {
-		t.Fatalf("LoadProject: %v", err)
+		t.Fatalf("LoadAgentPreference: %v", err)
 	}
-	codex := loaded.AgentState["codex"]
+	if loaded == nil {
+		t.Fatal("LoadAgentPreference: nil, want preference")
+	}
+	var decoded ProjectAgentState
+	if err := json.Unmarshal([]byte(loaded.PreferenceJSON), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	codex := decoded
 	if got := len(codex.ConfigOptions); got != 3 {
 		t.Fatalf("config options = %d, want 3", got)
 	}
@@ -1494,13 +1658,24 @@ func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 		t.Fatalf("init schema: %v", err)
 	}
 	if _, err := legacyDB.Exec(`
-		DROP TABLE projects;
+		DROP TABLE sessions;
+		DROP TABLE IF EXISTS projects;
 		CREATE TABLE projects (
 			project_name TEXT PRIMARY KEY,
 			yolo INTEGER NOT NULL DEFAULT 0,
 			agent_state_json TEXT NOT NULL DEFAULT '{}',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
+		);
+		CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			project_name TEXT NOT NULL,
+			status INTEGER NOT NULL,
+			acp_session_id TEXT NOT NULL DEFAULT '',
+			agents_json TEXT NOT NULL DEFAULT '{}',
+			title TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			last_active_at TEXT NOT NULL
 		);
 	`); err != nil {
 		_ = legacyDB.Close()
@@ -1512,13 +1687,13 @@ func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 
 	err = CheckStoreSchema(dbPath)
 	if err == nil {
-		t.Fatal("CheckStoreSchema() error = nil, want mismatch for projects.yolo column")
+		t.Fatal("CheckStoreSchema() error = nil, want mismatch for legacy projects/sessions columns")
 	}
 	if !IsStoreSchemaMismatch(err) {
 		t.Fatalf("IsStoreSchemaMismatch(err) = false, err=%v", err)
 	}
-	if !strings.Contains(err.Error(), `table "projects" columns mismatch`) {
-		t.Fatalf("CheckStoreSchema() err = %v, want projects columns mismatch", err)
+	if !strings.Contains(err.Error(), `unexpected table "projects"`) && !strings.Contains(err.Error(), `table "sessions" columns mismatch`) {
+		t.Fatalf("CheckStoreSchema() err = %v, want projects/session schema mismatch", err)
 	}
 }
 func TestCheckStoreSchemaRejectsUnexpectedLegacyTable(t *testing.T) {
@@ -1609,6 +1784,8 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 		ID:          "sess-1",
 		ProjectName: "proj1",
 		Status:      SessionActive,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Fix app sessions"}`,
 
 		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 		LastActiveAt: time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
@@ -1652,6 +1829,8 @@ func TestStoreSessionTurnRoundTrip(t *testing.T) {
 		ID:           "sess-1",
 		ProjectName:  "proj1",
 		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
 		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -1711,6 +1890,8 @@ func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 		ID:           "sess-1",
 		ProjectName:  "proj1",
 		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
 		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 	}); err != nil {
@@ -1789,8 +1970,11 @@ func newSessionViewTestClient(t *testing.T) *Client {
 func addRuntimeSession(c *Client, sessionID, title, agent string, createdAt, lastActiveAt time.Time) {
 	sess := c.newWiredSession(sessionID)
 	sess.mu.Lock()
+	sess.agentType = agent
 	sess.activeAgent = agent
-	if state := sess.agentStateLocked(sess.currentAgentNameLocked()); state != nil {
+	sess.acpSessionID = sessionID
+	if state := sess.agentStateLocked(agent); state != nil {
+		state.ACPSessionID = sessionID
 		state.Title = title
 	}
 	sess.Status = SessionActive
@@ -1810,6 +1994,7 @@ func sessionViewCreatedEvent(sessionID, title string) SessionViewEvent {
 		Content: acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{
 			"params": map[string]any{
 				"sessionId": sessionID,
+				"agentType": "claude",
 				"title":     title,
 			},
 		}),
@@ -2413,7 +2598,7 @@ func TestSessionViewCreatedEventSilentlyHandlesMalformedTitle(t *testing.T) {
 	event := SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: "sess-1",
-		Content:   acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{"params": map[string]any{"title": 123}}),
+		Content:   acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{"params": map[string]any{"agentType": "claude", "title": 123}}),
 	}
 
 	if err := c.RecordEvent(context.Background(), event); err != nil {
@@ -2512,8 +2697,8 @@ func TestSessionViewListIncludesRuntimeClientSessions(t *testing.T) {
 	if sessions[0].Title != "Runtime Session" {
 		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Runtime Session")
 	}
-	if sessions[0].Agent != "claude" {
-		t.Fatalf("sessions[0].Agent = %q, want %q", sessions[0].Agent, "claude")
+	if sessions[0].AgentType != "claude" {
+		t.Fatalf("sessions[0].AgentType = %q, want %q", sessions[0].AgentType, "claude")
 	}
 }
 
@@ -2848,6 +3033,8 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 		ID:          "sess-runtime-1",
 		ProjectName: "proj1",
 		Status:      SessionSuspended,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Persisted Title"}`,
 		Title:       "Persisted Title",
 
 		CreatedAt:    mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
@@ -3489,6 +3676,20 @@ func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestHandleSessionRequest_SessionNewRequiresAgentType(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	c := New(store, "proj1", "/tmp")
+	_, err = c.HandleSessionRequest(context.Background(), "session.new", "proj1", json.RawMessage(`{"title":"hello"}`))
+	if err == nil || !strings.Contains(err.Error(), "agentType is required") {
+		t.Fatalf("HandleSessionRequest() err = %v, want agentType is required", err)
+	}
+}
+
 func TestSessionViewReadRepairsSameTurnOverwriteFromCheckpoint(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
@@ -3912,18 +4113,15 @@ func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.SaveProject(ctx, "proj-a", ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
-	}
 	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
 		t.Fatalf("SaveRouteBinding() error = %v", err)
 	}
 	if err := store.SaveSession(ctx, &SessionRecord{
-		ID:           "sess-1",
-		ProjectName:  "proj-a",
-		Status:       SessionPersisted,
-		ACPSessionID: "acp-1",
-		AgentsJSON:   `{"claude":{"acpSessionId":"acp-1"}}`,
+		ID:          "sess-1",
+		ProjectName: "proj-a",
+		Status:      SessionPersisted,
+		AgentType:   "claude",
+		AgentJSON:   `{"title":"Persisted"}`,
 	}); err != nil {
 		t.Fatalf("SaveSession() error = %v", err)
 	}
@@ -4034,9 +4232,6 @@ func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	if err := store.SaveProject(ctx, "proj-a", ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProject() error = %v", err)
-	}
 	if err := store.SaveRouteBinding(ctx, "proj-a", "im:feishu:chat-1", "sess-1"); err != nil {
 		t.Fatalf("SaveRouteBinding() error = %v", err)
 	}
@@ -4044,18 +4239,20 @@ func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
 		ID:           "sess-1",
 		ProjectName:  "proj-a",
 		Status:       SessionSuspended,
-		ACPSessionID: "acp-1",
-		AgentsJSON:   `{"claude":{"acpSessionId":"acp-1","title":"Persisted"}}`,
+		AgentType:    "claude",
+		AgentJSON:    `{"title":"Persisted","commands":[{"name":"/status"}]}`,
+		Title:        "Persisted",
+		CreatedAt:    time.Unix(10, 0).UTC(),
+		LastActiveAt: time.Unix(20, 0).UTC(),
 	}); err != nil {
 		t.Fatalf("SaveSession() error = %v", err)
 	}
-
-	cfg, err := store.LoadProject(ctx, "proj-a")
-	if err != nil {
-		t.Fatalf("LoadProject() error = %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("LoadProject() = nil, want config")
+	if err := store.SaveAgentPreference(ctx, AgentPreferenceRecord{
+		ProjectName:    "proj-a",
+		AgentType:      "claude",
+		PreferenceJSON: `{"configOptions":[{"id":"mode","currentValue":"code"}]}`,
+	}); err != nil {
+		t.Fatalf("SaveAgentPreference() error = %v", err)
 	}
 
 	bindings, err := store.LoadRouteBindings(ctx, "proj-a")
@@ -4072,6 +4269,20 @@ func TestSQLiteStore_ProjectRouteAndSessionRoundTrip(t *testing.T) {
 	}
 	if rec == nil || rec.ID != "sess-1" {
 		t.Fatalf("LoadSession() = %+v, want sess-1", rec)
+	}
+	if rec.AgentType != "claude" {
+		t.Fatalf("LoadSession().AgentType = %q, want claude", rec.AgentType)
+	}
+	if strings.Contains(rec.AgentJSON, "acpSessionId") {
+		t.Fatalf("LoadSession().AgentJSON = %q, should not contain acpSessionId", rec.AgentJSON)
+	}
+
+	pref, err := store.LoadAgentPreference(ctx, "proj-a", "claude")
+	if err != nil {
+		t.Fatalf("LoadAgentPreference() error = %v", err)
+	}
+	if pref == nil || !strings.Contains(pref.PreferenceJSON, `"mode"`) {
+		t.Fatalf("LoadAgentPreference() = %+v, want mode config", pref)
 	}
 
 	entries, err := store.ListSessions(ctx, "proj-a")

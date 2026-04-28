@@ -1648,6 +1648,29 @@ body,
   color: var(--muted);
 }
 
+.chat-agent-picker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.chat-agent-picker-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.chat-agent-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ── Thinking Block ── */
 .thinking-block {
   border: 1px solid var(--border);

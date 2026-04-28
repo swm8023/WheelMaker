@@ -100,7 +100,7 @@ func ParseCommand(text string) (Command, bool) {
 		return Command{}, false
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/help":
+	case "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/help":
 		return Command{
 			Name: parts[0],
 			Args: strings.Join(parts[1:], " "),

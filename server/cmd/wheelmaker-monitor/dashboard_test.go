@@ -49,7 +49,7 @@ func TestRenderDashboardHTML_PWALinksForRoot(t *testing.T) {
 	}
 }
 
-func TestDashboardHTML_HasAgentsJSONModalUI(t *testing.T) {
+func TestDashboardHTML_HasAgentJSONModalUI(t *testing.T) {
 	if !strings.Contains(dashboardHTML, `id="json-modal"`) {
 		t.Fatalf("dashboard should include json modal container")
 	}
@@ -61,9 +61,12 @@ func TestDashboardHTML_HasAgentsJSONModalUI(t *testing.T) {
 	}
 }
 
-func TestDashboardHTML_HasAgentsJSONModalScriptHooks(t *testing.T) {
-	if !strings.Contains(dashboardHTML, "openAgentsJSONModal") {
-		t.Fatalf("dashboard should define openAgentsJSONModal")
+func TestDashboardHTML_HasAgentJSONModalScriptHooks(t *testing.T) {
+	if strings.Contains(dashboardHTML, "openAgentsJSONModal") {
+		t.Fatalf("dashboard should not define openAgentsJSONModal")
+	}
+	if !strings.Contains(dashboardHTML, "renderAgentJSONContent") {
+		t.Fatalf("dashboard should define renderAgentJSONContent")
 	}
 	if !strings.Contains(dashboardHTML, "closeJSONModal") {
 		t.Fatalf("dashboard should define closeJSONModal")
@@ -78,6 +81,18 @@ func TestDashboardHTML_HasGenericJSONCellViewHook(t *testing.T) {
 	}
 	if !strings.Contains(dashboardHTML, "openJSONModal(") {
 		t.Fatalf("dashboard should define generic openJSONModal hook")
+	}
+}
+
+func TestDashboardHTML_UsesAgentJSONAndUnifiedSessionIdentity(t *testing.T) {
+	if strings.Contains(dashboardHTML, "ACP Session") {
+		t.Fatalf("dashboard should not render ACP Session once session.id is unified")
+	}
+	if strings.Contains(dashboardHTML, "agents_json") {
+		t.Fatalf("dashboard should not reference agents_json")
+	}
+	if !strings.Contains(dashboardHTML, "agent_json") {
+		t.Fatalf("dashboard should expose agent_json column hooks")
 	}
 }
 

@@ -352,6 +352,30 @@ func TestSystemNotify_HelpCardCardActionUpdatesExistingMessage(t *testing.T) {
 	}
 }
 
+func TestHandleHelpOptionAction_NewConversationUsesNewCommand(t *testing.T) {
+	ft := &fakeTransport{}
+	ch := newWithTransport(ft)
+	var cmds []im.Command
+	ch.OnCommand(func(_ context.Context, _ im.ChatRef, cmd im.Command) error {
+		cmds = append(cmds, cmd)
+		return nil
+	})
+
+	ch.handleHelpOptionAction(CardActionEvent{
+		ChatID:    "chat-1",
+		MessageID: "om_1",
+		Value: map[string]string{
+			"kind":    "help_option",
+			"command": "/new",
+			"value":   "claude",
+		},
+	})
+
+	if len(cmds) == 0 || cmds[0].Name != "/new" || cmds[0].Args != "claude" {
+		t.Fatalf("commands = %+v, want /new claude", cmds)
+	}
+}
+
 func TestSystemNotify_TitleKeepsEmojiAndBodyNoDuplicate(t *testing.T) {
 	ft := &fakeTransport{}
 	ch := newWithTransport(ft)

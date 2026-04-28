@@ -40,7 +40,7 @@ export class RegistryRepository {
       updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
       messageCount: typeof input.messageCount === 'number' && Number.isFinite(input.messageCount) ? input.messageCount : 0,
       unreadCount: typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount) ? input.unreadCount : undefined,
-      agent: typeof input.agent === 'string' ? input.agent : undefined,
+      agentType: typeof input.agentType === 'string' ? input.agentType : undefined,
     };
   }
 
@@ -439,6 +439,9 @@ export class RegistryRepository {
       .filter(project => !!project.projectId)
       .map(project => ({
         ...project,
+        agents: Array.isArray(project.agents)
+          ? project.agents.filter((item): item is string => typeof item === 'string')
+          : undefined,
         hubId: project.hubId || project.projectId.split(':', 1)[0] || '',
       }));
   }
@@ -654,11 +657,11 @@ export class RegistryRepository {
     return this.readSessionByMethod(projectId, sessionId, promptIndex, turnIndex, 'session.read');
   }
 
-  async createSession(projectId: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
+  async createSession(projectId: string, agentType: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
     const resp = await this.client.request({
       method: 'session.new',
       projectId,
-      payload: title?.trim() ? {title: title.trim()} : {},
+      payload: title?.trim() ? {agentType, title: title.trim()} : {agentType},
       timeoutMs: 15000,
     });
     const body = (resp.payload ?? {}) as {ok?: boolean; session?: RegistrySessionSummary};
@@ -670,6 +673,7 @@ export class RegistryRepository {
         preview: '',
         updatedAt: '',
         messageCount: 0,
+        agentType,
       },
     };
   }

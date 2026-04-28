@@ -25,30 +25,6 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 	defer cancel()
 
 	switch cmd {
-	case "/use":
-		if args == "" {
-			example := "Usage: /use <agent-name> [--continue]"
-			if sess.registry != nil {
-				names := sess.registry.Names()
-				if len(names) > 0 {
-					example += fmt.Sprintf("  (available: %s)", strings.Join(names, ", "))
-				}
-			}
-			sess.reply(example)
-			return
-		}
-		parts := strings.Fields(args)
-		name := strings.ToLower(parts[0])
-		mode := SwitchClean
-		for _, p := range parts[1:] {
-			if p == "--continue" {
-				mode = SwitchWithContext
-			}
-		}
-		if err := sess.switchAgent(ctx, name, mode); err != nil {
-			sess.reply(fmt.Sprintf("Switch error: %v", err))
-		}
-
 	case "/cancel":
 		sess.mu.Lock()
 		active := sess.instance != nil
@@ -77,7 +53,7 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 		c.handleListCommand(sess)
 
 	case "/new":
-		c.handleNewCommand(routeKey)
+		c.handleNewCommand(sess, routeKey, args)
 
 	case "/load":
 		c.handleLoadCommand(sess, routeKey, args)
@@ -95,15 +71,27 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 }
 
 // handleNewCommand creates a new Client-level session and rebinds the route.
-func (c *Client) handleNewCommand(routeKey string) {
-	newSess, err := c.ClientNewSession(routeKey)
-	if err != nil {
-		if routeKey == "" {
+func (c *Client) handleNewCommand(sess *Session, routeKey, args string) {
+	agentType := strings.TrimSpace(args)
+	if agentType == "" {
+		if _, source, ok := sess.imContext(); ok {
+			model, err := sess.resolveHelpModel(context.Background(), source.ChatID)
+			if err != nil {
+				sess.reply(fmt.Sprintf("New error: %v", err))
+				return
+			}
+			if err := c.sendHelpCard(context.Background(), source, model, "menu:new", 0); err != nil {
+				sess.reply(fmt.Sprintf("New error: %v", err))
+			}
 			return
 		}
-		if sess, resolveErr := c.resolveSession(routeKey); resolveErr == nil && sess != nil {
-			sess.reply(fmt.Sprintf("New error: %v", err))
-		}
+		sess.reply("Usage: /new <agent-name>")
+		return
+	}
+
+	newSess, err := c.ClientNewSession(routeKey, agentType)
+	if err != nil {
+		sess.reply(fmt.Sprintf("New error: %v", err))
 		return
 	}
 	newSess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
@@ -213,7 +201,8 @@ func (s *Session) handleConfigCommand(
 
 	// Lock section 1: read session state for config resolution.
 	s.mu.Lock()
-	sessionState := cloneSessionAgentState(s.agents[s.currentAgentNameLocked()])
+	agentName := s.currentAgentNameLocked()
+	sessionState := cloneSessionAgentState(s.agentStateLocked(agentName))
 	s.mu.Unlock()
 
 	if err := s.ensureReadyAndNotify(ctx); err != nil {
@@ -242,7 +231,7 @@ func (s *Session) handleConfigCommand(
 		return
 	}
 	// Apply returned config options immediately so the help menu reflects the new value.
-	agentName := ""
+	agentName = ""
 	commands := []acp.AvailableCommand(nil)
 	if len(updatedOpts) > 0 {
 		s.mu.Lock()
@@ -253,7 +242,7 @@ func (s *Session) handleConfigCommand(
 			commands = append([]acp.AvailableCommand(nil), state.Commands...)
 		}
 		s.mu.Unlock()
-		s.persistProjectAgentState(agentName, updatedOpts, commands)
+		s.persistAgentPreferenceState(agentName, updatedOpts, commands)
 	}
 
 	s.persistSessionBestEffort()
@@ -356,7 +345,7 @@ func (s *Session) listSessions(ctx context.Context) ([]string, error) {
 	curSID := s.acpSessionID
 	agentName := s.currentAgentNameLocked()
 	caps := acp.AgentCapabilities{}
-	if state := s.agents[agentName]; state != nil {
+	if state := s.agentStateLocked(agentName); state != nil {
 		caps = state.AgentCapabilities
 	}
 	s.mu.Unlock()
@@ -455,7 +444,7 @@ func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, er
 	cwd := s.cwd
 	loadCap := false
 	var sessions []SessionSummary
-	if state := s.agents[agentName]; state != nil {
+	if state := s.agentStateLocked(agentName); state != nil {
 		loadCap = state.AgentCapabilities.LoadSession
 		sessions = append(sessions, state.Sessions...)
 	}
@@ -517,7 +506,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 	// If session/list is unsupported or fails, we silently fall back to cached state.
 	_, _ = s.listSessions(ctx)
 
-	state, currentAgent := s.currentAgentStateSnapshot()
+	state, _ := s.currentAgentStateSnapshot()
 	opts := []acp.ConfigOption(nil)
 	cachedSessions := []SessionSummary(nil)
 	if state != nil {
@@ -532,32 +521,65 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		Menus:    map[string]HelpMenu{},
 	}
 
-	// 1. Agent switch (show current agent in label)
-	agentLabel := "Agent Switch"
-	if currentAgent != "" {
-		agentLabel = "Agent: " + currentAgent
-	}
-	agentMenuID := "menu:agents"
+	// 1. New Conversation
+	newMenuID := "menu:new"
 	model.Options = append(model.Options, HelpOption{
-		Label:  agentLabel,
-		MenuID: agentMenuID,
+		Label:  "New Conversation",
+		MenuID: newMenuID,
 	})
-	agentMenu := HelpMenu{
-		Title:  "Agent Switch",
-		Body:   "Choose an agent to switch to.",
+	newMenu := HelpMenu{
+		Title:  "New Conversation",
+		Body:   "Choose an agent for the new conversation.",
 		Parent: model.RootMenu,
 	}
-	agentNames := s.registry.Names()
+	agentNames := []string(nil)
+	if s.registry != nil {
+		agentNames = s.registry.Names()
+	}
 	for _, name := range agentNames {
-		agentMenu.Options = append(agentMenu.Options, HelpOption{
+		newMenu.Options = append(newMenu.Options, HelpOption{
 			Label:   "Agent: " + name,
-			Command: "/use",
+			Command: "/new",
 			Value:   name,
 		})
 	}
-	model.Menus[agentMenuID] = agentMenu
+	if len(newMenu.Options) == 0 {
+		newMenu.Body = "No agents available."
+	}
+	model.Menus[newMenuID] = newMenu
 
-	// 2. Config options
+	// 2. Session List — submenu from latest/cached sessions, clicking loads the session
+	sessionMenuID := "menu:sessions"
+	model.Options = append(model.Options, HelpOption{
+		Label:  "Session List",
+		MenuID: sessionMenuID,
+	})
+	sessionMenu := HelpMenu{
+		Title:  "Sessions",
+		Body:   "Select a session to load.",
+		Parent: model.RootMenu,
+	}
+	for i, s := range cachedSessions {
+		title := strings.TrimSpace(s.Title)
+		if title == "" {
+			title = "(no title)"
+		}
+		label := fmt.Sprintf("%d. %s", i+1, title)
+		sessionMenu.Options = append(sessionMenu.Options, HelpOption{
+			Label:   label,
+			Command: "/load",
+			Value:   strconv.Itoa(i + 1),
+		})
+	}
+	if len(sessionMenu.Options) == 0 {
+		sessionMenu.Body = "No sessions available."
+	}
+	model.Menus[sessionMenuID] = sessionMenu
+
+	// 3. Status
+	model.Options = append(model.Options, HelpOption{Label: "Status", Command: "/status"})
+
+	// 4. Config options
 	for _, opt := range opts {
 		cfgID := strings.TrimSpace(opt.ID)
 		if cfgID == "" {
@@ -593,37 +615,6 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		}
 		model.Menus[menuID] = cfgMenu
 	}
-
-	// 3. Session List — submenu from latest/cached sessions, clicking loads the session
-	sessionMenuID := "menu:sessions"
-	model.Options = append(model.Options, HelpOption{
-		Label:  "Session List",
-		MenuID: sessionMenuID,
-	})
-	sessionMenu := HelpMenu{
-		Title:  "Sessions",
-		Body:   "Select a session to load.",
-		Parent: model.RootMenu,
-	}
-	for i, s := range cachedSessions {
-		title := strings.TrimSpace(s.Title)
-		if title == "" {
-			title = "(no title)"
-		}
-		label := fmt.Sprintf("%d. %s", i+1, title)
-		sessionMenu.Options = append(sessionMenu.Options, HelpOption{
-			Label:   label,
-			Command: "/load",
-			Value:   strconv.Itoa(i + 1),
-		})
-	}
-	if len(sessionMenu.Options) == 0 {
-		sessionMenu.Body = "No sessions available."
-	}
-	model.Menus[sessionMenuID] = sessionMenu
-
-	// 4. Status
-	model.Options = append(model.Options, HelpOption{Label: "Status", Command: "/status"})
 
 	return model, nil
 }

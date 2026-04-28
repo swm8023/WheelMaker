@@ -23,6 +23,10 @@ describe('web chat integration', () => {
     expect(repositoryTs).not.toContain('afterIndex');
     expect(repositoryTs).not.toContain('afterSubIndex');
     expect(repositoryTs).toContain("method: 'session.new'");
+    expect(registryTypes).toContain('agentType?: string;');
+    expect(registryTypes).toContain('agents?: string[];');
+    expect(repositoryTs).toContain('async createSession(projectId: string, agentType: string, title?: string)');
+    expect(repositoryTs).toContain('payload: title?.trim() ? {agentType, title: title.trim()} : {agentType}');
     expect(repositoryTs).toContain("method: 'session.send'");
     expect(repositoryTs).not.toContain("method: 'session.markRead'");
     expect(repositoryTs).not.toContain('turnId = typeof input.turnId');
@@ -30,6 +34,7 @@ describe('web chat integration', () => {
     expect(workspaceServiceTs).toContain('async listSessions(');
     expect(workspaceServiceTs).toContain('async readSession(');
     expect(workspaceServiceTs).toContain('async createSession(');
+    expect(workspaceServiceTs).toContain('async createSession(agentType: string, title?: string)');
     expect(workspaceServiceTs).toContain('async sendSessionMessage(');
     expect(workspaceServiceTs).not.toContain('async markSessionRead(');
     expect(workspaceServiceTs).not.toContain('async respondToSessionPermission(');
@@ -51,6 +56,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('selectionSnapshot');
     expect(mainTsx).toContain('chatSelectedIdRef.current = session.sessionId');
     expect(mainTsx).toContain('sessionId');
+    expect(mainTsx).toContain('const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);');
+    expect(mainTsx).toContain('const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);');
+    expect(mainTsx).toContain('await service.createSession(agentType, title);');
+    expect(mainTsx).toContain('project?.agents ?? []');
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");

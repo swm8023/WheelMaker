@@ -18,12 +18,6 @@ import (
 )
 
 const sqliteSchema = `
-CREATE TABLE IF NOT EXISTS projects (
-	project_name TEXT PRIMARY KEY,
-	agent_state_json TEXT NOT NULL DEFAULT '{}',
-	created_at TEXT NOT NULL,
-	updated_at TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS route_bindings (
 	project_name TEXT NOT NULL,
 	route_key TEXT NOT NULL,
@@ -35,10 +29,18 @@ CREATE TABLE IF NOT EXISTS route_bindings (
 CREATE TABLE IF NOT EXISTS sessions (
 	id TEXT PRIMARY KEY,
 	project_name TEXT NOT NULL,
-	status INTEGER NOT NULL,	acp_session_id TEXT NOT NULL DEFAULT '',
-	agents_json TEXT NOT NULL DEFAULT '{}',
-	title TEXT NOT NULL DEFAULT '',	created_at TEXT NOT NULL,
+	status INTEGER NOT NULL,
+	agent_type TEXT NOT NULL,
+	agent_json TEXT NOT NULL DEFAULT '{}',
+	title TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL,
 	last_active_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agent_preferences (
+	project_name TEXT NOT NULL,
+	agent_type TEXT NOT NULL,
+	preference_json TEXT NOT NULL DEFAULT '{}',
+	PRIMARY KEY (project_name, agent_type)
 );
 
 CREATE TABLE IF NOT EXISTS session_prompts (
@@ -68,21 +70,23 @@ type ProjectAgentState struct {
 	UpdatedAt         string                 `json:"updatedAt,omitempty"`
 }
 
-type ProjectConfig struct {
-	AgentState map[string]ProjectAgentState
-}
-
 type SessionRecord struct {
 	ID           string
 	ProjectName  string
 	Status       SessionStatus
-	ACPSessionID string
-	AgentsJSON   string
+	AgentType    string
+	AgentJSON    string
 	Title        string
 	Agent        string
 	CreatedAt    time.Time
 	LastActiveAt time.Time
 	InMemory     bool
+}
+
+type AgentPreferenceRecord struct {
+	ProjectName    string
+	AgentType      string
+	PreferenceJSON string
 }
 
 type SessionPromptRecord struct {
@@ -102,9 +106,6 @@ type SessionTurnRecord struct {
 }
 
 type Store interface {
-	LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error)
-	SaveProject(ctx context.Context, projectName string, cfg ProjectConfig) error
-
 	LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error)
 	SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error
 	DeleteRouteBinding(ctx context.Context, projectName, routeKey string) error
@@ -113,6 +114,8 @@ type Store interface {
 	SaveSession(ctx context.Context, rec *SessionRecord) error
 	ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
+	LoadAgentPreference(ctx context.Context, projectName, agentType string) (*AgentPreferenceRecord, error)
+	SaveAgentPreference(ctx context.Context, rec AgentPreferenceRecord) error
 	UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error
 	LoadSessionPrompt(ctx context.Context, projectName, sessionID string, promptIndex int64) (*SessionPromptRecord, error)
 	ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error)
@@ -136,92 +139,23 @@ func NewStore(dbPath string) (Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %q: %w", dbPath, err)
 	}
-	if err := migrateLegacyStoreSchema(db); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate schema: %w", err)
-	}
 	if _, err := db.Exec(sqliteSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
+	}
+	if err := CheckStoreSchema(dbPath); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	return &sqliteStore{db: db}, nil
 }
 
 var expectedStoreSchemaColumns = map[string][]string{
-	"projects":        {"project_name", "agent_state_json", "created_at", "updated_at"},
-	"route_bindings":  {"project_name", "route_key", "session_id", "created_at", "updated_at"},
-	"sessions":        {"id", "project_name", "status", "acp_session_id", "agents_json", "title", "created_at", "last_active_at"},
-	"session_prompts": {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
-	"session_turns":   {"session_id", "prompt_index", "turn_index", "update_json"},
-}
-
-func migrateLegacyStoreSchema(db *sql.DB) error {
-	tables, err := sqliteUserTables(db)
-	if err != nil {
-		return fmt.Errorf("list sqlite tables: %w", err)
-	}
-	if _, ok := tables["session_turns"]; !ok {
-		return nil
-	}
-	columns, err := sqliteTableColumns(db, "session_turns")
-	if err != nil {
-		return fmt.Errorf("read session_turns columns: %w", err)
-	}
-	if !storeSchemaColumnsContain(columns, "update_index") {
-		return nil
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("begin schema migration: %w", err)
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if _, err := tx.Exec(`
-		DROP TABLE IF EXISTS session_turns_next;
-		CREATE TABLE session_turns_next (
-			session_id TEXT NOT NULL,
-			prompt_index INTEGER NOT NULL,
-			turn_index INTEGER NOT NULL,
-			update_json TEXT NOT NULL DEFAULT '{}',
-			PRIMARY KEY (session_id, prompt_index, turn_index)
-		);
-		INSERT INTO session_turns_next (session_id, prompt_index, turn_index, update_json)
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_json
-		FROM session_turns t
-		JOIN (
-			SELECT session_id, prompt_index, turn_index, MAX(update_index) AS max_update_index
-			FROM session_turns
-			GROUP BY session_id, prompt_index, turn_index
-		) latest
-		ON latest.session_id = t.session_id
-		AND latest.prompt_index = t.prompt_index
-		AND latest.turn_index = t.turn_index
-		AND latest.max_update_index = t.update_index;
-		DROP TABLE session_turns;
-		ALTER TABLE session_turns_next RENAME TO session_turns;
-	`); err != nil {
-		return fmt.Errorf("migrate session_turns remove update_index: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit schema migration: %w", err)
-	}
-	tx = nil
-	return nil
-}
-
-func storeSchemaColumnsContain(columns []string, target string) bool {
-	target = normalizeStoreSchemaName(target)
-	for _, column := range columns {
-		if normalizeStoreSchemaName(column) == target {
-			return true
-		}
-	}
-	return false
+	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
+	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "title", "created_at", "last_active_at"},
+	"agent_preferences": {"project_name", "agent_type", "preference_json"},
+	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
+	"session_turns":     {"session_id", "prompt_index", "turn_index", "update_json"},
 }
 
 type StoreSchemaMismatchError struct {
@@ -364,52 +298,6 @@ func normalizeStoreSchemaName(v string) string {
 	return strings.ToLower(strings.TrimSpace(v))
 }
 
-func (s *sqliteStore) LoadProject(ctx context.Context, projectName string) (*ProjectConfig, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT agent_state_json FROM projects WHERE project_name = ?`, strings.TrimSpace(projectName))
-
-	var agentStateJSON string
-	if err := row.Scan(&agentStateJSON); err != nil {
-		if err == sql.ErrNoRows {
-			return &ProjectConfig{AgentState: map[string]ProjectAgentState{}}, nil
-		}
-		return nil, fmt.Errorf("load project: %w", err)
-	}
-
-	cfg := &ProjectConfig{AgentState: map[string]ProjectAgentState{}}
-	if strings.TrimSpace(agentStateJSON) != "" {
-		if err := json.Unmarshal([]byte(agentStateJSON), &cfg.AgentState); err != nil {
-			return nil, fmt.Errorf("unmarshal agent_state_json: %w", err)
-		}
-	}
-	return cfg, nil
-}
-
-func (s *sqliteStore) SaveProject(ctx context.Context, projectName string, cfg ProjectConfig) error {
-	projectName = strings.TrimSpace(projectName)
-	if projectName == "" {
-		return fmt.Errorf("project name is required")
-	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if cfg.AgentState == nil {
-		cfg.AgentState = map[string]ProjectAgentState{}
-	}
-	raw, err := json.Marshal(cfg.AgentState)
-	if err != nil {
-		return fmt.Errorf("marshal agent_state_json: %w", err)
-	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO projects (project_name, agent_state_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(project_name) DO UPDATE SET
-			agent_state_json=excluded.agent_state_json,
-			updated_at=excluded.updated_at
-	`, projectName, string(raw), now, now)
-	if err != nil {
-		return fmt.Errorf("save project: %w", err)
-	}
-	return nil
-}
-
 func (s *sqliteStore) LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT route_key, session_id
@@ -473,9 +361,47 @@ func (s *sqliteStore) DeleteRouteBinding(ctx context.Context, projectName, route
 	return nil
 }
 
+func (s *sqliteStore) LoadAgentPreference(ctx context.Context, projectName, agentType string) (*AgentPreferenceRecord, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT project_name, agent_type, preference_json
+		FROM agent_preferences
+		WHERE project_name = ? AND agent_type = ?
+	`, strings.TrimSpace(projectName), strings.TrimSpace(agentType))
+
+	var rec AgentPreferenceRecord
+	if err := row.Scan(&rec.ProjectName, &rec.AgentType, &rec.PreferenceJSON); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load agent preference: %w", err)
+	}
+	return &rec, nil
+}
+
+func (s *sqliteStore) SaveAgentPreference(ctx context.Context, rec AgentPreferenceRecord) error {
+	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
+	rec.AgentType = strings.TrimSpace(rec.AgentType)
+	if rec.ProjectName == "" || rec.AgentType == "" {
+		return fmt.Errorf("project name and agent type are required")
+	}
+	if strings.TrimSpace(rec.PreferenceJSON) == "" {
+		rec.PreferenceJSON = "{}"
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO agent_preferences (project_name, agent_type, preference_json)
+		VALUES (?, ?, ?)
+		ON CONFLICT(project_name, agent_type) DO UPDATE SET
+			preference_json=excluded.preference_json
+	`, rec.ProjectName, rec.AgentType, rec.PreferenceJSON)
+	if err != nil {
+		return fmt.Errorf("save agent preference: %w", err)
+	}
+	return nil
+}
+
 func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, status, acp_session_id, agents_json, title, created_at, last_active_at
+		SELECT id, status, agent_type, agent_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
@@ -487,8 +413,8 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 	if err := row.Scan(
 		&rec.ID,
 		&status,
-		&rec.ACPSessionID,
-		&rec.AgentsJSON,
+		&rec.AgentType,
+		&rec.AgentJSON,
 		&rec.Title,
 		&createdAt,
 		&lastActiveAt,
@@ -518,8 +444,12 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if rec.ProjectName == "" {
 		return fmt.Errorf("project name is required")
 	}
-	if strings.TrimSpace(rec.AgentsJSON) == "" {
-		rec.AgentsJSON = "{}"
+	rec.AgentType = strings.TrimSpace(rec.AgentType)
+	if rec.AgentType == "" {
+		return fmt.Errorf("agent type is required")
+	}
+	if strings.TrimSpace(rec.AgentJSON) == "" {
+		rec.AgentJSON = "{}"
 	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
@@ -530,16 +460,16 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at
+			id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_name=excluded.project_name,
 			status=excluded.status,
-			acp_session_id=excluded.acp_session_id,
-			agents_json=excluded.agents_json,
+			agent_type=excluded.agent_type,
+			agent_json=excluded.agent_json,
 			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
 			last_active_at=excluded.last_active_at
-	`, rec.ID, rec.ProjectName, int(rec.Status), rec.ACPSessionID, rec.AgentsJSON, rec.Title,
+	`, rec.ID, rec.ProjectName, int(rec.Status), rec.AgentType, rec.AgentJSON, rec.Title,
 		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.LastActiveAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
@@ -550,7 +480,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_name, status, acp_session_id, agents_json, title, created_at, last_active_at
+		SELECT id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ?
 		ORDER BY last_active_at DESC
@@ -565,21 +495,21 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		var entry SessionRecord
 		var entryProjectName string
 		var status int
-		var acpSessionID string
-		var agentsJSON string
+		var agentType string
+		var agentJSON string
 		var storedTitle string
 		var createdAt string
 		var lastActiveAt string
-		if err := rows.Scan(&entry.ID, &entryProjectName, &status, &acpSessionID, &agentsJSON, &storedTitle, &createdAt, &lastActiveAt); err != nil {
+		if err := rows.Scan(&entry.ID, &entryProjectName, &status, &agentType, &agentJSON, &storedTitle, &createdAt, &lastActiveAt); err != nil {
 			return nil, fmt.Errorf("scan session list entry: %w", err)
 		}
 		entry.ProjectName = strings.TrimSpace(entryProjectName)
 		entry.Status = SessionStatus(status)
-		entry.ACPSessionID = strings.TrimSpace(acpSessionID)
-		entry.AgentsJSON = firstNonEmpty(strings.TrimSpace(agentsJSON), "{}")
+		entry.AgentType = strings.TrimSpace(agentType)
+		entry.AgentJSON = firstNonEmpty(strings.TrimSpace(agentJSON), "{}")
 		entry.CreatedAt = parseStoreTime(createdAt)
 		entry.LastActiveAt = parseStoreTime(lastActiveAt)
-		entry.Agent, entry.Title = inferSessionListMetadata(acpSessionID, agentsJSON)
+		entry.Agent, entry.Title = inferSessionListMetadata(agentType, agentJSON)
 		if strings.TrimSpace(storedTitle) != "" {
 			entry.Title = strings.TrimSpace(storedTitle)
 		}
@@ -815,27 +745,14 @@ func parseStoreTime(raw string) time.Time {
 	return time.Time{}
 }
 
-func inferSessionListMetadata(acpSessionID, agentsJSON string) (string, string) {
-	type storedAgent struct {
-		ACPSessionID string `json:"acpSessionId,omitempty"`
-		Title        string `json:"title,omitempty"`
+func inferSessionListMetadata(agentType, agentJSON string) (string, string) {
+	type storedAgentState struct {
+		Title string `json:"title,omitempty"`
 	}
 
-	agents := map[string]storedAgent{}
-	if err := json.Unmarshal([]byte(agentsJSON), &agents); err != nil {
-		return "", ""
+	state := storedAgentState{}
+	if err := json.Unmarshal([]byte(firstNonEmpty(agentJSON, "{}")), &state); err != nil {
+		return strings.TrimSpace(agentType), ""
 	}
-	if strings.TrimSpace(acpSessionID) != "" {
-		for name, state := range agents {
-			if strings.TrimSpace(state.ACPSessionID) == strings.TrimSpace(acpSessionID) {
-				return name, state.Title
-			}
-		}
-	}
-	if len(agents) == 1 {
-		for name, state := range agents {
-			return name, state.Title
-		}
-	}
-	return "", ""
+	return strings.TrimSpace(agentType), strings.TrimSpace(state.Title)
 }

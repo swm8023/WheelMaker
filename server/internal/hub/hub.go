@@ -263,6 +263,7 @@ func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
 	if preferred := strings.TrimSpace(agent.DefaultACPFactory().PreferredName()); preferred != "" {
 		info.Agent = preferred
 	}
+	info.Agents = append([]string(nil), agent.DefaultACPFactory().Names()...)
 	gitState := collectGitState(path)
 	info.Git = gitState
 	info.ProjectRev = hubHashLines(gitState.GitRev, gitState.WorktreeRev)

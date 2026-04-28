@@ -26,7 +26,7 @@ type promptState struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	updatesCh chan<- acp.SessionUpdateParams
-	currentCh <-chan promptStreamEvent // tracked for draining during switchAgent
+	currentCh <-chan promptStreamEvent // tracked for prompt lifecycle cleanup
 	activeTCs map[string]struct{}
 }
 
@@ -100,16 +100,11 @@ func (c *Client) ProjectName() string {
 // Start loads persisted state.
 // Agent initialization is deferred until the first incoming IM event (lazy init).
 func (c *Client) Start(ctx context.Context) error {
-	cfg, err := c.store.LoadProject(ctx, c.projectName)
-	if err != nil {
-		return fmt.Errorf("client: load project config: %w", err)
-	}
 	bindings, err := c.store.LoadRouteBindings(ctx, c.projectName)
 	if err != nil {
 		return fmt.Errorf("client: load route bindings: %w", err)
 	}
 	c.mu.Lock()
-	_ = cfg
 	c.routeMap = bindings
 	c.mu.Unlock()
 	go c.persistLoop()
@@ -166,15 +161,25 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func (c *Client) CreateSession(ctx context.Context, title string) (*Session, error) {
+func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*Session, error) {
+	agentType = strings.TrimSpace(agentType)
+	if agentType == "" {
+		return nil, fmt.Errorf("agent type is required")
+	}
 	sess := c.newWiredSession("")
+	sess.mu.Lock()
+	sess.ID = ""
+	sess.agentType = agentType
+	sess.activeAgent = agentType
 	if strings.TrimSpace(title) != "" {
-		sess.mu.Lock()
-		state := sess.agentStateLocked(sess.currentAgentNameLocked())
-		if state != nil {
-			state.Title = strings.TrimSpace(title)
-		}
-		sess.mu.Unlock()
+		sess.agentState.Title = strings.TrimSpace(title)
+	}
+	sess.mu.Unlock()
+	if err := sess.ensureInstance(ctx); err != nil {
+		return nil, fmt.Errorf("create session instance: %w", err)
+	}
+	if err := sess.ensureReady(ctx); err != nil {
+		return nil, fmt.Errorf("create session ready: %w", err)
 	}
 	if err := sess.persistSession(ctx); err != nil {
 		return nil, fmt.Errorf("save session: %w", err)
@@ -355,12 +360,16 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		return map[string]any{"session": summary, "prompts": prompts}, nil
 	case "session.new":
 		var req struct {
-			Title string `json:"title,omitempty"`
+			AgentType string `json:"agentType"`
+			Title     string `json:"title,omitempty"`
 		}
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.new payload: %w", err)
 		}
-		sess, err := c.CreateSession(ctx, req.Title)
+		if strings.TrimSpace(req.AgentType) == "" {
+			return nil, fmt.Errorf("agentType is required")
+		}
+		sess, err := c.CreateSession(ctx, req.AgentType, req.Title)
 		if err != nil {
 			return nil, err
 		}
@@ -370,6 +379,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			Content: acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{
 				"params": sessionViewSessionNewParams{
 					SessionID: sess.ID,
+					AgentType: sess.agentType,
 					Title:     firstNonEmpty(req.Title, sess.ID),
 				},
 			}),
@@ -557,7 +567,15 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		return c.sendIMDirect(ctx, source, body)
 	}
 	if cmd == "/new" {
-		sess, err := c.ClientNewSession(routeKey)
+		agentType := strings.TrimSpace(args)
+		if agentType == "" {
+			model, _, err := c.helpModelForRoute(ctx, source, routeKey)
+			if err != nil {
+				return c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
+			}
+			return c.sendHelpCard(ctx, source, model, "menu:new", 0)
+		}
+		sess, err := c.ClientNewSession(routeKey, agentType)
 		if err != nil {
 			return c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
 		}
@@ -578,13 +596,8 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		return nil
 	}
 	if cmd == "/help" {
-		sess := c.resolveOrCreateIMSession(ctx, source, routeKey)
-		if sess == nil {
-			return nil
-		}
-		sess.setIMSource(source)
 		menuID, page := parseHelpArgs(args)
-		model, err := sess.resolveHelpModel(ctx, source.ChatID)
+		model, _, err := c.helpModelForRoute(ctx, source, routeKey)
 		if err != nil {
 			return c.sendIMDirect(ctx, source, fmt.Sprintf("Help error: %v", err))
 		}
@@ -612,7 +625,12 @@ func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef
 		}
 		return sess
 	}
-	sess, err := c.ClientNewSession(routeKey)
+	agentType := c.preferredAvailableAgent()
+	if agentType == "" {
+		_ = c.sendIMDirect(ctx, source, "No available agent.")
+		return nil
+	}
+	sess, err := c.ClientNewSession(routeKey, agentType)
 	if err != nil {
 		_ = c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
 		return nil
@@ -670,8 +688,10 @@ func (c *Client) resolveSession(routeKey string) (*Session, error) {
 			c.mu.Unlock()
 			return sess, nil
 		}
-		store := c.store
-		c.mu.Unlock()
+	}
+	store := c.store
+	c.mu.Unlock()
+	if sessID != "" {
 		rec, err := store.LoadSession(context.Background(), c.projectName, sessID)
 		if err != nil {
 			return nil, fmt.Errorf("load session %q: %w", sessID, err)
@@ -693,15 +713,83 @@ func (c *Client) resolveSession(routeKey string) (*Session, error) {
 	}
 	c.mu.Unlock()
 
-	sess := c.newWiredSession("")
-	if err := c.persistBoundSession(routeKey, sess); err != nil {
-		return nil, err
+	return nil, fmt.Errorf("route %q is not bound to a session", routeKey)
+}
+
+func (c *Client) helpModelForRoute(ctx context.Context, source im.ChatRef, routeKey string) (HelpModel, *Session, error) {
+	routeKey, err := normalizeRouteKey(routeKey)
+	if err != nil {
+		return HelpModel{}, nil, err
 	}
+
 	c.mu.Lock()
-	c.sessions[sess.ID] = sess
-	c.routeMap[routeKey] = sess.ID
+	hasBoundSession := strings.TrimSpace(c.routeMap[routeKey]) != ""
 	c.mu.Unlock()
-	return sess, nil
+	if hasBoundSession {
+		sess, err := c.resolveSession(routeKey)
+		if err != nil {
+			return HelpModel{}, nil, err
+		}
+		sess.setIMSource(source)
+		model, err := sess.resolveHelpModel(ctx, source.ChatID)
+		return model, sess, err
+	}
+
+	return c.resolveDetachedHelpModel(), nil, nil
+}
+
+func (c *Client) resolveDetachedHelpModel() HelpModel {
+	model := HelpModel{
+		Title:    "WheelMaker",
+		RootMenu: "root",
+		Menus:    map[string]HelpMenu{},
+	}
+
+	newMenuID := "menu:new"
+	model.Options = append(model.Options, HelpOption{Label: "New Conversation", MenuID: newMenuID})
+	newMenu := HelpMenu{
+		Title:  "New Conversation",
+		Body:   "Choose an agent for the new conversation.",
+		Parent: model.RootMenu,
+	}
+	if c.registry != nil {
+		for _, name := range c.registry.Names() {
+			newMenu.Options = append(newMenu.Options, HelpOption{Label: "Agent: " + name, Command: "/new", Value: name})
+		}
+	}
+	if len(newMenu.Options) == 0 {
+		newMenu.Body = "No agents available."
+	}
+	model.Menus[newMenuID] = newMenu
+
+	sessionMenuID := "menu:sessions"
+	model.Options = append(model.Options, HelpOption{Label: "Session List", MenuID: sessionMenuID})
+	sessionMenu := HelpMenu{
+		Title:  "Sessions",
+		Body:   "Select a session to load.",
+		Parent: model.RootMenu,
+	}
+	entries, err := c.clientListSessions()
+	if err == nil {
+		for i, entry := range entries {
+			title := strings.TrimSpace(entry.Title)
+			if title == "" {
+				title = "(no title)"
+			}
+			sessionMenu.Options = append(sessionMenu.Options, HelpOption{
+				Label:   fmt.Sprintf("%d. %s", i+1, title),
+				Command: "/load",
+				Value:   strconv.Itoa(i + 1),
+			})
+		}
+	}
+	if len(sessionMenu.Options) == 0 {
+		sessionMenu.Body = "No sessions available."
+	}
+	model.Menus[sessionMenuID] = sessionMenu
+	model.Options = append(model.Options, HelpOption{Label: "Status", Command: "/status"})
+
+	return model
 }
 
 // newWiredSession creates a Session with all Client back-references wired.
@@ -746,21 +834,22 @@ func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
 
 // ClientNewSession suspends the current session for the given route,
 // creates a new session, and rebinds the route. Returns the new session.
-func (c *Client) ClientNewSession(routeKey string) (*Session, error) {
+func (c *Client) ClientNewSession(routeKey, agentType string) (*Session, error) {
 	routeKey, err := normalizeRouteKey(routeKey)
 	if err != nil {
 		return nil, err
+	}
+	agentType = strings.TrimSpace(agentType)
+	if agentType == "" {
+		return nil, fmt.Errorf("agent type is required")
 	}
 	c.mu.Lock()
 	oldSessID := c.routeMap[routeKey]
 	oldSess := c.sessions[oldSessID]
 	c.mu.Unlock()
 
-	inheritedAgent := ""
-	// Suspend old session if it is active and has an agent.
 	if oldSess != nil {
 		oldSess.mu.Lock()
-		inheritedAgent = oldSess.currentAgentNameLocked()
 		hasInst := oldSess.instance != nil
 		oldSess.mu.Unlock()
 		if hasInst {
@@ -774,17 +863,14 @@ func (c *Client) ClientNewSession(routeKey string) (*Session, error) {
 		oldSess.mu.Unlock()
 	}
 
-	sess := c.newWiredSession("")
-	if strings.TrimSpace(inheritedAgent) != "" {
-		sess.mu.Lock()
-		sess.activeAgent = inheritedAgent
-		sess.mu.Unlock()
-	}
-	if err := c.persistBoundSession(routeKey, sess); err != nil {
+	sess, err := c.CreateSession(context.Background(), agentType, "")
+	if err != nil {
 		return nil, err
 	}
+	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.ID); err != nil {
+		return nil, fmt.Errorf("save route binding: %w", err)
+	}
 	c.mu.Lock()
-	c.sessions[sess.ID] = sess
 	c.routeMap[routeKey] = sess.ID
 	c.mu.Unlock()
 	return sess, nil
@@ -893,12 +979,13 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		sess.mu.Lock()
 		agentName := sess.currentAgentNameLocked()
 		title := ""
-		if state := sess.agents[agentName]; state != nil {
+		if state := sess.agentStateLocked(agentName); state != nil {
 			title = state.Title
 		}
 		e := SessionRecord{
 			ID:           sess.ID,
 			ProjectName:  c.projectName,
+			AgentType:    agentName,
 			Agent:        agentName,
 			Title:        title,
 			Status:       sess.Status,
@@ -1010,7 +1097,7 @@ func (c *Client) evictSuspendedSessions() {
 }
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/use, /cancel, /status, /mode, /model, /config, /list, /new, /load) are treated as commands;
+// Only exact first-word matches (/cancel, /status, /mode, /model, /config, /list, /new, /load) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -1018,7 +1105,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/use", "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load":
+	case "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return

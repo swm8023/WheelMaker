@@ -38,7 +38,7 @@ type sessionViewSummary struct {
 	SessionID string `json:"sessionId"`
 	Title     string `json:"title"`
 	UpdatedAt string `json:"updatedAt"`
-	Agent     string `json:"agent,omitempty"`
+	AgentType string `json:"agentType,omitempty"`
 }
 
 type sessionViewMessage struct {
@@ -81,6 +81,7 @@ type sessionPromptState struct {
 
 type sessionViewSessionNewParams struct {
 	SessionID string `json:"sessionId,omitempty"`
+	AgentType string `json:"agentType,omitempty"`
 	Title     string `json:"title,omitempty"`
 }
 
@@ -175,9 +176,11 @@ func (r *SessionRecorder) RecordEvent(ctx context.Context, event SessionViewEven
 	switch parsed.acpMethod {
 	case acp.MethodSessionNew:
 		title := ""
+		agentType := ""
 		jsonDecodeAt(json.RawMessage(parsed.raw.Content), "params.title", &title)
+		jsonDecodeAt(json.RawMessage(parsed.raw.Content), "params.agentType", &agentType)
 		title = strings.TrimSpace(title)
-		return r.upsertSessionProjection(ctx, parsed.raw.SessionID, title, parsed.raw.UpdatedAt, false)
+		return r.upsertSessionProjection(ctx, parsed.raw.SessionID, strings.TrimSpace(agentType), title, parsed.raw.UpdatedAt, false)
 	default:
 		return nil
 	}
@@ -312,7 +315,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 		return err
 	}
 	r.promptState[rawEvent.SessionID] = state
-	if err := r.upsertSessionProjection(ctx, rawEvent.SessionID, promptTitle, rawEvent.UpdatedAt, true); err != nil {
+	if err := r.upsertSessionProjection(ctx, rawEvent.SessionID, "", promptTitle, rawEvent.UpdatedAt, true); err != nil {
 		return err
 	}
 	return nil
@@ -426,7 +429,7 @@ func (r *SessionRecorder) appendPromptMessages(ctx context.Context, sessionID st
 	return nil
 }
 
-func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, title string, updatedAt time.Time, titleIfEmptyOnly bool) error {
+func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, agentType, title string, updatedAt time.Time, titleIfEmptyOnly bool) error {
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
 		return err
@@ -435,7 +438,16 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 		updatedAt = time.Now().UTC()
 	}
 	if rec == nil {
-		rec = &SessionRecord{ID: sessionID, ProjectName: r.projectName, Status: SessionActive, CreatedAt: updatedAt, LastActiveAt: updatedAt}
+		agentType = strings.TrimSpace(agentType)
+		if agentType == "" {
+			return fmt.Errorf("session agent type is required")
+		}
+		rec = &SessionRecord{ID: sessionID, ProjectName: r.projectName, Status: SessionActive, AgentType: agentType, CreatedAt: updatedAt, LastActiveAt: updatedAt}
+	} else if strings.TrimSpace(rec.AgentType) == "" && strings.TrimSpace(agentType) != "" {
+		rec.AgentType = strings.TrimSpace(agentType)
+	}
+	if strings.TrimSpace(rec.AgentType) == "" {
+		return fmt.Errorf("session agent type is required")
 	}
 	title = strings.TrimSpace(title)
 	if title != "" {
@@ -456,7 +468,7 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 		rec.ID,
 		rec.Title,
 		rec.LastActiveAt,
-		rec.Agent,
+		rec.AgentType,
 	)
 }
 
@@ -468,12 +480,12 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
 }
 
-func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, agent string) sessionViewSummary {
+func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, agentType string) sessionViewSummary {
 	return sessionViewSummary{
 		SessionID: strings.TrimSpace(sessionID),
 		Title:     firstNonEmpty(strings.TrimSpace(title), strings.TrimSpace(sessionID)),
 		UpdatedAt: lastActiveAt.UTC().Format(time.RFC3339),
-		Agent:     strings.TrimSpace(agent),
+		AgentType: strings.TrimSpace(agentType),
 	}
 }
 

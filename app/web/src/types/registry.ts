@@ -46,7 +46,7 @@ export interface RegistrySessionSummary {
   updatedAt: string;
   messageCount: number;
   unreadCount?: number;
-  agent?: string;
+  agentType?: string;
 }
 
 export interface RegistrySessionPromptSnapshot {
@@ -103,7 +103,7 @@ export interface RegistryProject {
   online: boolean;
   path: string;
   hubId?: string;
-  agent?: string;
+  agents?: string[];
   imType?: string;
   projectRev?: string;
   git?: RegistryProjectGitState;

@@ -32,6 +32,7 @@ type ProjectInfo struct {
 	Path       string          `json:"path"`
 	Online     bool            `json:"online"`
 	Agent      string          `json:"agent"`
+	Agents     []string        `json:"agents,omitempty"`
 	IMType     string          `json:"imType"`
 	ProjectRev string          `json:"projectRev"`
 	Git        ProjectGitState `json:"git"`
@@ -130,6 +131,7 @@ type ProjectListItem struct {
 	Path       string          `json:"path"`
 	Online     bool            `json:"online"`
 	Agent      string          `json:"agent"`
+	Agents     []string        `json:"agents,omitempty"`
 	IMType     string          `json:"imType"`
 	ProjectRev string          `json:"projectRev"`
 	Git        ProjectGitState `json:"git"`

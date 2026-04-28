@@ -62,6 +62,11 @@ type ChatAttachment = {
   mimeType: string;
   data: string;
 };
+type PendingNewChatDraft = {
+  title: string;
+  text: string;
+  blocks: RegistryChatContentBlock[];
+};
 type WorkingTreeFileEntry = {
   path: string;
   status: string;
@@ -1424,6 +1429,8 @@ function App() {
   const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
     null,
   );
+  const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
+  const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -1613,6 +1620,8 @@ function App() {
     () => projects.find(item => item.projectId === projectId) ?? null,
     [projectId, projects],
   );
+  const project = currentProject;
+  const availableChatAgents = project?.agents ?? [];
   currentProjectRef.current = currentProject;
   expandedDirsRef.current = expandedDirs;
   selectedFileRef.current = selectedFile;
@@ -2248,9 +2257,9 @@ function App() {
     }
   };
 
-  const createChatSession = async (title = '') => {
+  const createChatSession = async (agentType: string, title = '') => {
     try {
-      const result = await service.createSession(title);
+      const result = await service.createSession(agentType, title);
       if (!result.session.sessionId) {
         throw new Error('Session was created without a sessionId');
       }
@@ -2261,6 +2270,38 @@ function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return '';
+    }
+  };
+
+  const beginNewChatFlow = (draft: PendingNewChatDraft) => {
+    if (availableChatAgents.length === 0) {
+      setError('No agents available for this project');
+      return;
+    }
+    setPendingNewChatDraft(draft);
+    setNewChatAgentPickerOpen(true);
+  };
+
+  const completeNewChatFlow = async (agentType: string) => {
+    const draft = pendingNewChatDraft;
+    if (!draft) {
+      return;
+    }
+    const sessionId = await createChatSession(agentType, draft.title);
+    setNewChatAgentPickerOpen(false);
+    setPendingNewChatDraft(null);
+    if (!sessionId) {
+      return;
+    }
+    if (draft.text.trim() || draft.blocks.length > 0) {
+      await service.sendSessionMessage({
+        sessionId,
+        text: draft.text,
+        blocks: draft.blocks,
+      });
+    }
+    if (!isWide) {
+      setDrawerOpen(false);
     }
   };
 
@@ -2281,9 +2322,16 @@ function App() {
 
     setChatSending(true);
     try {
-      const sessionId =
-        selectedChatId ||
-        (await createChatSession(trimmedText || chatAttachment?.name || ''));
+        if (!selectedChatId) {
+          beginNewChatFlow({
+            title: trimmedText || chatAttachment?.name || '',
+            text: trimmedText,
+            blocks,
+          });
+          setChatSending(false);
+          return;
+        }
+        const sessionId = selectedChatId;
       if (!sessionId) {
         return;
       }
@@ -2667,7 +2715,7 @@ function App() {
               updatedAt: message.updatedAt || new Date().toISOString(),
               messageCount: existing?.messageCount ?? 0,
               unreadCount: existing?.unreadCount,
-              agent: existing?.agent,
+              agentType: existing?.agentType,
             });
           });
         }
@@ -2816,12 +2864,43 @@ function App() {
               className="button"
               style={{ marginBottom: 10 }}
               onClick={() => {
-                createChatSession().catch(() => undefined);
-                if (!isWide) setDrawerOpen(false);
+                beginNewChatFlow({ title: '', text: '', blocks: [] });
               }}
             >
               New Session
             </button>
+            {newChatAgentPickerOpen && pendingNewChatDraft ? (
+              <div className="chat-agent-picker-card">
+                <div className="chat-agent-picker-title">Choose Agent</div>
+                <div className="chat-agent-picker-actions">
+                  {availableChatAgents.map(agentType => (
+                    <button
+                      key={agentType}
+                      type="button"
+                      className="button secondary"
+                      onClick={() => {
+                        completeNewChatFlow(agentType).catch(() => undefined);
+                      }}
+                    >
+                      {agentType}
+                    </button>
+                  ))}
+                </div>
+                {availableChatAgents.length === 0 ? (
+                  <div className="muted block">No agents available.</div>
+                ) : null}
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={() => {
+                    setNewChatAgentPickerOpen(false);
+                    setPendingNewChatDraft(null);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
             {chatSessions.map(session => (
               <div
                 key={session.sessionId}
@@ -2842,7 +2921,9 @@ function App() {
                 >
                   <span>{session.title || session.sessionId}</span>
                   <span className="muted" style={{ fontSize: 11 }}>
-                    {session.preview || 'No messages yet'}
+                    {session.agentType
+                      ? `${session.agentType} · ${session.preview || 'No messages yet'}`
+                      : (session.preview || 'No messages yet')}
                   </span>
                 </span>
               </div>
