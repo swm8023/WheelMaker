@@ -170,7 +170,6 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	sess.mu.Lock()
 	sess.ID = ""
 	sess.agentType = agentType
-	sess.activeAgent = agentType
 	if strings.TrimSpace(title) != "" {
 		sess.agentState.Title = strings.TrimSpace(title)
 	}
@@ -806,8 +805,8 @@ func (c *Client) wireSession(sess *Session) {
 	sess.imRouter = c.imRouter
 	sess.viewSink = c.viewSink
 	sess.store = c.store
-	if strings.TrimSpace(sess.activeAgent) == "" {
-		sess.activeAgent = c.preferredAvailableAgent()
+	if strings.TrimSpace(sess.agentType) == "" {
+		sess.agentType = c.preferredAvailableAgent()
 	}
 }
 

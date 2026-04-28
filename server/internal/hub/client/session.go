@@ -57,13 +57,9 @@ type Session struct {
 
 	// instance is the agent runtime bound to this Session.
 	// Created lazily by ensureInstance(). Nil means no agent connected yet.
-	instance agent.Instance
-	agentType string
+	instance   agent.Instance
+	agentType  string
 	agentState SessionAgentState
-
-	// Per-agent state indexed by agent name.
-	agents      map[string]*SessionAgentState
-	activeAgent string
 
 	// Runtime ACP session state (moved from Client.session / Client.sessionMeta / Client.initMeta).
 	acpSessionID string
@@ -100,7 +96,6 @@ func newSession(id string, cwd string) *Session {
 	s := &Session{
 		ID:        id,
 		Status:    SessionActive,
-		agents:    make(map[string]*SessionAgentState),
 		cwd:       cwd,
 		createdAt: time.Now(),
 		prompt: promptState{
@@ -137,43 +132,18 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	return &cp
 }
 
-func inferActiveAgent(acpSessionID string, agents map[string]*SessionAgentState) string {
-	acpSessionID = strings.TrimSpace(acpSessionID)
-	if acpSessionID != "" {
-		for name, state := range agents {
-			if state != nil && strings.TrimSpace(state.ACPSessionID) == acpSessionID {
-				return name
-			}
-		}
-	}
-	if len(agents) == 1 {
-		for name := range agents {
-			return name
-		}
-	}
-	return ""
-}
-
 func (s *Session) agentStateLocked(name string) *SessionAgentState {
 	name = strings.TrimSpace(name)
 	if name == "" {
+		name = strings.TrimSpace(s.agentType)
+	}
+	if name == "" {
 		return nil
 	}
-	if strings.TrimSpace(s.agentType) == "" && (s.agents == nil || len(s.agents) == 0) {
+	if strings.TrimSpace(s.agentType) == "" {
 		s.agentType = name
 	}
-	if strings.EqualFold(strings.TrimSpace(s.agentType), name) {
-		return &s.agentState
-	}
-	if s.agents == nil {
-		s.agents = map[string]*SessionAgentState{}
-	}
-	state := s.agents[name]
-	if state == nil {
-		state = &SessionAgentState{}
-		s.agents[name] = state
-	}
-	return state
+	return &s.agentState
 }
 
 func (s *Session) currentAgentNameLocked() string {
@@ -183,10 +153,7 @@ func (s *Session) currentAgentNameLocked() string {
 	if strings.TrimSpace(s.agentType) != "" {
 		return strings.TrimSpace(s.agentType)
 	}
-	if strings.TrimSpace(s.activeAgent) != "" {
-		return strings.TrimSpace(s.activeAgent)
-	}
-	return inferActiveAgent(s.acpSessionID, s.agents)
+	return ""
 }
 
 func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
@@ -196,10 +163,7 @@ func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
 	if name == "" {
 		return nil, ""
 	}
-	if strings.EqualFold(strings.TrimSpace(s.agentType), name) {
-		return cloneSessionAgentState(&s.agentState), name
-	}
-	return cloneSessionAgentState(s.agents[name]), name
+	return cloneSessionAgentState(&s.agentState), name
 }
 
 func newSessionID() string {
@@ -242,7 +206,7 @@ func (s *Session) sessionInfoLine() string {
 	agentName := s.currentAgentNameLocked()
 	clientSID := s.ID
 	var configOpts []acp.ConfigOption
-	if state := s.agents[agentName]; state != nil {
+	if state := s.agentStateLocked(agentName); state != nil {
 		configOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
 	}
 	s.mu.Unlock()
@@ -340,8 +304,8 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	}
 	name = strings.TrimSpace(name)
 	savedSID := ""
-	if as := s.agents[name]; as != nil && strings.TrimSpace(as.ACPSessionID) != "" {
-		savedSID = strings.TrimSpace(as.ACPSessionID)
+	if state := s.agentStateLocked(name); state != nil && strings.TrimSpace(state.ACPSessionID) != "" {
+		savedSID = strings.TrimSpace(state.ACPSessionID)
 	}
 	cwd := s.cwd
 	s.mu.Unlock()
@@ -369,8 +333,8 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		}
 	}
 	s.mu.Lock()
-	if as := s.agents[name]; as != nil && strings.TrimSpace(as.ACPSessionID) != "" {
-		savedSID = strings.TrimSpace(as.ACPSessionID)
+	if state := s.agentStateLocked(name); state != nil && strings.TrimSpace(state.ACPSessionID) != "" {
+		savedSID = strings.TrimSpace(state.ACPSessionID)
 	}
 	s.mu.Unlock()
 
@@ -387,7 +351,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		return nil
 	}
 	s.instance = inst
-	s.activeAgent = name
+	s.agentType = name
 	s.ready = false
 	s.acpSessionID = savedSID
 	s.mu.Unlock()
@@ -426,7 +390,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	cwd := s.cwd
 	var persistedConfigOptions []acp.ConfigOption
 	var persistedCommands []acp.AvailableCommand
-	if state := s.agents[agentName]; state != nil {
+	if state := s.agentStateLocked(agentName); state != nil {
 		persistedConfigOptions = append([]acp.ConfigOption(nil), state.ConfigOptions...)
 		persistedCommands = append([]acp.AvailableCommand(nil), state.Commands...)
 	}
@@ -507,7 +471,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			state.AuthMethods = initResult.AuthMethods
 			state.Commands = append([]acp.AvailableCommand(nil), resolvedCommands...)
 			commands := append([]acp.AvailableCommand(nil), state.Commands...)
-			s.activeAgent = agentName
+			s.agentType = agentName
 			s.acpSessionID = savedSID
 			s.ready = true
 			s.initializing = false
@@ -561,9 +525,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	state.AuthMethods = initResult.AuthMethods
 	commands := append([]acp.AvailableCommand(nil), state.Commands...)
 	s.agentType = agentName
-	s.agentState = *cloneSessionAgentState(state)
 	s.ID = newResult.SessionID
-	s.activeAgent = agentName
 	s.acpSessionID = newResult.SessionID
 	s.ready = true
 	s.initializing = false
@@ -929,7 +891,6 @@ func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 	if s.agentType == "" {
 		return nil, fmt.Errorf("session %q missing agent type", rec.ID)
 	}
-	s.activeAgent = strings.TrimSpace(rec.AgentType)
 	s.acpSessionID = strings.TrimSpace(rec.ID)
 	s.createdAt = rec.CreatedAt
 	s.lastActiveAt = rec.LastActiveAt
@@ -938,28 +899,10 @@ func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 			return nil, fmt.Errorf("unmarshal agent_json: %w", err)
 		}
 	}
-	if s.agents == nil {
-		s.agents = map[string]*SessionAgentState{}
-	}
 	s.agentState.ACPSessionID = s.acpSessionID
-	if strings.TrimSpace(s.agentType) != "" {
-		s.agents[s.agentType] = cloneSessionAgentState(&s.agentState)
-	}
-	if state := s.agents[s.agentType]; state != nil {
-		state.ACPSessionID = s.acpSessionID
-	}
 	if strings.TrimSpace(rec.Title) != "" {
-		name := strings.TrimSpace(s.activeAgent)
-		if name == "" {
-			for n := range s.agents {
-				name = n
-				break
-			}
-		}
-		if name != "" {
-			if state := s.agentStateLocked(name); state != nil && strings.TrimSpace(state.Title) == "" {
-				state.Title = strings.TrimSpace(rec.Title)
-			}
+		if state := s.agentStateLocked(s.agentType); state != nil && strings.TrimSpace(state.Title) == "" {
+			state.Title = strings.TrimSpace(rec.Title)
 		}
 	}
 	return s, nil
@@ -1064,9 +1007,6 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		update.SessionUpdate == acp.SessionUpdateSessionInfoUpdate {
 		s.mu.Lock()
 		state := s.agentStateLocked(s.currentAgentNameLocked())
-		if state == nil {
-			state = s.agentStateLocked(s.activeAgent)
-		}
 		if state != nil {
 			state.ACPSessionID = s.acpSessionID
 		}
@@ -1108,7 +1048,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	if changed {
 		s.mu.Lock()
 		agentName := s.currentAgentNameLocked()
-		state := cloneSessionAgentState(s.agents[agentName])
+		state := cloneSessionAgentState(s.agentStateLocked(agentName))
 		s.mu.Unlock()
 		if state != nil {
 			s.persistAgentPreferenceState(agentName, state.ConfigOptions, state.Commands)
@@ -1527,8 +1467,8 @@ func (s *Session) preferredAgentName() string {
 	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
 		return strings.TrimSpace(s.instance.Name())
 	}
-	if strings.TrimSpace(s.activeAgent) != "" {
-		return strings.TrimSpace(s.activeAgent)
+	if strings.TrimSpace(s.agentType) != "" {
+		return strings.TrimSpace(s.agentType)
 	}
 	if s.registry != nil {
 		return strings.TrimSpace(s.registry.PreferredName())
@@ -1630,7 +1570,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 	}
 	sid := strings.TrimSpace(s.acpSessionID)
 	configOptions := []acp.ConfigOption(nil)
-	if state := s.agents[s.currentAgentNameLocked()]; state != nil {
+	if state := s.agentStateLocked(s.currentAgentNameLocked()); state != nil {
 		configOptions = append(configOptions, state.ConfigOptions...)
 	}
 	s.mu.Unlock()
