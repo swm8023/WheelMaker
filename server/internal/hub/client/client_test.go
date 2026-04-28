@@ -1952,6 +1952,16 @@ func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("LoadSessionPrompt returned nil")
 	}
+	encodedTurns := []string{}
+	if err := json.Unmarshal([]byte(loaded.TurnsJSON), &encodedTurns); err != nil {
+		t.Fatalf("turns_json format should be []string: %v", err)
+	}
+	if len(encodedTurns) != 2 {
+		t.Fatalf("encoded turns len = %d, want 2", len(encodedTurns))
+	}
+	if encodedTurns[0] != normalizeJSONDoc(turn1JSON, `{}`) {
+		t.Fatalf("encodedTurns[0] = %q, want %q", encodedTurns[0], normalizeJSONDoc(turn1JSON, `{}`))
+	}
 	if loaded.TurnIndex != 2 {
 		t.Fatalf("TurnIndex = %d, want 2", loaded.TurnIndex)
 	}

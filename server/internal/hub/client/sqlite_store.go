@@ -697,21 +697,21 @@ func (s *sqliteStore) Close() error {
 	return s.db.Close()
 }
 
-// storedTurnEntry is the compact format used inside session_prompts.turns_json.
+// storedTurnEntry is the legacy compact format used by older turns_json rows.
 type storedTurnEntry struct {
 	TurnIndex  int64  `json:"i"`
 	UpdateJSON string `json:"u"`
 }
 
-// EncodeStoredTurns serialises an ordered slice of SessionTurnRecord to the JSON
-// array stored in session_prompts.turns_json. Returns "" when turns is empty.
+// EncodeStoredTurns serialises an ordered slice of SessionTurnRecord to a JSON
+// string array stored in session_prompts.turns_json. Returns "" when turns is empty.
 func EncodeStoredTurns(turns []SessionTurnRecord) string {
 	if len(turns) == 0 {
 		return ""
 	}
-	entries := make([]storedTurnEntry, 0, len(turns))
+	entries := make([]string, 0, len(turns))
 	for _, t := range turns {
-		entries = append(entries, storedTurnEntry{TurnIndex: t.TurnIndex, UpdateJSON: normalizeJSONDoc(t.UpdateJSON, `{}`)})
+		entries = append(entries, normalizeJSONDoc(t.UpdateJSON, `{}`))
 	}
 	raw, err := json.Marshal(entries)
 	if err != nil {
@@ -726,16 +726,33 @@ func DecodeStoredTurns(sessionID string, promptIndex int64, turnsJSON string) ([
 	if turnsJSON == "" {
 		return nil, nil
 	}
-	var entries []storedTurnEntry
-	if err := json.Unmarshal([]byte(turnsJSON), &entries); err != nil {
+	entries := []string{}
+	if err := json.Unmarshal([]byte(turnsJSON), &entries); err == nil {
+		out := make([]SessionTurnRecord, 0, len(entries))
+		for i, updateJSON := range entries {
+			out = append(out, SessionTurnRecord{
+				SessionID:   strings.TrimSpace(sessionID),
+				PromptIndex: promptIndex,
+				TurnIndex:   int64(i + 1),
+				UpdateJSON:  normalizeJSONDoc(updateJSON, `{}`),
+			})
+		}
+		return out, nil
+	}
+	legacy := []storedTurnEntry{}
+	if err := json.Unmarshal([]byte(turnsJSON), &legacy); err != nil {
 		return nil, fmt.Errorf("decode turns_json: %w", err)
 	}
-	out := make([]SessionTurnRecord, 0, len(entries))
-	for _, e := range entries {
+	out := make([]SessionTurnRecord, 0, len(legacy))
+	for i, e := range legacy {
+		turnIndex := e.TurnIndex
+		if turnIndex <= 0 {
+			turnIndex = int64(i + 1)
+		}
 		out = append(out, SessionTurnRecord{
 			SessionID:   strings.TrimSpace(sessionID),
 			PromptIndex: promptIndex,
-			TurnIndex:   e.TurnIndex,
+			TurnIndex:   turnIndex,
 			UpdateJSON:  normalizeJSONDoc(e.UpdateJSON, `{}`),
 		})
 	}
