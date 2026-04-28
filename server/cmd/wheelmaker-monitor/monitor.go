@@ -620,37 +620,16 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 			continue
 		}
 		entries := []string{}
-		if jsonErr := json.Unmarshal([]byte(turnsJSON), &entries); jsonErr == nil {
-			for i, updateJSON := range entries {
-				var item MonitorSessionMessage
-				item.ProjectName = itemProjectName
-				item.SessionID = itemSessionID
-				fallbackIndex++
-				item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, fallbackIndex)
-				all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: int64(i + 1)})
-			}
+		if jsonErr := json.Unmarshal([]byte(turnsJSON), &entries); jsonErr != nil {
 			continue
 		}
-
-		type storedTurnEntry struct {
-			TurnIndex  int64  `json:"i"`
-			UpdateJSON string `json:"u"`
-		}
-		legacy := []storedTurnEntry{}
-		if jsonErr := json.Unmarshal([]byte(turnsJSON), &legacy); jsonErr != nil {
-			continue
-		}
-		for i, entry := range legacy {
-			turnIndex := entry.TurnIndex
-			if turnIndex <= 0 {
-				turnIndex = int64(i + 1)
-			}
+		for i, updateJSON := range entries {
 			var item MonitorSessionMessage
 			item.ProjectName = itemProjectName
 			item.SessionID = itemSessionID
 			fallbackIndex++
-			item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(entry.UpdateJSON, promptUpdatedAt, fallbackIndex)
-			all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: turnIndex})
+			item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, fallbackIndex)
+			all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: int64(i + 1)})
 		}
 	}
 	if err := rows.Err(); err != nil {

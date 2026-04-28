@@ -697,12 +697,6 @@ func (s *sqliteStore) Close() error {
 	return s.db.Close()
 }
 
-// storedTurnEntry is the legacy compact format used by older turns_json rows.
-type storedTurnEntry struct {
-	TurnIndex  int64  `json:"i"`
-	UpdateJSON string `json:"u"`
-}
-
 // EncodeStoredTurns serialises an ordered slice of SessionTurnRecord to a JSON
 // string array stored in session_prompts.turns_json. Returns "" when turns is empty.
 func EncodeStoredTurns(turns []SessionTurnRecord) string {
@@ -727,33 +721,16 @@ func DecodeStoredTurns(sessionID string, promptIndex int64, turnsJSON string) ([
 		return nil, nil
 	}
 	entries := []string{}
-	if err := json.Unmarshal([]byte(turnsJSON), &entries); err == nil {
-		out := make([]SessionTurnRecord, 0, len(entries))
-		for i, updateJSON := range entries {
-			out = append(out, SessionTurnRecord{
-				SessionID:   strings.TrimSpace(sessionID),
-				PromptIndex: promptIndex,
-				TurnIndex:   int64(i + 1),
-				UpdateJSON:  normalizeJSONDoc(updateJSON, `{}`),
-			})
-		}
-		return out, nil
-	}
-	legacy := []storedTurnEntry{}
-	if err := json.Unmarshal([]byte(turnsJSON), &legacy); err != nil {
+	if err := json.Unmarshal([]byte(turnsJSON), &entries); err != nil {
 		return nil, fmt.Errorf("decode turns_json: %w", err)
 	}
-	out := make([]SessionTurnRecord, 0, len(legacy))
-	for i, e := range legacy {
-		turnIndex := e.TurnIndex
-		if turnIndex <= 0 {
-			turnIndex = int64(i + 1)
-		}
+	out := make([]SessionTurnRecord, 0, len(entries))
+	for i, updateJSON := range entries {
 		out = append(out, SessionTurnRecord{
 			SessionID:   strings.TrimSpace(sessionID),
 			PromptIndex: promptIndex,
-			TurnIndex:   turnIndex,
-			UpdateJSON:  normalizeJSONDoc(e.UpdateJSON, `{}`),
+			TurnIndex:   int64(i + 1),
+			UpdateJSON:  normalizeJSONDoc(updateJSON, `{}`),
 		})
 	}
 	return out, nil
