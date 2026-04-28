@@ -144,12 +144,12 @@ func (c *Client) Close() error {
 		sess.mu.Unlock()
 		if inst != nil {
 			if err := sess.Suspend(ctx); err != nil {
-				hubLogger(c.projectName).Warn("suspend session during close session=%s err=%v", sess.ID, err)
+				hubLogger(c.projectName).Warn("suspend session during close session=%s err=%v", sess.acpSessionID, err)
 			}
 			continue
 		}
 		if err := sess.persistSession(ctx); err != nil {
-			hubLogger(c.projectName).Warn("persist session during close session=%s err=%v", sess.ID, err)
+			hubLogger(c.projectName).Warn("persist session during close session=%s err=%v", sess.acpSessionID, err)
 		}
 	}
 	if c.sessionRecorder != nil {
@@ -168,7 +168,7 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	}
 	sess := c.newWiredSession("")
 	sess.mu.Lock()
-	sess.ID = ""
+	sess.acpSessionID = ""
 	sess.agentType = agentType
 	if strings.TrimSpace(title) != "" {
 		sess.agentState.Title = strings.TrimSpace(title)
@@ -184,7 +184,7 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 		return nil, fmt.Errorf("save session: %w", err)
 	}
 	c.mu.Lock()
-	c.sessions[sess.ID] = sess
+	c.sessions[sess.acpSessionID] = sess
 	c.mu.Unlock()
 	return sess, nil
 }
@@ -217,7 +217,7 @@ func (c *Client) SessionByID(ctx context.Context, sessionID string) (*Session, e
 	restored.Status = SessionActive
 	restored.lastActiveAt = time.Now().UTC()
 	c.mu.Lock()
-	c.sessions[restored.ID] = restored
+	c.sessions[restored.acpSessionID] = restored
 	c.mu.Unlock()
 	return restored, nil
 }
@@ -238,10 +238,10 @@ func (c *Client) PromptToSession(ctx context.Context, sessionID string, source i
 	source = normalizeChatRef(source)
 	if hasChatRef(source) {
 		sess.setIMSource(source)
-		if err := c.bindIM(ctx, source, sess.ID); err != nil {
+		if err := c.bindIM(ctx, source, sess.acpSessionID); err != nil {
 			return err
 		}
-		if err := c.store.SaveRouteBinding(ctx, c.projectName, imRouteKey(source), sess.ID); err != nil {
+		if err := c.store.SaveRouteBinding(ctx, c.projectName, imRouteKey(source), sess.acpSessionID); err != nil {
 			return fmt.Errorf("save route binding: %w", err)
 		}
 	}
@@ -379,18 +379,18 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		if err := c.RecordEvent(ctx, SessionViewEvent{
 			Type:      SessionViewEventTypeACP,
-			SessionID: sess.ID,
+			SessionID: sess.acpSessionID,
 			Content: acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{
 				"params": sessionViewSessionNewParams{
-					SessionID: sess.ID,
+					SessionID: sess.acpSessionID,
 					AgentType: sess.agentType,
-					Title:     firstNonEmpty(req.Title, sess.ID),
+					Title:     firstNonEmpty(req.Title, sess.acpSessionID),
 				},
 			}),
 		}); err != nil {
 			return nil, err
 		}
-		summary, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.ID, 0, 0)
+		summary, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.acpSessionID, 0, 0)
 		if err != nil {
 			return nil, err
 		}
@@ -487,7 +487,7 @@ func (c *Client) loadSessionForIM(ctx context.Context, source im.ChatRef, routeK
 	if err != nil {
 		return nil, err
 	}
-	return loaded, c.bindIM(ctx, source, loaded.ID)
+	return loaded, c.bindIM(ctx, source, loaded.acpSessionID)
 }
 
 func imRouteKey(source im.ChatRef) string {
@@ -583,11 +583,11 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 		if err != nil {
 			return c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
 		}
-		if err := c.bindIM(ctx, source, sess.ID); err != nil {
+		if err := c.bindIM(ctx, source, sess.acpSessionID); err != nil {
 			return err
 		}
 		sess.setIMSource(source)
-		sess.reply(fmt.Sprintf("Created new session: %s", sess.ID))
+		sess.reply(fmt.Sprintf("Created new session: %s", sess.acpSessionID))
 		return nil
 	}
 	if cmd == "/load" {
@@ -596,7 +596,7 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 			return c.sendIMDirect(ctx, source, fmt.Sprintf("Load error: %v", err))
 		}
 		loaded.setIMSource(source)
-		loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))
+		loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.acpSessionID))
 		return nil
 	}
 	if cmd == "/help" {
@@ -639,7 +639,7 @@ func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef
 		_ = c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
 		return nil
 	}
-	if err := c.bindIM(ctx, source, sess.ID); err != nil {
+	if err := c.bindIM(ctx, source, sess.acpSessionID); err != nil {
 		return nil
 	}
 	return sess
@@ -711,11 +711,10 @@ func (c *Client) resolveSession(routeKey string) (*Session, error) {
 		restored.Status = SessionActive
 		restored.lastActiveAt = time.Now()
 		c.mu.Lock()
-		c.sessions[restored.ID] = restored
+		c.sessions[restored.acpSessionID] = restored
 		c.mu.Unlock()
 		return restored, nil
 	}
-	c.mu.Unlock()
 
 	return nil, fmt.Errorf("route %q is not bound to a session", routeKey)
 }
@@ -837,12 +836,12 @@ func (c *Client) preferredAgentForAutoCreate() string {
 func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
 	if err := sess.persistSession(context.Background()); err != nil {
 		hubLogger(c.projectName).Error("save session failed route=%s session=%s err=%v",
-			routeKey, sess.ID, err)
+			routeKey, sess.acpSessionID, err)
 		return fmt.Errorf("save session: %w", err)
 	}
-	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.ID); err != nil {
+	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.acpSessionID); err != nil {
 		hubLogger(c.projectName).Error("save route binding failed route=%s session=%s err=%v",
-			routeKey, sess.ID, err)
+			routeKey, sess.acpSessionID, err)
 		return fmt.Errorf("save route binding: %w", err)
 	}
 	return nil
@@ -892,11 +891,11 @@ func (c *Client) clientNewSessionWithOptions(routeKey, agentType string, persist
 			hubLogger(c.projectName).Warn("save project default agent failed agent=%s err=%v", agentType, err)
 		}
 	}
-	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.ID); err != nil {
+	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.acpSessionID); err != nil {
 		return nil, fmt.Errorf("save route binding: %w", err)
 	}
 	c.mu.Lock()
-	c.routeMap[routeKey] = sess.ID
+	c.routeMap[routeKey] = sess.acpSessionID
 	c.mu.Unlock()
 	return sess, nil
 }
@@ -926,7 +925,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		c.mu.Unlock()
 
 		// Suspend old if different from target.
-		if oldSess != nil && oldSess.ID != target.ID {
+		if oldSess != nil && oldSess.acpSessionID != target.ID {
 			oldSess.mu.Lock()
 			hasInst := oldSess.instance != nil
 			oldSess.mu.Unlock()
@@ -963,7 +962,7 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	oldSessID := c.routeMap[routeKey]
 	oldSess := c.sessions[oldSessID]
 	c.mu.Unlock()
-	if oldSess != nil && oldSess.ID != target.ID {
+	if oldSess != nil && oldSess.acpSessionID != target.ID {
 		oldSess.mu.Lock()
 		hasInst := oldSess.instance != nil
 		oldSess.mu.Unlock()
@@ -984,10 +983,10 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	c.mu.Lock()
 	restored.Status = SessionActive
 	restored.lastActiveAt = time.Now()
-	c.sessions[restored.ID] = restored
-	c.routeMap[routeKey] = restored.ID
+	c.sessions[restored.acpSessionID] = restored
+	c.routeMap[routeKey] = restored.acpSessionID
 	c.mu.Unlock()
-	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, restored.ID); err != nil {
+	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, restored.acpSessionID); err != nil {
 		return nil, fmt.Errorf("save route binding: %w", err)
 	}
 	return restored, nil
@@ -1008,7 +1007,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 			title = state.Title
 		}
 		e := SessionRecord{
-			ID:           sess.ID,
+			ID:           sess.acpSessionID,
 			ProjectName:  c.projectName,
 			AgentType:    agentName,
 			Agent:        agentName,
@@ -1020,7 +1019,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		}
 		sess.mu.Unlock()
 		memEntries = append(memEntries, e)
-		memIDs[sess.ID] = true
+		memIDs[sess.acpSessionID] = true
 	}
 	store := c.store
 	c.mu.Unlock()
@@ -1103,7 +1102,7 @@ func (c *Client) evictSuspendedSessions() {
 
 	for _, sess := range toEvict {
 		if err := sess.persistSession(context.Background()); err != nil {
-			hubLogger(c.projectName).Warn("persist session failed session=%s err=%v", sess.ID, err)
+			hubLogger(c.projectName).Warn("persist session failed session=%s err=%v", sess.acpSessionID, err)
 			continue
 		}
 
@@ -1114,10 +1113,10 @@ func (c *Client) evictSuspendedSessions() {
 
 		// Remove from sessions map but keep route mapping pointing to the ID
 		// so we can look it up later for restoration.
-		delete(c.sessions, sess.ID)
+		delete(c.sessions, sess.acpSessionID)
 		c.mu.Unlock()
 
-		hubLogger(c.projectName).Info("evicted suspended session to sqlite session=%s", sess.ID)
+		hubLogger(c.projectName).Info("evicted suspended session to sqlite session=%s", sess.acpSessionID)
 	}
 }
 
@@ -1149,3 +1148,4 @@ func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
 	}
 	return json.Unmarshal(raw, out)
 }
+

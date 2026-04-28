@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -94,7 +93,7 @@ func (c *Client) handleNewCommand(sess *Session, routeKey, args string) {
 		sess.reply(fmt.Sprintf("New error: %v", err))
 		return
 	}
-	newSess.reply(fmt.Sprintf("Created new session: %s", newSess.ID))
+	newSess.reply(fmt.Sprintf("Created new session: %s", newSess.acpSessionID))
 }
 
 // handleLoadCommand loads a session by index and rebinds the route.
@@ -115,7 +114,7 @@ func (c *Client) handleLoadCommand(sess *Session, routeKey, args string) {
 		return
 	}
 	// Reply from the NEW session so the message goes to the right context.
-	loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.ID))
+	loaded.reply(fmt.Sprintf("Loaded session: %s", loaded.acpSessionID))
 }
 
 func parsePositiveIndex(value string) (int, error) {
@@ -128,7 +127,7 @@ func parsePositiveIndex(value string) (int, error) {
 
 // handleListCommand lists all sessions (in-memory + persisted).
 func (c *Client) handleListCommand(sess *Session) {
-	body, err := c.formatSessionList(sess.ID)
+	body, err := c.formatSessionList(sess.acpSessionID)
 	if err != nil {
 		sess.reply(fmt.Sprintf("List error: %v", err))
 		return
@@ -331,169 +330,6 @@ func resolveConfigSelectArg(kind string, defaultConfigID string, input string, s
 	return configID, v, nil
 }
 
-func (s *Session) listSessions(ctx context.Context) ([]string, error) {
-	if err := s.ensureInstance(ctx); err != nil {
-		return nil, err
-	}
-
-	if err := s.ensureReady(ctx); err != nil {
-		return nil, err
-	}
-
-	s.mu.Lock()
-	cwd := s.cwd
-	curSID := s.acpSessionID
-	agentName := s.currentAgentNameLocked()
-	caps := acp.AgentCapabilities{}
-	if state := s.agentStateLocked(agentName); state != nil {
-		caps = state.AgentCapabilities
-	}
-	s.mu.Unlock()
-
-	if caps.SessionCapabilities == nil || caps.SessionCapabilities.List == nil {
-		return nil, errors.New("agent does not support session/list")
-	}
-
-	all := make([]acp.SessionInfo, 0, 16)
-	cursor := ""
-	for page := 0; page < 20; page++ {
-		res, err := s.instance.SessionList(ctx, acp.SessionListParams{
-			CWD:    cwd,
-			Cursor: cursor,
-		})
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, res.Sessions...)
-		if strings.TrimSpace(res.NextCursor) == "" || res.NextCursor == cursor {
-			break
-		}
-		cursor = res.NextCursor
-	}
-
-	summaries := make([]SessionSummary, 0, len(all))
-	lines := make([]string, 0, len(all)+1)
-	lines = append(lines, fmt.Sprintf("Sessions (%d):", len(all)))
-	for i, s := range all {
-		summaries = append(summaries, SessionSummary{
-			ID:        s.SessionID,
-			Title:     s.Title,
-			UpdatedAt: s.UpdatedAt,
-		})
-		marker := " "
-		if s.SessionID == curSID {
-			marker = "*"
-		}
-		title := strings.TrimSpace(s.Title)
-		if title == "" {
-			title = "(no title)"
-		}
-		lines = append(lines, fmt.Sprintf("%s %d. %s  %s", marker, i+1, s.SessionID, title))
-	}
-
-	s.persistSessionSummaries(agentName, summaries)
-	return lines, nil
-}
-
-func (s *Session) createNewSession(ctx context.Context) (string, error) {
-	if err := s.ensureInstance(ctx); err != nil {
-		return "", err
-	}
-	s.mu.Lock()
-	cwd := s.cwd
-	s.mu.Unlock()
-	if err := s.ensureReady(ctx); err != nil {
-		return "", err
-	}
-
-	res, err := s.instance.SessionNew(ctx, acp.SessionNewParams{
-		CWD:        cwd,
-		MCPServers: emptyMCPServers(),
-	})
-	if err != nil {
-		return "", err
-	}
-
-	s.mu.Lock()
-	agentName := s.currentAgentNameLocked()
-	s.acpSessionID = res.SessionID
-	s.ready = true
-	s.lastReply = ""
-	s.prompt.activeTCs = make(map[string]struct{})
-	if state := s.agentStateLocked(agentName); state != nil {
-		state.ACPSessionID = res.SessionID
-		state.ConfigOptions = append([]acp.ConfigOption(nil), res.ConfigOptions...)
-		state.Commands = nil
-		state.Title = ""
-		state.UpdatedAt = ""
-	}
-	s.mu.Unlock()
-	s.persistSessionBestEffort()
-	return res.SessionID, nil
-}
-
-func (s *Session) loadSessionByIndex(ctx context.Context, index int) (string, error) {
-	lines, err := s.listSessions(ctx)
-	if err != nil {
-		return "", err
-	}
-	_ = lines // listSessions already refreshes and persists state
-
-	s.mu.Lock()
-	agentName := s.currentAgentNameLocked()
-	cwd := s.cwd
-	loadCap := false
-	var sessions []SessionSummary
-	if state := s.agentStateLocked(agentName); state != nil {
-		loadCap = state.AgentCapabilities.LoadSession
-		sessions = append(sessions, state.Sessions...)
-	}
-	s.mu.Unlock()
-
-	if !loadCap {
-		return "", errors.New("agent does not support session/load")
-	}
-	if index < 1 || index > len(sessions) {
-		return "", fmt.Errorf("index out of range (1-%d)", len(sessions))
-	}
-	target := sessions[index-1].ID
-	if strings.TrimSpace(target) == "" {
-		return "", errors.New("invalid session id")
-	}
-
-	_, err = s.instance.SessionLoad(ctx, acp.SessionLoadParams{
-		SessionID:  target,
-		CWD:        cwd,
-		MCPServers: emptyMCPServers(),
-	})
-	if err != nil {
-		return "", err
-	}
-
-	s.mu.Lock()
-	s.acpSessionID = target
-	s.ready = true
-	s.lastReply = ""
-	s.prompt.activeTCs = make(map[string]struct{})
-	if state := s.agentStateLocked(agentName); state != nil {
-		state.ACPSessionID = target
-	}
-	s.mu.Unlock()
-	s.persistSessionBestEffort()
-	return target, nil
-}
-
-func (s *Session) persistSessionSummaries(agentName string, sessions []SessionSummary) {
-	if strings.TrimSpace(agentName) == "" {
-		return
-	}
-	s.mu.Lock()
-	as := s.agentStateLocked(agentName)
-	as.Sessions = cloneSessionSummaries(sessions)
-	s.mu.Unlock()
-	s.persistSessionBestEffort()
-}
-
 func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, error) {
 	s.mu.Lock()
 	hasInstance := s.instance != nil
@@ -502,16 +338,11 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		_ = s.ensureInstance(ctx)
 	}
 	_ = s.ensureReady(ctx)
-	// Try to refresh session summaries from agent runtime before rendering menu.
-	// If session/list is unsupported or fails, we silently fall back to cached state.
-	_, _ = s.listSessions(ctx)
 
 	state, _ := s.currentAgentStateSnapshot()
 	opts := []acp.ConfigOption(nil)
-	cachedSessions := []SessionSummary(nil)
 	if state != nil {
 		opts = append(opts, state.ConfigOptions...)
-		cachedSessions = cloneSessionSummaries(state.Sessions)
 	}
 
 	model := HelpModel{
@@ -548,33 +379,17 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 	}
 	model.Menus[newMenuID] = newMenu
 
-	// 2. Session List — submenu from latest/cached sessions, clicking loads the session
+	// 2. Session List (client-level behavior)
 	sessionMenuID := "menu:sessions"
-	model.Options = append(model.Options, HelpOption{
-		Label:  "Session List",
-		MenuID: sessionMenuID,
-	})
-	sessionMenu := HelpMenu{
+	model.Options = append(model.Options, HelpOption{Label: "Session List", MenuID: sessionMenuID})
+	model.Menus[sessionMenuID] = HelpMenu{
 		Title:  "Sessions",
-		Body:   "Select a session to load.",
+		Body:   "Use /list to view sessions, then /load <index> to load one.",
 		Parent: model.RootMenu,
+		Options: []HelpOption{
+			{Label: "Show sessions", Command: "/list"},
+		},
 	}
-	for i, s := range cachedSessions {
-		title := strings.TrimSpace(s.Title)
-		if title == "" {
-			title = "(no title)"
-		}
-		label := fmt.Sprintf("%d. %s", i+1, title)
-		sessionMenu.Options = append(sessionMenu.Options, HelpOption{
-			Label:   label,
-			Command: "/load",
-			Value:   strconv.Itoa(i + 1),
-		})
-	}
-	if len(sessionMenu.Options) == 0 {
-		sessionMenu.Body = "No sessions available."
-	}
-	model.Menus[sessionMenuID] = sessionMenu
 
 	// 3. Status
 	model.Options = append(model.Options, HelpOption{Label: "Status", Command: "/status"})
@@ -655,3 +470,4 @@ func formatConfigOptionUpdateMessage(raw []byte) string {
 	}
 	return fmt.Sprintf("Config options updated: mode=%s model=%s", renderUnknown(mode), renderUnknown(model))
 }
+

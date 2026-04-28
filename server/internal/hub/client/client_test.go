@@ -83,9 +83,9 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	c.mu.Lock()
 	sess := c.sessions[c.routeMap[testRouteKey]]
 	if sess == nil {
-		sess = c.newWiredSession("")
-		c.sessions[sess.ID] = sess
-		c.routeMap[testRouteKey] = sess.ID
+		sess = c.newWiredSession(sessionID)
+		c.sessions[sessionID] = sess
+		c.routeMap[testRouteKey] = sessionID
 	}
 	c.mu.Unlock()
 
@@ -138,7 +138,7 @@ func (c *Client) HandleMessage(msg Message) {
 			if source.ChatID != "" {
 				sess.setIMSource(source)
 			}
-			sess.reply("Created new session: " + sess.ID)
+			sess.reply("Created new session: " + sess.acpSessionID)
 			return
 		case "/load":
 			idx, err := parsePositiveIndex(args)
@@ -158,7 +158,7 @@ func (c *Client) HandleMessage(msg Message) {
 			if source.ChatID != "" {
 				loaded.setIMSource(source)
 			}
-			loaded.reply("Loaded session: " + loaded.ID)
+			loaded.reply("Loaded session: " + loaded.acpSessionID)
 			return
 		}
 	}
@@ -833,8 +833,8 @@ func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveSession: %v", err)
 	}
-	if sess.ID != "restore-me" {
-		t.Fatalf("resolved session ID = %q, want restore-me", sess.ID)
+	if sess.acpSessionID != "restore-me" {
+		t.Fatalf("resolved session ID = %q, want restore-me", sess.acpSessionID)
 	}
 
 }
@@ -910,7 +910,7 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	sess.Status = SessionActive
 	sess.agentType = "claude"
 	sess.agentState.Title = "Runtime Title"
-	c.sessions[sess.ID] = sess
+	c.sessions[sess.acpSessionID] = sess
 	c.mu.Unlock()
 
 	entries, err := c.ListSessions(ctx)
@@ -1211,8 +1211,8 @@ func TestSessionFromRecord_RestoresSingleAgentState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sessionFromRecord: %v", err)
 	}
-	if sess.ID != "sess-restored" {
-		t.Fatalf("ID = %q, want sess-restored", sess.ID)
+	if sess.acpSessionID != "sess-restored" {
+		t.Fatalf("ID = %q, want sess-restored", sess.acpSessionID)
 	}
 	if got := sess.agentType; got != "claude" {
 		t.Fatalf("agentType = %q, want claude", got)
@@ -1246,8 +1246,8 @@ func TestCreateSessionWithAgent_UsesACPResultAsUnifiedSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if sess.ID != "sess-from-agent" {
-		t.Fatalf("session ID = %q, want sess-from-agent", sess.ID)
+	if sess.acpSessionID != "sess-from-agent" {
+		t.Fatalf("session ID = %q, want sess-from-agent", sess.acpSessionID)
 	}
 	if got := sess.agentType; got != "claude" {
 		t.Fatalf("agentType = %q, want claude", got)
@@ -1301,8 +1301,8 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	c.mu.Lock()
 	oldSess := c.newWiredSession("sess-old")
 	oldSess.agentType = "claude"
-	c.sessions[oldSess.ID] = oldSess
-	c.routeMap["route-1"] = oldSess.ID
+	c.sessions[oldSess.acpSessionID] = oldSess
+	c.routeMap["route-1"] = oldSess.acpSessionID
 	c.mu.Unlock()
 
 	sess, err := c.ClientNewSession("route-1", "claude")
@@ -1543,7 +1543,7 @@ func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
 		t.Fatalf("ClientNewSession: %v", err)
 	}
 
-	err = c.PromptToSession(context.Background(), sess.ID, im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
+	err = c.PromptToSession(context.Background(), sess.acpSessionID, im.ChatRef{ChannelID: " feishu ", ChatID: " chat-1 "}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}})
 	if err != nil {
 		t.Fatalf("PromptToSession: %v", err)
 	}
@@ -1552,8 +1552,8 @@ func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRouteBindings: %v", err)
 	}
-	if got := bindings["im:feishu:chat-1"]; got != sess.ID {
-		t.Fatalf("route binding = %q, want %q", got, sess.ID)
+	if got := bindings["im:feishu:chat-1"]; got != sess.acpSessionID {
+		t.Fatalf("route binding = %q, want %q", got, sess.acpSessionID)
 	}
 }
 
@@ -1594,17 +1594,14 @@ func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 	if !ok {
 		t.Fatalf("session menu not found")
 	}
-	if len(sessionMenu.Options) != 2 {
-		t.Fatalf("session menu options len = %d, want 2", len(sessionMenu.Options))
+	if len(sessionMenu.Options) != 1 {
+		t.Fatalf("session menu options len = %d, want 1", len(sessionMenu.Options))
 	}
-	if sessionMenu.Options[0].Command != "/load" || sessionMenu.Options[0].Value != "1" {
-		t.Fatalf("session menu option[0] = %#v, want /load 1", sessionMenu.Options[0])
+	if sessionMenu.Options[0].Command != "/list" {
+		t.Fatalf("session menu option[0] = %#v, want /list", sessionMenu.Options[0])
 	}
-	if sessionMenu.Options[1].Command != "/load" || sessionMenu.Options[1].Value != "2" {
-		t.Fatalf("session menu option[1] = %#v, want /load 2", sessionMenu.Options[1])
-	}
-	if strings.Contains(sessionMenu.Body, "No cached sessions") {
-		t.Fatalf("session menu body should not show cached-session fallback: %q", sessionMenu.Body)
+	if !strings.Contains(sessionMenu.Body, "/list") {
+		t.Fatalf("session menu body = %q, want usage hint about /list", sessionMenu.Body)
 	}
 }
 
@@ -2003,7 +2000,7 @@ func addRuntimeSession(c *Client, sessionID, title, agent string, createdAt, las
 	sess.mu.Unlock()
 
 	c.mu.Lock()
-	c.sessions[sess.ID] = sess
+	c.sessions[sess.acpSessionID] = sess
 	c.mu.Unlock()
 }
 
@@ -4475,3 +4472,4 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
+

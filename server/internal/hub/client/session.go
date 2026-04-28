@@ -2,8 +2,6 @@ package client
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,12 +26,6 @@ const (
 	SessionPersisted
 )
 
-type SessionSummary struct {
-	ID        string `json:"id"`
-	Title     string `json:"title,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
-}
-
 // SessionAgentState holds all persisted per-agent metadata within one Session.
 type SessionAgentState struct {
 	ACPSessionID      string                 `json:"acpSessionId,omitempty"`
@@ -41,18 +33,15 @@ type SessionAgentState struct {
 	Commands          []acp.AvailableCommand `json:"commands,omitempty"`
 	Title             string                 `json:"title,omitempty"`
 	UpdatedAt         string                 `json:"updatedAt,omitempty"`
-	ProtocolVersion   string                 `json:"protocolVersion,omitempty"`
 	AgentCapabilities acp.AgentCapabilities  `json:"agentCapabilities,omitempty"`
 	AgentInfo         *acp.AgentInfo         `json:"agentInfo,omitempty"`
 	AuthMethods       []acp.AuthMethod       `json:"authMethods,omitempty"`
-	Sessions          []SessionSummary       `json:"sessions,omitempty"`
 }
 
 // Session is the business session object that owns ACP session state,
 // prompt lifecycle and callback handling.
 // A Client holds multiple Sessions, routed by IM routeKey.
 type Session struct {
-	ID     string
 	Status SessionStatus
 
 	// instance is the agent runtime bound to this Session.
@@ -65,7 +54,6 @@ type Session struct {
 	acpSessionID string
 	ready        bool
 	initializing bool
-	lastReply    string
 
 	prompt   promptState
 	initCond *sync.Cond
@@ -90,11 +78,8 @@ type Session struct {
 
 // newSession creates a Session with sensible defaults.
 func newSession(id string, cwd string) *Session {
-	if strings.TrimSpace(id) == "" {
-		id = newSessionID()
-	}
 	s := &Session{
-		ID:        id,
+		acpSessionID: strings.TrimSpace(id),
 		Status:    SessionActive,
 		cwd:       cwd,
 		createdAt: time.Now(),
@@ -115,10 +100,6 @@ func cloneAgentInfo(src *acp.AgentInfo) *acp.AgentInfo {
 	return &cp
 }
 
-func cloneSessionSummaries(src []SessionSummary) []SessionSummary {
-	return append([]SessionSummary(nil), src...)
-}
-
 func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	if src == nil {
 		return nil
@@ -127,7 +108,6 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	cp.ConfigOptions = append([]acp.ConfigOption(nil), src.ConfigOptions...)
 	cp.Commands = append([]acp.AvailableCommand(nil), src.Commands...)
 	cp.AuthMethods = append([]acp.AuthMethod(nil), src.AuthMethods...)
-	cp.Sessions = cloneSessionSummaries(src.Sessions)
 	cp.AgentInfo = cloneAgentInfo(src.AgentInfo)
 	return &cp
 }
@@ -165,24 +145,6 @@ func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
 	return cloneSessionAgentState(&s.agentState), name
 }
 
-func newSessionID() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return fmt.Sprintf("sess-fallback-%d", time.Now().UnixNano())
-	}
-	buf[6] = (buf[6] & 0x0f) | 0x40
-	buf[8] = (buf[8] & 0x3f) | 0x80
-
-	hexBuf := hex.EncodeToString(buf)
-	return fmt.Sprintf("sess-%s-%s-%s-%s-%s",
-		hexBuf[0:8],
-		hexBuf[8:12],
-		hexBuf[12:16],
-		hexBuf[16:20],
-		hexBuf[20:32],
-	)
-}
-
 // shortSessionID returns a compact display form of a session ID.
 // e.g. "sess-12345678-1234-1234-1234-123456789012" -> "sess-12345678"
 func shortSessionID(id string) string {
@@ -203,7 +165,7 @@ func shortSessionID(id string) string {
 func (s *Session) sessionInfoLine() string {
 	s.mu.Lock()
 	agentName := s.currentAgentNameLocked()
-	clientSID := s.ID
+	clientSID := s.acpSessionID
 	var configOpts []acp.ConfigOption
 	if state := s.agentStateLocked(agentName); state != nil {
 		configOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
@@ -248,7 +210,7 @@ func (s *Session) replyWithTitle(title, body string) {
 		})
 	}
 	if router, source, ok := s.imContext(); ok {
-		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.ID, Source: &source}, im.SystemPayload{
+		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.acpSessionID, Source: &source}, im.SystemPayload{
 			Kind:  "message",
 			Title: title,
 			Body:  body,
@@ -282,7 +244,7 @@ func (s *Session) recordSessionViewEvent(event SessionViewEvent) {
 		return
 	}
 	if strings.TrimSpace(event.SessionID) == "" {
-		event.SessionID = s.ID
+		event.SessionID = s.acpSessionID
 	}
 	if event.UpdatedAt.IsZero() {
 		event.UpdatedAt = time.Now().UTC()
@@ -469,7 +431,6 @@ func (s *Session) ensureReady(ctx context.Context) error {
 			if len(resolved) > 0 {
 				state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
 			}
-			state.ProtocolVersion = initResult.ProtocolVersion.String()
 			state.AgentCapabilities = initResult.AgentCapabilities
 			state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
 			state.AuthMethods = initResult.AuthMethods
@@ -523,13 +484,11 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	state.Commands = append([]acp.AvailableCommand(nil), resolvedCommands...)
 	state.Title = ""
 	state.UpdatedAt = ""
-	state.ProtocolVersion = initResult.ProtocolVersion.String()
 	state.AgentCapabilities = initResult.AgentCapabilities
 	state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
 	state.AuthMethods = initResult.AuthMethods
 	commands := append([]acp.AvailableCommand(nil), state.Commands...)
 	s.agentType = agentName
-	s.ID = newResult.SessionID
 	s.acpSessionID = newResult.SessionID
 	s.ready = true
 	s.initializing = false
@@ -687,10 +646,6 @@ func (s *Session) sessionConfigSnapshot() acp.SessionConfigSnapshot {
 
 // promptStream sends a prompt and returns a channel of streaming updates.
 func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (<-chan promptStreamEvent, error) {
-	s.mu.Lock()
-	s.lastReply = ""
-	s.mu.Unlock()
-
 	if err := s.ensureReady(ctx); err != nil {
 		return nil, err
 	}
@@ -785,13 +740,6 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 	done:
 		result, err := pr.result, pr.err
 
-		replyMu.Lock()
-		reply := replyBuf.String()
-		replyMu.Unlock()
-		s.mu.Lock()
-		s.lastReply = reply
-		s.mu.Unlock()
-
 		if err != nil {
 			select {
 			case updates <- promptStreamEvent{err: err}:
@@ -880,7 +828,7 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 	}
 
 	return &SessionRecord{
-		ID:           s.ID,
+		ID:           s.acpSessionID,
 		ProjectName:  s.projectName,
 		Status:       s.Status,
 		AgentType:    agentType,
@@ -928,7 +876,7 @@ func (s *Session) persistSession(ctx context.Context) error {
 
 func (s *Session) persistSessionBestEffort() {
 	if err := s.persistSession(context.Background()); err != nil {
-		hubLogger(s.projectName).Warn("persist session failed session=%s err=%v", s.ID, err)
+		hubLogger(s.projectName).Warn("persist session failed session=%s err=%v", s.acpSessionID, err)
 	}
 }
 
@@ -1169,10 +1117,10 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 	}
 	s.recordSessionViewEvent(SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
-		SessionID: s.ID,
+		SessionID: s.acpSessionID,
 		Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
 			"params": acp.SessionPromptParams{
-				SessionID: s.ID,
+				SessionID: s.acpSessionID,
 				Prompt:    cloneSessionContentBlocks(blocks),
 			},
 		}),
@@ -1266,13 +1214,13 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					params := *ev.update
 					s.recordSessionViewEvent(SessionViewEvent{
 						Type:      SessionViewEventTypeACP,
-						SessionID: s.ID,
+						SessionID: s.acpSessionID,
 						Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
 							"params": params,
 						}),
 					})
 					if hasIMEmitter {
-						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
+						target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
 						if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {
 							s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 						}
@@ -1298,13 +1246,13 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 				if ev.result != nil {
 					s.recordSessionViewEvent(SessionViewEvent{
 						Type:      SessionViewEventTypeACP,
-						SessionID: s.ID,
+						SessionID: s.acpSessionID,
 						Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
 							"result": *ev.result,
 						}),
 					})
 					if hasIMEmitter {
-						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
+						target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
 						if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
 							s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
 						}
@@ -1314,13 +1262,13 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 			case <-observeTicker.C:
 				ev := observe.Eval(time.Now(), observe.Started())
 				if ev.WarnFirstWait {
-					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=first_wait session=%s", s.ID)
+					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=first_wait session=%s", s.acpSessionID)
 				}
 				if ev.ErrorFirstWait {
 					s.reportTimeoutError("stream", "first_wait")
 				}
 				if ev.WarnSilence {
-					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=silence session=%s", s.ID)
+					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=silence session=%s", s.acpSessionID)
 				}
 				if ev.ErrorSilence {
 					s.reportTimeoutError("stream", "silence")
@@ -1431,11 +1379,11 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 	)
 	if err := router.SystemNotify(
 		context.Background(),
-		im.SendTarget{SessionID: s.ID, Source: &source},
+		im.SendTarget{SessionID: s.acpSessionID, Source: &source},
 		im.SystemPayload{Kind: "message", Body: body},
 	); err != nil {
 		hubLogger(s.projectName).Error("timeout im notify failed stage=%s kind=%s session=%s err=%v",
-			stage, kind, s.ID, err)
+			stage, kind, s.acpSessionID, err)
 	}
 }
 
