@@ -1654,22 +1654,33 @@ function App() {
     return matches;
   }, [fileContent, fileLines, fileSearchQuery]);
 
-  const applyHydratedProjectState = (hydrated: {
-    projectId: string;
-    dirEntries: Record<string, RegistryFsEntry[]>;
-    expandedDirs: string[];
-    selectedFile: string;
-    pinnedFiles: string[];
-    gitCurrentBranch: string;
-    commits: RegistryGitCommit[];
-    selectedCommit: string;
-    commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
-    selectedDiff: string;
-    cachedDiffText: string;
-  }) => {
-    fileReadSeqRef.current += 1;
-    fileHashRef.current = {};
-    fileCacheRef.current = {};
+  const applyHydratedProjectState = (
+    hydrated: {
+      projectId: string;
+      dirEntries: Record<string, RegistryFsEntry[]>;
+      expandedDirs: string[];
+      selectedFile: string;
+      pinnedFiles: string[];
+      gitCurrentBranch: string;
+      commits: RegistryGitCommit[];
+      selectedCommit: string;
+      commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
+      selectedDiff: string;
+      cachedDiffText: string;
+    },
+    options?: {preserveFileView?: boolean},
+  ) => {
+    const preserveFileView =
+      options?.preserveFileView === true &&
+      hydrated.projectId === projectIdRef.current &&
+      hydrated.selectedFile === selectedFileRef.current &&
+      !!hydrated.selectedFile;
+
+    if (!preserveFileView) {
+      fileReadSeqRef.current += 1;
+      fileHashRef.current = {};
+      fileCacheRef.current = {};
+    }
     expandedDirsRef.current = hydrated.expandedDirs;
     selectedFileRef.current = hydrated.selectedFile;
     setProjectId(hydrated.projectId);
@@ -1678,8 +1689,10 @@ function App() {
     setSelectedFile(hydrated.selectedFile);
     setPinnedFiles([]);
     setPinnedFiles(hydrated.pinnedFiles);
-    setFileContent('');
-    setFileInfo(null);
+    if (!preserveFileView) {
+      setFileContent('');
+      setFileInfo(null);
+    }
     setGitCurrentBranch(hydrated.gitCurrentBranch);
     setGitBranches([]);
     setGitSelectedBranches([]);
@@ -1870,11 +1883,14 @@ function App() {
     }
   };
 
-  const readSelectedFile = async (path: string, options?: {restoreScroll?: boolean}) => {
+  const readSelectedFile = async (path: string, options?: {restoreScroll?: boolean; silent?: boolean}) => {
     if (!path) return;
     const requestSeq = fileReadSeqRef.current + 1;
     fileReadSeqRef.current = requestSeq;
-    setFileLoading(true);
+    const silentRead = options?.silent === true;
+    if (!silentRead) {
+      setFileLoading(true);
+    }
     const shouldRestoreScroll = options?.restoreScroll === true;
     try {
       const info = await service.getFileInfo(path);
@@ -1916,11 +1932,13 @@ function App() {
       }
     } catch (err) {
       if (requestSeq !== fileReadSeqRef.current) return;
-      setFileInfo(null);
-      setFileContent('');
+      if (!silentRead) {
+        setFileInfo(null);
+        setFileContent('');
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      if (requestSeq === fileReadSeqRef.current) {
+      if (requestSeq === fileReadSeqRef.current && !silentRead) {
         setFileLoading(false);
       }
     }
@@ -2418,14 +2436,18 @@ function App() {
       setProjects(result.projects);
       captureSelectedFileScrollPosition();
       dirHashRef.current = {};
-      fileHashRef.current = {};
-      fileCacheRef.current = {};
-      applyHydratedProjectState(result.hydrated);
+      if (!silentReconnect) {
+        fileHashRef.current = {};
+        fileCacheRef.current = {};
+      }
+      applyHydratedProjectState(result.hydrated, {
+        preserveFileView: silentReconnect,
+      });
       const selectedFileToReload =
         result.hydrated.selectedFile || selectedFileRef.current;
       if (selectedFileToReload) {
         skipNextSelectedFileAutoReadRef.current = true;
-        readSelectedFile(selectedFileToReload, { restoreScroll: true }).catch(() => undefined);
+        readSelectedFile(selectedFileToReload, { restoreScroll: true, silent: silentReconnect }).catch(() => undefined);
       }
       setGitDirty(
         Boolean(
@@ -2499,7 +2521,9 @@ function App() {
     supervisorManagedCloseRef.current = true;
     clearReconnectTimer();
     reconnectStartedAtRef.current = null;
-    setReconnecting(false);
+    const shouldKeepWorkspaceVisible =
+      reason !== 'stop' && !!tokenRef.current.trim() && !!projectIdRef.current;
+    setReconnecting(shouldKeepWorkspaceVisible);
     setAutoConnecting(false);
     setConnected(false);
     if (reason !== 'stop') {
@@ -4299,6 +4323,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
 
 
 
