@@ -1929,10 +1929,7 @@ func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 
 	turn1JSON := `{"method":"session/prompt","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`
 	turn2JSON := `{"method":"agent_message_chunk","param":{"text":"world"}}`
-	turnsJSON := EncodeStoredTurns([]SessionTurnRecord{
-		{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateJSON: turn1JSON},
-		{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 2, UpdateJSON: turn2JSON},
-	})
+	turnsJSON := EncodeStoredTurns([]string{turn1JSON, turn2JSON})
 
 	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   "sess-1",
@@ -2272,8 +2269,9 @@ func TestCurrentPromptStateLockedReturnsLiveCachedState(t *testing.T) {
 func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	state := sessionPromptState{
 		nextTurnIndex: 3,
-		turns: map[int64]sessionTurnMessage{
-			2: {TurnIndex: 2, method: acp.IMMethodToolCall},
+		turns: []sessionTurnMessage{
+			{TurnIndex: 1, method: acp.IMMethodSystem},
+			{TurnIndex: 2, method: acp.IMMethodToolCall},
 		},
 		turnIndexByKey: map[string]int64{
 			"merge-key": 2,
@@ -2315,10 +2313,10 @@ func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
 	if state.nextTurnIndex != 2 {
 		t.Fatalf("state.nextTurnIndex = %d, want 2", state.nextTurnIndex)
 	}
-	turn, ok := state.turns[1]
-	if !ok {
-		t.Fatalf("state.turns[1] missing")
+	if len(state.turns) != 1 {
+		t.Fatalf("len(state.turns) = %d, want 1", len(state.turns))
 	}
+	turn := state.turns[0]
 	if turn.method != acp.IMMethodPromptRequest {
 		t.Fatalf("turn method = %q, want %q", turn.method, acp.IMMethodPromptRequest)
 	}
@@ -4380,5 +4378,3 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
-
-

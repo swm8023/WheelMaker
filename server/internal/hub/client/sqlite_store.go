@@ -697,15 +697,15 @@ func (s *sqliteStore) Close() error {
 	return s.db.Close()
 }
 
-// EncodeStoredTurns serialises an ordered slice of SessionTurnRecord to a JSON
-// string array stored in session_prompts.turns_json. Returns "" when turns is empty.
-func EncodeStoredTurns(turns []SessionTurnRecord) string {
+// EncodeStoredTurns serialises an ordered turn JSON array for storage in
+// session_prompts.turns_json. Returns "" when turns is empty.
+func EncodeStoredTurns(turns []string) string {
 	if len(turns) == 0 {
 		return ""
 	}
 	entries := make([]string, 0, len(turns))
-	for _, t := range turns {
-		entries = append(entries, normalizeJSONDoc(t.UpdateJSON, `{}`))
+	for _, updateJSON := range turns {
+		entries = append(entries, normalizeJSONDoc(updateJSON, `{}`))
 	}
 	raw, err := json.Marshal(entries)
 	if err != nil {
@@ -745,10 +745,6 @@ func validateRouteKey(routeKey string) error {
 
 func formatPromptSeq(promptIndex int64) string {
 	return fmt.Sprintf("p%d", promptIndex)
-}
-
-func formatPromptTurnSeq(promptIndex, turnIndex int64) string {
-	return fmt.Sprintf("p%d.t%d", promptIndex, turnIndex)
 }
 
 func maxInt64(v int64, fallback int64) int64 {

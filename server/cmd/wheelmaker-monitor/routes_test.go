@@ -98,13 +98,8 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
-	turnsJSON := clientpkg.EncodeStoredTurns([]clientpkg.SessionTurnRecord{
-		{
-			SessionID:   "sess-1",
-			PromptIndex: 1,
-			TurnIndex:   1,
-			UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
-		},
+	turnsJSON := clientpkg.EncodeStoredTurns([]string{
+		`{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
 	})
 	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
 		SessionID:   "sess-1",
