@@ -2181,18 +2181,18 @@ func TestBuildACPContentJSONIncludesMethodAndFields(t *testing.T) {
 func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 	merged := mergeTurnMessage(
 		sessionTurnMessage{
-			SessionID:   "sess-1",
+			sessionID:   "sess-1",
 			method:      acp.IMMethodAgentMessage,
 			payload:     acp.IMTextResult{Text: "hello"},
-			PromptIndex: 1,
-			TurnIndex:   2,
+			promptIndex: 1,
+			turnIndex:   2,
 		},
 		sessionTurnMessage{
-			SessionID:   "sess-1",
+			sessionID:   "sess-1",
 			method:      acp.IMMethodAgentMessage,
 			payload:     acp.IMTextResult{Text: " world"},
-			PromptIndex: 1,
-			TurnIndex:   2,
+			promptIndex: 1,
+			turnIndex:   2,
 		},
 		2,
 	)
@@ -2218,12 +2218,12 @@ func TestBuildIMContentJSONDoesNotTrimMethod(t *testing.T) {
 
 func TestSessionPromptStateUpdateTurnDoesNotTrimFields(t *testing.T) {
 	state := newSessionPromptState(1, 1)
-	state.updateTurn(sessionTurnMessage{SessionID: "  sid  ", method: "  method  "}, "  key  ")
+	state.updateTurn(sessionTurnMessage{sessionID: "  sid  ", method: "  method  "}, "  key  ")
 	if len(state.turns) != 1 {
 		t.Fatalf("turns len = %d, want 1", len(state.turns))
 	}
-	if state.turns[0].SessionID != "  sid  " {
-		t.Fatalf("turn.SessionID = %q, want %q", state.turns[0].SessionID, "  sid  ")
+	if state.turns[0].sessionID != "  sid  " {
+		t.Fatalf("turn.SessionID = %q, want %q", state.turns[0].sessionID, "  sid  ")
 	}
 	if state.turns[0].method != "  method  " {
 		t.Fatalf("turn.method = %q, want %q", state.turns[0].method, "  method  ")
@@ -2355,8 +2355,8 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	state := sessionPromptState{
 		nextTurnIndex: 3,
 		turns: []sessionTurnMessage{
-			{TurnIndex: 1, method: acp.IMMethodSystem},
-			{TurnIndex: 2, method: acp.IMMethodToolCall},
+			{turnIndex: 1, method: acp.IMMethodSystem},
+			{turnIndex: 2, method: acp.IMMethodToolCall},
 		},
 		turnIndexByKey: map[string]int64{
 			"merge-key": 2,
@@ -2438,14 +2438,6 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 				if len(requestPayload.ContentBlocks) != 1 || strings.TrimSpace(requestPayload.ContentBlocks[0].Text) != "say hi" {
 					t.Fatalf("payload.ContentBlocks = %#v, want single text block", requestPayload.ContentBlocks)
 				}
-				message := parsed.imMessage()
-				request := acp.IMPromptRequest{}
-				if err := json.Unmarshal(message.Param, &request); err != nil {
-					t.Fatalf("json.Unmarshal(prompt request): %v", err)
-				}
-				if len(request.ContentBlocks) != 1 || strings.TrimSpace(request.ContentBlocks[0].Text) != "say hi" {
-					t.Fatalf("request.ContentBlocks = %#v, want single text block", request.ContentBlocks)
-				}
 			},
 		},
 		{
@@ -2462,14 +2454,6 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 				}
 				if resultPayload.StopReason != acp.StopReasonEndTurn {
 					t.Fatalf("payload.StopReason = %q, want %q", resultPayload.StopReason, acp.StopReasonEndTurn)
-				}
-				message := parsed.imMessage()
-				result := acp.IMPromptResult{}
-				if err := json.Unmarshal(message.Param, &result); err != nil {
-					t.Fatalf("json.Unmarshal(prompt result): %v", err)
-				}
-				if result.StopReason != acp.StopReasonEndTurn {
-					t.Fatalf("result.StopReason = %q, want %q", result.StopReason, acp.StopReasonEndTurn)
 				}
 			},
 		},
@@ -2522,12 +2506,6 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			if parsed.method != tt.wantMethod {
 				t.Fatalf("parsed.method = %q, want %q", parsed.method, tt.wantMethod)
 			}
-			if tt.wantMessage {
-				message := parsed.imMessage()
-				if strings.TrimSpace(message.Method) != tt.wantMethod {
-					t.Fatalf("parsed.imMessage().Method = %q, want %q", message.Method, tt.wantMethod)
-				}
-			}
 			if parsed.turnKey != tt.wantTurnKey {
 				t.Fatalf("parsed.turnKey = %q, want %q", parsed.turnKey, tt.wantTurnKey)
 			}
@@ -2559,10 +2537,9 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			wantMethod:    acp.IMMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				message := parsed.imMessage()
-				request := acp.IMPromptRequest{}
-				if err := json.Unmarshal(message.Param, &request); err != nil {
-					t.Fatalf("json.Unmarshal(prompt request): %v", err)
+				request, ok := parsed.payload.(acp.IMPromptRequest)
+				if !ok {
+					t.Fatalf("parsed.payload type = %T, want acp.IMPromptRequest", parsed.payload)
 				}
 				if len(request.ContentBlocks) != 0 {
 					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
@@ -2581,10 +2558,9 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			wantMethod:    acp.IMMethodPromptRequest,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				message := parsed.imMessage()
-				request := acp.IMPromptRequest{}
-				if err := json.Unmarshal(message.Param, &request); err != nil {
-					t.Fatalf("json.Unmarshal(prompt request): %v", err)
+				request, ok := parsed.payload.(acp.IMPromptRequest)
+				if !ok {
+					t.Fatalf("parsed.payload type = %T, want acp.IMPromptRequest", parsed.payload)
 				}
 				if len(request.ContentBlocks) != 0 {
 					t.Fatalf("request.ContentBlocks len = %d, want 0", len(request.ContentBlocks))
@@ -2649,10 +2625,9 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			wantMethod:    acp.IMMethodSystem,
 			check: func(t *testing.T, parsed parsedSessionViewEvent) {
 				t.Helper()
-				message := parsed.imMessage()
-				result := acp.IMTextResult{}
-				if err := json.Unmarshal(message.Param, &result); err != nil {
-					t.Fatalf("json.Unmarshal(system result): %v", err)
+				result, ok := parsed.payload.(acp.IMTextResult)
+				if !ok {
+					t.Fatalf("parsed.payload type = %T, want acp.IMTextResult", parsed.payload)
 				}
 				if strings.TrimSpace(result.Text) != "legacy system" {
 					t.Fatalf("result.Text = %q, want %q", result.Text, "legacy system")
@@ -2675,12 +2650,6 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			}
 			if parsed.method != tt.wantMethod {
 				t.Fatalf("parsed.method = %q, want %q", parsed.method, tt.wantMethod)
-			}
-			if tt.wantMessage {
-				message := parsed.imMessage()
-				if strings.TrimSpace(message.Method) != tt.wantMethod {
-					t.Fatalf("parsed.imMessage().Method = %q, want %q", message.Method, tt.wantMethod)
-				}
 			}
 			if tt.check != nil {
 				tt.check(t, parsed)

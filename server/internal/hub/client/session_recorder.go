@@ -49,11 +49,11 @@ type sessionViewMessage struct {
 }
 
 type sessionTurnMessage struct {
-	SessionID   string
+	sessionID   string
 	method      string
 	payload     any
-	PromptIndex int64
-	TurnIndex   int64
+	promptIndex int64
+	turnIndex   int64
 }
 
 type sessionPromptState struct {
@@ -195,14 +195,6 @@ func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, turn
 	e.turnKey = turnKey
 }
 
-func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
-	message := acp.IMMessage{Method: e.method}
-	if e.payload != nil {
-		message.Param = mustJSONRaw(e.payload)
-	}
-	return message
-}
-
 func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
 	entries, err := r.listSessions(ctx)
 	if err != nil {
@@ -304,10 +296,10 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	state.ensureMaps()
 
 	turn := sessionTurnMessage{
-		SessionID:   event.raw.SessionID,
+		sessionID:   event.raw.SessionID,
 		method:      event.method,
 		payload:     event.payload,
-		PromptIndex: state.promptIndex,
+		promptIndex: state.promptIndex,
 	}
 
 	mergedTurnIndex := int64(0)
@@ -327,22 +319,22 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	if mergedTurnIndex > 0 {
 		if idx := int(mergedTurnIndex - 1); idx >= 0 && idx < len(state.turns) {
 			existingTurn := state.turns[idx]
-			turn.TurnIndex = mergedTurnIndex
+			turn.turnIndex = mergedTurnIndex
 			turn = mergeTurnMessage(existingTurn, turn, mergedTurnIndex)
 		}
 	}
 
-	if turn.TurnIndex <= 0 {
-		turn.TurnIndex = state.nextTurnIndex
+	if turn.turnIndex <= 0 {
+		turn.turnIndex = state.nextTurnIndex
 	}
 
 	updateJSON := buildIMContentJSON(turn.method, turn.payload)
 	publish := r.eventPublisher()
 	if publish != nil {
 		_ = publish("registry.session.message", map[string]any{
-			"sessionId":   turn.SessionID,
-			"promptIndex": turn.PromptIndex,
-			"turnIndex":   turn.TurnIndex,
+			"sessionId":   turn.sessionID,
+			"promptIndex": turn.promptIndex,
+			"turnIndex":   turn.turnIndex,
 			"content":     updateJSON,
 		})
 	}
@@ -510,19 +502,19 @@ func (s *sessionPromptState) ensureMaps() {
 
 func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string) {
 	s.ensureMaps()
-	if turn.TurnIndex <= 0 {
-		turn.TurnIndex = s.nextTurnIndex
+	if turn.turnIndex <= 0 {
+		turn.turnIndex = s.nextTurnIndex
 	}
-	idx := int(turn.TurnIndex - 1)
+	idx := int(turn.turnIndex - 1)
 	if idx >= 0 && idx < len(s.turns) {
 		s.turns[idx] = turn
 	} else {
-		turn.TurnIndex = int64(len(s.turns) + 1)
+		turn.turnIndex = int64(len(s.turns) + 1)
 		s.turns = append(s.turns, turn)
 	}
 	s.nextTurnIndex = int64(len(s.turns) + 1)
 	if turnKey != "" {
-		s.turnIndexByKey[turnKey] = turn.TurnIndex
+		s.turnIndexByKey[turnKey] = turn.turnIndex
 	}
 }
 
@@ -738,11 +730,11 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 }
 
 func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) sessionTurnMessage {
-	existing.SessionID = firstNonEmpty(existing.SessionID, incoming.SessionID)
+	existing.sessionID = firstNonEmpty(existing.sessionID, incoming.sessionID)
 	existing.method = firstNonEmpty(incoming.method, existing.method)
-	existing.TurnIndex = maxInt64(turnIndex, existing.TurnIndex)
-	if existing.PromptIndex <= 0 {
-		existing.PromptIndex = incoming.PromptIndex
+	existing.turnIndex = maxInt64(turnIndex, existing.turnIndex)
+	if existing.promptIndex <= 0 {
+		existing.promptIndex = incoming.promptIndex
 	}
 	switch incoming.method {
 	case acp.IMMethodToolCall:
