@@ -2605,6 +2605,34 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 	}
 }
 
+func TestParseSessionViewEventSessionUpdateUnknownTypeReturnsError(t *testing.T) {
+	event := sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: "session/update.unknown",
+		Content:       mustJSON(map[string]any{"text": "ignored"}),
+	})
+
+	_, err := parseSessionViewEvent(event)
+	if err == nil {
+		t.Fatal("parseSessionViewEvent error = nil, want unsupported session update type error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "unsupported session update type") {
+		t.Fatalf("parseSessionViewEvent error = %v, want unsupported session update type", err)
+	}
+}
+
+func TestDecodeTurnPayloadUnknownMethodReturnsError(t *testing.T) {
+	_, err := decodeTurnPayload(acp.IMMessage{
+		Method: "im.unknown",
+		Param:  mustJSON(map[string]any{"x": 1}),
+	})
+	if err == nil {
+		t.Fatal("decodeTurnPayload error = nil, want unsupported IM method error")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "unsupported im method") {
+		t.Fatalf("decodeTurnPayload error = %v, want unsupported im method", err)
+	}
+}
+
 func TestJSONDecodeAtSupportsTopLevelAndSingleNestedField(t *testing.T) {
 	raw := mustJSON(map[string]any{
 		"method": "session.update",

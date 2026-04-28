@@ -843,6 +843,9 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			params := acp.SessionUpdateParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
 			method := strings.TrimSpace(params.Update.SessionUpdate)
+			if method == "" {
+				return parsed, nil
+			}
 			switch method {
 			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
 				parsed.setJSONMessage(method, acp.IMTextResult{Text: extractUpdateText(params.Update.Content)}, "")
@@ -859,6 +862,7 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 				}
 				parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, "")
 			default:
+				return parsedSessionViewEvent{}, fmt.Errorf("unsupported session update type: %s", method)
 			}
 		default:
 		}
@@ -911,12 +915,7 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 func buildIMContentJSON(method string, payload any) (string, error) {
 	message := acp.IMMessage{Method: strings.TrimSpace(method)}
 	if payload != nil {
-		switch value := payload.(type) {
-		case json.RawMessage:
-			message.Param = cloneJSONRaw(value)
-		default:
-			message.Param = mustJSONRaw(value)
-		}
+		message.Param = mustJSONRaw(payload)
 	}
 	raw, err := json.Marshal(message)
 	if err != nil {
@@ -1001,7 +1000,7 @@ func decodeTurnPayload(message acp.IMMessage) (any, error) {
 		}
 		return payload, nil
 	default:
-		return cloneJSONRaw(message.Param), nil
+		return nil, fmt.Errorf("unsupported IM method: %s", method)
 	}
 }
 
