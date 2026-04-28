@@ -2171,7 +2171,7 @@ func TestBuildACPContentJSONIncludesMethodAndFields(t *testing.T) {
 }
 
 func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
-	merged, err := mergeTurnMessage(
+	merged := mergeTurnMessage(
 		sessionTurnMessage{
 			SessionID:   "sess-1",
 			method:      acp.IMMethodAgentMessage,
@@ -2189,9 +2189,6 @@ func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 		sessionTurnMergeText,
 		2,
 	)
-	if err != nil {
-		t.Fatalf("mergeTurnMessage: %v", err)
-	}
 	result, ok := merged.payload.(acp.IMTextResult)
 	if !ok {
 		t.Fatalf("merged.payload type = %T, want %T", merged.payload, acp.IMTextResult{})
@@ -4377,3 +4374,4 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
+

@@ -351,15 +351,9 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	mergeKind, mergedTurnIndex := getTurnKindAndIndex(*state, event)
 	if mergedTurnIndex > 0 {
 		existingTurn, ok := state.turns[mergedTurnIndex]
-
 		if ok {
 			turn.TurnIndex = mergedTurnIndex
-
-			merged, err := mergeTurnMessage(existingTurn, turn, mergeKind, mergedTurnIndex)
-			if err != nil {
-				return err
-			}
-			turn = merged
+			turn = mergeTurnMessage(existingTurn, turn, mergeKind, mergedTurnIndex)
 		}
 	}
 
@@ -923,52 +917,37 @@ func getTurnKindAndIndex(state sessionPromptState, event parsedSessionViewEvent)
 	return sessionTurnMergeNone, 0
 }
 
-func mergeTurnMessage(existing, incoming sessionTurnMessage, mergeKind sessionTurnMergeKind, turnIndex int64) (sessionTurnMessage, error) {
-	merged := sessionTurnMessage{
-		SessionID:   strings.TrimSpace(firstNonEmpty(strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID))),
-		method:      strings.TrimSpace(firstNonEmpty(strings.TrimSpace(incoming.method), strings.TrimSpace(existing.method))),
-		payload:     incoming.payload,
-		PromptIndex: existing.PromptIndex,
-		TurnIndex:   maxInt64(turnIndex, existing.TurnIndex),
+func mergeTurnMessage(existing, incoming sessionTurnMessage, mergeKind sessionTurnMergeKind, turnIndex int64) sessionTurnMessage {
+	existing.SessionID = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID)))
+	existing.method = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(incoming.method), strings.TrimSpace(existing.method)))
+	existing.TurnIndex = maxInt64(turnIndex, existing.TurnIndex)
+	if existing.PromptIndex <= 0 {
+		existing.PromptIndex = incoming.PromptIndex
 	}
-	var err error
 	switch mergeKind {
 	case sessionTurnMergeTool:
-		merged.payload, err = mergeToolPayload(existing.payload, incoming.payload)
+		existing.payload = mergeToolPayload(existing.payload, incoming.payload)
 	case sessionTurnMergeText:
-		merged.payload, err = mergeTextPayload(existing.payload, incoming.payload)
+		existing.payload = mergeTextPayload(existing.payload, incoming.payload)
+	default:
+		existing.payload = incoming.payload
 	}
-	if err != nil {
-		return sessionTurnMessage{}, err
-	}
-	return merged, nil
+	return existing
 }
 
-func mergeTextPayload(existing, incoming any) (any, error) {
-	base, ok := existing.(acp.IMTextResult)
-	if !ok {
-		return nil, fmt.Errorf("merge text payload: unexpected existing type %T", existing)
-	}
-	inc, ok := incoming.(acp.IMTextResult)
-	if !ok {
-		return nil, fmt.Errorf("merge text payload: unexpected incoming type %T", incoming)
-	}
+func mergeTextPayload(existing, incoming any) any {
+	base := existing.(acp.IMTextResult)
+	inc := incoming.(acp.IMTextResult)
 	inc.Text = base.Text + inc.Text
 	if strings.TrimSpace(inc.Text) == "" {
 		inc.Text = base.Text
 	}
-	return inc, nil
+	return inc
 }
 
-func mergeToolPayload(existing, incoming any) (any, error) {
-	base, ok := existing.(acp.IMToolResult)
-	if !ok {
-		return nil, fmt.Errorf("merge tool payload: unexpected existing type %T", existing)
-	}
-	inc, ok := incoming.(acp.IMToolResult)
-	if !ok {
-		return nil, fmt.Errorf("merge tool payload: unexpected incoming type %T", incoming)
-	}
+func mergeToolPayload(existing, incoming any) any {
+	base := existing.(acp.IMToolResult)
+	inc := incoming.(acp.IMToolResult)
 	if strings.TrimSpace(inc.Cmd) == "" {
 		inc.Cmd = strings.TrimSpace(base.Cmd)
 	}
@@ -978,7 +957,7 @@ func mergeToolPayload(existing, incoming any) (any, error) {
 	if strings.TrimSpace(inc.Status) == "" {
 		inc.Status = strings.TrimSpace(base.Status)
 	}
-	return inc, nil
+	return inc
 }
 
 func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionTurnMessage, string, bool, error) {
