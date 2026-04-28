@@ -2282,6 +2282,14 @@ function App() {
     setNewChatAgentPickerOpen(true);
   };
 
+  const resetChatComposer = () => {
+    setChatComposerText('');
+    setChatAttachment(null);
+    if (chatFileInputRef.current) {
+      chatFileInputRef.current.value = '';
+    }
+  };
+
   const completeNewChatFlow = async (agentType: string) => {
     const draft = pendingNewChatDraft;
     if (!draft) {
@@ -2300,6 +2308,7 @@ function App() {
         blocks: draft.blocks,
       });
     }
+    resetChatComposer();
     if (!isWide) {
       setDrawerOpen(false);
     }
@@ -2353,11 +2362,7 @@ function App() {
           }),
         );
       }
-      setChatComposerText('');
-      setChatAttachment(null);
-      if (chatFileInputRef.current) {
-        chatFileInputRef.current.value = '';
-      }
+      resetChatComposer();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

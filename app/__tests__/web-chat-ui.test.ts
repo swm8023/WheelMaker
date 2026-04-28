@@ -58,8 +58,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('sessionId');
     expect(mainTsx).toContain('const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);');
     expect(mainTsx).toContain('const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);');
+    expect(mainTsx).toContain('const resetChatComposer = () => {');
     expect(mainTsx).toContain('await service.createSession(agentType, title);');
     expect(mainTsx).toContain('project?.agents ?? []');
+    expect(mainTsx).toContain('resetChatComposer();');
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
