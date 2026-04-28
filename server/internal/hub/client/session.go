@@ -28,7 +28,6 @@ const (
 
 // SessionAgentState holds all persisted per-agent metadata within one Session.
 type SessionAgentState struct {
-	ACPSessionID      string                 `json:"acpSessionId,omitempty"`
 	ConfigOptions     []acp.ConfigOption     `json:"configOptions,omitempty"`
 	Commands          []acp.AvailableCommand `json:"commands,omitempty"`
 	Title             string                 `json:"title,omitempty"`
@@ -80,12 +79,10 @@ type Session struct {
 func newSession(id string, cwd string) *Session {
 	s := &Session{
 		acpSessionID: strings.TrimSpace(id),
-		Status:    SessionActive,
-		cwd:       cwd,
-		createdAt: time.Now(),
-		prompt: promptState{
-			activeTCs: make(map[string]struct{}),
-		},
+		Status:       SessionActive,
+		cwd:          cwd,
+		createdAt:    time.Now(),
+		prompt:       promptState{},
 		timeoutLimiter: newTimeoutNotifyLimiter(timeoutNotifyCooldown),
 	}
 	s.initCond = sync.NewCond(&s.mu)
@@ -269,10 +266,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		name = strings.TrimSpace(s.registry.PreferredName())
 	}
 	name = strings.TrimSpace(name)
-	savedSID := ""
-	if state := s.agentStateLocked(name); state != nil && strings.TrimSpace(state.ACPSessionID) != "" {
-		savedSID = strings.TrimSpace(state.ACPSessionID)
-	}
+	savedSID := s.acpSessionID
 	cwd := s.cwd
 	s.mu.Unlock()
 
@@ -298,12 +292,6 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 			return fmt.Errorf("no agent registered for %q", name)
 		}
 	}
-	s.mu.Lock()
-	if state := s.agentStateLocked(name); state != nil && strings.TrimSpace(state.ACPSessionID) != "" {
-		savedSID = strings.TrimSpace(state.ACPSessionID)
-	}
-	s.mu.Unlock()
-
 	inst, err := creator(ctx, cwd)
 	if err != nil {
 		return err
@@ -427,7 +415,6 @@ func (s *Session) ensureReady(ctx context.Context) error {
 
 			s.mu.Lock()
 			state := s.agentStateLocked(agentName)
-			state.ACPSessionID = savedSID
 			if len(resolved) > 0 {
 				state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
 			}
@@ -479,7 +466,6 @@ func (s *Session) ensureReady(ctx context.Context) error {
 
 	s.mu.Lock()
 	state := s.agentStateLocked(agentName)
-	state.ACPSessionID = newResult.SessionID
 	state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
 	state.Commands = append([]acp.AvailableCommand(nil), resolvedCommands...)
 	state.Title = ""
@@ -672,7 +658,6 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 			s.mu.Lock()
 			s.prompt.ctx = nil
 			s.prompt.cancel = nil
-			s.prompt.activeTCs = make(map[string]struct{})
 			s.prompt.updatesCh = nil
 			s.mu.Unlock()
 			promptCancel()
@@ -765,32 +750,10 @@ func (s *Session) cancelPrompt() error {
 	sessID := s.acpSessionID
 	ready := s.ready
 	cancel := s.prompt.cancel
-	ch := s.prompt.updatesCh
-	var cancelIDs []string
-	for id := range s.prompt.activeTCs {
-		cancelIDs = append(cancelIDs, id)
-	}
 	s.mu.Unlock()
 
 	if cancel != nil {
 		cancel()
-	}
-
-	for _, id := range cancelIDs {
-		u := acp.SessionUpdateParams{
-			SessionID: sessID,
-			Update: acp.SessionUpdate{
-				SessionUpdate: acp.SessionUpdateToolCallUpdate,
-				ToolCallID:    id,
-				Status:        acp.ToolCallStatusCancelled,
-			},
-		}
-		if ch != nil {
-			select {
-			case ch <- u:
-			default:
-			}
-		}
 	}
 
 	if sessID == "" || !ready {
@@ -819,7 +782,6 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 
 	agentJSON := "{}"
 	if state != nil {
-		state.ACPSessionID = ""
 		raw, err := json.Marshal(state)
 		if err != nil {
 			return nil, fmt.Errorf("marshal agent_json: %w", err)
@@ -854,7 +816,6 @@ func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 			return nil, fmt.Errorf("unmarshal agent_json: %w", err)
 		}
 	}
-	s.agentState.ACPSessionID = s.acpSessionID
 	if strings.TrimSpace(rec.Title) != "" {
 		if state := s.agentStateLocked(s.agentType); state != nil && strings.TrimSpace(state.Title) == "" {
 			state.Title = strings.TrimSpace(rec.Title)
@@ -962,9 +923,6 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		update.SessionUpdate == acp.SessionUpdateSessionInfoUpdate {
 		s.mu.Lock()
 		state := s.agentStateLocked(s.currentAgentNameLocked())
-		if state != nil {
-			state.ACPSessionID = s.acpSessionID
-		}
 		switch update.SessionUpdate {
 		case acp.SessionUpdateAvailableCommandsUpdate:
 			if len(update.AvailableCommands) > 0 {
@@ -985,18 +943,6 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 				state.UpdatedAt = update.UpdatedAt
 				changed = true
 			}
-		}
-		s.mu.Unlock()
-	}
-
-	addToolCallID, doneToolCallID := trackToolCallUpdate(update)
-	if addToolCallID != "" || doneToolCallID != "" {
-		s.mu.Lock()
-		if addToolCallID != "" {
-			s.prompt.activeTCs[addToolCallID] = struct{}{}
-		}
-		if doneToolCallID != "" {
-			delete(s.prompt.activeTCs, doneToolCallID)
 		}
 		s.mu.Unlock()
 	}
@@ -1026,28 +972,6 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	case <-promptCtx.Done():
 	}
 }
-
-func trackToolCallUpdate(update acp.SessionUpdate) (addToolCallID string, doneToolCallID string) {
-	toolCallID := strings.TrimSpace(update.ToolCallID)
-	if toolCallID == "" {
-		return "", ""
-	}
-
-	isDoneStatus := update.Status == acp.ToolCallStatusCompleted || update.Status == acp.ToolCallStatusFailed
-	switch update.SessionUpdate {
-	case acp.SessionUpdateToolCall:
-		if isDoneStatus {
-			return "", toolCallID
-		}
-		return toolCallID, ""
-	case acp.SessionUpdateToolCallUpdate:
-		if isDoneStatus {
-			return "", toolCallID
-		}
-	}
-	return "", ""
-}
-
 // SessionRequestPermission responds to session/request_permission agent requests.
 func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	_ = ctx
@@ -1561,7 +1485,6 @@ func (s *Session) resetDeadConnection(err error) bool {
 	s.prompt.cancel = nil
 	s.prompt.updatesCh = nil
 	s.prompt.currentCh = nil
-	s.prompt.activeTCs = make(map[string]struct{})
 	s.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
@@ -1579,7 +1502,6 @@ func (s *Session) forceReconnect() {
 	s.prompt.cancel = nil
 	s.prompt.updatesCh = nil
 	s.prompt.currentCh = nil
-	s.prompt.activeTCs = make(map[string]struct{})
 	s.mu.Unlock()
 	if old != nil {
 		_ = old.Close()

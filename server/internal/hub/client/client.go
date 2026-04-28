@@ -27,7 +27,6 @@ type promptState struct {
 	cancel    context.CancelFunc
 	updatesCh chan<- acp.SessionUpdateParams
 	currentCh <-chan promptStreamEvent // tracked for prompt lifecycle cleanup
-	activeTCs map[string]struct{}
 }
 
 type promptStreamEvent struct {
@@ -1148,4 +1147,3 @@ func decodeSessionRequestPayload(raw json.RawMessage, out any) error {
 	}
 	return json.Unmarshal(raw, out)
 }
-

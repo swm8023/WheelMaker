@@ -470,4 +470,3 @@ func formatConfigOptionUpdateMessage(raw []byte) string {
 	}
 	return fmt.Sprintf("Config options updated: mode=%s model=%s", renderUnknown(mode), renderUnknown(model))
 }
-

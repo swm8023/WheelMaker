@@ -106,8 +106,6 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	sess.agentType = name
 	sess.acpSessionID = sessionID
 	sess.ready = true
-	state := sess.agentStateLocked(name)
-	state.ACPSessionID = sessionID
 	sess.mu.Unlock()
 }
 
@@ -938,7 +936,6 @@ func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testi
 	s.agentType = "claude"
 	s.acpSessionID = "acp-keep"
 	s.agentState = SessionAgentState{
-		ACPSessionID: "acp-keep",
 		ConfigOptions: []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
 			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
@@ -982,7 +979,6 @@ func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T
 	s.agentType = "claude"
 	s.acpSessionID = "acp-old"
 	s.agentState = SessionAgentState{
-		ACPSessionID: "acp-old",
 		ConfigOptions: []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
 			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
@@ -1356,7 +1352,6 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 	s.agentType = "claude"
 	s.acpSessionID = "acp-old"
 	s.agentState = SessionAgentState{
-		ACPSessionID: "acp-old",
 		ConfigOptions: []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
 			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
@@ -1460,7 +1455,6 @@ func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *t
 	s.agentType = "claude"
 	s.acpSessionID = "acp-1"
 	s.agentState = SessionAgentState{
-		ACPSessionID: "acp-1",
 		Commands:     []acp.AvailableCommand{{Name: "/cached"}},
 	}
 
@@ -1991,7 +1985,6 @@ func addRuntimeSession(c *Client, sessionID, title, agent string, createdAt, las
 	sess.agentType = agent
 	sess.acpSessionID = sessionID
 	if state := sess.agentStateLocked(agent); state != nil {
-		state.ACPSessionID = sessionID
 		state.Title = title
 	}
 	sess.Status = SessionActive
