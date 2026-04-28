@@ -250,8 +250,12 @@ func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID str
 	}
 	page := newSessionMessagePage(afterPromptIndex, afterTurnIndex)
 	for _, prompt := range prompts {
-		if err := r.appendPromptMessages(ctx, sessionID, prompt.PromptIndex, &page); err != nil {
+		messages, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
+		if err != nil {
 			return sessionViewSummary{}, nil, 0, 0, err
+		}
+		for _, turn := range messages {
+			page.append(turn)
 		}
 	}
 
@@ -271,12 +275,28 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 	if err != nil {
 		return sessionViewSummary{}, nil, err
 	}
-	prompts = promptsFromCheckpoint(prompts, checkpointPromptIndex)
 	out := make([]sessionPromptSnapshot, 0, len(prompts))
 	for _, prompt := range prompts {
-		snapshot, err := r.buildPromptSnapshot(ctx, sessionID, prompt.PromptIndex)
+		if checkpointPromptIndex > 0 && prompt.PromptIndex < checkpointPromptIndex {
+			continue
+		}
+		turns, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
 		if err != nil {
 			return sessionViewSummary{}, nil, err
+		}
+		content := make([]string, 0, len(turns))
+		lastTurnIndex := int64(0)
+		for _, turn := range turns {
+			content = append(content, normalizeJSONDoc(turn.UpdateJSON, `{}`))
+			if turn.TurnIndex > lastTurnIndex {
+				lastTurnIndex = turn.TurnIndex
+			}
+		}
+		snapshot := sessionPromptSnapshot{
+			SessionID:   strings.TrimSpace(sessionID),
+			PromptIndex: prompt.PromptIndex,
+			TurnIndex:   lastTurnIndex,
+			Content:     content,
 		}
 		out = append(out, snapshot)
 	}
@@ -410,17 +430,6 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	return nil
 }
 
-func (r *SessionRecorder) appendPromptMessages(ctx context.Context, sessionID string, promptIndex int64, page *sessionMessagePage) error {
-	messages, err := r.promptTurnsForRead(ctx, sessionID, promptIndex)
-	if err != nil {
-		return err
-	}
-	for _, turn := range messages {
-		page.append(turn)
-	}
-	return nil
-}
-
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, agentType, title string, updatedAt time.Time, titleIfEmptyOnly bool) error {
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
@@ -479,39 +488,6 @@ func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, ag
 		UpdatedAt: lastActiveAt.UTC().Format(time.RFC3339),
 		AgentType: strings.TrimSpace(agentType),
 	}
-}
-
-func promptsFromCheckpoint(prompts []SessionPromptRecord, checkpointPromptIndex int64) []SessionPromptRecord {
-	if len(prompts) == 0 || checkpointPromptIndex <= 0 {
-		return prompts
-	}
-	for i, prompt := range prompts {
-		if prompt.PromptIndex >= checkpointPromptIndex {
-			return prompts[i:]
-		}
-	}
-	return prompts
-}
-
-func (r *SessionRecorder) buildPromptSnapshot(ctx context.Context, sessionID string, promptIndex int64) (sessionPromptSnapshot, error) {
-	turns, err := r.promptTurnsForRead(ctx, sessionID, promptIndex)
-	if err != nil {
-		return sessionPromptSnapshot{}, fmt.Errorf("load prompt turns: %w", err)
-	}
-	content := make([]string, 0, len(turns))
-	lastTurnIndex := int64(0)
-	for _, turn := range turns {
-		content = append(content, normalizeJSONDoc(turn.UpdateJSON, `{}`))
-		if turn.TurnIndex > lastTurnIndex {
-			lastTurnIndex = turn.TurnIndex
-		}
-	}
-	return sessionPromptSnapshot{
-		SessionID:   strings.TrimSpace(sessionID),
-		PromptIndex: promptIndex,
-		TurnIndex:   lastTurnIndex,
-		Content:     content,
-	}, nil
 }
 
 // encodePromptStateTurns serialises all in-memory turns into the turns_json format
@@ -664,10 +640,6 @@ func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string)
 	}
 }
 
-func (s *sessionPromptState) assignTurn(turn sessionTurnMessage, turnKey string) {
-	s.updateTurn(turn, turnKey)
-}
-
 func normalizeSessionID(sessionID string) (string, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -772,7 +744,7 @@ func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionI
 		if err != nil {
 			return nil, err
 		}
-		state.assignTurn(turn, "")
+		state.updateTurn(turn, "")
 	}
 	return &state, nil
 }
