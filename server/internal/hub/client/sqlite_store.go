@@ -53,7 +53,6 @@ CREATE TABLE IF NOT EXISTS session_turns (
 	session_id TEXT NOT NULL,
 	prompt_index INTEGER NOT NULL,
 	turn_index INTEGER NOT NULL,
-	update_index INTEGER NOT NULL DEFAULT 0,
 	update_json TEXT NOT NULL DEFAULT '{}',
 	PRIMARY KEY (session_id, prompt_index, turn_index)
 );
@@ -99,7 +98,6 @@ type SessionTurnRecord struct {
 	SessionID   string
 	PromptIndex int64
 	TurnIndex   int64
-	UpdateIndex int64
 	UpdateJSON  string
 }
 
@@ -138,6 +136,10 @@ func NewStore(dbPath string) (Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %q: %w", dbPath, err)
 	}
+	if err := migrateLegacyStoreSchema(db); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate schema: %w", err)
+	}
 	if _, err := db.Exec(sqliteSchema); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
@@ -150,7 +152,76 @@ var expectedStoreSchemaColumns = map[string][]string{
 	"route_bindings":  {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":        {"id", "project_name", "status", "acp_session_id", "agents_json", "title", "created_at", "last_active_at"},
 	"session_prompts": {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
-	"session_turns":   {"session_id", "prompt_index", "turn_index", "update_index", "update_json"},
+	"session_turns":   {"session_id", "prompt_index", "turn_index", "update_json"},
+}
+
+func migrateLegacyStoreSchema(db *sql.DB) error {
+	tables, err := sqliteUserTables(db)
+	if err != nil {
+		return fmt.Errorf("list sqlite tables: %w", err)
+	}
+	if _, ok := tables["session_turns"]; !ok {
+		return nil
+	}
+	columns, err := sqliteTableColumns(db, "session_turns")
+	if err != nil {
+		return fmt.Errorf("read session_turns columns: %w", err)
+	}
+	if !storeSchemaColumnsContain(columns, "update_index") {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin schema migration: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.Exec(`
+		DROP TABLE IF EXISTS session_turns_next;
+		CREATE TABLE session_turns_next (
+			session_id TEXT NOT NULL,
+			prompt_index INTEGER NOT NULL,
+			turn_index INTEGER NOT NULL,
+			update_json TEXT NOT NULL DEFAULT '{}',
+			PRIMARY KEY (session_id, prompt_index, turn_index)
+		);
+		INSERT INTO session_turns_next (session_id, prompt_index, turn_index, update_json)
+		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_json
+		FROM session_turns t
+		JOIN (
+			SELECT session_id, prompt_index, turn_index, MAX(update_index) AS max_update_index
+			FROM session_turns
+			GROUP BY session_id, prompt_index, turn_index
+		) latest
+		ON latest.session_id = t.session_id
+		AND latest.prompt_index = t.prompt_index
+		AND latest.turn_index = t.turn_index
+		AND latest.max_update_index = t.update_index;
+		DROP TABLE session_turns;
+		ALTER TABLE session_turns_next RENAME TO session_turns;
+	`); err != nil {
+		return fmt.Errorf("migrate session_turns remove update_index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit schema migration: %w", err)
+	}
+	tx = nil
+	return nil
+}
+
+func storeSchemaColumnsContain(columns []string, target string) bool {
+	target = normalizeStoreSchemaName(target)
+	for _, column := range columns {
+		if normalizeStoreSchemaName(column) == target {
+			return true
+		}
+	}
+	return false
 }
 
 type StoreSchemaMismatchError struct {
@@ -652,12 +723,11 @@ func (s *sqliteStore) UpsertSessionTurn(ctx context.Context, rec SessionTurnReco
 	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
 
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_turns (session_id, prompt_index, turn_index, update_index, update_json)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO session_turns (session_id, prompt_index, turn_index, update_json)
+		VALUES (?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index, turn_index) DO UPDATE SET
-			update_index = CASE WHEN excluded.update_index > session_turns.update_index THEN excluded.update_index ELSE session_turns.update_index END,
 			update_json = excluded.update_json
-	`, rec.SessionID, rec.PromptIndex, rec.TurnIndex, rec.UpdateIndex, rec.UpdateJSON); err != nil {
+	`, rec.SessionID, rec.PromptIndex, rec.TurnIndex, rec.UpdateJSON); err != nil {
 		return fmt.Errorf("upsert session turn: %w", err)
 	}
 	return nil
@@ -669,12 +739,12 @@ func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionI
 	}
 	var rec SessionTurnRecord
 	err := s.db.QueryRowContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, t.update_json
+		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		WHERE s.project_name = ? AND t.session_id = ? AND t.prompt_index = ? AND t.turn_index = ?
 		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex, turnIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON)
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex, turnIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateJSON)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -687,7 +757,7 @@ func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionI
 
 func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, sessionID string, promptIndex int64) ([]SessionTurnRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_index, t.update_json
+		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		WHERE s.project_name = ? AND t.session_id = ? AND t.prompt_index = ?
@@ -701,7 +771,7 @@ func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, session
 	out := []SessionTurnRecord{}
 	for rows.Next() {
 		var rec SessionTurnRecord
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateIndex, &rec.UpdateJSON); err != nil {
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateJSON); err != nil {
 			return nil, fmt.Errorf("scan session turn: %w", err)
 		}
 		rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)

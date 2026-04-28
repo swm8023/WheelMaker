@@ -582,7 +582,7 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT s.project_name, t.session_id, t.prompt_index, t.turn_index, t.update_index, p.updated_at, t.update_json
+		SELECT s.project_name, t.session_id, t.prompt_index, t.turn_index, p.updated_at, t.update_json
 		FROM session_turns t
 		JOIN sessions s ON s.id = t.session_id
 		LEFT JOIN session_prompts p ON p.session_id = t.session_id AND p.prompt_index = t.prompt_index
@@ -612,14 +612,13 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 		var item MonitorSessionMessage
 		var promptIndex int64
 		var turnIndex int64
-		var turnUpdateIndex int64
 		var promptUpdatedAt string
 		var updateJSON string
-		if err := rows.Scan(&item.ProjectName, &item.SessionID, &promptIndex, &turnIndex, &turnUpdateIndex, &promptUpdatedAt, &updateJSON); err != nil {
+		if err := rows.Scan(&item.ProjectName, &item.SessionID, &promptIndex, &turnIndex, &promptUpdatedAt, &updateJSON); err != nil {
 			return nil, err
 		}
 		fallbackIndex++
-		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, turnUpdateIndex, fallbackIndex)
+		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, fallbackIndex)
 		all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: turnIndex})
 	}
 	if err := rows.Err(); err != nil {
@@ -655,14 +654,76 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	return out, nil
 }
 
-func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex, fallbackIndex int64) (method, role, kind, body, status string, requestID, index, subIndex int64, source, ts string) {
+func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, fallbackIndex int64) (method, role, kind, body, status string, requestID, index, subIndex int64, source, ts string) {
 	method = rp.MethodSessionUpdate
 	index = fallbackIndex
-	subIndex = maxInt64(turnUpdateIndex-1, 0)
+	subIndex = 0
 	ts = strings.TrimSpace(promptUpdatedAt)
 
 	updateJSON = strings.TrimSpace(updateJSON)
 	if updateJSON != "" {
+		message := rp.IMMessage{}
+		if err := json.Unmarshal([]byte(updateJSON), &message); err == nil && strings.TrimSpace(message.Method) != "" && !isLegacyMonitorACPMethod(message.Method) {
+			method = strings.TrimSpace(message.Method)
+			switch method {
+			case rp.IMMethodPromptRequest:
+				prompt := rp.IMPromptRequest{}
+				_ = json.Unmarshal(message.Param, &prompt)
+				parts := make([]string, 0, len(prompt.ContentBlocks))
+				for _, block := range prompt.ContentBlocks {
+					if strings.EqualFold(strings.TrimSpace(block.Type), rp.ContentBlockTypeText) && strings.TrimSpace(block.Text) != "" {
+						parts = append(parts, strings.TrimSpace(block.Text))
+					}
+				}
+				body = strings.TrimSpace(strings.Join(parts, " "))
+				role = "user"
+				status = "done"
+			case rp.IMMethodPromptDone:
+				result := rp.IMPromptResult{}
+				_ = json.Unmarshal(message.Param, &result)
+				body = strings.TrimSpace(result.StopReason)
+				role = "system"
+				status = "done"
+			case rp.IMMethodAgentMessage, rp.IMMethodAgentThought, rp.SessionUpdateUserMessageChunk, rp.IMMethodSystem:
+				result := rp.IMTextResult{}
+				_ = json.Unmarshal(message.Param, &result)
+				body = strings.TrimSpace(result.Text)
+				status = "done"
+				switch method {
+				case rp.SessionUpdateUserMessageChunk:
+					role = "user"
+				case rp.IMMethodSystem:
+					role = "system"
+				default:
+					role = "assistant"
+				}
+			case rp.IMMethodToolCall:
+				result := rp.IMToolResult{}
+				_ = json.Unmarshal(message.Param, &result)
+				body = firstNonEmpty(strings.TrimSpace(result.Output), strings.TrimSpace(result.Cmd))
+				role = "system"
+				status = firstNonEmpty(strings.TrimSpace(result.Status), "done")
+			case rp.IMMethodAgentPlan:
+				entries := []rp.IMPlanResult{}
+				_ = json.Unmarshal(message.Param, &entries)
+				parts := make([]string, 0, len(entries))
+				for _, entry := range entries {
+					if strings.TrimSpace(entry.Content) != "" {
+						parts = append(parts, strings.TrimSpace(entry.Content))
+					}
+				}
+				body = strings.TrimSpace(strings.Join(parts, "\n"))
+				role = "assistant"
+				status = "done"
+			default:
+				body = strings.TrimSpace(string(message.Param))
+			}
+			if strings.TrimSpace(kind) == "" {
+				kind = method
+			}
+			return method, role, kind, body, status, requestID, index, subIndex, source, ts
+		}
+
 		var content struct {
 			Method string `json:"method"`
 			ID     int64  `json:"id"`
@@ -733,6 +794,15 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, turnUpdateIndex
 		kind = method
 	}
 	return method, role, kind, body, status, requestID, index, subIndex, source, ts
+}
+
+func isLegacyMonitorACPMethod(method string) bool {
+	switch strings.TrimSpace(method) {
+	case rp.MethodSessionPrompt, rp.MethodSessionUpdate, rp.MethodRequestPermission:
+		return true
+	default:
+		return false
+	}
 }
 
 func monitorRoleFromSessionUpdate(updateKind string) string {

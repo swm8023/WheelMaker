@@ -11,7 +11,7 @@ import type {
   RegistryProject,
   RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
-  RegistrySessionPrompt,
+  RegistrySessionPromptSnapshot,
   RegistrySessionReadResponse,
   RegistrySessionSummary,
   RegistrySyncCheckPayload,
@@ -86,6 +86,12 @@ export class RegistryRepository {
     };
   }
 
+  private normalizeSessionMessageStatus(value: unknown): RegistrySessionMessage['status'] {
+    return value === 'streaming' || value === 'done' || value === 'needs_action'
+      ? value
+      : 'done';
+  }
+
   private extractTextFromACPContent(content: unknown): string {
     if (typeof content === 'string') {
       return content.trim();
@@ -102,6 +108,39 @@ export class RegistryRepository {
       }
     }
     return chunks.join('\n').trim();
+  }
+
+  private extractTextFromIMParam(param: unknown): string {
+    if (typeof param === 'string') {
+      return param.trim();
+    }
+    if (Array.isArray(param)) {
+      const chunks = param
+        .map(item => {
+          if (!item || typeof item !== 'object') return '';
+          const entry = item as Record<string, unknown>;
+          return typeof entry.content === 'string' ? entry.content.trim() : '';
+        })
+        .filter(Boolean);
+      return chunks.join('\n').trim();
+    }
+    if (!param || typeof param !== 'object') {
+      return '';
+    }
+    const input = param as Record<string, unknown>;
+    if (typeof input.text === 'string') {
+      return input.text.trim();
+    }
+    if (typeof input.output === 'string') {
+      return input.output.trim();
+    }
+    if (typeof input.cmd === 'string') {
+      return input.cmd.trim();
+    }
+    if (Array.isArray(input.contentBlocks)) {
+      return this.extractTextFromACPContent(input.contentBlocks);
+    }
+    return '';
   }
 
   private normalizeSessionWireMessage(raw: unknown, fallbackSessionId: string): RegistrySessionMessage | null {
@@ -125,17 +164,14 @@ export class RegistryRepository {
     const turnIndex = typeof input.turnIndex === 'number' && Number.isFinite(input.turnIndex)
       ? Math.trunc(input.turnIndex)
       : 0;
-    const updateIndex = typeof input.updateIndex === 'number' && Number.isFinite(input.updateIndex)
-      ? Math.trunc(input.updateIndex)
-      : 0;
     const content = typeof input.content === 'string' ? input.content.trim() : '';
-    const messageId = `${sessionId}:${promptIndex}:${turnIndex}:${updateIndex}`;
+    const messageId = `${sessionId}:${promptIndex}:${turnIndex}`;
     const now = new Date().toISOString();
     const out: RegistrySessionMessage = {
       messageId,
       sessionId,
       syncIndex: promptIndex > 0 ? promptIndex : undefined,
-      syncSubIndex: turnIndex > 0 ? turnIndex : (updateIndex > 0 ? updateIndex : undefined),
+      syncSubIndex: turnIndex > 0 ? turnIndex : undefined,
       role: 'assistant',
       kind: 'message',
       text: '',
@@ -155,6 +191,9 @@ export class RegistryRepository {
       }
       const payloadDoc = (doc.payload && typeof doc.payload === 'object')
         ? (doc.payload as Record<string, unknown>)
+        : undefined;
+      const paramDoc = (doc.param && typeof doc.param === 'object' && !Array.isArray(doc.param))
+        ? (doc.param as Record<string, unknown>)
         : undefined;
       const params = (doc.params && typeof doc.params === 'object')
         ? (doc.params as Record<string, unknown>)
@@ -181,7 +220,62 @@ export class RegistryRepository {
         }
       }
 
-      if (method === 'session.prompt') {
+      if (method === 'prompt_request') {
+        const promptBlocks = Array.isArray(paramDoc?.contentBlocks) ? paramDoc.contentBlocks : [];
+        out.role = 'user';
+        out.kind = 'message';
+        if (!out.text) {
+          out.text = this.extractTextFromACPContent(promptBlocks);
+        }
+        if (promptBlocks.length > 0) {
+          out.blocks = promptBlocks as RegistrySessionMessage['blocks'];
+        }
+      } else if (method === 'prompt_done') {
+        out.role = 'system';
+        out.kind = 'prompt_result';
+        if (!out.text) {
+          out.text = typeof paramDoc?.stopReason === 'string' ? paramDoc.stopReason : '';
+        }
+      } else if (method === 'user_message_chunk') {
+        out.role = 'user';
+        out.kind = 'message';
+        if (!out.text) {
+          out.text = this.extractTextFromIMParam(doc.param);
+        }
+      } else if (method === 'agent_message_chunk') {
+        out.role = 'assistant';
+        out.kind = 'message';
+        if (!out.text) {
+          out.text = this.extractTextFromIMParam(doc.param);
+        }
+      } else if (method === 'agent_thought_chunk') {
+        out.role = 'assistant';
+        out.kind = 'thought';
+        if (!out.text) {
+          out.text = this.extractTextFromIMParam(doc.param);
+        }
+      } else if (method === 'tool_call') {
+        out.role = 'system';
+        out.kind = 'tool';
+        if (!out.text) {
+          out.text = this.extractTextFromIMParam(doc.param);
+        }
+        if (typeof paramDoc?.status === 'string') {
+          out.status = this.normalizeSessionMessageStatus(paramDoc.status);
+        }
+      } else if (method === 'agent_plan') {
+        out.role = 'assistant';
+        out.kind = 'thought';
+        if (!out.text) {
+          out.text = this.extractTextFromIMParam(doc.param);
+        }
+      } else if (method === 'system') {
+        out.role = 'system';
+        out.kind = 'message';
+        if (!out.text) {
+          out.text = this.extractTextFromIMParam(doc.param);
+        }
+      } else if (method === 'session.prompt') {
         const promptBlocks = Array.isArray(params?.prompt) ? params.prompt : [];
         out.role = 'user';
         if (!out.text) {
@@ -225,6 +319,55 @@ export class RegistryRepository {
     return out;
   }
 
+  private normalizeSessionPromptSnapshot(raw: unknown, fallbackSessionId: string): RegistrySessionPromptSnapshot | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const sessionId = typeof input.sessionId === 'string' && input.sessionId.trim().length > 0
+      ? input.sessionId.trim()
+      : fallbackSessionId;
+    const promptIndex = typeof input.promptIndex === 'number' && Number.isFinite(input.promptIndex)
+      ? Math.trunc(input.promptIndex)
+      : 0;
+    const turnIndex = typeof input.turnIndex === 'number' && Number.isFinite(input.turnIndex)
+      ? Math.trunc(input.turnIndex)
+      : 0;
+    const content = Array.isArray(input.content)
+      ? input.content.filter((item): item is string => typeof item === 'string').map(item => item.trim())
+      : [];
+    if (!sessionId || promptIndex <= 0) {
+      return null;
+    }
+    return {
+      sessionId,
+      promptIndex,
+      turnIndex: turnIndex > 0 ? turnIndex : content.length,
+      content,
+    };
+  }
+
+  private flattenPromptSnapshotMessages(
+    prompts: RegistrySessionPromptSnapshot[],
+    fallbackSessionId: string,
+  ): RegistrySessionMessage[] {
+    const messages: RegistrySessionMessage[] = [];
+    for (const prompt of prompts) {
+      for (let index = 0; index < prompt.content.length; index += 1) {
+        const message = this.normalizeSessionWireMessage({
+          sessionId: prompt.sessionId,
+          promptIndex: prompt.promptIndex,
+          turnIndex: index + 1,
+          content: prompt.content[index],
+        }, fallbackSessionId);
+        if (message) {
+          messages.push(message);
+        }
+      }
+    }
+    return messages;
+  }
+
   private async listSessionsByMethod(projectId: string, method: 'session.list'): Promise<RegistrySessionSummary[]> {
     const resp = await this.client.request({
       method,
@@ -241,24 +384,19 @@ export class RegistryRepository {
   private async readSessionByMethod(
     projectId: string,
     sessionId: string,
-    afterIndex: number,
-    afterSubIndex: number,
+    promptIndex: number,
+    turnIndex: number,
     method: 'session.read',
   ): Promise<RegistrySessionReadResponse> {
     const resp = await this.client.request({
       method,
       projectId,
-      payload: afterIndex > 0 || afterSubIndex > 0 ? {sessionId, afterIndex, afterSubIndex} : {sessionId},
+      payload: promptIndex > 0 || turnIndex > 0 ? {sessionId, promptIndex, turnIndex} : {sessionId},
       timeoutMs: 15000,
     });
     const payload = (resp.payload ?? {}) as {
       session?: unknown;
       prompts?: unknown[];
-      messages?: unknown[];
-      lastIndex?: number;
-      lastSubIndex?: number;
-      lastPromptIndex?: number;
-      lastPromptUpdateIndex?: number;
     };
     const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
       sessionId,
@@ -268,87 +406,15 @@ export class RegistryRepository {
       messageCount: 0,
     };
 
-    if (Array.isArray(payload.messages) && !Array.isArray(payload.prompts)) {
-      const normalizedMessages = payload.messages
-        .map(item => this.normalizeSessionWireMessage(item, normalizedSession.sessionId))
-        .filter((item): item is RegistrySessionMessage => !!item);
-      const maxSyncIndex = normalizedMessages.reduce((max, message) => Math.max(max, message.syncIndex ?? 0), 0);
-      return {
-        session: normalizedSession,
-        prompts: [],
-        messages: normalizedMessages,
-        lastIndex: typeof payload.lastIndex === 'number' ? payload.lastIndex : maxSyncIndex,
-        lastSubIndex: typeof payload.lastSubIndex === 'number' ? payload.lastSubIndex : 0,
-      };
-    }
-
-    const normalizedPrompts: RegistrySessionPrompt[] = (Array.isArray(payload.prompts) ? payload.prompts : [])
-      .map(raw => raw as Record<string, unknown>)
-      .map(prompt => ({
-        messageId: typeof prompt?.messageId === 'string' ? prompt.messageId : (typeof prompt?.promptId === 'string' ? prompt.promptId : ''),
-        promptId: typeof prompt?.promptId === 'string' ? prompt.promptId : '',
-        sessionId: typeof prompt?.sessionId === 'string' && prompt.sessionId.trim().length > 0 ? prompt.sessionId : normalizedSession.sessionId,
-        promptIndex: Number(prompt?.promptIndex ?? 0),
-        updateIndex: Number(prompt?.updateIndex ?? 0),
-        title: typeof prompt?.title === 'string' ? prompt.title : '',
-        stopReason: typeof prompt?.stopReason === 'string' ? prompt.stopReason : undefined,
-        status: typeof prompt?.status === 'string' ? prompt.status : 'done',
-        updatedAt: typeof prompt?.updatedAt === 'string' ? prompt.updatedAt : '',
-        turns: (Array.isArray(prompt?.turns) ? prompt.turns : [])
-          .map(turnRaw => turnRaw as Record<string, unknown>)
-          .map(turn => {
-            const promptIndex = Number(turn?.promptIndex ?? prompt?.promptIndex ?? 0);
-            const turnIndex = Number(turn?.turnIndex ?? 0);
-            const updateIndex = Number(turn?.updateIndex ?? 0);
-            return {
-              promptIndex,
-              turnIndex,
-              updateIndex,
-              role: turn?.role as RegistrySessionPrompt['turns'][number]['role'],
-              kind: turn?.kind as RegistrySessionPrompt['turns'][number]['kind'],
-              text: typeof turn?.text === 'string' ? turn.text : undefined,
-              status: turn?.status as RegistrySessionPrompt['turns'][number]['status'],
-              toolCallId: typeof turn?.toolCallId === 'string' ? turn.toolCallId : undefined,
-              blocks: Array.isArray(turn?.blocks) ? (turn.blocks as RegistrySessionMessage['blocks']) : undefined,
-            };
-          })
-          .filter(turn => turn.promptIndex > 0 && turn.turnIndex > 0 && turn.updateIndex > 0),
-      }))
-      .filter(prompt => !!prompt.messageId && !!prompt.promptId && prompt.promptIndex > 0 && prompt.updateIndex > 0)
+    const normalizedPrompts: RegistrySessionPromptSnapshot[] = (Array.isArray(payload.prompts) ? payload.prompts : [])
+      .map(item => this.normalizeSessionPromptSnapshot(item, normalizedSession.sessionId))
+      .filter((item): item is RegistrySessionPromptSnapshot => !!item)
       .sort((a, b) => a.promptIndex - b.promptIndex);
-
-    const flattenedPromptMessages = normalizedPrompts.flatMap(prompt =>
-      prompt.turns.map(turn => ({
-        messageId: `${prompt.sessionId}:${turn.promptIndex}:${turn.turnIndex}:${turn.updateIndex}`,
-        sessionId: prompt.sessionId,
-        syncIndex: prompt.promptIndex,
-        syncSubIndex: turn.updateIndex,
-        role: turn.role,
-        kind: turn.kind,
-        text: turn.text,
-        status: turn.status,
-        createdAt: prompt.updatedAt,
-        updatedAt: prompt.updatedAt,
-        blocks: turn.blocks,
-      })),
-    );
-    const normalizedMessages = ((Array.isArray(payload.messages) && payload.messages.length > 0) ? payload.messages : flattenedPromptMessages)
-      .map(item => this.normalizeSessionMessage(item, normalizedSession.sessionId))
-      .filter((item): item is RegistrySessionMessage => !!item);
-    const maxSyncIndex = normalizedMessages.reduce((max, message) => Math.max(max, message.syncIndex ?? 0), 0);
-    const maxPromptIndex = normalizedPrompts.reduce((max, prompt) => Math.max(max, prompt.promptIndex), 0);
-    const lastIndex = typeof payload.lastPromptIndex === 'number'
-      ? payload.lastPromptIndex
-      : (typeof payload.lastIndex === 'number' ? payload.lastIndex : Math.max(maxPromptIndex, maxSyncIndex));
-    const lastSubIndex = typeof payload.lastPromptUpdateIndex === 'number'
-      ? payload.lastPromptUpdateIndex
-      : (typeof payload.lastSubIndex === 'number' ? payload.lastSubIndex : 0);
+    const normalizedMessages = this.flattenPromptSnapshotMessages(normalizedPrompts, normalizedSession.sessionId);
     return {
       session: normalizedSession,
       prompts: normalizedPrompts,
       messages: normalizedMessages,
-      lastIndex,
-      lastSubIndex,
     };
   }
 
@@ -584,8 +650,8 @@ export class RegistryRepository {
     return this.listSessionsByMethod(projectId, 'session.list');
   }
 
-  async readSession(projectId: string, sessionId: string, afterIndex = 0, afterSubIndex = 0): Promise<RegistrySessionReadResponse> {
-    return this.readSessionByMethod(projectId, sessionId, afterIndex, afterSubIndex, 'session.read');
+  async readSession(projectId: string, sessionId: string, promptIndex = 0, turnIndex = 0): Promise<RegistrySessionReadResponse> {
+    return this.readSessionByMethod(projectId, sessionId, promptIndex, turnIndex, 'session.read');
   }
 
   async createSession(projectId: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {

@@ -341,23 +341,18 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		return map[string]any{"sessions": sessions}, nil
 	case "session.read":
 		var req struct {
-			SessionID        string `json:"sessionId"`
-			AfterPromptIndex int64  `json:"afterPromptIndex,omitempty"`
-			AfterIndex       int64  `json:"afterIndex,omitempty"`
-			AfterSubIndex    int64  `json:"afterSubIndex,omitempty"`
+			SessionID   string `json:"sessionId"`
+			PromptIndex int64  `json:"promptIndex,omitempty"`
+			TurnIndex   int64  `json:"turnIndex,omitempty"`
 		}
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.read payload: %w", err)
 		}
-		afterPromptIndex := req.AfterPromptIndex
-		if afterPromptIndex <= 0 {
-			afterPromptIndex = req.AfterIndex
-		}
-		summary, messages, lastIndex, lastSubIndex, err := c.sessionRecorder.ReadSessionMessages(ctx, req.SessionID, afterPromptIndex, req.AfterSubIndex)
+		summary, prompts, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, req.PromptIndex, req.TurnIndex)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"session": summary, "messages": messages, "lastIndex": lastIndex, "lastSubIndex": lastSubIndex}, nil
+		return map[string]any{"session": summary, "prompts": prompts}, nil
 	case "session.new":
 		var req struct {
 			Title string `json:"title,omitempty"`
@@ -372,14 +367,16 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := c.RecordEvent(ctx, SessionViewEvent{
 			Type:      SessionViewEventTypeACP,
 			SessionID: sess.ID,
-			Content: buildACPMethodParamsContent(acp.MethodSessionNew, sessionViewSessionNewParams{
-				SessionID: sess.ID,
-				Title:     firstNonEmpty(req.Title, sess.ID),
+			Content: acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{
+				"params": sessionViewSessionNewParams{
+					SessionID: sess.ID,
+					Title:     firstNonEmpty(req.Title, sess.ID),
+				},
 			}),
 		}); err != nil {
 			return nil, err
 		}
-		summary, _, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, sess.ID, 0, 0)
+		summary, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.ID, 0, 0)
 		if err != nil {
 			return nil, err
 		}

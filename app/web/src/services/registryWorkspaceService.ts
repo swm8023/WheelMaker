@@ -10,6 +10,7 @@ import type {
   RegistryGitStatus,
   RegistryProject,
   RegistrySessionMessage,
+  RegistrySessionReadResponse,
   RegistrySessionSummary,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
@@ -233,16 +234,15 @@ export class RegistryWorkspaceService {
     return this.repository.listSessions(this.session.selectedProjectId);
   }
 
-  async readSession(sessionId: string, afterIndex = 0, afterSubIndex = 0): Promise<{session: RegistrySessionSummary; messages: RegistrySessionMessage[]; lastIndex: number; lastSubIndex: number}> {
+  async readSession(sessionId: string, promptIndex = 0, turnIndex = 0): Promise<{session: RegistrySessionSummary; prompts: RegistrySessionReadResponse['prompts']; messages: RegistrySessionMessage[]}> {
     if (!this.session || !this.repository) {
       return {
         session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0},
+        prompts: [],
         messages: [],
-        lastIndex: 0,
-        lastSubIndex: 0,
       };
     }
-    return this.repository.readSession(this.session.selectedProjectId, sessionId, afterIndex, afterSubIndex);
+    return this.repository.readSession(this.session.selectedProjectId, sessionId, promptIndex, turnIndex);
   }
 
   async createSession(title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {

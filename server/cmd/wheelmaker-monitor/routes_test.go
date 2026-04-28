@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 )
 
 func TestActionUpdatePublishWritesFullUpdateSignal(t *testing.T) {
@@ -99,7 +100,6 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 		SessionID:   "sess-1",
 		PromptIndex: 1,
 		TurnIndex:   1,
-		UpdateIndex: 1,
 		UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)

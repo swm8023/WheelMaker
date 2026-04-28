@@ -9,7 +9,8 @@ describe('web clear local cache settings', () => {
     const workspacePersistence = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'workspacePersistence.ts'), 'utf8');
 
     expect(mainTsx).toContain('Clear Local Cache (Keep Token)');
-    expect(mainTsx).toContain("window.confirm('Clear all local cache data except token?')");
+    expect(mainTsx).toContain('window.confirm(');
+    expect(mainTsx).toContain('Clear all local cache data except token?');
     expect(mainTsx).toContain('workspaceStore.clearLocalCachePreservingToken();');
     expect(mainTsx).toContain('window.location.reload();');
 

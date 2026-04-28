@@ -1670,7 +1670,6 @@ func TestStoreSessionTurnRoundTrip(t *testing.T) {
 		SessionID:   "sess-1",
 		PromptIndex: 1,
 		TurnIndex:   1,
-		UpdateIndex: 1,
 		UpdateJSON:  turnJSON,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)
@@ -1728,7 +1727,6 @@ func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 		SessionID:   "sess-1",
 		PromptIndex: 1,
 		TurnIndex:   1,
-		UpdateIndex: 1,
 		UpdateJSON:  `{"method":"session/request_permission","id":42,"params":{"toolCall":{"title":"Run tool?"}}}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn initial: %v", err)
@@ -1737,7 +1735,6 @@ func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 		SessionID:   "sess-1",
 		PromptIndex: 1,
 		TurnIndex:   1,
-		UpdateIndex: 2,
 		UpdateJSON:  `{"method":"session/request_permission","id":42,"result":{"outcome":{"outcome":"done"}}}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn merged: %v", err)
@@ -1749,9 +1746,6 @@ func TestStoreSessionTurnUpsertRoundTrip(t *testing.T) {
 	}
 	if len(turns) != 1 {
 		t.Fatalf("ListSessionTurns() len = %d, want 1", len(turns))
-	}
-	if turns[0].UpdateIndex != 2 {
-		t.Fatalf("turn updateIndex = %d, want 2", turns[0].UpdateIndex)
 	}
 	var resultDoc struct {
 		Result struct {
@@ -1813,9 +1807,11 @@ func sessionViewCreatedEvent(sessionID, title string) SessionViewEvent {
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildACPMethodParamsContent(acp.MethodSessionNew, map[string]any{
-			"sessionId": sessionID,
-			"title":     title,
+		Content: acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{
+			"params": map[string]any{
+				"sessionId": sessionID,
+				"title":     title,
+			},
 		}),
 	}
 }
@@ -1830,7 +1826,9 @@ func sessionViewPromptEvent(sessionID, text string, blocks []acp.ContentBlock) S
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content:   buildACPMethodParamsContent(acp.MethodSessionPrompt, params),
+		Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+			"params": params,
+		}),
 	}
 }
 
@@ -1838,9 +1836,11 @@ func sessionViewUpdateEvent(sessionID string, update acp.SessionUpdate) SessionV
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
-			SessionID: sessionID,
-			Update:    update,
+		Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
+			"params": acp.SessionUpdateParams{
+				SessionID: sessionID,
+				Update:    update,
+			},
 		}),
 	}
 }
@@ -1866,8 +1866,10 @@ func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEve
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildACPMethodResultContent(acp.MethodSessionPrompt, acp.SessionPromptResult{
-			StopReason: stopReason,
+		Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+			"result": acp.SessionPromptResult{
+				StopReason: stopReason,
+			},
 		}),
 	}
 }
@@ -1884,7 +1886,10 @@ func sessionViewPermissionRequestedEvent(sessionID, text string, requestID int64
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content:   buildACPMethodRequestContent(requestID, acp.MethodRequestPermission, params),
+		Content: acp.BuildACPContentJSON(acp.MethodRequestPermission, map[string]any{
+			"id":     requestID,
+			"params": params,
+		}),
 	}
 }
 
@@ -1892,8 +1897,11 @@ func sessionViewPermissionResolvedEvent(sessionID string, requestID int64, statu
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content: buildACPMethodResponseContent(requestID, acp.MethodRequestPermission, acp.PermissionResponse{
-			Outcome: acp.PermissionResult{Outcome: status},
+		Content: acp.BuildACPContentJSON(acp.MethodRequestPermission, map[string]any{
+			"id": requestID,
+			"result": acp.PermissionResponse{
+				Outcome: acp.PermissionResult{Outcome: status},
+			},
 		}),
 		UpdatedAt: updatedAt,
 	}
@@ -1911,7 +1919,9 @@ func sessionViewACPSystemEvent(sessionID, text string) SessionViewEvent {
 	return SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: sessionID,
-		Content:   buildACPMethodResultContent(acp.IMMethodSystem, text),
+		Content: acp.BuildACPContentJSON(acp.IMMethodSystem, map[string]any{
+			"result": text,
+		}),
 	}
 }
 
@@ -1933,6 +1943,75 @@ func TestBuildConvertedMessageFromSessionUpdateReturnsToolTurnKey(t *testing.T) 
 	}
 	if turnKey != "call-1" {
 		t.Fatalf("turnKey = %q, want %q", turnKey, "call-1")
+	}
+}
+
+func TestBuildACPContentJSONIncludesMethodAndFields(t *testing.T) {
+	raw := acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+		"params": acp.SessionPromptParams{
+			SessionID: "sess-1",
+			Prompt:    []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}},
+		},
+	})
+
+	var doc struct {
+		Method string                  `json:"method"`
+		Params acp.SessionPromptParams `json:"params"`
+	}
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		t.Fatalf("json.Unmarshal(buildACPContentJSON): %v", err)
+	}
+	if doc.Method != acp.MethodSessionPrompt {
+		t.Fatalf("method = %q, want %q", doc.Method, acp.MethodSessionPrompt)
+	}
+	if doc.Params.SessionID != "sess-1" {
+		t.Fatalf("params.sessionId = %q, want %q", doc.Params.SessionID, "sess-1")
+	}
+	if len(doc.Params.Prompt) != 1 || strings.TrimSpace(doc.Params.Prompt[0].Text) != "hello" {
+		t.Fatalf("params.prompt = %#v, want single text block", doc.Params.Prompt)
+	}
+}
+
+func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
+	merged, err := mergeTurnMessage(
+		sessionTurnMessage{
+			SessionID:   "sess-1",
+			method:      acp.IMMethodAgentMessage,
+			payload:     acp.IMTextResult{Text: "hello"},
+			PromptIndex: 1,
+			TurnIndex:   2,
+		},
+		sessionTurnMessage{
+			SessionID:   "sess-1",
+			method:      acp.IMMethodAgentMessage,
+			payload:     acp.IMTextResult{Text: " world"},
+			PromptIndex: 1,
+			TurnIndex:   2,
+		},
+		sessionTurnMergeText,
+		2,
+	)
+	if err != nil {
+		t.Fatalf("mergeTurnMessage: %v", err)
+	}
+	result, ok := merged.payload.(acp.IMTextResult)
+	if !ok {
+		t.Fatalf("merged.payload type = %T, want %T", merged.payload, acp.IMTextResult{})
+	}
+	if result.Text != "hello world" {
+		t.Fatalf("merged text = %q, want %q", result.Text, "hello world")
+	}
+}
+
+func TestCurrentPromptStateLockedReturnsNilWhenMissing(t *testing.T) {
+	c := newSessionViewTestClient(t)
+
+	state, err := c.sessionRecorder.currentPromptStateLocked(context.Background(), "sess-missing")
+	if err != nil {
+		t.Fatalf("currentPromptStateLocked: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("state = %#v, want nil", *state)
 	}
 }
 
@@ -2095,7 +2174,9 @@ func TestParseSessionViewEventSeparatesControlAndMessageEvents(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventType("ACP"),
 				SessionID: "sess-1",
-				Content:   buildACPMethodParamsContent(acp.MethodSessionPrompt, acp.SessionPromptParams{}),
+				Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+					"params": acp.SessionPromptParams{},
+				}),
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
@@ -2148,7 +2229,7 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   buildACPMethodContentJSON(acp.MethodSessionPrompt, nil),
+				Content:   acp.BuildACPContentJSON(acp.MethodSessionPrompt, nil),
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
@@ -2170,7 +2251,7 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   buildACPMethodContentJSON(acp.MethodSessionPrompt, map[string]any{"params": "oops"}),
+				Content:   acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{"params": "oops"}),
 			},
 			wantMessage:   true,
 			wantACPMethod: acp.MethodSessionPrompt,
@@ -2192,7 +2273,7 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   buildACPMethodContentJSON(acp.MethodSessionUpdate, nil),
+				Content:   acp.BuildACPContentJSON(acp.MethodSessionUpdate, nil),
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.MethodSessionUpdate,
@@ -2203,7 +2284,7 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   buildACPMethodContentJSON(acp.MethodSessionUpdate, map[string]any{"params": "oops"}),
+				Content:   acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{"params": "oops"}),
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.MethodSessionUpdate,
@@ -2214,7 +2295,7 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   buildACPMethodContentJSON(acp.IMMethodSystem, nil),
+				Content:   acp.BuildACPContentJSON(acp.IMMethodSystem, nil),
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.IMMethodSystem,
@@ -2225,7 +2306,9 @@ func TestParseSessionViewEventSilentlyHandlesMissingParams(t *testing.T) {
 			event: SessionViewEvent{
 				Type:      SessionViewEventTypeACP,
 				SessionID: "sess-1",
-				Content:   buildACPMethodResultContent(acp.IMMethodSystem, "ignored"),
+				Content: acp.BuildACPContentJSON(acp.IMMethodSystem, map[string]any{
+					"result": "ignored",
+				}),
 			},
 			wantMessage:   false,
 			wantACPMethod: acp.IMMethodSystem,
@@ -2330,7 +2413,7 @@ func TestSessionViewCreatedEventSilentlyHandlesMalformedTitle(t *testing.T) {
 	event := SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: "sess-1",
-		Content:   buildACPMethodContentJSON(acp.MethodSessionNew, map[string]any{"params": map[string]any{"title": 123}}),
+		Content:   acp.BuildACPContentJSON(acp.MethodSessionNew, map[string]any{"params": map[string]any{"title": 123}}),
 	}
 
 	if err := c.RecordEvent(context.Background(), event); err != nil {
@@ -2375,9 +2458,6 @@ func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 	}
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
-	}
-	if messages[1].UpdateIndex != 2 {
-		t.Fatalf("messages[1].UpdateIndex = %d, want 2", messages[1].UpdateIndex)
 	}
 	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
 	if text := extractTextChunk(update2.Content); text != "hello world" {
@@ -2465,9 +2545,15 @@ func TestSessionReadOmitsTurnIDAndSummaryExtras(t *testing.T) {
 	if _, ok := summaryType.FieldByName("ProjectName"); ok {
 		t.Fatalf("sessionViewSummary unexpectedly still contains ProjectName field")
 	}
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	if _, ok := body["messages"]; ok {
+		t.Fatalf("session.read unexpectedly returned messages: %+v", body)
+	}
+	prompts := body["prompts"].([]sessionPromptSnapshot)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if prompts[0].TurnIndex != 1 || len(prompts[0].Content) != 1 {
+		t.Fatalf("prompt snapshot = %#v, want turnIndex=1 content len=1", prompts[0])
 	}
 }
 
@@ -2500,6 +2586,199 @@ func TestSessionViewPublishMessageOmitsTurnID(t *testing.T) {
 	}
 	if _, ok := published["turnId"]; ok {
 		t.Fatalf("published payload unexpectedly contains turnId: %+v", published)
+	}
+}
+
+func TestSessionViewPublishMessageOmitsUpdateIndexAndPublishesMergedTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	var published []map[string]any
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		published = append(published, body)
+		return nil
+	})
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Merge Publish")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "say hi", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello "}),
+		Status:        "streaming",
+	})); err != nil {
+		t.Fatalf("RecordEvent update1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"}),
+		Status:        "done",
+	})); err != nil {
+		t.Fatalf("RecordEvent update2: %v", err)
+	}
+
+	if len(published) < 3 {
+		t.Fatalf("published len = %d, want at least 3", len(published))
+	}
+	last := published[len(published)-1]
+	if _, ok := last["updateIndex"]; ok {
+		t.Fatalf("published payload unexpectedly contains updateIndex: %+v", last)
+	}
+	if got := last["turnIndex"].(int64); got != 2 {
+		t.Fatalf("published turnIndex = %d, want 2", got)
+	}
+	content, _ := last["content"].(string)
+	if text := extractTextChunk(decodeTurnSessionUpdate(t, content).Content); text != "hello world" {
+		t.Fatalf("published content text = %q, want %q", text, "hello world")
+	}
+}
+
+func TestSessionReadWithoutCheckpointReturnsPromptSnapshots(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Task")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "first", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "one"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "second", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt #2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "two"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update #2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished #2: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	if _, ok := body["messages"]; ok {
+		t.Fatalf("session.read unexpectedly returned messages: %+v", body)
+	}
+	if _, ok := body["lastIndex"]; ok {
+		t.Fatalf("session.read unexpectedly returned lastIndex: %+v", body)
+	}
+	if _, ok := body["lastSubIndex"]; ok {
+		t.Fatalf("session.read unexpectedly returned lastSubIndex: %+v", body)
+	}
+
+	rawPrompts, err := json.Marshal(body["prompts"])
+	if err != nil {
+		t.Fatalf("json.Marshal(prompts): %v", err)
+	}
+	var prompts []struct {
+		SessionID   string   `json:"sessionId"`
+		PromptIndex int64    `json:"promptIndex"`
+		TurnIndex   int64    `json:"turnIndex"`
+		Content     []string `json:"content"`
+	}
+	if err := json.Unmarshal(rawPrompts, &prompts); err != nil {
+		t.Fatalf("json.Unmarshal(prompts): %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("prompts len = %d, want 2", len(prompts))
+	}
+	if prompts[0].PromptIndex != 1 || prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
+		t.Fatalf("prompt[0] = %#v, want promptIndex=1 turnIndex=2 content len=2", prompts[0])
+	}
+	if prompts[1].PromptIndex != 2 || prompts[1].TurnIndex != 2 || len(prompts[1].Content) != 2 {
+		t.Fatalf("prompt[1] = %#v, want promptIndex=2 turnIndex=2 content len=2", prompts[1])
+	}
+}
+
+func TestSessionReadReturnsCheckpointPromptSnapshotAndLaterPrompts(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Task")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "first", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "one"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished #1: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "second", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt #2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "two"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update #2: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished #2: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 2})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	rawPrompts, err := json.Marshal(body["prompts"])
+	if err != nil {
+		t.Fatalf("json.Marshal(prompts): %v", err)
+	}
+	var prompts []struct {
+		PromptIndex int64    `json:"promptIndex"`
+		TurnIndex   int64    `json:"turnIndex"`
+		Content     []string `json:"content"`
+	}
+	if err := json.Unmarshal(rawPrompts, &prompts); err != nil {
+		t.Fatalf("json.Unmarshal(prompts): %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("prompts len = %d, want 2", len(prompts))
+	}
+	if prompts[0].PromptIndex != 1 || prompts[0].TurnIndex != 2 {
+		t.Fatalf("prompt[0] = %#v, want checkpoint prompt snapshot", prompts[0])
+	}
+	if prompts[1].PromptIndex != 2 || prompts[1].TurnIndex != 2 {
+		t.Fatalf("prompt[1] = %#v, want later prompt snapshot", prompts[1])
 	}
 }
 
@@ -2545,9 +2824,9 @@ func TestSessionRecorderResetPromptStateRestartsIndexes(t *testing.T) {
 
 func TestSessionMessagePageTracksLatestCursorBeyondFilteredTurns(t *testing.T) {
 	page := newSessionMessagePage(2, 2)
-	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateIndex: 1, UpdateJSON: `{}`})
-	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 1, UpdateIndex: 1, UpdateJSON: `{}`})
-	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 2, UpdateIndex: 1, UpdateJSON: `{}`})
+	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateJSON: `{}`})
+	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 1, UpdateJSON: `{}`})
+	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 2, UpdateJSON: `{}`})
 
 	if len(page.messages) != 0 {
 		t.Fatalf("page.messages len = %d, want 0", len(page.messages))
@@ -2715,9 +2994,11 @@ func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID
 	promptEvent := SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: "client-1",
-		Content: buildACPMethodParamsContent(acp.MethodSessionPrompt, acp.SessionPromptParams{
-			SessionID: "acp-1",
-			Prompt:    []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "run"}},
+		Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+			"params": acp.SessionPromptParams{
+				SessionID: "acp-1",
+				Prompt:    []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "run"}},
+			},
 		}),
 	}
 	if err := c.RecordEvent(ctx, promptEvent); err != nil {
@@ -2727,11 +3008,13 @@ func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID
 	updateEvent := SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: "client-1",
-		Content: buildACPMethodParamsContent(acp.MethodSessionUpdate, acp.SessionUpdateParams{
-			SessionID: "acp-1",
-			Update: acp.SessionUpdate{
-				SessionUpdate: acp.SessionUpdateAgentMessageChunk,
-				Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+		Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
+			"params": acp.SessionUpdateParams{
+				SessionID: "acp-1",
+				Update: acp.SessionUpdate{
+					SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+					Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "hello"}),
+				},
 			},
 		}),
 	}
@@ -2779,9 +3062,6 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	if len(turns) != 2 {
 		t.Fatalf("turns len = %d, want 2", len(turns))
 	}
-	if turns[1].UpdateIndex != 2 {
-		t.Fatalf("tool turn updateIndex = %d, want 2", turns[1].UpdateIndex)
-	}
 	if got := decodeTurnSessionUpdate(t, turns[1].UpdateJSON).Title; strings.TrimSpace(got) != "Build finished" {
 		t.Fatalf("turns[1].title = %q, want Build finished", got)
 	}
@@ -2828,14 +3108,11 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
 		t.Fatalf("stored assistant update kind = %q, want %q", updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
 	}
-	if stored[1].UpdateIndex != 2 {
-		t.Fatalf("stored assistant UpdateIndex = %d, want 2", stored[1].UpdateIndex)
-	}
 	if text := strings.TrimSpace(extractTextChunk(updateStored.Content)); text != "hello world" {
 		t.Fatalf("stored assistant text = %q, want hello world", text)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -2844,14 +3121,24 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	rawPrompts, err := json.Marshal(body["prompts"])
+	if err != nil {
+		t.Fatalf("json.Marshal(prompts): %v", err)
 	}
-	if messages[1].UpdateIndex != 2 {
-		t.Fatalf("messages[1].UpdateIndex = %d, want 2", messages[1].UpdateIndex)
+	var prompts []struct {
+		TurnIndex int64    `json:"turnIndex"`
+		Content   []string `json:"content"`
 	}
-	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
+	if err := json.Unmarshal(rawPrompts, &prompts); err != nil {
+		t.Fatalf("json.Unmarshal(prompts): %v", err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
+		t.Fatalf("prompt snapshot = %#v, want turnIndex=2 content len=2", prompts[0])
+	}
+	update2 := decodeTurnSessionUpdate(t, prompts[0].Content[1])
 	if strings.TrimSpace(extractTextChunk(update2.Content)) != "hello world" {
 		t.Fatalf("message[1] text = %q, want hello world", extractTextChunk(update2.Content))
 	}
@@ -2998,16 +3285,16 @@ func TestSessionViewMergedTurnPublishesIncomingContentWithMergedIndices(t *testi
 	if got := last["turnIndex"].(int64); got != 2 {
 		t.Fatalf("published turnIndex = %d, want 2", got)
 	}
-	if got := last["updateIndex"].(int64); got != 2 {
-		t.Fatalf("published updateIndex = %d, want 2", got)
+	if _, ok := last["updateIndex"]; ok {
+		t.Fatalf("published payload unexpectedly contains updateIndex: %+v", last)
 	}
 	content, _ := last["content"].(string)
-	if text := extractTextChunk(decodeTurnSessionUpdate(t, content).Content); text != "world" {
-		t.Fatalf("published content text = %q, want world", text)
+	if text := extractTextChunk(decodeTurnSessionUpdate(t, content).Content); text != "helloworld" {
+		t.Fatalf("published content text = %q, want helloworld", text)
 	}
 }
 
-func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
+func TestSessionViewReadReturnsCheckpointPromptSnapshot(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
@@ -3027,7 +3314,7 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 1})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3036,22 +3323,19 @@ func TestSessionViewReadAfterIndexReturnsIncrementalMessages(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	prompts := body["prompts"].([]sessionPromptSnapshot)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if method := decodeTurnMethod(t, messages[0].Content); method != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("messages[0] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
+	if prompts[0].PromptIndex != 1 || prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
+		t.Fatalf("prompt snapshot = %#v, want promptIndex=1 turnIndex=2 content len=2", prompts[0])
 	}
-	if got := body["lastIndex"].(int64); got != 1 {
-		t.Fatalf("lastIndex = %d, want 1", got)
-	}
-	if got := body["lastSubIndex"].(int64); got != 2 {
-		t.Fatalf("lastSubIndex = %d, want 2", got)
+	if method := decodeTurnMethod(t, prompts[0].Content[1]); method != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("prompt content[1] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
 	}
 }
 
-func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
+func TestSessionViewReadReturnsMergedStreamingPromptSnapshot(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Stream")); err != nil {
@@ -3064,7 +3348,7 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 		t.Fatalf("RecordEvent chunk: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 1})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3073,19 +3357,16 @@ func TestSessionViewStreamingChunksAdvanceSyncIndexBeforeFlush(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	prompts := body["prompts"].([]sessionPromptSnapshot)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	update := decodeTurnSessionUpdate(t, messages[0].Content)
+	if prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
+		t.Fatalf("prompt snapshot = %#v, want turnIndex=2 content len=2", prompts[0])
+	}
+	update := decodeTurnSessionUpdate(t, prompts[0].Content[1])
 	if text := strings.TrimSpace(extractTextChunk(update.Content)); text != "hello" {
 		t.Fatalf("message text = %q, want hello", text)
-	}
-	if got := body["lastIndex"].(int64); got != 1 {
-		t.Fatalf("lastIndex = %d, want 1", got)
-	}
-	if got := body["lastSubIndex"].(int64); got != 2 {
-		t.Fatalf("lastSubIndex = %d, want 2", got)
 	}
 }
 
@@ -3126,9 +3407,6 @@ func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 	if len(turns) != 2 {
 		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
 	}
-	if turns[1].UpdateIndex != 2 {
-		t.Fatalf("assistant turn updateIndex = %d, want 2", turns[1].UpdateIndex)
-	}
 	update2 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
 	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "hello world" {
 		t.Fatalf("assistant text = %q, want hello world", text)
@@ -3162,7 +3440,7 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 0})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3171,33 +3449,36 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 4 {
-		t.Fatalf("messages len = %d, want 4 (prompt + assistant + thought + tool)", len(messages))
+	prompts := body["prompts"].([]sessionPromptSnapshot)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if prompts[0].TurnIndex != 4 || len(prompts[0].Content) != 4 {
+		t.Fatalf("prompt snapshot = %#v, want turnIndex=4 content len=4", prompts[0])
 	}
 
 	seen := map[string]bool{}
-	for _, message := range messages {
-		if decodeTurnMethod(t, message.Content) == acp.MethodSessionPrompt {
+	for _, content := range prompts[0].Content {
+		if decodeTurnMethod(t, content) == acp.MethodSessionPrompt {
 			seen["prompt"] = true
 			continue
 		}
-		update := decodeTurnSessionUpdate(t, message.Content)
+		update := decodeTurnSessionUpdate(t, content)
 		if strings.TrimSpace(update.SessionUpdate) != "" {
 			seen[update.SessionUpdate] = true
 		}
 	}
 	if !seen["prompt"] {
-		t.Fatalf("missing prompt message, messages=%+v", messages)
+		t.Fatalf("missing prompt message, prompts=%+v", prompts)
 	}
 	if !seen[acp.SessionUpdateAgentMessageChunk] {
-		t.Fatalf("missing agent message chunk, messages=%+v", messages)
+		t.Fatalf("missing agent message chunk, prompts=%+v", prompts)
 	}
 	if !seen[acp.SessionUpdateAgentThoughtChunk] {
-		t.Fatalf("missing agent thought chunk, messages=%+v", messages)
+		t.Fatalf("missing agent thought chunk, prompts=%+v", prompts)
 	}
 	if !seen[acp.SessionUpdateToolCallUpdate] {
-		t.Fatalf("missing tool call update, messages=%+v", messages)
+		t.Fatalf("missing tool call update, prompts=%+v", prompts)
 	}
 }
 func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
@@ -3208,7 +3489,7 @@ func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
 	}
 }
 
-func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
+func TestSessionViewReadRepairsSameTurnOverwriteFromCheckpoint(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
 	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
@@ -3232,7 +3513,7 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 		t.Fatalf("RecordEvent update #2: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "afterIndex": 1, "afterSubIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 1})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3241,18 +3522,18 @@ func TestSessionViewReadAfterSubIndexReturnsUpdatedMessage(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want 1", len(messages))
+	prompts := body["prompts"].([]sessionPromptSnapshot)
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if method := decodeTurnMethod(t, messages[0].Content); method != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("messages[0] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
+	if prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
+		t.Fatalf("prompt snapshot = %#v, want turnIndex=2 content len=2", prompts[0])
 	}
-	if got := body["lastIndex"].(int64); got != 1 {
-		t.Fatalf("lastIndex = %d, want 1", got)
+	if method := decodeTurnMethod(t, prompts[0].Content[1]); method != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("prompt content[1] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
 	}
-	if got := body["lastSubIndex"].(int64); got != 2 {
-		t.Fatalf("lastSubIndex = %d, want 2", got)
+	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, prompts[0].Content[1]).Content)); text != "hello world" {
+		t.Fatalf("prompt content[1] text = %q, want hello world", text)
 	}
 }
 
@@ -3359,9 +3640,6 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
 	}
 	toolTurn := turns[1]
-	if toolTurn.UpdateIndex != 2 {
-		t.Fatalf("tool turn updateIndex = %d, want 2", toolTurn.UpdateIndex)
-	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
 	if update.SessionUpdate != acp.SessionUpdateToolCallUpdate {
 		t.Fatalf("tool turn sessionUpdate = %q, want %q", update.SessionUpdate, acp.SessionUpdateToolCallUpdate)
@@ -3470,9 +3748,6 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
 	}
 	toolTurn := turns[1]
-	if toolTurn.UpdateIndex != 3 {
-		t.Fatalf("tool turn updateIndex = %d, want 3", toolTurn.UpdateIndex)
-	}
 	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
 	if update.Status != acp.ToolCallStatusCancelled {
 		t.Fatalf("tool turn status = %q, want %q", update.Status, acp.ToolCallStatusCancelled)

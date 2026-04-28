@@ -114,7 +114,6 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 		SessionID:   "sess-1",
 		PromptIndex: 1,
 		TurnIndex:   1,
-		UpdateIndex: 1,
 		UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)
@@ -137,6 +136,44 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 	}
 	if !foundPrompts || !foundTurns {
 		t.Fatalf("prompt/turn tables missing: %#v", res.Tables)
+	}
+}
+
+func TestParseMonitorSessionTurnDoesNotUseUpdateIndexAsSubIndex(t *testing.T) {
+	method, role, kind, body, status, requestID, index, subIndex, source, ts := parseMonitorSessionTurn(
+		`{"method":"agent_message_chunk","param":{"text":"hello"}}`,
+		"2026-04-28T09:00:00Z",
+		7,
+	)
+	if method != "agent_message_chunk" {
+		t.Fatalf("method = %q, want %q", method, "agent_message_chunk")
+	}
+	if role != "assistant" {
+		t.Fatalf("role = %q, want %q", role, "assistant")
+	}
+	if kind != "agent_message_chunk" {
+		t.Fatalf("kind = %q, want %q", kind, "agent_message_chunk")
+	}
+	if body != "hello" {
+		t.Fatalf("body = %q, want %q", body, "hello")
+	}
+	if status != "done" {
+		t.Fatalf("status = %q, want %q", status, "done")
+	}
+	if requestID != 0 {
+		t.Fatalf("requestID = %d, want 0", requestID)
+	}
+	if index != 7 {
+		t.Fatalf("index = %d, want 7", index)
+	}
+	if subIndex != 0 {
+		t.Fatalf("subIndex = %d, want 0", subIndex)
+	}
+	if source != "" {
+		t.Fatalf("source = %q, want empty", source)
+	}
+	if ts != "2026-04-28T09:00:00Z" {
+		t.Fatalf("ts = %q, want %q", ts, "2026-04-28T09:00:00Z")
 	}
 }
 
@@ -171,7 +208,6 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 		SessionID:   "sess-1",
 		PromptIndex: 1,
 		TurnIndex:   1,
-		UpdateIndex: 1,
 		UpdateJSON:  `{}`,
 	}); err != nil {
 		t.Fatalf("UpsertSessionTurn: %v", err)

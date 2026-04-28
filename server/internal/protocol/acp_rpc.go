@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ACPRPCVersion is the JSON-RPC protocol version used by WheelMaker transport.
@@ -76,4 +77,20 @@ type ACPRPCRawMessage struct {
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *ACPRPCError    `json:"error,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+func BuildACPContentJSON(method string, fields map[string]any) string {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return "{}"
+	}
+	doc := map[string]any{"method": method}
+	for key, value := range fields {
+		doc[key] = value
+	}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		return fmt.Sprintf(`{"method":%q}`, method)
+	}
+	return string(raw)
 }

@@ -1272,9 +1272,11 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 	s.recordSessionViewEvent(SessionViewEvent{
 		Type:      SessionViewEventTypeACP,
 		SessionID: s.ID,
-		Content: buildACPMethodParamsContent(acp.MethodSessionPrompt, acp.SessionPromptParams{
-			SessionID: s.ID,
-			Prompt:    cloneSessionContentBlocks(blocks),
+		Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+			"params": acp.SessionPromptParams{
+				SessionID: s.ID,
+				Prompt:    cloneSessionContentBlocks(blocks),
+			},
 		}),
 	})
 	s.promptMu.Lock()
@@ -1367,7 +1369,9 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					s.recordSessionViewEvent(SessionViewEvent{
 						Type:      SessionViewEventTypeACP,
 						SessionID: s.ID,
-						Content:   buildACPMethodParamsContent(acp.MethodSessionUpdate, params),
+						Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
+							"params": params,
+						}),
 					})
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}
@@ -1397,7 +1401,9 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					s.recordSessionViewEvent(SessionViewEvent{
 						Type:      SessionViewEventTypeACP,
 						SessionID: s.ID,
-						Content:   buildACPMethodResultContent(acp.MethodSessionPrompt, *ev.result),
+						Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+							"result": *ev.result,
+						}),
 					})
 					if hasIMEmitter {
 						target := im.SendTarget{SessionID: s.ID, Source: &imSource}

@@ -49,36 +49,16 @@ export interface RegistrySessionSummary {
   agent?: string;
 }
 
-export interface RegistrySessionTurn {
-  promptIndex: number;
-  turnIndex: number;
-  updateIndex: number;
-  role?: RegistrySessionMessageRole;
-  kind?: RegistrySessionMessageKind;
-  text?: string;
-  status?: RegistrySessionMessageStatus;
-  toolCallId?: string;
-  blocks?: RegistrySessionContentBlock[];
-}
-
-export interface RegistrySessionPrompt {
-  messageId: string;
-  promptId: string;
+export interface RegistrySessionPromptSnapshot {
   sessionId: string;
   promptIndex: number;
-  updateIndex: number;
-  title: string;
-  stopReason?: string;
-  status: string;
-  updatedAt: string;
-  turns: RegistrySessionTurn[];
+  turnIndex: number;
+  content: string[];
 }
 export interface RegistrySessionReadResponse {
   session: RegistrySessionSummary;
-  prompts: RegistrySessionPrompt[];
+  prompts: RegistrySessionPromptSnapshot[];
   messages: RegistrySessionMessage[];
-  lastIndex: number;
-  lastSubIndex: number;
 }
 
 export interface RegistrySessionMessageEventPayload {
@@ -87,7 +67,6 @@ export interface RegistrySessionMessageEventPayload {
   sessionId?: string;
   promptIndex?: number;
   turnIndex?: number;
-  updateIndex?: number;
   content?: string;
 }
 
