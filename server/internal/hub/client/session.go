@@ -147,13 +147,12 @@ func (s *Session) agentStateLocked(name string) *SessionAgentState {
 }
 
 func (s *Session) currentAgentNameLocked() string {
-	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
-		return strings.TrimSpace(s.instance.Name())
+	if s.instance != nil {
+		if name := strings.TrimSpace(s.instance.Name()); name != "" {
+			return name
+		}
 	}
-	if strings.TrimSpace(s.agentType) != "" {
-		return strings.TrimSpace(s.agentType)
-	}
-	return ""
+	return strings.TrimSpace(s.agentType)
 }
 
 func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
@@ -231,11 +230,16 @@ func (s *Session) reply(text string) {
 
 // replyWithTitle sends a system message with an optional card title.
 func (s *Session) replyWithTitle(title, body string) {
-	messageText := strings.TrimSpace(body)
-	if strings.TrimSpace(title) != "" && strings.TrimSpace(body) != "" {
-		messageText = strings.TrimSpace(title) + "\n" + strings.TrimSpace(body)
-	} else if strings.TrimSpace(title) != "" {
-		messageText = strings.TrimSpace(title)
+	title = strings.TrimSpace(title)
+	body = strings.TrimSpace(body)
+	var messageText string
+	switch {
+	case title != "" && body != "":
+		messageText = title + "\n" + body
+	case title != "":
+		messageText = title
+	default:
+		messageText = body
 	}
 	if messageText != "" {
 		s.recordSessionViewEvent(SessionViewEvent{
@@ -565,10 +569,13 @@ func mergeConfigOptions(current []acp.ConfigOption, updated []acp.ConfigOption) 
 	}
 	merged := append([]acp.ConfigOption(nil), current...)
 	for _, next := range updated {
+		nextID := strings.TrimSpace(next.ID)
+		nextCategory := strings.TrimSpace(next.Category)
 		replaced := false
 		for i, existing := range merged {
-			sameID := strings.TrimSpace(next.ID) != "" && strings.EqualFold(strings.TrimSpace(existing.ID), strings.TrimSpace(next.ID))
-			sameCategory := strings.TrimSpace(next.ID) == "" && strings.TrimSpace(next.Category) != "" && strings.EqualFold(strings.TrimSpace(existing.Category), strings.TrimSpace(next.Category))
+			existingID := strings.TrimSpace(existing.ID)
+			sameID := nextID != "" && strings.EqualFold(existingID, nextID)
+			sameCategory := nextID == "" && nextCategory != "" && strings.EqualFold(strings.TrimSpace(existing.Category), nextCategory)
 			if sameID || sameCategory {
 				merged[i] = next
 				replaced = true
@@ -1386,21 +1393,6 @@ func extractTextFromAny(v any) string {
 	default:
 		return ""
 	}
-}
-
-func renderSessionToolStatus(update acp.SessionUpdate) string {
-	title := strings.TrimSpace(update.Title)
-	if title == "" {
-		title = strings.TrimSpace(update.Kind)
-	}
-	status := strings.TrimSpace(update.Status)
-	if title == "" {
-		return status
-	}
-	if status == "" {
-		return title
-	}
-	return title + " - " + status
 }
 
 func renderUnknown(v string) string {
