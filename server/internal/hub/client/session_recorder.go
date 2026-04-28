@@ -337,10 +337,7 @@ func (r *SessionRecorder) handleUpdateMessageLocked(ctx context.Context, event p
 	if state == nil {
 		return nil
 	}
-	if err := r.addMessageTurn(state, event); err != nil {
-		return err
-	}
-	return nil
+	return r.addMessageTurn(state, event)
 }
 
 func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsedSessionViewEvent) error {
@@ -382,10 +379,7 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 		turn.TurnIndex = state.nextTurnIndex
 	}
 
-	updateJSON, err := buildIMContentJSON(turn.method, turn.payload)
-	if err != nil {
-		return err
-	}
+	updateJSON := buildIMContentJSON(turn.method, turn.payload)
 	publish := r.eventPublisher()
 	if publish != nil {
 		_ = publish("registry.session.message", map[string]any{
@@ -415,7 +409,7 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
 		PromptIndex: state.promptIndex,
-		StopReason:  strings.TrimSpace(stopReason),
+		StopReason:  stopReason,
 		UpdatedAt:   event.UpdatedAt,
 		TurnsJSON:   turnsJSON,
 		TurnIndex:   turnIndex,
@@ -494,10 +488,7 @@ func encodePromptStateTurns(state *sessionPromptState) (string, int64) {
 	}
 	encodedTurns := make([]string, 0, len(state.turns))
 	for _, turn := range state.turns {
-		updateJSON, err := buildIMContentJSON(turn.method, turn.payload)
-		if err != nil {
-			continue
-		}
+		updateJSON := buildIMContentJSON(turn.method, turn.payload)
 		encodedTurns = append(encodedTurns, updateJSON)
 	}
 	return EncodeStoredTurns(encodedTurns), int64(len(encodedTurns))
@@ -529,10 +520,7 @@ func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID stri
 	// Snapshot in-memory turns (while holding the lock).
 	updates := make([]string, 0, len(state.turns))
 	for _, turn := range state.turns {
-		updateJSON, err := buildIMContentJSON(turn.method, turn.payload)
-		if err != nil {
-			continue
-		}
+		updateJSON := buildIMContentJSON(turn.method, turn.payload)
 		updates = append(updates, updateJSON)
 	}
 	r.writeMu.Unlock()
@@ -607,8 +595,6 @@ func (s *sessionPromptState) ensureMaps() {
 
 func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string) {
 	s.ensureMaps()
-	turn.SessionID = strings.TrimSpace(turn.SessionID)
-	turn.method = strings.TrimSpace(turn.method)
 	if turn.TurnIndex <= 0 {
 		turn.TurnIndex = s.nextTurnIndex
 	}
@@ -620,7 +606,7 @@ func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string)
 		s.turns = append(s.turns, turn)
 	}
 	s.nextTurnIndex = int64(len(s.turns) + 1)
-	if turnKey = strings.TrimSpace(turnKey); turnKey != "" {
+	if turnKey != "" {
 		s.turnIndexByKey[turnKey] = turn.TurnIndex
 	}
 }
@@ -862,8 +848,8 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 }
 
 func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) sessionTurnMessage {
-	existing.SessionID = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID)))
-	existing.method = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(incoming.method), strings.TrimSpace(existing.method)))
+	existing.SessionID = firstNonEmpty(existing.SessionID, incoming.SessionID)
+	existing.method = firstNonEmpty(incoming.method, existing.method)
 	existing.TurnIndex = maxInt64(turnIndex, existing.TurnIndex)
 	if existing.PromptIndex <= 0 {
 		existing.PromptIndex = incoming.PromptIndex
@@ -872,21 +858,21 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 	case acp.IMMethodToolCall:
 		base := existing.payload.(acp.IMToolResult)
 		inc := incoming.payload.(acp.IMToolResult)
-		if strings.TrimSpace(inc.Cmd) == "" {
-			inc.Cmd = strings.TrimSpace(base.Cmd)
+		if inc.Cmd == "" {
+			inc.Cmd = base.Cmd
 		}
-		if strings.TrimSpace(inc.Kind) == "" {
-			inc.Kind = strings.TrimSpace(base.Kind)
+		if inc.Kind == "" {
+			inc.Kind = base.Kind
 		}
-		if strings.TrimSpace(inc.Status) == "" {
-			inc.Status = strings.TrimSpace(base.Status)
+		if inc.Status == "" {
+			inc.Status = base.Status
 		}
 		existing.payload = inc
 	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought:
 		base := existing.payload.(acp.IMTextResult)
 		inc := incoming.payload.(acp.IMTextResult)
 		inc.Text = base.Text + inc.Text
-		if strings.TrimSpace(inc.Text) == "" {
+		if inc.Text == "" {
 			inc.Text = base.Text
 		}
 		existing.payload = inc
@@ -896,16 +882,13 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 	return existing
 }
 
-func buildIMContentJSON(method string, payload any) (string, error) {
+func buildIMContentJSON(method string, payload any) string {
 	message := acp.IMMessage{Method: method}
 	if payload != nil {
 		message.Param = mustJSONRaw(payload)
 	}
-	raw, err := json.Marshal(message)
-	if err != nil {
-		return "", err
-	}
-	return string(raw), nil
+	raw, _ := json.Marshal(message)
+	return string(raw)
 }
 
 func decodeIMMessage(raw string) (acp.IMMessage, error) {
@@ -918,21 +901,12 @@ func decodeIMMessage(raw string) (acp.IMMessage, error) {
 	return message, nil
 }
 
-func cloneJSONRaw(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return nil
-	}
-	out := make([]byte, len(raw))
-	copy(out, raw)
-	return json.RawMessage(out)
-}
-
 func mustJSONRaw(value any) json.RawMessage {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		panic(fmt.Errorf("marshal message payload: %w", err))
 	}
-	return cloneJSONRaw(raw)
+	return json.RawMessage(raw)
 }
 
 func decodeTurnPayload(message acp.IMMessage) (any, error) {

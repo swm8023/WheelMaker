@@ -2206,16 +2206,30 @@ func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 }
 
 func TestBuildIMContentJSONDoesNotTrimMethod(t *testing.T) {
-	raw, err := buildIMContentJSON("  method.with.space  ", map[string]any{"k": "v"})
-	if err != nil {
-		t.Fatalf("buildIMContentJSON: %v", err)
-	}
+	raw := buildIMContentJSON("  method.with.space  ", map[string]any{"k": "v"})
 	msg := acp.IMMessage{}
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
 	if msg.Method != "  method.with.space  " {
 		t.Fatalf("msg.Method = %q, want %q", msg.Method, "  method.with.space  ")
+	}
+}
+
+func TestSessionPromptStateUpdateTurnDoesNotTrimFields(t *testing.T) {
+	state := newSessionPromptState(1, 1)
+	state.updateTurn(sessionTurnMessage{SessionID: "  sid  ", method: "  method  "}, "  key  ")
+	if len(state.turns) != 1 {
+		t.Fatalf("turns len = %d, want 1", len(state.turns))
+	}
+	if state.turns[0].SessionID != "  sid  " {
+		t.Fatalf("turn.SessionID = %q, want %q", state.turns[0].SessionID, "  sid  ")
+	}
+	if state.turns[0].method != "  method  " {
+		t.Fatalf("turn.method = %q, want %q", state.turns[0].method, "  method  ")
+	}
+	if _, ok := state.turnIndexByKey["  key  "]; !ok {
+		t.Fatalf("turnIndexByKey missing exact key %q", "  key  ")
 	}
 }
 
@@ -3462,7 +3476,7 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 		t.Fatalf("ReadSessionMessages: %v", err)
 	}
 	if len(messages) != 3 {
-		t.Fatalf("messages len = %d, want 3", len(messages))
+		t.Fatalf("messages len = %d, want 3; messages=%+v", len(messages), messages)
 	}
 	seen := map[string]string{}
 	for _, message := range messages {
@@ -3477,6 +3491,55 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 	}
 	if got := seen[acp.SessionUpdateAgentMessageChunk]; got != "assistant says hi" {
 		t.Fatalf("assistant chunk text = %q, want %q", got, "assistant says hi")
+	}
+}
+
+func TestSessionViewKeepsUserMessageChunkTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "User Chunk")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateUserMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "user says hi"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent user chunk: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionMessages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2; messages=%+v", len(messages), messages)
+	}
+	if got := decodeTurnMethod(t, messages[1].Content); got != acp.SessionUpdateUserMessageChunk {
+		t.Fatalf("messages[1] method = %q, want %q", got, acp.SessionUpdateUserMessageChunk)
+	}
+}
+
+func TestParseSessionViewEventUserMessageChunkAsMessage(t *testing.T) {
+	event := sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateUserMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "user says hi"}),
+	})
+	parsed, err := parseSessionViewEvent(event)
+	if err != nil {
+		t.Fatalf("parseSessionViewEvent: %v", err)
+	}
+	if !parsed.bMessage {
+		t.Fatal("parsed.bMessage = false, want true")
+	}
+	if parsed.method != acp.SessionUpdateUserMessageChunk {
+		t.Fatalf("parsed.method = %q, want %q", parsed.method, acp.SessionUpdateUserMessageChunk)
 	}
 }
 
