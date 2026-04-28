@@ -211,9 +211,7 @@ func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, turn
 }
 
 func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
-	message := acp.IMMessage{
-		Method: e.method,
-	}
+	message := acp.IMMessage{Method: e.method}
 	if e.payload != nil {
 		message.Param = mustJSONRaw(e.payload)
 	}
@@ -609,10 +607,6 @@ func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string)
 	if turnKey != "" {
 		s.turnIndexByKey[turnKey] = turn.TurnIndex
 	}
-}
-
-func (s *sessionPromptState) assignTurn(turn sessionTurnMessage, turnKey string) {
-	s.updateTurn(turn, turnKey)
 }
 
 func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
