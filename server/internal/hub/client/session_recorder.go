@@ -94,14 +94,6 @@ type parsedSessionViewEvent struct {
 	turnKey   string
 }
 
-type sessionTurnMergeKind string
-
-const (
-	sessionTurnMergeNone sessionTurnMergeKind = ""
-	sessionTurnMergeTool sessionTurnMergeKind = "tool"
-	sessionTurnMergeText sessionTurnMergeKind = "text"
-)
-
 type SessionRecorder struct {
 	projectName  string
 	store        Store
@@ -348,12 +340,25 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 		PromptIndex: state.promptIndex,
 	}
 
-	mergeKind, mergedTurnIndex := getTurnKindAndIndex(*state, event)
+	mergedTurnIndex := int64(0)
+	switch event.method {
+	case acp.IMMethodToolCall:
+		if event.turnKey != "" {
+			mergedTurnIndex = state.turnIndexByKey[event.turnKey]
+		}
+	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought:
+		lastTurnIndex := state.nextTurnIndex - 1
+		if lastTurnIndex > 0 {
+			if existing, ok := state.turns[lastTurnIndex]; ok && existing.method == event.method {
+				mergedTurnIndex = lastTurnIndex
+			}
+		}
+	}
 	if mergedTurnIndex > 0 {
 		existingTurn, ok := state.turns[mergedTurnIndex]
 		if ok {
 			turn.TurnIndex = mergedTurnIndex
-			turn = mergeTurnMessage(existingTurn, turn, mergeKind, mergedTurnIndex)
+			turn = mergeTurnMessage(existingTurn, turn, mergedTurnIndex)
 		}
 	}
 
@@ -896,68 +901,39 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 	return parsed, nil
 }
 
-func getTurnKindAndIndex(state sessionPromptState, event parsedSessionViewEvent) (sessionTurnMergeKind, int64) {
-	method := event.method
-	switch method {
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.IMMethodAgentPlan:
-		lastTurnIndex := state.nextTurnIndex - 1
-		if lastTurnIndex > 0 {
-			if existing, ok := state.turns[lastTurnIndex]; ok && existing.method == method {
-				return sessionTurnMergeText, lastTurnIndex
-			}
-		}
-	case acp.IMMethodToolCall:
-		if event.turnKey == "" {
-			return sessionTurnMergeNone, 0
-		}
-		if turnIndex := state.turnIndexByKey[event.turnKey]; turnIndex > 0 {
-			return sessionTurnMergeTool, turnIndex
-		}
-	}
-	return sessionTurnMergeNone, 0
-}
-
-func mergeTurnMessage(existing, incoming sessionTurnMessage, mergeKind sessionTurnMergeKind, turnIndex int64) sessionTurnMessage {
+func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) sessionTurnMessage {
 	existing.SessionID = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(existing.SessionID), strings.TrimSpace(incoming.SessionID)))
 	existing.method = strings.TrimSpace(firstNonEmpty(strings.TrimSpace(incoming.method), strings.TrimSpace(existing.method)))
 	existing.TurnIndex = maxInt64(turnIndex, existing.TurnIndex)
 	if existing.PromptIndex <= 0 {
 		existing.PromptIndex = incoming.PromptIndex
 	}
-	switch mergeKind {
-	case sessionTurnMergeTool:
-		existing.payload = mergeToolPayload(existing.payload, incoming.payload)
-	case sessionTurnMergeText:
-		existing.payload = mergeTextPayload(existing.payload, incoming.payload)
+	switch incoming.method {
+	case acp.IMMethodToolCall:
+		base := existing.payload.(acp.IMToolResult)
+		inc := incoming.payload.(acp.IMToolResult)
+		if strings.TrimSpace(inc.Cmd) == "" {
+			inc.Cmd = strings.TrimSpace(base.Cmd)
+		}
+		if strings.TrimSpace(inc.Kind) == "" {
+			inc.Kind = strings.TrimSpace(base.Kind)
+		}
+		if strings.TrimSpace(inc.Status) == "" {
+			inc.Status = strings.TrimSpace(base.Status)
+		}
+		existing.payload = inc
+	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought:
+		base := existing.payload.(acp.IMTextResult)
+		inc := incoming.payload.(acp.IMTextResult)
+		inc.Text = base.Text + inc.Text
+		if strings.TrimSpace(inc.Text) == "" {
+			inc.Text = base.Text
+		}
+		existing.payload = inc
 	default:
 		existing.payload = incoming.payload
 	}
 	return existing
-}
-
-func mergeTextPayload(existing, incoming any) any {
-	base := existing.(acp.IMTextResult)
-	inc := incoming.(acp.IMTextResult)
-	inc.Text = base.Text + inc.Text
-	if strings.TrimSpace(inc.Text) == "" {
-		inc.Text = base.Text
-	}
-	return inc
-}
-
-func mergeToolPayload(existing, incoming any) any {
-	base := existing.(acp.IMToolResult)
-	inc := incoming.(acp.IMToolResult)
-	if strings.TrimSpace(inc.Cmd) == "" {
-		inc.Cmd = strings.TrimSpace(base.Cmd)
-	}
-	if strings.TrimSpace(inc.Kind) == "" {
-		inc.Kind = strings.TrimSpace(base.Kind)
-	}
-	if strings.TrimSpace(inc.Status) == "" {
-		inc.Status = strings.TrimSpace(base.Status)
-	}
-	return inc
 }
 
 func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionTurnMessage, string, bool, error) {
@@ -1007,24 +983,6 @@ func decodeIMMessage(raw string) (acp.IMMessage, error) {
 	}
 	message.Method = strings.TrimSpace(message.Method)
 	return message, nil
-}
-
-func stringifyRawJSON(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return text
-	}
-	val := any(nil)
-	if err := json.Unmarshal(raw, &val); err == nil {
-		out, marshalErr := json.Marshal(val)
-		if marshalErr == nil {
-			return string(out)
-		}
-	}
-	return strings.TrimSpace(string(raw))
 }
 
 func cloneJSONRaw(raw json.RawMessage) json.RawMessage {

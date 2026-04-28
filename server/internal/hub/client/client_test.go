@@ -2186,7 +2186,6 @@ func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 			PromptIndex: 1,
 			TurnIndex:   2,
 		},
-		sessionTurnMergeText,
 		2,
 	)
 	result, ok := merged.payload.(acp.IMTextResult)
@@ -2271,12 +2270,9 @@ func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 		},
 	}
 
-	mergeKind, turnIndex := getTurnKindAndIndex(state, parsedSessionViewEvent{method: acp.IMMethodToolCall, turnKey: "merge-key"})
+	turnIndex := state.turnIndexByKey["merge-key"]
 	if turnIndex != 2 {
 		t.Fatalf("turnIndex = %d, want 2", turnIndex)
-	}
-	if mergeKind != sessionTurnMergeTool {
-		t.Fatalf("mergeKind = %q, want %q", mergeKind, sessionTurnMergeTool)
 	}
 }
 
@@ -4374,4 +4370,5 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
+
 
