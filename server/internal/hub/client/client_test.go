@@ -1963,15 +1963,15 @@ func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("TurnIndex = %d, want 2", loaded.TurnIndex)
 	}
 
-	decoded, err := DecodeStoredTurns("sess-1", 1, loaded.TurnsJSON)
+	decoded, err := DecodeStoredTurns(loaded.TurnsJSON)
 	if err != nil {
 		t.Fatalf("DecodeStoredTurns: %v", err)
 	}
 	if len(decoded) != 2 {
 		t.Fatalf("decoded turns len = %d, want 2", len(decoded))
 	}
-	if decoded[1].TurnIndex != 2 {
-		t.Fatalf("decoded[1].TurnIndex = %d, want 2", decoded[1].TurnIndex)
+	if decoded[1] != normalizeJSONDoc(turn2JSON, `{}`) {
+		t.Fatalf("decoded[1] = %q, want %q", decoded[1], normalizeJSONDoc(turn2JSON, `{}`))
 	}
 }
 func newSessionViewTestClient(t *testing.T) *Client {
@@ -2130,24 +2130,25 @@ func sessionViewACPSystemEvent(sessionID, text string) SessionViewEvent {
 	}
 }
 
-func TestBuildConvertedMessageFromSessionUpdateReturnsToolTurnKey(t *testing.T) {
-	converted, turnKey, ok, err := buildTurnMessageFromSessionUpdate(acp.SessionUpdate{
+func TestParseSessionViewEventSessionUpdateReturnsToolTurnKey(t *testing.T) {
+	event := sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
 		SessionUpdate: acp.SessionUpdateToolCallUpdate,
 		ToolCallID:    "call-1",
 		Title:         "build",
 		Status:        "completed",
 	})
+	parsed, err := parseSessionViewEvent(event)
 	if err != nil {
-		t.Fatalf("buildConvertedMessageFromSessionUpdate: %v", err)
+		t.Fatalf("parseSessionViewEvent: %v", err)
 	}
-	if !ok {
-		t.Fatalf("buildConvertedMessageFromSessionUpdate ok = false, want true")
+	if !parsed.bMessage {
+		t.Fatal("parsed.bMessage = false, want true")
 	}
-	if converted.method != acp.IMMethodToolCall {
-		t.Fatalf("converted method = %q, want %q", converted.method, acp.IMMethodToolCall)
+	if parsed.method != acp.IMMethodToolCall {
+		t.Fatalf("parsed.method = %q, want %q", parsed.method, acp.IMMethodToolCall)
 	}
-	if turnKey != "call-1" {
-		t.Fatalf("turnKey = %q, want %q", turnKey, "call-1")
+	if parsed.turnKey != "call-1" {
+		t.Fatalf("parsed.turnKey = %q, want %q", parsed.turnKey, "call-1")
 	}
 }
 
@@ -3059,9 +3060,9 @@ func TestSessionRecorderResetPromptStateRestartsIndexes(t *testing.T) {
 
 func TestSessionMessagePageTracksLatestCursorBeyondFilteredTurns(t *testing.T) {
 	page := newSessionMessagePage(2, 2)
-	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateJSON: `{}`})
-	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 1, UpdateJSON: `{}`})
-	page.append(SessionTurnRecord{SessionID: "sess-1", PromptIndex: 2, TurnIndex: 2, UpdateJSON: `{}`})
+	page.append("sess-1", 1, 1, `{}`)
+	page.append("sess-1", 2, 1, `{}`)
+	page.append("sess-1", 2, 2, `{}`)
 
 	if len(page.messages) != 0 {
 		t.Fatalf("page.messages len = %d, want 0", len(page.messages))
@@ -3187,7 +3188,7 @@ func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testi
 	}
 
 	msg := acp.IMMessage{}
-	if err := json.Unmarshal([]byte(turns[1].UpdateJSON), &msg); err != nil {
+	if err := json.Unmarshal([]byte(turns[1]), &msg); err != nil {
 		t.Fatalf("unmarshal legacy system turn: %v", err)
 	}
 	if strings.TrimSpace(msg.Method) != acp.IMMethodSystem {
@@ -3293,7 +3294,7 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	if len(turns) != 2 {
 		t.Fatalf("turns len = %d, want 2", len(turns))
 	}
-	if got := decodeTurnSessionUpdate(t, turns[1].UpdateJSON).Title; strings.TrimSpace(got) != "Build finished" {
+	if got := decodeTurnSessionUpdate(t, turns[1]).Title; strings.TrimSpace(got) != "Build finished" {
 		t.Fatalf("turns[1].title = %q, want Build finished", got)
 	}
 }
@@ -3332,7 +3333,7 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if len(stored) != 2 {
 		t.Fatalf("stored len = %d, want 2", len(stored))
 	}
-	updateStored := decodeTurnSessionUpdate(t, stored[1].UpdateJSON)
+	updateStored := decodeTurnSessionUpdate(t, stored[1])
 	if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
 		t.Fatalf("stored assistant update kind = %q, want %q", updateStored.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
 	}
@@ -3632,7 +3633,7 @@ func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 	if len(turns) != 2 {
 		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
 	}
-	update2 := decodeTurnSessionUpdate(t, turns[1].UpdateJSON)
+	update2 := decodeTurnSessionUpdate(t, turns[1])
 	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "hello world" {
 		t.Fatalf("assistant text = %q, want hello world", text)
 	}
@@ -3901,7 +3902,7 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
 	}
 	toolTurn := turns[1]
-	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
+	update := decodeTurnSessionUpdate(t, toolTurn)
 	if update.SessionUpdate != acp.SessionUpdateToolCallUpdate {
 		t.Fatalf("tool turn sessionUpdate = %q, want %q", update.SessionUpdate, acp.SessionUpdateToolCallUpdate)
 	}
@@ -3946,8 +3947,8 @@ func TestSessionViewBufferedUpdatesDoNotLeakAcrossPrompts(t *testing.T) {
 		t.Fatalf("turn counts = (%d,%d), want (2,2)", len(turnsPrompt1), len(turnsPrompt2))
 	}
 
-	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1].UpdateJSON)
-	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1].UpdateJSON)
+	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1])
+	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1])
 	if text := extractTextChunk(update1.Content); text != "hello" {
 		t.Fatalf("prompt1 assistant text = %q, want %q", text, "hello")
 	}
@@ -4000,7 +4001,7 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
 	}
 	toolTurn := turns[1]
-	update := decodeTurnSessionUpdate(t, toolTurn.UpdateJSON)
+	update := decodeTurnSessionUpdate(t, toolTurn)
 	if update.Status != acp.ToolCallStatusCancelled {
 		t.Fatalf("tool turn status = %q, want %q", update.Status, acp.ToolCallStatusCancelled)
 	}
@@ -4096,14 +4097,14 @@ func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T)
 	if len(turnsPrompt2) != 2 {
 		t.Fatalf("prompt2 stored turns = %d, want 2", len(turnsPrompt2))
 	}
-	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1].UpdateJSON)
+	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1])
 	if text := extractTextChunk(update2.Content); text != "world" {
 		t.Fatalf("prompt2 assistant text = %q, want %q", text, "world")
 	}
 }
 
 // listStoredTurns reads the persisted turns for a completed prompt from session_prompts.turns_json.
-func listStoredTurns(ctx context.Context, t *testing.T, store Store, projectName, sessionID string, promptIndex int64) []SessionTurnRecord {
+func listStoredTurns(ctx context.Context, t *testing.T, store Store, projectName, sessionID string, promptIndex int64) []string {
 	t.Helper()
 	prompt, err := store.LoadSessionPrompt(ctx, projectName, sessionID, promptIndex)
 	if err != nil {
@@ -4112,7 +4113,7 @@ func listStoredTurns(ctx context.Context, t *testing.T, store Store, projectName
 	if prompt == nil {
 		return nil
 	}
-	turns, err := DecodeStoredTurns(sessionID, promptIndex, prompt.TurnsJSON)
+	turns, err := DecodeStoredTurns(prompt.TurnsJSON)
 	if err != nil {
 		t.Fatalf("DecodeStoredTurns(%d): %v", promptIndex, err)
 	}

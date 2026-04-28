@@ -99,13 +99,6 @@ type SessionPromptRecord struct {
 	TurnIndex   int64
 }
 
-type SessionTurnRecord struct {
-	SessionID   string
-	PromptIndex int64
-	TurnIndex   int64
-	UpdateJSON  string
-}
-
 type Store interface {
 	LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error)
 	SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error
@@ -714,8 +707,8 @@ func EncodeStoredTurns(turns []string) string {
 	return string(raw)
 }
 
-// DecodeStoredTurns parses session_prompts.turns_json back to a slice of SessionTurnRecord.
-func DecodeStoredTurns(sessionID string, promptIndex int64, turnsJSON string) ([]SessionTurnRecord, error) {
+// DecodeStoredTurns parses session_prompts.turns_json back to an ordered turn JSON string slice.
+func DecodeStoredTurns(turnsJSON string) ([]string, error) {
 	turnsJSON = strings.TrimSpace(turnsJSON)
 	if turnsJSON == "" {
 		return nil, nil
@@ -724,16 +717,10 @@ func DecodeStoredTurns(sessionID string, promptIndex int64, turnsJSON string) ([
 	if err := json.Unmarshal([]byte(turnsJSON), &entries); err != nil {
 		return nil, fmt.Errorf("decode turns_json: %w", err)
 	}
-	out := make([]SessionTurnRecord, 0, len(entries))
-	for i, updateJSON := range entries {
-		out = append(out, SessionTurnRecord{
-			SessionID:   strings.TrimSpace(sessionID),
-			PromptIndex: promptIndex,
-			TurnIndex:   int64(i + 1),
-			UpdateJSON:  normalizeJSONDoc(updateJSON, `{}`),
-		})
+	for i := range entries {
+		entries[i] = normalizeJSONDoc(entries[i], `{}`)
 	}
-	return out, nil
+	return entries, nil
 }
 
 func validateRouteKey(routeKey string) error {

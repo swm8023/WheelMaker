@@ -250,8 +250,12 @@ func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID str
 	}
 	page := newSessionMessagePage(afterPromptIndex, afterTurnIndex)
 	for _, prompt := range prompts {
-		if err := r.appendPromptMessages(ctx, sessionID, prompt.PromptIndex, &page); err != nil {
+		turns, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
+		if err != nil {
 			return sessionViewSummary{}, nil, 0, 0, err
+		}
+		for i, updateJSON := range turns {
+			page.append(sessionID, prompt.PromptIndex, int64(i+1), updateJSON)
 		}
 	}
 
@@ -271,12 +275,24 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 	if err != nil {
 		return sessionViewSummary{}, nil, err
 	}
-	prompts = promptsFromCheckpoint(prompts, checkpointPromptIndex)
 	out := make([]sessionPromptSnapshot, 0, len(prompts))
 	for _, prompt := range prompts {
-		snapshot, err := r.buildPromptSnapshot(ctx, sessionID, prompt.PromptIndex)
+		if checkpointPromptIndex > 0 && prompt.PromptIndex < checkpointPromptIndex {
+			continue
+		}
+		turns, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
 		if err != nil {
 			return sessionViewSummary{}, nil, err
+		}
+		content := make([]string, 0, len(turns))
+		for _, updateJSON := range turns {
+			content = append(content, normalizeJSONDoc(updateJSON, `{}`))
+		}
+		snapshot := sessionPromptSnapshot{
+			SessionID:   strings.TrimSpace(sessionID),
+			PromptIndex: prompt.PromptIndex,
+			TurnIndex:   int64(len(content)),
+			Content:     content,
 		}
 		out = append(out, snapshot)
 	}
@@ -410,17 +426,6 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	return nil
 }
 
-func (r *SessionRecorder) appendPromptMessages(ctx context.Context, sessionID string, promptIndex int64, page *sessionMessagePage) error {
-	messages, err := r.promptTurnsForRead(ctx, sessionID, promptIndex)
-	if err != nil {
-		return err
-	}
-	for _, turn := range messages {
-		page.append(turn)
-	}
-	return nil
-}
-
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, agentType, title string, updatedAt time.Time, titleIfEmptyOnly bool) error {
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
@@ -481,39 +486,6 @@ func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, ag
 	}
 }
 
-func promptsFromCheckpoint(prompts []SessionPromptRecord, checkpointPromptIndex int64) []SessionPromptRecord {
-	if len(prompts) == 0 || checkpointPromptIndex <= 0 {
-		return prompts
-	}
-	for i, prompt := range prompts {
-		if prompt.PromptIndex >= checkpointPromptIndex {
-			return prompts[i:]
-		}
-	}
-	return prompts
-}
-
-func (r *SessionRecorder) buildPromptSnapshot(ctx context.Context, sessionID string, promptIndex int64) (sessionPromptSnapshot, error) {
-	turns, err := r.promptTurnsForRead(ctx, sessionID, promptIndex)
-	if err != nil {
-		return sessionPromptSnapshot{}, fmt.Errorf("load prompt turns: %w", err)
-	}
-	content := make([]string, 0, len(turns))
-	lastTurnIndex := int64(0)
-	for _, turn := range turns {
-		content = append(content, normalizeJSONDoc(turn.UpdateJSON, `{}`))
-		if turn.TurnIndex > lastTurnIndex {
-			lastTurnIndex = turn.TurnIndex
-		}
-	}
-	return sessionPromptSnapshot{
-		SessionID:   strings.TrimSpace(sessionID),
-		PromptIndex: promptIndex,
-		TurnIndex:   lastTurnIndex,
-		Content:     content,
-	}, nil
-}
-
 // encodePromptStateTurns serialises all in-memory turns into the turns_json format
 // and returns the JSON string plus the maximum turn index seen.
 func encodePromptStateTurns(state *sessionPromptState) (string, int64) {
@@ -528,20 +500,20 @@ func encodePromptStateTurns(state *sessionPromptState) (string, int64) {
 		}
 		encodedTurns = append(encodedTurns, updateJSON)
 	}
-	return EncodeStoredTurns(encodedTurns), int64(len(state.turns))
+	return EncodeStoredTurns(encodedTurns), int64(len(encodedTurns))
 }
 
 // promptTurnsForRead returns the persisted turns for a prompt.
 // For finished prompts the turns come from session_prompts.turns_json.
 // For the active (in-flight) prompt, turns are taken from in-memory state.
-func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID string, promptIndex int64) ([]SessionTurnRecord, error) {
+func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID string, promptIndex int64) ([]string, error) {
 	prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, promptIndex)
 	if err != nil {
 		return nil, err
 	}
 	if prompt != nil && strings.TrimSpace(prompt.StopReason) != "" {
 		// Finished prompt – read from persisted turns_json.
-		return DecodeStoredTurns(sessionID, promptIndex, prompt.TurnsJSON)
+		return DecodeStoredTurns(prompt.TurnsJSON)
 	}
 	// Active (in-flight) prompt – read from in-memory state.
 	r.writeMu.Lock()
@@ -550,26 +522,21 @@ func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID stri
 		r.writeMu.Unlock()
 		// No live state available; return persisted turns_json (may be empty for just-started prompt).
 		if prompt != nil {
-			return DecodeStoredTurns(sessionID, promptIndex, prompt.TurnsJSON)
+			return DecodeStoredTurns(prompt.TurnsJSON)
 		}
 		return nil, nil
 	}
 	// Snapshot in-memory turns (while holding the lock).
-	records := make([]SessionTurnRecord, 0, len(state.turns))
-	for i, turn := range state.turns {
+	updates := make([]string, 0, len(state.turns))
+	for _, turn := range state.turns {
 		updateJSON, err := buildIMContentJSON(turn.method, turn.payload)
 		if err != nil {
 			continue
 		}
-		records = append(records, SessionTurnRecord{
-			SessionID:   strings.TrimSpace(sessionID),
-			PromptIndex: promptIndex,
-			TurnIndex:   int64(i + 1),
-			UpdateJSON:  updateJSON,
-		})
+		updates = append(updates, updateJSON)
 	}
 	r.writeMu.Unlock()
-	return records, nil
+	return updates, nil
 }
 
 func newSessionMessagePage(afterPromptIndex, afterTurnIndex int64) sessionMessagePage {
@@ -580,26 +547,35 @@ func newSessionMessagePage(afterPromptIndex, afterTurnIndex int64) sessionMessag
 	}
 }
 
-func (p *sessionMessagePage) append(turn SessionTurnRecord) {
-	p.advance(turn)
-	if !p.includes(turn) {
+func (p *sessionMessagePage) append(sessionID string, promptIndex, turnIndex int64, updateJSON string) {
+	p.advance(promptIndex, turnIndex)
+	if !p.includes(promptIndex, turnIndex) {
 		return
 	}
-	p.messages = append(p.messages, toSessionViewMessage(turn))
+	content := strings.TrimSpace(updateJSON)
+	if content == "" {
+		content = "{}"
+	}
+	p.messages = append(p.messages, sessionViewMessage{
+		SessionID:   strings.TrimSpace(sessionID),
+		PromptIndex: promptIndex,
+		TurnIndex:   turnIndex,
+		Content:     content,
+	})
 }
 
-func (p *sessionMessagePage) advance(turn SessionTurnRecord) {
-	if turn.PromptIndex > p.lastPromptIndex || (turn.PromptIndex == p.lastPromptIndex && turn.TurnIndex > p.lastTurnIndex) {
-		p.lastPromptIndex = turn.PromptIndex
-		p.lastTurnIndex = turn.TurnIndex
+func (p *sessionMessagePage) advance(promptIndex, turnIndex int64) {
+	if promptIndex > p.lastPromptIndex || (promptIndex == p.lastPromptIndex && turnIndex > p.lastTurnIndex) {
+		p.lastPromptIndex = promptIndex
+		p.lastTurnIndex = turnIndex
 	}
 }
 
-func (p sessionMessagePage) includes(turn SessionTurnRecord) bool {
-	if turn.PromptIndex < p.afterPromptIndex {
+func (p sessionMessagePage) includes(promptIndex, turnIndex int64) bool {
+	if promptIndex < p.afterPromptIndex {
 		return false
 	}
-	if turn.PromptIndex == p.afterPromptIndex && turn.TurnIndex <= p.afterTurnIndex {
+	if promptIndex == p.afterPromptIndex && turnIndex <= p.afterTurnIndex {
 		return false
 	}
 	return true
@@ -744,16 +720,16 @@ func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionI
 	if err != nil {
 		return nil, err
 	}
-	var messages []SessionTurnRecord
+	var updates []string
 	if prompt != nil {
-		messages, err = DecodeStoredTurns(sessionID, promptIndex, prompt.TurnsJSON)
+		updates, err = DecodeStoredTurns(prompt.TurnsJSON)
 		if err != nil {
 			return nil, err
 		}
 	}
 	state := newSessionPromptState(promptIndex, 1)
-	for i := range messages {
-		turn, err := decodeSessionTurnMessage(messages[i])
+	for i, updateJSON := range updates {
+		turn, err := decodeSessionTurnMessage(strings.TrimSpace(sessionID), promptIndex, int64(i+1), updateJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -829,39 +805,6 @@ func extractUpdateText(raw json.RawMessage) string {
 	return ""
 }
 
-func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionTurnMessage, string, bool, error) {
-	method := strings.TrimSpace(update.SessionUpdate)
-	switch method {
-	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
-		return sessionTurnMessage{method: method, payload: acp.IMTextResult{Text: extractUpdateText(update.Content)}}, "", true, nil
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		return sessionTurnMessage{method: acp.IMMethodToolCall, payload: acp.IMToolResult{
-			Cmd:    strings.TrimSpace(update.Title),
-			Kind:   strings.TrimSpace(update.Kind),
-			Status: strings.TrimSpace(update.Status),
-		}}, strings.TrimSpace(update.ToolCallID), true, nil
-	case acp.SessionUpdatePlan:
-		entries := make([]acp.IMPlanResult, 0, len(update.Entries))
-		for _, entry := range update.Entries {
-			entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
-		}
-		return sessionTurnMessage{method: acp.IMMethodAgentPlan, payload: entries}, "", true, nil
-	default:
-		return sessionTurnMessage{}, "", false, nil
-	}
-}
-
-func setSessionUpdateJsonMessage(event *parsedSessionViewEvent, update acp.SessionUpdate) {
-	if event == nil {
-		return
-	}
-	turn, turnKey, ok, err := buildTurnMessageFromSessionUpdate(update)
-	if err != nil || !ok {
-		return
-	}
-	event.setJSONMessage(turn.method, turn.payload, turnKey)
-}
-
 func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, error) {
 	parsed := parsedSessionViewEvent{
 		raw: event,
@@ -899,7 +842,24 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 		case acp.MethodSessionUpdate:
 			params := acp.SessionUpdateParams{}
 			jsonDecodeAt(contentRaw, "params", &params)
-			setSessionUpdateJsonMessage(&parsed, params.Update)
+			method := strings.TrimSpace(params.Update.SessionUpdate)
+			switch method {
+			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
+				parsed.setJSONMessage(method, acp.IMTextResult{Text: extractUpdateText(params.Update.Content)}, "")
+			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+				parsed.setJSONMessage(acp.IMMethodToolCall, acp.IMToolResult{
+					Cmd:    strings.TrimSpace(params.Update.Title),
+					Kind:   strings.TrimSpace(params.Update.Kind),
+					Status: strings.TrimSpace(params.Update.Status),
+				}, strings.TrimSpace(params.Update.ToolCallID))
+			case acp.SessionUpdatePlan:
+				entries := make([]acp.IMPlanResult, 0, len(params.Update.Entries))
+				for _, entry := range params.Update.Entries {
+					entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
+				}
+				parsed.setJSONMessage(acp.IMMethodAgentPlan, entries, "")
+			default:
+			}
 		default:
 		}
 	} else if strings.EqualFold(eventType, string(SessionViewEventTypeSystem)) {
@@ -1045,8 +1005,8 @@ func decodeTurnPayload(message acp.IMMessage) (any, error) {
 	}
 }
 
-func decodeSessionTurnMessage(record SessionTurnRecord) (sessionTurnMessage, error) {
-	imMessage, err := decodeIMMessage(record.UpdateJSON)
+func decodeSessionTurnMessage(sessionID string, promptIndex, turnIndex int64, updateJSON string) (sessionTurnMessage, error) {
+	imMessage, err := decodeIMMessage(updateJSON)
 	if err != nil {
 		return sessionTurnMessage{}, err
 	}
@@ -1055,23 +1015,10 @@ func decodeSessionTurnMessage(record SessionTurnRecord) (sessionTurnMessage, err
 		return sessionTurnMessage{}, err
 	}
 	return sessionTurnMessage{
-		SessionID:   strings.TrimSpace(record.SessionID),
+		SessionID:   strings.TrimSpace(sessionID),
 		method:      strings.TrimSpace(imMessage.Method),
 		payload:     payload,
-		PromptIndex: record.PromptIndex,
-		TurnIndex:   record.TurnIndex,
+		PromptIndex: promptIndex,
+		TurnIndex:   turnIndex,
 	}, nil
-}
-
-func toSessionViewMessage(message SessionTurnRecord) sessionViewMessage {
-	content := strings.TrimSpace(message.UpdateJSON)
-	if content == "" {
-		content = "{}"
-	}
-	return sessionViewMessage{
-		SessionID:   strings.TrimSpace(message.SessionID),
-		PromptIndex: message.PromptIndex,
-		TurnIndex:   message.TurnIndex,
-		Content:     content,
-	}
 }
