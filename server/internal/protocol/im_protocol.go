@@ -55,7 +55,6 @@ type IMToolResult struct {
 	Cmd    string `json:"cmd,omitempty"`
 	Kind   string `json:"kind,omitempty"`
 	Status string `json:"status,omitempty"`
-	Output string `json:"output,omitempty"`
 }
 
 type IMPlanResult struct {

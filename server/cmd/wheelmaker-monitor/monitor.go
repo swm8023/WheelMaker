@@ -715,7 +715,7 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, fallbackIndex i
 			case rp.IMMethodToolCall:
 				result := rp.IMToolResult{}
 				_ = json.Unmarshal(message.Param, &result)
-				body = firstNonEmpty(strings.TrimSpace(result.Output), strings.TrimSpace(result.Cmd))
+				body = strings.TrimSpace(result.Cmd)
 				role = "system"
 				status = firstNonEmpty(strings.TrimSpace(result.Status), "done")
 			case rp.IMMethodAgentPlan:

@@ -978,11 +978,6 @@ func mergeToolPayload(existing, incoming any) (any, error) {
 	if strings.TrimSpace(inc.Status) == "" {
 		inc.Status = strings.TrimSpace(base.Status)
 	}
-	if strings.TrimSpace(inc.Output) == "" {
-		inc.Output = base.Output
-	} else if strings.TrimSpace(base.Output) != "" {
-		inc.Output = base.Output + inc.Output
-	}
 	return inc, nil
 }
 
@@ -992,15 +987,10 @@ func buildTurnMessageFromSessionUpdate(update acp.SessionUpdate) (sessionTurnMes
 	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
 		return sessionTurnMessage{method: method, payload: acp.IMTextResult{Text: extractUpdateText(update.Content)}}, "", true, nil
 	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		output := extractUpdateText(update.Content)
-		if strings.TrimSpace(output) == "" {
-			output = stringifyRawJSON(update.RawOutput)
-		}
 		return sessionTurnMessage{method: acp.IMMethodToolCall, payload: acp.IMToolResult{
 			Cmd:    strings.TrimSpace(update.Title),
 			Kind:   strings.TrimSpace(update.Kind),
 			Status: strings.TrimSpace(update.Status),
-			Output: output,
 		}}, strings.TrimSpace(update.ToolCallID), true, nil
 	case acp.SessionUpdatePlan:
 		entries := make([]acp.IMPlanResult, 0, len(update.Entries))

@@ -1814,65 +1814,65 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 }
 
 func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
-		store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
-		if err != nil {
-			t.Fatalf("NewStore: %v", err)
-		}
-		defer store.Close()
-
-		ctx := context.Background()
-		if err := store.SaveSession(ctx, &SessionRecord{
-			ID:           "sess-1",
-			ProjectName:  "proj1",
-			Status:       SessionActive,
-			AgentType:    "claude",
-			AgentJSON:    `{}`,
-			CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
-			LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
-		}); err != nil {
-			t.Fatalf("SaveSession: %v", err)
-		}
-
-		turn1JSON := `{"method":"session/prompt","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`
-		turn2JSON := `{"method":"agent_message_chunk","param":{"text":"world"}}`
-		turnsJSON := EncodeStoredTurns([]SessionTurnRecord{
-			{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateJSON: turn1JSON},
-			{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 2, UpdateJSON: turn2JSON},
-		})
-
-		if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
-			SessionID:   "sess-1",
-			PromptIndex: 1,
-			StopReason:  "end_turn",
-			UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
-			TurnsJSON:   turnsJSON,
-			TurnIndex:   2,
-		}); err != nil {
-			t.Fatalf("UpsertSessionPrompt with turns: %v", err)
-		}
-
-		loaded, err := store.LoadSessionPrompt(ctx, "proj1", "sess-1", 1)
-		if err != nil {
-			t.Fatalf("LoadSessionPrompt: %v", err)
-		}
-		if loaded == nil {
-			t.Fatal("LoadSessionPrompt returned nil")
-		}
-		if loaded.TurnIndex != 2 {
-			t.Fatalf("TurnIndex = %d, want 2", loaded.TurnIndex)
-		}
-
-		decoded, err := DecodeStoredTurns("sess-1", 1, loaded.TurnsJSON)
-		if err != nil {
-			t.Fatalf("DecodeStoredTurns: %v", err)
-		}
-		if len(decoded) != 2 {
-			t.Fatalf("decoded turns len = %d, want 2", len(decoded))
-		}
-		if decoded[1].TurnIndex != 2 {
-			t.Fatalf("decoded[1].TurnIndex = %d, want 2", decoded[1].TurnIndex)
-		}
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
 	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		CreatedAt:    time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turn1JSON := `{"method":"session/prompt","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`
+	turn2JSON := `{"method":"agent_message_chunk","param":{"text":"world"}}`
+	turnsJSON := EncodeStoredTurns([]SessionTurnRecord{
+		{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 1, UpdateJSON: turn1JSON},
+		{SessionID: "sess-1", PromptIndex: 1, TurnIndex: 2, UpdateJSON: turn2JSON},
+	})
+
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt with turns: %v", err)
+	}
+
+	loaded, err := store.LoadSessionPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("LoadSessionPrompt: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadSessionPrompt returned nil")
+	}
+	if loaded.TurnIndex != 2 {
+		t.Fatalf("TurnIndex = %d, want 2", loaded.TurnIndex)
+	}
+
+	decoded, err := DecodeStoredTurns("sess-1", 1, loaded.TurnsJSON)
+	if err != nil {
+		t.Fatalf("DecodeStoredTurns: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("decoded turns len = %d, want 2", len(decoded))
+	}
+	if decoded[1].TurnIndex != 2 {
+		t.Fatalf("decoded[1].TurnIndex = %d, want 2", decoded[1].TurnIndex)
+	}
+}
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
@@ -3715,7 +3715,6 @@ func decodeTurnSessionUpdate(t *testing.T, raw string) acp.SessionUpdate {
 			Title:         strings.TrimSpace(result.Cmd),
 			Kind:          strings.TrimSpace(result.Kind),
 			Status:        strings.TrimSpace(result.Status),
-			Content:       mustJSON(map[string]any{"text": result.Output}),
 		}
 	case acp.IMMethodAgentPlan:
 		plan := []acp.IMPlanResult{}
@@ -3981,6 +3980,7 @@ func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T)
 		t.Fatalf("prompt2 assistant text = %q, want %q", text, "world")
 	}
 }
+
 // listStoredTurns reads the persisted turns for a completed prompt from session_prompts.turns_json.
 func listStoredTurns(ctx context.Context, t *testing.T, store Store, projectName, sessionID string, promptIndex int64) []SessionTurnRecord {
 	t.Helper()
