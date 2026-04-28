@@ -2307,6 +2307,50 @@ func TestCurrentPromptStateLockedReturnsLiveCachedState(t *testing.T) {
 	}
 }
 
+func TestCurrentPromptStateLockedDoesNotDecodePersistedTurns(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	now := time.Date(2026, 4, 29, 0, 0, 0, 0, time.UTC)
+
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-no-restore",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		CreatedAt:    now,
+		LastActiveAt: now,
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := c.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-no-restore",
+		PromptIndex: 3,
+		UpdatedAt:   now,
+		TurnsJSON:   `["not-json-doc"]`,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	state, err := c.sessionRecorder.currentPromptStateLocked(ctx, "sess-no-restore")
+	if err != nil {
+		t.Fatalf("currentPromptStateLocked: %v", err)
+	}
+	if state == nil {
+		t.Fatal("state = nil, want non-nil")
+	}
+	if state.promptIndex != 3 {
+		t.Fatalf("state.promptIndex = %d, want 3", state.promptIndex)
+	}
+	if state.nextTurnIndex != 3 {
+		t.Fatalf("state.nextTurnIndex = %d, want 3", state.nextTurnIndex)
+	}
+	if len(state.turns) != 0 {
+		t.Fatalf("len(state.turns) = %d, want 0", len(state.turns))
+	}
+}
+
 func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	state := sessionPromptState{
 		nextTurnIndex: 3,
@@ -2657,19 +2701,6 @@ func TestParseSessionViewEventSessionUpdateUnknownTypeReturnsError(t *testing.T)
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "unsupported session update type") {
 		t.Fatalf("parseSessionViewEvent error = %v, want unsupported session update type", err)
-	}
-}
-
-func TestDecodeTurnPayloadUnknownMethodReturnsError(t *testing.T) {
-	_, err := decodeTurnPayload(acp.IMMessage{
-		Method: "im.unknown",
-		Param:  mustJSON(map[string]any{"x": 1}),
-	})
-	if err == nil {
-		t.Fatal("decodeTurnPayload error = nil, want unsupported IM method error")
-	}
-	if !strings.Contains(strings.ToLower(err.Error()), "unsupported im method") {
-		t.Fatalf("decodeTurnPayload error = %v, want unsupported im method", err)
 	}
 }
 

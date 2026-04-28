@@ -677,35 +677,14 @@ func (r *SessionRecorder) loadLatestPromptStateLocked(ctx context.Context, sessi
 		return nil, nil
 	}
 	latest := prompts[len(prompts)-1]
-	state, err := r.restorePromptStateLocked(ctx, sessionID, latest.PromptIndex)
-	if err != nil {
-		return nil, err
+	nextTurnIndex := latest.TurnIndex + 1
+	if nextTurnIndex <= 0 {
+		nextTurnIndex = 1
 	}
+	created := newSessionPromptState(latest.PromptIndex, nextTurnIndex)
+	state := &created
 	r.promptState[sessionID] = state
 	return state, nil
-}
-
-func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionID string, promptIndex int64) (*sessionPromptState, error) {
-	prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, promptIndex)
-	if err != nil {
-		return nil, err
-	}
-	var updates []string
-	if prompt != nil {
-		updates, err = DecodeStoredTurns(prompt.TurnsJSON)
-		if err != nil {
-			return nil, err
-		}
-	}
-	state := newSessionPromptState(promptIndex, 1)
-	for i, updateJSON := range updates {
-		turn, err := decodeSessionTurnMessage(sessionID, promptIndex, int64(i+1), updateJSON)
-		if err != nil {
-			return nil, err
-		}
-		state.assignTurn(turn, "")
-	}
-	return &state, nil
 }
 
 func jsonGet(raw json.RawMessage, key string) (json.RawMessage, bool) {
@@ -891,91 +870,10 @@ func buildIMContentJSON(method string, payload any) string {
 	return string(raw)
 }
 
-func decodeIMMessage(raw string) (acp.IMMessage, error) {
-	raw = normalizeJSONDoc(raw, `{}`)
-	message := acp.IMMessage{}
-	if err := json.Unmarshal([]byte(raw), &message); err != nil {
-		return acp.IMMessage{}, err
-	}
-	message.Method = strings.TrimSpace(message.Method)
-	return message, nil
-}
-
 func mustJSONRaw(value any) json.RawMessage {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		panic(fmt.Errorf("marshal message payload: %w", err))
 	}
 	return json.RawMessage(raw)
-}
-
-func decodeTurnPayload(message acp.IMMessage) (any, error) {
-	method := strings.TrimSpace(message.Method)
-	decode := func(out any) (any, error) {
-		if len(message.Param) == 0 {
-			return out, nil
-		}
-		if err := json.Unmarshal(message.Param, out); err != nil {
-			return nil, err
-		}
-		return out, nil
-	}
-
-	switch method {
-	case acp.IMMethodPromptRequest:
-		payload, err := decode(&acp.IMPromptRequest{})
-		if err != nil {
-			return nil, err
-		}
-		request := payload.(*acp.IMPromptRequest)
-		request.ContentBlocks = cloneSessionContentBlocks(request.ContentBlocks)
-		return *request, nil
-	case acp.IMMethodPromptDone:
-		payload, err := decode(&acp.IMPromptResult{})
-		if err != nil {
-			return nil, err
-		}
-		return *(payload.(*acp.IMPromptResult)), nil
-	case acp.IMMethodAgentMessage, acp.IMMethodAgentThought, acp.SessionUpdateUserMessageChunk, acp.IMMethodSystem:
-		payload, err := decode(&acp.IMTextResult{})
-		if err != nil {
-			return nil, err
-		}
-		return *(payload.(*acp.IMTextResult)), nil
-	case acp.IMMethodToolCall:
-		payload, err := decode(&acp.IMToolResult{})
-		if err != nil {
-			return nil, err
-		}
-		return *(payload.(*acp.IMToolResult)), nil
-	case acp.IMMethodAgentPlan:
-		payload := []acp.IMPlanResult{}
-		if len(message.Param) == 0 {
-			return payload, nil
-		}
-		if err := json.Unmarshal(message.Param, &payload); err != nil {
-			return nil, err
-		}
-		return payload, nil
-	default:
-		return nil, fmt.Errorf("unsupported IM method: %s", method)
-	}
-}
-
-func decodeSessionTurnMessage(sessionID string, promptIndex, turnIndex int64, updateJSON string) (sessionTurnMessage, error) {
-	imMessage, err := decodeIMMessage(updateJSON)
-	if err != nil {
-		return sessionTurnMessage{}, err
-	}
-	payload, err := decodeTurnPayload(imMessage)
-	if err != nil {
-		return sessionTurnMessage{}, err
-	}
-	return sessionTurnMessage{
-		SessionID:   sessionID,
-		method:      imMessage.Method,
-		payload:     payload,
-		PromptIndex: promptIndex,
-		TurnIndex:   turnIndex,
-	}, nil
 }
