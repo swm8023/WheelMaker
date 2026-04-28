@@ -205,9 +205,9 @@ func (r *SessionRecorder) handleIMMessage(ctx context.Context, event parsedSessi
 
 func (e *parsedSessionViewEvent) setJSONMessage(method string, payload any, turnKey string) {
 	e.bMessage = true
-	e.method = strings.TrimSpace(method)
+	e.method = method
 	e.payload = payload
-	e.turnKey = strings.TrimSpace(turnKey)
+	e.turnKey = turnKey
 }
 
 func (e parsedSessionViewEvent) imMessage() acp.IMMessage {
@@ -350,7 +350,7 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	state.ensureMaps()
 
 	turn := sessionTurnMessage{
-		SessionID:   strings.TrimSpace(event.raw.SessionID),
+		SessionID:   event.raw.SessionID,
 		method:      event.method,
 		payload:     event.payload,
 		PromptIndex: state.promptIndex,
@@ -389,7 +389,7 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	publish := r.eventPublisher()
 	if publish != nil {
 		_ = publish("registry.session.message", map[string]any{
-			"sessionId":   strings.TrimSpace(turn.SessionID),
+			"sessionId":   turn.SessionID,
 			"promptIndex": turn.PromptIndex,
 			"turnIndex":   turn.TurnIndex,
 			"content":     updateJSON,
@@ -643,7 +643,6 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 }
 
 func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (*sessionPromptState, error) {
-	sessionID = strings.TrimSpace(sessionID)
 	state, err := r.currentPromptStateLocked(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -660,10 +659,6 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 }
 
 func (r *SessionRecorder) currentPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return nil, nil
-	}
 	if state, err := r.cachedPromptStateLocked(ctx, sessionID); state != nil || err != nil {
 		return state, err
 	}
@@ -718,7 +713,7 @@ func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionI
 	}
 	state := newSessionPromptState(promptIndex, 1)
 	for i, updateJSON := range updates {
-		turn, err := decodeSessionTurnMessage(strings.TrimSpace(sessionID), promptIndex, int64(i+1), updateJSON)
+		turn, err := decodeSessionTurnMessage(sessionID, promptIndex, int64(i+1), updateJSON)
 		if err != nil {
 			return nil, err
 		}
@@ -902,7 +897,7 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 }
 
 func buildIMContentJSON(method string, payload any) (string, error) {
-	message := acp.IMMessage{Method: strings.TrimSpace(method)}
+	message := acp.IMMessage{Method: method}
 	if payload != nil {
 		message.Param = mustJSONRaw(payload)
 	}
@@ -910,7 +905,7 @@ func buildIMContentJSON(method string, payload any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return normalizeJSONDoc(string(raw), `{}`), nil
+	return string(raw), nil
 }
 
 func decodeIMMessage(raw string) (acp.IMMessage, error) {
@@ -1003,8 +998,8 @@ func decodeSessionTurnMessage(sessionID string, promptIndex, turnIndex int64, up
 		return sessionTurnMessage{}, err
 	}
 	return sessionTurnMessage{
-		SessionID:   strings.TrimSpace(sessionID),
-		method:      strings.TrimSpace(imMessage.Method),
+		SessionID:   sessionID,
+		method:      imMessage.Method,
 		payload:     payload,
 		PromptIndex: promptIndex,
 		TurnIndex:   turnIndex,

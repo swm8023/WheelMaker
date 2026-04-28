@@ -2205,6 +2205,20 @@ func TestMergeTurnMessageMergesTypedTextPayload(t *testing.T) {
 	}
 }
 
+func TestBuildIMContentJSONDoesNotTrimMethod(t *testing.T) {
+	raw, err := buildIMContentJSON("  method.with.space  ", map[string]any{"k": "v"})
+	if err != nil {
+		t.Fatalf("buildIMContentJSON: %v", err)
+	}
+	msg := acp.IMMessage{}
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if msg.Method != "  method.with.space  " {
+		t.Fatalf("msg.Method = %q, want %q", msg.Method, "  method.with.space  ")
+	}
+}
+
 func TestCurrentPromptStateLockedReturnsNilWhenMissing(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
