@@ -2790,9 +2790,9 @@ func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2", len(messages))
@@ -2883,15 +2883,15 @@ func TestSessionReadOmitsTurnIDAndSummaryExtras(t *testing.T) {
 	if _, ok := summaryType.FieldByName("ProjectName"); ok {
 		t.Fatalf("sessionViewSummary unexpectedly still contains ProjectName field")
 	}
-	if _, ok := body["messages"]; ok {
-		t.Fatalf("session.read unexpectedly returned messages: %+v", body)
+	if _, ok := body["prompts"]; ok {
+		t.Fatalf("session.read unexpectedly returned prompts: %+v", body)
 	}
-	prompts := body["prompts"].([]sessionPromptSnapshot)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
-	if prompts[0].TurnIndex != 1 || len(prompts[0].Content) != 1 {
-		t.Fatalf("prompt snapshot = %#v, want turnIndex=1 content len=1", prompts[0])
+	if messages[0].TurnIndex != 1 {
+		t.Fatalf("messages[0].TurnIndex = %d, want 1", messages[0].TurnIndex)
 	}
 }
 
@@ -3022,37 +3022,36 @@ func TestSessionReadWithoutCheckpointReturnsPromptSnapshots(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	if _, ok := body["messages"]; ok {
-		t.Fatalf("session.read unexpectedly returned messages: %+v", body)
+	if _, ok := body["prompts"]; ok {
+		t.Fatalf("session.read unexpectedly returned prompts: %+v", body)
 	}
-	if _, ok := body["lastIndex"]; ok {
-		t.Fatalf("session.read unexpectedly returned lastIndex: %+v", body)
-	}
-	if _, ok := body["lastSubIndex"]; ok {
-		t.Fatalf("session.read unexpectedly returned lastSubIndex: %+v", body)
-	}
-
-	rawPrompts, err := json.Marshal(body["prompts"])
+	rawMessages, err := json.Marshal(body["messages"])
 	if err != nil {
-		t.Fatalf("json.Marshal(prompts): %v", err)
+		t.Fatalf("json.Marshal(messages): %v", err)
 	}
-	var prompts []struct {
-		SessionID   string   `json:"sessionId"`
-		PromptIndex int64    `json:"promptIndex"`
-		TurnIndex   int64    `json:"turnIndex"`
-		Content     []string `json:"content"`
+	var messages []struct {
+		SessionID   string `json:"sessionId"`
+		PromptIndex int64  `json:"promptIndex"`
+		TurnIndex   int64  `json:"turnIndex"`
+		Content     string `json:"content"`
 	}
-	if err := json.Unmarshal(rawPrompts, &prompts); err != nil {
-		t.Fatalf("json.Unmarshal(prompts): %v", err)
+	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+		t.Fatalf("json.Unmarshal(messages): %v", err)
 	}
-	if len(prompts) != 2 {
-		t.Fatalf("prompts len = %d, want 2", len(prompts))
+	if len(messages) != 4 {
+		t.Fatalf("messages len = %d, want 4", len(messages))
 	}
-	if prompts[0].PromptIndex != 1 || prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
-		t.Fatalf("prompt[0] = %#v, want promptIndex=1 turnIndex=2 content len=2", prompts[0])
+	if messages[0].PromptIndex != 1 || messages[0].TurnIndex != 1 {
+		t.Fatalf("messages[0] = %#v, want promptIndex=1 turnIndex=1", messages[0])
 	}
-	if prompts[1].PromptIndex != 2 || prompts[1].TurnIndex != 2 || len(prompts[1].Content) != 2 {
-		t.Fatalf("prompt[1] = %#v, want promptIndex=2 turnIndex=2 content len=2", prompts[1])
+	if messages[1].PromptIndex != 1 || messages[1].TurnIndex != 2 {
+		t.Fatalf("messages[1] = %#v, want promptIndex=1 turnIndex=2", messages[1])
+	}
+	if messages[2].PromptIndex != 2 || messages[2].TurnIndex != 1 {
+		t.Fatalf("messages[2] = %#v, want promptIndex=2 turnIndex=1", messages[2])
+	}
+	if messages[3].PromptIndex != 2 || messages[3].TurnIndex != 2 {
+		t.Fatalf("messages[3] = %#v, want promptIndex=2 turnIndex=2", messages[3])
 	}
 }
 
@@ -3097,26 +3096,26 @@ func TestSessionReadReturnsCheckpointPromptSnapshotAndLaterPrompts(t *testing.T)
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	rawPrompts, err := json.Marshal(body["prompts"])
+	rawMessages, err := json.Marshal(body["messages"])
 	if err != nil {
-		t.Fatalf("json.Marshal(prompts): %v", err)
+		t.Fatalf("json.Marshal(messages): %v", err)
 	}
-	var prompts []struct {
-		PromptIndex int64    `json:"promptIndex"`
-		TurnIndex   int64    `json:"turnIndex"`
-		Content     []string `json:"content"`
+	var messages []struct {
+		PromptIndex int64  `json:"promptIndex"`
+		TurnIndex   int64  `json:"turnIndex"`
+		Content     string `json:"content"`
 	}
-	if err := json.Unmarshal(rawPrompts, &prompts); err != nil {
-		t.Fatalf("json.Unmarshal(prompts): %v", err)
+	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+		t.Fatalf("json.Unmarshal(messages): %v", err)
 	}
-	if len(prompts) != 2 {
-		t.Fatalf("prompts len = %d, want 2", len(prompts))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2 (only prompt 2 turns after cursor)", len(messages))
 	}
-	if prompts[0].PromptIndex != 1 || prompts[0].TurnIndex != 2 {
-		t.Fatalf("prompt[0] = %#v, want checkpoint prompt snapshot", prompts[0])
+	if messages[0].PromptIndex != 2 || messages[0].TurnIndex != 1 {
+		t.Fatalf("messages[0] = %#v, want promptIndex=2 turnIndex=1", messages[0])
 	}
-	if prompts[1].PromptIndex != 2 || prompts[1].TurnIndex != 2 {
-		t.Fatalf("prompt[1] = %#v, want later prompt snapshot", prompts[1])
+	if messages[1].PromptIndex != 2 || messages[1].TurnIndex != 2 {
+		t.Fatalf("messages[1] = %#v, want promptIndex=2 turnIndex=2", messages[1])
 	}
 }
 
@@ -3145,32 +3144,15 @@ func TestSessionRecorderResetPromptStateRestartsIndexes(t *testing.T) {
 		t.Fatalf("RecordEvent prompt after reset: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(messages))
 	}
 	if messages[0].PromptIndex != 1 {
 		t.Fatalf("messages[0].PromptIndex = %d, want 1", messages[0].PromptIndex)
-	}
-}
-
-func TestSessionMessagePageTracksLatestCursorBeyondFilteredTurns(t *testing.T) {
-	page := newSessionMessagePage(2, 2)
-	page.append("sess-1", 1, 1, `{}`)
-	page.append("sess-1", 2, 1, `{}`)
-	page.append("sess-1", 2, 2, `{}`)
-
-	if len(page.messages) != 0 {
-		t.Fatalf("page.messages len = %d, want 0", len(page.messages))
-	}
-	if page.lastPromptIndex != 2 {
-		t.Fatalf("page.lastPromptIndex = %d, want 2", page.lastPromptIndex)
-	}
-	if page.lastTurnIndex != 2 {
-		t.Fatalf("page.lastTurnIndex = %d, want 2", page.lastTurnIndex)
 	}
 }
 
@@ -3227,9 +3209,9 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 		t.Fatalf("RecordEvent user image message: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(context.Background(), "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(context.Background(), "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1", len(messages))
@@ -3356,16 +3338,16 @@ func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID
 		t.Fatalf("RecordEvent update: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "client-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "client-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages(client-1): %v", err)
+		t.Fatalf("ReadSessionPrompts(client-1): %v", err)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("client messages len = %d, want 2", len(messages))
 	}
 
-	if _, _, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "acp-1", 0, 0); err == nil {
-		t.Fatalf("ReadSessionMessages(acp-1) unexpectedly succeeded")
+	if _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "acp-1", 0, 0); err == nil {
+		t.Fatalf("ReadSessionPrompts(acp-1) unexpectedly succeeded")
 	}
 }
 
@@ -3449,26 +3431,26 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	rawPrompts, err := json.Marshal(body["prompts"])
+	rawMessages, err := json.Marshal(body["messages"])
 	if err != nil {
-		t.Fatalf("json.Marshal(prompts): %v", err)
+		t.Fatalf("json.Marshal(messages): %v", err)
 	}
-	var prompts []struct {
-		TurnIndex int64    `json:"turnIndex"`
-		Content   []string `json:"content"`
+	var messages []struct {
+		TurnIndex int64  `json:"turnIndex"`
+		Content   string `json:"content"`
 	}
-	if err := json.Unmarshal(rawPrompts, &prompts); err != nil {
-		t.Fatalf("json.Unmarshal(prompts): %v", err)
+	if err := json.Unmarshal(rawMessages, &messages); err != nil {
+		t.Fatalf("json.Unmarshal(messages): %v", err)
 	}
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
-		t.Fatalf("prompt snapshot = %#v, want turnIndex=2 content len=2", prompts[0])
+	if messages[1].TurnIndex != 2 {
+		t.Fatalf("messages[1].TurnIndex = %d, want 2", messages[1].TurnIndex)
 	}
-	update2 := decodeTurnSessionUpdate(t, prompts[0].Content[1])
+	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
 	if strings.TrimSpace(extractTextChunk(update2.Content)) != "hello world" {
-		t.Fatalf("message[1] text = %q, want hello world", extractTextChunk(update2.Content))
+		t.Fatalf("messages[1] text = %q, want hello world", extractTextChunk(update2.Content))
 	}
 }
 
@@ -3502,9 +3484,9 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages len = %d, want 3; messages=%+v", len(messages), messages)
@@ -3545,9 +3527,9 @@ func TestSessionViewKeepsUserMessageChunkTurn(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 2 {
 		t.Fatalf("messages len = %d, want 2; messages=%+v", len(messages), messages)
@@ -3585,9 +3567,9 @@ func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
 		t.Fatalf("RecordEvent system message: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 0 {
 		t.Fatalf("messages len = %d, want 0", len(messages))
@@ -3608,9 +3590,9 @@ func TestSessionViewUpdateWithoutPromptIsDropped(t *testing.T) {
 		t.Fatalf("RecordEvent update: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 0 {
 		t.Fatalf("messages len = %d, want 0", len(messages))
@@ -3691,7 +3673,7 @@ func TestSessionViewReadReturnsCheckpointPromptSnapshot(t *testing.T) {
 		t.Fatalf("RecordEvent permission requested: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3700,15 +3682,15 @@ func TestSessionViewReadReturnsCheckpointPromptSnapshot(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	prompts := body["prompts"].([]sessionPromptSnapshot)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if prompts[0].PromptIndex != 1 || prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
-		t.Fatalf("prompt snapshot = %#v, want promptIndex=1 turnIndex=2 content len=2", prompts[0])
+	if messages[0].PromptIndex != 1 || messages[0].TurnIndex != 1 {
+		t.Fatalf("messages[0] = %#v, want promptIndex=1 turnIndex=1", messages[0])
 	}
-	if method := decodeTurnMethod(t, prompts[0].Content[1]); method != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("prompt content[1] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
+	if method := decodeTurnMethod(t, messages[1].Content); method != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("messages[1] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
 	}
 }
 
@@ -3725,7 +3707,7 @@ func TestSessionViewReadReturnsMergedStreamingPromptSnapshot(t *testing.T) {
 		t.Fatalf("RecordEvent chunk: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3734,14 +3716,14 @@ func TestSessionViewReadReturnsMergedStreamingPromptSnapshot(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	prompts := body["prompts"].([]sessionPromptSnapshot)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
-		t.Fatalf("prompt snapshot = %#v, want turnIndex=2 content len=2", prompts[0])
+	if messages[1].TurnIndex != 2 {
+		t.Fatalf("messages[1].TurnIndex = %d, want 2", messages[1].TurnIndex)
 	}
-	update := decodeTurnSessionUpdate(t, prompts[0].Content[1])
+	update := decodeTurnSessionUpdate(t, messages[1].Content)
 	if text := strings.TrimSpace(extractTextChunk(update.Content)); text != "hello" {
 		t.Fatalf("message text = %q, want hello", text)
 	}
@@ -3823,36 +3805,33 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	prompts := body["prompts"].([]sessionPromptSnapshot)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
-	}
-	if prompts[0].TurnIndex != 4 || len(prompts[0].Content) != 4 {
-		t.Fatalf("prompt snapshot = %#v, want turnIndex=4 content len=4", prompts[0])
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 4 {
+		t.Fatalf("messages len = %d, want 4", len(messages))
 	}
 
 	seen := map[string]bool{}
-	for _, content := range prompts[0].Content {
-		if decodeTurnMethod(t, content) == acp.MethodSessionPrompt {
+	for _, msg := range messages {
+		if decodeTurnMethod(t, msg.Content) == acp.MethodSessionPrompt {
 			seen["prompt"] = true
 			continue
 		}
-		update := decodeTurnSessionUpdate(t, content)
+		update := decodeTurnSessionUpdate(t, msg.Content)
 		if strings.TrimSpace(update.SessionUpdate) != "" {
 			seen[update.SessionUpdate] = true
 		}
 	}
 	if !seen["prompt"] {
-		t.Fatalf("missing prompt message, prompts=%+v", prompts)
+		t.Fatalf("missing prompt message, messages=%+v", messages)
 	}
 	if !seen[acp.SessionUpdateAgentMessageChunk] {
-		t.Fatalf("missing agent message chunk, prompts=%+v", prompts)
+		t.Fatalf("missing agent message chunk, messages=%+v", messages)
 	}
 	if !seen[acp.SessionUpdateAgentThoughtChunk] {
-		t.Fatalf("missing agent thought chunk, prompts=%+v", prompts)
+		t.Fatalf("missing agent thought chunk, messages=%+v", messages)
 	}
 	if !seen[acp.SessionUpdateToolCallUpdate] {
-		t.Fatalf("missing tool call update, prompts=%+v", prompts)
+		t.Fatalf("missing tool call update, messages=%+v", messages)
 	}
 }
 func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
@@ -3927,7 +3906,7 @@ func TestSessionViewReadRepairsSameTurnOverwriteFromCheckpoint(t *testing.T) {
 		t.Fatalf("RecordEvent update #2: %v", err)
 	}
 
-	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": 1, "turnIndex": 1})
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
@@ -3936,18 +3915,18 @@ func TestSessionViewReadRepairsSameTurnOverwriteFromCheckpoint(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	prompts := body["prompts"].([]sessionPromptSnapshot)
-	if len(prompts) != 1 {
-		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want 2", len(messages))
 	}
-	if prompts[0].TurnIndex != 2 || len(prompts[0].Content) != 2 {
-		t.Fatalf("prompt snapshot = %#v, want turnIndex=2 content len=2", prompts[0])
+	if messages[1].TurnIndex != 2 {
+		t.Fatalf("messages[1].TurnIndex = %d, want 2", messages[1].TurnIndex)
 	}
-	if method := decodeTurnMethod(t, prompts[0].Content[1]); method != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("prompt content[1] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
+	if method := decodeTurnMethod(t, messages[1].Content); method != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("messages[1] method = %q, want %q", method, acp.SessionUpdateAgentMessageChunk)
 	}
-	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, prompts[0].Content[1]).Content)); text != "hello world" {
-		t.Fatalf("prompt content[1] text = %q, want hello world", text)
+	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, messages[1].Content).Content)); text != "hello world" {
+		t.Fatalf("messages[1] text = %q, want hello world", text)
 	}
 }
 
@@ -4172,9 +4151,9 @@ func TestSessionViewPermissionEventsAreIgnored(t *testing.T) {
 		t.Fatalf("RecordEvent permission resolved: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1 (prompt only)", len(messages))
@@ -4194,9 +4173,9 @@ func TestSessionViewDropsOrphanPermissionResult(t *testing.T) {
 		t.Fatalf("RecordEvent orphan permission resolved: %v", err)
 	}
 
-	_, messages, _, _, err := c.sessionRecorder.ReadSessionMessages(ctx, "sess-1", 0, 0)
+	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
-		t.Fatalf("ReadSessionMessages: %v", err)
+		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
 	if len(messages) != 1 {
 		t.Fatalf("messages len = %d, want 1 (prompt only)", len(messages))

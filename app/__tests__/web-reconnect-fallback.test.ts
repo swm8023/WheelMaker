@@ -66,9 +66,10 @@ describe('web reconnect fallback behavior', () => {
       'result.hydrated.selectedFile || selectedFileRef.current;',
     );
     expect(mainTsx).toContain(
-      'readSelectedFile(selectedFileToReload, { restoreScroll: true }).catch(() => undefined);',
+      'readSelectedFile(selectedFileToReload, { restoreScroll: true, silent: silentReconnect }).catch(() => undefined);',
     );
   });
+
   test('restores selected file scroll position after reconnect success', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
@@ -80,13 +81,14 @@ describe('web reconnect fallback behavior', () => {
       'const fileScrollTopByPathRef = useRef<Record<string, number>>({});',
     );
     expect(mainTsx).toContain(
-      'readSelectedFile(selectedFileToReload, { restoreScroll: true }).catch(() => undefined);',
+      'readSelectedFile(selectedFileToReload, { restoreScroll: true, silent: silentReconnect }).catch(() => undefined);',
     );
     expect(mainTsx).toContain('const savedTop = fileScrollTopByPathRef.current[path];');
     expect(mainTsx).toContain(
       'fileScrollTopByPathRef.current[path] = event.currentTarget.scrollTop;',
     );
   });
+
   test('shows reconnecting state through refresh button while recovering', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
@@ -99,5 +101,34 @@ describe('web reconnect fallback behavior', () => {
     );
     expect(mainTsx).toContain('disabled={refreshingProject || reconnecting}');
     expect(mainTsx).toContain('codicon-loading codicon-modifier-spin');
+  });
+
+  test('keeps workspace visible while background-disconnected and reconnecting', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain('const shouldKeepWorkspaceVisible =');
+    expect(mainTsx).toContain(
+      "reason !== 'stop' && !!tokenRef.current.trim() && !!projectIdRef.current;",
+    );
+    expect(mainTsx).toContain('setReconnecting(shouldKeepWorkspaceVisible);');
+  });
+
+  test('supports silent file reads during reconnect to avoid loading flicker', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'main.tsx'),
+      'utf8',
+    );
+
+    expect(mainTsx).toContain(
+      'const readSelectedFile = async (path: string, options?: {restoreScroll?: boolean; silent?: boolean}) => {',
+    );
+    expect(mainTsx).toContain('const silentRead = options?.silent === true;');
+    expect(mainTsx).toContain('if (!silentRead) {');
+    expect(mainTsx).toContain('setFileLoading(true);');
   });
 });

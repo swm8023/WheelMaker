@@ -352,11 +352,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.read payload: %w", err)
 		}
-		summary, prompts, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, req.PromptIndex, req.TurnIndex)
+		summary, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, req.PromptIndex, req.TurnIndex)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"session": summary, "prompts": prompts}, nil
+		return map[string]any{"session": summary, "messages": messages}, nil
 	case "session.new":
 		var req struct {
 			AgentType string `json:"agentType"`

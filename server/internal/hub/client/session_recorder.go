@@ -48,21 +48,6 @@ type sessionViewMessage struct {
 	Content     string `json:"content"`
 }
 
-type sessionPromptSnapshot struct {
-	SessionID   string   `json:"sessionId"`
-	PromptIndex int64    `json:"promptIndex"`
-	TurnIndex   int64    `json:"turnIndex"`
-	Content     []string `json:"content"`
-}
-
-type sessionMessagePage struct {
-	afterPromptIndex int64
-	afterTurnIndex   int64
-	lastPromptIndex  int64
-	lastTurnIndex    int64
-	messages         []sessionViewMessage
-}
-
 type sessionTurnMessage struct {
 	SessionID   string
 	method      string
@@ -233,34 +218,7 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	return out, nil
 }
 
-func (r *SessionRecorder) ReadSessionMessages(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewMessage, int64, int64, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	if rec == nil {
-		return sessionViewSummary{}, nil, 0, 0, fmt.Errorf("session not found: %s", sessionID)
-	}
-	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
-	if err != nil {
-		return sessionViewSummary{}, nil, 0, 0, err
-	}
-	page := newSessionMessagePage(afterPromptIndex, afterTurnIndex)
-	for _, prompt := range prompts {
-		turns, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
-		if err != nil {
-			return sessionViewSummary{}, nil, 0, 0, err
-		}
-		for i, updateJSON := range turns {
-			page.append(sessionID, prompt.PromptIndex, int64(i+1), updateJSON)
-		}
-	}
-
-	return r.sessionViewSummaryFromRecord(*rec), page.messages, page.lastPromptIndex, page.lastTurnIndex, nil
-}
-
-func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, checkpointPromptIndex, _ int64) (sessionViewSummary, []sessionPromptSnapshot, error) {
+func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewMessage, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
@@ -273,28 +231,29 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 	if err != nil {
 		return sessionViewSummary{}, nil, err
 	}
-	out := make([]sessionPromptSnapshot, 0, len(prompts))
+	var messages []sessionViewMessage
 	for _, prompt := range prompts {
-		if checkpointPromptIndex > 0 && prompt.PromptIndex < checkpointPromptIndex {
-			continue
-		}
 		turns, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
 		if err != nil {
 			return sessionViewSummary{}, nil, err
 		}
-		content := make([]string, 0, len(turns))
-		for _, updateJSON := range turns {
-			content = append(content, normalizeJSONDoc(updateJSON, `{}`))
+		for i, updateJSON := range turns {
+			turnIndex := int64(i + 1)
+			if prompt.PromptIndex < afterPromptIndex {
+				continue
+			}
+			if prompt.PromptIndex == afterPromptIndex && turnIndex <= afterTurnIndex {
+				continue
+			}
+			messages = append(messages, sessionViewMessage{
+				SessionID:   sessionID,
+				PromptIndex: prompt.PromptIndex,
+				TurnIndex:   turnIndex,
+				Content:     normalizeJSONDoc(updateJSON, "{}"),
+			})
 		}
-		snapshot := sessionPromptSnapshot{
-			SessionID:   strings.TrimSpace(sessionID),
-			PromptIndex: prompt.PromptIndex,
-			TurnIndex:   int64(len(content)),
-			Content:     content,
-		}
-		out = append(out, snapshot)
 	}
-	return r.sessionViewSummaryFromRecord(*rec), out, nil
+	return r.sessionViewSummaryFromRecord(*rec), messages, nil
 }
 
 func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event parsedSessionViewEvent) error {
@@ -523,48 +482,6 @@ func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID stri
 	}
 	r.writeMu.Unlock()
 	return updates, nil
-}
-
-func newSessionMessagePage(afterPromptIndex, afterTurnIndex int64) sessionMessagePage {
-	return sessionMessagePage{
-		afterPromptIndex: afterPromptIndex,
-		afterTurnIndex:   afterTurnIndex,
-		messages:         make([]sessionViewMessage, 0),
-	}
-}
-
-func (p *sessionMessagePage) append(sessionID string, promptIndex, turnIndex int64, updateJSON string) {
-	p.advance(promptIndex, turnIndex)
-	if !p.includes(promptIndex, turnIndex) {
-		return
-	}
-	content := strings.TrimSpace(updateJSON)
-	if content == "" {
-		content = "{}"
-	}
-	p.messages = append(p.messages, sessionViewMessage{
-		SessionID:   strings.TrimSpace(sessionID),
-		PromptIndex: promptIndex,
-		TurnIndex:   turnIndex,
-		Content:     content,
-	})
-}
-
-func (p *sessionMessagePage) advance(promptIndex, turnIndex int64) {
-	if promptIndex > p.lastPromptIndex || (promptIndex == p.lastPromptIndex && turnIndex > p.lastTurnIndex) {
-		p.lastPromptIndex = promptIndex
-		p.lastTurnIndex = turnIndex
-	}
-}
-
-func (p sessionMessagePage) includes(promptIndex, turnIndex int64) bool {
-	if promptIndex < p.afterPromptIndex {
-		return false
-	}
-	if promptIndex == p.afterPromptIndex && turnIndex <= p.afterTurnIndex {
-		return false
-	}
-	return true
 }
 
 func newSessionPromptState(promptIndex, nextTurnIndex int64) sessionPromptState {
