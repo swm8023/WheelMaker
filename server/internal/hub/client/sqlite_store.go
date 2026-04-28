@@ -18,6 +18,11 @@ import (
 )
 
 const sqliteSchema = `
+CREATE TABLE IF NOT EXISTS projects (
+	project_name TEXT PRIMARY KEY,
+	default_agent_type TEXT NOT NULL DEFAULT '',
+	updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS route_bindings (
 	project_name TEXT NOT NULL,
 	route_key TEXT NOT NULL,
@@ -105,6 +110,8 @@ type Store interface {
 	LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error)
 	SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error
 	DeleteRouteBinding(ctx context.Context, projectName, routeKey string) error
+	LoadProjectDefaultAgent(ctx context.Context, projectName string) (string, error)
+	SaveProjectDefaultAgent(ctx context.Context, projectName, agentType string) error
 
 	LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error)
 	SaveSession(ctx context.Context, rec *SessionRecord) error
@@ -154,6 +161,7 @@ func NewStore(dbPath string) (Store, error) {
 }
 
 var expectedStoreSchemaColumns = map[string][]string{
+	"projects":          {"project_name", "default_agent_type", "updated_at"},
 	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "title", "created_at", "last_active_at"},
 	"agent_preferences": {"project_name", "agent_type", "preference_json"},
@@ -367,6 +375,42 @@ func (s *sqliteStore) DeleteRouteBinding(ctx context.Context, projectName, route
 	`, strings.TrimSpace(projectName), strings.TrimSpace(routeKey))
 	if err != nil {
 		return fmt.Errorf("delete route binding: %w", err)
+	}
+	return nil
+}
+
+func (s *sqliteStore) LoadProjectDefaultAgent(ctx context.Context, projectName string) (string, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT default_agent_type
+		FROM projects
+		WHERE project_name = ?
+	`, strings.TrimSpace(projectName))
+	var agentType string
+	if err := row.Scan(&agentType); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("load project default agent: %w", err)
+	}
+	return strings.TrimSpace(agentType), nil
+}
+
+func (s *sqliteStore) SaveProjectDefaultAgent(ctx context.Context, projectName, agentType string) error {
+	projectName = strings.TrimSpace(projectName)
+	agentType = strings.TrimSpace(agentType)
+	if projectName == "" || agentType == "" {
+		return fmt.Errorf("project name and agent type are required")
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO projects (project_name, default_agent_type, updated_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT(project_name) DO UPDATE SET
+			default_agent_type=excluded.default_agent_type,
+			updated_at=excluded.updated_at
+	`, projectName, agentType, now)
+	if err != nil {
+		return fmt.Errorf("save project default agent: %w", err)
 	}
 	return nil
 }

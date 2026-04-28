@@ -401,6 +401,10 @@ func (s *noopStore) LoadRouteBindings(context.Context, string) (map[string]strin
 }
 func (s *noopStore) SaveRouteBinding(context.Context, string, string, string) error { return nil }
 func (s *noopStore) DeleteRouteBinding(context.Context, string, string) error       { return nil }
+func (s *noopStore) LoadProjectDefaultAgent(context.Context, string) (string, error) {
+	return "", nil
+}
+func (s *noopStore) SaveProjectDefaultAgent(context.Context, string, string) error { return nil }
 func (s *noopStore) LoadSession(context.Context, string, string) (*SessionRecord, error) {
 	return nil, nil
 }
@@ -614,6 +618,37 @@ func TestHandleIMInbound_UnboundPromptBindsAndEmitsACP(t *testing.T) {
 	}
 	if !foundACP {
 		t.Fatalf("updates=%+v, want ACP session/update emission", fake.updates)
+	}
+}
+
+func TestResolveOrCreateIMSessionUsesStoredDefaultAndFallbackDoesNotRewrite(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	if err := store.SaveProjectDefaultAgent(context.Background(), "proj1", "claude"); err != nil {
+		t.Fatalf("SaveProjectDefaultAgent: %v", err)
+	}
+
+	c := New(store, "proj1", "/tmp")
+	c.registry = &agent.ACPFactory{}
+	codexInst := &testInjectedInstance{name: "codex", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-codex"}}
+	c.registry.Register(acp.ACPProviderCodex, func(context.Context, string) (agent.Instance, error) { return codexInst, nil })
+
+	sess := c.resolveOrCreateIMSession(context.Background(), im.ChatRef{ChannelID: "feishu", ChatID: "chat-a"}, "im:feishu:chat-a")
+	if sess == nil {
+		t.Fatal("resolveOrCreateIMSession = nil")
+	}
+	if sess.agentType != "codex" {
+		t.Fatalf("agentType = %q, want codex fallback", sess.agentType)
+	}
+	still, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if still != "claude" {
+		t.Fatalf("stored default rewritten to %q, want claude", still)
 	}
 }
 
@@ -1291,6 +1326,30 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 
 }
 
+func TestClientNewSessionPersistsProjectDefaultAgent(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	c := New(store, "proj1", "/tmp")
+	inst := &testInjectedInstance{name: "claude", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-new"}}
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
+
+	if _, err := c.ClientNewSession("route-1", "claude"); err != nil {
+		t.Fatalf("ClientNewSession: %v", err)
+	}
+	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if got != "claude" {
+		t.Fatalf("default agent = %q, want claude", got)
+	}
+}
+
 func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *testing.T) {
 	s := newSession("restore-load-success", "/tmp")
 	s.projectName = "proj1"
@@ -1640,6 +1699,41 @@ func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreProjectDefaultAgentRoundTrip(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	if err := store.SaveProjectDefaultAgent(context.Background(), "proj1", "claude"); err != nil {
+		t.Fatalf("SaveProjectDefaultAgent: %v", err)
+	}
+	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if got != "claude" {
+		t.Fatalf("default agent = %q, want claude", got)
+	}
+}
+
+func TestStoreProjectDefaultAgentMissingReturnsEmpty(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj-missing")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("default agent = %q, want empty", got)
+	}
+}
+
 func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
 
@@ -1686,7 +1780,7 @@ func TestCheckStoreSchemaRejectsLegacyProjectsTable(t *testing.T) {
 	if !IsStoreSchemaMismatch(err) {
 		t.Fatalf("IsStoreSchemaMismatch(err) = false, err=%v", err)
 	}
-	if !strings.Contains(err.Error(), `unexpected table "projects"`) && !strings.Contains(err.Error(), `table "sessions" columns mismatch`) {
+	if !strings.Contains(err.Error(), `table "projects" columns mismatch`) && !strings.Contains(err.Error(), `table "sessions" columns mismatch`) {
 		t.Fatalf("CheckStoreSchema() err = %v, want projects/session schema mismatch", err)
 	}
 }
@@ -2211,7 +2305,7 @@ func TestAddMessageTurnMutatesStateInPlace(t *testing.T) {
 	}
 
 	state := newSessionPromptState(1, 1)
-	if err := c.sessionRecorder.addMessageTurn(ctx, &state, parsed); err != nil {
+	if err := c.sessionRecorder.addMessageTurn(&state, parsed); err != nil {
 		t.Fatalf("addMessageTurn: %v", err)
 	}
 
@@ -3630,6 +3724,32 @@ func TestHandleSessionRequest_SessionNewRequiresAgentType(t *testing.T) {
 	_, err = c.HandleSessionRequest(context.Background(), "session.new", "proj1", json.RawMessage(`{"title":"hello"}`))
 	if err == nil || !strings.Contains(err.Error(), "agentType is required") {
 		t.Fatalf("HandleSessionRequest() err = %v, want agentType is required", err)
+	}
+}
+
+func TestHandleSessionRequest_SessionNewPersistsProjectDefaultAgent(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	c := New(store, "proj1", "/tmp")
+	inst := &testInjectedInstance{name: "claude", initResult: acp.InitializeResult{ProtocolVersion: "0.1"}, newResult: &acp.SessionNewResult{SessionID: "sess-1"}}
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
+
+	_, err = c.HandleSessionRequest(context.Background(), "session.new", "proj1", json.RawMessage(`{"agentType":"claude","title":"hello"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.new): %v", err)
+	}
+
+	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if got != "claude" {
+		t.Fatalf("default agent = %q, want claude", got)
 	}
 }
 

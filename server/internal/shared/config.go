@@ -40,9 +40,9 @@ type LogConfig struct {
 
 // ProjectConfig describes one WheelMaker project.
 type ProjectConfig struct {
-	Name     string        `json:"name"`
-	Path     string        `json:"path"`
-	Feishu   *FeishuConfig `json:"feishu,omitempty"`
+	Name   string        `json:"name"`
+	Path   string        `json:"path"`
+	Feishu *FeishuConfig `json:"feishu,omitempty"`
 }
 
 // FeishuConfig describes Feishu transport config.

@@ -372,6 +372,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err != nil {
 			return nil, err
 		}
+		if c.store != nil {
+			if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, sess.agentType); err != nil {
+				hubLogger(c.projectName).Warn("save project default agent failed agent=%s err=%v", sess.agentType, err)
+			}
+		}
 		if err := c.RecordEvent(ctx, SessionViewEvent{
 			Type:      SessionViewEventTypeACP,
 			SessionID: sess.ID,
@@ -574,7 +579,7 @@ func (c *Client) handleIMCommand(ctx context.Context, source im.ChatRef, cmd, ar
 			}
 			return c.sendHelpCard(ctx, source, model, "menu:new", 0)
 		}
-		sess, err := c.ClientNewSession(routeKey, agentType)
+		sess, err := c.clientNewSessionWithOptions(routeKey, agentType, false)
 		if err != nil {
 			return c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
 		}
@@ -624,12 +629,12 @@ func (c *Client) resolveOrCreateIMSession(ctx context.Context, source im.ChatRef
 		}
 		return sess
 	}
-	agentType := c.preferredAvailableAgent()
+	agentType := c.preferredAgentForAutoCreate()
 	if agentType == "" {
 		_ = c.sendIMDirect(ctx, source, "No available agent.")
 		return nil
 	}
-	sess, err := c.ClientNewSession(routeKey, agentType)
+	sess, err := c.clientNewSessionWithOptions(routeKey, agentType, false)
 	if err != nil {
 		_ = c.sendIMDirect(ctx, source, fmt.Sprintf("New error: %v", err))
 		return nil
@@ -817,6 +822,18 @@ func (c *Client) preferredAvailableAgent() string {
 	return strings.TrimSpace(c.registry.PreferredName())
 }
 
+func (c *Client) preferredAgentForAutoCreate() string {
+	if c.store != nil {
+		agentType, err := c.store.LoadProjectDefaultAgent(context.Background(), c.projectName)
+		if err != nil {
+			hubLogger(c.projectName).Warn("load project default agent failed err=%v", err)
+		} else if agentType != "" && c.registry != nil && c.registry.CreatorByName(agentType) != nil {
+			return agentType
+		}
+	}
+	return c.preferredAvailableAgent()
+}
+
 func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
 	if err := sess.persistSession(context.Background()); err != nil {
 		hubLogger(c.projectName).Error("save session failed route=%s session=%s err=%v",
@@ -834,6 +851,10 @@ func (c *Client) persistBoundSession(routeKey string, sess *Session) error {
 // ClientNewSession suspends the current session for the given route,
 // creates a new session, and rebinds the route. Returns the new session.
 func (c *Client) ClientNewSession(routeKey, agentType string) (*Session, error) {
+	return c.clientNewSessionWithOptions(routeKey, agentType, true)
+}
+
+func (c *Client) clientNewSessionWithOptions(routeKey, agentType string, persistDefault bool) (*Session, error) {
 	routeKey, err := normalizeRouteKey(routeKey)
 	if err != nil {
 		return nil, err
@@ -865,6 +886,11 @@ func (c *Client) ClientNewSession(routeKey, agentType string) (*Session, error) 
 	sess, err := c.CreateSession(context.Background(), agentType, "")
 	if err != nil {
 		return nil, err
+	}
+	if persistDefault && c.store != nil {
+		if err := c.store.SaveProjectDefaultAgent(context.Background(), c.projectName, agentType); err != nil {
+			hubLogger(c.projectName).Warn("save project default agent failed agent=%s err=%v", agentType, err)
+		}
 	}
 	if err := c.store.SaveRouteBinding(context.Background(), c.projectName, routeKey, sess.ID); err != nil {
 		return nil, fmt.Errorf("save route binding: %w", err)

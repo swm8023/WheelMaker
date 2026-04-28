@@ -311,7 +311,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 	}); err != nil {
 		return err
 	}
-	if err := r.addMessageTurn(ctx, state, event); err != nil {
+	if err := r.addMessageTurn(state, event); err != nil {
 		return err
 	}
 	r.promptState[rawEvent.SessionID] = state
@@ -329,13 +329,13 @@ func (r *SessionRecorder) handleUpdateMessageLocked(ctx context.Context, event p
 	if state == nil {
 		return nil
 	}
-	if err := r.addMessageTurn(ctx, state, event); err != nil {
+	if err := r.addMessageTurn(state, event); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *SessionRecorder) addMessageTurn(ctx context.Context, state *sessionPromptState, event parsedSessionViewEvent) error {
+func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsedSessionViewEvent) error {
 	if state == nil {
 		return fmt.Errorf("prompt state is required")
 	}

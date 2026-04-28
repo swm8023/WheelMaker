@@ -155,8 +155,8 @@ func TestGetDBTablesMatchesCurrentStoreSchema(t *testing.T) {
 	if !foundAgentPreferences {
 		t.Fatalf("agent_preferences table missing: %#v", res.Tables)
 	}
-	if foundProjects {
-		t.Fatalf("projects table should not be shown for current schema: %#v", res.Tables)
+	if !foundProjects {
+		t.Fatalf("projects table missing: %#v", res.Tables)
 	}
 }
 
