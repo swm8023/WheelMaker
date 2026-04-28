@@ -1737,6 +1737,45 @@ func TestCheckStoreSchemaRejectsUnexpectedLegacyTable(t *testing.T) {
 	}
 }
 
+func TestNewStoreRejectsExistingPartialSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+		CREATE TABLE route_bindings (
+			project_name TEXT NOT NULL,
+			route_key TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (project_name, route_key)
+		)
+	`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("create partial schema: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	store, err := NewStore(dbPath)
+	if err == nil {
+		if store != nil {
+			_ = store.Close()
+		}
+		t.Fatal("NewStore() error = nil, want schema mismatch")
+	}
+	if !IsStoreSchemaMismatch(err) {
+		t.Fatalf("IsStoreSchemaMismatch(err) = false, err=%v", err)
+	}
+	if !strings.Contains(err.Error(), `missing table "sessions"`) {
+		t.Fatalf("NewStore() err = %v, want missing sessions table", err)
+	}
+}
+
 func TestNewStoreSessionTurnsSchemaOmitsExtraJSON(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
 	store, err := NewStore(dbPath)

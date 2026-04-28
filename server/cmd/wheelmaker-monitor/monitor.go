@@ -476,7 +476,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"projects", "route_bindings", "sessions", "session_prompts", "session_turns"}
+	tableNames := []string{"route_bindings", "sessions", "agent_preferences", "session_prompts", "session_turns"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {

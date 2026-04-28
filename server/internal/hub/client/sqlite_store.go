@@ -139,11 +139,21 @@ func NewStore(dbPath string) (Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite %q: %w", dbPath, err)
 	}
-	if _, err := db.Exec(sqliteSchema); err != nil {
+	existingTables, err := sqliteUserTables(db)
+	if err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("init schema: %w", err)
+		return nil, fmt.Errorf("list sqlite tables: %w", err)
 	}
-	if err := CheckStoreSchema(dbPath); err != nil {
+	if len(existingTables) == 0 {
+		if _, err := db.Exec(sqliteSchema); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("init schema: %w", err)
+		}
+		if err := checkStoreSchemaDB(db, dbPath); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	} else if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -182,10 +192,18 @@ func CheckStoreSchema(dbPath string) error {
 	}
 	defer db.Close()
 
+	return checkStoreSchemaDB(db, dbPath)
+}
+
+func checkStoreSchemaDB(db *sql.DB, dbPath string) error {
 	existingTables, err := sqliteUserTables(db)
 	if err != nil {
 		return fmt.Errorf("list sqlite tables: %w", err)
 	}
+	return validateStoreSchema(db, dbPath, existingTables)
+}
+
+func validateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {
 	if len(existingTables) == 0 {
 		return nil
 	}

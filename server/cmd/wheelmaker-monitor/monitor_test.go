@@ -141,6 +141,38 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 	}
 }
 
+func TestGetDBTablesMatchesCurrentStoreSchema(t *testing.T) {
+	base := t.TempDir()
+	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	mon := NewMonitor(base)
+	res := mon.GetDBTables()
+	if res.Error != "" {
+		t.Fatalf("GetDBTables error: %s", res.Error)
+	}
+
+	foundAgentPreferences := false
+	foundProjects := false
+	for _, table := range res.Tables {
+		if table.Name == "agent_preferences" {
+			foundAgentPreferences = true
+		}
+		if table.Name == "projects" {
+			foundProjects = true
+		}
+	}
+	if !foundAgentPreferences {
+		t.Fatalf("agent_preferences table missing: %#v", res.Tables)
+	}
+	if foundProjects {
+		t.Fatalf("projects table should not be shown for current schema: %#v", res.Tables)
+	}
+}
+
 func TestParseMonitorSessionTurnDoesNotUseUpdateIndexAsSubIndex(t *testing.T) {
 	method, role, kind, body, status, requestID, index, subIndex, source, ts := parseMonitorSessionTurn(
 		`{"method":"agent_message_chunk","param":{"text":"hello"}}`,
