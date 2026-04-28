@@ -49,19 +49,13 @@ CREATE TABLE IF NOT EXISTS session_prompts (
 	title TEXT NOT NULL DEFAULT '',
 	stop_reason TEXT NOT NULL DEFAULT '',
 	updated_at TEXT NOT NULL DEFAULT '',
+	turns_json TEXT NOT NULL DEFAULT '',
+	turn_index INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, prompt_index)
-);
-CREATE TABLE IF NOT EXISTS session_turns (
-	session_id TEXT NOT NULL,
-	prompt_index INTEGER NOT NULL,
-	turn_index INTEGER NOT NULL,
-	update_json TEXT NOT NULL DEFAULT '{}',
-	PRIMARY KEY (session_id, prompt_index, turn_index)
 );
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
 CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC);
 CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index);
-CREATE INDEX IF NOT EXISTS idx_session_turns_session_prompt_turn ON session_turns(session_id, prompt_index, turn_index);
 `
 
 type ProjectAgentState struct {
@@ -96,6 +90,8 @@ type SessionPromptRecord struct {
 	Title       string
 	StopReason  string
 	UpdatedAt   time.Time
+	TurnsJSON   string
+	TurnIndex   int64
 }
 
 type SessionTurnRecord struct {
@@ -120,9 +116,6 @@ type Store interface {
 	LoadSessionPrompt(ctx context.Context, projectName, sessionID string, promptIndex int64) (*SessionPromptRecord, error)
 	ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error)
 	ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error)
-	UpsertSessionTurn(ctx context.Context, rec SessionTurnRecord) error
-	LoadSessionTurn(ctx context.Context, projectName, sessionID string, promptIndex, turnIndex int64) (*SessionTurnRecord, error)
-	ListSessionTurns(ctx context.Context, projectName, sessionID string, promptIndex int64) ([]SessionTurnRecord, error)
 	Close() error
 }
 
@@ -164,8 +157,7 @@ var expectedStoreSchemaColumns = map[string][]string{
 	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "title", "created_at", "last_active_at"},
 	"agent_preferences": {"project_name", "agent_type", "preference_json"},
-	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at"},
-	"session_turns":     {"session_id", "prompt_index", "turn_index", "update_json"},
+	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at", "turns_json", "turn_index"},
 }
 
 type StoreSchemaMismatchError struct {
@@ -563,14 +555,17 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 	}
 	updatedAt := rec.UpdatedAt.UTC().Format(time.RFC3339Nano)
 
+	turnsJSON := strings.TrimSpace(rec.TurnsJSON)
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index) DO UPDATE SET
 			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE session_prompts.title END,
 			stop_reason = CASE WHEN excluded.stop_reason != '' THEN excluded.stop_reason ELSE session_prompts.stop_reason END,
-			updated_at = CASE WHEN excluded.updated_at > session_prompts.updated_at THEN excluded.updated_at ELSE session_prompts.updated_at END
-	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt); err != nil {
+			updated_at = CASE WHEN excluded.updated_at > session_prompts.updated_at THEN excluded.updated_at ELSE session_prompts.updated_at END,
+			turns_json = CASE WHEN excluded.turns_json != '' THEN excluded.turns_json ELSE session_prompts.turns_json END,
+			turn_index = CASE WHEN excluded.turns_json != '' THEN excluded.turn_index ELSE session_prompts.turn_index END
+	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt, turnsJSON, rec.TurnIndex); err != nil {
 		return fmt.Errorf("upsert session prompt: %w", err)
 	}
 	return nil
@@ -583,12 +578,12 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 	var rec SessionPromptRecord
 	var updatedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index = ?
 		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt)
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -602,7 +597,7 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 
 func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ?
@@ -617,7 +612,7 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 	for rows.Next() {
 		var rec SessionPromptRecord
 		var updatedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex); err != nil {
 			return nil, fmt.Errorf("scan session prompt: %w", err)
 		}
 		rec.UpdatedAt = parseStoreTime(updatedAt)
@@ -629,7 +624,7 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 
 func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index > ?
@@ -644,7 +639,7 @@ func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectN
 	for rows.Next() {
 		var rec SessionPromptRecord
 		var updatedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt); err != nil {
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex); err != nil {
 			return nil, fmt.Errorf("scan session prompt after index: %w", err)
 		}
 		rec.UpdatedAt = parseStoreTime(updatedAt)
@@ -654,81 +649,53 @@ func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectN
 	return out, rows.Err()
 }
 
-func (s *sqliteStore) UpsertSessionTurn(ctx context.Context, rec SessionTurnRecord) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
-	rec.SessionID = strings.TrimSpace(rec.SessionID)
-	if rec.SessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-	if rec.PromptIndex <= 0 {
-		return fmt.Errorf("prompt index is required")
-	}
-	if rec.TurnIndex <= 0 {
-		return fmt.Errorf("turn index is required")
-	}
-	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
-
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_turns (session_id, prompt_index, turn_index, update_json)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT(session_id, prompt_index, turn_index) DO UPDATE SET
-			update_json = excluded.update_json
-	`, rec.SessionID, rec.PromptIndex, rec.TurnIndex, rec.UpdateJSON); err != nil {
-		return fmt.Errorf("upsert session turn: %w", err)
-	}
-	return nil
-}
-
-func (s *sqliteStore) LoadSessionTurn(ctx context.Context, projectName, sessionID string, promptIndex, turnIndex int64) (*SessionTurnRecord, error) {
-	if promptIndex <= 0 || turnIndex <= 0 {
-		return nil, nil
-	}
-	var rec SessionTurnRecord
-	err := s.db.QueryRowContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_json
-		FROM session_turns t
-		JOIN sessions s ON s.id = t.session_id
-		WHERE s.project_name = ? AND t.session_id = ? AND t.prompt_index = ? AND t.turn_index = ?
-		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex, turnIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateJSON)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load session turn: %w", err)
-	}
-	rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
-	return &rec, nil
-}
-
-func (s *sqliteStore) ListSessionTurns(ctx context.Context, projectName, sessionID string, promptIndex int64) ([]SessionTurnRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT t.session_id, t.prompt_index, t.turn_index, t.update_json
-		FROM session_turns t
-		JOIN sessions s ON s.id = t.session_id
-		WHERE s.project_name = ? AND t.session_id = ? AND t.prompt_index = ?
-		ORDER BY t.turn_index ASC
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex)
-	if err != nil {
-		return nil, fmt.Errorf("list session turns: %w", err)
-	}
-	defer rows.Close()
-
-	out := []SessionTurnRecord{}
-	for rows.Next() {
-		var rec SessionTurnRecord
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.TurnIndex, &rec.UpdateJSON); err != nil {
-			return nil, fmt.Errorf("scan session turn: %w", err)
-		}
-		rec.UpdateJSON = normalizeJSONDoc(rec.UpdateJSON, `{}`)
-		out = append(out, rec)
-	}
-	return out, rows.Err()
-}
 func (s *sqliteStore) Close() error {
 	return s.db.Close()
+}
+
+// storedTurnEntry is the compact format used inside session_prompts.turns_json.
+type storedTurnEntry struct {
+	TurnIndex  int64  `json:"i"`
+	UpdateJSON string `json:"u"`
+}
+
+// EncodeStoredTurns serialises an ordered slice of SessionTurnRecord to the JSON
+// array stored in session_prompts.turns_json. Returns "" when turns is empty.
+func EncodeStoredTurns(turns []SessionTurnRecord) string {
+	if len(turns) == 0 {
+		return ""
+	}
+	entries := make([]storedTurnEntry, 0, len(turns))
+	for _, t := range turns {
+		entries = append(entries, storedTurnEntry{TurnIndex: t.TurnIndex, UpdateJSON: normalizeJSONDoc(t.UpdateJSON, `{}`)})
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// DecodeStoredTurns parses session_prompts.turns_json back to a slice of SessionTurnRecord.
+func DecodeStoredTurns(sessionID string, promptIndex int64, turnsJSON string) ([]SessionTurnRecord, error) {
+	turnsJSON = strings.TrimSpace(turnsJSON)
+	if turnsJSON == "" {
+		return nil, nil
+	}
+	var entries []storedTurnEntry
+	if err := json.Unmarshal([]byte(turnsJSON), &entries); err != nil {
+		return nil, fmt.Errorf("decode turns_json: %w", err)
+	}
+	out := make([]SessionTurnRecord, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, SessionTurnRecord{
+			SessionID:   strings.TrimSpace(sessionID),
+			PromptIndex: promptIndex,
+			TurnIndex:   e.TurnIndex,
+			UpdateJSON:  normalizeJSONDoc(e.UpdateJSON, `{}`),
+		})
+	}
+	return out, nil
 }
 
 func validateRouteKey(routeKey string) error {

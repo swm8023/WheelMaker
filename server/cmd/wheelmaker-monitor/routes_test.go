@@ -98,13 +98,23 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
-	if err := store.UpsertSessionTurn(ctx, clientpkg.SessionTurnRecord{
+	turnsJSON := clientpkg.EncodeStoredTurns([]clientpkg.SessionTurnRecord{
+		{
+			SessionID:   "sess-1",
+			PromptIndex: 1,
+			TurnIndex:   1,
+			UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
+		},
+	})
+	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
 		SessionID:   "sess-1",
 		PromptIndex: 1,
+		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
+		TurnsJSON:   turnsJSON,
 		TurnIndex:   1,
-		UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
+		StopReason:  "done",
 	}); err != nil {
-		t.Fatalf("UpsertSessionTurn: %v", err)
+		t.Fatalf("UpsertSessionPrompt with turns: %v", err)
 	}
 
 	mon := NewMonitor(base)

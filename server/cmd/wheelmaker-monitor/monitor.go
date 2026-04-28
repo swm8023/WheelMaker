@@ -476,7 +476,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"route_bindings", "sessions", "agent_preferences", "session_prompts", "session_turns"}
+	tableNames := []string{"route_bindings", "sessions", "agent_preferences", "session_prompts"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {
@@ -582,18 +582,17 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT s.project_name, t.session_id, t.prompt_index, t.turn_index, p.updated_at, t.update_json
-		FROM session_turns t
-		JOIN sessions s ON s.id = t.session_id
-		LEFT JOIN session_prompts p ON p.session_id = t.session_id AND p.prompt_index = t.prompt_index
-		WHERE t.session_id = ?`
+		SELECT s.project_name, p.session_id, p.prompt_index, p.updated_at, p.turns_json
+		FROM session_prompts p
+		JOIN sessions s ON s.id = p.session_id
+		WHERE p.session_id = ?`
 	args := []any{strings.TrimSpace(sessionID)}
 	projectName = strings.TrimSpace(projectName)
 	if projectName != "" {
 		query += ` AND s.project_name = ?`
 		args = append(args, projectName)
 	}
-	query += ` ORDER BY t.prompt_index ASC, t.turn_index ASC`
+	query += ` ORDER BY p.prompt_index ASC`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -609,17 +608,33 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	all := make([]monitorMessageRow, 0)
 	fallbackIndex := int64(0)
 	for rows.Next() {
-		var item MonitorSessionMessage
 		var promptIndex int64
-		var turnIndex int64
 		var promptUpdatedAt string
-		var updateJSON string
-		if err := rows.Scan(&item.ProjectName, &item.SessionID, &promptIndex, &turnIndex, &promptUpdatedAt, &updateJSON); err != nil {
+		var turnsJSON string
+		var itemProjectName, itemSessionID string
+		if err := rows.Scan(&itemProjectName, &itemSessionID, &promptIndex, &promptUpdatedAt, &turnsJSON); err != nil {
 			return nil, err
 		}
-		fallbackIndex++
-		item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, fallbackIndex)
-		all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: turnIndex})
+		turnsJSON = strings.TrimSpace(turnsJSON)
+		if turnsJSON == "" {
+			continue
+		}
+		type storedTurnEntry struct {
+			TurnIndex  int64  `json:"i"`
+			UpdateJSON string `json:"u"`
+		}
+		var entries []storedTurnEntry
+		if jsonErr := json.Unmarshal([]byte(turnsJSON), &entries); jsonErr != nil {
+			continue
+		}
+		for _, entry := range entries {
+			var item MonitorSessionMessage
+			item.ProjectName = itemProjectName
+			item.SessionID = itemSessionID
+			fallbackIndex++
+			item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(entry.UpdateJSON, promptUpdatedAt, fallbackIndex)
+			all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: entry.TurnIndex})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

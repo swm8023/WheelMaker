@@ -112,32 +112,19 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
-	if err := store.UpsertSessionTurn(ctx, clientpkg.SessionTurnRecord{
-		SessionID:   "sess-1",
-		PromptIndex: 1,
-		TurnIndex:   1,
-		UpdateJSON:  `{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
-	}); err != nil {
-		t.Fatalf("UpsertSessionTurn: %v", err)
-	}
-
 	mon := NewMonitor(base)
 	res := mon.GetDBTables()
 	if res.Error != "" {
 		t.Fatalf("GetDBTables error: %s", res.Error)
 	}
 	foundPrompts := false
-	foundTurns := false
 	for _, table := range res.Tables {
 		if table.Name == "session_prompts" {
 			foundPrompts = true
 		}
-		if table.Name == "session_turns" {
-			foundTurns = true
-		}
 	}
-	if !foundPrompts || !foundTurns {
-		t.Fatalf("prompt/turn tables missing: %#v", res.Tables)
+	if !foundPrompts {
+		t.Fatalf("session_prompts table missing: %#v", res.Tables)
 	}
 }
 
@@ -240,15 +227,6 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 	}); err != nil {
 		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
-	if err := store.UpsertSessionTurn(ctx, clientpkg.SessionTurnRecord{
-		SessionID:   "sess-1",
-		PromptIndex: 1,
-		TurnIndex:   1,
-		UpdateJSON:  `{}`,
-	}); err != nil {
-		t.Fatalf("UpsertSessionTurn: %v", err)
-	}
-
 	mon := NewMonitor(base)
 	if err := mon.ExecuteActionByHub(context.Background(), "", "clear-session-history"); err != nil {
 		t.Fatalf("ExecuteActionByHub(clear-session-history): %v", err)
@@ -260,13 +238,6 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 	}
 	if len(prompts) != 0 {
 		t.Fatalf("prompts len = %d, want 0", len(prompts))
-	}
-	turns, err := store.ListSessionTurns(ctx, "proj1", "sess-1", 1)
-	if err != nil {
-		t.Fatalf("ListSessionTurns: %v", err)
-	}
-	if len(turns) != 0 {
-		t.Fatalf("turns len = %d, want 0", len(turns))
 	}
 	rec, err := store.LoadSession(ctx, "proj1", "sess-1")
 	if err != nil {
