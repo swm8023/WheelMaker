@@ -629,14 +629,6 @@ func (s *sessionPromptState) assignTurn(turn sessionTurnMessage, turnKey string)
 	s.updateTurn(turn, turnKey)
 }
 
-func normalizeSessionID(sessionID string) (string, error) {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return "", fmt.Errorf("session id is required")
-	}
-	return sessionID, nil
-}
-
 func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
 	state, err := r.currentPromptStateLocked(ctx, sessionID)
 	if err != nil {
@@ -651,10 +643,7 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 }
 
 func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (*sessionPromptState, error) {
-	sessionID, err := normalizeSessionID(sessionID)
-	if err != nil {
-		return nil, err
-	}
+	sessionID = strings.TrimSpace(sessionID)
 	state, err := r.currentPromptStateLocked(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -671,9 +660,9 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 }
 
 func (r *SessionRecorder) currentPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
-	sessionID, err := normalizeSessionID(sessionID)
-	if err != nil {
-		return nil, err
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, nil
 	}
 	if state, err := r.cachedPromptStateLocked(ctx, sessionID); state != nil || err != nil {
 		return state, err

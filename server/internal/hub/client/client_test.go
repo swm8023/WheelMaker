@@ -2217,6 +2217,18 @@ func TestCurrentPromptStateLockedReturnsNilWhenMissing(t *testing.T) {
 	}
 }
 
+func TestCurrentPromptStateLockedIgnoresBlankSessionID(t *testing.T) {
+	c := newSessionViewTestClient(t)
+
+	state, err := c.sessionRecorder.currentPromptStateLocked(context.Background(), "   ")
+	if err != nil {
+		t.Fatalf("currentPromptStateLocked blank sessionID: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("state = %#v, want nil", *state)
+	}
+}
+
 func TestCurrentPromptStateLockedReturnsLiveCachedState(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
