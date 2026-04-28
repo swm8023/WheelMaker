@@ -2241,6 +2241,56 @@ func TestCurrentPromptStateLockedReturnsNilWhenMissing(t *testing.T) {
 	}
 }
 
+func TestCurrentPromptStateLockedReturnsLiveCachedState(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	now := time.Date(2026, 4, 28, 9, 0, 0, 0, time.UTC)
+
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-live",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		CreatedAt:    now,
+		LastActiveAt: now,
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := c.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-live",
+		PromptIndex: 1,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	c.sessionRecorder.writeMu.Lock()
+	cached := newSessionPromptState(1, 1)
+	c.sessionRecorder.promptState["sess-live"] = &cached
+	c.sessionRecorder.writeMu.Unlock()
+
+	state, err := c.sessionRecorder.currentPromptStateLocked(ctx, "sess-live")
+	if err != nil {
+		t.Fatalf("currentPromptStateLocked first read: %v", err)
+	}
+	if state == nil {
+		t.Fatal("currentPromptStateLocked first read = nil, want state")
+	}
+	state.nextTurnIndex = 7
+
+	reloaded, err := c.sessionRecorder.currentPromptStateLocked(ctx, "sess-live")
+	if err != nil {
+		t.Fatalf("currentPromptStateLocked second read: %v", err)
+	}
+	if reloaded == nil {
+		t.Fatal("currentPromptStateLocked second read = nil, want state")
+	}
+	if reloaded.nextTurnIndex != 7 {
+		t.Fatalf("reloaded.nextTurnIndex = %d, want 7", reloaded.nextTurnIndex)
+	}
+}
+
 func TestGetTurnIndexUsesGenericTurnKeyIndex(t *testing.T) {
 	state := sessionPromptState{
 		nextTurnIndex: 3,

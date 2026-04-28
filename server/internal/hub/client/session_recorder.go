@@ -111,7 +111,7 @@ type SessionRecorder struct {
 	publish func(method string, payload any) error
 
 	writeMu     sync.Mutex
-	promptState map[string]sessionPromptState
+	promptState map[string]*sessionPromptState
 }
 
 func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionRecord, error)) *SessionRecorder {
@@ -119,7 +119,7 @@ func newSessionRecorder(projectName string, store Store, listSessions func(conte
 		projectName:  projectName,
 		store:        store,
 		listSessions: listSessions,
-		promptState:  map[string]sessionPromptState{},
+		promptState:  map[string]*sessionPromptState{},
 	}
 }
 
@@ -131,7 +131,7 @@ func (r *SessionRecorder) Close() {
 	r.publish = nil
 	r.mu.Unlock()
 	r.writeMu.Lock()
-	r.promptState = map[string]sessionPromptState{}
+	r.promptState = map[string]*sessionPromptState{}
 	r.writeMu.Unlock()
 }
 
@@ -140,7 +140,7 @@ func (r *SessionRecorder) ResetPromptState() {
 		return
 	}
 	r.writeMu.Lock()
-	r.promptState = map[string]sessionPromptState{}
+	r.promptState = map[string]*sessionPromptState{}
 	r.writeMu.Unlock()
 }
 
@@ -311,7 +311,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 	}); err != nil {
 		return err
 	}
-	if err := r.addMessageTurn(ctx, &state, event); err != nil {
+	if err := r.addMessageTurn(ctx, state, event); err != nil {
 		return err
 	}
 	r.promptState[rawEvent.SessionID] = state
@@ -332,7 +332,6 @@ func (r *SessionRecorder) handleUpdateMessageLocked(ctx context.Context, event p
 	if err := r.addMessageTurn(ctx, state, event); err != nil {
 		return err
 	}
-	r.promptState[event.raw.SessionID] = *state
 	return nil
 }
 
@@ -604,35 +603,37 @@ func normalizeSessionID(sessionID string) (string, error) {
 	return sessionID, nil
 }
 
-func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string) (sessionPromptState, error) {
+func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
 	state, err := r.currentPromptStateLocked(ctx, sessionID)
 	if err != nil {
-		return sessionPromptState{}, err
+		return nil, err
 	}
 	if state == nil {
-		return newSessionPromptState(1, 1), nil
+		created := newSessionPromptState(1, 1)
+		return &created, nil
 	}
-	return newSessionPromptState(state.promptIndex+1, 1), nil
+	next := newSessionPromptState(state.promptIndex+1, 1)
+	return &next, nil
 }
 
-func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (sessionPromptState, error) {
+func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (*sessionPromptState, error) {
 	sessionID, err := normalizeSessionID(sessionID)
 	if err != nil {
-		return sessionPromptState{}, err
+		return nil, err
 	}
 	state, err := r.currentPromptStateLocked(ctx, sessionID)
 	if err != nil {
-		return sessionPromptState{}, err
+		return nil, err
 	}
 	if state != nil {
-		return *state, nil
+		return state, nil
 	}
 	created := newSessionPromptState(1, 1)
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{SessionID: sessionID, PromptIndex: 1, UpdatedAt: updatedAt}); err != nil {
-		return sessionPromptState{}, err
+		return nil, err
 	}
-	r.promptState[sessionID] = created
-	return created, nil
+	r.promptState[sessionID] = &created
+	return &created, nil
 }
 
 func (r *SessionRecorder) currentPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
@@ -648,7 +649,7 @@ func (r *SessionRecorder) currentPromptStateLocked(ctx context.Context, sessionI
 
 func (r *SessionRecorder) cachedPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
 	state, ok := r.promptState[sessionID]
-	if !ok || state.promptIndex <= 0 {
+	if !ok || state == nil || state.promptIndex <= 0 {
 		return nil, nil
 	}
 	prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, state.promptIndex)
@@ -660,7 +661,7 @@ func (r *SessionRecorder) cachedPromptStateLocked(ctx context.Context, sessionID
 		return nil, nil
 	}
 	state.ensureMaps()
-	return &state, nil
+	return state, nil
 }
 
 func (r *SessionRecorder) loadLatestPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
@@ -677,23 +678,23 @@ func (r *SessionRecorder) loadLatestPromptStateLocked(ctx context.Context, sessi
 		return nil, err
 	}
 	r.promptState[sessionID] = state
-	return &state, nil
+	return state, nil
 }
 
-func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionID string, promptIndex int64) (sessionPromptState, error) {
+func (r *SessionRecorder) restorePromptStateLocked(ctx context.Context, sessionID string, promptIndex int64) (*sessionPromptState, error) {
 	messages, err := r.store.ListSessionTurns(ctx, r.projectName, sessionID, promptIndex)
 	if err != nil {
-		return sessionPromptState{}, err
+		return nil, err
 	}
 	state := newSessionPromptState(promptIndex, 1)
 	for i := range messages {
 		turn, err := decodeSessionTurnMessage(messages[i])
 		if err != nil {
-			return sessionPromptState{}, err
+			return nil, err
 		}
 		state.assignTurn(turn, "")
 	}
-	return state, nil
+	return &state, nil
 }
 
 func jsonGet(raw json.RawMessage, key string) (json.RawMessage, bool) {
