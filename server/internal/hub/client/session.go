@@ -43,7 +43,6 @@ type createdSessionState struct {
 	state     SessionAgentState
 	instance  agent.Instance
 	createdAt time.Time
-	ready     bool
 }
 
 // Session is the business session object that owns ACP session state,
@@ -144,16 +143,6 @@ func (s *Session) currentAgentNameLocked() string {
 		}
 	}
 	return strings.TrimSpace(s.agentType)
-}
-
-func (s *Session) currentAgentStateSnapshot() (*SessionAgentState, string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	name := s.currentAgentNameLocked()
-	if name == "" {
-		return nil, ""
-	}
-	return cloneSessionAgentState(&s.agentState), name
 }
 
 // shortSessionID returns a compact display form of a session ID.
@@ -330,10 +319,7 @@ func emptyMCPServers() []acp.MCPServer {
 	return []acp.MCPServer{}
 }
 
-// ensureReady performs the ACP handshake if the session is not yet connected:
-//  1. Send "initialize" and store agent capabilities.
-//  2. If caps.LoadSession and a sessionID is stored, attempt session/load.
-//  3. Otherwise, create a new session via session/new.
+// ensureReady performs ACP initialize + session/load for an existing ACP session ID.
 func (s *Session) ensureReady(ctx context.Context) error {
 	s.mu.Lock()
 	for s.initializing {
@@ -584,15 +570,6 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 		s.persistSessionBestEffort()
 	}
 	return nil
-}
-
-// sessionConfigSnapshot returns the current mode/model values.
-func (s *Session) sessionConfigSnapshot() acp.SessionConfigSnapshot {
-	state, _ := s.currentAgentStateSnapshot()
-	if state == nil {
-		return acp.SessionConfigSnapshot{}
-	}
-	return acp.SessionConfigSnapshotFromOptions(state.ConfigOptions)
 }
 
 // promptStream sends a prompt and returns a channel of streaming updates.

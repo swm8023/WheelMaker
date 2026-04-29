@@ -261,7 +261,6 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 		state:     state,
 		instance:  inst,
 		createdAt: time.Now(),
-		ready:     true,
 	}, nil
 }
 
@@ -286,7 +285,7 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	sess.createdAt = created.createdAt
 	// New sessions already completed initialize + session/new before Session construction,
 	// so they start ready without re-entering ensureReady.
-	sess.ready = created.ready
+	sess.ready = true
 	sess.mu.Unlock()
 	created.instance.SetCallbacks(sess)
 	sess.persistAgentPreferenceState(created.agentType, created.state.ConfigOptions, created.state.Commands)

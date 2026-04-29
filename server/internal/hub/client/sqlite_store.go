@@ -690,6 +690,18 @@ func (s *sqliteStore) Close() error {
 	return s.db.Close()
 }
 
+func normalizeJSONDoc(raw string, fallback string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return fallback
+	}
+	return raw
+}
+
 // EncodeStoredTurns serialises an ordered turn JSON array for storage in
 // session_prompts.turns_json. Returns "" when turns is empty.
 func EncodeStoredTurns(turns []string) string {

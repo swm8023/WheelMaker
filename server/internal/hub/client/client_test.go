@@ -985,7 +985,9 @@ func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testi
 		t.Fatalf("ensureReady: %v", err)
 	}
 
-	snap := s.sessionConfigSnapshot()
+	s.mu.Lock()
+	snap := acp.SessionConfigSnapshotFromOptions(append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...))
+	s.mu.Unlock()
 	if snap.Mode != "code" {
 		t.Fatalf("mode = %q, want %q", snap.Mode, "code")
 	}
@@ -1483,7 +1485,9 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 		t.Fatalf("ensureReady: %v", err)
 	}
 
-	state, _ := s.currentAgentStateSnapshot()
+	s.mu.Lock()
+	state := cloneSessionAgentState(&s.agentState)
+	s.mu.Unlock()
 	if state == nil {
 		t.Fatal("currentAgentStateSnapshot returned nil state")
 	}
@@ -1511,7 +1515,9 @@ func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
 		t.Fatalf("cancelPrompt: %v", err)
 	}
 
-	snap := s.sessionConfigSnapshot()
+	s.mu.Lock()
+	snap := acp.SessionConfigSnapshotFromOptions(append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...))
+	s.mu.Unlock()
 	if snap.Mode != "code" || snap.Model != "gpt-5" || snap.ThoughtLevel != "high" {
 		t.Fatalf("snapshot after cancel = %+v", snap)
 	}
@@ -1552,7 +1558,9 @@ func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *t
 		},
 	})
 
-	state, _ := s.currentAgentStateSnapshot()
+	s.mu.Lock()
+	state := cloneSessionAgentState(&s.agentState)
+	s.mu.Unlock()
 	if state == nil {
 		t.Fatal("currentAgentStateSnapshot returned nil state")
 	}

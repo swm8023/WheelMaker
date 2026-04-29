@@ -339,11 +339,9 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 	}
 	_ = s.ensureReady(ctx)
 
-	state, _ := s.currentAgentStateSnapshot()
-	opts := []acp.ConfigOption(nil)
-	if state != nil {
-		opts = append(opts, state.ConfigOptions...)
-	}
+	s.mu.Lock()
+	opts := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
+	s.mu.Unlock()
 
 	model := HelpModel{
 		Title:    "WheelMaker",
