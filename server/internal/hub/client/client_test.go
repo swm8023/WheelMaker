@@ -1371,8 +1371,8 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	defer store.Close()
 
 	if err := store.SaveAgentPreference(context.Background(), AgentPreferenceRecord{
-		ProjectName: "proj1",
-		AgentType:   "claude",
+		ProjectName:    "proj1",
+		AgentType:      "claude",
 		PreferenceJSON: string(mustJSON(PreferenceState{Mode: "code", Model: "gpt-5", ThoughtLevel: "high"})),
 	}); err != nil {
 		t.Fatalf("SaveAgentPreference: %v", err)

@@ -226,11 +226,11 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 		return nil, fmt.Errorf("create session initialize: %w", err)
 	}
 
-	baseline := loadProjectAgentPreferenceState(c.store, c.projectName, agentType)
-	baselineSnap := acp.SessionConfigSnapshot{
-		Mode:         baseline.Mode,
-		Model:        baseline.Model,
-		ThoughtLevel: baseline.ThoughtLevel,
+	preference := loadProjectAgentPreferenceState(c.store, c.projectName, agentType)
+	targetSnap := acp.SessionConfigSnapshot{
+		Mode:         preference.Mode,
+		Model:        preference.Model,
+		ThoughtLevel: preference.ThoughtLevel,
 	}
 
 	newResult, err := inst.SessionNew(ctx, acp.SessionNewParams{
@@ -246,8 +246,8 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 	}
 
 	resolved := append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
-	if baselineSnap.Mode != "" || baselineSnap.Model != "" || baselineSnap.ThoughtLevel != "" {
-		resolved = applyReplayableConfigBaseline(ctx, c.projectName, inst, sessionID, resolved, baselineSnap)
+	if targetSnap.Mode != "" || targetSnap.Model != "" || targetSnap.ThoughtLevel != "" {
+		resolved = applyReplayableConfigTarget(ctx, c.projectName, inst, sessionID, resolved, targetSnap)
 	}
 
 	state := SessionAgentState{
