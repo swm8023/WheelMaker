@@ -160,19 +160,22 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func loadProjectAgentPreferenceState(store Store, projectName string, agentName string) ProjectAgentState {
+func loadProjectAgentPreferenceState(store Store, projectName string, agentName string) PreferenceState {
 	if store == nil || strings.TrimSpace(agentName) == "" {
-		return ProjectAgentState{}
+		return PreferenceState{}
 	}
 	rec, err := store.LoadAgentPreference(context.Background(), projectName, strings.TrimSpace(agentName))
 	if err != nil || rec == nil || strings.TrimSpace(rec.PreferenceJSON) == "" {
-		return ProjectAgentState{}
+		return PreferenceState{}
 	}
-	var pref ProjectAgentState
+	var pref PreferenceState
 	if err := json.Unmarshal([]byte(rec.PreferenceJSON), &pref); err != nil {
 		hubLogger(projectName).Warn("decode agent preference failed agent=%s err=%v", agentName, err)
-		return ProjectAgentState{}
+		return PreferenceState{}
 	}
+	pref.Mode = strings.TrimSpace(pref.Mode)
+	pref.Model = strings.TrimSpace(pref.Model)
+	pref.ThoughtLevel = strings.TrimSpace(pref.ThoughtLevel)
 	return pref
 }
 
@@ -224,8 +227,11 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 	}
 
 	baseline := loadProjectAgentPreferenceState(c.store, c.projectName, agentType)
-	baselineSnap := acp.SessionConfigSnapshotFromOptions(baseline.ConfigOptions)
-	baselineCommands := append([]acp.AvailableCommand(nil), baseline.AvailableCommands...)
+	baselineSnap := acp.SessionConfigSnapshot{
+		Mode:         baseline.Mode,
+		Model:        baseline.Model,
+		ThoughtLevel: baseline.ThoughtLevel,
+	}
 
 	newResult, err := inst.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        c.cwd,
@@ -243,11 +249,10 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 	if baselineSnap.Mode != "" || baselineSnap.Model != "" || baselineSnap.ThoughtLevel != "" {
 		resolved = applyReplayableConfigBaseline(ctx, c.projectName, inst, sessionID, resolved, baselineSnap)
 	}
-	resolvedCommands := append([]acp.AvailableCommand(nil), baselineCommands...)
 
 	state := SessionAgentState{
 		ConfigOptions:     append([]acp.ConfigOption(nil), resolved...),
-		Commands:          append([]acp.AvailableCommand(nil), resolvedCommands...),
+		Commands:          []acp.AvailableCommand{},
 		Title:             strings.TrimSpace(title),
 		AgentCapabilities: initResult.AgentCapabilities,
 		AgentInfo:         cloneAgentInfo(initResult.AgentInfo),
@@ -287,7 +292,7 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	sess.ready = true
 	sess.mu.Unlock()
 	created.instance.SetCallbacks(sess)
-	sess.persistAgentPreferenceState(created.agentType, created.state.ConfigOptions, created.state.Commands)
+	sess.persistAgentPreferenceState(created.agentType, acp.SessionConfigSnapshotFromOptions(created.state.ConfigOptions))
 	if err := sess.persistSession(ctx); err != nil {
 		sess.mu.Lock()
 		sess.instance = nil
@@ -1116,9 +1121,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		sess.mu.Lock()
 		agentType := sess.agentType
 		title := ""
-		if state := sess.agentStateLocked(); state != nil {
-			title = state.Title
-		}
+		title = sess.agentState.Title
 		e := SessionRecord{
 			ID:           sess.acpSessionID,
 			ProjectName:  c.projectName,

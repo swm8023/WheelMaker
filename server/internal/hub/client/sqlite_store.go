@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	_ "modernc.org/sqlite"
 )
 
@@ -63,10 +62,11 @@ CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_
 CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index);
 `
 
-type ProjectAgentState struct {
-	ConfigOptions     []acp.ConfigOption     `json:"configOptions,omitempty"`
-	AvailableCommands []acp.AvailableCommand `json:"availableCommands,omitempty"`
-	UpdatedAt         string                 `json:"updatedAt,omitempty"`
+type PreferenceState struct {
+	Mode         string `json:"mode,omitempty"`
+	Model        string `json:"model,omitempty"`
+	ThoughtLevel string `json:"thought_level,omitempty"`
+	UpdatedAt    string `json:"updatedAt,omitempty"`
 }
 
 type SessionRecord struct {

@@ -83,7 +83,6 @@ type Session struct {
 	promptMu sync.Mutex
 }
 
-
 // newSession creates a Session with sensible defaults.
 // id, cwd, and agentType are all required and immutable after creation.
 func newSession(id, cwd, agentType string) (*Session, error) {
@@ -128,13 +127,6 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	return &cp
 }
 
-func (s *Session) agentStateLocked() *SessionAgentState {
-	if s.agentType == "" {
-		return nil
-	}
-	return &s.agentState
-}
-
 // shortSessionID returns a compact display form of a session ID.
 // e.g. "sess-12345678-1234-1234-1234-123456789012" -> "sess-12345678"
 func shortSessionID(id string) string {
@@ -156,10 +148,7 @@ func (s *Session) sessionInfoLine() string {
 	s.mu.Lock()
 	agentType := s.agentType
 	clientSID := s.acpSessionID
-	var configOpts []acp.ConfigOption
-	if state := s.agentStateLocked(); state != nil {
-		configOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
-	}
+	configOpts := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 	s.mu.Unlock()
 
 	snap := acp.SessionConfigSnapshotFromOptions(configOpts)
@@ -254,15 +243,13 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	agentType := s.agentType
-	cwd := s.cwd
 	s.mu.Unlock()
 
-	creator := s.registry.CreatorByName(agentType)
+	creator := s.registry.CreatorByName(s.agentType)
 	if creator == nil {
-		return fmt.Errorf("no agent registered for %q", agentType)
+		return fmt.Errorf("no agent registered for %q", s.agentType)
 	}
-	inst, err := creator(ctx, cwd)
+	inst, err := creator(ctx, s.cwd)
 	if err != nil {
 		return err
 	}
@@ -304,15 +291,11 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		s.initCond.Broadcast()
 		return errors.New("ensureReady: instance is nil")
 	}
-	agentName := inst.Name()
+	agentName := s.agentType
 	savedSID := s.acpSessionID
 	cwd := s.cwd
-	var persistedConfigOptions []acp.ConfigOption
-	var persistedCommands []acp.AvailableCommand
-	if state := s.agentStateLocked(); state != nil {
-		persistedConfigOptions = append([]acp.ConfigOption(nil), state.ConfigOptions...)
-		persistedCommands = append([]acp.AvailableCommand(nil), state.Commands...)
-	}
+	persistedConfigOptions := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
+	persistedCommands := append([]acp.AvailableCommand(nil), s.agentState.Commands...)
 	s.mu.Unlock()
 
 	notifyDone := func() {
@@ -339,10 +322,6 @@ func (s *Session) ensureReady(ctx context.Context) error {
 		return fmt.Errorf("ensureReady: initialize: %w", err)
 	}
 
-	baseline := s.loadAgentPreferenceState(agentName)
-	baselineSnap := acp.SessionConfigSnapshotFromOptions(baseline.ConfigOptions)
-	baselineCommands := append([]acp.AvailableCommand(nil), baseline.AvailableCommands...)
-
 	if savedSID == "" {
 		notifyDone()
 		return errors.New("ensureReady: session id is required")
@@ -365,33 +344,16 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	resolved := append([]acp.ConfigOption(nil), loadResult.ConfigOptions...)
 	savedSessionSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
 	if len(resolved) > 0 {
-		resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, savedSID, resolved, savedSessionSnap)
+		if savedSessionSnap.Mode != "" || savedSessionSnap.Model != "" || savedSessionSnap.ThoughtLevel != "" {
+			resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, savedSID, resolved, savedSessionSnap)
+		}
 	} else if len(persistedConfigOptions) > 0 {
 		resolved = append([]acp.ConfigOption(nil), persistedConfigOptions...)
 	}
 	resolvedCommands := append([]acp.AvailableCommand(nil), persistedCommands...)
-	if len(resolvedCommands) == 0 && len(baselineCommands) > 0 {
-		resolvedCommands = append([]acp.AvailableCommand(nil), baselineCommands...)
-	}
-
-	resolvedSnap := acp.SessionConfigSnapshotFromOptions(resolved)
-	missing := acp.SessionConfigSnapshot{}
-	if strings.TrimSpace(resolvedSnap.Mode) == "" {
-		missing.Mode = strings.TrimSpace(baselineSnap.Mode)
-	}
-	if strings.TrimSpace(resolvedSnap.Model) == "" {
-		missing.Model = strings.TrimSpace(baselineSnap.Model)
-	}
-	if strings.TrimSpace(resolvedSnap.ThoughtLevel) == "" {
-		missing.ThoughtLevel = strings.TrimSpace(baselineSnap.ThoughtLevel)
-	}
-	if missing.Mode != "" || missing.Model != "" || missing.ThoughtLevel != "" {
-		resolved = mergeConfigOptions(resolved, baseline.ConfigOptions)
-		resolved = applyReplayableConfigBaseline(ctx, s.projectName, inst, savedSID, resolved, missing)
-	}
 
 	s.mu.Lock()
-	state := s.agentStateLocked()
+	state := &s.agentState
 	if len(resolved) > 0 {
 		state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
 	}
@@ -399,31 +361,32 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	state.AgentCapabilities = initResult.AgentCapabilities
 	state.AgentInfo = cloneAgentInfo(initResult.AgentInfo)
 	state.AuthMethods = initResult.AuthMethods
-	commands := append([]acp.AvailableCommand(nil), state.Commands...)
-	s.agentType = agentName
 	s.ready = true
 	s.initializing = false
 	s.mu.Unlock()
 	s.initCond.Broadcast()
 
-	s.persistAgentPreferenceState(agentName, resolved, commands)
+	s.persistAgentPreferenceState(agentName, acp.SessionConfigSnapshotFromOptions(resolved))
 	hubLogger(s.projectName).Info("connected agent=%s session=%s resumed", inst.Name(), savedSID)
 	return nil
 }
 func findConfigOptionID(options []acp.ConfigOption, id, category string) string {
-	id = strings.TrimSpace(id)
-	category = strings.TrimSpace(category)
+	id = strings.ToLower(strings.TrimSpace(id))
+	category = strings.ToLower(strings.TrimSpace(category))
+	fallback := ""
 	for _, opt := range options {
-		if strings.EqualFold(strings.TrimSpace(opt.ID), id) && strings.TrimSpace(opt.ID) != "" {
-			return strings.TrimSpace(opt.ID)
+		optID := strings.TrimSpace(opt.ID)
+		if optID == "" {
+			continue
+		}
+		if id != "" && strings.EqualFold(strings.ToLower(optID), id) {
+			return optID
+		}
+		if fallback == "" && category != "" && strings.EqualFold(strings.ToLower(strings.TrimSpace(opt.Category)), category) {
+			fallback = optID
 		}
 	}
-	for _, opt := range options {
-		if strings.EqualFold(strings.TrimSpace(opt.Category), category) && strings.TrimSpace(opt.ID) != "" {
-			return strings.TrimSpace(opt.ID)
-		}
-	}
-	return ""
+	return fallback
 }
 
 func mergeConfigOptions(current []acp.ConfigOption, updated []acp.ConfigOption) []acp.ConfigOption {
@@ -679,7 +642,7 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 		return nil, fmt.Errorf("session agent type is required")
 	}
 
-	state := cloneSessionAgentState(s.agentStateLocked())
+	state := cloneSessionAgentState(&s.agentState)
 	title := ""
 	if state != nil {
 		title = strings.TrimSpace(state.Title)
@@ -720,7 +683,8 @@ func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 		}
 	}
 	if strings.TrimSpace(rec.Title) != "" {
-		if state := s.agentStateLocked(); state != nil && strings.TrimSpace(state.Title) == "" {
+		if strings.TrimSpace(s.agentState.Title) == "" {
+			state := &s.agentState
 			state.Title = strings.TrimSpace(rec.Title)
 		}
 	}
@@ -744,34 +708,16 @@ func (s *Session) persistSessionBestEffort() {
 	}
 }
 
-func (s *Session) loadAgentPreferenceState(agentName string) ProjectAgentState {
-	if s.store == nil || strings.TrimSpace(agentName) == "" {
-		return ProjectAgentState{}
-	}
-	rec, err := s.store.LoadAgentPreference(context.Background(), s.projectName, strings.TrimSpace(agentName))
-	if err != nil || rec == nil || strings.TrimSpace(rec.PreferenceJSON) == "" {
-		return ProjectAgentState{}
-	}
-	var pref ProjectAgentState
-	if err := json.Unmarshal([]byte(rec.PreferenceJSON), &pref); err != nil {
-		hubLogger(s.projectName).Warn("decode agent preference failed agent=%s err=%v", agentName, err)
-		return ProjectAgentState{}
-	}
-	return pref
-}
-
-func (s *Session) persistAgentPreferenceState(agentName string, configOptions []acp.ConfigOption, commands []acp.AvailableCommand) {
+func (s *Session) persistAgentPreferenceState(agentName string, snap acp.SessionConfigSnapshot) {
 	if s.store == nil || strings.TrimSpace(agentName) == "" {
 		return
 	}
-	next := s.loadAgentPreferenceState(agentName)
-	if configOptions != nil {
-		next.ConfigOptions = append([]acp.ConfigOption(nil), configOptions...)
+	next := PreferenceState{
+		Mode:         strings.TrimSpace(snap.Mode),
+		Model:        strings.TrimSpace(snap.Model),
+		ThoughtLevel: strings.TrimSpace(snap.ThoughtLevel),
+		UpdatedAt:    time.Now().UTC().Format(time.RFC3339Nano),
 	}
-	if commands != nil {
-		next.AvailableCommands = append([]acp.AvailableCommand(nil), commands...)
-	}
-	next.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	raw, err := json.Marshal(next)
 	if err != nil {
 		hubLogger(s.projectName).Warn("encode agent preference failed agent=%s err=%v", agentName, err)
@@ -825,7 +771,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		update.SessionUpdate == acp.SessionUpdateConfigOptionUpdate ||
 		update.SessionUpdate == acp.SessionUpdateSessionInfoUpdate {
 		s.mu.Lock()
-		state := s.agentStateLocked()
+		state := &s.agentState
 		switch update.SessionUpdate {
 		case acp.SessionUpdateAvailableCommandsUpdate:
 			if len(update.AvailableCommands) > 0 {
@@ -852,10 +798,10 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	if changed {
 		s.mu.Lock()
 		agentType := s.agentType
-		state := cloneSessionAgentState(s.agentStateLocked())
+		state := cloneSessionAgentState(&s.agentState)
 		s.mu.Unlock()
 		if state != nil {
-			s.persistAgentPreferenceState(agentType, state.ConfigOptions, state.Commands)
+			s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptions(state.ConfigOptions))
 		}
 		s.persistSessionBestEffort()
 	}
@@ -1325,10 +1271,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 		return false
 	}
 	sid := strings.TrimSpace(s.acpSessionID)
-	configOptions := []acp.ConfigOption(nil)
-	if state := s.agentStateLocked(); state != nil {
-		configOptions = append(configOptions, state.ConfigOptions...)
-	}
+	configOptions := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 	s.mu.Unlock()
 
 	if sid == "" {
@@ -1355,9 +1298,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 
 	s.mu.Lock()
 	if len(updatedOpts) > 0 {
-		if state := s.agentStateLocked(); state != nil {
-			state.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
-		}
+		s.agentState.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
 	}
 	s.mu.Unlock()
 	s.persistSessionBestEffort()

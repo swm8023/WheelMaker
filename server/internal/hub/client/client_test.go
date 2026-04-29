@@ -1373,13 +1373,7 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	if err := store.SaveAgentPreference(context.Background(), AgentPreferenceRecord{
 		ProjectName: "proj1",
 		AgentType:   "claude",
-		PreferenceJSON: string(mustJSON(ProjectAgentState{
-			ConfigOptions: []acp.ConfigOption{
-				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
-				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
-				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
-			},
-		})),
+		PreferenceJSON: string(mustJSON(PreferenceState{Mode: "code", Model: "gpt-5", ThoughtLevel: "high"})),
 	}); err != nil {
 		t.Fatalf("SaveAgentPreference: %v", err)
 	}
@@ -1673,7 +1667,7 @@ func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 	s.instance = inst
 	s.agentType = inst.name
 	s.ready = true
-	state := s.agentStateLocked()
+	state := &s.agentState
 	state.AgentCapabilities = acp.AgentCapabilities{
 		LoadSession: true,
 		SessionCapabilities: &acp.SessionCapabilities{
@@ -1751,15 +1745,7 @@ func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	}
 	defer store.Close()
 
-	pref := ProjectAgentState{
-		ConfigOptions: []acp.ConfigOption{
-			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
-			{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
-			{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
-		},
-		AvailableCommands: []acp.AvailableCommand{{Name: "/status"}},
-		UpdatedAt:         "2026-04-11T00:00:00Z",
-	}
+	pref := PreferenceState{Mode: "code", Model: "gpt-5", ThoughtLevel: "high", UpdatedAt: "2026-04-11T00:00:00Z"}
 	raw, err := json.Marshal(pref)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
@@ -1779,16 +1765,12 @@ func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	if loaded == nil {
 		t.Fatal("LoadAgentPreference: nil, want preference")
 	}
-	var decoded ProjectAgentState
+	var decoded PreferenceState
 	if err := json.Unmarshal([]byte(loaded.PreferenceJSON), &decoded); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	codex := decoded
-	if got := len(codex.ConfigOptions); got != 3 {
-		t.Fatalf("config options = %d, want 3", got)
-	}
-	if got := len(codex.AvailableCommands); got != 1 {
-		t.Fatalf("commands = %d, want 1", got)
+	if decoded.Mode != "code" || decoded.Model != "gpt-5" || decoded.ThoughtLevel != "high" {
+		t.Fatalf("decoded preference = %+v", decoded)
 	}
 }
 
@@ -2088,9 +2070,7 @@ func addRuntimeSession(c *Client, sessionID, title, agent string, createdAt, las
 	}
 	sess.mu.Lock()
 	sess.acpSessionID = sessionID
-	if state := sess.agentStateLocked(); state != nil {
-		state.Title = title
-	}
+	sess.agentState.Title = title
 	sess.Status = SessionActive
 	sess.createdAt = createdAt
 	sess.lastActiveAt = lastActiveAt
@@ -4569,4 +4549,3 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
-

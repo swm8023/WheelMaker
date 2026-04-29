@@ -200,7 +200,7 @@ func (s *Session) handleConfigCommand(
 
 	// Lock section 1: read session state for config resolution.
 	s.mu.Lock()
-	sessionState := cloneSessionAgentState(s.agentStateLocked())
+	sessionState := cloneSessionAgentState(&s.agentState)
 	s.mu.Unlock()
 
 	if err := s.ensureReadyAndNotify(ctx); err != nil {
@@ -230,17 +230,13 @@ func (s *Session) handleConfigCommand(
 	}
 	// Apply returned config options immediately so the help menu reflects the new value.
 	agentType := ""
-	commands := []acp.AvailableCommand(nil)
 	if len(updatedOpts) > 0 {
 		s.mu.Lock()
 		agentType = s.agentType
-		if state := s.agentStateLocked(); state != nil {
-			state.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
-			updatedOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
-			commands = append([]acp.AvailableCommand(nil), state.Commands...)
-		}
+		s.agentState.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
+		updatedOpts = append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 		s.mu.Unlock()
-		s.persistAgentPreferenceState(agentType, updatedOpts, commands)
+		s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptions(updatedOpts))
 	}
 
 	s.persistSessionBestEffort()
