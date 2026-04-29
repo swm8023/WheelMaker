@@ -518,9 +518,6 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 	s.prompt.updatesCh = interceptCh
 	s.mu.Unlock()
 
-	var replyMu sync.Mutex
-	var replyBuf strings.Builder
-
 	go func() {
 		defer func() {
 			s.mu.Lock()
@@ -546,14 +543,6 @@ func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (
 
 		drain := func(params acp.SessionUpdateParams) bool {
 			copied := params
-			if copied.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-				var content acp.ContentBlock
-				if len(copied.Update.Content) > 0 && json.Unmarshal(copied.Update.Content, &content) == nil && content.Type == acp.ContentBlockTypeText {
-					replyMu.Lock()
-					replyBuf.WriteString(content.Text)
-					replyMu.Unlock()
-				}
-			}
 			select {
 			case updates <- promptStreamEvent{update: &copied}:
 				return true
@@ -845,29 +834,6 @@ func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64,
 	return acp.PermissionResult{Outcome: "cancelled"}, nil
 }
 
-func normalizeSessionPromptBlocks(blocks []acp.ContentBlock) []acp.ContentBlock {
-	if len(blocks) == 0 {
-		return nil
-	}
-	out := make([]acp.ContentBlock, 0, len(blocks))
-	for _, block := range blocks {
-		kind := strings.TrimSpace(block.Type)
-		if kind == "" {
-			continue
-		}
-		if kind == acp.ContentBlockTypeText {
-			text := strings.TrimSpace(block.Text)
-			if text == "" {
-				continue
-			}
-			block.Text = text
-		}
-		block.Type = kind
-		out = append(out, block)
-	}
-	return out
-}
-
 // handlePrompt sends text to the active (or lazily initialized) session and streams the reply.
 // promptMu is held for the full duration, serializing with switchAgent.
 func (s *Session) handlePrompt(text string) {
@@ -881,7 +847,6 @@ func (s *Session) handlePrompt(text string) {
 // handlePromptBlocks sends content blocks to the active (or lazily initialized) session.
 // promptMu is held for the full duration, serializing with switchAgent.
 func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
-	blocks = normalizeSessionPromptBlocks(blocks)
 	if len(blocks) == 0 {
 		return
 	}
@@ -898,174 +863,131 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 	ctx := context.Background()
-	for attempt := 1; attempt <= 2; attempt++ {
-		if err := s.ensureInstance(ctx); err != nil {
-			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
-			return
-		}
-
-		if err := s.ensureReadyAndNotify(ctx); err != nil {
-			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
-				s.reply("Agent init failed transiently, reconnecting and retrying once...")
-				s.forceReconnect()
-				continue
-			}
-			s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
-			return
-		}
-
-		updates, err := s.promptStream(ctx, blocks)
-		if err != nil {
-			if attempt == 1 && s.shouldReconnectOnRecoverableErr(err) {
-				s.reply("Agent disconnected, reconnecting and retrying once...")
-				s.forceReconnect()
-				continue
-			}
-			if isAgentExitError(err) && !s.agentProcessAlive() {
-				_ = s.resetDeadConnection(err)
-			}
-			s.reply(fmt.Sprintf("Prompt error: %v", err))
-			return
-		}
-
-		s.mu.Lock()
-		s.prompt.currentCh = updates
-		s.mu.Unlock()
-
-		var buf strings.Builder
-		imRouter, imSource, hasIMEmitter := s.imContext()
-
-		sawSandboxRefresh := false
-		sawText := false
-		observe := newPromptObserveState(time.Now())
-		observeTicker := time.NewTicker(promptObserveInterval)
-
-		retryStream := false
-		streamDone := false
-		for !streamDone {
-			select {
-			case ev, ok := <-updates:
-				if !ok {
-					streamDone = true
-					break
-				}
-				observe.MarkActivity(time.Now(), true)
-				if ev.err != nil {
-					if attempt == 1 && isUnsupportedReasoningEffortError(ev.err) && s.tryCopilotReasoningFallback(ctx) {
-						s.reply("Detected incompatible reasoning settings, switched model and retrying once...")
-						retryStream = true
-						break
-					}
-					if attempt == 1 && !sawText && s.shouldReconnectOnRecoverableErr(ev.err) {
-						s.reply("Agent disconnected during stream, reconnecting and retrying once...")
-						s.forceReconnect()
-						retryStream = true
-						break
-					}
-					recovered := false
-					if !s.agentProcessAlive() && s.resetDeadConnection(ev.err) {
-						if recErr := s.ensureInstance(ctx); recErr == nil {
-							_ = s.ensureReadyAndNotify(ctx)
-							recovered = true
-						}
-					}
-					if recovered {
-						s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
-					} else {
-						s.reply(fmt.Sprintf("Agent error: %v", ev.err))
-					}
-					s.mu.Lock()
-					s.prompt.currentCh = nil
-					s.mu.Unlock()
-					observeTicker.Stop()
-					return
-				}
-				if ev.update != nil {
-					params := *ev.update
-					s.recordSessionViewEvent(SessionViewEvent{
-						Type:      SessionViewEventTypeACP,
-						SessionID: s.acpSessionID,
-						Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
-							"params": params,
-						}),
-					})
-					if hasIMEmitter {
-						target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
-						if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {
-							s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
-						}
-					}
-					if hasSandboxRefreshUpdate(params.Update) {
-						sawSandboxRefresh = true
-					}
-					if params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
-						text := extractTextChunk(params.Update.Content)
-						if strings.TrimSpace(text) != "" {
-							sawText = true
-							if !hasIMEmitter {
-								buf.WriteString(text)
-							}
-						}
-					}
-					if params.Update.SessionUpdate == acp.SessionUpdateConfigOptionUpdate && !hasIMEmitter {
-						raw, _ := json.Marshal(params.Update)
-						s.reply(formatConfigOptionUpdateMessage(raw))
-						s.persistSessionBestEffort()
-					}
-				}
-				if ev.result != nil {
-					s.recordSessionViewEvent(SessionViewEvent{
-						Type:      SessionViewEventTypeACP,
-						SessionID: s.acpSessionID,
-						Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
-							"result": *ev.result,
-						}),
-					})
-					if hasIMEmitter {
-						target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
-						if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
-							s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
-						}
-					}
-					streamDone = true
-				}
-			case <-observeTicker.C:
-				ev := observe.Eval(time.Now(), observe.Started())
-				if ev.WarnFirstWait {
-					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=first_wait session=%s", s.acpSessionID)
-				}
-				if ev.ErrorFirstWait {
-					s.reportTimeoutError("stream", "first_wait")
-				}
-				if ev.WarnSilence {
-					hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=silence session=%s", s.acpSessionID)
-				}
-				if ev.ErrorSilence {
-					s.reportTimeoutError("stream", "silence")
-				}
-			}
-		}
-		observeTicker.Stop()
-		if retryStream {
-			continue
-		}
-
-		s.mu.Lock()
-		s.prompt.currentCh = nil
-		s.mu.Unlock()
-
-		s.persistSessionBestEffort()
-
-		if !hasIMEmitter && buf.Len() > 0 {
-			s.reply(buf.String())
-		}
-
-		if attempt == 1 && sawSandboxRefresh && !sawText && !s.agentProcessAlive() {
-			s.reply("Detected sandbox refresh failure, reconnecting and retrying once...")
-			s.forceReconnect()
-			continue
-		}
+	if err := s.ensureInstance(ctx); err != nil {
+		s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 		return
+	}
+
+	if err := s.ensureReadyAndNotify(ctx); err != nil {
+		s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
+		return
+	}
+
+	updates, err := s.promptStream(ctx, blocks)
+	if err != nil {
+		if isAgentExitError(err) && !s.agentProcessAlive() {
+			_ = s.resetDeadConnection(err)
+		}
+		s.reply(fmt.Sprintf("Prompt error: %v", err))
+		return
+	}
+
+	s.mu.Lock()
+	s.prompt.currentCh = updates
+	s.mu.Unlock()
+
+	var buf strings.Builder
+	imRouter, imSource, hasIMEmitter := s.imContext()
+	observe := newPromptObserveState(time.Now())
+	observeTicker := time.NewTicker(promptObserveInterval)
+
+	streamDone := false
+	for !streamDone {
+		select {
+		case ev, ok := <-updates:
+			if !ok {
+				streamDone = true
+				break
+			}
+			observe.MarkActivity(time.Now(), true)
+			if ev.err != nil {
+				recovered := false
+				if !s.agentProcessAlive() && s.resetDeadConnection(ev.err) {
+					if recErr := s.ensureInstance(ctx); recErr == nil {
+						_ = s.ensureReadyAndNotify(ctx)
+						recovered = true
+					}
+				}
+				if recovered {
+					s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
+				} else {
+					s.reply(fmt.Sprintf("Agent error: %v", ev.err))
+				}
+				s.mu.Lock()
+				s.prompt.currentCh = nil
+				s.mu.Unlock()
+				observeTicker.Stop()
+				return
+			}
+			if ev.update != nil {
+				params := *ev.update
+				s.recordSessionViewEvent(SessionViewEvent{
+					Type:      SessionViewEventTypeACP,
+					SessionID: s.acpSessionID,
+					Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
+						"params": params,
+					}),
+				})
+				if hasIMEmitter {
+					target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
+					if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {
+						s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
+					}
+				}
+				if params.Update.SessionUpdate == acp.SessionUpdateAgentMessageChunk {
+					text := extractTextChunk(params.Update.Content)
+					if strings.TrimSpace(text) != "" && !hasIMEmitter {
+						buf.WriteString(text)
+					}
+				}
+				if params.Update.SessionUpdate == acp.SessionUpdateConfigOptionUpdate && !hasIMEmitter {
+					raw, _ := json.Marshal(params.Update)
+					s.reply(formatConfigOptionUpdateMessage(raw))
+					s.persistSessionBestEffort()
+				}
+			}
+			if ev.result != nil {
+				s.recordSessionViewEvent(SessionViewEvent{
+					Type:      SessionViewEventTypeACP,
+					SessionID: s.acpSessionID,
+					Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+						"result": *ev.result,
+					}),
+				})
+				if hasIMEmitter {
+					target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
+					if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
+						s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
+					}
+				}
+				streamDone = true
+			}
+		case <-observeTicker.C:
+			ev := observe.Eval(time.Now(), observe.Started())
+			if ev.WarnFirstWait {
+				hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=first_wait session=%s", s.acpSessionID)
+			}
+			if ev.ErrorFirstWait {
+				s.reportTimeoutError("stream", "first_wait")
+			}
+			if ev.WarnSilence {
+				hubLogger(s.projectName).Warn("timeout warn category=timeout stage=stream kind=silence session=%s", s.acpSessionID)
+			}
+			if ev.ErrorSilence {
+				s.reportTimeoutError("stream", "silence")
+			}
+		}
+	}
+	observeTicker.Stop()
+
+	s.mu.Lock()
+	s.prompt.currentCh = nil
+	s.mu.Unlock()
+
+	s.persistSessionBestEffort()
+
+	if !hasIMEmitter && buf.Len() > 0 {
+		s.reply(buf.String())
 	}
 }
 
@@ -1192,13 +1114,6 @@ func (s *Session) agentProcessAlive() bool {
 	return probe.Alive()
 }
 
-func (s *Session) shouldReconnectOnRecoverableErr(err error) bool {
-	if !isAgentRecoverableRuntimeErr(err) {
-		return false
-	}
-	return !s.agentProcessAlive()
-}
-
 func isAgentExitError(err error) bool {
 	if err == nil {
 		return false
@@ -1221,86 +1136,6 @@ func isAgentExitError(err error) bool {
 		strings.Contains(s, "process stdout closed")
 }
 
-func isAgentRecoverableRuntimeErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return isAgentExitError(err) || isSandboxRefreshErr(err)
-}
-
-func isUnsupportedReasoningEffortError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	if msg == "" || !strings.Contains(msg, "reasoning_effort") {
-		return false
-	}
-	hints := []string{"unrecognized request argument", "unknown field", "not supported", "unsupported", "invalid request"}
-	for _, hint := range hints {
-		if strings.Contains(msg, hint) {
-			return true
-		}
-	}
-	return false
-}
-
-func pickAlternativeModelValue(opt *acp.ConfigOption) string {
-	if opt == nil || len(opt.Options) == 0 {
-		return ""
-	}
-	current := strings.TrimSpace(opt.CurrentValue)
-	for _, candidate := range opt.Options {
-		value := strings.TrimSpace(candidate.Value)
-		if value == "" || strings.EqualFold(value, current) {
-			continue
-		}
-		return value
-	}
-	return ""
-}
-
-func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
-	s.mu.Lock()
-	if s.instance == nil || !strings.EqualFold(strings.TrimSpace(s.instance.Name()), string(acp.ACPProviderCopilot)) {
-		s.mu.Unlock()
-		return false
-	}
-	sid := strings.TrimSpace(s.acpSessionID)
-	configOptions := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
-	s.mu.Unlock()
-
-	if sid == "" {
-		return false
-	}
-
-	var modelOpt *acp.ConfigOption
-	for i := range configOptions {
-		opt := &configOptions[i]
-		if strings.EqualFold(strings.TrimSpace(opt.ID), acp.ConfigOptionIDModel) || strings.EqualFold(strings.TrimSpace(opt.Category), acp.ConfigOptionCategoryModel) {
-			modelOpt = opt
-			break
-		}
-	}
-	target := pickAlternativeModelValue(modelOpt)
-	if target == "" {
-		return false
-	}
-
-	updatedOpts, err := s.instance.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{SessionID: sid, ConfigID: modelOpt.ID, Value: target})
-	if err != nil {
-		return false
-	}
-
-	s.mu.Lock()
-	if len(updatedOpts) > 0 {
-		s.agentState.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
-	}
-	s.mu.Unlock()
-	s.persistSessionBestEffort()
-	return true
-}
-
 func (s *Session) resetDeadConnection(err error) bool {
 	if !isAgentExitError(err) {
 		return false
@@ -1321,31 +1156,3 @@ func (s *Session) resetDeadConnection(err error) bool {
 	return true
 }
 
-func (s *Session) forceReconnect() {
-	s.mu.Lock()
-	old := s.instance
-	s.instance = nil
-	s.ready = false
-	s.initializing = false
-	s.prompt.ctx = nil
-	s.prompt.cancel = nil
-	s.prompt.updatesCh = nil
-	s.prompt.currentCh = nil
-	s.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-}
-
-func hasSandboxRefreshUpdate(update acp.SessionUpdate) bool {
-	raw, _ := json.Marshal(update)
-	s := strings.ToLower(string(raw))
-	return strings.Contains(s, "windows sandbox: spawn setup refresh")
-}
-
-func isSandboxRefreshErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "windows sandbox: spawn setup refresh")
-}

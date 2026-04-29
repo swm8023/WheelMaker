@@ -471,43 +471,6 @@ func TestIsAgentExitError_TLSHandshakeEOFFalse(t *testing.T) {
 	}
 }
 
-func TestIsAgentRecoverableRuntimeErr(t *testing.T) {
-	if !isAgentRecoverableRuntimeErr(errors.New("agent owned conn: process exited")) {
-		t.Fatal("expected process-exit error to be recoverable")
-	}
-	if !isAgentRecoverableRuntimeErr(errors.New("windows sandbox: spawn setup refresh")) {
-		t.Fatal("expected sandbox refresh error to be recoverable")
-	}
-	if isAgentRecoverableRuntimeErr(errors.New("selected model is at capacity")) {
-		t.Fatal("capacity error should not be treated as recoverable runtime error")
-	}
-}
-
-func TestSessionShouldReconnectOnRecoverableErr_RequiresDeadProcess(t *testing.T) {
-	s := mustNewSession(t, "sess-1", "/tmp", "claude")
-
-	s.mu.Lock()
-	s.instance = &testInjectedInstance{name: "codex", alive: true}
-	s.mu.Unlock()
-	if s.shouldReconnectOnRecoverableErr(errors.New("windows sandbox: spawn setup refresh")) {
-		t.Fatal("alive process should not trigger reconnect")
-	}
-
-	s.mu.Lock()
-	s.instance = &testInjectedInstance{name: "codex", alive: false}
-	s.mu.Unlock()
-	if !s.shouldReconnectOnRecoverableErr(errors.New("windows sandbox: spawn setup refresh")) {
-		t.Fatal("dead process should trigger reconnect for recoverable runtime error")
-	}
-}
-
-func TestHasSandboxRefreshUpdate(t *testing.T) {
-	u := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateToolCallUpdate, Content: json.RawMessage(`"tool failed: windows sandbox: spawn setup refresh"`)}
-	if !hasSandboxRefreshUpdate(u) {
-		t.Fatal("expected sandbox refresh detection")
-	}
-}
-
 func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
 	st := &SessionAgentState{
 		ConfigOptions: []acp.ConfigOption{{
