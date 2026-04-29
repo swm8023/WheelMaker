@@ -10,6 +10,7 @@ const (
 	IMMethodPromptRequest = "prompt_request"
 	IMMethodPromptDone    = "prompt_done"
 	IMMethodSystem        = "system"
+	IMMethodSessionInfo   = "session_info"
 
 	// Outbound session update methods.
 	IMMethodAgentMessage = SessionUpdateAgentMessageChunk
@@ -18,7 +19,7 @@ const (
 	IMMethodToolCall     = SessionUpdateToolCall
 )
 
-// IMMessage is the minimal IM boundary payload.
+// IMTurnMessage is the minimal IM boundary payload.
 //
 // This protocol uses method-driven payload typing:
 //   - method=prompt_request:
@@ -34,7 +35,7 @@ const (
 //
 // Payload is inlined in Param (no extra type wrapper map).
 // Ordering metadata lives in the outer transport or persistence envelope.
-type IMMessage struct {
+type IMTurnMessage struct {
 	Method string          `json:"method"`
 	Param  json.RawMessage `json:"param,omitempty"`
 }

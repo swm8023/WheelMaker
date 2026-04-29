@@ -85,13 +85,19 @@ type Session struct {
 
 
 // newSession creates a Session with sensible defaults.
-func newSession(id string, cwd string) (*Session, error) {
+// id, cwd, and agentType are all required and immutable after creation.
+func newSession(id, cwd, agentType string) (*Session, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, fmt.Errorf("session id is required")
 	}
+	agentType = strings.TrimSpace(agentType)
+	if agentType == "" {
+		return nil, fmt.Errorf("agent type is required")
+	}
 	s := &Session{
 		acpSessionID:   id,
+		agentType:      agentType,
 		Status:         SessionActive,
 		cwd:            cwd,
 		createdAt:      time.Now(),
@@ -248,35 +254,13 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	name := s.agentType
-	if name == "" && s.registry != nil {
-		name = strings.TrimSpace(s.registry.PreferredName())
-	}
-	name = strings.TrimSpace(name)
+	agentType := s.agentType
 	cwd := s.cwd
 	s.mu.Unlock()
 
-	if name == "" {
-		return fmt.Errorf("no available ACP provider")
-	}
-
-	creator := s.registry.CreatorByName(name)
+	creator := s.registry.CreatorByName(agentType)
 	if creator == nil {
-		fallback := ""
-		if s.registry != nil {
-			fallback = strings.TrimSpace(s.registry.PreferredName())
-		}
-		if fallback == "" {
-			return fmt.Errorf("no available ACP provider")
-		}
-		if !strings.EqualFold(fallback, name) {
-			hubLogger(s.projectName).Warn("requested agent unavailable requested=%s fallback=%s", name, fallback)
-		}
-		name = fallback
-		creator = s.registry.CreatorByName(name)
-		if creator == nil {
-			return fmt.Errorf("no agent registered for %q", name)
-		}
+		return fmt.Errorf("no agent registered for %q", agentType)
 	}
 	inst, err := creator(ctx, cwd)
 	if err != nil {
@@ -291,7 +275,6 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		return nil
 	}
 	s.instance = inst
-	s.agentType = name
 	s.ready = false
 	s.mu.Unlock()
 	return nil
@@ -724,15 +707,11 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 }
 
 func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
-	s, err := newSession(rec.ID, cwd)
+	s, err := newSession(rec.ID, cwd, rec.AgentType)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("session %q: %w", rec.ID, err)
 	}
 	s.Status = rec.Status
-	s.agentType = strings.TrimSpace(rec.AgentType)
-	if s.agentType == "" {
-		return nil, fmt.Errorf("session %q missing agent type", rec.ID)
-	}
 	s.createdAt = rec.CreatedAt
 	s.lastActiveAt = rec.LastActiveAt
 	if strings.TrimSpace(rec.AgentJSON) != "" {
@@ -896,6 +875,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	case <-promptCtx.Done():
 	}
 }
+
 // SessionRequestPermission responds to session/request_permission agent requests.
 func (s *Session) SessionRequestPermission(ctx context.Context, requestID int64, params acp.PermissionRequestParams) (acp.PermissionResult, error) {
 	_ = ctx

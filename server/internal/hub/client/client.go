@@ -273,14 +273,13 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	if err != nil {
 		return nil, err
 	}
-	sess, err := c.newWiredSession(created.sessionID)
+	sess, err := c.newWiredSession(created.sessionID, created.agentType)
 	if err != nil {
 		_ = created.instance.Close()
 		return nil, err
 	}
 	sess.mu.Lock()
 	sess.instance = created.instance
-	sess.agentType = created.agentType
 	sess.agentState = created.state
 	sess.createdAt = created.createdAt
 	// New sessions already completed initialize + session/new before Session construction,
@@ -911,8 +910,8 @@ func (c *Client) resolveDetachedHelpModel() HelpModel {
 
 // newWiredSession creates a Session with all Client back-references wired.
 // Does NOT add it to c.sessions. Caller may hold c.mu.
-func (c *Client) newWiredSession(id string) (*Session, error) {
-	sess, err := newSession(id, c.cwd)
+func (c *Client) newWiredSession(id, agentType string) (*Session, error) {
+	sess, err := newSession(id, c.cwd, agentType)
 	if err != nil {
 		return nil, err
 	}
@@ -926,9 +925,6 @@ func (c *Client) wireSession(sess *Session) {
 	sess.imRouter = c.imRouter
 	sess.viewSink = c.viewSink
 	sess.store = c.store
-	if strings.TrimSpace(sess.agentType) == "" {
-		sess.agentType = c.preferredAvailableAgent()
-	}
 }
 
 func (c *Client) preferredAvailableAgent() string {

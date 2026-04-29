@@ -765,7 +765,7 @@ func mergeTurnMessage(existing, incoming sessionTurnMessage, turnIndex int64) se
 }
 
 func buildIMContentJSON(method string, payload any) string {
-	message := acp.IMMessage{Method: method}
+	message := acp.IMTurnMessage{Method: method}
 	if payload != nil {
 		message.Param = mustJSONRaw(payload)
 	}

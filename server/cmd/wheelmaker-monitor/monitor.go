@@ -673,7 +673,7 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, fallbackIndex i
 
 	updateJSON = strings.TrimSpace(updateJSON)
 	if updateJSON != "" {
-		message := rp.IMMessage{}
+		message := rp.IMTurnMessage{}
 		if err := json.Unmarshal([]byte(updateJSON), &message); err == nil && strings.TrimSpace(message.Method) != "" && !isLegacyMonitorACPMethod(message.Method) {
 			method = strings.TrimSpace(message.Method)
 			switch method {
