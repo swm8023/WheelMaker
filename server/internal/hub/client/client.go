@@ -160,26 +160,142 @@ func (c *Client) Close() error {
 	return nil
 }
 
+func loadProjectAgentPreferenceState(store Store, projectName string, agentName string) ProjectAgentState {
+	if store == nil || strings.TrimSpace(agentName) == "" {
+		return ProjectAgentState{}
+	}
+	rec, err := store.LoadAgentPreference(context.Background(), projectName, strings.TrimSpace(agentName))
+	if err != nil || rec == nil || strings.TrimSpace(rec.PreferenceJSON) == "" {
+		return ProjectAgentState{}
+	}
+	var pref ProjectAgentState
+	if err := json.Unmarshal([]byte(rec.PreferenceJSON), &pref); err != nil {
+		hubLogger(projectName).Warn("decode agent preference failed agent=%s err=%v", agentName, err)
+		return ProjectAgentState{}
+	}
+	return pref
+}
+
+func (c *Client) createSessionState(ctx context.Context, agentType, title string) (*createdSessionState, error) {
+	creator := c.registry.CreatorByName(agentType)
+	if creator == nil {
+		fallback := ""
+		if c.registry != nil {
+			fallback = strings.TrimSpace(c.registry.PreferredName())
+		}
+		if fallback == "" {
+			return nil, fmt.Errorf("no available ACP provider")
+		}
+		if !strings.EqualFold(fallback, agentType) {
+			hubLogger(c.projectName).Warn("requested agent unavailable requested=%s fallback=%s", agentType, fallback)
+		}
+		agentType = fallback
+		creator = c.registry.CreatorByName(agentType)
+		if creator == nil {
+			return nil, fmt.Errorf("no agent registered for %q", agentType)
+		}
+	}
+
+	inst, err := creator(ctx, c.cwd)
+	if err != nil {
+		return nil, fmt.Errorf("create session instance: %w", err)
+	}
+	closeOnErr := true
+	defer func() {
+		if closeOnErr {
+			_ = inst.Close()
+		}
+	}()
+
+	clientCaps := acp.ClientCapabilities{
+		FS: &acp.FSCapabilities{
+			ReadTextFile:  true,
+			WriteTextFile: true,
+		},
+		Terminal: true,
+	}
+	initResult, err := inst.Initialize(ctx, acp.InitializeParams{
+		ProtocolVersion:    acpClientProtocolVersion,
+		ClientCapabilities: clientCaps,
+		ClientInfo:         acpClientInfo,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create session initialize: %w", err)
+	}
+
+	baseline := loadProjectAgentPreferenceState(c.store, c.projectName, agentType)
+	baselineSnap := acp.SessionConfigSnapshotFromOptions(baseline.ConfigOptions)
+	baselineCommands := append([]acp.AvailableCommand(nil), baseline.AvailableCommands...)
+
+	newResult, err := inst.SessionNew(ctx, acp.SessionNewParams{
+		CWD:        c.cwd,
+		MCPServers: emptyMCPServers(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create session new: %w", err)
+	}
+	sessionID := strings.TrimSpace(newResult.SessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("create session new: empty session id")
+	}
+
+	resolved := append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
+	if baselineSnap.Mode != "" || baselineSnap.Model != "" || baselineSnap.ThoughtLevel != "" {
+		resolved = applyReplayableConfigBaseline(ctx, c.projectName, inst, sessionID, resolved, baselineSnap)
+	}
+	resolvedCommands := append([]acp.AvailableCommand(nil), baselineCommands...)
+
+	state := SessionAgentState{
+		ConfigOptions:     append([]acp.ConfigOption(nil), resolved...),
+		Commands:          append([]acp.AvailableCommand(nil), resolvedCommands...),
+		Title:             strings.TrimSpace(title),
+		AgentCapabilities: initResult.AgentCapabilities,
+		AgentInfo:         cloneAgentInfo(initResult.AgentInfo),
+		AuthMethods:       append([]acp.AuthMethod(nil), initResult.AuthMethods...),
+	}
+
+	closeOnErr = false
+	return &createdSessionState{
+		sessionID: sessionID,
+		agentType: agentType,
+		state:     state,
+		instance:  inst,
+		createdAt: time.Now(),
+		ready:     true,
+	}, nil
+}
+
 func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*Session, error) {
 	agentType = strings.TrimSpace(agentType)
 	if agentType == "" {
 		return nil, fmt.Errorf("agent type is required")
 	}
-	sess := c.newWiredSession("")
+	created, err := c.createSessionState(ctx, agentType, title)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := c.newWiredSession(created.sessionID)
+	if err != nil {
+		_ = created.instance.Close()
+		return nil, err
+	}
 	sess.mu.Lock()
-	sess.acpSessionID = ""
-	sess.agentType = agentType
-	if strings.TrimSpace(title) != "" {
-		sess.agentState.Title = strings.TrimSpace(title)
-	}
+	sess.instance = created.instance
+	sess.agentType = created.agentType
+	sess.agentState = created.state
+	sess.createdAt = created.createdAt
+	// New sessions already completed initialize + session/new before Session construction,
+	// so they start ready without re-entering ensureReady.
+	sess.ready = created.ready
 	sess.mu.Unlock()
-	if err := sess.ensureInstance(ctx); err != nil {
-		return nil, fmt.Errorf("create session instance: %w", err)
-	}
-	if err := sess.ensureReady(ctx); err != nil {
-		return nil, fmt.Errorf("create session ready: %w", err)
-	}
+	created.instance.SetCallbacks(sess)
+	sess.persistAgentPreferenceState(created.agentType, created.state.ConfigOptions, created.state.Commands)
 	if err := sess.persistSession(ctx); err != nil {
+		sess.mu.Lock()
+		sess.instance = nil
+		sess.ready = false
+		sess.mu.Unlock()
+		_ = created.instance.Close()
 		return nil, fmt.Errorf("save session: %w", err)
 	}
 	c.mu.Lock()
@@ -796,10 +912,13 @@ func (c *Client) resolveDetachedHelpModel() HelpModel {
 
 // newWiredSession creates a Session with all Client back-references wired.
 // Does NOT add it to c.sessions. Caller may hold c.mu.
-func (c *Client) newWiredSession(id string) *Session {
-	sess := newSession(id, c.cwd)
+func (c *Client) newWiredSession(id string) (*Session, error) {
+	sess, err := newSession(id, c.cwd)
+	if err != nil {
+		return nil, err
+	}
 	c.wireSession(sess)
-	return sess
+	return sess, nil
 }
 
 func (c *Client) wireSession(sess *Session) {

@@ -83,7 +83,11 @@ func (c *Client) InjectForwarder(agentName, sessionID string, promptFn func(cont
 	c.mu.Lock()
 	sess := c.sessions[c.routeMap[testRouteKey]]
 	if sess == nil {
-		sess = c.newWiredSession(sessionID)
+		var err error
+		sess, err = c.newWiredSession(sessionID)
+		if err != nil {
+			panic(err)
+		}
 		c.sessions[sessionID] = sess
 		c.routeMap[testRouteKey] = sessionID
 	}
@@ -306,6 +310,24 @@ func mustJSON(v any) []byte {
 	return raw
 }
 
+func mustNewSession(t *testing.T, id string, cwd string) *Session {
+	t.Helper()
+	sess, err := newSession(id, cwd)
+	if err != nil {
+		t.Fatalf("newSession(%q): %v", id, err)
+	}
+	return sess
+}
+
+func mustNewWiredSession(t *testing.T, c *Client, id string) *Session {
+	t.Helper()
+	sess, err := c.newWiredSession(id)
+	if err != nil {
+		t.Fatalf("newWiredSession(%q): %v", id, err)
+	}
+	return sess
+}
+
 func (i *testInjectedInstance) Name() string { return i.name }
 func (i *testInjectedInstance) Alive() bool {
 	return i.alive
@@ -463,7 +485,7 @@ func TestIsAgentRecoverableRuntimeErr(t *testing.T) {
 }
 
 func TestSessionShouldReconnectOnRecoverableErr_RequiresDeadProcess(t *testing.T) {
-	s := newSession("sess-1", "/tmp")
+	s := mustNewSession(t, "sess-1", "/tmp")
 
 	s.mu.Lock()
 	s.instance = &testInjectedInstance{name: "codex", alive: true}
@@ -510,7 +532,7 @@ func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
 }
 
 func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T) {
-	s := newSession("sess-1", "/tmp")
+	s := mustNewSession(t, "sess-1", "/tmp")
 	s.mu.Lock()
 	s.agentType = "claude"
 	s.agentState.ConfigOptions = []acp.ConfigOption{
@@ -729,7 +751,7 @@ func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
 	logger.SetOutput(&buf)
 	defer logger.SetOutput(os.Stderr)
 
-	s := newSession("sess-1", "/tmp")
+	s := mustNewSession(t, "sess-1", "/tmp")
 	s.imRouter = &failingPermissionIMRouter{}
 	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
 	result, err := s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{
@@ -747,7 +769,7 @@ func TestSessionRequestPermissionAutoAllowsWithoutIMRoundTrip(t *testing.T) {
 }
 
 func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
-	s := newSession("sess-1", "/tmp")
+	s := mustNewSession(t, "sess-1", "/tmp")
 	result, err := s.SessionRequestPermission(context.Background(), 1, acp.PermissionRequestParams{
 		Options: []acp.PermissionOption{{
 			OptionID: "allow",
@@ -766,7 +788,7 @@ func TestSessionRequestPermissionRecognizesLegacyOnceKind(t *testing.T) {
 func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
 	router := &fakeIMRouter{}
 	sink := &recordingSessionViewSink{}
-	s := newSession("sess-1", "/tmp")
+	s := mustNewSession(t, "sess-1", "/tmp")
 	s.imRouter = router
 	s.viewSink = sink
 	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
@@ -902,7 +924,7 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 
 	c := New(store, "proj1", "/tmp")
 	c.mu.Lock()
-	sess := c.newWiredSession("sess-1")
+	sess := mustNewWiredSession(t, c, "sess-1")
 	sess.createdAt = createdAt
 	sess.lastActiveAt = time.Now().UTC()
 	sess.Status = SessionActive
@@ -931,10 +953,9 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 }
 
 func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testing.T) {
-	s := newSession("restore-mode", "/tmp")
+	s := mustNewSession(t, "acp-keep", "/tmp")
 	s.projectName = "proj1"
 	s.agentType = "claude"
-	s.acpSessionID = "acp-keep"
 	s.agentState = SessionAgentState{
 		ConfigOptions: []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
@@ -973,11 +994,10 @@ func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testi
 	}
 }
 
-func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T) {
-	s := newSession("restore-fallback", "/tmp")
+func TestEnsureReady_SessionLoadFailure_ReturnsErrorWithoutAllocatingNewSessionID(t *testing.T) {
+	s := mustNewSession(t, "acp-old", "/tmp")
 	s.projectName = "proj1"
 	s.agentType = "claude"
-	s.acpSessionID = "acp-old"
 	s.agentState = SessionAgentState{
 		ConfigOptions: []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
@@ -996,29 +1016,6 @@ func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T
 			AgentInfo: &acp.AgentInfo{Name: "test-injected-agent"},
 		},
 		loadErr: errors.New("session not found"),
-		newResult: &acp.SessionNewResult{
-			SessionID: "acp-new",
-			ConfigOptions: []acp.ConfigOption{
-				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "ask"},
-				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
-			},
-		},
-		setConfigFn: func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
-			switch p.ConfigID {
-			case acp.ConfigOptionIDMode:
-				return []acp.ConfigOption{
-					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: p.Value},
-					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-4o-mini"},
-				}, nil
-			case acp.ConfigOptionIDModel:
-				return []acp.ConfigOption{
-					{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
-					{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: p.Value},
-				}, nil
-			default:
-				return nil, errors.New("unexpected config id")
-			}
-		},
 	}
 
 	s.registry = agent.DefaultACPFactory().Clone()
@@ -1029,24 +1026,45 @@ func TestEnsureReady_SessionLoadFailure_ReappliesPersistedModeModel(t *testing.T
 	if err := s.ensureInstance(context.Background()); err != nil {
 		t.Fatalf("ensureInstance: %v", err)
 	}
-	if err := s.ensureReady(context.Background()); err != nil {
-		t.Fatalf("ensureReady: %v", err)
+	err := s.ensureReady(context.Background())
+	if err == nil {
+		t.Fatal("ensureReady error = nil, want error")
 	}
+	if s.acpSessionID != "acp-old" {
+		t.Fatalf("session ID = %q, want acp-old", s.acpSessionID)
+	}
+}
 
-	snap := s.sessionConfigSnapshot()
-	if snap.Mode != "code" {
-		t.Fatalf("mode = %q, want %q", snap.Mode, "code")
+func TestEnsureReady_FailsWhenAgentDoesNotSupportLoadSession(t *testing.T) {
+	s := mustNewSession(t, "acp-existing", "/tmp")
+	s.projectName = "proj1"
+	s.agentType = "claude"
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{
+			name:      "claude",
+			sessionID: "acp-existing",
+			initResult: acp.InitializeResult{
+				ProtocolVersion:   "0.1",
+				AgentCapabilities: acp.AgentCapabilities{LoadSession: false},
+			},
+		}, nil
+	})
+
+	if err := s.ensureInstance(context.Background()); err != nil {
+		t.Fatalf("ensureInstance: %v", err)
 	}
-	if snap.Model != "gpt-5" {
-		t.Fatalf("model = %q, want %q", snap.Model, "gpt-5")
+	err := s.ensureReady(context.Background())
+	if err == nil {
+		t.Fatal("ensureReady error = nil, want error")
 	}
-	if len(inst.setCalls) < 2 {
-		t.Fatalf("set config calls = %d, want at least 2 (mode+model)", len(inst.setCalls))
+	if !strings.Contains(err.Error(), "does not support session/load") {
+		t.Fatalf("ensureReady error = %v, want unsupported load-session error", err)
 	}
 }
 
 func TestEnsureReadyAndNotify_DoesNotSendSessionInfoAfterReady(t *testing.T) {
-	s := newSession("no-session-info", "/tmp")
+	s := mustNewSession(t, "acp-1", "/tmp")
 	s.projectName = "proj1"
 	s.agentType = "claude"
 	router := &fakeIMRouter{}
@@ -1057,6 +1075,11 @@ func TestEnsureReadyAndNotify_DoesNotSendSessionInfoAfterReady(t *testing.T) {
 		return &testInjectedInstance{
 			name:      "claude",
 			sessionID: "acp-1",
+			initResult: acp.InitializeResult{
+				ProtocolVersion:   "0.1",
+				AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+			},
+			loadResult: acp.SessionLoadResult{},
 		}, nil
 	})
 
@@ -1092,7 +1115,7 @@ func TestEvictSuspendedSessions(t *testing.T) {
 	c.suspendTimeout = 0
 
 	c.mu.Lock()
-	sess := c.newWiredSession("evict-me")
+	sess := mustNewWiredSession(t, c, "evict-me")
 	sess.agentType = "claude"
 	sess.Status = SessionSuspended
 	sess.lastActiveAt = time.Now().Add(-time.Minute)
@@ -1114,7 +1137,7 @@ func TestEvictSuspendedSessions(t *testing.T) {
 }
 
 func TestSessionUpdate_NoPromptContext_DoesNotBlockWhenChannelFull(t *testing.T) {
-	s := newSession("sess", "/tmp")
+	s := mustNewSession(t, "sess", "/tmp")
 	content, _ := json.Marshal(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "chunk"})
 
 	ch := make(chan acp.SessionUpdateParams, 1)
@@ -1258,6 +1281,53 @@ func TestCreateSessionWithAgent_UsesACPResultAsUnifiedSessionID(t *testing.T) {
 	}
 }
 
+func TestCreateSessionWithAgent_FailsWhenACPReturnsEmptySessionID(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	inst := &testInjectedInstance{
+		name: "claude",
+		initResult: acp.InitializeResult{
+			ProtocolVersion:   "0.1",
+			AgentCapabilities: acp.AgentCapabilities{},
+		},
+		newResult: &acp.SessionNewResult{SessionID: ""},
+	}
+
+	c := New(store, "proj1", "/tmp")
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register("claude", func(context.Context, string) (agent.Instance, error) { return inst, nil })
+
+	sess, err := c.CreateSession(context.Background(), "claude", "hello")
+	if err == nil {
+		t.Fatalf("CreateSession error = nil, want error")
+	}
+	if sess != nil {
+		t.Fatalf("CreateSession session = %#v, want nil", sess)
+	}
+
+	entries, err := store.ListSessions(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("ListSessions count = %d, want 0", len(entries))
+	}
+}
+
+func TestNewSession_RequiresNonEmptyACPID(t *testing.T) {
+	sess, err := newSession("   ", "/tmp")
+	if err == nil {
+		t.Fatalf("newSession error = nil, want error")
+	}
+	if sess != nil {
+		t.Fatalf("newSession session = %#v, want nil", sess)
+	}
+}
+
 func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -1295,7 +1365,7 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	c.registry = agent.DefaultACPFactory().Clone()
 	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) { return inst, nil })
 	c.mu.Lock()
-	oldSess := c.newWiredSession("sess-old")
+	oldSess := mustNewWiredSession(t, c, "sess-old")
 	oldSess.agentType = "claude"
 	c.sessions[oldSess.acpSessionID] = oldSess
 	c.routeMap["route-1"] = oldSess.acpSessionID
@@ -1347,10 +1417,9 @@ func TestClientNewSessionPersistsProjectDefaultAgent(t *testing.T) {
 }
 
 func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *testing.T) {
-	s := newSession("restore-load-success", "/tmp")
+	s := mustNewSession(t, "acp-old", "/tmp")
 	s.projectName = "proj1"
 	s.agentType = "claude"
-	s.acpSessionID = "acp-old"
 	s.agentState = SessionAgentState{
 		ConfigOptions: []acp.ConfigOption{
 			{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
@@ -1426,9 +1495,8 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 	}
 }
 func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
-	s := newSession("cancel-keep-config", "/tmp")
+	s := mustNewSession(t, "cancel-keep-config", "/tmp")
 	s.ready = true
-	s.acpSessionID = "acp-1"
 	s.agentType = "claude"
 	s.agentState = SessionAgentState{
 		ConfigOptions: []acp.ConfigOption{
@@ -1450,12 +1518,11 @@ func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
 }
 
 func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *testing.T) {
-	s := newSession("commands-load", "/tmp")
+	s := mustNewSession(t, "acp-1", "/tmp")
 	s.projectName = "proj1"
 	s.agentType = "claude"
-	s.acpSessionID = "acp-1"
 	s.agentState = SessionAgentState{
-		Commands:     []acp.AvailableCommand{{Name: "/cached"}},
+		Commands: []acp.AvailableCommand{{Name: "/cached"}},
 	}
 
 	inst := &testInjectedInstance{
@@ -1552,7 +1619,7 @@ func TestPromptToSession_TrimsSourceBeforeRouting(t *testing.T) {
 }
 
 func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
-	s := newSession("sess-local", ".")
+	s := mustNewSession(t, "sess-local", ".")
 	inst := &testInjectedInstance{
 		name:      string(acp.ACPProviderClaude),
 		sessionID: "sess-current",
@@ -1568,7 +1635,6 @@ func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 	s.mu.Lock()
 	s.instance = inst
 	s.agentType = inst.name
-	s.acpSessionID = "sess-current"
 	s.ready = true
 	state := s.agentStateLocked(inst.name)
 	state.AgentCapabilities = acp.AgentCapabilities{
@@ -1600,7 +1666,7 @@ func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 }
 
 func TestResolveHelpModel_RootStartsWithNewConversationMenu(t *testing.T) {
-	s := newSession("sess-help", "/tmp")
+	s := mustNewSession(t, "sess-help", "/tmp")
 	s.registry = agent.DefaultACPFactory().Clone()
 	s.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
 		return &testInjectedInstance{name: "claude", alive: true}, nil
@@ -1980,7 +2046,10 @@ func newSessionViewTestClient(t *testing.T) *Client {
 }
 
 func addRuntimeSession(c *Client, sessionID, title, agent string, createdAt, lastActiveAt time.Time) {
-	sess := c.newWiredSession(sessionID)
+	sess, err := c.newWiredSession(sessionID)
+	if err != nil {
+		panic(err)
+	}
 	sess.mu.Lock()
 	sess.agentType = agent
 	sess.acpSessionID = sessionID
@@ -4465,4 +4534,3 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
-
