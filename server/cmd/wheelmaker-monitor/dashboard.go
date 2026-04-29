@@ -515,6 +515,35 @@ html, body {
   text-transform: uppercase;
   color: var(--text-hi);
 }
+.json-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 10px;
+}
+.json-modal-tab {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid var(--border-hi);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text);
+  padding: 3px 8px;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  cursor: pointer;
+}
+.json-modal-tab:hover {
+  border-color: var(--accent);
+  color: var(--text-hi);
+}
+.json-modal-tab.active {
+  border-color: var(--accent);
+  color: var(--text-hi);
+  background: var(--accent-bg);
+}
 .json-modal-close {
   font-family: var(--mono);
   font-size: 10px;
@@ -604,6 +633,38 @@ html, body {
   color: var(--text);
   font-family: var(--mono);
   font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.turn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.turn-item {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--surface);
+  padding: 8px 10px;
+}
+.turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.turn-index {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.turn-method {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.turn-body {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -778,6 +839,10 @@ html, body {
   <div class="json-modal-panel">
     <div class="json-modal-header">
       <div id="json-modal-title" class="json-modal-title">Session Agent Details</div>
+      <div class="json-modal-actions">
+        <button id="json-modal-tab-parsed" type="button" class="json-modal-tab active" onclick="switchJSONModalView('parsed')">Parsed</button>
+        <button id="json-modal-tab-raw" type="button" class="json-modal-tab" onclick="switchJSONModalView('raw')">Raw JSON</button>
+      </div>
       <button type="button" class="json-modal-close" onclick="closeJSONModal()">Close</button>
     </div>
     <div id="json-modal-body" class="json-modal-body"></div>
@@ -792,6 +857,7 @@ const appBasePath = (() => {
 })();
 const jsonCellStore = {};
 let jsonCellSeq = 0;
+const jsonModalState = { raw: '', column: '', table: '', mode: 'parsed' };
 let selectedHubId = "";
 let appConfig = null;
 
@@ -880,7 +946,7 @@ function stashJSONCellValue(raw) {
   return key;
 }
 
-function openJSONModal(key, columnName) {
+function openJSONModal(key, columnName, tableName) {
   const body = $('json-modal-body');
   const modal = $('json-modal');
   const title = $('json-modal-title');
@@ -888,16 +954,45 @@ function openJSONModal(key, columnName) {
   const raw = jsonCellStore[key];
   if (raw == null) return;
   const col = String(columnName || '').trim();
+  const table = String(tableName || '').trim();
+  jsonModalState.raw = String(raw);
+  jsonModalState.column = col;
+  jsonModalState.table = table;
+  jsonModalState.mode = 'parsed';
   if (title) {
-    title.textContent = col ? (col + ' JSON') : 'JSON Details';
+    title.textContent = table && col ? (table + '.' + col + ' JSON') : (col ? (col + ' JSON') : 'JSON Details');
   }
-  if (col.toLowerCase() === 'agent_json') {
-    body.innerHTML = renderAgentJSONContent(raw);
-  } else {
-    body.innerHTML = renderGenericJSONContent(raw);
-  }
+  switchJSONModalView('parsed');
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
+}
+
+function switchJSONModalView(mode) {
+  const body = $('json-modal-body');
+  const parsedBtn = $('json-modal-tab-parsed');
+  const rawBtn = $('json-modal-tab-raw');
+  if (!body) return;
+  const next = mode === 'raw' ? 'raw' : 'parsed';
+  jsonModalState.mode = next;
+  if (parsedBtn) parsedBtn.classList.toggle('active', next === 'parsed');
+  if (rawBtn) rawBtn.classList.toggle('active', next === 'raw');
+  if (next === 'raw') {
+    body.innerHTML = renderGenericJSONContent(jsonModalState.raw);
+    return;
+  }
+  body.innerHTML = renderParsedJSONContent(jsonModalState.raw, jsonModalState.column, jsonModalState.table);
+}
+
+function renderParsedJSONContent(raw, columnName, tableName) {
+  const col = String(columnName || '').toLowerCase();
+  const table = String(tableName || '').toLowerCase();
+  if (col === 'agent_json') {
+    return renderAgentJSONContent(raw);
+  }
+  if (table === 'session_prompts' && col === 'turns_json') {
+    return renderSessionPromptsTurnsContent(raw);
+  }
+  return renderGenericJSONContent(raw);
 }
 
 function closeJSONModal() {
@@ -906,6 +1001,10 @@ function closeJSONModal() {
   if (!modal || !body) return;
   modal.classList.add('hidden');
   body.innerHTML = '';
+  jsonModalState.raw = '';
+  jsonModalState.column = '';
+  jsonModalState.table = '';
+  jsonModalState.mode = 'parsed';
   document.body.style.overflow = '';
 }
 
@@ -939,6 +1038,104 @@ function renderGenericJSONContent(raw) {
     return '<pre class="json-code">' + esc(raw) + '</pre>';
   }
   return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
+}
+
+function normalizeConfigOptionName(opt) {
+  const id = opt && opt.id ? String(opt.id).trim().toLowerCase() : '';
+  const category = opt && opt.category ? String(opt.category).trim().toLowerCase() : '';
+  const name = opt && opt.name ? String(opt.name).trim() : '';
+  if (id === 'thought_level' || category.indexOf('thought') >= 0 || category.indexOf('reasoning') >= 0 || name.toLowerCase() === 'reasoning effort') {
+    return 'Thought Level';
+  }
+  if (name) return name;
+  if (opt && opt.id) return String(opt.id);
+  return '-';
+}
+
+function renderSessionPromptsTurnsContent(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    return '<pre class="json-code">' + esc(raw) + '</pre>';
+  }
+  if (!Array.isArray(parsed)) {
+    return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
+  }
+  if (parsed.length === 0) {
+    return '<div class="empty-state">No turns</div>';
+  }
+  let html = '<div class="turn-list">';
+  for (let i = 0; i < parsed.length; i++) {
+    const turn = parsePromptTurnEntry(parsed[i]);
+    html += '<div class="turn-item">';
+    html += '<div class="turn-head">' +
+      '<span class="turn-index">#' + String(i + 1) + '</span>' +
+      '<span class="badge badge-blue">' + esc(turn.role) + '</span>' +
+      '<span class="turn-method">' + esc(turn.method) + '</span>' +
+      '</div>';
+    html += '<div class="turn-body">' + esc(turn.body) + '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function parsePromptTurnEntry(rawEntry) {
+  const fallback = { role: 'system', method: 'unknown', body: '' };
+  const text = typeof rawEntry === 'string' ? rawEntry : JSON.stringify(rawEntry || {});
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_) {
+    fallback.body = text;
+    return fallback;
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    fallback.body = JSON.stringify(parsed);
+    return fallback;
+  }
+  const method = parsed.method && String(parsed.method).trim() ? String(parsed.method).trim() : 'unknown';
+  const param = parsed.param && typeof parsed.param === 'object' ? parsed.param : {};
+  let role = 'assistant';
+  let body = '';
+  if (method === 'im.prompt.request') {
+    role = 'user';
+    const blocks = Array.isArray(param.contentBlocks) ? param.contentBlocks : [];
+    const parts = [];
+    for (const block of blocks) {
+      if (block && String(block.type || '').trim() === 'text' && String(block.text || '').trim() !== '') {
+        parts.push(String(block.text).trim());
+      }
+    }
+    body = parts.join('\n');
+  } else if (method === 'im.agent.message' || method === 'im.agent.thought') {
+    role = 'assistant';
+    body = String(param.text || '').trim();
+  } else if (method === 'im.system') {
+    role = 'system';
+    body = String(param.text || '').trim();
+  } else if (method === 'session.update') {
+    const update = param.update && typeof param.update === 'object' ? param.update : {};
+    const sessionUpdate = String(update.sessionUpdate || '').trim();
+    const content = update.content;
+    role = sessionUpdate === 'user_message_chunk' ? 'user' : 'assistant';
+    if (typeof content === 'string') {
+      body = content.trim();
+    } else if (content && typeof content === 'object' && typeof content.text === 'string') {
+      body = content.text.trim();
+    }
+    if (!body) {
+      body = sessionUpdate || JSON.stringify(update);
+    }
+  } else if (method === 'im.prompt.done') {
+    role = 'system';
+    body = String(param.stopReason || '').trim();
+  }
+  if (!body) {
+    body = JSON.stringify(param && Object.keys(param).length > 0 ? param : parsed, null, 2);
+  }
+  return { role, method, body };
 }
 
 function summarizeAgentJSON(raw) {
@@ -996,7 +1193,7 @@ function renderAgentJSONContent(raw) {
     if (configOptions.length > 0) {
       html += '<div class="json-subsection"><div class="json-subtitle">Config Options</div><div class="json-table-wrap"><table class="json-mini-table"><thead><tr><th>Name</th><th>Current</th></tr></thead><tbody>';
       for (const opt of configOptions) {
-        html += '<tr><td>' + esc(opt && opt.name ? opt.name : (opt && opt.id ? opt.id : '-')) + '</td><td>' + esc(resolveOptValue(opt)) + '</td></tr>';
+        html += '<tr><td>' + esc(normalizeConfigOptionName(opt)) + '</td><td>' + esc(resolveOptValue(opt)) + '</td></tr>';
       }
       html += '</tbody></table></div></div>';
     }
@@ -1230,8 +1427,10 @@ function renderDBTables(db) {
               } catch (_) {
                 summary = 'invalid json';
               }
-            }            const safeCol = col.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            html += '<td><span class="tbl-muted">' + esc(summary) + '</span> <button type="button" class="json-cell-btn" onclick="openJSONModal(\'' + key + '\', \'' + safeCol + '\')">View JSON</button></td>';
+            }
+            const safeCol = col.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            const safeTable = tableName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            html += '<td><span class="tbl-muted">' + esc(summary) + '</span> <button type="button" class="json-cell-btn" onclick="openJSONModal(\'' + key + '\', \'' + safeCol + '\', \'' + safeTable + '\')">View JSON</button></td>';
             continue;
           }
           if (isStatus) {

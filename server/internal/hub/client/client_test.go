@@ -1373,10 +1373,6 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 		t.Fatalf("ensureReady: %v", err)
 	}
 
-	if got := sess.preferredAgentName(); got != "claude" {
-		t.Fatalf("preferred agent = %q, want claude", got)
-	}
-
 	if got := len(inst.setCalls); got != 3 {
 		t.Fatalf("set calls = %d, want 3", got)
 	}
@@ -4333,6 +4329,40 @@ func TestStart_LoadsRouteBindingsWithoutRestoringSessions(t *testing.T) {
 	}
 	if c.HasSessionInMemoryForTest("sess-1") {
 		t.Fatal("persisted session should not be eagerly restored during Start()")
+	}
+}
+
+func TestStart_CreatesProjectRowWhenMissing(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	c := New(store, "proj-a", t.TempDir())
+	if err := c.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	sqliteStore, ok := store.(*sqliteStore)
+	if !ok {
+		t.Fatal("store type mismatch")
+	}
+
+	var rows int
+	if err := sqliteStore.db.QueryRow(`SELECT COUNT(1) FROM projects WHERE project_name = ?`, "proj-a").Scan(&rows); err != nil {
+		t.Fatalf("query projects row count: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("projects rows = %d, want 1", rows)
+	}
+
+	got, err := store.LoadProjectDefaultAgent(context.Background(), "proj-a")
+	if err != nil {
+		t.Fatalf("LoadProjectDefaultAgent: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("default agent = %q, want empty", got)
 	}
 }
 

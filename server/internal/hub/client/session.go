@@ -1068,7 +1068,12 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 }
 
 func (s *Session) connectHint() string {
-	agentName := s.preferredAgentName()
+	s.mu.Lock()
+	agentName := strings.TrimSpace(s.agentType)
+	s.mu.Unlock()
+	if agentName == "" && s.registry != nil {
+		agentName = strings.TrimSpace(s.registry.PreferredName())
+	}
 	if agentName == "" {
 		if s.registry != nil {
 			names := s.registry.Names()
@@ -1079,21 +1084,6 @@ func (s *Session) connectHint() string {
 		return "No available ACP provider. Check environment and restart wheelmaker."
 	}
 	return fmt.Sprintf("Run `%s` to connect.", "/new "+agentName)
-}
-
-func (s *Session) preferredAgentName() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.instance != nil && strings.TrimSpace(s.instance.Name()) != "" {
-		return strings.TrimSpace(s.instance.Name())
-	}
-	if strings.TrimSpace(s.agentType) != "" {
-		return strings.TrimSpace(s.agentType)
-	}
-	if s.registry != nil {
-		return strings.TrimSpace(s.registry.PreferredName())
-	}
-	return ""
 }
 
 type instanceLivenessProbe interface {
@@ -1155,4 +1145,3 @@ func (s *Session) resetDeadConnection(err error) bool {
 	}
 	return true
 }
-

@@ -391,15 +391,15 @@ func (s *sqliteStore) LoadProjectDefaultAgent(ctx context.Context, projectName s
 func (s *sqliteStore) SaveProjectDefaultAgent(ctx context.Context, projectName, agentType string) error {
 	projectName = strings.TrimSpace(projectName)
 	agentType = strings.TrimSpace(agentType)
-	if projectName == "" || agentType == "" {
-		return fmt.Errorf("project name and agent type are required")
+	if projectName == "" {
+		return fmt.Errorf("project name is required")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO projects (project_name, default_agent_type, updated_at)
 		VALUES (?, ?, ?)
 		ON CONFLICT(project_name) DO UPDATE SET
-			default_agent_type=excluded.default_agent_type,
+			default_agent_type=CASE WHEN excluded.default_agent_type != '' THEN excluded.default_agent_type ELSE projects.default_agent_type END,
 			updated_at=excluded.updated_at
 	`, projectName, agentType, now)
 	if err != nil {

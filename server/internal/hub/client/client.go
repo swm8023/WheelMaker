@@ -99,6 +99,9 @@ func (c *Client) ProjectName() string {
 // Start loads persisted state.
 // Agent initialization is deferred until the first incoming IM event (lazy init).
 func (c *Client) Start(ctx context.Context) error {
+	if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, ""); err != nil {
+		return fmt.Errorf("client: ensure project row: %w", err)
+	}
 	bindings, err := c.store.LoadRouteBindings(ctx, c.projectName)
 	if err != nil {
 		return fmt.Errorf("client: load route bindings: %w", err)
