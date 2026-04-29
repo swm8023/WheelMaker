@@ -236,7 +236,7 @@ func (s *Session) handleConfigCommand(
 		s.agentState.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
 		updatedOpts = append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 		s.mu.Unlock()
-		s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptionsRaw(updatedOpts))
+		s.persistAgentPreferenceState(agentType, updatedOpts)
 	}
 
 	s.persistSessionBestEffort()
@@ -393,7 +393,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		if cfgID == "" {
 			continue
 		}
-		displayName := normalizeConfigOptionName(opt)
+		displayName := firstNonEmpty(opt.Name, cfgID)
 		label := "Config: " + displayName
 		if cur := strings.TrimSpace(opt.CurrentValue); cur != "" {
 			label += " (" + cur + ")"
@@ -435,27 +435,6 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
-}
-
-func normalizeConfigOptionName(opt acp.ConfigOption) string {
-	id := strings.ToLower(strings.TrimSpace(opt.ID))
-	category := strings.ToLower(strings.TrimSpace(opt.Category))
-	name := strings.ToLower(strings.TrimSpace(opt.Name))
-	if id == acp.ConfigOptionIDThoughtLevel ||
-		id == acp.ConfigOptionIDReasoningEffort ||
-		category == acp.ConfigOptionCategoryThoughtLv ||
-		category == acp.ConfigOptionCategoryReasoning ||
-		name == "reasoning effort" ||
-		name == "thought level" {
-		return "Thought Level"
-	}
-	if strings.TrimSpace(opt.Name) != "" {
-		return strings.TrimSpace(opt.Name)
-	}
-	if strings.TrimSpace(opt.ID) != "" {
-		return strings.TrimSpace(opt.ID)
-	}
-	return "unknown"
 }
 
 func formatConfigOptionUpdateMessage(raw []byte) string {

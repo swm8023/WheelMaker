@@ -63,10 +63,13 @@ CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts
 `
 
 type PreferenceState struct {
-	Mode         string `json:"mode,omitempty"`
-	Model        string `json:"model,omitempty"`
-	ThoughtLevel string `json:"thought_level,omitempty"`
-	UpdatedAt    string `json:"updatedAt,omitempty"`
+	ConfigOptions []PreferenceConfigOption `json:"configOptions,omitempty"`
+	UpdatedAt     string                   `json:"updatedAt,omitempty"`
+}
+
+type PreferenceConfigOption struct {
+	ID           string `json:"id"`
+	CurrentValue string `json:"currentValue,omitempty"`
 }
 
 type SessionRecord struct {

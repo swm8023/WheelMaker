@@ -1041,20 +1041,6 @@ function renderGenericJSONContent(raw) {
 }
 
 function normalizeConfigOptionName(opt) {
-  const normalize = (v) => String(v || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
-  const id = normalize(opt && opt.id);
-  const category = normalize(opt && opt.category);
-  const name = normalize(opt && opt.name);
-  if (
-    id === 'thought_level' ||
-    id === 'reasoning_effort' ||
-    category === 'thought_level' ||
-    category === 'reasoning_effort' ||
-    name === 'reasoning_effort' ||
-    name === 'thought_level'
-  ) {
-    return 'Thought Level';
-  }
   const rawName = opt && opt.name ? String(opt.name).trim() : '';
   if (rawName) return rawName;
   if (opt && opt.id) return String(opt.id);

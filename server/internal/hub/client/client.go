@@ -176,10 +176,32 @@ func loadProjectAgentPreferenceState(store Store, projectName string, agentName 
 		hubLogger(projectName).Warn("decode agent preference failed agent=%s err=%v", agentName, err)
 		return PreferenceState{}
 	}
-	pref.Mode = strings.TrimSpace(pref.Mode)
-	pref.Model = strings.TrimSpace(pref.Model)
-	pref.ThoughtLevel = strings.TrimSpace(pref.ThoughtLevel)
+	pref.ConfigOptions = sanitizePreferenceConfigOptions(pref.ConfigOptions)
 	return pref
+}
+
+func sanitizePreferenceConfigOptions(options []PreferenceConfigOption) []PreferenceConfigOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]PreferenceConfigOption, 0, len(options))
+	seen := make(map[string]struct{}, len(options))
+	for _, opt := range options {
+		id := strings.TrimSpace(opt.ID)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, PreferenceConfigOption{
+			ID:           id,
+			CurrentValue: opt.CurrentValue,
+		})
+	}
+	return out
 }
 
 func (c *Client) createSessionState(ctx context.Context, agentType, title string) (*createdSessionState, error) {
@@ -230,11 +252,6 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 	}
 
 	preference := loadProjectAgentPreferenceState(c.store, c.projectName, agentType)
-	targetSnap := acp.SessionConfigSnapshot{
-		Mode:         preference.Mode,
-		Model:        preference.Model,
-		ThoughtLevel: preference.ThoughtLevel,
-	}
 
 	newResult, err := inst.SessionNew(ctx, acp.SessionNewParams{
 		CWD:        c.cwd,
@@ -249,8 +266,8 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 	}
 
 	resolved := append([]acp.ConfigOption(nil), newResult.ConfigOptions...)
-	if targetSnap.Mode != "" || targetSnap.Model != "" || targetSnap.ThoughtLevel != "" {
-		resolved = applyReplayableConfigTarget(ctx, c.projectName, inst, sessionID, resolved, targetSnap)
+	if len(preference.ConfigOptions) > 0 {
+		resolved = applyStoredConfigOptions(ctx, c.projectName, inst, sessionID, resolved, preference.ConfigOptions)
 	}
 
 	state := SessionAgentState{
@@ -295,7 +312,7 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	sess.ready = true
 	sess.mu.Unlock()
 	created.instance.SetCallbacks(sess)
-	sess.persistAgentPreferenceState(created.agentType, acp.SessionConfigSnapshotFromOptionsRaw(created.state.ConfigOptions))
+	sess.persistAgentPreferenceState(created.agentType, created.state.ConfigOptions)
 	if err := sess.persistSession(ctx); err != nil {
 		sess.mu.Lock()
 		sess.instance = nil

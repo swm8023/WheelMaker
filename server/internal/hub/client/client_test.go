@@ -1334,9 +1334,13 @@ func TestClientNewSession_ReappliesProjectAgentBaseline(t *testing.T) {
 	defer store.Close()
 
 	if err := store.SaveAgentPreference(context.Background(), AgentPreferenceRecord{
-		ProjectName:    "proj1",
-		AgentType:      "claude",
-		PreferenceJSON: string(mustJSON(PreferenceState{Mode: "code", Model: "gpt-5", ThoughtLevel: "high"})),
+		ProjectName: "proj1",
+		AgentType:   "claude",
+		PreferenceJSON: string(mustJSON(PreferenceState{ConfigOptions: []PreferenceConfigOption{
+			{ID: acp.ConfigOptionIDMode, CurrentValue: "code"},
+			{ID: acp.ConfigOptionIDModel, CurrentValue: "gpt-5"},
+			{ID: acp.ConfigOptionIDThoughtLevel, CurrentValue: "high"},
+		}})),
 	}); err != nil {
 		t.Fatalf("SaveAgentPreference: %v", err)
 	}
@@ -1403,7 +1407,7 @@ func TestClientNewSessionPersistsProjectDefaultAgent(t *testing.T) {
 	}
 }
 
-func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *testing.T) {
+func TestEnsureReady_SessionLoadSuccess_ReplaysStoredConfigValuesByID(t *testing.T) {
 	s := mustNewSession(t, "acp-old", "/tmp", "claude")
 	s.projectName = "proj1"
 	s.agentState = SessionAgentState{
@@ -1452,6 +1456,13 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: p.Value},
 				{ID: "custom_toggle", CurrentValue: "agent-custom"},
 			}, nil
+		case "custom_toggle":
+			return []acp.ConfigOption{
+				{ID: acp.ConfigOptionIDMode, Category: acp.ConfigOptionCategoryMode, CurrentValue: "code"},
+				{ID: acp.ConfigOptionIDModel, Category: acp.ConfigOptionCategoryModel, CurrentValue: "gpt-5"},
+				{ID: acp.ConfigOptionIDThoughtLevel, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "high"},
+				{ID: "custom_toggle", CurrentValue: p.Value},
+			}, nil
 		default:
 			return nil, errors.New("unexpected config id")
 		}
@@ -1475,11 +1486,11 @@ func TestEnsureReady_SessionLoadSuccess_ReplaysOnlyReplayableSessionValues(t *te
 	if state == nil {
 		t.Fatal("currentAgentStateSnapshot returned nil state")
 	}
-	if findCurrentValue(state.ConfigOptions, "custom_toggle") != "agent-custom" {
-		t.Fatalf("custom_toggle should stay agent-owned")
+	if findCurrentValue(state.ConfigOptions, "custom_toggle") != "persisted-custom" {
+		t.Fatalf("custom_toggle should restore persisted value")
 	}
-	if got := len(inst.setCalls); got != 3 {
-		t.Fatalf("set calls = %d, want 3", got)
+	if got := len(inst.setCalls); got != 4 {
+		t.Fatalf("set calls = %d, want 4", got)
 	}
 }
 func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
@@ -1704,7 +1715,14 @@ func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	}
 	defer store.Close()
 
-	pref := PreferenceState{Mode: "code", Model: "gpt-5", ThoughtLevel: "high", UpdatedAt: "2026-04-11T00:00:00Z"}
+	pref := PreferenceState{
+		ConfigOptions: []PreferenceConfigOption{
+			{ID: acp.ConfigOptionIDMode, CurrentValue: "code"},
+			{ID: acp.ConfigOptionIDModel, CurrentValue: "gpt-5"},
+			{ID: acp.ConfigOptionIDThoughtLevel, CurrentValue: "high"},
+		},
+		UpdatedAt: "2026-04-11T00:00:00Z",
+	}
 	raw, err := json.Marshal(pref)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
@@ -1728,8 +1746,17 @@ func TestStoreAgentPreferenceRoundTrip(t *testing.T) {
 	if err := json.Unmarshal([]byte(loaded.PreferenceJSON), &decoded); err != nil {
 		t.Fatalf("json.Unmarshal: %v", err)
 	}
-	if decoded.Mode != "code" || decoded.Model != "gpt-5" || decoded.ThoughtLevel != "high" {
-		t.Fatalf("decoded preference = %+v", decoded)
+	if got := len(decoded.ConfigOptions); got != 3 {
+		t.Fatalf("decoded config option count = %d, want 3", got)
+	}
+	if decoded.ConfigOptions[0].ID != acp.ConfigOptionIDMode || decoded.ConfigOptions[0].CurrentValue != "code" {
+		t.Fatalf("decoded config[0] = %+v", decoded.ConfigOptions[0])
+	}
+	if decoded.ConfigOptions[1].ID != acp.ConfigOptionIDModel || decoded.ConfigOptions[1].CurrentValue != "gpt-5" {
+		t.Fatalf("decoded config[1] = %+v", decoded.ConfigOptions[1])
+	}
+	if decoded.ConfigOptions[2].ID != acp.ConfigOptionIDThoughtLevel || decoded.ConfigOptions[2].CurrentValue != "high" {
+		t.Fatalf("decoded config[2] = %+v", decoded.ConfigOptions[2])
 	}
 }
 
@@ -1752,75 +1779,42 @@ func TestStoreProjectDefaultAgentRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSessionConfigSnapshotFromOptionsRaw_UsesCurrentValueAndReasoningAlias(t *testing.T) {
-	opts := []acp.ConfigOption{
-		{
-			ID:           acp.ConfigOptionIDModel,
-			Category:     acp.ConfigOptionCategoryModel,
-			CurrentValue: "gpt-5",
-			Options: []acp.ConfigOptionValue{
-				{Name: "GPT-5", Value: "gpt-5"},
-			},
-		},
-		{
-			ID:           acp.ConfigOptionIDReasoningEffort,
-			Category:     acp.ConfigOptionCategoryReasoning,
-			CurrentValue: "high",
-			Options: []acp.ConfigOptionValue{
-				{Name: "High", Value: "high"},
-			},
-		},
-	}
-
-	display := acp.SessionConfigSnapshotFromOptions(opts)
-	if display.Model != "GPT-5" {
-		t.Fatalf("display model = %q, want %q", display.Model, "GPT-5")
-	}
-	if display.ThoughtLevel != "High" {
-		t.Fatalf("display thought level = %q, want %q", display.ThoughtLevel, "High")
-	}
-
-	raw := acp.SessionConfigSnapshotFromOptionsRaw(opts)
-	if raw.Model != "gpt-5" {
-		t.Fatalf("raw model = %q, want %q", raw.Model, "gpt-5")
-	}
-	if raw.ThoughtLevel != "high" {
-		t.Fatalf("raw thought level = %q, want %q", raw.ThoughtLevel, "high")
-	}
-}
-
-func TestApplyReplayableConfigTarget_UsesReasoningEffortAliasID(t *testing.T) {
-	inst := &testInjectedInstance{name: "copilot"}
+func TestApplyStoredConfigOptions_ReplaysByExactConfigID(t *testing.T) {
+	inst := &testInjectedInstance{name: "agent"}
 	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
 		return []acp.ConfigOption{
-			{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryReasoning, CurrentValue: p.Value},
+			{ID: p.ConfigID, CurrentValue: p.Value},
 		}, nil
 	}
 
 	current := []acp.ConfigOption{
-		{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryReasoning, CurrentValue: "low"},
+		{ID: "mode", CurrentValue: "ask"},
+		{ID: "custom_toggle", CurrentValue: "off"},
 	}
-	target := acp.SessionConfigSnapshot{ThoughtLevel: "high"}
+	target := []PreferenceConfigOption{
+		{ID: "mode", CurrentValue: "code"},
+		{ID: "custom_toggle", CurrentValue: "on"},
+	}
+	updated := applyStoredConfigOptions(context.Background(), "proj1", inst, "sess-1", current, target)
 
-	updated := applyReplayableConfigTarget(context.Background(), "proj1", inst, "sess-1", current, target)
-
-	if got := len(inst.setCalls); got != 1 {
-		t.Fatalf("set calls = %d, want 1", got)
+	if got := len(inst.setCalls); got != 2 {
+		t.Fatalf("set calls = %d, want 2", got)
 	}
-	if inst.setCalls[0].ConfigID != acp.ConfigOptionIDReasoningEffort {
-		t.Fatalf("configID = %q, want %q", inst.setCalls[0].ConfigID, acp.ConfigOptionIDReasoningEffort)
+	if inst.setCalls[0].ConfigID != "mode" || inst.setCalls[0].Value != "code" {
+		t.Fatalf("set call[0] = %+v", inst.setCalls[0])
 	}
-	if inst.setCalls[0].Value != "high" {
-		t.Fatalf("value = %q, want %q", inst.setCalls[0].Value, "high")
+	if inst.setCalls[1].ConfigID != "custom_toggle" || inst.setCalls[1].Value != "on" {
+		t.Fatalf("set call[1] = %+v", inst.setCalls[1])
 	}
-
-	snap := acp.SessionConfigSnapshotFromOptionsRaw(updated)
-	if snap.ThoughtLevel != "high" {
-		t.Fatalf("updated thought level = %q, want %q", snap.ThoughtLevel, "high")
+	if got := findCurrentValue(updated, "mode"); got != "code" {
+		t.Fatalf("updated mode = %q, want %q", got, "code")
+	}
+	if got := findCurrentValue(updated, "custom_toggle"); got != "on" {
+		t.Fatalf("updated custom_toggle = %q, want %q", got, "on")
 	}
 }
 
-func TestResolveHelpModel_NormalizesReasoningEffortLabel(t *testing.T) {
+func TestResolveHelpModel_UsesRawConfigOptionName(t *testing.T) {
 	s := mustNewSession(t, "sess-help-reasoning", "/tmp", "copilot")
 	s.registry = agent.DefaultACPFactory().Clone()
 	s.registry.Register(acp.ACPProviderCopilot, func(context.Context, string) (agent.Instance, error) {
@@ -1831,9 +1825,8 @@ func TestResolveHelpModel_NormalizesReasoningEffortLabel(t *testing.T) {
 	s.ready = true
 	s.agentState.ConfigOptions = []acp.ConfigOption{
 		{
-			ID:           acp.ConfigOptionIDReasoningEffort,
+			ID:           "reasoning_effort",
 			Name:         "Reasoning Effort",
-			Category:     acp.ConfigOptionCategoryReasoning,
 			CurrentValue: "medium",
 			Options: []acp.ConfigOptionValue{
 				{Name: "Low", Value: "low"},
@@ -1850,23 +1843,23 @@ func TestResolveHelpModel_NormalizesReasoningEffortLabel(t *testing.T) {
 	}
 	found := false
 	for _, opt := range model.Options {
-		if opt.MenuID == "menu:config:"+acp.ConfigOptionIDReasoningEffort {
-			if !strings.HasPrefix(opt.Label, "Config: Thought Level") {
-				t.Fatalf("config option label = %q, want Thought Level", opt.Label)
+		if opt.MenuID == "menu:config:reasoning_effort" {
+			if !strings.HasPrefix(opt.Label, "Config: Reasoning Effort") {
+				t.Fatalf("config option label = %q, want Reasoning Effort", opt.Label)
 			}
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("did not find config option menu for %q", acp.ConfigOptionIDReasoningEffort)
+		t.Fatalf("did not find config option menu for reasoning_effort")
 	}
-	menu, ok := model.Menus["menu:config:"+acp.ConfigOptionIDReasoningEffort]
+	menu, ok := model.Menus["menu:config:reasoning_effort"]
 	if !ok {
-		t.Fatalf("missing config menu for %q", acp.ConfigOptionIDReasoningEffort)
+		t.Fatal("missing config menu for reasoning_effort")
 	}
-	if menu.Title != "Config: Thought Level" {
-		t.Fatalf("config menu title = %q, want %q", menu.Title, "Config: Thought Level")
+	if menu.Title != "Config: Reasoning Effort" {
+		t.Fatalf("config menu title = %q, want %q", menu.Title, "Config: Reasoning Effort")
 	}
 }
 
