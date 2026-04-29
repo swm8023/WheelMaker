@@ -122,26 +122,14 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	return &cp
 }
 
-func (s *Session) agentStateLocked(name string) *SessionAgentState {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = strings.TrimSpace(s.agentType)
-	}
-	if name == "" {
-		return nil
-	}
+func (s *Session) agentStateLocked(_ string) *SessionAgentState {
 	if strings.TrimSpace(s.agentType) == "" {
-		s.agentType = name
+		return nil
 	}
 	return &s.agentState
 }
 
 func (s *Session) currentAgentNameLocked() string {
-	if s.instance != nil {
-		if name := strings.TrimSpace(s.instance.Name()); name != "" {
-			return name
-		}
-	}
 	return strings.TrimSpace(s.agentType)
 }
 
@@ -1234,25 +1222,13 @@ func (s *Session) reportTimeoutError(stage string, kind string) {
 	if !allow {
 		return
 	}
-
-	router, source, ok := s.imContext()
-	if !ok {
-		return
-	}
 	body := fmt.Sprintf(
 		"category=timeout stage=%s agent=%s sessionID=%s action=check /status then retry",
 		stage,
 		renderUnknown(agent),
 		renderUnknown(sid),
 	)
-	if err := router.SystemNotify(
-		context.Background(),
-		im.SendTarget{SessionID: s.acpSessionID, Source: &source},
-		im.SystemPayload{Kind: "message", Body: body},
-	); err != nil {
-		hubLogger(s.projectName).Error("timeout im notify failed stage=%s kind=%s session=%s err=%v",
-			stage, kind, s.acpSessionID, err)
-	}
+	s.reply(body)
 }
 
 func (s *Session) connectHint() string {

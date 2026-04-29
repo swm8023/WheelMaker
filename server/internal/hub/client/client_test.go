@@ -823,6 +823,49 @@ func TestReplyWithTitleRecordsLegacySystemEvent(t *testing.T) {
 	}
 }
 
+func TestReportTimeoutError_RecordsSystemEvent(t *testing.T) {
+	router := &fakeIMRouter{}
+	sink := &recordingSessionViewSink{}
+	s := mustNewSession(t, "sess-1", "/tmp")
+	s.imRouter = router
+	s.viewSink = sink
+	s.setIMSource(im.ChatRef{ChannelID: "app", ChatID: "chat-1"})
+	s.agentType = "claude"
+
+	s.reportTimeoutError("stream", "silence")
+
+	if len(sink.events) != 1 {
+		t.Fatalf("session view events len = %d, want 1", len(sink.events))
+	}
+	event := sink.events[0]
+	if event.Type != SessionViewEventTypeSystem {
+		t.Fatalf("event.Type = %q, want %q", event.Type, SessionViewEventTypeSystem)
+	}
+	if !strings.Contains(event.Content, "category=timeout stage=stream") {
+		t.Fatalf("event.Content = %q, want timeout payload", event.Content)
+	}
+
+	if len(router.systems) != 1 {
+		t.Fatalf("router system notifications len = %d, want 1", len(router.systems))
+	}
+	if got := strings.TrimSpace(router.systems[0].payload.Body); !strings.Contains(got, "category=timeout stage=stream") {
+		t.Fatalf("system payload body = %q, want timeout payload", got)
+	}
+}
+
+func TestCurrentAgentNameLocked_PrefersSessionAgentType(t *testing.T) {
+	s := mustNewSession(t, "sess-1", "/tmp")
+	s.mu.Lock()
+	s.agentType = "claude"
+	s.instance = &testInjectedInstance{name: "codex"}
+	got := s.currentAgentNameLocked()
+	s.mu.Unlock()
+
+	if got != "claude" {
+		t.Fatalf("currentAgentNameLocked() = %q, want %q", got, "claude")
+	}
+}
+
 func TestClientLoadSession_RestoresFromStore(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
