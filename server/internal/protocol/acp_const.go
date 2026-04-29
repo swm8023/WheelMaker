@@ -70,9 +70,11 @@ const (
 	ConfigOptionIDMode            = "mode"
 	ConfigOptionIDModel           = "model"
 	ConfigOptionIDThoughtLevel    = "thought_level"
+	ConfigOptionIDReasoningEffort = "reasoning_effort"
 	ConfigOptionCategoryMode      = "mode"
 	ConfigOptionCategoryModel     = "model"
 	ConfigOptionCategoryThoughtLv = "thought_level"
+	ConfigOptionCategoryReasoning = "reasoning_effort"
 )
 
 // --- ACP stop reasons ---
@@ -93,8 +95,8 @@ const (
 	ACPProviderClaude      ACPProvider = "claude"
 	ACPProviderCopilot     ACPProvider = "copilot"
 	ACPProviderCodeflicker ACPProvider = "codeflicker"
-	ACPProviderOpenCode  ACPProvider = "opencode"
-	ACPProviderCodeBuddy ACPProvider = "codebuddy"
+	ACPProviderOpenCode    ACPProvider = "opencode"
+	ACPProviderCodeBuddy   ACPProvider = "codebuddy"
 )
 
 var acpProviders = []ACPProvider{ACPProviderCodex, ACPProviderClaude, ACPProviderCopilot, ACPProviderCodeflicker, ACPProviderOpenCode, ACPProviderCodeBuddy}

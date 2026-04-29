@@ -406,6 +406,44 @@ type SessionConfigSnapshot struct {
 	ThoughtLevel string
 }
 
+func normalizeConfigToken(v string) string {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.ReplaceAll(v, "-", "_")
+	v = strings.ReplaceAll(v, " ", "_")
+	return v
+}
+
+func hasConfigToken(v string, tokens ...string) bool {
+	normalized := normalizeConfigToken(v)
+	if normalized == "" {
+		return false
+	}
+	for _, token := range tokens {
+		if normalized == token {
+			return true
+		}
+	}
+	return false
+}
+
+func isModeConfigOption(opt ConfigOption) bool {
+	return hasConfigToken(opt.ID, ConfigOptionIDMode) || hasConfigToken(opt.Category, ConfigOptionCategoryMode)
+}
+
+func isModelConfigOption(opt ConfigOption) bool {
+	return hasConfigToken(opt.ID, ConfigOptionIDModel) || hasConfigToken(opt.Category, ConfigOptionCategoryModel)
+}
+
+func isThoughtLevelConfigOption(opt ConfigOption) bool {
+	if hasConfigToken(opt.ID, ConfigOptionIDThoughtLevel, ConfigOptionIDReasoningEffort) {
+		return true
+	}
+	if hasConfigToken(opt.Category, ConfigOptionCategoryThoughtLv, ConfigOptionCategoryReasoning) {
+		return true
+	}
+	return hasConfigToken(opt.Name, "thought_level", "reasoning_effort", "reasoning")
+}
+
 // resolveOptionDisplayValue resolves a config option's current value to a
 // human-readable display name. It first looks for a matching entry in
 // opt.Options; if not found it falls back to extracting the URL fragment
@@ -432,19 +470,30 @@ func resolveOptionDisplayValue(opt ConfigOption) string {
 	return v
 }
 
-// SessionConfigSnapshotFromOptions extracts mode/model/thought_level from a ConfigOption list.
-func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
+func sessionConfigSnapshotFromOptions(opts []ConfigOption, resolve func(opt ConfigOption) string) SessionConfigSnapshot {
 	snap := SessionConfigSnapshot{}
 	for _, opt := range opts {
-		if snap.Mode == "" && (opt.ID == ConfigOptionIDMode || opt.Category == ConfigOptionCategoryMode) {
-			snap.Mode = resolveOptionDisplayValue(opt)
+		if snap.Mode == "" && isModeConfigOption(opt) {
+			snap.Mode = resolve(opt)
 		}
-		if snap.Model == "" && (opt.ID == ConfigOptionIDModel || opt.Category == ConfigOptionCategoryModel) {
-			snap.Model = resolveOptionDisplayValue(opt)
+		if snap.Model == "" && isModelConfigOption(opt) {
+			snap.Model = resolve(opt)
 		}
-		if snap.ThoughtLevel == "" && (opt.ID == ConfigOptionIDThoughtLevel || opt.Category == ConfigOptionCategoryThoughtLv) {
-			snap.ThoughtLevel = resolveOptionDisplayValue(opt)
+		if snap.ThoughtLevel == "" && isThoughtLevelConfigOption(opt) {
+			snap.ThoughtLevel = resolve(opt)
 		}
 	}
 	return snap
+}
+
+// SessionConfigSnapshotFromOptions extracts user-facing mode/model/thought-level values from a ConfigOption list.
+func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
+	return sessionConfigSnapshotFromOptions(opts, resolveOptionDisplayValue)
+}
+
+// SessionConfigSnapshotFromOptionsRaw extracts replayable raw current values from a ConfigOption list.
+func SessionConfigSnapshotFromOptionsRaw(opts []ConfigOption) SessionConfigSnapshot {
+	return sessionConfigSnapshotFromOptions(opts, func(opt ConfigOption) string {
+		return strings.TrimSpace(opt.CurrentValue)
+	})
 }

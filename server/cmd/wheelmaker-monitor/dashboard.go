@@ -1041,13 +1041,22 @@ function renderGenericJSONContent(raw) {
 }
 
 function normalizeConfigOptionName(opt) {
-  const id = opt && opt.id ? String(opt.id).trim().toLowerCase() : '';
-  const category = opt && opt.category ? String(opt.category).trim().toLowerCase() : '';
-  const name = opt && opt.name ? String(opt.name).trim() : '';
-  if (id === 'thought_level' || category.indexOf('thought') >= 0 || category.indexOf('reasoning') >= 0 || name.toLowerCase() === 'reasoning effort') {
+  const normalize = (v) => String(v || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  const id = normalize(opt && opt.id);
+  const category = normalize(opt && opt.category);
+  const name = normalize(opt && opt.name);
+  if (
+    id === 'thought_level' ||
+    id === 'reasoning_effort' ||
+    category === 'thought_level' ||
+    category === 'reasoning_effort' ||
+    name === 'reasoning_effort' ||
+    name === 'thought_level'
+  ) {
     return 'Thought Level';
   }
-  if (name) return name;
+  const rawName = opt && opt.name ? String(opt.name).trim() : '';
+  if (rawName) return rawName;
   if (opt && opt.id) return String(opt.id);
   return '-';
 }

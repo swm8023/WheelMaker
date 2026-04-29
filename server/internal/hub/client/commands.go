@@ -236,7 +236,7 @@ func (s *Session) handleConfigCommand(
 		s.agentState.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
 		updatedOpts = append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 		s.mu.Unlock()
-		s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptions(updatedOpts))
+		s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptionsRaw(updatedOpts))
 	}
 
 	s.persistSessionBestEffort()
@@ -393,7 +393,8 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 		if cfgID == "" {
 			continue
 		}
-		label := "Config: " + cfgID
+		displayName := normalizeConfigOptionName(opt)
+		label := "Config: " + displayName
 		if cur := strings.TrimSpace(opt.CurrentValue); cur != "" {
 			label += " (" + cur + ")"
 		}
@@ -403,7 +404,7 @@ func (s *Session) resolveHelpModel(ctx context.Context, _ string) (HelpModel, er
 			MenuID: menuID,
 		})
 		cfgMenu := HelpMenu{
-			Title:  "Config: " + cfgID,
+			Title:  "Config: " + displayName,
 			Body:   "Select a value.",
 			Parent: model.RootMenu,
 		}
@@ -434,6 +435,27 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+func normalizeConfigOptionName(opt acp.ConfigOption) string {
+	id := strings.ToLower(strings.TrimSpace(opt.ID))
+	category := strings.ToLower(strings.TrimSpace(opt.Category))
+	name := strings.ToLower(strings.TrimSpace(opt.Name))
+	if id == acp.ConfigOptionIDThoughtLevel ||
+		id == acp.ConfigOptionIDReasoningEffort ||
+		category == acp.ConfigOptionCategoryThoughtLv ||
+		category == acp.ConfigOptionCategoryReasoning ||
+		name == "reasoning effort" ||
+		name == "thought level" {
+		return "Thought Level"
+	}
+	if strings.TrimSpace(opt.Name) != "" {
+		return strings.TrimSpace(opt.Name)
+	}
+	if strings.TrimSpace(opt.ID) != "" {
+		return strings.TrimSpace(opt.ID)
+	}
+	return "unknown"
 }
 
 func formatConfigOptionUpdateMessage(raw []byte) string {

@@ -295,7 +295,7 @@ func (c *Client) CreateSession(ctx context.Context, agentType, title string) (*S
 	sess.ready = true
 	sess.mu.Unlock()
 	created.instance.SetCallbacks(sess)
-	sess.persistAgentPreferenceState(created.agentType, acp.SessionConfigSnapshotFromOptions(created.state.ConfigOptions))
+	sess.persistAgentPreferenceState(created.agentType, acp.SessionConfigSnapshotFromOptionsRaw(created.state.ConfigOptions))
 	if err := sess.persistSession(ctx); err != nil {
 		sess.mu.Lock()
 		sess.instance = nil

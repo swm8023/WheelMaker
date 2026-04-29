@@ -1752,6 +1752,124 @@ func TestStoreProjectDefaultAgentRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSessionConfigSnapshotFromOptionsRaw_UsesCurrentValueAndReasoningAlias(t *testing.T) {
+	opts := []acp.ConfigOption{
+		{
+			ID:           acp.ConfigOptionIDModel,
+			Category:     acp.ConfigOptionCategoryModel,
+			CurrentValue: "gpt-5",
+			Options: []acp.ConfigOptionValue{
+				{Name: "GPT-5", Value: "gpt-5"},
+			},
+		},
+		{
+			ID:           acp.ConfigOptionIDReasoningEffort,
+			Category:     acp.ConfigOptionCategoryReasoning,
+			CurrentValue: "high",
+			Options: []acp.ConfigOptionValue{
+				{Name: "High", Value: "high"},
+			},
+		},
+	}
+
+	display := acp.SessionConfigSnapshotFromOptions(opts)
+	if display.Model != "GPT-5" {
+		t.Fatalf("display model = %q, want %q", display.Model, "GPT-5")
+	}
+	if display.ThoughtLevel != "High" {
+		t.Fatalf("display thought level = %q, want %q", display.ThoughtLevel, "High")
+	}
+
+	raw := acp.SessionConfigSnapshotFromOptionsRaw(opts)
+	if raw.Model != "gpt-5" {
+		t.Fatalf("raw model = %q, want %q", raw.Model, "gpt-5")
+	}
+	if raw.ThoughtLevel != "high" {
+		t.Fatalf("raw thought level = %q, want %q", raw.ThoughtLevel, "high")
+	}
+}
+
+func TestApplyReplayableConfigTarget_UsesReasoningEffortAliasID(t *testing.T) {
+	inst := &testInjectedInstance{name: "copilot"}
+	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+		return []acp.ConfigOption{
+			{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryReasoning, CurrentValue: p.Value},
+		}, nil
+	}
+
+	current := []acp.ConfigOption{
+		{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryReasoning, CurrentValue: "low"},
+	}
+	target := acp.SessionConfigSnapshot{ThoughtLevel: "high"}
+
+	updated := applyReplayableConfigTarget(context.Background(), "proj1", inst, "sess-1", current, target)
+
+	if got := len(inst.setCalls); got != 1 {
+		t.Fatalf("set calls = %d, want 1", got)
+	}
+	if inst.setCalls[0].ConfigID != acp.ConfigOptionIDReasoningEffort {
+		t.Fatalf("configID = %q, want %q", inst.setCalls[0].ConfigID, acp.ConfigOptionIDReasoningEffort)
+	}
+	if inst.setCalls[0].Value != "high" {
+		t.Fatalf("value = %q, want %q", inst.setCalls[0].Value, "high")
+	}
+
+	snap := acp.SessionConfigSnapshotFromOptionsRaw(updated)
+	if snap.ThoughtLevel != "high" {
+		t.Fatalf("updated thought level = %q, want %q", snap.ThoughtLevel, "high")
+	}
+}
+
+func TestResolveHelpModel_NormalizesReasoningEffortLabel(t *testing.T) {
+	s := mustNewSession(t, "sess-help-reasoning", "/tmp", "copilot")
+	s.registry = agent.DefaultACPFactory().Clone()
+	s.registry.Register(acp.ACPProviderCopilot, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{name: "copilot", alive: true}, nil
+	})
+	s.mu.Lock()
+	s.instance = &testInjectedInstance{name: "copilot", alive: true}
+	s.ready = true
+	s.agentState.ConfigOptions = []acp.ConfigOption{
+		{
+			ID:           acp.ConfigOptionIDReasoningEffort,
+			Name:         "Reasoning Effort",
+			Category:     acp.ConfigOptionCategoryReasoning,
+			CurrentValue: "medium",
+			Options: []acp.ConfigOptionValue{
+				{Name: "Low", Value: "low"},
+				{Name: "Medium", Value: "medium"},
+				{Name: "High", Value: "high"},
+			},
+		},
+	}
+	s.mu.Unlock()
+
+	model, err := s.resolveHelpModel(context.Background(), "")
+	if err != nil {
+		t.Fatalf("resolveHelpModel: %v", err)
+	}
+	found := false
+	for _, opt := range model.Options {
+		if opt.MenuID == "menu:config:"+acp.ConfigOptionIDReasoningEffort {
+			if !strings.HasPrefix(opt.Label, "Config: Thought Level") {
+				t.Fatalf("config option label = %q, want Thought Level", opt.Label)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("did not find config option menu for %q", acp.ConfigOptionIDReasoningEffort)
+	}
+	menu, ok := model.Menus["menu:config:"+acp.ConfigOptionIDReasoningEffort]
+	if !ok {
+		t.Fatalf("missing config menu for %q", acp.ConfigOptionIDReasoningEffort)
+	}
+	if menu.Title != "Config: Thought Level" {
+		t.Fatalf("config menu title = %q, want %q", menu.Title, "Config: Thought Level")
+	}
+}
+
 func TestStoreProjectDefaultAgentMissingReturnsEmpty(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {

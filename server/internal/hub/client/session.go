@@ -342,7 +342,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 
 	resolved := append([]acp.ConfigOption(nil), loadResult.ConfigOptions...)
-	targetSnap := acp.SessionConfigSnapshotFromOptions(persistedConfigOptions)
+	targetSnap := acp.SessionConfigSnapshotFromOptionsRaw(persistedConfigOptions)
 	if len(resolved) > 0 {
 		if targetSnap.Mode != "" || targetSnap.Model != "" || targetSnap.ThoughtLevel != "" {
 			resolved = applyReplayableConfigTarget(ctx, s.projectName, inst, savedSID, resolved, targetSnap)
@@ -366,24 +366,44 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	s.mu.Unlock()
 	s.initCond.Broadcast()
 
-	s.persistAgentPreferenceState(agentName, acp.SessionConfigSnapshotFromOptions(resolved))
+	s.persistAgentPreferenceState(agentName, acp.SessionConfigSnapshotFromOptionsRaw(resolved))
 	hubLogger(s.projectName).Info("connected agent=%s session=%s resumed", inst.Name(), savedSID)
 	return nil
 }
-func findConfigOptionID(options []acp.ConfigOption, id, category string) string {
-	id = strings.TrimSpace(id)
-	category = strings.TrimSpace(category)
+func findConfigOptionID(options []acp.ConfigOption, ids []string, categories []string) string {
+	normalizedIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			normalizedIDs = append(normalizedIDs, id)
+		}
+	}
+	normalizedCategories := make([]string, 0, len(categories))
+	for _, category := range categories {
+		category = strings.TrimSpace(category)
+		if category != "" {
+			normalizedCategories = append(normalizedCategories, category)
+		}
+	}
 	fallback := ""
 	for _, opt := range options {
 		optID := strings.TrimSpace(opt.ID)
 		if optID == "" {
 			continue
 		}
-		if id != "" && strings.EqualFold(optID, id) {
-			return optID
+		for _, id := range normalizedIDs {
+			if strings.EqualFold(optID, id) {
+				return optID
+			}
 		}
-		if fallback == "" && category != "" && strings.EqualFold(strings.TrimSpace(opt.Category), category) {
-			fallback = optID
+		if fallback == "" {
+			optCategory := strings.TrimSpace(opt.Category)
+			for _, category := range normalizedCategories {
+				if strings.EqualFold(optCategory, category) {
+					fallback = optID
+					break
+				}
+			}
 		}
 	}
 	return fallback
@@ -417,16 +437,21 @@ func mergeConfigOptions(current []acp.ConfigOption, updated []acp.ConfigOption) 
 
 type replayableConfigTarget struct {
 	name     string
-	id       string
-	category string
+	ids      []string
+	category []string
 	desired  string
 }
 
 func replayableTargetsFromSnapshot(snap acp.SessionConfigSnapshot) []replayableConfigTarget {
 	return []replayableConfigTarget{
-		{name: "mode", id: acp.ConfigOptionIDMode, category: acp.ConfigOptionCategoryMode, desired: strings.TrimSpace(snap.Mode)},
-		{name: "model", id: acp.ConfigOptionIDModel, category: acp.ConfigOptionCategoryModel, desired: strings.TrimSpace(snap.Model)},
-		{name: "thought_level", id: acp.ConfigOptionIDThoughtLevel, category: acp.ConfigOptionCategoryThoughtLv, desired: strings.TrimSpace(snap.ThoughtLevel)},
+		{name: "mode", ids: []string{acp.ConfigOptionIDMode}, category: []string{acp.ConfigOptionCategoryMode}, desired: strings.TrimSpace(snap.Mode)},
+		{name: "model", ids: []string{acp.ConfigOptionIDModel}, category: []string{acp.ConfigOptionCategoryModel}, desired: strings.TrimSpace(snap.Model)},
+		{
+			name:     "thought_level",
+			ids:      []string{acp.ConfigOptionIDThoughtLevel, acp.ConfigOptionIDReasoningEffort},
+			category: []string{acp.ConfigOptionCategoryThoughtLv, acp.ConfigOptionCategoryReasoning},
+			desired:  strings.TrimSpace(snap.ThoughtLevel),
+		},
 	}
 }
 
@@ -443,7 +468,7 @@ func applyReplayableConfigTarget(
 		if next.desired == "" {
 			continue
 		}
-		currentSnap := acp.SessionConfigSnapshotFromOptions(options)
+		currentSnap := acp.SessionConfigSnapshotFromOptionsRaw(options)
 		var currentValue string
 		switch next.name {
 		case "mode":
@@ -457,7 +482,7 @@ func applyReplayableConfigTarget(
 			continue
 		}
 
-		configID := findConfigOptionID(options, next.id, next.category)
+		configID := findConfigOptionID(options, next.ids, next.category)
 		if configID == "" {
 			hubLogger(projectName).Warn("skip reapply %s: config option not found", next.name)
 			continue
@@ -786,7 +811,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		state := cloneSessionAgentState(&s.agentState)
 		s.mu.Unlock()
 		if state != nil {
-			s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptions(state.ConfigOptions))
+			s.persistAgentPreferenceState(agentType, acp.SessionConfigSnapshotFromOptionsRaw(state.ConfigOptions))
 		}
 		s.persistSessionBestEffort()
 	}
