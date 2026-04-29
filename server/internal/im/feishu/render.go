@@ -60,13 +60,20 @@ func planStatusEmoji(status string) string {
 
 // buildConfigCard renders a config update as a small system card.
 func buildConfigCard(update acp.SessionUpdate) RawCard {
-	snap := acp.SessionConfigSnapshotFromOptions(update.ConfigOptions)
-	parts := make([]string, 0, 4)
-	if strings.TrimSpace(snap.Mode) != "" {
-		parts = append(parts, "**mode** = "+strings.TrimSpace(snap.Mode))
-	}
-	if strings.TrimSpace(snap.Model) != "" {
-		parts = append(parts, "**model** = "+strings.TrimSpace(snap.Model))
+	parts := make([]string, 0, len(update.ConfigOptions))
+	for _, opt := range update.ConfigOptions {
+		key := strings.TrimSpace(opt.ID)
+		if strings.TrimSpace(opt.Name) != "" {
+			key = strings.TrimSpace(opt.Name)
+		}
+		if key == "" {
+			continue
+		}
+		value := strings.TrimSpace(opt.CurrentValue)
+		if value == "" {
+			value = "-"
+		}
+		parts = append(parts, fmt.Sprintf("**%s** = %s", key, value))
 	}
 	if len(parts) == 0 {
 		return nil
@@ -157,13 +164,16 @@ func renderUpdateSummary(prefix string, update acp.SessionUpdate) string {
 			}
 		}
 	case acp.SessionUpdateConfigOptionUpdate:
-		snap := acp.SessionConfigSnapshotFromOptions(update.ConfigOptions)
-		parts := make([]string, 0, 2)
-		if strings.TrimSpace(snap.Mode) != "" {
-			parts = append(parts, "mode="+strings.TrimSpace(snap.Mode))
-		}
-		if strings.TrimSpace(snap.Model) != "" {
-			parts = append(parts, "model="+strings.TrimSpace(snap.Model))
+		parts := make([]string, 0, 3)
+		for _, opt := range update.ConfigOptions {
+			id := strings.TrimSpace(opt.ID)
+			if id == "" {
+				continue
+			}
+			parts = append(parts, id+"="+strings.TrimSpace(opt.CurrentValue))
+			if len(parts) >= 3 {
+				break
+			}
 		}
 		if len(parts) > 0 {
 			return prefix + ": " + strings.Join(parts, ", ")

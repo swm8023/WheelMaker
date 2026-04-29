@@ -151,17 +151,31 @@ func (s *Session) sessionInfoLine() string {
 	configOpts := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 	s.mu.Unlock()
 
-	snap := acp.SessionConfigSnapshotFromOptions(configOpts)
 	sid := shortSessionID(clientSID)
 	if sid == "" {
 		sid = "none"
 	}
+	mode := configValueByID(configOpts, acp.ConfigOptionIDMode)
+	model := configValueByID(configOpts, acp.ConfigOptionIDModel)
 	return fmt.Sprintf("session: %s\nagent: %s\nmode: %s\nmodel: %s",
 		sid,
 		renderUnknown(agentType),
-		renderUnknown(snap.Mode),
-		renderUnknown(snap.Model),
+		renderUnknown(mode),
+		renderUnknown(model),
 	)
+}
+
+func configValueByID(options []acp.ConfigOption, targetID string) string {
+	targetID = strings.TrimSpace(targetID)
+	if targetID == "" {
+		return ""
+	}
+	for _, opt := range options {
+		if strings.EqualFold(strings.TrimSpace(opt.ID), targetID) {
+			return strings.TrimSpace(opt.CurrentValue)
+		}
+	}
+	return ""
 }
 
 // reply sends a text response to the active chat via the IM channel.

@@ -986,13 +986,13 @@ func TestEnsureReady_SessionLoadKeepsPersistedConfigWhenLoadResultEmpty(t *testi
 	}
 
 	s.mu.Lock()
-	snap := acp.SessionConfigSnapshotFromOptions(append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...))
+	opts := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 	s.mu.Unlock()
-	if snap.Mode != "code" {
-		t.Fatalf("mode = %q, want %q", snap.Mode, "code")
+	if got := findCurrentValue(opts, acp.ConfigOptionIDMode); got != "code" {
+		t.Fatalf("mode = %q, want %q", got, "code")
 	}
-	if snap.Model != "gpt-5" {
-		t.Fatalf("model = %q, want %q", snap.Model, "gpt-5")
+	if got := findCurrentValue(opts, acp.ConfigOptionIDModel); got != "gpt-5" {
+		t.Fatalf("model = %q, want %q", got, "gpt-5")
 	}
 }
 
@@ -1510,10 +1510,12 @@ func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
 	}
 
 	s.mu.Lock()
-	snap := acp.SessionConfigSnapshotFromOptions(append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...))
+	opts := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 	s.mu.Unlock()
-	if snap.Mode != "code" || snap.Model != "gpt-5" || snap.ThoughtLevel != "high" {
-		t.Fatalf("snapshot after cancel = %+v", snap)
+	if findCurrentValue(opts, acp.ConfigOptionIDMode) != "code" ||
+		findCurrentValue(opts, acp.ConfigOptionIDModel) != "gpt-5" ||
+		findCurrentValue(opts, acp.ConfigOptionIDThoughtLevel) != "high" {
+		t.Fatalf("config after cancel = %+v", opts)
 	}
 }
 

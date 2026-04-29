@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"encoding/json"
-	"strings"
 )
 
 // --- ACP-specific param/result types ---
@@ -398,53 +397,3 @@ type SessionListResult struct {
 }
 
 // --- Session config helpers ---
-
-// SessionConfigSnapshot is a compact view of session-level mode/model values.
-type SessionConfigSnapshot struct {
-	Mode         string
-	Model        string
-	ThoughtLevel string
-}
-
-// resolveOptionDisplayValue resolves a config option's current value to a
-// human-readable display name. It first looks for a matching entry in
-// opt.Options; if not found it falls back to extracting the URL fragment
-// (e.g. "https://example.com/modes#agent" → "agent") and finally returns
-// the raw value.
-func resolveOptionDisplayValue(opt ConfigOption) string {
-	v := opt.CurrentValue
-	for _, o := range opt.Options {
-		if o.Value == v && o.Name != "" {
-			return o.Name
-		}
-	}
-	// Strip URI to fragment or last path segment for readability.
-	if strings.Contains(v, "#") {
-		if frag := v[strings.LastIndex(v, "#")+1:]; frag != "" {
-			return frag
-		}
-	}
-	if strings.Contains(v, "/") {
-		if seg := v[strings.LastIndex(v, "/")+1:]; seg != "" {
-			return seg
-		}
-	}
-	return v
-}
-
-// SessionConfigSnapshotFromOptions extracts mode/model/thought_level from a ConfigOption list.
-func SessionConfigSnapshotFromOptions(opts []ConfigOption) SessionConfigSnapshot {
-	snap := SessionConfigSnapshot{}
-	for _, opt := range opts {
-		if snap.Mode == "" && (opt.ID == ConfigOptionIDMode || opt.Category == ConfigOptionCategoryMode) {
-			snap.Mode = resolveOptionDisplayValue(opt)
-		}
-		if snap.Model == "" && (opt.ID == ConfigOptionIDModel || opt.Category == ConfigOptionCategoryModel) {
-			snap.Model = resolveOptionDisplayValue(opt)
-		}
-		if snap.ThoughtLevel == "" && (opt.ID == ConfigOptionIDThoughtLevel || opt.Category == ConfigOptionCategoryThoughtLv) {
-			snap.ThoughtLevel = resolveOptionDisplayValue(opt)
-		}
-	}
-	return snap
-}
