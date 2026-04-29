@@ -122,15 +122,11 @@ func cloneSessionAgentState(src *SessionAgentState) *SessionAgentState {
 	return &cp
 }
 
-func (s *Session) agentStateLocked(_ string) *SessionAgentState {
-	if strings.TrimSpace(s.agentType) == "" {
+func (s *Session) agentStateLocked() *SessionAgentState {
+	if s.agentType == "" {
 		return nil
 	}
 	return &s.agentState
-}
-
-func (s *Session) currentAgentNameLocked() string {
-	return strings.TrimSpace(s.agentType)
 }
 
 // shortSessionID returns a compact display form of a session ID.
@@ -152,10 +148,10 @@ func shortSessionID(id string) string {
 // sessionInfoLine returns a multi-line summary of the current session state.
 func (s *Session) sessionInfoLine() string {
 	s.mu.Lock()
-	agentName := s.currentAgentNameLocked()
+	agentType := s.agentType
 	clientSID := s.acpSessionID
 	var configOpts []acp.ConfigOption
-	if state := s.agentStateLocked(agentName); state != nil {
+	if state := s.agentStateLocked(); state != nil {
 		configOpts = append([]acp.ConfigOption(nil), state.ConfigOptions...)
 	}
 	s.mu.Unlock()
@@ -167,7 +163,7 @@ func (s *Session) sessionInfoLine() string {
 	}
 	return fmt.Sprintf("session: %s\nagent: %s\nmode: %s\nmodel: %s",
 		sid,
-		renderUnknown(agentName),
+		renderUnknown(agentType),
 		renderUnknown(snap.Mode),
 		renderUnknown(snap.Model),
 	)
@@ -252,7 +248,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 		s.mu.Unlock()
 		return nil
 	}
-	name := s.currentAgentNameLocked()
+	name := s.agentType
 	if name == "" && s.registry != nil {
 		name = strings.TrimSpace(s.registry.PreferredName())
 	}
@@ -330,7 +326,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	cwd := s.cwd
 	var persistedConfigOptions []acp.ConfigOption
 	var persistedCommands []acp.AvailableCommand
-	if state := s.agentStateLocked(agentName); state != nil {
+	if state := s.agentStateLocked(); state != nil {
 		persistedConfigOptions = append([]acp.ConfigOption(nil), state.ConfigOptions...)
 		persistedCommands = append([]acp.AvailableCommand(nil), state.Commands...)
 	}
@@ -412,7 +408,7 @@ func (s *Session) ensureReady(ctx context.Context) error {
 	}
 
 	s.mu.Lock()
-	state := s.agentStateLocked(agentName)
+	state := s.agentStateLocked()
 	if len(resolved) > 0 {
 		state.ConfigOptions = append([]acp.ConfigOption(nil), resolved...)
 	}
@@ -696,15 +692,11 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	agentType := strings.TrimSpace(s.agentType)
-	if agentType == "" {
-		agentType = s.currentAgentNameLocked()
-	}
-	if agentType == "" {
+	if s.agentType == "" {
 		return nil, fmt.Errorf("session agent type is required")
 	}
 
-	state := cloneSessionAgentState(s.agentStateLocked(agentType))
+	state := cloneSessionAgentState(s.agentStateLocked())
 	title := ""
 	if state != nil {
 		title = strings.TrimSpace(state.Title)
@@ -723,7 +715,7 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 		ID:           s.acpSessionID,
 		ProjectName:  s.projectName,
 		Status:       s.Status,
-		AgentType:    agentType,
+		AgentType:    s.agentType,
 		AgentJSON:    agentJSON,
 		Title:        title,
 		CreatedAt:    s.createdAt,
@@ -749,7 +741,7 @@ func sessionFromRecord(rec *SessionRecord, cwd string) (*Session, error) {
 		}
 	}
 	if strings.TrimSpace(rec.Title) != "" {
-		if state := s.agentStateLocked(s.agentType); state != nil && strings.TrimSpace(state.Title) == "" {
+		if state := s.agentStateLocked(); state != nil && strings.TrimSpace(state.Title) == "" {
 			state.Title = strings.TrimSpace(rec.Title)
 		}
 	}
@@ -854,7 +846,7 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 		update.SessionUpdate == acp.SessionUpdateConfigOptionUpdate ||
 		update.SessionUpdate == acp.SessionUpdateSessionInfoUpdate {
 		s.mu.Lock()
-		state := s.agentStateLocked(s.currentAgentNameLocked())
+		state := s.agentStateLocked()
 		switch update.SessionUpdate {
 		case acp.SessionUpdateAvailableCommandsUpdate:
 			if len(update.AvailableCommands) > 0 {
@@ -880,11 +872,11 @@ func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	}
 	if changed {
 		s.mu.Lock()
-		agentName := s.currentAgentNameLocked()
-		state := cloneSessionAgentState(s.agentStateLocked(agentName))
+		agentType := s.agentType
+		state := cloneSessionAgentState(s.agentStateLocked())
 		s.mu.Unlock()
 		if state != nil {
-			s.persistAgentPreferenceState(agentName, state.ConfigOptions, state.Commands)
+			s.persistAgentPreferenceState(agentType, state.ConfigOptions, state.Commands)
 		}
 		s.persistSessionBestEffort()
 	}
@@ -1209,7 +1201,7 @@ func renderUnknown(v string) string {
 func (s *Session) reportTimeoutError(stage string, kind string) {
 	now := time.Now()
 	s.mu.Lock()
-	agent := s.currentAgentNameLocked()
+	agent := s.agentType
 	sid := s.acpSessionID
 	allow := true
 	if s.timeoutLimiter != nil {
@@ -1354,7 +1346,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 	}
 	sid := strings.TrimSpace(s.acpSessionID)
 	configOptions := []acp.ConfigOption(nil)
-	if state := s.agentStateLocked(s.currentAgentNameLocked()); state != nil {
+	if state := s.agentStateLocked(); state != nil {
 		configOptions = append(configOptions, state.ConfigOptions...)
 	}
 	s.mu.Unlock()
@@ -1383,7 +1375,7 @@ func (s *Session) tryCopilotReasoningFallback(ctx context.Context) bool {
 
 	s.mu.Lock()
 	if len(updatedOpts) > 0 {
-		if state := s.agentStateLocked(s.currentAgentNameLocked()); state != nil {
+		if state := s.agentStateLocked(); state != nil {
 			state.ConfigOptions = append([]acp.ConfigOption(nil), updatedOpts...)
 		}
 	}

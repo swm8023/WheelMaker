@@ -858,11 +858,11 @@ func TestCurrentAgentNameLocked_PrefersSessionAgentType(t *testing.T) {
 	s.mu.Lock()
 	s.agentType = "claude"
 	s.instance = &testInjectedInstance{name: "codex"}
-	got := s.currentAgentNameLocked()
+	got := s.agentType
 	s.mu.Unlock()
 
 	if got != "claude" {
-		t.Fatalf("currentAgentNameLocked() = %q, want %q", got, "claude")
+		t.Fatalf("agentType = %q, want %q", got, "claude")
 	}
 }
 
@@ -1687,7 +1687,7 @@ func TestResolveHelpModelRefreshesSessionMenuFromRuntimeList(t *testing.T) {
 	s.instance = inst
 	s.agentType = inst.name
 	s.ready = true
-	state := s.agentStateLocked(inst.name)
+	state := s.agentStateLocked()
 	state.AgentCapabilities = acp.AgentCapabilities{
 		LoadSession: true,
 		SessionCapabilities: &acp.SessionCapabilities{
@@ -2104,7 +2104,7 @@ func addRuntimeSession(c *Client, sessionID, title, agent string, createdAt, las
 	sess.mu.Lock()
 	sess.agentType = agent
 	sess.acpSessionID = sessionID
-	if state := sess.agentStateLocked(agent); state != nil {
+	if state := sess.agentStateLocked(); state != nil {
 		state.Title = title
 	}
 	sess.Status = SessionActive

@@ -1118,16 +1118,16 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 	memIDs := make(map[string]bool, len(c.sessions))
 	for _, sess := range c.sessions {
 		sess.mu.Lock()
-		agentName := sess.currentAgentNameLocked()
+		agentType := sess.agentType
 		title := ""
-		if state := sess.agentStateLocked(agentName); state != nil {
+		if state := sess.agentStateLocked(); state != nil {
 			title = state.Title
 		}
 		e := SessionRecord{
 			ID:           sess.acpSessionID,
 			ProjectName:  c.projectName,
-			AgentType:    agentName,
-			Agent:        agentName,
+			AgentType:    agentType,
+			Agent:        agentType,
 			Title:        title,
 			Status:       sess.Status,
 			CreatedAt:    sess.createdAt,
