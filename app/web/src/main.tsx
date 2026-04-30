@@ -2489,18 +2489,40 @@ function App() {
     });
   };
 
+  const applySingleChatSessionConfigValue = (
+    sessionId: string,
+    configId: string,
+    value: string,
+  ) => {
+    if (!sessionId || !configId) return;
+    setChatSessions(prev =>
+      prev.map(item => {
+        if (item.sessionId !== sessionId) return item;
+        const options = item.configOptions;
+        if (!options?.length) return item;
+        return {
+          ...item,
+          configOptions: options.map(option =>
+            option.id === configId ? { ...option, currentValue: value } : option,
+          ),
+        };
+      }),
+    );
+  };
+
   const handleChatConfigOptionChange = async (
     option: RegistrySessionConfigOption,
     value: string,
   ) => {
     const sessionId = chatSelectedIdRef.current.trim();
     const configId = option.id.trim();
-    const nextValue = value.trim();
+    const nextValue = value;
     if (!sessionId || !configId || !nextValue || nextValue === option.currentValue) {
       return;
     }
     const updatingKey = `${sessionId}:${configId}`;
     setChatConfigUpdatingKey(updatingKey);
+    applySingleChatSessionConfigValue(sessionId, configId, nextValue);
     try {
       const result = await service.setSessionConfig({
         sessionId,
@@ -4152,7 +4174,7 @@ function App() {
                         <select
                           className="chat-config-select"
                           value={currentValue}
-                          disabled={chatSending || updating}
+                          disabled={updating}
                           onChange={event => {
                             handleChatConfigOptionChange(
                               option,
@@ -4674,6 +4696,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
 

@@ -1753,15 +1753,20 @@ body,
 }
 
 .chat-config-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .chat-config-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .chat-config-label {
@@ -1770,13 +1775,14 @@ body,
 }
 
 .chat-config-select {
-  width: 100%;
-  min-height: 30px;
+  min-width: 128px;
+  max-width: 220px;
+  min-height: 28px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
   color: var(--text);
-  padding: 4px 8px;
+  padding: 3px 8px;
   font: inherit;
   font-size: 12px;
 }
