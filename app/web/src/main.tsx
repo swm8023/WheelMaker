@@ -3785,6 +3785,105 @@ function App() {
     [chatMessages],
   );
 
+  const resolveChatFileLink = (
+    href: string,
+  ): { path: string; line: number | null } | null => {
+    const rawHref = href.trim();
+    if (!rawHref) return null;
+
+    const decodePath = (value: string) => {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    };
+
+    let pathCandidate = rawHref;
+    if (/^file:\/\//i.test(rawHref)) {
+      try {
+        const parsed = new URL(rawHref);
+        pathCandidate = `${parsed.hostname || ''}${decodePath(
+          parsed.pathname,
+        )}`;
+      } catch {
+        return null;
+      }
+    } else if (/^vscode:\/\//i.test(rawHref)) {
+      try {
+        const parsed = new URL(rawHref);
+        if (parsed.hostname.toLowerCase() !== 'file') return null;
+        pathCandidate = decodePath(parsed.pathname);
+      } catch {
+        return null;
+      }
+    } else if (/^[a-z][a-z0-9+.-]*:/i.test(rawHref)) {
+      return null;
+    } else {
+      pathCandidate = decodePath(rawHref);
+    }
+
+    const normalizeSlashes = (value: string) => value.replaceAll('\\', '/');
+    let normalized = normalizeSlashes(pathCandidate.trim());
+    if (!normalized) return null;
+
+    let line: number | null = null;
+    const hashMatch = /#L(\d+)(?:C\d+)?$/i.exec(normalized);
+    if (hashMatch) {
+      const parsedLine = Number.parseInt(hashMatch[1], 10);
+      if (Number.isFinite(parsedLine) && parsedLine > 0) {
+        line = parsedLine;
+      }
+      normalized = normalized.slice(0, hashMatch.index);
+    }
+    const suffixLineMatch = /:(\d+)(?::\d+)?$/.exec(normalized);
+    if (suffixLineMatch) {
+      const parsedLine = Number.parseInt(suffixLineMatch[1], 10);
+      if (Number.isFinite(parsedLine) && parsedLine > 0) {
+        line = parsedLine;
+      }
+      normalized = normalized.slice(0, suffixLineMatch.index);
+    }
+    normalized = normalized.trim();
+    if (!normalized) return null;
+    if (/^(\/\/|[a-z]+:\/\/)/i.test(normalized)) {
+      return null;
+    }
+
+    const root = normalizeSlashes(currentProject?.path ?? '').replace(
+      /\/+$/,
+      '',
+    );
+    const rootLower = root.toLowerCase();
+    let candidateLower = normalized.toLowerCase();
+    if (root && candidateLower === rootLower) {
+      return null;
+    }
+
+    if (/^\/[a-z]:\//i.test(normalized)) {
+      normalized = normalized.slice(1);
+      candidateLower = normalized.toLowerCase();
+    }
+
+    let resolvedPath = normalized;
+    if (root) {
+      const normalizedRootWithSlash = `${rootLower}/`;
+      if (candidateLower.startsWith(normalizedRootWithSlash)) {
+        resolvedPath = normalized.slice(root.length + 1);
+      }
+    }
+
+    resolvedPath = resolvedPath
+      .replace(/^\.\/+/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/');
+    if (!resolvedPath || resolvedPath.startsWith('../')) {
+      return null;
+    }
+
+    return { path: resolvedPath, line };
+  };
+
   const chatMarkdownComponents = useMemo<Components>(
     () => ({
       pre: markdownPreRenderer,
@@ -3801,6 +3900,39 @@ function App() {
           wrap: true,
           lineNumbers: false,
         }),
+      a: ({ href, children, ...rest }) => {
+        const linkHref = typeof href === 'string' ? href : '';
+        const targetFile = linkHref ? resolveChatFileLink(linkHref) : null;
+        const isFileLink = !!targetFile;
+        const fallbackHref = linkHref || '#';
+
+        return (
+          <a
+            {...rest}
+            href={fallbackHref}
+            target={isFileLink ? undefined : '_blank'}
+            rel={isFileLink ? undefined : 'noreferrer'}
+            onClick={event => {
+              if (!targetFile) return;
+              event.preventDefault();
+              setSelectedFile(targetFile.path);
+              readSelectedFile(targetFile.path)
+                .then(() => {
+                  const line = targetFile.line;
+                  if (!line) return;
+                  window.requestAnimationFrame(() => {
+                    scrollToFileLine(line);
+                  });
+                })
+                .catch(err => {
+                  setError(err instanceof Error ? err.message : String(err));
+                });
+            }}
+          >
+            {children}
+          </a>
+        );
+      },
     }),
     [
       themeMode,
@@ -3809,6 +3941,7 @@ function App() {
       codeFontSize,
       codeLineHeight,
       codeTabSize,
+      currentProject?.path,
     ],
   );
 
