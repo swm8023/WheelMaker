@@ -1690,28 +1690,29 @@ body,
 
 .chat-composer-main {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
 }
 
 .chat-composer-input {
   flex: 1 1 auto;
   min-width: 0;
-  height: 36px;
+  min-height: 36px;
+  max-height: 180px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
   color: var(--text);
-  padding: 0 12px;
+  padding: 7px 12px;
   font: inherit;
-  line-height: 36px;
+  line-height: 1.45;
+  resize: none;
 }
 
 .chat-composer-input:focus {
   outline: none;
   border-color: var(--accent);
 }
-
 .chat-action-button,
 .chat-send-button {
   width: 36px;

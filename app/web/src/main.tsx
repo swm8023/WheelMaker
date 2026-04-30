@@ -1476,7 +1476,7 @@ function App() {
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
-  const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
+  const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -1564,6 +1564,17 @@ function App() {
     loadChatSessions(projectIdRef.current).catch(() => undefined);
   }, [tab, connected]);
 
+
+  useEffect(() => {
+    const input = chatComposerTextareaRef.current;
+    if (!input) {
+      return;
+    }
+    input.style.height = '0px';
+    const nextHeight = Math.max(36, Math.min(input.scrollHeight, 180));
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
+  }, [chatComposerText]);
 
   useEffect(() => {
     if (tab !== 'chat') {
@@ -2430,7 +2441,6 @@ function App() {
             text: trimmedText,
             blocks,
           });
-          resetChatComposer();
           setChatSending(false);
           return;
         }
@@ -4103,9 +4113,9 @@ function App() {
               >
                 <span className="codicon codicon-mic" />
               </button>
-              <input
-                ref={chatComposerInputRef}
-                type="text"
+              <textarea
+                ref={chatComposerTextareaRef}
+                rows={1}
                 className="chat-composer-input"
                 value={chatComposerText}
                 onChange={event => setChatComposerText(event.target.value)}
