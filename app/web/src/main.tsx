@@ -3851,6 +3851,8 @@ function App() {
   ): { path: string; line: number | null } | null => {
     const rawHref = href.trim();
     if (!rawHref) return null;
+    const isWindowsDrivePath = /^[a-zA-Z]:[\\/]/.test(rawHref) ||
+      /^\/[a-zA-Z]:[\\/]/.test(rawHref);
 
     const decodePath = (value: string) => {
       try {
@@ -3878,6 +3880,8 @@ function App() {
       } catch {
         return null;
       }
+    } else if (isWindowsDrivePath) {
+      pathCandidate = decodePath(rawHref);
     } else if (/^[a-z][a-z0-9+.-]*:/i.test(rawHref)) {
       return null;
     } else {
@@ -3974,6 +3978,8 @@ function App() {
         const linkHref = typeof href === 'string' ? href : '';
         const targetFile = linkHref ? resolveChatFileLink(linkHref) : null;
         const isFileLink = !!targetFile;
+        const isWindowsLocalPath = /^[a-zA-Z]:[\\/]/.test(linkHref.trim()) ||
+          /^\/[a-zA-Z]:[\\/]/.test(linkHref.trim());
         const fallbackHref = linkHref || '#';
 
         return (
@@ -3983,7 +3989,13 @@ function App() {
             target={isFileLink ? undefined : '_blank'}
             rel={isFileLink ? undefined : 'noreferrer'}
             onClick={event => {
-              if (!targetFile) return;
+              if (!targetFile) {
+                if (isWindowsLocalPath) {
+                  event.preventDefault();
+                  setError(`Invalid file link: ${linkHref}`);
+                }
+                return;
+              }
               event.preventDefault();
               setTab('file');
               setSelectedFile(targetFile.path);
