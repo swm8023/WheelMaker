@@ -18,6 +18,8 @@ describe('web reconnect fallback behavior', () => {
       /connect\(\{\s*silentReconnect:\s*true\s*\}\)\.catch\(\(\)\s*=>\s*undefined\);/,
     );
     expect(mainTsx).toContain('if (!connected && !keepWorkspaceVisible) {');
+    expect(mainTsx).toContain("tabRef.current === 'chat'");
+    expect(mainTsx).toContain('hydrateMessages: shouldHydrateOnReconnect,');
   });
 
   test('uses pwa foreground supervisor for background suspend and resume reconnect', () => {

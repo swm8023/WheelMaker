@@ -22,6 +22,8 @@ describe('web chat integration', () => {
     expect(repositoryTs).toContain('payload: promptIndex > 0 || turnIndex > 0 ? {sessionId, promptIndex, turnIndex} : {sessionId}');
     expect(repositoryTs).toContain('messages?: unknown[];');
     expect(repositoryTs).toContain('Array.isArray(payload.messages) ? payload.messages : []');
+    expect(repositoryTs).not.toContain('prompts?: unknown[];');
+    expect(repositoryTs).not.toContain('Array.isArray(payload.prompts) ? payload.prompts : []');
     expect(repositoryTs).not.toContain('afterIndex');
     expect(repositoryTs).not.toContain('afterSubIndex');
     expect(repositoryTs).toContain("method: 'session.new'");
@@ -48,13 +50,14 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatComposerText');
     expect(mainTsx).toContain('chatMessages');
     expect(mainTsx).toContain('session.message');
-    expect(mainTsx).toContain('`${sessionId}:${promptIndex}:${turnIndex}`');
+    expect(mainTsx).toContain('return payload.message?.messageId ? payload.message : null;');
     expect(mainTsx).not.toContain('updateIndex');
     expect(mainTsx).not.toContain('await service.markSessionRead(');
     expect(mainTsx).toContain('chatSyncIndexRef');
     expect(mainTsx).toContain('sessions.some(session => session.sessionId === preferredSessionId)');
     expect(mainTsx).not.toContain('result.lastIndex < afterIndex');
     expect(mainTsx).toContain('preserveUserSelection');
+    expect(mainTsx).toContain('const shouldHydrateOnReconnect =');
     expect(mainTsx).toContain('selectionSnapshot');
     expect(mainTsx).toContain('chatSelectedIdRef.current = session.sessionId');
     expect(mainTsx).toContain('sessionId');
@@ -72,4 +75,3 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-permission-button');
   });
 });
-

@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-describe('web chat hydration behavior', () => {
-  test('connect and project switch hydrate selected session messages for baseline sync and reconnect recovery', () => {
+describe('web chat read-on-demand behavior', () => {
+  test('connect and project switch only load session list; reconnect hydrates only when currently in chat with selected session', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
       path.join(projectRoot, 'web', 'src', 'main.tsx'),
@@ -10,10 +10,10 @@ describe('web chat hydration behavior', () => {
     );
 
     expect(mainTsx).toContain('hydrateMessages?: boolean');
-    expect(mainTsx).toContain('hydrateMessages: true,');
-    expect(mainTsx).toContain(
-      "await loadChatSessions('', result.hydrated.projectId, {",
-    );
-    expect(mainTsx).toContain('if (!options?.hydrateMessages) {');
+    expect(mainTsx).toContain('hydrateMessages: false,');
+    expect(mainTsx).toContain('const shouldHydrateOnReconnect =');
+    expect(mainTsx).toContain("tabRef.current === 'chat'");
+    expect(mainTsx).toContain('hydrateMessages: shouldHydrateOnReconnect,');
+    expect(mainTsx).toContain('if (!canHydrateSelection) {');
   });
 });

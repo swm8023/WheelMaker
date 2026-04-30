@@ -350,170 +350,8 @@ function extractTextFromIMParam(param: unknown): string {
 function decodeSessionMessageFromEventPayload(
   payload: RegistryChatMessageEventPayload,
 ): RegistryChatMessage | null {
-  if (payload.message?.messageId) {
-    return payload.message;
-  }
-  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
-  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
-  if (!sessionId || !content) {
-    return null;
-  }
-
-  const promptIndex = Number(payload.promptIndex ?? 0);
-  const turnIndex = Number(payload.turnIndex ?? 0);
-  const messageId = `${sessionId}:${promptIndex}:${turnIndex}`;
-  const now = new Date().toISOString();
-
-  const message: RegistryChatMessage = {
-    messageId,
-    sessionId,
-    syncIndex: promptIndex > 0 ? promptIndex : undefined,
-    syncSubIndex: turnIndex > 0 ? turnIndex : undefined,
-    role: 'assistant',
-    kind: 'message',
-    text: '',
-    status: 'done',
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  try {
-    const doc = JSON.parse(content) as Record<string, unknown>;
-    const method = typeof doc.method === 'string' ? doc.method.trim() : '';
-    if (method === 'request_permission') {
-      return null;
-    }
-    const payloadDoc = (doc.payload && typeof doc.payload === 'object')
-      ? (doc.payload as Record<string, unknown>)
-      : undefined;
-    const paramDoc = (doc.param && typeof doc.param === 'object' && !Array.isArray(doc.param))
-      ? (doc.param as Record<string, unknown>)
-      : undefined;
-    const params = (doc.params && typeof doc.params === 'object')
-      ? (doc.params as Record<string, unknown>)
-      : undefined;
-    const result = (doc.result && typeof doc.result === 'object')
-      ? (doc.result as Record<string, unknown>)
-      : undefined;
-
-    if (payloadDoc) {
-      message.role = normalizeChatRole(payloadDoc.role);
-      message.kind = normalizeChatKind(payloadDoc.kind);
-      message.status = normalizeChatStatus(payloadDoc.status);
-      if (typeof payloadDoc.text === 'string') {
-        message.text = payloadDoc.text;
-      }
-      if (Array.isArray(payloadDoc.blocks)) {
-        message.blocks = payloadDoc.blocks as RegistryChatMessage['blocks'];
-      }
-    }
-
-    if (method === 'prompt_request') {
-      const promptBlocks = Array.isArray(paramDoc?.contentBlocks) ? paramDoc.contentBlocks : [];
-      message.role = 'user';
-      message.kind = 'message';
-      if (!message.text) {
-        message.text = extractTextFromACPContent(promptBlocks);
-      }
-      if (promptBlocks.length > 0) {
-        message.blocks = promptBlocks as RegistryChatMessage['blocks'];
-      }
-    } else if (method === 'prompt_done') {
-      message.role = 'system';
-      message.kind = 'prompt_result';
-      if (!message.text) {
-        message.text = typeof paramDoc?.stopReason === 'string' ? paramDoc.stopReason : '';
-      }
-    } else if (method === 'user_message_chunk') {
-      message.role = 'user';
-      message.kind = 'message';
-      if (!message.text) {
-        message.text = extractTextFromIMParam(doc.param);
-      }
-    } else if (method === 'agent_message_chunk') {
-      message.role = 'assistant';
-      message.kind = 'message';
-      if (!message.text) {
-        message.text = extractTextFromIMParam(doc.param);
-      }
-    } else if (method === 'agent_thought_chunk') {
-      message.role = 'assistant';
-      message.kind = 'thought';
-      if (!message.text) {
-        message.text = extractTextFromIMParam(doc.param);
-      }
-    } else if (method === 'tool_call') {
-      message.role = 'system';
-      message.kind = 'tool';
-      if (!message.text) {
-        message.text = extractTextFromIMParam(doc.param);
-      }
-      if (typeof paramDoc?.status === 'string') {
-        message.status = normalizeChatStatus(paramDoc.status);
-      }
-    } else if (method === 'agent_plan') {
-      message.role = 'assistant';
-      message.kind = 'thought';
-      if (!message.text) {
-        message.text = extractTextFromIMParam(doc.param);
-      }
-    } else if (method === 'system') {
-      message.role = 'system';
-      message.kind = 'message';
-      if (!message.text) {
-        message.text = extractTextFromIMParam(doc.param);
-      }
-    } else if (method === 'session.prompt') {
-      const promptBlocks = Array.isArray(params?.prompt) ? params.prompt : [];
-      message.role = 'user';
-      message.kind = 'message';
-      if (!message.text) {
-        message.text = extractTextFromACPContent(promptBlocks);
-      }
-      if (promptBlocks.length > 0) {
-        message.blocks = promptBlocks as RegistryChatMessage['blocks'];
-      }
-      const stopReason = (result?.stopReason && typeof result.stopReason === 'string')
-        ? result.stopReason.trim()
-        : '';
-      if (!message.text && stopReason) {
-        message.text = stopReason;
-      }
-    }
-
-    if (method === 'session.update') {
-      const update = (params?.update && typeof params.update === 'object')
-        ? (params.update as Record<string, unknown>)
-        : undefined;
-      const updateMethod = typeof update?.sessionUpdate === 'string' ? update.sessionUpdate.trim() : '';
-      const updateText = extractTextFromACPContent(update?.content);
-      if (updateMethod === 'user_message_chunk') {
-        message.role = 'user';
-        message.kind = 'message';
-      } else if (updateMethod === 'agent_message_chunk') {
-        message.role = 'assistant';
-        message.kind = 'message';
-      } else if (updateMethod === 'agent_thought_chunk') {
-        message.role = 'assistant';
-        message.kind = 'thought';
-      } else if (updateMethod === 'tool_call' || updateMethod === 'tool_call_update') {
-        message.role = 'system';
-        message.kind = 'tool';
-      }
-      if (!message.text) {
-        message.text = updateText;
-      }
-      if (typeof update?.status === 'string') {
-        message.status = normalizeChatStatus(update.status);
-      }
-    }
-  } catch {
-    message.text = content;
-  }
-
-  return message;
+  return payload.message?.messageId ? payload.message : null;
 }
-
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
@@ -1366,6 +1204,7 @@ function App() {
   const isWide = windowWidth >= 900;
 
   const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
+  const tabRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -1487,6 +1326,10 @@ function App() {
   useEffect(() => {
     chatSelectedIdRef.current = selectedChatId;
   }, [selectedChatId]);
+
+  useEffect(() => {
+    tabRef.current = tab;
+  }, [tab]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -2247,11 +2090,14 @@ function App() {
           : '';
       const fallbackSessionId =
         currentSelection || preferredSelection || sessions[0]?.sessionId || '';
-      const shouldIncrementallySync = Boolean(
-        options?.incremental &&
+      const canHydrateSelection = Boolean(
+        options?.hydrateMessages &&
           fallbackSessionId &&
           (fallbackSessionId === preferredSelection ||
             fallbackSessionId === currentSelection),
+      );
+      const shouldIncrementallySync = Boolean(
+        canHydrateSelection && options?.incremental,
       );
       if (!fallbackSessionId) {
         setSelectedChatId('');
@@ -2259,7 +2105,7 @@ function App() {
         return;
       }
       setSelectedChatId(fallbackSessionId);
-      if (!options?.hydrateMessages) {
+      if (!canHydrateSelection) {
         if (!options?.preserveUserSelection) {
           setChatMessages([]);
         }
@@ -2467,13 +2313,17 @@ function App() {
         chatSyncIndexRef.current = {};
         chatSyncSubIndexRef.current = {};
       }
+      const shouldHydrateOnReconnect =
+        silentReconnect &&
+        tabRef.current === 'chat' &&
+        !!previousSelectedChatId;
       await loadChatSessions(
         previousSelectedChatId,
         result.hydrated.projectId,
         {
-          incremental: silentReconnect && !!previousSelectedChatId,
+          incremental: shouldHydrateOnReconnect,
           preserveUserSelection: silentReconnect,
-          hydrateMessages: true,
+          hydrateMessages: shouldHydrateOnReconnect,
         },
       );
       workspaceController
@@ -2626,7 +2476,7 @@ function App() {
       chatSyncIndexRef.current = {};
         chatSyncSubIndexRef.current = {};
       await loadChatSessions('', result.hydrated.projectId, {
-        hydrateMessages: true,
+        hydrateMessages: false,
       });
       workspaceController
         .validateExpandedDirectories(
