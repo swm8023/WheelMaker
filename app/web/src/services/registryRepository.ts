@@ -368,6 +368,31 @@ export class RegistryRepository {
     return messages;
   }
 
+  private derivePromptSnapshotsFromMessages(
+    messages: RegistrySessionMessage[],
+    sessionId: string,
+  ): RegistrySessionPromptSnapshot[] {
+    const byPrompt = new Map<number, RegistrySessionPromptSnapshot>();
+    for (const message of messages) {
+      const promptIndex = message.syncIndex ?? 0;
+      if (promptIndex <= 0) continue;
+      const existing = byPrompt.get(promptIndex);
+      const turnIndex = message.syncSubIndex ?? 0;
+      if (!existing) {
+        byPrompt.set(promptIndex, {
+          sessionId,
+          promptIndex,
+          turnIndex,
+          content: [],
+        });
+        continue;
+      }
+      if (turnIndex > existing.turnIndex) {
+        existing.turnIndex = turnIndex;
+      }
+    }
+    return [...byPrompt.values()].sort((a, b) => a.promptIndex - b.promptIndex);
+  }
   private async listSessionsByMethod(projectId: string, method: 'session.list'): Promise<RegistrySessionSummary[]> {
     const resp = await this.client.request({
       method,
@@ -396,6 +421,7 @@ export class RegistryRepository {
     });
     const payload = (resp.payload ?? {}) as {
       session?: unknown;
+      messages?: unknown[];
       prompts?: unknown[];
     };
     const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
@@ -410,14 +436,30 @@ export class RegistryRepository {
       .map(item => this.normalizeSessionPromptSnapshot(item, normalizedSession.sessionId))
       .filter((item): item is RegistrySessionPromptSnapshot => !!item)
       .sort((a, b) => a.promptIndex - b.promptIndex);
-    const normalizedMessages = this.flattenPromptSnapshotMessages(normalizedPrompts, normalizedSession.sessionId);
+    const normalizedWireMessages: RegistrySessionMessage[] = (Array.isArray(payload.messages) ? payload.messages : [])
+      .map(item => this.normalizeSessionWireMessage(item, normalizedSession.sessionId))
+      .filter((item): item is RegistrySessionMessage => !!item)
+      .sort((a, b) => {
+        const promptDelta = (a.syncIndex ?? 0) - (b.syncIndex ?? 0);
+        if (promptDelta !== 0) return promptDelta;
+        const turnDelta = (a.syncSubIndex ?? 0) - (b.syncSubIndex ?? 0);
+        if (turnDelta !== 0) return turnDelta;
+        const updatedAtDelta = (a.updatedAt || '').localeCompare(b.updatedAt || '');
+        if (updatedAtDelta !== 0) return updatedAtDelta;
+        return (a.messageId || '').localeCompare(b.messageId || '');
+      });
+    const normalizedMessages = normalizedWireMessages.length > 0
+      ? normalizedWireMessages
+      : this.flattenPromptSnapshotMessages(normalizedPrompts, normalizedSession.sessionId);
+    const prompts = normalizedPrompts.length > 0
+      ? normalizedPrompts
+      : this.derivePromptSnapshotsFromMessages(normalizedMessages, normalizedSession.sessionId);
     return {
       session: normalizedSession,
-      prompts: normalizedPrompts,
+      prompts,
       messages: normalizedMessages,
     };
   }
-
   async initialize(url: string, token?: string): Promise<void> {
     await this.client.connect(url);
     await this.client.connectInit({

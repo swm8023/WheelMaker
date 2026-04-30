@@ -20,6 +20,8 @@ describe('web chat integration', () => {
     expect(repositoryTs).toContain("method: 'session.list'");
     expect(repositoryTs).toContain("method: 'session.read'");
     expect(repositoryTs).toContain('payload: promptIndex > 0 || turnIndex > 0 ? {sessionId, promptIndex, turnIndex} : {sessionId}');
+    expect(repositoryTs).toContain('messages?: unknown[];');
+    expect(repositoryTs).toContain('Array.isArray(payload.messages) ? payload.messages : []');
     expect(repositoryTs).not.toContain('afterIndex');
     expect(repositoryTs).not.toContain('afterSubIndex');
     expect(repositoryTs).toContain("method: 'session.new'");

@@ -2473,7 +2473,7 @@ function App() {
         {
           incremental: silentReconnect && !!previousSelectedChatId,
           preserveUserSelection: silentReconnect,
-          hydrateMessages: false,
+          hydrateMessages: true,
         },
       );
       workspaceController
@@ -2626,7 +2626,7 @@ function App() {
       chatSyncIndexRef.current = {};
         chatSyncSubIndexRef.current = {};
       await loadChatSessions('', result.hydrated.projectId, {
-        hydrateMessages: false,
+        hydrateMessages: true,
       });
       workspaceController
         .validateExpandedDirectories(

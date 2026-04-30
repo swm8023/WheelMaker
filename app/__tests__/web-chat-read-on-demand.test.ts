@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 
-describe('web chat read-on-demand behavior', () => {
-  test('connect and project switch only load session list, not session messages', () => {
+describe('web chat hydration behavior', () => {
+  test('connect and project switch hydrate selected session messages for baseline sync and reconnect recovery', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
       path.join(projectRoot, 'web', 'src', 'main.tsx'),
@@ -10,7 +10,7 @@ describe('web chat read-on-demand behavior', () => {
     );
 
     expect(mainTsx).toContain('hydrateMessages?: boolean');
-    expect(mainTsx).toContain('hydrateMessages: false,');
+    expect(mainTsx).toContain('hydrateMessages: true,');
     expect(mainTsx).toContain(
       "await loadChatSessions('', result.hydrated.projectId, {",
     );
