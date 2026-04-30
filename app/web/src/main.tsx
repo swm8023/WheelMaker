@@ -1429,6 +1429,7 @@ function App() {
   const gitBranchMenuRef = useRef<HTMLDivElement | null>(null);
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
@@ -1526,6 +1527,19 @@ function App() {
     input.style.height = `${nextHeight}px`;
     input.style.overflowY = input.scrollHeight > 220 ? 'auto' : 'hidden';
   }, [chatComposerText]);
+
+  useEffect(() => {
+    if (tab !== 'chat') {
+      return;
+    }
+    const container = chatScrollRef.current;
+    if (!container) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+  }, [tab, selectedChatId, chatMessages, chatLoading]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -3822,7 +3836,7 @@ function App() {
           <div className="block-title">
             CHAT - {selectedChatSession?.title || 'New Session'}
           </div>
-          <div className="scroll-panel chat-block">
+          <div ref={chatScrollRef} className="scroll-panel chat-block">
             {chatLoading ? (
               <div className="muted block">Loading chat...</div>
             ) : null}
