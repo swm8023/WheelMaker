@@ -301,57 +301,62 @@ func (r *Reporter) runSession(ctx context.Context) error {
 		if in.Type != "request" {
 			continue
 		}
-		switch in.Method {
-		case "chat.send":
-			r.replyChat(conn, in)
-		case "session.list", "session.read", "session.new", "session.send", "session.markRead":
-			r.replySession(conn, in)
-		case "monitor.status":
-			r.replyMonitorStatus(conn, in)
-		case "monitor.log":
-			r.replyMonitorLog(conn, in)
-		case "monitor.db":
-			r.replyMonitorDB(conn, in)
-		case "monitor.action":
-			r.replyMonitorAction(conn, in)
-		case "fs.list":
-			r.replyFSList(conn, in)
-		case "fs.info":
-			r.replyFSInfo(conn, in)
-		case "fs.read":
-			r.replyFSRead(conn, in)
-		case "fs.search":
-			r.replyFSSearch(conn, in)
-		case "fs.grep":
-			r.replyFSGrep(conn, in)
-		case "git.refs", "git.branches":
-			r.replyGitRefs(conn, in)
-		case "git.log":
-			r.replyGitLog(conn, in)
-		case "git.commit.files":
-			r.replyGitCommitFiles(conn, in)
-		case "git.commit.fileDiff":
-			r.replyGitCommitFileDiff(conn, in)
-		case "git.diff":
-			r.replyGitDiff(conn, in)
-		case "git.diff.fileDiff":
-			r.replyGitDiffFileDiff(conn, in)
-		case "git.status":
-			r.replyGitStatus(conn, in)
-		case "git.workingTree.fileDiff":
-			r.replyGitWorkingTreeFileDiff(conn, in)
-		default:
-			_ = r.writeJSON(conn, "->", envelope{
-				RequestID: in.RequestID,
-				Type:      "error",
-				Method:    in.Method,
-				Payload: rp.MustRaw(errorPayload{
-					Code:    codeInvalidArgument,
-					Message: "unsupported method on hub",
-					Details: map[string]any{"method": in.Method},
-				}),
-			})
-		}
+		req := in
+		go r.handleRegistryRequest(conn, req)
+	}
+}
+
+func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
+	switch in.Method {
+	case "chat.send":
+		r.replyChat(conn, in)
+	case "session.list", "session.read", "session.new", "session.send", "session.markRead":
+		r.replySession(conn, in)
+	case "monitor.status":
+		r.replyMonitorStatus(conn, in)
+	case "monitor.log":
+		r.replyMonitorLog(conn, in)
+	case "monitor.db":
+		r.replyMonitorDB(conn, in)
+	case "monitor.action":
+		r.replyMonitorAction(conn, in)
+	case "fs.list":
+		r.replyFSList(conn, in)
+	case "fs.info":
+		r.replyFSInfo(conn, in)
+	case "fs.read":
+		r.replyFSRead(conn, in)
+	case "fs.search":
+		r.replyFSSearch(conn, in)
+	case "fs.grep":
+		r.replyFSGrep(conn, in)
+	case "git.refs", "git.branches":
+		r.replyGitRefs(conn, in)
+	case "git.log":
+		r.replyGitLog(conn, in)
+	case "git.commit.files":
+		r.replyGitCommitFiles(conn, in)
+	case "git.commit.fileDiff":
+		r.replyGitCommitFileDiff(conn, in)
+	case "git.diff":
+		r.replyGitDiff(conn, in)
+	case "git.diff.fileDiff":
+		r.replyGitDiffFileDiff(conn, in)
+	case "git.status":
+		r.replyGitStatus(conn, in)
+	case "git.workingTree.fileDiff":
+		r.replyGitWorkingTreeFileDiff(conn, in)
+	default:
+		_ = r.writeJSON(conn, "->", envelope{
+			RequestID: in.RequestID,
+			Type:      "error",
+			Method:    in.Method,
+			Payload: rp.MustRaw(errorPayload{
+				Code:    codeInvalidArgument,
+				Message: "unsupported method on hub",
+				Details: map[string]any{"method": in.Method},
+			}),
+		})
 	}
 }
 
