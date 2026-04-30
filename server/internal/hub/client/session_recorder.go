@@ -35,10 +35,11 @@ type SessionViewSink interface {
 }
 
 type sessionViewSummary struct {
-	SessionID string `json:"sessionId"`
-	Title     string `json:"title"`
-	UpdatedAt string `json:"updatedAt"`
-	AgentType string `json:"agentType,omitempty"`
+	SessionID     string             `json:"sessionId"`
+	Title         string             `json:"title"`
+	UpdatedAt     string             `json:"updatedAt"`
+	AgentType     string             `json:"agentType,omitempty"`
+	ConfigOptions []acp.ConfigOption `json:"configOptions,omitempty"`
 }
 
 type sessionViewMessage struct {

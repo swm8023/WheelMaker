@@ -9,6 +9,8 @@ import type {
   RegistryGitFileDiff,
   RegistryGitStatus,
   RegistryProject,
+  RegistrySessionConfigOption,
+  RegistrySessionConfigOptionValue,
   RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
   RegistrySessionPromptSnapshot,
@@ -21,6 +23,47 @@ import type {
 
 export class RegistryRepository {
   constructor(private readonly client: RegistryClient) {}
+
+  private normalizeSessionConfigOptionValue(raw: unknown): RegistrySessionConfigOptionValue | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const value = typeof input.value === 'string' ? input.value.trim() : '';
+    if (!value) {
+      return null;
+    }
+    return {
+      value,
+      name: typeof input.name === 'string' ? input.name : undefined,
+      description: typeof input.description === 'string' ? input.description : undefined,
+    };
+  }
+
+  private normalizeSessionConfigOption(raw: unknown): RegistrySessionConfigOption | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const id = typeof input.id === 'string' ? input.id.trim() : '';
+    if (!id) {
+      return null;
+    }
+    const options = Array.isArray(input.options)
+      ? input.options
+          .map(item => this.normalizeSessionConfigOptionValue(item))
+          .filter((item): item is RegistrySessionConfigOptionValue => !!item)
+      : undefined;
+    return {
+      id,
+      name: typeof input.name === 'string' ? input.name : undefined,
+      description: typeof input.description === 'string' ? input.description : undefined,
+      category: typeof input.category === 'string' ? input.category : undefined,
+      type: typeof input.type === 'string' ? input.type : undefined,
+      currentValue: typeof input.currentValue === 'string' ? input.currentValue : undefined,
+      options,
+    };
+  }
 
   private normalizeSessionSummary(raw: unknown): RegistrySessionSummary | null {
     if (!raw || typeof raw !== 'object') {
@@ -41,6 +84,11 @@ export class RegistryRepository {
       messageCount: typeof input.messageCount === 'number' && Number.isFinite(input.messageCount) ? input.messageCount : 0,
       unreadCount: typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount) ? input.unreadCount : undefined,
       agentType: typeof input.agentType === 'string' ? input.agentType : undefined,
+      configOptions: Array.isArray(input.configOptions)
+        ? input.configOptions
+            .map(item => this.normalizeSessionConfigOption(item))
+            .filter((item): item is RegistrySessionConfigOption => !!item)
+        : undefined,
     };
   }
 
@@ -600,6 +648,31 @@ export class RegistryRepository {
     return {
       ok: body.ok ?? false,
       sessionId: body.sessionId ?? payload.sessionId,
+    };
+  }
+
+  async setSessionConfig(
+    projectId: string,
+    payload: {sessionId: string; configId: string; value: string},
+  ): Promise<{ok: boolean; sessionId: string; configOptions: RegistrySessionConfigOption[]}> {
+    const resp = await this.client.request({
+      method: 'session.setConfig',
+      projectId,
+      payload,
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {
+      ok?: boolean;
+      sessionId?: string;
+      configOptions?: unknown[];
+    };
+    const configOptions = (Array.isArray(body.configOptions) ? body.configOptions : [])
+      .map(item => this.normalizeSessionConfigOption(item))
+      .filter((item): item is RegistrySessionConfigOption => !!item);
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? payload.sessionId,
+      configOptions,
     };
   }
 

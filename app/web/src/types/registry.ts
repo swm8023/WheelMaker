@@ -39,6 +39,22 @@ export interface RegistrySessionMessage {
   blocks?: RegistrySessionContentBlock[];
 }
 
+export interface RegistrySessionConfigOptionValue {
+  value: string;
+  name?: string;
+  description?: string;
+}
+
+export interface RegistrySessionConfigOption {
+  id: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  type?: string;
+  currentValue?: string;
+  options?: RegistrySessionConfigOptionValue[];
+}
+
 export interface RegistrySessionSummary {
   sessionId: string;
   title: string;
@@ -47,6 +63,7 @@ export interface RegistrySessionSummary {
   messageCount: number;
   unreadCount?: number;
   agentType?: string;
+  configOptions?: RegistrySessionConfigOption[];
 }
 
 export interface RegistrySessionPromptSnapshot {

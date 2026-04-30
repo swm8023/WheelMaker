@@ -178,6 +178,66 @@ func configValueByID(options []acp.ConfigOption, targetID string) string {
 	return ""
 }
 
+func (s *Session) CurrentConfigOptions() []acp.ConfigOption {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
+}
+
+func (s *Session) SetConfigOption(ctx context.Context, configID, value string) ([]acp.ConfigOption, error) {
+	configID = strings.TrimSpace(configID)
+	value = strings.TrimSpace(value)
+	if configID == "" {
+		return nil, fmt.Errorf("config id is required")
+	}
+	if value == "" {
+		return nil, fmt.Errorf("config value is required")
+	}
+
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
+
+	if err := s.ensureInstance(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	sessionID := s.acpSessionID
+	current := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
+	s.mu.Unlock()
+
+	updated, err := s.instance.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
+		SessionID: sessionID,
+		ConfigID:  configID,
+		Value:     value,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	next := current
+	if len(updated) > 0 {
+		next = append([]acp.ConfigOption(nil), updated...)
+	} else {
+		next = mergeConfigOptions(current, []acp.ConfigOption{{
+			ID:           configID,
+			CurrentValue: value,
+		}})
+	}
+
+	s.mu.Lock()
+	agentType := s.agentType
+	s.agentState.ConfigOptions = append([]acp.ConfigOption(nil), next...)
+	s.mu.Unlock()
+
+	s.persistAgentPreferenceState(agentType, next)
+	s.persistSessionBestEffort()
+	return append([]acp.ConfigOption(nil), next...), nil
+}
+
 // reply sends a text response to the active chat via the IM channel.
 func (s *Session) reply(text string) {
 	s.replyWithTitle("", text)

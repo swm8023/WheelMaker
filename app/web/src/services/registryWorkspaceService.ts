@@ -9,6 +9,7 @@ import type {
   RegistryGitFileDiff,
   RegistryGitStatus,
   RegistryProject,
+  RegistrySessionConfigOption,
   RegistrySessionMessage,
   RegistrySessionReadResponse,
   RegistrySessionSummary,
@@ -257,6 +258,13 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.sendSessionMessage(this.session.selectedProjectId, payload);
+  }
+
+  async setSessionConfig(payload: {sessionId: string; configId: string; value: string}): Promise<{ok: boolean; sessionId: string; configOptions: RegistrySessionConfigOption[]}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.setSessionConfig(this.session.selectedProjectId, payload);
   }
 
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {

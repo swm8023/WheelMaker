@@ -44,6 +44,7 @@ import type {
   RegistryChatMessage,
   RegistryChatMessageEventPayload,
   RegistryChatSession,
+  RegistrySessionConfigOption,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -1486,6 +1487,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
+  const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
     null,
@@ -2331,7 +2333,17 @@ function App() {
     if (!activeProjectId) return;
     try {
       const sessions = sortChatSessions(await service.listSessions());
-      setChatSessions(sessions);
+      setChatSessions(prev =>
+        sortChatSessions(
+          sessions.map(session => {
+            const cached = prev.find(item => item.sessionId === session.sessionId);
+            if (cached?.configOptions && cached.configOptions.length > 0 && !session.configOptions?.length) {
+              return { ...session, configOptions: cached.configOptions };
+            }
+            return session;
+          }),
+        ),
+      );
       const currentSelection = chatSelectedIdRef.current;
       if (!currentSelection || !sessions.some(session => session.sessionId === currentSelection)) {
         setSelectedChatId('');
@@ -2428,6 +2440,7 @@ function App() {
             text: trimmedText,
             blocks,
           });
+          resetChatComposer();
           setChatSending(false);
           return;
         }
@@ -2458,6 +2471,49 @@ function App() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setChatSending(false);
+    }
+  };
+
+  const applyChatSessionConfigOptions = (
+    sessionId: string,
+    configOptions: RegistrySessionConfigOption[],
+  ) => {
+    if (!sessionId) return;
+    setChatSessions(prev => {
+      const existing = prev.find(item => item.sessionId === sessionId);
+      if (!existing) return prev;
+      return mergeChatSession(prev, {
+        ...existing,
+        configOptions,
+      });
+    });
+  };
+
+  const handleChatConfigOptionChange = async (
+    option: RegistrySessionConfigOption,
+    value: string,
+  ) => {
+    const sessionId = chatSelectedIdRef.current.trim();
+    const configId = option.id.trim();
+    const nextValue = value.trim();
+    if (!sessionId || !configId || !nextValue || nextValue === option.currentValue) {
+      return;
+    }
+    const updatingKey = `${sessionId}:${configId}`;
+    setChatConfigUpdatingKey(updatingKey);
+    try {
+      const result = await service.setSessionConfig({
+        sessionId,
+        configId,
+        value: nextValue,
+      });
+      if (result.configOptions.length > 0) {
+        applyChatSessionConfigOptions(result.sessionId || sessionId, result.configOptions);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatConfigUpdatingKey(prev => (prev === updatingKey ? '' : prev));
     }
   };
 
@@ -3924,6 +3980,7 @@ function App() {
             onClick={event => {
               if (!targetFile) return;
               event.preventDefault();
+              setTab('file');
               setSelectedFile(targetFile.path);
               readSelectedFile(targetFile.path)
                 .then(() => {
@@ -4074,6 +4131,53 @@ function App() {
                 />
               </button>
             </div>
+            {selectedChatSession?.configOptions?.some(
+              option => (option.options?.length ?? 0) > 0,
+            ) ? (
+              <div className="chat-config-options">
+                {selectedChatSession.configOptions
+                  .filter(option => (option.options?.length ?? 0) > 0)
+                  .map(option => {
+                    const optionValues = option.options ?? [];
+                    const currentValue =
+                      option.currentValue || optionValues[0]?.value || '';
+                    const updating =
+                      chatConfigUpdatingKey ===
+                      `${selectedChatSession.sessionId}:${option.id}`;
+                    return (
+                      <label key={option.id} className="chat-config-item">
+                        <span className="chat-config-label">
+                          {option.name || option.id}
+                        </span>
+                        <select
+                          className="chat-config-select"
+                          value={currentValue}
+                          disabled={chatSending || updating}
+                          onChange={event => {
+                            handleChatConfigOptionChange(
+                              option,
+                              event.target.value,
+                            ).catch(() => undefined);
+                          }}
+                        >
+                          {!optionValues.some(item => item.value === currentValue) &&
+                          currentValue ? (
+                            <option value={currentValue}>{currentValue}</option>
+                          ) : null}
+                          {optionValues.map(item => (
+                            <option
+                              key={`${option.id}:${item.value}`}
+                              value={item.value}
+                            >
+                              {item.name || item.value}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
+              </div>
+            ) : null}
           </div>
         </div>
       );

@@ -498,6 +498,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err != nil {
 			return nil, err
 		}
+		summary.ConfigOptions = c.sessionConfigOptions(ctx, req.SessionID)
 		return map[string]any{"session": summary, "messages": messages}, nil
 	case "session.new":
 		var req struct {
@@ -536,7 +537,30 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err != nil {
 			return nil, err
 		}
+		summary.ConfigOptions = sess.CurrentConfigOptions()
 		return map[string]any{"ok": true, "session": summary}, nil
+	case "session.setConfig":
+		var req struct {
+			SessionID string `json:"sessionId"`
+			ConfigID  string `json:"configId"`
+			Value     string `json:"value"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.setConfig payload: %w", err)
+		}
+		sess, err := c.SessionByID(ctx, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		options, err := sess.SetConfigOption(ctx, req.ConfigID, req.Value)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"ok":            true,
+			"sessionId":     sess.acpSessionID,
+			"configOptions": options,
+		}, nil
 	case "session.send":
 		var req struct {
 			SessionID string             `json:"sessionId"`
@@ -567,6 +591,14 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 
 func (c *Client) listSessionViews(ctx context.Context) ([]sessionViewSummary, error) {
 	return c.sessionRecorder.ListSessionViews(ctx)
+}
+
+func (c *Client) sessionConfigOptions(ctx context.Context, sessionID string) []acp.ConfigOption {
+	sess, err := c.SessionByID(ctx, sessionID)
+	if err != nil {
+		return nil
+	}
+	return sess.CurrentConfigOptions()
 }
 
 func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {

@@ -1751,6 +1751,40 @@ body,
   font-size: 12px;
   color: var(--muted);
 }
+
+.chat-config-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.chat-config-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-config-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-config-select {
+  width: 100%;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.chat-config-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .chat-agent-picker-card {
   display: flex;
   flex-direction: column;
