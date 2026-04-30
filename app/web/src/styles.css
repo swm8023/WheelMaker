@@ -1755,42 +1755,54 @@ body,
 .chat-config-options {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: nowrap;
   overflow-x: auto;
   padding-bottom: 2px;
+  scrollbar-width: thin;
 }
 
 .chat-config-item {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
   flex: 0 0 auto;
-  white-space: nowrap;
-}
-
-.chat-config-label {
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .chat-config-select {
-  min-width: 128px;
-  max-width: 220px;
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 96px;
+  max-width: 150px;
   min-height: 28px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
+  border-radius: 999px;
+  background-color: var(--panel);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2710%27 height=%2710%27 viewBox=%270 0 10 10%27 fill=%27none%27%3E%3Cpath d=%27M2 3.5L5 6.5L8 3.5%27 stroke=%27%23939cad%27 stroke-width=%271.2%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px 10px;
   color: var(--text);
-  padding: 3px 8px;
+  padding: 3px 24px 3px 10px;
   font: inherit;
   font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.chat-config-select:hover {
+  border-color: var(--muted);
 }
 
 .chat-config-select:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.18);
 }
+
+.chat-config-select:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
 .chat-agent-picker-card {
   display: flex;
   flex-direction: column;

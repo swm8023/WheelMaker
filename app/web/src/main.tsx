@@ -2489,27 +2489,6 @@ function App() {
     });
   };
 
-  const applySingleChatSessionConfigValue = (
-    sessionId: string,
-    configId: string,
-    value: string,
-  ) => {
-    if (!sessionId || !configId) return;
-    setChatSessions(prev =>
-      prev.map(item => {
-        if (item.sessionId !== sessionId) return item;
-        const options = item.configOptions;
-        if (!options?.length) return item;
-        return {
-          ...item,
-          configOptions: options.map(option =>
-            option.id === configId ? { ...option, currentValue: value } : option,
-          ),
-        };
-      }),
-    );
-  };
-
   const handleChatConfigOptionChange = async (
     option: RegistrySessionConfigOption,
     value: string,
@@ -2522,7 +2501,7 @@ function App() {
     }
     const updatingKey = `${sessionId}:${configId}`;
     setChatConfigUpdatingKey(updatingKey);
-    applySingleChatSessionConfigValue(sessionId, configId, nextValue);
+
     try {
       const result = await service.setSessionConfig({
         sessionId,
@@ -4167,14 +4146,13 @@ function App() {
                       chatConfigUpdatingKey ===
                       `${selectedChatSession.sessionId}:${option.id}`;
                     return (
-                      <label key={option.id} className="chat-config-item">
-                        <span className="chat-config-label">
-                          {option.name || option.id}
-                        </span>
+                      <div key={option.id} className="chat-config-item">
                         <select
                           className="chat-config-select"
                           value={currentValue}
                           disabled={updating}
+                          title={option.name || option.id}
+                          aria-label={option.name || option.id}
                           onChange={event => {
                             handleChatConfigOptionChange(
                               option,
@@ -4195,7 +4173,7 @@ function App() {
                             </option>
                           ))}
                         </select>
-                      </label>
+                      </div>
                     );
                   })}
               </div>
@@ -4696,4 +4674,5 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
