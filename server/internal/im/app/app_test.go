@@ -48,6 +48,39 @@ func TestChannelHandleChatSendDispatchesPrompt(t *testing.T) {
 	}
 }
 
+func TestChannelPublishSessionMessageEmitsChatMessageEvent(t *testing.T) {
+	ch := New()
+	publisher, ok := any(ch).(eventPublisherSetter)
+	if !ok {
+		t.Fatal("Channel does not expose event publisher binding")
+	}
+
+	var publishedPayload map[string]any
+	publisher.SetEventPublisher("hub-a:proj1", func(_ string, payload any) error {
+		mapped, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type=%T, want map[string]any", payload)
+		}
+		publishedPayload = mapped
+		return nil
+	})
+
+	err := ch.PublishSessionMessage(context.Background(), im.SendTarget{ChatID: "chat-1", SessionID: "sess-1"}, acp.IMTurnMessage{
+		Method: acp.IMMethodAgentMessage,
+		Param:  acp.MustRaw(acp.IMTextResult{Text: "stream hello"}),
+	})
+	if err != nil {
+		t.Fatalf("PublishSessionMessage() err = %v", err)
+	}
+	session, _ := publishedPayload["session"].(map[string]any)
+	if session["chatId"] != "chat-1" {
+		t.Fatalf("session=%v", session)
+	}
+	message, _ := publishedPayload["message"].(map[string]any)
+	if message["role"] != "assistant" || message["text"] != "stream hello" || message["status"] != "streaming" {
+		t.Fatalf("message=%v", message)
+	}
+}
 func TestChannelPublishSessionUpdateEmitsChatMessageEvent(t *testing.T) {
 	ch := New()
 	handler, ok := any(ch).(chatRequestHandler)

@@ -183,6 +183,84 @@ func (c *Channel) PublishPromptResult(ctx context.Context, target im.SendTarget,
 	return c.finishStreamingMessages(chatID, target.SessionID, result.StopReason)
 }
 
+func (c *Channel) PublishSessionMessage(ctx context.Context, target im.SendTarget, message acp.IMTurnMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	chatID := resolveChatID(target)
+	if chatID == "" {
+		return fmt.Errorf("im app: chat is empty")
+	}
+
+	method := acp.NormalizeIMMethod(message.Method)
+	switch method {
+	case acp.IMMethodSystem:
+		payload := acp.IMTextResult{}
+		if !decodeIMTurnPayload(message.Param, &payload) {
+			return nil
+		}
+		text := strings.TrimSpace(payload.Text)
+		if text == "" {
+			return nil
+		}
+		return c.appendNewMessage(chatID, map[string]any{
+			"sessionId": target.SessionID,
+			"role":      "system",
+			"kind":      "message",
+			"text":      text,
+			"status":    "done",
+		})
+	case acp.IMMethodPromptDone:
+		payload := acp.IMPromptResult{}
+		if !decodeIMTurnPayload(message.Param, &payload) {
+			return nil
+		}
+		return c.finishStreamingMessages(chatID, target.SessionID, strings.TrimSpace(payload.StopReason))
+	case acp.IMMethodAgentMessage:
+		payload := acp.IMTextResult{}
+		if !decodeIMTurnPayload(message.Param, &payload) {
+			return nil
+		}
+		text := strings.TrimSpace(payload.Text)
+		if text == "" {
+			return nil
+		}
+		return c.appendStreamingMessage(chatID, target.SessionID, "assistant", "text", text, &c.getSession(chatID).activeAssistantID)
+	case acp.IMMethodAgentThought:
+		payload := acp.IMTextResult{}
+		if !decodeIMTurnPayload(message.Param, &payload) {
+			return nil
+		}
+		text := strings.TrimSpace(payload.Text)
+		if text == "" {
+			return nil
+		}
+		return c.appendStreamingMessage(chatID, target.SessionID, "assistant", "thought", text, &c.getSession(chatID).activeThoughtID)
+	case acp.IMMethodToolCall:
+		payload := acp.IMToolResult{}
+		if !decodeIMTurnPayload(message.Param, &payload) {
+			return nil
+		}
+		cmd := strings.TrimSpace(payload.Cmd)
+		if cmd == "" {
+			cmd = "tool"
+		}
+		status := strings.TrimSpace(payload.Status)
+		body := cmd
+		if status != "" {
+			body = fmt.Sprintf("%s (%s)", cmd, status)
+		}
+		return c.appendNewMessage(chatID, map[string]any{
+			"sessionId": target.SessionID,
+			"role":      "system",
+			"kind":      "tool",
+			"text":      body,
+			"status":    "done",
+		})
+	default:
+		return nil
+	}
+}
 func (c *Channel) SystemNotify(ctx context.Context, target im.SendTarget, payload im.SystemPayload) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -454,6 +532,13 @@ func resolveChatID(target im.SendTarget) string {
 	return ""
 }
 
+func decodeIMTurnPayload(raw json.RawMessage, out any) bool {
+	raw = json.RawMessage(strings.TrimSpace(string(raw)))
+	if len(raw) == 0 || string(raw) == "null" {
+		return false
+	}
+	return json.Unmarshal(raw, out) == nil
+}
 func decodePayload(raw json.RawMessage, out any) error {
 	if len(raw) == 0 || strings.TrimSpace(string(raw)) == "" {
 		return nil

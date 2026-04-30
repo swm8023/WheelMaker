@@ -85,6 +85,12 @@ type Channel interface {
 	Run(ctx context.Context) error
 }
 
+// SessionMessageChannel is an optional channel capability that receives
+// normalized IM turn messages directly.
+type SessionMessageChannel interface {
+	PublishSessionMessage(ctx context.Context, target SendTarget, message acp.IMTurnMessage) error
+}
+
 type InboundHandler interface {
 	HandleIMPrompt(ctx context.Context, source ChatRef, params acp.SessionPromptParams) error
 	HandleIMCommand(ctx context.Context, source ChatRef, cmd Command) error

@@ -196,11 +196,15 @@ func (s *Session) replyWithTitle(title, body string) {
 	default:
 		messageText = body
 	}
+	delivered := false
 	if messageText != "" {
-		s.recordSessionViewEvent(SessionViewEvent{
+		delivered = s.recordSessionViewEvent(SessionViewEvent{
 			Type:    SessionViewEventTypeSystem,
 			Content: messageText,
 		})
+	}
+	if delivered {
+		return
 	}
 	if router, source, ok := s.imContext(); ok {
 		_ = router.SystemNotify(context.Background(), im.SendTarget{SessionID: s.acpSessionID, Source: &source}, im.SystemPayload{
@@ -232,10 +236,7 @@ func (s *Session) imContext() (IMRouter, im.ChatRef, bool) {
 	return s.imRouter, *s.imSource, true
 }
 
-func (s *Session) recordSessionViewEvent(event SessionViewEvent) {
-	if s.viewSink == nil {
-		return
-	}
+func (s *Session) recordSessionViewEvent(event SessionViewEvent) bool {
 	if strings.TrimSpace(event.SessionID) == "" {
 		event.SessionID = s.acpSessionID
 	}
@@ -245,8 +246,105 @@ func (s *Session) recordSessionViewEvent(event SessionViewEvent) {
 	if router, source, ok := s.imContext(); ok && router != nil {
 		event.SourceChannel = source.ChannelID
 		event.SourceChatID = source.ChatID
+		if messageRouter, ok := router.(IMSessionMessageRouter); ok {
+			if message, ok := sessionViewEventToIMTurnMessage(event); ok {
+				target := im.SendTarget{SessionID: event.SessionID, Source: &source}
+				if err := messageRouter.PublishSessionMessage(context.Background(), target, message); err != nil {
+					hubLogger(s.projectName).Warn("publish session message failed session=%s err=%v", event.SessionID, err)
+				} else {
+					if s.viewSink != nil {
+						_ = s.viewSink.RecordEvent(context.Background(), event)
+					}
+					return true
+				}
+			}
+		}
 	}
-	_ = s.viewSink.RecordEvent(context.Background(), event)
+	if s.viewSink != nil {
+		_ = s.viewSink.RecordEvent(context.Background(), event)
+	}
+	return false
+}
+
+func sessionViewEventToIMTurnMessage(event SessionViewEvent) (acp.IMTurnMessage, bool) {
+	switch event.Type {
+	case SessionViewEventTypeSystem:
+		text := strings.TrimSpace(event.Content)
+		if text == "" {
+			return acp.IMTurnMessage{}, false
+		}
+		return makeIMTurnMessage(acp.IMMethodSystem, acp.IMTextResult{Text: text})
+	case SessionViewEventTypeACP:
+		content := strings.TrimSpace(event.Content)
+		if content == "" {
+			return acp.IMTurnMessage{}, false
+		}
+		var envelope struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params,omitempty"`
+			Result json.RawMessage `json:"result,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(content), &envelope); err != nil {
+			return acp.IMTurnMessage{}, false
+		}
+		switch strings.TrimSpace(envelope.Method) {
+		case acp.MethodSessionUpdate:
+			params := acp.SessionUpdateParams{}
+			if len(envelope.Params) == 0 || json.Unmarshal(envelope.Params, &params) != nil {
+				return acp.IMTurnMessage{}, false
+			}
+			return sessionUpdateToIMTurnMessage(params.Update)
+		case acp.MethodSessionPrompt:
+			result := acp.SessionPromptResult{}
+			if len(envelope.Result) == 0 || string(envelope.Result) == "null" || json.Unmarshal(envelope.Result, &result) != nil {
+				return acp.IMTurnMessage{}, false
+			}
+			return makeIMTurnMessage(acp.IMMethodPromptDone, acp.IMPromptResult{StopReason: strings.TrimSpace(result.StopReason)})
+		default:
+			return acp.IMTurnMessage{}, false
+		}
+	default:
+		return acp.IMTurnMessage{}, false
+	}
+}
+
+func sessionUpdateToIMTurnMessage(update acp.SessionUpdate) (acp.IMTurnMessage, bool) {
+	method := strings.TrimSpace(update.SessionUpdate)
+	switch method {
+	case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
+		return makeIMTurnMessage(method, acp.IMTextResult{Text: extractTextChunk(update.Content)})
+	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
+		return makeIMTurnMessage(acp.IMMethodToolCall, acp.IMToolResult{
+			Cmd:    strings.TrimSpace(update.Title),
+			Kind:   strings.TrimSpace(update.Kind),
+			Status: strings.TrimSpace(update.Status),
+		})
+	case acp.SessionUpdatePlan:
+		entries := make([]acp.IMPlanResult, 0, len(update.Entries))
+		for _, entry := range update.Entries {
+			entries = append(entries, acp.IMPlanResult{Content: strings.TrimSpace(entry.Content), Status: strings.TrimSpace(entry.Status)})
+		}
+		return makeIMTurnMessage(acp.IMMethodAgentPlan, entries)
+	default:
+		return acp.IMTurnMessage{}, false
+	}
+}
+
+func makeIMTurnMessage(method string, payload any) (acp.IMTurnMessage, bool) {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return acp.IMTurnMessage{}, false
+	}
+	msg := acp.IMTurnMessage{Method: method}
+	if payload == nil {
+		return msg, true
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return acp.IMTurnMessage{}, false
+	}
+	msg.Param = raw
+	return msg, true
 }
 
 // ensureInstance connects the active agent via AgentFactory and sets up the
@@ -920,14 +1018,14 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 			}
 			if ev.update != nil {
 				params := *ev.update
-				s.recordSessionViewEvent(SessionViewEvent{
+				delivered := s.recordSessionViewEvent(SessionViewEvent{
 					Type:      SessionViewEventTypeACP,
 					SessionID: s.acpSessionID,
 					Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
 						"params": params,
 					}),
 				})
-				if hasIMEmitter {
+				if hasIMEmitter && !delivered {
 					target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
 					if emitErr := imRouter.PublishSessionUpdate(ctx, target, params); emitErr != nil {
 						s.reply(fmt.Sprintf("IM emit error: %v", emitErr))
@@ -946,14 +1044,14 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 				}
 			}
 			if ev.result != nil {
-				s.recordSessionViewEvent(SessionViewEvent{
+				delivered := s.recordSessionViewEvent(SessionViewEvent{
 					Type:      SessionViewEventTypeACP,
 					SessionID: s.acpSessionID,
 					Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
 						"result": *ev.result,
 					}),
 				})
-				if hasIMEmitter {
+				if hasIMEmitter && !delivered {
 					target := im.SendTarget{SessionID: s.acpSessionID, Source: &imSource}
 					if emitErr := imRouter.PublishPromptResult(ctx, target, *ev.result); emitErr != nil {
 						s.reply(fmt.Sprintf("IM emit error: %v", emitErr))

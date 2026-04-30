@@ -43,6 +43,10 @@ type IMRouter interface {
 	Run(ctx context.Context) error
 }
 
+type IMSessionMessageRouter interface {
+	PublishSessionMessage(ctx context.Context, target im.SendTarget, message acp.IMTurnMessage) error
+}
+
 // Client is the top-level coordinator for a single WheelMaker project.
 // Agent initialization is lazy: the first incoming message triggers ensureInstance(),
 // which connects the active agent and creates the ACP forwarder.

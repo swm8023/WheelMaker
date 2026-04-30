@@ -90,6 +90,20 @@ func (c *captureChannel) Run(context.Context) error {
 	return nil
 }
 
+type capturedSessionMessage struct {
+	target  SendTarget
+	message acp.IMTurnMessage
+}
+
+type captureMessageChannel struct {
+	captureChannel
+	messages []capturedSessionMessage
+}
+
+func (c *captureMessageChannel) PublishSessionMessage(_ context.Context, target SendTarget, message acp.IMTurnMessage) error {
+	c.messages = append(c.messages, capturedSessionMessage{target: target, message: message})
+	return nil
+}
 func TestHandlePrompt_UnboundChatReachesClientWithoutSession(t *testing.T) {
 	ctx := context.Background()
 	client := &captureInboundClient{}
@@ -230,5 +244,45 @@ func TestRun_StartsRegisteredChannels(t *testing.T) {
 	}
 	if !ch.runCalled {
 		t.Fatal("channel Run was not called")
+	}
+}
+
+func TestPublishSessionMessage_UsesChannelCapabilityWhenAvailable(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureMessageChannel{captureChannel: captureChannel{id: "app"}}
+	_ = router.RegisterChannel(ch)
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "a"}, "s1", BindOptions{})
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "b"}, "s1", BindOptions{Watch: true})
+	source := ChatRef{ChannelID: "app", ChatID: "a"}
+
+	message := acp.IMTurnMessage{Method: acp.IMMethodAgentMessage, Param: acp.MustRaw(acp.IMTextResult{Text: "hello"})}
+	if err := router.PublishSessionMessage(ctx, SendTarget{SessionID: "s1", Source: &source}, message); err != nil {
+		t.Fatalf("PublishSessionMessage: %v", err)
+	}
+	if len(ch.messages) != 2 {
+		t.Fatalf("messages count=%d, want 2", len(ch.messages))
+	}
+	if ch.messages[0].target.ChatID != "a" || ch.messages[1].target.ChatID != "b" {
+		t.Fatalf("message targets=%+v", ch.messages)
+	}
+	if len(ch.updates) != 0 || len(ch.promptResults) != 0 || len(ch.systems) != 0 {
+		t.Fatalf("legacy methods should not be used: updates=%d promptResults=%d systems=%d", len(ch.updates), len(ch.promptResults), len(ch.systems))
+	}
+}
+
+func TestPublishSessionMessage_FallsBackToLegacyChannelMethods(t *testing.T) {
+	ctx := context.Background()
+	router := NewRouter(nil, nil)
+	ch := &captureChannel{id: "app"}
+	_ = router.RegisterChannel(ch)
+	_ = router.Bind(ctx, ChatRef{ChannelID: "app", ChatID: "a"}, "s1", BindOptions{})
+
+	message := acp.IMTurnMessage{Method: acp.IMMethodPromptDone, Param: acp.MustRaw(acp.IMPromptResult{StopReason: acp.StopReasonEndTurn})}
+	if err := router.PublishSessionMessage(ctx, SendTarget{SessionID: "s1"}, message); err != nil {
+		t.Fatalf("PublishSessionMessage: %v", err)
+	}
+	if len(ch.promptResults) != 1 {
+		t.Fatalf("promptResults count=%d, want 1", len(ch.promptResults))
 	}
 }
