@@ -444,8 +444,86 @@ function decodeSessionMessageFromEventPayload(
   } catch {
     message.text = content;
   }
-
   return message;
+}
+
+type ChatPromptGroup = {
+  key: string;
+  promptIndex: number;
+  userMessages: RegistryChatMessage[];
+  toolLines: string[];
+  messageMarkdown: string;
+  imageBlocks: NonNullable<RegistryChatMessage['blocks']>;
+  updatedAt: string;
+};
+
+function groupChatMessagesByPrompt(
+  messages: RegistryChatMessage[],
+): ChatPromptGroup[] {
+  const groups = new Map<string, ChatPromptGroup>();
+  const ordered = [...messages].sort((a, b) => {
+    const promptDelta = (a.syncIndex ?? 0) - (b.syncIndex ?? 0);
+    if (promptDelta !== 0) return promptDelta;
+    const turnDelta = (a.syncSubIndex ?? 0) - (b.syncSubIndex ?? 0);
+    if (turnDelta !== 0) return turnDelta;
+    return (a.updatedAt || a.createdAt || '').localeCompare(
+      b.updatedAt || b.createdAt || '',
+    );
+  });
+
+  for (const message of ordered) {
+    const promptIndex = message.syncIndex ?? 0;
+    const groupKey =
+      promptIndex > 0 ? `prompt:${promptIndex}` : `message:${message.messageId}`;
+    const existing =
+      groups.get(groupKey) ??
+      ({
+        key: groupKey,
+        promptIndex,
+        userMessages: [],
+        toolLines: [],
+        messageMarkdown: '',
+        imageBlocks: [],
+        updatedAt: message.updatedAt || message.createdAt || '',
+      } as ChatPromptGroup);
+
+    if (message.role === 'user') {
+      existing.userMessages.push(message);
+      if (Array.isArray(message.blocks)) {
+        for (const block of message.blocks) {
+          if (block.type === 'image' && block.data) {
+            existing.imageBlocks.push(block);
+          }
+        }
+      }
+    } else if (message.kind === 'tool' || message.kind === 'thought') {
+      const line = (message.text || '').replace(/\s+/g, ' ').trim();
+      if (line) {
+        existing.toolLines.push(line);
+      }
+    } else if (
+      message.kind === 'message' ||
+      message.kind === 'prompt_result'
+    ) {
+      const text = (message.text || '').trim();
+      if (text) {
+        existing.messageMarkdown = existing.messageMarkdown
+          ? `${existing.messageMarkdown}\n\n${text}`
+          : text;
+      }
+    }
+    const nextUpdatedAt = message.updatedAt || message.createdAt || '';
+    if (nextUpdatedAt && nextUpdatedAt > existing.updatedAt) {
+      existing.updatedAt = nextUpdatedAt;
+    }
+    groups.set(groupKey, existing);
+  }
+
+  return [...groups.values()].sort((a, b) => {
+    const promptDelta = a.promptIndex - b.promptIndex;
+    if (promptDelta !== 0) return promptDelta;
+    return a.updatedAt.localeCompare(b.updatedAt);
+  });
 }
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
@@ -1351,6 +1429,7 @@ function App() {
   const gitBranchMenuRef = useRef<HTMLDivElement | null>(null);
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
+  const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -1436,6 +1515,17 @@ function App() {
     }
     loadChatSessions(projectIdRef.current).catch(() => undefined);
   }, [tab, connected]);
+
+  useEffect(() => {
+    const input = chatComposerTextareaRef.current;
+    if (!input) {
+      return;
+    }
+    input.style.height = '0px';
+    const nextHeight = Math.max(36, Math.min(input.scrollHeight, 220));
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > 220 ? 'auto' : 'hidden';
+  }, [chatComposerText]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -3631,48 +3721,92 @@ function App() {
     );
   };
 
-  const renderChatMessage = (message: RegistryChatMessage) => {
-    if (message.kind === 'thought') {
-      return (
-        <ThinkingBlock
-          content={message.text}
-          isStreaming={message.status === 'streaming'}
-        />
-      );
-    }
+  const chatPromptGroups = useMemo(
+    () => groupChatMessagesByPrompt(chatMessages),
+    [chatMessages],
+  );
+
+  const chatMarkdownComponents = useMemo<Components>(
+    () => ({
+      pre: markdownPreRenderer,
+      code: ({ className, children }) =>
+        markdownCodeRenderer({
+          className,
+          children,
+          themeMode,
+          codeTheme,
+          codeFont,
+          codeFontSize,
+          codeLineHeight,
+          codeTabSize,
+          wrap: true,
+          lineNumbers: false,
+        }),
+    }),
+    [
+      themeMode,
+      codeTheme,
+      codeFont,
+      codeFontSize,
+      codeLineHeight,
+      codeTabSize,
+    ],
+  );
+
+  const renderChatPromptGroup = (group: ChatPromptGroup) => {
+    const latestUserMessage =
+      group.userMessages.length > 0
+        ? group.userMessages[group.userMessages.length - 1]
+        : null;
+    const userText = latestUserMessage?.text?.trim() || '';
+
     return (
-      <div
-        className={`chat-message ${message.role} ${
-          message.status === 'streaming' ? 'streaming' : ''
-        }`}
-      >
-        <div className="chat-message-meta">
-          <span className="chat-message-role">{message.role}</span>
-          <span className="chat-message-time">
-            {formatChatTimestamp(message.updatedAt || message.createdAt)}
-          </span>
-        </div>
-        <div className="chat-message-body">{message.text}</div>
-        {message.blocks?.some(block => block.type === 'image' && block.data) ? (
+      <div key={group.key} className="chat-prompt-group">
+        {userText ? (
+          <div className="chat-prompt-user">{userText}</div>
+        ) : null}
+        {group.imageBlocks.length > 0 ? (
           <div className="chat-image-strip">
-            {message.blocks
-              .filter(block => block.type === 'image' && block.data)
-              .map((block, index) => (
-                <img
-                  key={`${message.messageId}:${index}`}
-                  className="chat-inline-image"
-                  src={`data:${block.mimeType || 'image/png'};base64,${
-                    block.data
-                  }`}
-                  alt="chat attachment"
-                />
-              ))}
+            {group.imageBlocks.map((block, index) => (
+              <img
+                key={`${group.key}:img:${index}`}
+                className="chat-inline-image"
+                src={`data:${block.mimeType || 'image/png'};base64,${
+                  block.data
+                }`}
+                alt="chat attachment"
+              />
+            ))}
+          </div>
+        ) : null}
+        {group.toolLines.length > 0 ? (
+          <div className="chat-tool-stack">
+            {group.toolLines.map((line, index) => (
+              <div
+                key={`${group.key}:tool:${index}`}
+                className="chat-tool-line"
+                title={line}
+              >
+                <span className="codicon codicon-tools" />
+                <span>{line}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {group.messageMarkdown ? (
+          <div className="chat-main-message">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[rehypeKatex]}
+              components={chatMarkdownComponents}
+            >
+              {group.messageMarkdown}
+            </ReactMarkdown>
           </div>
         ) : null}
       </div>
     );
   };
-
   const renderMain = () => {
     const heavyDiffDeferred =
       !!selectedDiff &&
@@ -3692,7 +3826,7 @@ function App() {
             {chatLoading ? (
               <div className="muted block">Loading chat...</div>
             ) : null}
-            {!chatLoading && chatMessages.length === 0 ? (
+            {!chatLoading && chatPromptGroups.length === 0 ? (
               <div className="empty-card">
                 <div className="empty-title">Start chatting</div>
                 <div className="empty-subtitle">
@@ -3700,9 +3834,7 @@ function App() {
                 </div>
               </div>
             ) : null}
-            {chatMessages.map(message => (
-              <div key={message.messageId}>{renderChatMessage(message)}</div>
-            ))}
+            {chatPromptGroups.map(group => renderChatPromptGroup(group))}
           </div>
           <div className="chat-composer">
             <input
@@ -3720,6 +3852,8 @@ function App() {
               <div className="chat-attachment-pill">{chatAttachment.name}</div>
             ) : null}
             <textarea
+              ref={chatComposerTextareaRef}
+              rows={1}
               className="chat-composer-input"
               value={chatComposerText}
               onChange={event => setChatComposerText(event.target.value)}
@@ -3741,17 +3875,20 @@ function App() {
               </button>
               <button
                 type="button"
-                className="button chat-send-button"
+                className="chat-send-button"
                 onClick={() => sendChatMessage().catch(() => undefined)}
+                title="Send"
+                aria-label="Send message"
               >
-                {chatSending ? 'Sending...' : 'Send'}
+                <span
+                  className={`codicon ${chatSending ? 'codicon-loading codicon-modifier-spin' : 'codicon-send'}`}
+                />
               </button>
             </div>
           </div>
         </div>
       );
     }
-
     if (tab === 'file') {
       return (
         <div className="content">
