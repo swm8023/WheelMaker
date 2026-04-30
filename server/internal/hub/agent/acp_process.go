@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -144,8 +145,7 @@ func (p *ACPProcess) Alive() bool {
 func (p *ACPProcess) readLoop(r io.Reader) {
 	defer p.markDone()
 
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
+	scanner := newACPScanner(r)
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -168,15 +168,18 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		p.logSink().Errorf("stdout read failed: %v", err)
+		if errors.Is(err, bufio.ErrTooLong) {
+			p.logSink().Errorf("stdout read failed: %v (frame exceeds %d bytes)", err, protocol.ACPRPCMaxScannerBuf)
+		} else {
+			p.logSink().Errorf("stdout read failed: %v", err)
+		}
 		return
 	}
 	p.logSink().Errorf("process stdout closed")
 }
 
 func (p *ACPProcess) readStderrLoop(r io.Reader) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, protocol.ACPRPCMaxScannerBuf), protocol.ACPRPCMaxScannerBuf)
+	scanner := newACPScanner(r)
 	for scanner.Scan() {
 		p.logSink().StderrLine(scanner.Text())
 	}
@@ -184,7 +187,11 @@ func (p *ACPProcess) readStderrLoop(r io.Reader) {
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		p.logSink().Errorf("stderr read failed: %v", err)
+		if errors.Is(err, bufio.ErrTooLong) {
+			p.logSink().Errorf("stderr read failed: %v (frame exceeds %d bytes)", err, protocol.ACPRPCMaxScannerBuf)
+		} else {
+			p.logSink().Errorf("stderr read failed: %v", err)
+		}
 	}
 }
 
@@ -230,6 +237,13 @@ func (p *ACPProcess) setClosing(v bool) {
 	p.lifecycleMu.Lock()
 	p.closing = v
 	p.lifecycleMu.Unlock()
+}
+
+func newACPScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	// Keep a small initial buffer and allow large newline-delimited frames.
+	scanner.Buffer(make([]byte, 64*1024), protocol.ACPRPCMaxScannerBuf)
+	return scanner
 }
 
 func (p *ACPProcess) isClosing() bool {
