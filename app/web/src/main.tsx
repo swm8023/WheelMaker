@@ -3884,6 +3884,15 @@ function App() {
     return { path: resolvedPath, line };
   };
 
+  const chatMarkdownUrlTransform = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    if (/^(javascript|vbscript):/i.test(trimmed)) {
+      return '';
+    }
+    return value;
+  };
+
   const chatMarkdownComponents = useMemo<Components>(
     () => ({
       pre: markdownPreRenderer,
@@ -3981,6 +3990,7 @@ function App() {
             <div key={entry.key} className="chat-main-message">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
+                urlTransform={chatMarkdownUrlTransform}
                 rehypePlugins={[rehypeKatex]}
                 components={chatMarkdownComponents}
               >
