@@ -447,12 +447,21 @@ function decodeSessionMessageFromEventPayload(
   return message;
 }
 
+type ChatPromptEntryKind = 'tool' | 'message';
+
+type ChatPromptEntry = {
+  key: string;
+  kind: ChatPromptEntryKind;
+  text: string;
+  turnIndex: number;
+  order: number;
+};
+
 type ChatPromptGroup = {
   key: string;
   promptIndex: number;
   userMessages: RegistryChatMessage[];
-  toolLines: string[];
-  messageMarkdown: string;
+  entries: ChatPromptEntry[];
   imageBlocks: NonNullable<RegistryChatMessage['blocks']>;
   updatedAt: string;
 };
@@ -461,6 +470,9 @@ function groupChatMessagesByPrompt(
   messages: RegistryChatMessage[],
 ): ChatPromptGroup[] {
   const groups = new Map<string, ChatPromptGroup>();
+  const entryIndexByKey = new Map<string, number>();
+  let entryOrder = 0;
+
   const ordered = [...messages].sort((a, b) => {
     const promptDelta = (a.syncIndex ?? 0) - (b.syncIndex ?? 0);
     if (promptDelta !== 0) return promptDelta;
@@ -481,8 +493,7 @@ function groupChatMessagesByPrompt(
         key: groupKey,
         promptIndex,
         userMessages: [],
-        toolLines: [],
-        messageMarkdown: '',
+        entries: [],
         imageBlocks: [],
         updatedAt: message.updatedAt || message.createdAt || '',
       } as ChatPromptGroup);
@@ -496,22 +507,48 @@ function groupChatMessagesByPrompt(
           }
         }
       }
-    } else if (message.kind === 'tool' || message.kind === 'thought') {
-      const line = (message.text || '').replace(/\s+/g, ' ').trim();
-      if (line) {
-        existing.toolLines.push(line);
+    } else {
+      let kind: ChatPromptEntryKind | null = null;
+      let text = '';
+      if (message.kind === 'tool' || message.kind === 'thought') {
+        kind = 'tool';
+        text = (message.text || '').replace(/\s+/g, ' ').trim();
+      } else if (
+        message.kind === 'message' ||
+        message.kind === 'prompt_result'
+      ) {
+        kind = 'message';
+        text = (message.text || '').trim();
       }
-    } else if (
-      message.kind === 'message' ||
-      message.kind === 'prompt_result'
-    ) {
-      const text = (message.text || '').trim();
-      if (text) {
-        existing.messageMarkdown = existing.messageMarkdown
-          ? `${existing.messageMarkdown}\n\n${text}`
-          : text;
+
+      if (kind && text) {
+        const turnIndex = message.syncSubIndex ?? 0;
+        const dedupeKey =
+          turnIndex > 0
+            ? `${groupKey}:${kind}:turn:${turnIndex}`
+            : `${groupKey}:${kind}:msg:${message.messageId}`;
+        const existingIndex = entryIndexByKey.get(dedupeKey);
+        if (typeof existingIndex === 'number') {
+          const previous = existing.entries[existingIndex];
+          existing.entries[existingIndex] = {
+            ...previous,
+            text,
+            turnIndex,
+          };
+        } else {
+          existing.entries.push({
+            key: dedupeKey,
+            kind,
+            text,
+            turnIndex,
+            order: entryOrder,
+          });
+          entryIndexByKey.set(dedupeKey, existing.entries.length - 1);
+          entryOrder += 1;
+        }
       }
     }
+
     const nextUpdatedAt = message.updatedAt || message.createdAt || '';
     if (nextUpdatedAt && nextUpdatedAt > existing.updatedAt) {
       existing.updatedAt = nextUpdatedAt;
@@ -519,13 +556,21 @@ function groupChatMessagesByPrompt(
     groups.set(groupKey, existing);
   }
 
+  for (const group of groups.values()) {
+    group.entries.sort((a, b) => {
+      if (a.turnIndex > 0 && b.turnIndex > 0 && a.turnIndex !== b.turnIndex) {
+        return a.turnIndex - b.turnIndex;
+      }
+      return a.order - b.order;
+    });
+  }
+
   return [...groups.values()].sort((a, b) => {
     const promptDelta = a.promptIndex - b.promptIndex;
     if (promptDelta !== 0) return promptDelta;
     return a.updatedAt.localeCompare(b.updatedAt);
   });
-}
-function formatChatTimestamp(value: string): string {
+}function formatChatTimestamp(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return '';
@@ -3793,31 +3838,24 @@ function App() {
             ))}
           </div>
         ) : null}
-        {group.toolLines.length > 0 ? (
-          <div className="chat-tool-stack">
-            {group.toolLines.map((line, index) => (
-              <div
-                key={`${group.key}:tool:${index}`}
-                className="chat-tool-line"
-                title={line}
+        {group.entries.map(entry =>
+          entry.kind === 'tool' ? (
+            <div key={entry.key} className="chat-tool-line" title={entry.text}>
+              <span className="codicon codicon-tools" />
+              <span>{entry.text}</span>
+            </div>
+          ) : (
+            <div key={entry.key} className="chat-main-message">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={chatMarkdownComponents}
               >
-                <span className="codicon codicon-tools" />
-                <span>{line}</span>
-              </div>
-            ))}
-          </div>
-        ) : null}
-        {group.messageMarkdown ? (
-          <div className="chat-main-message">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-              components={chatMarkdownComponents}
-            >
-              {group.messageMarkdown}
-            </ReactMarkdown>
-          </div>
-        ) : null}
+                {entry.text}
+              </ReactMarkdown>
+            </div>
+          ),
+        )}
       </div>
     );
   };
@@ -4395,4 +4433,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
 
