@@ -291,9 +291,19 @@ function normalizeChatKind(value: unknown): RegistryChatMessage['kind'] {
 }
 
 function normalizeChatStatus(value: unknown): RegistryChatMessage['status'] {
-  return value === 'streaming' || value === 'done' || value === 'needs_action'
-    ? value
-    : 'done';
+  if (value === 'streaming' || value === 'done' || value === 'needs_action') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const status = value.trim().toLowerCase();
+    if (status === 'running' || status === 'in_progress') {
+      return 'streaming';
+    }
+    if (status === 'need_action') {
+      return 'needs_action';
+    }
+  }
+  return 'done';
 }
 
 function extractTextFromACPContent(content: unknown): string {
@@ -350,7 +360,92 @@ function extractTextFromIMParam(param: unknown): string {
 function decodeSessionMessageFromEventPayload(
   payload: RegistryChatMessageEventPayload,
 ): RegistryChatMessage | null {
-  return payload.message?.messageId ? payload.message : null;
+  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
+  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+  const promptIndex = Number(payload.promptIndex ?? 0);
+  const turnIndex = Number(payload.turnIndex ?? 0);
+  if (!sessionId || promptIndex <= 0 || turnIndex <= 0) {
+    return null;
+  }
+
+  const messageId = `${sessionId}:${promptIndex}:${turnIndex}`;
+  const now = new Date().toISOString();
+
+  const message: RegistryChatMessage = {
+    messageId,
+    sessionId,
+    syncIndex: promptIndex,
+    syncSubIndex: turnIndex,
+    role: 'assistant',
+    kind: 'message',
+    text: '',
+    status: 'done',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (!content) {
+    return message;
+  }
+
+  try {
+    const doc = JSON.parse(content) as Record<string, unknown>;
+    const method = typeof doc.method === 'string' ? doc.method.trim() : '';
+    const paramDoc = (doc.param && typeof doc.param === 'object' && !Array.isArray(doc.param))
+      ? (doc.param as Record<string, unknown>)
+      : undefined;
+
+    if (method === 'prompt_request') {
+      const promptBlocks = Array.isArray(paramDoc?.contentBlocks) ? paramDoc.contentBlocks : [];
+      message.role = 'user';
+      message.kind = 'message';
+      message.text = extractTextFromACPContent(promptBlocks);
+      if (promptBlocks.length > 0) {
+        message.blocks = promptBlocks as RegistryChatMessage['blocks'];
+      }
+    } else if (method === 'prompt_done') {
+      message.role = 'system';
+      message.kind = 'prompt_result';
+      message.text = typeof paramDoc?.stopReason === 'string' ? paramDoc.stopReason : '';
+    } else if (method === 'user_message_chunk') {
+      message.role = 'user';
+      message.kind = 'message';
+      message.status = 'streaming';
+      message.text = extractTextFromIMParam(doc.param);
+    } else if (method === 'agent_message_chunk') {
+      message.role = 'assistant';
+      message.kind = 'message';
+      message.status = 'streaming';
+      message.text = extractTextFromIMParam(doc.param);
+    } else if (method === 'agent_thought_chunk') {
+      message.role = 'assistant';
+      message.kind = 'thought';
+      message.status = 'streaming';
+      message.text = extractTextFromIMParam(doc.param);
+    } else if (method === 'tool_call') {
+      message.role = 'system';
+      message.kind = 'tool';
+      message.text = extractTextFromIMParam(doc.param);
+      if (typeof paramDoc?.status === 'string') {
+        message.status = normalizeChatStatus(paramDoc.status);
+      }
+    } else if (method === 'agent_plan') {
+      message.role = 'assistant';
+      message.kind = 'thought';
+      message.status = 'streaming';
+      message.text = extractTextFromIMParam(doc.param);
+    } else if (method === 'system') {
+      message.role = 'system';
+      message.kind = 'message';
+      message.text = extractTextFromIMParam(doc.param);
+    } else {
+      message.text = extractTextFromIMParam(doc.param);
+    }
+  } catch {
+    message.text = content;
+  }
+
+  return message;
 }
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
@@ -1205,6 +1300,7 @@ function App() {
 
   const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
   const tabRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
+  const previousTabForChatListRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -1258,6 +1354,7 @@ function App() {
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
+  const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [selectedChatId, setSelectedChatId] = useState('');
@@ -1326,10 +1423,19 @@ function App() {
   useEffect(() => {
     chatSelectedIdRef.current = selectedChatId;
   }, [selectedChatId]);
-
   useEffect(() => {
+    const previousTab = previousTabForChatListRef.current;
+    const enteredChat = previousTab !== 'chat' && tab === 'chat';
+    previousTabForChatListRef.current = tab;
     tabRef.current = tab;
-  }, [tab]);
+    if (!enteredChat) {
+      return;
+    }
+    if (!connected || !projectIdRef.current) {
+      return;
+    }
+    loadChatSessions(projectIdRef.current).catch(() => undefined);
+  }, [tab, connected]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -2008,18 +2114,26 @@ function App() {
       incremental?: boolean;
       preserveUserSelection?: boolean;
       selectionSnapshot?: string;
+      forceFull?: boolean;
     },
   ) => {
     if (!activeProjectId || !sessionId) return;
     setChatLoading(true);
     try {
-      const checkpointPromptIndex = options?.incremental
+      const useIncremental = options?.forceFull
+        ? false
+        : (options?.incremental ?? true);
+      const checkpointPromptIndex = useIncremental
         ? chatSyncIndexRef.current[sessionId] ?? 0
         : 0;
-      const checkpointTurnIndex = options?.incremental
+      const checkpointTurnIndex = useIncremental
         ? chatSyncSubIndexRef.current[sessionId] ?? 0
         : 0;
-      const result = await service.readSession(sessionId, checkpointPromptIndex, checkpointTurnIndex);
+      const result = await service.readSession(
+        sessionId,
+        checkpointPromptIndex,
+        checkpointTurnIndex,
+      );
       if (
         options?.preserveUserSelection &&
         chatSelectedIdRef.current !== (options.selectionSnapshot ?? '') &&
@@ -2027,34 +2141,34 @@ function App() {
       ) {
         return;
       }
-      if (
-        options?.incremental &&
-        chatSelectedIdRef.current &&
-        chatSelectedIdRef.current !== sessionId
-      ) {
-        return;
+
+      const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
+      let nextMessages: RegistryChatMessage[];
+      if (useIncremental) {
+        if (result.prompts.length > 0) {
+          const firstReturnedPromptIndex = result.prompts[0].promptIndex;
+          const replaceFromPromptIndex = checkpointPromptIndex > 0
+            ? Math.min(checkpointPromptIndex, firstReturnedPromptIndex)
+            : firstReturnedPromptIndex;
+          nextMessages = replaceChatMessagesFromPrompt(
+            existingMessages,
+            result.messages,
+            replaceFromPromptIndex,
+          );
+        } else {
+          nextMessages = existingMessages;
+        }
+      } else {
+        nextMessages = result.messages;
       }
-      if (options?.incremental && result.prompts.length > 0) {
-        const firstReturnedPromptIndex = result.prompts[0].promptIndex;
-        const replaceFromPromptIndex = checkpointPromptIndex > 0
-          ? Math.min(checkpointPromptIndex, firstReturnedPromptIndex)
-          : firstReturnedPromptIndex;
-        setChatMessages(prev =>
-          replaceChatMessagesFromPrompt(prev, result.messages, replaceFromPromptIndex),
-        );
-      } else if (!options?.incremental) {
-        setChatMessages(result.messages);
-      }
-      if (result.messages.length > 0) {
-        const latestSyncCursor = getLatestChatSyncCursor(result.messages);
-        chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.syncIndex;
-        chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.syncSubIndex;
-      } else if (!options?.incremental) {
-        chatSyncIndexRef.current[result.session.sessionId] = 0;
-        chatSyncSubIndexRef.current[result.session.sessionId] = 0;
-      }
+
+      chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
+      const latestSyncCursor = getLatestChatSyncCursor(nextMessages);
+      chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.syncIndex;
+      chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.syncSubIndex;
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
+      setChatMessages(nextMessages);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -2063,64 +2177,24 @@ function App() {
   };
 
   const loadChatSessions = async (
-    preferredSessionId = '',
     activeProjectId = projectIdRef.current,
-    options?: {
-      incremental?: boolean;
-      preserveUserSelection?: boolean;
-      hydrateMessages?: boolean;
-    },
   ) => {
     if (!activeProjectId) return;
     try {
-      const selectionSnapshot = chatSelectedIdRef.current;
       const sessions = sortChatSessions(await service.listSessions());
       setChatSessions(sessions);
-      const preferredSelection =
-        preferredSessionId &&
-        sessions.some(session => session.sessionId === preferredSessionId)
-          ? preferredSessionId
-          : '';
-      const currentSelection =
-        chatSelectedIdRef.current &&
-        sessions.some(
-          session => session.sessionId === chatSelectedIdRef.current,
-        )
-          ? chatSelectedIdRef.current
-          : '';
-      const fallbackSessionId =
-        currentSelection || preferredSelection || sessions[0]?.sessionId || '';
-      const canHydrateSelection = Boolean(
-        options?.hydrateMessages &&
-          fallbackSessionId &&
-          (fallbackSessionId === preferredSelection ||
-            fallbackSessionId === currentSelection),
-      );
-      const shouldIncrementallySync = Boolean(
-        canHydrateSelection && options?.incremental,
-      );
-      if (!fallbackSessionId) {
+      const currentSelection = chatSelectedIdRef.current;
+      if (!currentSelection || !sessions.some(session => session.sessionId === currentSelection)) {
         setSelectedChatId('');
         setChatMessages([]);
         return;
       }
-      setSelectedChatId(fallbackSessionId);
-      if (!canHydrateSelection) {
-        if (!options?.preserveUserSelection) {
-          setChatMessages([]);
-        }
-        return;
-      }
-      await loadChatSession(fallbackSessionId, activeProjectId, {
-        incremental: shouldIncrementallySync,
-        preserveUserSelection: options?.preserveUserSelection,
-        selectionSnapshot,
-      });
+      setSelectedChatId(currentSelection);
+      setChatMessages(chatMessageStoreRef.current[currentSelection] ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   };
-
   const createChatSession = async (agentType: string, title = '') => {
     try {
       const result = await service.createSession(agentType, title);
@@ -2129,6 +2203,10 @@ function App() {
       }
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
+      chatSelectedIdRef.current = result.session.sessionId;
+      chatMessageStoreRef.current[result.session.sessionId] = [];
+      chatSyncIndexRef.current[result.session.sessionId] = 0;
+      chatSyncSubIndexRef.current[result.session.sessionId] = 0;
       setChatMessages([]);
       return result.session.sessionId;
     } catch (err) {
@@ -2312,20 +2390,22 @@ function App() {
         chatSelectedIdRef.current = '';
         chatSyncIndexRef.current = {};
         chatSyncSubIndexRef.current = {};
+        chatMessageStoreRef.current = {};
       }
-      const shouldHydrateOnReconnect =
-        silentReconnect &&
-        tabRef.current === 'chat' &&
-        !!previousSelectedChatId;
-      await loadChatSessions(
-        previousSelectedChatId,
-        result.hydrated.projectId,
-        {
-          incremental: shouldHydrateOnReconnect,
-          preserveUserSelection: silentReconnect,
-          hydrateMessages: shouldHydrateOnReconnect,
-        },
-      );
+      if (silentReconnect) {
+        const shouldSyncSelectedSession =
+          tabRef.current === 'chat' &&
+          !!previousSelectedChatId;
+        if (shouldSyncSelectedSession) {
+          await loadChatSession(previousSelectedChatId, result.hydrated.projectId, {
+            incremental: true,
+            preserveUserSelection: true,
+            selectionSnapshot: previousSelectedChatId,
+          });
+        }
+      } else if (tabRef.current === 'chat') {
+        await loadChatSessions(result.hydrated.projectId);
+      }
       workspaceController
         .validateExpandedDirectories(
           result.rootEntries,
@@ -2474,10 +2554,8 @@ function App() {
       setSelectedChatId('');
       chatSelectedIdRef.current = '';
       chatSyncIndexRef.current = {};
-        chatSyncSubIndexRef.current = {};
-      await loadChatSessions('', result.hydrated.projectId, {
-        hydrateMessages: false,
-      });
+      chatSyncSubIndexRef.current = {};
+      chatMessageStoreRef.current = {};
       workspaceController
         .validateExpandedDirectories(
           result.rootEntries,
@@ -2578,58 +2656,49 @@ function App() {
         const payload = (event.payload ??
           {}) as RegistryChatMessageEventPayload;
         const message = decodeSessionMessageFromEventPayload(payload);
-        const messageSessionID = message?.sessionId ?? '';
-        const sessionId = payload.session?.sessionId || messageSessionID;
+        if (!message) {
+          return;
+        }
 
-        const sessionSummary = payload.session;
-        if (sessionSummary?.sessionId) {
-          setChatSessions(prev => mergeChatSession(prev, sessionSummary));
-        } else if (sessionId && message) {
-          setChatSessions(prev => {
-            const existing = prev.find(item => item.sessionId === sessionId);
-            return mergeChatSession(prev, {
-              sessionId,
-              title: existing?.title || sessionId,
-              preview: message.text || existing?.preview || '',
-              updatedAt: message.updatedAt || new Date().toISOString(),
-              messageCount: existing?.messageCount ?? 0,
-              unreadCount: existing?.unreadCount,
-              agentType: existing?.agentType,
-            });
+        const sessionId = message.sessionId;
+        setChatSessions(prev => {
+          const existing = prev.find(item => item.sessionId === sessionId);
+          return mergeChatSession(prev, {
+            sessionId,
+            title: existing?.title || sessionId,
+            preview: message.text || existing?.preview || '',
+            updatedAt: message.updatedAt || new Date().toISOString(),
+            messageCount: existing?.messageCount ?? 0,
+            unreadCount: existing?.unreadCount,
+            agentType: existing?.agentType,
           });
-        }
-        if (message?.messageId) {
-          maybeNotifyChatMessage(message, payload.session);
-        }
-        if (message && messageSessionID) {
-          const incomingSyncIndex = message.syncIndex ?? 0;
-          const incomingSyncSubIndex = message.syncSubIndex ?? 0;
-          const currentSyncIndex = chatSyncIndexRef.current[messageSessionID] ?? 0;
-          const currentSyncSubIndex = chatSyncSubIndexRef.current[messageSessionID] ?? 0;
-          if (
-            incomingSyncIndex > currentSyncIndex ||
-            (incomingSyncIndex === currentSyncIndex && incomingSyncSubIndex > currentSyncSubIndex)
-          ) {
-            chatSyncIndexRef.current[messageSessionID] = incomingSyncIndex;
-            chatSyncSubIndexRef.current[messageSessionID] = incomingSyncSubIndex;
-          }
-        }
+        });
+
+        maybeNotifyChatMessage(message);
+
+        const incomingSyncIndex = message.syncIndex ?? 0;
+        const incomingSyncSubIndex = message.syncSubIndex ?? 0;
+        const currentSyncIndex = chatSyncIndexRef.current[sessionId] ?? 0;
+        const currentSyncSubIndex = chatSyncSubIndexRef.current[sessionId] ?? 0;
         if (
-          messageSessionID &&
-          messageSessionID === chatSelectedIdRef.current &&
-          message
+          incomingSyncIndex > currentSyncIndex ||
+          (incomingSyncIndex === currentSyncIndex && incomingSyncSubIndex > currentSyncSubIndex)
         ) {
-          setChatMessages(prev => upsertChatMessage(prev, message));
+          chatSyncIndexRef.current[sessionId] = incomingSyncIndex;
+          chatSyncSubIndexRef.current[sessionId] = incomingSyncSubIndex;
         }
-        if (!chatSelectedIdRef.current && sessionId) {
-          setSelectedChatId(sessionId);
-          if (message) {
-            setChatMessages(prev => upsertChatMessage(prev, message));
-          }
+
+        const merged = upsertChatMessage(
+          chatMessageStoreRef.current[sessionId] ?? [],
+          message,
+        );
+        chatMessageStoreRef.current[sessionId] = merged;
+
+        if (sessionId === chatSelectedIdRef.current) {
+          setChatMessages(merged);
         }
       }
     });
-
     const unsubscribeClose = service.onClose(() => {
       setConnected(false);
       if (supervisorManagedCloseRef.current) {
@@ -2789,7 +2858,10 @@ function App() {
                 onClick={() => {
                   chatSelectedIdRef.current = session.sessionId;
                   setSelectedChatId(session.sessionId);
-                  loadChatSession(session.sessionId).catch(() => undefined);
+                  setChatMessages(chatMessageStoreRef.current[session.sessionId] ?? []);
+                  loadChatSession(session.sessionId, projectIdRef.current, {
+                    incremental: true,
+                  }).catch(() => undefined);
                   if (!isWide) setDrawerOpen(false);
                 }}
               >
@@ -2811,7 +2883,6 @@ function App() {
         </>
       );
     }
-
     if (tab === 'file') {
       return (
         <>
@@ -4173,19 +4244,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

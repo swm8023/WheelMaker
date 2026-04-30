@@ -62,12 +62,10 @@ export interface RegistrySessionReadResponse {
 }
 
 export interface RegistrySessionMessageEventPayload {
-  session?: RegistrySessionSummary;
-  message?: RegistrySessionMessage;
-  sessionId?: string;
-  promptIndex?: number;
-  turnIndex?: number;
-  content?: string;
+  sessionId: string;
+  promptIndex: number;
+  turnIndex: number;
+  content: string;
 }
 
 export type RegistryChatContentBlock = RegistrySessionContentBlock;
@@ -203,6 +201,4 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
-
-
 

@@ -148,11 +148,106 @@ export class RegistryRepository {
       return null;
     }
     const input = raw as Record<string, unknown>;
-    if (typeof input.messageId !== 'string' || input.messageId.trim().length === 0) {
+    const sessionId = typeof input.sessionId === 'string' && input.sessionId.trim().length > 0
+      ? input.sessionId.trim()
+      : fallbackSessionId;
+    if (!sessionId) {
       return null;
     }
-    return this.normalizeSessionMessage(input, fallbackSessionId);
+    const promptIndex = typeof input.promptIndex === 'number' && Number.isFinite(input.promptIndex)
+      ? Math.trunc(input.promptIndex)
+      : 0;
+    const turnIndex = typeof input.turnIndex === 'number' && Number.isFinite(input.turnIndex)
+      ? Math.trunc(input.turnIndex)
+      : 0;
+    if (promptIndex <= 0 || turnIndex <= 0) {
+      return null;
+    }
+    const content = typeof input.content === 'string' ? input.content.trim() : '';
+    const messageId = `${sessionId}:${promptIndex}:${turnIndex}`;
+    const now = new Date().toISOString();
+    const out: RegistrySessionMessage = {
+      messageId,
+      sessionId,
+      syncIndex: promptIndex,
+      syncSubIndex: turnIndex,
+      role: 'assistant',
+      kind: 'message',
+      text: '',
+      status: 'done',
+      createdAt: now,
+      updatedAt: now,
+    };
+    if (content === '') {
+      return out;
+    }
+
+    try {
+      const doc = JSON.parse(content) as Record<string, unknown>;
+      const method = typeof doc.method === 'string' ? doc.method.trim() : '';
+      const paramDoc = (doc.param && typeof doc.param === 'object' && !Array.isArray(doc.param))
+        ? (doc.param as Record<string, unknown>)
+        : undefined;
+
+      if (method === 'prompt_request') {
+        const promptBlocks = Array.isArray(paramDoc?.contentBlocks) ? paramDoc.contentBlocks : [];
+        out.role = 'user';
+        out.kind = 'message';
+        out.text = this.extractTextFromACPContent(promptBlocks);
+        if (promptBlocks.length > 0) {
+          out.blocks = promptBlocks as RegistrySessionMessage['blocks'];
+        }
+      } else if (method === 'prompt_done') {
+        out.role = 'system';
+        out.kind = 'prompt_result';
+        out.text = typeof paramDoc?.stopReason === 'string' ? paramDoc.stopReason : '';
+      } else if (method === 'user_message_chunk') {
+        out.role = 'user';
+        out.kind = 'message';
+        out.text = this.extractTextFromIMParam(doc.param);
+        out.status = 'streaming';
+      } else if (method === 'agent_message_chunk') {
+        out.role = 'assistant';
+        out.kind = 'message';
+        out.text = this.extractTextFromIMParam(doc.param);
+        out.status = 'streaming';
+      } else if (method === 'agent_thought_chunk') {
+        out.role = 'assistant';
+        out.kind = 'thought';
+        out.text = this.extractTextFromIMParam(doc.param);
+        out.status = 'streaming';
+      } else if (method === 'tool_call') {
+        out.role = 'system';
+        out.kind = 'tool';
+        out.text = this.extractTextFromIMParam(doc.param);
+        if (typeof paramDoc?.status === 'string') {
+          const statusText = paramDoc.status.trim().toLowerCase();
+          if (statusText === 'streaming' || statusText === 'running' || statusText === 'in_progress') {
+            out.status = 'streaming';
+          } else if (statusText === 'needs_action' || statusText === 'need_action') {
+            out.status = 'needs_action';
+          } else {
+            out.status = 'done';
+          }
+        }
+      } else if (method === 'agent_plan') {
+        out.role = 'assistant';
+        out.kind = 'thought';
+        out.text = this.extractTextFromIMParam(doc.param);
+        out.status = 'streaming';
+      } else if (method === 'system') {
+        out.role = 'system';
+        out.kind = 'message';
+        out.text = this.extractTextFromIMParam(doc.param);
+      } else {
+        out.text = this.extractTextFromIMParam(doc.param);
+      }
+    } catch {
+      out.text = content;
+    }
+    return out;
   }
+
   private derivePromptSnapshotsFromMessages(
     messages: RegistrySessionMessage[],
     sessionId: string,
@@ -532,19 +627,4 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
