@@ -2377,13 +2377,14 @@ function App() {
     }
   };
 
-  const beginNewChatFlow = (draft: PendingNewChatDraft) => {
+  const beginNewChatFlow = (draft: PendingNewChatDraft): boolean => {
     if (availableChatAgents.length === 0) {
       setError('No agents available for this project');
-      return;
+      return false;
     }
     setPendingNewChatDraft(draft);
     setNewChatAgentPickerOpen(true);
+    return true;
   };
 
   const resetChatComposer = () => {
@@ -2436,11 +2437,14 @@ function App() {
     setChatSending(true);
     try {
         if (!selectedChatId) {
-          beginNewChatFlow({
+          const started = beginNewChatFlow({
             title: trimmedText || chatAttachment?.name || '',
             text: trimmedText,
             blocks,
           });
+          if (started) {
+            resetChatComposer();
+          }
           setChatSending(false);
           return;
         }
