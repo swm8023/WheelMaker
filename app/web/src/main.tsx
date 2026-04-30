@@ -4042,12 +4042,6 @@ function App() {
               className="chat-composer-input"
               value={chatComposerText}
               onChange={event => setChatComposerText(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  sendChatMessage().catch(() => undefined);
-                }
-              }}
               placeholder="Send a message..."
             />
             <div className="chat-composer-actions">
