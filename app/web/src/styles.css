@@ -1688,30 +1688,28 @@ body,
   gap: 8px;
 }
 
+.chat-composer-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .chat-composer-input {
-  width: 100%;
-  min-height: 36px;
-  max-height: 220px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
   color: var(--text);
-  padding: 7px 12px;
-  resize: none;
+  padding: 0 12px;
   font: inherit;
-  line-height: 1.5;
+  line-height: 36px;
 }
 
 .chat-composer-input:focus {
   outline: none;
   border-color: var(--accent);
-}
-
-.chat-composer-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
 }
 
 .chat-action-button,

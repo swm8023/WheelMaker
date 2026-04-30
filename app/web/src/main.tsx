@@ -1476,7 +1476,7 @@ function App() {
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
-  const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatComposerInputRef = useRef<HTMLInputElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -1564,16 +1564,6 @@ function App() {
     loadChatSessions(projectIdRef.current).catch(() => undefined);
   }, [tab, connected]);
 
-  useEffect(() => {
-    const input = chatComposerTextareaRef.current;
-    if (!input) {
-      return;
-    }
-    input.style.height = '0px';
-    const nextHeight = Math.max(36, Math.min(input.scrollHeight, 220));
-    input.style.height = `${nextHeight}px`;
-    input.style.overflowY = input.scrollHeight > 220 ? 'auto' : 'hidden';
-  }, [chatComposerText]);
 
   useEffect(() => {
     if (tab !== 'chat') {
@@ -4104,19 +4094,29 @@ function App() {
             {chatAttachment ? (
               <div className="chat-attachment-pill">{chatAttachment.name}</div>
             ) : null}
-            <textarea
-              ref={chatComposerTextareaRef}
-              rows={1}
-              className="chat-composer-input"
-              value={chatComposerText}
-              onChange={event => setChatComposerText(event.target.value)}
-              placeholder="Send a message..."
-            />
-            <div className="chat-composer-actions">
+            <div className="chat-composer-main">
+              <button
+                type="button"
+                className="chat-action-button"
+                title="Voice input"
+                aria-label="Voice input"
+              >
+                <span className="codicon codicon-mic" />
+              </button>
+              <input
+                ref={chatComposerInputRef}
+                type="text"
+                className="chat-composer-input"
+                value={chatComposerText}
+                onChange={event => setChatComposerText(event.target.value)}
+                placeholder="Send a message..."
+              />
               <button
                 type="button"
                 className="chat-action-button"
                 onClick={() => chatFileInputRef.current?.click()}
+                title="Upload image"
+                aria-label="Upload image"
               >
                 <span className="codicon codicon-device-camera" />
               </button>
@@ -4674,5 +4674,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
 
