@@ -2487,6 +2487,7 @@ function App() {
     if (!sessionId) {
       return;
     }
+    setSelectedChatId(sessionId);
     if (draft.text.trim() || draft.blocks.length > 0) {
       await service.sendSessionMessage({
         sessionId,
