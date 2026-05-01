@@ -535,6 +535,52 @@ body,
   background: #094771;
 }
 
+
+.chat-session-group {
+  padding-bottom: 6px;
+}
+
+.chat-session-group + .chat-session-group {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.chat-session-group-title {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.chat-session-item {
+  align-items: flex-start;
+  min-height: 34px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  white-space: normal;
+}
+
+.chat-session-meta {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-session-updated {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .label {
   min-width: 0;
   overflow: hidden;

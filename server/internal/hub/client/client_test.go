@@ -2920,23 +2920,27 @@ func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 
 func TestSessionViewListIncludesProjectionFields(t *testing.T) {
 	c := newSessionViewTestClient(t)
+	ctx := context.Background()
 
-	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-1", "Task")); err != nil {
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Task")); err != nil {
 		t.Fatalf("RecordEvent session created: %v", err)
 	}
-	if err := c.RecordEvent(context.Background(), sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
-		t.Fatalf("RecordEvent user message: %v", err)
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent first prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "latest prompt", nil)); err != nil {
+		t.Fatalf("RecordEvent second prompt: %v", err)
 	}
 
-	sessions, err := c.listSessionViews(context.Background())
+	sessions, err := c.listSessionViews(ctx)
 	if err != nil {
 		t.Fatalf("listSessionViews: %v", err)
 	}
 	if len(sessions) != 1 {
 		t.Fatalf("sessions len = %d, want 1", len(sessions))
 	}
-	if sessions[0].Title != "Task" {
-		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Task")
+	if sessions[0].Title != "latest prompt" {
+		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "latest prompt")
 	}
 }
 
@@ -4655,3 +4659,4 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
+

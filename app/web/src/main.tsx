@@ -225,6 +225,45 @@ function mergeChatSession(
   return sortChatSessions([next, ...filtered]);
 }
 
+
+type ChatSessionGroup = {
+  agentKey: string;
+  label: string;
+  sessions: RegistryChatSession[];
+};
+
+function sessionUpdatedAtSortKey(session?: RegistryChatSession): string {
+  return session?.updatedAt || '';
+}
+
+function groupChatSessionsByAgent(
+  sessions: RegistryChatSession[],
+): ChatSessionGroup[] {
+  const grouped = new Map<string, RegistryChatSession[]>();
+  for (const session of sortChatSessions(sessions)) {
+    const agentKey = (session.agentType || '').trim() || 'unknown';
+    const bucket = grouped.get(agentKey) ?? [];
+    bucket.push(session);
+    grouped.set(agentKey, bucket);
+  }
+
+  const groups = Array.from(grouped.entries()).map(([agentKey, items]) => ({
+    agentKey,
+    label: agentKey === 'unknown' ? 'Unknown Agent' : agentKey,
+    sessions: sortChatSessions(items),
+  }));
+
+  groups.sort((a, b) => {
+    const aUpdated = sessionUpdatedAtSortKey(a.sessions[0]);
+    const bUpdated = sessionUpdatedAtSortKey(b.sessions[0]);
+    const updatedDelta = bUpdated.localeCompare(aUpdated);
+    if (updatedDelta !== 0) return updatedDelta;
+    return a.label.localeCompare(b.label);
+  });
+
+  return groups;
+}
+
 function upsertChatMessage(
   list: RegistryChatMessage[],
   next: RegistryChatMessage,
@@ -1002,6 +1041,25 @@ function formatRelativeTime(value: string): string {
   const deltaYear = Math.floor(deltaMonth / 12);
   return `${deltaYear}y ago`;
 }
+
+function formatCompactRelativeAge(value: string): string {
+  if (!value) return '0m';
+  const parsed = new Date(value);
+  const ts = parsed.getTime();
+  if (Number.isNaN(ts)) return '0m';
+  const deltaMs = Math.max(0, Date.now() - ts);
+  const deltaMin = Math.floor(deltaMs / 60000);
+  if (deltaMin < 60) return `${Math.max(0, deltaMin)}m`;
+  const deltaHour = Math.floor(deltaMin / 60);
+  if (deltaHour < 24) return `${deltaHour}h`;
+  const deltaDay = Math.floor(deltaHour / 24);
+  if (deltaDay < 30) return `${deltaDay}d`;
+  const deltaMonth = Math.floor(deltaDay / 30);
+  if (deltaMonth < 12) return `${deltaMonth}mo`;
+  const deltaYear = Math.floor(deltaMonth / 12);
+  return `${deltaYear}y`;
+}
+
 type ShikiCodeBlockProps = {
   content: string;
   language: string;
@@ -3008,6 +3066,11 @@ function App() {
     });
   };
 
+  const groupedChatSessions = useMemo(
+    () => groupChatSessionsByAgent(chatSessions),
+    [chatSessions],
+  );
+
   const renderSidebarMain = () => {
     if (tab === 'chat') {
       return (
@@ -3059,34 +3122,36 @@ function App() {
                 </button>
               </div>
             ) : null}
-            {chatSessions.map(session => (
-              <div
-                key={session.sessionId}
-                className={`item ${
-                  selectedChatId === session.sessionId ? 'selected' : ''
-                }`}
-                onClick={() => {
-                  chatSelectedIdRef.current = session.sessionId;
-                  setSelectedChatId(session.sessionId);
-                  setChatMessages(chatMessageStoreRef.current[session.sessionId] ?? []);
-                  loadChatSession(session.sessionId, projectIdRef.current, {
-                    incremental: true,
-                  }).catch(() => undefined);
-                  if (!isWide) setDrawerOpen(false);
-                }}
-              >
-                <span className="file-dot codicon codicon-comment-discussion" />
-                <span
-                  className="label"
-                  style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
-                >
-                  <span>{session.title || session.sessionId}</span>
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    {session.agentType
-                      ? `${session.agentType} · ${session.preview || 'No messages yet'}`
-                      : (session.preview || 'No messages yet')}
-                  </span>
-                </span>
+            {groupedChatSessions.map(group => (
+              <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
+                <div className="chat-session-group-title">{group.label}</div>
+                {group.sessions.map(session => (
+                  <div
+                    key={session.sessionId}
+                    className={`item chat-session-item ${
+                      selectedChatId === session.sessionId ? 'selected' : ''
+                    }`}
+                    onClick={() => {
+                      chatSelectedIdRef.current = session.sessionId;
+                      setSelectedChatId(session.sessionId);
+                      setChatMessages(chatMessageStoreRef.current[session.sessionId] ?? []);
+                      loadChatSession(session.sessionId, projectIdRef.current, {
+                        incremental: true,
+                      }).catch(() => undefined);
+                      if (!isWide) setDrawerOpen(false);
+                    }}
+                  >
+                    <span className="file-dot codicon codicon-comment-discussion" />
+                    <span className="label chat-session-meta">
+                      <span className="chat-session-title">
+                        {session.title || session.sessionId}
+                      </span>
+                      <span className="chat-session-updated muted" title={session.updatedAt || ''}>
+                        {formatCompactRelativeAge(session.updatedAt)}
+                      </span>
+                    </span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>

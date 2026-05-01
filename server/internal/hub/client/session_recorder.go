@@ -273,7 +273,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 		return err
 	}
 	r.promptState[rawEvent.SessionID] = state
-	if err := r.upsertSessionProjection(ctx, rawEvent.SessionID, "", promptTitle, rawEvent.UpdatedAt, true); err != nil {
+	if err := r.upsertSessionProjection(ctx, rawEvent.SessionID, "", promptTitle, rawEvent.UpdatedAt, false); err != nil {
 		return err
 	}
 	return nil
@@ -781,3 +781,4 @@ func mustJSONRaw(value any) json.RawMessage {
 	}
 	return json.RawMessage(raw)
 }
+
