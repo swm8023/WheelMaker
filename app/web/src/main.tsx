@@ -3851,8 +3851,7 @@ function App() {
   ): { path: string; line: number | null } | null => {
     const rawHref = href.trim();
     if (!rawHref) return null;
-    const isWindowsDrivePath = /^[a-zA-Z]:[\\/]/.test(rawHref) ||
-      /^\/[a-zA-Z]:[\\/]/.test(rawHref);
+    const isWindowsDrivePath = /^\/?[a-zA-Z]:/.test(rawHref);
 
     const decodePath = (value: string) => {
       try {
@@ -3863,6 +3862,16 @@ function App() {
     };
 
     let pathCandidate = rawHref;
+    if (/^\/?[a-zA-Z]:[^\\/]/.test(pathCandidate)) {
+      const hasLeadingSlash = pathCandidate.startsWith('/');
+      const prefix = hasLeadingSlash
+        ? pathCandidate.slice(0, 3)
+        : pathCandidate.slice(0, 2);
+      const suffix = hasLeadingSlash
+        ? pathCandidate.slice(3)
+        : pathCandidate.slice(2);
+      pathCandidate = `${prefix}/${suffix}`;
+    }
     if (/^file:\/\//i.test(rawHref)) {
       try {
         const parsed = new URL(rawHref);
@@ -3948,7 +3957,6 @@ function App() {
 
     return { path: resolvedPath, line };
   };
-
   const chatMarkdownUrlTransform = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return '';
@@ -3978,8 +3986,7 @@ function App() {
         const linkHref = typeof href === 'string' ? href : '';
         const targetFile = linkHref ? resolveChatFileLink(linkHref) : null;
         const isFileLink = !!targetFile;
-        const isWindowsLocalPath = /^[a-zA-Z]:[\\/]/.test(linkHref.trim()) ||
-          /^\/[a-zA-Z]:[\\/]/.test(linkHref.trim());
+        const isWindowsLocalPath = /^\/?[a-zA-Z]:/.test(linkHref.trim());
         const fallbackHref = linkHref || '#';
 
         return (
