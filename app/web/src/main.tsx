@@ -1780,7 +1780,28 @@ function App() {
     [projectId, projects],
   );
   const project = currentProject;
-  const availableChatAgents = project?.agents ?? [];
+  const availableChatAgents = useMemo(() => {
+    const seen = new Set<string>();
+    const agents: string[] = [];
+    const append = (value?: string) => {
+      const normalized = (value || '').trim();
+      if (!normalized) return;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      agents.push(normalized);
+    };
+    for (const item of project?.agents ?? []) {
+      append(item);
+    }
+    append(project?.agent);
+    if (agents.length === 0) {
+      for (const session of chatSessions) {
+        append(session.agentType);
+      }
+    }
+    return agents;
+  }, [project?.agents, project?.agent, chatSessions]);
   currentProjectRef.current = currentProject;
   expandedDirsRef.current = expandedDirs;
   selectedFileRef.current = selectedFile;
@@ -2416,8 +2437,13 @@ function App() {
     }
   };
   const createChatSession = async (agentType: string, title = '') => {
+    const normalizedAgentType = agentType.trim();
+    if (!normalizedAgentType) {
+      setError('No agent selected for new session');
+      return '';
+    }
     try {
-      const result = await service.createSession(agentType, title);
+      const result = await service.createSession(normalizedAgentType, title);
       if (!result.session.sessionId) {
         throw new Error('Session was created without a sessionId');
       }

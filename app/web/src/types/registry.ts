@@ -118,6 +118,7 @@ export interface RegistryProject {
   online: boolean;
   path: string;
   hubId?: string;
+  agent?: string;
   agents?: string[];
   imType?: string;
   projectRev?: string;

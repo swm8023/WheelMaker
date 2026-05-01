@@ -398,8 +398,14 @@ export class RegistryRepository {
       .filter(project => !!project.projectId)
       .map(project => ({
         ...project,
+        agent: typeof project.agent === 'string'
+          ? project.agent.trim()
+          : undefined,
         agents: Array.isArray(project.agents)
-          ? project.agents.filter((item): item is string => typeof item === 'string')
+          ? project.agents
+              .filter((item): item is string => typeof item === 'string')
+              .map(item => item.trim())
+              .filter(item => item.length > 0)
           : undefined,
         hubId: project.hubId || project.projectId.split(':', 1)[0] || '',
       }));
