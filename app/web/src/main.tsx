@@ -1546,6 +1546,7 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
+  const [chatConfigFeedback, setChatConfigFeedback] = useState('');
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
     null,
@@ -2462,10 +2463,6 @@ function App() {
   };
 
   const beginNewChatFlow = (draft: PendingNewChatDraft): boolean => {
-    if (availableChatAgents.length === 0) {
-      setError('No agents available for this project');
-      return false;
-    }
     setPendingNewChatDraft(draft);
     setNewChatAgentPickerOpen(true);
     return true;
@@ -2589,6 +2586,7 @@ function App() {
     }
     const updatingKey = `${sessionId}:${configId}`;
     setChatConfigUpdatingKey(updatingKey);
+    setChatConfigFeedback('Applying config...');
 
     try {
       const result = await service.setSessionConfig({
@@ -2599,8 +2597,10 @@ function App() {
       if (result.configOptions.length > 0) {
         applyChatSessionConfigOptions(result.sessionId || sessionId, result.configOptions);
       }
+      setChatConfigFeedback('');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setChatConfigFeedback('Config update failed');
     } finally {
       setChatConfigUpdatingKey(prev => (prev === updatingKey ? '' : prev));
     }
@@ -4301,6 +4301,9 @@ function App() {
                     );
                   })}
               </div>
+            ) : null}
+            {chatConfigFeedback ? (
+              <div className="chat-config-feedback muted">{chatConfigFeedback}</div>
             ) : null}
           </div>
         </div>

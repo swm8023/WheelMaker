@@ -1807,6 +1807,13 @@ body,
   scrollbar-width: thin;
 }
 
+.chat-config-feedback {
+  font-size: 11px;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+
+
 .chat-config-item {
   display: inline-flex;
   flex: 0 0 auto;
