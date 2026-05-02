@@ -2534,6 +2534,8 @@ function App() {
       });
     }
 
+    // Clear UI immediately after capturing text — before any async work
+    resetChatComposer();
     setChatSending(true);
     try {
         if (!selectedChatId) {
@@ -2542,8 +2544,8 @@ function App() {
             text: trimmedText,
             blocks,
           });
-          if (started) {
-            resetChatComposer();
+          if (!started) {
+            return;
           }
           setChatSending(false);
           return;
@@ -2570,7 +2572,6 @@ function App() {
           }),
         );
       }
-      resetChatComposer();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
