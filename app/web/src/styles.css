@@ -1784,6 +1784,14 @@ body,
   gap: 8px;
 }
 
+.chat-composer-input-shell {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+}
+
 .chat-composer-input {
   flex: 1 1 auto;
   min-width: 0;
@@ -1793,7 +1801,7 @@ body,
   border-radius: 10px;
   background: var(--panel);
   color: var(--text);
-  padding: 7px 12px;
+  padding: 7px 36px 7px 12px;
   font: inherit;
   line-height: 1.45;
   resize: none;
@@ -1834,6 +1842,46 @@ body,
 .chat-action-menu {
   position: relative;
   flex: 0 0 auto;
+}
+
+.chat-action-menu-inline {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  z-index: 3;
+}
+
+.chat-action-menu-inline-toggle {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.chat-action-menu-inline-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.chat-action-menu-inline-toggle:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.18);
+}
+
+.chat-action-menu-inline .codicon {
+  font-size: 12px;
+  transition: transform 0.16s ease;
+}
+
+.chat-action-menu-inline.open .codicon {
+  transform: rotate(180deg);
 }
 
 .chat-action-menu-toggle {

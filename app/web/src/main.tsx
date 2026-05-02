@@ -301,10 +301,23 @@ function replaceChatMessagesFromPrompt(
   list: RegistryChatMessage[],
   nextMessages: RegistryChatMessage[],
   promptIndex: number,
+  checkpointTurnIndex?: number,
 ): RegistryChatMessage[] {
-  const base = promptIndex > 0
-    ? list.filter(item => (item.syncIndex ?? 0) < promptIndex)
-    : [];
+  const base = list.filter(item => {
+    const si = item.syncIndex ?? 0;
+    if (promptIndex <= 0) return false;
+    if (si < promptIndex) return true;
+    // Preserve turns at-or-before checkpoint within the boundary prompt
+    // (server skips them, so they won't be in nextMessages)
+    if (
+      si === promptIndex &&
+      checkpointTurnIndex != null &&
+      checkpointTurnIndex > 0
+    ) {
+      return (item.syncSubIndex ?? 0) <= checkpointTurnIndex;
+    }
+    return false;
+  });
   return nextMessages.reduce(
     (items, message) => upsertChatMessage(items, message),
     base,
@@ -443,7 +456,7 @@ function decodeSessionMessageFromEventPayload(
   };
 
   if (!content) {
-    return message;
+    return null;
   }
 
   try {
@@ -1827,6 +1840,15 @@ function App() {
   }, [chatComposerActionMenuOpen]);
 
   useEffect(() => {
+    if (!chatComposerActionMenuOpen) {
+      return;
+    }
+    if (chatComposerText.length > 0) {
+      setChatComposerActionMenuOpen(false);
+    }
+  }, [chatComposerText, chatComposerActionMenuOpen]);
+
+  useEffect(() => {
     workspaceStore.rememberGlobalState({
       address,
       token,
@@ -2470,6 +2492,10 @@ function App() {
       const checkpointTurnIndex = useIncremental
         ? chatSyncSubIndexRef.current[sessionId] ?? 0
         : 0;
+      // Snapshot existing messages BEFORE the await so the base is
+      // consistent with the cursor. Live session.message events may
+      // mutate chatMessageStoreRef during the network round-trip.
+      const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
       const result = await service.readSession(
         sessionId,
         checkpointPromptIndex,
@@ -2483,18 +2509,15 @@ function App() {
         return;
       }
 
-      const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
       let nextMessages: RegistryChatMessage[];
       if (useIncremental) {
         if (result.prompts.length > 0) {
           const firstReturnedPromptIndex = result.prompts[0].promptIndex;
-          const replaceFromPromptIndex = checkpointPromptIndex > 0
-            ? Math.min(checkpointPromptIndex, firstReturnedPromptIndex)
-            : firstReturnedPromptIndex;
           nextMessages = replaceChatMessagesFromPrompt(
             existingMessages,
             result.messages,
-            replaceFromPromptIndex,
+            firstReturnedPromptIndex,
+            checkpointTurnIndex,
           );
         } else {
           nextMessages = existingMessages;
@@ -4468,58 +4491,61 @@ function App() {
               <div className="chat-attachment-pill">{chatAttachment.name}</div>
             ) : null}
             <div className="chat-composer-main">
-              <textarea
-                ref={chatComposerTextareaRef}
-                rows={1}
-                className="chat-composer-input"
-                value={chatComposerText}
-                onChange={event => setChatComposerText(event.target.value)}
-                placeholder="Send a message..."
-              />
-              <div
-                ref={chatComposerActionMenuRef}
-                className={`chat-action-menu${chatComposerActionMenuOpen ? ' open' : ''}`}
-              >
-                <button
-                  type="button"
-                  className="chat-action-button chat-action-menu-toggle"
-                  onClick={() =>
-                    setChatComposerActionMenuOpen(prevOpen => !prevOpen)
-                  }
-                  title="Media actions"
-                  aria-label="Media actions"
-                  aria-haspopup="menu"
-                  aria-expanded={chatComposerActionMenuOpen}
-                >
-                  <span className="codicon codicon-device-camera" />
-                  <span className="codicon codicon-chevron-down chat-action-menu-chevron" />
-                </button>
-                {chatComposerActionMenuOpen ? (
-                  <div className="chat-action-menu-panel" role="menu">
+              <div className="chat-composer-input-shell">
+                <textarea
+                  ref={chatComposerTextareaRef}
+                  rows={1}
+                  className="chat-composer-input"
+                  value={chatComposerText}
+                  onChange={event => setChatComposerText(event.target.value)}
+                  placeholder="Send a message..."
+                />
+                {chatComposerText.length === 0 ? (
+                  <div
+                    ref={chatComposerActionMenuRef}
+                    className={`chat-action-menu chat-action-menu-inline${chatComposerActionMenuOpen ? ' open' : ''}`}
+                  >
                     <button
                       type="button"
-                      className="chat-action-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setChatComposerActionMenuOpen(false);
-                        setError('Voice input is not available yet.');
-                      }}
+                      className="chat-action-menu-inline-toggle"
+                      onClick={() =>
+                        setChatComposerActionMenuOpen(prevOpen => !prevOpen)
+                      }
+                      title="Media actions"
+                      aria-label="Media actions"
+                      aria-haspopup="menu"
+                      aria-expanded={chatComposerActionMenuOpen}
                     >
-                      <span className="codicon codicon-mic" />
-                      <span>Voice</span>
+                      <span className="codicon codicon-chevron-down" />
                     </button>
-                    <button
-                      type="button"
-                      className="chat-action-menu-item"
-                      role="menuitem"
-                      onClick={() => {
-                        setChatComposerActionMenuOpen(false);
-                        chatFileInputRef.current?.click();
-                      }}
-                    >
-                      <span className="codicon codicon-file-media" />
-                      <span>Photo Library</span>
-                    </button>
+                    {chatComposerActionMenuOpen ? (
+                      <div className="chat-action-menu-panel" role="menu">
+                        <button
+                          type="button"
+                          className="chat-action-menu-item"
+                          role="menuitem"
+                          onClick={() => {
+                            setChatComposerActionMenuOpen(false);
+                            setError('Voice input is not available yet.');
+                          }}
+                        >
+                          <span className="codicon codicon-mic" />
+                          <span>Voice</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="chat-action-menu-item"
+                          role="menuitem"
+                          onClick={() => {
+                            setChatComposerActionMenuOpen(false);
+                            chatFileInputRef.current?.click();
+                          }}
+                        >
+                          <span className="codicon codicon-file-media" />
+                          <span>Photo Library</span>
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
