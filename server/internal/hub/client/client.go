@@ -1214,7 +1214,7 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		if entries[i].Agent == "" {
 			entries[i].Agent = storedEntry.Agent
 		}
-		if entries[i].Title == "" {
+		if strings.TrimSpace(storedEntry.Title) != "" {
 			entries[i].Title = storedEntry.Title
 		}
 	}

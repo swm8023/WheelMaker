@@ -941,8 +941,8 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	if len(entries) != 1 {
 		t.Fatalf("entries len = %d, want 1", len(entries))
 	}
-	if entries[0].Title != "Runtime Title" {
-		t.Fatalf("entries[0].Title = %q, want %q", entries[0].Title, "Runtime Title")
+	if entries[0].Title != "Persisted Title" {
+		t.Fatalf("entries[0].Title = %q, want %q", entries[0].Title, "Persisted Title")
 	}
 	if entries[0].Status != SessionActive {
 		t.Fatalf("entries[0].Status = %v, want %v", entries[0].Status, SessionActive)
@@ -3310,8 +3310,8 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 	if len(sessions) != 1 {
 		t.Fatalf("sessions len = %d, want 1", len(sessions))
 	}
-	if sessions[0].Title != "Runtime Session" {
-		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Runtime Session")
+	if sessions[0].Title != "Persisted Title" {
+		t.Fatalf("sessions[0].Title = %q, want %q", sessions[0].Title, "Persisted Title")
 	}
 	if sessions[0].UpdatedAt != lastActiveAt.Format(time.RFC3339) {
 		t.Fatalf("sessions[0].UpdatedAt = %q, want %q", sessions[0].UpdatedAt, lastActiveAt.Format(time.RFC3339))
@@ -4659,4 +4659,3 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
 	}
 }
-
