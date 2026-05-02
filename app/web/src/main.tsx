@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
@@ -522,6 +522,62 @@ type ChatPromptGroup = {
   updatedAt: string;
 };
 
+type ChatPromptGroupViewProps = {
+  group: ChatPromptGroup;
+  markdownComponents: Components;
+  markdownUrlTransform: (value: string) => string;
+};
+
+const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
+  group,
+  markdownComponents,
+  markdownUrlTransform,
+}: ChatPromptGroupViewProps) {
+  const latestUserMessage =
+    group.userMessages.length > 0
+      ? group.userMessages[group.userMessages.length - 1]
+      : null;
+  const userText = latestUserMessage?.text?.trim() || '';
+
+  return (
+    <div className="chat-prompt-group">
+      {userText ? (
+        <div className="chat-prompt-user">{userText}</div>
+      ) : null}
+      {group.imageBlocks.length > 0 ? (
+        <div className="chat-image-strip">
+          {group.imageBlocks.map((block, index) => (
+            <img
+              key={`${group.key}:img:${index}`}
+              className="chat-inline-image"
+              src={`data:${block.mimeType || 'image/png'};base64,${block.data}`}
+              alt="chat attachment"
+            />
+          ))}
+        </div>
+      ) : null}
+      {group.entries.map(entry =>
+        entry.kind === 'tool' ? (
+          <div key={entry.key} className="chat-tool-line" title={entry.text}>
+            <span className="codicon codicon-tools" />
+            <span>{entry.text}</span>
+          </div>
+        ) : (
+          <div key={entry.key} className="chat-main-message">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              urlTransform={markdownUrlTransform}
+              rehypePlugins={[rehypeKatex]}
+              components={markdownComponents}
+            >
+              {entry.text}
+            </ReactMarkdown>
+          </div>
+        ),
+      )}
+    </div>
+  );
+});
 function groupChatMessagesByPrompt(
   messages: RegistryChatMessage[],
 ): ChatPromptGroup[] {
@@ -4243,14 +4299,14 @@ function App() {
 
     return { path: resolvedPath, line };
   };
-  const chatMarkdownUrlTransform = (value: string) => {
+  const chatMarkdownUrlTransform = useCallback((value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return '';
     if (/^(javascript|vbscript):/i.test(trimmed)) {
       return '';
     }
     return value;
-  };
+  }, []);
 
   const chatMarkdownComponents = useMemo<Components>(
     () => ({
@@ -4321,54 +4377,18 @@ function App() {
     ],
   );
 
-  const renderChatPromptGroup = (group: ChatPromptGroup) => {
-    const latestUserMessage =
-      group.userMessages.length > 0
-        ? group.userMessages[group.userMessages.length - 1]
-        : null;
-    const userText = latestUserMessage?.text?.trim() || '';
-
-    return (
-      <div key={group.key} className="chat-prompt-group">
-        {userText ? (
-          <div className="chat-prompt-user">{userText}</div>
-        ) : null}
-        {group.imageBlocks.length > 0 ? (
-          <div className="chat-image-strip">
-            {group.imageBlocks.map((block, index) => (
-              <img
-                key={`${group.key}:img:${index}`}
-                className="chat-inline-image"
-                src={`data:${block.mimeType || 'image/png'};base64,${
-                  block.data
-                }`}
-                alt="chat attachment"
-              />
-            ))}
-          </div>
-        ) : null}
-        {group.entries.map(entry =>
-          entry.kind === 'tool' ? (
-            <div key={entry.key} className="chat-tool-line" title={entry.text}>
-              <span className="codicon codicon-tools" />
-              <span>{entry.text}</span>
-            </div>
-          ) : (
-            <div key={entry.key} className="chat-main-message">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkMath]}
-                urlTransform={chatMarkdownUrlTransform}
-                rehypePlugins={[rehypeKatex]}
-                components={chatMarkdownComponents}
-              >
-                {entry.text}
-              </ReactMarkdown>
-            </div>
-          ),
-        )}
-      </div>
-    );
-  };
+  const renderedChatPromptGroups = useMemo(
+    () =>
+      chatPromptGroups.map(group => (
+        <ChatPromptGroupView
+          key={group.key}
+          group={group}
+          markdownComponents={chatMarkdownComponents}
+          markdownUrlTransform={chatMarkdownUrlTransform}
+        />
+      )),
+    [chatPromptGroups, chatMarkdownComponents, chatMarkdownUrlTransform],
+  );
   const renderMain = () => {
     const heavyDiffDeferred =
       !!selectedDiff &&
@@ -4396,7 +4416,7 @@ function App() {
                 </div>
               </div>
             ) : null}
-            {chatPromptGroups.map(group => renderChatPromptGroup(group))}
+            {renderedChatPromptGroups}
           </div>
           <div className="chat-composer">
             <input
@@ -4994,6 +5014,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
 
 
 
