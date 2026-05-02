@@ -219,10 +219,25 @@ function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
 
 function mergeChatSession(
   list: RegistryChatSession[],
-  next: RegistryChatSession,
+  next: Partial<RegistryChatSession> & {sessionId: string},
 ): RegistryChatSession[] {
+  const existing = list.find(item => item.sessionId === next.sessionId);
+  const merged: RegistryChatSession = {
+    sessionId: next.sessionId,
+    title: next.title ?? existing?.title ?? next.sessionId,
+    preview: next.preview ?? existing?.preview ?? '',
+    updatedAt: next.updatedAt ?? existing?.updatedAt ?? '',
+    messageCount: next.messageCount ?? existing?.messageCount ?? 0,
+    unreadCount: next.unreadCount ?? existing?.unreadCount,
+    agentType: next.agentType ?? existing?.agentType,
+    configOptions:
+      next.configOptions ??
+      (existing?.configOptions
+        ? [...existing.configOptions]
+        : undefined),
+  };
   const filtered = list.filter(item => item.sessionId !== next.sessionId);
-  return sortChatSessions([next, ...filtered]);
+  return sortChatSessions([merged, ...filtered]);
 }
 
 
@@ -2414,14 +2429,11 @@ function App() {
     try {
       const sessions = sortChatSessions(await service.listSessions());
       setChatSessions(prev =>
-        sortChatSessions(
-          sessions.map(session => {
-            const cached = prev.find(item => item.sessionId === session.sessionId);
-            if (cached?.configOptions && cached.configOptions.length > 0 && !session.configOptions?.length) {
-              return { ...session, configOptions: cached.configOptions };
-            }
-            return session;
-          }),
+        sessions.reduce(
+          (acc, session) => mergeChatSession(acc, session),
+          prev.filter(item =>
+            sessions.every(session => session.sessionId !== item.sessionId),
+          ),
         ),
       );
       const currentSelection = chatSelectedIdRef.current;
@@ -2601,13 +2613,17 @@ function App() {
         configId,
         value: nextValue,
       });
+      if (!result.ok) {
+        throw new Error('session.setConfig returned ok=false');
+      }
       if (result.configOptions.length > 0) {
         applyChatSessionConfigOptions(result.sessionId || sessionId, result.configOptions);
       }
       setChatConfigFeedback('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setChatConfigFeedback('Config update failed');
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setChatConfigFeedback('Config update failed: ' + message);
     } finally {
       setChatConfigUpdatingKey(prev => (prev === updatingKey ? '' : prev));
     }
@@ -2964,11 +2980,15 @@ function App() {
         const sessionId = message.sessionId;
         setChatSessions(prev => {
           const existing = prev.find(item => item.sessionId === sessionId);
+          const fallbackTitle =
+            message.role === 'user' && message.text
+              ? message.text.slice(0, 120)
+              : existing?.title || sessionId;
           return mergeChatSession(prev, {
             sessionId,
-            title: existing?.title || sessionId,
+            title: fallbackTitle,
             preview: message.text || existing?.preview || '',
-            updatedAt: message.updatedAt || new Date().toISOString(),
+            updatedAt: existing?.updatedAt || '',
             messageCount: existing?.messageCount ?? 0,
             unreadCount: existing?.unreadCount,
             agentType: existing?.agentType,
@@ -4808,4 +4828,5 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
