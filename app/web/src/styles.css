@@ -571,6 +571,16 @@ body,
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.chat-session-swipe-row.open .chat-session-delete-action {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .chat-session-delete-action:disabled {
@@ -581,6 +591,7 @@ body,
 .chat-session-item {
   position: relative;
   z-index: 1;
+  width: 100%;
   align-items: flex-start;
   min-height: 34px;
   padding-top: 5px;
@@ -722,6 +733,10 @@ body,
   justify-content: center;
   gap: 4px;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
 .git-section-btn:hover {
@@ -824,6 +839,10 @@ body,
   gap: 6px;
   padding: 0 8px;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
 .git-branch-picker-item:hover {
@@ -1606,6 +1625,7 @@ body,
 .file-pin-floating {
   position: static;
   z-index: 1;
+  width: 100%;
 }
 
 .chat-block {
@@ -1870,6 +1890,10 @@ body,
   font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(10px);
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
 .chat-config-select:hover {
@@ -2358,4 +2382,6 @@ body,
     transform: translateX(0);
   }
 }
+
+
 

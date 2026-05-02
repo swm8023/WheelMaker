@@ -3324,7 +3324,7 @@ function App() {
               <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
                 <div className="chat-session-group-title">{group.label}</div>
                 {group.sessions.map(session => (
-                  <div key={session.sessionId} className="chat-session-swipe-row">
+                  <div key={session.sessionId} className={`chat-session-swipe-row ${chatSwipeOpenSessionId === session.sessionId || chatSwipeDraggingSessionId === session.sessionId ? 'open' : ''}`}> 
                     <button
                       type="button"
                       className="chat-session-delete-action"
@@ -4996,6 +4996,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
 
 
 
