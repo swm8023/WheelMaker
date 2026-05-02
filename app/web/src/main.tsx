@@ -1607,6 +1607,7 @@ function App() {
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatComposerActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -1631,6 +1632,7 @@ function App() {
   const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
     null,
   );
+  const [chatComposerActionMenuOpen, setChatComposerActionMenuOpen] = useState(false);
   const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
   const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
 
@@ -1810,6 +1812,17 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [gitBranchPickerOpen, isWide]);
+
+  useEffect(() => {
+    if (!chatComposerActionMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && chatComposerActionMenuRef.current?.contains(target)) return;
+      setChatComposerActionMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [chatComposerActionMenuOpen]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -4443,14 +4456,6 @@ function App() {
               <div className="chat-attachment-pill">{chatAttachment.name}</div>
             ) : null}
             <div className="chat-composer-main">
-              <button
-                type="button"
-                className="chat-action-button"
-                title="Voice input"
-                aria-label="Voice input"
-              >
-                <span className="codicon codicon-mic" />
-              </button>
               <textarea
                 ref={chatComposerTextareaRef}
                 rows={1}
@@ -4459,15 +4464,53 @@ function App() {
                 onChange={event => setChatComposerText(event.target.value)}
                 placeholder="Send a message..."
               />
-              <button
-                type="button"
-                className="chat-action-button"
-                onClick={() => chatFileInputRef.current?.click()}
-                title="Upload image"
-                aria-label="Upload image"
+              <div
+                ref={chatComposerActionMenuRef}
+                className={`chat-action-menu${chatComposerActionMenuOpen ? ' open' : ''}`}
               >
-                <span className="codicon codicon-device-camera" />
-              </button>
+                <button
+                  type="button"
+                  className="chat-action-button chat-action-menu-toggle"
+                  onClick={() =>
+                    setChatComposerActionMenuOpen(prevOpen => !prevOpen)
+                  }
+                  title="Media actions"
+                  aria-label="Media actions"
+                  aria-haspopup="menu"
+                  aria-expanded={chatComposerActionMenuOpen}
+                >
+                  <span className="codicon codicon-device-camera" />
+                  <span className="codicon codicon-chevron-down chat-action-menu-chevron" />
+                </button>
+                {chatComposerActionMenuOpen ? (
+                  <div className="chat-action-menu-panel" role="menu">
+                    <button
+                      type="button"
+                      className="chat-action-menu-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setChatComposerActionMenuOpen(false);
+                        setError('Voice input is not available yet.');
+                      }}
+                    >
+                      <span className="codicon codicon-mic" />
+                      <span>Voice</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="chat-action-menu-item"
+                      role="menuitem"
+                      onClick={() => {
+                        setChatComposerActionMenuOpen(false);
+                        chatFileInputRef.current?.click();
+                      }}
+                    >
+                      <span className="codicon codicon-file-media" />
+                      <span>Photo Library</span>
+                    </button>
+                  </div>
+                ) : null}
+              </div>
               <button
                 type="button"
                 className="chat-send-button"
@@ -5023,13 +5066,3 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
-
-
-
-
-
-
-
-
