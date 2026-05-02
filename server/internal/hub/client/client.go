@@ -609,7 +609,34 @@ func (c *Client) sessionConfigOptions(ctx context.Context, sessionID string) []a
 	if err != nil {
 		return nil
 	}
-	return sess.CurrentConfigOptions()
+	options := sess.CurrentConfigOptions()
+	if len(options) > 0 {
+		return options
+	}
+
+	sess.mu.Lock()
+	agentType := strings.TrimSpace(sess.agentType)
+	sess.mu.Unlock()
+	if agentType == "" {
+		return options
+	}
+
+	preference := loadProjectAgentPreferenceState(c.store, c.projectName, agentType)
+	if len(preference.ConfigOptions) == 0 {
+		return options
+	}
+	fallback := make([]acp.ConfigOption, 0, len(preference.ConfigOptions))
+	for _, pref := range preference.ConfigOptions {
+		id := strings.TrimSpace(pref.ID)
+		if id == "" {
+			continue
+		}
+		fallback = append(fallback, acp.ConfigOption{
+			ID:           id,
+			CurrentValue: strings.TrimSpace(pref.CurrentValue),
+		})
+	}
+	return fallback
 }
 
 func (c *Client) HandleIMPrompt(ctx context.Context, source im.ChatRef, params acp.SessionPromptParams) error {
