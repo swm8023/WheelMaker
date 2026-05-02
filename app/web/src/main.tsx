@@ -203,6 +203,7 @@ const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
+const CHAT_SWIPE_DELETE_WIDTH = 78;
 let mermaidRenderSequence = 0;
 
 function nextMermaidRenderId(): string {
@@ -1556,11 +1557,18 @@ function App() {
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const newChatFlowGuardRef = useRef(false);
+  const chatSwipeSessionIdRef = useRef('');
+  const chatSwipeStartXRef = useRef(0);
+  const chatSwipeSuppressClickRef = useRef(false);
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [selectedChatId, setSelectedChatId] = useState('');
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
+  const [chatDeletingSessionId, setChatDeletingSessionId] = useState('');
+  const [chatSwipeOpenSessionId, setChatSwipeOpenSessionId] = useState('');
+  const [chatSwipeDraggingSessionId, setChatSwipeDraggingSessionId] = useState('');
+  const [chatSwipeDraggingOffset, setChatSwipeDraggingOffset] = useState(0);
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatConfigFeedback, setChatConfigFeedback] = useState('');
   const [chatComposerText, setChatComposerText] = useState('');
@@ -1638,6 +1646,22 @@ function App() {
     }
     loadChatSessions(projectIdRef.current).catch(() => undefined);
   }, [tab, connected]);
+
+
+  useEffect(() => {
+    if (!chatSwipeOpenSessionId) {
+      return;
+    }
+    const stillExists = chatSessions.some(
+      session => session.sessionId === chatSwipeOpenSessionId,
+    );
+    if (stillExists) {
+      return;
+    }
+    setChatSwipeOpenSessionId('');
+    setChatSwipeDraggingSessionId('');
+    setChatSwipeDraggingOffset(0);
+  }, [chatSessions, chatSwipeOpenSessionId]);
 
 
   useEffect(() => {
@@ -2519,6 +2543,126 @@ function App() {
     }
   };
 
+  const removeChatSessionFromState = (sessionId: string) => {
+    if (!sessionId) return;
+    setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
+    if (chatSelectedIdRef.current === sessionId) {
+      setSelectedChatId('');
+      chatSelectedIdRef.current = '';
+      setChatMessages([]);
+    }
+    if (chatSwipeOpenSessionId === sessionId) {
+      setChatSwipeOpenSessionId('');
+      setChatSwipeDraggingSessionId('');
+      setChatSwipeDraggingOffset(0);
+    }
+    const nextMessageStore = {...chatMessageStoreRef.current};
+    const nextSyncIndex = {...chatSyncIndexRef.current};
+    const nextSyncSubIndex = {...chatSyncSubIndexRef.current};
+    delete nextMessageStore[sessionId];
+    delete nextSyncIndex[sessionId];
+    delete nextSyncSubIndex[sessionId];
+    chatMessageStoreRef.current = nextMessageStore;
+    chatSyncIndexRef.current = nextSyncIndex;
+    chatSyncSubIndexRef.current = nextSyncSubIndex;
+  };
+
+  const handleDeleteChatSession = async (sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId || chatDeletingSessionId) {
+      return;
+    }
+    setChatDeletingSessionId(normalizedSessionId);
+    try {
+      const result = await service.deleteSession(normalizedSessionId);
+      if (!result.ok) {
+        throw new Error('session.delete returned ok=false');
+      }
+      removeChatSessionFromState(result.sessionId || normalizedSessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatDeletingSessionId('');
+    }
+  };
+
+  const resolveChatSessionSwipeOffset = (sessionId: string): number => {
+    if (chatSwipeDraggingSessionId === sessionId) {
+      return chatSwipeDraggingOffset;
+    }
+    return chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_DELETE_WIDTH : 0;
+  };
+
+  const beginChatSessionSwipe = (event: React.TouchEvent<HTMLDivElement>, sessionId: string) => {
+    if (event.touches.length !== 1) {
+      return;
+    }
+    chatSwipeSessionIdRef.current = sessionId;
+    chatSwipeStartXRef.current = event.touches[0].clientX;
+    chatSwipeSuppressClickRef.current = false;
+    setChatSwipeDraggingSessionId(sessionId);
+    setChatSwipeDraggingOffset(
+      chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_DELETE_WIDTH : 0,
+    );
+  };
+
+  const moveChatSessionSwipe = (event: React.TouchEvent<HTMLDivElement>, sessionId: string) => {
+    if (chatSwipeSessionIdRef.current !== sessionId || event.touches.length !== 1) {
+      return;
+    }
+    const startX = chatSwipeStartXRef.current;
+    const currentX = event.touches[0].clientX;
+    const deltaX = currentX - startX;
+    if (Math.abs(deltaX) > 6) {
+      chatSwipeSuppressClickRef.current = true;
+    }
+    const anchoredDelta =
+      chatSwipeOpenSessionId === sessionId
+        ? deltaX - CHAT_SWIPE_DELETE_WIDTH
+        : deltaX;
+    const nextOffset = Math.max(
+      -CHAT_SWIPE_DELETE_WIDTH,
+      Math.min(0, anchoredDelta),
+    );
+    setChatSwipeDraggingOffset(nextOffset);
+  };
+
+  const endChatSessionSwipe = (sessionId: string) => {
+    if (chatSwipeSessionIdRef.current !== sessionId) {
+      return;
+    }
+    const shouldOpen = chatSwipeDraggingOffset <= -(CHAT_SWIPE_DELETE_WIDTH / 2);
+    setChatSwipeOpenSessionId(shouldOpen ? sessionId : '');
+    setChatSwipeDraggingSessionId('');
+    setChatSwipeDraggingOffset(0);
+    chatSwipeSessionIdRef.current = '';
+  };
+
+  const selectChatSession = (sessionId: string) => {
+    if (!sessionId) {
+      return;
+    }
+    if (chatSwipeSuppressClickRef.current) {
+      chatSwipeSuppressClickRef.current = false;
+      return;
+    }
+    if (chatSwipeOpenSessionId) {
+      if (chatSwipeOpenSessionId === sessionId) {
+        setChatSwipeOpenSessionId('');
+        return;
+      }
+      setChatSwipeOpenSessionId('');
+    }
+    chatSelectedIdRef.current = sessionId;
+    setSelectedChatId(sessionId);
+    setChatMessages(chatMessageStoreRef.current[sessionId] ?? []);
+    loadChatSession(sessionId, projectIdRef.current, {
+      incremental: true,
+    }).catch(() => undefined);
+    if (!isWide) setDrawerOpen(false);
+  };
+
+
   const sendChatMessage = async () => {
     const trimmedText = chatComposerText.trim();
     if (!trimmedText && !chatAttachment) return;
@@ -3180,30 +3324,53 @@ function App() {
               <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
                 <div className="chat-session-group-title">{group.label}</div>
                 {group.sessions.map(session => (
-                  <div
-                    key={session.sessionId}
-                    className={`item chat-session-item ${
-                      selectedChatId === session.sessionId ? 'selected' : ''
-                    }`}
-                    onClick={() => {
-                      chatSelectedIdRef.current = session.sessionId;
-                      setSelectedChatId(session.sessionId);
-                      setChatMessages(chatMessageStoreRef.current[session.sessionId] ?? []);
-                      loadChatSession(session.sessionId, projectIdRef.current, {
-                        incremental: true,
-                      }).catch(() => undefined);
-                      if (!isWide) setDrawerOpen(false);
-                    }}
-                  >
-                    <span className="file-dot codicon codicon-comment-discussion" />
-                    <span className="label chat-session-meta">
-                      <span className="chat-session-title">
-                        {session.title || session.sessionId}
+                  <div key={session.sessionId} className="chat-session-swipe-row">
+                    <button
+                      type="button"
+                      className="chat-session-delete-action"
+                      disabled={chatDeletingSessionId === session.sessionId}
+                      onClick={event => {
+                        event.stopPropagation();
+                        handleDeleteChatSession(session.sessionId).catch(() => undefined);
+                      }}
+                    >
+                      {chatDeletingSessionId === session.sessionId ? '...' : 'Delete'}
+                    </button>
+                    <div
+                      className={`item chat-session-item ${
+                        selectedChatId === session.sessionId ? 'selected' : ''
+                      } ${
+                        chatSwipeDraggingSessionId === session.sessionId ? 'swiping' : ''
+                      }`}
+                      style={{
+                        transform: `translateX(${resolveChatSessionSwipeOffset(session.sessionId)}px)`
+                      }}
+                      onClick={() => {
+                        selectChatSession(session.sessionId);
+                      }}
+                      onTouchStart={event => {
+                        beginChatSessionSwipe(event, session.sessionId);
+                      }}
+                      onTouchMove={event => {
+                        moveChatSessionSwipe(event, session.sessionId);
+                      }}
+                      onTouchEnd={() => {
+                        endChatSessionSwipe(session.sessionId);
+                      }}
+                      onTouchCancel={() => {
+                        endChatSessionSwipe(session.sessionId);
+                      }}
+                    >
+                      <span className="file-dot codicon codicon-comment-discussion" />
+                      <span className="label chat-session-meta">
+                        <span className="chat-session-title">
+                          {session.title || session.sessionId}
+                        </span>
+                        <span className="chat-session-updated muted" title={session.updatedAt || ''}>
+                          {formatCompactRelativeAge(session.updatedAt)}
+                        </span>
                       </span>
-                      <span className="chat-session-updated muted" title={session.updatedAt || ''}>
-                        {formatCompactRelativeAge(session.updatedAt)}
-                      </span>
-                    </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -4829,5 +4996,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
 

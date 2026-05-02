@@ -623,6 +623,42 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		t.Fatalf("unexpected session.setConfig response: %#v", setConfigResp)
 	}
 
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 4,
+		Type:      "request",
+		Method:    "session.delete",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+		},
+	})
+
+	forwardedDelete := mustReadEnvelope(t, hub)
+	if forwardedDelete.Method != "session.delete" {
+		t.Fatalf("forwarded.method=%q, want session.delete", forwardedDelete.Method)
+	}
+	if forwardedDelete.ProjectID != "hub-a:server" {
+		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwardedDelete.ProjectID)
+	}
+	forwardDeletePayload := forwardedDelete.Payload
+	if forwardDeletePayload["sessionId"] != "sess-1" {
+		t.Fatalf("forwarded delete payload=%v", forwardDeletePayload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwardedDelete.RequestID,
+		Type:      "response",
+		Method:    "session.delete",
+		ProjectID: forwardedDelete.ProjectID,
+		Payload: map[string]any{
+			"ok": true,
+		},
+	})
+	deleteResp := mustReadEnvelope(t, client)
+	if deleteResp.Type != "response" || deleteResp.Method != "session.delete" {
+		t.Fatalf("unexpected session.delete response: %#v", deleteResp)
+	}
+
 }
 
 func TestConnectInitMonitorRole(t *testing.T) {

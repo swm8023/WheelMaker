@@ -1,7 +1,10 @@
 # SessionRecorder `RecordEvent` 流程梳理
 
-更新时间：2026-04-24  
+更新时间：2026-04-24
 状态：Draft
+**类别：内部实现分析**（非对外协议文档）
+
+> 本文档描述 Go 服务端内部实现逻辑。对外协议契约参见 [app-chat-recorder-sync-protocol.zh-CN.md](./app-chat-recorder-sync-protocol.zh-CN.md) 和 [registry-protocol.md](./registry-protocol.md)。
 
 ## 1. 范围
 

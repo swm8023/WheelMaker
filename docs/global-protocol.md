@@ -145,3 +145,10 @@ Code placement:
 - `server/internal/protocol/global.go`: envelope and `kind` definitions.
 - `server/internal/protocol/registry.go`: existing registry payload contracts.
 - Future protocol changes should update this document first, then code.
+
+## 11. Related Documents
+
+- [registry-protocol.md](./registry-protocol.md) — Full Registry Protocol 2.2 specification
+- [app-chat-recorder-sync-protocol.md](./app-chat-recorder-sync-protocol.md) — App Chat protocol (session.* APIs, realtime events, message decode, sync model)
+- [session-recorder-record-event.md](./session-recorder-record-event.md) — Internal implementation analysis of SessionRecorder
+- [session-persistence-sqlite.md](./session-persistence-sqlite.md) — SQLite session persistence schema

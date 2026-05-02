@@ -561,6 +561,17 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			"sessionId":     sess.acpSessionID,
 			"configOptions": options,
 		}, nil
+	case "session.delete":
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.delete payload: %w", err)
+		}
+		if err := c.DeleteSession(ctx, req.SessionID); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
 	case "session.send":
 		var req struct {
 			SessionID string             `json:"sessionId"`
@@ -1239,6 +1250,46 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		return left.After(right)
 	})
 	return entries, nil
+}
+
+func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+
+	c.mu.Lock()
+	sess := c.sessions[sessionID]
+	for routeKey, mappedSessionID := range c.routeMap {
+		if strings.TrimSpace(mappedSessionID) == sessionID {
+			delete(c.routeMap, routeKey)
+		}
+	}
+	delete(c.sessions, sessionID)
+	store := c.store
+	c.mu.Unlock()
+
+	if sess != nil {
+		sess.mu.Lock()
+		inst := sess.instance
+		sess.instance = nil
+		sess.ready = false
+		sess.initializing = false
+		sess.Status = SessionSuspended
+		sess.mu.Unlock()
+		if inst != nil {
+			_ = inst.Close()
+		}
+	}
+	if c.sessionRecorder != nil {
+		c.sessionRecorder.RemovePromptState(sessionID)
+	}
+	if store != nil {
+		if err := store.DeleteSession(ctx, c.projectName, sessionID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Client) clientListSessions() ([]SessionRecord, error) {

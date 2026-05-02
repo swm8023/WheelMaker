@@ -1339,7 +1339,15 @@ Registry 即将关闭客户端连接时提前通知：
 4. **客户端**：按 pull-only 做可见范围增量刷新；实现 conditional GET。
 5. **可观测性**：补齐 hash 命中率、Git 刷新耗时、工作区变更推送频率等指标。
 
-## 10. 版本历史
+## 10. 相关文档
+
+- [app-chat-recorder-sync-protocol.zh-CN.md](./app-chat-recorder-sync-protocol.zh-CN.md) — App Chat 协议（session.* 族方法、实时事件、消息解码、同步模型）
+- [session-recorder-record-event.md](./session-recorder-record-event.md) — SessionRecorder 内部实现分析
+- [global-protocol.md](./global-protocol.md) — Global Protocol 封装设计
+- [session-persistence-sqlite.md](./session-persistence-sqlite.md) — SQLite 会话持久化 schema
+- [architecture-3.0.md](./architecture-3.0.md) — 架构设计 3.0
+
+## 11. 版本历史
 
 ### 2.2 相比 2.1 的变更
 

@@ -569,13 +569,52 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 }
 
 func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID string) error {
-	_, err := s.db.ExecContext(ctx, `
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	projectName = strings.TrimSpace(projectName)
+	sessionID = strings.TrimSpace(sessionID)
+	if projectName == "" {
+		return fmt.Errorf("project name is required")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete session tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM session_prompts
+		WHERE session_id IN (
+			SELECT id FROM sessions WHERE project_name = ? AND id = ?
+		)
+	`, projectName, sessionID); err != nil {
+		return fmt.Errorf("delete session prompts: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM route_bindings
+		WHERE project_name = ? AND session_id = ?
+	`, projectName, sessionID); err != nil {
+		return fmt.Errorf("delete session route bindings: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM sessions
 		WHERE project_name = ? AND id = ?
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
-	if err != nil {
+	`, projectName, sessionID); err != nil {
 		return fmt.Errorf("delete session: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete session: %w", err)
+	}
+	tx = nil
 	return nil
 }
 

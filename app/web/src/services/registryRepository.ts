@@ -657,6 +657,20 @@ export class RegistryRepository {
     };
   }
 
+  async deleteSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    const resp = await this.client.request({
+      method: 'session.delete',
+      projectId,
+      payload: {sessionId},
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string};
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? sessionId,
+    };
+  }
+
   async setSessionConfig(
     projectId: string,
     payload: {sessionId: string; configId: string; value: string},

@@ -3965,6 +3965,95 @@ func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
 	}
 }
 
+func TestHandleSessionRequestSessionDeleteRemovesSessionAndPrompts(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	addRuntimeSession(c, "sess-1", "Delete Target", "claude", now, now)
+	c.mu.Lock()
+	c.routeMap["im:app:chat-1"] = "sess-1"
+	c.mu.Unlock()
+
+	c.sessionRecorder.writeMu.Lock()
+	c.sessionRecorder.promptState["sess-1"] = &sessionPromptState{promptIndex: 9, nextTurnIndex: 2}
+	c.sessionRecorder.writeMu.Unlock()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Delete Target")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	storedPrompt, err := c.store.LoadSessionPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("LoadSessionPrompt before delete: %v", err)
+	}
+	if storedPrompt == nil {
+		t.Fatal("expected stored prompt before delete")
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(`{"sessionId":"  sess-1  "}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.delete): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("session.delete response type = %T, want map[string]any", resp)
+	}
+	if body["ok"] != true || body["sessionId"] != "sess-1" {
+		t.Fatalf("unexpected session.delete response body: %#v", body)
+	}
+
+	c.mu.Lock()
+	_, inMemory := c.sessions["sess-1"]
+	_, routeMapped := c.routeMap["im:app:chat-1"]
+	c.mu.Unlock()
+	if inMemory {
+		t.Fatal("session still present in memory after delete")
+	}
+	if routeMapped {
+		t.Fatal("route binding still present after delete")
+	}
+
+	c.sessionRecorder.writeMu.Lock()
+	_, hasPromptState := c.sessionRecorder.promptState["sess-1"]
+	c.sessionRecorder.writeMu.Unlock()
+	if hasPromptState {
+		t.Fatal("prompt state still present after delete")
+	}
+
+	storedSession, err := c.store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession after delete: %v", err)
+	}
+	if storedSession != nil {
+		t.Fatalf("stored session still exists after delete: %+v", storedSession)
+	}
+
+	storedPrompts, err := c.store.ListSessionPrompts(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("ListSessionPrompts after delete: %v", err)
+	}
+	if len(storedPrompts) != 0 {
+		t.Fatalf("stored prompts len = %d, want 0", len(storedPrompts))
+	}
+
+	if _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0); err == nil || !strings.Contains(err.Error(), "session not found") {
+		t.Fatalf("ReadSessionPrompts err = %v, want session not found", err)
+	}
+}
+
 func TestHandleSessionRequest_SessionNewRequiresAgentType(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {

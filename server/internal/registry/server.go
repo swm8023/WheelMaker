@@ -280,7 +280,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case "monitor.status", "monitor.log", "monitor.db", "monitor.action":
 			s.handleMonitorForwardRequest(state.peer, state, in)
 		case "chat.send",
-			"session.list", "session.read", "session.new", "session.send", "session.markRead", "session.setConfig",
+			"session.list", "session.read", "session.new", "session.send", "session.markRead", "session.setConfig", "session.delete",
 			"fs.list", "fs.info", "fs.read", "fs.search", "fs.grep",
 			"git.refs", "git.log", "git.commit.files", "git.commit.fileDiff",
 			"git.diff", "git.diff.fileDiff", "git.status", "git.workingTree.fileDiff":

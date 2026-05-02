@@ -122,6 +122,19 @@ func (r *SessionRecorder) ResetPromptState() {
 	r.writeMu.Unlock()
 }
 
+func (r *SessionRecorder) RemovePromptState(sessionID string) {
+	if r == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	r.writeMu.Lock()
+	delete(r.promptState, sessionID)
+	r.writeMu.Unlock()
+}
+
 func (r *SessionRecorder) SetEventPublisher(publish func(method string, payload any) error) {
 	r.mu.Lock()
 	r.publish = publish
@@ -781,4 +794,3 @@ func mustJSONRaw(value any) json.RawMessage {
 	}
 	return json.RawMessage(raw)
 }
-
