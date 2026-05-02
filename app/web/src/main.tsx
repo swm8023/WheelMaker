@@ -204,6 +204,8 @@ const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
 const CHAT_SWIPE_DELETE_WIDTH = 78;
+const CHAT_SWIPE_REVEAL_THRESHOLD = 20;
+const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 let mermaidRenderSequence = 0;
 
 function nextMermaidRenderId(): string {
@@ -2671,6 +2673,16 @@ function App() {
     return chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_DELETE_WIDTH : 0;
   };
 
+
+  const isChatSessionSwipeOpen = (sessionId: string): boolean => {
+    if (chatSwipeOpenSessionId === sessionId) {
+      return true;
+    }
+    if (chatSwipeDraggingSessionId !== sessionId) {
+      return false;
+    }
+    return chatSwipeDraggingOffset <= -CHAT_SWIPE_REVEAL_THRESHOLD;
+  };
   const beginChatSessionSwipe = (event: React.TouchEvent<HTMLDivElement>, sessionId: string) => {
     if (event.touches.length !== 1) {
       return;
@@ -2709,7 +2721,7 @@ function App() {
     if (chatSwipeSessionIdRef.current !== sessionId) {
       return;
     }
-    const shouldOpen = chatSwipeDraggingOffset <= -(CHAT_SWIPE_DELETE_WIDTH / 2);
+    const shouldOpen = chatSwipeDraggingOffset <= -CHAT_SWIPE_OPEN_THRESHOLD;
     setChatSwipeOpenSessionId(shouldOpen ? sessionId : '');
     setChatSwipeDraggingSessionId('');
     setChatSwipeDraggingOffset(0);
@@ -3402,7 +3414,7 @@ function App() {
               <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
                 <div className="chat-session-group-title">{group.label}</div>
                 {group.sessions.map(session => (
-                  <div key={session.sessionId} className={`chat-session-swipe-row ${chatSwipeOpenSessionId === session.sessionId || chatSwipeDraggingSessionId === session.sessionId ? 'open' : ''}`}> 
+                  <div key={session.sessionId} className={`chat-session-swipe-row ${isChatSessionSwipeOpen(session.sessionId) ? 'open' : ''}`}> 
                     <button
                       type="button"
                       className="chat-session-delete-action"
