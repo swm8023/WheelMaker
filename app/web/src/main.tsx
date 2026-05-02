@@ -2628,6 +2628,15 @@ function App() {
     if (!normalizedSessionId || chatDeletingSessionId) {
       return;
     }
+
+    const confirmed = window.confirm(
+      'Delete this session and all related prompts? This action cannot be undone.',
+    );
+    if (!confirmed) {
+      setChatSwipeOpenSessionId('');
+      return;
+    }
+
     setChatDeletingSessionId(normalizedSessionId);
     try {
       const result = await service.deleteSession(normalizedSessionId);
