@@ -786,10 +786,6 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 	}
 
 	state := cloneSessionAgentState(&s.agentState)
-	title := ""
-	if state != nil {
-		title = strings.TrimSpace(state.Title)
-	}
 
 	agentJSON := "{}"
 	if state != nil {
@@ -801,12 +797,14 @@ func (s *Session) toRecord() (*SessionRecord, error) {
 	}
 
 	return &SessionRecord{
-		ID:           s.acpSessionID,
-		ProjectName:  s.projectName,
-		Status:       s.Status,
-		AgentType:    s.agentType,
-		AgentJSON:    agentJSON,
-		Title:        title,
+		ID:          s.acpSessionID,
+		ProjectName: s.projectName,
+		Status:      s.Status,
+		AgentType:   s.agentType,
+		AgentJSON:   agentJSON,
+		// Session title is owned by SessionRecorder projection (latest prompt title).
+		// Keep snapshot writes title-neutral so runtime state does not overwrite recorder title.
+		Title:        "",
 		CreatedAt:    s.createdAt,
 		LastActiveAt: s.lastActiveAt,
 	}, nil

@@ -2947,6 +2947,54 @@ func TestSessionViewListIncludesProjectionFields(t *testing.T) {
 	}
 }
 
+func TestSessionViewPersistSessionDoesNotOverrideLatestPromptTitle(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	addRuntimeSession(c, "sess-1", "Runtime Title", "claude", now.Add(-2*time.Minute), now)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Created Title")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "latest prompt title", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	sessionsBefore, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("listSessionViews before persist: %v", err)
+	}
+	if len(sessionsBefore) != 1 {
+		t.Fatalf("sessionsBefore len = %d, want 1", len(sessionsBefore))
+	}
+	if sessionsBefore[0].Title != "latest prompt title" {
+		t.Fatalf("sessionsBefore[0].Title = %q, want %q", sessionsBefore[0].Title, "latest prompt title")
+	}
+
+	sess, err := c.SessionByID(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("SessionByID: %v", err)
+	}
+	sess.mu.Lock()
+	sess.agentState.Title = "Stale Runtime Title"
+	sess.mu.Unlock()
+	if err := sess.persistSession(ctx); err != nil {
+		t.Fatalf("persistSession: %v", err)
+	}
+
+	sessionsAfter, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("listSessionViews after persist: %v", err)
+	}
+	if len(sessionsAfter) != 1 {
+		t.Fatalf("sessionsAfter len = %d, want 1", len(sessionsAfter))
+	}
+	if sessionsAfter[0].Title != "latest prompt title" {
+		t.Fatalf("sessionsAfter[0].Title = %q, want %q", sessionsAfter[0].Title, "latest prompt title")
+	}
+}
+
 func TestSessionViewListIncludesRuntimeClientSessions(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
