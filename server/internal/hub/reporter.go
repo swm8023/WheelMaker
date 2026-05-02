@@ -310,7 +310,7 @@ func (r *Reporter) handleRegistryRequest(conn *websocket.Conn, in envelope) {
 	switch in.Method {
 	case "chat.send":
 		r.replyChat(conn, in)
-	case "session.list", "session.read", "session.new", "session.send", "session.markRead":
+	case "session.list", "session.read", "session.new", "session.send", "session.markRead", "session.setConfig":
 		r.replySession(conn, in)
 	case "monitor.status":
 		r.replyMonitorStatus(conn, in)

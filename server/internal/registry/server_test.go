@@ -585,6 +585,44 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		t.Fatalf("unexpected session.send response: %#v", sendResp)
 	}
 
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 3,
+		Type:      "request",
+		Method:    "session.setConfig",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+			"configId":  "model",
+			"value":     "gpt-5",
+		},
+	})
+
+	forwardedConfig := mustReadEnvelope(t, hub)
+	if forwardedConfig.Method != "session.setConfig" {
+		t.Fatalf("forwarded.method=%q, want session.setConfig", forwardedConfig.Method)
+	}
+	if forwardedConfig.ProjectID != "hub-a:server" {
+		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwardedConfig.ProjectID)
+	}
+	forwardConfigPayload := forwardedConfig.Payload
+	if forwardConfigPayload["sessionId"] != "sess-1" || forwardConfigPayload["configId"] != "model" || forwardConfigPayload["value"] != "gpt-5" {
+		t.Fatalf("forwarded config payload=%v", forwardConfigPayload)
+	}
+
+	mustWriteJSON(t, hub, testEnvelope{
+		RequestID: forwardedConfig.RequestID,
+		Type:      "response",
+		Method:    "session.setConfig",
+		ProjectID: forwardedConfig.ProjectID,
+		Payload: map[string]any{
+			"ok": true,
+		},
+	})
+	setConfigResp := mustReadEnvelope(t, client)
+	if setConfigResp.Type != "response" || setConfigResp.Method != "session.setConfig" {
+		t.Fatalf("unexpected session.setConfig response: %#v", setConfigResp)
+	}
+
 }
 
 func TestConnectInitMonitorRole(t *testing.T) {
