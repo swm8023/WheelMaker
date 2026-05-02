@@ -1540,6 +1540,7 @@ function App() {
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
+  const newChatFlowGuardRef = useRef(false);
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [selectedChatId, setSelectedChatId] = useState('');
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
@@ -1796,10 +1797,8 @@ function App() {
       append(item);
     }
     append(project?.agent);
-    if (agents.length === 0) {
-      for (const session of chatSessions) {
-        append(session.agentType);
-      }
+    for (const session of chatSessions) {
+      append(session.agentType);
     }
     return agents;
   }, [project?.agents, project?.agent, chatSessions]);
@@ -2477,25 +2476,32 @@ function App() {
   };
 
   const completeNewChatFlow = async (agentType: string) => {
+    if (newChatFlowGuardRef.current) {
+      return;
+    }
     const draft = pendingNewChatDraft;
     if (!draft) {
       return;
     }
-    const sessionId = await createChatSession(agentType, draft.title);
-    setNewChatAgentPickerOpen(false);
-    setPendingNewChatDraft(null);
-    if (!sessionId) {
-      return;
+    newChatFlowGuardRef.current = true;
+    try {
+      const sessionId = await createChatSession(agentType, draft.title);
+      setNewChatAgentPickerOpen(false);
+      setPendingNewChatDraft(null);
+      if (!sessionId) {
+        return;
+      }
+      if (draft.text.trim() || draft.blocks.length > 0) {
+        await service.sendSessionMessage({
+          sessionId,
+          text: draft.text,
+          blocks: draft.blocks,
+        });
+      }
+      resetChatComposer();
+    } finally {
+      newChatFlowGuardRef.current = false;
     }
-    setSelectedChatId(sessionId);
-    if (draft.text.trim() || draft.blocks.length > 0) {
-      await service.sendSessionMessage({
-        sessionId,
-        text: draft.text,
-        blocks: draft.blocks,
-      });
-    }
-    resetChatComposer();
     if (!isWide) {
       setDrawerOpen(false);
     }
