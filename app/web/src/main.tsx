@@ -4451,25 +4451,23 @@ function App() {
                 />
               </button>
             </div>
-            {selectedChatSession?.configOptions?.some(
-              option => (option.options?.length ?? 0) > 0,
-            ) ? (
+            {(selectedChatSession?.configOptions?.length ?? 0) > 0 ? (
               <div className="chat-config-options">
-                {selectedChatSession.configOptions
-                  .filter(option => (option.options?.length ?? 0) > 0)
+                {(selectedChatSession?.configOptions ?? [])
                   .map(option => {
                     const optionValues = option.options ?? [];
                     const currentValue =
                       option.currentValue || optionValues[0]?.value || '';
+                    const hasChoices = optionValues.length > 0;
                     const updating =
                       chatConfigUpdatingKey ===
-                      `${selectedChatSession.sessionId}:${option.id}`;
+                      `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
                     return (
                       <div key={option.id} className="chat-config-item">
                         <select
                           className="chat-config-select"
                           value={currentValue}
-                          disabled={updating}
+                          disabled={updating || !hasChoices}
                           title={option.name || option.id}
                           aria-label={option.name || option.id}
                           onChange={event => {
@@ -4996,6 +4994,9 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
 
 
 
