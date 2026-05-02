@@ -1217,6 +1217,9 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		if strings.TrimSpace(storedEntry.Title) != "" {
 			entries[i].Title = storedEntry.Title
 		}
+		if !storedEntry.LastActiveAt.IsZero() {
+			entries[i].LastActiveAt = storedEntry.LastActiveAt
+		}
 	}
 	for _, s := range stored {
 		if memIDs[s.ID] {

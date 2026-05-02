@@ -944,6 +944,9 @@ func TestListSessions_InMemorySessionKeepsStoredProjectionMetadata(t *testing.T)
 	if entries[0].Title != "Persisted Title" {
 		t.Fatalf("entries[0].Title = %q, want %q", entries[0].Title, "Persisted Title")
 	}
+	if !entries[0].LastActiveAt.Equal(lastMessageAt) {
+		t.Fatalf("entries[0].LastActiveAt = %q, want %q", entries[0].LastActiveAt.Format(time.RFC3339), lastMessageAt.Format(time.RFC3339))
+	}
 	if entries[0].Status != SessionActive {
 		t.Fatalf("entries[0].Status = %v, want %v", entries[0].Status, SessionActive)
 	}
@@ -3294,13 +3297,14 @@ func TestSessionViewListPreservesStoredProjectionMetadataForRuntimeSessions(t *t
 		t.Fatalf("SaveSession: %v", err)
 	}
 
+	runtimeLastActiveAt := time.Now().UTC()
 	addRuntimeSession(
 		c,
 		"sess-runtime-1",
 		"Runtime Session",
 		"claude",
 		mustRFC3339Time(t, "2026-04-12T10:00:00Z"),
-		mustRFC3339Time(t, "2026-04-12T10:05:00Z"),
+		runtimeLastActiveAt,
 	)
 
 	sessions, err := c.listSessionViews(ctx)
