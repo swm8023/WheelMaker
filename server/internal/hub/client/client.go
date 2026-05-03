@@ -639,8 +639,21 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := c.store.DeleteSessionPrompts(ctx, c.projectName, req.SessionID); err != nil {
 			return nil, fmt.Errorf("delete session prompts: %w", err)
 		}
-		if err := reloadClaudeSessionPrompts(ctx, c.store, c.projectName, req.SessionID); err != nil {
-			return nil, fmt.Errorf("reload session prompts: %w", err)
+		sess, err := c.SessionByID(ctx, req.SessionID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve session: %w", err)
+		}
+		if err := sess.Suspend(ctx); err != nil {
+			return nil, fmt.Errorf("suspend session: %w", err)
+		}
+		records, err := sess.reloadHistory(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("reload session history: %w", err)
+		}
+		for _, rec := range records {
+			if err := c.store.UpsertSessionPrompt(ctx, rec); err != nil {
+				return nil, fmt.Errorf("save prompt record: %w", err)
+			}
 		}
 		return map[string]any{"ok": true, "sessionId": req.SessionID}, nil
 	case "session.setConfig":
