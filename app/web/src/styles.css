@@ -1914,10 +1914,14 @@ body,
   border-radius: 10px;
   background: var(--panel);
   color: var(--text);
-  padding: 7px 36px 7px 12px;
+  padding: 7px 12px;
   font: inherit;
   line-height: 1.45;
   resize: none;
+}
+
+.chat-composer-input.has-inline-action {
+  padding-right: 36px;
 }
 
 .chat-composer-input:focus {

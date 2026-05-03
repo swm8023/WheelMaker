@@ -4679,7 +4679,7 @@ function App() {
                 <textarea
                   ref={chatComposerTextareaRef}
                   rows={1}
-                  className="chat-composer-input"
+                  className={`chat-composer-input${chatComposerText.length === 0 ? ' has-inline-action' : ''}`}
                   value={chatComposerText}
                   onChange={event => setChatComposerText(event.target.value)}
                   placeholder="Send a message..."
