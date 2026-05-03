@@ -586,8 +586,8 @@ Recorder 路径发出的全部内容方法：
 
 前端为每个会话维护两个游标（存储在 `Ref` 中）：
 
-- `syncIndex`（= `promptIndex`）：当前最新的 prompt 序号。
-- `syncSubIndex`（= `turnIndex`）：当前 prompt 内最新的 turn 序号。
+- `promptIndex`：当前最新的 prompt 序号。
+- `turnIndex`：当前 prompt 内最新的 turn 序号。
 
 ### 7.2 更新逻辑
 
@@ -597,18 +597,14 @@ Recorder 路径发出的全部内容方法：
 ### 7.3 `RegistryChatMessage` 类型
 
 ```typescript
+// 与后端 IMTurnMessage 线格式完全一致。
+// role/kind/status/text/blocks 均为纯函数计算，不作为字段存储。
 interface RegistrySessionMessage {
-  messageId: string;      // "sessionId:promptIndex:turnIndex"
   sessionId: string;
-  syncIndex?: number;     // = promptIndex
-  syncSubIndex?: number;  // = turnIndex
-  role: 'user' | 'assistant' | 'system';
-  kind: 'text' | 'image' | 'thought' | 'tool' | 'prompt_result' | 'message';
-  text: string;
-  status: 'streaming' | 'done' | 'needs_action';
-  createdAt: string;
-  updatedAt: string;
-  blocks?: RegistrySessionContentBlock[];
+  promptIndex: number;
+  turnIndex: number;
+  method: string;                     // IMTurnMessage.method
+  param: Record<string, unknown>;     // IMTurnMessage.param
 }
 ```
 

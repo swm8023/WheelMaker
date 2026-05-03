@@ -92,125 +92,6 @@ export class RegistryRepository {
     };
   }
 
-  private normalizeSessionMessage(raw: unknown, fallbackSessionId: string): RegistrySessionMessage | null {
-    if (!raw || typeof raw !== 'object') {
-      return null;
-    }
-    const input = raw as Record<string, unknown>;
-    const messageId = typeof input.messageId === 'string' ? input.messageId : '';
-    if (!messageId) {
-      return null;
-    }
-    const sessionId = typeof input.sessionId === 'string'
-      ? input.sessionId
-      : (typeof input.chatId === 'string' ? input.chatId : fallbackSessionId);
-    const syncIndex = typeof input.syncIndex === 'number' && Number.isFinite(input.syncIndex)
-      ? input.syncIndex
-      : undefined;
-    const syncSubIndex = typeof input.syncSubIndex === 'number' && Number.isFinite(input.syncSubIndex)
-      ? input.syncSubIndex
-      : undefined;
-    const role = input.role === 'user' || input.role === 'assistant' || input.role === 'system'
-      ? input.role
-      : 'assistant';
-    const kind = input.kind === 'text' || input.kind === 'image' || input.kind === 'thought' || input.kind === 'tool' || input.kind === 'plan' || input.kind === 'prompt_result' || input.kind === 'message'
-      ? input.kind
-      : 'text';
-    const status = input.status === 'streaming' || input.status === 'done' || input.status === 'needs_action'
-      ? input.status
-      : 'done';
-    return {
-      messageId,
-      sessionId,
-      syncIndex,
-      syncSubIndex,
-      role,
-      kind,
-      text: typeof input.text === 'string' ? input.text : '',
-      status,
-      createdAt: typeof input.createdAt === 'string' ? input.createdAt : '',
-      updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
-      blocks: Array.isArray(input.blocks) ? input.blocks as RegistrySessionMessage['blocks'] : undefined,
-      planEntries: this.extractPlanEntriesFromIMParam(input.planEntries),
-    };
-  }
-
-  private extractPlanEntriesFromIMParam(param: unknown): NonNullable<RegistrySessionMessage['planEntries']> {
-    if (!Array.isArray(param)) {
-      return [];
-    }
-    return param
-      .map(item => {
-        if (!item || typeof item !== 'object') {
-          return null;
-        }
-        const entry = item as Record<string, unknown>;
-        const content = typeof entry.content === 'string' ? entry.content.trim() : '';
-        if (!content) {
-          return null;
-        }
-        const status = typeof entry.status === 'string' ? entry.status.trim() : '';
-        return status ? {content, status} : {content};
-      })
-      .filter((item): item is NonNullable<RegistrySessionMessage['planEntries']>[number] => !!item);
-  }
-  private normalizeSessionMessageStatus(value: unknown): RegistrySessionMessage['status'] {
-    return value === 'streaming' || value === 'done' || value === 'needs_action'
-      ? value
-      : 'done';
-  }
-
-  private extractTextFromACPContent(content: unknown): string {
-    if (typeof content === 'string') {
-      return content.trim();
-    }
-    if (!Array.isArray(content)) {
-      return '';
-    }
-    const chunks: string[] = [];
-    for (const item of content) {
-      if (!item || typeof item !== 'object') continue;
-      const entry = item as Record<string, unknown>;
-      if (typeof entry.text === 'string' && entry.text.trim()) {
-        chunks.push(entry.text.trim());
-      }
-    }
-    return chunks.join('\n').trim();
-  }
-
-  private extractTextFromIMParam(param: unknown): string {
-    if (typeof param === 'string') {
-      return param.trim();
-    }
-    if (Array.isArray(param)) {
-      const chunks = param
-        .map(item => {
-          if (!item || typeof item !== 'object') return '';
-          const entry = item as Record<string, unknown>;
-          return typeof entry.content === 'string' ? entry.content.trim() : '';
-        })
-        .filter(Boolean);
-      return chunks.join('\n').trim();
-    }
-    if (!param || typeof param !== 'object') {
-      return '';
-    }
-    const input = param as Record<string, unknown>;
-    if (typeof input.text === 'string') {
-      return input.text.trim();
-    }
-    if (typeof input.output === 'string') {
-      return input.output.trim();
-    }
-    if (typeof input.cmd === 'string') {
-      return input.cmd.trim();
-    }
-    if (Array.isArray(input.contentBlocks)) {
-      return this.extractTextFromACPContent(input.contentBlocks);
-    }
-    return '';
-  }
-
   private normalizeSessionWireMessage(raw: unknown, fallbackSessionId: string): RegistrySessionMessage | null {
     if (!raw || typeof raw !== 'object') {
       return null;
@@ -232,89 +113,26 @@ export class RegistryRepository {
       return null;
     }
     const content = typeof input.content === 'string' ? input.content.trim() : '';
-    const messageId = `${sessionId}:${promptIndex}:${turnIndex}`;
-    const now = new Date().toISOString();
-    const out: RegistrySessionMessage = {
-      messageId,
-      sessionId,
-      syncIndex: promptIndex,
-      syncSubIndex: turnIndex,
-      role: 'assistant',
-      kind: 'message',
-      text: '',
-      status: 'done',
-      createdAt: now,
-      updatedAt: now,
-    };
     if (content === '') {
-      return out;
+      return null;
     }
-
     try {
       const doc = JSON.parse(content) as Record<string, unknown>;
       const method = typeof doc.method === 'string' ? doc.method.trim() : '';
-      const paramDoc = (doc.param && typeof doc.param === 'object' && !Array.isArray(doc.param))
-        ? (doc.param as Record<string, unknown>)
-        : undefined;
-
-      if (method === 'prompt_request') {
-        const promptBlocks = Array.isArray(paramDoc?.contentBlocks) ? paramDoc.contentBlocks : [];
-        out.role = 'user';
-        out.kind = 'message';
-        out.text = this.extractTextFromACPContent(promptBlocks);
-        if (promptBlocks.length > 0) {
-          out.blocks = promptBlocks as RegistrySessionMessage['blocks'];
-        }
-      } else if (method === 'prompt_done') {
-        out.role = 'system';
-        out.kind = 'prompt_result';
-        out.text = typeof paramDoc?.stopReason === 'string' ? paramDoc.stopReason : '';
-      } else if (method === 'user_message_chunk') {
-        out.role = 'user';
-        out.kind = 'message';
-        out.text = this.extractTextFromIMParam(doc.param);
-        out.status = 'streaming';
-      } else if (method === 'agent_message_chunk') {
-        out.role = 'assistant';
-        out.kind = 'message';
-        out.text = this.extractTextFromIMParam(doc.param);
-        out.status = 'streaming';
-      } else if (method === 'agent_thought_chunk') {
-        out.role = 'assistant';
-        out.kind = 'thought';
-        out.text = this.extractTextFromIMParam(doc.param);
-        out.status = 'streaming';
-      } else if (method === 'tool_call') {
-        out.role = 'system';
-        out.kind = 'tool';
-        out.text = this.extractTextFromIMParam(doc.param);
-        if (typeof paramDoc?.status === 'string') {
-          const statusText = paramDoc.status.trim().toLowerCase();
-          if (statusText === 'streaming' || statusText === 'running' || statusText === 'in_progress') {
-            out.status = 'streaming';
-          } else if (statusText === 'needs_action' || statusText === 'need_action') {
-            out.status = 'needs_action';
-          } else {
-            out.status = 'done';
-          }
-        }
-      } else if (method === 'agent_plan') {
-        out.role = 'assistant';
-        out.kind = 'plan';
-        out.planEntries = this.extractPlanEntriesFromIMParam(doc.param);
-        out.text = out.planEntries.map(item => item.content).join('\n').trim();
-        out.status = 'streaming';
-      } else if (method === 'system') {
-        out.role = 'system';
-        out.kind = 'message';
-        out.text = this.extractTextFromIMParam(doc.param);
-      } else {
-        out.text = this.extractTextFromIMParam(doc.param);
-      }
+      const param =
+        doc.param != null && typeof doc.param === 'object' && !Array.isArray(doc.param)
+          ? (doc.param as Record<string, unknown>)
+          : {};
+      return { sessionId, promptIndex, turnIndex, method, param };
     } catch {
-      out.text = content;
+      return {
+        sessionId,
+        promptIndex,
+        turnIndex,
+        method: 'system',
+        param: { text: content },
+      };
     }
-    return out;
   }
 
   private derivePromptSnapshotsFromMessages(
@@ -323,16 +141,15 @@ export class RegistryRepository {
   ): RegistrySessionPromptSnapshot[] {
     const byPrompt = new Map<number, RegistrySessionPromptSnapshot>();
     for (const message of messages) {
-      const promptIndex = message.syncIndex ?? 0;
+      const promptIndex = message.promptIndex ?? 0;
       if (promptIndex <= 0) continue;
       const existing = byPrompt.get(promptIndex);
-      const turnIndex = message.syncSubIndex ?? 0;
+      const turnIndex = message.turnIndex ?? 0;
       if (!existing) {
         byPrompt.set(promptIndex, {
           sessionId,
           promptIndex,
           turnIndex,
-          content: [],
         });
         continue;
       }
@@ -370,6 +187,7 @@ export class RegistryRepository {
     });
     const payload = (resp.payload ?? {}) as {
       session?: unknown;
+      prompts?: unknown[];
       messages?: unknown[];
     };
     const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
@@ -384,14 +202,35 @@ export class RegistryRepository {
       .map(item => this.normalizeSessionWireMessage(item, normalizedSession.sessionId))
       .filter((item): item is RegistrySessionMessage => !!item)
       .sort((a, b) => {
-        const promptDelta = (a.syncIndex ?? 0) - (b.syncIndex ?? 0);
+        const promptDelta = (a.promptIndex ?? 0) - (b.promptIndex ?? 0);
         if (promptDelta !== 0) return promptDelta;
-        const turnDelta = (a.syncSubIndex ?? 0) - (b.syncSubIndex ?? 0);
-        if (turnDelta !== 0) return turnDelta;
-        const updatedAtDelta = (a.updatedAt || '').localeCompare(b.updatedAt || '');
-        if (updatedAtDelta !== 0) return updatedAtDelta;
-        return (a.messageId || '').localeCompare(b.messageId || '');
+        return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
       });
+
+    // Use server-provided prompt snapshots (model, duration) when available.
+    const serverPrompts: RegistrySessionPromptSnapshot[] = Array.isArray(payload.prompts)
+      ? payload.prompts
+          .map((p: unknown) => {
+            if (!p || typeof p !== 'object') return null;
+            const item = p as Record<string, unknown>;
+            return {
+              sessionId: normalizedSession.sessionId,
+              promptIndex: typeof item.promptIndex === 'number' ? item.promptIndex : 0,
+              turnIndex: typeof item.turnIndex === 'number' ? item.turnIndex : 0,
+              modelName: typeof item.modelName === 'string' ? item.modelName : '',
+              durationMs: typeof item.durationMs === 'number' ? item.durationMs : 0,
+            };
+          })
+          .filter((item): item is RegistrySessionPromptSnapshot => !!item && item.promptIndex > 0)
+      : [];
+
+    if (serverPrompts.length > 0) {
+      return {
+        session: normalizedSession,
+        prompts: serverPrompts,
+        messages: normalizedMessages,
+      };
+    }
     return {
       session: normalizedSession,
       prompts: this.derivePromptSnapshotsFromMessages(normalizedMessages, normalizedSession.sessionId),

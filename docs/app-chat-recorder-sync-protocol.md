@@ -586,29 +586,25 @@ Frontend normalizes server-side status strings during decode:
 
 Frontend maintains two cursors per session (stored in `Ref`):
 
-- `syncIndex` (= `promptIndex`): current latest prompt sequence number.
-- `syncSubIndex` (= `turnIndex`): current latest turn sequence number within the prompt.
+- `promptIndex`: current latest prompt sequence number.
+- `turnIndex`: current latest turn sequence number within the prompt.
 
 ### 7.2 Update Logic
 
-- **Realtime `session.message` events**: upsert message by `messageId`, advance cursor if incoming `(syncIndex, syncSubIndex)` is greater than current.
+- **Realtime `session.message` events**: upsert message by `(sessionId, promptIndex, turnIndex)`, advance cursor if incoming `(promptIndex, turnIndex)` is greater than current.
 - **`session.read` active pull**: pull delta from checkpoint, replace messages after affected prompt boundary.
 
 ### 7.3 `RegistryChatMessage` Type
 
 ```typescript
+// Matches backend IMTurnMessage wire format exactly.
+// role/kind/status/text/blocks are computed via helper functions, not stored.
 interface RegistrySessionMessage {
-  messageId: string;      // "sessionId:promptIndex:turnIndex"
   sessionId: string;
-  syncIndex?: number;     // = promptIndex
-  syncSubIndex?: number;  // = turnIndex
-  role: 'user' | 'assistant' | 'system';
-  kind: 'text' | 'image' | 'thought' | 'tool' | 'prompt_result' | 'message';
-  text: string;
-  status: 'streaming' | 'done' | 'needs_action';
-  createdAt: string;
-  updatedAt: string;
-  blocks?: RegistrySessionContentBlock[];
+  promptIndex: number;
+  turnIndex: number;
+  method: string;                     // IMTurnMessage.method
+  param: Record<string, unknown>;     // IMTurnMessage.param
 }
 ```
 

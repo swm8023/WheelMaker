@@ -2908,7 +2908,7 @@ func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -3053,8 +3053,9 @@ func TestSessionReadOmitsTurnIDAndSummaryExtras(t *testing.T) {
 	if _, ok := summaryType.FieldByName("ProjectName"); ok {
 		t.Fatalf("sessionViewSummary unexpectedly still contains ProjectName field")
 	}
-	if _, ok := body["prompts"]; ok {
-		t.Fatalf("session.read unexpectedly returned prompts: %+v", body)
+	prompts, ok := body["prompts"].([]sessionViewPromptSnapshot)
+	if !ok || len(prompts) != 1 {
+		t.Fatalf("session.read expected 1 prompt snapshot, got %+v", body["prompts"])
 	}
 	messages := body["messages"].([]sessionViewMessage)
 	if len(messages) != 1 {
@@ -3192,8 +3193,9 @@ func TestSessionReadWithoutCheckpointReturnsPromptSnapshots(t *testing.T) {
 		t.Fatalf("HandleSessionRequest: %v", err)
 	}
 	body := resp.(map[string]any)
-	if _, ok := body["prompts"]; ok {
-		t.Fatalf("session.read unexpectedly returned prompts: %+v", body)
+	prompts, ok := body["prompts"].([]sessionViewPromptSnapshot)
+	if !ok || len(prompts) != 2 {
+		t.Fatalf("session.read expected 2 prompt snapshots, got %+v", body["prompts"])
 	}
 	rawMessages, err := json.Marshal(body["messages"])
 	if err != nil {
@@ -3314,7 +3316,7 @@ func TestSessionRecorderResetPromptStateRestartsIndexes(t *testing.T) {
 		t.Fatalf("RecordEvent prompt after reset: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -3380,7 +3382,7 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 		t.Fatalf("RecordEvent user image message: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(context.Background(), "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(context.Background(), "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -3509,7 +3511,7 @@ func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID
 		t.Fatalf("RecordEvent update: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "client-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "client-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts(client-1): %v", err)
 	}
@@ -3517,7 +3519,7 @@ func TestSessionRecorderUsesClientSessionIDWhenACPEventCarriesDifferentSessionID
 		t.Fatalf("client messages len = %d, want 2", len(messages))
 	}
 
-	if _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "acp-1", 0, 0); err == nil {
+	if _, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "acp-1", 0, 0); err == nil {
 		t.Fatalf("ReadSessionPrompts(acp-1) unexpectedly succeeded")
 	}
 }
@@ -3655,7 +3657,7 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -3698,7 +3700,7 @@ func TestSessionViewKeepsUserMessageChunkTurn(t *testing.T) {
 		t.Fatalf("RecordEvent prompt finished: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -3738,7 +3740,7 @@ func TestSessionViewSystemMessageIsNotPersisted(t *testing.T) {
 		t.Fatalf("RecordEvent system message: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -3761,7 +3763,7 @@ func TestSessionViewUpdateWithoutPromptIsDropped(t *testing.T) {
 		t.Fatalf("RecordEvent update: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -4097,7 +4099,7 @@ func TestHandleSessionRequestSessionDeleteRemovesSessionAndPrompts(t *testing.T)
 		t.Fatalf("stored prompts len = %d, want 0", len(storedPrompts))
 	}
 
-	if _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0); err == nil || !strings.Contains(err.Error(), "session not found") {
+	if _, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0); err == nil || !strings.Contains(err.Error(), "session not found") {
 		t.Fatalf("ReadSessionPrompts err = %v, want session not found", err)
 	}
 }
@@ -4411,7 +4413,7 @@ func TestSessionViewPermissionEventsAreIgnored(t *testing.T) {
 		t.Fatalf("RecordEvent permission resolved: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
@@ -4433,7 +4435,7 @@ func TestSessionViewDropsOrphanPermissionResult(t *testing.T) {
 		t.Fatalf("RecordEvent orphan permission resolved: %v", err)
 	}
 
-	_, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}

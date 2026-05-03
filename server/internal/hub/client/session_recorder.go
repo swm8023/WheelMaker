@@ -42,6 +42,14 @@ type sessionViewSummary struct {
 	ConfigOptions []acp.ConfigOption `json:"configOptions,omitempty"`
 }
 
+type sessionViewPromptSnapshot struct {
+	SessionID   string `json:"sessionId"`
+	PromptIndex int64  `json:"promptIndex"`
+	TurnIndex   int64  `json:"turnIndex"`
+	ModelName   string `json:"modelName"`
+	DurationMs  int64  `json:"durationMs"`
+}
+
 type sessionViewMessage struct {
 	SessionID   string `json:"sessionId"`
 	PromptIndex int64  `json:"promptIndex"`
@@ -90,6 +98,8 @@ type SessionRecorder struct {
 
 	writeMu     sync.Mutex
 	promptState map[string]*sessionPromptState
+
+	modelLookup func(sessionID string) string
 }
 
 func newSessionRecorder(projectName string, store Store, listSessions func(context.Context) ([]SessionRecord, error)) *SessionRecorder {
@@ -224,25 +234,41 @@ func (r *SessionRecorder) ListSessionViews(ctx context.Context) ([]sessionViewSu
 	return out, nil
 }
 
-func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewMessage, error) {
+func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID string, afterPromptIndex, afterTurnIndex int64) (sessionViewSummary, []sessionViewPromptSnapshot, []sessionViewMessage, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
-		return sessionViewSummary{}, nil, err
+		return sessionViewSummary{}, nil, nil, err
 	}
 	if rec == nil {
-		return sessionViewSummary{}, nil, fmt.Errorf("session not found: %s", sessionID)
+		return sessionViewSummary{}, nil, nil, fmt.Errorf("session not found: %s", sessionID)
 	}
 	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
 	if err != nil {
-		return sessionViewSummary{}, nil, err
+		return sessionViewSummary{}, nil, nil, err
 	}
+	var snapshot []sessionViewPromptSnapshot
 	var messages []sessionViewMessage
 	for _, prompt := range prompts {
 		turns, err := r.promptTurnsForRead(ctx, sessionID, prompt.PromptIndex)
 		if err != nil {
-			return sessionViewSummary{}, nil, err
+			return sessionViewSummary{}, nil, nil, err
 		}
+		// Build prompt snapshot with model + duration.
+		ps := sessionViewPromptSnapshot{
+			SessionID:   sessionID,
+			PromptIndex: prompt.PromptIndex,
+			ModelName:   strings.TrimSpace(prompt.ModelName),
+			TurnIndex:   prompt.TurnIndex,
+		}
+		if !prompt.StartedAt.IsZero() {
+			endTime := prompt.UpdatedAt
+			if strings.TrimSpace(prompt.StopReason) == "" {
+				endTime = time.Now().UTC()
+			}
+			ps.DurationMs = endTime.Sub(prompt.StartedAt).Milliseconds()
+		}
+		snapshot = append(snapshot, ps)
 		for i, updateJSON := range turns {
 			turnIndex := int64(i + 1)
 			if prompt.PromptIndex < afterPromptIndex {
@@ -259,7 +285,7 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 			})
 		}
 	}
-	return r.sessionViewSummaryFromRecord(*rec), messages, nil
+	return r.sessionViewSummaryFromRecord(*rec), snapshot, messages, nil
 }
 
 func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event parsedSessionViewEvent) error {
@@ -274,11 +300,17 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 		return err
 	}
 	promptTitle := strings.TrimSpace(promptTitleFromBlocks(request.ContentBlocks))
+	modelName := ""
+	if r.modelLookup != nil {
+		modelName = strings.TrimSpace(r.modelLookup(rawEvent.SessionID))
+	}
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   rawEvent.SessionID,
 		PromptIndex: state.promptIndex,
 		Title:       promptTitle,
 		UpdatedAt:   rawEvent.UpdatedAt,
+		ModelName:   modelName,
+		StartedAt:   time.Now().UTC(),
 	}); err != nil {
 		return err
 	}
@@ -474,7 +506,16 @@ func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID stri
 	state, ok := r.promptState[sessionID]
 	if !ok || state == nil || state.promptIndex != promptIndex {
 		r.writeMu.Unlock()
-		// No live state available; return persisted turns_json (may be empty for just-started prompt).
+		// No live state available; return persisted turns_json.
+		if prompt != nil {
+			return DecodeStoredTurns(prompt.TurnsJSON)
+		}
+		return nil, nil
+	}
+	// If in-memory state has no turns yet (e.g. restored after restart),
+	// fall back to persisted turns_json so reads don't return empty results.
+	if len(state.turns) == 0 {
+		r.writeMu.Unlock()
 		if prompt != nil {
 			return DecodeStoredTurns(prompt.TurnsJSON)
 		}

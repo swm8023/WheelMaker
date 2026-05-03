@@ -1883,6 +1883,28 @@ body,
   object-fit: cover;
 }
 
+.chat-prompt-separator {
+  position: relative;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+.chat-prompt-separator hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+.chat-prompt-separator-label {
+  position: absolute;
+  right: 0;
+  bottom: -2px;
+  font-size: 10px;
+  color: var(--muted);
+  background: var(--bg);
+  padding-left: 8px;
+}
+
 .chat-composer {
   border-top: 1px solid var(--border);
   padding: 10px 14px 12px;

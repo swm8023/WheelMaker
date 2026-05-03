@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS session_prompts (
 	updated_at TEXT NOT NULL DEFAULT '',
 	turns_json TEXT NOT NULL DEFAULT '',
 	turn_index INTEGER NOT NULL DEFAULT 0,
+	model_name TEXT NOT NULL DEFAULT '',
+	started_at TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (session_id, prompt_index)
 );
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
@@ -100,6 +102,8 @@ type SessionPromptRecord struct {
 	UpdatedAt   time.Time
 	TurnsJSON   string
 	TurnIndex   int64
+	ModelName   string
+	StartedAt   time.Time
 }
 
 type Store interface {
@@ -149,9 +153,14 @@ func NewStore(dbPath string) (Store, error) {
 			_ = db.Close()
 			return nil, err
 		}
-	} else if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
-		_ = db.Close()
-		return nil, err
+	} else {
+		if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		// Migrate: add columns introduced after initial schema.
+		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`)
+		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`)
 	}
 	return &sqliteStore{db: db}, nil
 }
@@ -161,7 +170,7 @@ var expectedStoreSchemaColumns = map[string][]string{
 	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
 	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "title", "created_at", "last_active_at"},
 	"agent_preferences": {"project_name", "agent_type", "preference_json"},
-	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at", "turns_json", "turn_index"},
+	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at", "turns_json", "turn_index", "model_name", "started_at"},
 }
 
 type StoreSchemaMismatchError struct {
@@ -633,18 +642,24 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 		rec.UpdatedAt = time.Now().UTC()
 	}
 	updatedAt := rec.UpdatedAt.UTC().Format(time.RFC3339Nano)
+	var startedAt string
+	if !rec.StartedAt.IsZero() {
+		startedAt = rec.StartedAt.UTC().Format(time.RFC3339Nano)
+	}
 
 	turnsJSON := strings.TrimSpace(rec.TurnsJSON)
 	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index, model_name, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index) DO UPDATE SET
 			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE session_prompts.title END,
 			stop_reason = CASE WHEN excluded.stop_reason != '' THEN excluded.stop_reason ELSE session_prompts.stop_reason END,
 			updated_at = CASE WHEN excluded.updated_at > session_prompts.updated_at THEN excluded.updated_at ELSE session_prompts.updated_at END,
 			turns_json = CASE WHEN excluded.turns_json != '' THEN excluded.turns_json ELSE session_prompts.turns_json END,
-			turn_index = CASE WHEN excluded.turns_json != '' THEN excluded.turn_index ELSE session_prompts.turn_index END
-	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt, turnsJSON, rec.TurnIndex); err != nil {
+			turn_index = CASE WHEN excluded.turns_json != '' THEN excluded.turn_index ELSE session_prompts.turn_index END,
+			model_name = CASE WHEN excluded.model_name != '' THEN excluded.model_name ELSE session_prompts.model_name END,
+			started_at = CASE WHEN excluded.started_at != '' THEN excluded.started_at ELSE session_prompts.started_at END
+	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt, turnsJSON, rec.TurnIndex, strings.TrimSpace(rec.ModelName), startedAt); err != nil {
 		return fmt.Errorf("upsert session prompt: %w", err)
 	}
 	return nil
@@ -656,13 +671,14 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 	}
 	var rec SessionPromptRecord
 	var updatedAt string
+	var startedAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index, p.model_name, p.started_at
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index = ?
 		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex)
+	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -670,13 +686,16 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 		return nil, fmt.Errorf("load session prompt: %w", err)
 	}
 	rec.UpdatedAt = parseStoreTime(updatedAt)
+	if startedAt != "" {
+		rec.StartedAt = parseStoreTime(startedAt)
+	}
 	rec.PromptID = formatPromptSeq(rec.PromptIndex)
 	return &rec, nil
 }
 
 func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index, p.model_name, p.started_at
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ?
@@ -691,10 +710,14 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 	for rows.Next() {
 		var rec SessionPromptRecord
 		var updatedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex); err != nil {
+		var startedAt string
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt); err != nil {
 			return nil, fmt.Errorf("scan session prompt: %w", err)
 		}
 		rec.UpdatedAt = parseStoreTime(updatedAt)
+		if startedAt != "" {
+			rec.StartedAt = parseStoreTime(startedAt)
+		}
 		rec.PromptID = formatPromptSeq(rec.PromptIndex)
 		out = append(out, rec)
 	}
@@ -703,7 +726,7 @@ func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessi
 
 func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index
+		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index, p.model_name, p.started_at
 		FROM session_prompts p
 		JOIN sessions s ON s.id = p.session_id
 		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index > ?
@@ -718,10 +741,14 @@ func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectN
 	for rows.Next() {
 		var rec SessionPromptRecord
 		var updatedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex); err != nil {
+		var startedAt string
+		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt); err != nil {
 			return nil, fmt.Errorf("scan session prompt after index: %w", err)
 		}
 		rec.UpdatedAt = parseStoreTime(updatedAt)
+		if startedAt != "" {
+			rec.StartedAt = parseStoreTime(startedAt)
+		}
 		rec.PromptID = formatPromptSeq(rec.PromptIndex)
 		out = append(out, rec)
 	}

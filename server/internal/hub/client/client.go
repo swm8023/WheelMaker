@@ -92,6 +92,15 @@ func New(store Store, projectName string, cwd string) *Client {
 	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionRecord, error) {
 		return c.ListSessions(ctx)
 	})
+	c.sessionRecorder.modelLookup = func(sessionID string) string {
+		options := c.sessionConfigOptions(context.Background(), sessionID)
+		for _, opt := range options {
+			if opt.ID == "model" {
+				return opt.CurrentValue
+			}
+		}
+		return ""
+	}
 	c.viewSink = c.sessionRecorder
 	return c
 }
@@ -494,12 +503,12 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.read payload: %w", err)
 		}
-		summary, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, req.PromptIndex, req.TurnIndex)
+		summary, prompts, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, req.PromptIndex, req.TurnIndex)
 		if err != nil {
 			return nil, err
 		}
 		summary.ConfigOptions = c.sessionConfigOptions(ctx, req.SessionID)
-		return map[string]any{"session": summary, "messages": messages}, nil
+		return map[string]any{"session": summary, "prompts": prompts, "messages": messages}, nil
 	case "session.new":
 		var req struct {
 			AgentType string `json:"agentType"`
@@ -533,7 +542,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}); err != nil {
 			return nil, err
 		}
-		summary, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.acpSessionID, 0, 0)
+		summary, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.acpSessionID, 0, 0)
 		if err != nil {
 			return nil, err
 		}
