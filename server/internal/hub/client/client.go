@@ -646,15 +646,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := sess.Suspend(ctx); err != nil {
 			return nil, fmt.Errorf("suspend session: %w", err)
 		}
-		records, err := sess.reloadHistory(ctx)
+		updates, err := sess.captureReplay(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("reload session history: %w", err)
+			return nil, fmt.Errorf("capture replay: %w", err)
 		}
-		for _, rec := range records {
-			if err := c.store.UpsertSessionPrompt(ctx, rec); err != nil {
-				return nil, fmt.Errorf("save prompt record: %w", err)
-			}
-		}
+		feedReplayToRecorder(ctx, c.sessionRecorder, req.SessionID, updates)
 		return map[string]any{"ok": true, "sessionId": req.SessionID}, nil
 	case "session.setConfig":
 		var req struct {
@@ -714,6 +710,75 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported session method: %s", method)
+	}
+}
+
+// feedReplayToRecorder converts captured ACP session/update notifications into
+// sessionRecorder events, using the recorder's prompt lifecycle (prompt_request →
+// updates → prompt_done) to persist the replayed conversation.
+func feedReplayToRecorder(ctx context.Context, rec *SessionRecorder, sessionID string, updates []acp.SessionUpdateParams) {
+	if len(updates) == 0 {
+		return
+	}
+
+	finishPrompt := func() {
+		_ = rec.RecordEvent(ctx, SessionViewEvent{
+			Type:      SessionViewEventTypeACP,
+			SessionID: sessionID,
+			Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+				"result": acp.SessionPromptResult{StopReason: "end_turn"},
+			}),
+		})
+	}
+
+	startPrompt := func(text string) {
+		_ = rec.RecordEvent(ctx, SessionViewEvent{
+			Type:      SessionViewEventTypeACP,
+			SessionID: sessionID,
+			Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+				"params": acp.SessionPromptParams{
+					SessionID: sessionID,
+					Prompt:    []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}},
+				},
+			}),
+		})
+	}
+
+	recordUpdate := func(u acp.SessionUpdateParams) {
+		_ = rec.RecordEvent(ctx, SessionViewEvent{
+			Type:      SessionViewEventTypeACP,
+			SessionID: sessionID,
+			Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
+				"params": u,
+			}),
+		})
+	}
+
+	hasPending := false
+	for _, u := range updates {
+		kind := u.Update.SessionUpdate
+		switch kind {
+		case acp.SessionUpdateConfigOptionUpdate,
+			acp.SessionUpdateAvailableCommandsUpdate,
+			acp.SessionUpdateSessionInfoUpdate,
+			acp.SessionUpdateCurrentModeUpdate,
+			acp.SessionUpdateUsageUpdate:
+			continue
+		}
+
+		if kind == acp.SessionUpdateUserMessageChunk {
+			if hasPending {
+				finishPrompt()
+			}
+			startPrompt(extractUpdateText(u.Update.Content))
+			hasPending = true
+			continue
+		}
+
+		recordUpdate(u)
+	}
+	if hasPending {
+		finishPrompt()
 	}
 }
 

@@ -656,9 +656,9 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	return nil
 }
 
-// reloadHistory reactivates the session and captures the ACP session/load replay
-// as a slice of SessionPromptRecord, suitable for populating session_prompts.
-func (s *Session) reloadHistory(ctx context.Context) ([]SessionPromptRecord, error) {
+// captureReplay reactivates the session and captures session/update notifications
+// replayed by the agent during SessionLoad.
+func (s *Session) captureReplay(ctx context.Context) ([]acp.SessionUpdateParams, error) {
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 
@@ -666,188 +666,31 @@ func (s *Session) reloadHistory(ctx context.Context) ([]SessionPromptRecord, err
 		return nil, err
 	}
 
-	// Set up a buffered channel to capture all session/update notifications
-	// that the agent replays during SessionLoad.
 	captureCh := make(chan acp.SessionUpdateParams, 2048)
 	s.mu.Lock()
 	s.prompt.updatesCh = captureCh
 	s.mu.Unlock()
-	defer func() {
+
+	if err := s.ensureReadyAndNotify(ctx); err != nil {
 		s.mu.Lock()
 		s.prompt.updatesCh = nil
 		s.mu.Unlock()
-	}()
-
-	if err := s.ensureReadyAndNotify(ctx); err != nil {
 		return nil, err
 	}
 
-	// Per ACP protocol, SessionLoad is synchronous: the agent sends all
-	// session/update notifications, then responds. All replay events are
-	// now in the capture buffer.
-	close(captureCh)
+	// Unhook capture to prevent further sends (no close, so no panic on late arrivals).
+	s.mu.Lock()
+	s.prompt.updatesCh = nil
+	s.mu.Unlock()
 
 	var updates []acp.SessionUpdateParams
-	for u := range captureCh {
-		updates = append(updates, u)
-	}
-
-	return buildPromptRecordsFromReplay(s.acpSessionID, updates), nil
-}
-
-// buildPromptRecordsFromReplay groups ACP session/update notifications into
-// prompt records, using user_message_chunk as prompt boundaries.
-func buildPromptRecordsFromReplay(sessionID string, updates []acp.SessionUpdateParams) []SessionPromptRecord {
-	type promptGroup struct {
-		turns []string
-		title string
-	}
-	var groups []promptGroup
-	var current *promptGroup
-
-	for _, u := range updates {
-		kind := u.Update.SessionUpdate
-
-		// Skip metadata-only updates
-		switch kind {
-		case acp.SessionUpdateConfigOptionUpdate,
-			acp.SessionUpdateAvailableCommandsUpdate,
-			acp.SessionUpdateSessionInfoUpdate,
-			acp.SessionUpdateCurrentModeUpdate,
-			acp.SessionUpdateUsageUpdate:
-			continue
+	for {
+		select {
+		case u := <-captureCh:
+			updates = append(updates, u)
+		default:
+			return updates, nil
 		}
-
-		// Build an IMTurnMessage from the update
-		method := replayUpdateToIMMethod(kind)
-		if method == "" {
-			continue
-		}
-
-		param := replayUpdateToIMParam(kind, u.Update)
-		paramJSON, _ := json.Marshal(param)
-		turn := acp.IMTurnMessage{
-			Method: method,
-			Param:  paramJSON,
-		}
-		turnJSON, _ := json.Marshal(turn)
-
-		// user_message_chunk starts a new prompt
-		if kind == acp.SessionUpdateUserMessageChunk {
-			if current != nil {
-				// Finish previous prompt
-				turns := append([]string(nil), current.turns...)
-				doneTurn := buildPromptDoneTurn("end_turn")
-				turns = append(turns, doneTurn)
-				current.turns = turns
-				groups = append(groups, *current)
-			}
-			current = &promptGroup{}
-			if text, ok := param.(acp.IMTextResult); ok {
-				current.title = truncateForTitle(text.Text)
-			}
-		}
-
-		if current == nil {
-			current = &promptGroup{}
-		}
-		current.turns = append(current.turns, string(turnJSON))
-	}
-
-	// Flush last prompt
-	if current != nil && len(current.turns) > 0 {
-		turns := append([]string(nil), current.turns...)
-		doneTurn := buildPromptDoneTurn("end_turn")
-		turns = append(turns, doneTurn)
-		current.turns = turns
-		groups = append(groups, *current)
-	}
-
-	now := time.Now().UTC()
-	records := make([]SessionPromptRecord, 0, len(groups))
-	for i, g := range groups {
-		turnsJSON, _ := json.Marshal(g.turns)
-		rec := SessionPromptRecord{
-			SessionID:   sessionID,
-			PromptIndex: int64(i + 1),
-			Title:       g.title,
-			StopReason:  "end_turn",
-			TurnsJSON:   string(turnsJSON),
-			TurnIndex:   int64(len(g.turns)),
-			StartedAt:   now,
-			UpdatedAt:   now,
-		}
-		records = append(records, rec)
-	}
-	return records
-}
-
-func buildPromptDoneTurn(stopReason string) string {
-	param, _ := json.Marshal(acp.IMPromptResult{StopReason: stopReason})
-	turn := acp.IMTurnMessage{Method: "prompt_done", Param: param}
-	out, _ := json.Marshal(turn)
-	return string(out)
-}
-
-func truncateForTitle(s string) string {
-	if len(s) > 200 {
-		return s[:200]
-	}
-	return s
-}
-
-// replayUpdateToIMMethod maps an ACP session/update type to an IM turn method.
-func replayUpdateToIMMethod(kind string) string {
-	switch kind {
-	case acp.SessionUpdateUserMessageChunk:
-		return "prompt_request"
-	case acp.SessionUpdateAgentMessageChunk:
-		return "agent_message"
-	case acp.SessionUpdateAgentThoughtChunk:
-		return "agent_thought"
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		return "tool_call"
-	case acp.SessionUpdatePlan:
-		return "agent_plan"
-	default:
-		return "system"
-	}
-}
-
-// replayUpdateToIMParam extracts the content from a session/update into
-// the corresponding IM protocol struct.
-func replayUpdateToIMParam(kind string, update acp.SessionUpdate) any {
-	switch kind {
-	case acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentMessageChunk,
-		acp.SessionUpdateAgentThoughtChunk:
-		var text acp.IMTextResult
-		if len(update.Content) > 0 {
-			json.Unmarshal(update.Content, &text)
-		}
-		return text
-	case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
-		var tool acp.IMToolResult
-		if len(update.Content) > 0 {
-			json.Unmarshal(update.Content, &tool)
-		}
-		if tool.Cmd == "" {
-			tool.Cmd = update.ToolCallID
-		}
-		if tool.Kind == "" {
-			tool.Kind = update.Kind
-		}
-		if tool.Status == "" {
-			tool.Status = update.Status
-		}
-		return tool
-	case acp.SessionUpdatePlan:
-		return update.Entries
-	default:
-		var text acp.IMTextResult
-		if len(update.Content) > 0 {
-			json.Unmarshal(update.Content, &text)
-		}
-		return text
 	}
 }
 
