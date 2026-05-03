@@ -1,5 +1,8 @@
 const path = require('path');
+const os = require('os');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+
+const webTarget = path.join(os.homedir(), '.wheelmaker', 'web');
 
 module.exports = {
   entry: {
@@ -7,7 +10,7 @@ module.exports = {
     bundle: path.resolve(__dirname, 'src/main.tsx'),
   },
   output: {
-    path: path.resolve(__dirname, '../dist'),
+    path: webTarget,
     filename: '[name].js',
     publicPath: '/',
     clean: true,

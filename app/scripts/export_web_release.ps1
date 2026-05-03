@@ -1,25 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
-$dist = Join-Path $root "dist"
 $webPublic = Join-Path $root "web\public"
 $stateRoot = Join-Path $HOME ".wheelmaker"
 $target = Join-Path $stateRoot "web"
 
-if (-not (Test-Path $dist)) {
-  throw "Missing dist directory: $dist. Run npm run build:web first."
-}
-
 if (-not (Test-Path $stateRoot)) {
   New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
 }
-
-if (Test-Path $target) {
-  Get-ChildItem -LiteralPath $target -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+if (-not (Test-Path $target)) {
+  New-Item -ItemType Directory -Path $target -Force | Out-Null
 }
-
-New-Item -ItemType Directory -Path $target -Force | Out-Null
-Copy-Item -Path (Join-Path $dist "*") -Destination $target -Recurse -Force
 
 if (Test-Path (Join-Path $webPublic "manifest.webmanifest")) {
   Copy-Item -Path (Join-Path $webPublic "manifest.webmanifest") -Destination (Join-Path $target "manifest.webmanifest") -Force
