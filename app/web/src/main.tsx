@@ -1738,6 +1738,10 @@ function App() {
   const [fileSearchQuery, setFileSearchQuery] = useState('');
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
   const [gotoLineInput, setGotoLineInput] = useState('');
+  const [pendingFileJump, setPendingFileJump] = useState<{
+    path: string;
+    line: number;
+  } | null>(null);
   const [searchToolsOpen, setSearchToolsOpen] = useState(false);
   const [gotoToolsOpen, setGotoToolsOpen] = useState(false);
   const [markdownPreviewEnabled, setMarkdownPreviewEnabled] = useState(false);
@@ -2265,6 +2269,34 @@ function App() {
       });
     }
   };
+
+  useEffect(() => {
+    if (!pendingFileJump) return;
+    if (tab !== 'file') return;
+    if (selectedFileRef.current !== pendingFileJump.path) return;
+    if (fileLoading) return;
+
+    const targetPath = pendingFileJump.path;
+    const targetLine = pendingFileJump.line;
+    const runScroll = (attempt: number) => {
+      if (selectedFileRef.current !== targetPath) return;
+      const container = fileScrollRef.current;
+      if (!container) {
+        if (attempt < 8) {
+          window.requestAnimationFrame(() => runScroll(attempt + 1));
+        }
+        return;
+      }
+      scrollToFileLine(targetLine);
+      setPendingFileJump(current =>
+        current && current.path === targetPath && current.line === targetLine
+          ? null
+          : current,
+      );
+    };
+
+    window.requestAnimationFrame(() => runScroll(0));
+  }, [pendingFileJump, tab, fileLoading, selectedFile, fileContent]);
 
   const navigateSearchMatch = (delta: 1 | -1) => {
     if (fileSearchMatches.length === 0) return;
@@ -4550,19 +4582,13 @@ function App() {
                 return;
               }
               event.preventDefault();
+              if (jumpLine) {
+                setPendingFileJump({ path: targetFile.path, line: jumpLine });
+              } else {
+                setPendingFileJump(null);
+              }
               setTab('file');
               setSelectedFile(targetFile.path);
-              readSelectedFile(targetFile.path)
-                .then(() => {
-                  const line = jumpLine;
-                  if (!line) return;
-                  window.requestAnimationFrame(() => {
-                    scrollToFileLine(line);
-                  });
-                })
-                .catch(err => {
-                  setError(err instanceof Error ? err.message : String(err));
-                });
             }}
           >
             <>
@@ -5256,3 +5282,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
