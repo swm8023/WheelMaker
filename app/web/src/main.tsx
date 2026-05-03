@@ -355,6 +355,7 @@ function normalizeChatKind(value: unknown): RegistryChatMessage['kind'] {
     value === 'image' ||
     value === 'thought' ||
     value === 'tool' ||
+    value === 'plan' ||
     value === 'prompt_result' ||
     value === 'message'
     ? value
@@ -428,6 +429,28 @@ function extractTextFromIMParam(param: unknown): string {
   return '';
 }
 
+
+type ChatPlanEntry = NonNullable<RegistryChatMessage['planEntries']>[number];
+
+function extractPlanEntriesFromIMParam(param: unknown): ChatPlanEntry[] {
+  if (!Array.isArray(param)) {
+    return [];
+  }
+  const entries: ChatPlanEntry[] = [];
+  for (const item of param) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+    const entry = item as Record<string, unknown>;
+    const content = typeof entry.content === 'string' ? entry.content.trim() : '';
+    if (!content) {
+      continue;
+    }
+    const status = typeof entry.status === 'string' ? entry.status.trim() : '';
+    entries.push(status ? { content, status } : { content });
+  }
+  return entries;
+}
 function decodeSessionMessageFromEventPayload(
   payload: RegistryChatMessageEventPayload,
 ): RegistryChatMessage | null {
@@ -502,9 +525,10 @@ function decodeSessionMessageFromEventPayload(
       }
     } else if (method === 'agent_plan') {
       message.role = 'assistant';
-      message.kind = 'thought';
+      message.kind = 'plan';
       message.status = 'streaming';
-      message.text = extractTextFromIMParam(doc.param);
+      message.planEntries = extractPlanEntriesFromIMParam(doc.param);
+      message.text = message.planEntries.map(entry => entry.content).join('\n').trim();
     } else if (method === 'system') {
       message.role = 'system';
       message.kind = 'message';
@@ -518,7 +542,7 @@ function decodeSessionMessageFromEventPayload(
   return message;
 }
 
-type ChatPromptEntryKind = 'tool' | 'message';
+type ChatPromptEntryKind = 'tool' | 'thought' | 'plan' | 'message';
 
 type ChatPromptEntry = {
   key: string;
@@ -526,6 +550,7 @@ type ChatPromptEntry = {
   text: string;
   turnIndex: number;
   order: number;
+  planEntries?: ChatPlanEntry[];
 };
 
 type ChatPromptGroup = {
@@ -542,6 +567,22 @@ type ChatPromptGroupViewProps = {
   markdownComponents: Components;
   markdownUrlTransform: (value: string) => string;
 };
+
+function summarizeThoughtText(text: string): string {
+  const firstLine = text
+    .split('\n')
+    .map(line => line.trim())
+    .find(Boolean) || '';
+  if (!firstLine) {
+    return 'Thought';
+  }
+  return firstLine.length > 120 ? `${firstLine.slice(0, 120)}…` : firstLine;
+}
+
+function isPlanEntryCompleted(status?: string): boolean {
+  const value = (status || '').trim().toLowerCase();
+  return value === 'completed' || value === 'done' || value === 'success';
+}
 
 const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
   group,
@@ -571,13 +612,55 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
           ))}
         </div>
       ) : null}
-      {group.entries.map(entry =>
-        entry.kind === 'tool' ? (
-          <div key={entry.key} className="chat-tool-line" title={entry.text}>
-            <span className="codicon codicon-tools" />
-            <span>{entry.text}</span>
-          </div>
-        ) : (
+      {group.entries.map(entry => {
+        if (entry.kind === 'tool') {
+          return (
+            <div key={entry.key} className="chat-tool-line" title={entry.text}>
+              <span className="codicon codicon-tools" />
+              <span>{entry.text}</span>
+            </div>
+          );
+        }
+        if (entry.kind === 'thought') {
+          return (
+            <details key={entry.key} className="chat-thought-block">
+              <summary className="chat-thought-summary">
+                <span className="codicon codicon-lightbulb" />
+                <span>{summarizeThoughtText(entry.text)}</span>
+              </summary>
+              <div className="chat-thought-content">{entry.text}</div>
+            </details>
+          );
+        }
+        if (entry.kind === 'plan') {
+          const planEntries = entry.planEntries ?? [];
+          if (planEntries.length === 0) {
+            return null;
+          }
+          return (
+            <div key={entry.key} className="chat-plan-block">
+              <div className="chat-plan-title">
+                <span className="codicon codicon-checklist" />
+                <span>Plan</span>
+              </div>
+              <ul className="chat-plan-list">
+                {planEntries.map((item, index) => {
+                  const done = isPlanEntryCompleted(item.status);
+                  return (
+                    <li
+                      key={`${entry.key}:plan:${index}`}
+                      className={done ? 'done' : ''}
+                    >
+                      <span className="chat-plan-marker">{done ? '✓' : '○'}</span>
+                      <span>{item.content}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        }
+        return (
           <div key={entry.key} className="chat-main-message">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
@@ -588,11 +671,12 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
               {entry.text}
             </ReactMarkdown>
           </div>
-        ),
-      )}
+        );
+      })}
     </div>
   );
 });
+
 function groupChatMessagesByPrompt(
   messages: RegistryChatMessage[],
 ): ChatPromptGroup[] {
@@ -637,9 +721,33 @@ function groupChatMessagesByPrompt(
     } else {
       let kind: ChatPromptEntryKind | null = null;
       let text = '';
-      if (message.kind === 'tool' || message.kind === 'thought') {
+      let planEntries: ChatPlanEntry[] = [];
+
+      if (message.kind === 'tool') {
         kind = 'tool';
         text = (message.text || '').replace(/\s+/g, ' ').trim();
+      } else if (message.kind === 'thought') {
+        kind = 'thought';
+        text = (message.text || '').trim();
+      } else if (message.kind === 'plan') {
+        kind = 'plan';
+        const rawPlan = Array.isArray(message.planEntries)
+          ? message.planEntries
+          : [];
+        planEntries = rawPlan
+          .map(item => ({
+            content: (item?.content || '').trim(),
+            status: typeof item?.status === 'string' ? item.status.trim() : '',
+          }))
+          .filter(item => item.content.length > 0);
+        if (planEntries.length === 0 && message.text.trim()) {
+          planEntries = message.text
+            .split('\n')
+            .map(line => line.trim())
+            .filter(Boolean)
+            .map(content => ({ content }));
+        }
+        text = planEntries.map(item => item.content).join('\n').trim();
       } else if (
         message.kind === 'message' ||
         message.kind === 'prompt_result'
@@ -661,6 +769,7 @@ function groupChatMessagesByPrompt(
             ...previous,
             text,
             turnIndex,
+            planEntries: kind === 'plan' ? planEntries : previous.planEntries,
           };
         } else {
           existing.entries.push({
@@ -669,6 +778,7 @@ function groupChatMessagesByPrompt(
             text,
             turnIndex,
             order: entryOrder,
+            planEntries: kind === 'plan' ? planEntries : undefined,
           });
           entryIndexByKey.set(dedupeKey, existing.entries.length - 1);
           entryOrder += 1;
@@ -697,7 +807,8 @@ function groupChatMessagesByPrompt(
     if (promptDelta !== 0) return promptDelta;
     return a.updatedAt.localeCompare(b.updatedAt);
   });
-}function formatChatTimestamp(value: string): string {
+}
+function formatChatTimestamp(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return '';

@@ -113,7 +113,7 @@ export class RegistryRepository {
     const role = input.role === 'user' || input.role === 'assistant' || input.role === 'system'
       ? input.role
       : 'assistant';
-    const kind = input.kind === 'text' || input.kind === 'image' || input.kind === 'thought' || input.kind === 'tool' || input.kind === 'prompt_result' || input.kind === 'message'
+    const kind = input.kind === 'text' || input.kind === 'image' || input.kind === 'thought' || input.kind === 'tool' || input.kind === 'plan' || input.kind === 'prompt_result' || input.kind === 'message'
       ? input.kind
       : 'text';
     const status = input.status === 'streaming' || input.status === 'done' || input.status === 'needs_action'
@@ -131,9 +131,29 @@ export class RegistryRepository {
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : '',
       updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : '',
       blocks: Array.isArray(input.blocks) ? input.blocks as RegistrySessionMessage['blocks'] : undefined,
+      planEntries: this.extractPlanEntriesFromIMParam(input.planEntries),
     };
   }
 
+  private extractPlanEntriesFromIMParam(param: unknown): NonNullable<RegistrySessionMessage['planEntries']> {
+    if (!Array.isArray(param)) {
+      return [];
+    }
+    return param
+      .map(item => {
+        if (!item || typeof item !== 'object') {
+          return null;
+        }
+        const entry = item as Record<string, unknown>;
+        const content = typeof entry.content === 'string' ? entry.content.trim() : '';
+        if (!content) {
+          return null;
+        }
+        const status = typeof entry.status === 'string' ? entry.status.trim() : '';
+        return status ? {content, status} : {content};
+      })
+      .filter((item): item is NonNullable<RegistrySessionMessage['planEntries']>[number] => !!item);
+  }
   private normalizeSessionMessageStatus(value: unknown): RegistrySessionMessage['status'] {
     return value === 'streaming' || value === 'done' || value === 'needs_action'
       ? value
@@ -280,8 +300,9 @@ export class RegistryRepository {
         }
       } else if (method === 'agent_plan') {
         out.role = 'assistant';
-        out.kind = 'thought';
-        out.text = this.extractTextFromIMParam(doc.param);
+        out.kind = 'plan';
+        out.planEntries = this.extractPlanEntriesFromIMParam(doc.param);
+        out.text = out.planEntries.map(item => item.content).join('\n').trim();
         out.status = 'streaming';
       } else if (method === 'system') {
         out.role = 'system';

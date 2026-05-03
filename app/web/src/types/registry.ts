@@ -15,7 +15,7 @@ export interface RegistryEnvelope<TPayload = unknown> {
 }
 
 export type RegistrySessionMessageRole = 'user' | 'assistant' | 'system';
-export type RegistrySessionMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'prompt_result' | 'message';
+export type RegistrySessionMessageKind = 'text' | 'image' | 'thought' | 'tool' | 'plan' | 'prompt_result' | 'message';
 export type RegistrySessionMessageStatus = 'streaming' | 'done' | 'needs_action';
 
 export interface RegistrySessionContentBlock {
@@ -23,6 +23,12 @@ export interface RegistrySessionContentBlock {
   text?: string;
   mimeType?: string;
   data?: string;
+}
+
+
+export interface RegistrySessionPlanEntry {
+  content: string;
+  status?: string;
 }
 
 export interface RegistrySessionMessage {
@@ -37,6 +43,7 @@ export interface RegistrySessionMessage {
   createdAt: string;
   updatedAt: string;
   blocks?: RegistrySessionContentBlock[];
+  planEntries?: RegistrySessionPlanEntry[];
 }
 
 export interface RegistrySessionConfigOptionValue {

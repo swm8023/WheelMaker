@@ -1682,6 +1682,88 @@ body,
   text-overflow: ellipsis;
 }
 
+.chat-thought-block {
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.chat-thought-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text) 78%, var(--accent));
+}
+
+.chat-thought-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-thought-summary .codicon {
+  font-size: 12px;
+  opacity: 0.88;
+}
+
+.chat-thought-content {
+  border-top: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  padding: 8px 10px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-plan-block {
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface-1) 86%, var(--accent));
+}
+
+.chat-plan-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--text) 70%, var(--accent));
+}
+
+.chat-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-plan-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.chat-plan-list li.done {
+  color: color-mix(in srgb, #16a34a 78%, var(--text));
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+
+.chat-plan-marker {
+  width: 14px;
+  flex: 0 0 14px;
+  text-align: center;
+  color: color-mix(in srgb, var(--accent) 64%, var(--text));
+  line-height: 1.4;
+}
 .chat-main-message {
   line-height: 1.72;
   font-size: 14px;
