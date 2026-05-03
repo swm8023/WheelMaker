@@ -117,6 +117,7 @@ type Store interface {
 	SaveSession(ctx context.Context, rec *SessionRecord) error
 	ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
+	DeleteSessionPrompts(ctx context.Context, projectName, sessionID string) error
 	LoadAgentPreference(ctx context.Context, projectName, agentType string) (*AgentPreferenceRecord, error)
 	SaveAgentPreference(ctx context.Context, rec AgentPreferenceRecord) error
 	UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error
@@ -575,6 +576,30 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		entries = append(entries, entry)
 	}
 	return entries, rows.Err()
+}
+
+func (s *sqliteStore) DeleteSessionPrompts(ctx context.Context, projectName, sessionID string) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	projectName = strings.TrimSpace(projectName)
+	sessionID = strings.TrimSpace(sessionID)
+	if projectName == "" {
+		return fmt.Errorf("project name is required")
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+		DELETE FROM session_prompts
+		WHERE session_id IN (
+			SELECT id FROM sessions WHERE project_name = ? AND id = ?
+		)
+	`, projectName, sessionID); err != nil {
+		return fmt.Errorf("delete session prompts: %w", err)
+	}
+	return nil
 }
 
 func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID string) error {

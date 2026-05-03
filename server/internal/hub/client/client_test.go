@@ -436,6 +436,7 @@ func (s *noopStore) LoadAgentPreference(context.Context, string, string) (*Agent
 }
 func (s *noopStore) SaveAgentPreference(context.Context, AgentPreferenceRecord) error { return nil }
 func (s *noopStore) DeleteSession(context.Context, string, string) error              { return nil }
+func (s *noopStore) DeleteSessionPrompts(context.Context, string, string) error       { return nil }
 func (s *noopStore) UpsertSessionPrompt(context.Context, SessionPromptRecord) error {
 	return nil
 }

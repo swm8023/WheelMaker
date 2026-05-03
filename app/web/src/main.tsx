@@ -205,6 +205,8 @@ const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
 const CHAT_SWIPE_DELETE_WIDTH = 78;
+const CHAT_SWIPE_RELOAD_WIDTH = 72;
+const CHAT_SWIPE_TOTAL_ACTIONS_WIDTH = CHAT_SWIPE_DELETE_WIDTH + CHAT_SWIPE_RELOAD_WIDTH;
 const CHAT_SWIPE_REVEAL_THRESHOLD = 20;
 const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 let mermaidRenderSequence = 0;
@@ -1787,6 +1789,7 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
   const [chatDeletingSessionId, setChatDeletingSessionId] = useState('');
+  const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
   const [chatSwipeOpenSessionId, setChatSwipeOpenSessionId] = useState('');
   const [chatSwipeDraggingSessionId, setChatSwipeDraggingSessionId] = useState('');
   const [chatSwipeDraggingOffset, setChatSwipeDraggingOffset] = useState(0);
@@ -2924,11 +2927,39 @@ function App() {
     }
   };
 
+  const handleReloadChatSession = async (sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!normalizedSessionId || chatReloadingSessionId) {
+      return;
+    }
+    setChatReloadingSessionId(normalizedSessionId);
+    setChatSwipeOpenSessionId('');
+    try {
+      const result = await service.reloadSession(normalizedSessionId);
+      if (!result.ok) {
+        throw new Error('session.reload returned ok=false');
+      }
+      // Reset sync state so next load fetches from prompt 0
+      chatSyncIndexRef.current[normalizedSessionId] = 0;
+      chatSyncSubIndexRef.current[normalizedSessionId] = 0;
+      chatMessageStoreRef.current[normalizedSessionId] = [];
+      // Reload the session messages if currently selected
+      if (chatSelectedIdRef.current === normalizedSessionId) {
+        setChatMessages([]);
+        await loadChatSession(normalizedSessionId, projectIdRef.current, { forceFull: true });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatReloadingSessionId('');
+    }
+  };
+
   const resolveChatSessionSwipeOffset = (sessionId: string): number => {
     if (chatSwipeDraggingSessionId === sessionId) {
       return chatSwipeDraggingOffset;
     }
-    return chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_DELETE_WIDTH : 0;
+    return chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH : 0;
   };
 
 
@@ -2950,7 +2981,7 @@ function App() {
     chatSwipeSuppressClickRef.current = false;
     setChatSwipeDraggingSessionId(sessionId);
     setChatSwipeDraggingOffset(
-      chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_DELETE_WIDTH : 0,
+      chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH : 0,
     );
   };
 
@@ -2966,10 +2997,10 @@ function App() {
     }
     const anchoredDelta =
       chatSwipeOpenSessionId === sessionId
-        ? deltaX - CHAT_SWIPE_DELETE_WIDTH
+        ? deltaX - CHAT_SWIPE_TOTAL_ACTIONS_WIDTH
         : deltaX;
     const nextOffset = Math.max(
-      -CHAT_SWIPE_DELETE_WIDTH,
+      -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH,
       Math.min(0, anchoredDelta),
     );
     setChatSwipeDraggingOffset(nextOffset);
@@ -3760,7 +3791,18 @@ function App() {
               <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
                 <div className="chat-session-group-title">{group.label}</div>
                 {group.sessions.map(session => (
-                  <div key={session.sessionId} className={`chat-session-swipe-row ${isChatSessionSwipeOpen(session.sessionId) ? 'open' : ''}`}> 
+                  <div key={session.sessionId} className={`chat-session-swipe-row ${isChatSessionSwipeOpen(session.sessionId) ? 'open' : ''}`}>
+                    <button
+                      type="button"
+                      className="chat-session-reload-action"
+                      disabled={chatReloadingSessionId === session.sessionId}
+                      onClick={event => {
+                        event.stopPropagation();
+                        handleReloadChatSession(session.sessionId).catch(() => undefined);
+                      }}
+                    >
+                      {chatReloadingSessionId === session.sessionId ? '...' : 'Reload'}
+                    </button>
                     <button
                       type="button"
                       className="chat-session-delete-action"

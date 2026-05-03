@@ -626,6 +626,23 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			AgentType: rec.AgentType,
 		}
 		return map[string]any{"ok": true, "session": summary}, nil
+	case "session.reload":
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.reload payload: %w", err)
+		}
+		if strings.TrimSpace(req.SessionID) == "" {
+			return nil, fmt.Errorf("sessionId is required")
+		}
+		if err := c.store.DeleteSessionPrompts(ctx, c.projectName, req.SessionID); err != nil {
+			return nil, fmt.Errorf("delete session prompts: %w", err)
+		}
+		if err := reloadClaudeSessionPrompts(ctx, c.store, c.projectName, req.SessionID); err != nil {
+			return nil, fmt.Errorf("reload session prompts: %w", err)
+		}
+		return map[string]any{"ok": true, "sessionId": req.SessionID}, nil
 	case "session.setConfig":
 		var req struct {
 			SessionID string `json:"sessionId"`

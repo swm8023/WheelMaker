@@ -589,6 +589,20 @@ export class RegistryRepository {
     };
   }
 
+  async reloadSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    const resp = await this.client.request({
+      method: 'session.reload',
+      projectId,
+      payload: {sessionId},
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string};
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? sessionId,
+    };
+  }
+
   close(): void {
     this.client.close();
   }
