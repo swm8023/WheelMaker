@@ -2284,15 +2284,25 @@ function App() {
 
     const targetPath = pendingFileJump.path;
     const targetLine = pendingFileJump.line;
+    const maxAttempts = 16;
     const runScroll = (attempt: number) => {
       if (selectedFileRef.current !== targetPath) return;
       const container = fileScrollRef.current;
       if (!container) {
-        if (attempt < 8) {
+        if (attempt < maxAttempts) {
           window.requestAnimationFrame(() => runScroll(attempt + 1));
         }
         return;
       }
+
+      const exactLineElement = container.querySelector(
+        `.code-wrap [data-line-number="${targetLine}"]`,
+      );
+      if (!exactLineElement && attempt < maxAttempts) {
+        window.requestAnimationFrame(() => runScroll(attempt + 1));
+        return;
+      }
+
       scrollToFileLine(targetLine);
       setPendingFileJump(current =>
         current && current.path === targetPath && current.line === targetLine
