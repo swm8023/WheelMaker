@@ -557,16 +557,52 @@ type ChatPromptGroupViewProps = {
   markdownUrlTransform: (value: string) => string;
 };
 
-function summarizeThoughtText(text: string): string {
-  const firstLine = text
+const CollapsibleThought = React.memo(function CollapsibleThought({
+  text,
+  markdownComponents,
+  markdownUrlTransform,
+}: {
+  text: string;
+  markdownComponents: Components;
+  markdownUrlTransform: (value: string) => string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const firstLine = (text || '')
     .split('\n')
     .map(line => line.trim())
     .find(Boolean) || '';
-  if (!firstLine) {
-    return 'Thought';
-  }
-  return firstLine.length > 120 ? `${firstLine.slice(0, 120)}…` : firstLine;
-}
+
+  return (
+    <div className={`chat-thought-block${open ? ' chat-thought-open' : ''}`}>
+      <div
+        className="chat-thought-header"
+        onClick={() => setOpen(!open)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!open); } }}
+      >
+        <span className="codicon codicon-chevron-right chat-thought-chevron" />
+        <span className="codicon codicon-lightbulb" />
+        <span className="chat-thought-label">Thought</span>
+        {!open && firstLine ? (
+          <span className="chat-thought-preview">{firstLine}</span>
+        ) : null}
+      </div>
+      {open ? (
+        <div className="chat-thought-content">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm, remarkMath]}
+            urlTransform={markdownUrlTransform}
+            rehypePlugins={[rehypeKatex]}
+            components={markdownComponents}
+          >
+            {text}
+          </ReactMarkdown>
+        </div>
+      ) : null}
+    </div>
+  );
+});
 
 function isPlanEntryCompleted(status?: string): boolean {
   const value = (status || '').trim().toLowerCase();
@@ -625,19 +661,12 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
         }
         if (entry.kind === 'thought') {
           return (
-            <details key={entry.key} className="chat-thought-block">
-              <summary className="chat-thought-summary">
-                <span className="chat-thought-summary-head">
-                  <span className="codicon codicon-chevron-right chat-thought-chevron" />
-                  <span className="codicon codicon-lightbulb" />
-                  <span>Thought</span>
-                </span>
-                <span className="chat-thought-summary-text">
-                  {summarizeThoughtText(entry.text)}
-                </span>
-              </summary>
-              <div className="chat-thought-content">{entry.text}</div>
-            </details>
+            <CollapsibleThought
+              key={entry.key}
+              text={entry.text}
+              markdownComponents={markdownComponents}
+              markdownUrlTransform={markdownUrlTransform}
+            />
           );
         }
         if (entry.kind === 'plan') {

@@ -1756,47 +1756,44 @@ body,
   border-left: 2px solid color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
-.chat-thought-summary {
+.chat-thought-header {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 2px 0;
-  cursor: pointer;
-  list-style: none;
-}
-
-.chat-thought-summary::-webkit-details-marker {
-  display: none;
-}
-
-.chat-thought-summary-head {
-  display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 2px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-thought-header .codicon {
+  font-size: 11px;
+  opacity: 0.88;
+}
+
+.chat-thought-label {
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--muted) 80%, var(--accent));
 }
 
-.chat-thought-summary-head .codicon {
-  font-size: 11px;
-  opacity: 0.88;
+.chat-thought-preview {
+  font-size: 12px;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--text) 68%, var(--muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
 
 .chat-thought-chevron {
   transition: transform 140ms ease;
+  flex-shrink: 0;
 }
 
-.chat-thought-block[open] .chat-thought-chevron {
+.chat-thought-open .chat-thought-chevron {
   transform: rotate(90deg);
-}
-
-.chat-thought-summary-text {
-  font-size: 12px;
-  line-height: 1.35;
-  color: color-mix(in srgb, var(--text) 68%, var(--muted));
 }
 
 .chat-thought-content {
@@ -1807,8 +1804,14 @@ body,
   font-size: 12px;
   line-height: 1.55;
   color: color-mix(in srgb, var(--text) 74%, var(--muted));
-  white-space: pre-wrap;
-  word-break: break-word;
+}
+
+.chat-thought-content p {
+  margin: 0 0 6px 0;
+}
+
+.chat-thought-content p:last-child {
+  margin-bottom: 0;
 }
 
 .chat-plan-block {
