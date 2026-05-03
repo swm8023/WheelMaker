@@ -625,8 +625,14 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
           return (
             <details key={entry.key} className="chat-thought-block">
               <summary className="chat-thought-summary">
-                <span className="codicon codicon-lightbulb" />
-                <span>{summarizeThoughtText(entry.text)}</span>
+                <span className="chat-thought-summary-head">
+                  <span className="codicon codicon-chevron-right chat-thought-chevron" />
+                  <span className="codicon codicon-lightbulb" />
+                  <span>Thought</span>
+                </span>
+                <span className="chat-thought-summary-text">
+                  {summarizeThoughtText(entry.text)}
+                </span>
               </summary>
               <div className="chat-thought-content">{entry.text}</div>
             </details>
