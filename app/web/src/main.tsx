@@ -906,6 +906,34 @@ function detectCodeLanguage(path: string): string {
   }
 }
 
+function parseTrailingLineNumber(value: string): number | null {
+  const input = value.trim();
+  if (!input) return null;
+  const hashMatch = /#L(\d+)(?:C\d+)?$/i.exec(input);
+  if (hashMatch) {
+    const line = Number.parseInt(hashMatch[1], 10);
+    return Number.isFinite(line) && line > 0 ? line : null;
+  }
+  const suffixMatch = /:(\d+)(?::\d+)?$/.exec(input);
+  if (suffixMatch) {
+    const line = Number.parseInt(suffixMatch[1], 10);
+    return Number.isFinite(line) && line > 0 ? line : null;
+  }
+  return null;
+}
+
+function collectReactText(node: React.ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(item => collectReactText(item)).join('');
+  }
+  if (React.isValidElement(node)) {
+    return collectReactText((node.props as { children?: React.ReactNode }).children);
+  }
+  return '';
+}
 function isLoopbackHost(host: string): boolean {
   const v = host.trim().toLowerCase();
   return v === '127.0.0.1' || v === 'localhost' || v === '::1' || v === '[::1]';
@@ -4497,6 +4525,9 @@ function App() {
         const targetFile = linkHref ? resolveChatFileLink(linkHref) : null;
         const isFileLink = !!targetFile;
         const isWindowsLocalPath = /^\/?[a-zA-Z]:/.test(linkHref.trim());
+        const linkText = collectReactText(children);
+        const textLine = parseTrailingLineNumber(linkText);
+        const jumpLine = targetFile?.line ?? textLine;
         const fallbackHref = linkHref || '#';
 
         return (
@@ -4505,6 +4536,11 @@ function App() {
             href={fallbackHref}
             target={isFileLink ? undefined : '_blank'}
             rel={isFileLink ? undefined : 'noreferrer'}
+            title={
+              isFileLink && jumpLine
+                ? `${targetFile.path}:${jumpLine}`
+                : rest.title
+            }
             onClick={event => {
               if (!targetFile) {
                 if (isWindowsLocalPath) {
@@ -4518,7 +4554,7 @@ function App() {
               setSelectedFile(targetFile.path);
               readSelectedFile(targetFile.path)
                 .then(() => {
-                  const line = targetFile.line;
+                  const line = jumpLine;
                   if (!line) return;
                   window.requestAnimationFrame(() => {
                     scrollToFileLine(line);
@@ -4529,7 +4565,12 @@ function App() {
                 });
             }}
           >
-            {children}
+            <>
+              {children}
+              {isFileLink && jumpLine && !textLine ? (
+                <span className="chat-file-link-line">:{jumpLine}</span>
+              ) : null}
+            </>
           </a>
         );
       },
