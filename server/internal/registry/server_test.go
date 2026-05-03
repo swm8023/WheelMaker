@@ -2,6 +2,7 @@ package registry
 
 import (
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -82,8 +83,8 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 			"hubId":           "hub-a",
 			"connectionEpoch": int64(connectionEpoch),
 			"projects": []map[string]any{
-				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "imType": "console", "projectRev": "", "git": map[string]any{}},
-				{"name": "app", "path": "D:/Code/WheelMaker/app", "online": true, "agent": "claude", "imType": "feishu", "projectRev": "", "git": map[string]any{}},
+				{"name": "server", "path": "D:/Code/WheelMaker/server", "online": true, "agent": "codex", "agents": []string{"codex", "claude", "copilot"}, "imType": "console", "projectRev": "", "git": map[string]any{}},
+				{"name": "app", "path": "D:/Code/WheelMaker/app", "online": true, "agent": "claude", "agents": []string{"claude", "codex"}, "imType": "feishu", "projectRev": "", "git": map[string]any{}},
 			},
 		},
 	})
@@ -126,6 +127,29 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 	first, _ := projects[0].(map[string]any)
 	if _, ok := first["projectId"].(string); !ok {
 		t.Fatalf("projectId missing: %v", first)
+	}
+
+	projectsByName := map[string]map[string]any{}
+	for _, item := range projects {
+		proj, _ := item.(map[string]any)
+		name, _ := proj["name"].(string)
+		projectsByName[name] = proj
+	}
+	serverProject := projectsByName["server"]
+	if serverProject == nil {
+		t.Fatalf("server project missing: %v", projects)
+	}
+	serverAgents, _ := serverProject["agents"].([]any)
+	if !reflect.DeepEqual(serverAgents, []any{"codex", "claude", "copilot"}) {
+		t.Fatalf("server agents=%v, want [codex claude copilot]", serverAgents)
+	}
+	appProject := projectsByName["app"]
+	if appProject == nil {
+		t.Fatalf("app project missing: %v", projects)
+	}
+	appAgents, _ := appProject["agents"].([]any)
+	if !reflect.DeepEqual(appAgents, []any{"claude", "codex"}) {
+		t.Fatalf("app agents=%v, want [claude codex]", appAgents)
 	}
 }
 
