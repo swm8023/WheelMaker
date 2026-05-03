@@ -548,6 +548,7 @@ type ChatPromptGroup = {
   entries: ChatPromptEntry[];
   modelName: string;
   durationMs: number;
+  finished: boolean;
 };
 
 type ChatPromptGroupViewProps = {
@@ -680,7 +681,7 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
           </div>
         );
       })}
-      {group.modelName || group.durationMs > 0 ? (
+      {group.finished ? (
         <div className="chat-prompt-separator">
           <hr />
           <span className="chat-prompt-separator-label">
@@ -734,6 +735,7 @@ function groupChatMessagesByPrompt(
         entries: [],
         modelName: snapshot?.modelName ?? '',
         durationMs: snapshot?.durationMs ?? 0,
+        finished: snapshot?.finished ?? false,
       } as ChatPromptGroup);
 
     const role = msgRole(message.method);
@@ -2704,8 +2706,8 @@ function App() {
 
       let nextMessages: RegistryChatMessage[];
       if (useIncremental) {
-        if (result.prompts.length > 0) {
-          const firstReturnedPromptIndex = result.prompts[0].promptIndex;
+        if (result.messages.length > 0) {
+          const firstReturnedPromptIndex = result.messages[0].promptIndex;
           nextMessages = replaceChatMessagesFromPrompt(
             existingMessages,
             result.messages,
@@ -2717,6 +2719,17 @@ function App() {
         }
       } else {
         nextMessages = result.messages;
+      }
+
+      // Reconcile: live session.message events may have landed in the store
+      // during the await. Fold them in so they aren't lost.
+      const fresh = chatMessageStoreRef.current[result.session.sessionId] ?? [];
+      for (const m of fresh) {
+        if (!nextMessages.some(
+          n => n.promptIndex === m.promptIndex && n.turnIndex === m.turnIndex,
+        )) {
+          nextMessages = upsertChatMessage(nextMessages, m);
+        }
       }
 
       chatMessageStoreRef.current[result.session.sessionId] = nextMessages;

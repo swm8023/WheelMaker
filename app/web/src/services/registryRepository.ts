@@ -220,6 +220,7 @@ export class RegistryRepository {
               turnIndex: typeof item.turnIndex === 'number' ? item.turnIndex : 0,
               modelName: typeof item.modelName === 'string' ? item.modelName : '',
               durationMs: typeof item.durationMs === 'number' ? item.durationMs : 0,
+              finished: typeof item.finished === 'boolean' ? item.finished : false,
             };
           })
           .filter((item): item is RegistrySessionPromptSnapshot => !!item && item.promptIndex > 0)

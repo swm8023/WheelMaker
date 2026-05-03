@@ -48,6 +48,7 @@ type sessionViewPromptSnapshot struct {
 	TurnIndex   int64  `json:"turnIndex"`
 	ModelName   string `json:"modelName"`
 	DurationMs  int64  `json:"durationMs"`
+	Finished    bool   `json:"finished"`
 }
 
 type sessionViewMessage struct {
@@ -255,15 +256,17 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 			return sessionViewSummary{}, nil, nil, err
 		}
 		// Build prompt snapshot with model + duration.
+		finished := strings.TrimSpace(prompt.StopReason) != ""
 		ps := sessionViewPromptSnapshot{
 			SessionID:   sessionID,
 			PromptIndex: prompt.PromptIndex,
 			ModelName:   strings.TrimSpace(prompt.ModelName),
 			TurnIndex:   prompt.TurnIndex,
+			Finished:    finished,
 		}
 		if !prompt.StartedAt.IsZero() {
 			endTime := prompt.UpdatedAt
-			if strings.TrimSpace(prompt.StopReason) == "" {
+			if !finished {
 				endTime = time.Now().UTC()
 			}
 			ps.DurationMs = endTime.Sub(prompt.StartedAt).Milliseconds()

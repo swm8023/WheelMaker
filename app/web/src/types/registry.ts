@@ -40,6 +40,7 @@ export interface RegistrySessionPromptSnapshot {
   turnIndex: number;
   modelName: string;
   durationMs: number;
+  finished: boolean;
 }
 
 export interface RegistrySessionConfigOptionValue {
