@@ -9,6 +9,7 @@ import type {
   RegistryGitFileDiff,
   RegistryGitStatus,
   RegistryProject,
+  RegistryResumableSession,
   RegistrySessionConfigOption,
   RegistrySessionConfigOptionValue,
   RegistrySessionMessage,
@@ -553,6 +554,38 @@ export class RegistryRepository {
       ok: body.ok ?? false,
       sessionId: body.sessionId ?? payload.sessionId,
       configOptions,
+    };
+  }
+
+  async listResumableSessions(projectId: string, agentType: string): Promise<RegistryResumableSession[]> {
+    const resp = await this.client.request({
+      method: 'session.resume.list',
+      projectId,
+      payload: {agentType},
+      timeoutMs: 15000,
+    });
+    const payload = (resp.payload ?? {}) as {sessions?: RegistryResumableSession[]};
+    return payload.sessions ?? [];
+  }
+
+  async importResumedSession(projectId: string, agentType: string, sessionId: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
+    const resp = await this.client.request({
+      method: 'session.resume.import',
+      projectId,
+      payload: {agentType, sessionId},
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; session?: RegistrySessionSummary};
+    return {
+      ok: body.ok ?? false,
+      session: body.session ?? {
+        sessionId,
+        title: sessionId,
+        preview: '',
+        updatedAt: '',
+        messageCount: 0,
+        agentType,
+      },
     };
   }
 

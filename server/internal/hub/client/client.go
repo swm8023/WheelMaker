@@ -548,6 +548,84 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		summary.ConfigOptions = sess.CurrentConfigOptions()
 		return map[string]any{"ok": true, "session": summary}, nil
+	case "session.resume.list":
+		var req struct {
+			AgentType string `json:"agentType"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.resume.list payload: %w", err)
+		}
+		managed := make(map[string]bool)
+		if c.store != nil {
+			recs, err := c.store.ListSessions(ctx, c.projectName)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range recs {
+				managed[r.ID] = true
+			}
+		}
+		sessions, err := scanUnmanagedClaudeSessions(c.cwd, managed)
+		if err != nil {
+			return nil, err
+		}
+		if sessions == nil {
+			sessions = []ClaudeSessionInfo{}
+		}
+		return map[string]any{"sessions": sessions}, nil
+	case "session.resume.import":
+		var req struct {
+			SessionID string `json:"sessionId"`
+			AgentType string `json:"agentType"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.resume.import payload: %w", err)
+		}
+		if strings.TrimSpace(req.SessionID) == "" {
+			return nil, fmt.Errorf("sessionId is required")
+		}
+		if strings.TrimSpace(req.AgentType) == "" {
+			return nil, fmt.Errorf("agentType is required")
+		}
+		// Verify session exists on disk and is not already managed
+		managed := map[string]bool{req.SessionID: false}
+		found, err := scanUnmanagedClaudeSessions(c.cwd, managed)
+		if err != nil {
+			return nil, err
+		}
+		var info *ClaudeSessionInfo
+		for i := range found {
+			if found[i].SessionID == req.SessionID {
+				info = &found[i]
+				break
+			}
+		}
+		if info == nil {
+			return nil, fmt.Errorf("session not found or already managed")
+		}
+		rec := &SessionRecord{
+			ID:           req.SessionID,
+			ProjectName:  c.projectName,
+			Status:       SessionPersisted,
+			AgentType:    strings.TrimSpace(req.AgentType),
+			Title:        info.Title,
+			LastActiveAt: time.Now().UTC(),
+		}
+		if err := c.store.SaveSession(ctx, rec); err != nil {
+			return nil, fmt.Errorf("save session: %w", err)
+		}
+		if c.store != nil {
+			if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, rec.AgentType); err != nil {
+				hubLogger(c.projectName).Warn("save project default agent failed agent=%s err=%v", rec.AgentType, err)
+			}
+		}
+		summary := sessionViewSummary{
+			SessionID: req.SessionID,
+			Title:     info.Title,
+			UpdatedAt: info.UpdatedAt,
+			AgentType: rec.AgentType,
+		}
+		return map[string]any{"ok": true, "session": summary}, nil
 	case "session.setConfig":
 		var req struct {
 			SessionID string `json:"sessionId"`

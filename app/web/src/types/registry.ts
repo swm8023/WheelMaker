@@ -94,6 +94,14 @@ export type RegistryChatSession = RegistrySessionSummary;
 export type RegistryChatSessionReadResponse = RegistrySessionReadResponse;
 export type RegistryChatMessageEventPayload = RegistrySessionMessageEventPayload;
 
+export interface RegistryResumableSession {
+  sessionId: string;
+  title: string;
+  updatedAt: string;
+  messageCount: number;
+  cwd: string;
+}
+
 export interface RegistrySyncCheckPayload {
   knownProjectRev?: string;
   knownGitRev?: string;

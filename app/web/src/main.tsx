@@ -44,6 +44,7 @@ import type {
   RegistryChatMessage,
   RegistryChatMessageEventPayload,
   RegistryChatSession,
+  RegistryResumableSession,
   RegistrySessionConfigOption,
   RegistryFsEntry,
   RegistryFsInfo,
@@ -1798,6 +1799,9 @@ function App() {
   const [chatComposerActionMenuOpen, setChatComposerActionMenuOpen] = useState(false);
   const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
   const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
+  const [resumeAgentPickerOpen, setResumeAgentPickerOpen] = useState(false);
+  const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
+  const [resumeLoading, setResumeLoading] = useState(false);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -2824,6 +2828,47 @@ function App() {
     }
   };
 
+  const handleResumePickAgent = async (agentType: string) => {
+    setResumeLoading(true);
+    setResumeSessions([]);
+    try {
+      const sessions = await service.listResumableSessions(agentType);
+      setResumeSessions(sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setResumeAgentPickerOpen(false);
+    } finally {
+      setResumeLoading(false);
+    }
+  };
+
+  const handleResumeImport = async (agentType: string, sessionId: string) => {
+    setResumeLoading(true);
+    try {
+      const result = await service.importResumedSession(agentType, sessionId);
+      if (result.ok && result.session.sessionId) {
+        setChatSessions(prev => mergeChatSession(prev, result.session));
+        setSelectedChatId(result.session.sessionId);
+        chatSelectedIdRef.current = result.session.sessionId;
+        chatMessageStoreRef.current[result.session.sessionId] = [];
+        chatSyncIndexRef.current[result.session.sessionId] = 0;
+        chatSyncSubIndexRef.current[result.session.sessionId] = 0;
+        setChatMessages([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResumeLoading(false);
+      setResumeAgentPickerOpen(false);
+      setResumeSessions([]);
+    }
+  };
+
+  const handleDismissResume = () => {
+    setResumeAgentPickerOpen(false);
+    setResumeSessions([]);
+  };
+
   const removeChatSessionFromState = (sessionId: string) => {
     if (!sessionId) return;
     setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
@@ -3588,11 +3633,82 @@ function App() {
               className="button"
               style={{ marginBottom: 10 }}
               onClick={() => {
+                setResumeAgentPickerOpen(false);
+                setResumeSessions([]);
                 beginNewChatFlow({ title: '', text: '', blocks: [] });
               }}
             >
               New Session
             </button>
+            <button
+              type="button"
+              className="button"
+              style={{ marginBottom: 10 }}
+              onClick={() => {
+                setNewChatAgentPickerOpen(false);
+                setPendingNewChatDraft(null);
+                setResumeAgentPickerOpen(true);
+              }}
+            >
+              Resume
+            </button>
+            {resumeAgentPickerOpen ? (
+              <div className="chat-agent-picker-card">
+                <div className="chat-agent-picker-title">Resume Session</div>
+                {resumeSessions.length === 0 && !resumeLoading ? (
+                  <div className="chat-agent-picker-title" style={{ textTransform: 'none', fontWeight: 400, fontSize: 13 }}>
+                    Choose Agent
+                  </div>
+                ) : null}
+                {resumeSessions.length === 0 && !resumeLoading ? (
+                  <div className="chat-agent-picker-actions">
+                    {availableChatAgents.filter(a => a.toLowerCase() === 'claude').map(agentType => (
+                      <button
+                        key={agentType}
+                        type="button"
+                        className="button secondary"
+                        disabled={resumeLoading}
+                        onClick={() => { handleResumePickAgent(agentType).catch(() => undefined); }}
+                      >
+                        {agentType}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {resumeLoading ? (
+                  <div className="muted block">Loading...</div>
+                ) : null}
+                {resumeSessions.length > 0 ? (
+                  <div className="list" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                    {resumeSessions.map(s => (
+                      <div
+                        key={s.sessionId}
+                        className="item chat-session-item"
+                        onClick={() => { handleResumeImport('claude', s.sessionId).catch(() => undefined); }}
+                      >
+                        <span className="file-dot codicon codicon-comment-discussion" />
+                        <span className="label chat-session-meta">
+                          <span className="chat-session-title">
+                            {s.title || s.sessionId}
+                          </span>
+                          <span className="chat-session-updated muted" title={s.updatedAt || ''}>
+                            {formatCompactRelativeAge(s.updatedAt)}
+                            {s.messageCount > 0 ? ` · ${s.messageCount} msgs` : ''}
+                          </span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={handleDismissResume}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : null}
             {newChatAgentPickerOpen && pendingNewChatDraft ? (
               <div className="chat-agent-picker-card">
                 <div className="chat-agent-picker-title">Choose Agent</div>
