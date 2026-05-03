@@ -3628,73 +3628,79 @@ function App() {
             {chatSessions.length === 0 ? (
               <div className="muted block">No chat sessions yet</div>
             ) : null}
-            <button
-              type="button"
-              className="button"
-              style={{ marginBottom: 10 }}
-              onClick={() => {
-                setResumeAgentPickerOpen(false);
-                setResumeSessions([]);
-                beginNewChatFlow({ title: '', text: '', blocks: [] });
-              }}
-            >
-              New Session
-            </button>
-            <button
-              type="button"
-              className="button"
-              style={{ marginBottom: 10 }}
-              onClick={() => {
-                setNewChatAgentPickerOpen(false);
-                setPendingNewChatDraft(null);
-                setResumeAgentPickerOpen(true);
-              }}
-            >
-              Resume
-            </button>
+            <div className="button-row" style={{ marginBottom: 10 }}>
+              <button
+                type="button"
+                className="button button-icon"
+                style={{ marginTop: 0 }}
+                onClick={() => {
+                  setResumeAgentPickerOpen(false);
+                  setResumeSessions([]);
+                  beginNewChatFlow({ title: '', text: '', blocks: [] });
+                }}
+              >
+                <span className="codicon codicon-add" />
+                New
+              </button>
+              <button
+                type="button"
+                className="button secondary button-icon"
+                style={{ marginTop: 0 }}
+                onClick={() => {
+                  setNewChatAgentPickerOpen(false);
+                  setPendingNewChatDraft(null);
+                  setResumeAgentPickerOpen(true);
+                }}
+              >
+                <span className="codicon codicon-history" />
+                Resume
+              </button>
+            </div>
             {resumeAgentPickerOpen ? (
               <div className="chat-agent-picker-card">
-                <div className="chat-agent-picker-title">Resume Session</div>
+                <div className="chat-agent-picker-header">
+                  <span className="codicon codicon-history" />
+                  <span className="chat-agent-picker-title">Resume Session</span>
+                </div>
                 {resumeSessions.length === 0 && !resumeLoading ? (
-                  <div className="chat-agent-picker-title" style={{ textTransform: 'none', fontWeight: 400, fontSize: 13 }}>
-                    Choose Agent
-                  </div>
-                ) : null}
-                {resumeSessions.length === 0 && !resumeLoading ? (
-                  <div className="chat-agent-picker-actions">
-                    {availableChatAgents.filter(a => a.toLowerCase() === 'claude').map(agentType => (
-                      <button
-                        key={agentType}
-                        type="button"
-                        className="button secondary"
-                        disabled={resumeLoading}
-                        onClick={() => { handleResumePickAgent(agentType).catch(() => undefined); }}
-                      >
-                        {agentType}
-                      </button>
-                    ))}
-                  </div>
+                  <>
+                    <div className="chat-agent-picker-subtitle">Select an agent</div>
+                    <div className="chat-agent-picker-actions">
+                      {availableChatAgents.filter(a => a.toLowerCase() === 'claude').map(agentType => (
+                        <button
+                          key={agentType}
+                          type="button"
+                          className="button secondary"
+                          disabled={resumeLoading}
+                          onClick={() => { handleResumePickAgent(agentType).catch(() => undefined); }}
+                        >
+                          <span className="codicon codicon-sparkle" />
+                          {agentType}
+                        </button>
+                      ))}
+                      {availableChatAgents.filter(a => a.toLowerCase() === 'claude').length === 0 ? (
+                        <div className="muted block">No Claude agent available.</div>
+                      ) : null}
+                    </div>
+                  </>
                 ) : null}
                 {resumeLoading ? (
-                  <div className="muted block">Loading...</div>
+                  <div className="muted block">Loading sessions...</div>
                 ) : null}
                 {resumeSessions.length > 0 ? (
-                  <div className="list" style={{ maxHeight: 320, overflowY: 'auto' }}>
+                  <div className="chat-resume-list">
                     {resumeSessions.map(s => (
                       <div
                         key={s.sessionId}
-                        className="item chat-session-item"
+                        className="chat-resume-item"
                         onClick={() => { handleResumeImport('claude', s.sessionId).catch(() => undefined); }}
                       >
-                        <span className="file-dot codicon codicon-comment-discussion" />
-                        <span className="label chat-session-meta">
-                          <span className="chat-session-title">
-                            {s.title || s.sessionId}
-                          </span>
-                          <span className="chat-session-updated muted" title={s.updatedAt || ''}>
-                            {formatCompactRelativeAge(s.updatedAt)}
-                            {s.messageCount > 0 ? ` · ${s.messageCount} msgs` : ''}
-                          </span>
+                        <span className="chat-resume-item-title">
+                          {s.title || s.sessionId}
+                        </span>
+                        <span className="chat-resume-item-meta">
+                          <span>{formatCompactRelativeAge(s.updatedAt)}</span>
+                          {s.messageCount > 0 ? <span>{s.messageCount} messages</span> : null}
                         </span>
                       </div>
                     ))}
@@ -3703,15 +3709,21 @@ function App() {
                 <button
                   type="button"
                   className="button ghost"
+                  style={{ alignSelf: 'flex-start', marginTop: 0, fontSize: 12 }}
                   onClick={handleDismissResume}
                 >
+                  <span className="codicon codicon-close" style={{ marginRight: 4 }} />
                   Cancel
                 </button>
               </div>
             ) : null}
             {newChatAgentPickerOpen && pendingNewChatDraft ? (
               <div className="chat-agent-picker-card">
-                <div className="chat-agent-picker-title">Choose Agent</div>
+                <div className="chat-agent-picker-header">
+                  <span className="codicon codicon-add" />
+                  <span className="chat-agent-picker-title">New Session</span>
+                </div>
+                <div className="chat-agent-picker-subtitle">Choose an agent</div>
                 <div className="chat-agent-picker-actions">
                   {availableChatAgents.map(agentType => (
                     <button
@@ -3722,6 +3734,7 @@ function App() {
                         completeNewChatFlow(agentType).catch(() => undefined);
                       }}
                     >
+                      <span className="codicon codicon-sparkle" />
                       {agentType}
                     </button>
                   ))}
@@ -3732,11 +3745,13 @@ function App() {
                 <button
                   type="button"
                   className="button ghost"
+                  style={{ alignSelf: 'flex-start', marginTop: 0, fontSize: 12 }}
                   onClick={() => {
                     setNewChatAgentPickerOpen(false);
                     setPendingNewChatDraft(null);
                   }}
                 >
+                  <span className="codicon codicon-close" style={{ marginRight: 4 }} />
                   Cancel
                 </button>
               </div>

@@ -101,10 +101,50 @@ body,
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
+  transition: opacity 100ms ease, background 100ms ease, border-color 100ms ease;
 }
 
 .button:hover {
   opacity: 0.9;
+}
+
+.button.secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.button.secondary:hover {
+  background: var(--hover);
+  border-color: var(--muted);
+  opacity: 1;
+}
+
+.button.ghost {
+  background: transparent;
+  color: var(--muted);
+}
+
+.button.ghost:hover {
+  color: var(--text);
+  background: var(--hover);
+  opacity: 1;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+}
+
+.button-row .button {
+  flex: 1;
+  margin-top: 0;
+}
+
+.button-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .error {
@@ -2151,24 +2191,99 @@ body,
 .chat-agent-picker-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 12px;
-  padding: 12px;
-  border: 1px solid var(--border);
+  padding: 14px;
+  border: 1px solid var(--accent);
   border-radius: 10px;
   background: var(--panel);
+  box-shadow: 0 2px 12px rgba(0, 122, 204, 0.08);
+  animation: wmSlideDown 140ms ease-out;
+}
+
+@keyframes wmSlideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.chat-agent-picker-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chat-agent-picker-header .codicon {
+  font-size: 16px;
+  color: var(--accent);
 }
 
 .chat-agent-picker-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
+}
+
+.chat-agent-picker-subtitle {
+  font-size: 11px;
+  color: var(--muted);
+  padding-left: 4px;
 }
 
 .chat-agent-picker-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.chat-agent-picker-actions .button.secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.chat-agent-picker-actions .button.secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* resume session list items */
+.chat-resume-list {
+  margin: -4px -14px 0;
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+}
+
+.chat-resume-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 100ms ease;
+}
+
+.chat-resume-item:hover {
+  background: var(--hover);
+}
+
+.chat-resume-item-title {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-resume-item-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 /* ── Thinking Block ── */
