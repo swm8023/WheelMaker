@@ -1114,14 +1114,6 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 			}
 			if ev.update != nil {
 				params := *ev.update
-				// Skip system command messages replayed during session/load
-				// (e.g. <command-name>, <local-command-stdout>).
-				if params.Update.SessionUpdate == acp.SessionUpdateUserMessageChunk {
-					text := extractTextChunk(params.Update.Content)
-					if isCommandSystemMessage(text) {
-						continue
-					}
-				}
 				delivered := s.recordSessionViewEvent(SessionViewEvent{
 					Type:      SessionViewEventTypeACP,
 					SessionID: s.acpSessionID,

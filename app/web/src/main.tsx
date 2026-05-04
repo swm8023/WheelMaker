@@ -522,6 +522,15 @@ function decodeSessionMessageFromEventPayload(
       doc.param != null && typeof doc.param === 'object' && !Array.isArray(doc.param)
         ? (doc.param as Record<string, unknown>)
         : {};
+    // Skip Claude command system messages (<command-name>, <local-command-*, etc.)
+    if (method === 'user_message_chunk') {
+      const text = typeof param.text === 'string' ? param.text : '';
+      if (
+        /^<(command-name|command-message|command-args|local-command-caveat|local-command-stdout)[\s>]/.test(text)
+      ) {
+        return null;
+      }
+    }
     return { sessionId, promptIndex, turnIndex, method, param };
   } catch {
     // Unparseable content: store as system message

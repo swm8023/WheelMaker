@@ -715,25 +715,6 @@ func extractUpdateText(raw json.RawMessage) string {
 	return ""
 }
 
-// isCommandSystemMessage reports whether a user_message_chunk text is a
-// Claude system caveat (command logs, output captures) that should be
-// skipped during session recording.
-func isCommandSystemMessage(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false
-	}
-	for _, prefix := range []string{
-		"<command-name>", "<command-message>", "<command-args>",
-		"<local-command-caveat>", "<local-command-stdout>",
-	} {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, error) {
 	parsed := parsedSessionViewEvent{
 		raw: event,
@@ -776,14 +757,8 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 				return parsed, nil
 			}
 			switch method {
-			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+			case acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk, acp.SessionUpdateUserMessageChunk:
 				parsed.setJSONMessage(method, acp.IMTextResult{Text: extractUpdateText(params.Update.Content)}, "")
-			case acp.SessionUpdateUserMessageChunk:
-				text := extractUpdateText(params.Update.Content)
-				if isCommandSystemMessage(text) {
-					return parsed, nil
-				}
-				parsed.setJSONMessage(method, acp.IMTextResult{Text: text}, "")
 			case acp.SessionUpdateToolCall, acp.SessionUpdateToolCallUpdate:
 				parsed.setJSONMessage(acp.IMMethodToolCall, acp.IMToolResult{
 					Cmd:    strings.TrimSpace(params.Update.Title),
