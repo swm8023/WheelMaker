@@ -567,11 +567,9 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		agentType := strings.TrimSpace(req.AgentType)
 		var sessions []ClaudeSessionInfo
-		if provider := acpProviderForAgentType(agentType); provider != nil {
-			s, err := scanACPUnmanagedSessions(ctx, provider, c.cwd, managed)
-			if err != nil {
-				return nil, err
-			}
+		if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed); err != nil {
+			return nil, err
+		} else if len(s) > 0 {
 			sessions = s
 		} else {
 			s, err := scanUnmanagedClaudeSessions(c.cwd, managed)
@@ -600,16 +598,16 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		agentType := strings.TrimSpace(req.AgentType)
 		var info *ClaudeSessionInfo
-		if provider := acpProviderForAgentType(agentType); provider != nil {
-			found, err := verifyACPSessionExists(ctx, provider, c.cwd, req.SessionID)
-			if err != nil {
-				return nil, fmt.Errorf("verify %s session: %w", agentType, err)
+		// Try disk scan first (fast, no process spawn).
+		if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, map[string]bool{}); err == nil {
+			for i := range s {
+				if s[i].SessionID == req.SessionID {
+					info = &s[i]
+					break
+				}
 			}
-			if found == nil {
-				return nil, fmt.Errorf("session not found or already managed")
-			}
-			info = found
-		} else {
+		}
+		if info == nil {
 			// Verify session exists on disk and is not already managed
 			managed := map[string]bool{req.SessionID: false}
 			found, err := scanUnmanagedClaudeSessions(c.cwd, managed)
