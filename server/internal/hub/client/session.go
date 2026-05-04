@@ -1114,6 +1114,14 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 			}
 			if ev.update != nil {
 				params := *ev.update
+				// Skip system command messages replayed during session/load
+				// (e.g. <command-name>, <local-command-stdout>).
+				if params.Update.SessionUpdate == acp.SessionUpdateUserMessageChunk {
+					text := extractTextChunk(params.Update.Content)
+					if isCommandSystemMessage(text) {
+						continue
+					}
+				}
 				delivered := s.recordSessionViewEvent(SessionViewEvent{
 					Type:      SessionViewEventTypeACP,
 					SessionID: s.acpSessionID,
@@ -1226,6 +1234,25 @@ func extractTextFromAny(v any) string {
 	default:
 		return ""
 	}
+}
+
+// isCommandSystemMessage reports whether a user_message_chunk text is a
+// Claude system caveat (command logs, output captures, etc.) that should be
+// skipped during session replay.
+func isCommandSystemMessage(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	for _, prefix := range []string{
+		"<command-name>", "<command-message>", "<command-args>",
+		"<local-command-caveat>", "<local-command-stdout>",
+	} {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func renderUnknown(v string) string {
