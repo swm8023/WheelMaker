@@ -159,7 +159,7 @@ func (f *ACPFactory) CreateInstance(ctx context.Context, provider protocol.ACPPr
 
 func providerInstanceCreator(provider ACPProvider) InstanceCreator {
 	return func(_ context.Context, cwd string) (Instance, error) {
-		conn, err := newOwnedProviderConn(provider, cwd)
+		conn, err := NewOwnedProviderConn(provider, cwd)
 		if err != nil {
 			return nil, fmt.Errorf("connect %q: %w", provider.Name(), err)
 		}
@@ -167,7 +167,7 @@ func providerInstanceCreator(provider ACPProvider) InstanceCreator {
 	}
 }
 
-func newOwnedProviderConn(provider ACPProvider, cwd string) (Conn, error) {
+func NewOwnedProviderConn(provider ACPProvider, cwd string) (Conn, error) {
 	exe, args, env, err := provider.Launch()
 	if err != nil {
 		return nil, err

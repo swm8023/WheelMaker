@@ -565,9 +565,21 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 				managed[r.ID] = true
 			}
 		}
-		sessions, err := scanUnmanagedClaudeSessions(c.cwd, managed)
-		if err != nil {
-			return nil, err
+		agentType := strings.TrimSpace(req.AgentType)
+		var sessions []ClaudeSessionInfo
+		switch agentType {
+		case "copilot":
+			s, err := scanUnmanagedCopilotSessions(ctx, c.cwd, managed)
+			if err != nil {
+				return nil, err
+			}
+			sessions = s
+		default:
+			s, err := scanUnmanagedClaudeSessions(c.cwd, managed)
+			if err != nil {
+				return nil, err
+			}
+			sessions = s
 		}
 		if sessions == nil {
 			sessions = []ClaudeSessionInfo{}
@@ -587,27 +599,40 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if strings.TrimSpace(req.AgentType) == "" {
 			return nil, fmt.Errorf("agentType is required")
 		}
-		// Verify session exists on disk and is not already managed
-		managed := map[string]bool{req.SessionID: false}
-		found, err := scanUnmanagedClaudeSessions(c.cwd, managed)
-		if err != nil {
-			return nil, err
-		}
+		agentType := strings.TrimSpace(req.AgentType)
 		var info *ClaudeSessionInfo
-		for i := range found {
-			if found[i].SessionID == req.SessionID {
-				info = &found[i]
-				break
+		switch agentType {
+		case "copilot":
+			found, err := verifyCopilotSessionExists(ctx, c.cwd, req.SessionID)
+			if err != nil {
+				return nil, fmt.Errorf("verify copilot session: %w", err)
 			}
-		}
-		if info == nil {
-			return nil, fmt.Errorf("session not found or already managed")
+			if found == nil {
+				return nil, fmt.Errorf("session not found or already managed")
+			}
+			info = found
+		default:
+			// Verify session exists on disk and is not already managed
+			managed := map[string]bool{req.SessionID: false}
+			found, err := scanUnmanagedClaudeSessions(c.cwd, managed)
+			if err != nil {
+				return nil, err
+			}
+			for i := range found {
+				if found[i].SessionID == req.SessionID {
+					info = &found[i]
+					break
+				}
+			}
+			if info == nil {
+				return nil, fmt.Errorf("session not found or already managed")
+			}
 		}
 		rec := &SessionRecord{
 			ID:           req.SessionID,
 			ProjectName:  c.projectName,
 			Status:       SessionPersisted,
-			AgentType:    strings.TrimSpace(req.AgentType),
+			AgentType:    agentType,
 			Title:        info.Title,
 			LastActiveAt: time.Now().UTC(),
 		}
