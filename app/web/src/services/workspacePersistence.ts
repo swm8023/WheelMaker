@@ -37,6 +37,7 @@ export type PersistedProjectState = {
 export type PersistedGlobalState = {
   address: string;
   token: string;
+  deepseekApiKey: string;
   themeMode: PersistedThemeMode;
   codeTheme: CodeThemeId;
   codeFont: CodeFontId;
@@ -62,6 +63,7 @@ function defaultGlobalState(): PersistedGlobalState {
   return {
     address: '',
     token: '',
+    deepseekApiKey: '',
     themeMode: 'dark',
     codeTheme: DEFAULT_CODE_THEME,
     codeFont: DEFAULT_CODE_FONT,
@@ -121,6 +123,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
   return {
     address: typeof input.address === 'string' ? input.address : base.address,
     token: typeof input.token === 'string' ? input.token : base.token,
+    deepseekApiKey: typeof input.deepseekApiKey === 'string' ? input.deepseekApiKey : base.deepseekApiKey,
     themeMode: input.themeMode === 'light' ? 'light' : 'dark',
     codeTheme: typeof input.codeTheme === 'string' && isCodeThemeId(input.codeTheme) ? input.codeTheme : base.codeTheme,
     codeFont: typeof input.codeFont === 'string' && isCodeFontId(input.codeFont) ? input.codeFont : base.codeFont,
@@ -239,3 +242,5 @@ export class WorkspacePersistenceRepository {
     this.save();
   }
 }
+
+

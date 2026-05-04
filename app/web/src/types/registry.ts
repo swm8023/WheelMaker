@@ -34,14 +34,7 @@ export interface RegistrySessionPlanEntry {
   status?: string;
 }
 
-export interface RegistrySessionPromptSnapshot {
-  sessionId: string;
-  promptIndex: number;
-  turnIndex: number;
-  modelName: string;
-  durationMs: number;
-  finished: boolean;
-}
+
 
 export interface RegistrySessionConfigOptionValue {
   value: string;
@@ -70,18 +63,67 @@ export interface RegistrySessionSummary {
   configOptions?: RegistrySessionConfigOption[];
 }
 
+
+
 export interface RegistrySessionPromptSnapshot {
   sessionId: string;
   promptIndex: number;
   turnIndex: number;
-  content: string[];
+  modelName?: string;
+  durationMs?: number;
+  finished?: boolean;
+  content?: string[];
 }
+
 export interface RegistrySessionReadResponse {
   session: RegistrySessionSummary;
   prompts: RegistrySessionPromptSnapshot[];
   messages: RegistrySessionMessage[];
 }
 
+export interface RegistryTokenProvider {
+  id: string;
+  name: string;
+  authMode: string;
+}
+
+export interface RegistryDeepSeekBalanceInfo {
+  currency: string;
+  totalBalance: string;
+  grantedBalance: string;
+  toppedUpBalance: string;
+}
+
+export interface RegistryDeepSeekBalanceView {
+  isAvailable: boolean;
+  items: RegistryDeepSeekBalanceInfo[];
+}
+
+export interface RegistryDeepSeekUsageRow {
+  bucket: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cost: number;
+}
+
+export interface RegistryDeepSeekUsageView {
+  rangeType: 'day' | 'month';
+  month: string;
+  rows: RegistryDeepSeekUsageRow[];
+}
+
+export interface RegistryDeepSeekTokenStats {
+  ok: boolean;
+  provider: string;
+  rangeType: 'day' | 'month';
+  month: string;
+  updatedAt: string;
+  balance: RegistryDeepSeekBalanceView;
+  usage: RegistryDeepSeekUsageView;
+  usageUnavailable: boolean;
+  usageMessage?: string;
+}
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
   promptIndex: number;
@@ -232,4 +274,10 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
+
+
+
+
+
+
 

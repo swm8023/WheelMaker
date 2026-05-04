@@ -45,6 +45,8 @@ import type {
   RegistryChatMessageEventPayload,
   RegistryChatSession,
   RegistryResumableSession,
+  RegistrySessionContentBlock,
+  RegistrySessionPromptSnapshot,
   RegistrySessionConfigOption,
   RegistryFsEntry,
   RegistryFsInfo,
@@ -52,11 +54,14 @@ import type {
   RegistryGitCommitFile,
   RegistryGitStatus,
   RegistryProject,
+  RegistryTokenProvider,
+  RegistryDeepSeekTokenStats,
 } from './types/registry';
 import './styles.css';
 
 type Tab = 'chat' | 'file' | 'git';
 type ThemeMode = 'dark' | 'light';
+type SettingsPage = 'main' | 'tokenStats';
 type DirEntries = Record<string, RegistryFsEntry[]>;
 type GitDiffSource = 'commit' | 'worktree';
 type ChatAttachment = {
@@ -1750,6 +1755,18 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
+  const [sidebarSettingsPage, setSidebarSettingsPage] = useState<SettingsPage>('main');
+  const [tokenProviders, setTokenProviders] = useState<RegistryTokenProvider[]>([]);
+  const [tokenProvidersLoading, setTokenProvidersLoading] = useState(false);
+  const [tokenProvidersError, setTokenProvidersError] = useState('');
+  const [tokenProviderPickerOpen, setTokenProviderPickerOpen] = useState(false);
+  const [enabledTokenProviders, setEnabledTokenProviders] = useState<string[]>([]);
+  const [deepSeekApiKey, setDeepSeekApiKey] = useState(persistedGlobal.deepseekApiKey || '');
+  const [deepSeekRangeType, setDeepSeekRangeType] = useState<'day' | 'month'>('day');
+  const [deepSeekMonth, setDeepSeekMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [deepSeekStatsLoading, setDeepSeekStatsLoading] = useState(false);
+  const [deepSeekStats, setDeepSeekStats] = useState<RegistryDeepSeekTokenStats | null>(null);
+  const [deepSeekStatsError, setDeepSeekStatsError] = useState('');
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
@@ -2039,6 +2056,7 @@ function App() {
     workspaceStore.rememberGlobalState({
       address,
       token,
+      deepseekApiKey: deepSeekApiKey,
       themeMode,
       codeTheme,
       codeFont,
@@ -2053,6 +2071,7 @@ function App() {
   }, [
     address,
     token,
+    deepSeekApiKey,
     themeMode,
     codeTheme,
     codeFont,
@@ -3421,6 +3440,69 @@ function App() {
     });
   }, [address, autoConnecting, connected]);
 
+  useEffect(() => {
+    if (sidebarSettingsOpen) {
+      return;
+    }
+    setSidebarSettingsPage('main');
+    setTokenProviderPickerOpen(false);
+  }, [sidebarSettingsOpen]);
+
+  const loadTokenProviders = useCallback(async () => {
+    setTokenProvidersLoading(true);
+    setTokenProvidersError('');
+    try {
+      const providers = await service.listTokenProviders();
+      setTokenProviders(providers);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setTokenProvidersError(message);
+    } finally {
+      setTokenProvidersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarSettingsOpen || sidebarSettingsPage !== 'tokenStats') {
+      return;
+    }
+    loadTokenProviders().catch(() => undefined);
+  }, [sidebarSettingsOpen, sidebarSettingsPage, loadTokenProviders]);
+
+  const handleAddTokenProvider = (providerId: string) => {
+    const normalized = providerId.trim().toLowerCase();
+    if (!normalized) return;
+    setEnabledTokenProviders(prev =>
+      prev.includes(normalized) ? prev : [...prev, normalized],
+    );
+    setTokenProviderPickerOpen(false);
+  };
+
+  const handleFetchDeepSeekStats = async () => {
+    const apiKey = deepSeekApiKey.trim();
+    if (!apiKey) {
+      setDeepSeekStatsError('Please input DeepSeek API key.');
+      return;
+    }
+    setDeepSeekStatsLoading(true);
+    setDeepSeekStatsError('');
+    try {
+      const result = await service.fetchDeepSeekTokenStats({
+        apiKey,
+        rangeType: deepSeekRangeType,
+        month: deepSeekMonth,
+      });
+      setDeepSeekStats(result);
+      setEnabledTokenProviders(prev =>
+        prev.includes('deepseek') ? prev : [...prev, 'deepseek'],
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setDeepSeekStatsError(message);
+    } finally {
+      setDeepSeekStatsLoading(false);
+    }
+  };
   const clearLocalCache = () => {
     const confirmed = window.confirm(
       'Clear all local cache data except token?',
@@ -4401,154 +4483,338 @@ function App() {
     );
   };
 
-  const renderSidebar = () => (
-    <>
-      <div className="sidebar-scroll">
-        {sidebarSettingsOpen ? (
-          <>
-            <div className="section-title">SETTINGS</div>
-            <div className="list">
-              <label className="switch-row sidebar-setting-row">
-                <span>Dark Mode</span>
-                <input
-                  type="checkbox"
-                  checked={themeMode === 'dark'}
-                  onChange={e =>
-                    setThemeMode(e.target.checked ? 'dark' : 'light')
-                  }
-                />
-              </label>
-              <label className="switch-row sidebar-setting-row">
-                <span>Code Theme</span>
-                <select
-                  className="sidebar-setting-select"
-                  value={codeTheme}
-                  onChange={event => {
-                    const next = event.target.value;
-                    if (isCodeThemeId(next)) setCodeTheme(next);
-                  }}
-                >
-                  <option
-                    key={CODE_THEME_OPTIONS[0].id}
-                    value={CODE_THEME_OPTIONS[0].id}
-                  >
-                    {CODE_THEME_OPTIONS[0].label}
-                  </option>
-                  {CODE_THEME_OPTION_GROUPS.map(group => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.options.map(item => (
+  const renderSidebar = () => {
+    const deepSeekEnabled = enabledTokenProviders.includes('deepseek');
+    const availableProviders = tokenProviders.filter(
+      provider => !enabledTokenProviders.includes(provider.id.toLowerCase()),
+    );
+
+    return (
+      <>
+        <div className="sidebar-scroll">
+          {sidebarSettingsOpen ? (
+            <>
+              <div className="section-title">SETTINGS</div>
+              {sidebarSettingsPage === 'main' ? (
+                <div className="list">
+                  <label className="switch-row sidebar-setting-row">
+                    <span>Dark Mode</span>
+                    <input
+                      type="checkbox"
+                      checked={themeMode === 'dark'}
+                      onChange={e =>
+                        setThemeMode(e.target.checked ? 'dark' : 'light')
+                      }
+                    />
+                  </label>
+                  <label className="switch-row sidebar-setting-row">
+                    <span>Code Theme</span>
+                    <select
+                      className="sidebar-setting-select"
+                      value={codeTheme}
+                      onChange={event => {
+                        const next = event.target.value;
+                        if (isCodeThemeId(next)) setCodeTheme(next);
+                      }}
+                    >
+                      <option
+                        key={CODE_THEME_OPTIONS[0].id}
+                        value={CODE_THEME_OPTIONS[0].id}
+                      >
+                        {CODE_THEME_OPTIONS[0].label}
+                      </option>
+                      {CODE_THEME_OPTION_GROUPS.map(group => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.options.map(item => (
+                            <option key={item.id} value={item.id}>
+                              {item.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="switch-row sidebar-setting-row">
+                    <span>Code Font</span>
+                    <select
+                      className="sidebar-setting-select"
+                      value={codeFont}
+                      onChange={event => {
+                        const next = event.target.value;
+                        if (isCodeFontId(next)) setCodeFont(next);
+                      }}
+                    >
+                      {CODE_FONT_OPTIONS.map(item => (
                         <option key={item.id} value={item.id}>
                           {item.label}
                         </option>
                       ))}
-                    </optgroup>
-                  ))}
-                </select>
-              </label>
-              <label className="switch-row sidebar-setting-row">
-                <span>Code Font</span>
-                <select
-                  className="sidebar-setting-select"
-                  value={codeFont}
-                  onChange={event => {
-                    const next = event.target.value;
-                    if (isCodeFontId(next)) setCodeFont(next);
-                  }}
-                >
-                  {CODE_FONT_OPTIONS.map(item => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="switch-row sidebar-setting-row">
-                <span>Font Size</span>
-                <select
-                  className="sidebar-setting-select"
-                  value={String(codeFontSize)}
-                  onChange={event => {
-                    setCodeFontSize(
-                      clampCodeFontSize(Number(event.target.value)),
-                    );
-                  }}
-                >
-                  {CODE_FONT_SIZE_OPTIONS.map(size => (
-                    <option key={size} value={size}>
-                      {size}px
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="switch-row sidebar-setting-row">
-                <span>Line Height</span>
-                <select
-                  className="sidebar-setting-select"
-                  value={String(codeLineHeight)}
-                  onChange={event => {
-                    setCodeLineHeight(
-                      clampCodeLineHeight(Number(event.target.value)),
-                    );
-                  }}
-                >
-                  {CODE_LINE_HEIGHT_OPTIONS.map(v => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="switch-row sidebar-setting-row">
-                <span>Tab Size</span>
-                <select
-                  className="sidebar-setting-select"
-                  value={String(codeTabSize)}
-                  onChange={event => {
-                    setCodeTabSize(
-                      clampCodeTabSize(Number(event.target.value)),
-                    );
-                  }}
-                >
-                  {CODE_TAB_SIZE_OPTIONS.map(v => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                    </select>
+                  </label>
+                  <label className="switch-row sidebar-setting-row">
+                    <span>Font Size</span>
+                    <select
+                      className="sidebar-setting-select"
+                      value={String(codeFontSize)}
+                      onChange={event => {
+                        setCodeFontSize(
+                          clampCodeFontSize(Number(event.target.value)),
+                        );
+                      }}
+                    >
+                      {CODE_FONT_SIZE_OPTIONS.map(size => (
+                        <option key={size} value={size}>
+                          {size}px
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="switch-row sidebar-setting-row">
+                    <span>Line Height</span>
+                    <select
+                      className="sidebar-setting-select"
+                      value={String(codeLineHeight)}
+                      onChange={event => {
+                        setCodeLineHeight(
+                          clampCodeLineHeight(Number(event.target.value)),
+                        );
+                      }}
+                    >
+                      {CODE_LINE_HEIGHT_OPTIONS.map(v => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="switch-row sidebar-setting-row">
+                    <span>Tab Size</span>
+                    <select
+                      className="sidebar-setting-select"
+                      value={String(codeTabSize)}
+                      onChange={event => {
+                        setCodeTabSize(
+                          clampCodeTabSize(Number(event.target.value)),
+                        );
+                      }}
+                    >
+                      {CODE_TAB_SIZE_OPTIONS.map(v => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
 
-              <button
-                type="button"
-                className="sidebar-clear-cache-btn"
-                onClick={clearLocalCache}
-              >
-                Clear Local Cache (Keep Token)
-              </button>
-            </div>
-          </>
-        ) : (
-          renderSidebarMain()
-        )}
-      </div>
-      <div className="sidebar-footer">
-        <button
-          type="button"
-          className="sidebar-settings-btn"
-          onClick={() => setSidebarSettingsOpen(value => !value)}
-          title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
-        >
-          <span
-            className={`codicon ${
-              sidebarSettingsOpen
-                ? 'codicon-arrow-left'
-                : 'codicon-settings-gear'
-            }`}
-          />
-          <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
-        </button>
-      </div>
-    </>
-  );
+                  <button
+                    type="button"
+                    className="sidebar-secondary-btn"
+                    onClick={() => {
+                      setSidebarSettingsPage('tokenStats');
+                      setDeepSeekStatsError('');
+                      loadTokenProviders().catch(() => undefined);
+                    }}
+                  >
+                    Token统计
+                  </button>
+
+                  <button
+                    type="button"
+                    className="sidebar-clear-cache-btn"
+                    onClick={clearLocalCache}
+                  >
+                    Clear Local Cache (Keep Token)
+                  </button>
+                </div>
+              ) : (
+                <div className="list token-stats-page">
+                  <div className="token-stats-header-row">
+                    <button
+                      type="button"
+                      className="token-stats-back-btn"
+                      onClick={() => {
+                        setSidebarSettingsPage('main');
+                        setTokenProviderPickerOpen(false);
+                      }}
+                    >
+                      <span className="codicon codicon-arrow-left" />
+                      <span>Back</span>
+                    </button>
+                    <div className="token-stats-title">Token统计</div>
+                    <button
+                      type="button"
+                      className="token-stats-add-btn"
+                      onClick={() => setTokenProviderPickerOpen(v => !v)}
+                      title="Add provider"
+                    >
+                      <span className="codicon codicon-add" />
+                    </button>
+                  </div>
+
+                  {tokenProviderPickerOpen ? (
+                    <div className="token-stats-provider-picker">
+                      {availableProviders.length === 0 ? (
+                        <div className="muted block">No available providers</div>
+                      ) : (
+                        availableProviders.map(provider => (
+                          <button
+                            key={provider.id}
+                            type="button"
+                            className="token-stats-provider-btn"
+                            onClick={() => handleAddTokenProvider(provider.id)}
+                          >
+                            {provider.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
+
+                  {tokenProvidersLoading ? (
+                    <div className="muted block">Loading providers...</div>
+                  ) : null}
+                  {tokenProvidersError ? (
+                    <div className="muted block token-stats-error">{tokenProvidersError}</div>
+                  ) : null}
+
+                  {!deepSeekEnabled ? (
+                    <div className="muted block">Click + to add DeepSeek.</div>
+                  ) : null}
+
+                  {deepSeekEnabled ? (
+                    <div className="token-stats-card">
+                      <div className="token-stats-card-title">DeepSeek</div>
+                      <label className="token-stats-field">
+                        <span>API Key</span>
+                        <input
+                          type="password"
+                          className="token-stats-input"
+                          value={deepSeekApiKey}
+                          onChange={event => setDeepSeekApiKey(event.target.value)}
+                          placeholder="sk-..."
+                        />
+                      </label>
+                      <div className="token-stats-actions">
+                        <button
+                          type="button"
+                          className="token-stats-login-btn"
+                          disabled
+                          title="Login mode will be added later"
+                        >
+                          登录（暂未支持）
+                        </button>
+                        <select
+                          className="token-stats-select"
+                          value={deepSeekRangeType}
+                          onChange={event =>
+                            setDeepSeekRangeType(event.target.value === 'month' ? 'month' : 'day')
+                          }
+                        >
+                          <option value="day">按日</option>
+                          <option value="month">按月</option>
+                        </select>
+                        <input
+                          type="month"
+                          className="token-stats-month"
+                          value={deepSeekMonth}
+                          onChange={event => setDeepSeekMonth(event.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="token-stats-query-btn"
+                          onClick={() => {
+                            handleFetchDeepSeekStats().catch(() => undefined);
+                          }}
+                          disabled={deepSeekStatsLoading}
+                        >
+                          {deepSeekStatsLoading ? '查询中...' : '查询'}
+                        </button>
+                      </div>
+
+                      {deepSeekStatsError ? (
+                        <div className="muted block token-stats-error">{deepSeekStatsError}</div>
+                      ) : null}
+
+                      {deepSeekStats ? (
+                        <div className="token-stats-result">
+                          <div className="token-stats-subtitle">余额</div>
+                          {deepSeekStats.balance.items.length === 0 ? (
+                            <div className="muted block">No balance items.</div>
+                          ) : (
+                            <div className="token-stats-balance-list">
+                              {deepSeekStats.balance.items.map(item => (
+                                <div key={item.currency} className="token-stats-balance-item">
+                                  <span>{item.currency}</span>
+                                  <span>Total: {item.totalBalance}</span>
+                                  <span>Granted: {item.grantedBalance}</span>
+                                  <span>Topped: {item.toppedUpBalance}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="token-stats-subtitle">Token</div>
+                          {deepSeekStats.usageUnavailable ? (
+                            <div className="muted block token-stats-error">
+                              {deepSeekStats.usageMessage || 'Usage API unavailable'}
+                            </div>
+                          ) : (
+                            <div className="token-stats-table-wrap">
+                              <table className="token-stats-table">
+                                <thead>
+                                  <tr>
+                                    <th>Bucket</th>
+                                    <th>Input</th>
+                                    <th>Output</th>
+                                    <th>Total</th>
+                                    <th>Cost</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {deepSeekStats.usage.rows.map(row => (
+                                    <tr key={`${row.bucket}-${row.totalTokens}`}>
+                                      <td>{row.bucket}</td>
+                                      <td>{row.inputTokens.toLocaleString()}</td>
+                                      <td>{row.outputTokens.toLocaleString()}</td>
+                                      <td>{row.totalTokens.toLocaleString()}</td>
+                                      <td>{row.cost.toFixed(6)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </>
+          ) : (
+            renderSidebarMain()
+          )}
+        </div>
+        <div className="sidebar-footer">
+          <button
+            type="button"
+            className="sidebar-settings-btn"
+            onClick={() => setSidebarSettingsOpen(value => !value)}
+            title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
+          >
+            <span
+              className={`codicon ${
+                sidebarSettingsOpen
+                  ? 'codicon-arrow-left'
+                  : 'codicon-settings-gear'
+              }`}
+            />
+            <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
+          </button>
+        </div>
+      </>
+    );
+  };
 
   const renderCodePane = (
     content: string,
@@ -5543,4 +5809,11 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
+
+
+
+
 

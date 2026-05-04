@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -75,19 +76,23 @@ type Client struct {
 
 	sessionRecorder *SessionRecorder
 	viewSink        SessionViewSink
+	httpClient      *http.Client
+	deepSeekBaseURL string
 }
 
 // New creates a Client for the given project.
 func New(store Store, projectName string, cwd string) *Client {
 	c := &Client{
-		projectName:    projectName,
-		cwd:            cwd,
-		registry:       agent.DefaultACPFactory(),
-		store:          store,
-		sessions:       make(map[string]*Session),
-		routeMap:       make(map[string]string),
-		suspendTimeout: 5 * time.Minute,
-		stopPersistCh:  make(chan struct{}),
+		projectName:     projectName,
+		cwd:             cwd,
+		registry:        agent.DefaultACPFactory(),
+		store:           store,
+		sessions:        make(map[string]*Session),
+		routeMap:        make(map[string]string),
+		suspendTimeout:  5 * time.Minute,
+		stopPersistCh:   make(chan struct{}),
+		httpClient:      &http.Client{Timeout: 15 * time.Second},
+		deepSeekBaseURL: "https://api.deepseek.com",
 	}
 	c.sessionRecorder = newSessionRecorder(projectName, store, func(ctx context.Context) ([]SessionRecord, error) {
 		return c.ListSessions(ctx)
@@ -690,6 +695,24 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		feedReplayToRecorder(ctx, c.sessionRecorder, req.SessionID, updates)
 		return map[string]any{"ok": true, "sessionId": req.SessionID}, nil
+	case "session.token.providers":
+		return map[string]any{
+			"providers": []map[string]any{{"id": "deepseek", "name": "DeepSeek", "authMode": "api_key"}},
+		}, nil
+	case "session.token.deepseek.stats":
+		var req struct {
+			APIKey    string `json:"apiKey"`
+			RangeType string `json:"rangeType,omitempty"`
+			Month     string `json:"month,omitempty"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.token.deepseek.stats payload: %w", err)
+		}
+		stats, err := c.fetchDeepSeekTokenStats(ctx, req.APIKey, req.RangeType, req.Month)
+		if err != nil {
+			return nil, err
+		}
+		return stats, nil
 	case "session.setConfig":
 		var req struct {
 			SessionID string `json:"sessionId"`

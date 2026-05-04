@@ -19,6 +19,8 @@ import type {
   RegistrySessionSummary,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
+  RegistryTokenProvider,
+  RegistryDeepSeekTokenStats,
   RegistryWorkingTreeFileDiff,
 } from '../types/registry';
 
@@ -209,7 +211,7 @@ export class RegistryRepository {
       });
 
     // Use server-provided prompt snapshots (model, duration) when available.
-    const serverPrompts: RegistrySessionPromptSnapshot[] = Array.isArray(payload.prompts)
+    const serverPrompts = Array.isArray(payload.prompts)
       ? payload.prompts
           .map((p: unknown) => {
             if (!p || typeof p !== 'object') return null;
@@ -223,7 +225,7 @@ export class RegistryRepository {
               finished: typeof item.finished === 'boolean' ? item.finished : false,
             };
           })
-          .filter((item): item is RegistrySessionPromptSnapshot => !!item && item.promptIndex > 0)
+          .filter(item => !!item && item.promptIndex > 0) as RegistrySessionPromptSnapshot[]
       : [];
 
     if (serverPrompts.length > 0) {
@@ -604,6 +606,41 @@ export class RegistryRepository {
     };
   }
 
+  async listTokenProviders(projectId: string): Promise<RegistryTokenProvider[]> {
+    const resp = await this.client.request({
+      method: 'session.token.providers',
+      projectId,
+      payload: {},
+      timeoutMs: 15000,
+    });
+    const payload = (resp.payload ?? {}) as {providers?: unknown[]};
+    return (Array.isArray(payload.providers) ? payload.providers : [])
+      .map(item => {
+        if (!item || typeof item !== 'object') return null;
+        const value = item as Record<string, unknown>;
+        const id = typeof value.id === 'string' ? value.id.trim() : '';
+        if (!id) return null;
+        return {
+          id,
+          name: typeof value.name === 'string' ? value.name : id,
+          authMode: typeof value.authMode === 'string' ? value.authMode : 'api_key',
+        } as RegistryTokenProvider;
+      })
+      .filter((item): item is RegistryTokenProvider => !!item);
+  }
+
+  async fetchDeepSeekTokenStats(
+    projectId: string,
+    payload: {apiKey: string; rangeType?: 'day' | 'month'; month?: string},
+  ): Promise<RegistryDeepSeekTokenStats> {
+    const resp = await this.client.request({
+      method: 'session.token.deepseek.stats',
+      projectId,
+      payload,
+      timeoutMs: 30000,
+    });
+    return (resp.payload ?? {}) as RegistryDeepSeekTokenStats;
+  }
   close(): void {
     this.client.close();
   }
@@ -628,4 +665,6 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+
+
 
