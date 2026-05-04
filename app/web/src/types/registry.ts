@@ -98,6 +98,7 @@ export type RegistryChatMessageEventPayload = RegistrySessionMessageEventPayload
 export interface RegistryResumableSession {
   sessionId: string;
   title: string;
+  preview?: string;
   updatedAt: string;
   messageCount: number;
   cwd: string;

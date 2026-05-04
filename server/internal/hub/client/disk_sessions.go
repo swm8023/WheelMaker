@@ -14,6 +14,12 @@ import (
 
 // -- Codex disk scanning (~/.codex/session_index.jsonl + sessions/) --
 
+type codexIndexEntry struct {
+	ID        string `json:"id"`
+	Title     string `json:"thread_name"`
+	UpdatedAt string `json:"updated_at"`
+}
+
 func scanUnmanagedCodexSessions(projectCWD string, managedIDs map[string]bool) ([]ClaudeSessionInfo, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -24,11 +30,7 @@ func scanUnmanagedCodexSessions(projectCWD string, managedIDs map[string]bool) (
 	if err != nil {
 		return nil, nil
 	}
-	type codexIndexEntry struct {
-		ID        string `json:"id"`
-		Title     string `json:"thread_name"`
-		UpdatedAt string `json:"updated_at"`
-	}
+
 	entries := make(map[string]codexIndexEntry)
 	for _, line := range strings.Split(string(indexData), "\n") {
 		line = strings.TrimSpace(line)
@@ -44,9 +46,9 @@ func scanUnmanagedCodexSessions(projectCWD string, managedIDs map[string]bool) (
 		return nil, nil
 	}
 
-	normalizedCWD := normalizeCWD(projectCWD)
-	var results []ClaudeSessionInfo
-
+	// Build a set of session files by their session ID (extracted from filename).
+	// Format: sessions/YYYY/MM/DD/rollout-...-<uuid>.jsonl
+	sessionFiles := map[string][]string{} // sessionID -> paths
 	sessionsDir := filepath.Join(home, ".codex", "sessions")
 	_ = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
@@ -58,46 +60,99 @@ func scanUnmanagedCodexSessions(projectCWD string, managedIDs map[string]bool) (
 			return nil
 		}
 		sessionID := base[lastDash+1:]
-		entry, ok := entries[sessionID]
-		if !ok || managedIDs[sessionID] {
-			return nil
-		}
-		cwd := readCodexSessionCWD(path)
-		if normalizeCWD(cwd) != normalizedCWD {
-			return nil
-		}
-		results = append(results, ClaudeSessionInfo{
-			SessionID: sessionID,
-			Title:     firstNonEmpty(strings.TrimSpace(entry.Title), sessionID),
-			UpdatedAt: entry.UpdatedAt,
-			CWD:       cwd,
-		})
+		sessionFiles[sessionID] = append(sessionFiles[sessionID], path)
 		return nil
 	})
+
+	normalizedCWD := normalizeCWD(projectCWD)
+	var results []ClaudeSessionInfo
+
+	for _, entry := range entries {
+		if managedIDs[entry.ID] {
+			continue
+		}
+		paths := sessionFiles[entry.ID]
+		if len(paths) == 0 {
+			continue // can't verify CWD without a session file
+		}
+		// Use the first (usually only) session file.
+		info := readCodexSessionFile(paths[0], normalizedCWD, entry)
+		if info != nil {
+			results = append(results, *info)
+		}
+	}
 	return results, nil
 }
 
-func readCodexSessionCWD(jsonlPath string) string {
-	f, err := os.Open(jsonlPath)
+type codexLineMeta struct {
+	Payload struct {
+		CWD string `json:"cwd"`
+	} `json:"payload"`
+}
+
+type codexLineMsg struct {
+	Type    string `json:"type"`
+	Payload struct {
+		Type             string `json:"type"`
+		LastAgentMessage string `json:"last_agent_message"`
+	} `json:"payload"`
+}
+
+func readCodexSessionFile(path, normalizedCWD string, entry codexIndexEntry) *ClaudeSessionInfo {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return nil
 	}
-	defer f.Close()
-	var buf [2048]byte
-	n, _ := f.Read(buf[:])
-	firstLine := string(buf[:n])
-	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
-		firstLine = firstLine[:idx]
+
+	// First line: session_meta with CWD.
+	var firstLine string
+	raw := string(data)
+	if idx := strings.IndexByte(raw, '\n'); idx >= 0 {
+		firstLine = raw[:idx]
+	} else {
+		firstLine = raw
 	}
-	var ev struct {
-		Payload struct {
-			CWD string `json:"cwd"`
-		} `json:"payload"`
+	var meta codexLineMeta
+	if json.Unmarshal([]byte(firstLine), &meta) != nil {
+		return nil
 	}
-	if json.Unmarshal([]byte(firstLine), &ev) == nil {
-		return ev.Payload.CWD
+	if normalizeCWD(meta.Payload.CWD) != normalizedCWD {
+		return nil
 	}
-	return ""
+
+	// Last few lines: look for event_msg with a preview.
+	preview := firstNonEmpty(strings.TrimSpace(entry.Title), entry.ID)
+	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
+	// Scan backwards for a meaningful preview.
+	for i := len(lines) - 1; i >= 0; i-- {
+		var msg codexLineMsg
+		if json.Unmarshal([]byte(lines[i]), &msg) != nil {
+			continue
+		}
+		if msg.Type != "event_msg" {
+			continue
+		}
+		switch msg.Payload.Type {
+		case "task_complete":
+			if t := strings.TrimSpace(msg.Payload.LastAgentMessage); t != "" {
+				preview = truncateString(t, 200)
+			}
+		case "assistant_response", "user_prompt":
+			// These have more detail but are harder to parse generically.
+			// Fall through to use the index title.
+		}
+		if preview != entry.Title && preview != entry.ID {
+			break // found a good preview
+		}
+	}
+
+	return &ClaudeSessionInfo{
+		SessionID: entry.ID,
+		Title:     firstNonEmpty(strings.TrimSpace(entry.Title), entry.ID),
+		Preview:   preview,
+		UpdatedAt: entry.UpdatedAt,
+		CWD:       meta.Payload.CWD,
+	}
 }
 
 // -- Copilot disk scanning (~/.copilot/session-state/<id>/events.jsonl) --
@@ -133,7 +188,7 @@ func scanUnmanagedCopilotDiskSessions(projectCWD string, managedIDs map[string]b
 	return results, nil
 }
 
-type copilotEv struct {
+type copilotEvent struct {
 	Type string `json:"type"`
 	Data struct {
 		SessionID string `json:"sessionId"`
@@ -146,55 +201,62 @@ type copilotEv struct {
 }
 
 func readCopilotSessionInfo(eventsPath, normalizedCWD, fallbackSessionID string) *ClaudeSessionInfo {
-	f, err := os.Open(eventsPath)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
-	var buf [4096]byte
-	n, _ := f.Read(buf[:])
-	raw := string(buf[:n])
-
-	// Parse first line: session.start event with CWD.
-	var ev copilotEv
-	firstEnd := strings.IndexByte(raw, '\n')
-	if firstEnd < 0 {
-		firstEnd = len(raw)
-	}
-	if err := json.Unmarshal([]byte(raw[:firstEnd]), &ev); err != nil || ev.Type != "session.start" {
-		return nil
-	}
-	if normalizeCWD(ev.Data.Context.CWD) != normalizedCWD {
+	data, err := os.ReadFile(eventsPath)
+	if err != nil || len(data) == 0 {
 		return nil
 	}
 
-	sessionID := firstNonEmpty(ev.Data.SessionID, fallbackSessionID)
-	updatedAt := ev.Data.StartTime
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) == 0 {
+		return nil
+	}
+
+	// First line must be session.start with CWD.
+	var start copilotEvent
+	if json.Unmarshal([]byte(lines[0]), &start) != nil || start.Type != "session.start" {
+		return nil
+	}
+	if normalizeCWD(start.Data.Context.CWD) != normalizedCWD {
+		return nil
+	}
+
+	sessionID := firstNonEmpty(start.Data.SessionID, fallbackSessionID)
+	updatedAt := start.Data.StartTime
 	if updatedAt == "" {
 		if fi, err := os.Stat(eventsPath); err == nil {
 			updatedAt = fi.ModTime().UTC().Format(time.RFC3339)
 		}
 	}
+
+	// Scan forward for first user.message as title.
 	title := sessionID
-	// Try second line for first user message as title.
-	if firstEnd+1 < len(raw) {
-		secondEnd := strings.IndexByte(raw[firstEnd+1:], '\n')
-		secondLine := raw[firstEnd+1:]
-		if secondEnd >= 0 {
-			secondLine = raw[firstEnd+1 : firstEnd+1+secondEnd]
+	preview := ""
+	for i := 1; i < len(lines); i++ {
+		var ev copilotEvent
+		if json.Unmarshal([]byte(lines[i]), &ev) != nil {
+			continue
 		}
-		var msg copilotEv
-		if json.Unmarshal([]byte(secondLine), &msg) == nil && msg.Type == "session.message" && msg.Data.Content != "" {
-			title = firstNonEmpty(strings.TrimSpace(msg.Data.Content), sessionID)
+		if title == sessionID && ev.Type == "user.message" && ev.Data.Content != "" {
+			title = firstNonEmpty(strings.TrimSpace(ev.Data.Content), sessionID)
 		}
+		// Collect last meaningful content as preview.
+		switch ev.Type {
+		case "user.message", "assistant.message":
+			if c := strings.TrimSpace(ev.Data.Content); c != "" {
+				preview = c
+			}
+		}
+	}
+	if preview == "" {
+		preview = title
 	}
 
 	return &ClaudeSessionInfo{
 		SessionID: sessionID,
 		Title:     title,
+		Preview:   truncateString(preview, 200),
 		UpdatedAt: updatedAt,
-		CWD:       ev.Data.Context.CWD,
+		CWD:       start.Data.Context.CWD,
 	}
 }
 
@@ -211,7 +273,7 @@ func scanUnmanagedDiskSessions(agentType, projectCWD string, managedIDs map[stri
 	}
 }
 
-// -- ACP session/list fallback (for agents without disk storage) --
+// -- ACP session/list fallback --
 
 func scanACPUnmanagedSessions(ctx context.Context, provider agent.ACPProvider, projectCWD string, managedIDs map[string]bool) ([]ClaudeSessionInfo, error) {
 	conn, err := agent.NewOwnedProviderConn(provider, projectCWD)

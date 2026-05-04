@@ -12,8 +12,9 @@ import (
 type ClaudeSessionInfo struct {
 	SessionID    string `json:"sessionId"`
 	Title        string `json:"title"`
-	UpdatedAt    string `json:"updatedAt"`    // ISO 8601
-	MessageCount int    `json:"messageCount"` // jsonl lines
+	Preview      string `json:"preview,omitempty"`
+	UpdatedAt    string `json:"updatedAt"`
+	MessageCount int    `json:"messageCount"`
 	CWD          string `json:"cwd"`
 }
 
@@ -145,9 +146,32 @@ func readClaudeSessionInfo(jsonlPath string, normalizedCWD string, managedIDs ma
 		firstTitle = sessionID
 	}
 
+	// Extract preview from last assistant message.
+	var lastText string
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		var ev scanClaudeEvent
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		if ev.Type == "assistant" {
+			var msg scanClaudeMessage
+			if json.Unmarshal(ev.Message, &msg) == nil {
+				if text, ok := extractAssistantText(msg.Content); ok && text != "" {
+					lastText = text
+					break
+				}
+			}
+		}
+	}
+
 	return &ClaudeSessionInfo{
 		SessionID:    sessionID,
 		Title:        truncateString(firstTitle, 200),
+		Preview:      truncateString(cleanClaudeReply(lastText), 200),
 		UpdatedAt:    fileInfo.ModTime().UTC().Format(time.RFC3339),
 		MessageCount: messageCount,
 		CWD:          firstCWD,

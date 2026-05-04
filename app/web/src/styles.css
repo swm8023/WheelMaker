@@ -2308,6 +2308,15 @@ body,
   white-space: nowrap;
 }
 
+.chat-resume-item-preview {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
 .chat-resume-item-meta {
   display: flex;
   gap: 10px;

@@ -3774,6 +3774,11 @@ function App() {
                         <span className="chat-resume-item-title">
                           {s.title || s.sessionId}
                         </span>
+                        {s.preview && s.preview !== s.title ? (
+                          <span className="chat-resume-item-preview">
+                            {s.preview.length > 120 ? s.preview.slice(0, 120) + '…' : s.preview}
+                          </span>
+                        ) : null}
                         <span className="chat-resume-item-meta">
                           <span>{formatCompactRelativeAge(s.updatedAt)}</span>
                           {s.messageCount > 0 ? <span>{s.messageCount} messages</span> : null}
