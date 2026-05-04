@@ -3781,16 +3781,13 @@ function App() {
     if (tab === 'chat') {
       return (
         <>
-          <div className="section-title">CHAT SESSIONS</div>
-          <div className="list">
-            {chatSessions.length === 0 ? (
-              <div className="muted block">No chat sessions yet</div>
-            ) : null}
-            <div className="button-row" style={{ marginBottom: 10 }}>
+          <div className="chat-sessions-header">
+            <span className="chat-sessions-title">Chat</span>
+            <div className="chat-sessions-actions">
               <button
                 type="button"
-                className="button button-icon"
-                style={{ marginTop: 0 }}
+                className="chat-header-icon-btn"
+                title="New session"
                 onClick={() => {
                   setResumeAgentPickerOpen(false);
                   setResumeSessions([]);
@@ -3798,12 +3795,11 @@ function App() {
                 }}
               >
                 <span className="codicon codicon-add" />
-                New
               </button>
               <button
                 type="button"
-                className="button secondary button-icon"
-                style={{ marginTop: 0 }}
+                className="chat-header-icon-btn"
+                title="Resume session"
                 onClick={() => {
                   setNewChatAgentPickerOpen(false);
                   setPendingNewChatDraft(null);
@@ -3811,114 +3807,114 @@ function App() {
                 }}
               >
                 <span className="codicon codicon-history" />
-                Resume
               </button>
             </div>
-            {resumeAgentPickerOpen ? (
-              <div className="chat-agent-picker-card">
-                <div className="chat-agent-picker-header">
-                  <span className="codicon codicon-history" />
-                  <span className="chat-agent-picker-title">Resume Session</span>
-                </div>
-                {resumeSessions.length === 0 && !resumeLoading ? (
-                  <>
-                    <div className="chat-agent-picker-subtitle">Select an agent</div>
-                    <div className="chat-agent-picker-actions">
-                      {availableChatAgents.map(agentType => (
-                        <button
-                          key={agentType}
-                          type="button"
-                          className="button secondary"
-                          disabled={resumeLoading}
-                          onClick={() => { handleResumePickAgent(agentType).catch(() => undefined); }}
-                        >
-                          <span className="codicon codicon-sparkle" />
-                          {agentType}
-                        </button>
-                      ))}
-                      {availableChatAgents.length === 0 ? (
-                        <div className="muted block">No agent available.</div>
-                      ) : null}
-                    </div>
-                  </>
-                ) : null}
-                {resumeLoading ? (
-                  <div className="muted block">Loading sessions...</div>
-                ) : null}
-                {resumeSessions.length > 0 ? (
-                  <div className="chat-resume-list">
-                    {resumeSessions.map(s => (
-                      <div
-                        key={s.sessionId}
-                        className="chat-resume-item"
-                        onClick={() => { handleResumeImport(resumeAgentType, s.sessionId).catch(() => undefined); }}
-                      >
-                        <span className="chat-resume-item-title">
-                          {s.title || s.sessionId}
-                        </span>
-                        {s.preview && s.preview !== s.title ? (
-                          <span className="chat-resume-item-preview">
-                            {s.preview.length > 120 ? s.preview.slice(0, 120) + '…' : s.preview}
-                          </span>
-                        ) : null}
-                        <span className="chat-resume-item-meta">
-                          <span>{formatCompactRelativeAge(s.updatedAt)}</span>
-                          {s.messageCount > 0 ? <span>{s.messageCount} messages</span> : null}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ alignSelf: 'flex-start', marginTop: 0, fontSize: 12 }}
-                  onClick={handleDismissResume}
-                >
-                  <span className="codicon codicon-close" style={{ marginRight: 4 }} />
-                  Cancel
-                </button>
+          </div>
+          {chatSessions.length === 0 && !resumeAgentPickerOpen && !newChatAgentPickerOpen ? (
+            <div className="chat-empty-hint">Start a new chat or resume a previous session</div>
+          ) : null}
+          {resumeAgentPickerOpen ? (
+            <div className="chat-agent-picker-card">
+              <div className="chat-agent-picker-header">
+                <span className="codicon codicon-history" />
+                <span className="chat-agent-picker-title">Resume Session</span>
               </div>
-            ) : null}
-            {newChatAgentPickerOpen && pendingNewChatDraft ? (
-              <div className="chat-agent-picker-card">
-                <div className="chat-agent-picker-header">
-                  <span className="codicon codicon-add" />
-                  <span className="chat-agent-picker-title">New Session</span>
-                </div>
-                <div className="chat-agent-picker-subtitle">Choose an agent</div>
-                <div className="chat-agent-picker-actions">
-                  {availableChatAgents.map(agentType => (
-                    <button
-                      key={agentType}
-                      type="button"
-                      className="button secondary"
-                      onClick={() => {
-                        completeNewChatFlow(agentType).catch(() => undefined);
-                      }}
+              {resumeSessions.length === 0 && !resumeLoading ? (
+                <>
+                  <div className="chat-agent-picker-subtitle">Select an agent to find past sessions</div>
+                  <div className="chat-agent-picker-actions">
+                    {availableChatAgents.map(agentType => (
+                      <button
+                        key={agentType}
+                        type="button"
+                        className="chat-agent-btn"
+                        disabled={resumeLoading}
+                        onClick={() => { handleResumePickAgent(agentType).catch(() => undefined); }}
+                      >
+                        <span className="codicon codicon-sparkle" />
+                        <span>{agentType.charAt(0).toUpperCase() + agentType.slice(1)}</span>
+                      </button>
+                    ))}
+                    {availableChatAgents.length === 0 ? (
+                      <div className="muted block">No agent available.</div>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+              {resumeLoading ? (
+                <div className="chat-agent-picker-loading">Loading sessions…</div>
+              ) : null}
+              {resumeSessions.length > 0 ? (
+                <div className="chat-resume-list">
+                  {resumeSessions.map(s => (
+                    <div
+                      key={s.sessionId}
+                      className="chat-resume-item"
+                      onClick={() => { handleResumeImport(resumeAgentType, s.sessionId).catch(() => undefined); }}
                     >
-                      <span className="codicon codicon-sparkle" />
-                      {agentType}
-                    </button>
+                      <span className="chat-resume-item-title">
+                        {s.title || s.sessionId}
+                      </span>
+                      {s.preview && s.preview !== s.title ? (
+                        <span className="chat-resume-item-preview">
+                          {s.preview.length > 120 ? s.preview.slice(0, 120) + '…' : s.preview}
+                        </span>
+                      ) : null}
+                      <span className="chat-resume-item-meta">
+                        <span>{formatCompactRelativeAge(s.updatedAt)}</span>
+                        {s.messageCount > 0 ? <span>{s.messageCount} messages</span> : null}
+                      </span>
+                    </div>
                   ))}
                 </div>
-                {availableChatAgents.length === 0 ? (
-                  <div className="muted block">No agents available.</div>
-                ) : null}
-                <button
-                  type="button"
-                  className="button ghost"
-                  style={{ alignSelf: 'flex-start', marginTop: 0, fontSize: 12 }}
-                  onClick={() => {
-                    setNewChatAgentPickerOpen(false);
-                    setPendingNewChatDraft(null);
-                  }}
-                >
-                  <span className="codicon codicon-close" style={{ marginRight: 4 }} />
-                  Cancel
-                </button>
+              ) : null}
+              <button
+                type="button"
+                className="chat-agent-picker-cancel"
+                onClick={handleDismissResume}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
+          {newChatAgentPickerOpen && pendingNewChatDraft ? (
+            <div className="chat-agent-picker-card">
+              <div className="chat-agent-picker-header">
+                <span className="codicon codicon-add" />
+                <span className="chat-agent-picker-title">New Session</span>
               </div>
-            ) : null}
+              <div className="chat-agent-picker-subtitle">Choose an agent</div>
+              <div className="chat-agent-picker-actions">
+                {availableChatAgents.map(agentType => (
+                  <button
+                    key={agentType}
+                    type="button"
+                    className="chat-agent-btn"
+                    onClick={() => {
+                      completeNewChatFlow(agentType).catch(() => undefined);
+                    }}
+                  >
+                    <span className="codicon codicon-sparkle" />
+                    <span>{agentType.charAt(0).toUpperCase() + agentType.slice(1)}</span>
+                  </button>
+                ))}
+              </div>
+              {availableChatAgents.length === 0 ? (
+                <div className="muted block">No agents available.</div>
+              ) : null}
+              <button
+                type="button"
+                className="chat-agent-picker-cancel"
+                onClick={() => {
+                  setNewChatAgentPickerOpen(false);
+                  setPendingNewChatDraft(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : null}
+          <div className="list">
             {groupedChatSessions.map(group => (
               <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
                 <div className="chat-session-group-title">{group.label}</div>
