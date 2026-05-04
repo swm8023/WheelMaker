@@ -25,13 +25,11 @@ func scanUnmanagedCodexSessions(projectCWD string, managedIDs map[string]bool) (
 	if err != nil {
 		return nil, nil
 	}
-	indexPath := filepath.Join(home, ".codex", "session_index.jsonl")
-	indexData, err := os.ReadFile(indexPath)
-	if err != nil {
-		return nil, nil
-	}
 
-	entries := make(map[string]codexIndexEntry)
+	// Load session_index for title/updated_at lookup.
+	indexPath := filepath.Join(home, ".codex", "session_index.jsonl")
+	indexData, _ := os.ReadFile(indexPath)
+	indexEntries := make(map[string]codexIndexEntry)
 	for _, line := range strings.Split(string(indexData), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -39,120 +37,99 @@ func scanUnmanagedCodexSessions(projectCWD string, managedIDs map[string]bool) (
 		}
 		var e codexIndexEntry
 		if json.Unmarshal([]byte(line), &e) == nil && e.ID != "" {
-			entries[e.ID] = e
+			indexEntries[e.ID] = e
 		}
 	}
-	if len(entries) == 0 {
-		return nil, nil
-	}
 
-	// Build a set of session files by their session ID (extracted from filename).
-	// Format: sessions/YYYY/MM/DD/rollout-...-<uuid>.jsonl
-	sessionFiles := map[string][]string{} // sessionID -> paths
+	normalizedCWD := normalizeCWD(projectCWD)
+	var results []ClaudeSessionInfo
+
+	// Walk session files directly — read first line for session ID + CWD.
 	sessionsDir := filepath.Join(home, ".codex", "sessions")
 	_ = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
-		base := strings.TrimSuffix(d.Name(), ".jsonl")
-		lastDash := strings.LastIndex(base, "-")
-		if lastDash < 0 {
+		sessionID, cwd := readCodexSessionMeta(path)
+		if sessionID == "" {
 			return nil
 		}
-		sessionID := base[lastDash+1:]
-		sessionFiles[sessionID] = append(sessionFiles[sessionID], path)
+		if managedIDs[sessionID] {
+			return nil
+		}
+		if normalizeCWD(cwd) != normalizedCWD {
+			return nil
+		}
+		entry := indexEntries[sessionID]
+		updatedAt := entry.UpdatedAt
+		if updatedAt == "" {
+			if fi, err := d.Info(); err == nil {
+				updatedAt = fi.ModTime().UTC().Format(time.RFC3339)
+			}
+		}
+		title := firstNonEmpty(strings.TrimSpace(entry.Title), sessionID)
+		preview := readCodexSessionPreview(path, title)
+		results = append(results, ClaudeSessionInfo{
+			SessionID: sessionID,
+			Title:     title,
+			Preview:   preview,
+			UpdatedAt: updatedAt,
+			CWD:       cwd,
+		})
 		return nil
 	})
-
-	normalizedCWD := normalizeCWD(projectCWD)
-	var results []ClaudeSessionInfo
-
-	for _, entry := range entries {
-		if managedIDs[entry.ID] {
-			continue
-		}
-		paths := sessionFiles[entry.ID]
-		if len(paths) == 0 {
-			continue // can't verify CWD without a session file
-		}
-		// Use the first (usually only) session file.
-		info := readCodexSessionFile(paths[0], normalizedCWD, entry)
-		if info != nil {
-			results = append(results, *info)
-		}
-	}
 	return results, nil
 }
 
-type codexLineMeta struct {
-	Payload struct {
-		CWD string `json:"cwd"`
-	} `json:"payload"`
+// readCodexSessionMeta reads the first line of a Codex session file and returns sessionID + CWD.
+func readCodexSessionMeta(path string) (sessionID, cwd string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", ""
+	}
+	defer f.Close()
+	var buf [4096]byte
+	n, _ := f.Read(buf[:])
+	firstLine := string(buf[:n])
+	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
+		firstLine = firstLine[:idx]
+	}
+	var ev struct {
+		Payload struct {
+			ID  string `json:"id"`
+			CWD string `json:"cwd"`
+		} `json:"payload"`
+	}
+	if json.Unmarshal([]byte(firstLine), &ev) != nil {
+		return "", ""
+	}
+	return ev.Payload.ID, ev.Payload.CWD
 }
 
-type codexLineMsg struct {
-	Type    string `json:"type"`
-	Payload struct {
-		Type             string `json:"type"`
-		LastAgentMessage string `json:"last_agent_message"`
-	} `json:"payload"`
-}
-
-func readCodexSessionFile(path, normalizedCWD string, entry codexIndexEntry) *ClaudeSessionInfo {
+// readCodexSessionPreview scans a Codex session file backwards for a preview.
+func readCodexSessionPreview(path, fallback string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		return fallback
 	}
-
-	// First line: session_meta with CWD.
-	var firstLine string
-	raw := string(data)
-	if idx := strings.IndexByte(raw, '\n'); idx >= 0 {
-		firstLine = raw[:idx]
-	} else {
-		firstLine = raw
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	type evMsg struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Type             string `json:"type"`
+			LastAgentMessage string `json:"last_agent_message"`
+		} `json:"payload"`
 	}
-	var meta codexLineMeta
-	if json.Unmarshal([]byte(firstLine), &meta) != nil {
-		return nil
-	}
-	if normalizeCWD(meta.Payload.CWD) != normalizedCWD {
-		return nil
-	}
-
-	// Last few lines: look for event_msg with a preview.
-	preview := firstNonEmpty(strings.TrimSpace(entry.Title), entry.ID)
-	lines := strings.Split(strings.TrimRight(raw, "\n"), "\n")
-	// Scan backwards for a meaningful preview.
 	for i := len(lines) - 1; i >= 0; i-- {
-		var msg codexLineMsg
-		if json.Unmarshal([]byte(lines[i]), &msg) != nil {
+		var msg evMsg
+		if json.Unmarshal([]byte(lines[i]), &msg) != nil || msg.Type != "event_msg" {
 			continue
 		}
-		if msg.Type != "event_msg" {
-			continue
-		}
-		switch msg.Payload.Type {
-		case "task_complete":
-			if t := strings.TrimSpace(msg.Payload.LastAgentMessage); t != "" {
-				preview = truncateString(t, 200)
-			}
-		case "assistant_response", "user_prompt":
-			// These have more detail but are harder to parse generically.
-			// Fall through to use the index title.
-		}
-		if preview != entry.Title && preview != entry.ID {
-			break // found a good preview
+		if msg.Payload.Type == "task_complete" && msg.Payload.LastAgentMessage != "" {
+			return truncateString(strings.TrimSpace(msg.Payload.LastAgentMessage), 200)
 		}
 	}
-
-	return &ClaudeSessionInfo{
-		SessionID: entry.ID,
-		Title:     firstNonEmpty(strings.TrimSpace(entry.Title), entry.ID),
-		Preview:   preview,
-		UpdatedAt: entry.UpdatedAt,
-		CWD:       meta.Payload.CWD,
-	}
+	return fallback
 }
 
 // -- Copilot disk scanning (~/.copilot/session-state/<id>/events.jsonl) --

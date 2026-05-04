@@ -122,12 +122,15 @@ func readClaudeSessionInfo(jsonlPath string, normalizedCWD string, managedIDs ma
 			}
 		}
 
-		// Capture title from first user message (the prompt itself).
+		// Capture title from first real user prompt (skip system caveats like <local-command-caveat>).
 		if firstTitle == "" && ev.Type == "user" {
 			var msg scanClaudeMessage
-			if json.Unmarshal(ev.Message, &msg) == nil {
+			if json.Unmarshal(ev.Message, &msg) == nil && msg.Role == "user" {
 				if text, ok := extractAssistantText(msg.Content); ok && text != "" {
-					firstTitle = strings.TrimSpace(text)
+					text = strings.TrimSpace(text)
+					if text != "" && !strings.HasPrefix(text, "<local-command") && !strings.HasPrefix(text, "<system-") {
+						firstTitle = text
+					}
 				}
 			}
 		}
