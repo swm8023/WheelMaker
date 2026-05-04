@@ -1834,6 +1834,7 @@ function App() {
   const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
   const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
   const [resumeAgentPickerOpen, setResumeAgentPickerOpen] = useState(false);
+  const [resumeAgentType, setResumeAgentType] = useState('');
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
 
@@ -2874,6 +2875,7 @@ function App() {
   };
 
   const handleResumePickAgent = async (agentType: string) => {
+    setResumeAgentType(agentType);
     setResumeLoading(true);
     setResumeSessions([]);
     try {
@@ -2911,6 +2913,7 @@ function App() {
 
   const handleDismissResume = () => {
     setResumeAgentPickerOpen(false);
+    setResumeAgentType('');
     setResumeSessions([]);
   };
 
@@ -3739,7 +3742,7 @@ function App() {
                   <>
                     <div className="chat-agent-picker-subtitle">Select an agent</div>
                     <div className="chat-agent-picker-actions">
-                      {availableChatAgents.filter(a => a.toLowerCase() === 'claude').map(agentType => (
+                      {availableChatAgents.map(agentType => (
                         <button
                           key={agentType}
                           type="button"
@@ -3751,8 +3754,8 @@ function App() {
                           {agentType}
                         </button>
                       ))}
-                      {availableChatAgents.filter(a => a.toLowerCase() === 'claude').length === 0 ? (
-                        <div className="muted block">No Claude agent available.</div>
+                      {availableChatAgents.length === 0 ? (
+                        <div className="muted block">No agent available.</div>
                       ) : null}
                     </div>
                   </>
@@ -3766,7 +3769,7 @@ function App() {
                       <div
                         key={s.sessionId}
                         className="chat-resume-item"
-                        onClick={() => { handleResumeImport('claude', s.sessionId).catch(() => undefined); }}
+                        onClick={() => { handleResumeImport(resumeAgentType, s.sessionId).catch(() => undefined); }}
                       >
                         <span className="chat-resume-item-title">
                           {s.title || s.sessionId}
