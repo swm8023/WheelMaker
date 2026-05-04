@@ -1236,25 +1236,6 @@ func extractTextFromAny(v any) string {
 	}
 }
 
-// isCommandSystemMessage reports whether a user_message_chunk text is a
-// Claude system caveat (command logs, output captures, etc.) that should be
-// skipped during session replay.
-func isCommandSystemMessage(text string) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return false
-	}
-	for _, prefix := range []string{
-		"<command-name>", "<command-message>", "<command-args>",
-		"<local-command-caveat>", "<local-command-stdout>",
-	} {
-		if strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func renderUnknown(v string) string {
 	if strings.TrimSpace(v) == "" {
 		return "unknown"
