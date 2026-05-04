@@ -567,20 +567,35 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		agentType := strings.TrimSpace(req.AgentType)
 		var sessions []ClaudeSessionInfo
-		if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed); err != nil {
-			return nil, err
-		} else if len(s) > 0 {
-			sessions = s
-		} else {
-			s, err := scanUnmanagedClaudeSessions(c.cwd, managed)
+		switch agentType {
+		case "codex", "copilot":
+			s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed)
 			if err != nil {
 				return nil, err
 			}
 			sessions = s
+		default:
+			// Claude or unknown: scan disk first, then fall back to Claude scanner.
+			if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed); err != nil {
+				return nil, err
+			} else if len(s) > 0 {
+				sessions = s
+			} else {
+				s, err := scanUnmanagedClaudeSessions(c.cwd, managed)
+				if err != nil {
+					return nil, err
+				}
+				sessions = s
+			}
 		}
 		if sessions == nil {
 			sessions = []ClaudeSessionInfo{}
 		}
+		// Sort by UpdatedAt descending.
+		sort.Slice(sessions, func(i, j int) bool {
+			return sessions[i].UpdatedAt > sessions[j].UpdatedAt
+		})
+		hubLogger(c.projectName).Info("session.resume.list agent=%s count=%d", agentType, len(sessions))
 		return map[string]any{"sessions": sessions}, nil
 	case "session.resume.import":
 		var req struct {
