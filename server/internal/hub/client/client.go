@@ -571,9 +571,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		case "codex", "copilot":
 			s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed)
 			if err != nil {
+				hubLogger(c.projectName).Warn("session.resume.list scan failed agent=%s err=%v", agentType, err)
 				return nil, err
 			}
 			sessions = s
+			hubLogger(c.projectName).Info("session.resume.list agent=%s disk_count=%d", agentType, len(s))
 		default:
 			// Claude or unknown: scan disk first, then fall back to Claude scanner.
 			if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed); err != nil {

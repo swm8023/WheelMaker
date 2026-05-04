@@ -122,12 +122,12 @@ func readClaudeSessionInfo(jsonlPath string, normalizedCWD string, managedIDs ma
 			}
 		}
 
-		// Capture title from first assistant message
-		if firstTitle == "" && ev.Type == "assistant" {
+		// Capture title from first user message (the prompt itself).
+		if firstTitle == "" && ev.Type == "user" {
 			var msg scanClaudeMessage
 			if json.Unmarshal(ev.Message, &msg) == nil {
 				if text, ok := extractAssistantText(msg.Content); ok && text != "" {
-					firstTitle = cleanClaudeReply(text)
+					firstTitle = strings.TrimSpace(text)
 				}
 			}
 		}
