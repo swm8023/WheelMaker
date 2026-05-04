@@ -36,7 +36,7 @@ func scanACPUnmanagedSessions(ctx context.Context, provider agent.ACPProvider, p
 	var listResult struct {
 		Sessions []acp.SessionInfo `json:"sessions"`
 	}
-	if err := conn.Send(ctx, acp.MethodSessionList, acp.SessionListParams{}, &listResult); err != nil {
+	if err := conn.Send(ctx, acp.MethodSessionList, acp.SessionListParams{CWD: projectCWD}, &listResult); err != nil {
 		return nil, nil
 	}
 
@@ -88,7 +88,7 @@ func verifyACPSessionExists(ctx context.Context, provider agent.ACPProvider, pro
 	var listResult struct {
 		Sessions []acp.SessionInfo `json:"sessions"`
 	}
-	if err := conn.Send(ctx, acp.MethodSessionList, acp.SessionListParams{}, &listResult); err != nil {
+	if err := conn.Send(ctx, acp.MethodSessionList, acp.SessionListParams{CWD: projectCWD}, &listResult); err != nil {
 		return nil, err
 	}
 	for _, s := range listResult.Sessions {
