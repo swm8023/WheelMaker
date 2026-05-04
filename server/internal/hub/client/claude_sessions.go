@@ -128,7 +128,7 @@ func readClaudeSessionInfo(jsonlPath string, normalizedCWD string, managedIDs ma
 			if json.Unmarshal(ev.Message, &msg) == nil && msg.Role == "user" {
 				if text, ok := extractAssistantText(msg.Content); ok && text != "" {
 					text = strings.TrimSpace(text)
-					if text != "" && !strings.HasPrefix(text, "<local-command") && !strings.HasPrefix(text, "<system-") {
+					if text != "" && !strings.HasPrefix(text, "<local-command") && !strings.HasPrefix(text, "<command-name") && !strings.HasPrefix(text, "<system-") {
 						firstTitle = text
 					}
 				}

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"os"
@@ -88,19 +89,20 @@ func readCodexSessionMeta(path string) (sessionID, cwd string) {
 		return "", ""
 	}
 	defer f.Close()
-	var buf [4096]byte
-	n, _ := f.Read(buf[:])
-	firstLine := string(buf[:n])
-	if idx := strings.IndexByte(firstLine, '\n'); idx >= 0 {
-		firstLine = firstLine[:idx]
+	// First line can be very long (includes base_instructions text).
+	// Use a bufio.Scanner to handle arbitrary line length.
+	scanner := bufio.NewScanner(f)
+	if !scanner.Scan() {
+		return "", ""
 	}
+	firstLine := scanner.Bytes()
 	var ev struct {
 		Payload struct {
 			ID  string `json:"id"`
 			CWD string `json:"cwd"`
 		} `json:"payload"`
 	}
-	if json.Unmarshal([]byte(firstLine), &ev) != nil {
+	if json.Unmarshal(firstLine, &ev) != nil {
 		return "", ""
 	}
 	return ev.Payload.ID, ev.Payload.CWD
