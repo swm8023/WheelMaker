@@ -726,8 +726,8 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
 // -- Prompt separator helpers --
 
 function formatPromptDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
+  if (ms < 15000) return `${ms}ms`;
+  const seconds = ms / 15000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -3319,7 +3319,7 @@ function App() {
         setReconnecting(false);
         setError(
           `Registry reconnect failed for ${Math.floor(
-            RECONNECT_GRACE_PERIOD_MS / 1000,
+            RECONNECT_GRACE_PERIOD_MS / 15000,
           )}s. Please reconnect manually.`,
         );
         return;
@@ -3627,7 +3627,7 @@ function App() {
     }
     const timer = window.setInterval(() => {
       refreshProject({silent: true}).catch(() => undefined);
-    }, 1000);
+    }, 15000);
     return () => {
       window.clearInterval(timer);
     };
@@ -5498,12 +5498,23 @@ function App() {
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
+    let reloading = false;
+    // Reload when a new service worker takes control (after skipWaiting).
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+
     navigator.serviceWorker
       .register('/service-worker.js')
       .then(registration => {
-        window.setTimeout(() => {
+        // Periodic update check (every 5 minutes).
+        const checkUpdate = () => {
           registration.update().catch(() => undefined);
-        }, 1500);
+        };
+        window.setTimeout(checkUpdate, 1500);
+        window.setInterval(checkUpdate, 5 * 60 * 1000);
 
         if (registration.waiting) {
           registration.waiting.postMessage('SKIP_WAITING');
