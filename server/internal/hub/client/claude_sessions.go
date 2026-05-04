@@ -228,5 +228,8 @@ func truncateString(s string, maxLen int) string {
 }
 
 func normalizeCWD(cwd string) string {
-	return strings.TrimRight(strings.TrimSpace(cwd), string(filepath.Separator))
+	s := strings.TrimSpace(cwd)
+	s = strings.TrimRight(s, string(filepath.Separator))
+	s = strings.TrimRight(s, "/")
+	return strings.ToLower(s)
 }
