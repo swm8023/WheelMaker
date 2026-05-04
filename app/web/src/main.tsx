@@ -3627,7 +3627,7 @@ function App() {
     }
     const timer = window.setInterval(() => {
       refreshProject({silent: true}).catch(() => undefined);
-    }, 3000);
+    }, 1000);
     return () => {
       window.clearInterval(timer);
     };
