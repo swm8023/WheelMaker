@@ -8,13 +8,12 @@ import (
 	"github.com/swm8023/wheelmaker/internal/hub/agent"
 )
 
-// scanUnmanagedCopilotSessions spawns a temporary Copilot ACP process to list
-// resumable sessions via session/list, filtered by CWD and excluding managed IDs.
-func scanUnmanagedCopilotSessions(ctx context.Context, projectCWD string, managedIDs map[string]bool) ([]ClaudeSessionInfo, error) {
-	provider := agent.NewCopilotProvider()
+// scanACPUnmanagedSessions spawns a temporary ACP process to list resumable
+// sessions via session/list, filtered by CWD and excluding managed IDs.
+func scanACPUnmanagedSessions(ctx context.Context, provider agent.ACPProvider, projectCWD string, managedIDs map[string]bool) ([]ClaudeSessionInfo, error) {
 	conn, err := agent.NewOwnedProviderConn(provider, projectCWD)
 	if err != nil {
-		return nil, nil // copilot not available, no sessions to return
+		return nil, nil // agent not available, no sessions to return
 	}
 	defer conn.Close()
 
@@ -30,8 +29,10 @@ func scanUnmanagedCopilotSessions(ctx context.Context, projectCWD string, manage
 	}, &initResult); err != nil {
 		return nil, nil
 	}
+	if !initResult.AgentCapabilities.LoadSession {
+		return nil, nil
+	}
 
-	// List sessions (no CWD filter at protocol level, we filter client-side)
 	var listResult struct {
 		Sessions []acp.SessionInfo `json:"sessions"`
 	}
@@ -63,10 +64,9 @@ func scanUnmanagedCopilotSessions(ctx context.Context, projectCWD string, manage
 	return results, nil
 }
 
-// verifyCopilotSessionExists checks that a session ID is known to Copilot via
+// verifyACPSessionExists checks that a session ID is known to the agent via
 // session/list and returns its metadata.
-func verifyCopilotSessionExists(ctx context.Context, projectCWD, targetSessionID string) (*ClaudeSessionInfo, error) {
-	provider := agent.NewCopilotProvider()
+func verifyACPSessionExists(ctx context.Context, provider agent.ACPProvider, projectCWD, targetSessionID string) (*ClaudeSessionInfo, error) {
 	conn, err := agent.NewOwnedProviderConn(provider, projectCWD)
 	if err != nil {
 		return nil, err
@@ -102,4 +102,15 @@ func verifyCopilotSessionExists(ctx context.Context, projectCWD, targetSessionID
 		}
 	}
 	return nil, nil
+}
+
+func acpProviderForAgentType(agentType string) agent.ACPProvider {
+	switch strings.TrimSpace(agentType) {
+	case "codex":
+		return agent.NewCodexProvider()
+	case "copilot":
+		return agent.NewCopilotProvider()
+	default:
+		return nil
+	}
 }

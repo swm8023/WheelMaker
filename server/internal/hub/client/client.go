@@ -567,14 +567,13 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		agentType := strings.TrimSpace(req.AgentType)
 		var sessions []ClaudeSessionInfo
-		switch agentType {
-		case "copilot":
-			s, err := scanUnmanagedCopilotSessions(ctx, c.cwd, managed)
+		if provider := acpProviderForAgentType(agentType); provider != nil {
+			s, err := scanACPUnmanagedSessions(ctx, provider, c.cwd, managed)
 			if err != nil {
 				return nil, err
 			}
 			sessions = s
-		default:
+		} else {
 			s, err := scanUnmanagedClaudeSessions(c.cwd, managed)
 			if err != nil {
 				return nil, err
@@ -601,17 +600,16 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		}
 		agentType := strings.TrimSpace(req.AgentType)
 		var info *ClaudeSessionInfo
-		switch agentType {
-		case "copilot":
-			found, err := verifyCopilotSessionExists(ctx, c.cwd, req.SessionID)
+		if provider := acpProviderForAgentType(agentType); provider != nil {
+			found, err := verifyACPSessionExists(ctx, provider, c.cwd, req.SessionID)
 			if err != nil {
-				return nil, fmt.Errorf("verify copilot session: %w", err)
+				return nil, fmt.Errorf("verify %s session: %w", agentType, err)
 			}
 			if found == nil {
 				return nil, fmt.Errorf("session not found or already managed")
 			}
 			info = found
-		default:
+		} else {
 			// Verify session exists on disk and is not already managed
 			managed := map[string]bool{req.SessionID: false}
 			found, err := scanUnmanagedClaudeSessions(c.cwd, managed)
