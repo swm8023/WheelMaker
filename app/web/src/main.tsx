@@ -961,6 +961,55 @@ function detectCodeLanguage(path: string): string {
   }
 }
 
+function inferImageMimeType(path: string): string {
+  const ext = getFileExtension(path);
+  switch (ext) {
+    case 'svg':
+      return 'image/svg+xml';
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'gif':
+      return 'image/gif';
+    case 'webp':
+      return 'image/webp';
+    case 'bmp':
+      return 'image/bmp';
+    case 'ico':
+      return 'image/x-icon';
+    case 'avif':
+      return 'image/avif';
+    default:
+      return '';
+  }
+}
+
+function isImageFile(path: string, mimeType?: string): boolean {
+  const normalizedMime = (mimeType || '').trim().toLowerCase();
+  if (normalizedMime.startsWith('image/')) {
+    return true;
+  }
+  return inferImageMimeType(path) !== '';
+}
+
+function buildImageDataUrl(params: {
+  content: string;
+  path: string;
+  mimeType?: string;
+  isBinary?: boolean;
+}): string {
+  const { content, path, mimeType, isBinary } = params;
+  if (!content) {
+    return '';
+  }
+  const normalizedMime = (mimeType || '').trim() || inferImageMimeType(path) || 'image/png';
+  if (isBinary) {
+    return `data:${normalizedMime};base64,${content}`;
+  }
+  return `data:${normalizedMime};charset=utf-8,${encodeURIComponent(content)}`;
+}
 function parseTrailingLineNumber(value: string): number | null {
   const input = value.trim();
   if (!input) return null;
@@ -5208,6 +5257,18 @@ function App() {
     const chatAttachmentPreviewSrc = chatAttachment
       ? `data:${chatAttachment.mimeType || 'image/png'};base64,${chatAttachment.data}`
       : '';
+    const selectedFileIsImage = isImageFile(
+      selectedFile,
+      fileInfo?.mimeType,
+    );
+    const selectedFileImageSrc = selectedFileIsImage
+      ? buildImageDataUrl({
+          content: fileContent,
+          path: selectedFile,
+          mimeType: fileInfo?.mimeType,
+          isBinary: fileInfo?.isBinary,
+        })
+      : '';
 
     if (tab === 'chat') {
       return (
@@ -5567,6 +5628,18 @@ function App() {
                 >
                   {fileLoading ? (
                     <div className="muted block">Loading file...</div>
+                  ) : selectedFileIsImage ? (
+                    selectedFileImageSrc ? (
+                      <div className="file-image-preview-wrap">
+                        <img
+                          className="file-image-preview"
+                          src={selectedFileImageSrc}
+                          alt={selectedFile.split('/').pop() || 'image preview'}
+                        />
+                      </div>
+                    ) : (
+                      <div className="muted block">Image content is unavailable.</div>
+                    )
                   ) : selectedFileIsMarkdown && markdownPreviewEnabled ? (
                     <MarkdownPreview
                       content={fileContent}
@@ -5887,6 +5960,9 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
 
 
 

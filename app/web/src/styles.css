@@ -1825,6 +1825,40 @@ body,
 .file-code-area .code-wrap.wrap {
   width: 100%;
 }
+.file-image-preview-wrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.file-image-preview {
+  width: auto;
+  height: auto;
+  max-width: min(100%, 1600px);
+  max-height: min(78vh, 1200px);
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background:
+    linear-gradient(45deg, rgba(127, 127, 127, 0.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(127, 127, 127, 0.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(127, 127, 127, 0.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(127, 127, 127, 0.08) 75%);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+}
+
+@media (max-width: 900px) {
+  .file-image-preview-wrap {
+    padding: 10px;
+  }
+
+  .file-image-preview {
+    max-height: 68vh;
+  }
+}
 
 .file-code-area {
   flex: 1;
@@ -3133,6 +3167,7 @@ body,
     transform: translateX(0);
   }
 }
+
 
 
 
