@@ -477,8 +477,11 @@ function msgBlocks(
   method: string,
   param: Record<string, unknown>,
 ): RegistrySessionContentBlock[] {
+  if (Array.isArray(param.contentBlocks)) {
+    return param.contentBlocks as RegistrySessionContentBlock[];
+  }
   if (method === 'prompt_request') {
-    return Array.isArray(param.contentBlocks) ? param.contentBlocks as RegistrySessionContentBlock[] : [];
+    return [];
   }
   return [];
 }
@@ -2864,12 +2867,16 @@ function App() {
     return true;
   };
 
-  const resetChatComposer = () => {
-    setChatComposerText('');
+  const clearChatAttachment = () => {
     setChatAttachment(null);
     if (chatFileInputRef.current) {
       chatFileInputRef.current.value = '';
     }
+  };
+
+  const resetChatComposer = () => {
+    setChatComposerText('');
+    clearChatAttachment();
   };
 
   const completeNewChatFlow = async (agentType: string) => {
@@ -3256,7 +3263,7 @@ function App() {
   ) => {
     const file = event.target.files?.[0];
     if (!file) {
-      setChatAttachment(null);
+      clearChatAttachment();
       return;
     }
     const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -5198,6 +5205,9 @@ function App() {
     const selectedChatSession = chatSessions.find(
       item => item.sessionId === selectedChatId,
     );
+    const chatAttachmentPreviewSrc = chatAttachment
+      ? `data:${chatAttachment.mimeType || 'image/png'};base64,${chatAttachment.data}`
+      : '';
 
     if (tab === 'chat') {
       return (
@@ -5231,8 +5241,26 @@ function App() {
                 );
               }}
             />
-            {chatAttachment ? (
-              <div className="chat-attachment-pill">{chatAttachment.name}</div>
+                        {chatAttachment ? (
+              <div className="chat-attachment-preview">
+                <img
+                  className="chat-attachment-thumb"
+                  src={chatAttachmentPreviewSrc}
+                  alt={chatAttachment.name || 'attachment preview'}
+                />
+                <div className="chat-attachment-meta">
+                  <div className="chat-attachment-name">{chatAttachment.name}</div>
+                </div>
+                <button
+                  type="button"
+                  className="chat-attachment-remove"
+                  onClick={clearChatAttachment}
+                  title="Remove image"
+                  aria-label="Remove image"
+                >
+                  <span className="codicon codicon-close" />
+                </button>
+              </div>
             ) : null}
             <div className="chat-composer-main">
               <div className="chat-composer-input-shell">
@@ -5859,6 +5887,10 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
+
 
 
 
