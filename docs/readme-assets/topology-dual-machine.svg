@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">WheelMaker dual machine topology</title>
+  <desc id="desc">Browser and mobile clients access machine A through nginx, while hub B connects to machine A registry.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#60a5fa"/>
+    </marker>
+    <style>
+      .label { font: 600 26px 'Segoe UI', Arial, sans-serif; fill: #e5eefc; }
+      .box { fill: #172554; stroke: #60a5fa; stroke-width: 2; rx: 18; }
+      .soft { fill: #0f766e; stroke: #5eead4; stroke-width: 2; rx: 16; }
+      .local { fill: #1f2937; stroke: #94a3b8; stroke-width: 2; rx: 16; }
+      .sub { font: 500 18px 'Segoe UI', Arial, sans-serif; fill: #bfdbfe; }
+      .tiny { font: 500 16px 'Segoe UI', Arial, sans-serif; fill: #cbd5e1; }
+      .note { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #94a3b8; }
+      .line { stroke: #60a5fa; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #5eead4; stroke-width: 4; fill: none; stroke-dasharray: 10 8; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="700" fill="url(#bg)"/>
+
+  <text x="60" y="70" class="label">WheelMaker 双机部署示例</text>
+  <text x="60" y="104" class="note">机器 A 暴露统一 HTTPS 入口；机器 B 只把项目汇报给 A 的 Registry。</text>
+
+  <rect x="60" y="180" width="220" height="120" class="local"/>
+  <text x="90" y="225" class="sub">浏览器 / 手机</text>
+  <text x="90" y="258" class="tiny">Web UI</text>
+  <text x="90" y="286" class="tiny">Monitor</text>
+
+  <rect x="360" y="130" width="470" height="470" class="box"/>
+  <text x="390" y="180" class="label" style="font-size:28px">机器 A</text>
+  <text x="390" y="210" class="note">Hub A + Registry + Monitor + Web + Nginx</text>
+
+  <rect x="390" y="245" width="180" height="92" class="soft"/>
+  <text x="420" y="286" class="sub">Nginx :28800</text>
+  <text x="420" y="316" class="tiny">HTTPS / WSS 统一入口</text>
+
+  <rect x="610" y="245" width="180" height="92" class="local"/>
+  <text x="642" y="286" class="sub">Web UI</text>
+  <text x="642" y="316" class="tiny">127.0.0.1:8080</text>
+
+  <rect x="390" y="380" width="180" height="92" class="local"/>
+  <text x="420" y="421" class="sub">Registry</text>
+  <text x="420" y="451" class="tiny">127.0.0.1:9630 /ws</text>
+
+  <rect x="610" y="380" width="180" height="92" class="local"/>
+  <text x="645" y="421" class="sub">Monitor</text>
+  <text x="645" y="451" class="tiny">127.0.0.1:9631</text>
+
+  <rect x="500" y="515" width="180" height="60" class="local"/>
+  <text x="558" y="552" class="sub">Hub A</text>
+
+  <rect x="910" y="170" width="230" height="320" class="box"/>
+  <text x="942" y="220" class="label" style="font-size:28px">机器 B</text>
+  <text x="942" y="250" class="note">只运行 Hub B，并连接 A 的 Registry</text>
+
+  <rect x="948" y="300" width="155" height="80" class="local"/>
+  <text x="995" y="346" class="sub">Hub B</text>
+
+  <rect x="948" y="410" width="155" height="60" class="soft"/>
+  <text x="965" y="447" class="tiny">Project-B / Claude / Codex / Copilot</text>
+
+  <path d="M280 240 C320 240, 330 292, 390 292" class="line"/>
+  <path d="M570 291 C590 291, 595 291, 610 291" class="line"/>
+  <path d="M570 425 C590 425, 595 425, 610 425" class="line"/>
+  <path d="M1025 380 C1025 380, 1025 380, 1025 410" class="dash"/>
+  <path d="M948 340 C875 340, 860 425, 570 425" class="dash"/>
+
+  <text x="300" y="227" class="tiny">HTTPS :28800</text>
+  <text x="746" y="405" class="tiny">/monitor/</text>
+  <text x="736" y="275" class="tiny">/</text>
+  <text x="796" y="330" class="tiny">/ws</text>
+  <text x="780" y="360" class="note">Hub B 使用同一 token 接入</text>
+</svg>

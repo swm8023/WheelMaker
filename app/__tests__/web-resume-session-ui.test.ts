@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 describe('web resume session ui', () => {
-  test('renders resume overlay controls and reloads immediately after import', () => {
+  test('renders unified session picker controls and reloads immediately after import', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(
       path.join(projectRoot, 'web', 'src', 'main.tsx'),
@@ -14,6 +14,7 @@ describe('web resume session ui', () => {
     );
 
     expect(mainTsx).toContain('const handleResumeBackToAgents = () => {');
+    expect(mainTsx).toContain('const handleDismissNewChatPicker = () => {');
     expect(mainTsx).toContain(
       'const imported = await service.importResumedSession(agentType, sessionId);',
     );
@@ -31,6 +32,8 @@ describe('web resume session ui', () => {
     expect(mainTsx).toContain('handleDismissResume();');
     expect(mainTsx).toContain('className="chat-agent-picker-close"');
     expect(mainTsx).toContain('className="chat-agent-picker-back"');
+    expect(mainTsx).toContain('<div className="chat-agent-picker-card chat-agent-picker-overlay">');
+    expect(mainTsx).not.toContain('className="chat-agent-picker-cancel"');
     expect(styles).toContain('.chat-agent-picker-close {');
     expect(styles).toContain('.chat-agent-picker-back {');
   });

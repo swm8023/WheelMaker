@@ -2965,6 +2965,11 @@ function App() {
     setResumeLoading(false);
   };
 
+  const handleDismissNewChatPicker = () => {
+    setNewChatAgentPickerOpen(false);
+    setPendingNewChatDraft(null);
+  };
+
   const removeChatSessionFromState = (sessionId: string) => {
     if (!sessionId) return;
     setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
@@ -3830,8 +3835,7 @@ function App() {
                 className="chat-header-icon-btn"
                 title="Resume session"
                 onClick={() => {
-                  setNewChatAgentPickerOpen(false);
-                  setPendingNewChatDraft(null);
+                  handleDismissNewChatPicker();
                   setResumeAgentType('');
                   setResumeSessions([]);
                   setResumeLoading(false);
@@ -3928,12 +3932,20 @@ function App() {
             </div>
           ) : null}
           {newChatAgentPickerOpen && pendingNewChatDraft ? (
-            <div className="chat-agent-picker-card">
+            <div className="chat-agent-picker-card chat-agent-picker-overlay">
               <div className="chat-agent-picker-header">
                 <div className="chat-agent-picker-header-main">
                   <span className="codicon codicon-add" />
                   <span className="chat-agent-picker-title">New Session</span>
                 </div>
+                <button
+                  type="button"
+                  className="chat-agent-picker-close"
+                  onClick={handleDismissNewChatPicker}
+                  aria-label="Close new session picker"
+                >
+                  <span className="codicon codicon-close" />
+                </button>
               </div>
               <div className="chat-agent-picker-subtitle">Choose an agent</div>
               <div className="chat-agent-picker-actions">
@@ -3954,16 +3966,6 @@ function App() {
               {availableChatAgents.length === 0 ? (
                 <div className="muted block">No agents available.</div>
               ) : null}
-              <button
-                type="button"
-                className="chat-agent-picker-cancel"
-                onClick={() => {
-                  setNewChatAgentPickerOpen(false);
-                  setPendingNewChatDraft(null);
-                }}
-              >
-                Cancel
-              </button>
             </div>
           ) : null}
           <div className="list">

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="620" viewBox="0 0 1200 620" role="img" aria-labelledby="title desc">
+  <title id="title">Nginx routing map</title>
+  <desc id="desc">Current nginx routing on machine A from port 28800 to web, registry websocket and monitor.</desc>
+  <defs>
+    <style>
+      .bg { fill: #0b1020; }
+      .frame { fill: #111827; stroke: #475569; stroke-width: 2; rx: 18; }
+      .box { fill: #172554; stroke: #60a5fa; stroke-width: 2; rx: 16; }
+      .path { fill: #0f766e; stroke: #5eead4; stroke-width: 2; rx: 14; }
+      .title { font: 600 28px 'Segoe UI', Arial, sans-serif; fill: #eff6ff; }
+      .sub { font: 600 20px 'Segoe UI', Arial, sans-serif; fill: #dbeafe; }
+      .text { font: 500 17px 'Segoe UI', Arial, sans-serif; fill: #cbd5e1; }
+      .note { font: 500 15px 'Segoe UI', Arial, sans-serif; fill: #94a3b8; }
+      .line { stroke: #60a5fa; stroke-width: 4; fill: none; }
+    </style>
+  </defs>
+  <rect width="1200" height="620" class="bg"/>
+  <text x="60" y="70" class="title">机器 A 当前 Nginx 路由</text>
+  <text x="60" y="102" class="note">来源：D:\Nginx\nginx-1.29.5\conf\conf.d\proxy-28800.conf</text>
+
+  <rect x="60" y="150" width="250" height="380" class="frame"/>
+  <text x="95" y="205" class="sub">HTTPS 入口</text>
+  <text x="95" y="245" class="text">listen 28800 ssl;</text>
+  <text x="95" y="280" class="text">ssl_certificate stunnel.pem</text>
+  <text x="95" y="315" class="text">TLSv1.2 / TLSv1.3</text>
+  <text x="95" y="350" class="text">统一暴露 Web / WS / Monitor</text>
+
+  <rect x="390" y="140" width="720" height="410" class="box"/>
+  <text x="425" y="190" class="sub">location 路由拆分</text>
+
+  <rect x="430" y="235" width="200" height="90" class="path"/>
+  <text x="462" y="275" class="sub">/</text>
+  <text x="462" y="305" class="text">proxy_pass 127.0.0.1:8080</text>
+
+  <rect x="690" y="235" width="200" height="90" class="path"/>
+  <text x="722" y="275" class="sub">/ws</text>
+  <text x="722" y="305" class="text">proxy_pass 127.0.0.1:9630</text>
+
+  <rect x="950" y="235" width="120" height="90" class="path"/>
+  <text x="972" y="275" class="sub">/monitor/</text>
+  <text x="972" y="305" class="text" style="font-size:15px">127.0.0.1:9631</text>
+
+  <rect x="430" y="385" width="200" height="110" class="frame"/>
+  <text x="460" y="430" class="sub">Web 静态资源</text>
+  <text x="460" y="462" class="text">C:\Users\suweimin\.wheelmaker\web</text>
+
+  <rect x="690" y="385" width="200" height="110" class="frame"/>
+  <text x="722" y="430" class="sub">Registry</text>
+  <text x="722" y="462" class="text">WebSocket /ws</text>
+  <text x="722" y="490" class="note">供 App 与其他 hub 连接</text>
+
+  <rect x="950" y="385" width="120" height="110" class="frame"/>
+  <text x="972" y="430" class="sub">Monitor</text>
+  <text x="972" y="462" class="text" style="font-size:15px">服务状态 / 日志 / 操作</text>
+
+  <line x1="310" y1="255" x2="430" y2="255" class="line"/>
+  <line x1="310" y1="280" x2="690" y2="280" class="line"/>
+  <line x1="310" y1="305" x2="950" y2="305" class="line"/>
+
+  <text x="60" y="585" class="note">当前还存在另一组 HTTPS 入口：33006 → 127.0.0.1:3006，可复用为其他服务的 HTTPS 反代模板。</text>
+</svg>
