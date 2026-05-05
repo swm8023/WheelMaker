@@ -1856,6 +1856,7 @@ function App() {
   const knownWorktreeRevRef = useRef('');
   const [loadingProject, setLoadingProject] = useState(false);
   const [refreshingProject, setRefreshingProject] = useState(false);
+  const [hasPendingProjectUpdates, setHasPendingProjectUpdates] = useState(false);
 
   const [dirEntries, setDirEntries] = useState<DirEntries>({ '.': [] });
   const [expandedDirs, setExpandedDirs] = useState<string[]>(['.']);
@@ -1938,7 +1939,6 @@ function App() {
   const [gitBranches, setGitBranches] = useState<string[]>([]);
   const [gitSelectedBranches, setGitSelectedBranches] = useState<string[]>([]);
   const [gitBranchPickerOpen, setGitBranchPickerOpen] = useState(false);
-  const [gitDirty, setGitDirty] = useState(false);
   const [gitLoadedProjectId, setGitLoadedProjectId] = useState('');
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
@@ -2613,7 +2613,6 @@ function App() {
       setGitBranches(availableBranches);
       setGitSelectedBranches(selectedBranches);
       gitSelectedBranchesRef.current = selectedBranches;
-      setGitDirty(statusData.dirty);
       const working = buildWorkingTreeFiles(statusData);
       setWorkingTreeFiles(working);
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
@@ -2673,7 +2672,6 @@ function App() {
   const refreshGitStatusOnly = async () => {
     try {
       const statusData = await service.getGitStatus();
-      setGitDirty(statusData.dirty);
       setWorkingTreeFiles(buildWorkingTreeFiles(statusData));
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
     } catch {
@@ -3354,6 +3352,7 @@ function App() {
       const ws = toRegistryWsUrl(nextAddress);
       const result = await workspaceController.connect(ws, trimmedToken);
       setProjects(result.projects);
+      setHasPendingProjectUpdates(false);
       captureSelectedFileScrollPosition();
       dirHashRef.current = {};
       if (!silentReconnect) {
@@ -3369,13 +3368,6 @@ function App() {
         skipNextSelectedFileAutoReadRef.current = true;
         readSelectedFile(selectedFileToReload, { restoreScroll: true, silent: silentReconnect }).catch(() => undefined);
       }
-      setGitDirty(
-        Boolean(
-          result.projects.find(
-            item => item.projectId === result.hydrated.projectId,
-          )?.git?.dirty,
-        ),
-      );
       reconnectStartedAtRef.current = null;
       setReconnecting(false);
       setConnected(true);
@@ -3608,6 +3600,7 @@ function App() {
     try {
       const result = await workspaceController.switchProject(nextProjectId);
       setProjects(result.projects);
+      setHasPendingProjectUpdates(false);
       applyHydratedProjectState(result.hydrated);
       setChatMessages([]);
       setChatSessions([]);
@@ -3674,6 +3667,9 @@ function App() {
       ) {
         await loadGit();
       }
+      if (!silent) {
+        setHasPendingProjectUpdates(false);
+      }
     } finally {
       refreshInFlightRef.current = false;
       if (!silent) {
@@ -3694,8 +3690,11 @@ function App() {
             item.projectId === eventProjectId
               ? { ...item, online: event.method === 'project.online' }
               : item,
-          ),
+            ),
         );
+        if (!eventProjectId || eventProjectId === projectIdRef.current) {
+          setHasPendingProjectUpdates(true);
+        }
       }
       if (event.method === 'session.updated') {
         if (eventProjectId && eventProjectId !== projectIdRef.current) {
@@ -5772,12 +5771,6 @@ function App() {
             <span className="project-name" title={currentProjectName}>
               {currentProjectName}
             </span>
-            <span
-              className={`project-presence ${
-                currentProject?.online ? 'online' : 'offline'
-              }`}
-            />
-            {gitDirty ? <span className="project-dirty">dirty</span> : null}
             {loadingProject || refreshingProject || reconnecting ? (
               <span className="muted">...</span>
             ) : null}
@@ -5820,7 +5813,7 @@ function App() {
         </div>
 
         <button
-          className="header-btn refresh-btn"
+          className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
           onClick={() => refreshProject().catch(() => undefined)}
           title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
           disabled={refreshingProject || reconnecting}
