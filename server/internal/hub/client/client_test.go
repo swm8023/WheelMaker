@@ -1067,7 +1067,7 @@ func TestEnsureReady_FailsWhenAgentDoesNotSupportLoadSession(t *testing.T) {
 	}
 }
 
-func TestEnsureReadyAndNotify_DoesNotSendSessionInfoAfterReady(t *testing.T) {
+func TestEnsureReadyAndNotify_DoesNotEmitReadySystemPrompt(t *testing.T) {
 	s := mustNewSession(t, "acp-1", "/tmp", "claude")
 	s.projectName = "proj1"
 	router := &fakeIMRouter{}
@@ -1092,18 +1092,15 @@ func TestEnsureReadyAndNotify_DoesNotSendSessionInfoAfterReady(t *testing.T) {
 	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
 		t.Fatalf("ensureReadyAndNotify(first): %v", err)
 	}
-	if got := len(router.systems); got != 1 {
-		t.Fatalf("system notify count after first ensureReadyAndNotify = %d, want 1", got)
-	}
-	if got := router.systems[0].payload.Title; got != "Session ready" {
-		t.Fatalf("first title = %q, want %q", got, "Session ready")
+	if got := len(router.systems); got != 0 {
+		t.Fatalf("system notify count after first ensureReadyAndNotify = %d, want 0", got)
 	}
 
 	if err := s.ensureReadyAndNotify(context.Background()); err != nil {
 		t.Fatalf("ensureReadyAndNotify(second): %v", err)
 	}
-	if got := len(router.systems); got != 1 {
-		t.Fatalf("system notify count after second ensureReadyAndNotify = %d, want 1", got)
+	if got := len(router.systems); got != 0 {
+		t.Fatalf("system notify count after second ensureReadyAndNotify = %d, want 0", got)
 	}
 }
 

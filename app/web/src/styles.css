@@ -1971,13 +1971,6 @@ body,
   opacity: 0.88;
 }
 
-.chat-thought-label {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--muted) 80%, var(--accent));
-}
-
 .chat-thought-preview {
   font-size: 12px;
   line-height: 1.35;
@@ -2176,11 +2169,31 @@ body,
 }
 
 .chat-composer {
-  border-top: 1px solid var(--border);
-  padding: 10px 14px 12px;
+  position: relative;
+  z-index: 1;
+  margin-top: -16px;
+  padding: 18px 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  background: var(--bg);
+}
+
+.chat-composer::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 32px;
+  transform: translateY(-100%);
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    color-mix(in srgb, var(--bg) 74%, transparent) 56%,
+    var(--bg) 100%
+  );
 }
 
 .chat-composer-main {
@@ -2997,46 +3010,6 @@ body,
 
 ::-webkit-scrollbar-track {
   background: transparent;
-}
-
-.status-bar {
-  height: 22px;
-  background: var(--accent);
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 500;
-  flex: 0 0 auto;
-  user-select: none;
-  gap: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.statusbar-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.statusbar-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.statusbar-muted {
-  opacity: 0.75;
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-
-.statusbar-spacer {
-  flex: 1;
 }
 
 @media (max-width: 900px) {

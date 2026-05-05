@@ -71,7 +71,13 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('respondToChatPermission');
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
+    expect(stylesCss).toContain('.chat-composer::before {');
     expect(stylesCss).toContain('.chat-session-item');
+    expect(mainTsx).not.toContain('className="status-bar"');
+    expect(mainTsx).not.toContain('gitStatusSummary');
+    expect(mainTsx).not.toContain('chat-thought-label');
+    expect(stylesCss).not.toContain('.status-bar {');
+    expect(stylesCss).not.toContain('.chat-thought-label {');
     expect(stylesCss).not.toContain('.chat-permission-button');
   });
 });

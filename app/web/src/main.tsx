@@ -600,7 +600,6 @@ const CollapsibleThought = React.memo(function CollapsibleThought({
       >
         <span className="codicon codicon-chevron-right chat-thought-chevron" />
         <span className="codicon codicon-lightbulb" />
-        <span className="chat-thought-label">Thought</span>
         {!open && firstLine ? (
           <span className="chat-thought-preview">{firstLine}</span>
         ) : null}
@@ -1940,11 +1939,6 @@ function App() {
   const [gitSelectedBranches, setGitSelectedBranches] = useState<string[]>([]);
   const [gitBranchPickerOpen, setGitBranchPickerOpen] = useState(false);
   const [gitDirty, setGitDirty] = useState(false);
-  const [gitStatusSummary, setGitStatusSummary] = useState({
-    staged: 0,
-    unstaged: 0,
-    untracked: 0,
-  });
   const [gitLoadedProjectId, setGitLoadedProjectId] = useState('');
   const [commits, setCommits] = useState<RegistryGitCommit[]>([]);
   const [selectedCommit, setSelectedCommit] = useState('');
@@ -2620,11 +2614,6 @@ function App() {
       setGitSelectedBranches(selectedBranches);
       gitSelectedBranchesRef.current = selectedBranches;
       setGitDirty(statusData.dirty);
-      setGitStatusSummary({
-        staged: statusData.staged.length,
-        unstaged: statusData.unstaged.length,
-        untracked: statusData.untracked.length,
-      });
       const working = buildWorkingTreeFiles(statusData);
       setWorkingTreeFiles(working);
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
@@ -2685,11 +2674,6 @@ function App() {
     try {
       const statusData = await service.getGitStatus();
       setGitDirty(statusData.dirty);
-      setGitStatusSummary({
-        staged: statusData.staged.length,
-        unstaged: statusData.unstaged.length,
-        untracked: statusData.untracked.length,
-      });
       setWorkingTreeFiles(buildWorkingTreeFiles(statusData));
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
     } catch {
@@ -5883,40 +5867,6 @@ function App() {
         ) : null}
         <main className="workspace-right">{renderMain()}</main>
       </div>
-
-      {tab === 'file' ? (
-        <div className="status-bar">
-          {selectedFile ? (
-            <span className="statusbar-item">
-              <span className="codicon codicon-file" />
-              <span className="statusbar-text">
-                {selectedFile.split('/').pop()}
-              </span>
-            </span>
-          ) : null}
-          {selectedFile && fileContent.length > 0 ? (
-            <span className="statusbar-muted">
-              {fileInfo?.isBinary
-                ? `${fileInfo.size ?? 0} bytes`
-                : `${
-                    fileInfo?.totalLines ?? fileContent.split('\n').length
-                  } lines`}
-            </span>
-          ) : null}
-          <span className="statusbar-spacer" />
-          <span className="statusbar-muted">
-            {gitDirty
-              ? `dirty ${gitStatusSummary.staged}/${gitStatusSummary.unstaged}/${gitStatusSummary.untracked}`
-              : 'clean'}
-          </span>
-          {gitCurrentBranch ? (
-            <span className="statusbar-item">
-              <span className="codicon codicon-git-branch" />
-              <span className="statusbar-text">{gitCurrentBranch}</span>
-            </span>
-          ) : null}
-        </div>
-      ) : null}
 
       {!isWide ? (
         <div

@@ -638,7 +638,7 @@ func applyStoredConfigOptions(
 	return options
 }
 
-// ensureReadyAndNotify calls ensureReady and only emits a ready message when
+// ensureReadyAndNotify calls ensureReady and persists the session when
 // transitioning from not-ready to ready.
 func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	s.mu.Lock()
@@ -650,7 +650,6 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	}
 
 	if !wasReady {
-		s.replyWithTitle("Session ready", s.sessionInfoLine())
 		s.persistSessionBestEffort()
 	}
 	return nil
