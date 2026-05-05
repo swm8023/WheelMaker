@@ -248,7 +248,56 @@ This will:
 2. export the assets to `~\.wheelmaker\web`
 3. refresh the files served by the Nginx root path
 
-### 6. Service operations
+### 6. Install the Web UI as a PWA
+
+WheelMaker Web already ships with:
+
+- `manifest.webmanifest`
+- `service-worker.js`
+- `display: "standalone"`
+
+So once the site is served over **HTTPS**, modern browsers can install it as a local PWA.
+
+#### Open the app
+
+1. Publish the latest Web build with `npm run build:web:release`.
+2. Open `https://<host>:28800/` in a supported browser.
+3. Wait until the page finishes loading once so the browser can discover the manifest and register the service worker.
+
+If you open the site through plain HTTP instead of HTTPS, most browsers will not offer PWA install.
+
+#### Install on desktop (Chrome / Edge)
+
+1. Open `https://<host>:28800/`.
+2. Look for the **Install app** / **Install WheelMaker** icon in the address bar, or open the browser menu.
+3. Choose **Install**.
+4. The app will be added locally and launch in a standalone window.
+
+#### Install on Android
+
+1. Open `https://<host>:28800/` in Chrome or Edge.
+2. Open the browser menu.
+3. Tap **Install app** or **Add to Home screen**.
+4. Confirm the prompt.
+
+After installation, WheelMaker can be launched from the app drawer or home screen like a native app.
+
+#### Install on iPhone / iPad
+
+1. Open `https://<host>:28800/` in **Safari**.
+2. Tap the **Share** button.
+3. Choose **Add to Home Screen**.
+4. Confirm the app name and tap **Add**.
+
+On iOS, the installed app opens from the home screen in a standalone-style window.
+
+#### What to expect after installation
+
+- the app opens without normal browser tabs
+- the service worker can cache core shell assets
+- local notifications and PWA-related capabilities can be enabled by the browser when supported
+
+### 7. Service operations
 
 ```powershell
 ~/.wheelmaker/start.bat
@@ -276,7 +325,7 @@ You can also trigger the updater manually:
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/signal_update_now.ps1 -DelaySeconds 30
 ```
 
-### 7. Quick validation checklist
+### 8. Quick validation checklist
 
 After deployment:
 
@@ -285,6 +334,7 @@ After deployment:
 3. Confirm Machine B points `registry.server` at Machine A.
 4. Confirm both machines use the same `registry.token`.
 5. Confirm projects from multiple hubs appear in the UI.
+6. Confirm the browser offers **Install app** / **Add to Home Screen** when opened over HTTPS.
 
 ### Chat commands
 
