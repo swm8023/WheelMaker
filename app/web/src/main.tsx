@@ -994,6 +994,22 @@ function isImageFile(path: string, mimeType?: string): boolean {
   return inferImageMimeType(path) !== '';
 }
 
+function encodeUtf8ToBase64(value: string): string {
+  try {
+    if (typeof TextEncoder !== 'undefined') {
+      const bytes = new TextEncoder().encode(value);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 1) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+  } catch {
+    // fallback below
+  }
+  return btoa(unescape(encodeURIComponent(value)));
+}
+
 function buildImageDataUrl(params: {
   content: string;
   path: string;
@@ -1004,11 +1020,12 @@ function buildImageDataUrl(params: {
   if (!content) {
     return '';
   }
-  const normalizedMime = (mimeType || '').trim() || inferImageMimeType(path) || 'image/png';
+  const inferredMime = inferImageMimeType(path);
+  const normalizedMime = inferredMime || (mimeType || '').trim() || 'image/png';
   if (isBinary) {
     return `data:${normalizedMime};base64,${content}`;
   }
-  return `data:${normalizedMime};charset=utf-8,${encodeURIComponent(content)}`;
+  return `data:${normalizedMime};base64,${encodeUtf8ToBase64(content)}`;
 }
 function parseTrailingLineNumber(value: string): number | null {
   const input = value.trim();
@@ -5960,6 +5977,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
 
 
