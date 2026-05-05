@@ -2442,6 +2442,11 @@ body,
   animation: wmSlideDown 120ms ease-out;
 }
 
+.chat-agent-picker-overlay {
+  position: relative;
+  box-shadow: var(--soft-shadow);
+}
+
 @keyframes wmSlideDown {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -2450,10 +2455,18 @@ body,
 .chat-agent-picker-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
 }
 
-.chat-agent-picker-header .codicon {
+.chat-agent-picker-header-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chat-agent-picker-header-main .codicon {
   font-size: 14px;
   color: var(--accent);
 }
@@ -2506,20 +2519,54 @@ body,
   color: var(--accent);
 }
 
-.chat-agent-picker-cancel {
-  align-self: flex-start;
-  margin-top: 0;
-  padding: 4px 0;
-  border: none;
-  background: none;
+.chat-agent-picker-close {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
   color: var(--muted);
-  font-size: 11px;
   cursor: pointer;
-  transition: color 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
-.chat-agent-picker-cancel:hover {
+.chat-agent-picker-close:hover {
   color: var(--text);
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.chat-agent-picker-close:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.chat-agent-picker-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+
+.chat-agent-picker-back:hover {
+  background: var(--hover);
+  border-color: var(--accent);
+}
+
+.chat-agent-picker-back:disabled {
+  opacity: 0.65;
+  cursor: default;
 }
 
 /* resume session list items */
@@ -2533,7 +2580,11 @@ body,
   display: flex;
   flex-direction: column;
   gap: 2px;
+  width: 100%;
   padding: 8px 12px;
+  border: none;
+  background: transparent;
+  text-align: left;
   cursor: pointer;
   border-radius: 4px;
   transition: background 100ms ease;
@@ -2541,6 +2592,11 @@ body,
 
 .chat-resume-item:hover {
   background: var(--hover);
+}
+
+.chat-resume-item:disabled {
+  opacity: 0.72;
+  cursor: default;
 }
 
 .chat-resume-item-title {

@@ -2733,7 +2733,7 @@ function App() {
       forceFull?: boolean;
     },
   ) => {
-    if (!activeProjectId || !sessionId) return;
+    if (!activeProjectId || !sessionId) return false;
     setChatLoading(true);
     try {
       const useIncremental = options?.forceFull
@@ -2798,8 +2798,10 @@ function App() {
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
       setChatMessages(nextMessages);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setChatLoading(false);
     }
@@ -2917,25 +2919,42 @@ function App() {
     }
   };
 
+  const handleResumeBackToAgents = () => {
+    setResumeAgentType('');
+    setResumeSessions([]);
+    setResumeLoading(false);
+  };
+
   const handleResumeImport = async (agentType: string, sessionId: string) => {
     setResumeLoading(true);
+    let importedSessionId = '';
     try {
-      const result = await service.importResumedSession(agentType, sessionId);
-      if (result.ok && result.session.sessionId) {
-        setChatSessions(prev => mergeChatSession(prev, result.session));
-        setSelectedChatId(result.session.sessionId);
-        chatSelectedIdRef.current = result.session.sessionId;
-        chatMessageStoreRef.current[result.session.sessionId] = [];
-        chatSyncIndexRef.current[result.session.sessionId] = 0;
-        chatSyncSubIndexRef.current[result.session.sessionId] = 0;
-        setChatMessages([]);
+      const imported = await service.importResumedSession(agentType, sessionId);
+      if (!imported.ok || !imported.session.sessionId) {
+        throw new Error('session.resume.import returned ok=false');
       }
+      importedSessionId = imported.session.sessionId;
+      setResumeSessions(prev => prev.filter(item => item.sessionId !== importedSessionId));
+      setChatSessions(prev => mergeChatSession(prev, imported.session));
+      const reloaded = await service.reloadSession(importedSessionId);
+      if (!reloaded.ok) {
+        throw new Error('session.reload returned ok=false');
+      }
+      chatMessageStoreRef.current[importedSessionId] = [];
+      chatSyncIndexRef.current[importedSessionId] = 0;
+      chatSyncSubIndexRef.current[importedSessionId] = 0;
+      const loaded = await loadChatSession(importedSessionId, projectIdRef.current, { forceFull: true });
+      if (!loaded) {
+        throw new Error('Failed to load resumed session history');
+      }
+      handleDismissResume();
     } catch (err) {
+      if (importedSessionId) {
+        handleDismissResume();
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setResumeLoading(false);
-      setResumeAgentPickerOpen(false);
-      setResumeSessions([]);
     }
   };
 
@@ -2943,6 +2962,7 @@ function App() {
     setResumeAgentPickerOpen(false);
     setResumeAgentType('');
     setResumeSessions([]);
+    setResumeLoading(false);
   };
 
   const removeChatSessionFromState = (sessionId: string) => {
@@ -3812,6 +3832,9 @@ function App() {
                 onClick={() => {
                   setNewChatAgentPickerOpen(false);
                   setPendingNewChatDraft(null);
+                  setResumeAgentType('');
+                  setResumeSessions([]);
+                  setResumeLoading(false);
                   setResumeAgentPickerOpen(true);
                 }}
               >
@@ -3823,10 +3846,21 @@ function App() {
             <div className="chat-empty-hint">Start a new chat or resume a previous session</div>
           ) : null}
           {resumeAgentPickerOpen ? (
-            <div className="chat-agent-picker-card">
+            <div className="chat-agent-picker-card chat-agent-picker-overlay">
               <div className="chat-agent-picker-header">
-                <span className="codicon codicon-history" />
-                <span className="chat-agent-picker-title">Resume Session</span>
+                <div className="chat-agent-picker-header-main">
+                  <span className="codicon codicon-history" />
+                  <span className="chat-agent-picker-title">Resume Session</span>
+                </div>
+                <button
+                  type="button"
+                  className="chat-agent-picker-close"
+                  onClick={handleDismissResume}
+                  disabled={resumeLoading}
+                  aria-label="Close resume picker"
+                >
+                  <span className="codicon codicon-close" />
+                </button>
               </div>
               {resumeSessions.length === 0 && !resumeLoading ? (
                 <>
@@ -3854,11 +3888,24 @@ function App() {
                 <div className="chat-agent-picker-loading">Loading sessions…</div>
               ) : null}
               {resumeSessions.length > 0 ? (
-                <div className="chat-resume-list">
+                <>
+                  <button
+                    type="button"
+                    className="chat-agent-picker-back"
+                    onClick={handleResumeBackToAgents}
+                    disabled={resumeLoading}
+                  >
+                    <span className="codicon codicon-arrow-left" />
+                    <span>Change agent</span>
+                  </button>
+                  <div className="chat-agent-picker-subtitle">Import the selected session and reload its history immediately</div>
+                  <div className="chat-resume-list">
                   {resumeSessions.map(s => (
-                    <div
+                    <button
+                      type="button"
                       key={s.sessionId}
                       className="chat-resume-item"
+                      disabled={resumeLoading}
                       onClick={() => { handleResumeImport(resumeAgentType, s.sessionId).catch(() => undefined); }}
                     >
                       <span className="chat-resume-item-title">
@@ -3873,24 +3920,20 @@ function App() {
                         <span>{formatCompactRelativeAge(s.updatedAt)}</span>
                         {s.messageCount > 0 ? <span>{s.messageCount} messages</span> : null}
                       </span>
-                    </div>
+                    </button>
                   ))}
-                </div>
+                  </div>
+                </>
               ) : null}
-              <button
-                type="button"
-                className="chat-agent-picker-cancel"
-                onClick={handleDismissResume}
-              >
-                Cancel
-              </button>
             </div>
           ) : null}
           {newChatAgentPickerOpen && pendingNewChatDraft ? (
             <div className="chat-agent-picker-card">
               <div className="chat-agent-picker-header">
-                <span className="codicon codicon-add" />
-                <span className="chat-agent-picker-title">New Session</span>
+                <div className="chat-agent-picker-header-main">
+                  <span className="codicon codicon-add" />
+                  <span className="chat-agent-picker-title">New Session</span>
+                </div>
               </div>
               <div className="chat-agent-picker-subtitle">Choose an agent</div>
               <div className="chat-agent-picker-actions">
@@ -5814,7 +5857,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
 
 
 

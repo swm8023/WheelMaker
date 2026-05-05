@@ -656,44 +656,6 @@ func (s *Session) ensureReadyAndNotify(ctx context.Context) error {
 	return nil
 }
 
-// captureReplay reactivates the session and captures session/update notifications
-// replayed by the agent during SessionLoad.
-func (s *Session) captureReplay(ctx context.Context) ([]acp.SessionUpdateParams, error) {
-	s.promptMu.Lock()
-	defer s.promptMu.Unlock()
-
-	if err := s.ensureInstance(ctx); err != nil {
-		return nil, err
-	}
-
-	captureCh := make(chan acp.SessionUpdateParams, 2048)
-	s.mu.Lock()
-	s.prompt.updatesCh = captureCh
-	s.mu.Unlock()
-
-	if err := s.ensureReadyAndNotify(ctx); err != nil {
-		s.mu.Lock()
-		s.prompt.updatesCh = nil
-		s.mu.Unlock()
-		return nil, err
-	}
-
-	// Unhook capture to prevent further sends (no close, so no panic on late arrivals).
-	s.mu.Lock()
-	s.prompt.updatesCh = nil
-	s.mu.Unlock()
-
-	var updates []acp.SessionUpdateParams
-	for {
-		select {
-		case u := <-captureCh:
-			updates = append(updates, u)
-		default:
-			return updates, nil
-		}
-	}
-}
-
 // promptStream sends a prompt and returns a channel of streaming updates.
 func (s *Session) promptStream(ctx context.Context, blocks []acp.ContentBlock) (<-chan promptStreamEvent, error) {
 	if err := s.ensureReady(ctx); err != nil {

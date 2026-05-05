@@ -560,50 +560,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.resume.list payload: %w", err)
 		}
-		managed := make(map[string]bool)
-		if c.store != nil {
-			recs, err := c.store.ListSessions(ctx, c.projectName)
-			if err != nil {
-				return nil, err
-			}
-			for _, r := range recs {
-				managed[r.ID] = true
-			}
-		}
-		agentType := strings.TrimSpace(req.AgentType)
-		var sessions []ClaudeSessionInfo
-		switch agentType {
-		case "codex", "copilot":
-			s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed)
-			if err != nil {
-				hubLogger(c.projectName).Warn("session.resume.list scan failed agent=%s err=%v", agentType, err)
-				return nil, err
-			}
-			sessions = s
-			hubLogger(c.projectName).Info("session.resume.list agent=%s disk_count=%d", agentType, len(s))
-		default:
-			// Claude or unknown: scan disk first, then fall back to Claude scanner.
-			if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, managed); err != nil {
-				return nil, err
-			} else if len(s) > 0 {
-				sessions = s
-			} else {
-				s, err := scanUnmanagedClaudeSessions(c.cwd, managed)
-				if err != nil {
-					return nil, err
-				}
-				sessions = s
-			}
-		}
-		if sessions == nil {
-			sessions = []ClaudeSessionInfo{}
-		}
-		// Sort by UpdatedAt descending.
-		sort.Slice(sessions, func(i, j int) bool {
-			return sessions[i].UpdatedAt > sessions[j].UpdatedAt
-		})
-		hubLogger(c.projectName).Info("session.resume.list agent=%s count=%d", agentType, len(sessions))
-		return map[string]any{"sessions": sessions}, nil
+		return c.recovery().ListResumableSessions(ctx, req.AgentType)
 	case "session.resume.import":
 		var req struct {
 			SessionID string `json:"sessionId"`
@@ -612,63 +569,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.resume.import payload: %w", err)
 		}
-		if strings.TrimSpace(req.SessionID) == "" {
-			return nil, fmt.Errorf("sessionId is required")
-		}
-		if strings.TrimSpace(req.AgentType) == "" {
-			return nil, fmt.Errorf("agentType is required")
-		}
-		agentType := strings.TrimSpace(req.AgentType)
-		var info *ClaudeSessionInfo
-		// Try disk scan first (fast, no process spawn).
-		if s, err := scanUnmanagedDiskSessions(agentType, c.cwd, map[string]bool{}); err == nil {
-			for i := range s {
-				if s[i].SessionID == req.SessionID {
-					info = &s[i]
-					break
-				}
-			}
-		}
-		if info == nil {
-			// Verify session exists on disk and is not already managed
-			managed := map[string]bool{req.SessionID: false}
-			found, err := scanUnmanagedClaudeSessions(c.cwd, managed)
-			if err != nil {
-				return nil, err
-			}
-			for i := range found {
-				if found[i].SessionID == req.SessionID {
-					info = &found[i]
-					break
-				}
-			}
-			if info == nil {
-				return nil, fmt.Errorf("session not found or already managed")
-			}
-		}
-		rec := &SessionRecord{
-			ID:           req.SessionID,
-			ProjectName:  c.projectName,
-			Status:       SessionPersisted,
-			AgentType:    agentType,
-			Title:        info.Title,
-			LastActiveAt: time.Now().UTC(),
-		}
-		if err := c.store.SaveSession(ctx, rec); err != nil {
-			return nil, fmt.Errorf("save session: %w", err)
-		}
-		if c.store != nil {
-			if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, rec.AgentType); err != nil {
-				hubLogger(c.projectName).Warn("save project default agent failed agent=%s err=%v", rec.AgentType, err)
-			}
-		}
-		summary := sessionViewSummary{
-			SessionID: req.SessionID,
-			Title:     info.Title,
-			UpdatedAt: info.UpdatedAt,
-			AgentType: rec.AgentType,
-		}
-		return map[string]any{"ok": true, "session": summary}, nil
+		return c.recovery().ImportResumableSession(ctx, req.AgentType, req.SessionID)
 	case "session.reload":
 		var req struct {
 			SessionID string `json:"sessionId"`
@@ -676,25 +577,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.reload payload: %w", err)
 		}
-		if strings.TrimSpace(req.SessionID) == "" {
-			return nil, fmt.Errorf("sessionId is required")
-		}
-		if err := c.store.DeleteSessionPrompts(ctx, c.projectName, req.SessionID); err != nil {
-			return nil, fmt.Errorf("delete session prompts: %w", err)
-		}
-		sess, err := c.SessionByID(ctx, req.SessionID)
-		if err != nil {
-			return nil, fmt.Errorf("resolve session: %w", err)
-		}
-		if err := sess.Suspend(ctx); err != nil {
-			return nil, fmt.Errorf("suspend session: %w", err)
-		}
-		updates, err := sess.captureReplay(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("capture replay: %w", err)
-		}
-		feedReplayToRecorder(ctx, c.sessionRecorder, req.SessionID, updates)
-		return map[string]any{"ok": true, "sessionId": req.SessionID}, nil
+		return c.recovery().ReloadSession(ctx, req.SessionID)
 	case "session.token.providers":
 		return map[string]any{
 			"providers": []map[string]any{{"id": "deepseek", "name": "DeepSeek", "authMode": "api_key"}},
@@ -771,75 +654,6 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported session method: %s", method)
-	}
-}
-
-// feedReplayToRecorder converts captured ACP session/update notifications into
-// sessionRecorder events, using the recorder's prompt lifecycle (prompt_request →
-// updates → prompt_done) to persist the replayed conversation.
-func feedReplayToRecorder(ctx context.Context, rec *SessionRecorder, sessionID string, updates []acp.SessionUpdateParams) {
-	if len(updates) == 0 {
-		return
-	}
-
-	finishPrompt := func() {
-		_ = rec.RecordEvent(ctx, SessionViewEvent{
-			Type:      SessionViewEventTypeACP,
-			SessionID: sessionID,
-			Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
-				"result": acp.SessionPromptResult{StopReason: "end_turn"},
-			}),
-		})
-	}
-
-	startPrompt := func(text string) {
-		_ = rec.RecordEvent(ctx, SessionViewEvent{
-			Type:      SessionViewEventTypeACP,
-			SessionID: sessionID,
-			Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
-				"params": acp.SessionPromptParams{
-					SessionID: sessionID,
-					Prompt:    []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: text}},
-				},
-			}),
-		})
-	}
-
-	recordUpdate := func(u acp.SessionUpdateParams) {
-		_ = rec.RecordEvent(ctx, SessionViewEvent{
-			Type:      SessionViewEventTypeACP,
-			SessionID: sessionID,
-			Content: acp.BuildACPContentJSON(acp.MethodSessionUpdate, map[string]any{
-				"params": u,
-			}),
-		})
-	}
-
-	hasPending := false
-	for _, u := range updates {
-		kind := u.Update.SessionUpdate
-		switch kind {
-		case acp.SessionUpdateConfigOptionUpdate,
-			acp.SessionUpdateAvailableCommandsUpdate,
-			acp.SessionUpdateSessionInfoUpdate,
-			acp.SessionUpdateCurrentModeUpdate,
-			acp.SessionUpdateUsageUpdate:
-			continue
-		}
-
-		if kind == acp.SessionUpdateUserMessageChunk {
-			if hasPending {
-				finishPrompt()
-			}
-			startPrompt(extractUpdateText(u.Update.Content))
-			hasPending = true
-			continue
-		}
-
-		recordUpdate(u)
-	}
-	if hasPending {
-		finishPrompt()
 	}
 }
 

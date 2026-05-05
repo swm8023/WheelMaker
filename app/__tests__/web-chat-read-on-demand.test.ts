@@ -9,11 +9,14 @@ describe('web chat read-on-demand behavior', () => {
       'utf8',
     );
 
-    expect(mainTsx).toContain('hydrateMessages?: boolean');
-    expect(mainTsx).toContain('hydrateMessages: false,');
-    expect(mainTsx).toContain('const shouldHydrateOnReconnect =');
+    expect(mainTsx).toContain('incremental?: boolean;');
+    expect(mainTsx).toContain('forceFull?: boolean;');
+    expect(mainTsx).toContain('const useIncremental = options?.forceFull');
+    expect(mainTsx).toContain('const shouldSyncSelectedSession =');
     expect(mainTsx).toContain("tabRef.current === 'chat'");
-    expect(mainTsx).toContain('hydrateMessages: shouldHydrateOnReconnect,');
-    expect(mainTsx).toContain('if (!canHydrateSelection) {');
+    expect(mainTsx).toContain('incremental: true,');
+    expect(mainTsx).toContain('preserveUserSelection: true,');
+    expect(mainTsx).toContain('selectionSnapshot: previousSelectedChatId,');
+    expect(mainTsx).toContain('if (useIncremental) {');
   });
 });

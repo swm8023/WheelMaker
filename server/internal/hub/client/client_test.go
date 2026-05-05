@@ -2229,6 +2229,22 @@ func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEve
 	}
 }
 
+func writeClaudeSessionFixture(t *testing.T, homeDir, projectDirName, sessionID, cwd, title, assistant string) {
+	t.Helper()
+	projectDir := filepath.Join(homeDir, ".claude", "projects", projectDirName)
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", projectDir, err)
+	}
+	lines := []string{
+		fmt.Sprintf(`{"type":"user","message":{"role":"user","content":"%s"},"cwd":%q}`, title, cwd),
+		fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":"%s"}}`, assistant),
+	}
+	sessionPath := filepath.Join(projectDir, sessionID+".jsonl")
+	if err := os.WriteFile(sessionPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", sessionPath, err)
+	}
+}
+
 func sessionViewPermissionRequestedEvent(sessionID, text string, requestID int64, options []acp.PermissionOption) SessionViewEvent {
 	params := acp.PermissionRequestParams{
 		SessionID: sessionID,
@@ -4102,6 +4118,96 @@ func TestHandleSessionRequestSessionDeleteRemovesSessionAndPrompts(t *testing.T)
 
 	if _, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0); err == nil || !strings.Contains(err.Error(), "session not found") {
 		t.Fatalf("ReadSessionPrompts err = %v, want session not found", err)
+	}
+}
+
+func TestHandleSessionRequestSessionReloadClearsPromptStateBeforeReplay(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 5, 9, 0, 0, 0, time.UTC)
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register(acp.ACPProviderClaude, func(context.Context, string) (agent.Instance, error) {
+		return &testInjectedInstance{
+			name:      "claude",
+			sessionID: "sess-reload",
+			initResult: acp.InitializeResult{
+				ProtocolVersion:   "0.1",
+				AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+			},
+			loadErr: errors.New("resource not found"),
+		}, nil
+	})
+
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-reload",
+		ProjectName:  "proj1",
+		Status:       SessionPersisted,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Title:        "Reload target",
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := c.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-reload",
+		PromptIndex: 1,
+		UpdatedAt:   now,
+		TurnIndex:   4,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	c.sessionRecorder.writeMu.Lock()
+	cached := newSessionPromptState(3, 9)
+	c.sessionRecorder.promptState["sess-reload"] = &cached
+	c.sessionRecorder.writeMu.Unlock()
+
+	_, err := c.HandleSessionRequest(ctx, "session.reload", "proj1", json.RawMessage(`{"sessionId":"sess-reload"}`))
+	if err == nil {
+		t.Fatal("expected reload to fail when replay load fails")
+	}
+
+	c.sessionRecorder.writeMu.Lock()
+	_, hasPromptState := c.sessionRecorder.promptState["sess-reload"]
+	c.sessionRecorder.writeMu.Unlock()
+	if hasPromptState {
+		t.Fatal("prompt state still present after reload failure")
+	}
+}
+
+func TestHandleSessionRequestSessionResumeImportRejectsAlreadyManagedClaudeSession(t *testing.T) {
+	cwd := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	writeClaudeSessionFixture(t, homeDir, "wheelmaker", "sess-dup", cwd, "Resume me", "assistant preview")
+
+	c := newSessionViewTestClient(t)
+	c.cwd = cwd
+	ctx := context.Background()
+	now := time.Date(2026, 5, 5, 9, 5, 0, 0, time.UTC)
+
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-dup",
+		ProjectName:  "proj1",
+		Status:       SessionPersisted,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Title:        "Already managed",
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	_, err := c.HandleSessionRequest(ctx, "session.resume.import", "proj1", json.RawMessage(`{"agentType":"claude","sessionId":"sess-dup"}`))
+	if err == nil {
+		t.Fatal("expected duplicate managed session import to fail")
+	}
+	if !strings.Contains(err.Error(), "already managed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
