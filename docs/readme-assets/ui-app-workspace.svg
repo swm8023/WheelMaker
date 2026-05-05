@@ -15,7 +15,7 @@
     </style>
   </defs>
   <rect width="1280" height="760" class="bg"/>
-  <text x="50" y="60" class="title">WheelMaker App 工作区示意</text>
+  <text x="50" y="60" class="title">WheelMaker app workspace</text>
 
   <rect x="40" y="90" width="1200" height="620" class="shell"/>
   <rect x="60" y="110" width="1160" height="52" class="accent"/>
@@ -23,12 +23,12 @@
 
   <rect x="60" y="185" width="260" height="500" class="panel"/>
   <text x="85" y="220" class="sub">Sidebar</text>
-  <text x="85" y="255" class="text">• 项目切换</text>
-  <text x="85" y="285" class="text">• Session 列表</text>
+  <text x="85" y="255" class="text">• project switching</text>
+  <text x="85" y="285" class="text">• session list</text>
   <text x="85" y="315" class="text">• New / Resume</text>
   <text x="85" y="345" class="text">• Swipe Reload / Delete</text>
-  <text x="85" y="375" class="text">• 在线状态</text>
-  <text x="85" y="405" class="text">• Agent 分组</text>
+  <text x="85" y="375" class="text">• online status</text>
+  <text x="85" y="405" class="text">• agent grouping</text>
 
   <rect x="345" y="185" width="875" height="500" class="panel"/>
   <rect x="365" y="205" width="250" height="48" class="tab"/>
@@ -40,16 +40,16 @@
 
   <rect x="365" y="275" width="390" height="270" class="accent"/>
   <text x="390" y="315" class="sub">Chat</text>
-  <text x="390" y="348" class="text">• 流式消息</text>
+  <text x="390" y="348" class="text">• streaming messages</text>
   <text x="390" y="378" class="text">• Markdown / Mermaid / KaTeX</text>
-  <text x="390" y="408" class="text">• 会话历史补载</text>
-  <text x="390" y="438" class="text">• 文件链接跳转</text>
-  <text x="390" y="468" class="text">• 图片附件发送</text>
+  <text x="390" y="408" class="text">• session history hydration</text>
+  <text x="390" y="438" class="text">• file link jumps</text>
+  <text x="390" y="468" class="text">• image attachments</text>
 
   <rect x="780" y="275" width="415" height="125" class="accent"/>
   <text x="805" y="315" class="sub">File</text>
-  <text x="805" y="348" class="text">• 目录树浏览</text>
-  <text x="805" y="378" class="text">• pinned files / 缓存 / 滚动恢复</text>
+  <text x="805" y="348" class="text">• tree browsing</text>
+  <text x="805" y="378" class="text">• pinned files / cache / scroll restore</text>
 
   <rect x="780" y="420" width="415" height="125" class="accent"/>
   <text x="805" y="460" class="sub">Git</text>
@@ -58,7 +58,7 @@
 
   <rect x="365" y="565" width="830" height="90" class="tab"/>
   <text x="395" y="605" class="sub">Composer & Live State</text>
-  <text x="395" y="635" class="text">发送消息、附件操作、自动重连、本地通知、PWA 前后台恢复</text>
+  <text x="395" y="635" class="text">message send, attachment actions, reconnect, local notifications, PWA foreground/background recovery</text>
 
-  <text x="50" y="735" class="note">README 中的“功能”部分会围绕这几块真实能力来展开，而不是只列多 agent / 多项目这种抽象标签。</text>
+  <text x="50" y="735" class="note">The README feature section is organized around real app capabilities, not only high-level labels like multi-agent or multi-project.</text>
 </svg>

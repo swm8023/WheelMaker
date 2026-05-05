@@ -23,25 +23,25 @@
   </defs>
   <rect width="1200" height="700" fill="url(#bg)"/>
 
-  <text x="60" y="70" class="label">WheelMaker 双机部署示例</text>
-  <text x="60" y="104" class="note">机器 A 暴露统一 HTTPS 入口；机器 B 只把项目汇报给 A 的 Registry。</text>
+  <text x="60" y="70" class="label">WheelMaker dual-machine deployment</text>
+  <text x="60" y="104" class="note">Machine A exposes the public HTTPS entrypoint. Machine B only reports projects to A through the registry.</text>
 
   <rect x="60" y="180" width="220" height="120" class="local"/>
-  <text x="90" y="225" class="sub">浏览器 / 手机</text>
+  <text x="90" y="225" class="sub">Browser / Phone</text>
   <text x="90" y="258" class="tiny">Web UI</text>
   <text x="90" y="286" class="tiny">Monitor</text>
 
   <rect x="360" y="130" width="470" height="470" class="box"/>
-  <text x="390" y="180" class="label" style="font-size:28px">机器 A</text>
+  <text x="390" y="180" class="label" style="font-size:28px">Machine A</text>
   <text x="390" y="210" class="note">Hub A + Registry + Monitor + Web + Nginx</text>
 
   <rect x="390" y="245" width="180" height="92" class="soft"/>
   <text x="420" y="286" class="sub">Nginx :28800</text>
-  <text x="420" y="316" class="tiny">HTTPS / WSS 统一入口</text>
+  <text x="420" y="316" class="tiny">Unified HTTPS / WSS entrypoint</text>
 
   <rect x="610" y="245" width="180" height="92" class="local"/>
-  <text x="642" y="286" class="sub">Web UI</text>
-  <text x="642" y="316" class="tiny">127.0.0.1:8080</text>
+  <text x="630" y="286" class="sub">Published Web Assets</text>
+  <text x="622" y="316" class="tiny">~/.wheelmaker/web</text>
 
   <rect x="390" y="380" width="180" height="92" class="local"/>
   <text x="420" y="421" class="sub">Registry</text>
@@ -55,8 +55,8 @@
   <text x="558" y="552" class="sub">Hub A</text>
 
   <rect x="910" y="170" width="230" height="320" class="box"/>
-  <text x="942" y="220" class="label" style="font-size:28px">机器 B</text>
-  <text x="942" y="250" class="note">只运行 Hub B，并连接 A 的 Registry</text>
+  <text x="942" y="220" class="label" style="font-size:28px">Machine B</text>
+  <text x="930" y="250" class="note">Runs Hub B and connects to A's registry</text>
 
   <rect x="948" y="300" width="155" height="80" class="local"/>
   <text x="995" y="346" class="sub">Hub B</text>
@@ -74,5 +74,5 @@
   <text x="746" y="405" class="tiny">/monitor/</text>
   <text x="736" y="275" class="tiny">/</text>
   <text x="796" y="330" class="tiny">/ws</text>
-  <text x="780" y="360" class="note">Hub B 使用同一 token 接入</text>
+  <text x="758" y="360" class="note">Hub B connects with the same shared token</text>
 </svg>
