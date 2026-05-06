@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
@@ -1894,6 +1894,8 @@ function App() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatComposerActionMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
+  const chatConfigOptionsMeasureRef = useRef<HTMLDivElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -1917,6 +1919,7 @@ function App() {
   const [chatSwipeDraggingOffset, setChatSwipeDraggingOffset] = useState(0);
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatConfigFeedback, setChatConfigFeedback] = useState('');
+  const [showChatConfigLabels, setShowChatConfigLabels] = useState(false);
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
     null,
@@ -1929,6 +1932,11 @@ function App() {
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
   const [tokenStatsPanelOpen, setTokenStatsPanelOpen] = useState(false);
+
+  const selectedChatConfigOptions = useMemo(() => {
+    const selected = chatSessions.find(item => item.sessionId === selectedChatId);
+    return selected?.configOptions ?? [];
+  }, [chatSessions, selectedChatId]);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -2057,6 +2065,20 @@ function App() {
       setDrawerOpen(false);
     }
   }, [isWide]);
+
+  useLayoutEffect(() => {
+    if (!isWide || selectedChatConfigOptions.length === 0) {
+      setShowChatConfigLabels(false);
+      return;
+    }
+    const container = chatConfigOptionsRef.current;
+    const measure = chatConfigOptionsMeasureRef.current;
+    if (!container || !measure) {
+      return;
+    }
+    const nextVisible = measure.scrollWidth <= container.clientWidth;
+    setShowChatConfigLabels(prev => (prev === nextVisible ? prev : nextVisible));
+  }, [isWide, windowWidth, selectedChatConfigOptions, chatConfigUpdatingKey]);
 
   useEffect(() => {
     const onPointer = () => {
@@ -4129,7 +4151,18 @@ function App() {
                               ) : null}
                               {provider.id === 'copilot' ? (
                                 <div className="token-stats-account-metrics token-stats-account-metrics-copilot">
-                                  <span>Tokens: {usageTotal.toLocaleString()}</span>
+                                  <span>
+                                    Premium requests used:{' '}
+                                    {typeof account.premiumRequestsUsed === 'number'
+                                      ? account.premiumRequestsUsed.toLocaleString()
+                                      : '-'}
+                                  </span>
+                                  <span>
+                                    Remaining:{' '}
+                                    {typeof account.premiumRequestsRemaining === 'number'
+                                      ? account.premiumRequestsRemaining.toLocaleString()
+                                      : '-'}
+                                  </span>
                                 </div>
                               ) : null}
                             </div>
@@ -5228,6 +5261,7 @@ function App() {
     const selectedChatSession = chatSessions.find(
       item => item.sessionId === selectedChatId,
     );
+    const chatConfigOptions = selectedChatSession?.configOptions ?? [];
     const chatAttachmentPreviewSrc = chatAttachment
       ? `data:${chatAttachment.mimeType || 'image/png'};base64,${chatAttachment.data}`
       : '';
@@ -5368,10 +5402,10 @@ function App() {
                 />
               </button>
             </div>
-            {(selectedChatSession?.configOptions?.length ?? 0) > 0 ? (
-              <div className="chat-config-options">
-                {(selectedChatSession?.configOptions ?? [])
-                  .map(option => {
+            {chatConfigOptions.length > 0 ? (
+              <div className="chat-config-options-wrap">
+                <div ref={chatConfigOptionsRef} className="chat-config-options">
+                  {chatConfigOptions.map(option => {
                     const optionValues = option.options ?? [];
                     const currentValue =
                       option.currentValue || optionValues[0]?.value || '';
@@ -5382,7 +5416,7 @@ function App() {
                     const optionLabel = option.name || option.id;
                     return (
                       <div key={option.id} className="chat-config-item">
-                        {isWide ? (
+                        {isWide && showChatConfigLabels ? (
                           <span className="chat-config-item-label" title={optionLabel}>
                             {optionLabel}
                           </span>
@@ -5416,6 +5450,50 @@ function App() {
                       </div>
                     );
                   })}
+                </div>
+                {isWide ? (
+                  <div
+                    ref={chatConfigOptionsMeasureRef}
+                    className="chat-config-options chat-config-options-measure"
+                    aria-hidden="true"
+                  >
+                    {chatConfigOptions.map(option => {
+                      const optionValues = option.options ?? [];
+                      const currentValue =
+                        option.currentValue || optionValues[0]?.value || '';
+                      const hasChoices = optionValues.length > 0;
+                      const optionLabel = option.name || option.id;
+                      return (
+                        <div key={`measure:${option.id}`} className="chat-config-item">
+                          <span className="chat-config-item-label" title={optionLabel}>
+                            {optionLabel}
+                          </span>
+                          <select
+                            className="chat-config-select"
+                            value={currentValue}
+                            disabled={!hasChoices}
+                            title={option.name || option.id}
+                            aria-hidden="true"
+                            onChange={() => undefined}
+                          >
+                            {!optionValues.some(item => item.value === currentValue) &&
+                            currentValue ? (
+                              <option value={currentValue}>{currentValue}</option>
+                            ) : null}
+                            {optionValues.map(item => (
+                              <option
+                                key={`measure:${option.id}:${item.value}`}
+                                value={item.value}
+                              >
+                                {item.name || item.value}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {chatConfigFeedback ? (
@@ -5900,41 +5978,5 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

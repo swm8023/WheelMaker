@@ -2503,6 +2503,10 @@ body,
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
 }
 
+.chat-config-options-wrap {
+  position: relative;
+}
+
 .chat-config-options {
   display: flex;
   align-items: center;
@@ -2512,6 +2516,17 @@ body,
   padding-bottom: 2px;
   scrollbar-width: thin;
 }
+
+.chat-config-options-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: visible;
+  width: max-content;
+}
+
 
 .chat-config-feedback {
   font-size: 11px;
@@ -2537,9 +2552,6 @@ body,
   text-transform: uppercase;
   letter-spacing: 0.04em;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 84px;
 }
 
 .chat-config-select {

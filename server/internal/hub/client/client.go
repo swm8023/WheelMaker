@@ -583,7 +583,7 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			"providers": []map[string]any{
 				{"id": "deepseek", "name": "DeepSeek", "authMode": "api_key"},
 				{"id": "codex", "name": "Codex", "authMode": "oauth"},
-				{"id": "copilot", "name": "Copilot", "authMode": "session_log"},
+				{"id": "copilot", "name": "Copilot", "authMode": "github_api"},
 			},
 		}, nil
 	case "session.token.scan":

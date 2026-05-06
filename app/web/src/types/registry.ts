@@ -136,6 +136,9 @@ export interface RegistryTokenProviderAccount {
   plan?: string;
   fiveHourLimit?: string;
   weeklyLimit?: string;
+  premiumRequestsUsed?: number;
+  premiumRequestsRemaining?: number;
+  premiumRequestsMonth?: string;
   balance: RegistryDeepSeekBalanceView;
   usage: RegistryDeepSeekUsageView;
   usageUnavailable: boolean;
@@ -305,13 +308,4 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
-
-
-
-
-
-
-
-
-
 

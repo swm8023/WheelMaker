@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -72,21 +71,24 @@ type tokenProviderScanResult struct {
 }
 
 type tokenProviderAccount struct {
-	ID               string              `json:"id"`
-	Alias            string              `json:"alias"`
-	DisplayName      string              `json:"displayName"`
-	Source           string              `json:"source"`
-	Status           string              `json:"status"`
-	Message          string              `json:"message,omitempty"`
-	Email            string              `json:"email,omitempty"`
-	Plan             string              `json:"plan,omitempty"`
-	FiveHourLimit    string              `json:"fiveHourLimit,omitempty"`
-	WeeklyLimit      string              `json:"weeklyLimit,omitempty"`
-	Balance          deepSeekBalanceView `json:"balance"`
-	Usage            deepSeekUsageView   `json:"usage"`
-	UsageUnavailable bool                `json:"usageUnavailable"`
-	UsageMessage     string              `json:"usageMessage,omitempty"`
-	UpdatedAt        string              `json:"updatedAt,omitempty"`
+	ID                       string              `json:"id"`
+	Alias                    string              `json:"alias"`
+	DisplayName              string              `json:"displayName"`
+	Source                   string              `json:"source"`
+	Status                   string              `json:"status"`
+	Message                  string              `json:"message,omitempty"`
+	Email                    string              `json:"email,omitempty"`
+	Plan                     string              `json:"plan,omitempty"`
+	FiveHourLimit            string              `json:"fiveHourLimit,omitempty"`
+	WeeklyLimit              string              `json:"weeklyLimit,omitempty"`
+	PremiumRequestsUsed      int64               `json:"premiumRequestsUsed"`
+	PremiumRequestsRemaining int64               `json:"premiumRequestsRemaining,omitempty"`
+	PremiumRequestsMonth     string              `json:"premiumRequestsMonth,omitempty"`
+	Balance                  deepSeekBalanceView `json:"balance"`
+	Usage                    deepSeekUsageView   `json:"usage"`
+	UsageUnavailable         bool                `json:"usageUnavailable"`
+	UsageMessage             string              `json:"usageMessage,omitempty"`
+	UpdatedAt                string              `json:"updatedAt,omitempty"`
 }
 
 type tokenScanPayload struct {
@@ -459,11 +461,18 @@ type copilotProfile struct {
 	Source      string
 }
 
+type copilotPremiumUsageSummary struct {
+	Used      int64
+	Remaining int64
+	Month     string
+	HasQuota  bool
+}
+
 func (c *Client) scanTokenStats(ctx context.Context) (tokenScanPayload, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	deepSeek := c.scanDeepSeekProvider(ctx, now)
 	codex := c.scanCodexProvider(ctx, now)
-	copilot := c.scanCopilotProvider(now)
+	copilot := c.scanCopilotProvider(ctx, now)
 	return tokenScanPayload{
 		OK:        true,
 		UpdatedAt: now,
@@ -555,8 +564,9 @@ func (c *Client) scanCodexProvider(ctx context.Context, updatedAt string) tokenP
 	return tokenProviderScanResult{ID: "codex", Name: "Codex", Accounts: accounts}
 }
 
-func (c *Client) scanCopilotProvider(updatedAt string) tokenProviderScanResult {
+func (c *Client) scanCopilotProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
 	profile := discoverCopilotProfile()
+	month := time.Now().UTC().Format("2006-01")
 	account := tokenProviderAccount{
 		ID:          "copilot:" + profile.Alias,
 		Alias:       profile.Alias,
@@ -566,20 +576,44 @@ func (c *Client) scanCopilotProvider(updatedAt string) tokenProviderScanResult {
 		UpdatedAt:   updatedAt,
 		Usage: deepSeekUsageView{
 			RangeType: "month",
-			Month:     time.Now().UTC().Format("2006-01"),
+			Month:     month,
 			Rows:      []deepSeekUsageRow{},
 		},
 	}
-	rows, usageMessage, err := collectCopilotUsageRows()
+	token, tokenSource := discoverGitHubToken()
+	if strings.TrimSpace(token) == "" {
+		account.Status = "error"
+		account.Message = "GitHub token not found for Copilot premium usage API (set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN)"
+		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
+	}
+	if strings.TrimSpace(tokenSource) != "" {
+		account.Source = account.Source + ", " + tokenSource
+	}
+	login, err := c.fetchGitHubLogin(ctx, token)
 	if err != nil {
 		account.Status = "error"
 		account.Message = err.Error()
 		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
 	}
-	account.Usage.Rows = rows
-	account.UsageUnavailable = len(rows) == 0
-	if usageMessage != "" {
-		account.UsageMessage = usageMessage
+	if strings.TrimSpace(login) != "" {
+		account.Alias = login
+		account.DisplayName = login
+		account.Email = login
+		account.ID = "copilot:" + login
+	}
+	summary, err := c.fetchCopilotPremiumUsage(ctx, token, login, time.Now().UTC())
+	if err != nil {
+		account.Status = "error"
+		account.Message = err.Error()
+		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
+	}
+	account.PremiumRequestsUsed = summary.Used
+	account.PremiumRequestsMonth = firstNonEmptyString(summary.Month, month)
+	if summary.HasQuota {
+		account.PremiumRequestsRemaining = summary.Remaining
+	} else {
+		account.UsageUnavailable = true
+		account.UsageMessage = "GitHub API returned usage but no monthly quota; remaining premium requests unavailable"
 	}
 	return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
 }
@@ -769,122 +803,196 @@ func discoverCopilotProfile() copilotProfile {
 	return profile
 }
 
-func collectCopilotUsageRows() ([]deepSeekUsageRow, string, error) {
+func discoverGitHubToken() (string, string) {
+	for _, key := range []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		if value, ok := os.LookupEnv(key); ok {
+			trimmed := strings.TrimSpace(value)
+			if trimmed != "" {
+				return trimmed, "env:" + key
+			}
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", err
+		return "", ""
 	}
-	stateDir := filepath.Join(home, ".copilot", "session-state")
-	entries, err := os.ReadDir(stateDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []deepSeekUsageRow{}, "Copilot session-state not found", nil
-		}
-		return nil, "", err
+	ghHostFiles := []struct {
+		path   string
+		source string
+	}{
+		{path: filepath.Join(home, ".config", "gh", "hosts.yml"), source: "~/.config/gh/hosts.yml"},
+		{path: filepath.Join(home, ".config", "gh", "hosts.yaml"), source: "~/.config/gh/hosts.yaml"},
+		{path: filepath.Join(home, "AppData", "Roaming", "GitHub CLI", "hosts.yml"), source: "~/AppData/Roaming/GitHub CLI/hosts.yml"},
+		{path: filepath.Join(home, "AppData", "Roaming", "GitHub CLI", "hosts.yaml"), source: "~/AppData/Roaming/GitHub CLI/hosts.yaml"},
 	}
-	monthTotals := map[string]int64{}
-	foundSession := false
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	for _, file := range ghHostFiles {
+		body, readErr := os.ReadFile(file.path)
+		if readErr != nil {
 			continue
 		}
-		foundSession = true
-		eventsPath := filepath.Join(stateDir, entry.Name(), "events.jsonl")
-		if err := aggregateCopilotSessionUsage(eventsPath, monthTotals); err != nil {
-			continue
+		if token := parseGitHubTokenFromHostsYAML(string(body)); token != "" {
+			return token, file.source
 		}
 	}
-	if !foundSession {
-		return []deepSeekUsageRow{}, "No Copilot sessions found", nil
-	}
-	if len(monthTotals) == 0 {
-		return []deepSeekUsageRow{}, "No token fields found in Copilot session logs", nil
-	}
-	months := make([]string, 0, len(monthTotals))
-	for month := range monthTotals {
-		months = append(months, month)
-	}
-	sort.Strings(months)
-	rows := make([]deepSeekUsageRow, 0, len(months))
-	for _, month := range months {
-		total := monthTotals[month]
-		if total <= 0 {
-			continue
-		}
-		rows = append(rows, deepSeekUsageRow{
-			Bucket:      month,
-			TotalTokens: total,
-		})
-	}
-	if len(rows) == 0 {
-		return []deepSeekUsageRow{}, "No positive token usage found in Copilot session logs", nil
-	}
-	return rows, "Aggregated from local Copilot session logs (output tokens)", nil
+	return "", ""
 }
 
-func aggregateCopilotSessionUsage(eventsPath string, monthTotals map[string]int64) error {
-	file, err := os.Open(eventsPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	type copilotEventLine struct {
-		Type      string `json:"type"`
-		Timestamp string `json:"timestamp"`
-		Data      struct {
-			OutputTokens int64  `json:"outputTokens"`
-			StartTime    string `json:"startTime"`
-		} `json:"data"`
-	}
-
-	scanner := bufio.NewScanner(file)
-	buffer := make([]byte, 0, 64*1024)
-	scanner.Buffer(buffer, 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+func parseGitHubTokenFromHostsYAML(content string) string {
+	lines := strings.Split(strings.ReplaceAll(content, "\r", "\n"), "\n")
+	currentHost := ""
+	for _, raw := range lines {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		var eventLine copilotEventLine
-		if json.Unmarshal([]byte(line), &eventLine) != nil {
+		if !strings.HasPrefix(raw, " ") && strings.HasSuffix(trimmed, ":") {
+			host := strings.TrimSuffix(trimmed, ":")
+			host = strings.Trim(host, "\"'")
+			currentHost = strings.ToLower(strings.TrimSpace(host))
 			continue
 		}
-		if eventLine.Type != "assistant.message" {
+		if currentHost != "github.com" {
 			continue
 		}
-		if eventLine.Data.OutputTokens <= 0 {
+		if !strings.HasPrefix(trimmed, "oauth_token:") {
 			continue
 		}
-		ts := strings.TrimSpace(eventLine.Timestamp)
-		if ts == "" {
-			ts = strings.TrimSpace(eventLine.Data.StartTime)
+		value := strings.TrimSpace(strings.TrimPrefix(trimmed, "oauth_token:"))
+		value = strings.Trim(value, "\"'")
+		if value != "" {
+			return value
 		}
-		month := tokenUsageMonthFromTimestamp(ts)
-		monthTotals[month] += eventLine.Data.OutputTokens
 	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return nil
+	return ""
 }
 
-func tokenUsageMonthFromTimestamp(raw string) string {
-	now := time.Now().UTC()
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return now.Format("2006-01")
+func (c *Client) fetchGitHubLogin(ctx context.Context, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
+	if err != nil {
+		return "", fmt.Errorf("build github user request: %w", err)
 	}
-	layouts := []string{time.RFC3339Nano, time.RFC3339}
-	for _, layout := range layouts {
-		if parsed, err := time.Parse(layout, trimmed); err == nil {
-			return parsed.UTC().Format("2006-01")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("query github user: %w", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 2<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = res.Status
+		}
+		return "", fmt.Errorf("github user request failed: http %d %s", res.StatusCode, msg)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", fmt.Errorf("decode github user response: %w", err)
+	}
+	login := strings.TrimSpace(firstStringField(out, "login"))
+	if login == "" {
+		return "", fmt.Errorf("github user response missing login")
+	}
+	return login, nil
+}
+
+func (c *Client) fetchCopilotPremiumUsage(ctx context.Context, token, login string, now time.Time) (copilotPremiumUsageSummary, error) {
+	username := strings.TrimSpace(login)
+	if username == "" {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("missing github login for premium usage query")
+	}
+	month := now.UTC().Format("2006-01")
+	year := now.UTC().Year()
+	monthNumber := int(now.UTC().Month())
+	endpoint := fmt.Sprintf("https://api.github.com/users/%s/settings/billing/premium_request/usage", url.PathEscape(username))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("build copilot premium usage request: %w", err)
+	}
+	query := req.URL.Query()
+	query.Set("year", strconv.Itoa(year))
+	query.Set("month", strconv.Itoa(monthNumber))
+	query.Set("product", "copilot")
+	req.URL.RawQuery = query.Encode()
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("query copilot premium usage: %w", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = res.Status
+		}
+		return copilotPremiumUsageSummary{}, fmt.Errorf("copilot premium usage request failed: http %d %s", res.StatusCode, msg)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("decode copilot premium usage response: %w", err)
+	}
+	items, _ := payload["usageItems"].([]any)
+	var used int64
+	var quota int64
+	for _, rawItem := range items {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			continue
+		}
+		product := strings.ToLower(strings.TrimSpace(firstStringField(item, "product", "name", "sku")))
+		if product != "" && !strings.Contains(product, "copilot") {
+			continue
+		}
+		quantity := firstFloat64Field(item, "netQuantity", "grossQuantity", "quantity", "used", "usedQuantity")
+		if quantity > 0 {
+			used += int64(math.Round(quantity))
+		}
+		quotaValue := firstFloat64Field(item, "totalMonthlyQuota", "total_monthly_quota", "monthlyQuota", "monthly_quota", "quota")
+		if quotaValue > 0 {
+			candidate := int64(math.Round(quotaValue))
+			if candidate > quota {
+				quota = candidate
+			}
 		}
 	}
-	if len(trimmed) >= 7 {
-		return trimmed[:7]
+	if used <= 0 {
+		fallbackUsed := firstFloat64Field(payload, "used", "usedQuantity", "netQuantity", "grossQuantity", "quantity")
+		if fallbackUsed > 0 {
+			used = int64(math.Round(fallbackUsed))
+		}
 	}
-	return now.Format("2006-01")
+	if quota <= 0 {
+		fallbackQuota := firstFloat64Field(payload, "totalMonthlyQuota", "total_monthly_quota", "monthlyQuota", "monthly_quota", "quota")
+		if fallbackQuota > 0 {
+			quota = int64(math.Round(fallbackQuota))
+		}
+	}
+	summary := copilotPremiumUsageSummary{
+		Used:      used,
+		Month:     month,
+		HasQuota:  quota > 0,
+		Remaining: 0,
+	}
+	if quota > 0 {
+		remaining := quota - used
+		if remaining < 0 {
+			remaining = 0
+		}
+		summary.Remaining = remaining
+	}
+	if period, ok := payload["timePeriod"].(map[string]any); ok {
+		y := firstInt64Field(period, "year")
+		m := firstInt64Field(period, "month")
+		if y > 0 && m > 0 && m <= 12 {
+			summary.Month = fmt.Sprintf("%04d-%02d", y, m)
+		}
+	}
+	return summary, nil
 }
 func readJSONMapFile(path string) map[string]any {
 	body, err := os.ReadFile(path)
