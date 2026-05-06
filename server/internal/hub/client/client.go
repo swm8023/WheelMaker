@@ -371,7 +371,6 @@ func (c *Client) SessionByID(ctx context.Context, sessionID string) (*Session, e
 	}
 	c.wireSession(restored)
 	restored.Status = SessionActive
-	restored.lastActiveAt = time.Now().UTC()
 	c.mu.Lock()
 	c.sessions[restored.acpSessionID] = restored
 	c.mu.Unlock()
@@ -988,7 +987,6 @@ func (c *Client) resolveSession(routeKey string) (*Session, error) {
 		}
 		c.wireSession(restored)
 		restored.Status = SessionActive
-		restored.lastActiveAt = time.Now()
 		c.mu.Lock()
 		c.sessions[restored.acpSessionID] = restored
 		c.mu.Unlock()
@@ -1157,7 +1155,6 @@ func (c *Client) clientNewSessionWithOptions(routeKey, agentType string, persist
 		}
 		oldSess.mu.Lock()
 		oldSess.Status = SessionSuspended
-		oldSess.lastActiveAt = time.Now()
 		oldSess.mu.Unlock()
 	}
 
@@ -1213,7 +1210,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 			}
 			oldSess.mu.Lock()
 			oldSess.Status = SessionSuspended
-			oldSess.lastActiveAt = time.Now()
 			oldSess.mu.Unlock()
 		}
 
@@ -1250,7 +1246,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 		}
 		oldSess.mu.Lock()
 		oldSess.Status = SessionSuspended
-		oldSess.lastActiveAt = time.Now()
 		oldSess.mu.Unlock()
 	}
 
@@ -1261,7 +1256,6 @@ func (c *Client) ClientLoadSession(routeKey string, index int) (*Session, error)
 	c.wireSession(restored)
 	c.mu.Lock()
 	restored.Status = SessionActive
-	restored.lastActiveAt = time.Now()
 	c.sessions[restored.acpSessionID] = restored
 	c.routeMap[routeKey] = restored.acpSessionID
 	c.mu.Unlock()

@@ -18,7 +18,7 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
-import { formatPromptDurationMs } from './sessionTime';
+import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import {
   CODE_FONT_OPTIONS,
@@ -236,9 +236,7 @@ function nextMermaidRenderId(): string {
 
 
 function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
-  return [...items].sort((a, b) =>
-    (b.updatedAt || '').localeCompare(a.updatedAt || ''),
-  );
+  return [...items].sort((a, b) => compareUpdatedAtDesc(a.updatedAt || '', b.updatedAt || ''));
 }
 
 function mergeChatSession(
@@ -316,7 +314,7 @@ function groupChatSessionsByAgent(
   groups.sort((a, b) => {
     const aUpdated = sessionUpdatedAtSortKey(a.sessions[0]);
     const bUpdated = sessionUpdatedAtSortKey(b.sessions[0]);
-    const updatedDelta = bUpdated.localeCompare(aUpdated);
+    const updatedDelta = compareUpdatedAtDesc(aUpdated, bUpdated);
     if (updatedDelta !== 0) return updatedDelta;
     return a.label.localeCompare(b.label);
   });

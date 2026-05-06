@@ -3549,6 +3549,99 @@ func TestSessionRecorderPromptFinishWithoutLiveStateSeedsPromptTimes(t *testing.
 	}
 }
 
+func TestSessionPersistKeepsRecorderLastActiveAtAndStoresLocalOffset(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() {
+		time.Local = originalLocal
+	}()
+
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	createdAt := time.Date(2026, 5, 6, 22, 10, 33, 582878300, time.Local)
+	startedAt := time.Date(2026, 5, 6, 22, 13, 35, 544978800, time.Local)
+	finishedAt := time.Date(2026, 5, 6, 22, 31, 35, 451831900, time.Local)
+
+	created := sessionViewCreatedEvent("sess-1", "Timing")
+	created.UpdatedAt = createdAt
+	if err := c.RecordEvent(ctx, created); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	sess, err := c.SessionByID(ctx, "sess-1")
+	if err != nil {
+		t.Fatalf("SessionByID: %v", err)
+	}
+
+	started := sessionViewPromptEvent("sess-1", "measure", nil)
+	started.UpdatedAt = startedAt
+	if err := c.RecordEvent(ctx, started); err != nil {
+		t.Fatalf("RecordEvent prompt started: %v", err)
+	}
+
+	finished := sessionViewPromptFinishedEvent("sess-1", "end_turn")
+	finished.UpdatedAt = finishedAt
+	if err := c.RecordEvent(ctx, finished); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	sess.mu.Lock()
+	sess.lastActiveAt = createdAt
+	sess.mu.Unlock()
+	if err := sess.persistSession(ctx); err != nil {
+		t.Fatalf("persistSession: %v", err)
+	}
+
+	rec, err := c.store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("LoadSession returned nil record")
+	}
+	if !rec.LastActiveAt.Equal(finishedAt) {
+		t.Fatalf("session LastActiveAt = %q, want %q", rec.LastActiveAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano))
+	}
+
+	promptRec, err := c.store.LoadSessionPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("LoadSessionPrompt: %v", err)
+	}
+	if promptRec == nil {
+		t.Fatal("LoadSessionPrompt returned nil record")
+	}
+	if !promptRec.StartedAt.Equal(startedAt) {
+		t.Fatalf("prompt StartedAt = %q, want %q", promptRec.StartedAt.Format(time.RFC3339Nano), startedAt.Format(time.RFC3339Nano))
+	}
+	if !promptRec.UpdatedAt.Equal(finishedAt) {
+		t.Fatalf("prompt UpdatedAt = %q, want %q", promptRec.UpdatedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano))
+	}
+
+	sqliteStore, ok := c.store.(*sqliteStore)
+	if !ok {
+		t.Fatalf("store type = %T, want *sqliteStore", c.store)
+	}
+	var rawLastActiveAt string
+	if err := sqliteStore.db.QueryRowContext(ctx, `SELECT last_active_at FROM sessions WHERE id = ?`, "sess-1").Scan(&rawLastActiveAt); err != nil {
+		t.Fatalf("QueryRowContext session last_active_at: %v", err)
+	}
+	if !strings.HasSuffix(rawLastActiveAt, "+08:00") {
+		t.Fatalf("raw session last_active_at = %q, want +08:00 offset", rawLastActiveAt)
+	}
+	var rawPromptStartedAt string
+	var rawPromptUpdatedAt string
+	if err := sqliteStore.db.QueryRowContext(ctx, `SELECT started_at, updated_at FROM session_prompts WHERE session_id = ? AND prompt_index = 1`, "sess-1").Scan(&rawPromptStartedAt, &rawPromptUpdatedAt); err != nil {
+		t.Fatalf("QueryRowContext prompt timestamps: %v", err)
+	}
+	if !strings.HasSuffix(rawPromptStartedAt, "+08:00") {
+		t.Fatalf("raw prompt started_at = %q, want +08:00 offset", rawPromptStartedAt)
+	}
+	if !strings.HasSuffix(rawPromptUpdatedAt, "+08:00") {
+		t.Fatalf("raw prompt updated_at = %q, want +08:00 offset", rawPromptUpdatedAt)
+	}
+}
+
 func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()

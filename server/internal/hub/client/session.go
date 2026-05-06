@@ -303,6 +303,9 @@ func (s *Session) recordSessionViewEvent(event SessionViewEvent) bool {
 	if event.UpdatedAt.IsZero() {
 		event.UpdatedAt = time.Now().UTC()
 	}
+	s.mu.Lock()
+	s.lastActiveAt = maxTime(s.lastActiveAt, event.UpdatedAt)
+	s.mu.Unlock()
 	if router, source, ok := s.imContext(); ok && router != nil {
 		event.SourceChannel = source.ChannelID
 		event.SourceChatID = source.ChatID
@@ -882,7 +885,6 @@ func (s *Session) Suspend(ctx context.Context) error {
 	s.ready = false
 	s.initializing = false
 	s.Status = SessionSuspended
-	s.lastActiveAt = time.Now()
 	s.mu.Unlock()
 
 	if inst != nil {

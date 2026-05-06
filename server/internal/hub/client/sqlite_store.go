@@ -496,6 +496,8 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if rec == nil {
 		return fmt.Errorf("session record is required")
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	rec.ID = strings.TrimSpace(rec.ID)
 	rec.ProjectName = strings.TrimSpace(rec.ProjectName)
 	if rec.ID == "" {
@@ -517,8 +519,18 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if rec.LastActiveAt.IsZero() {
 		rec.LastActiveAt = rec.CreatedAt
 	}
+	existing, err := s.loadSessionByID(ctx, rec.ID)
+	if err != nil {
+		return err
+	}
+	if existing != nil {
+		if !existing.CreatedAt.IsZero() {
+			rec.CreatedAt = existing.CreatedAt
+		}
+		rec.LastActiveAt = maxTime(rec.LastActiveAt, existing.LastActiveAt)
+	}
 
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
 			id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -530,7 +542,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
 			last_active_at=excluded.last_active_at
 	`, rec.ID, rec.ProjectName, int(rec.Status), rec.AgentType, rec.AgentJSON, rec.Title,
-		rec.CreatedAt.UTC().Format(time.RFC3339Nano), rec.LastActiveAt.UTC().Format(time.RFC3339Nano),
+		formatStoreTime(rec.CreatedAt), formatStoreTime(rec.LastActiveAt),
 	)
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
@@ -543,7 +555,6 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		SELECT id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ?
-		ORDER BY last_active_at DESC
 	`, strings.TrimSpace(projectName))
 	if err != nil {
 		return nil, fmt.Errorf("list sessions: %w", err)
@@ -575,7 +586,16 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		}
 		entries = append(entries, entry)
 	}
-	return entries, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].LastActiveAt.Equal(entries[j].LastActiveAt) {
+			return entries[i].CreatedAt.After(entries[j].CreatedAt)
+		}
+		return entries[i].LastActiveAt.After(entries[j].LastActiveAt)
+	})
+	return entries, nil
 }
 
 func (s *sqliteStore) DeleteSessionPrompts(ctx context.Context, projectName, sessionID string) error {
@@ -664,27 +684,42 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 		return fmt.Errorf("prompt index is required")
 	}
 	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = time.Now().UTC()
+		rec.UpdatedAt = time.Now()
 	}
-	updatedAt := rec.UpdatedAt.UTC().Format(time.RFC3339Nano)
-	var startedAt string
-	if !rec.StartedAt.IsZero() {
-		startedAt = rec.StartedAt.UTC().Format(time.RFC3339Nano)
+	existing, err := s.loadSessionPromptByID(ctx, rec.SessionID, rec.PromptIndex)
+	if err != nil {
+		return err
 	}
-
+	if existing != nil {
+		if strings.TrimSpace(rec.Title) == "" {
+			rec.Title = existing.Title
+		}
+		if strings.TrimSpace(rec.StopReason) == "" {
+			rec.StopReason = existing.StopReason
+		}
+		rec.UpdatedAt = maxTime(rec.UpdatedAt, existing.UpdatedAt)
+		if strings.TrimSpace(rec.TurnsJSON) == "" {
+			rec.TurnsJSON = existing.TurnsJSON
+			rec.TurnIndex = existing.TurnIndex
+		}
+		if strings.TrimSpace(rec.ModelName) == "" {
+			rec.ModelName = existing.ModelName
+		}
+		rec.StartedAt = minNonZeroTime(rec.StartedAt, existing.StartedAt)
+	}
 	turnsJSON := strings.TrimSpace(rec.TurnsJSON)
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index, model_name, started_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, prompt_index) DO UPDATE SET
-			title = CASE WHEN excluded.title != '' THEN excluded.title ELSE session_prompts.title END,
-			stop_reason = CASE WHEN excluded.stop_reason != '' THEN excluded.stop_reason ELSE session_prompts.stop_reason END,
-			updated_at = CASE WHEN excluded.updated_at > session_prompts.updated_at THEN excluded.updated_at ELSE session_prompts.updated_at END,
-			turns_json = CASE WHEN excluded.turns_json != '' THEN excluded.turns_json ELSE session_prompts.turns_json END,
-			turn_index = CASE WHEN excluded.turns_json != '' THEN excluded.turn_index ELSE session_prompts.turn_index END,
-			model_name = CASE WHEN excluded.model_name != '' THEN excluded.model_name ELSE session_prompts.model_name END,
-			started_at = CASE WHEN excluded.started_at != '' THEN excluded.started_at ELSE session_prompts.started_at END
-	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), updatedAt, turnsJSON, rec.TurnIndex, strings.TrimSpace(rec.ModelName), startedAt); err != nil {
+			title = excluded.title,
+			stop_reason = excluded.stop_reason,
+			updated_at = excluded.updated_at,
+			turns_json = excluded.turns_json,
+			turn_index = excluded.turn_index,
+			model_name = excluded.model_name,
+			started_at = excluded.started_at
+	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), formatStoreTime(rec.UpdatedAt), turnsJSON, rec.TurnIndex, strings.TrimSpace(rec.ModelName), formatStoreTime(rec.StartedAt)); err != nil {
 		return fmt.Errorf("upsert session prompt: %w", err)
 	}
 	return nil
@@ -855,6 +890,87 @@ func parseStoreTime(raw string) time.Time {
 		return ts
 	}
 	return time.Time{}
+}
+
+func formatStoreTime(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.In(time.Local).Format(time.RFC3339Nano)
+}
+
+func minNonZeroTime(left, right time.Time) time.Time {
+	switch {
+	case left.IsZero():
+		return right
+	case right.IsZero():
+		return left
+	case right.Before(left):
+		return right
+	default:
+		return left
+	}
+}
+
+func maxTime(left, right time.Time) time.Time {
+	switch {
+	case left.IsZero():
+		return right
+	case right.IsZero():
+		return left
+	case right.After(left):
+		return right
+	default:
+		return left
+	}
+}
+
+func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*SessionRecord, error) {
+	var rec SessionRecord
+	var entryProjectName string
+	var status int
+	var createdAt string
+	var lastActiveAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
+		FROM sessions
+		WHERE id = ?
+		LIMIT 1
+	`, strings.TrimSpace(sessionID)).Scan(&rec.ID, &entryProjectName, &status, &rec.AgentType, &rec.AgentJSON, &rec.Title, &createdAt, &lastActiveAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session by id: %w", err)
+	}
+	rec.ProjectName = strings.TrimSpace(entryProjectName)
+	rec.Status = SessionStatus(status)
+	rec.AgentType = strings.TrimSpace(rec.AgentType)
+	rec.AgentJSON = firstNonEmpty(strings.TrimSpace(rec.AgentJSON), "{}")
+	rec.CreatedAt = parseStoreTime(createdAt)
+	rec.LastActiveAt = parseStoreTime(lastActiveAt)
+	return &rec, nil
+}
+
+func (s *sqliteStore) loadSessionPromptByID(ctx context.Context, sessionID string, promptIndex int64) (*SessionPromptRecord, error) {
+	var rec SessionPromptRecord
+	var updatedAt string
+	var startedAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index, model_name, started_at
+		FROM session_prompts
+		WHERE session_id = ? AND prompt_index = ?
+		LIMIT 1
+	`, strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load session prompt by id: %w", err)
+	}
+	rec.UpdatedAt = parseStoreTime(updatedAt)
+	rec.StartedAt = parseStoreTime(startedAt)
+	return &rec, nil
 }
 
 func inferSessionListMetadata(agentType, agentJSON string) (string, string) {
