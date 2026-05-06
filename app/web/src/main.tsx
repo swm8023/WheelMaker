@@ -2213,8 +2213,9 @@ function App() {
     [projectId, projects],
   );
   useEffect(() => {
+    const baseTitle = 'WheelMaker';
     const projectTitle = (currentProjectName || '').trim();
-    document.title = projectTitle || 'WheelMaker';
+    document.title = projectTitle ? `${baseTitle} - ${projectTitle}` : baseTitle;
   }, [currentProjectName]);
   const project = currentProject;
   const availableChatAgents = useMemo(() => {
