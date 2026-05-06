@@ -2522,23 +2522,24 @@ body,
 
 .chat-config-item {
   display: inline-flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   min-width: 0;
 }
 
 .chat-config-item-label {
-  display: block;
+  display: inline-block;
+  flex: 0 0 auto;
   font-size: 10px;
-  line-height: 1;
+  line-height: 1.1;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 150px;
+  max-width: 84px;
 }
 
 .chat-config-select {
@@ -3243,6 +3244,10 @@ body,
     transform: translateX(0);
   }
 }
+
+
+
+
 
 
 

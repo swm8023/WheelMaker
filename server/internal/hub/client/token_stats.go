@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -452,14 +453,21 @@ type codexAuthState struct {
 	Plan         string
 }
 
+type copilotProfile struct {
+	Alias       string
+	DisplayName string
+	Source      string
+}
+
 func (c *Client) scanTokenStats(ctx context.Context) (tokenScanPayload, error) {
 	now := time.Now().UTC().Format(time.RFC3339)
 	deepSeek := c.scanDeepSeekProvider(ctx, now)
 	codex := c.scanCodexProvider(ctx, now)
+	copilot := c.scanCopilotProvider(now)
 	return tokenScanPayload{
 		OK:        true,
 		UpdatedAt: now,
-		Providers: []tokenProviderScanResult{deepSeek, codex},
+		Providers: []tokenProviderScanResult{deepSeek, codex, copilot},
 	}, nil
 }
 
@@ -547,6 +555,34 @@ func (c *Client) scanCodexProvider(ctx context.Context, updatedAt string) tokenP
 	return tokenProviderScanResult{ID: "codex", Name: "Codex", Accounts: accounts}
 }
 
+func (c *Client) scanCopilotProvider(updatedAt string) tokenProviderScanResult {
+	profile := discoverCopilotProfile()
+	account := tokenProviderAccount{
+		ID:          "copilot:" + profile.Alias,
+		Alias:       profile.Alias,
+		DisplayName: profile.DisplayName,
+		Source:      profile.Source,
+		Status:      "ok",
+		UpdatedAt:   updatedAt,
+		Usage: deepSeekUsageView{
+			RangeType: "month",
+			Month:     time.Now().UTC().Format("2006-01"),
+			Rows:      []deepSeekUsageRow{},
+		},
+	}
+	rows, usageMessage, err := collectCopilotUsageRows()
+	if err != nil {
+		account.Status = "error"
+		account.Message = err.Error()
+		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
+	}
+	account.Usage.Rows = rows
+	account.UsageUnavailable = len(rows) == 0
+	if usageMessage != "" {
+		account.UsageMessage = usageMessage
+	}
+	return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
+}
 func discoverDeepSeekCredentials() []deepSeekCredential {
 	out := make([]deepSeekCredential, 0)
 	seen := map[string]struct{}{}
@@ -706,6 +742,150 @@ func discoverCodexAuthProfiles() []codexAuthProfile {
 	return profiles
 }
 
+func discoverCopilotProfile() copilotProfile {
+	profile := copilotProfile{
+		Alias:       "current",
+		DisplayName: "Current Account",
+		Source:      "~/.copilot/config.json",
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return profile
+	}
+	config := readJSONMapFile(filepath.Join(home, ".copilot", "config.json"))
+	if len(config) == 0 {
+		return profile
+	}
+	lastUser, _ := config["lastLoggedInUser"].(map[string]any)
+	login := strings.TrimSpace(firstStringField(lastUser, "login"))
+	host := strings.TrimSpace(firstStringField(lastUser, "host"))
+	if login != "" {
+		profile.Alias = login
+		profile.DisplayName = login
+	}
+	if host != "" && profile.DisplayName != "" {
+		profile.DisplayName = profile.DisplayName + "@" + host
+	}
+	return profile
+}
+
+func collectCopilotUsageRows() ([]deepSeekUsageRow, string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", err
+	}
+	stateDir := filepath.Join(home, ".copilot", "session-state")
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []deepSeekUsageRow{}, "Copilot session-state not found", nil
+		}
+		return nil, "", err
+	}
+	monthTotals := map[string]int64{}
+	foundSession := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		foundSession = true
+		eventsPath := filepath.Join(stateDir, entry.Name(), "events.jsonl")
+		if err := aggregateCopilotSessionUsage(eventsPath, monthTotals); err != nil {
+			continue
+		}
+	}
+	if !foundSession {
+		return []deepSeekUsageRow{}, "No Copilot sessions found", nil
+	}
+	if len(monthTotals) == 0 {
+		return []deepSeekUsageRow{}, "No token fields found in Copilot session logs", nil
+	}
+	months := make([]string, 0, len(monthTotals))
+	for month := range monthTotals {
+		months = append(months, month)
+	}
+	sort.Strings(months)
+	rows := make([]deepSeekUsageRow, 0, len(months))
+	for _, month := range months {
+		total := monthTotals[month]
+		if total <= 0 {
+			continue
+		}
+		rows = append(rows, deepSeekUsageRow{
+			Bucket:      month,
+			TotalTokens: total,
+		})
+	}
+	if len(rows) == 0 {
+		return []deepSeekUsageRow{}, "No positive token usage found in Copilot session logs", nil
+	}
+	return rows, "Aggregated from local Copilot session logs (output tokens)", nil
+}
+
+func aggregateCopilotSessionUsage(eventsPath string, monthTotals map[string]int64) error {
+	file, err := os.Open(eventsPath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	type copilotEventLine struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Data      struct {
+			OutputTokens int64  `json:"outputTokens"`
+			StartTime    string `json:"startTime"`
+		} `json:"data"`
+	}
+
+	scanner := bufio.NewScanner(file)
+	buffer := make([]byte, 0, 64*1024)
+	scanner.Buffer(buffer, 8*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var eventLine copilotEventLine
+		if json.Unmarshal([]byte(line), &eventLine) != nil {
+			continue
+		}
+		if eventLine.Type != "assistant.message" {
+			continue
+		}
+		if eventLine.Data.OutputTokens <= 0 {
+			continue
+		}
+		ts := strings.TrimSpace(eventLine.Timestamp)
+		if ts == "" {
+			ts = strings.TrimSpace(eventLine.Data.StartTime)
+		}
+		month := tokenUsageMonthFromTimestamp(ts)
+		monthTotals[month] += eventLine.Data.OutputTokens
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func tokenUsageMonthFromTimestamp(raw string) string {
+	now := time.Now().UTC()
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return now.Format("2006-01")
+	}
+	layouts := []string{time.RFC3339Nano, time.RFC3339}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, trimmed); err == nil {
+			return parsed.UTC().Format("2006-01")
+		}
+	}
+	if len(trimmed) >= 7 {
+		return trimmed[:7]
+	}
+	return now.Format("2006-01")
+}
 func readJSONMapFile(path string) map[string]any {
 	body, err := os.ReadFile(path)
 	if err != nil {

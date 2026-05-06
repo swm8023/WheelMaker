@@ -4127,6 +4127,11 @@ function App() {
                                   <span>Tokens: {usageTotal.toLocaleString()}</span>
                                 </div>
                               ) : null}
+                              {provider.id === 'copilot' ? (
+                                <div className="token-stats-account-metrics token-stats-account-metrics-copilot">
+                                  <span>Tokens: {usageTotal.toLocaleString()}</span>
+                                </div>
+                              ) : null}
                             </div>
                           );
                         })}
@@ -5895,6 +5900,10 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
+
 
 
 
