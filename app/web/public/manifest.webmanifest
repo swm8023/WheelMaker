@@ -1,5 +1,5 @@
 {
-  "name": "WheelMaker Web",
+  "name": "WheelMaker",
   "short_name": "WheelMaker",
   "start_url": "/",
   "scope": "/",
@@ -15,3 +15,4 @@
     }
   ]
 }
+

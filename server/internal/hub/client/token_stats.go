@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -816,6 +817,23 @@ func discoverGitHubToken() (string, string) {
 	if err != nil {
 		return "", ""
 	}
+	copilotTokenFiles := []struct {
+		path   string
+		source string
+	}{
+		{path: filepath.Join(home, ".copilot", "apps.json"), source: "~/.copilot/apps.json"},
+		{path: filepath.Join(home, ".copilot", "config.json"), source: "~/.copilot/config.json"},
+		{path: filepath.Join(home, ".config", "github-copilot", "apps.json"), source: "~/.config/github-copilot/apps.json"},
+		{path: filepath.Join(home, ".config", "github-copilot", "hosts.json"), source: "~/.config/github-copilot/hosts.json"},
+		{path: filepath.Join(home, "AppData", "Local", "github-copilot", "apps.json"), source: "~/AppData/Local/github-copilot/apps.json"},
+		{path: filepath.Join(home, "AppData", "Local", "github-copilot", "hosts.json"), source: "~/AppData/Local/github-copilot/hosts.json"},
+	}
+	for _, file := range copilotTokenFiles {
+		token := extractGitHubTokenFromJSONFile(file.path)
+		if token != "" {
+			return token, file.source
+		}
+	}
 	ghHostFiles := []struct {
 		path   string
 		source string
@@ -833,6 +851,9 @@ func discoverGitHubToken() (string, string) {
 		if token := parseGitHubTokenFromHostsYAML(string(body)); token != "" {
 			return token, file.source
 		}
+	}
+	if token := discoverGitHubTokenByCLI(); token != "" {
+		return token, "gh auth token"
 	}
 	return "", ""
 }
@@ -866,6 +887,61 @@ func parseGitHubTokenFromHostsYAML(content string) string {
 	return ""
 }
 
+func extractGitHubTokenFromJSONFile(path string) string {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" || (!strings.HasPrefix(trimmed, "{") && !strings.HasPrefix(trimmed, "[")) {
+		return ""
+	}
+	var payload any
+	if json.Unmarshal(body, &payload) != nil {
+		return ""
+	}
+	tokens := collectGitHubTokensFromAny(payload)
+	for _, token := range tokens {
+		if token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
+func collectGitHubTokensFromAny(value any) []string {
+	out := make([]string, 0)
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"oauth_token", "oauthToken", "token", "github_token", "githubToken", "access_token", "accessToken"} {
+			if raw, ok := typed[key]; ok {
+				if text, ok := raw.(string); ok {
+					trimmed := strings.TrimSpace(text)
+					if trimmed != "" {
+						out = append(out, trimmed)
+					}
+				}
+			}
+		}
+		for _, child := range typed {
+			out = append(out, collectGitHubTokensFromAny(child)...)
+		}
+	case []any:
+		for _, child := range typed {
+			out = append(out, collectGitHubTokensFromAny(child)...)
+		}
+	}
+	return out
+}
+
+func discoverGitHubTokenByCLI() string {
+	cmd := exec.Command("gh", "auth", "token")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
 func (c *Client) fetchGitHubLogin(ctx context.Context, token string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)
 	if err != nil {

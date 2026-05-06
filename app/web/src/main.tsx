@@ -1828,6 +1828,10 @@ function App() {
 
   const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
   const isWide = windowWidth >= 900;
+  const isWindowsPlatform = useMemo(
+    () => /windows/i.test(window.navigator.userAgent),
+    [],
+  );
 
   const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
   const tabRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
@@ -2208,6 +2212,11 @@ function App() {
     () => projects.find(item => item.projectId === projectId) ?? null,
     [projectId, projects],
   );
+  useEffect(() => {
+    const baseTitle = 'WheelMaker';
+    const projectTitle = (currentProjectName || '').trim();
+    document.title = projectTitle ? `${projectTitle} - ${baseTitle}` : baseTitle;
+  }, [currentProjectName]);
   const project = currentProject;
   const availableChatAgents = useMemo(() => {
     const seen = new Set<string>();
@@ -4113,22 +4122,8 @@ function App() {
                             <div key={account.id} className="token-stats-account-item">
                               <div className="token-stats-account-header">
                                 <span className="token-stats-account-name">
-                                  {(account.alias || '').trim().toLowerCase() === 'current'
-                                    ? (account.displayName || account.email || '(unnamed)')
-                                    : (account.alias || account.displayName || account.email || '(unnamed)')}
+                                  {account.displayName || account.email || account.alias || '(unnamed)'}
                                 </span>
-                                <span className="token-stats-account-hub">{account.hubId}</span>
-                                <span
-                                  className={`token-stats-account-status ${
-                                    account.status === 'ok' ? 'ok' : 'error'
-                                  }`}
-                                >
-                                  {account.status === 'ok' ? 'OK' : 'ERROR'}
-                                </span>
-                              </div>
-                              <div className="token-stats-account-meta">
-                                {account.email ? <span>{account.email}</span> : null}
-                                {account.plan ? <span>Plan: {account.plan}</span> : null}
                               </div>
                               {account.message ? (
                                 <div className="token-stats-account-error">{account.message}</div>
@@ -4165,6 +4160,9 @@ function App() {
                                   </span>
                                 </div>
                               ) : null}
+                              <div className="token-stats-account-footer">
+                                <span className="token-stats-account-hub">{account.hubId}</span>
+                              </div>
                             </div>
                           );
                         })}
@@ -5339,6 +5337,19 @@ function App() {
                   className={`chat-composer-input${chatComposerText.length === 0 ? ' has-inline-action' : ''}`}
                   value={chatComposerText}
                   onChange={event => setChatComposerText(event.target.value)}
+                  onKeyDown={event => {
+                    if (!isWindowsPlatform) {
+                      return;
+                    }
+                    if (event.key !== 'Enter' || event.altKey || event.nativeEvent.isComposing) {
+                      return;
+                    }
+                    event.preventDefault();
+                    if (chatSending) {
+                      return;
+                    }
+                    sendChatMessage().catch(() => undefined);
+                  }}
                   placeholder="Send a message..."
                 />
                 {chatComposerText.length === 0 ? (
@@ -5978,5 +5989,4 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
-
 
