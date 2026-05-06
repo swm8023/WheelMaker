@@ -91,6 +91,7 @@ type TokenProviderSectionView = {
   name: string;
   accounts: TokenProviderAccountView[];
 };
+type SessionFlagMap = Record<string, true>;
 type SetiThemeSection = {
   file: string;
   fileExtensions?: Record<string, string>;
@@ -261,6 +262,27 @@ function mergeChatSession(
   };
   const filtered = list.filter(item => item.sessionId !== next.sessionId);
   return sortChatSessions([merged, ...filtered]);
+}
+
+function addSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFlagMap {
+  if (!sessionId || flags[sessionId]) {
+    return flags;
+  }
+  return {
+    ...flags,
+    [sessionId]: true,
+  };
+}
+
+function removeSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFlagMap {
+  if (!sessionId || !flags[sessionId]) {
+    return flags;
+  }
+  const next = {
+    ...flags,
+  };
+  delete next[sessionId];
+  return next;
 }
 
 
@@ -1920,6 +1942,8 @@ function App() {
   const [chatSwipeOpenSessionId, setChatSwipeOpenSessionId] = useState('');
   const [chatSwipeDraggingSessionId, setChatSwipeDraggingSessionId] = useState('');
   const [chatSwipeDraggingOffset, setChatSwipeDraggingOffset] = useState(0);
+  const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
+  const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatConfigFeedback, setChatConfigFeedback] = useState('');
   const [showChatConfigLabels, setShowChatConfigLabels] = useState(false);
@@ -1940,6 +1964,13 @@ function App() {
     const selected = chatSessions.find(item => item.sessionId === selectedChatId);
     return selected?.configOptions ?? [];
   }, [chatSessions, selectedChatId]);
+
+  useEffect(() => {
+    if (!selectedChatId) {
+      return;
+    }
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, selectedChatId));
+  }, [selectedChatId]);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -3052,6 +3083,8 @@ function App() {
   const removeChatSessionFromState = (sessionId: string) => {
     if (!sessionId) return;
     setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
+    setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
     if (chatSelectedIdRef.current === sessionId) {
       setSelectedChatId('');
       chatSelectedIdRef.current = '';
@@ -3211,6 +3244,7 @@ function App() {
       setChatSwipeOpenSessionId('');
     }
     chatSelectedIdRef.current = sessionId;
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
     setSelectedChatId(sessionId);
     setChatMessages(chatMessageStoreRef.current[sessionId] ?? []);
     loadChatSession(sessionId, projectIdRef.current, {
@@ -3261,6 +3295,8 @@ function App() {
         blocks,
       });
       const nextSessionId = result.sessionId || sessionId;
+      setChatRunningSessionFlags(prev => addSessionFlag(prev, nextSessionId));
+      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, nextSessionId));
       setSelectedChatId(nextSessionId);
       if (!chatSessions.find(item => item.sessionId === nextSessionId)) {
         setChatSessions(prev =>
@@ -3399,6 +3435,8 @@ function App() {
       if (!silentReconnect) {
         setChatMessages([]);
         setChatSessions([]);
+        setChatRunningSessionFlags({});
+        setChatCompletedUnopenedFlags({});
         setSelectedChatId('');
         chatSelectedIdRef.current = '';
         chatSyncIndexRef.current = {};
@@ -3654,6 +3692,8 @@ function App() {
       applyHydratedProjectState(result.hydrated);
       setChatMessages([]);
       setChatSessions([]);
+      setChatRunningSessionFlags({});
+      setChatCompletedUnopenedFlags({});
       setSelectedChatId('');
       chatSelectedIdRef.current = '';
       chatSyncIndexRef.current = {};
@@ -3775,8 +3815,21 @@ function App() {
         if (!message) {
           return;
         }
-
         const sessionId = message.sessionId;
+        const messageState = msgStatus(message.method, message.param);
+        const isSelectedSession = sessionId === chatSelectedIdRef.current;
+        if (messageState === 'streaming') {
+          setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
+          setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+        }
+        if (message.method === 'prompt_done') {
+          setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
+          if (isSelectedSession) {
+            setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+          } else {
+            setChatCompletedUnopenedFlags(prev => addSessionFlag(prev, sessionId));
+          }
+        }
         const messageText = msgText(message.method, message.param);
         setChatSessions(prev => {
           const existing = prev.find(item => item.sessionId === sessionId);
@@ -4273,8 +4326,23 @@ function App() {
                     >
                       <span className="file-dot codicon codicon-comment-discussion" />
                       <span className="label chat-session-meta">
-                        <span className="chat-session-title">
-                          {session.title || session.sessionId}
+                        <span className="chat-session-title-row">
+                          <span className="chat-session-title">
+                            {session.title || session.sessionId}
+                          </span>
+                          <span className="chat-session-indicators">
+                            {chatRunningSessionFlags[session.sessionId] ? (
+                              <span className="chat-session-running" title="In progress">
+                                <span className="codicon codicon-loading codicon-modifier-spin" />
+                              </span>
+                            ) : null}
+                            {!chatRunningSessionFlags[session.sessionId] && chatCompletedUnopenedFlags[session.sessionId] ? (
+                              <span
+                                className="chat-session-completed-hint"
+                                title="Completed, click to view"
+                              />
+                            ) : null}
+                          </span>
                         </span>
                         <span className="chat-session-updated muted" title={session.updatedAt || ''}>
                           {formatCompactRelativeAge(session.updatedAt)}

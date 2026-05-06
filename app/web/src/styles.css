@@ -911,10 +911,40 @@ body,
   gap: 2px;
 }
 
+.chat-session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .chat-session-title {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-session-indicators {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 12px;
+}
+
+.chat-session-running {
+  color: #8bb8dd;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.chat-session-completed-hint {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4fbf6b;
 }
 
 .chat-session-updated {
@@ -3233,22 +3263,4 @@ body,
     transform: translateX(0);
   }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
