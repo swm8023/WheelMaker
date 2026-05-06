@@ -5372,8 +5372,14 @@ function App() {
                     const updating =
                       chatConfigUpdatingKey ===
                       `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
+                    const optionLabel = option.name || option.id;
                     return (
                       <div key={option.id} className="chat-config-item">
+                        {isWide ? (
+                          <span className="chat-config-item-label" title={optionLabel}>
+                            {optionLabel}
+                          </span>
+                        ) : null}
                         <select
                           className="chat-config-select"
                           value={currentValue}
@@ -5887,6 +5893,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
 
 
 
