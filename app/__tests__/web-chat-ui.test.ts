@@ -54,6 +54,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('updateIndex');
     expect(mainTsx).not.toContain('await service.markSessionRead(');
     expect(mainTsx).toContain('chatSyncIndexRef');
+    expect(mainTsx).toContain('const [chatPromptSnapshotVersion, setChatPromptSnapshotVersion] = useState(0);');
     expect(mainTsx).toContain('sessions.some(session => session.sessionId === currentSelection)');
     expect(mainTsx).not.toContain('result.lastIndex < afterIndex');
     expect(mainTsx).toContain('preserveUserSelection');
@@ -82,6 +83,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('setHasPendingProjectUpdates(true);');
     expect(mainTsx).toContain('if (!silent) {');
     expect(mainTsx).toContain('setHasPendingProjectUpdates(false);');
+    expect(mainTsx).toContain('setChatPromptSnapshotVersion(version => version + 1);');
+    expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
+    expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
     expect(mainTsx).toContain("className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');

@@ -3430,6 +3430,125 @@ func TestSessionViewPreservesUserImageBlocks(t *testing.T) {
 	}
 }
 
+func TestSessionRecorderPromptTimingUpdatesSessionSummaryAndDuration(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	createdAt := mustRFC3339Time(t, "2026-05-06T12:00:00Z")
+	startedAt := mustRFC3339Time(t, "2026-05-06T12:01:02Z")
+	finishedAt := mustRFC3339Time(t, "2026-05-06T12:01:27Z")
+
+	created := sessionViewCreatedEvent("sess-1", "Timing")
+	created.UpdatedAt = createdAt
+	if err := c.RecordEvent(ctx, created); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	started := sessionViewPromptEvent("sess-1", "measure", nil)
+	started.UpdatedAt = startedAt
+	if err := c.RecordEvent(ctx, started); err != nil {
+		t.Fatalf("RecordEvent prompt started: %v", err)
+	}
+
+	finished := sessionViewPromptFinishedEvent("sess-1", "end_turn")
+	finished.UpdatedAt = finishedAt
+	if err := c.RecordEvent(ctx, finished); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	rec, err := c.store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("LoadSession returned nil record")
+	}
+	if !rec.LastActiveAt.Equal(finishedAt) {
+		t.Fatalf("session LastActiveAt = %q, want %q", rec.LastActiveAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano))
+	}
+
+	promptRec, err := c.store.LoadSessionPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("LoadSessionPrompt: %v", err)
+	}
+	if promptRec == nil {
+		t.Fatal("LoadSessionPrompt returned nil record")
+	}
+	if !promptRec.StartedAt.Equal(startedAt) {
+		t.Fatalf("prompt StartedAt = %q, want %q", promptRec.StartedAt.Format(time.RFC3339Nano), startedAt.Format(time.RFC3339Nano))
+	}
+	if !promptRec.UpdatedAt.Equal(finishedAt) {
+		t.Fatalf("prompt UpdatedAt = %q, want %q", promptRec.UpdatedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano))
+	}
+
+	sessions, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("listSessionViews: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	if sessions[0].UpdatedAt != finishedAt.Format(time.RFC3339) {
+		t.Fatalf("summary UpdatedAt = %q, want %q", sessions[0].UpdatedAt, finishedAt.Format(time.RFC3339))
+	}
+
+	_, prompts, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if prompts[0].DurationMs != finishedAt.Sub(startedAt).Milliseconds() {
+		t.Fatalf("prompt DurationMs = %d, want %d", prompts[0].DurationMs, finishedAt.Sub(startedAt).Milliseconds())
+	}
+}
+
+func TestSessionRecorderPromptFinishWithoutLiveStateSeedsPromptTimes(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	createdAt := mustRFC3339Time(t, "2026-05-06T13:00:00Z")
+	finishedAt := mustRFC3339Time(t, "2026-05-06T13:00:12Z")
+
+	created := sessionViewCreatedEvent("sess-1", "Timing Fallback")
+	created.UpdatedAt = createdAt
+	if err := c.RecordEvent(ctx, created); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	finished := sessionViewPromptFinishedEvent("sess-1", "end_turn")
+	finished.UpdatedAt = finishedAt
+	if err := c.RecordEvent(ctx, finished); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	promptRec, err := c.store.LoadSessionPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("LoadSessionPrompt: %v", err)
+	}
+	if promptRec == nil {
+		t.Fatal("LoadSessionPrompt returned nil record")
+	}
+	if !promptRec.StartedAt.Equal(finishedAt) {
+		t.Fatalf("prompt StartedAt = %q, want %q", promptRec.StartedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano))
+	}
+	if !promptRec.UpdatedAt.Equal(finishedAt) {
+		t.Fatalf("prompt UpdatedAt = %q, want %q", promptRec.UpdatedAt.Format(time.RFC3339Nano), finishedAt.Format(time.RFC3339Nano))
+	}
+
+	_, prompts, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if prompts[0].DurationMs != 0 {
+		t.Fatalf("prompt DurationMs = %d, want 0", prompts[0].DurationMs)
+	}
+}
+
 func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()

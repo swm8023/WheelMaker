@@ -313,7 +313,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 		Title:       promptTitle,
 		UpdatedAt:   rawEvent.UpdatedAt,
 		ModelName:   modelName,
-		StartedAt:   time.Now().UTC(),
+		StartedAt:   rawEvent.UpdatedAt,
 	}); err != nil {
 		return err
 	}
@@ -412,6 +412,9 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 		TurnsJSON:   turnsJSON,
 		TurnIndex:   turnIndex,
 	}); err != nil {
+		return err
+	}
+	if err := r.upsertSessionProjection(ctx, event.SessionID, "", "", event.UpdatedAt, true); err != nil {
 		return err
 	}
 	delete(r.promptState, event.SessionID)
@@ -598,7 +601,12 @@ func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID
 		return state, nil
 	}
 	created := newSessionPromptState(1, 1)
-	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{SessionID: sessionID, PromptIndex: 1, UpdatedAt: updatedAt}); err != nil {
+	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   sessionID,
+		PromptIndex: 1,
+		UpdatedAt:   updatedAt,
+		StartedAt:   updatedAt,
+	}); err != nil {
 		return nil, err
 	}
 	r.promptState[sessionID] = &created

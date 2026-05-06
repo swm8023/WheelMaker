@@ -18,6 +18,7 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
+import { formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import {
   CODE_FONT_OPTIONS,
@@ -742,7 +743,7 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
           <hr />
           <span className="chat-prompt-separator-label">
             By {group.modelName || 'unknown'}
-            {group.durationMs > 0 ? ` · ${formatPromptDuration(group.durationMs)}` : ''}
+            {group.durationMs > 0 ? ` · ${formatPromptDurationMs(group.durationMs)}` : ''}
           </span>
         </div>
       ) : null}
@@ -751,15 +752,6 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
 });
 
 // -- Prompt separator helpers --
-
-function formatPromptDuration(ms: number): string {
-  if (ms < 15000) return `${ms}ms`;
-  const seconds = ms / 15000;
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return secs > 0 ? `${minutes}m ${secs.toFixed(0)}s` : `${minutes}m`;
-}
 
 function groupChatMessagesByPrompt(
   messages: RegistryChatMessage[],
@@ -1907,6 +1899,7 @@ function App() {
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const chatPromptSnapshotsRef = useRef<Record<string, RegistrySessionPromptSnapshot[]>>({});
+  const [chatPromptSnapshotVersion, setChatPromptSnapshotVersion] = useState(0);
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const newChatFlowGuardRef = useRef(false);
   const chatSwipeSessionIdRef = useRef('');
@@ -2845,6 +2838,7 @@ function App() {
 
       chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
       chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
+      setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestChatSyncCursor(nextMessages);
       chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.syncIndex;
       chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.syncSubIndex;
@@ -3048,11 +3042,12 @@ function App() {
     delete nextSyncIndex[sessionId];
     delete nextSyncSubIndex[sessionId];
     delete nextSnapshots[sessionId];
-    chatMessageStoreRef.current = nextMessageStore;
-    chatSyncIndexRef.current = nextSyncIndex;
-    chatSyncSubIndexRef.current = nextSyncSubIndex;
-    chatPromptSnapshotsRef.current = nextSnapshots;
-  };
+     chatMessageStoreRef.current = nextMessageStore;
+     chatSyncIndexRef.current = nextSyncIndex;
+     chatSyncSubIndexRef.current = nextSyncSubIndex;
+     chatPromptSnapshotsRef.current = nextSnapshots;
+     setChatPromptSnapshotVersion(version => version + 1);
+   };
 
   const handleDeleteChatSession = async (sessionId: string) => {
     const normalizedSessionId = sessionId.trim();
@@ -3732,6 +3727,13 @@ function App() {
         };
         if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session!));
+          if (payload.session?.sessionId === chatSelectedIdRef.current) {
+            loadChatSession(payload.session.sessionId, projectIdRef.current, {
+              incremental: true,
+              preserveUserSelection: true,
+              selectionSnapshot: chatSelectedIdRef.current,
+            }).catch(() => undefined);
+          }
         }
         return;
       }
@@ -5002,7 +5004,7 @@ function App() {
         : undefined;
       return groupChatMessagesByPrompt(chatMessages, snapshots);
     },
-    [chatMessages],
+    [chatMessages, chatPromptSnapshotVersion],
   );
 
   const resolveChatFileLink = (
