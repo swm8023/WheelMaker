@@ -935,12 +935,29 @@ func collectGitHubTokensFromAny(value any) []string {
 }
 
 func discoverGitHubTokenByCLI() string {
-	cmd := exec.Command("gh", "auth", "token")
-	output, err := cmd.Output()
-	if err != nil {
-		return ""
+	home, _ := os.UserHomeDir()
+	candidates := []string{"gh"}
+	if strings.TrimSpace(home) != "" {
+		candidates = append(candidates,
+			filepath.Join(home, "AppData", "Local", "Programs", "GitHub CLI", "gh.exe"),
+		)
 	}
-	return strings.TrimSpace(string(output))
+	candidates = append(candidates, `C:\Program Files\GitHub CLI\gh.exe`)
+	for _, bin := range candidates {
+		if strings.TrimSpace(bin) == "" {
+			continue
+		}
+		cmd := exec.Command(bin, "auth", "token", "--hostname", "github.com")
+		output, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		token := strings.TrimSpace(string(output))
+		if token != "" {
+			return token
+		}
+	}
+	return ""
 }
 func (c *Client) fetchGitHubLogin(ctx context.Context, token string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/user", nil)

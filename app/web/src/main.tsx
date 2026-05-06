@@ -2213,9 +2213,8 @@ function App() {
     [projectId, projects],
   );
   useEffect(() => {
-    const baseTitle = 'WheelMaker';
     const projectTitle = (currentProjectName || '').trim();
-    document.title = projectTitle ? `${projectTitle} - ${baseTitle}` : baseTitle;
+    document.title = projectTitle || 'WheelMaker';
   }, [currentProjectName]);
   const project = currentProject;
   const availableChatAgents = useMemo(() => {
@@ -4118,11 +4117,22 @@ function App() {
                             (sum, row) => sum + (row.totalTokens || 0),
                             0,
                           );
+                          const accountNameCandidates = [
+                            (account.email || '').trim(),
+                            (account.displayName || '').trim(),
+                            (account.alias || '').trim(),
+                          ].filter(Boolean);
+                          const accountName =
+                            accountNameCandidates.find(
+                              name => !/^current(?:\s+account)?$/i.test(name),
+                            ) ||
+                            accountNameCandidates[0] ||
+                            '(unnamed)';
                           return (
                             <div key={account.id} className="token-stats-account-item">
                               <div className="token-stats-account-header">
                                 <span className="token-stats-account-name">
-                                  {account.displayName || account.email || account.alias || '(unnamed)'}
+                                  {accountName}
                                 </span>
                               </div>
                               {account.message ? (
