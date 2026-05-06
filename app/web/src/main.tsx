@@ -1835,7 +1835,6 @@ function App() {
 
   const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
   const tabRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
-  const previousTabForChatListRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -1992,18 +1991,16 @@ function App() {
     chatSelectedIdRef.current = selectedChatId;
   }, [selectedChatId]);
   useEffect(() => {
-    const previousTab = previousTabForChatListRef.current;
-    const enteredChat = previousTab !== 'chat' && tab === 'chat';
-    previousTabForChatListRef.current = tab;
     tabRef.current = tab;
-    if (!enteredChat) {
+    if (tab !== 'chat') {
       return;
     }
-    if (!connected || !projectIdRef.current) {
+    const activeProjectId = projectId || projectIdRef.current;
+    if (!connected || !activeProjectId) {
       return;
     }
-    loadChatSessions(projectIdRef.current).catch(() => undefined);
-  }, [tab, connected]);
+    loadChatSessions(activeProjectId).catch(() => undefined);
+  }, [tab, connected, projectId]);
 
 
   useEffect(() => {
