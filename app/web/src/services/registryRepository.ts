@@ -21,6 +21,7 @@ import type {
   RegistrySyncCheckResponse,
   RegistryTokenProvider,
   RegistryDeepSeekTokenStats,
+  RegistryTokenScanResult,
   RegistryWorkingTreeFileDiff,
 } from '../types/registry';
 
@@ -650,6 +651,17 @@ export class RegistryRepository {
     });
     return (resp.payload ?? {}) as RegistryDeepSeekTokenStats;
   }
+
+  async scanTokenStats(projectId: string): Promise<RegistryTokenScanResult> {
+    const resp = await this.client.request({
+      method: 'session.token.scan',
+      projectId,
+      payload: {},
+      timeoutMs: 45000,
+    });
+    return (resp.payload ?? {}) as RegistryTokenScanResult;
+  }
+
   close(): void {
     this.client.close();
   }
@@ -674,6 +686,9 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+
+
+
 
 
 

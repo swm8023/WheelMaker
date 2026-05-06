@@ -2,12 +2,15 @@ package client
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,6 +63,35 @@ type deepSeekBalanceResponse struct {
 		GrantedBalance  string `json:"granted_balance"`
 		ToppedUpBalance string `json:"topped_up_balance"`
 	} `json:"balance_infos"`
+}
+type tokenProviderScanResult struct {
+	ID       string                 `json:"id"`
+	Name     string                 `json:"name"`
+	Accounts []tokenProviderAccount `json:"accounts"`
+}
+
+type tokenProviderAccount struct {
+	ID               string              `json:"id"`
+	Alias            string              `json:"alias"`
+	DisplayName      string              `json:"displayName"`
+	Source           string              `json:"source"`
+	Status           string              `json:"status"`
+	Message          string              `json:"message,omitempty"`
+	Email            string              `json:"email,omitempty"`
+	Plan             string              `json:"plan,omitempty"`
+	FiveHourLimit    string              `json:"fiveHourLimit,omitempty"`
+	WeeklyLimit      string              `json:"weeklyLimit,omitempty"`
+	Balance          deepSeekBalanceView `json:"balance"`
+	Usage            deepSeekUsageView   `json:"usage"`
+	UsageUnavailable bool                `json:"usageUnavailable"`
+	UsageMessage     string              `json:"usageMessage,omitempty"`
+	UpdatedAt        string              `json:"updatedAt,omitempty"`
+}
+
+type tokenScanPayload struct {
+	OK        bool                      `json:"ok"`
+	UpdatedAt string                    `json:"updatedAt"`
+	Providers []tokenProviderScanResult `json:"providers"`
 }
 
 func (c *Client) fetchDeepSeekTokenStats(ctx context.Context, apiKey, rangeType, month string) (deepSeekTokenStatsPayload, error) {
@@ -398,4 +430,538 @@ func firstFloat64Field(m map[string]any, keys ...string) float64 {
 		}
 	}
 	return 0
+}
+
+type deepSeekCredential struct {
+	Alias  string
+	APIKey string
+	Source string
+}
+
+type codexAuthProfile struct {
+	Alias  string
+	Source string
+	Auth   map[string]any
+}
+
+type codexAuthState struct {
+	AccessToken  string
+	RefreshToken string
+	AccountID    string
+	Email        string
+	Plan         string
+}
+
+func (c *Client) scanTokenStats(ctx context.Context) (tokenScanPayload, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	deepSeek := c.scanDeepSeekProvider(ctx, now)
+	codex := c.scanCodexProvider(ctx, now)
+	return tokenScanPayload{
+		OK:        true,
+		UpdatedAt: now,
+		Providers: []tokenProviderScanResult{deepSeek, codex},
+	}, nil
+}
+
+func (c *Client) scanDeepSeekProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
+	credentials := discoverDeepSeekCredentials()
+	accounts := make([]tokenProviderAccount, 0, len(credentials))
+	for _, credential := range credentials {
+		alias := strings.TrimSpace(credential.Alias)
+		if alias == "" {
+			alias = "deepseek"
+		}
+		masked := maskSecret(credential.APIKey)
+		account := tokenProviderAccount{
+			ID:          alias + ":" + masked,
+			Alias:       alias,
+			DisplayName: alias,
+			Source:      credential.Source,
+			Status:      "ok",
+			UpdatedAt:   updatedAt,
+			Usage: deepSeekUsageView{
+				RangeType: "month",
+				Month:     time.Now().UTC().Format("2006-01"),
+				Rows:      []deepSeekUsageRow{},
+			},
+		}
+		stats, err := c.fetchDeepSeekTokenStats(ctx, credential.APIKey, "month", "")
+		if err != nil {
+			account.Status = "error"
+			account.Message = err.Error()
+			accounts = append(accounts, account)
+			continue
+		}
+		account.Balance = stats.Balance
+		account.Usage = stats.Usage
+		account.UsageUnavailable = stats.UsageUnavailable
+		account.UsageMessage = stats.UsageMessage
+		accounts = append(accounts, account)
+	}
+	sort.Slice(accounts, func(i, j int) bool {
+		return strings.ToLower(accounts[i].Alias) < strings.ToLower(accounts[j].Alias)
+	})
+	return tokenProviderScanResult{ID: "deepseek", Name: "DeepSeek", Accounts: accounts}
+}
+
+func (c *Client) scanCodexProvider(ctx context.Context, updatedAt string) tokenProviderScanResult {
+	profiles := discoverCodexAuthProfiles()
+	accounts := make([]tokenProviderAccount, 0, len(profiles))
+	for _, profile := range profiles {
+		state := extractCodexAuthState(profile.Auth)
+		alias := strings.TrimSpace(profile.Alias)
+		if alias == "" {
+			alias = "codex"
+		}
+		accountID := strings.TrimSpace(state.AccountID)
+		if accountID == "" {
+			accountID = alias
+		}
+		account := tokenProviderAccount{
+			ID:          accountID + ":" + alias,
+			Alias:       alias,
+			DisplayName: alias,
+			Source:      profile.Source,
+			Status:      "ok",
+			Email:       state.Email,
+			Plan:        state.Plan,
+			UpdatedAt:   updatedAt,
+		}
+		fiveHour, weekly, plan, err := c.fetchCodexUsageLimits(ctx, state)
+		if err != nil {
+			account.Status = "error"
+			account.Message = err.Error()
+			accounts = append(accounts, account)
+			continue
+		}
+		if strings.TrimSpace(plan) != "" {
+			account.Plan = plan
+		}
+		account.FiveHourLimit = fiveHour
+		account.WeeklyLimit = weekly
+		accounts = append(accounts, account)
+	}
+	sort.Slice(accounts, func(i, j int) bool {
+		return strings.ToLower(accounts[i].Alias) < strings.ToLower(accounts[j].Alias)
+	})
+	return tokenProviderScanResult{ID: "codex", Name: "Codex", Accounts: accounts}
+}
+
+func discoverDeepSeekCredentials() []deepSeekCredential {
+	out := make([]deepSeekCredential, 0)
+	seen := map[string]struct{}{}
+	appendCredential := func(alias, key, source string) {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			return
+		}
+		if _, ok := seen[trimmed]; ok {
+			return
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, deepSeekCredential{Alias: strings.TrimSpace(alias), APIKey: trimmed, Source: strings.TrimSpace(source)})
+	}
+	if value, ok := os.LookupEnv("DEEPSEEK_API_KEY"); ok {
+		appendCredential("env", value, "env:DEEPSEEK_API_KEY")
+	}
+	if value, ok := os.LookupEnv("DEEPSEEK_API_KEYS"); ok {
+		for _, item := range splitSecrets(value) {
+			appendCredential("env", item, "env:DEEPSEEK_API_KEYS")
+		}
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return out
+	}
+	fileSources := []struct {
+		path   string
+		source string
+	}{
+		{path: filepath.Join(home, ".config", "deepseek-cli", "config.json"), source: "~/.config/deepseek-cli/config.json"},
+		{path: filepath.Join(home, ".deepseek-cli.json"), source: "~/.deepseek-cli.json"},
+		{path: filepath.Join(home, ".wheelmaker", "deepseek-accounts.json"), source: "~/.wheelmaker/deepseek-accounts.json"},
+		{path: filepath.Join(home, ".wheelmaker", "deepseek-api-keys.txt"), source: "~/.wheelmaker/deepseek-api-keys.txt"},
+	}
+	for _, fileSource := range fileSources {
+		content, readErr := os.ReadFile(fileSource.path)
+		if readErr != nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(string(content))
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			var doc any
+			if json.Unmarshal(content, &doc) != nil {
+				continue
+			}
+			for _, item := range collectDeepSeekKeysFromAny(doc, "") {
+				alias := strings.TrimSpace(item.Alias)
+				if alias == "" {
+					alias = "file"
+				}
+				appendCredential(alias, item.APIKey, fileSource.source)
+			}
+			continue
+		}
+		for _, item := range strings.Split(trimmed, "\n") {
+			appendCredential("file", item, fileSource.source)
+		}
+	}
+	return out
+}
+
+func collectDeepSeekKeysFromAny(value any, fallbackAlias string) []deepSeekCredential {
+	credentials := make([]deepSeekCredential, 0)
+	switch typed := value.(type) {
+	case map[string]any:
+		alias := firstNonEmptyString(
+			firstStringField(typed, "alias", "name", "id", "label"),
+			fallbackAlias,
+		)
+		for _, keyName := range []string{"apiKey", "api_key", "deepseekApiKey", "deepseek_api_key", "token"} {
+			if item, ok := typed[keyName]; ok {
+				if secret, ok := item.(string); ok {
+					credentials = append(credentials, deepSeekCredential{Alias: alias, APIKey: strings.TrimSpace(secret)})
+				}
+			}
+		}
+		for _, child := range typed {
+			credentials = append(credentials, collectDeepSeekKeysFromAny(child, alias)...)
+		}
+	case []any:
+		for _, child := range typed {
+			credentials = append(credentials, collectDeepSeekKeysFromAny(child, fallbackAlias)...)
+		}
+	}
+	return credentials
+}
+
+func splitSecrets(raw string) []string {
+	normalized := strings.ReplaceAll(raw, "\r", "\n")
+	normalized = strings.ReplaceAll(normalized, ",", "\n")
+	parts := strings.Split(normalized, "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func discoverCodexAuthProfiles() []codexAuthProfile {
+	profiles := make([]codexAuthProfile, 0)
+	seen := map[string]struct{}{}
+	appendProfile := func(alias, source string, auth map[string]any) {
+		if len(auth) == 0 {
+			return
+		}
+		state := extractCodexAuthState(auth)
+		identity := firstNonEmptyString(state.AccountID, state.Email, state.AccessToken)
+		if strings.TrimSpace(identity) == "" {
+			return
+		}
+		if _, exists := seen[identity]; exists {
+			return
+		}
+		seen[identity] = struct{}{}
+		profiles = append(profiles, codexAuthProfile{Alias: strings.TrimSpace(alias), Source: strings.TrimSpace(source), Auth: auth})
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return profiles
+	}
+	codexDir := filepath.Join(home, ".codex")
+	if auth := readJSONMapFile(filepath.Join(codexDir, "auth.json")); len(auth) > 0 {
+		appendProfile("current", "~/.codex/auth.json", auth)
+	}
+	store := readJSONMapFile(filepath.Join(codexDir, "codex-cc.json"))
+	if len(store) == 0 {
+		return profiles
+	}
+	profilesNode, ok := store["profiles"].(map[string]any)
+	if !ok {
+		return profiles
+	}
+	for alias, rawProfile := range profilesNode {
+		profileMap, ok := rawProfile.(map[string]any)
+		if !ok {
+			continue
+		}
+		provider := strings.ToLower(strings.TrimSpace(firstStringField(profileMap, "provider")))
+		if provider != "" && provider != "codex" {
+			continue
+		}
+		authNode, ok := profileMap["auth"].(map[string]any)
+		if !ok {
+			authNode, _ = profileMap["data"].(map[string]any)
+		}
+		appendProfile(alias, "~/.codex/codex-cc.json", authNode)
+	}
+	return profiles
+}
+
+func readJSONMapFile(path string) map[string]any {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func extractCodexAuthState(auth map[string]any) codexAuthState {
+	tokens, _ := auth["tokens"].(map[string]any)
+	accessToken := strings.TrimSpace(firstStringField(tokens, "access_token", "accessToken"))
+	refreshToken := strings.TrimSpace(firstStringField(tokens, "refresh_token", "refreshToken"))
+	accountID := strings.TrimSpace(firstStringField(tokens, "account_id", "accountId"))
+	email := ""
+	plan := ""
+	claims := decodeJWTPayload(accessToken)
+	if len(claims) == 0 {
+		idToken := strings.TrimSpace(firstStringField(tokens, "id_token", "idToken"))
+		claims = decodeJWTPayload(idToken)
+	}
+	if len(claims) > 0 {
+		profileMap, _ := claims["https://api.openai.com/profile"].(map[string]any)
+		email = strings.TrimSpace(firstStringField(profileMap, "email"))
+		authInfo, _ := claims["https://api.openai.com/auth"].(map[string]any)
+		if accountID == "" {
+			accountID = strings.TrimSpace(firstStringField(authInfo, "chatgpt_account_id"))
+		}
+		plan = strings.TrimSpace(firstStringField(authInfo, "chatgpt_plan_type"))
+	}
+	return codexAuthState{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		AccountID:    accountID,
+		Email:        email,
+		Plan:         normalizePlanLabel(plan),
+	}
+}
+
+func decodeJWTPayload(token string) map[string]any {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	payload := parts[1]
+	decoded, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(decoded, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func (c *Client) fetchCodexUsageLimits(ctx context.Context, state codexAuthState) (string, string, string, error) {
+	access := strings.TrimSpace(state.AccessToken)
+	if access == "" {
+		return "", "", state.Plan, fmt.Errorf("missing access token")
+	}
+	payload, err := c.fetchCodexUsagePayload(ctx, access, state.AccountID)
+	if err != nil {
+		if !strings.Contains(err.Error(), "http 401") || strings.TrimSpace(state.RefreshToken) == "" {
+			return "", "", state.Plan, err
+		}
+		refreshedAccess, refreshedAccountID, refreshErr := c.refreshCodexAccessToken(ctx, state.RefreshToken)
+		if refreshErr != nil {
+			return "", "", state.Plan, refreshErr
+		}
+		if refreshedAccountID != "" {
+			state.AccountID = refreshedAccountID
+		}
+		if refreshedAccess == "" {
+			return "", "", state.Plan, fmt.Errorf("refresh succeeded but access token is empty")
+		}
+		payload, err = c.fetchCodexUsagePayload(ctx, refreshedAccess, state.AccountID)
+		if err != nil {
+			return "", "", state.Plan, err
+		}
+	}
+	fiveHour, weekly := pickCodexLimits(payload)
+	plan := strings.TrimSpace(state.Plan)
+	if plan == "" {
+		plan = normalizePlanLabel(firstStringField(payload, "plan_type", "planType"))
+	}
+	return fiveHour, weekly, plan, nil
+}
+
+func (c *Client) fetchCodexUsagePayload(ctx context.Context, accessToken, accountID string) (map[string]any, error) {
+	endpoint := "https://chatgpt.com/backend-api/wham/usage"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build codex usage request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(accessToken))
+	req.Header.Set("User-Agent", "codex-cli")
+	if trimmed := strings.TrimSpace(accountID); trimmed != "" {
+		req.Header.Set("ChatGPT-Account-Id", trimmed)
+	}
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("query codex usage: %w", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = res.Status
+		}
+		return nil, fmt.Errorf("codex usage request failed: http %d %s", res.StatusCode, msg)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode codex usage response: %w", err)
+	}
+	return payload, nil
+}
+
+func (c *Client) refreshCodexAccessToken(ctx context.Context, refreshToken string) (string, string, error) {
+	payload := map[string]string{
+		"client_id":     "app_EMoamEEZ73f0CkXaXp7hrann",
+		"grant_type":    "refresh_token",
+		"refresh_token": strings.TrimSpace(refreshToken),
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://auth.openai.com/oauth/token", strings.NewReader(string(body)))
+	if err != nil {
+		return "", "", fmt.Errorf("build refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "codex-cli")
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("refresh access token: %w", err)
+	}
+	defer res.Body.Close()
+	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 2<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(responseBody))
+		if msg == "" {
+			msg = res.Status
+		}
+		return "", "", fmt.Errorf("refresh token request failed: http %d %s", res.StatusCode, msg)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(responseBody, &out); err != nil {
+		return "", "", fmt.Errorf("decode refresh token response: %w", err)
+	}
+	accessToken := strings.TrimSpace(firstStringField(out, "access_token", "accessToken"))
+	accountID := strings.TrimSpace(firstStringField(out, "account_id", "accountId"))
+	if accountID == "" {
+		claims := decodeJWTPayload(accessToken)
+		authInfo, _ := claims["https://api.openai.com/auth"].(map[string]any)
+		accountID = strings.TrimSpace(firstStringField(authInfo, "chatgpt_account_id"))
+	}
+	return accessToken, accountID, nil
+}
+
+func pickCodexLimits(payload map[string]any) (string, string) {
+	rateLimit, _ := payload["rate_limit"].(map[string]any)
+	primary, _ := rateLimit["primary_window"].(map[string]any)
+	secondary, _ := rateLimit["secondary_window"].(map[string]any)
+	weeklyWindow := secondary
+	if additional, ok := payload["additional_rate_limits"].([]any); ok {
+		for _, item := range additional {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name := strings.ToLower(firstStringField(entry, "metered_feature", "limit_name"))
+			if !strings.Contains(name, "weekly") {
+				continue
+			}
+			rate, _ := entry["rate_limit"].(map[string]any)
+			window, _ := rate["primary_window"].(map[string]any)
+			if len(window) > 0 {
+				weeklyWindow = window
+			}
+			break
+		}
+	}
+	return formatCodexWindow(primary), formatCodexWindow(weeklyWindow)
+}
+
+func formatCodexWindow(window map[string]any) string {
+	if len(window) == 0 {
+		return ""
+	}
+	used := firstFloat64Field(window, "used_percent", "usedPercent")
+	if used < 0 {
+		return ""
+	}
+	remaining := int64(math.Round(100 - used))
+	if remaining < 0 {
+		remaining = 0
+	}
+	if remaining > 100 {
+		remaining = 100
+	}
+	resetAt := firstInt64Field(window, "reset_at", "resetAt")
+	if resetAt <= 0 {
+		resetAfter := firstInt64Field(window, "reset_after_seconds", "resetAfterSeconds")
+		if resetAfter > 0 {
+			resetAt = time.Now().UTC().Add(time.Duration(resetAfter) * time.Second).Unix()
+		}
+	}
+	if resetAt <= 0 {
+		return fmt.Sprintf("%d%%", remaining)
+	}
+	return fmt.Sprintf("%d%% (%s)", remaining, time.Unix(resetAt, 0).Local().Format("01-02 15:04"))
+}
+
+func normalizePlanLabel(plan string) string {
+	value := strings.ToLower(strings.TrimSpace(plan))
+	switch value {
+	case "plus":
+		return "Plus"
+	case "pro":
+		return "Pro"
+	case "team":
+		return "Team"
+	case "business":
+		return "Business"
+	case "enterprise", "enterprise/edu":
+		return "Enterprise"
+	default:
+		if value == "" {
+			return ""
+		}
+		return strings.ToUpper(value)
+	}
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func maskSecret(secret string) string {
+	trimmed := strings.TrimSpace(secret)
+	if len(trimmed) <= 8 {
+		return "****"
+	}
+	return trimmed[:4] + "..." + trimmed[len(trimmed)-4:]
 }

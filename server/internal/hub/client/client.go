@@ -580,8 +580,17 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		return c.recovery().ReloadSession(ctx, req.SessionID)
 	case "session.token.providers":
 		return map[string]any{
-			"providers": []map[string]any{{"id": "deepseek", "name": "DeepSeek", "authMode": "api_key"}},
+			"providers": []map[string]any{
+				{"id": "deepseek", "name": "DeepSeek", "authMode": "api_key"},
+				{"id": "codex", "name": "Codex", "authMode": "oauth"},
+			},
 		}, nil
+	case "session.token.scan":
+		stats, err := c.scanTokenStats(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return stats, nil
 	case "session.token.deepseek.stats":
 		var req struct {
 			APIKey    string `json:"apiKey"`

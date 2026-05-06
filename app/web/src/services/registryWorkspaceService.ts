@@ -16,8 +16,7 @@ import type {
   RegistrySessionSummary,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
-  RegistryTokenProvider,
-  RegistryDeepSeekTokenStats,
+  RegistryTokenScanResult,
   RegistryWorkingTreeFileDiff,
 } from '../types/registry';
 
@@ -298,23 +297,14 @@ export class RegistryWorkspaceService {
     return this.repository.setSessionConfig(this.session.selectedProjectId, payload);
   }
 
-  async listTokenProviders(): Promise<RegistryTokenProvider[]> {
-    if (!this.session || !this.repository) {
-      return [];
-    }
-    return this.repository.listTokenProviders(this.session.selectedProjectId);
-  }
-
-  async fetchDeepSeekTokenStats(payload: {
-    apiKey: string;
-    rangeType?: 'day' | 'month';
-    month?: string;
-  }): Promise<RegistryDeepSeekTokenStats> {
+  async scanTokenStats(projectId?: string): Promise<RegistryTokenScanResult> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
-    return this.repository.fetchDeepSeekTokenStats(this.session.selectedProjectId, payload);
+    const targetProjectId = (projectId || '').trim() || this.session.selectedProjectId;
+    return this.repository.scanTokenStats(targetProjectId);
   }
+
   onEvent(listener: (event: RegistryEnvelope) => void): () => void {
     this.eventListeners.add(listener);
     return () => {
@@ -329,6 +319,9 @@ export class RegistryWorkspaceService {
     };
   }
 }
+
+
+
 
 
 

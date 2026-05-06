@@ -54,8 +54,8 @@ import type {
   RegistryGitCommitFile,
   RegistryGitStatus,
   RegistryProject,
-  RegistryTokenProvider,
-  RegistryDeepSeekTokenStats,
+  RegistryTokenProviderAccount,
+  RegistryTokenScanResult,
 } from './types/registry';
 import './styles.css';
 
@@ -78,6 +78,18 @@ type WorkingTreeFileEntry = {
   path: string;
   status: string;
   scope: 'staged' | 'unstaged' | 'untracked';
+};
+type TokenProviderAccountView = RegistryTokenProviderAccount & {
+  hubId: string;
+  projectId: string;
+  providerId: string;
+  providerName: string;
+};
+
+type TokenProviderSectionView = {
+  id: string;
+  name: string;
+  accounts: TokenProviderAccountView[];
 };
 type SetiThemeSection = {
   file: string;
@@ -1833,17 +1845,10 @@ function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
   const [sidebarSettingsPage, setSidebarSettingsPage] = useState<SettingsPage>('main');
-  const [tokenProviders, setTokenProviders] = useState<RegistryTokenProvider[]>([]);
-  const [tokenProvidersLoading, setTokenProvidersLoading] = useState(false);
-  const [tokenProvidersError, setTokenProvidersError] = useState('');
-  const [tokenProviderPickerOpen, setTokenProviderPickerOpen] = useState(false);
-  const [enabledTokenProviders, setEnabledTokenProviders] = useState<string[]>([]);
-  const [deepSeekApiKey, setDeepSeekApiKey] = useState(persistedGlobal.deepseekApiKey || '');
-  const [deepSeekRangeType, setDeepSeekRangeType] = useState<'day' | 'month'>('day');
-  const [deepSeekMonth, setDeepSeekMonth] = useState(() => new Date().toISOString().slice(0, 7));
-  const [deepSeekStatsLoading, setDeepSeekStatsLoading] = useState(false);
-  const [deepSeekStats, setDeepSeekStats] = useState<RegistryDeepSeekTokenStats | null>(null);
-  const [deepSeekStatsError, setDeepSeekStatsError] = useState('');
+  const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
+  const [tokenStatsError, setTokenStatsError] = useState('');
+  const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
+  const [tokenStatsProviders, setTokenStatsProviders] = useState<TokenProviderSectionView[]>([]);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
 
@@ -2128,7 +2133,6 @@ function App() {
     workspaceStore.rememberGlobalState({
       address,
       token,
-      deepseekApiKey: deepSeekApiKey,
       themeMode,
       codeTheme,
       codeFont,
@@ -2143,7 +2147,6 @@ function App() {
   }, [
     address,
     token,
-    deepSeekApiKey,
     themeMode,
     codeTheme,
     codeFont,
@@ -3528,64 +3531,96 @@ function App() {
       return;
     }
     setSidebarSettingsPage('main');
-    setTokenProviderPickerOpen(false);
   }, [sidebarSettingsOpen]);
 
-  const loadTokenProviders = useCallback(async () => {
-    setTokenProvidersLoading(true);
-    setTokenProvidersError('');
+  const mergeTokenProviders = useCallback(
+    (entries: Array<{hubId: string; projectId: string; result: RegistryTokenScanResult}>): TokenProviderSectionView[] => {
+      const sections = new Map<string, TokenProviderSectionView>();
+      for (const entry of entries) {
+        const providers = Array.isArray(entry.result.providers) ? entry.result.providers : [];
+        for (const provider of providers) {
+          const providerId = (provider.id || provider.name || 'unknown').trim().toLowerCase();
+          if (!providerId) continue;
+          const section = sections.get(providerId) ?? {
+            id: providerId,
+            name: provider.name || provider.id || providerId,
+            accounts: [],
+          };
+          const accounts = Array.isArray(provider.accounts) ? provider.accounts : [];
+          for (const account of accounts) {
+            section.accounts.push({
+              ...account,
+              id: `${entry.hubId}:${account.id || account.alias || account.displayName || 'account'}`,
+              hubId: entry.hubId,
+              projectId: entry.projectId,
+              providerId: section.id,
+              providerName: section.name,
+            });
+          }
+          sections.set(providerId, section);
+        }
+      }
+      const merged = Array.from(sections.values());
+      merged.forEach(section => {
+        section.accounts.sort((left, right) => {
+          const hubDiff = left.hubId.localeCompare(right.hubId);
+          if (hubDiff !== 0) return hubDiff;
+          return (left.alias || left.displayName || '').localeCompare(right.alias || right.displayName || '');
+        });
+      });
+      merged.sort((left, right) => left.name.localeCompare(right.name));
+      return merged;
+    },
+    [],
+  );
+
+  const refreshTokenStats = useCallback(async () => {
+    setTokenStatsLoading(true);
+    setTokenStatsError('');
     try {
-      const providers = await service.listTokenProviders();
-      setTokenProviders(providers);
+      const latestProjects = await service.listProjects();
+      if (latestProjects.length > 0) {
+        setProjects(latestProjects);
+      }
+      const onlineByHub = new Map<string, RegistryProject>();
+      for (const project of latestProjects) {
+        if (!project.online) continue;
+        const hubId = (project.hubId || 'local').trim() || 'local';
+        if (!onlineByHub.has(hubId)) {
+          onlineByHub.set(hubId, project);
+        }
+      }
+      if (onlineByHub.size === 0) {
+        setTokenStatsProviders([]);
+        setTokenStatsUpdatedAt('');
+        setTokenStatsError('No online hubs available.');
+        return;
+      }
+      const requests = Array.from(onlineByHub.entries()).map(async ([hubId, project]) => {
+        const result = await service.scanTokenStats(project.projectId);
+        return {hubId, projectId: project.projectId, result};
+      });
+      const responses = await Promise.all(requests);
+      setTokenStatsProviders(mergeTokenProviders(responses));
+      const latestUpdatedAt = responses
+        .map(item => item.result.updatedAt || '')
+        .sort((left, right) => right.localeCompare(left))[0] || '';
+      setTokenStatsUpdatedAt(latestUpdatedAt);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setTokenProvidersError(message);
+      setTokenStatsError(message);
     } finally {
-      setTokenProvidersLoading(false);
+      setTokenStatsLoading(false);
     }
-  }, []);
+  }, [mergeTokenProviders]);
 
   useEffect(() => {
     if (!sidebarSettingsOpen || sidebarSettingsPage !== 'tokenStats') {
       return;
     }
-    loadTokenProviders().catch(() => undefined);
-  }, [sidebarSettingsOpen, sidebarSettingsPage, loadTokenProviders]);
+    refreshTokenStats().catch(() => undefined);
+  }, [sidebarSettingsOpen, sidebarSettingsPage, refreshTokenStats]);
 
-  const handleAddTokenProvider = (providerId: string) => {
-    const normalized = providerId.trim().toLowerCase();
-    if (!normalized) return;
-    setEnabledTokenProviders(prev =>
-      prev.includes(normalized) ? prev : [...prev, normalized],
-    );
-    setTokenProviderPickerOpen(false);
-  };
-
-  const handleFetchDeepSeekStats = async () => {
-    const apiKey = deepSeekApiKey.trim();
-    if (!apiKey) {
-      setDeepSeekStatsError('Please input DeepSeek API key.');
-      return;
-    }
-    setDeepSeekStatsLoading(true);
-    setDeepSeekStatsError('');
-    try {
-      const result = await service.fetchDeepSeekTokenStats({
-        apiKey,
-        rangeType: deepSeekRangeType,
-        month: deepSeekMonth,
-      });
-      setDeepSeekStats(result);
-      setEnabledTokenProviders(prev =>
-        prev.includes('deepseek') ? prev : [...prev, 'deepseek'],
-      );
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setDeepSeekStatsError(message);
-    } finally {
-      setDeepSeekStatsLoading(false);
-    }
-  };
   const clearLocalCache = () => {
     const confirmed = window.confirm(
       'Clear all local cache data except token?',
@@ -4590,10 +4625,6 @@ function App() {
   };
 
   const renderSidebar = () => {
-    const deepSeekEnabled = enabledTokenProviders.includes('deepseek');
-    const availableProviders = tokenProviders.filter(
-      provider => !enabledTokenProviders.includes(provider.id.toLowerCase()),
-    );
 
     return (
       <>
@@ -4717,8 +4748,8 @@ function App() {
                     className="sidebar-secondary-btn"
                     onClick={() => {
                       setSidebarSettingsPage('tokenStats');
-                      setDeepSeekStatsError('');
-                      loadTokenProviders().catch(() => undefined);
+                      setTokenStatsError('');
+                      refreshTokenStats().catch(() => undefined);
                     }}
                   >
                     Token统计
@@ -4740,7 +4771,6 @@ function App() {
                       className="token-stats-back-btn"
                       onClick={() => {
                         setSidebarSettingsPage('main');
-                        setTokenProviderPickerOpen(false);
                       }}
                     >
                       <span className="codicon codicon-arrow-left" />
@@ -4749,151 +4779,88 @@ function App() {
                     <div className="token-stats-title">Token统计</div>
                     <button
                       type="button"
-                      className="token-stats-add-btn"
-                      onClick={() => setTokenProviderPickerOpen(v => !v)}
-                      title="Add provider"
+                      className="token-stats-refresh-btn"
+                      onClick={() => {
+                        refreshTokenStats().catch(() => undefined);
+                      }}
+                      disabled={tokenStatsLoading}
                     >
-                      <span className="codicon codicon-add" />
+                      {tokenStatsLoading ? '刷新中...' : '刷新'}
                     </button>
                   </div>
 
-                  {tokenProviderPickerOpen ? (
-                    <div className="token-stats-provider-picker">
-                      {availableProviders.length === 0 ? (
-                        <div className="muted block">No available providers</div>
+                  {tokenStatsUpdatedAt ? (
+                    <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
+                  ) : null}
+                  {tokenStatsLoading ? (
+                    <div className="muted block">Scanning online hubs...</div>
+                  ) : null}
+                  {tokenStatsError ? (
+                    <div className="muted block token-stats-error">{tokenStatsError}</div>
+                  ) : null}
+                  {!tokenStatsLoading && tokenStatsProviders.length === 0 && !tokenStatsError ? (
+                    <div className="muted block">No token accounts discovered.</div>
+                  ) : null}
+
+                  {tokenStatsProviders.map(provider => (
+                    <div key={provider.id} className="token-stats-card">
+                      <div className="token-stats-card-title">{provider.name}</div>
+                      {provider.accounts.length === 0 ? (
+                        <div className="muted block">No available accounts.</div>
                       ) : (
-                        availableProviders.map(provider => (
-                          <button
-                            key={provider.id}
-                            type="button"
-                            className="token-stats-provider-btn"
-                            onClick={() => handleAddTokenProvider(provider.id)}
-                          >
-                            {provider.name}
-                          </button>
-                        ))
+                        <div className="token-stats-account-list">
+                          {provider.accounts.map(account => {
+                            const usageTotal = (account.usage?.rows || []).reduce(
+                              (sum, row) => sum + (row.totalTokens || 0),
+                              0,
+                            );
+                            return (
+                              <div key={account.id} className="token-stats-account-item">
+                                <div className="token-stats-account-header">
+                                  <span className="token-stats-account-name">
+                                    {account.alias || account.displayName || '(unnamed)'}
+                                  </span>
+                                  <span className="token-stats-account-hub">{account.hubId}</span>
+                                  <span
+                                    className={`token-stats-account-status ${
+                                      account.status === 'ok' ? 'ok' : 'error'
+                                    }`}
+                                  >
+                                    {account.status === 'ok' ? 'OK' : 'ERROR'}
+                                  </span>
+                                </div>
+                                <div className="token-stats-account-meta">
+                                  {account.email ? <span>{account.email}</span> : null}
+                                  {account.plan ? <span>Plan: {account.plan}</span> : null}
+                                  {account.source ? <span>Source: {account.source}</span> : null}
+                                </div>
+                                {account.message ? (
+                                  <div className="token-stats-account-error">{account.message}</div>
+                                ) : null}
+                                {provider.id === 'codex' ? (
+                                  <div className="token-stats-account-metrics">
+                                    <span>5h: {account.fiveHourLimit || '-'}</span>
+                                    <span>Week: {account.weeklyLimit || '-'}</span>
+                                  </div>
+                                ) : null}
+                                {provider.id === 'deepseek' ? (
+                                  <div className="token-stats-account-metrics">
+                                    <span>
+                                      Balance: 
+                                      {(account.balance?.items || [])
+                                        .map(item => `${item.currency}:${item.totalBalance}`)
+                                        .join(' | ') || '-'}
+                                    </span>
+                                    <span>Token: {usageTotal.toLocaleString()}</span>
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
-                  ) : null}
-
-                  {tokenProvidersLoading ? (
-                    <div className="muted block">Loading providers...</div>
-                  ) : null}
-                  {tokenProvidersError ? (
-                    <div className="muted block token-stats-error">{tokenProvidersError}</div>
-                  ) : null}
-
-                  {!deepSeekEnabled ? (
-                    <div className="muted block">Click + to add DeepSeek.</div>
-                  ) : null}
-
-                  {deepSeekEnabled ? (
-                    <div className="token-stats-card">
-                      <div className="token-stats-card-title">DeepSeek</div>
-                      <label className="token-stats-field">
-                        <span>API Key</span>
-                        <input
-                          type="password"
-                          className="token-stats-input"
-                          value={deepSeekApiKey}
-                          onChange={event => setDeepSeekApiKey(event.target.value)}
-                          placeholder="sk-..."
-                        />
-                      </label>
-                      <div className="token-stats-actions">
-                        <button
-                          type="button"
-                          className="token-stats-login-btn"
-                          disabled
-                          title="Login mode will be added later"
-                        >
-                          登录（暂未支持）
-                        </button>
-                        <select
-                          className="token-stats-select"
-                          value={deepSeekRangeType}
-                          onChange={event =>
-                            setDeepSeekRangeType(event.target.value === 'month' ? 'month' : 'day')
-                          }
-                        >
-                          <option value="day">按日</option>
-                          <option value="month">按月</option>
-                        </select>
-                        <input
-                          type="month"
-                          className="token-stats-month"
-                          value={deepSeekMonth}
-                          onChange={event => setDeepSeekMonth(event.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="token-stats-query-btn"
-                          onClick={() => {
-                            handleFetchDeepSeekStats().catch(() => undefined);
-                          }}
-                          disabled={deepSeekStatsLoading}
-                        >
-                          {deepSeekStatsLoading ? '查询中...' : '查询'}
-                        </button>
-                      </div>
-
-                      {deepSeekStatsError ? (
-                        <div className="muted block token-stats-error">{deepSeekStatsError}</div>
-                      ) : null}
-
-                      {deepSeekStats ? (
-                        <div className="token-stats-result">
-                          <div className="token-stats-subtitle">余额</div>
-                          {deepSeekStats.balance.items.length === 0 ? (
-                            <div className="muted block">No balance items.</div>
-                          ) : (
-                            <div className="token-stats-balance-list">
-                              {deepSeekStats.balance.items.map(item => (
-                                <div key={item.currency} className="token-stats-balance-item">
-                                  <span>{item.currency}</span>
-                                  <span>Total: {item.totalBalance}</span>
-                                  <span>Granted: {item.grantedBalance}</span>
-                                  <span>Topped: {item.toppedUpBalance}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="token-stats-subtitle">Token</div>
-                          {deepSeekStats.usageUnavailable ? (
-                            <div className="muted block token-stats-error">
-                              {deepSeekStats.usageMessage || 'Usage API unavailable'}
-                            </div>
-                          ) : (
-                            <div className="token-stats-table-wrap">
-                              <table className="token-stats-table">
-                                <thead>
-                                  <tr>
-                                    <th>Bucket</th>
-                                    <th>Input</th>
-                                    <th>Output</th>
-                                    <th>Total</th>
-                                    <th>Cost</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {deepSeekStats.usage.rows.map(row => (
-                                    <tr key={`${row.bucket}-${row.totalTokens}`}>
-                                      <td>{row.bucket}</td>
-                                      <td>{row.inputTokens.toLocaleString()}</td>
-                                      <td>{row.outputTokens.toLocaleString()}</td>
-                                      <td>{row.totalTokens.toLocaleString()}</td>
-                                      <td>{row.cost.toFixed(6)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
+                  ))}
                 </div>
               )}
             </>
@@ -5920,6 +5887,9 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
 
 
 

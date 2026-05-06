@@ -124,6 +124,37 @@ export interface RegistryDeepSeekTokenStats {
   usageUnavailable: boolean;
   usageMessage?: string;
 }
+
+export interface RegistryTokenProviderAccount {
+  id: string;
+  alias: string;
+  displayName: string;
+  source: string;
+  status: 'ok' | 'error';
+  message?: string;
+  email?: string;
+  plan?: string;
+  fiveHourLimit?: string;
+  weeklyLimit?: string;
+  balance: RegistryDeepSeekBalanceView;
+  usage: RegistryDeepSeekUsageView;
+  usageUnavailable: boolean;
+  usageMessage?: string;
+  updatedAt?: string;
+}
+
+export interface RegistryTokenScanProvider {
+  id: string;
+  name: string;
+  accounts: RegistryTokenProviderAccount[];
+}
+
+export interface RegistryTokenScanResult {
+  ok: boolean;
+  updatedAt: string;
+  providers: RegistryTokenScanProvider[];
+}
+
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
   promptIndex: number;
@@ -274,6 +305,9 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
+
+
+
 
 
 
