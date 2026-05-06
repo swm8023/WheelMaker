@@ -61,7 +61,6 @@ import './styles.css';
 
 type Tab = 'chat' | 'file' | 'git';
 type ThemeMode = 'dark' | 'light';
-type SettingsPage = 'main' | 'tokenStats';
 type DirEntries = Record<string, RegistryFsEntry[]>;
 type GitDiffSource = 'commit' | 'worktree';
 type ChatAttachment = {
@@ -1844,7 +1843,6 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
-  const [sidebarSettingsPage, setSidebarSettingsPage] = useState<SettingsPage>('main');
   const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
   const [tokenStatsError, setTokenStatsError] = useState('');
   const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
@@ -1937,6 +1935,7 @@ function App() {
   const [resumeAgentType, setResumeAgentType] = useState('');
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
+  const [tokenStatsPanelOpen, setTokenStatsPanelOpen] = useState(false);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -3526,13 +3525,6 @@ function App() {
     });
   }, [address, autoConnecting, connected]);
 
-  useEffect(() => {
-    if (sidebarSettingsOpen) {
-      return;
-    }
-    setSidebarSettingsPage('main');
-  }, [sidebarSettingsOpen]);
-
   const mergeTokenProviders = useCallback(
     (entries: Array<{hubId: string; projectId: string; result: RegistryTokenScanResult}>): TokenProviderSectionView[] => {
       const sections = new Map<string, TokenProviderSectionView>();
@@ -3615,11 +3607,11 @@ function App() {
   }, [mergeTokenProviders]);
 
   useEffect(() => {
-    if (!sidebarSettingsOpen || sidebarSettingsPage !== 'tokenStats') {
+    if (!tokenStatsPanelOpen) {
       return;
     }
     refreshTokenStats().catch(() => undefined);
-  }, [sidebarSettingsOpen, sidebarSettingsPage, refreshTokenStats]);
+  }, [tokenStatsPanelOpen, refreshTokenStats]);
 
   const clearLocalCache = () => {
     const confirmed = window.confirm(
@@ -3914,6 +3906,7 @@ function App() {
                 className="chat-header-icon-btn"
                 title="New session"
                 onClick={() => {
+                  setTokenStatsPanelOpen(false);
                   setResumeAgentPickerOpen(false);
                   setResumeSessions([]);
                   beginNewChatFlow({ title: '', text: '', blocks: [] });
@@ -3926,6 +3919,7 @@ function App() {
                 className="chat-header-icon-btn"
                 title="Resume session"
                 onClick={() => {
+                  setTokenStatsPanelOpen(false);
                   handleDismissNewChatPicker();
                   setResumeAgentType('');
                   setResumeSessions([]);
@@ -3935,9 +3929,22 @@ function App() {
               >
                 <span className="codicon codicon-history" />
               </button>
+              <button
+                type="button"
+                className="chat-header-icon-btn"
+                title="Token stats"
+                onClick={() => {
+                  handleDismissNewChatPicker();
+                  handleDismissResume();
+                  setTokenStatsError('');
+                  setTokenStatsPanelOpen(true);
+                }}
+              >
+                <span className="codicon codicon-graph" />
+              </button>
             </div>
           </div>
-          {chatSessions.length === 0 && !resumeAgentPickerOpen && !newChatAgentPickerOpen ? (
+          {chatSessions.length === 0 && !resumeAgentPickerOpen && !newChatAgentPickerOpen && !tokenStatsPanelOpen ? (
             <div className="chat-empty-hint">Start a new chat or resume a previous session</div>
           ) : null}
           {resumeAgentPickerOpen ? (
@@ -4020,6 +4027,112 @@ function App() {
                   </div>
                 </>
               ) : null}
+            </div>
+          ) : null}
+                    {tokenStatsPanelOpen ? (
+            <div className="chat-agent-picker-card chat-agent-picker-overlay token-stats-overlay-card">
+              <div className="chat-agent-picker-header">
+                <div className="chat-agent-picker-header-main">
+                  <span className="codicon codicon-graph" />
+                  <span className="chat-agent-picker-title">Token Stats</span>
+                </div>
+                <div className="token-stats-header-actions">
+                  <button
+                    type="button"
+                    className="token-stats-refresh-btn token-stats-refresh-inline"
+                    onClick={() => {
+                      refreshTokenStats().catch(() => undefined);
+                    }}
+                    disabled={tokenStatsLoading}
+                  >
+                    {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-agent-picker-close"
+                    onClick={() => {
+                      setTokenStatsPanelOpen(false);
+                    }}
+                    aria-label="Close token stats"
+                  >
+                    <span className="codicon codicon-close" />
+                  </button>
+                </div>
+              </div>
+              <div className="list token-stats-page token-stats-compact-page">
+                {tokenStatsUpdatedAt ? (
+                  <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
+                ) : null}
+                {tokenStatsLoading ? (
+                  <div className="muted block">Scanning online hubs...</div>
+                ) : null}
+                {tokenStatsError ? (
+                  <div className="muted block token-stats-error">{tokenStatsError}</div>
+                ) : null}
+                {!tokenStatsLoading && tokenStatsProviders.length === 0 && !tokenStatsError ? (
+                  <div className="muted block">No token accounts discovered.</div>
+                ) : null}
+
+                {tokenStatsProviders.map(provider => (
+                  <div key={provider.id} className="token-stats-card">
+                    <div className="token-stats-card-title">{provider.name}</div>
+                    {provider.accounts.length === 0 ? (
+                      <div className="muted block">No available accounts.</div>
+                    ) : (
+                      <div className="token-stats-account-list">
+                        {provider.accounts.map(account => {
+                          const usageTotal = (account.usage?.rows || []).reduce(
+                            (sum, row) => sum + (row.totalTokens || 0),
+                            0,
+                          );
+                          return (
+                            <div key={account.id} className="token-stats-account-item">
+                              <div className="token-stats-account-header">
+                                <span className="token-stats-account-name">
+                                  {(account.alias || '').trim().toLowerCase() === 'current'
+                                    ? (account.displayName || account.email || '(unnamed)')
+                                    : (account.alias || account.displayName || account.email || '(unnamed)')}
+                                </span>
+                                <span className="token-stats-account-hub">{account.hubId}</span>
+                                <span
+                                  className={`token-stats-account-status ${
+                                    account.status === 'ok' ? 'ok' : 'error'
+                                  }`}
+                                >
+                                  {account.status === 'ok' ? 'OK' : 'ERROR'}
+                                </span>
+                              </div>
+                              <div className="token-stats-account-meta">
+                                {account.email ? <span>{account.email}</span> : null}
+                                {account.plan ? <span>Plan: {account.plan}</span> : null}
+                              </div>
+                              {account.message ? (
+                                <div className="token-stats-account-error">{account.message}</div>
+                              ) : null}
+                              {provider.id === 'codex' ? (
+                                <div className="token-stats-account-metrics token-stats-account-metrics-codex">
+                                  <span>5h: {account.fiveHourLimit || '-'}</span>
+                                  <span>Week: {account.weeklyLimit || '-'}</span>
+                                </div>
+                              ) : null}
+                              {provider.id === 'deepseek' ? (
+                                <div className="token-stats-account-metrics token-stats-account-metrics-deepseek">
+                                  <span>
+                                    Balance: {(account.balance?.items || [])
+                                      .map(item => `${item.currency}:${item.totalBalance}`)
+                                      .join(' | ') || '-'}
+                                  </span>
+                                  <span>Tokens: {usageTotal.toLocaleString()}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
           {newChatAgentPickerOpen && pendingNewChatDraft ? (
@@ -4632,237 +4745,124 @@ function App() {
           {sidebarSettingsOpen ? (
             <>
               <div className="section-title">SETTINGS</div>
-              {sidebarSettingsPage === 'main' ? (
-                <div className="list">
-                  <label className="switch-row sidebar-setting-row">
-                    <span>Dark Mode</span>
-                    <input
-                      type="checkbox"
-                      checked={themeMode === 'dark'}
-                      onChange={e =>
-                        setThemeMode(e.target.checked ? 'dark' : 'light')
-                      }
-                    />
-                  </label>
-                  <label className="switch-row sidebar-setting-row">
-                    <span>Code Theme</span>
-                    <select
-                      className="sidebar-setting-select"
-                      value={codeTheme}
-                      onChange={event => {
-                        const next = event.target.value;
-                        if (isCodeThemeId(next)) setCodeTheme(next);
-                      }}
-                    >
-                      <option
-                        key={CODE_THEME_OPTIONS[0].id}
-                        value={CODE_THEME_OPTIONS[0].id}
-                      >
-                        {CODE_THEME_OPTIONS[0].label}
-                      </option>
-                      {CODE_THEME_OPTION_GROUPS.map(group => (
-                        <optgroup key={group.label} label={group.label}>
-                          {group.options.map(item => (
-                            <option key={item.id} value={item.id}>
-                              {item.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="switch-row sidebar-setting-row">
-                    <span>Code Font</span>
-                    <select
-                      className="sidebar-setting-select"
-                      value={codeFont}
-                      onChange={event => {
-                        const next = event.target.value;
-                        if (isCodeFontId(next)) setCodeFont(next);
-                      }}
-                    >
-                      {CODE_FONT_OPTIONS.map(item => (
-                        <option key={item.id} value={item.id}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="switch-row sidebar-setting-row">
-                    <span>Font Size</span>
-                    <select
-                      className="sidebar-setting-select"
-                      value={String(codeFontSize)}
-                      onChange={event => {
-                        setCodeFontSize(
-                          clampCodeFontSize(Number(event.target.value)),
-                        );
-                      }}
-                    >
-                      {CODE_FONT_SIZE_OPTIONS.map(size => (
-                        <option key={size} value={size}>
-                          {size}px
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="switch-row sidebar-setting-row">
-                    <span>Line Height</span>
-                    <select
-                      className="sidebar-setting-select"
-                      value={String(codeLineHeight)}
-                      onChange={event => {
-                        setCodeLineHeight(
-                          clampCodeLineHeight(Number(event.target.value)),
-                        );
-                      }}
-                    >
-                      {CODE_LINE_HEIGHT_OPTIONS.map(v => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="switch-row sidebar-setting-row">
-                    <span>Tab Size</span>
-                    <select
-                      className="sidebar-setting-select"
-                      value={String(codeTabSize)}
-                      onChange={event => {
-                        setCodeTabSize(
-                          clampCodeTabSize(Number(event.target.value)),
-                        );
-                      }}
-                    >
-                      {CODE_TAB_SIZE_OPTIONS.map(v => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <button
-                    type="button"
-                    className="sidebar-secondary-btn"
-                    onClick={() => {
-                      setSidebarSettingsPage('tokenStats');
-                      setTokenStatsError('');
-                      refreshTokenStats().catch(() => undefined);
+              <div className="list">
+                <label className="switch-row sidebar-setting-row">
+                  <span>Dark Mode</span>
+                  <input
+                    type="checkbox"
+                    checked={themeMode === 'dark'}
+                    onChange={e =>
+                      setThemeMode(e.target.checked ? 'dark' : 'light')
+                    }
+                  />
+                </label>
+                <label className="switch-row sidebar-setting-row">
+                  <span>Code Theme</span>
+                  <select
+                    className="sidebar-setting-select"
+                    value={codeTheme}
+                    onChange={event => {
+                      const next = event.target.value;
+                      if (isCodeThemeId(next)) setCodeTheme(next);
                     }}
                   >
-                    Token统计
-                  </button>
-
-                  <button
-                    type="button"
-                    className="sidebar-clear-cache-btn"
-                    onClick={clearLocalCache}
+                    <option
+                      key={CODE_THEME_OPTIONS[0].id}
+                      value={CODE_THEME_OPTIONS[0].id}
+                    >
+                      {CODE_THEME_OPTIONS[0].label}
+                    </option>
+                    {CODE_THEME_OPTION_GROUPS.map(group => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.options.map(item => (
+                          <option key={item.id} value={item.id}>
+                            {item.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </label>
+                <label className="switch-row sidebar-setting-row">
+                  <span>Code Font</span>
+                  <select
+                    className="sidebar-setting-select"
+                    value={codeFont}
+                    onChange={event => {
+                      const next = event.target.value;
+                      if (isCodeFontId(next)) setCodeFont(next);
+                    }}
                   >
-                    Clear Local Cache (Keep Token)
-                  </button>
-                </div>
-              ) : (
-                <div className="list token-stats-page">
-                  <div className="token-stats-header-row">
-                    <button
-                      type="button"
-                      className="token-stats-back-btn"
-                      onClick={() => {
-                        setSidebarSettingsPage('main');
-                      }}
-                    >
-                      <span className="codicon codicon-arrow-left" />
-                      <span>Back</span>
-                    </button>
-                    <div className="token-stats-title">Token统计</div>
-                    <button
-                      type="button"
-                      className="token-stats-refresh-btn"
-                      onClick={() => {
-                        refreshTokenStats().catch(() => undefined);
-                      }}
-                      disabled={tokenStatsLoading}
-                    >
-                      {tokenStatsLoading ? '刷新中...' : '刷新'}
-                    </button>
-                  </div>
+                    {CODE_FONT_OPTIONS.map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="switch-row sidebar-setting-row">
+                  <span>Font Size</span>
+                  <select
+                    className="sidebar-setting-select"
+                    value={String(codeFontSize)}
+                    onChange={event => {
+                      setCodeFontSize(
+                        clampCodeFontSize(Number(event.target.value)),
+                      );
+                    }}
+                  >
+                    {CODE_FONT_SIZE_OPTIONS.map(size => (
+                      <option key={size} value={size}>
+                        {size}px
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="switch-row sidebar-setting-row">
+                  <span>Line Height</span>
+                  <select
+                    className="sidebar-setting-select"
+                    value={String(codeLineHeight)}
+                    onChange={event => {
+                      setCodeLineHeight(
+                        clampCodeLineHeight(Number(event.target.value)),
+                      );
+                    }}
+                  >
+                    {CODE_LINE_HEIGHT_OPTIONS.map(v => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="switch-row sidebar-setting-row">
+                  <span>Tab Size</span>
+                  <select
+                    className="sidebar-setting-select"
+                    value={String(codeTabSize)}
+                    onChange={event => {
+                      setCodeTabSize(
+                        clampCodeTabSize(Number(event.target.value)),
+                      );
+                    }}
+                  >
+                    {CODE_TAB_SIZE_OPTIONS.map(v => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-                  {tokenStatsUpdatedAt ? (
-                    <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
-                  ) : null}
-                  {tokenStatsLoading ? (
-                    <div className="muted block">Scanning online hubs...</div>
-                  ) : null}
-                  {tokenStatsError ? (
-                    <div className="muted block token-stats-error">{tokenStatsError}</div>
-                  ) : null}
-                  {!tokenStatsLoading && tokenStatsProviders.length === 0 && !tokenStatsError ? (
-                    <div className="muted block">No token accounts discovered.</div>
-                  ) : null}
-
-                  {tokenStatsProviders.map(provider => (
-                    <div key={provider.id} className="token-stats-card">
-                      <div className="token-stats-card-title">{provider.name}</div>
-                      {provider.accounts.length === 0 ? (
-                        <div className="muted block">No available accounts.</div>
-                      ) : (
-                        <div className="token-stats-account-list">
-                          {provider.accounts.map(account => {
-                            const usageTotal = (account.usage?.rows || []).reduce(
-                              (sum, row) => sum + (row.totalTokens || 0),
-                              0,
-                            );
-                            return (
-                              <div key={account.id} className="token-stats-account-item">
-                                <div className="token-stats-account-header">
-                                  <span className="token-stats-account-name">
-                                    {account.alias || account.displayName || '(unnamed)'}
-                                  </span>
-                                  <span className="token-stats-account-hub">{account.hubId}</span>
-                                  <span
-                                    className={`token-stats-account-status ${
-                                      account.status === 'ok' ? 'ok' : 'error'
-                                    }`}
-                                  >
-                                    {account.status === 'ok' ? 'OK' : 'ERROR'}
-                                  </span>
-                                </div>
-                                <div className="token-stats-account-meta">
-                                  {account.email ? <span>{account.email}</span> : null}
-                                  {account.plan ? <span>Plan: {account.plan}</span> : null}
-                                  {account.source ? <span>Source: {account.source}</span> : null}
-                                </div>
-                                {account.message ? (
-                                  <div className="token-stats-account-error">{account.message}</div>
-                                ) : null}
-                                {provider.id === 'codex' ? (
-                                  <div className="token-stats-account-metrics">
-                                    <span>5h: {account.fiveHourLimit || '-'}</span>
-                                    <span>Week: {account.weeklyLimit || '-'}</span>
-                                  </div>
-                                ) : null}
-                                {provider.id === 'deepseek' ? (
-                                  <div className="token-stats-account-metrics">
-                                    <span>
-                                      Balance: 
-                                      {(account.balance?.items || [])
-                                        .map(item => `${item.currency}:${item.totalBalance}`)
-                                        .join(' | ') || '-'}
-                                    </span>
-                                    <span>Token: {usageTotal.toLocaleString()}</span>
-                                  </div>
-                                ) : null}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
+                <button
+                  type="button"
+                  className="sidebar-clear-cache-btn"
+                  onClick={clearLocalCache}
+                >
+                  Clear Local Cache (Keep Token)
+                </button>
+              </div>
             </>
           ) : (
             renderSidebarMain()
@@ -5887,6 +5887,20 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
