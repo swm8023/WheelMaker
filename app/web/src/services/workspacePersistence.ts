@@ -1,4 +1,4 @@
-import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
+import type {RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
 import {
   DEFAULT_CODE_FONT,
   DEFAULT_CODE_FONT_SIZE,
@@ -58,35 +58,9 @@ export type PersistedGlobalState = {
 };
 
 type PersistedWorkspaceState = {
-  version: 3;
+  version: 4;
   global: PersistedGlobalState;
   projects: Record<string, PersistedProjectState>;
-};
-
-type LegacyDiffCacheEntry = {
-  diff: string;
-  isBinary: boolean;
-  truncated: boolean;
-  updatedAt: number;
-};
-
-type LegacyProjectState = {
-  dirEntries?: Record<string, RegistryFsEntry[]>;
-  expandedDirs?: string[];
-  selectedFile?: string;
-  pinnedFiles?: string[];
-  gitCurrentBranch?: string;
-  commits?: RegistryGitCommit[];
-  selectedCommit?: string;
-  commitFilesBySha?: Record<string, RegistryGitCommitFile[]>;
-  selectedDiff?: string;
-  diffCacheByKey?: Record<string, LegacyDiffCacheEntry>;
-};
-
-type LegacyWorkspaceState = {
-  version?: number;
-  global?: Partial<PersistedGlobalState>;
-  projects?: Record<string, Partial<LegacyProjectState>>;
 };
 
 export type WorkspaceDatabaseDump = {
@@ -94,16 +68,15 @@ export type WorkspaceDatabaseDump = {
   projects: Array<{projectId: string; stateJson: string; updatedAt: number}>;
   projectCommits: Array<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>;
   fileCache: Array<{k: string; hash: string; v: string; updatedAt: number}>;
-  diffCache: Array<{k: string; v: string; metaJson: string; updatedAt: number}>;
+  diffCache: Array<{k: string; v: string; updatedAt: number}>;
   meta: Array<{k: string; v: string; updatedAt: number}>;
   localStorage: {address: string; token: string};
 };
 
-const STORAGE_KEY = 'wheelmaker.workspace.state.v1';
 const LOCAL_ADDRESS_KEY = 'wheelmaker.workspace.address';
 const LOCAL_TOKEN_KEY = 'wheelmaker.workspace.token';
 const WORKSPACE_DB_NAME = 'wheelmaker.workspace.db';
-const WORKSPACE_DB_VERSION = 2;
+const WORKSPACE_DB_VERSION = 3;
 const TABLE_GLOBAL_KV = 'wm_global_kv';
 const TABLE_PROJECT_STATE = 'wm_project_state';
 const TABLE_PROJECT_COMMITS = 'wm_project_commits';
@@ -164,7 +137,7 @@ function defaultProjectCommitsState(): PersistedProjectCommitsState {
 
 function defaultWorkspaceState(): PersistedWorkspaceState {
   return {
-    version: 3,
+    version: 4,
     global: defaultGlobalState(),
     projects: {},
   };
@@ -242,13 +215,6 @@ type RawKVRow = {
   updatedAt: number;
 };
 
-type RawFileCacheRow = {
-  k: string;
-  hash: string;
-  v: string;
-  updatedAt: number;
-};
-
 type RawProjectStateRow = {
   projectId: string;
   stateJson: string;
@@ -262,10 +228,16 @@ type RawProjectCommitsRow = {
   updatedAt: number;
 };
 
+type RawFileCacheRow = {
+  k: string;
+  hash: string;
+  v: string;
+  updatedAt: number;
+};
+
 type RawDiffCacheRow = {
   k: string;
   v: string;
-  metaJson: string;
   updatedAt: number;
 };
 
@@ -370,6 +342,14 @@ class WorkspaceDatabase {
   }
 }
 
+function sortByKey<T extends {k: string}>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.k.localeCompare(b.k));
+}
+
+function sortByProjectId<T extends {projectId: string}>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.projectId.localeCompare(b.projectId));
+}
+
 export class WorkspacePersistenceRepository {
   private readonly db = new WorkspaceDatabase();
   private state: PersistedWorkspaceState;
@@ -388,7 +368,6 @@ export class WorkspacePersistenceRepository {
   }
 
   private async initialize(): Promise<void> {
-    const legacy = this.loadLegacyState();
     const [globalRows, projectRows, projectCommitRows, diffRows, fileRows] = await Promise.all([
       this.db.getAllRows<RawKVRow>(TABLE_GLOBAL_KV),
       this.db.getAllRows<RawProjectStateRow>(TABLE_PROJECT_STATE),
@@ -404,26 +383,16 @@ export class WorkspacePersistenceRepository {
       diffRows.length > 0 ||
       fileRows.length > 0;
 
-    if (hasPersisted) {
-      this.state = this.fromDbRows(globalRows, projectRows);
-      this.restoreProjectCommits(projectCommitRows);
-      this.restoreDiffCache(diffRows);
-      this.restoreFileCache(fileRows);
-      return;
-    }
-
-    if (legacy) {
-      this.state = legacy.state;
-      Object.assign(this.projectCommits, legacy.projectCommits);
-      this.saveLocalIdentityState(this.state.global);
-      this.restoreLegacyDiffCache(legacy.diffRows);
+    if (!hasPersisted) {
+      this.state = defaultWorkspaceState();
       await this.saveAllStateToDb();
-      this.clearLegacyState();
       return;
     }
 
-    this.state = defaultWorkspaceState();
-    await this.saveAllStateToDb();
+    this.state = this.fromDbRows(globalRows, projectRows);
+    this.restoreProjectCommits(projectCommitRows);
+    this.restoreDiffCache(diffRows);
+    this.restoreFileCache(fileRows);
   }
 
   private fromDbRows(globalRows: RawKVRow[], projectRows: RawProjectStateRow[]): PersistedWorkspaceState {
@@ -441,7 +410,7 @@ export class WorkspacePersistenceRepository {
     }
 
     return {
-      version: 3,
+      version: 4,
       global: sanitizeGlobalState({...base.global, ...globalPatch, ...this.readLocalIdentityState()}),
       projects,
     };
@@ -464,11 +433,11 @@ export class WorkspacePersistenceRepository {
   private restoreDiffCache(rows: RawDiffCacheRow[]): void {
     this.diffCache.clear();
     for (const row of rows) {
-      const meta = tryParse<{isBinary?: boolean; truncated?: boolean}>(row.metaJson, {});
+      const payload = tryParse<{diff?: string; isBinary?: boolean; truncated?: boolean}>(row.v, {});
       this.diffCache.set(row.k, {
-        diff: typeof row.v === 'string' ? row.v : '',
-        isBinary: !!meta.isBinary,
-        truncated: !!meta.truncated,
+        diff: typeof payload.diff === 'string' ? payload.diff : '',
+        isBinary: !!payload.isBinary,
+        truncated: !!payload.truncated,
         updatedAt: row.updatedAt,
       });
     }
@@ -482,68 +451,6 @@ export class WorkspacePersistenceRepository {
         value: row.v || '',
         updatedAt: row.updatedAt,
       });
-    }
-  }
-
-  private loadLegacyState(): {
-    state: PersistedWorkspaceState;
-    projectCommits: Record<string, PersistedProjectCommitsState>;
-    diffRows: Array<{k: string; payload: DiffCacheEntry}>;
-  } | null {
-    if (typeof window === 'undefined') return null;
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as LegacyWorkspaceState;
-
-      const next: PersistedWorkspaceState = {
-        version: 3,
-        global: sanitizeGlobalState(parsed.global),
-        projects: {},
-      };
-      const projectCommits: Record<string, PersistedProjectCommitsState> = {};
-      const diffRows: Array<{k: string; payload: DiffCacheEntry}> = [];
-
-      const projects = parsed.projects ?? {};
-      for (const [projectId, project] of Object.entries(projects)) {
-        if (!projectId || !project) continue;
-        next.projects[projectId] = sanitizeProjectState(project);
-        projectCommits[projectId] = sanitizeProjectCommitsState(project as Partial<PersistedProjectCommitsState>);
-
-        const diffCacheByKey = project.diffCacheByKey ?? {};
-        for (const [key, value] of Object.entries(diffCacheByKey)) {
-          if (!key || !value || typeof value.diff !== 'string') continue;
-          diffRows.push({
-            k: diffCacheKey(projectId, key),
-            payload: {
-              diff: value.diff,
-              isBinary: !!value.isBinary,
-              truncated: !!value.truncated,
-              updatedAt: Number.isFinite(value.updatedAt) ? value.updatedAt : Date.now(),
-            },
-          });
-        }
-      }
-
-      return {state: next, projectCommits, diffRows};
-    } catch {
-      return null;
-    }
-  }
-
-  private restoreLegacyDiffCache(rows: Array<{k: string; payload: DiffCacheEntry}>): void {
-    this.diffCache.clear();
-    for (const row of rows) {
-      this.diffCache.set(row.k, row.payload);
-    }
-  }
-
-  private clearLegacyState(): void {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      // ignore
     }
   }
 
@@ -596,8 +503,11 @@ export class WorkspacePersistenceRepository {
     for (const [k, entry] of this.diffCache.entries()) {
       await this.db.putRow(TABLE_DIFF_CACHE, {
         k,
-        v: entry.diff,
-        metaJson: serialize({isBinary: entry.isBinary, truncated: entry.truncated}),
+        v: serialize({
+          diff: entry.diff,
+          isBinary: entry.isBinary,
+          truncated: entry.truncated,
+        }),
         updatedAt: entry.updatedAt,
       });
     }
@@ -613,12 +523,7 @@ export class WorkspacePersistenceRepository {
 
     await this.db.putRow(TABLE_META, {
       k: 'schemaVersion',
-      v: serialize(2),
-      updatedAt: now,
-    });
-    await this.db.putRow(TABLE_META, {
-      k: 'migratedAt',
-      v: serialize(new Date(now).toISOString()),
+      v: serialize(3),
       updatedAt: now,
     });
   }
@@ -689,19 +594,21 @@ export class WorkspacePersistenceRepository {
   patchGlobalState(patch: Partial<PersistedGlobalState>): void {
     this.state.global = sanitizeGlobalState({...this.state.global, ...patch});
     this.saveLocalIdentityState(this.state.global);
+
     const now = Date.now();
+    const next = cloneState(this.state.global);
     void this.ready().then(async () => {
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.deepseekApiKey, v: serialize(this.state.global.deepseekApiKey), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.themeMode, v: serialize(this.state.global.themeMode), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTheme, v: serialize(this.state.global.codeTheme), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeFont, v: serialize(this.state.global.codeFont), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeFontSize, v: serialize(this.state.global.codeFontSize), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeLineHeight, v: serialize(this.state.global.codeLineHeight), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTabSize, v: serialize(this.state.global.codeTabSize), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.wrapLines, v: serialize(this.state.global.wrapLines), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now});
-      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.deepseekApiKey, v: serialize(next.deepseekApiKey), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.themeMode, v: serialize(next.themeMode), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTheme, v: serialize(next.codeTheme), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeFont, v: serialize(next.codeFont), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeFontSize, v: serialize(next.codeFontSize), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeLineHeight, v: serialize(next.codeLineHeight), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTabSize, v: serialize(next.codeTabSize), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.wrapLines, v: serialize(next.wrapLines), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
     }).catch(() => undefined);
   }
 
@@ -766,8 +673,11 @@ export class WorkspacePersistenceRepository {
     if (!payload) return;
     void this.ready().then(() => this.db.putRow(TABLE_DIFF_CACHE, {
       k,
-      v: payload.diff,
-      metaJson: serialize({isBinary: payload.isBinary, truncated: payload.truncated}),
+      v: serialize({
+        diff: payload.diff,
+        isBinary: payload.isBinary,
+        truncated: payload.truncated,
+      }),
       updatedAt: payload.updatedAt,
     })).catch(() => undefined);
   }
@@ -821,6 +731,11 @@ export class WorkspacePersistenceRepository {
         TABLE_FILE_CACHE,
       ]);
       await this.db.putRow(TABLE_META, {
+        k: 'schemaVersion',
+        v: serialize(3),
+        updatedAt: now,
+      });
+      await this.db.putRow(TABLE_META, {
         k: 'cacheClearedAt',
         v: serialize(new Date(now).toISOString()),
         updatedAt: now,
@@ -835,17 +750,18 @@ export class WorkspacePersistenceRepository {
       this.db.getAllRows<{projectId: string; stateJson: string; updatedAt: number}>(TABLE_PROJECT_STATE),
       this.db.getAllRows<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>(TABLE_PROJECT_COMMITS),
       this.db.getAllRows<{k: string; hash: string; v: string; updatedAt: number}>(TABLE_FILE_CACHE),
-      this.db.getAllRows<{k: string; v: string; metaJson: string; updatedAt: number}>(TABLE_DIFF_CACHE),
+      this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_DIFF_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),
     ]);
     return {
-      global,
-      projects,
-      projectCommits,
-      fileCache,
-      diffCache,
-      meta,
+      global: sortByKey(global),
+      projects: sortByProjectId(projects),
+      projectCommits: sortByProjectId(projectCommits),
+      fileCache: sortByKey(fileCache),
+      diffCache: sortByKey(diffCache),
+      meta: sortByKey(meta),
       localStorage: this.readLocalIdentityState(),
     };
   }
 }
+

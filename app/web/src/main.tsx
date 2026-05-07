@@ -3751,6 +3751,23 @@ function App() {
       });
   };
 
+  const exportDatabaseDump = () => {
+    if (!databaseDumpText || databaseLoading || databaseError) {
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `wheelmaker-local-db-${timestamp}.json`;
+    const blob = new Blob([databaseDumpText], {
+      type: 'application/json;charset=utf-8',
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = fileName;
+    link.click();
+    URL.revokeObjectURL(objectUrl);
+  };
+
   const clearLocalCache = () => {
     const confirmed = window.confirm(
       'Clear all local cache data except token and address?',
@@ -5065,17 +5082,28 @@ function App() {
                   <div className="database-panel">
                     <div className="database-panel-header">
                       <strong>Local Database</strong>
-                      <button
-                        type="button"
-                        className="git-section-btn"
-                        onClick={() => {
-                          setDatabasePanelOpen(false);
-                          setDatabaseError('');
-                        }}
-                        aria-label="Close database panel"
-                      >
-                        <span className="codicon codicon-close" />
-                      </button>
+                      <div className="database-panel-actions">
+                        <button
+                          type="button"
+                          className="git-section-btn"
+                          onClick={exportDatabaseDump}
+                          disabled={databaseLoading || !!databaseError || !databaseDumpText}
+                          title="Export current database dump"
+                        >
+                          Export
+                        </button>
+                        <button
+                          type="button"
+                          className="git-section-btn"
+                          onClick={() => {
+                            setDatabasePanelOpen(false);
+                            setDatabaseError('');
+                          }}
+                          aria-label="Close database panel"
+                        >
+                          <span className="codicon codicon-close" />
+                        </button>
+                      </div>
                     </div>
                     {databaseLoading ? (
                       <div className="muted block">Loading database...</div>

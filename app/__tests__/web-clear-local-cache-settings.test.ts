@@ -17,11 +17,20 @@ describe('web clear local cache settings', () => {
     expect(workspaceStore).toContain('clearLocalCachePreservingToken(): void {');
     expect(workspaceStore).toContain('this.persistence.clearCachePreservingToken();');
 
+    expect(mainTsx).toContain('exportDatabaseDump');
+    expect(mainTsx).toContain('Export current database dump');
+    expect(mainTsx).toContain('wheelmaker-local-db-');
+
     expect(workspacePersistence).toContain('const LOCAL_ADDRESS_KEY =');
     expect(workspacePersistence).toContain('const LOCAL_TOKEN_KEY =');
+    expect(workspacePersistence).toContain('const WORKSPACE_DB_VERSION = 3;');
     expect(workspacePersistence).toContain('saveLocalIdentityState');
     expect(workspacePersistence).toContain('const preservedAddress =');
     expect(workspacePersistence).toContain('this.state.global.address = preservedAddress;');
     expect(workspacePersistence).toContain('this.state.global.token = preservedToken;');
+    expect(workspacePersistence).not.toContain('STORAGE_KEY');
+    expect(workspacePersistence).not.toContain('loadLegacyState');
+    expect(workspacePersistence).not.toContain('metaJson');
   });
 });
+

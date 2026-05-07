@@ -696,6 +696,12 @@ body,
   font-size: 12px;
 }
 
+.database-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .database-dump {
   margin: 0;
   max-height: 260px;
@@ -707,12 +713,6 @@ body,
   background: transparent;
   white-space: pre;
 }
-
-
-
-
-
-
 
 
 .header-spacer {
@@ -3293,5 +3293,4 @@ body,
     transform: translateX(0);
   }
 }
-
 
