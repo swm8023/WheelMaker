@@ -3680,7 +3680,7 @@ function App() {
     clearReconnectTimer();
     reconnectStartedAtRef.current = null;
     const shouldKeepWorkspaceVisible =
-      reason !== 'stop' && !!tokenRef.current.trim() && !!projectIdRef.current;
+      reason !== 'stop' && !!addressRef.current.trim() && !!projectIdRef.current;
     setReconnecting(shouldKeepWorkspaceVisible);
     setAutoConnecting(false);
     setConnected(false);
@@ -3734,9 +3734,7 @@ function App() {
     const supervisor = pwaFoundation.createConnectionSupervisor({
       connect: async () => {
         const canSilentReconnect =
-          !!tokenRef.current.trim() &&
-          !!addressRef.current.trim() &&
-          !!projectIdRef.current;
+          !!addressRef.current.trim() && !!projectIdRef.current;
         if (!canSilentReconnect) {
           return;
         }
@@ -4118,7 +4116,7 @@ function App() {
         return;
       }
       const canSilentReconnect =
-        !!tokenRef.current.trim() && !!projectIdRef.current;
+        !!addressRef.current.trim() && !!projectIdRef.current;
       if (!canSilentReconnect) {
         reconnectStartedAtRef.current = null;
         setReconnecting(false);
@@ -6130,7 +6128,7 @@ function App() {
 
   const hasCachedWorkspace = projects.length > 0 || !!projectId;
   const keepWorkspaceVisible =
-    reconnecting && !!token.trim() && hasCachedWorkspace;
+    reconnecting && hasCachedWorkspace;
 
   if (!connected && !keepWorkspaceVisible) {
     return (
@@ -6359,6 +6357,7 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
+
 
 
 
