@@ -2889,7 +2889,14 @@ function App() {
     if (!activeProjectId || !sessionId) return [];
     const cached = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
     if (!cached) {
-      return [];
+      const inMemoryMessages = (chatMessageStoreRef.current[sessionId] ?? []).filter(
+        message => !shouldSuppressChatMessage(message),
+      );
+      if (inMemoryMessages.length === 0) {
+        chatSyncIndexRef.current[sessionId] = 0;
+        chatSyncSubIndexRef.current[sessionId] = 0;
+      }
+      return inMemoryMessages;
     }
 
     const cachedMessages = [...cached.messages];
@@ -2988,23 +2995,28 @@ function App() {
     if (!activeProjectId || !sessionId) return false;
     setChatLoading(true);
     try {
-      const useIncremental = options?.forceFull
+      const requestedIncremental = options?.forceFull
         ? false
         : (options?.incremental ?? true);
-      const checkpointPromptIndex = useIncremental
-        ? chatSyncIndexRef.current[sessionId] ?? 0
-        : 0;
-      const checkpointTurnIndex = useIncremental
-        ? chatSyncSubIndexRef.current[sessionId] ?? 0
-        : 0;
       // Snapshot existing messages BEFORE the await so the base is
       // consistent with the cursor. Live session.message events may
       // mutate chatMessageStoreRef during the network round-trip.
       const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
+      const checkpointPromptIndex = requestedIncremental
+        ? chatSyncIndexRef.current[sessionId] ?? 0
+        : 0;
+      const checkpointTurnIndex = requestedIncremental
+        ? chatSyncSubIndexRef.current[sessionId] ?? 0
+        : 0;
+      const fallbackToFullRead =
+        requestedIncremental &&
+        existingMessages.length === 0 &&
+        (checkpointPromptIndex > 0 || checkpointTurnIndex > 0);
+      const useIncremental = requestedIncremental && !fallbackToFullRead;
       const result = await service.readSession(
         sessionId,
-        checkpointPromptIndex,
-        checkpointTurnIndex,
+        useIncremental ? checkpointPromptIndex : 0,
+        useIncremental ? checkpointTurnIndex : 0,
       );
       if (
         options?.preserveUserSelection &&
@@ -6347,5 +6359,6 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
+
 
 
