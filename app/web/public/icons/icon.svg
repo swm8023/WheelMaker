@@ -23,15 +23,19 @@
 
   <rect x="0" y="0" width="512" height="512" rx="96" fill="url(#bg)"/>
 
-  <path
-    d="M 86 182 L 124 182 L 160 260 L 196 182 L 228 182 L 288 320 L 254 320 L 196 236 L 170 320 L 146 320 Z"
-    fill="url(#wmBlue)"
-    filter="url(#glowBlue)"
-  />
+  <g transform="translate(-6 0)">
+    <g transform="translate(256 256) scale(0.86) translate(-256 -256)">
+      <path
+        d="M 86 182 L 124 182 L 160 260 L 196 182 L 228 182 L 288 320 L 254 320 L 196 236 L 170 320 L 146 320 Z"
+        fill="url(#wmBlue)"
+        filter="url(#glowBlue)"
+      />
 
-  <path
-    d="M 268 236 L 296 182 L 338 260 L 380 182 L 442 320 L 408 320 L 380 262 L 344 320 L 332 320 L 296 262 L 282 288 L 268 264 Z"
-    fill="url(#wmWhite)"
-    filter="url(#glowWhite)"
-  />
+      <path
+        d="M 268 236 L 296 182 L 338 260 L 380 182 L 442 320 L 408 320 L 380 262 L 344 320 L 332 320 L 296 262 L 282 288 L 268 264 Z"
+        fill="url(#wmWhite)"
+        filter="url(#glowWhite)"
+      />
+    </g>
+  </g>
 </svg>
