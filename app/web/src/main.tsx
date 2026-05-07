@@ -2241,10 +2241,8 @@ function App() {
     [projectId, projects],
   );
   useEffect(() => {
-    const baseTitle = 'WheelMaker';
-    const projectTitle = (currentProjectName || '').trim();
-    document.title = projectTitle ? `${baseTitle} - ${projectTitle}` : baseTitle;
-  }, [currentProjectName]);
+    document.title = 'WheelMaker';
+  }, []);
   const project = currentProject;
   const availableChatAgents = useMemo(() => {
     const seen = new Set<string>();
