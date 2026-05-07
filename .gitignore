@@ -4,6 +4,10 @@ server/bin/**/*
 
 # 运行时状态
 .wheelmaker/
+server/.tmp/
+.tmp_codex_acc/
+.claude/
+app/node_modules/
 
 # Go build artifacts
 *.exe

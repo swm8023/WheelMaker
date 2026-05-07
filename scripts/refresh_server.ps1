@@ -298,9 +298,21 @@ function Build-Binary {
   Write-Step ("build {0}: {1}" -f $Label, $Out)
   if ($WhatIf) { Write-Host ("[whatif] go build -o {0} {1}" -f $Out, $Pkg); return }
   New-Item -ItemType Directory -Path (Split-Path $Out -Parent) -Force | Out-Null
+  New-Item -ItemType Directory -Path $script:GoBuildCache -Force | Out-Null
+  $previousGoCache = $env:GOCACHE
   Push-Location $script:ServerRoot
-  try { Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $Out, $Pkg) -FailureMessage ("go build failed: {0}" -f $Label) }
-  finally { Pop-Location }
+  try {
+    $env:GOCACHE = $script:GoBuildCache
+    Invoke-Checked -FilePath "go" -Arguments @("build", "-o", $Out, $Pkg) -FailureMessage ("go build failed: {0}" -f $Label)
+  }
+  finally {
+    if ($null -ne $previousGoCache -and $previousGoCache -ne "") {
+      $env:GOCACHE = $previousGoCache
+    } else {
+      Remove-Item Env:GOCACHE -ErrorAction SilentlyContinue
+    }
+    Pop-Location
+  }
 }
 
 function Test-ServiceExists {
@@ -748,15 +760,18 @@ function Get-UpdaterServiceArguments {
 $script:RepoRoot = if ([string]::IsNullOrWhiteSpace($RepoRoot)) { (Resolve-Path (Join-Path $PSScriptRoot "..")).Path } else { (Resolve-Path $RepoRoot).Path }
 $script:ServerRoot = Join-Path $script:RepoRoot "server"
 $script:WheelmakerHome = Join-Path $HOME ".wheelmaker"
+$script:BuildCacheRoot = Join-Path $script:WheelmakerHome "cache"
+$script:GoBuildCache = Join-Path $script:BuildCacheRoot "go-build"
+$script:BuildOutputRoot = Join-Path $script:WheelmakerHome "build\windows_amd64"
 $script:ConfigPath = Join-Path $script:WheelmakerHome "config.json"
 $script:ConfigExamplePath = Join-Path $script:ServerRoot "config.example.json"
 $script:InstallDirResolved = Get-ResolvedPathOrDefault -Path $InstallDir -Default (Join-Path $HOME ".wheelmaker\bin")
-$script:OutputBinary = Get-ResolvedPathOrDefault -Path $OutputPath -Default (Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker.exe")
+$script:OutputBinary = Get-ResolvedPathOrDefault -Path $OutputPath -Default (Join-Path $script:BuildOutputRoot "wheelmaker.exe")
 $script:SourceBinary = Get-ResolvedPathOrDefault -Path $SourceExe -Default $script:OutputBinary
 $script:InstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker.exe"
-$script:MonitorOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-monitor.exe"
+$script:MonitorOutputBinary = Join-Path $script:BuildOutputRoot "wheelmaker-monitor.exe"
 $script:MonitorInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-monitor.exe"
-$script:UpdaterOutputBinary = Join-Path $script:ServerRoot "bin\windows_amd64\wheelmaker-updater.exe"
+$script:UpdaterOutputBinary = Join-Path $script:BuildOutputRoot "wheelmaker-updater.exe"
 $script:UpdaterInstalledBinary = Join-Path $script:InstallDirResolved "wheelmaker-updater.exe"
 $script:UpdaterServiceArguments = Get-UpdaterServiceArguments
 
