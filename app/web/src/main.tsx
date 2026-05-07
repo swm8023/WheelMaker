@@ -2889,9 +2889,7 @@ function App() {
     if (!activeProjectId || !sessionId) return [];
     const cached = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
     if (!cached) {
-      const inMemoryMessages = (chatMessageStoreRef.current[sessionId] ?? []).filter(
-        message => !shouldSuppressChatMessage(message),
-      );
+      const inMemoryMessages = chatMessageStoreRef.current[sessionId] ?? [];
       if (inMemoryMessages.length === 0) {
         chatSyncIndexRef.current[sessionId] = 0;
         chatSyncSubIndexRef.current[sessionId] = 0;
@@ -3432,6 +3430,8 @@ function App() {
     setChatMessages(hydrateChatSessionContentFromCache(sessionId, projectIdRef.current));
     loadChatSession(sessionId, projectIdRef.current, {
       incremental: true,
+      preserveUserSelection: true,
+      selectionSnapshot: sessionId,
     }).catch(() => undefined);
     if (!isWide) setDrawerOpen(false);
   };
@@ -6359,6 +6359,8 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
+
+
 
 
 
