@@ -74,6 +74,10 @@ type PendingNewChatDraft = {
   text: string;
   blocks: RegistryChatContentBlock[];
 };
+type ChatComposerDraft = {
+  text: string;
+  attachment: ChatAttachment | null;
+};
 type WorkingTreeFileEntry = {
   path: string;
   status: string;
@@ -227,11 +231,20 @@ const CHAT_SWIPE_RELOAD_WIDTH = 72;
 const CHAT_SWIPE_TOTAL_ACTIONS_WIDTH = CHAT_SWIPE_DELETE_WIDTH + CHAT_SWIPE_RELOAD_WIDTH;
 const CHAT_SWIPE_REVEAL_THRESHOLD = 20;
 const CHAT_SWIPE_OPEN_THRESHOLD = 56;
+const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
+const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
+const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachment: null };
 let mermaidRenderSequence = 0;
 
 function nextMermaidRenderId(): string {
   mermaidRenderSequence += 1;
   return `wm-mermaid-${mermaidRenderSequence}`;
+}
+
+function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
+  const projectKey = activeProjectId.trim() || CHAT_DRAFT_KEY_PROJECT_FALLBACK;
+  const sessionKey = sessionId.trim() || CHAT_NEW_DRAFT_SESSION_KEY;
+  return `${projectKey}:${sessionKey}`;
 }
 
 
@@ -1953,6 +1966,12 @@ function App() {
   const [chatAttachment, setChatAttachment] = useState<ChatAttachment | null>(
     null,
   );
+  const [chatKeyboardInset, setChatKeyboardInset] = useState(0);
+  const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
+  const chatComposerTextRef = useRef('');
+  const chatAttachmentRef = useRef<ChatAttachment | null>(null);
+  const chatComposerDraftsRef = useRef<Record<string, ChatComposerDraft>>({});
+  const currentChatDraftKeyRef = useRef('');
   const [chatComposerActionMenuOpen, setChatComposerActionMenuOpen] = useState(false);
   const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
   const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
@@ -1966,6 +1985,98 @@ function App() {
     const selected = chatSessions.find(item => item.sessionId === selectedChatId);
     return selected?.configOptions ?? [];
   }, [chatSessions, selectedChatId]);
+
+  const currentChatDraftKey = useMemo(
+    () => buildChatDraftKey(projectId, selectedChatId),
+    [projectId, selectedChatId],
+  );
+
+  const saveChatComposerDraft = useCallback(
+    (draftKey: string, text: string, attachment: ChatAttachment | null) => {
+      const normalizedKey = draftKey.trim();
+      if (!normalizedKey) {
+        return;
+      }
+      setChatComposerDrafts(prev => {
+        const existing = prev[normalizedKey] ?? EMPTY_CHAT_COMPOSER_DRAFT;
+        const hasContent = text.length > 0 || !!attachment;
+        if (!hasContent) {
+          if (!(normalizedKey in prev)) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[normalizedKey];
+          return next;
+        }
+        if (existing.text === text && existing.attachment === attachment) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [normalizedKey]: {
+            text,
+            attachment,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const updateChatComposerText = useCallback(
+    (nextText: string) => {
+      setChatComposerText(nextText);
+      saveChatComposerDraft(
+        currentChatDraftKeyRef.current,
+        nextText,
+        chatAttachmentRef.current,
+      );
+    },
+    [saveChatComposerDraft],
+  );
+
+  const updateChatComposerAttachment = useCallback(
+    (nextAttachment: ChatAttachment | null) => {
+      setChatAttachment(nextAttachment);
+      saveChatComposerDraft(
+        currentChatDraftKeyRef.current,
+        chatComposerTextRef.current,
+        nextAttachment,
+      );
+    },
+    [saveChatComposerDraft],
+  );
+
+  useEffect(() => {
+    currentChatDraftKeyRef.current = currentChatDraftKey;
+  }, [currentChatDraftKey]);
+
+  useEffect(() => {
+    chatComposerTextRef.current = chatComposerText;
+  }, [chatComposerText]);
+
+  useEffect(() => {
+    chatAttachmentRef.current = chatAttachment;
+  }, [chatAttachment]);
+
+  useEffect(() => {
+    chatComposerDraftsRef.current = chatComposerDrafts;
+  }, [chatComposerDrafts]);
+
+  useEffect(() => {
+    const draft =
+      chatComposerDraftsRef.current[currentChatDraftKey] ??
+      EMPTY_CHAT_COMPOSER_DRAFT;
+    if (chatComposerTextRef.current !== draft.text) {
+      setChatComposerText(draft.text);
+    }
+    if (chatAttachmentRef.current !== draft.attachment) {
+      setChatAttachment(draft.attachment);
+    }
+    if (!draft.attachment && chatFileInputRef.current) {
+      chatFileInputRef.current.value = '';
+    }
+  }, [currentChatDraftKey]);
 
   useEffect(() => {
     if (!selectedChatId) {
@@ -2093,6 +2204,47 @@ function App() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (isWide || tab !== 'chat') {
+      setChatKeyboardInset(0);
+      return;
+    }
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+    let raf = 0;
+    const updateInset = () => {
+      const bottomGap = Math.max(
+        0,
+        Math.round(window.innerHeight - (viewport.height + viewport.offsetTop)),
+      );
+      const nextInset = bottomGap >= 72 ? bottomGap : 0;
+      setChatKeyboardInset(prev => (prev === nextInset ? prev : nextInset));
+    };
+    const scheduleUpdate = () => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        updateInset();
+      });
+    };
+    updateInset();
+    viewport.addEventListener('resize', scheduleUpdate);
+    viewport.addEventListener('scroll', scheduleUpdate);
+    window.addEventListener('orientationchange', scheduleUpdate);
+    return () => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      viewport.removeEventListener('resize', scheduleUpdate);
+      viewport.removeEventListener('scroll', scheduleUpdate);
+      window.removeEventListener('orientationchange', scheduleUpdate);
+    };
+  }, [isWide, tab]);
 
   useEffect(() => {
     if (isWide) {
@@ -3146,7 +3298,7 @@ function App() {
   };
 
   const clearChatAttachment = () => {
-    setChatAttachment(null);
+    updateChatComposerAttachment(null);
     if (chatFileInputRef.current) {
       chatFileInputRef.current.value = '';
     }
@@ -3154,7 +3306,11 @@ function App() {
 
   const resetChatComposer = () => {
     setChatComposerText('');
-    clearChatAttachment();
+    setChatAttachment(null);
+    saveChatComposerDraft(currentChatDraftKeyRef.current, '', null);
+    if (chatFileInputRef.current) {
+      chatFileInputRef.current.value = '';
+    }
   };
 
   const completeNewChatFlow = async (agentType: string) => {
@@ -3278,6 +3434,15 @@ function App() {
     delete nextSyncIndex[sessionId];
     delete nextSyncSubIndex[sessionId];
     delete nextSnapshots[sessionId];
+    const sessionDraftKey = buildChatDraftKey(projectIdRef.current, sessionId);
+    setChatComposerDrafts(prev => {
+      if (!(sessionDraftKey in prev)) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[sessionDraftKey];
+      return next;
+    });
     chatMessageStoreRef.current = nextMessageStore;
     chatSyncIndexRef.current = nextSyncIndex;
     chatSyncSubIndexRef.current = nextSyncSubIndex;
@@ -3569,7 +3734,7 @@ function App() {
     const base64 = dataUrl.includes(',')
       ? dataUrl.slice(dataUrl.indexOf(',') + 1)
       : dataUrl;
-    setChatAttachment({
+    updateChatComposerAttachment({
       name: file.name,
       mimeType: file.type || 'image/png',
       data: base64,
@@ -5639,7 +5804,11 @@ function App() {
           <div className="block-title">
             CHAT - {selectedChatSession?.title || 'New Session'}
           </div>
-          <div ref={chatScrollRef} className="scroll-panel chat-block">
+          <div
+            className="chat-main"
+            style={chatKeyboardInset > 0 ? { paddingBottom: `${chatKeyboardInset}px` } : undefined}
+          >
+            <div ref={chatScrollRef} className="scroll-panel chat-block">
             {chatLoading ? (
               <div className="muted block">Loading chat...</div>
             ) : null}
@@ -5693,7 +5862,7 @@ function App() {
                   rows={1}
                   className={`chat-composer-input${chatComposerText.length === 0 ? ' has-inline-action' : ''}`}
                   value={chatComposerText}
-                  onChange={event => setChatComposerText(event.target.value)}
+                  onChange={event => updateChatComposerText(event.target.value)}
                   onKeyDown={event => {
                     if (!isWindowsPlatform) {
                       return;
@@ -5867,6 +6036,7 @@ function App() {
             {chatConfigFeedback ? (
               <div className="chat-config-feedback muted">{chatConfigFeedback}</div>
             ) : null}
+          </div>
           </div>
         </div>
       );

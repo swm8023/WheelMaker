@@ -2012,6 +2012,14 @@ body,
   width: 100%;
 }
 
+.chat-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .chat-block {
   padding: 18px 18px;
   scrollbar-gutter: stable both-edges;
@@ -3171,8 +3179,23 @@ body,
     gap: 2px;
   }
 
+  .project-wrap {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   .project-btn {
-    max-width: 28vw;
+    width: 100%;
+    max-width: none;
+  }
+
+  .header-spacer {
+    display: none;
+  }
+
+  .tabs {
+    flex: 0 0 auto;
+    margin-left: 2px;
   }
 
   .tab {
