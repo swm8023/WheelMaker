@@ -57,7 +57,6 @@ export type CachedChatSession = {
 export type CachedChatSessionContent = {
   messages: RegistryChatMessage[];
   prompts: RegistrySessionPromptSnapshot[];
-  cursor: PersistedChatCursor;
 };
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
@@ -235,7 +234,6 @@ export class WorkspaceStore {
     return {
       messages: Array.isArray(cached.messages) ? cached.messages : [],
       prompts: Array.isArray(cached.prompts) ? cached.prompts : [],
-      cursor: sanitizeCursor(cached.cursor),
     };
   }
 
@@ -258,10 +256,9 @@ export class WorkspaceStore {
     sessionId: string,
     messages: RegistryChatMessage[],
     prompts: RegistrySessionPromptSnapshot[],
-    cursor: PersistedChatCursor,
   ): void {
     if (!projectId || !sessionId) return;
-    this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages, prompts, sanitizeCursor(cursor));
+    this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages, prompts);
   }
 
   deleteChatSession(projectId: string, sessionId: string): void {
@@ -277,3 +274,4 @@ export class WorkspaceStore {
     return this.persistence.dumpDatabase();
   }
 }
+

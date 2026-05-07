@@ -2899,8 +2899,8 @@ function App() {
     chatPromptSnapshotsRef.current[sessionId] = [...cached.prompts];
 
     const latest = getLatestChatSyncCursor(cachedMessages);
-    const cachedPromptIndex = Math.max(0, cached.cursor.promptIndex || 0);
-    const cachedTurnIndex = Math.max(0, cached.cursor.turnIndex || 0);
+    const cachedPromptIndex = Math.max(0, chatSyncIndexRef.current[sessionId] ?? 0);
+    const cachedTurnIndex = Math.max(0, chatSyncSubIndexRef.current[sessionId] ?? 0);
     if (
       latest.syncIndex > cachedPromptIndex ||
       (latest.syncIndex === cachedPromptIndex && latest.syncSubIndex > cachedTurnIndex)
@@ -2970,7 +2970,7 @@ function App() {
       promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
       turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
     };
-    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, messages, prompts, cursor);
+    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, messages, prompts);
     const targetSession = session ?? chatSessions.find(item => item.sessionId === sessionId);
     if (targetSession) {
       workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
@@ -6349,3 +6349,5 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
+
+

@@ -70,7 +70,6 @@ export type PersistedChatSessionEntry = {
 export type PersistedChatSessionContent = {
   messages: RegistryChatMessage[];
   prompts: RegistrySessionPromptSnapshot[];
-  cursor: PersistedChatCursor;
 };
 
 type PersistedWorkspaceState = {
@@ -83,7 +82,7 @@ export type WorkspaceDatabaseDump = {
   projects: Array<{projectId: string; stateJson: string; updatedAt: number}>;
   projectCommits: Array<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>;
   chatSessionIndex: Array<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>;
-  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; cursorJson: string; updatedAt: number}>;
+  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; updatedAt: number}>;
   fileCache: Array<{k: string; hash: string; v: string; updatedAt: number}>;
   diffCache: Array<{k: string; v: string; updatedAt: number}>;
   meta: Array<{k: string; v: string; updatedAt: number}>;
@@ -298,7 +297,6 @@ type RawChatSessionContentRow = {
   sessionId: string;
   messagesJson: string;
   promptsJson: string;
-  cursorJson: string;
   updatedAt: number;
 };
 
@@ -547,11 +545,9 @@ export class WorkspacePersistenceRepository {
     for (const row of contentRows) {
       const messages = tryParse<RegistryChatMessage[]>(row.messagesJson, []);
       const prompts = tryParse<RegistrySessionPromptSnapshot[]>(row.promptsJson, []);
-      const cursor = sanitizeChatCursor(tryParse<Partial<PersistedChatCursor>>(row.cursorJson, defaultChatCursor()));
       this.chatSessionContent.set(row.k, {
         messages: Array.isArray(messages) ? messages : [],
         prompts: Array.isArray(prompts) ? prompts : [],
-        cursor,
       });
     }
   }
@@ -651,7 +647,6 @@ export class WorkspacePersistenceRepository {
         sessionId,
         messagesJson: serialize(content.messages),
         promptsJson: serialize(content.prompts),
-        cursorJson: serialize(content.cursor),
         updatedAt: now,
       });
     }
@@ -835,7 +830,6 @@ export class WorkspacePersistenceRepository {
     sessionId: string,
     messages: RegistryChatMessage[],
     prompts: RegistrySessionPromptSnapshot[],
-    cursor: PersistedChatCursor,
   ): void {
     if (!projectId || !sessionId) return;
     const key = chatSessionKey(projectId, sessionId);
@@ -843,7 +837,6 @@ export class WorkspacePersistenceRepository {
     const payload: PersistedChatSessionContent = {
       messages: Array.isArray(messages) ? messages : [],
       prompts: Array.isArray(prompts) ? prompts : [],
-      cursor: sanitizeChatCursor(cursor),
     };
     this.chatSessionContent.set(key, payload);
     void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
@@ -852,7 +845,6 @@ export class WorkspacePersistenceRepository {
       sessionId,
       messagesJson: serialize(payload.messages),
       promptsJson: serialize(payload.prompts),
-      cursorJson: serialize(payload.cursor),
       updatedAt: now,
     })).catch(() => undefined);
   }
@@ -1030,7 +1022,7 @@ export class WorkspacePersistenceRepository {
       this.db.getAllRows<{projectId: string; stateJson: string; updatedAt: number}>(TABLE_PROJECT_STATE),
       this.db.getAllRows<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>(TABLE_PROJECT_COMMITS),
       this.db.getAllRows<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_INDEX),
-      this.db.getAllRows<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; cursorJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
+      this.db.getAllRows<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
       this.db.getAllRows<{k: string; hash: string; v: string; updatedAt: number}>(TABLE_FILE_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_DIFF_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),
@@ -1048,3 +1040,4 @@ export class WorkspacePersistenceRepository {
     };
   }
 }
+
