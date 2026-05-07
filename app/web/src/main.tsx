@@ -1858,6 +1858,10 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
+  const [databasePanelOpen, setDatabasePanelOpen] = useState(false);
+  const [databaseLoading, setDatabaseLoading] = useState(false);
+  const [databaseError, setDatabaseError] = useState('');
+  const [databaseDumpText, setDatabaseDumpText] = useState('');
   const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
   const [tokenStatsError, setTokenStatsError] = useState('');
   const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
@@ -2526,16 +2530,38 @@ function App() {
     if (loadingDirs[path]) return;
     setLoadingDirs(prev => ({ ...prev, [path]: true }));
     try {
+      const persistedCache = projectId
+        ? workspaceStore.getCachedDirectory(projectId, path)
+        : null;
+      const knownHash =
+        dirHashRef.current[path] || persistedCache?.hash || '';
       const result = await service.listDirectory(
         path,
-        dirHashRef.current[path],
+        knownHash || undefined,
       );
-      if (!result.notModified) {
-        const entries = sortEntries(result.entries);
-        setDirEntries(prev => ({ ...prev, [path]: entries }));
+
+      if (result.notModified) {
+        const cachedEntries = persistedCache?.entries;
+        if (Array.isArray(cachedEntries)) {
+          setDirEntries(prev => ({ ...prev, [path]: sortEntries(cachedEntries) }));
+        }
         if (result.hash) {
           dirHashRef.current[path] = result.hash;
+          if (projectId && Array.isArray(cachedEntries)) {
+            workspaceStore.cacheDirectory(projectId, path, result.hash, cachedEntries);
+          }
         }
+        return;
+      }
+
+      const entries = sortEntries(result.entries);
+      setDirEntries(prev => ({ ...prev, [path]: entries }));
+      const nextHash = result.hash || persistedCache?.hash || '';
+      if (nextHash) {
+        dirHashRef.current[path] = nextHash;
+      }
+      if (projectId) {
+        workspaceStore.cacheDirectory(projectId, path, nextHash, entries);
       }
     } finally {
       setLoadingDirs(prev => {
@@ -2576,7 +2602,17 @@ function App() {
       const info = await service.getFileInfo(path);
       if (requestSeq !== fileReadSeqRef.current) return;
       setFileInfo(info);
-      const isFirstLoad = !fileHashRef.current[path];
+      const persistedFile = projectId
+        ? workspaceStore.getCachedFile(projectId, path)
+        : null;
+      if (persistedFile?.content && !fileCacheRef.current[path]) {
+        fileCacheRef.current[path] = persistedFile.content;
+      }
+      if (persistedFile?.hash && !fileHashRef.current[path]) {
+        fileHashRef.current[path] = persistedFile.hash;
+      }
+      const knownHash = fileHashRef.current[path] || persistedFile?.hash || '';
+      const isFirstLoad = !knownHash;
       if ((info.size ?? 0) > LARGE_FILE_CONFIRM_BYTES && isFirstLoad) {
         const sizeMB = ((info.size ?? 0) / (1024 * 1024)).toFixed(1);
         const confirmed = window.confirm(
@@ -2588,14 +2624,19 @@ function App() {
         }
       }
       const result = await service.readFile(path, {
-        knownHash: fileHashRef.current[path],
+        knownHash: knownHash || undefined,
       });
       if (requestSeq !== fileReadSeqRef.current) return;
       if (result.notModified) {
-        const cachedContent = fileCacheRef.current[path];
+        const cachedContent =
+          fileCacheRef.current[path] ?? persistedFile?.content ?? '';
         setFileContent(typeof cachedContent === 'string' ? cachedContent : '');
-        if (result.hash) {
-          fileHashRef.current[path] = result.hash;
+        const nextHash = result.hash || knownHash;
+        if (nextHash) {
+          fileHashRef.current[path] = nextHash;
+          if (projectId && typeof cachedContent === 'string') {
+            workspaceStore.cacheFile(projectId, path, nextHash, cachedContent);
+          }
         }
         if (shouldRestoreScroll) {
           scheduleRestoreSelectedFileScroll(path);
@@ -2604,8 +2645,12 @@ function App() {
       }
       setFileContent(result.content);
       fileCacheRef.current[path] = result.content;
-      if (result.hash) {
-        fileHashRef.current[path] = result.hash;
+      const nextHash = result.hash || knownHash;
+      if (nextHash) {
+        fileHashRef.current[path] = nextHash;
+      }
+      if (projectId) {
+        workspaceStore.cacheFile(projectId, path, nextHash, result.content);
       }
       if (shouldRestoreScroll) {
         scheduleRestoreSelectedFileScroll(path);
@@ -2623,6 +2668,7 @@ function App() {
       }
     }
   };
+
 
   useEffect(() => {
     if (!selectedFile) {
@@ -3457,6 +3503,7 @@ function App() {
       }
       workspaceController
         .validateExpandedDirectories(
+          result.hydrated.projectId,
           result.rootEntries,
           result.hydrated.expandedDirs,
         )
@@ -3672,9 +3719,42 @@ function App() {
     refreshTokenStats().catch(() => undefined);
   }, [tokenStatsPanelOpen, refreshTokenStats]);
 
+  const formatDatabaseDump = (dump: Awaited<ReturnType<typeof workspaceStore.dumpDatabase>>): string => {
+    return JSON.stringify(
+      {
+        wm_global_kv: dump.global,
+        wm_project_state: dump.projects,
+        wm_file_cache: dump.fileCache,
+        wm_diff_cache: dump.diffCache,
+        wm_meta: dump.meta,
+        local_storage: dump.localStorage,
+      },
+      null,
+      2,
+    );
+  };
+
+  const openDatabasePanel = () => {
+    setDatabasePanelOpen(true);
+    setDatabaseLoading(true);
+    setDatabaseError('');
+    workspaceStore
+      .dumpDatabase()
+      .then(dump => {
+        setDatabaseDumpText(formatDatabaseDump(dump));
+      })
+      .catch(err => {
+        const message = err instanceof Error ? err.message : String(err);
+        setDatabaseError(message);
+      })
+      .finally(() => {
+        setDatabaseLoading(false);
+      });
+  };
+
   const clearLocalCache = () => {
     const confirmed = window.confirm(
-      'Clear all local cache data except token?',
+      'Clear all local cache data except token and address?',
     );
     if (!confirmed) return;
     workspaceStore.clearLocalCachePreservingToken();
@@ -3699,6 +3779,7 @@ function App() {
       chatMessageStoreRef.current = {};
       workspaceController
         .validateExpandedDirectories(
+          result.hydrated.projectId,
           result.rootEntries,
           result.hydrated.expandedDirs,
         )
@@ -4970,10 +5051,44 @@ function App() {
                 <button
                   type="button"
                   className="sidebar-clear-cache-btn"
+                  onClick={openDatabasePanel}
+                >
+                  Database
+                </button>
+                <button
+                  type="button"
+                  className="sidebar-clear-cache-btn"
                   onClick={clearLocalCache}
                 >
                   Clear Local Cache (Keep Token)
                 </button>
+                {databasePanelOpen ? (
+                  <div className="database-panel">
+                    <div className="database-panel-header">
+                      <strong>Local Database</strong>
+                      <button
+                        type="button"
+                        className="git-section-btn"
+                        onClick={() => {
+                          setDatabasePanelOpen(false);
+                          setDatabaseError('');
+                        }}
+                        aria-label="Close database panel"
+                      >
+                        <span className="codicon codicon-close" />
+                      </button>
+                    </div>
+                    {databaseLoading ? (
+                      <div className="muted block">Loading database...</div>
+                    ) : null}
+                    {databaseError ? (
+                      <div className="error">Database error: {databaseError}</div>
+                    ) : null}
+                    {!databaseLoading && !databaseError ? (
+                      <pre className="database-dump">{databaseDumpText}</pre>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </>
           ) : (
@@ -6062,5 +6177,18 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   });
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+workspaceStore.ready().then(() => {
+  createRoot(document.getElementById('root')!).render(<App />);
+}).catch(error => {
+  const root = document.getElementById('root');
+  if (!root) return;
+  const message = error instanceof Error ? error.message : String(error);
+  root.innerHTML = '';
+  const box = document.createElement('div');
+  box.style.cssText = 'padding:16px;color:#ff7b72;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;';
+  box.textContent = `IndexedDB initialization failed: ${message}`;
+  root.appendChild(box);
+});
+
+
 

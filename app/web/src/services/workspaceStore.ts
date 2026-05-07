@@ -1,5 +1,9 @@
 import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from '../types/registry';
-import {WorkspacePersistenceRepository, type PersistedGlobalState} from './workspacePersistence';
+import {
+  WorkspacePersistenceRepository,
+  type PersistedGlobalState,
+  type WorkspaceDatabaseDump,
+} from './workspacePersistence';
 
 type ProjectSnapshot = {
   dirEntries: Record<string, RegistryFsEntry[]>;
@@ -27,6 +31,16 @@ export type HydratedProjectState = {
   cachedDiffText: string;
 };
 
+export type CachedDirectory = {
+  hash: string;
+  entries: RegistryFsEntry[];
+};
+
+export type CachedFile = {
+  hash: string;
+  content: string;
+};
+
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
     if (a.kind === 'dir' && b.kind !== 'dir') return -1;
@@ -45,6 +59,10 @@ function diffCacheKey(sha: string, path: string): string {
 
 export class WorkspaceStore {
   constructor(private readonly persistence = new WorkspacePersistenceRepository()) {}
+
+  ready(): Promise<void> {
+    return this.persistence.ready();
+  }
 
   getGlobalState(defaultAddress: string): PersistedGlobalState {
     const saved = this.persistence.getGlobalState();
@@ -115,7 +133,42 @@ export class WorkspaceStore {
     });
   }
 
+  getCachedDirectory(projectId: string, path: string): CachedDirectory | null {
+    const cached = this.persistence.getCachedFile(projectId, 'dir', path);
+    if (!cached) return null;
+    try {
+      const parsed = JSON.parse(cached.value) as RegistryFsEntry[];
+      const entries = Array.isArray(parsed) ? parsed : [];
+      return {hash: cached.hash, entries};
+    } catch {
+      return null;
+    }
+  }
+
+  cacheDirectory(projectId: string, path: string, hash: string, entries: RegistryFsEntry[]): void {
+    if (!projectId || !path) return;
+    this.persistence.putCachedFile(projectId, 'dir', path, hash, JSON.stringify(entries));
+  }
+
+  getCachedFile(projectId: string, path: string): CachedFile | null {
+    const cached = this.persistence.getCachedFile(projectId, 'file', path);
+    if (!cached) return null;
+    return {
+      hash: cached.hash,
+      content: cached.value,
+    };
+  }
+
+  cacheFile(projectId: string, path: string, hash: string, content: string): void {
+    if (!projectId || !path) return;
+    this.persistence.putCachedFile(projectId, 'file', path, hash, content);
+  }
+
   clearLocalCachePreservingToken(): void {
     this.persistence.clearCachePreservingToken();
+  }
+
+  dumpDatabase(): Promise<WorkspaceDatabaseDump> {
+    return this.persistence.dumpDatabase();
   }
 }

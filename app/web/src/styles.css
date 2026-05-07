@@ -678,6 +678,36 @@ body,
   font-weight: 600;
 }
 
+.database-panel {
+  margin: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 86%, black 14%);
+  overflow: hidden;
+}
+
+.database-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.database-dump {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text);
+  background: transparent;
+  white-space: pre;
+}
+
 
 
 
@@ -3263,4 +3293,5 @@ body,
     transform: translateX(0);
   }
 }
+
 

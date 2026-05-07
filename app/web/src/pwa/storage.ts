@@ -1,4 +1,4 @@
-export type PWAStorageKind = 'indexeddb' | 'localstorage' | 'memory';
+export type PWAStorageKind = 'indexeddb';
 
 export type PWAStorageAdapter = {
   kind: PWAStorageKind;
@@ -10,63 +10,7 @@ export type PWAStorageAdapter = {
 
 type StorageEnv = {
   indexedDB?: IDBFactory;
-  localStorage?: Storage;
 };
-
-class MemoryStorageAdapter implements PWAStorageAdapter {
-  kind: PWAStorageKind = 'memory';
-  private readonly data = new Map<string, string>();
-
-  async get(key: string): Promise<string | null> {
-    return this.data.has(key) ? this.data.get(key)! : null;
-  }
-
-  async set(key: string, value: string): Promise<void> {
-    this.data.set(key, value);
-  }
-
-  async remove(key: string): Promise<void> {
-    this.data.delete(key);
-  }
-
-  async clear(): Promise<void> {
-    this.data.clear();
-  }
-}
-
-class LocalStorageAdapter implements PWAStorageAdapter {
-  kind: PWAStorageKind = 'localstorage';
-  constructor(private readonly storage: Storage, private readonly prefix: string) {}
-
-  async get(key: string): Promise<string | null> {
-    return this.storage.getItem(this.fullKey(key));
-  }
-
-  async set(key: string, value: string): Promise<void> {
-    this.storage.setItem(this.fullKey(key), value);
-  }
-
-  async remove(key: string): Promise<void> {
-    this.storage.removeItem(this.fullKey(key));
-  }
-
-  async clear(): Promise<void> {
-    const keys: string[] = [];
-    for (let i = 0; i < this.storage.length; i += 1) {
-      const key = this.storage.key(i);
-      if (key && key.startsWith(this.prefix + ':')) {
-        keys.push(key);
-      }
-    }
-    for (const key of keys) {
-      this.storage.removeItem(key);
-    }
-  }
-
-  private fullKey(key: string): string {
-    return `${this.prefix}:${key}`;
-  }
-}
 
 class IndexedDBStorageAdapter implements PWAStorageAdapter {
   kind: PWAStorageKind = 'indexeddb';
@@ -125,23 +69,9 @@ export async function createPWAStorageAdapter(
   namespace = 'wheelmaker.pwa',
   env: StorageEnv = globalThis as StorageEnv,
 ): Promise<PWAStorageAdapter> {
-  if (env.indexedDB) {
-    try {
-      const db = await openStorageDB(env.indexedDB, `${namespace}.db`);
-      return new IndexedDBStorageAdapter(db);
-    } catch {
-      // fall through to local storage
-    }
+  if (!env.indexedDB) {
+    throw new Error('IndexedDB is unavailable in this environment.');
   }
-  if (env.localStorage) {
-    try {
-      const testKey = `${namespace}:__probe__`;
-      env.localStorage.setItem(testKey, '1');
-      env.localStorage.removeItem(testKey);
-      return new LocalStorageAdapter(env.localStorage, namespace);
-    } catch {
-      // fall through to in-memory
-    }
-  }
-  return new MemoryStorageAdapter();
+  const db = await openStorageDB(env.indexedDB, `${namespace}.db`);
+  return new IndexedDBStorageAdapter(db);
 }

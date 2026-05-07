@@ -49,17 +49,30 @@ export class WorkspaceController {
     };
   }
 
-  async validateExpandedDirectories(rootEntries: RegistryFsEntry[], expandedSnapshot: string[]): Promise<ValidatedDirectoryState> {
+  async validateExpandedDirectories(
+    projectId: string,
+    rootEntries: RegistryFsEntry[],
+    expandedSnapshot: string[],
+  ): Promise<ValidatedDirectoryState> {
     const dirEntries: Record<string, RegistryFsEntry[]> = {
       '.': sortEntries(rootEntries),
     };
+    this.store.cacheDirectory(projectId, '.', '', dirEntries['.']);
     const expandedDirs: string[] = ['.'];
     for (const dirPath of expandedSnapshot) {
       if (dirPath === '.') continue;
       try {
-        const result = await this.service.listDirectory(dirPath);
-        dirEntries[dirPath] = sortEntries(result.entries);
+        const cached = this.store.getCachedDirectory(projectId, dirPath);
+        const result = await this.service.listDirectory(dirPath, cached?.hash || undefined);
+        if (result.notModified && cached) {
+          dirEntries[dirPath] = sortEntries(cached.entries);
+          expandedDirs.push(dirPath);
+          continue;
+        }
+        const entries = sortEntries(result.entries);
+        dirEntries[dirPath] = entries;
         expandedDirs.push(dirPath);
+        this.store.cacheDirectory(projectId, dirPath, result.hash || cached?.hash || '', entries);
       } catch {
         // drop stale directory cache entry
       }
@@ -69,6 +82,6 @@ export class WorkspaceController {
 
   async refreshProject(projectId: string, expandedSnapshot: string[]): Promise<ValidatedDirectoryState> {
     const session = await this.service.selectProject(projectId);
-    return this.validateExpandedDirectories(session.fileEntries, expandedSnapshot);
+    return this.validateExpandedDirectories(projectId, session.fileEntries, expandedSnapshot);
   }
 }
