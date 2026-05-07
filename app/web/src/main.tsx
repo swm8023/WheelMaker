@@ -3091,12 +3091,19 @@ function App() {
     }
 
     const currentSelection = preferredSelection || chatSelectedIdRef.current;
-    if (currentSelection && sessionRows.some(item => item.sessionId === currentSelection)) {
+    if (!currentSelection) {
+      setChatMessages([]);
+      return;
+    }
+    setSelectedChatId(currentSelection);
+    if (sessionRows.some(item => item.sessionId === currentSelection)) {
       const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setChatMessages(cachedMessages);
-      setSelectedChatId(currentSelection);
-    } else {
-      setChatMessages([]);
+      return;
+    }
+    const retainedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
+    if (retainedMessages.length > 0) {
+      setChatMessages(retainedMessages);
     }
   };
 
@@ -3254,12 +3261,19 @@ function App() {
       workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
 
       const currentSelection = preferredSelection || chatSelectedIdRef.current;
-      if (!currentSelection || !nextSessions.some(session => session.sessionId === currentSelection)) {
+      if (!currentSelection) {
         setSelectedChatId('');
         setChatMessages([]);
         return;
       }
       setSelectedChatId(currentSelection);
+      if (!nextSessions.some(session => session.sessionId === currentSelection)) {
+        const retainedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
+        if (retainedSelection.length > 0) {
+          setChatMessages(retainedSelection);
+        }
+        return;
+      }
       const cachedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setChatMessages(cachedSelection.length > 0
         ? cachedSelection
