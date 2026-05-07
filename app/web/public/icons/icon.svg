@@ -1,26 +1,37 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="WheelMaker icon">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0b1220"/>
-      <stop offset="100%" stop-color="#13253a"/>
+      <stop offset="0%" stop-color="#01112b"/>
+      <stop offset="100%" stop-color="#00103a"/>
     </linearGradient>
-    <linearGradient id="bridge" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#22c55e"/>
-      <stop offset="50%" stop-color="#3b82f6"/>
-      <stop offset="100%" stop-color="#22c55e"/>
+    <linearGradient id="wmBlue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2bd6ff"/>
+      <stop offset="100%" stop-color="#149cff"/>
     </linearGradient>
+    <linearGradient id="wmWhite" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#dfe7f5"/>
+    </linearGradient>
+    <filter id="glowBlue" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#22c5ff" flood-opacity="0.45"/>
+    </filter>
+    <filter id="glowWhite" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#e7f0ff" flood-opacity="0.35"/>
+    </filter>
   </defs>
-  <rect x="24" y="24" width="464" height="464" rx="96" fill="url(#bg)"/>
-  <rect x="98" y="126" width="130" height="108" rx="18" fill="#07101b" stroke="#2f4667" stroke-width="9"/>
-  <rect x="284" y="278" width="130" height="108" rx="18" fill="#07101b" stroke="#2f4667" stroke-width="9"/>
-  <path d="M138 176 h48 M138 198 h74 M138 220 h38" stroke="#9fb3cc" stroke-width="9" stroke-linecap="round"/>
-  <path d="M324 328 h48 M324 350 h74 M324 372 h38" stroke="#9fb3cc" stroke-width="9" stroke-linecap="round"/>
-  <path d="M228 234 L284 278" stroke="url(#bridge)" stroke-width="18" stroke-linecap="round"/>
-  <path d="M260 246 L228 234 L238 264" fill="none" stroke="#3b82f6" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M270 248 L284 278 L254 268" fill="none" stroke="#22c55e" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="216" cy="224" r="13" fill="#3b82f6"/>
-  <circle cx="296" cy="288" r="13" fill="#22c55e"/>
-  <circle cx="356" cy="144" r="24" fill="#0b1726" stroke="#3b82f6" stroke-width="9"/>
-  <path d="M346 144 h20 M356 134 v20" stroke="#dbe7f6" stroke-width="7" stroke-linecap="round"/>
+
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <path
+    d="M 86 182 L 124 182 L 160 260 L 196 182 L 228 182 L 288 320 L 254 320 L 196 236 L 170 320 L 146 320 Z"
+    fill="url(#wmBlue)"
+    filter="url(#glowBlue)"
+  />
+
+  <path
+    d="M 268 236 L 296 182 L 338 260 L 380 182 L 442 320 L 408 320 L 380 262 L 344 320 L 332 320 L 296 262 L 282 288 L 268 264 Z"
+    fill="url(#wmWhite)"
+    filter="url(#glowWhite)"
+  />
 </svg>
