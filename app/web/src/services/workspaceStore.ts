@@ -1,6 +1,15 @@
-import type {RegistryFsEntry, RegistryGitCommit, RegistryGitCommitFile, RegistryProject} from '../types/registry';
+import type {
+  RegistryChatMessage,
+  RegistryChatSession,
+  RegistryFsEntry,
+  RegistryGitCommit,
+  RegistryGitCommitFile,
+  RegistryProject,
+  RegistrySessionPromptSnapshot,
+} from '../types/registry';
 import {
   WorkspacePersistenceRepository,
+  type PersistedChatCursor,
   type PersistedGlobalState,
   type WorkspaceDatabaseDump,
 } from './workspacePersistence';
@@ -40,6 +49,17 @@ export type CachedFile = {
   content: string;
 };
 
+export type CachedChatSession = {
+  session: RegistryChatSession;
+  cursor: PersistedChatCursor;
+};
+
+export type CachedChatSessionContent = {
+  messages: RegistryChatMessage[];
+  prompts: RegistrySessionPromptSnapshot[];
+  cursor: PersistedChatCursor;
+};
+
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
     if (a.kind === 'dir' && b.kind !== 'dir') return -1;
@@ -54,6 +74,19 @@ function uniqueStrings(items: string[]): string[] {
 
 function diffCacheKey(sha: string, path: string): string {
   return `${sha}::${path}`;
+}
+
+function sanitizeCursor(cursor: Partial<PersistedChatCursor> | undefined): PersistedChatCursor {
+  const promptIndex = Number.isFinite(cursor?.promptIndex)
+    ? Math.max(0, Math.floor(Number(cursor?.promptIndex)))
+    : 0;
+  const turnIndex = Number.isFinite(cursor?.turnIndex)
+    ? Math.max(0, Math.floor(Number(cursor?.turnIndex)))
+    : 0;
+  return {
+    promptIndex,
+    turnIndex,
+  };
 }
 
 export class WorkspaceStore {
@@ -185,6 +218,55 @@ export class WorkspaceStore {
   cacheFile(projectId: string, path: string, hash: string, content: string): void {
     if (!projectId || !path) return;
     this.persistence.putCachedFile(projectId, 'file', path, hash, content);
+  }
+
+  hydrateChatSessions(projectId: string): CachedChatSession[] {
+    if (!projectId) return [];
+    return this.persistence.getProjectChatSessions(projectId).map(entry => ({
+      session: entry.session,
+      cursor: sanitizeCursor(entry.cursor),
+    }));
+  }
+
+  getCachedChatSessionContent(projectId: string, sessionId: string): CachedChatSessionContent | null {
+    if (!projectId || !sessionId) return null;
+    const cached = this.persistence.getProjectChatSessionContent(projectId, sessionId);
+    if (!cached) return null;
+    return {
+      messages: Array.isArray(cached.messages) ? cached.messages : [],
+      prompts: Array.isArray(cached.prompts) ? cached.prompts : [],
+      cursor: sanitizeCursor(cached.cursor),
+    };
+  }
+
+  replaceChatSessions(projectId: string, sessions: RegistryChatSession[], cursorBySessionId: Record<string, PersistedChatCursor>): void {
+    if (!projectId) return;
+    const payload = sessions.map(session => ({
+      session,
+      cursor: sanitizeCursor(cursorBySessionId[session.sessionId]),
+    }));
+    this.persistence.replaceProjectChatSessions(projectId, payload);
+  }
+
+  rememberChatSession(projectId: string, session: RegistryChatSession, cursor: PersistedChatCursor): void {
+    if (!projectId || !session.sessionId) return;
+    this.persistence.patchProjectChatSession(projectId, session, sanitizeCursor(cursor));
+  }
+
+  rememberChatSessionContent(
+    projectId: string,
+    sessionId: string,
+    messages: RegistryChatMessage[],
+    prompts: RegistrySessionPromptSnapshot[],
+    cursor: PersistedChatCursor,
+  ): void {
+    if (!projectId || !sessionId) return;
+    this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages, prompts, sanitizeCursor(cursor));
+  }
+
+  deleteChatSession(projectId: string, sessionId: string): void {
+    if (!projectId || !sessionId) return;
+    this.persistence.deleteProjectChatSession(projectId, sessionId);
   }
 
   clearLocalCachePreservingToken(): void {

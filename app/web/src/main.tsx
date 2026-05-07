@@ -2870,6 +2870,113 @@ function App() {
     }, RECONNECT_RETRY_DELAY_MS);
   };
 
+  const clearChatRuntimeState = () => {
+    setChatMessages([]);
+    setChatSessions([]);
+    setChatRunningSessionFlags({});
+    setChatCompletedUnopenedFlags({});
+    setSelectedChatId('');
+    chatSelectedIdRef.current = '';
+    chatSyncIndexRef.current = {};
+    chatSyncSubIndexRef.current = {};
+    chatMessageStoreRef.current = {};
+    chatPromptSnapshotsRef.current = {};
+    setChatPromptSnapshotVersion(version => version + 1);
+  };
+
+  const hydrateChatSessionContentFromCache = (
+    sessionId: string,
+    activeProjectId = projectIdRef.current,
+  ): RegistryChatMessage[] => {
+    if (!activeProjectId || !sessionId) return [];
+    const cached = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
+    if (!cached) {
+      return [];
+    }
+
+    const cachedMessages = [...cached.messages];
+    chatMessageStoreRef.current[sessionId] = cachedMessages;
+    chatPromptSnapshotsRef.current[sessionId] = [...cached.prompts];
+
+    const latest = getLatestChatSyncCursor(cachedMessages);
+    const cachedPromptIndex = Math.max(0, cached.cursor.promptIndex || 0);
+    const cachedTurnIndex = Math.max(0, cached.cursor.turnIndex || 0);
+    if (
+      latest.syncIndex > cachedPromptIndex ||
+      (latest.syncIndex === cachedPromptIndex && latest.syncSubIndex > cachedTurnIndex)
+    ) {
+      chatSyncIndexRef.current[sessionId] = latest.syncIndex;
+      chatSyncSubIndexRef.current[sessionId] = latest.syncSubIndex;
+    } else {
+      chatSyncIndexRef.current[sessionId] = cachedPromptIndex;
+      chatSyncSubIndexRef.current[sessionId] = cachedTurnIndex;
+    }
+    setChatPromptSnapshotVersion(version => version + 1);
+    return cachedMessages;
+  };
+
+  const hydrateChatSessionsFromCache = (
+    activeProjectId = projectIdRef.current,
+  ) => {
+    if (!activeProjectId) return;
+    const cachedSessions = workspaceStore.hydrateChatSessions(activeProjectId);
+    if (cachedSessions.length === 0) {
+      return;
+    }
+
+    const sessionRows = cachedSessions.map(item => item.session);
+    setChatSessions(sortChatSessions(sessionRows));
+
+    for (const cached of cachedSessions) {
+      const sessionId = cached.session.sessionId;
+      if (!sessionId) continue;
+      chatSyncIndexRef.current[sessionId] = cached.cursor.promptIndex || 0;
+      chatSyncSubIndexRef.current[sessionId] = cached.cursor.turnIndex || 0;
+    }
+
+    const currentSelection = chatSelectedIdRef.current;
+    if (currentSelection && sessionRows.some(item => item.sessionId === currentSelection)) {
+      const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
+      setChatMessages(cachedMessages);
+      setSelectedChatId(currentSelection);
+    } else {
+      setChatMessages([]);
+    }
+  };
+
+  const persistChatSessionsIndex = (activeProjectId = projectIdRef.current) => {
+    if (!activeProjectId) return;
+    const cursorBySessionId: Record<string, {promptIndex: number; turnIndex: number}> = {};
+    for (const session of chatSessions) {
+      const sessionId = session.sessionId;
+      if (!sessionId) continue;
+      cursorBySessionId[sessionId] = {
+        promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
+        turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+      };
+    }
+    workspaceStore.replaceChatSessions(activeProjectId, chatSessions, cursorBySessionId);
+  };
+
+  const persistChatSessionContent = (
+    sessionId: string,
+    activeProjectId = projectIdRef.current,
+    session?: RegistryChatSession,
+  ) => {
+    if (!activeProjectId || !sessionId) return;
+    const messages = chatMessageStoreRef.current[sessionId] ?? [];
+    const prompts = chatPromptSnapshotsRef.current[sessionId] ?? [];
+    const cursor = {
+      promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
+      turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+    };
+    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, messages, prompts, cursor);
+    const targetSession = session ?? chatSessions.find(item => item.sessionId === sessionId);
+    if (targetSession) {
+      workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
+    }
+  };
+
   const loadChatSession = async (
     sessionId: string,
     activeProjectId = projectIdRef.current,
@@ -2946,6 +3053,7 @@ function App() {
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
       setChatMessages(nextMessages);
+      persistChatSessionContent(result.session.sessionId, activeProjectId, result.session);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -2961,22 +3069,39 @@ function App() {
     if (!activeProjectId) return;
     try {
       const sessions = sortChatSessions(await service.listSessions());
-      setChatSessions(prev =>
-        sessions.reduce(
+      let nextSessions: RegistryChatSession[] = [];
+      setChatSessions(prev => {
+        nextSessions = sessions.reduce(
           (acc, session) => mergeChatSession(acc, session),
           prev.filter(item =>
             sessions.every(session => session.sessionId !== item.sessionId),
           ),
-        ),
-      );
+        );
+        return nextSessions;
+      });
+
+      const cursorBySessionId: Record<string, {promptIndex: number; turnIndex: number}> = {};
+      for (const session of nextSessions) {
+        const sessionId = session.sessionId;
+        if (!sessionId) continue;
+        cursorBySessionId[sessionId] = {
+          promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
+          turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+        };
+      }
+      workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
+
       const currentSelection = chatSelectedIdRef.current;
-      if (!currentSelection || !sessions.some(session => session.sessionId === currentSelection)) {
+      if (!currentSelection || !nextSessions.some(session => session.sessionId === currentSelection)) {
         setSelectedChatId('');
         setChatMessages([]);
         return;
       }
       setSelectedChatId(currentSelection);
-      setChatMessages(chatMessageStoreRef.current[currentSelection] ?? []);
+      const cachedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
+      setChatMessages(cachedSelection.length > 0
+        ? cachedSelection
+        : (chatMessageStoreRef.current[currentSelection] ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -3145,12 +3270,16 @@ function App() {
     delete nextSyncIndex[sessionId];
     delete nextSyncSubIndex[sessionId];
     delete nextSnapshots[sessionId];
-     chatMessageStoreRef.current = nextMessageStore;
-     chatSyncIndexRef.current = nextSyncIndex;
-     chatSyncSubIndexRef.current = nextSyncSubIndex;
-     chatPromptSnapshotsRef.current = nextSnapshots;
-     setChatPromptSnapshotVersion(version => version + 1);
-   };
+    chatMessageStoreRef.current = nextMessageStore;
+    chatSyncIndexRef.current = nextSyncIndex;
+    chatSyncSubIndexRef.current = nextSyncSubIndex;
+    chatPromptSnapshotsRef.current = nextSnapshots;
+    const activeProjectId = projectIdRef.current;
+    if (activeProjectId) {
+      workspaceStore.deleteChatSession(activeProjectId, sessionId);
+    }
+    setChatPromptSnapshotVersion(version => version + 1);
+  };
 
   const handleDeleteChatSession = async (sessionId: string) => {
     const normalizedSessionId = sessionId.trim();
@@ -3196,6 +3325,8 @@ function App() {
       chatSyncIndexRef.current[normalizedSessionId] = 0;
       chatSyncSubIndexRef.current[normalizedSessionId] = 0;
       chatMessageStoreRef.current[normalizedSessionId] = [];
+      chatPromptSnapshotsRef.current[normalizedSessionId] = [];
+      persistChatSessionContent(normalizedSessionId, projectIdRef.current);
       // Reload the session messages if currently selected
       if (chatSelectedIdRef.current === normalizedSessionId) {
         setChatMessages([]);
@@ -3288,7 +3419,7 @@ function App() {
     chatSelectedIdRef.current = sessionId;
     setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
     setSelectedChatId(sessionId);
-    setChatMessages(chatMessageStoreRef.current[sessionId] ?? []);
+    setChatMessages(hydrateChatSessionContentFromCache(sessionId, projectIdRef.current));
     loadChatSession(sessionId, projectIdRef.current, {
       incremental: true,
     }).catch(() => undefined);
@@ -3475,15 +3606,8 @@ function App() {
       setReconnecting(false);
       setConnected(true);
       if (!silentReconnect) {
-        setChatMessages([]);
-        setChatSessions([]);
-        setChatRunningSessionFlags({});
-        setChatCompletedUnopenedFlags({});
-        setSelectedChatId('');
-        chatSelectedIdRef.current = '';
-        chatSyncIndexRef.current = {};
-        chatSyncSubIndexRef.current = {};
-        chatMessageStoreRef.current = {};
+        clearChatRuntimeState();
+        hydrateChatSessionsFromCache(result.hydrated.projectId);
       }
       if (silentReconnect) {
         const shouldSyncSelectedSession =
@@ -3629,6 +3753,12 @@ function App() {
     });
   }, [address, autoConnecting, connected]);
 
+  useEffect(() => {
+    const activeProjectId = projectIdRef.current;
+    if (!activeProjectId) return;
+    persistChatSessionsIndex(activeProjectId);
+  }, [chatSessions]);
+
   const mergeTokenProviders = useCallback(
     (entries: Array<{hubId: string; projectId: string; result: RegistryTokenScanResult}>): TokenProviderSectionView[] => {
       const sections = new Map<string, TokenProviderSectionView>();
@@ -3723,6 +3853,8 @@ function App() {
         wm_global_kv: dump.global,
         wm_project_state: dump.projects,
         wm_project_commits: dump.projectCommits,
+        wm_chat_session_index: dump.chatSessionIndex,
+        wm_chat_session_content: dump.chatSessionContent,
         wm_file_cache: dump.fileCache,
         wm_diff_cache: dump.diffCache,
         wm_meta: dump.meta,
@@ -3784,15 +3916,8 @@ function App() {
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       applyHydratedProjectState(result.hydrated);
-      setChatMessages([]);
-      setChatSessions([]);
-      setChatRunningSessionFlags({});
-      setChatCompletedUnopenedFlags({});
-      setSelectedChatId('');
-      chatSelectedIdRef.current = '';
-      chatSyncIndexRef.current = {};
-      chatSyncSubIndexRef.current = {};
-      chatMessageStoreRef.current = {};
+      clearChatRuntimeState();
+      hydrateChatSessionsFromCache(result.hydrated.projectId);
       workspaceController
         .validateExpandedDirectories(
           result.hydrated.projectId,
@@ -3890,6 +4015,10 @@ function App() {
         };
         if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session!));
+          workspaceStore.rememberChatSession(projectIdRef.current, payload.session, {
+            promptIndex: chatSyncIndexRef.current[payload.session.sessionId] ?? 0,
+            turnIndex: chatSyncSubIndexRef.current[payload.session.sessionId] ?? 0,
+          });
           if (payload.session?.sessionId === chatSelectedIdRef.current) {
             loadChatSession(payload.session.sessionId, projectIdRef.current, {
               incremental: true,
@@ -3926,13 +4055,14 @@ function App() {
           }
         }
         const messageText = msgText(message.method, message.param);
+        let mergedSessionForCache: RegistryChatSession | undefined;
         setChatSessions(prev => {
           const existing = prev.find(item => item.sessionId === sessionId);
           const fallbackTitle =
             msgRole(message.method) === 'user' && messageText
               ? messageText.slice(0, 120)
               : existing?.title || sessionId;
-          return mergeChatSession(prev, {
+          const next = mergeChatSession(prev, {
             sessionId,
             title: fallbackTitle,
             preview: messageText || existing?.preview || '',
@@ -3941,6 +4071,8 @@ function App() {
             unreadCount: existing?.unreadCount,
             agentType: existing?.agentType,
           });
+          mergedSessionForCache = next.find(item => item.sessionId === sessionId);
+          return next;
         });
 
         maybeNotifyChatMessage(message);
@@ -3962,6 +4094,7 @@ function App() {
           message,
         );
         chatMessageStoreRef.current[sessionId] = merged;
+        persistChatSessionContent(sessionId, projectIdRef.current, mergedSessionForCache);
 
         if (sessionId === chatSelectedIdRef.current) {
           setChatMessages(merged);
@@ -6216,4 +6349,3 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-

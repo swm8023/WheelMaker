@@ -1,4 +1,4 @@
-import type {RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
+import type {RegistryChatMessage, RegistryChatSession, RegistryGitCommit, RegistryGitCommitFile, RegistrySessionPromptSnapshot} from '../types/registry';
 import {
   DEFAULT_CODE_FONT,
   DEFAULT_CODE_FONT_SIZE,
@@ -57,8 +57,23 @@ export type PersistedGlobalState = {
   selectedProjectId: string;
 };
 
+export type PersistedChatCursor = {
+  promptIndex: number;
+  turnIndex: number;
+};
+
+export type PersistedChatSessionEntry = {
+  session: RegistryChatSession;
+  cursor: PersistedChatCursor;
+};
+
+export type PersistedChatSessionContent = {
+  messages: RegistryChatMessage[];
+  prompts: RegistrySessionPromptSnapshot[];
+  cursor: PersistedChatCursor;
+};
+
 type PersistedWorkspaceState = {
-  version: 4;
   global: PersistedGlobalState;
   projects: Record<string, PersistedProjectState>;
 };
@@ -67,6 +82,8 @@ export type WorkspaceDatabaseDump = {
   global: Array<{k: string; v: string; updatedAt: number}>;
   projects: Array<{projectId: string; stateJson: string; updatedAt: number}>;
   projectCommits: Array<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>;
+  chatSessionIndex: Array<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>;
+  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; cursorJson: string; updatedAt: number}>;
   fileCache: Array<{k: string; hash: string; v: string; updatedAt: number}>;
   diffCache: Array<{k: string; v: string; updatedAt: number}>;
   meta: Array<{k: string; v: string; updatedAt: number}>;
@@ -76,10 +93,12 @@ export type WorkspaceDatabaseDump = {
 const LOCAL_ADDRESS_KEY = 'wheelmaker.workspace.address';
 const LOCAL_TOKEN_KEY = 'wheelmaker.workspace.token';
 const WORKSPACE_DB_NAME = 'wheelmaker.workspace.db';
-const WORKSPACE_DB_VERSION = 3;
+const WORKSPACE_DB_VERSION = 4;
 const TABLE_GLOBAL_KV = 'wm_global_kv';
 const TABLE_PROJECT_STATE = 'wm_project_state';
 const TABLE_PROJECT_COMMITS = 'wm_project_commits';
+const TABLE_CHAT_SESSION_INDEX = 'wm_chat_session_index';
+const TABLE_CHAT_SESSION_CONTENT = 'wm_chat_session_content';
 const TABLE_FILE_CACHE = 'wm_file_cache';
 const TABLE_DIFF_CACHE = 'wm_diff_cache';
 const TABLE_META = 'wm_meta';
@@ -137,10 +156,24 @@ function defaultProjectCommitsState(): PersistedProjectCommitsState {
 
 function defaultWorkspaceState(): PersistedWorkspaceState {
   return {
-    version: 4,
     global: defaultGlobalState(),
     projects: {},
   };
+}
+
+function defaultChatCursor(): PersistedChatCursor {
+  return {
+    promptIndex: 0,
+    turnIndex: 0,
+  };
+}
+
+function sanitizeChatCursor(input: Partial<PersistedChatCursor> | undefined): PersistedChatCursor {
+  const base = defaultChatCursor();
+  if (!input) return base;
+  const promptIndex = Number.isFinite(input.promptIndex) ? Math.max(0, Math.floor(Number(input.promptIndex))) : base.promptIndex;
+  const turnIndex = Number.isFinite(input.turnIndex) ? Math.max(0, Math.floor(Number(input.turnIndex))) : base.turnIndex;
+  return {promptIndex, turnIndex};
 }
 
 function sanitizeProjectState(input: Partial<PersistedProjectState> | undefined): PersistedProjectState {
@@ -209,6 +242,28 @@ function diffCacheKey(projectId: string, key: string): string {
   return `dc:${projectId}:${key}`;
 }
 
+function chatSessionKey(projectId: string, sessionId: string): string {
+  return `cs:${projectId}:${sessionId}`;
+}
+
+function chatProjectPrefix(projectId: string): string {
+  return `cs:${projectId}:`;
+}
+
+
+function parseChatSessionKey(key: string): {projectId: string; sessionId: string} | null {
+  if (!key.startsWith('cs:')) return null;
+  const payload = key.slice(3);
+  const splitAt = payload.lastIndexOf(':');
+  if (splitAt <= 0 || splitAt >= payload.length - 1) {
+    return null;
+  }
+  return {
+    projectId: payload.slice(0, splitAt),
+    sessionId: payload.slice(splitAt + 1),
+  };
+}
+
 type RawKVRow = {
   k: string;
   v: string;
@@ -225,6 +280,25 @@ type RawProjectCommitsRow = {
   projectId: string;
   commitsJson: string;
   commitFilesByShaJson: string;
+  updatedAt: number;
+};
+
+type RawChatSessionIndexRow = {
+  k: string;
+  projectId: string;
+  sessionId: string;
+  sessionJson: string;
+  cursorJson: string;
+  updatedAt: number;
+};
+
+type RawChatSessionContentRow = {
+  k: string;
+  projectId: string;
+  sessionId: string;
+  messagesJson: string;
+  promptsJson: string;
+  cursorJson: string;
   updatedAt: number;
 };
 
@@ -263,6 +337,12 @@ class WorkspaceDatabase {
         }
         if (!db.objectStoreNames.contains(TABLE_PROJECT_COMMITS)) {
           db.createObjectStore(TABLE_PROJECT_COMMITS, {keyPath: 'projectId'});
+        }
+        if (!db.objectStoreNames.contains(TABLE_CHAT_SESSION_INDEX)) {
+          db.createObjectStore(TABLE_CHAT_SESSION_INDEX, {keyPath: 'k'});
+        }
+        if (!db.objectStoreNames.contains(TABLE_CHAT_SESSION_CONTENT)) {
+          db.createObjectStore(TABLE_CHAT_SESSION_CONTENT, {keyPath: 'k'});
         }
         if (!db.objectStoreNames.contains(TABLE_FILE_CACHE)) {
           db.createObjectStore(TABLE_FILE_CACHE, {keyPath: 'k'});
@@ -350,10 +430,21 @@ function sortByProjectId<T extends {projectId: string}>(rows: T[]): T[] {
   return [...rows].sort((a, b) => a.projectId.localeCompare(b.projectId));
 }
 
+function compareUpdatedAtDesc(a: string, b: string): number {
+  const aTime = Date.parse(a || '');
+  const bTime = Date.parse(b || '');
+  const safeA = Number.isFinite(aTime) ? aTime : 0;
+  const safeB = Number.isFinite(bTime) ? bTime : 0;
+  if (safeA === safeB) return 0;
+  return safeA > safeB ? -1 : 1;
+}
+
 export class WorkspacePersistenceRepository {
   private readonly db = new WorkspaceDatabase();
   private state: PersistedWorkspaceState;
   private readonly projectCommits: Record<string, PersistedProjectCommitsState> = {};
+  private readonly chatSessionIndex = new Map<string, PersistedChatSessionEntry>();
+  private readonly chatSessionContent = new Map<string, PersistedChatSessionContent>();
   private readonly diffCache = new Map<string, DiffCacheEntry>();
   private readonly fileCache = new Map<string, FileCacheEntry>();
   private readonly readyPromise: Promise<void>;
@@ -368,10 +459,12 @@ export class WorkspacePersistenceRepository {
   }
 
   private async initialize(): Promise<void> {
-    const [globalRows, projectRows, projectCommitRows, diffRows, fileRows] = await Promise.all([
+    const [globalRows, projectRows, projectCommitRows, chatIndexRows, chatContentRows, diffRows, fileRows] = await Promise.all([
       this.db.getAllRows<RawKVRow>(TABLE_GLOBAL_KV),
       this.db.getAllRows<RawProjectStateRow>(TABLE_PROJECT_STATE),
       this.db.getAllRows<RawProjectCommitsRow>(TABLE_PROJECT_COMMITS),
+      this.db.getAllRows<RawChatSessionIndexRow>(TABLE_CHAT_SESSION_INDEX),
+      this.db.getAllRows<RawChatSessionContentRow>(TABLE_CHAT_SESSION_CONTENT),
       this.db.getAllRows<RawDiffCacheRow>(TABLE_DIFF_CACHE),
       this.db.getAllRows<RawFileCacheRow>(TABLE_FILE_CACHE),
     ]);
@@ -380,6 +473,8 @@ export class WorkspacePersistenceRepository {
       globalRows.length > 0 ||
       projectRows.length > 0 ||
       projectCommitRows.length > 0 ||
+      chatIndexRows.length > 0 ||
+      chatContentRows.length > 0 ||
       diffRows.length > 0 ||
       fileRows.length > 0;
 
@@ -391,6 +486,7 @@ export class WorkspacePersistenceRepository {
 
     this.state = this.fromDbRows(globalRows, projectRows);
     this.restoreProjectCommits(projectCommitRows);
+    this.restoreChatSessions(chatIndexRows, chatContentRows);
     this.restoreDiffCache(diffRows);
     this.restoreFileCache(fileRows);
   }
@@ -410,7 +506,6 @@ export class WorkspacePersistenceRepository {
     }
 
     return {
-      version: 4,
       global: sanitizeGlobalState({...base.global, ...globalPatch, ...this.readLocalIdentityState()}),
       projects,
     };
@@ -430,6 +525,36 @@ export class WorkspacePersistenceRepository {
     }
   }
 
+  private restoreChatSessions(indexRows: RawChatSessionIndexRow[], contentRows: RawChatSessionContentRow[]): void {
+    this.chatSessionIndex.clear();
+    this.chatSessionContent.clear();
+
+    for (const row of indexRows) {
+      const session = tryParse<RegistryChatSession>(row.sessionJson, {
+        sessionId: row.sessionId,
+        title: row.sessionId,
+        preview: '',
+        updatedAt: '',
+        messageCount: 0,
+      });
+      const cursor = sanitizeChatCursor(tryParse<Partial<PersistedChatCursor>>(row.cursorJson, defaultChatCursor()));
+      this.chatSessionIndex.set(row.k, {
+        session,
+        cursor,
+      });
+    }
+
+    for (const row of contentRows) {
+      const messages = tryParse<RegistryChatMessage[]>(row.messagesJson, []);
+      const prompts = tryParse<RegistrySessionPromptSnapshot[]>(row.promptsJson, []);
+      const cursor = sanitizeChatCursor(tryParse<Partial<PersistedChatCursor>>(row.cursorJson, defaultChatCursor()));
+      this.chatSessionContent.set(row.k, {
+        messages: Array.isArray(messages) ? messages : [],
+        prompts: Array.isArray(prompts) ? prompts : [],
+        cursor,
+      });
+    }
+  }
   private restoreDiffCache(rows: RawDiffCacheRow[]): void {
     this.diffCache.clear();
     for (const row of rows) {
@@ -460,6 +585,8 @@ export class WorkspacePersistenceRepository {
       TABLE_GLOBAL_KV,
       TABLE_PROJECT_STATE,
       TABLE_PROJECT_COMMITS,
+      TABLE_CHAT_SESSION_INDEX,
+      TABLE_CHAT_SESSION_CONTENT,
       TABLE_DIFF_CACHE,
       TABLE_FILE_CACHE,
       TABLE_META,
@@ -500,6 +627,34 @@ export class WorkspacePersistenceRepository {
       });
     }
 
+    for (const [k, entry] of this.chatSessionIndex.entries()) {
+      const parsed = parseChatSessionKey(k);
+      const projectId = parsed?.projectId || '';
+      const sessionId = parsed?.sessionId || entry.session.sessionId;
+      await this.db.putRow(TABLE_CHAT_SESSION_INDEX, {
+        k,
+        projectId,
+        sessionId,
+        sessionJson: serialize(entry.session),
+        cursorJson: serialize(entry.cursor),
+        updatedAt: now,
+      });
+    }
+
+    for (const [k, content] of this.chatSessionContent.entries()) {
+      const parsed = parseChatSessionKey(k);
+      const projectId = parsed?.projectId || '';
+      const sessionId = parsed?.sessionId || '';
+      await this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
+        k,
+        projectId,
+        sessionId,
+        messagesJson: serialize(content.messages),
+        promptsJson: serialize(content.prompts),
+        cursorJson: serialize(content.cursor),
+        updatedAt: now,
+      });
+    }
     for (const [k, entry] of this.diffCache.entries()) {
       await this.db.putRow(TABLE_DIFF_CACHE, {
         k,
@@ -523,7 +678,7 @@ export class WorkspacePersistenceRepository {
 
     await this.db.putRow(TABLE_META, {
       k: 'schemaVersion',
-      v: serialize(3),
+      v: serialize(WORKSPACE_DB_VERSION),
       updatedAt: now,
     });
   }
@@ -591,6 +746,127 @@ export class WorkspacePersistenceRepository {
     return cloneState(this.projectCommits[projectId] ?? defaultProjectCommitsState());
   }
 
+  getProjectChatSessions(projectId: string): PersistedChatSessionEntry[] {
+    if (!projectId) return [];
+    const prefix = chatProjectPrefix(projectId);
+    const entries: PersistedChatSessionEntry[] = [];
+    for (const [key, value] of this.chatSessionIndex.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      entries.push(cloneState(value));
+    }
+    return entries.sort((a, b) => {
+      const updatedAtDelta = compareUpdatedAtDesc(a.session.updatedAt || '', b.session.updatedAt || '');
+      if (updatedAtDelta !== 0) return updatedAtDelta;
+      return (a.session.title || '').localeCompare(b.session.title || '');
+    });
+  }
+
+  getProjectChatSessionContent(projectId: string, sessionId: string): PersistedChatSessionContent | null {
+    if (!projectId || !sessionId) return null;
+    const entry = this.chatSessionContent.get(chatSessionKey(projectId, sessionId));
+    return entry ? cloneState(entry) : null;
+  }
+
+  replaceProjectChatSessions(projectId: string, sessions: PersistedChatSessionEntry[]): void {
+    if (!projectId) return;
+    const prefix = chatProjectPrefix(projectId);
+    const keepKeys = new Set<string>();
+    const now = Date.now();
+
+    for (const sessionEntry of sessions) {
+      const sessionId = sessionEntry.session.sessionId;
+      if (!sessionId) continue;
+      const key = chatSessionKey(projectId, sessionId);
+      keepKeys.add(key);
+      const entry: PersistedChatSessionEntry = {
+        session: sessionEntry.session,
+        cursor: sanitizeChatCursor(sessionEntry.cursor),
+      };
+      this.chatSessionIndex.set(key, entry);
+      void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_INDEX, {
+        k: key,
+        projectId,
+        sessionId,
+        sessionJson: serialize(entry.session),
+        cursorJson: serialize(entry.cursor),
+        updatedAt: now,
+      })).catch(() => undefined);
+    }
+
+    const deleteKeys: string[] = [];
+    for (const key of this.chatSessionIndex.keys()) {
+      if (!key.startsWith(prefix)) continue;
+      if (keepKeys.has(key)) continue;
+      deleteKeys.push(key);
+    }
+
+    for (const key of deleteKeys) {
+      this.chatSessionIndex.delete(key);
+      this.chatSessionContent.delete(key);
+      void this.ready().then(async () => {
+        await this.db.deleteRow(TABLE_CHAT_SESSION_INDEX, key);
+        await this.db.deleteRow(TABLE_CHAT_SESSION_CONTENT, key);
+      }).catch(() => undefined);
+    }
+  }
+
+  patchProjectChatSession(projectId: string, session: RegistryChatSession, cursor: PersistedChatCursor): void {
+    const sessionId = (session.sessionId || '').trim();
+    if (!projectId || !sessionId) return;
+    const key = chatSessionKey(projectId, sessionId);
+    const now = Date.now();
+    const entry: PersistedChatSessionEntry = {
+      session,
+      cursor: sanitizeChatCursor(cursor),
+    };
+    this.chatSessionIndex.set(key, entry);
+    void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_INDEX, {
+      k: key,
+      projectId,
+      sessionId,
+      sessionJson: serialize(entry.session),
+      cursorJson: serialize(entry.cursor),
+      updatedAt: now,
+    })).catch(() => undefined);
+  }
+
+  patchProjectChatSessionContent(
+    projectId: string,
+    sessionId: string,
+    messages: RegistryChatMessage[],
+    prompts: RegistrySessionPromptSnapshot[],
+    cursor: PersistedChatCursor,
+  ): void {
+    if (!projectId || !sessionId) return;
+    const key = chatSessionKey(projectId, sessionId);
+    const now = Date.now();
+    const payload: PersistedChatSessionContent = {
+      messages: Array.isArray(messages) ? messages : [],
+      prompts: Array.isArray(prompts) ? prompts : [],
+      cursor: sanitizeChatCursor(cursor),
+    };
+    this.chatSessionContent.set(key, payload);
+    void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
+      k: key,
+      projectId,
+      sessionId,
+      messagesJson: serialize(payload.messages),
+      promptsJson: serialize(payload.prompts),
+      cursorJson: serialize(payload.cursor),
+      updatedAt: now,
+    })).catch(() => undefined);
+  }
+
+  deleteProjectChatSession(projectId: string, sessionId: string): void {
+    if (!projectId || !sessionId) return;
+    const key = chatSessionKey(projectId, sessionId);
+    this.chatSessionIndex.delete(key);
+    this.chatSessionContent.delete(key);
+    void this.ready().then(async () => {
+      await this.db.deleteRow(TABLE_CHAT_SESSION_INDEX, key);
+      await this.db.deleteRow(TABLE_CHAT_SESSION_CONTENT, key);
+    }).catch(() => undefined);
+  }
   patchGlobalState(patch: Partial<PersistedGlobalState>): void {
     this.state.global = sanitizeGlobalState({...this.state.global, ...patch});
     this.saveLocalIdentityState(this.state.global);
@@ -718,6 +994,8 @@ export class WorkspacePersistenceRepository {
     for (const key of Object.keys(this.projectCommits)) {
       delete this.projectCommits[key];
     }
+    this.chatSessionIndex.clear();
+    this.chatSessionContent.clear();
     this.diffCache.clear();
     this.fileCache.clear();
 
@@ -727,12 +1005,14 @@ export class WorkspacePersistenceRepository {
         TABLE_GLOBAL_KV,
         TABLE_PROJECT_STATE,
         TABLE_PROJECT_COMMITS,
+        TABLE_CHAT_SESSION_INDEX,
+        TABLE_CHAT_SESSION_CONTENT,
         TABLE_DIFF_CACHE,
         TABLE_FILE_CACHE,
       ]);
       await this.db.putRow(TABLE_META, {
         k: 'schemaVersion',
-        v: serialize(3),
+        v: serialize(WORKSPACE_DB_VERSION),
         updatedAt: now,
       });
       await this.db.putRow(TABLE_META, {
@@ -745,10 +1025,12 @@ export class WorkspacePersistenceRepository {
 
   async dumpDatabase(): Promise<WorkspaceDatabaseDump> {
     await this.ready();
-    const [global, projects, projectCommits, fileCache, diffCache, meta] = await Promise.all([
+    const [global, projects, projectCommits, chatSessionIndex, chatSessionContent, fileCache, diffCache, meta] = await Promise.all([
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_GLOBAL_KV),
       this.db.getAllRows<{projectId: string; stateJson: string; updatedAt: number}>(TABLE_PROJECT_STATE),
       this.db.getAllRows<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>(TABLE_PROJECT_COMMITS),
+      this.db.getAllRows<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_INDEX),
+      this.db.getAllRows<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; cursorJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
       this.db.getAllRows<{k: string; hash: string; v: string; updatedAt: number}>(TABLE_FILE_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_DIFF_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),
@@ -757,6 +1039,8 @@ export class WorkspacePersistenceRepository {
       global: sortByKey(global),
       projects: sortByProjectId(projects),
       projectCommits: sortByProjectId(projectCommits),
+      chatSessionIndex: sortByKey(chatSessionIndex),
+      chatSessionContent: sortByKey(chatSessionContent),
       fileCache: sortByKey(fileCache),
       diffCache: sortByKey(diffCache),
       meta: sortByKey(meta),
@@ -764,4 +1048,3 @@ export class WorkspacePersistenceRepository {
     };
   }
 }
-
