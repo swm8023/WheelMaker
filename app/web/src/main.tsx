@@ -2210,7 +2210,6 @@ function App() {
   useEffect(() => {
     if (!projectId) return;
     workspaceStore.rememberProjectSnapshot(projectId, {
-      dirEntries,
       expandedDirs,
       selectedFile,
       pinnedFiles,
@@ -2222,7 +2221,6 @@ function App() {
     });
   }, [
     projectId,
-    dirEntries,
     expandedDirs,
     selectedFile,
     pinnedFiles,
@@ -3724,6 +3722,7 @@ function App() {
       {
         wm_global_kv: dump.global,
         wm_project_state: dump.projects,
+        wm_project_commits: dump.projectCommits,
         wm_file_cache: dump.fileCache,
         wm_diff_cache: dump.diffCache,
         wm_meta: dump.meta,
@@ -6189,6 +6188,4 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
 

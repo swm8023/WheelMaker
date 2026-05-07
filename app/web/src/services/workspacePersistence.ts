@@ -28,15 +28,17 @@ export type FileCacheEntry = {
 };
 
 export type PersistedProjectState = {
-  dirEntries: Record<string, RegistryFsEntry[]>;
   expandedDirs: string[];
   selectedFile: string;
   pinnedFiles: string[];
   gitCurrentBranch: string;
-  commits: RegistryGitCommit[];
   selectedCommit: string;
-  commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
   selectedDiff: string;
+};
+
+export type PersistedProjectCommitsState = {
+  commits: RegistryGitCommit[];
+  commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
 };
 
 export type PersistedGlobalState = {
@@ -56,7 +58,7 @@ export type PersistedGlobalState = {
 };
 
 type PersistedWorkspaceState = {
-  version: 2;
+  version: 3;
   global: PersistedGlobalState;
   projects: Record<string, PersistedProjectState>;
 };
@@ -68,7 +70,16 @@ type LegacyDiffCacheEntry = {
   updatedAt: number;
 };
 
-type LegacyProjectState = PersistedProjectState & {
+type LegacyProjectState = {
+  dirEntries?: Record<string, RegistryFsEntry[]>;
+  expandedDirs?: string[];
+  selectedFile?: string;
+  pinnedFiles?: string[];
+  gitCurrentBranch?: string;
+  commits?: RegistryGitCommit[];
+  selectedCommit?: string;
+  commitFilesBySha?: Record<string, RegistryGitCommitFile[]>;
+  selectedDiff?: string;
   diffCacheByKey?: Record<string, LegacyDiffCacheEntry>;
 };
 
@@ -81,6 +92,7 @@ type LegacyWorkspaceState = {
 export type WorkspaceDatabaseDump = {
   global: Array<{k: string; v: string; updatedAt: number}>;
   projects: Array<{projectId: string; stateJson: string; updatedAt: number}>;
+  projectCommits: Array<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>;
   fileCache: Array<{k: string; hash: string; v: string; updatedAt: number}>;
   diffCache: Array<{k: string; v: string; metaJson: string; updatedAt: number}>;
   meta: Array<{k: string; v: string; updatedAt: number}>;
@@ -91,9 +103,10 @@ const STORAGE_KEY = 'wheelmaker.workspace.state.v1';
 const LOCAL_ADDRESS_KEY = 'wheelmaker.workspace.address';
 const LOCAL_TOKEN_KEY = 'wheelmaker.workspace.token';
 const WORKSPACE_DB_NAME = 'wheelmaker.workspace.db';
-const WORKSPACE_DB_VERSION = 1;
+const WORKSPACE_DB_VERSION = 2;
 const TABLE_GLOBAL_KV = 'wm_global_kv';
 const TABLE_PROJECT_STATE = 'wm_project_state';
+const TABLE_PROJECT_COMMITS = 'wm_project_commits';
 const TABLE_FILE_CACHE = 'wm_file_cache';
 const TABLE_DIFF_CACHE = 'wm_diff_cache';
 const TABLE_META = 'wm_meta';
@@ -133,21 +146,25 @@ function defaultGlobalState(): PersistedGlobalState {
 
 function defaultProjectState(): PersistedProjectState {
   return {
-    dirEntries: {'.': []},
     expandedDirs: ['.'],
     selectedFile: '',
     pinnedFiles: [],
     gitCurrentBranch: '',
-    commits: [],
     selectedCommit: '',
-    commitFilesBySha: {},
     selectedDiff: '',
+  };
+}
+
+function defaultProjectCommitsState(): PersistedProjectCommitsState {
+  return {
+    commits: [],
+    commitFilesBySha: {},
   };
 }
 
 function defaultWorkspaceState(): PersistedWorkspaceState {
   return {
-    version: 2,
+    version: 3,
     global: defaultGlobalState(),
     projects: {},
   };
@@ -157,15 +174,21 @@ function sanitizeProjectState(input: Partial<PersistedProjectState> | undefined)
   const base = defaultProjectState();
   if (!input) return base;
   return {
-    dirEntries: typeof input.dirEntries === 'object' && input.dirEntries ? input.dirEntries : base.dirEntries,
     expandedDirs: Array.isArray(input.expandedDirs) && input.expandedDirs.length > 0 ? input.expandedDirs : base.expandedDirs,
     selectedFile: typeof input.selectedFile === 'string' ? input.selectedFile : base.selectedFile,
     pinnedFiles: Array.isArray(input.pinnedFiles) ? input.pinnedFiles.filter(item => typeof item === 'string') : base.pinnedFiles,
     gitCurrentBranch: typeof input.gitCurrentBranch === 'string' ? input.gitCurrentBranch : base.gitCurrentBranch,
-    commits: Array.isArray(input.commits) ? input.commits : base.commits,
     selectedCommit: typeof input.selectedCommit === 'string' ? input.selectedCommit : base.selectedCommit,
-    commitFilesBySha: typeof input.commitFilesBySha === 'object' && input.commitFilesBySha ? input.commitFilesBySha : base.commitFilesBySha,
     selectedDiff: typeof input.selectedDiff === 'string' ? input.selectedDiff : base.selectedDiff,
+  };
+}
+
+function sanitizeProjectCommitsState(input: Partial<PersistedProjectCommitsState> | undefined): PersistedProjectCommitsState {
+  const base = defaultProjectCommitsState();
+  if (!input) return base;
+  return {
+    commits: Array.isArray(input.commits) ? input.commits : base.commits,
+    commitFilesBySha: typeof input.commitFilesBySha === 'object' && input.commitFilesBySha ? input.commitFilesBySha : base.commitFilesBySha,
   };
 }
 
@@ -209,8 +232,8 @@ function fileCacheKey(projectId: string, kind: 'file' | 'dir', path: string): st
   return `fc:${projectId}:${kind}:${path}`;
 }
 
-function diffCacheKey(projectId: string, cacheKey: string): string {
-  return `dc:${projectId}:${cacheKey}`;
+function diffCacheKey(projectId: string, key: string): string {
+  return `dc:${projectId}:${key}`;
 }
 
 type RawKVRow = {
@@ -229,6 +252,13 @@ type RawFileCacheRow = {
 type RawProjectStateRow = {
   projectId: string;
   stateJson: string;
+  updatedAt: number;
+};
+
+type RawProjectCommitsRow = {
+  projectId: string;
+  commitsJson: string;
+  commitFilesByShaJson: string;
   updatedAt: number;
 };
 
@@ -259,6 +289,9 @@ class WorkspaceDatabase {
         if (!db.objectStoreNames.contains(TABLE_PROJECT_STATE)) {
           db.createObjectStore(TABLE_PROJECT_STATE, {keyPath: 'projectId'});
         }
+        if (!db.objectStoreNames.contains(TABLE_PROJECT_COMMITS)) {
+          db.createObjectStore(TABLE_PROJECT_COMMITS, {keyPath: 'projectId'});
+        }
         if (!db.objectStoreNames.contains(TABLE_FILE_CACHE)) {
           db.createObjectStore(TABLE_FILE_CACHE, {keyPath: 'k'});
         }
@@ -275,14 +308,21 @@ class WorkspaceDatabase {
     return this.openPromise;
   }
 
+  private request<T>(req: IDBRequest<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error ?? new Error('workspace db request failed'));
+    });
+  }
+
   private async run<T>(
-    storeNames: string | string[],
+    stores: string | string[],
     mode: IDBTransactionMode,
     action: (tx: IDBTransaction) => Promise<T>,
   ): Promise<T> {
     const db = await this.open();
     return new Promise<T>((resolve, reject) => {
-      const tx = db.transaction(storeNames, mode);
+      const tx = db.transaction(stores, mode);
       action(tx)
         .then(result => {
           tx.oncomplete = () => resolve(result);
@@ -294,24 +334,16 @@ class WorkspaceDatabase {
           try {
             tx.abort();
           } catch {
-            // no-op
+            // ignore
           }
         });
-    });
-  }
-
-  private request<T>(req: IDBRequest<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error ?? new Error('workspace db request failed'));
     });
   }
 
   async getAllRows<T>(storeName: string): Promise<T[]> {
     return this.run(storeName, 'readonly', async tx => {
       const store = tx.objectStore(storeName);
-      const result = await this.request(store.getAll() as IDBRequest<T[]>);
-      return result;
+      return this.request(store.getAll() as IDBRequest<T[]>);
     });
   }
 
@@ -329,26 +361,10 @@ class WorkspaceDatabase {
     });
   }
 
-  async getRow<T>(storeName: string, key: IDBValidKey): Promise<T | undefined> {
-    return this.run(storeName, 'readonly', async tx => {
-      const store = tx.objectStore(storeName);
-      const row = await this.request(store.get(key) as IDBRequest<T | undefined>);
-      return row;
-    });
-  }
-
-  async clearStore(storeName: string): Promise<void> {
-    await this.run(storeName, 'readwrite', async tx => {
-      const store = tx.objectStore(storeName);
-      await this.request(store.clear());
-    });
-  }
-
   async clearStores(storeNames: string[]): Promise<void> {
     await this.run(storeNames, 'readwrite', async tx => {
-      for (const storeName of storeNames) {
-        const store = tx.objectStore(storeName);
-        await this.request(store.clear());
+      for (const name of storeNames) {
+        await this.request(tx.objectStore(name).clear());
       }
     });
   }
@@ -357,6 +373,7 @@ class WorkspaceDatabase {
 export class WorkspacePersistenceRepository {
   private readonly db = new WorkspaceDatabase();
   private state: PersistedWorkspaceState;
+  private readonly projectCommits: Record<string, PersistedProjectCommitsState> = {};
   private readonly diffCache = new Map<string, DiffCacheEntry>();
   private readonly fileCache = new Map<string, FileCacheEntry>();
   private readonly readyPromise: Promise<void>;
@@ -372,16 +389,24 @@ export class WorkspacePersistenceRepository {
 
   private async initialize(): Promise<void> {
     const legacy = this.loadLegacyState();
-    const globalRows = await this.db.getAllRows<RawKVRow>(TABLE_GLOBAL_KV);
-    const projectRows = await this.db.getAllRows<RawProjectStateRow>(TABLE_PROJECT_STATE);
-    const diffRows = await this.db.getAllRows<RawDiffCacheRow>(TABLE_DIFF_CACHE);
-    const fileRows = await this.db.getAllRows<RawFileCacheRow>(TABLE_FILE_CACHE);
+    const [globalRows, projectRows, projectCommitRows, diffRows, fileRows] = await Promise.all([
+      this.db.getAllRows<RawKVRow>(TABLE_GLOBAL_KV),
+      this.db.getAllRows<RawProjectStateRow>(TABLE_PROJECT_STATE),
+      this.db.getAllRows<RawProjectCommitsRow>(TABLE_PROJECT_COMMITS),
+      this.db.getAllRows<RawDiffCacheRow>(TABLE_DIFF_CACHE),
+      this.db.getAllRows<RawFileCacheRow>(TABLE_FILE_CACHE),
+    ]);
 
     const hasPersisted =
-      globalRows.length > 0 || projectRows.length > 0 || diffRows.length > 0 || fileRows.length > 0;
+      globalRows.length > 0 ||
+      projectRows.length > 0 ||
+      projectCommitRows.length > 0 ||
+      diffRows.length > 0 ||
+      fileRows.length > 0;
 
     if (hasPersisted) {
       this.state = this.fromDbRows(globalRows, projectRows);
+      this.restoreProjectCommits(projectCommitRows);
       this.restoreDiffCache(diffRows);
       this.restoreFileCache(fileRows);
       return;
@@ -389,6 +414,7 @@ export class WorkspacePersistenceRepository {
 
     if (legacy) {
       this.state = legacy.state;
+      Object.assign(this.projectCommits, legacy.projectCommits);
       this.saveLocalIdentityState(this.state.global);
       this.restoreLegacyDiffCache(legacy.diffRows);
       await this.saveAllStateToDb();
@@ -404,30 +430,45 @@ export class WorkspacePersistenceRepository {
     const base = defaultWorkspaceState();
     const globalPatch: Partial<PersistedGlobalState> = {};
     for (const row of globalRows) {
-      const key = row.k;
-      if (!(key in GLOBAL_KEYS)) continue;
-      (globalPatch as Record<string, unknown>)[key] = tryParse(row.v, row.v);
+      if (!(row.k in GLOBAL_KEYS)) continue;
+      (globalPatch as Record<string, unknown>)[row.k] = tryParse(row.v, row.v);
     }
+
     const projects: Record<string, PersistedProjectState> = {};
     for (const row of projectRows) {
       const raw = tryParse<Partial<PersistedProjectState>>(row.stateJson, defaultProjectState());
       projects[row.projectId] = sanitizeProjectState(raw);
     }
+
     return {
-      version: 2,
+      version: 3,
       global: sanitizeGlobalState({...base.global, ...globalPatch, ...this.readLocalIdentityState()}),
       projects,
     };
   }
 
+  private restoreProjectCommits(rows: RawProjectCommitsRow[]): void {
+    for (const key of Object.keys(this.projectCommits)) {
+      delete this.projectCommits[key];
+    }
+    for (const row of rows) {
+      const commits = tryParse<RegistryGitCommit[]>(row.commitsJson, []);
+      const commitFilesBySha = tryParse<Record<string, RegistryGitCommitFile[]>>(row.commitFilesByShaJson, {});
+      this.projectCommits[row.projectId] = sanitizeProjectCommitsState({
+        commits,
+        commitFilesBySha,
+      });
+    }
+  }
+
   private restoreDiffCache(rows: RawDiffCacheRow[]): void {
     this.diffCache.clear();
     for (const row of rows) {
-      const parsedMeta = tryParse<{isBinary?: boolean; truncated?: boolean}>(row.metaJson, {});
+      const meta = tryParse<{isBinary?: boolean; truncated?: boolean}>(row.metaJson, {});
       this.diffCache.set(row.k, {
         diff: typeof row.v === 'string' ? row.v : '',
-        isBinary: !!parsedMeta.isBinary,
-        truncated: !!parsedMeta.truncated,
+        isBinary: !!meta.isBinary,
+        truncated: !!meta.truncated,
         updatedAt: row.updatedAt,
       });
     }
@@ -444,24 +485,32 @@ export class WorkspacePersistenceRepository {
     }
   }
 
-  private loadLegacyState(): {state: PersistedWorkspaceState; diffRows: Array<{k: string; payload: DiffCacheEntry}>} | null {
+  private loadLegacyState(): {
+    state: PersistedWorkspaceState;
+    projectCommits: Record<string, PersistedProjectCommitsState>;
+    diffRows: Array<{k: string; payload: DiffCacheEntry}>;
+  } | null {
     if (typeof window === 'undefined') return null;
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (!raw) return null;
       const parsed = JSON.parse(raw) as LegacyWorkspaceState;
+
       const next: PersistedWorkspaceState = {
-        version: 2,
+        version: 3,
         global: sanitizeGlobalState(parsed.global),
         projects: {},
       };
+      const projectCommits: Record<string, PersistedProjectCommitsState> = {};
       const diffRows: Array<{k: string; payload: DiffCacheEntry}> = [];
+
       const projects = parsed.projects ?? {};
-      for (const [projectId, legacyProject] of Object.entries(projects)) {
-        if (!projectId || !legacyProject) continue;
-        const projectState = sanitizeProjectState(legacyProject);
-        next.projects[projectId] = projectState;
-        const diffCacheByKey = legacyProject.diffCacheByKey ?? {};
+      for (const [projectId, project] of Object.entries(projects)) {
+        if (!projectId || !project) continue;
+        next.projects[projectId] = sanitizeProjectState(project);
+        projectCommits[projectId] = sanitizeProjectCommitsState(project as Partial<PersistedProjectCommitsState>);
+
+        const diffCacheByKey = project.diffCacheByKey ?? {};
         for (const [key, value] of Object.entries(diffCacheByKey)) {
           if (!key || !value || typeof value.diff !== 'string') continue;
           diffRows.push({
@@ -475,7 +524,8 @@ export class WorkspacePersistenceRepository {
           });
         }
       }
-      return {state: next, diffRows};
+
+      return {state: next, projectCommits, diffRows};
     } catch {
       return null;
     }
@@ -502,12 +552,14 @@ export class WorkspacePersistenceRepository {
     await this.db.clearStores([
       TABLE_GLOBAL_KV,
       TABLE_PROJECT_STATE,
+      TABLE_PROJECT_COMMITS,
       TABLE_DIFF_CACHE,
       TABLE_FILE_CACHE,
       TABLE_META,
     ]);
 
-    const globalRows: Array<{k: string; v: string; updatedAt: number}> = [      {k: GLOBAL_KEYS.deepseekApiKey, v: serialize(this.state.global.deepseekApiKey), updatedAt: now},
+    const globalRows: Array<{k: string; v: string; updatedAt: number}> = [
+      {k: GLOBAL_KEYS.deepseekApiKey, v: serialize(this.state.global.deepseekApiKey), updatedAt: now},
       {k: GLOBAL_KEYS.themeMode, v: serialize(this.state.global.themeMode), updatedAt: now},
       {k: GLOBAL_KEYS.codeTheme, v: serialize(this.state.global.codeTheme), updatedAt: now},
       {k: GLOBAL_KEYS.codeFont, v: serialize(this.state.global.codeFont), updatedAt: now},
@@ -532,6 +584,15 @@ export class WorkspacePersistenceRepository {
       });
     }
 
+    for (const [projectId, state] of Object.entries(this.projectCommits)) {
+      await this.db.putRow(TABLE_PROJECT_COMMITS, {
+        projectId,
+        commitsJson: serialize(state.commits),
+        commitFilesByShaJson: serialize(state.commitFilesBySha),
+        updatedAt: now,
+      });
+    }
+
     for (const [k, entry] of this.diffCache.entries()) {
       await this.db.putRow(TABLE_DIFF_CACHE, {
         k,
@@ -552,7 +613,7 @@ export class WorkspacePersistenceRepository {
 
     await this.db.putRow(TABLE_META, {
       k: 'schemaVersion',
-      v: serialize(1),
+      v: serialize(2),
       updatedAt: now,
     });
     await this.db.putRow(TABLE_META, {
@@ -584,9 +645,7 @@ export class WorkspacePersistenceRepository {
   }
 
   private saveLocalIdentityState(value: Pick<PersistedGlobalState, 'address' | 'token'>): void {
-    if (typeof window === 'undefined') {
-      return;
-    }
+    if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem(LOCAL_ADDRESS_KEY, value.address || '');
     } catch {
@@ -598,11 +657,19 @@ export class WorkspacePersistenceRepository {
       // ignore
     }
   }
+
   private ensureProject(projectId: string): PersistedProjectState {
     if (!this.state.projects[projectId]) {
       this.state.projects[projectId] = defaultProjectState();
     }
     return this.state.projects[projectId];
+  }
+
+  private ensureProjectCommits(projectId: string): PersistedProjectCommitsState {
+    if (!this.projectCommits[projectId]) {
+      this.projectCommits[projectId] = defaultProjectCommitsState();
+    }
+    return this.projectCommits[projectId];
   }
 
   getGlobalState(): PersistedGlobalState {
@@ -613,6 +680,10 @@ export class WorkspacePersistenceRepository {
 
   getProjectState(projectId: string): PersistedProjectState {
     return cloneState(this.state.projects[projectId] ?? defaultProjectState());
+  }
+
+  getProjectCommitsState(projectId: string): PersistedProjectCommitsState {
+    return cloneState(this.projectCommits[projectId] ?? defaultProjectCommitsState());
   }
 
   patchGlobalState(patch: Partial<PersistedGlobalState>): void {
@@ -638,11 +709,25 @@ export class WorkspacePersistenceRepository {
     if (!projectId) return;
     const current = this.ensureProject(projectId);
     this.state.projects[projectId] = sanitizeProjectState({...current, ...patch});
-    const nextProject = cloneState(this.state.projects[projectId]);
     const now = Date.now();
+    const nextState = cloneState(this.state.projects[projectId]);
     void this.ready().then(() => this.db.putRow(TABLE_PROJECT_STATE, {
       projectId,
-      stateJson: serialize(nextProject),
+      stateJson: serialize(nextState),
+      updatedAt: now,
+    })).catch(() => undefined);
+  }
+
+  patchProjectCommitsState(projectId: string, patch: Partial<PersistedProjectCommitsState>): void {
+    if (!projectId) return;
+    const current = this.ensureProjectCommits(projectId);
+    this.projectCommits[projectId] = sanitizeProjectCommitsState({...current, ...patch});
+    const now = Date.now();
+    const nextState = cloneState(this.projectCommits[projectId]);
+    void this.ready().then(() => this.db.putRow(TABLE_PROJECT_COMMITS, {
+      projectId,
+      commitsJson: serialize(nextState.commits),
+      commitFilesByShaJson: serialize(nextState.commitFilesBySha),
       updatedAt: now,
     })).catch(() => undefined);
   }
@@ -656,8 +741,8 @@ export class WorkspacePersistenceRepository {
   putProjectDiff(projectId: string, key: string, entry: Omit<DiffCacheEntry, 'updatedAt'>): void {
     if (!projectId || !key) return;
     const now = Date.now();
-    const storeKey = diffCacheKey(projectId, key);
-    this.diffCache.set(storeKey, {
+    const k = diffCacheKey(projectId, key);
+    this.diffCache.set(k, {
       ...entry,
       updatedAt: now,
     });
@@ -668,19 +753,19 @@ export class WorkspacePersistenceRepository {
       .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
       .slice(0, DIFF_CACHE_LIMIT)
       .map(item => item[0]);
+
     const keepSet = new Set(keysByNewest);
     for (const cacheKey of [...this.diffCache.keys()]) {
       if (!cacheKey.startsWith(prefix)) continue;
-      if (!keepSet.has(cacheKey)) {
-        this.diffCache.delete(cacheKey);
-        void this.ready().then(() => this.db.deleteRow(TABLE_DIFF_CACHE, cacheKey)).catch(() => undefined);
-      }
+      if (keepSet.has(cacheKey)) continue;
+      this.diffCache.delete(cacheKey);
+      void this.ready().then(() => this.db.deleteRow(TABLE_DIFF_CACHE, cacheKey)).catch(() => undefined);
     }
 
-    const payload = this.diffCache.get(storeKey);
+    const payload = this.diffCache.get(k);
     if (!payload) return;
     void this.ready().then(() => this.db.putRow(TABLE_DIFF_CACHE, {
-      k: storeKey,
+      k,
       v: payload.diff,
       metaJson: serialize({isBinary: payload.isBinary, truncated: payload.truncated}),
       updatedAt: payload.updatedAt,
@@ -714,10 +799,15 @@ export class WorkspacePersistenceRepository {
     const localIdentity = this.readLocalIdentityState();
     const preservedToken = localIdentity.token || this.state.global.token;
     const preservedAddress = localIdentity.address || this.state.global.address;
+
     this.state = defaultWorkspaceState();
     this.state.global.token = preservedToken;
     this.state.global.address = preservedAddress;
     this.saveLocalIdentityState({address: preservedAddress, token: preservedToken});
+
+    for (const key of Object.keys(this.projectCommits)) {
+      delete this.projectCommits[key];
+    }
     this.diffCache.clear();
     this.fileCache.clear();
 
@@ -726,6 +816,7 @@ export class WorkspacePersistenceRepository {
       await this.db.clearStores([
         TABLE_GLOBAL_KV,
         TABLE_PROJECT_STATE,
+        TABLE_PROJECT_COMMITS,
         TABLE_DIFF_CACHE,
         TABLE_FILE_CACHE,
       ]);
@@ -739,25 +830,22 @@ export class WorkspacePersistenceRepository {
 
   async dumpDatabase(): Promise<WorkspaceDatabaseDump> {
     await this.ready();
-    const [global, projects, fileCache, diffCache, meta] = await Promise.all([
+    const [global, projects, projectCommits, fileCache, diffCache, meta] = await Promise.all([
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_GLOBAL_KV),
       this.db.getAllRows<{projectId: string; stateJson: string; updatedAt: number}>(TABLE_PROJECT_STATE),
+      this.db.getAllRows<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>(TABLE_PROJECT_COMMITS),
       this.db.getAllRows<{k: string; hash: string; v: string; updatedAt: number}>(TABLE_FILE_CACHE),
       this.db.getAllRows<{k: string; v: string; metaJson: string; updatedAt: number}>(TABLE_DIFF_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),
     ]);
-    const localStorage = this.readLocalIdentityState();
-    return {global, projects, fileCache, diffCache, meta, localStorage};
+    return {
+      global,
+      projects,
+      projectCommits,
+      fileCache,
+      diffCache,
+      meta,
+      localStorage: this.readLocalIdentityState(),
+    };
   }
 }
-
-
-
-
-
-
-
-
-
-
-

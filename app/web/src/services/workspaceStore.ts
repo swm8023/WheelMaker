@@ -6,7 +6,6 @@ import {
 } from './workspacePersistence';
 
 type ProjectSnapshot = {
-  dirEntries: Record<string, RegistryFsEntry[]>;
   expandedDirs: string[];
   selectedFile: string;
   pinnedFiles: string[];
@@ -90,33 +89,57 @@ export class WorkspaceStore {
   }
 
   hydrateProject(projectId: string, rootEntries: RegistryFsEntry[]): HydratedProjectState {
-    const cached = this.persistence.getProjectState(projectId);
+    const cachedProjectState = this.persistence.getProjectState(projectId);
+    const cachedCommitState = this.persistence.getProjectCommitsState(projectId);
     const rootSorted = sortEntries(rootEntries);
-    const mergedDirEntries: Record<string, RegistryFsEntry[]> = {...cached.dirEntries, '.': rootSorted};
-    const expandedDirs = uniqueStrings(['.', ...cached.expandedDirs.filter(path => path === '.' || !!mergedDirEntries[path])]);
-    const selectedFile = cached.selectedFile || (rootSorted.find(item => item.kind === 'file')?.path ?? '');
-    const pinnedFiles = uniqueStrings(cached.pinnedFiles.filter(path => !!path));
-    const cacheKey = cached.selectedCommit && cached.selectedDiff ? diffCacheKey(cached.selectedCommit, cached.selectedDiff) : '';
+    const dirEntries: Record<string, RegistryFsEntry[]> = {
+      '.': rootSorted,
+    };
+    const expandedDirs: string[] = ['.'];
+    for (const dirPath of uniqueStrings(cachedProjectState.expandedDirs)) {
+      if (!dirPath || dirPath === '.') continue;
+      const cachedDir = this.getCachedDirectory(projectId, dirPath);
+      if (!cachedDir) continue;
+      dirEntries[dirPath] = sortEntries(cachedDir.entries);
+      expandedDirs.push(dirPath);
+    }
+
+    const selectedFile = cachedProjectState.selectedFile || (rootSorted.find(item => item.kind === 'file')?.path ?? '');
+    const pinnedFiles = uniqueStrings(cachedProjectState.pinnedFiles.filter(path => !!path));
+    const cacheKey = cachedProjectState.selectedCommit && cachedProjectState.selectedDiff
+      ? diffCacheKey(cachedProjectState.selectedCommit, cachedProjectState.selectedDiff)
+      : '';
     const cachedDiff = cacheKey ? this.persistence.getProjectDiff(projectId, cacheKey) : null;
 
     return {
       projectId,
-      dirEntries: mergedDirEntries,
+      dirEntries,
       expandedDirs: expandedDirs.length > 0 ? expandedDirs : ['.'],
       selectedFile,
       pinnedFiles,
-      gitCurrentBranch: cached.gitCurrentBranch || '',
-      commits: cached.commits ?? [],
-      selectedCommit: cached.selectedCommit || '',
-      commitFilesBySha: cached.commitFilesBySha ?? {},
-      selectedDiff: cached.selectedDiff || '',
+      gitCurrentBranch: cachedProjectState.gitCurrentBranch || '',
+      commits: cachedCommitState.commits ?? [],
+      selectedCommit: cachedProjectState.selectedCommit || '',
+      commitFilesBySha: cachedCommitState.commitFilesBySha ?? {},
+      selectedDiff: cachedProjectState.selectedDiff || '',
       cachedDiffText: cachedDiff?.diff ?? '',
     };
   }
 
   rememberProjectSnapshot(projectId: string, snapshot: ProjectSnapshot): void {
     if (!projectId) return;
-    this.persistence.patchProjectState(projectId, snapshot);
+    this.persistence.patchProjectState(projectId, {
+      expandedDirs: snapshot.expandedDirs,
+      selectedFile: snapshot.selectedFile,
+      pinnedFiles: snapshot.pinnedFiles,
+      gitCurrentBranch: snapshot.gitCurrentBranch,
+      selectedCommit: snapshot.selectedCommit,
+      selectedDiff: snapshot.selectedDiff,
+    });
+    this.persistence.patchProjectCommitsState(projectId, {
+      commits: snapshot.commits,
+      commitFilesBySha: snapshot.commitFilesBySha,
+    });
   }
 
   getCachedDiff(projectId: string, sha: string, path: string): string | null {
