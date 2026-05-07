@@ -3020,13 +3020,13 @@ function App() {
     }, RECONNECT_RETRY_DELAY_MS);
   };
 
-  const clearChatRuntimeState = () => {
+  const clearChatRuntimeState = (preferredSelection = '') => {
     setChatMessages([]);
     setChatSessions([]);
     setChatRunningSessionFlags({});
     setChatCompletedUnopenedFlags({});
-    setSelectedChatId('');
-    chatSelectedIdRef.current = '';
+    setSelectedChatId(preferredSelection);
+    chatSelectedIdRef.current = preferredSelection;
     chatSyncIndexRef.current = {};
     chatSyncSubIndexRef.current = {};
     chatMessageStoreRef.current = {};
@@ -3072,6 +3072,7 @@ function App() {
 
   const hydrateChatSessionsFromCache = (
     activeProjectId = projectIdRef.current,
+    preferredSelection = '',
   ) => {
     if (!activeProjectId) return;
     const cachedSessions = workspaceStore.hydrateChatSessions(activeProjectId);
@@ -3089,7 +3090,7 @@ function App() {
       chatSyncSubIndexRef.current[sessionId] = cached.cursor.turnIndex || 0;
     }
 
-    const currentSelection = chatSelectedIdRef.current;
+    const currentSelection = preferredSelection || chatSelectedIdRef.current;
     if (currentSelection && sessionRows.some(item => item.sessionId === currentSelection)) {
       const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setChatMessages(cachedMessages);
@@ -3225,6 +3226,7 @@ function App() {
 
   const loadChatSessions = async (
     activeProjectId = projectIdRef.current,
+    preferredSelection = '',
   ) => {
     if (!activeProjectId) return;
     try {
@@ -3251,7 +3253,7 @@ function App() {
       }
       workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
 
-      const currentSelection = chatSelectedIdRef.current;
+      const currentSelection = preferredSelection || chatSelectedIdRef.current;
       if (!currentSelection || !nextSessions.some(session => session.sessionId === currentSelection)) {
         setSelectedChatId('');
         setChatMessages([]);
@@ -3751,6 +3753,7 @@ function App() {
     const trimmedToken = tokenRef.current.trim();
     const nextAddress = addressRef.current.trim();
     const previousSelectedChatId = chatSelectedIdRef.current;
+    const preferredSelectedChatId = previousSelectedChatId.trim();
     setError('');
     clearReconnectTimer();
     if (!silentReconnect) {
@@ -3781,22 +3784,22 @@ function App() {
       setReconnecting(false);
       setConnected(true);
       if (!silentReconnect) {
-        clearChatRuntimeState();
-        hydrateChatSessionsFromCache(result.hydrated.projectId);
+        clearChatRuntimeState(preferredSelectedChatId);
+        hydrateChatSessionsFromCache(result.hydrated.projectId, preferredSelectedChatId);
       }
       if (silentReconnect) {
         const shouldSyncSelectedSession =
           tabRef.current === 'chat' &&
-          !!previousSelectedChatId;
+          !!preferredSelectedChatId;
         if (shouldSyncSelectedSession) {
-          await loadChatSession(previousSelectedChatId, result.hydrated.projectId, {
+          await loadChatSession(preferredSelectedChatId, result.hydrated.projectId, {
             incremental: true,
             preserveUserSelection: true,
-            selectionSnapshot: previousSelectedChatId,
+            selectionSnapshot: preferredSelectedChatId,
           });
         }
       } else if (tabRef.current === 'chat') {
-        await loadChatSessions(result.hydrated.projectId);
+        await loadChatSessions(result.hydrated.projectId, preferredSelectedChatId);
       }
       workspaceController
         .validateExpandedDirectories(
