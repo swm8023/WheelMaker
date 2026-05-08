@@ -2393,9 +2393,9 @@ body,
   background: transparent;
   color: var(--text);
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
   text-align: left;
   cursor: pointer;
 }
@@ -2408,12 +2408,22 @@ body,
 .chat-slash-name {
   font-size: 12px;
   font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-slash-description {
   font-size: 11px;
   color: var(--muted);
-  line-height: 1.35;
+  line-height: 1.2;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 62%;
 }
 .chat-action-button,
 .chat-send-button {
@@ -3370,5 +3380,7 @@ body,
     transform: translateX(0);
   }
 }
+
+
 
 
