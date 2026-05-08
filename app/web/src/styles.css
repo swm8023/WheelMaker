@@ -588,6 +588,10 @@ body,
   gap: 8px;
 }
 
+.token-stats-account-list-flat {
+  grid-template-columns: 1fr;
+}
+
 .token-stats-account-item {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -596,6 +600,56 @@ body,
   display: grid;
   gap: 4px;
 }
+
+.token-stats-account-item-flat {
+  padding: 8px;
+  gap: 6px;
+}
+
+.token-stats-card-line {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.token-stats-card-line-primary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.token-stats-pill {
+  --pill-accent: #7f8c9b;
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--pill-accent) 48%, var(--border) 52%);
+  background: color-mix(in srgb, var(--pill-accent) 18%, var(--panel-2) 82%);
+  color: color-mix(in srgb, var(--pill-accent) 70%, var(--text) 30%);
+  font-size: 10px;
+  line-height: 1.1;
+  font-weight: 600;
+}
+
+.token-stats-pill-agent-0 { --pill-accent: #449dd1; }
+.token-stats-pill-agent-1 { --pill-accent: #5f8aff; }
+.token-stats-pill-agent-2 { --pill-accent: #2ca58d; }
+.token-stats-pill-agent-3 { --pill-accent: #57b65f; }
+.token-stats-pill-agent-4 { --pill-accent: #d8872b; }
+.token-stats-pill-agent-5 { --pill-accent: #d66f6f; }
+.token-stats-pill-agent-6 { --pill-accent: #ad7bd8; }
+.token-stats-pill-agent-7 { --pill-accent: #8c7fda; }
+
+.token-stats-pill-hub-0 { --pill-accent: #00a6a6; }
+.token-stats-pill-hub-1 { --pill-accent: #2f9e44; }
+.token-stats-pill-hub-2 { --pill-accent: #bc6c25; }
+.token-stats-pill-hub-3 { --pill-accent: #4f86c6; }
+.token-stats-pill-hub-4 { --pill-accent: #c879ff; }
+.token-stats-pill-hub-5 { --pill-accent: #d9480f; }
+.token-stats-pill-hub-6 { --pill-accent: #038c7f; }
+.token-stats-pill-hub-7 { --pill-accent: #7b6cb8; }
 
 .token-stats-account-header {
   display: flex;

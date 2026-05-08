@@ -99,6 +99,15 @@ type TokenProviderSectionView = {
   name: string;
   accounts: TokenProviderAccountView[];
 };
+type TokenStatCardView = {
+  id: string;
+  accountName: string;
+  agentTag: string;
+  hubTag: string;
+  message?: string;
+  secondaryLine: string;
+  tertiaryLine: string;
+};
 type SessionFlagMap = Record<string, true>;
 type SetiThemeSection = {
   file: string;
@@ -4312,6 +4321,99 @@ function App() {
     [],
   );
 
+  const normalizeTokenTagLabel = useCallback((value: string | undefined, fallback: string): string => {
+    const normalized = (value || '').trim();
+    return normalized || fallback;
+  }, []);
+
+  const tokenTagVariantClass = useCallback((scope: 'agent' | 'hub', value: string): string => {
+    const normalized = value.trim().toLowerCase();
+    let hash = 0;
+    for (let index = 0; index < normalized.length; index += 1) {
+      hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+    }
+    const variant = hash % 8;
+    return scope === 'agent'
+      ? `token-stats-pill-agent-${variant}`
+      : `token-stats-pill-hub-${variant}`;
+  }, []);
+
+  const formatCodexUsageLine = useCallback((label: '5h Usage' | 'Week Usage', value?: string): string => {
+    const normalized = (value || '').trim();
+    return `${label}: ${normalized || '-'}`;
+  }, []);
+
+  const formatCopilotRequestLine = useCallback((account: TokenProviderAccountView): string => {
+    const usedKnown = typeof account.premiumRequestsUsed === 'number';
+    const remainingKnown = typeof account.premiumRequestsRemaining === 'number';
+    const usedText = usedKnown ? account.premiumRequestsUsed.toLocaleString() : '-';
+    if (!usedKnown || !remainingKnown) {
+      return `Request Used: ${usedText} / - · -`;
+    }
+    const used = account.premiumRequestsUsed;
+    const remaining = account.premiumRequestsRemaining;
+    const total = used + remaining;
+    const percent = total > 0 ? `${((used / total) * 100).toFixed(1)}%` : '0.0%';
+    return `Request Used: ${used.toLocaleString()} / ${total.toLocaleString()} · ${percent}`;
+  }, []);
+
+  const tokenStatCards = useMemo((): TokenStatCardView[] => {
+    const cards: TokenStatCardView[] = [];
+    for (const provider of tokenStatsProviders) {
+      const agentTag = normalizeTokenTagLabel(
+        provider.name || provider.id,
+        (provider.id || 'unknown').toUpperCase(),
+      );
+      for (const account of provider.accounts) {
+        const accountNameCandidates = [
+          (account.email || '').trim(),
+          (account.displayName || '').trim(),
+          (account.alias || '').trim(),
+        ].filter(Boolean);
+        const accountName =
+          accountNameCandidates.find(name => !/^current(?:\s+account)?$/i.test(name)) ||
+          accountNameCandidates[0] ||
+          '(unnamed)';
+        const hubTag = normalizeTokenTagLabel(account.hubId, 'local');
+        const usageTotal = (account.usage?.rows || []).reduce(
+          (sum, row) => sum + (row.totalTokens || 0),
+          0,
+        );
+
+        let secondaryLine = '-';
+        let tertiaryLine = '';
+        if (provider.id === 'codex') {
+          secondaryLine = formatCodexUsageLine('5h Usage', account.fiveHourLimit);
+          tertiaryLine = formatCodexUsageLine('Week Usage', account.weeklyLimit);
+        } else if (provider.id === 'copilot') {
+          secondaryLine = formatCopilotRequestLine(account);
+          tertiaryLine = '';
+        } else if (provider.id === 'deepseek') {
+          secondaryLine = `Balance: ${(account.balance?.items || [])
+            .map(item => `${item.currency}:${item.totalBalance}`)
+            .join(' | ') || '-'}`;
+          tertiaryLine = `Tokens: ${usageTotal.toLocaleString()}`;
+        }
+
+        cards.push({
+          id: account.id,
+          accountName,
+          agentTag,
+          hubTag,
+          message: account.message,
+          secondaryLine,
+          tertiaryLine,
+        });
+      }
+    }
+    return cards;
+  }, [
+    formatCodexUsageLine,
+    formatCopilotRequestLine,
+    normalizeTokenTagLabel,
+    tokenStatsProviders,
+  ]);
+
   const refreshTokenStats = useCallback(async () => {
     setTokenStatsLoading(true);
     setTokenStatsError('');
@@ -4923,85 +5025,36 @@ function App() {
                 {tokenStatsError ? (
                   <div className="muted block token-stats-error">{tokenStatsError}</div>
                 ) : null}
-                {!tokenStatsLoading && tokenStatsProviders.length === 0 && !tokenStatsError ? (
+                {!tokenStatsLoading && tokenStatCards.length === 0 && !tokenStatsError ? (
                   <div className="muted block">No token accounts discovered.</div>
                 ) : null}
 
-                {tokenStatsProviders.map(provider => (
-                  <div key={provider.id} className="token-stats-card">
-                    <div className="token-stats-card-title">{provider.name}</div>
-                    {provider.accounts.length === 0 ? (
-                      <div className="muted block">No available accounts.</div>
-                    ) : (
-                      <div className="token-stats-account-list">
-                        {provider.accounts.map(account => {
-                          const usageTotal = (account.usage?.rows || []).reduce(
-                            (sum, row) => sum + (row.totalTokens || 0),
-                            0,
-                          );
-                          const accountNameCandidates = [
-                            (account.email || '').trim(),
-                            (account.displayName || '').trim(),
-                            (account.alias || '').trim(),
-                          ].filter(Boolean);
-                          const accountName =
-                            accountNameCandidates.find(
-                              name => !/^current(?:\s+account)?$/i.test(name),
-                            ) ||
-                            accountNameCandidates[0] ||
-                            '(unnamed)';
-                          return (
-                            <div key={account.id} className="token-stats-account-item">
-                              <div className="token-stats-account-header">
-                                <span className="token-stats-account-name">
-                                  {accountName}
-                                </span>
-                              </div>
-                              {account.message ? (
-                                <div className="token-stats-account-error">{account.message}</div>
-                              ) : null}
-                              {provider.id === 'codex' ? (
-                                <div className="token-stats-account-metrics token-stats-account-metrics-codex">
-                                  <span>5h: {account.fiveHourLimit || '-'}</span>
-                                  <span>Week: {account.weeklyLimit || '-'}</span>
-                                </div>
-                              ) : null}
-                              {provider.id === 'deepseek' ? (
-                                <div className="token-stats-account-metrics token-stats-account-metrics-deepseek">
-                                  <span>
-                                    Balance: {(account.balance?.items || [])
-                                      .map(item => `${item.currency}:${item.totalBalance}`)
-                                      .join(' | ') || '-'}
-                                  </span>
-                                  <span>Tokens: {usageTotal.toLocaleString()}</span>
-                                </div>
-                              ) : null}
-                              {provider.id === 'copilot' ? (
-                                <div className="token-stats-account-metrics token-stats-account-metrics-copilot">
-                                  <span>
-                                    Premium requests used:{' '}
-                                    {typeof account.premiumRequestsUsed === 'number'
-                                      ? account.premiumRequestsUsed.toLocaleString()
-                                      : '-'}
-                                  </span>
-                                  <span>
-                                    Remaining:{' '}
-                                    {typeof account.premiumRequestsRemaining === 'number'
-                                      ? account.premiumRequestsRemaining.toLocaleString()
-                                      : '-'}
-                                  </span>
-                                </div>
-                              ) : null}
-                              <div className="token-stats-account-footer">
-                                <span className="token-stats-account-hub">{account.hubId}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
+                <div className="token-stats-account-list token-stats-account-list-flat">
+                  {tokenStatCards.map(card => (
+                    <div key={card.id} className="token-stats-account-item token-stats-account-item-flat">
+                      <div className="token-stats-card-line token-stats-card-line-primary">
+                        <span className="token-stats-account-name">{card.accountName}</span>
+                        <span
+                          className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}
+                        >
+                          {card.agentTag}
+                        </span>
+                        <span className={`token-stats-pill ${tokenTagVariantClass('hub', card.hubTag)}`}>
+                          {card.hubTag}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {card.message ? (
+                        <div className="token-stats-account-error">{card.message}</div>
+                      ) : null}
+                      {card.secondaryLine ? (
+                        <div className="token-stats-card-line">{card.secondaryLine}</div>
+                      ) : null}
+                      {card.tertiaryLine ? (
+                        <div className="token-stats-card-line">{card.tertiaryLine}</div>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           ) : null}
