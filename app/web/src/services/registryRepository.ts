@@ -12,6 +12,7 @@ import type {
   RegistryResumableSession,
   RegistrySessionConfigOption,
   RegistrySessionConfigOptionValue,
+  RegistrySessionCommand,
   RegistrySessionMessage,
   RegistrySessionMessageEventPayload,
   RegistrySessionPromptSnapshot,
@@ -69,6 +70,21 @@ export class RegistryRepository {
     };
   }
 
+  private normalizeSessionCommand(raw: unknown): RegistrySessionCommand | null {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    const input = raw as Record<string, unknown>;
+    const nameRaw = typeof input.name === 'string' ? input.name.trim() : '';
+    if (!nameRaw) {
+      return null;
+    }
+    const name = nameRaw.startsWith('/') ? nameRaw : `/${nameRaw}`;
+    return {
+      name,
+      description: typeof input.description === 'string' ? input.description : undefined,
+    };
+  }
   private normalizeSessionSummary(raw: unknown): RegistrySessionSummary | null {
     if (!raw || typeof raw !== 'object') {
       return null;
@@ -92,6 +108,11 @@ export class RegistryRepository {
         ? input.configOptions
             .map(item => this.normalizeSessionConfigOption(item))
             .filter((item): item is RegistrySessionConfigOption => !!item)
+        : undefined,
+      commands: Array.isArray(input.commands)
+        ? input.commands
+            .map(item => this.normalizeSessionCommand(item))
+            .filter((item): item is RegistrySessionCommand => !!item)
         : undefined,
     };
   }

@@ -52,6 +52,11 @@ export interface RegistrySessionConfigOption {
   options?: RegistrySessionConfigOptionValue[];
 }
 
+export interface RegistrySessionCommand {
+  name: string;
+  description?: string;
+}
+
 export interface RegistrySessionSummary {
   sessionId: string;
   title: string;
@@ -61,6 +66,7 @@ export interface RegistrySessionSummary {
   unreadCount?: number;
   agentType?: string;
   configOptions?: RegistrySessionConfigOption[];
+  commands?: RegistrySessionCommand[];
 }
 
 

@@ -49,6 +49,7 @@ import type {
   RegistrySessionContentBlock,
   RegistrySessionPromptSnapshot,
   RegistrySessionConfigOption,
+  RegistrySessionCommand,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -77,6 +78,10 @@ type PendingNewChatDraft = {
 type ChatComposerDraft = {
   text: string;
   attachment: ChatAttachment | null;
+};
+type ChatSlashCommandOption = {
+  name: string;
+  description?: string;
 };
 type WorkingTreeFileEntry = {
   path: string;
@@ -234,6 +239,16 @@ const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachment: null };
+const DEFAULT_CHAT_SLASH_COMMANDS: ChatSlashCommandOption[] = [
+  { name: '/cancel', description: 'Cancel the running request.' },
+  { name: '/status', description: 'Show current session status.' },
+  { name: '/mode', description: 'Set interaction mode.' },
+  { name: '/model', description: 'Switch model.' },
+  { name: '/config', description: 'Set config option value.' },
+  { name: '/list', description: 'List sessions.' },
+  { name: '/new', description: 'Create a new session.' },
+  { name: '/load', description: 'Load a previous session.' },
+];
 let mermaidRenderSequence = 0;
 
 function nextMermaidRenderId(): string {
@@ -247,6 +262,65 @@ function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
   return `${projectKey}:${sessionKey}`;
 }
 
+
+function normalizeChatSlashCommandName(name: string): string {
+  const normalized = name.trim();
+  if (!normalized) {
+    return '';
+  }
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
+}
+
+function normalizeChatSlashCommands(commands?: RegistrySessionCommand[]): ChatSlashCommandOption[] {
+  const merged = new Map<string, ChatSlashCommandOption>();
+  for (const base of DEFAULT_CHAT_SLASH_COMMANDS) {
+    merged.set(base.name.toLowerCase(), base);
+  }
+  for (const item of commands ?? []) {
+    const name = normalizeChatSlashCommandName(item.name || '');
+    if (!name) {
+      continue;
+    }
+    const key = name.toLowerCase();
+    const existing = merged.get(key);
+    merged.set(key, {
+      name,
+      description: item.description || existing?.description,
+    });
+  }
+  return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function parseChatSlashQuery(text: string): string | null {
+  const leadingTrimmed = text.trimStart();
+  if (!leadingTrimmed.startsWith('/')) {
+    return null;
+  }
+  const firstToken = leadingTrimmed.split(/\s+/, 1)[0] || '';
+  if (!firstToken.startsWith('/')) {
+    return null;
+  }
+  if (leadingTrimmed.length > firstToken.length) {
+    return null;
+  }
+  return firstToken.slice(1).toLowerCase();
+}
+
+function filterChatSlashCommands(
+  options: ChatSlashCommandOption[],
+  query: string | null,
+): ChatSlashCommandOption[] {
+  if (query === null) {
+    return [];
+  }
+  if (!query) {
+    return options;
+  }
+  return options.filter(option =>
+    option.name.toLowerCase().includes(query) ||
+    (option.description || '').toLowerCase().includes(query),
+  );
+}
 
 function sortChatSessions(items: RegistryChatSession[]): RegistryChatSession[] {
   return [...items].sort((a, b) => compareUpdatedAtDesc(a.updatedAt || '', b.updatedAt || ''));
@@ -269,6 +343,11 @@ function mergeChatSession(
       next.configOptions ??
       (existing?.configOptions
         ? [...existing.configOptions]
+        : undefined),
+    commands:
+      next.commands ??
+      (existing?.commands
+        ? [...existing.commands]
         : undefined),
   };
   const filtered = list.filter(item => item.sessionId !== next.sessionId);
@@ -1933,6 +2012,7 @@ function App() {
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
   const chatComposerActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -1973,6 +2053,7 @@ function App() {
   const chatComposerDraftsRef = useRef<Record<string, ChatComposerDraft>>({});
   const currentChatDraftKeyRef = useRef('');
   const [chatComposerActionMenuOpen, setChatComposerActionMenuOpen] = useState(false);
+  const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
   const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
   const [resumeAgentPickerOpen, setResumeAgentPickerOpen] = useState(false);
@@ -1981,15 +2062,60 @@ function App() {
   const [resumeLoading, setResumeLoading] = useState(false);
   const [tokenStatsPanelOpen, setTokenStatsPanelOpen] = useState(false);
 
+  const selectedChatSession = useMemo(
+    () => chatSessions.find(item => item.sessionId === selectedChatId),
+    [chatSessions, selectedChatId],
+  );
+
   const selectedChatConfigOptions = useMemo(() => {
-    const selected = chatSessions.find(item => item.sessionId === selectedChatId);
-    return selected?.configOptions ?? [];
-  }, [chatSessions, selectedChatId]);
+    return selectedChatSession?.configOptions ?? [];
+  }, [selectedChatSession]);
+
+  const chatSlashCommands = useMemo(
+    () => normalizeChatSlashCommands(selectedChatSession?.commands),
+    [selectedChatSession],
+  );
+
+  const chatSlashQuery = useMemo(
+    () => parseChatSlashQuery(chatComposerText),
+    [chatComposerText],
+  );
+
+  const chatSlashCommandOptions = useMemo(
+    () => filterChatSlashCommands(chatSlashCommands, chatSlashQuery),
+    [chatSlashCommands, chatSlashQuery],
+  );
+
+  const chatSlashMenuVisible = chatSlashCommandOptions.length > 0;
+
 
   const currentChatDraftKey = useMemo(
     () => buildChatDraftKey(projectId, selectedChatId),
     [projectId, selectedChatId],
   );
+
+  useEffect(() => {
+    if (!chatSlashMenuVisible) {
+      setChatSlashActiveIndex(0);
+      return;
+    }
+    setChatSlashActiveIndex(prev => Math.max(0, Math.min(prev, chatSlashCommandOptions.length - 1)));
+  }, [chatSlashMenuVisible, chatSlashCommandOptions]);
+
+  useEffect(() => {
+    if (!chatSlashMenuVisible) {
+      return;
+    }
+    const menu = chatSlashMenuRef.current;
+    if (!menu) {
+      return;
+    }
+    const activeItem = menu.querySelector<HTMLElement>('.chat-slash-item.active');
+    if (!activeItem) {
+      return;
+    }
+    activeItem.scrollIntoView({ block: 'nearest' });
+  }, [chatSlashMenuVisible, chatSlashActiveIndex, chatSlashCommandOptions]);
 
   const saveChatComposerDraft = useCallback(
     (draftKey: string, text: string, attachment: ChatAttachment | null) => {
@@ -2033,6 +2159,22 @@ function App() {
       );
     },
     [saveChatComposerDraft],
+  );
+
+  const applyChatSlashCommand = useCallback(
+    (command: ChatSlashCommandOption) => {
+      const next = `${command.name} `;
+      updateChatComposerText(next);
+      window.requestAnimationFrame(() => {
+        const input = chatComposerTextareaRef.current;
+        if (!input) {
+          return;
+        }
+        input.focus();
+        input.setSelectionRange(next.length, next.length);
+      });
+    },
+    [updateChatComposerText],
   );
 
   const updateChatComposerAttachment = useCallback(
@@ -5795,9 +5937,6 @@ function App() {
       !!selectedDiff &&
       isHeavyGeneratedDiffPath(selectedDiff) &&
       !allowHeavyDiffLoad;
-    const selectedChatSession = chatSessions.find(
-      item => item.sessionId === selectedChatId,
-    );
     const chatConfigOptions = selectedChatSession?.configOptions ?? [];
     const chatAttachmentPreviewSrc = chatAttachment
       ? `data:${chatAttachment.mimeType || 'image/png'};base64,${chatAttachment.data}`
@@ -5814,6 +5953,9 @@ function App() {
           isBinary: fileInfo?.isBinary,
         })
       : '';
+    const activeChatSlashCommand = chatSlashMenuVisible
+      ? chatSlashCommandOptions[Math.max(0, Math.min(chatSlashActiveIndex, chatSlashCommandOptions.length - 1))]
+      : null;
 
     if (tab === 'chat') {
       return (
@@ -5881,6 +6023,36 @@ function App() {
                   value={chatComposerText}
                   onChange={event => updateChatComposerText(event.target.value)}
                   onKeyDown={event => {
+                    if (chatSlashMenuVisible) {
+                      if (event.key === 'ArrowDown') {
+                        event.preventDefault();
+                        setChatSlashActiveIndex(prev => {
+                          if (chatSlashCommandOptions.length === 0) {
+                            return 0;
+                          }
+                          return (prev + 1) % chatSlashCommandOptions.length;
+                        });
+                        return;
+                      }
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault();
+                        setChatSlashActiveIndex(prev => {
+                          if (chatSlashCommandOptions.length === 0) {
+                            return 0;
+                          }
+                          return (prev - 1 + chatSlashCommandOptions.length) % chatSlashCommandOptions.length;
+                        });
+                        return;
+                      }
+                      if (event.key === 'Enter' && !event.altKey && !event.nativeEvent.isComposing) {
+                        if (!activeChatSlashCommand) {
+                          return;
+                        }
+                        event.preventDefault();
+                        applyChatSlashCommand(activeChatSlashCommand);
+                        return;
+                      }
+                    }
                     if (!isWindowsPlatform) {
                       return;
                     }
@@ -5895,6 +6067,30 @@ function App() {
                   }}
                   placeholder="Send a message..."
                 />
+                {chatSlashMenuVisible ? (
+                  <div ref={chatSlashMenuRef} className="chat-slash-menu" role="listbox" aria-label="Available commands">
+                    {chatSlashCommandOptions.map((option, index) => {
+                      const selected = index === chatSlashActiveIndex;
+                      return (
+                        <button
+                          key={option.name}
+                          type="button"
+                          className={`chat-slash-item${selected ? ' active' : ''}`}
+                          role="option"
+                          aria-selected={selected}
+                          onMouseEnter={() => setChatSlashActiveIndex(index)}
+                          onMouseDown={event => event.preventDefault()}
+                          onClick={() => applyChatSlashCommand(option)}
+                        >
+                          <span className="chat-slash-name">{option.name}</span>
+                          {option.description ? (
+                            <span className="chat-slash-description">{option.description}</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
                 {chatComposerText.length === 0 ? (
                   <div
                     ref={chatComposerActionMenuRef}
@@ -6544,9 +6740,4 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
-
-
-
-
-
 
