@@ -3477,6 +3477,9 @@ function App() {
         useIncremental ? checkpointPromptIndex : 0,
         useIncremental ? checkpointTurnIndex : 0,
       );
+      if (activeProjectId !== projectIdRef.current) {
+        return false;
+      }
       if (
         options?.preserveUserSelection &&
         chatSelectedIdRef.current !== (options.selectionSnapshot ?? '') &&
@@ -3525,10 +3528,14 @@ function App() {
       persistChatSessionContent(result.session.sessionId, activeProjectId, result.session);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (activeProjectId === projectIdRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
       return false;
     } finally {
-      setChatLoading(false);
+      if (activeProjectId === projectIdRef.current) {
+        setChatLoading(false);
+      }
     }
   };
 
@@ -3539,16 +3546,11 @@ function App() {
     if (!activeProjectId) return;
     try {
       const sessions = sortChatSessions(await service.listSessions());
-      let nextSessions: RegistryChatSession[] = [];
-      setChatSessions(prev => {
-        nextSessions = sessions.reduce(
-          (acc, session) => mergeChatSession(acc, session),
-          prev.filter(item =>
-            sessions.every(session => session.sessionId !== item.sessionId),
-          ),
-        );
-        return nextSessions;
-      });
+      if (activeProjectId !== projectIdRef.current) {
+        return;
+      }
+      const nextSessions = sessions;
+      setChatSessions(nextSessions);
 
       const cursorBySessionId: Record<string, {promptIndex: number; turnIndex: number}> = {};
       for (const session of nextSessions) {
@@ -3580,7 +3582,9 @@ function App() {
         ? cachedSelection
         : (chatMessageStoreRef.current[currentSelection] ?? []));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (activeProjectId === projectIdRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     }
   };
   const createChatSession = async (agentType: string, title = '') => {
