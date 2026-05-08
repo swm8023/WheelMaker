@@ -614,6 +614,12 @@ body,
 .token-stats-card-line-primary {
   display: flex;
   align-items: center;
+  min-width: 0;
+}
+
+.token-stats-card-line-tags {
+  display: flex;
+  align-items: center;
   gap: 6px;
   flex-wrap: wrap;
 }
@@ -661,6 +667,10 @@ body,
   font-size: 12px;
   font-weight: 600;
   line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .token-stats-account-hub {

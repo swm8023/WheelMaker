@@ -5034,9 +5034,9 @@ function App() {
                     <div key={card.id} className="token-stats-account-item token-stats-account-item-flat">
                       <div className="token-stats-card-line token-stats-card-line-primary">
                         <span className="token-stats-account-name">{card.accountName}</span>
-                        <span
-                          className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}
-                        >
+                      </div>
+                      <div className="token-stats-card-line token-stats-card-line-tags">
+                        <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
                           {card.agentTag}
                         </span>
                         <span className={`token-stats-pill ${tokenTagVariantClass('hub', card.hubTag)}`}>
