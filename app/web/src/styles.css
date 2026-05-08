@@ -3384,3 +3384,34 @@ body,
 
 
 
+
+.agent-info-detail-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.agent-info-skill-list {
+  display: grid;
+  gap: 4px;
+}
+
+.agent-info-skill-item {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text);
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel) 84%, transparent);
+}
+
+
+.chat-agent-btn.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+

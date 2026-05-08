@@ -2062,6 +2062,8 @@ function App() {
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
   const [tokenStatsPanelOpen, setTokenStatsPanelOpen] = useState(false);
+  const [agentInfoPanelOpen, setAgentInfoPanelOpen] = useState(false);
+  const [selectedAgentInfoName, setSelectedAgentInfoName] = useState('');
 
   const selectedChatSession = useMemo(
     () => chatSessions.find(item => item.sessionId === selectedChatId),
@@ -2559,6 +2561,69 @@ function App() {
     }
     return agents;
   }, [project?.agents, project?.agent, chatSessions]);
+  const agentInfoAgents = useMemo(() => {
+    const names = new Map<string, string>();
+    const skillsByKey = new Map<string, string[]>();
+    const registerAgentName = (value?: string) => {
+      const normalized = (value || '').trim();
+      if (!normalized) {
+        return;
+      }
+      const key = normalized.toLowerCase();
+      if (!names.has(key)) {
+        names.set(key, normalized);
+      }
+      if (!skillsByKey.has(key)) {
+        skillsByKey.set(key, []);
+      }
+    };
+    const registerSkills = (name: string, skills?: string[]) => {
+      registerAgentName(name);
+      const key = name.trim().toLowerCase();
+      if (!key) {
+        return;
+      }
+      const existing = skillsByKey.get(key) ?? [];
+      const seen = new Set(existing.map(item => item.toLowerCase()));
+      for (const skill of skills ?? []) {
+        const normalized = (skill || '').trim();
+        if (!normalized) {
+          continue;
+        }
+        const skillKey = normalized.toLowerCase();
+        if (seen.has(skillKey)) {
+          continue;
+        }
+        seen.add(skillKey);
+        existing.push(normalized);
+      }
+      existing.sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+      skillsByKey.set(key, existing);
+    };
+
+    for (const profile of project?.agentProfiles ?? []) {
+      registerSkills(profile.name, profile.skills);
+    }
+    for (const name of project?.agents ?? []) {
+      registerAgentName(name);
+    }
+    registerAgentName(project?.agent);
+    for (const session of chatSessions) {
+      registerAgentName(session.agentType);
+    }
+
+    return Array.from(names.entries())
+      .map(([key, name]) => ({
+        name,
+        skills: skillsByKey.get(key) ?? [],
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
+  }, [project?.agentProfiles, project?.agents, project?.agent, chatSessions]);
+
+  const selectedAgentInfo = useMemo(
+    () => agentInfoAgents.find(item => item.name === selectedAgentInfoName) ?? null,
+    [agentInfoAgents, selectedAgentInfoName],
+  );
   currentProjectRef.current = currentProject;
   expandedDirsRef.current = expandedDirs;
   selectedFileRef.current = selectedFile;
@@ -3570,6 +3635,11 @@ function App() {
     setPendingNewChatDraft(null);
   };
 
+  const handleDismissAgentInfo = () => {
+    setAgentInfoPanelOpen(false);
+    setSelectedAgentInfoName('');
+  };
+
   const removeChatSessionFromState = (sessionId: string) => {
     if (!sessionId) return;
     setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
@@ -4205,6 +4275,21 @@ function App() {
     refreshTokenStats().catch(() => undefined);
   }, [tokenStatsPanelOpen, refreshTokenStats]);
 
+  useEffect(() => {
+    if (!agentInfoPanelOpen) {
+      return;
+    }
+    if (agentInfoAgents.length === 0) {
+      if (selectedAgentInfoName) {
+        setSelectedAgentInfoName('');
+      }
+      return;
+    }
+    if (!selectedAgentInfoName || !agentInfoAgents.some(item => item.name === selectedAgentInfoName)) {
+      setSelectedAgentInfoName(agentInfoAgents[0].name);
+    }
+  }, [agentInfoPanelOpen, agentInfoAgents, selectedAgentInfoName]);
+
   const formatDatabaseDump = (dump: Awaited<ReturnType<typeof workspaceStore.dumpDatabase>>): string => {
     return JSON.stringify(
       {
@@ -4576,6 +4661,7 @@ function App() {
                 title="New session"
                 onClick={() => {
                   setTokenStatsPanelOpen(false);
+                  handleDismissAgentInfo();
                   setResumeAgentPickerOpen(false);
                   setResumeSessions([]);
                   beginNewChatFlow({ title: '', text: '', blocks: [] });
@@ -4589,6 +4675,7 @@ function App() {
                 title="Resume session"
                 onClick={() => {
                   setTokenStatsPanelOpen(false);
+                  handleDismissAgentInfo();
                   handleDismissNewChatPicker();
                   setResumeAgentType('');
                   setResumeSessions([]);
@@ -4605,15 +4692,29 @@ function App() {
                 onClick={() => {
                   handleDismissNewChatPicker();
                   handleDismissResume();
+                  handleDismissAgentInfo();
                   setTokenStatsError('');
                   setTokenStatsPanelOpen(true);
                 }}
               >
                 <span className="codicon codicon-graph" />
               </button>
-            </div>
+              <button
+                type="button"
+                className="chat-header-icon-btn"
+                title="Agent info"
+                onClick={() => {
+                  handleDismissNewChatPicker();
+                  handleDismissResume();
+                  setTokenStatsPanelOpen(false);
+                  setAgentInfoPanelOpen(true);
+                }}
+              >
+                <span className="codicon codicon-account" />
+              </button>
+</div>
           </div>
-          {chatSessions.length === 0 && !resumeAgentPickerOpen && !newChatAgentPickerOpen && !tokenStatsPanelOpen ? (
+          {chatSessions.length === 0 && !resumeAgentPickerOpen && !newChatAgentPickerOpen && !tokenStatsPanelOpen && !agentInfoPanelOpen ? (
             <div className="chat-empty-hint">Start a new chat or resume a previous session</div>
           ) : null}
           {resumeAgentPickerOpen ? (
@@ -4818,6 +4919,60 @@ function App() {
                   </div>
                 ))}
               </div>
+            </div>
+          ) : null}
+          {agentInfoPanelOpen ? (
+            <div className="chat-agent-picker-card chat-agent-picker-overlay agent-info-overlay-card">
+              <div className="chat-agent-picker-header">
+                <div className="chat-agent-picker-header-main">
+                  <span className="codicon codicon-account" />
+                  <span className="chat-agent-picker-title">Agent Info</span>
+                </div>
+                <button
+                  type="button"
+                  className="chat-agent-picker-close"
+                  onClick={handleDismissAgentInfo}
+                  aria-label="Close agent info"
+                >
+                  <span className="codicon codicon-close" />
+                </button>
+              </div>
+              <div className="chat-agent-picker-subtitle">Select an agent to view discovered skills</div>
+              {agentInfoAgents.length === 0 ? (
+                <div className="muted block">No agents available.</div>
+              ) : (
+                <>
+                  <div className="chat-agent-picker-actions">
+                    {agentInfoAgents.map(item => (
+                      <button
+                        key={item.name}
+                        type="button"
+                        className={`chat-agent-btn${selectedAgentInfoName === item.name ? ' selected' : ''}`}
+                        onClick={() => {
+                          setSelectedAgentInfoName(item.name);
+                        }}
+                      >
+                        <span className="codicon codicon-sparkle" />
+                        <span>{item.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {selectedAgentInfo ? (
+                    <div className="agent-info-detail-card">
+                      <div className="token-stats-card-title">{selectedAgentInfo.name}</div>
+                      {selectedAgentInfo.skills.length === 0 ? (
+                        <div className="muted block">No skills discovered.</div>
+                      ) : (
+                        <div className="agent-info-skill-list">
+                          {selectedAgentInfo.skills.map(skill => (
+                            <div key={skill} className="agent-info-skill-item">{skill}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </>
+              )}
             </div>
           ) : null}
           {newChatAgentPickerOpen && pendingNewChatDraft ? (
@@ -6766,4 +6921,23 @@ workspaceStore.ready().then(() => {
   box.textContent = `IndexedDB initialization failed: ${message}`;
   root.appendChild(box);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

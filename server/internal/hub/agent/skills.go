@@ -15,6 +15,15 @@ type SkillDescriptor struct {
 	Path string `json:"path"`
 }
 
+// ListProviderSkills returns discovered skills for a provider name in cwd context.
+func ListProviderSkills(ctx context.Context, providerName, cwd string) ([]SkillDescriptor, error) {
+	preset, ok := providerPresetByName(providerName)
+	if !ok {
+		return nil, nil
+	}
+	return listSkillsForPreset(ctx, preset, cwd)
+}
+
 func providerPresetByName(name string) (ACPProviderPreset, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case CodexACPProviderPreset.Name:

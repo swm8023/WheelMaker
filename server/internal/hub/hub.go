@@ -264,12 +264,48 @@ func (h *Hub) collectProjectInfo(cfgProject logger.ProjectConfig) ProjectInfo {
 		info.Agent = preferred
 	}
 	info.Agents = append([]string(nil), agent.DefaultACPFactory().Names()...)
+	info.AgentProfiles = collectProjectAgentProfiles(cfgProject.Name, path, info.Agents)
 	gitState := collectGitState(path)
 	info.Git = gitState
 	info.ProjectRev = hubHashLines(gitState.GitRev, gitState.WorktreeRev)
 	return info
 }
 
+func collectProjectAgentProfiles(projectName, projectPath string, agentNames []string) []rp.ProjectAgentProfile {
+	if len(agentNames) == 0 {
+		return nil
+	}
+	profiles := make([]rp.ProjectAgentProfile, 0, len(agentNames))
+	for _, agentName := range agentNames {
+		name := strings.TrimSpace(agentName)
+		if name == "" {
+			continue
+		}
+		skills, err := agent.ListProviderSkills(context.Background(), name, projectPath)
+		if err != nil {
+			hubLogger(projectName).Warn("list skills failed agent=%s err=%v", name, err)
+		}
+		skillNames := make([]string, 0, len(skills))
+		seen := map[string]struct{}{}
+		for _, skill := range skills {
+			skillName := strings.TrimSpace(skill.Name)
+			if skillName == "" {
+				continue
+			}
+			key := strings.ToLower(skillName)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			skillNames = append(skillNames, skillName)
+		}
+		sort.Slice(skillNames, func(i, j int) bool {
+			return strings.ToLower(skillNames[i]) < strings.ToLower(skillNames[j])
+		})
+		profiles = append(profiles, rp.ProjectAgentProfile{Name: name, Skills: skillNames})
+	}
+	return profiles
+}
 func collectGitState(projectPath string) rp.ProjectGitState {
 	branch, branchErr := runGitLocal(projectPath, "rev-parse", "--abbrev-ref", "HEAD")
 	headSHA, shaErr := runGitLocal(projectPath, "rev-parse", "HEAD")

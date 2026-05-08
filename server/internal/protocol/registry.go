@@ -27,15 +27,21 @@ type ProjectGitState struct {
 	WorktreeRev string `json:"worktreeRev"`
 }
 
+type ProjectAgentProfile struct {
+	Name   string   `json:"name"`
+	Skills []string `json:"skills,omitempty"`
+}
+
 type ProjectInfo struct {
-	Name       string          `json:"name"`
-	Path       string          `json:"path"`
-	Online     bool            `json:"online"`
-	Agent      string          `json:"agent"`
-	Agents     []string        `json:"agents,omitempty"`
-	IMType     string          `json:"imType"`
-	ProjectRev string          `json:"projectRev"`
-	Git        ProjectGitState `json:"git"`
+	Name          string                `json:"name"`
+	Path          string                `json:"path"`
+	Online        bool                  `json:"online"`
+	Agent         string                `json:"agent"`
+	Agents        []string              `json:"agents,omitempty"`
+	AgentProfiles []ProjectAgentProfile `json:"agentProfiles,omitempty"`
+	IMType        string                `json:"imType"`
+	ProjectRev    string                `json:"projectRev"`
+	Git           ProjectGitState       `json:"git"`
 }
 
 type HubSnapshot struct {
@@ -126,15 +132,16 @@ type SyncCheckResponsePayload struct {
 }
 
 type ProjectListItem struct {
-	ProjectID  string          `json:"projectId"`
-	Name       string          `json:"name"`
-	Path       string          `json:"path"`
-	Online     bool            `json:"online"`
-	Agent      string          `json:"agent"`
-	Agents     []string        `json:"agents,omitempty"`
-	IMType     string          `json:"imType"`
-	ProjectRev string          `json:"projectRev"`
-	Git        ProjectGitState `json:"git"`
+	ProjectID     string                `json:"projectId"`
+	Name          string                `json:"name"`
+	Path          string                `json:"path"`
+	Online        bool                  `json:"online"`
+	Agent         string                `json:"agent"`
+	Agents        []string              `json:"agents,omitempty"`
+	AgentProfiles []ProjectAgentProfile `json:"agentProfiles,omitempty"`
+	IMType        string                `json:"imType"`
+	ProjectRev    string                `json:"projectRev"`
+	Git           ProjectGitState       `json:"git"`
 }
 
 type MonitorHubRefPayload struct {

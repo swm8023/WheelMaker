@@ -9,6 +9,7 @@ import type {
   RegistryGitFileDiff,
   RegistryGitStatus,
   RegistryProject,
+  RegistryProjectAgentProfile,
   RegistryResumableSession,
   RegistrySessionConfigOption,
   RegistrySessionConfigOptionValue,
@@ -301,6 +302,23 @@ export class RegistryRepository {
               .filter((item): item is string => typeof item === 'string')
               .map(item => item.trim())
               .filter(item => item.length > 0)
+          : undefined,
+        agentProfiles: Array.isArray(project.agentProfiles)
+          ? project.agentProfiles
+              .map((item): RegistryProjectAgentProfile | null => {
+                const name = typeof item?.name === 'string' ? item.name.trim() : '';
+                if (!name) {
+                  return null;
+                }
+                const skills = Array.isArray(item.skills)
+                  ? item.skills
+                      .filter((skill): skill is string => typeof skill === 'string')
+                      .map(skill => skill.trim())
+                      .filter(skill => skill.length > 0)
+                  : [];
+                return { name, skills };
+              })
+              .filter((item): item is RegistryProjectAgentProfile => !!item)
           : undefined,
         hubId: project.hubId || project.projectId.split(':', 1)[0] || '',
       }));
@@ -707,6 +725,8 @@ export const createRegistryRepository = (): RegistryRepository => {
 };
 
 export type RegistryResponse<TPayload> = RegistryEnvelope<TPayload>;
+
+
 
 
 

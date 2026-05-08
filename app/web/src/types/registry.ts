@@ -207,6 +207,11 @@ export interface RegistryProjectGitState {
   worktreeRev: string;
 }
 
+export interface RegistryProjectAgentProfile {
+  name: string;
+  skills?: string[];
+}
+
 export interface RegistryProject {
   projectId: string;
   name: string;
@@ -215,6 +220,7 @@ export interface RegistryProject {
   hubId?: string;
   agent?: string;
   agents?: string[];
+  agentProfiles?: RegistryProjectAgentProfile[];
   imType?: string;
   projectRev?: string;
   git?: RegistryProjectGitState;
@@ -314,4 +320,5 @@ export type RegistryConnectInitPayload = {
   ts?: number;
   nonce?: string;
 };
+
 
