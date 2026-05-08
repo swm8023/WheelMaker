@@ -683,7 +683,7 @@ func (f *fakeOwnedTransport) emit(v any) error {
 	}
 	return nil
 }
-func TestListSkillsForPreset_ProjectDirAndFrontmatterName(t *testing.T) {
+func TestListSkillsForPreset_ProjectDirUsesRelativeDirectoryName(t *testing.T) {
 	root := t.TempDir()
 	skillDir := filepath.Join(root, ".agents", "skills", "frontend-design")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
@@ -704,14 +704,38 @@ func TestListSkillsForPreset_ProjectDirAndFrontmatterName(t *testing.T) {
 	if len(skills) != 1 {
 		t.Fatalf("skills len = %d, want 1", len(skills))
 	}
-	if skills[0].Name != "fancy-ui" {
-		t.Fatalf("skill name = %q, want %q", skills[0].Name, "fancy-ui")
+	if skills[0].Name != "frontend-design" {
+		t.Fatalf("skill name = %q, want %q", skills[0].Name, "frontend-design")
 	}
 	if !strings.HasSuffix(skills[0].Path, filepath.Join("frontend-design", "SKILL.md")) {
 		t.Fatalf("skill path = %q", skills[0].Path)
 	}
 }
 
+func TestListSkillsForPreset_NestedSkillNameUsesColonPath(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, ".agents", "skills", "A", "B")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillFile, []byte("---\nname: ignored\n---\ncontent"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	skills, err := listSkillsForPreset(context.Background(), ACPProviderPreset{
+		SkillProjectDirs: []string{".agents/skills"},
+	}, root)
+	if err != nil {
+		t.Fatalf("listSkillsForPreset: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("skills len = %d, want 1", len(skills))
+	}
+	if skills[0].Name != "A:B" {
+		t.Fatalf("skill name = %q, want %q", skills[0].Name, "A:B")
+	}
+}
 func TestInstanceListSkills_UnknownProvider(t *testing.T) {
 	inst := NewInstance("unknown-agent", nil)
 	_, err := inst.ListSkills(context.Background(), t.TempDir())

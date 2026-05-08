@@ -49,26 +49,26 @@ func listSkillsForPreset(_ context.Context, preset ACPProviderPreset, cwd string
 		return nil, nil
 	}
 
-	seenNames := map[string]SkillDescriptor{}
+	seenPaths := map[string]SkillDescriptor{}
 	for _, root := range roots {
 		_ = walkSkillRoot(root, func(skill SkillDescriptor) {
-			key := strings.ToLower(strings.TrimSpace(skill.Name))
+			key := strings.ToLower(strings.TrimSpace(skill.Path))
 			if key == "" {
 				return
 			}
-			if _, exists := seenNames[key]; exists {
+			if _, exists := seenPaths[key]; exists {
 				return
 			}
-			seenNames[key] = skill
+			seenPaths[key] = skill
 		})
 	}
 
-	if len(seenNames) == 0 {
+	if len(seenPaths) == 0 {
 		return nil, nil
 	}
 
-	out := make([]SkillDescriptor, 0, len(seenNames))
-	for _, skill := range seenNames {
+	out := make([]SkillDescriptor, 0, len(seenPaths))
+	for _, skill := range seenPaths {
 		out = append(out, skill)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -221,7 +221,7 @@ func walkSkillRoot(root string, emit func(skill SkillDescriptor)) error {
 		if !strings.EqualFold(d.Name(), "SKILL.md") {
 			return nil
 		}
-		name := skillNameFromFile(path)
+		name := skillNameFromRelativePath(root, path)
 		if name == "" {
 			name = strings.TrimSpace(filepath.Base(filepath.Dir(path)))
 		}
@@ -234,31 +234,34 @@ func walkSkillRoot(root string, emit func(skill SkillDescriptor)) error {
 	})
 }
 
-func skillNameFromFile(path string) string {
-	content, err := os.ReadFile(path)
-	if err != nil || len(content) == 0 {
+func skillNameFromRelativePath(root, skillFile string) string {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
 		return ""
 	}
-	text := strings.TrimPrefix(string(content), "\ufeff")
-	lines := strings.Split(text, "\n")
-	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
+	fileAbs, err := filepath.Abs(skillFile)
+	if err != nil {
 		return ""
 	}
-	for i := 1; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "---" {
-			break
-		}
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok || !strings.EqualFold(strings.TrimSpace(key), "name") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, "\"'")
-		return strings.TrimSpace(value)
+	relDir, err := filepath.Rel(rootAbs, filepath.Dir(fileAbs))
+	if err != nil {
+		return ""
 	}
-	return ""
+	relDir = strings.TrimSpace(filepath.ToSlash(relDir))
+	if relDir == "" || relDir == "." || relDir == ".." || strings.HasPrefix(relDir, "../") {
+		return ""
+	}
+	parts := strings.Split(relDir, "/")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		out = append(out, part)
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, ":")
 }
