@@ -2428,7 +2428,7 @@ body,
 .chat-slash-trigger {
   font-family: var(--font-sans);
   font-weight: 600;
-  font-size: 5px;
+  font-size: 10px;
   line-height: 1;
 }
 
@@ -2447,12 +2447,12 @@ body,
 }
 
 .chat-action-button.chat-slash-trigger {
-  width: 8px;
-  height: 8px;
-  min-width: 8px;
-  min-height: 8px;
+  width: 18px;
+  height: 36px;
+  min-width: 18px;
+  min-height: 36px;
   padding: 0;
-  border-radius: 2px;
+  border-radius: 9px;
   flex: 0 0 auto;
 }
 
