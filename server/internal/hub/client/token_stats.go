@@ -436,6 +436,32 @@ func firstFloat64Field(m map[string]any, keys ...string) float64 {
 	return 0
 }
 
+func firstBoolField(m map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if value, ok := m[key]; ok {
+			switch typed := value.(type) {
+			case bool:
+				return typed
+			case string:
+				trimmed := strings.TrimSpace(strings.ToLower(typed))
+				if trimmed == "true" || trimmed == "1" || trimmed == "yes" {
+					return true
+				}
+				if trimmed == "false" || trimmed == "0" || trimmed == "no" {
+					return false
+				}
+			case float64:
+				return typed != 0
+			case json.Number:
+				if n, err := typed.Int64(); err == nil {
+					return n != 0
+				}
+			}
+		}
+	}
+	return false
+}
+
 type deepSeekCredential struct {
 	Alias  string
 	APIKey string
@@ -460,6 +486,7 @@ type copilotProfile struct {
 	Alias       string
 	DisplayName string
 	Source      string
+	Host        string
 }
 
 type copilotPremiumUsageSummary struct {
@@ -581,19 +608,34 @@ func (c *Client) scanCopilotProvider(ctx context.Context, updatedAt string) toke
 			Rows:      []deepSeekUsageRow{},
 		},
 	}
-	token, tokenSource := discoverGitHubToken()
+	token, tokenSource := discoverGitHubToken(profile)
 	if strings.TrimSpace(token) == "" {
 		account.Status = "error"
-		account.Message = "GitHub token not found for Copilot premium usage API (set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN)"
+		account.Message = "GitHub token not found for Copilot usage APIs (set COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN; on Windows, Copilot CLI login token can also be read from Credential Manager)"
 		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
 	}
 	if strings.TrimSpace(tokenSource) != "" {
 		account.Source = account.Source + ", " + tokenSource
 	}
+	internalSummary, internalErr := c.fetchCopilotInternalUsage(ctx, token, time.Now().UTC())
+	if internalErr == nil {
+		account.PremiumRequestsUsed = internalSummary.Used
+		account.PremiumRequestsMonth = firstNonEmptyString(internalSummary.Month, month)
+		if internalSummary.HasQuota {
+			account.PremiumRequestsRemaining = internalSummary.Remaining
+		} else {
+			account.UsageUnavailable = true
+			account.UsageMessage = "Copilot Internal API returned usage but no monthly quota; remaining premium requests unavailable"
+		}
+		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
+	}
 	login, err := c.fetchGitHubLogin(ctx, token)
 	if err != nil {
 		account.Status = "error"
 		account.Message = err.Error()
+		if internalErr != nil {
+			account.Message = account.Message + " (copilot_internal fallback failed: " + internalErr.Error() + ")"
+		}
 		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
 	}
 	if strings.TrimSpace(login) != "" {
@@ -606,6 +648,9 @@ func (c *Client) scanCopilotProvider(ctx context.Context, updatedAt string) toke
 	if err != nil {
 		account.Status = "error"
 		account.Message = err.Error()
+		if internalErr != nil {
+			account.Message = account.Message + " (copilot_internal fallback failed: " + internalErr.Error() + ")"
+		}
 		return tokenProviderScanResult{ID: "copilot", Name: "Copilot", Accounts: []tokenProviderAccount{account}}
 	}
 	account.PremiumRequestsUsed = summary.Used
@@ -782,6 +827,7 @@ func discoverCopilotProfile() copilotProfile {
 		Alias:       "current",
 		DisplayName: "Current Account",
 		Source:      "~/.copilot/config.json",
+		Host:        "https://github.com",
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -800,11 +846,12 @@ func discoverCopilotProfile() copilotProfile {
 	}
 	if host != "" && profile.DisplayName != "" {
 		profile.DisplayName = profile.DisplayName + "@" + host
+		profile.Host = host
 	}
 	return profile
 }
 
-func discoverGitHubToken() (string, string) {
+func discoverGitHubToken(profile copilotProfile) (string, string) {
 	for _, key := range []string{"COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
 		if value, ok := os.LookupEnv(key); ok {
 			trimmed := strings.TrimSpace(value)
@@ -854,6 +901,9 @@ func discoverGitHubToken() (string, string) {
 	}
 	if token := discoverGitHubTokenByCLI(); token != "" {
 		return token, "gh auth token"
+	}
+	if token, source := discoverGitHubTokenFromSystemCredentialStore(profile); strings.TrimSpace(token) != "" {
+		return token, source
 	}
 	return "", ""
 }
@@ -1086,6 +1136,98 @@ func (c *Client) fetchCopilotPremiumUsage(ctx context.Context, token, login stri
 		}
 	}
 	return summary, nil
+}
+
+func (c *Client) fetchCopilotInternalUsage(ctx context.Context, token string, now time.Time) (copilotPremiumUsageSummary, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/user", nil)
+	if err != nil {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("build copilot internal usage request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(token))
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("query copilot internal usage: %w", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		msg := strings.TrimSpace(string(body))
+		if msg == "" {
+			msg = res.Status
+		}
+		return copilotPremiumUsageSummary{}, fmt.Errorf("copilot internal usage request failed: http %d %s", res.StatusCode, msg)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("decode copilot internal usage response: %w", err)
+	}
+	summary, ok := parseCopilotInternalUsageSummary(payload, now)
+	if !ok {
+		return copilotPremiumUsageSummary{}, fmt.Errorf("copilot internal usage response missing quota_snapshots.premium_interactions")
+	}
+	return summary, nil
+}
+
+func parseCopilotInternalUsageSummary(payload map[string]any, now time.Time) (copilotPremiumUsageSummary, bool) {
+	summary := copilotPremiumUsageSummary{
+		Month: now.UTC().Format("2006-01"),
+	}
+	snapshots, _ := payload["quota_snapshots"].([]any)
+	bestEntitlement := int64(-1)
+	found := false
+	for _, rawSnapshot := range snapshots {
+		snapshot, ok := rawSnapshot.(map[string]any)
+		if !ok {
+			continue
+		}
+		premiumRaw, ok := snapshot["premium_interactions"].(map[string]any)
+		if !ok {
+			continue
+		}
+		entitlementValue := firstFloat64Field(premiumRaw, "entitlement", "quota", "total")
+		remainingValue := firstFloat64Field(premiumRaw, "remaining", "quota_remaining")
+		overageValue := firstFloat64Field(premiumRaw, "overage_count")
+		entitlement := int64(math.Round(entitlementValue))
+		remaining := int64(math.Round(remainingValue))
+		overage := int64(math.Round(overageValue))
+		if remaining < 0 {
+			remaining = 0
+		}
+		hasQuota := firstBoolField(premiumRaw, "has_quota") || entitlement > 0
+		if firstBoolField(premiumRaw, "unlimited") {
+			hasQuota = false
+		}
+		used := int64(0)
+		if entitlement > 0 {
+			used = entitlement - remaining
+			if used < 0 {
+				used = 0
+			}
+			used += maxInt64(0, overage)
+		}
+		if hasQuota && entitlement >= bestEntitlement {
+			bestEntitlement = entitlement
+			summary.Used = used
+			summary.Remaining = remaining
+			summary.HasQuota = true
+			found = true
+		} else if !found {
+			// Keep at least one snapshot as a fallback, even without explicit quota.
+			summary.Used = maxInt64(0, overage)
+			summary.Remaining = remaining
+			summary.HasQuota = hasQuota
+			found = true
+		}
+		if resetAt := strings.TrimSpace(firstStringField(premiumRaw, "quota_reset_at")); resetAt != "" {
+			if t, err := time.Parse(time.RFC3339, resetAt); err == nil {
+				// Use the period month for a stable month label in UI.
+				summary.Month = t.UTC().Add(-time.Second).Format("2006-01")
+			}
+		}
+	}
+	return summary, found
 }
 func readJSONMapFile(path string) map[string]any {
 	body, err := os.ReadFile(path)
