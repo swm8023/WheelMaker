@@ -417,6 +417,19 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	if err := r.upsertSessionProjection(ctx, event.SessionID, "", "", event.UpdatedAt, true); err != nil {
 		return err
 	}
+	if publish := r.eventPublisher(); publish != nil {
+		// Publish a terminal prompt_done turn so UI clients can clear in-progress state
+		// immediately without waiting for a full session reload.
+		doneJSON := buildIMContentJSON(acp.IMMethodPromptDone, acp.IMPromptResult{
+			StopReason: stopReason,
+		})
+		_ = publish("registry.session.message", map[string]any{
+			"sessionId":   event.SessionID,
+			"promptIndex": state.promptIndex,
+			"turnIndex":   state.nextTurnIndex,
+			"content":     doneJSON,
+		})
+	}
 	delete(r.promptState, event.SessionID)
 	return nil
 }

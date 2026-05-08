@@ -4061,6 +4061,63 @@ func TestSessionViewMergedTurnPublishesIncomingContentWithMergedIndices(t *testi
 	}
 }
 
+func TestSessionViewPromptFinishedPublishesPromptDoneMessage(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	var published []map[string]any
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		published = append(published, body)
+		return nil
+	})
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Prompt Done Publish")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewAssistantChunkTextEvent("sess-1", "hello", "streaming")); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	if len(published) < 3 {
+		t.Fatalf("published len = %d, want at least 3", len(published))
+	}
+	last := published[len(published)-1]
+	if got := last["promptIndex"].(int64); got != 1 {
+		t.Fatalf("published promptIndex = %d, want 1", got)
+	}
+	if got := last["turnIndex"].(int64); got != 3 {
+		t.Fatalf("published turnIndex = %d, want 3", got)
+	}
+	content, _ := last["content"].(string)
+	msg := acp.IMTurnMessage{}
+	if err := json.Unmarshal([]byte(content), &msg); err != nil {
+		t.Fatalf("unmarshal prompt_done content: %v", err)
+	}
+	if strings.TrimSpace(msg.Method) != acp.IMMethodPromptDone {
+		t.Fatalf("published method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	}
+	result := acp.IMPromptResult{}
+	if err := json.Unmarshal(msg.Param, &result); err != nil {
+		t.Fatalf("unmarshal prompt_done param: %v", err)
+	}
+	if strings.TrimSpace(result.StopReason) != acp.StopReasonEndTurn {
+		t.Fatalf("stopReason = %q, want %q", result.StopReason, acp.StopReasonEndTurn)
+	}
+}
+
 func TestSessionViewReadReturnsCheckpointPromptSnapshot(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
