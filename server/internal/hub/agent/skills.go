@@ -154,12 +154,13 @@ func expandHomePath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if strings.HasPrefix(path, "~"+string(os.PathSeparator)) {
+	if strings.HasPrefix(path, "~/") || strings.HasPrefix(path, "~\\") {
 		home, err := os.UserHomeDir()
 		if err != nil || strings.TrimSpace(home) == "" {
 			return ""
 		}
-		return filepath.Join(home, path[2:])
+		rest := strings.TrimPrefix(strings.TrimPrefix(path, "~/"), "~\\")
+		return filepath.Join(home, filepath.FromSlash(strings.ReplaceAll(rest, "\\", "/")))
 	}
 	if path == "~" {
 		home, err := os.UserHomeDir()
