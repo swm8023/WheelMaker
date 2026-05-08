@@ -679,10 +679,14 @@ type ChatPromptGroup = {
   modelName: string;
   durationMs: number;
   finished: boolean;
+  hasPromptRequest: boolean;
+  hasResponseActivity: boolean;
+  hasPromptDone: boolean;
 };
 
 type ChatPromptGroupViewProps = {
   group: ChatPromptGroup;
+  showSendingPending: boolean;
   markdownComponents: Components;
   markdownUrlTransform: (value: string) => string;
 };
@@ -752,6 +756,7 @@ function groupImageBlocks(msgs: RegistryChatMessage[]): RegistrySessionContentBl
 
 const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
   group,
+  showSendingPending,
   markdownComponents,
   markdownUrlTransform,
 }: ChatPromptGroupViewProps) {
@@ -761,11 +766,50 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
     .join('\n')
     .trim();
   const imageBlocks = groupImageBlocks(group.userMessages);
+  const hasPromptContent = group.userMessages.length > 0 || imageBlocks.length > 0;
+  const promptStatus = (() => {
+    if (!hasPromptContent) {
+      return null as 'sent' | 'responding' | 'done' | null;
+    }
+    if (group.hasPromptDone || group.finished) {
+      return 'done' as const;
+    }
+    if (group.hasResponseActivity || group.hasPromptRequest) {
+      return 'responding' as const;
+    }
+    if (showSendingPending) {
+      return 'sent' as const;
+    }
+    return null;
+  })();
 
   return (
     <div className="chat-prompt-group">
-      {userText ? (
-        <div className="chat-prompt-user">{userText}</div>
+      {userText || promptStatus ? (
+        <div className="chat-prompt-user-row">
+          {userText ? (
+            <div className="chat-prompt-user">{userText}</div>
+          ) : null}
+          {promptStatus === 'sent' ? (
+            <span className="chat-prompt-status chat-prompt-status-sent" title="Sent">
+              <span className="codicon codicon-loading codicon-modifier-spin" />
+            </span>
+          ) : null}
+          {promptStatus === 'responding' ? (
+            <span className="chat-prompt-status chat-prompt-status-responding" title="Responding">
+              <span className="chat-prompt-status-dots" aria-hidden="true">
+                <span>.</span>
+                <span>.</span>
+                <span>.</span>
+              </span>
+            </span>
+          ) : null}
+          {promptStatus === 'done' ? (
+            <span className="chat-prompt-status chat-prompt-status-done" title="Completed">
+              <span className="codicon codicon-check" />
+            </span>
+          ) : null}
+        </div>
       ) : null}
       {imageBlocks.length > 0 ? (
         <div className="chat-image-strip">
@@ -885,13 +929,27 @@ function groupChatMessagesByPrompt(
         modelName: snapshot?.modelName ?? '',
         durationMs: snapshot?.durationMs ?? 0,
         finished: snapshot?.finished ?? false,
+        hasPromptRequest: false,
+        hasResponseActivity: false,
+        hasPromptDone: false,
       } as ChatPromptGroup);
+
+    if (message.method === 'prompt_done') {
+      existing.hasPromptDone = true;
+      existing.finished = true;
+      groups.set(groupKey, existing);
+      continue;
+    }
 
     const role = msgRole(message.method);
 
     if (role === 'user') {
       existing.userMessages.push(message);
+      if (message.method === 'prompt_request') {
+        existing.hasPromptRequest = true;
+      }
     } else {
+      existing.hasResponseActivity = true;
       const kindStr = msgKind(message.method);
       let kind: ChatPromptEntryKind | null = null;
       let text = '';
@@ -6128,16 +6186,19 @@ function App() {
   );
 
   const renderedChatPromptGroups = useMemo(
-    () =>
-      chatPromptGroups.map(group => (
+    () => {
+      const latestGroupKey = chatPromptGroups[chatPromptGroups.length - 1]?.key || '';
+      return chatPromptGroups.map(group => (
         <ChatPromptGroupView
           key={group.key}
           group={group}
+          showSendingPending={chatSending && group.key === latestGroupKey}
           markdownComponents={chatMarkdownComponents}
           markdownUrlTransform={chatMarkdownUrlTransform}
         />
-      )),
-    [chatPromptGroups, chatMarkdownComponents, chatMarkdownUrlTransform],
+      ));
+    },
+    [chatPromptGroups, chatSending, chatMarkdownComponents, chatMarkdownUrlTransform],
   );
   const renderMain = () => {
     const heavyDiffDeferred =
@@ -6362,7 +6423,7 @@ function App() {
                 aria-label="Send message"
               >
                 <span
-                  className={`codicon ${chatSending ? 'codicon-loading codicon-modifier-spin' : 'codicon-send'}`}
+                  className="codicon codicon-send"
                 />
               </button>
             </div>
