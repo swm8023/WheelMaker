@@ -1174,14 +1174,20 @@ func parseCopilotInternalUsageSummary(payload map[string]any, now time.Time) (co
 	summary := copilotPremiumUsageSummary{
 		Month: now.UTC().Format("2006-01"),
 	}
-	snapshots, _ := payload["quota_snapshots"].([]any)
+	snapshots := make([]map[string]any, 0, 2)
+	switch raw := payload["quota_snapshots"].(type) {
+	case []any:
+		for _, item := range raw {
+			if typed, ok := item.(map[string]any); ok {
+				snapshots = append(snapshots, typed)
+			}
+		}
+	case map[string]any:
+		snapshots = append(snapshots, raw)
+	}
 	bestEntitlement := int64(-1)
 	found := false
-	for _, rawSnapshot := range snapshots {
-		snapshot, ok := rawSnapshot.(map[string]any)
-		if !ok {
-			continue
-		}
+	for _, snapshot := range snapshots {
 		premiumRaw, ok := snapshot["premium_interactions"].(map[string]any)
 		if !ok {
 			continue
@@ -1240,9 +1246,28 @@ func readJSONMapFile(path string) map[string]any {
 	}
 	var out map[string]any
 	if err := json.Unmarshal(body, &out); err != nil {
-		return nil
+		clean := sanitizeJSONWithLineComments(string(body))
+		if clean == "" || json.Unmarshal([]byte(clean), &out) != nil {
+			return nil
+		}
 	}
 	return out
+}
+
+func sanitizeJSONWithLineComments(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
 }
 
 func extractCodexAuthState(auth map[string]any) codexAuthState {
