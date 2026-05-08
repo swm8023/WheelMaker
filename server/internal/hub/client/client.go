@@ -1435,7 +1435,7 @@ func (c *Client) evictSuspendedSessions() {
 }
 
 // parseCommand checks whether text is a recognized WheelMaker command.
-// Only exact first-word matches (/cancel, /status, /mode, /model, /config, /list, /new, /load) are treated as commands;
+// Only exact first-word matches (/cancel, /status, /mode, /model, /config, /list, /new, /load, /skills) are treated as commands;
 // all other "/" lines fall through to the agent (fixing the "code starting with /" bug).
 func parseCommand(text string) (cmd, args string, ok bool) {
 	parts := strings.Fields(text)
@@ -1443,7 +1443,7 @@ func parseCommand(text string) (cmd, args string, ok bool) {
 		return
 	}
 	switch parts[0] {
-	case "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load":
+	case "/cancel", "/status", "/mode", "/model", "/config", "/list", "/new", "/load", "/skills":
 		return parts[0], strings.Join(parts[1:], " "), true
 	}
 	return

@@ -47,6 +47,8 @@ type testInjectedInstance struct {
 	listErr     error
 	setConfigFn func(context.Context, acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error)
 	setCalls    []acp.SessionSetConfigOptionParams
+	skills      []agent.SkillDescriptor
+	skillsErr   error
 }
 
 type fakeIMRouter struct {
@@ -408,6 +410,13 @@ func (i *testInjectedInstance) SessionSetConfigOption(_ context.Context, p acp.S
 	}
 	return []acp.ConfigOption{{ID: p.ConfigID, CurrentValue: p.Value}}, nil
 }
+func (i *testInjectedInstance) ListSkills(context.Context, string) ([]agent.SkillDescriptor, error) {
+	if i.skillsErr != nil {
+		return nil, i.skillsErr
+	}
+	return append([]agent.SkillDescriptor(nil), i.skills...), nil
+}
+
 func (i *testInjectedInstance) Close() error { return nil }
 
 var _ agent.Instance = (*testInjectedInstance)(nil)
@@ -5116,5 +5125,33 @@ func TestSQLiteStore_RejectsEmptyRouteKey(t *testing.T) {
 	err = store.SaveRouteBinding(context.Background(), "proj-a", "", "sess-1")
 	if err == nil {
 		t.Fatal("SaveRouteBinding() should reject empty route keys")
+	}
+}
+func TestHandleMessage_Skills(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-skills"}
+	c := newTestClient(t, mock)
+	msgs := captureReplies(c)
+
+	sess, err := c.resolveSession(testRouteKey)
+	if err != nil {
+		t.Fatalf("resolveSession: %v", err)
+	}
+	inst, ok := sess.instance.(*testInjectedInstance)
+	if !ok {
+		t.Fatalf("instance type = %T", sess.instance)
+	}
+	inst.skills = []agent.SkillDescriptor{{Name: "frontend-design", Path: "D:/repo/.agents/skills/frontend-design/SKILL.md"}}
+
+	c.HandleMessage(Message{ChatID: "chat1", Text: "/skills"})
+
+	if len(*msgs) == 0 {
+		t.Fatal("no reply received")
+	}
+	reply := strings.Join(*msgs, "\n")
+	if !strings.Contains(reply, "Skills (1):") {
+		t.Fatalf("skills reply missing header: %q", reply)
+	}
+	if !strings.Contains(reply, "frontend-design") {
+		t.Fatalf("skills reply missing skill name: %q", reply)
 	}
 }

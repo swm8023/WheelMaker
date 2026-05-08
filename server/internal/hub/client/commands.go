@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/swm8023/wheelmaker/internal/hub/agent"
 	"github.com/swm8023/wheelmaker/internal/im"
 	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -50,6 +51,9 @@ func (c *Client) handleCommand(sess *Session, routeKey, cmd, args string) {
 
 	case "/list":
 		c.handleListCommand(sess)
+
+	case "/skills":
+		c.handleSkillsCommand(ctx, sess)
 
 	case "/new":
 		c.handleNewCommand(sess, routeKey, args)
@@ -133,6 +137,42 @@ func (c *Client) handleListCommand(sess *Session) {
 		return
 	}
 	sess.reply(body)
+}
+
+func (c *Client) handleSkillsCommand(ctx context.Context, sess *Session) {
+	sess.promptMu.Lock()
+	defer sess.promptMu.Unlock()
+
+	if err := sess.ensureInstance(ctx); err != nil {
+		sess.reply(fmt.Sprintf("Skills error: %v", err))
+		return
+	}
+
+	skills, err := sess.instance.ListSkills(ctx, sess.cwd)
+	if err != nil {
+		sess.reply(fmt.Sprintf("Skills error: %v", err))
+		return
+	}
+	sess.reply(formatSkillsList(skills))
+}
+
+func formatSkillsList(skills []agent.SkillDescriptor) string {
+	if len(skills) == 0 {
+		return "Skills: none found."
+	}
+	lines := make([]string, 0, len(skills)+1)
+	lines = append(lines, fmt.Sprintf("Skills (%d):", len(skills)))
+	for i, skill := range skills {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			name = "(unnamed)"
+		}
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, name))
+		if path := strings.TrimSpace(skill.Path); path != "" {
+			lines = append(lines, "   "+path)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *Client) formatSessionList(currentID string) (string, error) {

@@ -683,3 +683,39 @@ func (f *fakeOwnedTransport) emit(v any) error {
 	}
 	return nil
 }
+func TestListSkillsForPreset_ProjectDirAndFrontmatterName(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, ".agents", "skills", "frontend-design")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	skillFile := filepath.Join(skillDir, "SKILL.md")
+	content := "---\nname: fancy-ui\ndescription: test\n---\ncontent"
+	if err := os.WriteFile(skillFile, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	skills, err := listSkillsForPreset(context.Background(), ACPProviderPreset{
+		SkillProjectDirs: []string{".agents/skills"},
+	}, root)
+	if err != nil {
+		t.Fatalf("listSkillsForPreset: %v", err)
+	}
+	if len(skills) != 1 {
+		t.Fatalf("skills len = %d, want 1", len(skills))
+	}
+	if skills[0].Name != "fancy-ui" {
+		t.Fatalf("skill name = %q, want %q", skills[0].Name, "fancy-ui")
+	}
+	if !strings.HasSuffix(skills[0].Path, filepath.Join("frontend-design", "SKILL.md")) {
+		t.Fatalf("skill path = %q", skills[0].Path)
+	}
+}
+
+func TestInstanceListSkills_UnknownProvider(t *testing.T) {
+	inst := NewInstance("unknown-agent", nil)
+	_, err := inst.ListSkills(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("ListSkills should fail for unknown provider")
+	}
+}

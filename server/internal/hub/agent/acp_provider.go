@@ -21,42 +21,63 @@ type ACPProviderPreset struct {
 	Args                   []string
 	NPMPackage             string
 	MissingPathErrTemplate string
+	SkillProjectDirs       []string
+	SkillProjectParentDirs []string
+	SkillUserDirs          []string
+	SkillExtraDirsEnv      string
+	SkillPluginDirGlobs    []string
 }
 
 var (
 	CodexACPProviderPreset = ACPProviderPreset{
-		Name:       "codex",
-		BinaryName: "codex-acp",
-		NPMPackage: "@zed-industries/codex-acp",
+		Name:             "codex",
+		BinaryName:       "codex-acp",
+		NPMPackage:       "@zed-industries/codex-acp",
+		SkillProjectDirs: []string{".agents/skills"},
+		SkillUserDirs:    []string{"~/.codex/skills"},
 	}
 	ClaudeACPProviderPreset = ACPProviderPreset{
-		Name:       "claude",
-		BinaryName: "claude-agent-acp",
-		NPMPackage: "@agentclientprotocol/claude-agent-acp",
+		Name:                   "claude",
+		BinaryName:             "claude-agent-acp",
+		NPMPackage:             "@agentclientprotocol/claude-agent-acp",
+		SkillProjectDirs:       []string{".claude/skills"},
+		SkillProjectParentDirs: []string{".claude/skills"},
+		SkillUserDirs:          []string{"~/.claude/skills"},
 	}
 	CopilotACPProviderPreset = ACPProviderPreset{
 		Name:                   "copilot",
 		BinaryName:             "copilot",
 		Args:                   []string{"--acp", "--stdio"},
 		MissingPathErrTemplate: "copilot: binary not found in PATH (install GitHub Copilot CLI): %v",
+		SkillProjectDirs:       []string{".github/skills", ".agents/skills", ".claude/skills"},
+		SkillProjectParentDirs: []string{".github/skills"},
+		SkillUserDirs:          []string{"~/.copilot/skills", "~/.agents/skills", "~/.claude/skills"},
+		SkillExtraDirsEnv:      "COPILOT_SKILLS_DIRS",
+		SkillPluginDirGlobs:    []string{"~/.copilot/installed-plugins/*/*/skills"},
 	}
 	CodeflickerACPProviderPreset = ACPProviderPreset{
 		Name:                   "codeflicker",
 		BinaryName:             "codeflicker",
 		Args:                   []string{"acp"},
 		MissingPathErrTemplate: "codeflicker: binary not found in PATH: %v",
+		SkillProjectDirs:       []string{".agents/skills"},
+		SkillUserDirs:          []string{"~/.agents/skills"},
 	}
 	OpenCodeACPProviderPreset = ACPProviderPreset{
 		Name:                   "opencode",
 		BinaryName:             "opencode",
 		Args:                   []string{"acp"},
 		MissingPathErrTemplate: "opencode: binary not found in PATH: %v",
+		SkillProjectDirs:       []string{".agents/skills"},
+		SkillUserDirs:          []string{"~/.agents/skills"},
 	}
 	CodeBuddyACPProviderPreset = ACPProviderPreset{
 		Name:                   "codebuddy",
 		BinaryName:             "codebuddy",
 		Args:                   []string{"--acp"},
 		MissingPathErrTemplate: "codebuddy: binary not found in PATH: %v",
+		SkillProjectDirs:       []string{".agents/skills"},
+		SkillUserDirs:          []string{"~/.agents/skills"},
 	}
 )
 

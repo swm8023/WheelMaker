@@ -30,6 +30,7 @@ type Instance interface {
 	SessionPrompt(ctx context.Context, p protocol.SessionPromptParams) (protocol.SessionPromptResult, error)
 	SessionCancel(acpSessionID string) error
 	SessionSetConfigOption(ctx context.Context, p protocol.SessionSetConfigOptionParams) ([]protocol.ConfigOption, error)
+	ListSkills(ctx context.Context, cwd string) ([]SkillDescriptor, error)
 	Close() error
 }
 
@@ -62,6 +63,15 @@ func NewInstance(name string, conn Conn) Instance {
 }
 
 func (i *instance) Name() string { return i.name }
+
+func (i *instance) ListSkills(ctx context.Context, cwd string) ([]SkillDescriptor, error) {
+	_ = ctx
+	preset, ok := providerPresetByName(i.name)
+	if !ok {
+		return nil, fmt.Errorf("skills: unknown provider %q", i.name)
+	}
+	return listSkillsForPreset(ctx, preset, cwd)
+}
 
 // Alive reports whether the underlying ACP connection appears alive.
 func (i *instance) Alive() bool {
