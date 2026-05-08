@@ -5155,3 +5155,39 @@ func TestHandleMessage_Skills(t *testing.T) {
 		t.Fatalf("skills reply missing skill name: %q", reply)
 	}
 }
+func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-send-skills"}
+	c := newTestClient(t, mock)
+	msgs := captureReplies(c)
+
+	sess, err := c.resolveSession(testRouteKey)
+	if err != nil {
+		t.Fatalf("resolveSession: %v", err)
+	}
+	inst, ok := sess.instance.(*testInjectedInstance)
+	if !ok {
+		t.Fatalf("instance type = %T", sess.instance)
+	}
+	inst.skills = []agent.SkillDescriptor{{Name: "diagnose", Path: "D:/repo/.agents/skills/diagnose/SKILL.md"}}
+
+	payload := json.RawMessage(`{"sessionId":"sess-send-skills","text":"/skills"}`)
+	resp, err := c.HandleSessionRequest(context.Background(), "session.send", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.send): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok || body["ok"] != true {
+		t.Fatalf("response = %#v, want ok=true", resp)
+	}
+
+	if len(*msgs) == 0 {
+		t.Fatal("no reply received")
+	}
+	reply := strings.Join(*msgs, "\n")
+	if !strings.Contains(reply, "Skills (1):") {
+		t.Fatalf("skills reply missing header: %q", reply)
+	}
+	if !strings.Contains(reply, "diagnose") {
+		t.Fatalf("skills reply missing skill name: %q", reply)
+	}
+}

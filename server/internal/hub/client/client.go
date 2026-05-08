@@ -657,6 +657,18 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if len(blocks) == 0 {
 			return nil, fmt.Errorf("session prompt is empty")
 		}
+		if text, ok := singleTextIMPrompt(blocks); ok {
+			if cmd, args, parsed := parseCommand(text); parsed {
+				sess, err := c.SessionByID(ctx, req.SessionID)
+				if err != nil {
+					return nil, err
+				}
+				sessionID := strings.TrimSpace(req.SessionID)
+				sess.setIMSource(im.ChatRef{ChannelID: "app", ChatID: sessionID})
+				c.handleCommand(sess, "app:"+sessionID, cmd, args)
+				return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
+			}
+		}
 		if err := c.PromptToSession(ctx, req.SessionID, im.ChatRef{ChannelID: "app", ChatID: strings.TrimSpace(req.SessionID)}, blocks); err != nil {
 			return nil, err
 		}
