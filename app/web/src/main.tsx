@@ -2025,6 +2025,7 @@ function App() {
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const newChatFlowGuardRef = useRef(false);
   const chatSwipeSessionIdRef = useRef('');
+  const chatSwipePointerIdRef = useRef<number | null>(null);
   const chatSwipeStartXRef = useRef(0);
   const chatSwipeSuppressClickRef = useRef(false);
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
@@ -3687,28 +3688,43 @@ function App() {
     }
     return chatSwipeDraggingOffset <= -CHAT_SWIPE_REVEAL_THRESHOLD;
   };
-  const beginChatSessionSwipe = (event: React.TouchEvent<HTMLDivElement>, sessionId: string) => {
-    if (event.touches.length !== 1) {
+  const beginChatSessionSwipe = (
+    event: React.PointerEvent<HTMLDivElement>,
+    sessionId: string,
+  ) => {
+    if (!event.isPrimary) {
       return;
     }
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+    chatSwipePointerIdRef.current = event.pointerId;
     chatSwipeSessionIdRef.current = sessionId;
-    chatSwipeStartXRef.current = event.touches[0].clientX;
+    chatSwipeStartXRef.current = event.clientX;
     chatSwipeSuppressClickRef.current = false;
+    event.currentTarget.setPointerCapture(event.pointerId);
     setChatSwipeDraggingSessionId(sessionId);
     setChatSwipeDraggingOffset(
       chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH : 0,
     );
   };
 
-  const moveChatSessionSwipe = (event: React.TouchEvent<HTMLDivElement>, sessionId: string) => {
-    if (chatSwipeSessionIdRef.current !== sessionId || event.touches.length !== 1) {
+  const moveChatSessionSwipe = (
+    event: React.PointerEvent<HTMLDivElement>,
+    sessionId: string,
+  ) => {
+    if (
+      chatSwipeSessionIdRef.current !== sessionId ||
+      chatSwipePointerIdRef.current !== event.pointerId
+    ) {
       return;
     }
     const startX = chatSwipeStartXRef.current;
-    const currentX = event.touches[0].clientX;
+    const currentX = event.clientX;
     const deltaX = currentX - startX;
     if (Math.abs(deltaX) > 6) {
       chatSwipeSuppressClickRef.current = true;
+      event.preventDefault();
     }
     const anchoredDelta =
       chatSwipeOpenSessionId === sessionId
@@ -3721,8 +3737,14 @@ function App() {
     setChatSwipeDraggingOffset(nextOffset);
   };
 
-  const endChatSessionSwipe = (sessionId: string) => {
-    if (chatSwipeSessionIdRef.current !== sessionId) {
+  const endChatSessionSwipe = (
+    event: React.PointerEvent<HTMLDivElement>,
+    sessionId: string,
+  ) => {
+    if (
+      chatSwipeSessionIdRef.current !== sessionId ||
+      chatSwipePointerIdRef.current !== event.pointerId
+    ) {
       return;
     }
     const shouldOpen = chatSwipeDraggingOffset <= -CHAT_SWIPE_OPEN_THRESHOLD;
@@ -3730,6 +3752,10 @@ function App() {
     setChatSwipeDraggingSessionId('');
     setChatSwipeDraggingOffset(0);
     chatSwipeSessionIdRef.current = '';
+    chatSwipePointerIdRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
   };
 
   const selectChatSession = (sessionId: string) => {
@@ -4871,17 +4897,17 @@ function App() {
                       onClick={() => {
                         selectChatSession(session.sessionId);
                       }}
-                      onTouchStart={event => {
+                      onPointerDown={event => {
                         beginChatSessionSwipe(event, session.sessionId);
                       }}
-                      onTouchMove={event => {
+                      onPointerMove={event => {
                         moveChatSessionSwipe(event, session.sessionId);
                       }}
-                      onTouchEnd={() => {
-                        endChatSessionSwipe(session.sessionId);
+                      onPointerUp={event => {
+                        endChatSessionSwipe(event, session.sessionId);
                       }}
-                      onTouchCancel={() => {
-                        endChatSessionSwipe(session.sessionId);
+                      onPointerCancel={event => {
+                        endChatSessionSwipe(event, session.sessionId);
                       }}
                     >
                       <span className="file-dot codicon codicon-comment-discussion" />
