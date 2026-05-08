@@ -719,3 +719,15 @@ func TestInstanceListSkills_UnknownProvider(t *testing.T) {
 		t.Fatal("ListSkills should fail for unknown provider")
 	}
 }
+func TestCodexPreset_IncludesAgentsUserSkillsDir(t *testing.T) {
+	found := false
+	for _, dir := range CodexACPProviderPreset.SkillUserDirs {
+		if strings.EqualFold(strings.TrimSpace(dir), "~/.agents/skills") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("codex preset user dirs missing ~/.agents/skills: %v", CodexACPProviderPreset.SkillUserDirs)
+	}
+}

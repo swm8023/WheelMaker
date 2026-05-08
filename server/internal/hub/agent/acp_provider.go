@@ -34,7 +34,7 @@ var (
 		BinaryName:       "codex-acp",
 		NPMPackage:       "@zed-industries/codex-acp",
 		SkillProjectDirs: []string{".agents/skills"},
-		SkillUserDirs:    []string{"~/.codex/skills"},
+		SkillUserDirs:    []string{"~/.codex/skills", "~/.agents/skills"},
 	}
 	ClaudeACPProviderPreset = ACPProviderPreset{
 		Name:                   "claude",
@@ -42,7 +42,7 @@ var (
 		NPMPackage:             "@agentclientprotocol/claude-agent-acp",
 		SkillProjectDirs:       []string{".claude/skills"},
 		SkillProjectParentDirs: []string{".claude/skills"},
-		SkillUserDirs:          []string{"~/.claude/skills"},
+		SkillUserDirs:          []string{"~/.claude/skills", "~/.agents/skills"},
 	}
 	CopilotACPProviderPreset = ACPProviderPreset{
 		Name:                   "copilot",
