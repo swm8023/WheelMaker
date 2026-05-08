@@ -263,5 +263,6 @@ func skillNameFromRelativePath(root, skillFile string) string {
 	if len(out) == 0 {
 		return ""
 	}
-	return strings.Join(out, ":")
+	return out[len(out)-1]
 }
+

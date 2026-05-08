@@ -2425,6 +2425,11 @@ body,
   text-overflow: ellipsis;
   max-width: 62%;
 }
+.chat-slash-trigger {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
 .chat-action-button,
 .chat-send-button {
   width: 36px;

@@ -49,7 +49,6 @@ import type {
   RegistrySessionContentBlock,
   RegistrySessionPromptSnapshot,
   RegistrySessionConfigOption,
-  RegistrySessionCommand,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -239,16 +238,6 @@ const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachment: null };
-const DEFAULT_CHAT_SLASH_COMMANDS: ChatSlashCommandOption[] = [
-  { name: '/cancel', description: 'Cancel the running request.' },
-  { name: '/status', description: 'Show current session status.' },
-  { name: '/mode', description: 'Set interaction mode.' },
-  { name: '/model', description: 'Switch model.' },
-  { name: '/config', description: 'Set config option value.' },
-  { name: '/list', description: 'List sessions.' },
-  { name: '/new', description: 'Create a new session.' },
-  { name: '/load', description: 'Load a previous session.' },
-];
 let mermaidRenderSequence = 0;
 
 function nextMermaidRenderId(): string {
@@ -271,22 +260,22 @@ function normalizeChatSlashCommandName(name: string): string {
   return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
 
-function normalizeChatSlashCommands(commands?: RegistrySessionCommand[]): ChatSlashCommandOption[] {
+function normalizeChatSlashCommands(skills?: string[]): ChatSlashCommandOption[] {
   const merged = new Map<string, ChatSlashCommandOption>();
-  for (const base of DEFAULT_CHAT_SLASH_COMMANDS) {
-    merged.set(base.name.toLowerCase(), base);
-  }
-  for (const item of commands ?? []) {
-    const name = normalizeChatSlashCommandName(item.name || '');
+  for (const skill of skills ?? []) {
+    const normalizedSkill = (skill || '').trim();
+    if (!normalizedSkill) {
+      continue;
+    }
+    const name = normalizeChatSlashCommandName(normalizedSkill);
     if (!name) {
       continue;
     }
     const key = name.toLowerCase();
-    const existing = merged.get(key);
-    merged.set(key, {
-      name,
-      description: item.description || existing?.description,
-    });
+    if (merged.has(key)) {
+      continue;
+    }
+    merged.set(key, { name });
   }
   return Array.from(merged.values()).sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -2074,9 +2063,27 @@ function App() {
     return selectedChatSession?.configOptions ?? [];
   }, [selectedChatSession]);
 
+  const chatSlashSkills = useMemo(() => {
+    const currentProject = projects.find(item => item.projectId === projectId);
+    const deduped = new Map<string, string>();
+    for (const profile of currentProject?.agentProfiles ?? []) {
+      for (const skill of profile.skills ?? []) {
+        const normalized = (skill || '').trim();
+        if (!normalized) {
+          continue;
+        }
+        const key = normalized.toLowerCase();
+        if (!deduped.has(key)) {
+          deduped.set(key, normalized);
+        }
+      }
+    }
+    return Array.from(deduped.values()).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+  }, [projects, projectId]);
+
   const chatSlashCommands = useMemo(
-    () => normalizeChatSlashCommands(selectedChatSession?.commands),
-    [selectedChatSession],
+    () => normalizeChatSlashCommands(chatSlashSkills),
+    [chatSlashSkills],
   );
 
   const chatSlashQuery = useMemo(
@@ -2179,6 +2186,25 @@ function App() {
     },
     [updateChatComposerText],
   );
+
+
+  const triggerChatSlashInput = useCallback(() => {
+    const input = chatComposerTextareaRef.current;
+    const current = chatComposerTextRef.current;
+    const start = input?.selectionStart ?? current.length;
+    const end = input?.selectionEnd ?? current.length;
+    const next = `${current.slice(0, start)}/${current.slice(end)}`;
+    updateChatComposerText(next);
+    window.requestAnimationFrame(() => {
+      const target = chatComposerTextareaRef.current;
+      if (!target) {
+        return;
+      }
+      const caret = start + 1;
+      target.focus();
+      target.setSelectionRange(caret, caret);
+    });
+  }, [updateChatComposerText]);
 
   const updateChatComposerAttachment = useCallback(
     (nextAttachment: ChatAttachment | null) => {
@@ -6196,6 +6222,13 @@ function App() {
               </div>
             ) : null}
             <div className="chat-composer-main">
+              <button
+                type="button"
+                className="chat-action-button chat-slash-trigger"
+                onClick={triggerChatSlashInput}
+                title="Insert slash"
+                aria-label="Insert slash"
+              >/</button>
               <div className="chat-composer-input-shell">
                 <textarea
                   ref={chatComposerTextareaRef}
@@ -6249,7 +6282,7 @@ function App() {
                   placeholder="Send a message..."
                 />
                 {chatSlashMenuVisible ? (
-                  <div ref={chatSlashMenuRef} className="chat-slash-menu" role="listbox" aria-label="Available commands">
+                  <div ref={chatSlashMenuRef} className="chat-slash-menu" role="listbox" aria-label="Available skills">
                     {chatSlashCommandOptions.map((option, index) => {
                       const selected = index === chatSlashActiveIndex;
                       return (

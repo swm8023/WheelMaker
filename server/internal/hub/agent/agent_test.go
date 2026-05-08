@@ -712,7 +712,7 @@ func TestListSkillsForPreset_ProjectDirUsesRelativeDirectoryName(t *testing.T) {
 	}
 }
 
-func TestListSkillsForPreset_NestedSkillNameUsesColonPath(t *testing.T) {
+func TestListSkillsForPreset_NestedSkillNameUsesLeafDirectoryName(t *testing.T) {
 	root := t.TempDir()
 	skillDir := filepath.Join(root, ".agents", "skills", "A", "B")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
@@ -732,8 +732,8 @@ func TestListSkillsForPreset_NestedSkillNameUsesColonPath(t *testing.T) {
 	if len(skills) != 1 {
 		t.Fatalf("skills len = %d, want 1", len(skills))
 	}
-	if skills[0].Name != "A:B" {
-		t.Fatalf("skill name = %q, want %q", skills[0].Name, "A:B")
+	if skills[0].Name != "B" {
+		t.Fatalf("skill name = %q, want %q", skills[0].Name, "B")
 	}
 }
 func TestInstanceListSkills_UnknownProvider(t *testing.T) {
@@ -755,3 +755,4 @@ func TestCodexPreset_IncludesAgentsUserSkillsDir(t *testing.T) {
 		t.Fatalf("codex preset user dirs missing ~/.agents/skills: %v", CodexACPProviderPreset.SkillUserDirs)
 	}
 }
+
