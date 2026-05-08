@@ -3180,13 +3180,13 @@ body,
   }
 
   .project-wrap {
-    flex: 0 1 56vw;
+    flex: 0 1 auto;
     min-width: 0;
   }
 
   .project-btn {
     width: auto;
-    max-width: 100%;
+    max-width: 56vw;
   }
 
   .header-spacer {
