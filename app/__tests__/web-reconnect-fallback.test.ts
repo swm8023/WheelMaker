@@ -11,7 +11,7 @@ describe('web reconnect fallback behavior', () => {
 
     expect(mainTsx).toContain('const RECONNECT_GRACE_PERIOD_MS = 30_000;');
     expect(mainTsx).toMatch(
-      /const\s+canSilentReconnect\s*=\s*!!tokenRef\.current\.trim\(\)\s*&&\s*!!projectIdRef\.current;/,
+      /const\s+canSilentReconnect\s*=\s*!!addressRef\.current\.trim\(\)\s*&&\s*!!projectIdRef\.current;/,
     );
     expect(mainTsx).toContain('if (elapsed < RECONNECT_GRACE_PERIOD_MS) {');
     expect(mainTsx).toMatch(
@@ -22,7 +22,7 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('const shouldSyncSelectedSession =');
     expect(mainTsx).toContain('incremental: true,');
     expect(mainTsx).toContain('preserveUserSelection: true,');
-    expect(mainTsx).toContain('selectionSnapshot: previousSelectedChatId,');
+    expect(mainTsx).toContain('selectionSnapshot: preferredSelectedChatId,');
   });
 
   test('uses pwa foreground supervisor for background suspend and resume reconnect', () => {
@@ -115,7 +115,7 @@ describe('web reconnect fallback behavior', () => {
 
     expect(mainTsx).toContain('const shouldKeepWorkspaceVisible =');
     expect(mainTsx).toContain(
-      "reason !== 'stop' && !!tokenRef.current.trim() && !!projectIdRef.current;",
+      "reason !== 'stop' && !!addressRef.current.trim() && !!projectIdRef.current;",
     );
     expect(mainTsx).toContain('setReconnecting(shouldKeepWorkspaceVisible);');
   });

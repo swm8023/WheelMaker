@@ -11,12 +11,12 @@ describe('web chat read-on-demand behavior', () => {
 
     expect(mainTsx).toContain('incremental?: boolean;');
     expect(mainTsx).toContain('forceFull?: boolean;');
-    expect(mainTsx).toContain('const useIncremental = options?.forceFull');
+    expect(mainTsx).toContain('const useIncremental = requestedIncremental && !fallbackToFullRead;');
     expect(mainTsx).toContain('const shouldSyncSelectedSession =');
     expect(mainTsx).toContain("tabRef.current === 'chat'");
     expect(mainTsx).toContain('incremental: true,');
     expect(mainTsx).toContain('preserveUserSelection: true,');
-    expect(mainTsx).toContain('selectionSnapshot: previousSelectedChatId,');
+    expect(mainTsx).toContain('selectionSnapshot: preferredSelectedChatId,');
     expect(mainTsx).toContain('if (useIncremental) {');
   });
 });

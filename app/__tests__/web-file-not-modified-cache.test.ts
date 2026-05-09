@@ -8,7 +8,7 @@ describe('web file read cache on notModified', () => {
 
     expect(mainTsx).toContain('const fileCacheRef = useRef<Record<string, string>>({});');
     expect(mainTsx).toContain('if (result.notModified) {');
-    expect(mainTsx).toContain('const cachedContent = fileCacheRef.current[path];');
+    expect(mainTsx).toContain("fileCacheRef.current[path] ?? persistedFile?.content ?? '';");
     expect(mainTsx).toContain("setFileContent(typeof cachedContent === 'string' ? cachedContent : '');");
     expect(mainTsx).toContain('fileCacheRef.current[path] = result.content;');
   });

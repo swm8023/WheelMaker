@@ -12,8 +12,9 @@ describe('web session list fallback compatibility', () => {
     expect(repositoryTs).toContain("typeof input.sessionId === 'string'");
     expect(repositoryTs).toContain("typeof input.chatId === 'string'");
     expect(mainTsx).toContain("const baseTitle = 'WheelMaker';");
+    expect(mainTsx).toContain('const currentProjectTitle = useMemo(');
     expect(mainTsx).toContain("document.title = projectTitle ? `${baseTitle} - ${projectTitle}` : baseTitle;");
-    expect(mainTsx).toContain("}, [currentProjectName]);");
+    expect(mainTsx).toContain("}, [currentProjectTitle]);");
   });
 });
 
