@@ -1,0 +1,92 @@
+<svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .machine-box { fill: #f3f3f3; stroke: #333; stroke-width: 2; }
+      .machine-title { font-size: 18px; font-weight: bold; fill: #1f2328; }
+      .service-box { fill: #e6f3ff; stroke: #0066cc; stroke-width: 1.5; border-radius: 4px; }
+      .service-text { font-size: 12px; fill: #1f2328; }
+      .port-label { font-size: 11px; fill: #666; font-family: monospace; }
+      .arrow { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .connection-label { font-size: 12px; fill: #1f2328; font-weight: bold; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#333"/>
+    </marker>
+  </defs>
+  
+  <!-- Title -->
+  <text x="500" y="30" style="font-size: 24px; font-weight: bold; text-anchor: middle; fill: #1f2328;">
+    WheelMaker Deployment Topology
+  </text>
+  
+  <!-- Machine A (Local) -->
+  <rect x="50" y="80" width="380" height="480" rx="8" class="machine-box"/>
+  <text x="240" y="110" text-anchor="middle" class="machine-title">Machine A (Local)</text>
+  
+  <!-- Nginx on Machine A -->
+  <rect x="70" y="130" width="340" height="50" rx="4" fill="#fff9e6" stroke="#cc9900" stroke-width="1.5"/>
+  <text x="240" y="152" text-anchor="middle" class="service-text" style="font-weight: bold;">Nginx (Port 28800, SSL)</text>
+  <text x="240" y="170" text-anchor="middle" class="port-label">https://localhost:28800</text>
+  
+  <!-- Services under Nginx -->
+  <!-- Web -->
+  <rect x="70" y="200" width="100" height="60" rx="4" class="service-box"/>
+  <text x="120" y="222" text-anchor="middle" class="service-text" style="font-weight: bold;">Web UI</text>
+  <text x="120" y="240" text-anchor="middle" class="port-label">:8080</text>
+  <text x="120" y="255" text-anchor="middle" class="port-label">→ 28800/</text>
+  
+  <!-- Hub WS -->
+  <rect x="190" y="200" width="100" height="60" rx="4" class="service-box"/>
+  <text x="240" y="222" text-anchor="middle" class="service-text" style="font-weight: bold;">Hub WS</text>
+  <text x="240" y="240" text-anchor="middle" class="port-label">:9630</text>
+  <text x="240" y="255" text-anchor="middle" class="port-label">→ 28800/ws</text>
+  
+  <!-- Monitor -->
+  <rect x="310" y="200" width="100" height="60" rx="4" class="service-box"/>
+  <text x="360" y="222" text-anchor="middle" class="service-text" style="font-weight: bold;">Monitor</text>
+  <text x="360" y="240" text-anchor="middle" class="port-label">:9631</text>
+  <text x="360" y="255" text-anchor="middle" class="port-label">→ 28800/monitor/</text>
+  
+  <!-- Registry -->
+  <rect x="70" y="290" width="340" height="50" rx="4" fill="#e6ffe6" stroke="#00cc00" stroke-width="1.5"/>
+  <text x="240" y="312" text-anchor="middle" class="service-text" style="font-weight: bold;">Registry (gRPC Server)</text>
+  <text x="240" y="330" text-anchor="middle" class="port-label">Configured: listen, port, server, token, hubId</text>
+  
+  <!-- Hub -->
+  <rect x="70" y="370" width="340" height="50" rx="4" fill="#ffe6e6" stroke="#cc0000" stroke-width="1.5"/>
+  <text x="240" y="392" text-anchor="middle" class="service-text" style="font-weight: bold;">Hub (ACP Bridge)</text>
+  <text x="240" y="410" text-anchor="middle" class="port-label">Connects to Machine A Registry</text>
+  
+  <!-- Data Flow -->
+  <rect x="70" y="450" width="340" height="50" rx="4" fill="#f0f0f0" stroke="#666" stroke-width="1.5"/>
+  <text x="240" y="472" text-anchor="middle" class="service-text" style="font-weight: bold;">Data Flow</text>
+  <text x="240" y="490" text-anchor="middle" class="port-label">Chat sessions ↔ Registry ↔ Hub Agents</text>
+  
+  <!-- Machine B (Remote Hub) -->
+  <rect x="570" y="250" width="350" height="310" rx="8" class="machine-box"/>
+  <text x="745" y="280" text-anchor="middle" class="machine-title">Machine B (Remote)</text>
+  
+  <!-- Hub on Machine B -->
+  <rect x="590" y="310" width="310" height="60" rx="4" fill="#ffe6e6" stroke="#cc0000" stroke-width="1.5"/>
+  <text x="745" y="332" text-anchor="middle" class="service-text" style="font-weight: bold;">Hub Agent</text>
+  <text x="745" y="350" text-anchor="middle" class="port-label">Connects to Machine A Registry</text>
+  
+  <!-- Agents -->
+  <rect x="590" y="400" width="310" height="120" rx="4" fill="#f0e6ff" stroke="#6600cc" stroke-width="1.5"/>
+  <text x="745" y="425" text-anchor="middle" class="service-text" style="font-weight: bold;">Agents (Running Tasks)</text>
+  <text x="745" y="445" text-anchor="middle" class="service-text">• Code Review</text>
+  <text x="745" y="463" text-anchor="middle" class="service-text">• Exploration</text>
+  <text x="745" y="481" text-anchor="middle" class="service-text">• General Purpose</text>
+  <text x="745" y="499" text-anchor="middle" class="service-text">• Custom Agents</text>
+  
+  <!-- Connection Arrow -->
+  <path d="M 420 390 Q 500 380 570 330" class="arrow"/>
+  <text x="490" y="365" text-anchor="middle" class="connection-label">Registry Sync</text>
+  
+  <!-- Legend -->
+  <g transform="translate(50, 580)">
+    <text x="0" y="0" style="font-size: 12px; font-weight: bold; fill: #1f2328;">
+      Endpoints: • Web / WS / Monitor routes through Nginx SSL tunnel • Registry = gRPC backend • Agents = Remote workers
+    </text>
+  </g>
+</svg>
