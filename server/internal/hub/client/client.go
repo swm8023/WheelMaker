@@ -497,6 +497,9 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err != nil {
 			return nil, err
 		}
+		for i := range sessions {
+			sessions[i].ConfigOptions = c.sessionConfigOptions(ctx, sessions[i].SessionID)
+		}
 		return map[string]any{"sessions": sessions}, nil
 	case "session.read":
 		var req struct {

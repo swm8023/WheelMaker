@@ -11,7 +11,8 @@ describe('web chat project scoping', () => {
 
     expect(mainTsx).toContain('if (activeProjectId !== projectIdRef.current) {');
     expect(mainTsx).toContain('return false;');
-    expect(mainTsx).toContain('setChatSessions(nextSessions);');
     expect(mainTsx).toContain('const nextSessions = sessions;');
+    expect(mainTsx).toContain('setChatSessions(prev => {');
+    expect(mainTsx).toContain('const byId = new Map(prev.map(item => [item.sessionId, item]));');
   });
 });

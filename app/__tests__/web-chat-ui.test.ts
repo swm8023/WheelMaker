@@ -76,6 +76,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };");
     expect(mainTsx).toContain('const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);');
     expect(mainTsx).toContain('const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);');
+    expect(mainTsx).toContain('const [chatConfigOverflowOpen, setChatConfigOverflowOpen] = useState(false);');
     expect(mainTsx).toContain('const chatAttachmentsRef = useRef<ChatAttachment[]>([]);');
     expect(mainTsx).toContain('const chatDraftGenerationRef = useRef<Record<string, number>>({});');
     expect(mainTsx).toContain('const applyChatAttachments = useCallback(');
@@ -120,6 +121,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('transform: translateY(calc(-100% + 6px));');
     expect(stylesCss).toContain('.chat-session-item');
     expect(stylesCss).toContain('.chat-attachment-preview-list {');
+    expect(stylesCss).toContain('.chat-config-overflow-button {');
+    expect(stylesCss).toContain('.chat-config-overflow-menu {');
     expect(mainTsx).not.toContain('className="status-bar"');
     expect(mainTsx).not.toContain('gitStatusSummary');
     expect(mainTsx).not.toContain('chat-thought-label');
@@ -129,6 +132,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('if (!silent) {');
     expect(mainTsx).toContain('setHasPendingProjectUpdates(false);');
     expect(mainTsx).toContain('setChatPromptSnapshotVersion(version => version + 1);');
+    expect(mainTsx).toContain('setChatSessions(prev => {');
+    expect(mainTsx).toContain('const byId = new Map(prev.map(item => [item.sessionId, item]));');
+    expect(mainTsx).toContain('const merged = mergeChatSession(next, session);');
+    expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
+    expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
+    expect(mainTsx).toContain('const chatConfigDisplay = useMemo(() => {');
+    expect(mainTsx).toContain('chat-config-overflow-button');
+    expect(mainTsx).toContain('chat-config-overflow-menu');
+    expect(mainTsx).toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
+    expect(mainTsx).toContain('text: chooseChatEntryText(previous.text, text),');
     expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
     expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
     expect(mainTsx).toContain("className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");

@@ -4526,6 +4526,54 @@ func TestHandleSessionRequest_SessionNewPersistsProjectDefaultAgent(t *testing.T
 	}
 }
 
+func TestHandleSessionRequest_SessionListIncludesConfigOptions(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 10, 5, 0, 0, 0, time.UTC)
+
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionPersisted,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		Title:        "Session 1",
+		CreatedAt:    now,
+		LastActiveAt: now,
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := c.store.SaveAgentPreference(ctx, AgentPreferenceRecord{
+		ProjectName:    "proj1",
+		AgentType:      "claude",
+		PreferenceJSON: `{"configOptions":[{"id":"mode","currentValue":"code"}]}`,
+	}); err != nil {
+		t.Fatalf("SaveAgentPreference: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.list", "proj1", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.list): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("response type = %T, want map[string]any", resp)
+	}
+	sessions, ok := body["sessions"].([]sessionViewSummary)
+	if !ok {
+		t.Fatalf("sessions type = %T, want []sessionViewSummary", body["sessions"])
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	if got := len(sessions[0].ConfigOptions); got != 1 {
+		t.Fatalf("configOptions len = %d, want 1", got)
+	}
+	if sessions[0].ConfigOptions[0].ID != "mode" || sessions[0].ConfigOptions[0].CurrentValue != "code" {
+		t.Fatalf("config option = %+v", sessions[0].ConfigOptions[0])
+	}
+}
+
 func TestSessionViewReadRepairsSameTurnOverwriteFromCheckpoint(t *testing.T) {
 	c := newSessionViewTestClient(t)
 

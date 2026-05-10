@@ -247,6 +247,8 @@ const CHAT_SWIPE_REVEAL_THRESHOLD = 20;
 const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
+const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
+const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 let mermaidRenderSequence = 0;
 
@@ -628,6 +630,38 @@ function msgPlanEntries(
   return entries;
 }
 
+function chooseChatEntryText(previousText: string, nextText: string): string {
+  if (!previousText) {
+    return nextText;
+  }
+  if (!nextText) {
+    return previousText;
+  }
+  if (nextText.length >= previousText.length) {
+    return nextText;
+  }
+  if (previousText.startsWith(nextText)) {
+    return previousText;
+  }
+  return nextText;
+}
+
+function chatConfigPriority(option: RegistrySessionConfigOption): number {
+  const id = (option.id || '').trim().toLowerCase();
+  const label = (option.name || '').trim().toLowerCase();
+  const exactRank = CHAT_CONFIG_PRIORITY_IDS.findIndex(item => item === id);
+  if (exactRank >= 0) {
+    return exactRank;
+  }
+  const fuzzyRank = CHAT_CONFIG_PRIORITY_MATCHERS.findIndex(
+    item => id.includes(item) || label.includes(item),
+  );
+  if (fuzzyRank >= 0) {
+    return CHAT_CONFIG_PRIORITY_IDS.length + fuzzyRank;
+  }
+  return 99;
+}
+
 function decodeSessionMessageFromEventPayload(
   payload: RegistryChatMessageEventPayload,
 ): RegistryChatMessage | null {
@@ -1001,7 +1035,7 @@ function groupChatMessagesByPrompt(
           const previous = existing.entries[existingIndex];
           existing.entries[existingIndex] = {
             ...previous,
-            text,
+            text: chooseChatEntryText(previous.text, text),
             turnIndex,
             planEntries: kind === 'plan' ? planEntries : previous.planEntries,
           };
@@ -2096,6 +2130,7 @@ function App() {
   const chatComposerActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsMeasureRef = useRef<HTMLDivElement | null>(null);
+  const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -2123,6 +2158,7 @@ function App() {
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatConfigFeedback, setChatConfigFeedback] = useState('');
   const [showChatConfigLabels, setShowChatConfigLabels] = useState(false);
+  const [chatConfigOverflowOpen, setChatConfigOverflowOpen] = useState(false);
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
@@ -2155,6 +2191,41 @@ function App() {
   const selectedChatConfigOptions = useMemo(() => {
     return selectedChatSession?.configOptions ?? [];
   }, [selectedChatSession]);
+
+  const chatConfigDisplay = useMemo(() => {
+    if (selectedChatConfigOptions.length === 0 || isWide) {
+      return {
+        visible: selectedChatConfigOptions,
+        overflow: [] as RegistrySessionConfigOption[],
+      };
+    }
+    if (selectedChatConfigOptions.length <= 3) {
+      return {
+        visible: selectedChatConfigOptions,
+        overflow: [] as RegistrySessionConfigOption[],
+      };
+    }
+    const prioritized = selectedChatConfigOptions
+      .map((option, index) => ({ option, index, rank: chatConfigPriority(option) }))
+      .sort((left, right) => {
+        if (left.rank !== right.rank) {
+          return left.rank - right.rank;
+        }
+        return left.index - right.index;
+      });
+    const visibleIds = new Set(prioritized.slice(0, 3).map(item => item.option.id));
+    const visible: RegistrySessionConfigOption[] = [];
+    const overflow: RegistrySessionConfigOption[] = [];
+    for (const option of selectedChatConfigOptions) {
+      if (visibleIds.has(option.id) && visible.length < 3) {
+        visible.push(option);
+        visibleIds.delete(option.id);
+      } else {
+        overflow.push(option);
+      }
+    }
+    return { visible, overflow };
+  }, [selectedChatConfigOptions, isWide]);
 
   const chatSlashSkills = useMemo(() => {
     const currentProject = projects.find(item => item.projectId === projectId);
@@ -2747,6 +2818,23 @@ function App() {
       setChatComposerActionMenuOpen(false);
     }
   }, [chatComposerText, chatComposerActionMenuOpen]);
+
+  useEffect(() => {
+    if (!chatConfigOverflowOpen || isWide) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && chatConfigOverflowRef.current?.contains(target)) return;
+      setChatConfigOverflowOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [chatConfigOverflowOpen, isWide]);
+
+  useEffect(() => {
+    if (isWide || chatConfigDisplay.overflow.length === 0) {
+      setChatConfigOverflowOpen(false);
+    }
+  }, [isWide, chatConfigDisplay.overflow.length, selectedChatId]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -3737,7 +3825,25 @@ function App() {
         return;
       }
       const nextSessions = sessions;
-      setChatSessions(nextSessions);
+      setChatSessions(prev => {
+        const byId = new Map(prev.map(item => [item.sessionId, item]));
+        let next: RegistryChatSession[] = [];
+        for (const item of nextSessions) {
+          const existing = byId.get(item.sessionId);
+          const session =
+            existing &&
+            (item.configOptions === undefined || item.commands === undefined)
+              ? {
+                  ...item,
+                  configOptions: item.configOptions ?? existing.configOptions,
+                  commands: item.commands ?? existing.commands,
+                }
+              : item;
+          const merged = mergeChatSession(next, session);
+          next = merged;
+        }
+        return next;
+      });
 
       const cursorBySessionId: Record<string, {promptIndex: number; turnIndex: number}> = {};
       for (const session of nextSessions) {
@@ -6472,7 +6578,8 @@ function App() {
       !!selectedDiff &&
       isHeavyGeneratedDiffPath(selectedDiff) &&
       !allowHeavyDiffLoad;
-    const chatConfigOptions = selectedChatSession?.configOptions ?? [];
+    const chatConfigOptions = chatConfigDisplay.visible;
+    const chatConfigOverflowOptions = chatConfigDisplay.overflow;
     const selectedFileIsImage = isImageFile(
       selectedFile,
       fileInfo?.mimeType,
@@ -6751,7 +6858,7 @@ function App() {
                 />
               </button>
             </div>
-            {chatConfigOptions.length > 0 ? (
+            {selectedChatConfigOptions.length > 0 ? (
               <div className="chat-config-options-wrap">
                 <div ref={chatConfigOptionsRef} className="chat-config-options">
                   {chatConfigOptions.map(option => {
@@ -6799,6 +6906,66 @@ function App() {
                       </div>
                     );
                   })}
+                  {!isWide && chatConfigOverflowOptions.length > 0 ? (
+                    <div ref={chatConfigOverflowRef} className="chat-config-overflow">
+                      <button
+                        type="button"
+                        className="chat-config-overflow-button"
+                        aria-label={`Show ${chatConfigOverflowOptions.length} more config options`}
+                        aria-expanded={chatConfigOverflowOpen}
+                        onClick={() => setChatConfigOverflowOpen(prev => !prev)}
+                      >
+                        +{chatConfigOverflowOptions.length}
+                      </button>
+                      {chatConfigOverflowOpen ? (
+                        <div className="chat-config-overflow-menu" role="menu" aria-label="More config options">
+                          {chatConfigOverflowOptions.map(option => {
+                            const optionValues = option.options ?? [];
+                            const currentValue =
+                              option.currentValue || optionValues[0]?.value || '';
+                            const hasChoices = optionValues.length > 0;
+                            const updating =
+                              chatConfigUpdatingKey ===
+                              `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
+                            const optionLabel = option.name || option.id;
+                            return (
+                              <div key={`overflow:${option.id}`} className="chat-config-item">
+                                <span className="chat-config-item-label" title={optionLabel}>
+                                  {optionLabel}
+                                </span>
+                                <select
+                                  className="chat-config-select"
+                                  value={currentValue}
+                                  disabled={updating || !hasChoices}
+                                  title={optionLabel}
+                                  aria-label={optionLabel}
+                                  onChange={event => {
+                                    handleChatConfigOptionChange(
+                                      option,
+                                      event.target.value,
+                                    ).catch(() => undefined);
+                                  }}
+                                >
+                                  {!optionValues.some(item => item.value === currentValue) &&
+                                  currentValue ? (
+                                    <option value={currentValue}>{currentValue}</option>
+                                  ) : null}
+                                  {optionValues.map(item => (
+                                    <option
+                                      key={`overflow:${option.id}:${item.value}`}
+                                      value={item.value}
+                                    >
+                                      {item.name || item.value}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
                 {isWide ? (
                   <div
