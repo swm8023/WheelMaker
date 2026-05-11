@@ -2115,13 +2115,11 @@ function App() {
   const floatingDragStateRef = useRef<FloatingDragState | null>(null);
   const [floatingKeyboardOffset, setFloatingKeyboardOffset] = useState(0);
   const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
-  const [narrowHeaderBubbleHeight, setNarrowHeaderBubbleHeight] = useState(48);
   const floatingLongPressTimerRef = useRef<number | null>(null);
   const floatingCooldownTimerRef = useRef<number | null>(null);
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
-  const headerBubbleRef = useRef<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -2768,18 +2766,13 @@ function App() {
     if (isWide) {
       return;
     }
-    const nextHeaderHeight = headerBubbleRef.current?.offsetHeight ?? 48;
     const nextFloatingHeight = floatingControlStackRef.current?.offsetHeight ?? 184;
-    setNarrowHeaderBubbleHeight(prev => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
     setFloatingControlStackHeight(prev => (prev === nextFloatingHeight ? prev : nextFloatingHeight));
   }, [
     isWide,
     windowWidth,
     projectId,
     projects.length,
-    loadingProject,
-    refreshingProject,
-    reconnecting,
     tab,
   ]);
 
@@ -3072,18 +3065,41 @@ function App() {
     document.title = projectTitle ? `${baseTitle} - ${projectTitle}` : baseTitle;
   }, [currentProjectTitle]);
   const project = currentProject;
-  const narrowHeaderInset = useMemo(() => {
-    if (isWide) return 0;
-    return safeAreaTopInset + narrowHeaderBubbleHeight + 22;
-  }, [isWide, narrowHeaderBubbleHeight, safeAreaTopInset]);
-  const narrowContentInsetStyle = !isWide
-    ? ({ paddingTop: `${narrowHeaderInset}px` } as const)
-    : undefined;
+  const breadcrumbProjectName = useMemo(
+    () => (currentProjectName || '').trim() || 'Project',
+    [currentProjectName],
+  );
+  const fileBreadcrumbLabel = useMemo(
+    () => splitPathForDisplay(selectedFile).fileName || 'No Selected File',
+    [selectedFile],
+  );
+  const chatBreadcrumbLabel = useMemo(
+    () => (selectedChatSession?.title || '').trim() || 'No Selected Session',
+    [selectedChatSession],
+  );
+  const gitBreadcrumbLabel = useMemo(
+    () => splitPathForDisplay(selectedDiff).fileName || 'No Selected Diff',
+    [selectedDiff],
+  );
+  const renderBreadcrumbTitle = useCallback(
+    (label: string) => (
+      <div className="breadcrumb-title">
+        <span className="breadcrumb-project-name">{breadcrumbProjectName}</span>
+        <span className="breadcrumb-separator" aria-hidden="true">
+          &gt;
+        </span>
+        <span className="title-text breadcrumb-current" title={label}>
+          {label}
+        </span>
+      </div>
+    ),
+    [breadcrumbProjectName],
+  );
   const floatingBounds = useMemo(() => {
     if (isWide) {
       return { minTop: 0, maxTop: 0 };
     }
-    const minTop = Math.max(narrowHeaderInset + 10, 72);
+    const minTop = Math.max(safeAreaTopInset + 12, 56);
     const maxTop = Math.max(
       minTop,
       windowHeight - floatingKeyboardOffset - floatingControlStackHeight - 18,
@@ -3091,7 +3107,7 @@ function App() {
     return { minTop, maxTop };
   }, [
     isWide,
-    narrowHeaderInset,
+    safeAreaTopInset,
     windowHeight,
     floatingKeyboardOffset,
     floatingControlStackHeight,
@@ -6481,6 +6497,38 @@ function App() {
 
     return (
       <>
+        {!isWide ? (
+          <div className="drawer-project-header">
+            <div className="drawer-project-pill">
+              <div
+                className="project-wrap"
+                onPointerDown={event => event.stopPropagation()}
+              >
+                <button
+                  className="project-btn drawer-project-button"
+                  onClick={() => setProjectMenuOpen(value => !value)}
+                >
+                  <span className="project-arrow codicon codicon-chevron-down" />
+                  <span className="project-name" title={currentProjectName}>
+                    {currentProjectName}
+                  </span>
+                  {loadingProject || refreshingProject || reconnecting ? (
+                    <span className="muted">...</span>
+                  ) : null}
+                </button>
+                {projectMenu}
+              </div>
+              <button
+                className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
+                onClick={() => refreshProject().catch(() => undefined)}
+                title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
+                disabled={refreshingProject || reconnecting}
+              >
+                {refreshButtonContent}
+              </button>
+            </div>
+          </div>
+        ) : null}
         <div className="sidebar-scroll">
           {sidebarSettingsOpen ? (
             <>
@@ -7028,7 +7076,13 @@ function App() {
       return (
         <div className="content">
           <div className="block-title">
-            CHAT - {selectedChatSession?.title || 'New Session'}
+            {isWide ? (
+              <>
+                CHAT - {selectedChatSession?.title || 'New Session'}
+              </>
+            ) : (
+              renderBreadcrumbTitle(chatBreadcrumbLabel)
+            )}
           </div>
           <div
             className="chat-main"
@@ -7456,9 +7510,13 @@ function App() {
       return (
         <div className="content">
           <div className="block-title with-tools file-title-bar">
-            <span className="title-text">
-              {selectedFile || 'Select a file'}
-            </span>
+            {isWide ? (
+              <span className="title-text">
+                {selectedFile || 'Select a file'}
+              </span>
+            ) : (
+              renderBreadcrumbTitle(fileBreadcrumbLabel)
+            )}
             <div className="view-tools">{renderViewTools()}</div>
           </div>
           <div className="file-pane">
@@ -7677,9 +7735,13 @@ function App() {
     return (
       <div className="content">
         <div className="block-title with-tools">
-          <span className="title-text">
-            {selectedDiff || 'Select a changed file'}
-          </span>
+          {isWide ? (
+            <span className="title-text">
+              {selectedDiff || 'Select a changed file'}
+            </span>
+          ) : (
+            renderBreadcrumbTitle(gitBreadcrumbLabel)
+          )}
           <div className="view-tools">{renderViewTools()}</div>
         </div>
         <div className="scroll-panel">
@@ -7858,39 +7920,6 @@ function App() {
     </header>
   ) : null;
 
-  const narrowHeaderBubble = !isWide ? (
-    <div className="header-bubble-layer">
-      <div ref={headerBubbleRef} className="header-bubble">
-        <div
-          className="project-wrap"
-          onPointerDown={event => event.stopPropagation()}
-        >
-          <button
-            className="project-btn header-bubble-project"
-            onClick={() => setProjectMenuOpen(value => !value)}
-          >
-            <span className="project-arrow codicon codicon-chevron-down" />
-            <span className="project-name" title={currentProjectName}>
-              {currentProjectName}
-            </span>
-            {loadingProject || refreshingProject || reconnecting ? (
-              <span className="muted">...</span>
-            ) : null}
-          </button>
-          {projectMenu}
-        </div>
-        <button
-          className={`header-btn refresh-btn header-bubble-refresh${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
-          onClick={() => refreshProject().catch(() => undefined)}
-          title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
-          disabled={refreshingProject || reconnecting}
-        >
-          {refreshButtonContent}
-        </button>
-      </div>
-    </div>
-  ) : null;
-
   const floatingControlStack = !isWide ? (
     <div className="floating-control-stack-layer">
       <div
@@ -7956,9 +7985,11 @@ function App() {
         <button
           type="button"
           className="drawer-toggle-bubble"
+          data-active={drawerOpen}
           onClick={handleFloatingDrawerToggle}
           title="Toggle drawer"
           aria-label="Toggle drawer"
+          aria-expanded={drawerOpen}
         >
           <span className="codicon codicon-menu" />
         </button>
@@ -7970,14 +8001,13 @@ function App() {
     <div className={`workspace theme-${themeMode}${!isWide ? ' narrow-shell' : ''}`}>
       <style>{setiFontCss}</style>
       {wideHeader}
-      {narrowHeaderBubble}
       {floatingControlStack}
 
       <div className="body">
         {isWide && !sidebarCollapsed ? (
           <aside className="workspace-left">{renderSidebar()}</aside>
         ) : null}
-        <main className="workspace-right" style={narrowContentInsetStyle}>{renderMain()}</main>
+        <main className="workspace-right">{renderMain()}</main>
       </div>
 
       {!isWide ? (
