@@ -548,14 +548,6 @@ func (c *codexappConn) sendSessionPrompt(ctx context.Context, p protocol.Session
 	c.pendingPromptUpdates = nil
 	c.mu.Unlock()
 
-	c.emitSessionUpdate(protocol.SessionUpdateParams{
-		SessionID: threadID,
-		Update: protocol.SessionUpdate{
-			SessionUpdate: protocol.SessionUpdateUserMessageChunk,
-			Content:       mustRaw(protocol.ContentBlock{Type: protocol.ContentBlockTypeText, Text: codexappInputText(input)}),
-		},
-	})
-
 	var resp appServerTurnStartResponse
 	if err := c.runtime.request(ctx, "turn/start", c.config.turnStartParams(threadID, firstNonEmptyString(c.cwd), input), &resp); err != nil {
 		c.clearPromptDone(done)
@@ -651,6 +643,27 @@ func (c *codexappConn) handleAppServerNotification(method string, params json.Ra
 		if json.Unmarshal(params, &p) == nil && p.ThreadID != "" && p.Delta != "" {
 			c.emitTurnTextUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdateAgentThoughtChunk, p.Delta)
 		}
+	case "item/started", "item/completed":
+		var p appServerItemEventParams
+		if json.Unmarshal(params, &p) == nil && p.ThreadID != "" {
+			c.emitItemUpdate(p, method == "item/completed")
+		}
+	case "item/commandExecution/outputDelta", "item/fileChange/outputDelta":
+		var p appServerAgentMessageDeltaParams
+		if json.Unmarshal(params, &p) == nil && p.ThreadID != "" && p.Delta != "" {
+			kind := protocol.ToolKindExecute
+			if method == "item/fileChange/outputDelta" {
+				kind = protocol.ToolKindWrite
+			}
+			c.emitTurnUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdate{
+				SessionUpdate:   protocol.SessionUpdateToolCallUpdate,
+				ToolCallID:      firstNonEmptyString(p.ItemID, p.TurnID),
+				Title:           firstNonEmptyString(p.ItemID, "tool"),
+				Kind:            kind,
+				Status:          protocol.ToolCallStatusInProgress,
+				ToolCallContent: []protocol.ToolCallContent{textToolCallContent(p.Delta)},
+			})
+		}
 	case "turn/started":
 		var p appServerTurnEventParams
 		if json.Unmarshal(params, &p) == nil {
@@ -672,6 +685,181 @@ func (c *codexappConn) handleAppServerNotification(method string, params json.Ra
 				},
 			})
 		}
+	}
+}
+
+func (c *codexappConn) emitItemUpdate(p appServerItemEventParams, completed bool) {
+	item := p.Item
+	switch item.Type {
+	case "reasoning":
+		if completed {
+			if text := codexappItemText(item.Summary, item.Content, item.Text); text != "" {
+				c.emitTurnTextUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdateAgentThoughtChunk, text)
+			}
+		}
+	case "plan":
+		text := codexappItemText(nil, item.Content, item.Text)
+		if text == "" {
+			return
+		}
+		c.emitTurnUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdate{
+			SessionUpdate: protocol.SessionUpdatePlan,
+			Entries: []protocol.PlanEntry{{
+				Content: text,
+				Status:  protocol.ToolCallStatusCompleted,
+			}},
+		})
+	case "commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "webSearch", "imageView":
+		update := codexappItemToolUpdate(item, completed)
+		if update.ToolCallID != "" {
+			c.emitTurnUpdate(p.ThreadID, p.TurnID, update)
+		}
+	}
+}
+
+func codexappItemToolUpdate(item appServerThreadItem, completed bool) protocol.SessionUpdate {
+	kind := codexappItemToolKind(item.Type)
+	status := codexappToolStatus(item.Status, completed)
+	update := protocol.SessionUpdate{
+		SessionUpdate: protocol.SessionUpdateToolCallUpdate,
+		ToolCallID:    item.ID,
+		Title:         codexappItemTitle(item),
+		Kind:          kind,
+		Status:        status,
+	}
+	if len(item.Arguments) > 0 && string(item.Arguments) != "null" {
+		update.RawInput = append(update.RawInput[:0], item.Arguments...)
+	}
+	if len(item.Result) > 0 && string(item.Result) != "null" {
+		update.RawOutput = append(update.RawOutput[:0], item.Result...)
+	}
+	if item.AggregatedOutput != "" {
+		update.ToolCallContent = append(update.ToolCallContent, textToolCallContent(item.AggregatedOutput))
+	}
+	for _, change := range item.Changes {
+		content := protocol.ToolCallContent{Type: "diff", Path: change.Path}
+		if change.Diff != "" {
+			content.NewText = change.Diff
+		} else {
+			content.OldText = change.OldText
+			content.NewText = change.NewText
+		}
+		update.ToolCallContent = append(update.ToolCallContent, content)
+	}
+	if len(update.ToolCallContent) == 0 && len(item.Error) > 0 && string(item.Error) != "null" {
+		update.ToolCallContent = append(update.ToolCallContent, textToolCallContent(codexappJSONText(item.Error)))
+	}
+	return update
+}
+
+func codexappItemToolKind(itemType string) string {
+	switch itemType {
+	case "commandExecution":
+		return protocol.ToolKindExecute
+	case "fileChange":
+		return protocol.ToolKindWrite
+	case "webSearch", "imageView":
+		return protocol.ToolKindRead
+	default:
+		return protocol.ToolKindOther
+	}
+}
+
+func codexappToolStatus(status string, completed bool) string {
+	switch status {
+	case "pending":
+		return protocol.ToolCallStatusPending
+	case "inProgress", "running":
+		return protocol.ToolCallStatusInProgress
+	case "completed", "success":
+		return protocol.ToolCallStatusCompleted
+	case "failed", "error":
+		return protocol.ToolCallStatusFailed
+	case "declined", "cancelled", "canceled":
+		return protocol.ToolCallStatusCancelled
+	default:
+		if completed {
+			return protocol.ToolCallStatusCompleted
+		}
+		return protocol.ToolCallStatusInProgress
+	}
+}
+
+func codexappItemTitle(item appServerThreadItem) string {
+	switch item.Type {
+	case "commandExecution":
+		return firstNonEmptyString(item.Command, item.ID)
+	case "fileChange":
+		return firstNonEmptyString(item.Path, item.ID)
+	case "mcpToolCall":
+		if item.Server != "" && item.Tool != "" {
+			return item.Server + "/" + item.Tool
+		}
+		return firstNonEmptyString(item.Tool, item.Server, item.ID)
+	case "dynamicToolCall":
+		return firstNonEmptyString(item.Tool, item.ID)
+	case "webSearch":
+		return firstNonEmptyString(item.Query, item.ID)
+	case "imageView":
+		return firstNonEmptyString(item.Path, item.ID)
+	default:
+		return firstNonEmptyString(item.ID, item.Type)
+	}
+}
+
+func codexappItemText(values ...any) string {
+	for _, value := range values {
+		switch v := value.(type) {
+		case string:
+			if v != "" {
+				return v
+			}
+		case json.RawMessage:
+			if text := codexappJSONText(v); text != "" {
+				return text
+			}
+		}
+	}
+	return ""
+}
+
+func codexappJSONText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return ""
+	}
+	return codexappTextFromAny(value)
+}
+
+func codexappTextFromAny(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case []any:
+		var builder strings.Builder
+		for _, item := range v {
+			builder.WriteString(codexappTextFromAny(item))
+		}
+		return builder.String()
+	case map[string]any:
+		for _, key := range []string{"text", "content", "summary", "message"} {
+			if text := codexappTextFromAny(v[key]); text != "" {
+				return text
+			}
+		}
+		return ""
+	default:
+		return ""
+	}
+}
+
+func textToolCallContent(text string) protocol.ToolCallContent {
+	return protocol.ToolCallContent{
+		Type:    "content",
+		Content: &protocol.ContentBlock{Type: protocol.ContentBlockTypeText, Text: text},
 	}
 }
 
@@ -744,6 +932,17 @@ func (c *codexappConn) emitTurnTextUpdate(sessionID string, turnID string, updat
 		return
 	}
 	c.emitSessionUpdate(update)
+}
+
+func (c *codexappConn) emitTurnUpdate(sessionID string, turnID string, update protocol.SessionUpdate) {
+	params := protocol.SessionUpdateParams{
+		SessionID: sessionID,
+		Update:    update,
+	}
+	if c.deferOrDropTurnUpdate(turnID, params) {
+		return
+	}
+	c.emitSessionUpdate(params)
 }
 
 func (c *codexappConn) emitSessionUpdate(update protocol.SessionUpdateParams) {

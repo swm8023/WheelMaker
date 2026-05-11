@@ -219,7 +219,42 @@ type appServerTurnInterruptParams struct {
 type appServerAgentMessageDeltaParams struct {
 	ThreadID string `json:"threadId"`
 	TurnID   string `json:"turnId,omitempty"`
+	ItemID   string `json:"itemId,omitempty"`
 	Delta    string `json:"delta"`
+}
+
+type appServerItemEventParams struct {
+	ThreadID string              `json:"threadId"`
+	TurnID   string              `json:"turnId,omitempty"`
+	Item     appServerThreadItem `json:"item"`
+}
+
+type appServerThreadItem struct {
+	ID               string                `json:"id"`
+	Type             string                `json:"type"`
+	Text             string                `json:"text,omitempty"`
+	Command          string                `json:"command,omitempty"`
+	CWD              string                `json:"cwd,omitempty"`
+	Status           string                `json:"status,omitempty"`
+	AggregatedOutput string                `json:"aggregatedOutput,omitempty"`
+	Server           string                `json:"server,omitempty"`
+	Tool             string                `json:"tool,omitempty"`
+	Query            string                `json:"query,omitempty"`
+	Path             string                `json:"path,omitempty"`
+	Summary          json.RawMessage       `json:"summary,omitempty"`
+	Content          json.RawMessage       `json:"content,omitempty"`
+	Arguments        json.RawMessage       `json:"arguments,omitempty"`
+	Result           json.RawMessage       `json:"result,omitempty"`
+	Error            json.RawMessage       `json:"error,omitempty"`
+	Changes          []appServerFileChange `json:"changes,omitempty"`
+}
+
+type appServerFileChange struct {
+	Path    string  `json:"path"`
+	Kind    string  `json:"kind,omitempty"`
+	Diff    string  `json:"diff,omitempty"`
+	OldText *string `json:"oldText,omitempty"`
+	NewText string  `json:"newText,omitempty"`
 }
 
 type appServerTurnEventParams struct {

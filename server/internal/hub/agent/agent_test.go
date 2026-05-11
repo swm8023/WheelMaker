@@ -713,6 +713,159 @@ func TestCodexAppPromptFiltersStaleStreamingDeltas(t *testing.T) {
 	}
 }
 
+func TestCodexAppPromptDoesNotEchoUserMessageChunk(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		switch msg["method"] {
+		case "turn/start":
+			_ = tr.emit(map[string]any{
+				"id":     msg["id"],
+				"result": map[string]any{"turn": map[string]any{"id": "turn-1"}},
+			})
+			_ = tr.emit(map[string]any{
+				"method": "item/agentMessage/delta",
+				"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "delta": "pong"},
+			})
+			_ = tr.emit(map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed"}},
+			})
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	updates := make(chan protocol.SessionUpdateParams, 4)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	var promptRes protocol.SessionPromptResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+		SessionID: "thread-1",
+		Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+	}, &promptRes); err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+
+	deadline := time.After(100 * time.Millisecond)
+	for {
+		select {
+		case update := <-updates:
+			if update.Update.SessionUpdate == protocol.SessionUpdateUserMessageChunk {
+				t.Fatalf("codexapp echoed user_message_chunk: %#v", update)
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+func TestCodexAppItemLifecycleEmitsToolUpdates(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	updates := make(chan protocol.SessionUpdateParams, 4)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	if err := tr.emit(map[string]any{
+		"method": "item/started",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id":      "cmd-1",
+				"type":    "commandExecution",
+				"command": "rg needle",
+				"status":  "inProgress",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("emit item/started: %v", err)
+	}
+
+	update := waitForCodexappUpdate(t, updates)
+	if update.Update.SessionUpdate != protocol.SessionUpdateToolCallUpdate {
+		t.Fatalf("sessionUpdate=%q, want tool_call_update", update.Update.SessionUpdate)
+	}
+	if update.Update.ToolCallID != "cmd-1" || update.Update.Title != "rg needle" ||
+		update.Update.Kind != protocol.ToolKindExecute || update.Update.Status != protocol.ToolCallStatusInProgress {
+		t.Fatalf("tool update=%#v", update.Update)
+	}
+
+	if err := tr.emit(map[string]any{
+		"method": "item/completed",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id":               "cmd-1",
+				"type":             "commandExecution",
+				"command":          "rg needle",
+				"status":           "completed",
+				"aggregatedOutput": "server/internal",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("emit item/completed: %v", err)
+	}
+
+	update = waitForCodexappUpdate(t, updates)
+	if update.Update.Status != protocol.ToolCallStatusCompleted || len(update.Update.ToolCallContent) == 0 {
+		t.Fatalf("completed tool update=%#v", update.Update)
+	}
+}
+
+func TestCodexAppCompletedReasoningItemEmitsThoughtChunk(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	updates := make(chan protocol.SessionUpdateParams, 1)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	if err := tr.emit(map[string]any{
+		"method": "item/completed",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"item": map[string]any{
+				"id":      "reasoning-1",
+				"type":    "reasoning",
+				"summary": []string{"checking files"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("emit reasoning item: %v", err)
+	}
+
+	update := waitForCodexappUpdate(t, updates)
+	if update.Update.SessionUpdate != protocol.SessionUpdateAgentThoughtChunk {
+		t.Fatalf("sessionUpdate=%q, want agent_thought_chunk", update.Update.SessionUpdate)
+	}
+	var content protocol.ContentBlock
+	if err := json.Unmarshal(update.Update.Content, &content); err != nil {
+		t.Fatalf("unmarshal content: %v", err)
+	}
+	if content.Text != "checking files" {
+		t.Fatalf("thought text=%q, want checking files", content.Text)
+	}
+}
+
+func waitForCodexappUpdate(t *testing.T, updates <-chan protocol.SessionUpdateParams) protocol.SessionUpdateParams {
+	t.Helper()
+	select {
+	case update := <-updates:
+		return update
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for codexapp update")
+		return protocol.SessionUpdateParams{}
+	}
+}
+
 func TestCodexAppCancelClearsActivePromptState(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
