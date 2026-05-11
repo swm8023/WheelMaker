@@ -316,6 +316,9 @@ func TestCodexAppRuntimeRequestMatchesNumberAndStringResponseIDs(t *testing.T) {
 	if first["method"] != "model/list" {
 		t.Fatalf("method=%v, want model/list", first["method"])
 	}
+	if params, ok := first["params"].(map[string]any); !ok || len(params) != 0 {
+		t.Fatalf("model/list params=%#v, want empty object", first["params"])
+	}
 	id, ok := first["id"]
 	if !ok {
 		t.Fatalf("request missing id: %#v", first)
@@ -890,6 +893,37 @@ func TestCodexAppModelRefreshResetsMissingSelectedModel(t *testing.T) {
 	}
 }
 
+func TestCodexAppModelListDecodesAppServerDataShape(t *testing.T) {
+	var resp appServerModelListResponse
+	if err := json.Unmarshal([]byte(`{
+		"data": [{
+			"id": "gpt-5.5",
+			"displayName": "GPT-5.5",
+			"supportedReasoningEfforts": [
+				{"reasoningEffort": "low", "description": "Fast"},
+				{"reasoningEffort": "high", "description": "Deep"}
+			],
+			"defaultReasoningEffort": "high",
+			"isDefault": true
+		}]
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal model list: %v", err)
+	}
+	if len(resp.Models) != 1 {
+		t.Fatalf("models=%#v, want one model", resp.Models)
+	}
+	model := resp.Models[0]
+	if model.ID != "gpt-5.5" || model.Name != "GPT-5.5" {
+		t.Fatalf("model=%#v, want id and display name", model)
+	}
+	if !reflect.DeepEqual(model.SupportedReasoningEfforts, []string{"low", "high"}) {
+		t.Fatalf("efforts=%#v", model.SupportedReasoningEfforts)
+	}
+	if model.DefaultReasoningEffort != "high" {
+		t.Fatalf("default reasoning=%q", model.DefaultReasoningEffort)
+	}
+}
+
 func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
@@ -899,9 +933,20 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 		id := msg["id"]
 		switch method {
 		case "initialize":
+			params := msg["params"].(map[string]any)
+			clientInfo := params["clientInfo"].(map[string]any)
+			if version, _ := clientInfo["version"].(string); version == "" {
+				t.Errorf("initialize clientInfo missing version: %#v", clientInfo)
+			}
 			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{}})
 		case "initialized":
+			if params, ok := msg["params"].(map[string]any); !ok || len(params) != 0 {
+				t.Errorf("initialized params=%#v, want empty object", msg["params"])
+			}
 		case "model/list":
+			if params, ok := msg["params"].(map[string]any); !ok || len(params) != 0 {
+				t.Errorf("model/list params=%#v, want empty object", msg["params"])
+			}
 			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
 				"models": []map[string]any{{
 					"id":                        "gpt-5",

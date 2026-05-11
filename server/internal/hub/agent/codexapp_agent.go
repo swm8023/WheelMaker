@@ -119,7 +119,7 @@ func (r *codexappRuntime) request(ctx context.Context, method string, params any
 	r.pending[key] = ch
 	r.mu.Unlock()
 
-	req := codexappRPCRequest{ID: id, Method: method, Params: params}
+	req := codexappRPCRequest{ID: id, Method: method, Params: codexappParams(params)}
 	if err := r.transport.SendMessage(req); err != nil {
 		r.removePending(key)
 		return err
@@ -157,7 +157,7 @@ func (r *codexappRuntime) notify(method string, params any) error {
 	if r == nil || r.transport == nil {
 		return errors.New("codexapp runtime is not ready")
 	}
-	return r.transport.SendMessage(codexappRPCNotification{Method: method, Params: params})
+	return r.transport.SendMessage(codexappRPCNotification{Method: method, Params: codexappParams(params)})
 }
 
 func (r *codexappRuntime) register(threadID string, conn *codexappConn) {
@@ -435,7 +435,7 @@ func (c *codexappConn) sendInitialize(ctx context.Context, result any) error {
 
 	var ignored json.RawMessage
 	if err := c.runtime.request(ctx, "initialize", appServerInitializeParams{
-		ClientInfo: appServerClientInfo{Name: "wheelmaker", Title: "WheelMaker"},
+		ClientInfo: appServerClientInfo{Name: "wheelmaker", Title: "WheelMaker", Version: "0.1.0"},
 	}, &ignored); err != nil {
 		return err
 	}

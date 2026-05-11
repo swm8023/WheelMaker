@@ -17,7 +17,7 @@ type codexappRPCRequest struct {
 
 type codexappRPCNotification struct {
 	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
+	Params any    `json:"params"`
 }
 
 type codexappRPCServerResponse struct {
@@ -45,8 +45,9 @@ type codexappRPCError struct {
 }
 
 type appServerClientInfo struct {
-	Name  string `json:"name"`
-	Title string `json:"title,omitempty"`
+	Name    string `json:"name"`
+	Title   string `json:"title,omitempty"`
+	Version string `json:"version"`
 }
 
 type appServerInitializeParams struct {
@@ -57,11 +58,58 @@ type appServerModelListResponse struct {
 	Models []appServerModel `json:"models"`
 }
 
+func (r *appServerModelListResponse) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Models []appServerModel `json:"models"`
+		Data   []appServerModel `json:"data"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.Models) > 0 {
+		r.Models = raw.Models
+		return nil
+	}
+	r.Models = raw.Data
+	return nil
+}
+
 type appServerModel struct {
 	ID                        string   `json:"id"`
 	Name                      string   `json:"name,omitempty"`
 	SupportedReasoningEfforts []string `json:"supportedReasoningEfforts,omitempty"`
 	DefaultReasoningEffort    string   `json:"defaultReasoningEffort,omitempty"`
+}
+
+func (m *appServerModel) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID                        string            `json:"id"`
+		Name                      string            `json:"name"`
+		DisplayName               string            `json:"displayName"`
+		SupportedReasoningEfforts []json.RawMessage `json:"supportedReasoningEfforts"`
+		DefaultReasoningEffort    string            `json:"defaultReasoningEffort"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.ID = raw.ID
+	m.Name = firstNonEmptyString(raw.Name, raw.DisplayName)
+	m.DefaultReasoningEffort = raw.DefaultReasoningEffort
+	m.SupportedReasoningEfforts = m.SupportedReasoningEfforts[:0]
+	for _, effort := range raw.SupportedReasoningEfforts {
+		var value string
+		if err := json.Unmarshal(effort, &value); err == nil && value != "" {
+			m.SupportedReasoningEfforts = append(m.SupportedReasoningEfforts, value)
+			continue
+		}
+		var object struct {
+			ReasoningEffort string `json:"reasoningEffort"`
+		}
+		if err := json.Unmarshal(effort, &object); err == nil && object.ReasoningEffort != "" {
+			m.SupportedReasoningEfforts = append(m.SupportedReasoningEfforts, object.ReasoningEffort)
+		}
+	}
+	return nil
 }
 
 type appServerThreadStartParams struct {
@@ -445,4 +493,11 @@ func codexappApprovalDecision(outcome protocol.PermissionResult) string {
 	default:
 		return "cancel"
 	}
+}
+
+func codexappParams(params any) any {
+	if params == nil {
+		return map[string]any{}
+	}
+	return params
 }
