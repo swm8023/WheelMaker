@@ -503,6 +503,26 @@ func TestResolveConfigArg_ValidatesOptionValue(t *testing.T) {
 	}
 }
 
+func TestResolveConfigArg_ResolvesCategoryAlias(t *testing.T) {
+	st := &SessionAgentState{
+		ConfigOptions: []acp.ConfigOption{{
+			ID:       acp.ConfigOptionIDReasoningEffort,
+			Category: acp.ConfigOptionCategoryThoughtLv,
+			Options: []acp.ConfigOptionValue{
+				{Name: "High", Value: "high"},
+				{Name: "Medium", Value: "medium"},
+			},
+		}},
+	}
+	id, value, err := resolveConfigArg("thought_level High", st)
+	if err != nil {
+		t.Fatalf("resolveConfigArg returned error: %v", err)
+	}
+	if id != acp.ConfigOptionIDReasoningEffort || value != "high" {
+		t.Fatalf("resolveConfigArg = (%q,%q), want (%q,%q)", id, value, acp.ConfigOptionIDReasoningEffort, "high")
+	}
+}
+
 func TestSessionInfoLine_UsesPrimaryAgentStateWithoutLegacyAgentMap(t *testing.T) {
 	s := mustNewSession(t, "sess-1", "/tmp", "claude")
 	s.mu.Lock()
@@ -1823,6 +1843,65 @@ func TestApplyStoredConfigOptions_ReplaysByExactConfigID(t *testing.T) {
 	}
 	if got := findCurrentValue(updated, "custom_toggle"); got != "on" {
 		t.Fatalf("updated custom_toggle = %q, want %q", got, "on")
+	}
+}
+
+func TestSessionSetConfigOption_ResolvesCategoryAliasToOptionID(t *testing.T) {
+	inst := &testInjectedInstance{name: "codexapp", alive: true}
+	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+		return []acp.ConfigOption{
+			{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: p.Value},
+		}, nil
+	}
+	s := mustNewSession(t, "sess-config-alias", t.TempDir(), string(acp.ACPProviderCodexApp))
+	s.mu.Lock()
+	s.instance = inst
+	s.ready = true
+	s.acpSessionID = "thread-1"
+	s.agentState.ConfigOptions = []acp.ConfigOption{
+		{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "medium"},
+	}
+	s.mu.Unlock()
+
+	opts, err := s.SetConfigOption(context.Background(), acp.ConfigOptionIDThoughtLevel, "high")
+	if err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	if len(inst.setCalls) != 1 {
+		t.Fatalf("set calls=%d, want 1", len(inst.setCalls))
+	}
+	if inst.setCalls[0].ConfigID != acp.ConfigOptionIDReasoningEffort {
+		t.Fatalf("config id sent=%q, want %q", inst.setCalls[0].ConfigID, acp.ConfigOptionIDReasoningEffort)
+	}
+	if got := findCurrentValue(opts, acp.ConfigOptionIDReasoningEffort); got != "high" {
+		t.Fatalf("reasoning_effort=%q, want high", got)
+	}
+}
+
+func TestApplyStoredConfigOptions_ReplaysByCategoryAlias(t *testing.T) {
+	inst := &testInjectedInstance{name: "codexapp"}
+	inst.setConfigFn = func(_ context.Context, p acp.SessionSetConfigOptionParams) ([]acp.ConfigOption, error) {
+		return []acp.ConfigOption{
+			{ID: p.ConfigID, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: p.Value},
+		}, nil
+	}
+
+	current := []acp.ConfigOption{
+		{ID: acp.ConfigOptionIDReasoningEffort, Category: acp.ConfigOptionCategoryThoughtLv, CurrentValue: "medium"},
+	}
+	target := []PreferenceConfigOption{
+		{ID: acp.ConfigOptionIDThoughtLevel, CurrentValue: "high"},
+	}
+	updated := applyStoredConfigOptions(context.Background(), "proj1", inst, "thread-1", current, target)
+
+	if got := len(inst.setCalls); got != 1 {
+		t.Fatalf("set calls = %d, want 1", got)
+	}
+	if inst.setCalls[0].ConfigID != acp.ConfigOptionIDReasoningEffort {
+		t.Fatalf("set call = %+v, want reasoning_effort", inst.setCalls[0])
+	}
+	if got := findCurrentValue(updated, acp.ConfigOptionIDReasoningEffort); got != "high" {
+		t.Fatalf("updated reasoning_effort = %q, want high", got)
 	}
 }
 

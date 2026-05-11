@@ -308,7 +308,7 @@ func resolveConfigArg(input string, st *SessionAgentState) (configID, value stri
 		return configID, value, nil
 	}
 	for _, opt := range st.ConfigOptions {
-		if !strings.EqualFold(opt.ID, configID) {
+		if !strings.EqualFold(opt.ID, configID) && !strings.EqualFold(opt.Category, configID) {
 			continue
 		}
 		if len(opt.Options) == 0 {

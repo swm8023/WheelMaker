@@ -209,6 +209,7 @@ func (s *Session) SetConfigOption(ctx context.Context, configID, value string) (
 	current := append([]acp.ConfigOption(nil), s.agentState.ConfigOptions...)
 	s.mu.Unlock()
 
+	configID = resolveConfigOptionID(current, configID)
 	updated, err := s.instance.SessionSetConfigOption(ctx, acp.SessionSetConfigOptionParams{
 		SessionID: sessionID,
 		ConfigID:  configID,
@@ -608,9 +609,10 @@ func applyStoredConfigOptions(
 		}
 		configID := ""
 		currentValue := ""
+		resolvedID := resolveConfigOptionID(options, targetID)
 		for _, opt := range options {
 			optID := strings.TrimSpace(opt.ID)
-			if optID == "" || !strings.EqualFold(optID, targetID) {
+			if optID == "" || !strings.EqualFold(optID, resolvedID) {
 				continue
 			}
 			configID = optID
@@ -639,6 +641,24 @@ func applyStoredConfigOptions(
 		}
 	}
 	return options
+}
+
+func resolveConfigOptionID(options []acp.ConfigOption, requestedID string) string {
+	requestedID = strings.TrimSpace(requestedID)
+	if requestedID == "" {
+		return ""
+	}
+	for _, opt := range options {
+		if strings.EqualFold(strings.TrimSpace(opt.ID), requestedID) {
+			return strings.TrimSpace(opt.ID)
+		}
+	}
+	for _, opt := range options {
+		if strings.EqualFold(strings.TrimSpace(opt.Category), requestedID) && strings.TrimSpace(opt.ID) != "" {
+			return strings.TrimSpace(opt.ID)
+		}
+	}
+	return requestedID
 }
 
 // ensureReadyAndNotify calls ensureReady and persists the session when
