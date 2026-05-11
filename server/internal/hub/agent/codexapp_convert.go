@@ -177,26 +177,8 @@ type appServerThreadListParams struct {
 }
 
 type appServerThreadListResponse struct {
-	Threads    []appServerThread `json:"threads"`
+	Data       []appServerThread `json:"data"`
 	NextCursor string            `json:"nextCursor,omitempty"`
-}
-
-func (r *appServerThreadListResponse) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Threads    []appServerThread `json:"threads"`
-		Data       []appServerThread `json:"data"`
-		NextCursor string            `json:"nextCursor"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	if len(raw.Data) > 0 {
-		r.Threads = raw.Data
-	} else {
-		r.Threads = raw.Threads
-	}
-	r.NextCursor = raw.NextCursor
-	return nil
 }
 
 type appServerTurnStartParams struct {

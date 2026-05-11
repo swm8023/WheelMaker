@@ -946,10 +946,10 @@ func TestCodexAppThreadListDecodesOfficialDataShape(t *testing.T) {
 	}`), &resp); err != nil {
 		t.Fatalf("unmarshal thread list: %v", err)
 	}
-	if len(resp.Threads) != 1 {
-		t.Fatalf("threads=%#v, want one thread", resp.Threads)
+	if len(resp.Data) != 1 {
+		t.Fatalf("data=%#v, want one thread", resp.Data)
 	}
-	thread := resp.Threads[0]
+	thread := resp.Data[0]
 	if thread.ID != "thread-1" || thread.displayTitle() != "Preview title" {
 		t.Fatalf("thread=%#v, want id and preview title", thread)
 	}

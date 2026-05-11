@@ -444,7 +444,7 @@ App-server request:
 }
 ```
 
-Schema note: `thread/list` 的正式返回字段是 `result.data`，不是 `result.threads`。adapter 可以为历史测试兼容 `threads`，但真实 app-server 返回必须按 `data` 解码。
+Schema note: `thread/list` 的正式返回字段是 `result.data`，不是 `result.threads`。adapter 必须只按官方 `data` 字段解码；`threads` 属于之前桥接实现的错误字段，不应保留兼容路径。
 
 ACP result mapping:
 

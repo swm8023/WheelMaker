@@ -511,7 +511,7 @@ func (c *codexappConn) sendSessionList(ctx context.Context, p protocol.SessionLi
 		return err
 	}
 	out := protocol.SessionListResult{NextCursor: resp.NextCursor}
-	for _, thread := range resp.Threads {
+	for _, thread := range resp.Data {
 		out.Sessions = append(out.Sessions, protocol.SessionInfo{
 			SessionID: thread.ID,
 			CWD:       thread.CWD,
