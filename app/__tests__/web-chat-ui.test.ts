@@ -187,11 +187,12 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.floating-nav-group {');
     expect(stylesCss).toContain('.floating-nav-indicator {');
     expect(stylesCss).toMatch(
-      /\.floating-nav-indicator \{[\s\S]*background: var\(--accent\);[\s\S]*border: 1px solid transparent;/,
+      /\.floating-nav-indicator \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 28%, transparent\);[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 32%, transparent\);/,
     );
+    expect(stylesCss).toContain(".floating-nav-button[data-active='true']:hover {");
     expect(stylesCss).toContain('.drawer-toggle-bubble {');
     expect(stylesCss).toMatch(
-      /\.drawer-toggle-bubble\[data-active='true'\] \{[\s\S]*background: var\(--accent\);[\s\S]*border-color: transparent;/,
+      /\.drawer-toggle-bubble\[data-active='true'\] \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 28%, transparent\);[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 32%, transparent\);/,
     );
     expect(stylesCss).toContain('-webkit-tap-highlight-color: transparent;');
     expect(stylesCss).toContain('.breadcrumb-title {');
