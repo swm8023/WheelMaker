@@ -40,6 +40,7 @@ import {
 } from './services/shikiRenderer';
 import { WorkspaceController } from './services/workspaceController';
 import { WorkspaceStore } from './services/workspaceStore';
+import type { PersistedFloatingControlSlot } from './services/workspacePersistence';
 import type {
   RegistryChatContentBlock,
   RegistryChatMessage,
@@ -110,6 +111,15 @@ type TokenStatCardView = {
   tertiaryLine: string;
 };
 type SessionFlagMap = Record<string, true>;
+type FloatingDragState = {
+  active: boolean;
+  pressing: boolean;
+  pointerId: number;
+  originY: number;
+  startTop: number;
+  currentTop: number;
+  cooldownUntil: number;
+};
 type SetiThemeSection = {
   file: string;
   fileExtensions?: Record<string, string>;
@@ -249,6 +259,7 @@ const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
+const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 let mermaidRenderSequence = 0;
 
@@ -261,6 +272,32 @@ function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
   const projectKey = activeProjectId.trim() || CHAT_DRAFT_KEY_PROJECT_FALLBACK;
   const sessionKey = sessionId.trim() || CHAT_NEW_DRAFT_SESSION_KEY;
   return `${projectKey}:${sessionKey}`;
+}
+
+function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
+  switch (slot) {
+    case 'upper':
+      return 0.26;
+    case 'center':
+      return 0.5;
+    case 'lower-middle':
+      return 0.68;
+    default:
+      return 0.4;
+  }
+}
+
+function clampFloatingTop(top: number, minTop: number, maxTop: number): number {
+  return Math.min(maxTop, Math.max(minTop, top));
+}
+
+function nearestFloatingSlot(
+  top: number,
+  slotTops: Array<{ slot: PersistedFloatingControlSlot; top: number }>,
+): PersistedFloatingControlSlot {
+  return slotTops.reduce((best, entry) =>
+    Math.abs(entry.top - top) < Math.abs(best.top - top) ? entry : best,
+  ).slot;
 }
 
 
@@ -1299,6 +1336,14 @@ function resolveInitialRegistryAddress(
   return savedAddress || defaultAddress;
 }
 
+function readSafeAreaTopInset(): number {
+  const value = window
+    .getComputedStyle(document.documentElement)
+    .getPropertyValue('--wm-safe-area-top');
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 type UnifiedDiffRow = {
   kind: 'context' | 'added' | 'removed' | 'separator';
   oldLineNumber: number | null;
@@ -2030,6 +2075,8 @@ function App() {
   const resolveFileIcon = (name: string) => resolveSetiIcon(name, themeMode);
 
   const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
+  const [windowHeight, setWindowHeight] = useState<number>(window.innerHeight);
+  const [safeAreaTopInset, setSafeAreaTopInset] = useState<number>(() => readSafeAreaTopInset());
   const isWide = windowWidth >= 900;
   const supportsChatClipboardImages = useMemo(() => {
     const userAgent = window.navigator.userAgent || '';
@@ -2061,6 +2108,20 @@ function App() {
 
   const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
   const tabRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
+  const [floatingControlSlot, setFloatingControlSlot] = useState<PersistedFloatingControlSlot>(
+    persistedGlobal.floatingControlSlot ?? 'upper-middle',
+  );
+  const [floatingDragState, setFloatingDragState] = useState<FloatingDragState | null>(null);
+  const floatingDragStateRef = useRef<FloatingDragState | null>(null);
+  const [floatingKeyboardOffset, setFloatingKeyboardOffset] = useState(0);
+  const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
+  const [narrowHeaderBubbleHeight, setNarrowHeaderBubbleHeight] = useState(48);
+  const floatingLongPressTimerRef = useRef<number | null>(null);
+  const floatingCooldownTimerRef = useRef<number | null>(null);
+  const floatingClickCooldownUntilRef = useRef(0);
+  const floatingIgnoreLostCaptureRef = useRef(false);
+  const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
+  const headerBubbleRef = useRef<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
@@ -2625,6 +2686,9 @@ function App() {
     chatSelectedIdRef.current = selectedChatId;
   }, [selectedChatId]);
   useEffect(() => {
+    floatingDragStateRef.current = floatingDragState;
+  }, [floatingDragState]);
+  useEffect(() => {
     tabRef.current = tab;
     if (tab !== 'chat') {
       return;
@@ -2690,10 +2754,34 @@ function App() {
   }, [selectedDiff, selectedCommit, selectedDiffSource, selectedDiffScope]);
 
   useEffect(() => {
-    const onResize = () => setWindowWidth(window.innerWidth);
+    const onResize = () => {
+      setWindowWidth(window.innerWidth);
+      setWindowHeight(window.innerHeight);
+      setSafeAreaTopInset(readSafeAreaTopInset());
+    };
+    onResize();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useLayoutEffect(() => {
+    if (isWide) {
+      return;
+    }
+    const nextHeaderHeight = headerBubbleRef.current?.offsetHeight ?? 48;
+    const nextFloatingHeight = floatingControlStackRef.current?.offsetHeight ?? 184;
+    setNarrowHeaderBubbleHeight(prev => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+    setFloatingControlStackHeight(prev => (prev === nextFloatingHeight ? prev : nextFloatingHeight));
+  }, [
+    isWide,
+    windowWidth,
+    projectId,
+    projects.length,
+    loadingProject,
+    refreshingProject,
+    reconnecting,
+    tab,
+  ]);
 
   useEffect(() => {
     if (isWide || tab !== 'chat') {
@@ -2737,10 +2825,83 @@ function App() {
   }, [isWide, tab]);
 
   useEffect(() => {
+    if (isWide || tab !== 'chat') {
+      setFloatingKeyboardOffset(0);
+      return;
+    }
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+    let raf = 0;
+    const updateOffset = () => {
+      const bottomGap = Math.max(
+        0,
+        Math.round(window.innerHeight - (viewport.height + viewport.offsetTop)),
+      );
+      const nextOffset = bottomGap >= 72 ? bottomGap : 0;
+      setFloatingKeyboardOffset(prev => (prev === nextOffset ? prev : nextOffset));
+    };
+    const scheduleUpdate = () => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        updateOffset();
+      });
+    };
+    updateOffset();
+    viewport.addEventListener('resize', scheduleUpdate);
+    viewport.addEventListener('scroll', scheduleUpdate);
+    window.addEventListener('orientationchange', scheduleUpdate);
+    return () => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      viewport.removeEventListener('resize', scheduleUpdate);
+      viewport.removeEventListener('scroll', scheduleUpdate);
+      window.removeEventListener('orientationchange', scheduleUpdate);
+    };
+  }, [isWide, tab]);
+
+  useEffect(() => {
     if (isWide) {
       setDrawerOpen(false);
     }
   }, [isWide]);
+
+  useEffect(() => {
+    if (!isWide) {
+      return;
+    }
+    if (floatingLongPressTimerRef.current !== null) {
+      window.clearTimeout(floatingLongPressTimerRef.current);
+      floatingLongPressTimerRef.current = null;
+    }
+    if (floatingCooldownTimerRef.current !== null) {
+      window.clearTimeout(floatingCooldownTimerRef.current);
+      floatingCooldownTimerRef.current = null;
+    }
+    floatingIgnoreLostCaptureRef.current = false;
+    setFloatingDragState(null);
+    setFloatingKeyboardOffset(0);
+  }, [isWide]);
+
+  useEffect(
+    () => () => {
+      if (floatingLongPressTimerRef.current !== null) {
+        window.clearTimeout(floatingLongPressTimerRef.current);
+        floatingLongPressTimerRef.current = null;
+      }
+      if (floatingCooldownTimerRef.current !== null) {
+        window.clearTimeout(floatingCooldownTimerRef.current);
+        floatingCooldownTimerRef.current = null;
+      }
+      floatingIgnoreLostCaptureRef.current = false;
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
     if (!isWide || selectedChatConfigOptions.length === 0) {
@@ -2850,6 +3011,7 @@ function App() {
       showLineNumbers,
       tab,
       selectedProjectId: projectId,
+      floatingControlSlot,
     });
   }, [
     address,
@@ -2864,6 +3026,7 @@ function App() {
     showLineNumbers,
     tab,
     projectId,
+    floatingControlSlot,
   ]);
 
   useEffect(() => {
@@ -2909,6 +3072,271 @@ function App() {
     document.title = projectTitle ? `${baseTitle} - ${projectTitle}` : baseTitle;
   }, [currentProjectTitle]);
   const project = currentProject;
+  const narrowHeaderInset = useMemo(() => {
+    if (isWide) return 0;
+    return safeAreaTopInset + narrowHeaderBubbleHeight + 22;
+  }, [isWide, narrowHeaderBubbleHeight, safeAreaTopInset]);
+  const narrowContentInsetStyle = !isWide
+    ? ({ paddingTop: `${narrowHeaderInset}px` } as const)
+    : undefined;
+  const floatingBounds = useMemo(() => {
+    if (isWide) {
+      return { minTop: 0, maxTop: 0 };
+    }
+    const minTop = Math.max(narrowHeaderInset + 10, 72);
+    const maxTop = Math.max(
+      minTop,
+      windowHeight - floatingKeyboardOffset - floatingControlStackHeight - 18,
+    );
+    return { minTop, maxTop };
+  }, [
+    isWide,
+    narrowHeaderInset,
+    windowHeight,
+    floatingKeyboardOffset,
+    floatingControlStackHeight,
+  ]);
+  const floatingSlotTops = useMemo(
+    () =>
+      FLOATING_CONTROL_SLOT_ORDER.map(slot => ({
+        slot,
+        top: clampFloatingTop(
+          Math.round(
+            floatingBounds.minTop +
+              (floatingBounds.maxTop - floatingBounds.minTop) * floatingControlSlotRatio(slot),
+          ),
+          floatingBounds.minTop,
+          floatingBounds.maxTop,
+        ),
+      })),
+    [floatingBounds.maxTop, floatingBounds.minTop],
+  );
+  const floatingRestTop = useMemo(
+    () =>
+      floatingSlotTops.find(entry => entry.slot === floatingControlSlot)?.top ??
+      floatingSlotTops[0]?.top ??
+      floatingBounds.minTop,
+    [floatingBounds.minTop, floatingControlSlot, floatingSlotTops],
+  );
+  const floatingControlTop = useMemo(() => {
+    if (floatingDragState?.active) {
+      return clampFloatingTop(
+        floatingDragState.currentTop,
+        floatingBounds.minTop,
+        floatingBounds.maxTop,
+      );
+    }
+    const keyboardShift = Math.min(
+      floatingKeyboardOffset,
+      Math.max(0, floatingRestTop - floatingBounds.minTop),
+    );
+    return clampFloatingTop(
+      floatingRestTop - keyboardShift,
+      floatingBounds.minTop,
+      floatingBounds.maxTop,
+    );
+  }, [
+    floatingBounds.maxTop,
+    floatingBounds.minTop,
+    floatingDragState,
+    floatingKeyboardOffset,
+    floatingRestTop,
+  ]);
+  const floatingNavIndex = tab === 'chat' ? 0 : tab === 'file' ? 1 : 2;
+  const floatingNavIndicatorStyle = useMemo(
+    () =>
+      ({
+        '--floating-nav-index': String(floatingNavIndex),
+      }) as React.CSSProperties,
+    [floatingNavIndex],
+  );
+  const floatingControlStackStyle = useMemo(
+    () =>
+      !isWide
+        ? ({
+            top: `${floatingControlTop}px`,
+          } as const)
+        : undefined,
+    [floatingControlTop, isWide],
+  );
+  const floatingDragVisualState =
+    floatingDragState?.active ? 'dragging' : floatingDragState?.pressing ? 'drag-ready' : 'idle';
+  const clearFloatingLongPressTimer = useCallback(() => {
+    if (floatingLongPressTimerRef.current !== null) {
+      window.clearTimeout(floatingLongPressTimerRef.current);
+      floatingLongPressTimerRef.current = null;
+    }
+  }, []);
+  const clearFloatingCooldownTimer = useCallback(() => {
+    if (floatingCooldownTimerRef.current !== null) {
+      window.clearTimeout(floatingCooldownTimerRef.current);
+      floatingCooldownTimerRef.current = null;
+    }
+  }, []);
+  const clearFloatingCooldownState = useCallback((cooldownUntil: number) => {
+    clearFloatingCooldownTimer();
+    const remaining = cooldownUntil - Date.now();
+    if (remaining <= 0) {
+      setFloatingDragState(prev =>
+        prev && !prev.active && !prev.pressing && prev.cooldownUntil <= Date.now()
+          ? null
+          : prev,
+      );
+      return;
+    }
+    floatingCooldownTimerRef.current = window.setTimeout(() => {
+      setFloatingDragState(prev =>
+        prev && !prev.active && !prev.pressing && prev.cooldownUntil <= Date.now()
+          ? null
+          : prev,
+      );
+      floatingCooldownTimerRef.current = null;
+    }, remaining);
+  }, [clearFloatingCooldownTimer]);
+  const beginFloatingPress = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (isWide || event.button !== 0) {
+        return;
+      }
+      if (floatingClickCooldownUntilRef.current > Date.now()) {
+        return;
+      }
+      clearFloatingLongPressTimer();
+      floatingIgnoreLostCaptureRef.current = false;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const originY = event.clientY;
+      setFloatingDragState({
+        active: false,
+        pressing: true,
+        pointerId: event.pointerId,
+        originY,
+        startTop: floatingControlTop,
+        currentTop: floatingControlTop,
+        cooldownUntil: 0,
+      });
+      floatingLongPressTimerRef.current = window.setTimeout(() => {
+        setFloatingDragState(prev =>
+          prev && prev.pointerId === event.pointerId
+            ? { ...prev, active: true, pressing: false }
+            : prev,
+        );
+        floatingLongPressTimerRef.current = null;
+      }, 350);
+    },
+    [clearFloatingLongPressTimer, floatingControlTop, isWide],
+  );
+  const handleFloatingPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const current = floatingDragStateRef.current;
+      if (!current || current.pointerId !== event.pointerId) {
+        return;
+      }
+      const deltaY = event.clientY - current.originY;
+      if (!current.active) {
+        if (Math.abs(deltaY) >= 10) {
+          clearFloatingLongPressTimer();
+          const cooldownUntil = Date.now() + 120;
+          floatingClickCooldownUntilRef.current = cooldownUntil;
+          setFloatingDragState({
+            ...current,
+            active: false,
+            pressing: false,
+            cooldownUntil,
+          });
+          clearFloatingCooldownState(cooldownUntil);
+        }
+        return;
+      }
+      event.preventDefault();
+      setFloatingDragState({
+        ...current,
+        currentTop: clampFloatingTop(
+          current.startTop + deltaY,
+          floatingBounds.minTop,
+          floatingBounds.maxTop,
+        ),
+      });
+    },
+    [
+      clearFloatingCooldownState,
+      clearFloatingLongPressTimer,
+      floatingBounds.maxTop,
+      floatingBounds.minTop,
+    ],
+  );
+  const finishFloatingDrag = useCallback(
+    (pointerId: number) => {
+      const current = floatingDragStateRef.current;
+      if (!current || current.pointerId !== pointerId) {
+        return;
+      }
+      clearFloatingLongPressTimer();
+      if (!current.active) {
+        setFloatingDragState(null);
+        return;
+      }
+      const snappedTop = clampFloatingTop(
+        current.currentTop,
+        floatingBounds.minTop,
+        floatingBounds.maxTop,
+      );
+      const nextSlot = nearestFloatingSlot(snappedTop, floatingSlotTops);
+      const cooldownUntil = Date.now() + 120;
+      floatingClickCooldownUntilRef.current = cooldownUntil;
+      setFloatingControlSlot(nextSlot);
+      workspaceStore.rememberGlobalState({ floatingControlSlot: nextSlot });
+      setFloatingDragState({
+        ...current,
+        active: false,
+        pressing: false,
+        currentTop: snappedTop,
+        cooldownUntil,
+      });
+      clearFloatingCooldownState(cooldownUntil);
+    },
+    [
+      clearFloatingCooldownState,
+      clearFloatingLongPressTimer,
+      floatingBounds.maxTop,
+      floatingBounds.minTop,
+      floatingSlotTops,
+    ],
+  );
+  const cancelFloatingDrag = useCallback(
+    (pointerId: number) => {
+      const current = floatingDragStateRef.current;
+      if (!current || current.pointerId !== pointerId) {
+        return;
+      }
+      clearFloatingLongPressTimer();
+      if (!current.active) {
+        setFloatingDragState(null);
+        return;
+      }
+      const cooldownUntil = Date.now() + 120;
+      floatingClickCooldownUntilRef.current = cooldownUntil;
+      setFloatingDragState({
+        ...current,
+        active: false,
+        pressing: false,
+        cooldownUntil,
+      });
+      clearFloatingCooldownState(cooldownUntil);
+    },
+    [clearFloatingCooldownState, clearFloatingLongPressTimer],
+  );
+  const handleFloatingNavSelect = useCallback((nextTab: Tab) => {
+    if (floatingClickCooldownUntilRef.current > Date.now()) {
+      return;
+    }
+    setTab(nextTab);
+  }, []);
+  const handleFloatingDrawerToggle = useCallback(() => {
+    if (floatingClickCooldownUntilRef.current > Date.now()) {
+      return;
+    }
+    setDrawerOpen(value => !value);
+  }, []);
   const availableChatAgents = useMemo(() => {
     const seen = new Set<string>();
     const agents: string[] = [];
@@ -7313,37 +7741,132 @@ function App() {
     );
   }
 
-  return (
-    <div className={`workspace theme-${themeMode}`}>
-      <style>{setiFontCss}</style>
-      <header className="header">
-        <button
-          className="header-btn"
-          onClick={() => {
-            if (isWide) {
-              setSidebarCollapsed(value => !value);
-            } else {
-              setDrawerOpen(value => !value);
-            }
-          }}
+  const projectMenu = projectMenuOpen ? (
+    <div className="project-menu">
+      {projects.map(projectItem => (
+        <div
+          key={projectItem.projectId}
+          className={`item project-menu-item ${
+            projectItem.projectId === projectId ? 'selected' : ''
+          }`}
+          onClick={() =>
+            switchProject(projectItem.projectId).catch(() => undefined)
+          }
         >
+          <div className="project-menu-main">
+            <span className="project-menu-name">{projectItem.name}</span>
+            <span
+              className="project-menu-path"
+              title={projectItem.path || ''}
+            >
+              {projectItem.path || '-'}
+            </span>
+          </div>
           <span
-            className={`codicon ${
-              isWide
-                ? sidebarCollapsed
-                  ? 'codicon-layout-sidebar-left-off'
-                  : 'codicon-layout-sidebar-left'
-                : 'codicon-menu'
+            className={`project-menu-state ${
+              projectItem.online ? 'online' : 'offline'
             }`}
-          />
-        </button>
+          >
+            {projectItem.online ? 'online' : 'offline'}
+          </span>
+          <span className="project-menu-hub">
+            {projectItem.hubId || 'local-hub'}
+          </span>
+        </div>
+      ))}
+    </div>
+  ) : null;
 
+  const refreshButtonContent = refreshingProject ? (
+    '...'
+  ) : reconnecting ? (
+    <span className="codicon codicon-loading codicon-modifier-spin" />
+  ) : (
+    <span className="codicon codicon-refresh" />
+  );
+
+  const wideHeader = isWide ? (
+    <header className="header">
+      <button
+        className="header-btn"
+        onClick={() => {
+          setSidebarCollapsed(value => !value);
+        }}
+      >
+        <span
+          className={`codicon ${
+            sidebarCollapsed
+              ? 'codicon-layout-sidebar-left-off'
+              : 'codicon-layout-sidebar-left'
+          }`}
+        />
+      </button>
+
+      <div
+        className="project-wrap"
+        onPointerDown={event => event.stopPropagation()}
+      >
+        <button
+          className="project-btn"
+          onClick={() => setProjectMenuOpen(value => !value)}
+        >
+          <span className="project-arrow codicon codicon-chevron-down" />
+          <span className="project-name" title={currentProjectName}>
+            {currentProjectName}
+          </span>
+          {loadingProject || refreshingProject || reconnecting ? (
+            <span className="muted">...</span>
+          ) : null}
+        </button>
+        {projectMenu}
+      </div>
+
+      <button
+        className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
+        onClick={() => refreshProject().catch(() => undefined)}
+        title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
+        disabled={refreshingProject || reconnecting}
+      >
+        {refreshButtonContent}
+      </button>
+
+      <div className="header-spacer" />
+
+      <div className="tabs">
+        <button
+          className={`tab ${tab === 'chat' ? 'active' : ''}`}
+          onClick={() => setTab('chat')}
+        >
+          <span className="codicon codicon-comment-discussion tab-icon" />
+          <span className="tab-label">CHAT</span>
+        </button>
+        <button
+          className={`tab ${tab === 'file' ? 'active' : ''}`}
+          onClick={() => setTab('file')}
+        >
+          <span className="codicon codicon-files tab-icon" />
+          <span className="tab-label">FILE</span>
+        </button>
+        <button
+          className={`tab ${tab === 'git' ? 'active' : ''}`}
+          onClick={() => setTab('git')}
+        >
+          <span className="codicon codicon-source-control tab-icon" />
+          <span className="tab-label">GIT</span>
+        </button>
+      </div>
+    </header>
+  ) : null;
+
+  const narrowHeaderBubble = !isWide ? (
+    <div className="header-bubble-layer">
+      <div ref={headerBubbleRef} className="header-bubble">
         <div
           className="project-wrap"
           onPointerDown={event => event.stopPropagation()}
         >
           <button
-            className="project-btn"
+            className="project-btn header-bubble-project"
             onClick={() => setProjectMenuOpen(value => !value)}
           >
             <span className="project-arrow codicon codicon-chevron-down" />
@@ -7354,90 +7877,107 @@ function App() {
               <span className="muted">...</span>
             ) : null}
           </button>
-          {projectMenuOpen ? (
-            <div className="project-menu">
-              {projects.map(project => (
-                <div
-                  key={project.projectId}
-                  className={`item project-menu-item ${
-                    project.projectId === projectId ? 'selected' : ''
-                  }`}
-                  onClick={() =>
-                    switchProject(project.projectId).catch(() => undefined)
-                  }
-                >
-                  <div className="project-menu-main">
-                    <span className="project-menu-name">{project.name}</span>
-                    <span
-                      className="project-menu-path"
-                      title={project.path || ''}
-                    >
-                      {project.path || '-'}
-                    </span>
-                  </div>
-                  <span
-                    className={`project-menu-state ${
-                      project.online ? 'online' : 'offline'
-                    }`}
-                  >
-                    {project.online ? 'online' : 'offline'}
-                  </span>
-                  <span className="project-menu-hub">
-                    {project.hubId || 'local-hub'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          {projectMenu}
         </div>
-
         <button
-          className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
+          className={`header-btn refresh-btn header-bubble-refresh${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
           onClick={() => refreshProject().catch(() => undefined)}
           title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
           disabled={refreshingProject || reconnecting}
         >
-          {refreshingProject ? (
-            '...'
-          ) : reconnecting ? (
-            <span className="codicon codicon-loading codicon-modifier-spin" />
-          ) : (
-            <span className="codicon codicon-refresh" />
-          )}
+          {refreshButtonContent}
         </button>
+      </div>
+    </div>
+  ) : null;
 
-        <div className="header-spacer" />
-
-        <div className="tabs">
+  const floatingControlStack = !isWide ? (
+    <div className="floating-control-stack-layer">
+      <div
+        ref={floatingControlStackRef}
+        className="floating-control-stack"
+        data-drag-state={floatingDragVisualState}
+        style={floatingControlStackStyle}
+        onPointerDown={beginFloatingPress}
+        onPointerMove={handleFloatingPointerMove}
+        onPointerUp={event => {
+          floatingIgnoreLostCaptureRef.current = true;
+          finishFloatingDrag(event.pointerId);
+        }}
+        onPointerCancel={event => {
+          floatingIgnoreLostCaptureRef.current = true;
+          cancelFloatingDrag(event.pointerId);
+        }}
+        onLostPointerCapture={event => {
+          if (floatingIgnoreLostCaptureRef.current) {
+            floatingIgnoreLostCaptureRef.current = false;
+            return;
+          }
+          cancelFloatingDrag(event.pointerId);
+        }}
+      >
+        <div
+          className="floating-nav-group"
+          aria-label="Primary navigation"
+          style={floatingNavIndicatorStyle}
+        >
+          <div className="floating-nav-indicator" />
           <button
-            className={`tab ${tab === 'chat' ? 'active' : ''}`}
-            onClick={() => setTab('chat')}
+            type="button"
+            className="floating-nav-button"
+            data-active={tab === 'chat'}
+            onClick={() => handleFloatingNavSelect('chat')}
+            title="Chat"
+            aria-label="Chat"
           >
-            <span className="codicon codicon-comment-discussion tab-icon" />
-            <span className="tab-label">CHAT</span>
+            <span className="codicon codicon-comment-discussion" />
           </button>
           <button
-            className={`tab ${tab === 'file' ? 'active' : ''}`}
-            onClick={() => setTab('file')}
+            type="button"
+            className="floating-nav-button"
+            data-active={tab === 'file'}
+            onClick={() => handleFloatingNavSelect('file')}
+            title="File"
+            aria-label="File"
           >
-            <span className="codicon codicon-files tab-icon" />
-            <span className="tab-label">FILE</span>
+            <span className="codicon codicon-files" />
           </button>
           <button
-            className={`tab ${tab === 'git' ? 'active' : ''}`}
-            onClick={() => setTab('git')}
+            type="button"
+            className="floating-nav-button"
+            data-active={tab === 'git'}
+            onClick={() => handleFloatingNavSelect('git')}
+            title="Git"
+            aria-label="Git"
           >
-            <span className="codicon codicon-source-control tab-icon" />
-            <span className="tab-label">GIT</span>
+            <span className="codicon codicon-source-control" />
           </button>
         </div>
-      </header>
+        <button
+          type="button"
+          className="drawer-toggle-bubble"
+          onClick={handleFloatingDrawerToggle}
+          title="Toggle drawer"
+          aria-label="Toggle drawer"
+        >
+          <span className="codicon codicon-menu" />
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div className={`workspace theme-${themeMode}${!isWide ? ' narrow-shell' : ''}`}>
+      <style>{setiFontCss}</style>
+      {wideHeader}
+      {narrowHeaderBubble}
+      {floatingControlStack}
 
       <div className="body">
         {isWide && !sidebarCollapsed ? (
           <aside className="workspace-left">{renderSidebar()}</aside>
         ) : null}
-        <main className="workspace-right">{renderMain()}</main>
+        <main className="workspace-right" style={narrowContentInsetStyle}>{renderMain()}</main>
       </div>
 
       {!isWide ? (
