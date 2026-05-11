@@ -138,6 +138,15 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const merged = mergeChatSession(next, session);');
     expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
     expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
+    expect(mainTsx).toContain("const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;");
+    expect(mainTsx).toContain('className="header-bubble"');
+    expect(mainTsx).toContain('className="floating-control-stack"');
+    expect(mainTsx).toContain('className="floating-nav-group"');
+    expect(mainTsx).toContain('className="drawer-toggle-bubble"');
+    expect(mainTsx).toContain('const [floatingControlSlot, setFloatingControlSlot] = useState<PersistedFloatingControlSlot>(');
+    expect(mainTsx).toContain('const [floatingDragState, setFloatingDragState] = useState');
+    expect(mainTsx).toContain('const [floatingKeyboardOffset, setFloatingKeyboardOffset] = useState(0);');
+    expect(mainTsx).toContain('style={narrowContentInsetStyle}');
     expect(mainTsx).toContain('const chatConfigDisplay = useMemo(() => {');
     expect(mainTsx).toContain('className="chat-config-options-shell"');
     expect(mainTsx).toContain('<div ref={chatConfigOptionsRef} className="chat-config-options">');
@@ -159,6 +168,11 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.status-bar {');
     expect(stylesCss).not.toContain('.chat-thought-label {');
     expect(stylesCss).toContain('.refresh-btn.has-update-badge::after {');
+    expect(stylesCss).toContain('.header-bubble {');
+    expect(stylesCss).toContain('.floating-control-stack {');
+    expect(stylesCss).toContain('.floating-nav-group {');
+    expect(stylesCss).toContain('.floating-nav-indicator {');
+    expect(stylesCss).toContain('.drawer-toggle-bubble {');
     expect(mainTsx).toContain('chatAttachments.map(attachment => (');
     expect(mainTsx).toContain('onClick={() => removeChatAttachment(attachment.id)}');
     expect(mainTsx).toContain('disabled={chatSending || chatAttachmentReadPending}');
