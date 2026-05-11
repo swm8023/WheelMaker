@@ -70,9 +70,13 @@ const (
 	ConfigOptionIDMode            = "mode"
 	ConfigOptionIDModel           = "model"
 	ConfigOptionIDThoughtLevel    = "thought_level"
-	ConfigOptionCategoryMode      = "mode"
-	ConfigOptionCategoryModel     = "model"
-	ConfigOptionCategoryThoughtLv = "thought_level"
+	ConfigOptionIDApprovalPreset  = "approval_preset"
+	ConfigOptionIDReasoningEffort = "reasoning_effort"
+
+	ConfigOptionCategoryMode           = "mode"
+	ConfigOptionCategoryModel          = "model"
+	ConfigOptionCategoryThoughtLv      = "thought_level"
+	ConfigOptionCategoryApprovalPreset = "_approval_preset"
 )
 
 // --- ACP stop reasons ---
@@ -95,9 +99,10 @@ const (
 	ACPProviderCodeflicker ACPProvider = "codeflicker"
 	ACPProviderOpenCode    ACPProvider = "opencode"
 	ACPProviderCodeBuddy   ACPProvider = "codebuddy"
+	ACPProviderCodexApp    ACPProvider = "codex-app"
 )
 
-var acpProviders = []ACPProvider{ACPProviderCodex, ACPProviderClaude, ACPProviderCopilot, ACPProviderCodeflicker, ACPProviderOpenCode, ACPProviderCodeBuddy}
+var acpProviders = []ACPProvider{ACPProviderCodex, ACPProviderClaude, ACPProviderCopilot, ACPProviderCodeflicker, ACPProviderOpenCode, ACPProviderCodeBuddy, ACPProviderCodexApp}
 
 // ParseACPProvider parses a provider name (case-insensitive).
 func ParseACPProvider(name string) (ACPProvider, bool) {
@@ -114,6 +119,8 @@ func ParseACPProvider(name string) (ACPProvider, bool) {
 		return ACPProviderOpenCode, true
 	case string(ACPProviderCodeBuddy):
 		return ACPProviderCodeBuddy, true
+	case string(ACPProviderCodexApp):
+		return ACPProviderCodexApp, true
 	default:
 		return "", false
 	}

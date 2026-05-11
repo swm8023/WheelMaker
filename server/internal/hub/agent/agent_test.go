@@ -254,6 +254,47 @@ func TestCodeBuddyACPProvider_LaunchArgs(t *testing.T) {
 	}
 }
 
+func TestParseACPProviderCodexApp(t *testing.T) {
+	provider, ok := protocol.ParseACPProvider("codex-app")
+	if !ok {
+		t.Fatal("ParseACPProvider returned ok=false")
+	}
+	if provider != protocol.ACPProviderCodexApp {
+		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodexApp)
+	}
+
+	for _, name := range protocol.ACPProviderNames() {
+		if name == string(protocol.ACPProviderCodexApp) {
+			return
+		}
+	}
+	t.Fatalf("ACPProviderNames missing %q: %v", protocol.ACPProviderCodexApp, protocol.ACPProviderNames())
+}
+
+func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
+	p := NewCodexAppServerProvider()
+	p.lookPath = func(bin string) (string, error) {
+		if bin != "codex" {
+			t.Fatalf("lookPath bin=%q, want codex", bin)
+		}
+		return "/usr/bin/codex", nil
+	}
+
+	exe, args, env, err := p.Launch()
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if exe != "/usr/bin/codex" {
+		t.Fatalf("exe=%q", exe)
+	}
+	if !reflect.DeepEqual(args, []string{"app-server", "--listen", "stdio://"}) {
+		t.Fatalf("args=%v", args)
+	}
+	if len(env) != 0 {
+		t.Fatalf("env=%v, want empty", env)
+	}
+}
+
 func TestOwnedConn_SendMatchesResponse(t *testing.T) {
 	tr := newFakeOwnedTransport()
 	tr.onSend = func(v any) {
@@ -755,4 +796,3 @@ func TestCodexPreset_IncludesAgentsUserSkillsDir(t *testing.T) {
 		t.Fatalf("codex preset user dirs missing ~/.agents/skills: %v", CodexACPProviderPreset.SkillUserDirs)
 	}
 }
-
