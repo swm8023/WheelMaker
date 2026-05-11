@@ -18,6 +18,7 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
+import { reconcileSessionReadMessages } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import {
@@ -4225,15 +4226,10 @@ function App() {
       }
 
       // Reconcile: live session.message events may have landed in the store
-      // during the await. Fold them in so they aren't lost.
+      // during the await. Fold only post-request changes back in so old cache
+      // entries cannot overwrite newer session.read results.
       const fresh = chatMessageStoreRef.current[result.session.sessionId] ?? [];
-      for (const m of fresh) {
-        if (!nextMessages.some(
-          n => n.promptIndex === m.promptIndex && n.turnIndex === m.turnIndex,
-        )) {
-          nextMessages = upsertChatMessage(nextMessages, m);
-        }
-      }
+      nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
       chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
       chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
