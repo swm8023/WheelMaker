@@ -187,6 +187,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.floating-nav-group {');
     expect(stylesCss).toContain('.floating-nav-indicator {');
     expect(stylesCss).toContain('.drawer-toggle-bubble {');
+    expect(stylesCss).toContain('-webkit-tap-highlight-color: transparent;');
     expect(stylesCss).toContain('.breadcrumb-title {');
     expect(stylesCss).toContain('.breadcrumb-project-name {');
     expect(stylesCss).toContain('max-width: min(42%, 160px);');
