@@ -299,7 +299,7 @@ type codexappConfigState struct {
 
 func newCodexappConfigState() codexappConfigState {
 	return codexappConfigState{
-		approvalPreset:  "ask",
+		approvalPreset:  "auto",
 		reasoningEffort: "medium",
 	}
 }
@@ -323,10 +323,9 @@ func (s codexappConfigState) options() []protocol.ConfigOption {
 			Type:         "select",
 			CurrentValue: s.approvalPreset,
 			Options: []protocol.ConfigOptionValue{
-				{Value: "read_only", Name: "Read only"},
-				{Value: "ask", Name: "Ask"},
 				{Value: "auto", Name: "Auto"},
-				{Value: "full", Name: "Full access"},
+				{Value: "read_only", Name: "Read-only"},
+				{Value: "full", Name: "Full Access"},
 			},
 		},
 		{
@@ -353,6 +352,9 @@ func (s *codexappConfigState) set(id, value string) error {
 	case protocol.ConfigOptionIDApprovalPreset:
 		if _, ok := codexappApprovalProfile(value); !ok {
 			return fmt.Errorf("invalid approval preset %q", value)
+		}
+		if value == "ask" {
+			value = "auto"
 		}
 		s.approvalPreset = value
 	case protocol.ConfigOptionIDModel:
@@ -408,7 +410,7 @@ func (s codexappConfigState) turnStartParams(threadID, cwd string, input []appSe
 		SandboxPolicy: appServerSandbox{
 			Type:          profile.turnSandboxType,
 			WritableRoots: profile.writableRoots(cwd),
-			NetworkAccess: false,
+			NetworkAccess: profile.networkAccess,
 		},
 	}
 }
@@ -478,6 +480,7 @@ type codexappApprovalPreset struct {
 	approvalPolicy  string
 	threadSandbox   string
 	turnSandboxType string
+	networkAccess   bool
 }
 
 func (p codexappApprovalPreset) writableRoots(cwd string) []string {
@@ -491,12 +494,15 @@ func codexappApprovalProfile(preset string) (codexappApprovalPreset, bool) {
 	switch preset {
 	case "read_only":
 		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "read-only", turnSandboxType: "readOnly"}, true
-	case "ask":
+	case "auto", "ask":
 		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
-	case "auto":
-		return codexappApprovalPreset{approvalPolicy: "on-failure", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
 	case "full":
-		return codexappApprovalPreset{approvalPolicy: "never", threadSandbox: "danger-full-access", turnSandboxType: "dangerFullAccess"}, true
+		return codexappApprovalPreset{
+			approvalPolicy:  "never",
+			threadSandbox:   "danger-full-access",
+			turnSandboxType: "dangerFullAccess",
+			networkAccess:   true,
+		}, true
 	default:
 		return codexappApprovalPreset{}, false
 	}

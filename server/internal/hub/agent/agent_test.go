@@ -985,6 +985,95 @@ func TestCodexAppTurnNotificationsDecodeOfficialNestedTurnShape(t *testing.T) {
 	}
 }
 
+func TestCodexAppApprovalPresetOptionsMatchOfficialModes(t *testing.T) {
+	state := newCodexappConfigState()
+	options := state.options()
+	if got := currentConfigValue(options, protocol.ConfigOptionIDApprovalPreset); got != "auto" {
+		t.Fatalf("default approval preset=%q, want auto", got)
+	}
+
+	var values []protocol.ConfigOptionValue
+	for _, opt := range options {
+		if opt.ID == protocol.ConfigOptionIDApprovalPreset {
+			values = opt.Options
+			break
+		}
+	}
+	want := []protocol.ConfigOptionValue{
+		{Value: "auto", Name: "Auto"},
+		{Value: "read_only", Name: "Read-only"},
+		{Value: "full", Name: "Full Access"},
+	}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("approval preset options=%#v, want %#v", values, want)
+	}
+}
+
+func TestCodexAppApprovalProfilesMatchOfficialModes(t *testing.T) {
+	tests := []struct {
+		name          string
+		preset        string
+		approval      string
+		threadSandbox string
+		turnSandbox   string
+		network       bool
+	}{
+		{
+			name:          "auto",
+			preset:        "auto",
+			approval:      "on-request",
+			threadSandbox: "workspace-write",
+			turnSandbox:   "workspaceWrite",
+		},
+		{
+			name:          "legacy ask alias",
+			preset:        "ask",
+			approval:      "on-request",
+			threadSandbox: "workspace-write",
+			turnSandbox:   "workspaceWrite",
+		},
+		{
+			name:          "read only",
+			preset:        "read_only",
+			approval:      "on-request",
+			threadSandbox: "read-only",
+			turnSandbox:   "readOnly",
+		},
+		{
+			name:          "full access",
+			preset:        "full",
+			approval:      "never",
+			threadSandbox: "danger-full-access",
+			turnSandbox:   "dangerFullAccess",
+			network:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile, ok := codexappApprovalProfile(tt.preset)
+			if !ok {
+				t.Fatalf("codexappApprovalProfile(%q) rejected", tt.preset)
+			}
+			if profile.approvalPolicy != tt.approval || profile.threadSandbox != tt.threadSandbox ||
+				profile.turnSandboxType != tt.turnSandbox || profile.networkAccess != tt.network {
+				t.Fatalf("profile=%#v, want approval=%q threadSandbox=%q turnSandbox=%q network=%v",
+					profile, tt.approval, tt.threadSandbox, tt.turnSandbox, tt.network)
+			}
+		})
+	}
+}
+
+func TestCodexAppLegacyAskPresetCanonicalizesToAuto(t *testing.T) {
+	state := newCodexappConfigState()
+	if err := state.set(protocol.ConfigOptionIDApprovalPreset, "ask"); err != nil {
+		t.Fatalf("set legacy ask preset: %v", err)
+	}
+	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDApprovalPreset); got != "auto" {
+		t.Fatalf("legacy ask canonicalized to %q, want auto", got)
+	}
+}
+
 func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
@@ -1071,8 +1160,8 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	if newRes.SessionID != "thread-1" {
 		t.Fatalf("sessionId=%q", newRes.SessionID)
 	}
-	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "ask" {
-		t.Fatalf("config options missing ask approval preset: %#v", newRes.ConfigOptions)
+	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "auto" {
+		t.Fatalf("config options missing auto approval preset: %#v", newRes.ConfigOptions)
 	}
 	opts, err := inst.SessionSetConfigOption(context.Background(), protocol.SessionSetConfigOptionParams{
 		SessionID: "thread-1",
