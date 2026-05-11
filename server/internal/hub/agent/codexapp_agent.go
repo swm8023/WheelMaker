@@ -516,7 +516,7 @@ func (c *codexappConn) sendSessionList(ctx context.Context, p protocol.SessionLi
 			SessionID: thread.ID,
 			CWD:       thread.CWD,
 			Title:     thread.Title,
-			UpdatedAt: thread.UpdatedAt,
+			UpdatedAt: string(thread.UpdatedAt),
 		})
 	}
 	return assignResult(result, out)

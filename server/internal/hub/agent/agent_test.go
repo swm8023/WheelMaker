@@ -961,7 +961,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 				t.Errorf("thread/start params=%#v", params)
 			}
 			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
-				"thread": map[string]any{"id": "thread-1", "title": "Thread 1"},
+				"thread": map[string]any{"id": "thread-1", "title": "Thread 1", "updatedAt": float64(1778536492)},
 			}})
 		case "turn/start":
 			params := msg["params"].(map[string]any)

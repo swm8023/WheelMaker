@@ -133,10 +133,30 @@ type appServerThreadStartResponse struct {
 }
 
 type appServerThread struct {
-	ID        string `json:"id"`
-	CWD       string `json:"cwd,omitempty"`
-	Title     string `json:"title,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
+	ID        string                  `json:"id"`
+	CWD       string                  `json:"cwd,omitempty"`
+	Title     string                  `json:"title,omitempty"`
+	UpdatedAt appServerFlexibleString `json:"updatedAt,omitempty"`
+}
+
+type appServerFlexibleString string
+
+func (s *appServerFlexibleString) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*s = appServerFlexibleString(text)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err == nil {
+		*s = appServerFlexibleString(number.String())
+		return nil
+	}
+	if string(data) == "null" {
+		*s = ""
+		return nil
+	}
+	return fmt.Errorf("unsupported string value %s", string(data))
 }
 
 type appServerThreadListParams struct {
