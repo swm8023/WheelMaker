@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
@@ -133,23 +134,34 @@ type appServerThreadStartResponse struct {
 }
 
 type appServerThread struct {
-	ID        string                  `json:"id"`
-	CWD       string                  `json:"cwd,omitempty"`
-	Title     string                  `json:"title,omitempty"`
-	UpdatedAt appServerFlexibleString `json:"updatedAt,omitempty"`
+	ID        string             `json:"id"`
+	CWD       string             `json:"cwd,omitempty"`
+	Title     string             `json:"title,omitempty"`
+	Name      string             `json:"name,omitempty"`
+	Preview   string             `json:"preview,omitempty"`
+	UpdatedAt appServerTimestamp `json:"updatedAt,omitempty"`
 }
 
-type appServerFlexibleString string
+func (t appServerThread) displayTitle() string {
+	return firstNonEmptyString(t.Title, t.Name, t.Preview)
+}
 
-func (s *appServerFlexibleString) UnmarshalJSON(data []byte) error {
+type appServerTimestamp string
+
+func (s *appServerTimestamp) UnmarshalJSON(data []byte) error {
 	var text string
 	if err := json.Unmarshal(data, &text); err == nil {
-		*s = appServerFlexibleString(text)
+		*s = appServerTimestamp(text)
 		return nil
 	}
 	var number json.Number
 	if err := json.Unmarshal(data, &number); err == nil {
-		*s = appServerFlexibleString(number.String())
+		seconds, err := number.Int64()
+		if err != nil {
+			*s = appServerTimestamp(number.String())
+			return nil
+		}
+		*s = appServerTimestamp(time.Unix(seconds, 0).UTC().Format(time.RFC3339))
 		return nil
 	}
 	if string(data) == "null" {
@@ -167,6 +179,24 @@ type appServerThreadListParams struct {
 type appServerThreadListResponse struct {
 	Threads    []appServerThread `json:"threads"`
 	NextCursor string            `json:"nextCursor,omitempty"`
+}
+
+func (r *appServerThreadListResponse) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Threads    []appServerThread `json:"threads"`
+		Data       []appServerThread `json:"data"`
+		NextCursor string            `json:"nextCursor"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.Data) > 0 {
+		r.Threads = raw.Data
+	} else {
+		r.Threads = raw.Threads
+	}
+	r.NextCursor = raw.NextCursor
+	return nil
 }
 
 type appServerTurnStartParams struct {
@@ -195,7 +225,8 @@ type appServerTurnStartResponse struct {
 }
 
 type appServerTurn struct {
-	ID string `json:"id"`
+	ID     string `json:"id"`
+	Status string `json:"status,omitempty"`
 }
 
 type appServerTurnInterruptParams struct {
@@ -211,26 +242,66 @@ type appServerAgentMessageDeltaParams struct {
 
 type appServerTurnEventParams struct {
 	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId"`
+	TurnID   string `json:"turnId,omitempty"`
+	Turn     appServerTurn
 }
 
 type appServerTurnCompletedParams struct {
 	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId"`
+	TurnID   string `json:"turnId,omitempty"`
 	Status   string `json:"status,omitempty"`
+	Turn     appServerTurn
+}
+
+func (p *appServerTurnEventParams) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ThreadID string        `json:"threadId"`
+		TurnID   string        `json:"turnId"`
+		Turn     appServerTurn `json:"turn"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ThreadID = raw.ThreadID
+	p.Turn = raw.Turn
+	p.TurnID = firstNonEmptyString(raw.TurnID, raw.Turn.ID)
+	return nil
+}
+
+func (p *appServerTurnCompletedParams) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ThreadID string        `json:"threadId"`
+		TurnID   string        `json:"turnId"`
+		Status   string        `json:"status"`
+		Turn     appServerTurn `json:"turn"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ThreadID = raw.ThreadID
+	p.Turn = raw.Turn
+	p.TurnID = firstNonEmptyString(raw.TurnID, raw.Turn.ID)
+	p.Status = firstNonEmptyString(raw.Status, raw.Turn.Status)
+	return nil
 }
 
 type appServerThreadNameUpdatedParams struct {
-	ThreadID string `json:"threadId"`
-	Name     string `json:"name"`
+	ThreadID   string `json:"threadId"`
+	ThreadName string `json:"threadName,omitempty"`
+	Name       string `json:"name,omitempty"`
+}
+
+func (p appServerThreadNameUpdatedParams) displayName() string {
+	return firstNonEmptyString(p.ThreadName, p.Name)
 }
 
 type appServerApprovalRequestParams struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId,omitempty"`
-	ItemID   string `json:"itemId"`
-	Command  string `json:"command,omitempty"`
-	Path     string `json:"path,omitempty"`
+	ThreadID  string `json:"threadId"`
+	TurnID    string `json:"turnId,omitempty"`
+	ItemID    string `json:"itemId"`
+	Command   string `json:"command,omitempty"`
+	Path      string `json:"path,omitempty"`
+	GrantRoot string `json:"grantRoot,omitempty"`
 }
 
 type appServerApprovalDecision struct {

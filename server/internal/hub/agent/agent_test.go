@@ -924,6 +924,67 @@ func TestCodexAppModelListDecodesAppServerDataShape(t *testing.T) {
 	}
 }
 
+func TestCodexAppThreadListDecodesOfficialDataShape(t *testing.T) {
+	var resp appServerThreadListResponse
+	if err := json.Unmarshal([]byte(`{
+		"data": [{
+			"id": "thread-1",
+			"sessionId": "session-1",
+			"name": null,
+			"preview": "Preview title",
+			"cwd": "D:\\Code\\WheelMaker",
+			"createdAt": 1778536400,
+			"updatedAt": 1778536492,
+			"cliVersion": "0.1.0",
+			"ephemeral": false,
+			"modelProvider": "openai",
+			"source": "user",
+			"status": {"type": "idle"},
+			"turns": []
+		}],
+		"nextCursor": "cursor-2"
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal thread list: %v", err)
+	}
+	if len(resp.Threads) != 1 {
+		t.Fatalf("threads=%#v, want one thread", resp.Threads)
+	}
+	thread := resp.Threads[0]
+	if thread.ID != "thread-1" || thread.displayTitle() != "Preview title" {
+		t.Fatalf("thread=%#v, want id and preview title", thread)
+	}
+	if got := string(thread.UpdatedAt); got != "2026-05-11T21:54:52Z" {
+		t.Fatalf("updatedAt=%q, want RFC3339 timestamp", got)
+	}
+	if resp.NextCursor != "cursor-2" {
+		t.Fatalf("nextCursor=%q", resp.NextCursor)
+	}
+}
+
+func TestCodexAppTurnNotificationsDecodeOfficialNestedTurnShape(t *testing.T) {
+	var started appServerTurnEventParams
+	if err := json.Unmarshal([]byte(`{
+		"threadId": "thread-1",
+		"turn": {"id": "turn-1", "items": [], "status": "inProgress"}
+	}`), &started); err != nil {
+		t.Fatalf("unmarshal turn/started: %v", err)
+	}
+	if started.ThreadID != "thread-1" || started.TurnID != "turn-1" {
+		t.Fatalf("started=%#v", started)
+	}
+
+	var completed appServerTurnCompletedParams
+	if err := json.Unmarshal([]byte(`{
+		"threadId": "thread-1",
+		"turn": {"id": "turn-1", "items": [], "status": "interrupted"}
+	}`), &completed); err != nil {
+		t.Fatalf("unmarshal turn/completed: %v", err)
+	}
+	if completed.TurnID != "turn-1" || completed.Status != "interrupted" {
+		t.Fatalf("completed=%#v", completed)
+	}
+}
+
 func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
@@ -961,7 +1022,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 				t.Errorf("thread/start params=%#v", params)
 			}
 			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
-				"thread": map[string]any{"id": "thread-1", "title": "Thread 1", "updatedAt": float64(1778536492)},
+				"thread": map[string]any{"id": "thread-1", "preview": "Thread 1", "updatedAt": float64(1778536492)},
 			}})
 		case "turn/start":
 			params := msg["params"].(map[string]any)
@@ -980,7 +1041,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 			})
 			_ = tr.emit(map[string]any{
 				"method": "turn/completed",
-				"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "status": "completed"},
+				"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "items": []any{}, "status": "completed"}},
 			})
 		default:
 			t.Errorf("unexpected app-server method %q", method)

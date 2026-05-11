@@ -515,7 +515,7 @@ func (c *codexappConn) sendSessionList(ctx context.Context, p protocol.SessionLi
 		out.Sessions = append(out.Sessions, protocol.SessionInfo{
 			SessionID: thread.ID,
 			CWD:       thread.CWD,
-			Title:     thread.Title,
+			Title:     thread.displayTitle(),
 			UpdatedAt: string(thread.UpdatedAt),
 		})
 	}
@@ -668,7 +668,7 @@ func (c *codexappConn) handleAppServerNotification(method string, params json.Ra
 				SessionID: p.ThreadID,
 				Update: protocol.SessionUpdate{
 					SessionUpdate: protocol.SessionUpdateSessionInfoUpdate,
-					Title:         p.Name,
+					Title:         p.displayName(),
 				},
 			})
 		}
@@ -697,7 +697,7 @@ func (c *codexappConn) handleApprovalRequest(ctx context.Context, params json.Ra
 	if h == nil {
 		return appServerApprovalDecision{Decision: "cancel"}, nil
 	}
-	title := firstNonEmptyString(p.Command, p.Path, "Approval requested")
+	title := firstNonEmptyString(p.Command, p.Path, p.GrantRoot, "Approval requested")
 	resp, err := h(ctx, time.Now().UnixNano(), protocol.MethodRequestPermission, mustRaw(protocol.PermissionRequestParams{
 		SessionID: p.ThreadID,
 		ToolCall: protocol.ToolCallRef{
