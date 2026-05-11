@@ -13,6 +13,11 @@ import {
 
 export type PersistedTab = 'chat' | 'file' | 'git';
 export type PersistedThemeMode = 'dark' | 'light';
+export type PersistedFloatingControlSlot =
+  | 'upper'
+  | 'upper-middle'
+  | 'center'
+  | 'lower-middle';
 
 export type DiffCacheEntry = {
   diff: string;
@@ -55,6 +60,7 @@ export type PersistedGlobalState = {
   showLineNumbers: boolean;
   tab: PersistedTab;
   selectedProjectId: string;
+  floatingControlSlot: PersistedFloatingControlSlot;
 };
 
 export type PersistedChatCursor = {
@@ -115,6 +121,7 @@ const GLOBAL_KEYS = {
   showLineNumbers: 'showLineNumbers',
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
+  floatingControlSlot: 'floatingControlSlot',
 } as const;
 
 function defaultGlobalState(): PersistedGlobalState {
@@ -132,6 +139,7 @@ function defaultGlobalState(): PersistedGlobalState {
     showLineNumbers: true,
     tab: 'file',
     selectedProjectId: '',
+    floatingControlSlot: 'upper-middle',
   };
 }
 
@@ -200,6 +208,12 @@ function sanitizeProjectCommitsState(input: Partial<PersistedProjectCommitsState
 function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): PersistedGlobalState {
   const base = defaultGlobalState();
   if (!input) return base;
+  const floatingControlSlot =
+    input.floatingControlSlot === 'upper' ||
+    input.floatingControlSlot === 'center' ||
+    input.floatingControlSlot === 'lower-middle'
+      ? input.floatingControlSlot
+      : 'upper-middle';
   return {
     address: typeof input.address === 'string' ? input.address : base.address,
     token: typeof input.token === 'string' ? input.token : base.token,
@@ -214,6 +228,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
+    floatingControlSlot,
   };
 }
 
@@ -600,6 +615,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
+      {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
     ];
 
     for (const row of globalRows) {
@@ -877,6 +893,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
     }).catch(() => undefined);
   }
 
