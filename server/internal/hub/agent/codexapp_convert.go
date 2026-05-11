@@ -56,23 +56,7 @@ type appServerInitializeParams struct {
 }
 
 type appServerModelListResponse struct {
-	Models []appServerModel `json:"models"`
-}
-
-func (r *appServerModelListResponse) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		Models []appServerModel `json:"models"`
-		Data   []appServerModel `json:"data"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	if len(raw.Models) > 0 {
-		r.Models = raw.Models
-		return nil
-	}
-	r.Models = raw.Data
-	return nil
+	Models []appServerModel `json:"data"`
 }
 
 type appServerModel struct {
@@ -135,15 +119,16 @@ type appServerThreadStartResponse struct {
 
 type appServerThread struct {
 	ID        string             `json:"id"`
+	SessionID string             `json:"sessionId,omitempty"`
 	CWD       string             `json:"cwd,omitempty"`
-	Title     string             `json:"title,omitempty"`
 	Name      string             `json:"name,omitempty"`
 	Preview   string             `json:"preview,omitempty"`
 	UpdatedAt appServerTimestamp `json:"updatedAt,omitempty"`
+	Turns     []appServerTurn    `json:"turns,omitempty"`
 }
 
 func (t appServerThread) displayTitle() string {
-	return firstNonEmptyString(t.Title, t.Name, t.Preview)
+	return firstNonEmptyString(t.Name, t.Preview)
 }
 
 type appServerTimestamp string
@@ -192,14 +177,20 @@ type appServerTurnStartParams struct {
 }
 
 type appServerSandbox struct {
-	Type          string   `json:"type"`
-	WritableRoots []string `json:"writableRoots,omitempty"`
-	NetworkAccess bool     `json:"networkAccess,omitempty"`
+	Type                string   `json:"type"`
+	WritableRoots       []string `json:"writableRoots,omitempty"`
+	NetworkAccess       *bool    `json:"networkAccess,omitempty"`
+	ExcludeTmpdirEnvVar *bool    `json:"excludeTmpdirEnvVar,omitempty"`
+	ExcludeSlashTmp     *bool    `json:"excludeSlashTmp,omitempty"`
 }
 
 type appServerUserInput struct {
-	Type string `json:"type"`
-	Text string `json:"text,omitempty"`
+	Type         string `json:"type"`
+	Text         string `json:"text,omitempty"`
+	TextElements []any  `json:"text_elements"`
+	URL          string `json:"url,omitempty"`
+	Path         string `json:"path,omitempty"`
+	Name         string `json:"name,omitempty"`
 }
 
 type appServerTurnStartResponse struct {
@@ -207,8 +198,9 @@ type appServerTurnStartResponse struct {
 }
 
 type appServerTurn struct {
-	ID     string `json:"id"`
-	Status string `json:"status,omitempty"`
+	ID     string                `json:"id"`
+	Items  []appServerThreadItem `json:"items,omitempty"`
+	Status string                `json:"status,omitempty"`
 }
 
 type appServerTurnInterruptParams struct {
@@ -233,6 +225,7 @@ type appServerThreadItem struct {
 	ID               string                `json:"id"`
 	Type             string                `json:"type"`
 	Text             string                `json:"text,omitempty"`
+	Phase            string                `json:"phase,omitempty"`
 	Command          string                `json:"command,omitempty"`
 	CWD              string                `json:"cwd,omitempty"`
 	Status           string                `json:"status,omitempty"`
@@ -258,71 +251,79 @@ type appServerFileChange struct {
 }
 
 type appServerTurnEventParams struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId,omitempty"`
-	Turn     appServerTurn
+	ThreadID string        `json:"threadId"`
+	Turn     appServerTurn `json:"turn"`
+}
+
+func (p appServerTurnEventParams) turnID() string {
+	return p.Turn.ID
 }
 
 type appServerTurnCompletedParams struct {
-	ThreadID string `json:"threadId"`
-	TurnID   string `json:"turnId,omitempty"`
-	Status   string `json:"status,omitempty"`
-	Turn     appServerTurn
+	ThreadID string        `json:"threadId"`
+	Turn     appServerTurn `json:"turn"`
 }
 
-func (p *appServerTurnEventParams) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		ThreadID string        `json:"threadId"`
-		TurnID   string        `json:"turnId"`
-		Turn     appServerTurn `json:"turn"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	p.ThreadID = raw.ThreadID
-	p.Turn = raw.Turn
-	p.TurnID = firstNonEmptyString(raw.TurnID, raw.Turn.ID)
-	return nil
+func (p appServerTurnCompletedParams) turnID() string {
+	return p.Turn.ID
 }
 
-func (p *appServerTurnCompletedParams) UnmarshalJSON(data []byte) error {
-	var raw struct {
-		ThreadID string        `json:"threadId"`
-		TurnID   string        `json:"turnId"`
-		Status   string        `json:"status"`
-		Turn     appServerTurn `json:"turn"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	p.ThreadID = raw.ThreadID
-	p.Turn = raw.Turn
-	p.TurnID = firstNonEmptyString(raw.TurnID, raw.Turn.ID)
-	p.Status = firstNonEmptyString(raw.Status, raw.Turn.Status)
-	return nil
+func (p appServerTurnCompletedParams) status() string {
+	return p.Turn.Status
 }
 
 type appServerThreadNameUpdatedParams struct {
 	ThreadID   string `json:"threadId"`
 	ThreadName string `json:"threadName,omitempty"`
-	Name       string `json:"name,omitempty"`
 }
 
 func (p appServerThreadNameUpdatedParams) displayName() string {
-	return firstNonEmptyString(p.ThreadName, p.Name)
+	return p.ThreadName
 }
 
 type appServerApprovalRequestParams struct {
-	ThreadID  string `json:"threadId"`
-	TurnID    string `json:"turnId,omitempty"`
-	ItemID    string `json:"itemId"`
-	Command   string `json:"command,omitempty"`
-	Path      string `json:"path,omitempty"`
-	GrantRoot string `json:"grantRoot,omitempty"`
+	ThreadID    string          `json:"threadId"`
+	TurnID      string          `json:"turnId,omitempty"`
+	ItemID      string          `json:"itemId"`
+	Command     string          `json:"command,omitempty"`
+	CWD         string          `json:"cwd,omitempty"`
+	Reason      string          `json:"reason,omitempty"`
+	Path        string          `json:"path,omitempty"`
+	GrantRoot   string          `json:"grantRoot,omitempty"`
+	Permissions json.RawMessage `json:"permissions,omitempty"`
 }
 
 type appServerApprovalDecision struct {
 	Decision string `json:"decision"`
+}
+
+type appServerPermissionsApprovalResponse struct {
+	Permissions json.RawMessage `json:"permissions"`
+	Scope       string          `json:"scope"`
+}
+
+type appServerMcpElicitationResponse struct {
+	Action  string `json:"action"`
+	Content any    `json:"content"`
+	Meta    any    `json:"_meta"`
+}
+
+type appServerTurnPlanUpdatedParams struct {
+	ThreadID string              `json:"threadId"`
+	TurnID   string              `json:"turnId"`
+	Plan     []appServerPlanStep `json:"plan"`
+}
+
+type appServerPlanStep struct {
+	Step   string `json:"step"`
+	Status string `json:"status"`
+}
+
+type appServerFileChangePatchUpdatedParams struct {
+	ThreadID string                `json:"threadId"`
+	TurnID   string                `json:"turnId"`
+	ItemID   string                `json:"itemId"`
+	Changes  []appServerFileChange `json:"changes"`
 }
 
 type codexappConfigState struct {
@@ -334,7 +335,7 @@ type codexappConfigState struct {
 
 func newCodexappConfigState() codexappConfigState {
 	return codexappConfigState{
-		approvalPreset:  "auto",
+		approvalPreset:  "ask",
 		reasoningEffort: "medium",
 	}
 }
@@ -358,8 +359,9 @@ func (s codexappConfigState) options() []protocol.ConfigOption {
 			Type:         "select",
 			CurrentValue: s.approvalPreset,
 			Options: []protocol.ConfigOptionValue{
-				{Value: "auto", Name: "Auto"},
 				{Value: "read_only", Name: "Read-only"},
+				{Value: "ask", Name: "Ask"},
+				{Value: "auto", Name: "Auto"},
 				{Value: "full", Name: "Full Access"},
 			},
 		},
@@ -387,9 +389,6 @@ func (s *codexappConfigState) set(id, value string) error {
 	case protocol.ConfigOptionIDApprovalPreset:
 		if _, ok := codexappApprovalProfile(value); !ok {
 			return fmt.Errorf("invalid approval preset %q", value)
-		}
-		if value == "ask" {
-			value = "auto"
 		}
 		s.approvalPreset = value
 	case protocol.ConfigOptionIDModel:
@@ -442,11 +441,7 @@ func (s codexappConfigState) turnStartParams(threadID, cwd string, input []appSe
 		Model:          s.model,
 		Effort:         s.reasoningEffort,
 		ApprovalPolicy: profile.approvalPolicy,
-		SandboxPolicy: appServerSandbox{
-			Type:          profile.turnSandboxType,
-			WritableRoots: profile.writableRoots(cwd),
-			NetworkAccess: profile.networkAccess,
-		},
+		SandboxPolicy:  profile.sandboxPolicy(cwd),
 	}
 }
 
@@ -525,12 +520,35 @@ func (p codexappApprovalPreset) writableRoots(cwd string) []string {
 	return []string{cwd}
 }
 
+func (p codexappApprovalPreset) sandboxPolicy(cwd string) appServerSandbox {
+	switch p.turnSandboxType {
+	case "dangerFullAccess":
+		return appServerSandbox{Type: "dangerFullAccess"}
+	case "readOnly":
+		network := p.networkAccess
+		return appServerSandbox{Type: "readOnly", NetworkAccess: &network}
+	default:
+		network := p.networkAccess
+		excludeTmpdir := false
+		excludeSlashTmp := false
+		return appServerSandbox{
+			Type:                "workspaceWrite",
+			WritableRoots:       p.writableRoots(cwd),
+			NetworkAccess:       &network,
+			ExcludeTmpdirEnvVar: &excludeTmpdir,
+			ExcludeSlashTmp:     &excludeSlashTmp,
+		}
+	}
+}
+
 func codexappApprovalProfile(preset string) (codexappApprovalPreset, bool) {
 	switch preset {
 	case "read_only":
 		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "read-only", turnSandboxType: "readOnly"}, true
-	case "auto", "ask":
+	case "ask":
 		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
+	case "auto":
+		return codexappApprovalPreset{approvalPolicy: "on-failure", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
 	case "full":
 		return codexappApprovalPreset{
 			approvalPolicy:  "never",
@@ -552,7 +570,7 @@ func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput
 		switch block.Type {
 		case protocol.ContentBlockTypeText:
 			if block.Text != "" {
-				out = append(out, appServerUserInput{Type: "text", Text: block.Text})
+				out = append(out, appServerUserInput{Type: "text", Text: block.Text, TextElements: []any{}})
 			}
 		default:
 			return nil, fmt.Errorf("codexapp phase 1 does not support prompt content type %q", block.Type)

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +62,66 @@ type codexappTransport interface {
 	Done() <-chan struct{}
 	Close() error
 	Alive() bool
+}
+
+var codexappSessionMapPathFunc = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".wheelmaker", "codexapp-sessions.json"), nil
+}
+
+type codexappSessionMapFile struct {
+	Sessions map[string]string `json:"sessions"`
+}
+
+func codexappMappedThreadID(acpSessionID string) string {
+	acpSessionID = strings.TrimSpace(acpSessionID)
+	if acpSessionID == "" {
+		return ""
+	}
+	path, err := codexappSessionMapPathFunc()
+	if err != nil || strings.TrimSpace(path) == "" {
+		return ""
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var file codexappSessionMapFile
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(file.Sessions[acpSessionID])
+}
+
+func codexappStoreThreadMapping(acpSessionID string, runtimeThreadID string) {
+	acpSessionID = strings.TrimSpace(acpSessionID)
+	runtimeThreadID = strings.TrimSpace(runtimeThreadID)
+	if acpSessionID == "" || runtimeThreadID == "" || acpSessionID == runtimeThreadID {
+		return
+	}
+	path, err := codexappSessionMapPathFunc()
+	if err != nil || strings.TrimSpace(path) == "" {
+		return
+	}
+	file := codexappSessionMapFile{Sessions: map[string]string{}}
+	if raw, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(raw, &file)
+		if file.Sessions == nil {
+			file.Sessions = map[string]string{}
+		}
+	}
+	file.Sessions[acpSessionID] = runtimeThreadID
+	raw, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	_ = os.WriteFile(path, raw, 0o600)
 }
 
 func newOwnedCodexappConn(provider *codexAppProvider, cwd string) (*codexappConn, error) {
@@ -303,11 +365,13 @@ type codexappConn struct {
 	respHandler   ACPResponseHandler
 	initialized   bool
 	initializeRes protocol.InitializeResult
+	acpSessionID  string
 	threadID      string
 	config        codexappConfigState
 	activeTurnID  string
 	lastTurnID    string
 	promptDone    chan codexappPromptResult
+	startedTools  map[string]bool
 
 	pendingPromptStops   map[string]string
 	pendingPromptUpdates map[string][]protocol.SessionUpdateParams
@@ -413,15 +477,54 @@ func (c *codexappConn) BindSessionID(sessionID string) {
 		return
 	}
 	c.mu.Lock()
+	runtimeThreadID := c.threadID
+	c.mu.Unlock()
+	if runtimeThreadID == "" {
+		runtimeThreadID = sessionID
+	}
+	c.bindSessionIDs(sessionID, runtimeThreadID)
+}
+
+func (c *codexappConn) bindSessionIDs(acpSessionID string, runtimeThreadID string) {
+	acpSessionID = strings.TrimSpace(acpSessionID)
+	runtimeThreadID = strings.TrimSpace(runtimeThreadID)
+	if acpSessionID == "" || runtimeThreadID == "" {
+		return
+	}
+	c.mu.Lock()
 	old := c.threadID
-	c.threadID = sessionID
+	c.acpSessionID = acpSessionID
+	c.threadID = runtimeThreadID
 	c.mu.Unlock()
 	if c.runtime != nil {
-		if old != "" && old != sessionID {
+		if old != "" && old != runtimeThreadID {
 			c.runtime.unregister(old, c)
 		}
-		c.runtime.register(sessionID, c)
+		c.runtime.register(runtimeThreadID, c)
 	}
+}
+
+func (c *codexappConn) runtimeThreadIDForSession(acpSessionID string) string {
+	acpSessionID = strings.TrimSpace(acpSessionID)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.threadID != "" && (acpSessionID == "" || c.acpSessionID == "" || c.acpSessionID == acpSessionID || c.threadID == acpSessionID) {
+		return c.threadID
+	}
+	return acpSessionID
+}
+
+func (c *codexappConn) outboundSessionID(runtimeThreadID string) string {
+	runtimeThreadID = strings.TrimSpace(runtimeThreadID)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.threadID == runtimeThreadID && c.acpSessionID != "" {
+		return c.acpSessionID
+	}
+	if c.acpSessionID != "" && runtimeThreadID == "" {
+		return c.acpSessionID
+	}
+	return runtimeThreadID
 }
 
 func (c *codexappConn) sendInitialize(ctx context.Context, result any) error {
@@ -478,7 +581,7 @@ func (c *codexappConn) sendSessionNew(ctx context.Context, p protocol.SessionNew
 	if threadID == "" {
 		return errors.New("codexapp thread/start returned empty thread id")
 	}
-	c.BindSessionID(threadID)
+	c.bindSessionIDs(threadID, threadID)
 	return assignResult(result, protocol.SessionNewResult{
 		SessionID:     threadID,
 		ConfigOptions: c.config.options(),
@@ -489,19 +592,35 @@ func (c *codexappConn) sendSessionLoad(ctx context.Context, p protocol.SessionLo
 	if len(p.MCPServers) > 0 {
 		return errors.New("codexapp phase 1 does not support MCP servers")
 	}
-	threadID := strings.TrimSpace(p.SessionID)
-	if threadID == "" {
+	acpSessionID := strings.TrimSpace(p.SessionID)
+	if acpSessionID == "" {
 		return errors.New("codexapp session/load requires sessionId")
 	}
 	if err := c.refreshModels(ctx); err != nil {
 		return err
 	}
-	c.BindSessionID(threadID)
-	req := c.config.threadResumeParams(threadID, firstNonEmptyString(p.CWD, c.cwd))
-	var ignored json.RawMessage
-	if err := c.runtime.request(ctx, "thread/resume", req, &ignored); err != nil {
-		return err
+	cwd := firstNonEmptyString(p.CWD, c.cwd)
+	runtimeThreadID := firstNonEmptyString(codexappMappedThreadID(acpSessionID), acpSessionID)
+	req := c.config.threadResumeParams(runtimeThreadID, cwd)
+	var resp appServerThreadStartResponse
+	if err := c.runtime.request(ctx, "thread/resume", req, &resp); err != nil {
+		if !codexappNoRolloutError(err) {
+			return err
+		}
+		startReq := c.config.threadStartParams(cwd)
+		if err := c.runtime.request(ctx, "thread/start", startReq, &resp); err != nil {
+			return err
+		}
 	}
+	if resp.Thread.ID != "" {
+		runtimeThreadID = strings.TrimSpace(resp.Thread.ID)
+	}
+	if runtimeThreadID == "" {
+		return errors.New("codexapp thread/resume returned empty thread id")
+	}
+	c.bindSessionIDs(acpSessionID, runtimeThreadID)
+	codexappStoreThreadMapping(acpSessionID, runtimeThreadID)
+	c.replayThreadTurns(acpSessionID, resp.Thread.Turns)
 	return assignResult(result, protocol.SessionLoadResult{ConfigOptions: c.config.options()})
 }
 
@@ -527,12 +646,7 @@ func (c *codexappConn) sendSessionPrompt(ctx context.Context, p protocol.Session
 	if err != nil {
 		return err
 	}
-	threadID := strings.TrimSpace(p.SessionID)
-	if threadID == "" {
-		c.mu.Lock()
-		threadID = c.threadID
-		c.mu.Unlock()
-	}
+	threadID := c.runtimeThreadIDForSession(p.SessionID)
 	if threadID == "" {
 		return errors.New("codexapp session/prompt requires sessionId")
 	}
@@ -591,7 +705,7 @@ func (c *codexappConn) refreshModels(ctx context.Context) error {
 
 func (c *codexappConn) cancel(sessionID string) error {
 	c.mu.Lock()
-	threadID := firstNonEmptyString(strings.TrimSpace(sessionID), c.threadID)
+	acpSessionID := firstNonEmptyString(strings.TrimSpace(sessionID), c.acpSessionID)
 	turnID := firstNonEmptyString(c.activeTurnID, c.lastTurnID)
 	done := c.promptDone
 	c.promptDone = nil
@@ -599,6 +713,7 @@ func (c *codexappConn) cancel(sessionID string) error {
 	c.pendingPromptStops = nil
 	c.pendingPromptUpdates = nil
 	c.mu.Unlock()
+	threadID := c.runtimeThreadIDForSession(acpSessionID)
 	if threadID == "" {
 		if done != nil {
 			select {
@@ -655,30 +770,53 @@ func (c *codexappConn) handleAppServerNotification(method string, params json.Ra
 			if method == "item/fileChange/outputDelta" {
 				kind = protocol.ToolKindWrite
 			}
+			toolCallID := firstNonEmptyString(p.ItemID, p.TurnID)
+			c.emitToolCallStart(p.ThreadID, p.TurnID, toolCallID, toolCallID, kind)
 			c.emitTurnUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdate{
 				SessionUpdate:   protocol.SessionUpdateToolCallUpdate,
-				ToolCallID:      firstNonEmptyString(p.ItemID, p.TurnID),
+				ToolCallID:      toolCallID,
 				Title:           firstNonEmptyString(p.ItemID, "tool"),
 				Kind:            kind,
 				Status:          protocol.ToolCallStatusInProgress,
 				ToolCallContent: []protocol.ToolCallContent{textToolCallContent(p.Delta)},
 			})
 		}
+	case "item/fileChange/patchUpdated":
+		var p appServerFileChangePatchUpdatedParams
+		if json.Unmarshal(params, &p) == nil && p.ThreadID != "" && p.ItemID != "" {
+			c.emitToolCallStart(p.ThreadID, p.TurnID, p.ItemID, "File change", protocol.ToolKindWrite)
+			c.emitTurnUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdate{
+				SessionUpdate:   protocol.SessionUpdateToolCallUpdate,
+				ToolCallID:      p.ItemID,
+				Title:           "File change",
+				Kind:            protocol.ToolKindWrite,
+				Status:          protocol.ToolCallStatusInProgress,
+				ToolCallContent: codexappFileChangeContents(p.Changes),
+			})
+		}
+	case "turn/plan/updated":
+		var p appServerTurnPlanUpdatedParams
+		if json.Unmarshal(params, &p) == nil && p.ThreadID != "" {
+			c.emitTurnUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdate{
+				SessionUpdate: protocol.SessionUpdatePlan,
+				Entries:       codexappPlanEntries(p.Plan),
+			})
+		}
 	case "turn/started":
 		var p appServerTurnEventParams
 		if json.Unmarshal(params, &p) == nil {
-			c.setActiveTurnID(p.TurnID)
+			c.setActiveTurnID(p.turnID())
 		}
 	case "turn/completed":
 		var p appServerTurnCompletedParams
 		if json.Unmarshal(params, &p) == nil {
-			c.completePrompt(p.TurnID, codexappStopReason(p.Status))
+			c.completePrompt(p.turnID(), codexappStopReason(p.status()))
 		}
 	case "thread/name/updated":
 		var p appServerThreadNameUpdatedParams
 		if json.Unmarshal(params, &p) == nil && p.ThreadID != "" {
 			c.emitSessionUpdate(protocol.SessionUpdateParams{
-				SessionID: p.ThreadID,
+				SessionID: c.outboundSessionID(p.ThreadID),
 				Update: protocol.SessionUpdate{
 					SessionUpdate: protocol.SessionUpdateSessionInfoUpdate,
 					Title:         p.displayName(),
@@ -705,16 +843,47 @@ func (c *codexappConn) emitItemUpdate(p appServerItemEventParams, completed bool
 		c.emitTurnUpdate(p.ThreadID, p.TurnID, protocol.SessionUpdate{
 			SessionUpdate: protocol.SessionUpdatePlan,
 			Entries: []protocol.PlanEntry{{
-				Content: text,
-				Status:  protocol.ToolCallStatusCompleted,
+				Content:  text,
+				Priority: "medium",
+				Status:   protocol.ToolCallStatusCompleted,
 			}},
 		})
 	case "commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "webSearch", "imageView":
+		if !completed {
+			c.emitToolCallStart(p.ThreadID, p.TurnID, item.ID, codexappItemTitle(item), codexappItemToolKind(item.Type))
+		}
 		update := codexappItemToolUpdate(item, completed)
-		if update.ToolCallID != "" {
+		if update.ToolCallID != "" && (completed || update.Status != protocol.ToolCallStatusPending) {
 			c.emitTurnUpdate(p.ThreadID, p.TurnID, update)
 		}
 	}
+}
+
+func (c *codexappConn) emitToolCallStart(threadID string, turnID string, toolCallID string, title string, kind string) {
+	toolCallID = strings.TrimSpace(toolCallID)
+	if toolCallID == "" || !c.markToolStarted(toolCallID) {
+		return
+	}
+	c.emitTurnUpdate(threadID, turnID, protocol.SessionUpdate{
+		SessionUpdate: protocol.SessionUpdateToolCall,
+		ToolCallID:    toolCallID,
+		Title:         firstNonEmptyString(title, toolCallID),
+		Kind:          kind,
+		Status:        protocol.ToolCallStatusPending,
+	})
+}
+
+func (c *codexappConn) markToolStarted(toolCallID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.startedTools == nil {
+		c.startedTools = map[string]bool{}
+	}
+	if c.startedTools[toolCallID] {
+		return false
+	}
+	c.startedTools[toolCallID] = true
+	return true
 }
 
 func codexappItemToolUpdate(item appServerThreadItem, completed bool) protocol.SessionUpdate {
@@ -776,7 +945,7 @@ func codexappToolStatus(status string, completed bool) string {
 	case "failed", "error":
 		return protocol.ToolCallStatusFailed
 	case "declined", "cancelled", "canceled":
-		return protocol.ToolCallStatusCancelled
+		return protocol.ToolCallStatusFailed
 	default:
 		if completed {
 			return protocol.ToolCallStatusCompleted
@@ -863,12 +1032,132 @@ func textToolCallContent(text string) protocol.ToolCallContent {
 	}
 }
 
+func codexappFileChangeContents(changes []appServerFileChange) []protocol.ToolCallContent {
+	out := make([]protocol.ToolCallContent, 0, len(changes))
+	for _, change := range changes {
+		content := protocol.ToolCallContent{Type: "diff", Path: change.Path}
+		if change.Diff != "" {
+			content.NewText = change.Diff
+		} else {
+			content.OldText = change.OldText
+			content.NewText = change.NewText
+		}
+		out = append(out, content)
+	}
+	return out
+}
+
+func codexappPlanEntries(steps []appServerPlanStep) []protocol.PlanEntry {
+	out := make([]protocol.PlanEntry, 0, len(steps))
+	for _, step := range steps {
+		if strings.TrimSpace(step.Step) == "" {
+			continue
+		}
+		out = append(out, protocol.PlanEntry{
+			Content:  step.Step,
+			Priority: "medium",
+			Status:   codexappPlanStatus(step.Status),
+		})
+	}
+	return out
+}
+
+func codexappPlanStatus(status string) string {
+	switch status {
+	case "completed":
+		return protocol.ToolCallStatusCompleted
+	case "inProgress", "in_progress":
+		return protocol.ToolCallStatusInProgress
+	default:
+		return protocol.ToolCallStatusPending
+	}
+}
+
+func codexappNoRolloutError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no rollout found for thread id")
+}
+
+func (c *codexappConn) replayThreadTurns(acpSessionID string, turns []appServerTurn) {
+	acpSessionID = strings.TrimSpace(acpSessionID)
+	if acpSessionID == "" || len(turns) == 0 {
+		return
+	}
+	for _, turn := range turns {
+		for _, item := range turn.Items {
+			c.replayThreadItem(acpSessionID, item)
+		}
+	}
+}
+
+func (c *codexappConn) replayThreadItem(acpSessionID string, item appServerThreadItem) {
+	switch item.Type {
+	case "userMessage":
+		var inputs []appServerUserInput
+		if len(item.Content) > 0 && json.Unmarshal(item.Content, &inputs) == nil {
+			for _, input := range inputs {
+				if input.Type == "text" && input.Text != "" {
+					c.emitReplayText(acpSessionID, protocol.SessionUpdateUserMessageChunk, input.Text)
+				}
+			}
+		}
+	case "agentMessage":
+		if item.Text != "" {
+			c.emitReplayText(acpSessionID, protocol.SessionUpdateAgentMessageChunk, item.Text)
+		}
+	case "reasoning":
+		if text := codexappItemText(item.Summary, item.Content, item.Text); text != "" {
+			c.emitReplayText(acpSessionID, protocol.SessionUpdateAgentThoughtChunk, text)
+		}
+	case "plan":
+		if text := codexappItemText(nil, item.Content, item.Text); text != "" {
+			c.emitSessionUpdate(protocol.SessionUpdateParams{
+				SessionID: acpSessionID,
+				Update: protocol.SessionUpdate{
+					SessionUpdate: protocol.SessionUpdatePlan,
+					Entries: []protocol.PlanEntry{{
+						Content:  text,
+						Priority: "medium",
+						Status:   protocol.ToolCallStatusCompleted,
+					}},
+				},
+			})
+		}
+	case "commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "webSearch", "imageView":
+		start := protocol.SessionUpdate{
+			SessionUpdate: protocol.SessionUpdateToolCall,
+			ToolCallID:    item.ID,
+			Title:         codexappItemTitle(item),
+			Kind:          codexappItemToolKind(item.Type),
+			Status:        protocol.ToolCallStatusPending,
+		}
+		c.emitSessionUpdate(protocol.SessionUpdateParams{SessionID: acpSessionID, Update: start})
+		update := codexappItemToolUpdate(item, true)
+		if update.ToolCallID != "" {
+			c.emitSessionUpdate(protocol.SessionUpdateParams{SessionID: acpSessionID, Update: update})
+		}
+	}
+}
+
+func (c *codexappConn) emitReplayText(acpSessionID string, updateType string, text string) {
+	c.emitSessionUpdate(protocol.SessionUpdateParams{
+		SessionID: acpSessionID,
+		Update: protocol.SessionUpdate{
+			SessionUpdate: updateType,
+			Content:       mustRaw(protocol.ContentBlock{Type: protocol.ContentBlockTypeText, Text: text}),
+		},
+	})
+}
+
 func (c *codexappConn) handleAppServerRequest(ctx context.Context, method string, params json.RawMessage) (any, error) {
 	switch method {
 	case "item/commandExecution/requestApproval":
 		return c.handleApprovalRequest(ctx, params, protocol.ToolKindExecute)
 	case "item/fileChange/requestApproval":
 		return c.handleApprovalRequest(ctx, params, protocol.ToolKindWrite)
+	case "item/permissions/requestApproval":
+		return c.handlePermissionsApprovalRequest(ctx, params)
+	case "mcpServer/elicitation/request":
+		return appServerMcpElicitationResponse{Action: "cancel", Content: nil, Meta: nil}, nil
 	default:
 		return nil, codexappMethodNotFoundError{method: method}
 	}
@@ -887,7 +1176,7 @@ func (c *codexappConn) handleApprovalRequest(ctx context.Context, params json.Ra
 	}
 	title := firstNonEmptyString(p.Command, p.Path, p.GrantRoot, "Approval requested")
 	resp, err := h(ctx, time.Now().UnixNano(), protocol.MethodRequestPermission, mustRaw(protocol.PermissionRequestParams{
-		SessionID: p.ThreadID,
+		SessionID: c.outboundSessionID(p.ThreadID),
 		ToolCall: protocol.ToolCallRef{
 			ToolCallID: p.ItemID,
 			Title:      title,
@@ -910,9 +1199,53 @@ func (c *codexappConn) handleApprovalRequest(ctx context.Context, params json.Ra
 	return appServerApprovalDecision{Decision: codexappApprovalDecision(permission.Outcome)}, nil
 }
 
+func (c *codexappConn) handlePermissionsApprovalRequest(ctx context.Context, params json.RawMessage) (any, error) {
+	var p appServerApprovalRequestParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return appServerPermissionsApprovalResponse{Permissions: json.RawMessage(`{}`), Scope: "turn"}, nil
+	}
+	c.mu.Lock()
+	h := c.reqHandler
+	c.mu.Unlock()
+	if h == nil {
+		return appServerPermissionsApprovalResponse{Permissions: json.RawMessage(`{}`), Scope: "turn"}, nil
+	}
+	title := firstNonEmptyString(p.Reason, p.CWD, "Additional permissions requested")
+	resp, err := h(ctx, time.Now().UnixNano(), protocol.MethodRequestPermission, mustRaw(protocol.PermissionRequestParams{
+		SessionID: c.outboundSessionID(p.ThreadID),
+		ToolCall: protocol.ToolCallRef{
+			ToolCallID: p.ItemID,
+			Title:      title,
+			Kind:       protocol.ToolKindOther,
+			Status:     protocol.ToolCallStatusPending,
+		},
+		Options: []protocol.PermissionOption{
+			{OptionID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+			{OptionID: "allow_always", Name: "Allow for session", Kind: "allow_always"},
+			{OptionID: "reject", Name: "Reject", Kind: "reject_once"},
+		},
+	}))
+	if err != nil {
+		return appServerPermissionsApprovalResponse{Permissions: json.RawMessage(`{}`), Scope: "turn"}, nil
+	}
+	var permission protocol.PermissionResponse
+	if err := remarshal(resp, &permission); err != nil {
+		return appServerPermissionsApprovalResponse{Permissions: json.RawMessage(`{}`), Scope: "turn"}, nil
+	}
+	value := firstNonEmptyString(permission.Outcome.OptionID, permission.Outcome.Outcome)
+	switch value {
+	case "allow_once":
+		return appServerPermissionsApprovalResponse{Permissions: nonEmptyJSON(p.Permissions), Scope: "turn"}, nil
+	case "allow_always":
+		return appServerPermissionsApprovalResponse{Permissions: nonEmptyJSON(p.Permissions), Scope: "session"}, nil
+	default:
+		return appServerPermissionsApprovalResponse{Permissions: json.RawMessage(`{}`), Scope: "turn"}, nil
+	}
+}
+
 func (c *codexappConn) emitTextUpdate(sessionID string, updateType string, text string) {
 	c.emitSessionUpdate(protocol.SessionUpdateParams{
-		SessionID: sessionID,
+		SessionID: c.outboundSessionID(sessionID),
 		Update: protocol.SessionUpdate{
 			SessionUpdate: updateType,
 			Content:       mustRaw(protocol.ContentBlock{Type: protocol.ContentBlockTypeText, Text: text}),
@@ -922,7 +1255,7 @@ func (c *codexappConn) emitTextUpdate(sessionID string, updateType string, text 
 
 func (c *codexappConn) emitTurnTextUpdate(sessionID string, turnID string, updateType string, text string) {
 	update := protocol.SessionUpdateParams{
-		SessionID: sessionID,
+		SessionID: c.outboundSessionID(sessionID),
 		Update: protocol.SessionUpdate{
 			SessionUpdate: updateType,
 			Content:       mustRaw(protocol.ContentBlock{Type: protocol.ContentBlockTypeText, Text: text}),
@@ -936,7 +1269,7 @@ func (c *codexappConn) emitTurnTextUpdate(sessionID string, turnID string, updat
 
 func (c *codexappConn) emitTurnUpdate(sessionID string, turnID string, update protocol.SessionUpdate) {
 	params := protocol.SessionUpdateParams{
-		SessionID: sessionID,
+		SessionID: c.outboundSessionID(sessionID),
 		Update:    update,
 	}
 	if c.deferOrDropTurnUpdate(turnID, params) {
@@ -1105,4 +1438,11 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func nonEmptyJSON(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage(`{}`)
+	}
+	return raw
 }

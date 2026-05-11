@@ -327,9 +327,9 @@ func TestCodexAppRuntimeRequestMatchesNumberAndStringResponseIDs(t *testing.T) {
 	if err := tr.emit(map[string]any{
 		"id": id,
 		"result": map[string]any{
-			"models": []map[string]any{{
+			"data": []map[string]any{{
 				"id":                        "gpt-5",
-				"name":                      "GPT-5",
+				"displayName":               "GPT-5",
 				"supportedReasoningEfforts": []string{"low", "high"},
 				"defaultReasoningEffort":    "high",
 			}},
@@ -353,7 +353,7 @@ func TestCodexAppRuntimeRequestMatchesNumberAndStringResponseIDs(t *testing.T) {
 	stringID := "req-string"
 	if err := tr.emit(map[string]any{
 		"id":     stringID,
-		"result": map[string]any{"models": []map[string]any{{"id": "ignored"}}},
+		"result": map[string]any{"data": []map[string]any{{"id": "ignored"}}},
 	}); err != nil {
 		t.Fatalf("emit unrelated string response: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestCodexAppRuntimeRequestMatchesNumberAndStringResponseIDs(t *testing.T) {
 	}
 	if err := tr.emit(map[string]any{
 		"id":     second["id"],
-		"result": map[string]any{"models": []map[string]any{{"id": "gpt-5-mini"}}},
+		"result": map[string]any{"data": []map[string]any{{"id": "gpt-5-mini"}}},
 	}); err != nil {
 		t.Fatalf("emit matching response: %v", err)
 	}
@@ -519,6 +519,104 @@ func TestCodexAppRuntimeUnsupportedKnownThreadServerRequestReturnsMethodNotFound
 	}
 }
 
+func TestCodexAppRuntimeCancelsMcpElicitationWithOfficialShape(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	rt.register("thread-1", conn)
+
+	if err := tr.emit(map[string]any{
+		"id":     "elicitation-req-1",
+		"method": "mcpServer/elicitation/request",
+		"params": map[string]any{
+			"threadId":   "thread-1",
+			"turnId":     "turn-1",
+			"serverName": "test-mcp",
+			"mode":       "form",
+			"message":    "Need input",
+			"requestedSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("emit request: %v", err)
+	}
+
+	resp := tr.nextSent(t)
+	if resp["id"] != "elicitation-req-1" {
+		t.Fatalf("response id=%#v, want original string id", resp["id"])
+	}
+	result := resp["result"].(map[string]any)
+	if result["action"] != "cancel" {
+		t.Fatalf("action=%#v, want cancel", result["action"])
+	}
+	if _, ok := result["content"]; !ok {
+		t.Fatalf("result=%#v, want content:null field", result)
+	}
+	if _, ok := result["_meta"]; !ok {
+		t.Fatalf("result=%#v, want _meta:null field", result)
+	}
+}
+
+func TestCodexAppRuntimeMapsPermissionsApprovalRequest(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.bindSessionIDs("acp-session", "runtime-thread")
+	conn.OnACPRequest(func(_ context.Context, _ int64, method string, params json.RawMessage) (any, error) {
+		if method != protocol.MethodRequestPermission {
+			t.Fatalf("method=%q, want request permission", method)
+		}
+		var p protocol.PermissionRequestParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			t.Fatalf("unmarshal permission params: %v", err)
+		}
+		if p.SessionID != "acp-session" || p.ToolCall.ToolCallID != "perm-1" || p.ToolCall.Kind != protocol.ToolKindOther {
+			t.Fatalf("permission params=%#v", p)
+		}
+		return protocol.PermissionResponse{
+			Outcome: protocol.PermissionResult{Outcome: "allow_always", OptionID: "allow_always"},
+		}, nil
+	})
+	rt.register("runtime-thread", conn)
+
+	if err := tr.emit(map[string]any{
+		"id":     "permissions-req-1",
+		"method": "item/permissions/requestApproval",
+		"params": map[string]any{
+			"threadId": "runtime-thread",
+			"turnId":   "turn-1",
+			"itemId":   "perm-1",
+			"cwd":      "D:/Code/WheelMaker",
+			"reason":   "Need workspace write",
+			"permissions": map[string]any{
+				"fileSystem": map[string]any{"write": []string{"D:/Code/WheelMaker"}},
+				"network":    map[string]any{"enabled": true},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("emit permissions request: %v", err)
+	}
+
+	resp := tr.nextSent(t)
+	if resp["id"] != "permissions-req-1" {
+		t.Fatalf("response id=%#v, want original string id", resp["id"])
+	}
+	result := resp["result"].(map[string]any)
+	if result["scope"] != "session" {
+		t.Fatalf("scope=%#v, want session", result["scope"])
+	}
+	permissions := result["permissions"].(map[string]any)
+	if permissions["fileSystem"] == nil || permissions["network"] == nil {
+		t.Fatalf("permissions=%#v, want requested subset", permissions)
+	}
+}
+
 func TestCodexAppPromptIgnoresStaleTurnCompletedForDifferentTurnID(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
@@ -549,7 +647,7 @@ func TestCodexAppPromptIgnoresStaleTurnCompletedForDifferentTurnID(t *testing.T)
 	waitForActiveTurn(t, conn, "turn-current")
 	if err := tr.emit(map[string]any{
 		"method": "turn/completed",
-		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-stale", "status": "completed"},
+		"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-stale", "status": "completed"}},
 	}); err != nil {
 		t.Fatalf("emit stale completion: %v", err)
 	}
@@ -561,7 +659,7 @@ func TestCodexAppPromptIgnoresStaleTurnCompletedForDifferentTurnID(t *testing.T)
 
 	if err := tr.emit(map[string]any{
 		"method": "turn/completed",
-		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-current", "status": "completed"},
+		"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-current", "status": "completed"}},
 	}); err != nil {
 		t.Fatalf("emit current completion: %v", err)
 	}
@@ -588,7 +686,7 @@ func TestCodexAppPromptCompletesWhenTurnCompletedArrivesBeforeTurnIDStored(t *te
 			})
 			_ = tr.emit(map[string]any{
 				"method": "turn/completed",
-				"params": map[string]any{"threadId": "thread-1", "turnId": "turn-fast", "status": "completed"},
+				"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-fast", "status": "completed"}},
 			})
 			<-releaseResponse
 		}
@@ -686,7 +784,7 @@ func TestCodexAppPromptFiltersStaleStreamingDeltas(t *testing.T) {
 	}
 	if err := tr.emit(map[string]any{
 		"method": "turn/completed",
-		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-current", "status": "completed"},
+		"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-current", "status": "completed"}},
 	}); err != nil {
 		t.Fatalf("emit completion: %v", err)
 	}
@@ -761,7 +859,7 @@ func TestCodexAppPromptDoesNotEchoUserMessageChunk(t *testing.T) {
 	}
 }
 
-func TestCodexAppItemLifecycleEmitsToolUpdates(t *testing.T) {
+func TestCodexAppItemLifecycleEmitsToolCallThenUpdates(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
 	t.Cleanup(func() { _ = rt.close() })
@@ -787,6 +885,15 @@ func TestCodexAppItemLifecycleEmitsToolUpdates(t *testing.T) {
 	}
 
 	update := waitForCodexappUpdate(t, updates)
+	if update.Update.SessionUpdate != protocol.SessionUpdateToolCall {
+		t.Fatalf("sessionUpdate=%q, want tool_call", update.Update.SessionUpdate)
+	}
+	if update.Update.ToolCallID != "cmd-1" || update.Update.Title != "rg needle" ||
+		update.Update.Kind != protocol.ToolKindExecute || update.Update.Status != protocol.ToolCallStatusPending {
+		t.Fatalf("tool call=%#v", update.Update)
+	}
+
+	update = waitForCodexappUpdate(t, updates)
 	if update.Update.SessionUpdate != protocol.SessionUpdateToolCallUpdate {
 		t.Fatalf("sessionUpdate=%q, want tool_call_update", update.Update.SessionUpdate)
 	}
@@ -815,6 +922,88 @@ func TestCodexAppItemLifecycleEmitsToolUpdates(t *testing.T) {
 	update = waitForCodexappUpdate(t, updates)
 	if update.Update.Status != protocol.ToolCallStatusCompleted || len(update.Update.ToolCallContent) == 0 {
 		t.Fatalf("completed tool update=%#v", update.Update)
+	}
+}
+
+func TestCodexAppTurnPlanUpdatedEmitsFullACPPlan(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	updates := make(chan protocol.SessionUpdateParams, 1)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	if err := tr.emit(map[string]any{
+		"method": "turn/plan/updated",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"plan": []map[string]any{
+				{"step": "Inspect app-server schema", "status": "completed"},
+				{"step": "Patch bridge", "status": "inProgress"},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("emit plan update: %v", err)
+	}
+
+	update := waitForCodexappUpdate(t, updates)
+	if update.Update.SessionUpdate != protocol.SessionUpdatePlan {
+		t.Fatalf("sessionUpdate=%q, want plan", update.Update.SessionUpdate)
+	}
+	want := []protocol.PlanEntry{
+		{Content: "Inspect app-server schema", Priority: "medium", Status: protocol.ToolCallStatusCompleted},
+		{Content: "Patch bridge", Priority: "medium", Status: protocol.ToolCallStatusInProgress},
+	}
+	if !reflect.DeepEqual(update.Update.Entries, want) {
+		t.Fatalf("plan entries=%#v, want %#v", update.Update.Entries, want)
+	}
+}
+
+func TestCodexAppFileChangePatchUpdatedEmitsDiffToolUpdate(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	updates := make(chan protocol.SessionUpdateParams, 1)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	if err := tr.emit(map[string]any{
+		"method": "item/fileChange/patchUpdated",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"itemId":   "patch-1",
+			"changes": []map[string]any{{
+				"path": "D:/Code/WheelMaker/server/main.go",
+				"kind": "update",
+				"diff": "@@ -1 +1 @@",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("emit patch update: %v", err)
+	}
+
+	start := waitForCodexappUpdate(t, updates)
+	if start.Update.SessionUpdate != protocol.SessionUpdateToolCall ||
+		start.Update.ToolCallID != "patch-1" ||
+		start.Update.Status != protocol.ToolCallStatusPending {
+		t.Fatalf("patch start=%#v", start.Update)
+	}
+
+	update := waitForCodexappUpdate(t, updates)
+	if update.Update.SessionUpdate != protocol.SessionUpdateToolCallUpdate ||
+		update.Update.ToolCallID != "patch-1" ||
+		update.Update.Kind != protocol.ToolKindWrite ||
+		update.Update.Status != protocol.ToolCallStatusInProgress {
+		t.Fatalf("patch update=%#v", update.Update)
+	}
+	if len(update.Update.ToolCallContent) != 1 || update.Update.ToolCallContent[0].Type != "diff" ||
+		update.Update.ToolCallContent[0].Path != "D:/Code/WheelMaker/server/main.go" ||
+		update.Update.ToolCallContent[0].NewText != "@@ -1 +1 @@" {
+		t.Fatalf("patch content=%#v", update.Update.ToolCallContent)
 	}
 }
 
@@ -929,7 +1118,7 @@ func TestCodexAppCancelClearsActivePromptState(t *testing.T) {
 	waitForActiveTurn(t, conn, "turn-2")
 	if err := tr.emit(map[string]any{
 		"method": "turn/completed",
-		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-2", "status": "completed"},
+		"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-2", "status": "completed"}},
 	}); err != nil {
 		t.Fatalf("emit second completion: %v", err)
 	}
@@ -1077,6 +1266,21 @@ func TestCodexAppModelListDecodesAppServerDataShape(t *testing.T) {
 	}
 }
 
+func TestCodexAppModelListIgnoresLegacyModelsShape(t *testing.T) {
+	var resp appServerModelListResponse
+	if err := json.Unmarshal([]byte(`{
+		"models": [{
+			"id": "legacy-models-field",
+			"name": "Legacy"
+		}]
+	}`), &resp); err != nil {
+		t.Fatalf("unmarshal legacy model list: %v", err)
+	}
+	if len(resp.Models) != 0 {
+		t.Fatalf("legacy models field decoded as %#v, want ignored", resp.Models)
+	}
+}
+
 func TestCodexAppThreadListDecodesOfficialDataShape(t *testing.T) {
 	var resp appServerThreadListResponse
 	if err := json.Unmarshal([]byte(`{
@@ -1122,7 +1326,7 @@ func TestCodexAppTurnNotificationsDecodeOfficialNestedTurnShape(t *testing.T) {
 	}`), &started); err != nil {
 		t.Fatalf("unmarshal turn/started: %v", err)
 	}
-	if started.ThreadID != "thread-1" || started.TurnID != "turn-1" {
+	if started.ThreadID != "thread-1" || started.turnID() != "turn-1" {
 		t.Fatalf("started=%#v", started)
 	}
 
@@ -1133,16 +1337,160 @@ func TestCodexAppTurnNotificationsDecodeOfficialNestedTurnShape(t *testing.T) {
 	}`), &completed); err != nil {
 		t.Fatalf("unmarshal turn/completed: %v", err)
 	}
-	if completed.TurnID != "turn-1" || completed.Status != "interrupted" {
+	if completed.turnID() != "turn-1" || completed.status() != "interrupted" {
 		t.Fatalf("completed=%#v", completed)
+	}
+}
+
+func TestCodexAppSessionLoadReplaysThreadTurnsBeforeReturning(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		method, _ := msg["method"].(string)
+		id := msg["id"]
+		switch method {
+		case "model/list":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{"data": []map[string]any{{"id": "gpt-5", "displayName": "GPT-5"}}}})
+		case "thread/resume":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
+				"thread": map[string]any{
+					"id": "thread-1",
+					"turns": []map[string]any{{
+						"id":     "turn-1",
+						"status": "completed",
+						"items": []map[string]any{
+							{
+								"id":   "user-1",
+								"type": "userMessage",
+								"content": []map[string]any{{
+									"type":          "text",
+									"text":          "hello",
+									"text_elements": []any{},
+								}},
+							},
+							{"id": "agent-1", "type": "agentMessage", "text": "world"},
+						},
+					}},
+				},
+			}})
+		default:
+			t.Errorf("unexpected app-server method %q", method)
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	updates := make(chan protocol.SessionUpdateParams, 2)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	var loadRes protocol.SessionLoadResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionLoad, protocol.SessionLoadParams{
+		SessionID: "thread-1",
+		CWD:       t.TempDir(),
+	}, &loadRes); err != nil {
+		t.Fatalf("SessionLoad: %v", err)
+	}
+
+	first := waitForCodexappUpdate(t, updates)
+	if first.SessionID != "thread-1" || first.Update.SessionUpdate != protocol.SessionUpdateUserMessageChunk {
+		t.Fatalf("first replay update=%#v", first)
+	}
+	var userContent protocol.ContentBlock
+	if err := json.Unmarshal(first.Update.Content, &userContent); err != nil {
+		t.Fatalf("unmarshal user content: %v", err)
+	}
+	if userContent.Text != "hello" {
+		t.Fatalf("user replay text=%q", userContent.Text)
+	}
+
+	second := waitForCodexappUpdate(t, updates)
+	if second.SessionID != "thread-1" || second.Update.SessionUpdate != protocol.SessionUpdateAgentMessageChunk {
+		t.Fatalf("second replay update=%#v", second)
+	}
+	var agentContent protocol.ContentBlock
+	if err := json.Unmarshal(second.Update.Content, &agentContent); err != nil {
+		t.Fatalf("unmarshal agent content: %v", err)
+	}
+	if agentContent.Text != "world" {
+		t.Fatalf("agent replay text=%q", agentContent.Text)
+	}
+}
+
+func TestCodexAppSessionLoadRecreatesUnmaterializedThreadInternally(t *testing.T) {
+	oldMapPath := codexappSessionMapPathFunc
+	mapPath := filepath.Join(t.TempDir(), "codexapp-session-map.json")
+	codexappSessionMapPathFunc = func() (string, error) { return mapPath, nil }
+	t.Cleanup(func() { codexappSessionMapPathFunc = oldMapPath })
+
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		method, _ := msg["method"].(string)
+		id := msg["id"]
+		switch method {
+		case "model/list":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{"data": []map[string]any{{"id": "gpt-5", "displayName": "GPT-5"}}}})
+		case "thread/resume":
+			params := msg["params"].(map[string]any)
+			if params["threadId"] != "old-acp-session" {
+				t.Errorf("thread/resume params=%#v", params)
+			}
+			_ = tr.emit(map[string]any{"id": id, "error": map[string]any{"code": -32600, "message": "no rollout found for thread id old-acp-session"}})
+		case "thread/start":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{"thread": map[string]any{"id": "new-runtime-thread"}}})
+		case "turn/start":
+			params := msg["params"].(map[string]any)
+			if params["threadId"] != "new-runtime-thread" {
+				t.Errorf("turn/start threadId=%#v, want remapped runtime thread", params["threadId"])
+			}
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{"turn": map[string]any{"id": "turn-1"}}})
+			_ = tr.emit(map[string]any{
+				"method": "item/agentMessage/delta",
+				"params": map[string]any{"threadId": "new-runtime-thread", "turnId": "turn-1", "delta": "pong"},
+			})
+			_ = tr.emit(map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"threadId": "new-runtime-thread", "turn": map[string]any{"id": "turn-1", "status": "completed"}},
+			})
+		default:
+			t.Errorf("unexpected app-server method %q", method)
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	updates := make(chan protocol.SessionUpdateParams, 1)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	var loadRes protocol.SessionLoadResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionLoad, protocol.SessionLoadParams{
+		SessionID: "old-acp-session",
+		CWD:       t.TempDir(),
+	}, &loadRes); err != nil {
+		t.Fatalf("SessionLoad: %v", err)
+	}
+
+	var promptRes protocol.SessionPromptResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+		SessionID: "old-acp-session",
+		Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+	}, &promptRes); err != nil {
+		t.Fatalf("SessionPrompt: %v", err)
+	}
+	if promptRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("stopReason=%q", promptRes.StopReason)
+	}
+	update := waitForCodexappUpdate(t, updates)
+	if update.SessionID != "old-acp-session" {
+		t.Fatalf("update sessionId=%q, want ACP session id", update.SessionID)
 	}
 }
 
 func TestCodexAppApprovalPresetOptionsMatchOfficialModes(t *testing.T) {
 	state := newCodexappConfigState()
 	options := state.options()
-	if got := currentConfigValue(options, protocol.ConfigOptionIDApprovalPreset); got != "auto" {
-		t.Fatalf("default approval preset=%q, want auto", got)
+	if got := currentConfigValue(options, protocol.ConfigOptionIDApprovalPreset); got != "ask" {
+		t.Fatalf("default approval preset=%q, want ask", got)
 	}
 
 	var values []protocol.ConfigOptionValue
@@ -1153,8 +1501,9 @@ func TestCodexAppApprovalPresetOptionsMatchOfficialModes(t *testing.T) {
 		}
 	}
 	want := []protocol.ConfigOptionValue{
-		{Value: "auto", Name: "Auto"},
 		{Value: "read_only", Name: "Read-only"},
+		{Value: "ask", Name: "Ask"},
+		{Value: "auto", Name: "Auto"},
 		{Value: "full", Name: "Full Access"},
 	}
 	if !reflect.DeepEqual(values, want) {
@@ -1174,12 +1523,12 @@ func TestCodexAppApprovalProfilesMatchOfficialModes(t *testing.T) {
 		{
 			name:          "auto",
 			preset:        "auto",
-			approval:      "on-request",
+			approval:      "on-failure",
 			threadSandbox: "workspace-write",
 			turnSandbox:   "workspaceWrite",
 		},
 		{
-			name:          "legacy ask alias",
+			name:          "ask",
 			preset:        "ask",
 			approval:      "on-request",
 			threadSandbox: "workspace-write",
@@ -1217,13 +1566,13 @@ func TestCodexAppApprovalProfilesMatchOfficialModes(t *testing.T) {
 	}
 }
 
-func TestCodexAppLegacyAskPresetCanonicalizesToAuto(t *testing.T) {
+func TestCodexAppAskPresetRemainsDistinctFromAuto(t *testing.T) {
 	state := newCodexappConfigState()
 	if err := state.set(protocol.ConfigOptionIDApprovalPreset, "ask"); err != nil {
-		t.Fatalf("set legacy ask preset: %v", err)
+		t.Fatalf("set ask preset: %v", err)
 	}
-	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDApprovalPreset); got != "auto" {
-		t.Fatalf("legacy ask canonicalized to %q, want auto", got)
+	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDApprovalPreset); got != "ask" {
+		t.Fatalf("ask preset stored as %q, want ask", got)
 	}
 }
 
@@ -1251,11 +1600,15 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 				t.Errorf("model/list params=%#v, want empty object", msg["params"])
 			}
 			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
-				"models": []map[string]any{{
-					"id":                        "gpt-5",
-					"name":                      "GPT-5",
-					"supportedReasoningEfforts": []string{"low", "medium", "high"},
-					"defaultReasoningEffort":    "medium",
+				"data": []map[string]any{{
+					"id":          "gpt-5",
+					"displayName": "GPT-5",
+					"supportedReasoningEfforts": []map[string]any{
+						{"reasoningEffort": "low", "description": "Fast"},
+						{"reasoningEffort": "medium", "description": "Balanced"},
+						{"reasoningEffort": "high", "description": "Deep"},
+					},
+					"defaultReasoningEffort": "medium",
 				}},
 			}})
 		case "thread/start":
@@ -1271,8 +1624,23 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 			if params["threadId"] != "thread-1" || params["model"] != "gpt-5" || params["effort"] != "high" {
 				t.Errorf("turn/start params=%#v", params)
 			}
+			input := params["input"].([]any)
+			textInput := input[0].(map[string]any)
+			if textInput["type"] != "text" || textInput["text"] != "ping" {
+				t.Errorf("turn/start input=%#v", input)
+			}
+			if elements, ok := textInput["text_elements"].([]any); !ok || len(elements) != 0 {
+				t.Errorf("turn/start text_elements=%#v, want empty array", textInput["text_elements"])
+			}
 			if _, ok := params["sandbox"]; ok {
 				t.Errorf("turn/start must use sandboxPolicy, not sandbox: %#v", params)
+			}
+			sandboxPolicy := params["sandboxPolicy"].(map[string]any)
+			if sandboxPolicy["type"] != "workspaceWrite" ||
+				sandboxPolicy["networkAccess"] != false ||
+				sandboxPolicy["excludeTmpdirEnvVar"] != false ||
+				sandboxPolicy["excludeSlashTmp"] != false {
+				t.Errorf("turn/start sandboxPolicy=%#v", sandboxPolicy)
 			}
 			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
 				"turn": map[string]any{"id": "turn-1"},
@@ -1313,8 +1681,8 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	if newRes.SessionID != "thread-1" {
 		t.Fatalf("sessionId=%q", newRes.SessionID)
 	}
-	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "auto" {
-		t.Fatalf("config options missing auto approval preset: %#v", newRes.ConfigOptions)
+	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "ask" {
+		t.Fatalf("config options missing ask approval preset: %#v", newRes.ConfigOptions)
 	}
 	opts, err := inst.SessionSetConfigOption(context.Background(), protocol.SessionSetConfigOptionParams{
 		SessionID: "thread-1",
