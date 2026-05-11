@@ -6860,65 +6860,69 @@ function App() {
             </div>
             {selectedChatConfigOptions.length > 0 ? (
               <div className="chat-config-options-wrap">
-                <div ref={chatConfigOptionsRef} className="chat-config-options">
-                  {chatConfigOptions.map(option => {
-                    const optionValues = option.options ?? [];
-                    const currentValue =
-                      option.currentValue || optionValues[0]?.value || '';
-                    const hasChoices = optionValues.length > 0;
-                    const updating =
-                      chatConfigUpdatingKey ===
-                      `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
-                    const optionLabel = option.name || option.id;
-                    return (
-                      <div key={option.id} className="chat-config-item">
-                        {isWide && showChatConfigLabels ? (
-                          <span className="chat-config-item-label" title={optionLabel}>
-                            {optionLabel}
-                          </span>
-                        ) : null}
-                        <select
-                          className="chat-config-select"
-                          value={currentValue}
-                          disabled={updating || !hasChoices}
-                          title={option.name || option.id}
-                          aria-label={option.name || option.id}
-                          onChange={event => {
-                            handleChatConfigOptionChange(
-                              option,
-                              event.target.value,
-                            ).catch(() => undefined);
-                          }}
-                        >
-                          {!optionValues.some(item => item.value === currentValue) &&
-                          currentValue ? (
-                            <option value={currentValue}>{currentValue}</option>
+                <div className="chat-config-options-shell">
+                  <div ref={chatConfigOptionsRef} className="chat-config-options">
+                    {chatConfigOptions.map(option => {
+                      const optionValues = option.options ?? [];
+                      const currentValue =
+                        option.currentValue || optionValues[0]?.value || '';
+                      const hasChoices = optionValues.length > 0;
+                      const updating =
+                        chatConfigUpdatingKey ===
+                        `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
+                      const optionLabel = option.name || option.id;
+                      return (
+                        <div key={option.id} className="chat-config-item">
+                          {isWide && showChatConfigLabels ? (
+                            <span className="chat-config-item-label" title={optionLabel}>
+                              {optionLabel}
+                            </span>
                           ) : null}
-                          {optionValues.map(item => (
-                            <option
-                              key={`${option.id}:${item.value}`}
-                              value={item.value}
-                            >
-                              {item.name || item.value}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    );
-                  })}
+                          <select
+                            className="chat-config-select"
+                            value={currentValue}
+                            disabled={updating || !hasChoices}
+                            title={option.name || option.id}
+                            aria-label={option.name || option.id}
+                            onChange={event => {
+                              handleChatConfigOptionChange(
+                                option,
+                                event.target.value,
+                              ).catch(() => undefined);
+                            }}
+                          >
+                            {!optionValues.some(item => item.value === currentValue) &&
+                            currentValue ? (
+                              <option value={currentValue}>{currentValue}</option>
+                            ) : null}
+                            {optionValues.map(item => (
+                              <option
+                                key={`${option.id}:${item.value}`}
+                                value={item.value}
+                              >
+                                {item.name || item.value}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
                   {!isWide && chatConfigOverflowOptions.length > 0 ? (
-                    <div ref={chatConfigOverflowRef} className="chat-config-overflow">
+                    <div ref={chatConfigOverflowRef} className="chat-config-overflow-anchor">
                       <button
                         type="button"
                         className="chat-config-overflow-button"
                         aria-label={`Show ${chatConfigOverflowOptions.length} more config options`}
                         aria-expanded={chatConfigOverflowOpen}
+                        title="More config options"
                         onClick={() => setChatConfigOverflowOpen(prev => !prev)}
                       >
-                        +{chatConfigOverflowOptions.length}
+                        <span className="codicon codicon-settings-gear" aria-hidden="true" />
+                        <span className="codicon codicon-chevron-down" aria-hidden="true" />
                       </button>
                       {chatConfigOverflowOpen ? (
-                        <div className="chat-config-overflow-menu" role="menu" aria-label="More config options">
+                        <div className="chat-config-overflow-menu" aria-label="More config options">
                           {chatConfigOverflowOptions.map(option => {
                             const optionValues = option.options ?? [];
                             const currentValue =

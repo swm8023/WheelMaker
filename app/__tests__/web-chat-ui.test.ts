@@ -121,6 +121,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('transform: translateY(calc(-100% + 6px));');
     expect(stylesCss).toContain('.chat-session-item');
     expect(stylesCss).toContain('.chat-attachment-preview-list {');
+    expect(stylesCss).toContain('.chat-config-overflow-anchor {');
     expect(stylesCss).toContain('.chat-config-overflow-button {');
     expect(stylesCss).toContain('.chat-config-overflow-menu {');
     expect(mainTsx).not.toContain('className="status-bar"');
@@ -138,8 +139,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
     expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
     expect(mainTsx).toContain('const chatConfigDisplay = useMemo(() => {');
+    expect(mainTsx).toContain('className="chat-config-options-shell"');
+    expect(mainTsx).toContain('<div ref={chatConfigOptionsRef} className="chat-config-options">');
+    expect(mainTsx).toContain('{!isWide && chatConfigOverflowOptions.length > 0 ? (');
+    expect(mainTsx).toContain('className="chat-config-overflow-anchor"');
     expect(mainTsx).toContain('chat-config-overflow-button');
     expect(mainTsx).toContain('chat-config-overflow-menu');
+    expect(mainTsx).toContain('className="codicon codicon-settings-gear"');
+    expect(mainTsx).toContain('className="codicon codicon-chevron-down"');
+    expect(mainTsx).not.toContain('+{chatConfigOverflowOptions.length}');
+    expect(mainTsx).toContain('title="More config options"');
     expect(mainTsx).toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
     expect(mainTsx).toContain('text: chooseChatEntryText(previous.text, text),');
     expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');

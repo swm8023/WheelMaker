@@ -2796,11 +2796,20 @@ body,
   position: relative;
 }
 
+.chat-config-options-shell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .chat-config-options {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
   padding-bottom: 2px;
   scrollbar-width: thin;
@@ -2832,23 +2841,30 @@ body,
   min-width: 0;
 }
 
-.chat-config-overflow {
+.chat-config-overflow-anchor {
   position: relative;
   flex: 0 0 auto;
-  margin-left: auto;
 }
 
 .chat-config-overflow-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   min-height: 28px;
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--panel);
   color: var(--text);
-  padding: 0 10px;
+  padding: 0 9px;
   font: inherit;
   font-size: 12px;
   line-height: 1.2;
   cursor: pointer;
+}
+
+.chat-config-overflow-button .codicon {
+  font-size: 12px;
 }
 
 .chat-config-overflow-button:hover {
@@ -3573,11 +3589,8 @@ body,
   }
 
   .chat-config-options {
-    width: 100%;
-    display: flex;
-    align-items: center;
+    width: auto;
     gap: 8px;
-    overflow-x: auto;
   }
 
   .chat-config-item {
