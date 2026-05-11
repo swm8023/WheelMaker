@@ -186,7 +186,13 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.floating-control-stack {');
     expect(stylesCss).toContain('.floating-nav-group {');
     expect(stylesCss).toContain('.floating-nav-indicator {');
+    expect(stylesCss).toMatch(
+      /\.floating-nav-indicator \{[\s\S]*background: var\(--accent\);[\s\S]*border: 1px solid transparent;/,
+    );
     expect(stylesCss).toContain('.drawer-toggle-bubble {');
+    expect(stylesCss).toMatch(
+      /\.drawer-toggle-bubble\[data-active='true'\] \{[\s\S]*background: var\(--accent\);[\s\S]*border-color: transparent;/,
+    );
     expect(stylesCss).toContain('-webkit-tap-highlight-color: transparent;');
     expect(stylesCss).toContain('.breadcrumb-title {');
     expect(stylesCss).toContain('.breadcrumb-project-name {');

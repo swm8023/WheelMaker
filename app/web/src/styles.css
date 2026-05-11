@@ -353,8 +353,8 @@ body,
   width: 40px;
   height: 40px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--accent);
+  border: 1px solid transparent;
   transform: translateY(calc(var(--floating-nav-index, 0) * 40px));
   transition: transform 180ms ease;
 }
@@ -405,8 +405,8 @@ body,
 }
 
 .drawer-toggle-bubble[data-active='true'] {
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: var(--accent);
+  border-color: transparent;
 }
 
 .breadcrumb-title {
