@@ -255,12 +255,15 @@ func TestCodeBuddyACPProvider_LaunchArgs(t *testing.T) {
 }
 
 func TestParseACPProviderCodexApp(t *testing.T) {
-	provider, ok := protocol.ParseACPProvider("codex-app")
+	provider, ok := protocol.ParseACPProvider("codexapp")
 	if !ok {
 		t.Fatal("ParseACPProvider returned ok=false")
 	}
 	if provider != protocol.ACPProviderCodexApp {
 		t.Fatalf("provider=%q, want %q", provider, protocol.ACPProviderCodexApp)
+	}
+	if _, ok := protocol.ParseACPProvider("codex-app"); ok {
+		t.Fatal("ParseACPProvider accepted legacy codex-app alias")
 	}
 
 	for _, name := range protocol.ACPProviderNames() {
@@ -272,7 +275,7 @@ func TestParseACPProviderCodexApp(t *testing.T) {
 }
 
 func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
-	p := NewCodexAppServerProvider()
+	p := NewCodexAppProvider()
 	p.lookPath = func(bin string) (string, error) {
 		if bin != "codex" {
 			t.Fatalf("lookPath bin=%q, want codex", bin)
@@ -292,6 +295,734 @@ func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
 	}
 	if len(env) != 0 {
 		t.Fatalf("env=%v, want empty", env)
+	}
+}
+
+func TestCodexAppRuntimeRequestMatchesNumberAndStringResponseIDs(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	var got appServerModelListResponse
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- rt.request(context.Background(), "model/list", nil, &got)
+	}()
+
+	first := tr.nextSent(t)
+	if _, ok := first["jsonrpc"]; ok {
+		t.Fatalf("app-server request must not include jsonrpc: %#v", first)
+	}
+	if first["method"] != "model/list" {
+		t.Fatalf("method=%v, want model/list", first["method"])
+	}
+	id, ok := first["id"]
+	if !ok {
+		t.Fatalf("request missing id: %#v", first)
+	}
+
+	if err := tr.emit(map[string]any{
+		"id": id,
+		"result": map[string]any{
+			"models": []map[string]any{{
+				"id":                        "gpt-5",
+				"name":                      "GPT-5",
+				"supportedReasoningEfforts": []string{"low", "high"},
+				"defaultReasoningEffort":    "high",
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("emit response: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	if len(got.Models) != 1 || got.Models[0].ID != "gpt-5" {
+		t.Fatalf("models=%#v", got.Models)
+	}
+
+	var got2 appServerModelListResponse
+	errCh = make(chan error, 1)
+	go func() {
+		errCh <- rt.request(context.Background(), "model/list", nil, &got2)
+	}()
+	second := tr.nextSent(t)
+	stringID := "req-string"
+	if err := tr.emit(map[string]any{
+		"id":     stringID,
+		"result": map[string]any{"models": []map[string]any{{"id": "ignored"}}},
+	}); err != nil {
+		t.Fatalf("emit unrelated string response: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("request completed for unrelated string response: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := tr.emit(map[string]any{
+		"id":     second["id"],
+		"result": map[string]any{"models": []map[string]any{{"id": "gpt-5-mini"}}},
+	}); err != nil {
+		t.Fatalf("emit matching response: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("request 2: %v", err)
+	}
+	if len(got2.Models) != 1 || got2.Models[0].ID != "gpt-5-mini" {
+		t.Fatalf("models2=%#v", got2.Models)
+	}
+}
+
+func TestCodexAppRuntimeRoutesNotificationsByThread(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	connA := newCodexappConnWithRuntime(rt, t.TempDir())
+	connB := newCodexappConnWithRuntime(rt, t.TempDir())
+	chA := make(chan protocol.SessionUpdateParams, 1)
+	chB := make(chan protocol.SessionUpdateParams, 1)
+	connA.OnACPResponse(captureSessionUpdate(t, chA))
+	connB.OnACPResponse(captureSessionUpdate(t, chB))
+	rt.register("thread-a", connA)
+	rt.register("thread-b", connB)
+
+	if err := tr.emit(map[string]any{
+		"method": "item/agentMessage/delta",
+		"params": map[string]any{"threadId": "thread-b", "turnId": "turn-1", "delta": "hello"},
+	}); err != nil {
+		t.Fatalf("emit notification: %v", err)
+	}
+
+	select {
+	case got := <-chB:
+		if got.SessionID != "thread-b" || got.Update.SessionUpdate != protocol.SessionUpdateAgentMessageChunk {
+			t.Fatalf("unexpected routed update: %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("thread-b did not receive routed update")
+	}
+	select {
+	case got := <-chA:
+		t.Fatalf("thread-a received cross-thread update: %#v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestCodexAppRuntimeDispatchesNotificationsAsynchronously(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	unblock := make(chan struct{})
+	defer close(unblock)
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.OnACPResponse(func(context.Context, string, json.RawMessage) {
+		<-unblock
+	})
+	rt.register("thread-1", conn)
+
+	emitDone := make(chan error, 1)
+	go func() {
+		emitDone <- tr.emit(map[string]any{
+			"method": "item/agentMessage/delta",
+			"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "delta": "hello"},
+		})
+	}()
+
+	select {
+	case err := <-emitDone:
+		if err != nil {
+			t.Fatalf("emit notification: %v", err)
+		}
+	case <-time.After(20 * time.Millisecond):
+		t.Fatal("notification dispatch blocked the transport read-loop")
+	}
+}
+
+func TestCodexAppRuntimeRoutesServerRequestAndRoundTripsStringID(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.OnACPRequest(func(_ context.Context, _ int64, method string, params json.RawMessage) (any, error) {
+		if method != protocol.MethodRequestPermission {
+			t.Fatalf("method=%q, want request permission", method)
+		}
+		var p protocol.PermissionRequestParams
+		if err := json.Unmarshal(params, &p); err != nil {
+			t.Fatalf("unmarshal permission params: %v", err)
+		}
+		if p.SessionID != "thread-1" || p.ToolCall.ToolCallID != "item-1" {
+			t.Fatalf("permission params=%#v", p)
+		}
+		return protocol.PermissionResponse{
+			Outcome: protocol.PermissionResult{Outcome: "allow_always", OptionID: "allow_always"},
+		}, nil
+	})
+	rt.register("thread-1", conn)
+
+	if err := tr.emit(map[string]any{
+		"id":     "approval-req-1",
+		"method": "item/commandExecution/requestApproval",
+		"params": map[string]any{
+			"threadId": "thread-1",
+			"turnId":   "turn-1",
+			"itemId":   "item-1",
+			"command":  "go test ./...",
+		},
+	}); err != nil {
+		t.Fatalf("emit request: %v", err)
+	}
+
+	resp := tr.nextSent(t)
+	if resp["id"] != "approval-req-1" {
+		t.Fatalf("response id=%#v, want original string id", resp["id"])
+	}
+	result := resp["result"].(map[string]any)
+	if result["decision"] != "acceptForSession" {
+		t.Fatalf("decision=%#v", result["decision"])
+	}
+}
+
+func TestCodexAppRuntimeUnsupportedKnownThreadServerRequestReturnsMethodNotFound(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	rt.register("thread-1", conn)
+
+	if err := tr.emit(map[string]any{
+		"id":     "unknown-req-1",
+		"method": "session/unsupported",
+		"params": map[string]any{"threadId": "thread-1"},
+	}); err != nil {
+		t.Fatalf("emit request: %v", err)
+	}
+
+	resp := tr.nextSent(t)
+	if resp["id"] != "unknown-req-1" {
+		t.Fatalf("response id=%#v, want original string id", resp["id"])
+	}
+	errObj, ok := resp["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("response error=%#v, want object", resp["error"])
+	}
+	if code := int(errObj["code"].(float64)); code != -32601 {
+		t.Fatalf("error code=%d, want -32601", code)
+	}
+}
+
+func TestCodexAppPromptIgnoresStaleTurnCompletedForDifferentTurnID(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		if msg["method"] == "turn/start" {
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": "turn-current"},
+				},
+			})
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+
+	var promptRes protocol.SessionPromptResult
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+		}, &promptRes)
+	}()
+
+	waitForActiveTurn(t, conn, "turn-current")
+	if err := tr.emit(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-stale", "status": "completed"},
+	}); err != nil {
+		t.Fatalf("emit stale completion: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("prompt completed for stale turn: err=%v result=%#v", err, promptRes)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if err := tr.emit(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-current", "status": "completed"},
+	}); err != nil {
+		t.Fatalf("emit current completion: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	if promptRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("stopReason=%q, want end_turn", promptRes.StopReason)
+	}
+}
+
+func TestCodexAppPromptCompletesWhenTurnCompletedArrivesBeforeTurnIDStored(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	releaseResponse := make(chan struct{})
+	tr.onSend = func(msg map[string]any) {
+		if msg["method"] == "turn/start" {
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": "turn-fast"},
+				},
+			})
+			_ = tr.emit(map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"threadId": "thread-1", "turnId": "turn-fast", "status": "completed"},
+			})
+			<-releaseResponse
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+
+	var promptRes protocol.SessionPromptResult
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+		}, &promptRes)
+	}()
+
+	close(releaseResponse)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("prompt: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not complete after early turn/completed")
+	}
+	if promptRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("stopReason=%q, want end_turn", promptRes.StopReason)
+	}
+}
+
+func TestCodexAppPromptFiltersStaleStreamingDeltas(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		if msg["method"] == "turn/start" {
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": "turn-current"},
+				},
+			})
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	updates := make(chan protocol.SessionUpdateParams, 4)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	errCh := make(chan error, 1)
+	go func() {
+		var promptRes protocol.SessionPromptResult
+		errCh <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+		}, &promptRes)
+	}()
+
+	waitForActiveTurn(t, conn, "turn-current")
+	if err := tr.emit(map[string]any{
+		"method": "item/agentMessage/delta",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-stale", "delta": "stale"},
+	}); err != nil {
+		t.Fatalf("emit stale delta: %v", err)
+	}
+	if err := tr.emit(map[string]any{
+		"method": "item/agentMessage/delta",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-current", "delta": "current"},
+	}); err != nil {
+		t.Fatalf("emit current delta: %v", err)
+	}
+	deadline := time.After(time.Second)
+	var sawCurrent bool
+	for !sawCurrent {
+		select {
+		case update := <-updates:
+			if update.Update.SessionUpdate == protocol.SessionUpdateUserMessageChunk {
+				continue
+			}
+			var content protocol.ContentBlock
+			if err := json.Unmarshal(update.Update.Content, &content); err != nil {
+				t.Fatalf("unmarshal content: %v", err)
+			}
+			if content.Text == "stale" {
+				t.Fatal("stale delta was emitted")
+			}
+			if content.Text == "current" {
+				sawCurrent = true
+			}
+		case <-deadline:
+			t.Fatal("current delta was not emitted")
+		}
+	}
+	if err := tr.emit(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-current", "status": "completed"},
+	}); err != nil {
+		t.Fatalf("emit completion: %v", err)
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("prompt: %v", err)
+	}
+	drain := time.After(50 * time.Millisecond)
+	for {
+		select {
+		case update := <-updates:
+			if update.Update.SessionUpdate == protocol.SessionUpdateUserMessageChunk {
+				continue
+			}
+			var content protocol.ContentBlock
+			if err := json.Unmarshal(update.Update.Content, &content); err != nil {
+				t.Fatalf("unmarshal content: %v", err)
+			}
+			if content.Text == "stale" {
+				t.Fatal("stale delta was emitted")
+			}
+		case <-drain:
+			return
+		}
+	}
+}
+
+func TestCodexAppCancelClearsActivePromptState(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+
+	var mu sync.Mutex
+	nextTurn := 0
+	tr.onSend = func(msg map[string]any) {
+		switch msg["method"] {
+		case "turn/start":
+			mu.Lock()
+			nextTurn++
+			turnID := "turn-1"
+			if nextTurn == 2 {
+				turnID = "turn-2"
+			}
+			mu.Unlock()
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": turnID},
+				},
+			})
+		case "turn/interrupt":
+			_ = tr.emit(map[string]any{"id": msg["id"], "result": map[string]any{}})
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+
+	var firstRes protocol.SessionPromptResult
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "first"}},
+		}, &firstRes)
+	}()
+
+	waitForActiveTurn(t, conn, "turn-1")
+	if err := conn.Notify(protocol.MethodSessionCancel, protocol.SessionCancelParams{SessionID: "thread-1"}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first prompt: %v", err)
+	}
+	if firstRes.StopReason != protocol.StopReasonCancelled {
+		t.Fatalf("first stopReason=%q, want cancelled", firstRes.StopReason)
+	}
+
+	var secondRes protocol.SessionPromptResult
+	secondErr := make(chan error, 1)
+	go func() {
+		secondErr <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "second"}},
+		}, &secondRes)
+	}()
+
+	waitForActiveTurn(t, conn, "turn-2")
+	if err := tr.emit(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-2", "status": "completed"},
+	}); err != nil {
+		t.Fatalf("emit second completion: %v", err)
+	}
+	if err := <-secondErr; err != nil {
+		t.Fatalf("second prompt should start after cancel: %v", err)
+	}
+	if secondRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("second stopReason=%q, want end_turn", secondRes.StopReason)
+	}
+}
+
+func TestCodexAppCancelInterruptsAfterPromptContextCancelledFirst(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	interrupts := make(chan map[string]any, 1)
+	tr.onSend = func(msg map[string]any) {
+		switch msg["method"] {
+		case "turn/start":
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": "turn-1"},
+				},
+			})
+		case "turn/interrupt":
+			interrupts <- msg
+			_ = tr.emit(map[string]any{"id": msg["id"], "result": map[string]any{}})
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		var promptRes protocol.SessionPromptResult
+		errCh <- conn.Send(ctx, protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "first"}},
+		}, &promptRes)
+	}()
+	waitForActiveTurn(t, conn, "turn-1")
+
+	cancel()
+	if err := <-errCh; err == nil {
+		t.Fatal("prompt should return context cancellation")
+	}
+	if err := conn.Notify(protocol.MethodSessionCancel, protocol.SessionCancelParams{SessionID: "thread-1"}); err != nil {
+		t.Fatalf("cancel notify: %v", err)
+	}
+	select {
+	case msg := <-interrupts:
+		params := msg["params"].(map[string]any)
+		if params["turnId"] != "turn-1" {
+			t.Fatalf("interrupt params=%#v", params)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("turn/interrupt was not sent")
+	}
+}
+
+func TestCodexAppRuntimeCloseCompletesActivePrompt(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	tr.onSend = func(msg map[string]any) {
+		if msg["method"] == "turn/start" {
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": "turn-1"},
+				},
+			})
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.BindSessionID("thread-1")
+	errCh := make(chan error, 1)
+	go func() {
+		var promptRes protocol.SessionPromptResult
+		errCh <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+		}, &promptRes)
+	}()
+	waitForActiveTurn(t, conn, "turn-1")
+
+	if err := rt.close(); err != nil {
+		t.Fatalf("close runtime: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("prompt should fail when runtime closes")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not unblock after runtime close")
+	}
+}
+
+func TestCodexAppModelRefreshResetsMissingSelectedModel(t *testing.T) {
+	state := newCodexappConfigState()
+	state.setModels([]appServerModel{{ID: "gpt-5"}})
+	if err := state.set(protocol.ConfigOptionIDModel, "gpt-5"); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+	state.setModels([]appServerModel{{ID: "gpt-5-mini", DefaultReasoningEffort: "low", SupportedReasoningEfforts: []string{"low"}}})
+	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDModel); got != "gpt-5-mini" {
+		t.Fatalf("model=%q, want gpt-5-mini", got)
+	}
+	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDReasoningEffort); got != "low" {
+		t.Fatalf("reasoning=%q, want low", got)
+	}
+}
+
+func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		method, _ := msg["method"].(string)
+		id := msg["id"]
+		switch method {
+		case "initialize":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{}})
+		case "initialized":
+		case "model/list":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
+				"models": []map[string]any{{
+					"id":                        "gpt-5",
+					"name":                      "GPT-5",
+					"supportedReasoningEfforts": []string{"low", "medium", "high"},
+					"defaultReasoningEffort":    "medium",
+				}},
+			}})
+		case "thread/start":
+			params := msg["params"].(map[string]any)
+			if params["approvalPolicy"] != "on-request" || params["sandbox"] != "workspace-write" {
+				t.Errorf("thread/start params=%#v", params)
+			}
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
+				"thread": map[string]any{"id": "thread-1", "title": "Thread 1"},
+			}})
+		case "turn/start":
+			params := msg["params"].(map[string]any)
+			if params["threadId"] != "thread-1" || params["model"] != "gpt-5" || params["effort"] != "high" {
+				t.Errorf("turn/start params=%#v", params)
+			}
+			if _, ok := params["sandbox"]; ok {
+				t.Errorf("turn/start must use sandboxPolicy, not sandbox: %#v", params)
+			}
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
+				"turn": map[string]any{"id": "turn-1"},
+			}})
+			_ = tr.emit(map[string]any{
+				"method": "item/agentMessage/delta",
+				"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "delta": "pong"},
+			})
+			_ = tr.emit(map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "status": "completed"},
+			})
+		default:
+			t.Errorf("unexpected app-server method %q", method)
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	inst := NewInstance("codexapp", conn)
+	updates := make(chan protocol.SessionUpdateParams, 4)
+	inst.SetCallbacks(&fakeCodexappCallbacks{updates: updates})
+
+	initRes, err := inst.Initialize(context.Background(), protocol.InitializeParams{})
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if initRes.AgentInfo == nil || initRes.AgentInfo.Name != "codexapp" {
+		t.Fatalf("agent info=%#v", initRes.AgentInfo)
+	}
+	if initRes.AgentCapabilities.PromptCapabilities == nil || initRes.AgentCapabilities.PromptCapabilities.Image {
+		t.Fatalf("prompt capabilities=%#v", initRes.AgentCapabilities.PromptCapabilities)
+	}
+
+	newRes, err := inst.SessionNew(context.Background(), protocol.SessionNewParams{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("SessionNew: %v", err)
+	}
+	if newRes.SessionID != "thread-1" {
+		t.Fatalf("sessionId=%q", newRes.SessionID)
+	}
+	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "ask" {
+		t.Fatalf("config options missing ask approval preset: %#v", newRes.ConfigOptions)
+	}
+	opts, err := inst.SessionSetConfigOption(context.Background(), protocol.SessionSetConfigOptionParams{
+		SessionID: "thread-1",
+		ConfigID:  protocol.ConfigOptionIDReasoningEffort,
+		Value:     "high",
+	})
+	if err != nil {
+		t.Fatalf("SessionSetConfigOption: %v", err)
+	}
+	if currentConfigValue(opts, protocol.ConfigOptionIDReasoningEffort) != "high" {
+		t.Fatalf("reasoning option not updated: %#v", opts)
+	}
+
+	promptRes, err := inst.SessionPrompt(context.Background(), protocol.SessionPromptParams{
+		SessionID: "thread-1",
+		Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+	})
+	if err != nil {
+		t.Fatalf("SessionPrompt: %v", err)
+	}
+	if promptRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("stopReason=%q", promptRes.StopReason)
+	}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case update := <-updates:
+			if update.SessionID == "thread-1" && update.Update.SessionUpdate == protocol.SessionUpdateAgentMessageChunk {
+				return
+			}
+		case <-deadline:
+			t.Fatal("missing agent message update")
+		}
+	}
+}
+
+func TestCodexAppRejectsUnsupportedPhaseOneInputs(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+
+	var newRes protocol.SessionNewResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionNew, protocol.SessionNewParams{
+		CWD:        t.TempDir(),
+		MCPServers: []protocol.MCPServer{{Name: "fs", Command: "mcp"}},
+	}, &newRes); err == nil {
+		t.Fatal("SessionNew accepted non-empty MCP servers")
+	}
+
+	var promptRes protocol.SessionPromptResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+		SessionID: "thread-1",
+		Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeImage, URI: "file:///tmp/a.png"}},
+	}, &promptRes); err == nil {
+		t.Fatal("SessionPrompt accepted image input in phase 1")
 	}
 }
 
@@ -648,6 +1379,59 @@ func (f *fakeCallbacks) SessionRequestPermission(_ context.Context, requestID in
 	return protocol.PermissionResult{Outcome: "allow_once", OptionID: "allow"}, nil
 }
 
+type fakeCodexappCallbacks struct {
+	updates chan protocol.SessionUpdateParams
+}
+
+func (f *fakeCodexappCallbacks) SessionUpdate(p protocol.SessionUpdateParams) {
+	f.updates <- p
+}
+
+func (f *fakeCodexappCallbacks) SessionRequestPermission(context.Context, int64, protocol.PermissionRequestParams) (protocol.PermissionResult, error) {
+	return protocol.PermissionResult{Outcome: "cancelled"}, nil
+}
+
+func captureSessionUpdate(t *testing.T, ch chan<- protocol.SessionUpdateParams) ACPResponseHandler {
+	t.Helper()
+	return func(_ context.Context, method string, params json.RawMessage) {
+		if method != protocol.MethodSessionUpdate {
+			t.Fatalf("method=%q, want session/update", method)
+		}
+		var update protocol.SessionUpdateParams
+		if err := json.Unmarshal(params, &update); err != nil {
+			t.Fatalf("unmarshal update: %v", err)
+		}
+		ch <- update
+	}
+}
+
+func currentConfigValue(opts []protocol.ConfigOption, id string) string {
+	for _, opt := range opts {
+		if opt.ID == id {
+			return opt.CurrentValue
+		}
+	}
+	return ""
+}
+
+func waitForActiveTurn(t *testing.T, conn *codexappConn, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		conn.mu.Lock()
+		got := conn.activeTurnID
+		conn.mu.Unlock()
+		if got == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	conn.mu.Lock()
+	got := conn.activeTurnID
+	conn.mu.Unlock()
+	t.Fatalf("activeTurnID=%q, want %q", got, want)
+}
+
 type fakeRawConn struct {
 	req  ACPRequestHandler
 	resp ACPResponseHandler
@@ -724,6 +1508,94 @@ func (f *fakeOwnedTransport) emit(v any) error {
 	}
 	return nil
 }
+
+type fakeCodexappTransport struct {
+	mu sync.RWMutex
+
+	h      func(json.RawMessage)
+	onSend func(map[string]any)
+
+	sent chan map[string]any
+	done chan struct{}
+}
+
+func newFakeCodexappTransport() *fakeCodexappTransport {
+	return &fakeCodexappTransport{
+		sent: make(chan map[string]any, 32),
+		done: make(chan struct{}),
+	}
+}
+
+func (f *fakeCodexappTransport) SendMessage(v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	var msg map[string]any
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		return err
+	}
+	f.sent <- msg
+	f.mu.RLock()
+	hook := f.onSend
+	f.mu.RUnlock()
+	if hook != nil {
+		hook(msg)
+	}
+	return nil
+}
+
+func (f *fakeCodexappTransport) OnMessage(h func(json.RawMessage)) {
+	f.mu.Lock()
+	f.h = h
+	f.mu.Unlock()
+}
+
+func (f *fakeCodexappTransport) Done() <-chan struct{} { return f.done }
+
+func (f *fakeCodexappTransport) Alive() bool {
+	select {
+	case <-f.done:
+		return false
+	default:
+		return true
+	}
+}
+
+func (f *fakeCodexappTransport) Close() error {
+	select {
+	case <-f.done:
+	default:
+		close(f.done)
+	}
+	return nil
+}
+
+func (f *fakeCodexappTransport) emit(v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	f.mu.RLock()
+	h := f.h
+	f.mu.RUnlock()
+	if h != nil {
+		h(raw)
+	}
+	return nil
+}
+
+func (f *fakeCodexappTransport) nextSent(t *testing.T) map[string]any {
+	t.Helper()
+	select {
+	case msg := <-f.sent:
+		return msg
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sent app-server message")
+		return nil
+	}
+}
+
 func TestListSkillsForPreset_ProjectDirUsesRelativeDirectoryName(t *testing.T) {
 	root := t.TempDir()
 	skillDir := filepath.Join(root, ".agents", "skills", "frontend-design")

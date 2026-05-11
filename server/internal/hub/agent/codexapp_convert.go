@@ -1,0 +1,448 @@
+package agent
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/swm8023/wheelmaker/internal/protocol"
+)
+
+type codexappRPCRequest struct {
+	ID     int64  `json:"id"`
+	Method string `json:"method"`
+	Params any    `json:"params"`
+}
+
+type codexappRPCNotification struct {
+	Method string `json:"method"`
+	Params any    `json:"params,omitempty"`
+}
+
+type codexappRPCServerResponse struct {
+	ID     json.RawMessage   `json:"id"`
+	Result any               `json:"result,omitempty"`
+	Error  *codexappRPCError `json:"error,omitempty"`
+}
+
+type codexappRPCEnvelope struct {
+	ID     json.RawMessage   `json:"id,omitempty"`
+	Method string            `json:"method,omitempty"`
+	Params json.RawMessage   `json:"params,omitempty"`
+	Result json.RawMessage   `json:"result,omitempty"`
+	Error  *codexappRPCError `json:"error,omitempty"`
+}
+
+type codexappRPCResponse struct {
+	Result json.RawMessage
+	Error  *codexappRPCError
+}
+
+type codexappRPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+type appServerClientInfo struct {
+	Name  string `json:"name"`
+	Title string `json:"title,omitempty"`
+}
+
+type appServerInitializeParams struct {
+	ClientInfo appServerClientInfo `json:"clientInfo"`
+}
+
+type appServerModelListResponse struct {
+	Models []appServerModel `json:"models"`
+}
+
+type appServerModel struct {
+	ID                        string   `json:"id"`
+	Name                      string   `json:"name,omitempty"`
+	SupportedReasoningEfforts []string `json:"supportedReasoningEfforts,omitempty"`
+	DefaultReasoningEffort    string   `json:"defaultReasoningEffort,omitempty"`
+}
+
+type appServerThreadStartParams struct {
+	CWD            string `json:"cwd,omitempty"`
+	Model          string `json:"model,omitempty"`
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
+	ServiceName    string `json:"serviceName,omitempty"`
+}
+
+type appServerThreadResumeParams struct {
+	ThreadID       string `json:"threadId"`
+	CWD            string `json:"cwd,omitempty"`
+	Model          string `json:"model,omitempty"`
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
+}
+
+type appServerThreadStartResponse struct {
+	Thread appServerThread `json:"thread"`
+}
+
+type appServerThread struct {
+	ID        string `json:"id"`
+	CWD       string `json:"cwd,omitempty"`
+	Title     string `json:"title,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
+}
+
+type appServerThreadListParams struct {
+	CWD    string `json:"cwd,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+}
+
+type appServerThreadListResponse struct {
+	Threads    []appServerThread `json:"threads"`
+	NextCursor string            `json:"nextCursor,omitempty"`
+}
+
+type appServerTurnStartParams struct {
+	ThreadID       string               `json:"threadId"`
+	Input          []appServerUserInput `json:"input"`
+	CWD            string               `json:"cwd,omitempty"`
+	Model          string               `json:"model,omitempty"`
+	Effort         string               `json:"effort,omitempty"`
+	ApprovalPolicy string               `json:"approvalPolicy,omitempty"`
+	SandboxPolicy  appServerSandbox     `json:"sandboxPolicy,omitempty"`
+}
+
+type appServerSandbox struct {
+	Type          string   `json:"type"`
+	WritableRoots []string `json:"writableRoots,omitempty"`
+	NetworkAccess bool     `json:"networkAccess,omitempty"`
+}
+
+type appServerUserInput struct {
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
+}
+
+type appServerTurnStartResponse struct {
+	Turn appServerTurn `json:"turn"`
+}
+
+type appServerTurn struct {
+	ID string `json:"id"`
+}
+
+type appServerTurnInterruptParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+}
+
+type appServerAgentMessageDeltaParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId,omitempty"`
+	Delta    string `json:"delta"`
+}
+
+type appServerTurnEventParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+}
+
+type appServerTurnCompletedParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId"`
+	Status   string `json:"status,omitempty"`
+}
+
+type appServerThreadNameUpdatedParams struct {
+	ThreadID string `json:"threadId"`
+	Name     string `json:"name"`
+}
+
+type appServerApprovalRequestParams struct {
+	ThreadID string `json:"threadId"`
+	TurnID   string `json:"turnId,omitempty"`
+	ItemID   string `json:"itemId"`
+	Command  string `json:"command,omitempty"`
+	Path     string `json:"path,omitempty"`
+}
+
+type appServerApprovalDecision struct {
+	Decision string `json:"decision"`
+}
+
+type codexappConfigState struct {
+	approvalPreset  string
+	model           string
+	reasoningEffort string
+	models          []appServerModel
+}
+
+func newCodexappConfigState() codexappConfigState {
+	return codexappConfigState{
+		approvalPreset:  "ask",
+		reasoningEffort: "medium",
+	}
+}
+
+func (s *codexappConfigState) setModels(models []appServerModel) {
+	s.models = append(s.models[:0], models...)
+	if len(models) > 0 && (s.model == "" || !s.modelAllowed(s.model)) {
+		s.model = models[0].ID
+	}
+	if !s.reasoningAllowed(s.reasoningEffort) {
+		s.reasoningEffort = s.defaultReasoningEffort()
+	}
+}
+
+func (s codexappConfigState) options() []protocol.ConfigOption {
+	return []protocol.ConfigOption{
+		{
+			ID:           protocol.ConfigOptionIDApprovalPreset,
+			Name:         "Approval Preset",
+			Category:     protocol.ConfigOptionCategoryApprovalPreset,
+			Type:         "select",
+			CurrentValue: s.approvalPreset,
+			Options: []protocol.ConfigOptionValue{
+				{Value: "read_only", Name: "Read only"},
+				{Value: "ask", Name: "Ask"},
+				{Value: "auto", Name: "Auto"},
+				{Value: "full", Name: "Full access"},
+			},
+		},
+		{
+			ID:           protocol.ConfigOptionIDModel,
+			Name:         "Model",
+			Category:     protocol.ConfigOptionCategoryModel,
+			Type:         "select",
+			CurrentValue: s.model,
+			Options:      s.modelOptions(),
+		},
+		{
+			ID:           protocol.ConfigOptionIDReasoningEffort,
+			Name:         "Reasoning Effort",
+			Category:     protocol.ConfigOptionCategoryThoughtLv,
+			Type:         "select",
+			CurrentValue: s.reasoningEffort,
+			Options:      s.reasoningOptions(),
+		},
+	}
+}
+
+func (s *codexappConfigState) set(id, value string) error {
+	switch id {
+	case protocol.ConfigOptionIDApprovalPreset:
+		if _, ok := codexappApprovalProfile(value); !ok {
+			return fmt.Errorf("invalid approval preset %q", value)
+		}
+		s.approvalPreset = value
+	case protocol.ConfigOptionIDModel:
+		if !s.modelAllowed(value) {
+			return fmt.Errorf("invalid model %q", value)
+		}
+		s.model = value
+		if !s.reasoningAllowed(s.reasoningEffort) {
+			s.reasoningEffort = s.defaultReasoningEffort()
+		}
+	case protocol.ConfigOptionIDReasoningEffort:
+		if !s.reasoningAllowed(value) {
+			return fmt.Errorf("invalid reasoning effort %q", value)
+		}
+		s.reasoningEffort = value
+	default:
+		return fmt.Errorf("unsupported config option %q", id)
+	}
+	return nil
+}
+
+func (s codexappConfigState) threadStartParams(cwd string) appServerThreadStartParams {
+	profile, _ := codexappApprovalProfile(s.approvalPreset)
+	return appServerThreadStartParams{
+		CWD:            cwd,
+		Model:          s.model,
+		ApprovalPolicy: profile.approvalPolicy,
+		Sandbox:        profile.threadSandbox,
+		ServiceName:    "wheelmaker",
+	}
+}
+
+func (s codexappConfigState) threadResumeParams(threadID, cwd string) appServerThreadResumeParams {
+	profile, _ := codexappApprovalProfile(s.approvalPreset)
+	return appServerThreadResumeParams{
+		ThreadID:       threadID,
+		CWD:            cwd,
+		Model:          s.model,
+		ApprovalPolicy: profile.approvalPolicy,
+		Sandbox:        profile.threadSandbox,
+	}
+}
+
+func (s codexappConfigState) turnStartParams(threadID, cwd string, input []appServerUserInput) appServerTurnStartParams {
+	profile, _ := codexappApprovalProfile(s.approvalPreset)
+	return appServerTurnStartParams{
+		ThreadID:       threadID,
+		Input:          input,
+		CWD:            cwd,
+		Model:          s.model,
+		Effort:         s.reasoningEffort,
+		ApprovalPolicy: profile.approvalPolicy,
+		SandboxPolicy: appServerSandbox{
+			Type:          profile.turnSandboxType,
+			WritableRoots: profile.writableRoots(cwd),
+			NetworkAccess: false,
+		},
+	}
+}
+
+func (s codexappConfigState) modelOptions() []protocol.ConfigOptionValue {
+	out := make([]protocol.ConfigOptionValue, 0, len(s.models))
+	for _, model := range s.models {
+		out = append(out, protocol.ConfigOptionValue{Value: model.ID, Name: firstNonEmptyString(model.Name, model.ID)})
+	}
+	return out
+}
+
+func (s codexappConfigState) reasoningOptions() []protocol.ConfigOptionValue {
+	efforts := s.currentModel().SupportedReasoningEfforts
+	if len(efforts) == 0 {
+		efforts = []string{"low", "medium", "high"}
+	}
+	out := make([]protocol.ConfigOptionValue, 0, len(efforts))
+	for _, effort := range efforts {
+		out = append(out, protocol.ConfigOptionValue{Value: effort, Name: effort})
+	}
+	return out
+}
+
+func (s codexappConfigState) modelAllowed(value string) bool {
+	if value == "" && len(s.models) == 0 {
+		return true
+	}
+	for _, model := range s.models {
+		if model.ID == value {
+			return true
+		}
+	}
+	return false
+}
+
+func (s codexappConfigState) reasoningAllowed(value string) bool {
+	if value == "" {
+		return true
+	}
+	for _, effort := range s.currentModel().SupportedReasoningEfforts {
+		if effort == value {
+			return true
+		}
+	}
+	return len(s.currentModel().SupportedReasoningEfforts) == 0 &&
+		(value == "low" || value == "medium" || value == "high")
+}
+
+func (s codexappConfigState) defaultReasoningEffort() string {
+	if effort := s.currentModel().DefaultReasoningEffort; effort != "" {
+		return effort
+	}
+	return "medium"
+}
+
+func (s codexappConfigState) currentModel() appServerModel {
+	for _, model := range s.models {
+		if model.ID == s.model {
+			return model
+		}
+	}
+	return appServerModel{}
+}
+
+type codexappApprovalPreset struct {
+	approvalPolicy  string
+	threadSandbox   string
+	turnSandboxType string
+}
+
+func (p codexappApprovalPreset) writableRoots(cwd string) []string {
+	if p.turnSandboxType != "workspaceWrite" || strings.TrimSpace(cwd) == "" {
+		return nil
+	}
+	return []string{cwd}
+}
+
+func codexappApprovalProfile(preset string) (codexappApprovalPreset, bool) {
+	switch preset {
+	case "read_only":
+		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "read-only", turnSandboxType: "readOnly"}, true
+	case "ask":
+		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
+	case "auto":
+		return codexappApprovalPreset{approvalPolicy: "on-failure", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
+	case "full":
+		return codexappApprovalPreset{approvalPolicy: "never", threadSandbox: "danger-full-access", turnSandboxType: "dangerFullAccess"}, true
+	default:
+		return codexappApprovalPreset{}, false
+	}
+}
+
+func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput, error) {
+	if len(blocks) == 0 {
+		return nil, errors.New("codexapp prompt is empty")
+	}
+	out := make([]appServerUserInput, 0, len(blocks))
+	for _, block := range blocks {
+		switch block.Type {
+		case protocol.ContentBlockTypeText:
+			if block.Text != "" {
+				out = append(out, appServerUserInput{Type: "text", Text: block.Text})
+			}
+		default:
+			return nil, fmt.Errorf("codexapp phase 1 does not support prompt content type %q", block.Type)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("codexapp prompt contains no text")
+	}
+	return out, nil
+}
+
+func codexappInputText(input []appServerUserInput) string {
+	var parts []string
+	for _, item := range input {
+		if item.Text != "" {
+			parts = append(parts, item.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func codexappThreadIDFromParams(raw json.RawMessage) string {
+	var p struct {
+		ThreadID string `json:"threadId"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(p.ThreadID)
+}
+
+func codexappStopReason(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "cancelled", "canceled", "interrupted":
+		return protocol.StopReasonCancelled
+	case "max_tokens":
+		return protocol.StopReasonMaxTokens
+	default:
+		return protocol.StopReasonEndTurn
+	}
+}
+
+func codexappApprovalDecision(outcome protocol.PermissionResult) string {
+	value := firstNonEmptyString(outcome.OptionID, outcome.Outcome)
+	switch value {
+	case "allow_once":
+		return "accept"
+	case "allow_always":
+		return "acceptForSession"
+	case "reject", "reject_once", "reject_always":
+		return "decline"
+	default:
+		return "cancel"
+	}
+}

@@ -99,7 +99,7 @@ const (
 	ACPProviderCodeflicker ACPProvider = "codeflicker"
 	ACPProviderOpenCode    ACPProvider = "opencode"
 	ACPProviderCodeBuddy   ACPProvider = "codebuddy"
-	ACPProviderCodexApp    ACPProvider = "codex-app"
+	ACPProviderCodexApp    ACPProvider = "codexapp"
 )
 
 var acpProviders = []ACPProvider{ACPProviderCodex, ACPProviderClaude, ACPProviderCopilot, ACPProviderCodeflicker, ACPProviderOpenCode, ACPProviderCodeBuddy, ACPProviderCodexApp}

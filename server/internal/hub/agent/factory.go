@@ -56,6 +56,10 @@ func newACPFactoryWithDefaults() *ACPFactory {
 		}
 		f.Register(candidate.provider, providerInstanceCreator(prov))
 	}
+	codexappProvider := NewCodexAppProvider()
+	if isProviderAvailable(codexappProvider) {
+		f.Register(protocol.ACPProviderCodexApp, codexappInstanceCreator(codexappProvider))
+	}
 	if len(f.Names()) == 0 {
 		agentLogger().Warn("no available ACP providers detected")
 	}
@@ -137,6 +141,7 @@ func (f *ACPFactory) PreferredName() string {
 		protocol.ACPProviderCodeflicker,
 		protocol.ACPProviderOpenCode,
 		protocol.ACPProviderCodeBuddy,
+		protocol.ACPProviderCodexApp,
 	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()

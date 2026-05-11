@@ -1,268 +1,369 @@
-# Codex App Server Phase 1 实现计划
+# CodexApp Phase 1 实现计划
 
 > **给 agentic workers：** 必须使用子技能：`superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，按任务逐项执行本计划。步骤使用 checkbox（`- [ ]`）语法跟踪。
 
-**目标：** 新增可选择的 `codex-app` agent，懒启动 `codex app-server --listen stdio://`，并提供符合 ACP 行为的文本聊天和 config option 同步。
+**目标：** 新增可选择的 `codexapp` agent。它在 `Conn` 层伪装成 ACP agent，对上层完全透明，对内连接 `codex app-server --listen stdio://`，完成 Phase 1 文本聊天、session load/list/cancel、approval request 和 config options 同步。
 
-**架构：** 在 `agent.Instance` 之下实现原生 Go adapter。WheelMaker 的 `Session`、IM、registry 和 recorder 继续保持 ACP-shaped；adapter 负责把 ACP 调用转换成 app-server JSON-RPC，并把 app-server notification/server request 转回 ACP update/callback。
+**架构：** 不新增 app-server-native 上层，也不绕过现有 `instance.go`。`codexapp` 实现一个 `agent.Conn`：上层仍走 `NewInstance("codexapp", conn)` 和现有 ACP-shaped `Instance` 方法；`codexappConn` 在 `Send/Notify` 内把 ACP method 转成 app-server request，并把 app-server notification/server request 转回 ACP `session/update` 与 `session/request_permission`。
 
-**技术栈：** Go、JSONL stdio、不带 `jsonrpc` 字段的 Codex app-server JSON-RPC、现有 `server/internal/hub/agent` 与 `server/internal/protocol` 包、基于 fake transport 的单元测试。
+**Tech Stack:** Go、现有 `agent.Conn`/`ACPProcess`、app-server JSON-RPC over JSONL stdio、`server/internal/hub/agent` 单包测试。
+
+**当前实现基线：** Phase 1 已落地的是基础文本聊天、session new/load/list、config options、cancel、按 thread routing、approval request skeleton。`resource_link` 输入、`session/load` history replay、tool/plan streaming 仍是后续任务；本文中涉及这些能力的条目应按 follow-up 解读，不能声明已完成。
 
 ---
 
-## Phase 1 已锁定决策
+## 已确认决策
 
-- Agent 名称与 provider id：`codex-app`。
-- Session 身份：`ACP sessionId == app-server threadId == WheelMaker SessionRecord.ID`。
-- 进程启动：`codex app-server --listen stdio://`，由 `Session.ensureInstance` 懒启动。
-- 不复用 `ownedConn`：app-server wire 不带 `jsonrpc`，而且有 app-server 专属 server request。
-- `codex-app` 暴露的 config options：`approval_preset`、`model`、`reasoning_effort`。
-- 默认 `approval_preset`：`ask`，除非 app-server 返回的有效配置能精确映射到某个已知 preset。
-- `ask` 含义：app-server `approvalPolicy=on-request`，thread `sandbox=workspace-write`，turn `sandboxPolicy.type=workspaceWrite`。
-- Phase 1 声明 `promptCapabilities.image=false`、`audio=false`、`embeddedContext=false`。
-- Phase 1 对非空 `mcpServers` 在 `thread/start` 或 `thread/resume` 前明确报错，不能静默忽略。
-- Schema 修正：`thread/start` 和 `thread/resume` 接收 `sandbox`，值是 `SandboxMode` 字符串；`turn/start` 接收 `sandboxPolicy`，值是 `SandboxPolicy` 对象。不要把 `sandbox` 发送给 `turn/start`。
+- Agent/provider 名称全链路无横杠：`codexapp`。
+- 用户侧使用 `/new codexapp`。
+- `protocol.ACPProviderCodexApp` 的值是 `"codexapp"`。
+- 代码文件统一使用 `codexapp_xx.go` 命名。
+- 测试不新增多个 test 文件，全部合并到 `server/internal/hub/agent/agent_test.go`。
+- 修改聚焦 agent 层；不改 `server/internal/hub/client`、IM、registry 协议或 recorder schema。
+- 保留现有 `instance.go`。`codexapp` 通过 `Conn` 接口伪装 ACP，而不是实现一个特殊 `Instance`。
+- 不直接复用现有 `ownedConn` 实现，因为它假设对端是真 ACP wire；但保留 owned connection 语义，并实现 `codexappConn`。
+- 可复用 `ACPProcess`，因为它只是 JSONL stdio subprocess transport。
+- Phase 1 可以每个 `codexappConn` 一个 app-server process，但结构必须先适配未来多 session shared app-server。
+- shared-ready 设计要求 runtime/conn 分层：runtime 共享 transport 和 model list cache，conn 保存 session-local state。
+- Phase 1 不支持图片、audio、embedded resource、非空 MCP servers；必须不声明或明确拒绝。
 
 ## 文件分工
 
-- 修改 `server/internal/protocol/acp_const.go`：provider 常量、解析逻辑、provider 名称列表、config id/category 常量。
-- 修改 `server/internal/hub/agent/factory.go`：用原生 `InstanceCreator` 注册 `codex-app`。
-- 新建 `server/internal/hub/agent/appserver_provider.go`：解析 `codex`，启动 `app-server --listen stdio://`。
-- 新建 `server/internal/hub/agent/appserver_client.go`：JSON-RPC request matching、notification、server request、close/liveness。
-- 新建 `server/internal/hub/agent/appserver_types.go`：Phase 1 使用的最小 app-server struct。
-- 新建 `server/internal/hub/agent/appserver_config.go`：config option 状态与 approval/sandbox 映射。
-- 新建 `server/internal/hub/agent/appserver_convert.go`：纯 ACP/app-server 转换函数。
-- 新建 `server/internal/hub/agent/appserver_instance.go`：原生 `agent.Instance` 实现。
-- 修改 `server/internal/hub/client/session.go`：推荐让状态展示包含 `approval_preset`。
-- 修改 `server/internal/hub/client/commands.go`：推荐让 config update 展示包含 `approval_preset`。
-- 测试：扩展 `server/internal/hub/agent/agent_test.go`；新增 `appserver_client_test.go`、`appserver_config_test.go`、`appserver_convert_test.go`、`appserver_instance_test.go`；扩展 `server/internal/hub/client/client_test.go` 做显示兼容测试。
+只新增两个实现文件：
 
-## Task 1：Provider 常量与懒加载 Factory 注册
+- `server/internal/hub/agent/codexapp_agent.go`
+  - `codexapp` provider launch
+  - factory creator
+  - `codexappConn` 实现 `agent.Conn`
+  - `codexappRuntime` 与 lightweight app-server JSON-RPC matching
+  - process lifecycle、routing、config state、prompt wait、approval wait
 
-**文件：** `server/internal/protocol/acp_const.go`、`server/internal/hub/agent/factory.go`、`server/internal/hub/agent/appserver_provider.go`、`server/internal/hub/agent/agent_test.go`
+- `server/internal/hub/agent/codexapp_convert.go`
+  - app-server 最小私有 structs
+  - ACP in -> app-server in 转换
+  - app-server out -> ACP out 转换
+  - config options、approval preset、sandbox policy、tool lifecycle、plan、stopReason 映射
 
-- [ ] 在 `agent_test.go` 添加失败测试：
+只修改这些现有文件：
 
-```go
-func TestParseACPProviderCodexApp(t *testing.T) {
-	provider, ok := protocol.ParseACPProvider("codex-app")
-	if !ok || provider != protocol.ACPProviderCodexApp {
-		t.Fatalf("provider=%q ok=%v", provider, ok)
-	}
-}
+- `server/internal/protocol/acp_const.go`
+  - 加 `ACPProviderCodexApp = "codexapp"`
+  - 加 config 常量：`approval_preset`、`reasoning_effort`、`_approval_preset`
 
-func TestCodexAppProviderLaunchUsesAppServerStdio(t *testing.T) {
-	p := NewCodexAppServerProvider()
-	p.lookPath = func(file string) (string, error) {
-		if file != "codex" { t.Fatalf("file=%q", file) }
-		return "C:\\bin\\codex.exe", nil
-	}
-	exe, args, env, err := p.Launch()
-	if err != nil { t.Fatalf("Launch: %v", err) }
-	if exe != "C:\\bin\\codex.exe" { t.Fatalf("exe=%q", exe) }
-	want := []string{"app-server", "--listen", "stdio://"}
-	if !reflect.DeepEqual(args, want) { t.Fatalf("args=%#v want=%#v", args, want) }
-	if len(env) != 0 { t.Fatalf("env=%#v", env) }
-}
-```
+- `server/internal/hub/agent/factory.go`
+  - 注册 `codexapp` native creator
+  - creator 返回 `NewInstance("codexapp", codexappConn)`
+  - 不走 `providerInstanceCreator`
 
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run "TestParseACPProviderCodexApp|TestCodexAppProviderLaunchUsesAppServerStdio" -count=1`。
-- [ ] 添加 `protocol.ACPProviderCodexApp = "codex-app"`，加入 `acpProviders`，并添加 `ParseACPProvider` 分支。
-- [ ] 添加 config 常量：`ConfigOptionIDApprovalPreset`、`ConfigOptionIDReasoningEffort`、`ConfigOptionCategoryApprovalPreset`。
-- [ ] 创建 `NewCodexAppServerProvider()`，其 `Launch()` 返回 `codex app-server --listen stdio://`。
-- [ ] 在 `newACPFactoryWithDefaults` 注册 native creator；`codex-app` 不允许走 `providerInstanceCreator`。
-- [ ] 再次运行 focused test。预期：Task 6 添加 instance constructor 后通过。
-- [ ] 提交：`git add server/internal/protocol/acp_const.go server/internal/hub/agent/factory.go server/internal/hub/agent/appserver_provider.go server/internal/hub/agent/agent_test.go && git commit -m "feat: register codex app-server provider"`。
+- `server/internal/hub/agent/agent_test.go`
+  - 合并所有 `codexapp` tests
 
-## Task 2：App-Server JSON-RPC Client
+不新增：
 
-**文件：** `server/internal/hub/agent/appserver_client.go`、`server/internal/hub/agent/appserver_types.go`、`server/internal/hub/agent/appserver_client_test.go`
+- `appserver_client.go`
+- `appserver_types.go`
+- `appserver_config.go`
+- `appserver_instance.go`
+- `appserver_*_test.go`
+- `codexapp_*_test.go`
 
-- [ ] 添加 fake transport 测试，证明 outbound request 不包含 `jsonrpc`、response 按 `id` 匹配、app-server server request 能收到 result/error、`Close` 会让 pending request 失败。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run TestAppServerClient -count=1`。
-- [ ] 实现 `appServerRequestID` 为 raw JSON，确保 string 和 number id 都能 round-trip。
-- [ ] 实现 `appServerClient.Request(ctx, method, params, out)`、`Notify(method, params)`、`OnRequest`、`OnNotification`、`Alive`、`Close`。
-- [ ] 实现 request 分类：
-
-```go
-switch {
-case msg.ID != nil && msg.Method != "":
-	go c.handleIncomingRequest(*msg.ID, msg.Method, msg.Params)
-case msg.ID != nil:
-	c.resolvePending(*msg.ID, msg.Result, msg.Error)
-case msg.Method != "":
-	c.notifyH(c.ctx, msg.Method, msg.Params)
-}
-```
-
-- [ ] 默认 server request 行为必须返回 app-server error `{code:-32601,message:"method not found: <method>"}`。
-- [ ] 运行：`cd server; go test ./internal/hub/agent -run TestAppServerClient -count=1`。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_client.go server/internal/hub/agent/appserver_types.go server/internal/hub/agent/appserver_client_test.go && git commit -m "feat: add codex app-server jsonrpc client"`。
-
-## Task 3：最小 App-Server 类型
-
-**文件：** `server/internal/hub/agent/appserver_types.go`、`server/internal/hub/agent/appserver_convert_test.go`
-
-- [ ] 添加 generated schema shape 的 decode 测试：`ThreadStartResponse`、`ThreadResumeResponse`、`TurnStartResponse`、`ModelListResponse`、`TurnCompletedNotification`、`ItemStartedNotification`、`CommandExecutionRequestApprovalParams`、`FileChangeRequestApprovalParams`。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run TestAppServerPhase1TypesDecodeGeneratedShapes -count=1`。
-- [ ] 添加 `thread/start`、`thread/resume`、`thread/read`、`thread/list`、`turn/start`、`turn/interrupt`、`model/list`、thread、turn、thread item、notification 和 approval params 的 struct。
-- [ ] 不稳定或 Phase 1 不使用的字段用 `json.RawMessage` 或 `any`；不要建模未使用的 app-server API。
-- [ ] 关键字段名：
-
-```go
-type appServerThreadStartParams struct {
-	Model *string `json:"model,omitempty"`
-	CWD string `json:"cwd,omitempty"`
-	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
-	ApprovalsReviewer string `json:"approvalsReviewer,omitempty"`
-	Sandbox string `json:"sandbox,omitempty"`
-	ServiceName string `json:"serviceName,omitempty"`
-}
-
-type appServerTurnStartParams struct {
-	ThreadID string `json:"threadId"`
-	Input []appServerUserInput `json:"input"`
-	CWD string `json:"cwd,omitempty"`
-	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
-	SandboxPolicy any `json:"sandboxPolicy,omitempty"`
-	Model *string `json:"model,omitempty"`
-	Effort *string `json:"effort,omitempty"`
-}
-```
-
-- [ ] 运行：`cd server; go test ./internal/hub/agent -run TestAppServerPhase1TypesDecodeGeneratedShapes -count=1`。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_types.go server/internal/hub/agent/appserver_convert_test.go && git commit -m "feat: add codex app-server phase one types"`。
-
-## Task 4：Config Options 与 Approval Presets
-
-**文件：** `server/internal/hub/agent/appserver_config.go`、`server/internal/hub/agent/appserver_config_test.go`
-
-- [ ] 添加测试：默认 options、从 model 派生 reasoning options、model 切换时重置不支持的 effort、非法 config id/value 拒绝、approval preset 映射。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run "TestCodexAppConfig|TestApprovalPreset" -count=1`。
-- [ ] 实现 `codexAppConfigState`，默认值：`approvalPreset="ask"`，model 来自第一个可见 app-server model，reasoning effort 来自所选 model 的默认值。
-- [ ] 返回且只返回三个 ACP options，顺序固定：`approval_preset`、`model`、`reasoning_effort`。
-- [ ] `approval_preset` 使用 category `_approval_preset`；`reasoning_effort` 使用 category `thought_level`。
-- [ ] 实现 approval profile 映射：
+## 核心结构
 
 ```text
-read_only -> approvalPolicy=on-request, thread sandbox=read-only, turn sandboxPolicy.type=readOnly
-ask      -> approvalPolicy=on-request, thread sandbox=workspace-write, turn sandboxPolicy.type=workspaceWrite
-auto     -> approvalPolicy=on-failure, thread sandbox=workspace-write, turn sandboxPolicy.type=workspaceWrite
-full     -> approvalPolicy=never, thread sandbox=danger-full-access, turn sandboxPolicy.type=dangerFullAccess
+Session
+  -> existing agent.Instance (instance.go)
+    -> codexappConn                  // implements agent.Conn, per WheelMaker session
+      -> codexappRuntime             // app-server runtime, owned now, shared-ready
+        -> ACPProcess                // JSONL stdio process transport
+          -> codex app-server
 ```
 
-- [ ] 运行：`cd server; go test ./internal/hub/agent -run "TestCodexAppConfig|TestApprovalPreset" -count=1`。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_config.go server/internal/hub/agent/appserver_config_test.go && git commit -m "feat: add codex app config mapping"`。
+`codexappConn` 是 per session：
 
-## Task 5：纯协议转换
+- 实现 `Conn`：`Send`、`Notify`、`OnACPRequest`、`OnACPResponse`、`Close`、`Alive`。
+- 保存当前 `threadId`，即 ACP `sessionId`。
+- 保存 session-local config：`approval_preset`、`model`、`reasoning_effort`。
+- 保存 session-local turn state：`activeTurnId`、prompt completion channel、pending approvals。
+- 只处理属于自己 `threadId` 的 app-server events。
+- 对上只暴露 ACP-shaped 行为。
 
-**文件：** `server/internal/hub/agent/appserver_convert.go`、`server/internal/hub/agent/appserver_convert_test.go`
+`codexappRuntime` 是 shared-ready：
 
-- [ ] 添加测试：ACP text input、本地文件 `resource_link`、不支持的 image/audio/resource 拒绝、assistant delta 转换、reasoning delta 转换、plan full replacement、tool lifecycle synthesis、stop reason 映射。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run "TestConvertACP|TestRejectUnsupported|TestToolLifecycle|TestTurnStatus|TestPlan" -count=1`。
-- [ ] 实现 `acpPromptToAppServerInput([]protocol.ContentBlock)`。
-- [ ] Text 映射为 `{type:"text", text, text_elements:[]}`。
-- [ ] `resource_link` 只接受绝对本地路径或 `file://` URI，映射为 `{type:"mention", name, path}`。
-- [ ] Phase 1 对 `image`、`audio`、embedded `resource` 返回 invalid-params 风格错误。
-- [ ] 实现 `appServerItemStartedToACPUpdates`；如果 app-server 第一次上报时 tool 已经 running，合成 `tool_call status=pending`，再发 `tool_call_update status=in_progress`。
-- [ ] 实现 stored `Turn.items` 到 ACP updates 的 replay 转换，并保证顺序稳定。
-- [ ] 实现 `turnStatusToStopReason`：`completed -> end_turn`，`interrupted -> cancelled`，`failed -> refusal`。
-- [ ] 运行 conversion tests。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_convert.go server/internal/hub/agent/appserver_convert_test.go && git commit -m "feat: map codex app-server events to acp"`。
+- 拥有 app-server process 或共享 process 引用。
+- 负责 app-server JSON-RPC request/response matching。
+- 负责读取所有 app-server notifications/server requests。
+- 通过 `threadId -> codexappConn` 路由事件。
+- 缓存 runtime-level `model/list`，但不保存 selected model。
+- 提供：`register(threadId, conn)`、`unregister(threadId, conn)`、`request(ctx, method, params, out)`、`notify(method, params)`、`close()`。
 
-## Task 6：原生 Instance 生命周期
+Phase 1 可以先这样创建：
 
-**文件：** `server/internal/hub/agent/appserver_instance.go`、`server/internal/hub/agent/appserver_instance_test.go`、`server/internal/hub/agent/factory.go`
+```go
+func newCodexappConn(provider *codexappProvider, cwd string) (*codexappConn, error) {
+    rt, err := newOwnedCodexappRuntime(provider, cwd)
+    if err != nil {
+        return nil, err
+    }
+    return newCodexappConnWithRuntime(rt, cwd), nil
+}
+```
 
-- [ ] 添加 fake RPC 测试：`Initialize`、`SessionNew`、`SessionList`、`SessionSetConfigOption`、非空 `mcpServers` 拒绝。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run "TestCodexAppInitialize|TestCodexAppSessionNew|TestCodexAppRejects|TestCodexAppSessionList|TestCodexAppSetConfig" -count=1`。
-- [ ] 实现 `NewCodexAppServerInstance(provider, cwd)`：用 app-server provider 启动 `ACPProcess`，再用 `newAppServerClient` 包装。
-- [ ] 实现测试专用 constructor：`newCodexAppServerInstanceWithRPC(rpc, cwd)`。
-- [ ] `Initialize` 必须发送 app-server `initialize`，再发送 `initialized`，然后返回 ACP `InitializeResult`，其中 `loadSession=true`、有 `sessionCapabilities.list`、prompt image/audio/embedded 均为 false。
-- [ ] `SessionNew` 必要时调用 `model/list`，拒绝非空 MCP，调用 `thread/start`，设置 `activeThreadID`，返回 thread id 和完整 config options。
-- [ ] `SessionList` 把 app-server threads 映射成 ACP `SessionInfo`，`updatedAt` 使用 RFC3339。
-- [ ] `SessionSetConfigOption` 修改 adapter config state，并返回完整 option list。
-- [ ] Phase 1 的 `ListSkills` 可以委托给 `listSkillsForPreset(ctx, CodexACPProviderPreset, cwd)`，保证当前 Codex skill 目录仍可见。
-- [ ] 运行 lifecycle tests。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_instance.go server/internal/hub/agent/appserver_instance_test.go server/internal/hub/agent/factory.go && git commit -m "feat: add codex app-server instance lifecycle"`。
+未来 shared mode 只替换 runtime provider：
 
-## Task 7：Session Load Replay
+```go
+func newCodexappConn(provider *codexappProvider, cwd string) (*codexappConn, error) {
+    rt := projectCodexappRuntimePool.Get(projectID, cwd)
+    return newCodexappConnWithRuntime(rt, cwd), nil
+}
+```
 
-**文件：** `server/internal/hub/agent/appserver_instance.go`、`server/internal/hub/agent/appserver_convert.go`、`server/internal/hub/agent/appserver_instance_test.go`
+`codexappConn` 不应该知道 runtime 是 owned 还是 shared。
 
-- [ ] 添加测试，证明 `SessionLoad` 在返回 `SessionLoadResult` 前已经通过 callback 发出 replay `SessionUpdate`。
-- [ ] 用一个 stored turn 测 replay 顺序：user message、assistant message、plan、command item。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run TestCodexAppSessionLoadReplaysHistoryBeforeReturn -count=1`。
-- [ ] 实现 `SessionLoad` 为 `thread/resume`；如果返回的 thread 没有 turns，则调用 `thread/read {includeTurns:true}`。
-- [ ] 当 app-server 返回有效 `model` 和 `reasoningEffort` 时，应用到本地 config state。
-- [ ] 在返回前通过 `callbacks.SessionUpdate` replay 历史 updates。
-- [ ] `SessionLoadResult` 在 replay 后返回完整 config options。
-- [ ] 运行 load tests。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_instance.go server/internal/hub/agent/appserver_convert.go server/internal/hub/agent/appserver_instance_test.go && git commit -m "feat: replay codex app-server thread history"`。
+## stdio 多 Thread 与 Config Options 设计
 
-## Task 8：Prompt Streaming 与 Cancel
+`stdio://` 是一条 JSONL JSON-RPC stream，不等于只能一个 thread。多 thread 通过两层 id 区分：
 
-**文件：** `server/internal/hub/agent/appserver_instance.go`、`server/internal/hub/agent/appserver_types.go`、`server/internal/hub/agent/appserver_convert.go`、`server/internal/hub/agent/appserver_instance_test.go`
+- JSON-RPC `id` 区分 request/response。
+- payload 中的 `threadId` / `turnId` 区分会话事件。
 
-- [ ] 添加 fake RPC 测试：text prompt、assistant delta、plan update、tool start/completion、completed turn、interrupted turn、不支持的 prompt content、cancel 发送 `turn/interrupt`。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run "TestCodexAppSessionPrompt|TestCodexAppSessionCancel" -count=1`。
-- [ ] `SessionPrompt` 转换 prompt blocks，发出 synthetic ACP `user_message_chunk`，发送 `turn/start`，跟踪 `activeTurnID`，等待匹配的 `turn/completed`，并返回 ACP `SessionPromptResult`。
-- [ ] `turn/start` params 必须包含选中的 `model`、`effort`、`approvalPolicy`，以及由当前 approval preset 派生的 `sandboxPolicy`。
-- [ ] Notification handlers 必须覆盖：`turn/started`、`turn/completed`、`turn/plan/updated`、`item/started`、`item/completed`、`item/agentMessage/delta`、`item/reasoning/textDelta`、`item/reasoning/summaryTextDelta`、`item/commandExecution/outputDelta`、`item/fileChange/patchUpdated`。
-- [ ] 未知 notification 以 debug 级别记录并忽略。
-- [ ] `SessionCancel` 用短 timeout 发送 `turn/interrupt`，包含当前 `threadId` 和 `turnId`；没有 active turn 时 no-op。
-- [ ] 如果 prompt context 被取消，调用 `SessionCancel`，并对普通取消返回 `stopReason=cancelled`。
-- [ ] 运行 prompt/cancel tests。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_instance.go server/internal/hub/agent/appserver_types.go server/internal/hub/agent/appserver_convert.go server/internal/hub/agent/appserver_instance_test.go && git commit -m "feat: stream codex app-server turns through acp"`。
+一条 stdio stream 上可以出现：
 
-## Task 9：Permission Requests
+```text
+thread/start -> thr_1
+thread/start -> thr_2
+turn/start {threadId: thr_1}
+turn/start {threadId: thr_2}
+item/agentMessage/delta {threadId: thr_1, turnId: ...}
+item/agentMessage/delta {threadId: thr_2, turnId: ...}
+```
 
-**文件：** `server/internal/hub/agent/appserver_instance.go`、`server/internal/hub/agent/appserver_types.go`、`server/internal/hub/agent/appserver_convert.go`、`server/internal/hub/agent/appserver_instance_test.go`
+因此设计必须从 Phase 1 就支持 runtime 按 `threadId` 分发：
 
-- [ ] 添加测试：`item/commandExecution/requestApproval`、`item/fileChange/requestApproval`、unsupported server request 返回 `-32601`、callback error fail closed、cancel 会把 active approval resolve 为 cancel。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/agent -run "TestCodexApp.*Approval|TestCodexAppUnsupportedServerRequest" -count=1`。
-- [ ] 把 command approval 转成 ACP `session/request_permission`，tool kind 为 `execute`，options 为 `allow_once`、`allow_always`、`reject`。
-- [ ] 把 file approval 转成 ACP `session/request_permission`，tool kind 为 `write`，options 同上。
-- [ ] 保守映射 ACP result：`allow_once -> approve/allow_once`（按 generated schema 确认）、`allow_always -> approve_for_session/allow_always`、`reject -> reject/deny`、cancelled/error -> cancel。
-- [ ] 最终确定 decision 字符串前，检查当前安装版本生成的 `CommandExecutionApprovalDecision.ts` 与 `FileChangeApprovalDecision.ts`。
-- [ ] 不支持的 request，例如 `item/tool/requestUserInput`，返回 app-server error `-32601`，不能阻塞。
-- [ ] `mcpServer/elicitation/request` 返回 cancelled response。
-- [ ] 运行 approval tests。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/agent/appserver_instance.go server/internal/hub/agent/appserver_types.go server/internal/hub/agent/appserver_convert.go server/internal/hub/agent/appserver_instance_test.go && git commit -m "feat: bridge codex app-server approvals to acp"`。
+```go
+type codexappRuntime struct {
+    connsByThread map[string]*codexappConn
+    pendingByReqID map[string]chan codexappRPCResponse
+}
+```
 
-## Task 10：Config Display 兼容
+`config options` 不属于 stdio connection 级别，而属于 `codexappConn` / thread 级别：
 
-**文件：** `server/internal/hub/client/session.go`、`server/internal/hub/client/commands.go`、`server/internal/hub/client/client_test.go`
+- `model/list` 是 runtime-level cache。
+- selected `model` 是 conn-local。
+- selected `reasoning_effort` 是 conn-local。
+- selected `approval_preset` 是 conn-local。
+- app-server `thread/start` / `thread/resume` response 返回的 effective config 只能更新当前 conn，不能影响其他 conn。
 
-- [ ] 添加测试：当存在 `approval_preset` 时，`sessionInfoLine` 显示 `approval: ask`。
-- [ ] 添加测试：当 update 携带 `approval_preset` 时，`formatConfigOptionUpdateMessage` 包含 `approval=<value>`。
-- [ ] 运行失败测试：`cd server; go test ./internal/hub/client -run "TestSessionInfoLineShowsApprovalPreset|TestFormatConfigOptionUpdateShowsApproval" -count=1`。
-- [ ] 更新 status rendering，包含 approval preset，同时保留现有 agents 的 mode/model 输出。
-- [ ] 更新 config update formatting，在存在时显示 approval、mode、model。
-- [ ] 不要复用 `/mode`；用户通过 `/config approval_preset ask|auto|full|read_only` 和 help menu config options 设置 approval preset。
-- [ ] 运行 client tests。预期：PASS。
-- [ ] 提交：`git add server/internal/hub/client/session.go server/internal/hub/client/commands.go server/internal/hub/client/client_test.go && git commit -m "feat: show codex app approval preset config"`。
+每次发 app-server request 时，由 conn 注入自己的 config：
 
-## Task 11：Docs、验证与 Gate
+`session/new -> thread/start`：
 
-**文件：** `docs/superpowers/specs/2026-05-11-codex-app-server-agent-design.md`、`docs/codex-app-server-acp-bridge.zh-CN.md`、`docs/superpowers/plans/2026-05-11-codex-app-server-phase1.md`
+```json
+{
+  "method": "thread/start",
+  "params": {
+    "cwd": "...",
+    "model": "gpt-5",
+    "approvalPolicy": "on-request",
+    "sandbox": "workspace-write",
+    "serviceName": "wheelmaker"
+  }
+}
+```
 
-- [ ] 把 schema correction 写入 bridge/spec 两份文档：`thread/start` 和 `thread/resume` 使用 `sandbox`；`turn/start` 使用 `sandboxPolicy`。
-- [ ] 运行 focused packages：`cd server; go test ./internal/protocol ./internal/hub/agent ./internal/hub/client -count=1`。预期：PASS。
-- [ ] 运行完整 server tests：`cd server; go test ./...`。预期：PASS。
-- [ ] 构建 server：`cd server; go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/`。预期：PASS。
-- [ ] 提交 docs/verification fixes：`git add docs server && git commit -m "docs: finalize codex app-server phase one plan"`。
-- [ ] 实现完成后执行仓库 completion gate：`git add -A`，如有未提交实现变更则 `git commit -m "feat: add codex app-server phase one bridge"`，`git push origin <current-branch>`，然后因为 server 文件变化运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/signal_update_now.ps1 -DelaySeconds 30`。
+`session/load -> thread/resume`：
+
+```json
+{
+  "method": "thread/resume",
+  "params": {
+    "threadId": "thr_1",
+    "cwd": "...",
+    "model": "gpt-5",
+    "approvalPolicy": "on-request",
+    "sandbox": "workspace-write"
+  }
+}
+```
+
+`session/prompt -> turn/start`：
+
+```json
+{
+  "method": "turn/start",
+  "params": {
+    "threadId": "thr_1",
+    "input": [],
+    "model": "gpt-5",
+    "effort": "high",
+    "approvalPolicy": "on-request",
+    "sandboxPolicy": {
+      "type": "workspaceWrite",
+      "writableRoots": ["..."],
+      "networkAccess": false
+    }
+  }
+}
+```
+
+同一个 conn/thread Phase 1 只允许一个 active turn。不同 thread 的并发 turn 可以先通过 runtime 全局 mutex 串行化 `turn/start`，但事件路由仍必须按多 thread 设计。
+
+## ACP Method 映射
+
+`codexappConn.Send` 根据 ACP method 分发：
+
+| ACP method | app-server mapping | conn 行为 |
+|---|---|---|
+| `initialize` | `initialize` + `initialized` | 返回 ACP `InitializeResult`，声明 conservative capabilities |
+| `session/new` | `thread/start` | 获取 `thread.id` 后注册 `threadId -> conn`，返回完整 config options |
+| `session/load` | `thread/resume` | 当前仅 resume 并返回 config options；`thread/read includeTurns=true` 与 history replay 是 follow-up |
+| `session/list` | `thread/list` | 返回 ACP `SessionListResult` |
+| `session/prompt` | `turn/start` | 发送 synthetic user chunk，等待 matching `turn/completed`，返回 stopReason |
+| `session/set_config_option` | 本地 conn state | 更新 selected config，返回完整 config options |
+
+`codexappConn.Notify` 支持：
+
+| ACP notification | app-server mapping |
+|---|---|
+| `session/cancel` | `turn/interrupt`，没有 active turn 时 no-op |
+
+`codexappConn.OnACPResponse` 用于向 existing `instance.go` 上报 ACP notification。当前 Phase 1 基线只实现：
+
+- app-server assistant delta -> ACP `session/update` `agent_message_chunk`
+- app-server reasoning delta -> ACP `agent_thought_chunk`
+- thread name update -> ACP `session_info_update`
+
+后续任务：
+
+- app-server plan -> ACP `plan`
+- app-server tool-like item -> ACP `tool_call` / `tool_call_update`
+- app-server config changes -> ACP `config_option_update`
+
+`codexappConn.OnACPRequest` 用于借 existing `instance.go` 的 callback path 发起 ACP client request：
+
+- app-server command/file approval -> ACP `session/request_permission`
+
+## Config Options
+
+Phase 1 只暴露三个 options：
+
+| id | category | source | app-server effect |
+|---|---|---|---|
+| `approval_preset` | `_approval_preset` | conn-local preset | 展开为 `approvalPolicy` + `sandbox` / `sandboxPolicy` |
+| `model` | `model` | runtime `model/list` | `thread/start.model`、`thread/resume.model`、`turn/start.model` |
+| `reasoning_effort` | `thought_level` | selected model 的 effort list | `turn/start.effort` |
+
+Config list 必须在这些边界返回完整列表：
+
+- `session/new`
+- `session/load`
+- `session/set_config_option`
+- `config_option_update`
+
+切换 `model` 时，conn 必须重新计算 `reasoning_effort.options`。如果旧 effort 不被新 model 支持，选择该 model 默认 effort。
+
+Approval preset 映射：
+
+| preset | approvalPolicy | thread sandbox | turn sandboxPolicy.type |
+|---|---|---|---|
+| `read_only` | `on-request` | `read-only` | `readOnly` |
+| `ask` | `on-request` | `workspace-write` | `workspaceWrite` |
+| `auto` | `on-failure` | `workspace-write` | `workspaceWrite` |
+| `full` | `never` | `danger-full-access` | `dangerFullAccess` |
+
+Schema 注意：`thread/start` 和 `thread/resume` 使用 `sandbox` 字符串；`turn/start` 使用 `sandboxPolicy` 对象。
+
+## Task 1：重命名 Provider 与常量
+
+**文件：** `server/internal/protocol/acp_const.go`、`server/internal/hub/agent/codexapp_agent.go`、`server/internal/hub/agent/agent_test.go`
+
+- [ ] 把 provider value 改成 `codexapp`，没有横杠。
+- [ ] `ParseACPProvider("codexapp")` 返回 `ACPProviderCodexApp`。
+- [ ] `ACPProviderNames()` 包含 `codexapp`。
+- [ ] 添加 config constants：`ConfigOptionIDApprovalPreset`、`ConfigOptionIDReasoningEffort`、`ConfigOptionCategoryApprovalPreset`。
+- [ ] 新增 provider launch helper，解析 `codex`，返回 args `app-server --listen stdio://`。
+- [ ] 测试合并到 `agent_test.go`：provider parse、provider names、launch args。
+- [ ] 运行：`cd server; go test ./internal/protocol ./internal/hub/agent -run "Test.*CodexApp.*Provider|TestParseACPProviderCodexApp" -count=1`。
+
+## Task 2：实现 shared-ready Runtime 和 Conn 骨架
+
+**文件：** `server/internal/hub/agent/codexapp_agent.go`、`server/internal/hub/agent/agent_test.go`
+
+- [ ] 定义 `codexappConn`，实现 `agent.Conn`。
+- [ ] 定义 `codexappRuntime`，支持 request id matching、notification dispatch、server request dispatch、`threadId -> conn` registry。
+- [ ] runtime outbound request/notification 不包含 `jsonrpc`。
+- [ ] runtime inbound request id 支持 string 或 number。
+- [ ] notification/server request 必须离开 `ACPProcess` read loop 异步分发，避免 handler re-entry deadlock。
+- [ ] `Close` 关闭 runtime 并 fail pending requests。
+- [ ] `Alive` 反映 process/runtime 状态。
+- [ ] 测试合并到 `agent_test.go`：wire shape、request matching、notification thread routing、unknown server request `-32601`、close pending、alive。
+- [ ] 运行：`cd server; go test ./internal/hub/agent -run "TestCodexApp.*Runtime|TestCodexApp.*Conn" -count=1`。
+
+## Task 3：ACP Initialize/New/Load/List/Config 基线
+
+**文件：** `server/internal/hub/agent/codexapp_agent.go`、`server/internal/hub/agent/codexapp_convert.go`、`server/internal/hub/agent/factory.go`、`server/internal/hub/agent/agent_test.go`
+
+- [ ] factory 注册 `codexapp` native creator：`NewInstance("codexapp", conn)`。
+- [ ] `initialize` 映射 app-server `initialize` + `initialized`，返回 ACP capabilities。
+- [ ] `session/new` 调用 `thread/start`，拿到 `thread.id` 后 runtime `register(threadId, conn)`。
+- [ ] `session/load` 先 runtime `register(sessionId, conn)`，再 `thread/resume` 后返回；`thread/read includeTurns=true` 与 replay 是 follow-up。
+- [ ] `session/list` 调用 `thread/list`。
+- [ ] `session/set_config_option` 修改 conn-local config，返回完整 options。
+- [ ] 非空 `mcpServers` 返回 invalid params 风格错误，不能静默忽略。
+- [ ] 测试：initialize order、new returns thread id、load/resume mapping、list mapping、config full list、MCP reject、factory creator。History replay before result 是 follow-up 测试。
+- [ ] 运行：`cd server; go test ./internal/hub/agent -run "TestCodexApp.*Initialize|TestCodexApp.*SessionNew|TestCodexApp.*SessionLoad|TestCodexApp.*Config|TestCodexApp.*Factory" -count=1`。
+
+## Task 4：Prompt、Streaming、Cancel
+
+**文件：** `server/internal/hub/agent/codexapp_agent.go`、`server/internal/hub/agent/codexapp_convert.go`、`server/internal/hub/agent/agent_test.go`
+
+- [ ] `session/prompt` 支持 ACP text；本地文件 `resource_link` 是 follow-up。
+- [ ] Phase 1 拒绝 image/audio/embedded resource。
+- [ ] prompt 开始时发 synthetic `user_message_chunk`。
+- [ ] `turn/start` 注入 conn-local `model`、`effort`、`approvalPolicy`、`sandboxPolicy`。
+- [ ] `turn/started` 设置 conn-local `activeTurnId`。
+- [ ] `turn/completed` 完成 matching prompt，返回 ACP `stopReason`。
+- [ ] `session/cancel` 发送 `turn/interrupt`，普通取消返回 `cancelled`。
+- [ ] 同一个 conn/thread 不允许并发 active prompt。
+- [ ] 测试：text prompt、unsupported content、assistant delta、completed/interrupted、cancel no-op、cancel active turn。`resource_link`、plan、tool lifecycle 是 follow-up 测试。
+- [ ] 运行：`cd server; go test ./internal/hub/agent -run "TestCodexApp.*Prompt|TestCodexApp.*Cancel|TestCodexApp.*Tool|TestCodexApp.*Plan" -count=1`。
+
+## Task 5：Approval 与 Server Requests
+
+**文件：** `server/internal/hub/agent/codexapp_agent.go`、`server/internal/hub/agent/codexapp_convert.go`、`server/internal/hub/agent/agent_test.go`
+
+- [ ] app-server `item/commandExecution/requestApproval` 转 ACP `session/request_permission`。
+- [ ] app-server `item/fileChange/requestApproval` 转 ACP `session/request_permission`。
+- [ ] ACP selected `allow_once` -> app-server `accept`。
+- [ ] ACP selected `allow_always` -> app-server `acceptForSession`。
+- [ ] ACP reject -> app-server `decline`。
+- [ ] ACP cancelled/error -> app-server `cancel`。
+- [ ] unsupported server request 返回 `-32601` 或 fail closed。
+- [ ] `mcpServer/elicitation/request` 返回 cancelled response，作为 follow-up server request 支持。
+- [ ] cancel/process close 时 pending approvals 必须 fail closed，作为 approval skeleton 的后续加固。
+- [ ] 测试：command approval、file approval、reject、cancel、callback error、unsupported request、unknown thread route fail closed。
+- [ ] 运行：`cd server; go test ./internal/hub/agent -run "TestCodexApp.*Approval|TestCodexApp.*ServerRequest" -count=1`。
+
+## Task 6：Docs 与验证
+
+**文件：** docs 与 agent 层文件
+
+- [ ] 把 spec/bridge 文档同步为 `codexapp`、Conn 层 proxy、runtime/conn shared-ready 结构。
+- [ ] 确认没有残留 `codex-app` 作为 agent id，除非在历史背景说明中明确表示旧称。
+- [ ] 确认没有新增 `appserver_*` 实现文件或 test 文件。
+- [ ] 运行：`cd server; go test ./internal/protocol ./internal/hub/agent -count=1`。
+- [ ] 运行：`cd server; go test ./...`。
+- [ ] 构建：`cd server; go build -o bin/windows_amd64/wheelmaker.exe ./cmd/wheelmaker/`。
 
 ## 验收清单
 
-- [ ] `/new codex-app` 创建新的 app-server thread，并把 thread id 存为 session id。
-- [ ] 文本 prompt 能流式输出 ACP `user_message_chunk`、`agent_message_chunk`、`plan` 和 tool updates。
-- [ ] `session/load` 在返回前 replay 历史 updates。
-- [ ] `session/list` 展示 app-server threads。
-- [ ] `/cancel` 中断 active app-server turn，普通取消的最终 prompt result 是 `cancelled`。
-- [ ] `approval_preset`、`model`、`reasoning_effort` 在 new/load/set/update 路径都以完整 option list 返回。
-- [ ] Stored config preferences 通过现有 `applyStoredConfigOptions` 按 exact id replay。
-- [ ] Tool lifecycle 不会跳过 ACP `pending` 直接进入 `in_progress`。
-- [ ] Command/file approvals 通过 ACP permission callback，并且 fail closed。
-- [ ] Phase 1 不会静默接受 images、audio、embedded resources 或非空 MCP servers。
+- [ ] `/new codexapp` 可创建新 thread，并把 thread id 作为 ACP session id。
+- [ ] 上层仍只通过 existing `instance.go` 和 `Conn` 接口工作。
+- [ ] `codexappConn` 对上完全 ACP-shaped。
+- [ ] `codexappRuntime` 从 Phase 1 起按 `threadId` 路由，适配未来 shared app-server。
+- [ ] session-local config 不进入 runtime 全局状态。
+- [ ] model list cache 可以 runtime-level 共享。
+- [ ] `session/load` 当前完成 resume；history replay 顺序符合 ACP 是 follow-up。
+- [ ] `session/prompt` update draining 与 stopReason 符合 ACP。
+- [ ] approval skeleton 与 cancel 不悬挂；tool lifecycle streaming 与 approval fail-closed 加固是 follow-up。
+- [ ] 不修改 `client/session/commands` 等上层 UI/业务文件。
