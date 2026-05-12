@@ -36,6 +36,7 @@ export type HydratedProjectState = {
   selectedCommit: string;
   commitFilesBySha: Record<string, RegistryGitCommitFile[]>;
   selectedDiff: string;
+  selectedChatSessionId: string;
   cachedDiffText: string;
 };
 
@@ -154,6 +155,7 @@ export class WorkspaceStore {
       selectedCommit: cachedProjectState.selectedCommit || '',
       commitFilesBySha: cachedCommitState.commitFilesBySha ?? {},
       selectedDiff: cachedProjectState.selectedDiff || '',
+      selectedChatSessionId: cachedProjectState.selectedChatSessionId || '',
       cachedDiffText: cachedDiff?.diff ?? '',
     };
   }
@@ -235,6 +237,16 @@ export class WorkspaceStore {
       messages: Array.isArray(cached.messages) ? cached.messages : [],
       prompts: Array.isArray(cached.prompts) ? cached.prompts : [],
     };
+  }
+
+  getSelectedChatSessionId(projectId: string): string {
+    if (!projectId) return '';
+    return this.persistence.getProjectState(projectId).selectedChatSessionId || '';
+  }
+
+  rememberSelectedChatSession(projectId: string, sessionId: string): void {
+    if (!projectId) return;
+    this.persistence.patchProjectState(projectId, { selectedChatSessionId: sessionId.trim() });
   }
 
   replaceChatSessions(projectId: string, sessions: RegistryChatSession[], cursorBySessionId: Record<string, PersistedChatCursor>): void {

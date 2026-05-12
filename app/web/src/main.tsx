@@ -2656,7 +2656,12 @@ function App() {
     if (!connected || !activeProjectId) {
       return;
     }
-    loadChatSessions(activeProjectId).catch(() => undefined);
+    const preferredChatSelection =
+      chatSelectedIdRef.current || workspaceStore.getSelectedChatSessionId(activeProjectId);
+    if (preferredChatSelection && !chatSelectedIdRef.current) {
+      hydrateChatSessionsFromCache(activeProjectId, preferredChatSelection);
+    }
+    loadChatSessions(activeProjectId, preferredChatSelection).catch(() => undefined);
   }, [tab, connected, projectId]);
 
 
@@ -4071,11 +4076,15 @@ function App() {
       chatSyncSubIndexRef.current[sessionId] = cached.cursor.turnIndex || 0;
     }
 
-    const currentSelection = preferredSelection || chatSelectedIdRef.current;
+    const currentSelection =
+      preferredSelection ||
+      chatSelectedIdRef.current ||
+      workspaceStore.getSelectedChatSessionId(activeProjectId);
     if (!currentSelection) {
       setChatMessages([]);
       return;
     }
+    chatSelectedIdRef.current = currentSelection;
     setSelectedChatId(currentSelection);
     if (sessionRows.some(item => item.sessionId === currentSelection)) {
       const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
@@ -4199,6 +4208,8 @@ function App() {
       chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
+      chatSelectedIdRef.current = result.session.sessionId;
+      workspaceStore.rememberSelectedChatSession(activeProjectId, result.session.sessionId);
       setChatMessages(nextMessages);
       persistChatSessionContent(result.session.sessionId, activeProjectId, result.session);
       return true;
@@ -4296,24 +4307,32 @@ function App() {
       }
       workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
 
-      const currentSelection = preferredSelection || chatSelectedIdRef.current;
+      let currentSelection =
+        preferredSelection ||
+        chatSelectedIdRef.current ||
+        workspaceStore.getSelectedChatSessionId(activeProjectId) ||
+        '';
+      if (currentSelection && !nextSessions.some(session => session.sessionId === currentSelection)) {
+        currentSelection = nextSessions[0]?.sessionId || '';
+      }
+      currentSelection = currentSelection || nextSessions[0]?.sessionId || '';
       if (!currentSelection) {
         setSelectedChatId('');
         setChatMessages([]);
         return;
       }
+      chatSelectedIdRef.current = currentSelection;
       setSelectedChatId(currentSelection);
-      if (!nextSessions.some(session => session.sessionId === currentSelection)) {
-        const retainedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
-        if (retainedSelection.length > 0) {
-          setChatMessages(retainedSelection);
-        }
-        return;
-      }
+      workspaceStore.rememberSelectedChatSession(activeProjectId, currentSelection);
       const cachedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setChatMessages(cachedSelection.length > 0
         ? cachedSelection
         : (chatMessageStoreRef.current[currentSelection] ?? []));
+      loadChatSession(currentSelection, activeProjectId, {
+        incremental: true,
+        preserveUserSelection: true,
+        selectionSnapshot: currentSelection,
+      }).catch(() => undefined);
     } catch (err) {
       if (activeProjectId === projectIdRef.current) {
         setError(err instanceof Error ? err.message : String(err));
@@ -4334,6 +4353,7 @@ function App() {
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
       chatSelectedIdRef.current = result.session.sessionId;
+      workspaceStore.rememberSelectedChatSession(projectIdRef.current, result.session.sessionId);
       chatMessageStoreRef.current[result.session.sessionId] = [];
       chatSyncIndexRef.current[result.session.sessionId] = 0;
       chatSyncSubIndexRef.current[result.session.sessionId] = 0;
@@ -4508,6 +4528,9 @@ function App() {
     chatPromptSnapshotsRef.current = nextSnapshots;
     const activeProjectId = projectIdRef.current;
     if (activeProjectId) {
+      if (workspaceStore.getSelectedChatSessionId(activeProjectId) === sessionId) {
+        workspaceStore.rememberSelectedChatSession(activeProjectId, '');
+      }
       workspaceStore.deleteChatSession(activeProjectId, sessionId);
     }
     setChatPromptSnapshotVersion(version => version + 1);
@@ -4674,6 +4697,7 @@ function App() {
       setChatSwipeOpenSessionId('');
     }
     chatSelectedIdRef.current = sessionId;
+    workspaceStore.rememberSelectedChatSession(projectIdRef.current, sessionId);
     setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
     setSelectedChatId(sessionId);
     setChatMessages(hydrateChatSessionContentFromCache(sessionId, projectIdRef.current));
@@ -4708,19 +4732,19 @@ function App() {
     resetChatComposer();
     setChatSending(true);
     try {
-        if (!selectedChatId) {
-          const started = beginNewChatFlow({
-            title: trimmedText || firstAttachmentName || '',
-            text: trimmedText,
-            blocks,
-          });
-          if (!started) {
-            return;
-          }
-          setChatSending(false);
+      if (!selectedChatId) {
+        const started = beginNewChatFlow({
+          title: trimmedText || firstAttachmentName || '',
+          text: trimmedText,
+          blocks,
+        });
+        if (!started) {
           return;
         }
-        const sessionId = selectedChatId;
+        setChatSending(false);
+        return;
+      }
+      const sessionId = selectedChatId;
       if (!sessionId) {
         return;
       }
@@ -4732,16 +4756,18 @@ function App() {
       const nextSessionId = result.sessionId || sessionId;
       setChatRunningSessionFlags(prev => addSessionFlag(prev, nextSessionId));
       setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, nextSessionId));
-        setSelectedChatId(nextSessionId);
-        if (!chatSessions.find(item => item.sessionId === nextSessionId)) {
-          setChatSessions(prev =>
-            mergeChatSession(prev, {
-              sessionId: nextSessionId,
-              title: trimmedText || firstAttachmentName || nextSessionId,
-              preview: trimmedText || firstAttachmentName || '',
-              updatedAt: new Date().toISOString(),
-              messageCount: 0,
-            }),
+      setSelectedChatId(nextSessionId);
+      chatSelectedIdRef.current = nextSessionId;
+      workspaceStore.rememberSelectedChatSession(projectIdRef.current, nextSessionId);
+      if (!chatSessions.find(item => item.sessionId === nextSessionId)) {
+        setChatSessions(prev =>
+          mergeChatSession(prev, {
+            sessionId: nextSessionId,
+            title: trimmedText || firstAttachmentName || nextSessionId,
+            preview: trimmedText || firstAttachmentName || '',
+            updatedAt: new Date().toISOString(),
+            messageCount: 0,
+          }),
         );
       }
     } catch (err) {
@@ -4858,7 +4884,6 @@ function App() {
     const trimmedToken = tokenRef.current.trim();
     const nextAddress = addressRef.current.trim();
     const previousSelectedChatId = chatSelectedIdRef.current;
-    const preferredSelectedChatId = previousSelectedChatId.trim();
     setError('');
     clearReconnectTimer();
     if (!silentReconnect) {
@@ -4868,6 +4893,9 @@ function App() {
     try {
       const ws = toRegistryWsUrl(nextAddress);
       const result = await workspaceController.connect(ws, trimmedToken);
+      const preferredSelectedChatId =
+        previousSelectedChatId.trim() ||
+        workspaceStore.getSelectedChatSessionId(result.hydrated.projectId);
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       captureSelectedFileScrollPosition();
@@ -4904,7 +4932,7 @@ function App() {
           });
         }
       } else if (tabRef.current === 'chat') {
-        await loadChatSessions(result.hydrated.projectId, preferredSelectedChatId);
+        loadChatSessions(result.hydrated.projectId, preferredSelectedChatId).catch(() => undefined);
       }
       workspaceController
         .validateExpandedDirectories(
@@ -5305,8 +5333,9 @@ function App() {
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       applyHydratedProjectState(result.hydrated);
-      clearChatRuntimeState();
-      hydrateChatSessionsFromCache(result.hydrated.projectId);
+      const preferredChatSelection = workspaceStore.getSelectedChatSessionId(result.hydrated.projectId);
+      clearChatRuntimeState(preferredChatSelection);
+      hydrateChatSessionsFromCache(result.hydrated.projectId, preferredChatSelection);
       workspaceController
         .validateExpandedDirectories(
           result.hydrated.projectId,

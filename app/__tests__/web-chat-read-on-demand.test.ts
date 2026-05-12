@@ -8,6 +8,14 @@ describe('web chat read-on-demand behavior', () => {
       path.join(projectRoot, 'web', 'src', 'main.tsx'),
       'utf8',
     );
+    const workspaceStoreTs = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'services', 'workspaceStore.ts'),
+      'utf8',
+    );
+    const workspacePersistenceTs = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'services', 'workspacePersistence.ts'),
+      'utf8',
+    );
 
     expect(mainTsx).toContain('incremental?: boolean;');
     expect(mainTsx).toContain('forceFull?: boolean;');
@@ -18,5 +26,12 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('preserveUserSelection: true,');
     expect(mainTsx).toContain('selectionSnapshot: preferredSelectedChatId,');
     expect(mainTsx).toContain('if (useIncremental) {');
+    expect(workspacePersistenceTs).toContain('selectedChatSessionId: string;');
+    expect(workspaceStoreTs).toContain('getSelectedChatSessionId(projectId: string): string {');
+    expect(workspaceStoreTs).toContain('rememberSelectedChatSession(projectId: string, sessionId: string): void {');
+    expect(mainTsx).toContain('workspaceStore.getSelectedChatSessionId(activeProjectId)');
+    expect(mainTsx).toContain('nextSessions[0]?.sessionId ||');
+    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSession(projectIdRef.current, sessionId);');
+    expect(mainTsx).toContain('loadChatSession(currentSelection, activeProjectId, {');
   });
 });

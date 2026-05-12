@@ -39,6 +39,7 @@ export type PersistedProjectState = {
   gitCurrentBranch: string;
   selectedCommit: string;
   selectedDiff: string;
+  selectedChatSessionId: string;
 };
 
 export type PersistedProjectCommitsState = {
@@ -151,6 +152,7 @@ function defaultProjectState(): PersistedProjectState {
     gitCurrentBranch: '',
     selectedCommit: '',
     selectedDiff: '',
+    selectedChatSessionId: '',
   };
 }
 
@@ -193,6 +195,7 @@ function sanitizeProjectState(input: Partial<PersistedProjectState> | undefined)
     gitCurrentBranch: typeof input.gitCurrentBranch === 'string' ? input.gitCurrentBranch : base.gitCurrentBranch,
     selectedCommit: typeof input.selectedCommit === 'string' ? input.selectedCommit : base.selectedCommit,
     selectedDiff: typeof input.selectedDiff === 'string' ? input.selectedDiff : base.selectedDiff,
+    selectedChatSessionId: typeof input.selectedChatSessionId === 'string' ? input.selectedChatSessionId : base.selectedChatSessionId,
   };
 }
 
