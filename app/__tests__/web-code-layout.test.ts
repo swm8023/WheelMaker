@@ -6,6 +6,7 @@ describe('web code layout', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const shikiRenderer = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'shikiRenderer.ts'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain("from './services/shikiRenderer'");
     expect(mainTsx).toContain('renderShikiHtml');
@@ -29,6 +30,7 @@ describe('web code layout', () => {
     expect(shikiRenderer).toContain('export async function renderShikiDiffHtml');
     expect(shikiRenderer).toContain('data-line-kind');
     expect(shikiRenderer).toContain('wm-shiki-diff-line');
+    expect(shikiRenderer).toContain('white-space:normal;tab-size:${codeTabSize};');
     expect(shikiRenderer).toContain("hast.properties['data-line-number'] = String(line);");
     expect(shikiRenderer).toContain('createHighlighterCore');
     expect(shikiRenderer).toContain('SHIKI_THEME_LOADERS');
@@ -43,5 +45,14 @@ describe('web code layout', () => {
     expect(mainTsx).toContain('codeFontFamily || VS_CODE_EDITOR_FONT_FAMILY');
     expect(mainTsx).not.toContain("from 'react-diff-viewer-continued'");
     expect(mainTsx).not.toContain('ReactDiffViewer');
+    expect(stylesCss).toContain('.chat-main-message code:not(.wm-shiki-code) {');
+    expect(stylesCss).toContain('.chat-main-message .wm-shiki-code {');
+    expect(stylesCss).toContain('white-space: normal;');
+    expect(stylesCss).toMatch(
+      /\.chat-main-message \{[\s\S]*line-height: 1\.55;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-main-message p,[\s\S]*margin: 0 0 7px 0;[\s\S]*\}/,
+    );
   });
 });

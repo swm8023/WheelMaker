@@ -205,7 +205,7 @@ function buildLineTransformer(
     },
     code(hast) {
       this.addClassToHast(hast, 'wm-shiki-code');
-      appendStyle(hast, wrap ? `display:block;min-width:100%;tab-size:${codeTabSize};` : `display:block;min-width:100%;width:max-content;tab-size:${codeTabSize};`);
+      appendStyle(hast, wrap ? `display:block;min-width:100%;white-space:normal;tab-size:${codeTabSize};` : `display:block;min-width:100%;width:max-content;white-space:normal;tab-size:${codeTabSize};`);
     },
     line(hast, line) {
       const diffLine = diffLines?.[line - 1];
