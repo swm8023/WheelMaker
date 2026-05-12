@@ -787,16 +787,17 @@ func (s *Session) cancelPrompt() error {
 	sessID := s.acpSessionID
 	ready := s.ready
 	cancel := s.prompt.cancel
+	inst := s.instance
 	s.mu.Unlock()
 
+	var err error
+	if sessID != "" && ready && inst != nil {
+		err = inst.SessionCancel(sessID)
+	}
 	if cancel != nil {
 		cancel()
 	}
-
-	if sessID == "" || !ready {
-		return nil
-	}
-	return s.instance.SessionCancel(sessID)
+	return err
 }
 
 func (s *Session) toRecord() (*SessionRecord, error) {

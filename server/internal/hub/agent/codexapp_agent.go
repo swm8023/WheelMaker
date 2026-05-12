@@ -144,8 +144,10 @@ type codexappRuntime struct {
 	nextID   int64
 	pending  map[string]chan codexappRPCResponse
 	conns    map[string]*codexappConn
+	queues   map[string]*codexappThreadQueue
 	closed   bool
 	closeErr error
+	done     chan struct{}
 }
 
 func newCodexappRuntimeWithTransport(transport codexappTransport) *codexappRuntime {
@@ -153,11 +155,22 @@ func newCodexappRuntimeWithTransport(transport codexappTransport) *codexappRunti
 		transport: transport,
 		pending:   map[string]chan codexappRPCResponse{},
 		conns:     map[string]*codexappConn{},
+		queues:    map[string]*codexappThreadQueue{},
+		done:      make(chan struct{}),
 	}
 	if transport != nil {
 		transport.OnMessage(rt.handleMessage)
 	}
 	return rt
+}
+
+type codexappThreadQueue struct {
+	ch chan codexappRuntimeEvent
+}
+
+type codexappRuntimeEvent struct {
+	msg     codexappRPCEnvelope
+	request bool
 }
 
 func (r *codexappRuntime) request(ctx context.Context, method string, params any, out any) error {
@@ -249,9 +262,13 @@ func (r *codexappRuntime) close() error {
 		return nil
 	}
 	r.mu.Lock()
+	alreadyClosed := r.closed
 	r.closed = true
 	if r.closeErr == nil {
 		r.closeErr = errors.New("codexapp runtime closed")
+	}
+	if !alreadyClosed {
+		close(r.done)
 	}
 	for key, ch := range r.pending {
 		delete(r.pending, key)
@@ -294,10 +311,55 @@ func (r *codexappRuntime) handleMessage(raw json.RawMessage) {
 		return
 	}
 	if len(msg.ID) > 0 {
-		go r.handleServerRequest(msg)
+		r.enqueueThreadEvent(codexappThreadIDFromParams(msg.Params), codexappRuntimeEvent{msg: msg, request: true})
 		return
 	}
-	go r.handleNotification(msg)
+	r.enqueueThreadEvent(codexappThreadIDFromParams(msg.Params), codexappRuntimeEvent{msg: msg})
+}
+
+func (r *codexappRuntime) enqueueThreadEvent(threadID string, event codexappRuntimeEvent) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	queue := r.threadQueue(threadID)
+	if queue == nil {
+		return
+	}
+	select {
+	case queue.ch <- event:
+	case <-r.done:
+	}
+}
+
+func (r *codexappRuntime) threadQueue(threadID string) *codexappThreadQueue {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil
+	}
+	if queue := r.queues[threadID]; queue != nil {
+		return queue
+	}
+	queue := &codexappThreadQueue{ch: make(chan codexappRuntimeEvent, 64)}
+	r.queues[threadID] = queue
+	go r.runThreadQueue(queue)
+	return queue
+}
+
+func (r *codexappRuntime) runThreadQueue(queue *codexappThreadQueue) {
+	for {
+		select {
+		case event := <-queue.ch:
+			if event.request {
+				r.handleServerRequest(event.msg)
+			} else {
+				r.handleNotification(event.msg)
+			}
+		case <-r.done:
+			return
+		}
+	}
 }
 
 func (r *codexappRuntime) resolveResponse(msg codexappRPCEnvelope) {
@@ -381,6 +443,8 @@ type codexappPromptResult struct {
 	stopReason string
 	err        error
 }
+
+var codexappCancelCompletionTimeout = 3 * time.Second
 
 func newCodexappConnWithRuntime(runtime *codexappRuntime, cwd string) *codexappConn {
 	return &codexappConn{
@@ -603,6 +667,7 @@ func (c *codexappConn) sendSessionLoad(ctx context.Context, p protocol.SessionLo
 	runtimeThreadID := firstNonEmptyString(codexappMappedThreadID(acpSessionID), acpSessionID)
 	req := c.config.threadResumeParams(runtimeThreadID, cwd)
 	var resp appServerThreadStartResponse
+	recreatedThread := false
 	if err := c.runtime.request(ctx, "thread/resume", req, &resp); err != nil {
 		if !codexappNoRolloutError(err) {
 			return err
@@ -611,12 +676,22 @@ func (c *codexappConn) sendSessionLoad(ctx context.Context, p protocol.SessionLo
 		if err := c.runtime.request(ctx, "thread/start", startReq, &resp); err != nil {
 			return err
 		}
+		recreatedThread = true
 	}
 	if resp.Thread.ID != "" {
 		runtimeThreadID = strings.TrimSpace(resp.Thread.ID)
 	}
 	if runtimeThreadID == "" {
 		return errors.New("codexapp thread/resume returned empty thread id")
+	}
+	if !recreatedThread && codexappThreadNeedsFullRead(resp.Thread.Turns) {
+		readReq := appServerThreadReadParams{ThreadID: runtimeThreadID, IncludeTurns: true}
+		if err := c.runtime.request(ctx, "thread/read", readReq, &resp); err != nil {
+			return err
+		}
+		if resp.Thread.ID != "" {
+			runtimeThreadID = strings.TrimSpace(resp.Thread.ID)
+		}
 	}
 	c.bindSessionIDs(acpSessionID, runtimeThreadID)
 	codexappStoreThreadMapping(acpSessionID, runtimeThreadID)
@@ -708,33 +783,21 @@ func (c *codexappConn) cancel(sessionID string) error {
 	acpSessionID := firstNonEmptyString(strings.TrimSpace(sessionID), c.acpSessionID)
 	turnID := firstNonEmptyString(c.activeTurnID, c.lastTurnID)
 	done := c.promptDone
-	c.promptDone = nil
-	c.activeTurnID = ""
-	c.pendingPromptStops = nil
-	c.pendingPromptUpdates = nil
 	c.mu.Unlock()
 	threadID := c.runtimeThreadIDForSession(acpSessionID)
 	if threadID == "" {
-		if done != nil {
-			select {
-			case done <- codexappPromptResult{stopReason: protocol.StopReasonCancelled}:
-			default:
-			}
-		}
+		c.synthesizePromptCancelled(done)
 		return nil
 	}
-	if turnID != "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		var ignored json.RawMessage
-		_ = c.runtime.request(ctx, "turn/interrupt", appServerTurnInterruptParams{ThreadID: threadID, TurnID: turnID}, &ignored)
+	if turnID == "" {
+		c.synthesizePromptCancelled(done)
+		return nil
 	}
-	if done != nil {
-		select {
-		case done <- codexappPromptResult{stopReason: protocol.StopReasonCancelled}:
-		default:
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var ignored json.RawMessage
+	_ = c.runtime.request(ctx, "turn/interrupt", appServerTurnInterruptParams{ThreadID: threadID, TurnID: turnID}, &ignored)
+	c.waitForPromptCompletionOrCancel(done)
 	return nil
 }
 
@@ -1077,6 +1140,18 @@ func codexappNoRolloutError(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "no rollout found for thread id")
 }
 
+func codexappThreadNeedsFullRead(turns []appServerTurn) bool {
+	if len(turns) == 0 {
+		return true
+	}
+	for _, turn := range turns {
+		if turn.ItemsView != "full" {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *codexappConn) replayThreadTurns(acpSessionID string, turns []appServerTurn) {
 	acpSessionID = strings.TrimSpace(acpSessionID)
 	if acpSessionID == "" || len(turns) == 0 {
@@ -1367,6 +1442,50 @@ func (c *codexappConn) completePrompt(turnID string, stopReason string) {
 	c.mu.Unlock()
 	select {
 	case done <- codexappPromptResult{stopReason: stopReason}:
+	default:
+	}
+}
+
+func (c *codexappConn) waitForPromptCompletionOrCancel(done chan codexappPromptResult) {
+	if done == nil {
+		return
+	}
+	timer := time.NewTimer(codexappCancelCompletionTimeout)
+	defer timer.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		c.mu.Lock()
+		matches := c.promptDone == done
+		c.mu.Unlock()
+		if !matches {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			c.synthesizePromptCancelled(done)
+			return
+		}
+	}
+}
+
+func (c *codexappConn) synthesizePromptCancelled(done chan codexappPromptResult) {
+	if done == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.promptDone != done {
+		c.mu.Unlock()
+		return
+	}
+	c.promptDone = nil
+	c.activeTurnID = ""
+	c.pendingPromptStops = nil
+	c.pendingPromptUpdates = nil
+	c.mu.Unlock()
+	select {
+	case done <- codexappPromptResult{stopReason: protocol.StopReasonCancelled}:
 	default:
 	}
 }

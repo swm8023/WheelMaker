@@ -444,6 +444,73 @@ func TestCodexAppRuntimeDispatchesNotificationsAsynchronously(t *testing.T) {
 	}
 }
 
+func TestCodexAppRuntimeKeepsPromptResultBehindBlockedPriorUpdate(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		if msg["method"] == "turn/start" {
+			_ = tr.emit(map[string]any{
+				"id": msg["id"],
+				"result": map[string]any{
+					"turn": map[string]any{"id": "turn-1"},
+				},
+			})
+		}
+	}
+
+	unblockUpdate := make(chan struct{})
+	defer close(unblockUpdate)
+	updateStarted := make(chan struct{})
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	conn.OnACPResponse(func(context.Context, string, json.RawMessage) {
+		close(updateStarted)
+		<-unblockUpdate
+	})
+	conn.BindSessionID("thread-1")
+
+	var promptRes protocol.SessionPromptResult
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+			SessionID: "thread-1",
+			Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeText, Text: "ping"}},
+		}, &promptRes)
+	}()
+	waitForActiveTurn(t, conn, "turn-1")
+
+	if err := tr.emit(map[string]any{
+		"method": "item/agentMessage/delta",
+		"params": map[string]any{"threadId": "thread-1", "turnId": "turn-1", "delta": "pong"},
+	}); err != nil {
+		t.Fatalf("emit delta: %v", err)
+	}
+	select {
+	case <-updateStarted:
+	case <-time.After(time.Second):
+		t.Fatal("blocked update handler was not reached")
+	}
+
+	if err := tr.emit(map[string]any{
+		"method": "turn/completed",
+		"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed"}},
+	}); err != nil {
+		t.Fatalf("emit completion: %v", err)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("prompt completed before prior update callback returned: err=%v result=%#v", err, promptRes)
+	case <-time.After(20 * time.Millisecond):
+	}
+	unblockUpdate <- struct{}{}
+	if err := <-errCh; err != nil {
+		t.Fatalf("prompt after unblocking update: %v", err)
+	}
+	if promptRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("stopReason=%q, want end_turn", promptRes.StopReason)
+	}
+}
+
 func TestCodexAppRuntimeRoutesServerRequestAndRoundTripsStringID(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
@@ -1080,6 +1147,10 @@ func TestCodexAppCancelClearsActivePromptState(t *testing.T) {
 			})
 		case "turn/interrupt":
 			_ = tr.emit(map[string]any{"id": msg["id"], "result": map[string]any{}})
+			_ = tr.emit(map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "interrupted"}},
+			})
 		}
 	}
 
@@ -1357,8 +1428,9 @@ func TestCodexAppSessionLoadReplaysThreadTurnsBeforeReturning(t *testing.T) {
 				"thread": map[string]any{
 					"id": "thread-1",
 					"turns": []map[string]any{{
-						"id":     "turn-1",
-						"status": "completed",
+						"id":        "turn-1",
+						"itemsView": "full",
+						"status":    "completed",
 						"items": []map[string]any{
 							{
 								"id":   "user-1",
@@ -1413,6 +1485,78 @@ func TestCodexAppSessionLoadReplaysThreadTurnsBeforeReturning(t *testing.T) {
 	}
 	if agentContent.Text != "world" {
 		t.Fatalf("agent replay text=%q", agentContent.Text)
+	}
+}
+
+func TestCodexAppSessionLoadReadsThreadWhenResumeTurnsAreNotFull(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		method, _ := msg["method"].(string)
+		id := msg["id"]
+		switch method {
+		case "model/list":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{"data": []map[string]any{{"id": "gpt-5", "displayName": "GPT-5"}}}})
+		case "thread/resume":
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
+				"thread": map[string]any{
+					"id": "thread-1",
+					"turns": []map[string]any{{
+						"id":        "turn-summary",
+						"itemsView": "summary",
+						"status":    "completed",
+						"items":     []map[string]any{},
+					}},
+				},
+			}})
+		case "thread/read":
+			params := msg["params"].(map[string]any)
+			if params["threadId"] != "thread-1" || params["includeTurns"] != true {
+				t.Errorf("thread/read params=%#v", params)
+			}
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{
+				"thread": map[string]any{
+					"id": "thread-1",
+					"turns": []map[string]any{{
+						"id":        "turn-full",
+						"itemsView": "full",
+						"status":    "completed",
+						"items": []map[string]any{{
+							"id":   "agent-1",
+							"type": "agentMessage",
+							"text": "loaded from read",
+						}},
+					}},
+				},
+			}})
+		default:
+			t.Errorf("unexpected app-server method %q", method)
+		}
+	}
+
+	conn := newCodexappConnWithRuntime(rt, t.TempDir())
+	updates := make(chan protocol.SessionUpdateParams, 1)
+	conn.OnACPResponse(captureSessionUpdate(t, updates))
+
+	var loadRes protocol.SessionLoadResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionLoad, protocol.SessionLoadParams{
+		SessionID: "thread-1",
+		CWD:       t.TempDir(),
+	}, &loadRes); err != nil {
+		t.Fatalf("SessionLoad: %v", err)
+	}
+
+	update := waitForCodexappUpdate(t, updates)
+	if update.Update.SessionUpdate != protocol.SessionUpdateAgentMessageChunk {
+		t.Fatalf("replay update=%#v, want agent message from thread/read", update)
+	}
+	var content protocol.ContentBlock
+	if err := json.Unmarshal(update.Update.Content, &content); err != nil {
+		t.Fatalf("unmarshal replay content: %v", err)
+	}
+	if content.Text != "loaded from read" {
+		t.Fatalf("replay text=%q, want thread/read content", content.Text)
 	}
 }
 
@@ -1573,6 +1717,39 @@ func TestCodexAppAskPresetRemainsDistinctFromAuto(t *testing.T) {
 	}
 	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDApprovalPreset); got != "ask" {
 		t.Fatalf("ask preset stored as %q, want ask", got)
+	}
+}
+
+func TestCodexAppPromptMapsResourceLinks(t *testing.T) {
+	input, err := codexappPromptToInput([]protocol.ContentBlock{
+		{
+			Type:     protocol.ContentBlockTypeResourceLink,
+			URI:      "file:///D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md",
+			Name:     "acp-protocol-full.zh-CN.md",
+			MimeType: "text/markdown",
+		},
+		{
+			Type:        protocol.ContentBlockTypeResourceLink,
+			URI:         "https://example.com/spec",
+			Name:        "remote spec",
+			Title:       "Remote Spec",
+			Description: "External reference",
+		},
+	})
+	if err != nil {
+		t.Fatalf("codexappPromptToInput: %v", err)
+	}
+	if len(input) != 2 {
+		t.Fatalf("input len=%d, want 2: %#v", len(input), input)
+	}
+	if input[0].Type != "mention" || input[0].Path != "D:/Code/WheelMaker/docs/acp-protocol-full.zh-CN.md" || input[0].Name != "acp-protocol-full.zh-CN.md" {
+		t.Fatalf("file resource link input=%#v, want mention path", input[0])
+	}
+	if input[1].Type != "text" || !strings.Contains(input[1].Text, "https://example.com/spec") || !strings.Contains(input[1].Text, "Remote Spec") {
+		t.Fatalf("remote resource link input=%#v, want descriptive text", input[1])
+	}
+	if input[1].TextElements == nil || len(input[1].TextElements) != 0 {
+		t.Fatalf("remote resource link text_elements=%#v, want empty array", input[1].TextElements)
 	}
 }
 

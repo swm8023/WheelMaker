@@ -1549,6 +1549,39 @@ func TestCancelPrompt_DoesNotClearSessionConfig(t *testing.T) {
 	}
 }
 
+func TestCancelPromptSendsSessionCancelBeforeCancellingPromptContext(t *testing.T) {
+	s := mustNewSession(t, "cancel-order", "/tmp", "claude")
+	s.ready = true
+
+	var mu sync.Mutex
+	order := []string{}
+	record := func(label string) {
+		mu.Lock()
+		defer mu.Unlock()
+		order = append(order, label)
+	}
+
+	s.prompt.cancel = func() { record("context") }
+	s.instance = &testInjectedInstance{
+		name: "claude",
+		cancelFn: func() error {
+			record("session")
+			return nil
+		},
+	}
+
+	if err := s.cancelPrompt(); err != nil {
+		t.Fatalf("cancelPrompt: %v", err)
+	}
+	mu.Lock()
+	got := append([]string(nil), order...)
+	mu.Unlock()
+	want := []string{"session", "context"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cancel order=%v, want %v", got, want)
+	}
+}
+
 func TestEnsureReady_SessionLoadSuccess_AgentCommandsOverrideCachedCommands(t *testing.T) {
 	s := mustNewSession(t, "acp-1", "/tmp", "claude")
 	s.projectName = "proj1"

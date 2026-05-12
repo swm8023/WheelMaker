@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -166,6 +167,11 @@ type appServerThreadListResponse struct {
 	NextCursor string            `json:"nextCursor,omitempty"`
 }
 
+type appServerThreadReadParams struct {
+	ThreadID     string `json:"threadId"`
+	IncludeTurns bool   `json:"includeTurns"`
+}
+
 type appServerTurnStartParams struct {
 	ThreadID       string               `json:"threadId"`
 	Input          []appServerUserInput `json:"input"`
@@ -193,14 +199,49 @@ type appServerUserInput struct {
 	Name         string `json:"name,omitempty"`
 }
 
+func (i appServerUserInput) MarshalJSON() ([]byte, error) {
+	switch i.Type {
+	case "text":
+		elements := i.TextElements
+		if elements == nil {
+			elements = []any{}
+		}
+		return json.Marshal(struct {
+			Type         string `json:"type"`
+			Text         string `json:"text"`
+			TextElements []any  `json:"text_elements"`
+		}{Type: i.Type, Text: i.Text, TextElements: elements})
+	case "image":
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			URL  string `json:"url"`
+		}{Type: i.Type, URL: i.URL})
+	case "localImage":
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Path string `json:"path"`
+		}{Type: i.Type, Path: i.Path})
+	case "skill", "mention":
+		return json.Marshal(struct {
+			Type string `json:"type"`
+			Name string `json:"name"`
+			Path string `json:"path"`
+		}{Type: i.Type, Name: i.Name, Path: i.Path})
+	default:
+		type alias appServerUserInput
+		return json.Marshal(alias(i))
+	}
+}
+
 type appServerTurnStartResponse struct {
 	Turn appServerTurn `json:"turn"`
 }
 
 type appServerTurn struct {
-	ID     string                `json:"id"`
-	Items  []appServerThreadItem `json:"items,omitempty"`
-	Status string                `json:"status,omitempty"`
+	ID        string                `json:"id"`
+	Items     []appServerThreadItem `json:"items,omitempty"`
+	ItemsView string                `json:"itemsView,omitempty"`
+	Status    string                `json:"status,omitempty"`
 }
 
 type appServerTurnInterruptParams struct {
@@ -572,6 +613,12 @@ func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput
 			if block.Text != "" {
 				out = append(out, appServerUserInput{Type: "text", Text: block.Text, TextElements: []any{}})
 			}
+		case protocol.ContentBlockTypeResourceLink:
+			input, err := codexappResourceLinkToInput(block)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, input)
 		default:
 			return nil, fmt.Errorf("codexapp phase 1 does not support prompt content type %q", block.Type)
 		}
@@ -580,6 +627,53 @@ func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput
 		return nil, errors.New("codexapp prompt contains no text")
 	}
 	return out, nil
+}
+
+func codexappResourceLinkToInput(block protocol.ContentBlock) (appServerUserInput, error) {
+	uriText := strings.TrimSpace(block.URI)
+	if uriText == "" {
+		return appServerUserInput{}, errors.New("codexapp resource_link requires uri")
+	}
+	parsed, err := url.Parse(uriText)
+	if err == nil && strings.EqualFold(parsed.Scheme, "file") {
+		path := codexappFileURIPath(parsed)
+		if strings.TrimSpace(path) == "" {
+			return appServerUserInput{}, fmt.Errorf("codexapp resource_link file uri has no path: %q", block.URI)
+		}
+		return appServerUserInput{Type: "mention", Name: firstNonEmptyString(block.Name, block.Title, path), Path: path}, nil
+	}
+	return appServerUserInput{Type: "text", Text: codexappResourceLinkText(block), TextElements: []any{}}, nil
+}
+
+func codexappFileURIPath(parsed *url.URL) string {
+	if parsed == nil {
+		return ""
+	}
+	path := parsed.Path
+	if parsed.Host != "" {
+		path = "//" + parsed.Host + path
+	}
+	if len(path) >= 3 && path[0] == '/' && path[2] == ':' {
+		path = path[1:]
+	}
+	return path
+}
+
+func codexappResourceLinkText(block protocol.ContentBlock) string {
+	parts := []string{"Resource link:"}
+	if value := firstNonEmptyString(block.Title, block.Name); value != "" {
+		parts = append(parts, value)
+	}
+	if block.URI != "" {
+		parts = append(parts, block.URI)
+	}
+	if block.MimeType != "" {
+		parts = append(parts, "mime="+block.MimeType)
+	}
+	if block.Description != "" {
+		parts = append(parts, block.Description)
+	}
+	return strings.Join(parts, " ")
 }
 
 func codexappInputText(input []appServerUserInput) string {
