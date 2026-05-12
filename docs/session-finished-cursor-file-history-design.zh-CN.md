@@ -26,6 +26,8 @@
 - `prompt_done` 作为真实 turn 存入历史。
 - 前端只缓存 `finished: true` 的 turn。
 - 前端重连时只上报自己已缓存的最新 finished cursor。
+- `session.read(P, T)` 返回 finished cursor 之后的增量，而不是返回完整 prompt snapshot。
+- App 发送 prompt 时不本地写入 `prompt_request`，只接受服务端回放的权威 turn。
 
 非目标：
 
@@ -113,6 +115,12 @@ session-history/
 
 这样前端收到 `prompt_done` 后如果立即补读，服务端已经能从文件返回完整结果。
 
+### 2.4 prompt request 的权威来源
+
+App 发送用户输入时只清空 composer 并调用 `session.send`。本地不乐观插入、不持久化 `prompt_request`。
+
+服务端收到请求后生成 `prompt_request finished=true` turn，通过 `session.message` 下发。客户端如果漏收，后续 reconnect 或 `session.read(P, T)` 会补回同一个权威 turn。这样可以避免本地乐观消息和服务端消息重复。
+
 ## 3. Turn Envelope 协议
 
 所有 app chat message 都使用统一 envelope：
@@ -188,6 +196,19 @@ turn 5: prompt_done          finished=true
 - 不再需要 `prompt_done.turnIndex - 1` watermark。
 - 不再需要“prompt_done 不推进读取游标”的特殊规则。
 
+### 3.3 Prompt terminal invariant
+
+服务端必须保证：只要一个 prompt 已经产生任何 turn，它最终就有一个 terminal turn。terminal turn 统一使用 `prompt_done finished=true` 表示，`stopReason` 区分来源：
+
+- `end_turn`：模型正常结束。
+- `cancelled`：用户取消。
+- `error`：服务端或 agent 返回错误。
+- `interrupted`：服务端准备进入下一个 prompt 时发现上一个 prompt 尚未 terminal。
+- `server_restart`：服务端启动恢复时发现历史中最后一个 prompt 非 terminal。
+- `reload_recovered`：reload/resume 过程中恢复了未闭合状态。
+
+因此服务端如果开始处理 prompt 2，必须先保证 prompt 1 已经 terminal。客户端如果只收到 prompt 2 的 turn，却没有收到 prompt 1 的 `prompt_done`，调用 `session.read(p1, t)` 必须能读回这个合成 terminal turn。
+
 ## 4. `session.read` 协议
 
 请求：
@@ -201,6 +222,8 @@ turn 5: prompt_done          finished=true
 ```
 
 语义：客户端已缓存 finished turns 到 `(promptIndex=12, turnIndex=3)`。
+
+`session.read(P, T)` 是 finished cursor 之后的增量补读，不是“读取 prompt P 的完整快照”。只有 `(0, 0)` 或 `(P, 0)` 这类 cursor 自然覆盖完整范围时，响应才会包含完整 prompt 内容。
 
 响应：
 
@@ -250,7 +273,7 @@ turn 5: prompt_done          finished=true
 
 - `(0, 0)`：返回全量已持久化 prompts，加上 active prompt tail。
 - `(P, 0)`：返回 prompt `P` 全部 turns，加上后续 prompts。
-- `(P, T)`：返回 prompt `P` 中 `turnIndex > T` 的 turns，加上后续 prompts。
+- `(P, T)`：返回 prompt `P` 中 `turnIndex > T` 的 turns，加上后续 prompts 的全部 turns。
 - finished prompt 从 prompt 文件读取。
 - active prompt 从内存读取。
 - 返回的 `finished: false` turns 只用于 UI，不进入客户端 cache。
@@ -279,6 +302,18 @@ turn 5: prompt_done          finished=true
 2. 按 `sessionId:promptIndex:turnIndex` upsert 到内存 UI。
 3. 如果 `finished: true`，写入 IndexedDB 并推进 cursor。
 4. 如果 `finished: false`，只显示，不缓存，不推进 cursor。
+
+实时缺口判断：
+
+假设本地 finished cursor 是 `(P, T)`，收到 turn `(Pi, Ti)`：
+
+- `Pi > P + 1`：存在 prompt 缺口，请求 `session.read(sessionId, P, T)`。
+- `Pi == P + 1` 且本地 prompt P 没有 terminal turn：前一个 prompt 的 terminal 可能漏收，请求 `session.read(sessionId, P, T)`。
+- `Pi == P + 1` 且 `Ti != 1`：新 prompt 起始 turn 漏收，请求 `session.read(sessionId, P, T)`。
+- `Pi == P` 且 `Ti > T + 1`：当前 prompt 内有 turn 缺口，请求 `session.read(sessionId, P, T)`。
+- `Pi == P + 1` 且本地 prompt P 已 terminal 且 `Ti == 1`：可直接接受。
+
+prompt 是否 terminal 只由 `prompt_done` 判断。客户端漏收 terminal 后，即使后续先收到了下一个 prompt，也应先补读再合并。
 
 重连：
 

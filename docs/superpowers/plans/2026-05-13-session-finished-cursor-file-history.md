@@ -4,7 +4,7 @@
 
 **Goal:** Move session prompt history from SQLite `session_prompts.turns_json` into prompt files, add a finished-turn reconnect cursor, and make app/web cache only finished turns.
 
-**Architecture:** Keep SQLite as the hot session index and add `sessions.session_sync_json` for reconnect projection. Add a file-backed Session History Store Adapter for prompt bodies, write one prompt snapshot file at `prompt_done`, and migrate existing prompt rows at startup. Change the app chat protocol from `done` to universal `finished`, with `prompt_done` stored as a real turn.
+**Architecture:** Keep SQLite as the hot session index and add `sessions.session_sync_json` for reconnect projection. Add a file-backed Session History Store Adapter for prompt bodies, write one prompt snapshot file at `prompt_done`, and migrate existing prompt rows at startup. Change the app chat protocol from `done` to universal `finished`, with `prompt_done` stored as a real turn. `session.read(P, T)` returns the delta after the client's finished cursor, realtime gap detection asks for that same cursor, the server synthesizes terminal `prompt_done` before moving past an incomplete prompt, and the client treats server-emitted `prompt_request` as authoritative.
 
 **Tech Stack:** Go, SQLite, JSON files, TypeScript, React, Jest
 
@@ -617,11 +617,35 @@ func TestSessionReadUsesFinishedCursorAndPromptFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestStartingNextPromptSynthesizesInterruptedPromptDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Interrupted Prompt")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "first", nil)); err != nil {
+		t.Fatalf("RecordEvent first prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "second", nil)); err != nil {
+		t.Fatalf("RecordEvent second prompt: %v", err)
+	}
+
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 1, 1)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if !hasPromptDoneWithStopReason(messages, 1, "interrupted") {
+		t.Fatalf("messages missing interrupted prompt_done: %#v", messages)
+	}
+}
 ```
 
 - [ ] **Step 2: Run focused tests to verify they fail**
 
-Run: `cd server && go test ./internal/hub/client -run "TestPromptFinishedWritesPromptFileBeforePublishingPromptDone|TestSessionReadUsesFinishedCursorAndPromptFiles" -count=1`
+Run: `cd server && go test ./internal/hub/client -run "TestPromptFinishedWritesPromptFileBeforePublishingPromptDone|TestSessionReadUsesFinishedCursorAndPromptFiles|TestStartingNextPromptSynthesizesInterruptedPromptDone" -count=1`
 
 Expected: FAIL because recorder still persists prompt content to SQLite `session_prompts.turns_json`.
 
@@ -641,7 +665,7 @@ type SessionRecorder struct {
 Convert state to file prompt on finish:
 
 ```go
-func promptHistoryFromState(state *sessionPromptState, stopReason string, updatedAt time.Time) sessionHistoryPrompt {
+func promptHistoryFromState(sessionID string, state *sessionPromptState, stopReason string, updatedAt time.Time) sessionHistoryPrompt {
 	turns := make([]sessionHistoryTurn, 0, len(state.turns))
 	for _, turn := range state.turns {
 		turns = append(turns, sessionHistoryTurn{
@@ -652,7 +676,7 @@ func promptHistoryFromState(state *sessionPromptState, stopReason string, update
 		})
 	}
 	return sessionHistoryPrompt{
-		SessionID:   state.sessionID,
+		SessionID:   sessionID,
 		PromptIndex: state.promptIndex,
 		UpdatedAt:   updatedAt,
 		StopReason:  stopReason,
@@ -661,11 +685,11 @@ func promptHistoryFromState(state *sessionPromptState, stopReason string, update
 }
 ```
 
-Use `historyStore.WritePrompt` before publishing the `prompt_done` turn. Update `ReadSessionPrompts` so finished prompts call `historyStore.ReadPrompt` and active prompts still read from memory.
+Use `historyStore.WritePrompt` before publishing the `prompt_done` turn. Before creating a new prompt state, call an `ensurePromptTerminalLocked` style helper that seals the previous non-empty prompt with `prompt_done` and `stopReason: "interrupted"` if it is not already terminal. Update `ReadSessionPrompts` so finished prompts call `historyStore.ReadPrompt`, active prompts still read from memory, and `(P, T)` returns only `turnIndex > T` for prompt `P` plus all later prompts.
 
 - [ ] **Step 4: Run focused tests to verify they pass**
 
-Run: `cd server && go test ./internal/hub/client -run "TestPromptFinishedWritesPromptFileBeforePublishingPromptDone|TestSessionReadUsesFinishedCursorAndPromptFiles" -count=1`
+Run: `cd server && go test ./internal/hub/client -run "TestPromptFinishedWritesPromptFileBeforePublishingPromptDone|TestSessionReadUsesFinishedCursorAndPromptFiles|TestStartingNextPromptSynthesizesInterruptedPromptDone" -count=1`
 
 Expected: PASS.
 
@@ -712,13 +736,34 @@ it('treats prompt_done as a normal finished cursor turn', () => {
 
   expect(getLatestSessionReadCursor(messages)).toEqual({promptIndex: 1, turnIndex: 2});
 });
+
+it('requests a read when the next prompt arrives before the previous prompt is terminal', () => {
+  const local = {
+    cursor: {promptIndex: 1, turnIndex: 3},
+    terminalPrompts: new Set<number>(),
+  };
+  const incoming = {sessionId: 's1', promptIndex: 2, turnIndex: 1, method: 'prompt_request', param: {}, finished: true};
+
+  expect(shouldRequestSessionReadForIncomingTurn(local, incoming)).toEqual({promptIndex: 1, turnIndex: 3});
+});
+
+it('requests a read when a prompt or turn gap is detected', () => {
+  const local = {
+    cursor: {promptIndex: 1, turnIndex: 3},
+    terminalPrompts: new Set<number>([1]),
+  };
+
+  expect(shouldRequestSessionReadForIncomingTurn(local, {sessionId: 's1', promptIndex: 3, turnIndex: 1, method: 'prompt_request', param: {}, finished: true})).toEqual({promptIndex: 1, turnIndex: 3});
+  expect(shouldRequestSessionReadForIncomingTurn(local, {sessionId: 's1', promptIndex: 2, turnIndex: 2, method: 'agent_message_chunk', param: {}, finished: true})).toEqual({promptIndex: 1, turnIndex: 3});
+  expect(shouldRequestSessionReadForIncomingTurn(local, {sessionId: 's1', promptIndex: 1, turnIndex: 5, method: 'agent_message_chunk', param: {}, finished: true})).toEqual({promptIndex: 1, turnIndex: 3});
+});
 ```
 
 - [ ] **Step 2: Run focused app tests to verify they fail**
 
 Run: `cd app && npm test -- --runTestsByPath __tests__/web-chat-sync-reconcile.test.ts --watch=false --runInBand`
 
-Expected: FAIL because app code still uses `done` and skips `prompt_done` for cursor advancement.
+Expected: FAIL because app code still uses `done`, skips `prompt_done` for cursor advancement, or has no realtime gap detector.
 
 - [ ] **Step 3: Implement finished-aware app cache rules**
 
@@ -763,6 +808,26 @@ export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): {
   );
 }
 ```
+
+Add a small gap detector in `chatSync.ts` and use it before merging realtime turns:
+
+```ts
+export function shouldRequestSessionReadForIncomingTurn(
+  local: {cursor: SessionReadCursor; terminalPrompts: ReadonlySet<number>},
+  incoming: RegistrySessionMessage,
+): SessionReadCursor | null {
+  const {promptIndex: p, turnIndex: t} = local.cursor;
+  const pi = incoming.promptIndex ?? 0;
+  const ti = incoming.turnIndex ?? 0;
+  if (pi > p + 1) return local.cursor;
+  if (pi === p + 1 && !local.terminalPrompts.has(p)) return local.cursor;
+  if (pi === p + 1 && ti !== 1) return local.cursor;
+  if (pi === p && ti > t + 1) return local.cursor;
+  return null;
+}
+```
+
+When applying a `prompt_done` turn, mark that prompt terminal. The send path must not create a local durable `prompt_request`; the server-emitted `prompt_request finished=true` turn is the cacheable source of truth.
 
 Update persistence calls so only `finished: true` messages are written to IndexedDB:
 
@@ -814,6 +879,9 @@ Document these rules:
 prompt_done is a normal turn and advances the finished cursor.
 finished=true means the turn is cacheable and can be used as the retransmission cursor.
 finished=false turns are display-only streaming state and are not saved to client IndexedDB.
+session.read(P, T) returns the delta after the client's finished cursor, not a full prompt snapshot.
+The app does not persist optimistic prompt_request turns; server prompt_request is authoritative.
+The server synthesizes prompt_done with interrupted/server_restart/reload_recovered stop reasons when needed.
 ```
 
 - [ ] **Step 2: Update persistence docs**
@@ -833,7 +901,7 @@ session-history/<project-key>/<session-id>/prompts/p000001.json
 
 - [ ] **Step 3: Verify docs contain the new protocol terms**
 
-Run: `rg -n "finished|session_sync_json|prompt_done is a normal turn|session-history" docs/app-chat-recorder-sync-protocol.zh-CN.md docs/app-chat-recorder-sync-protocol.md docs/session-persistence-sqlite.md`
+Run: `rg -n "finished|session_sync_json|prompt_done is a normal turn|session-history|server prompt_request is authoritative|session.read\\(P, T\\)" docs/app-chat-recorder-sync-protocol.zh-CN.md docs/app-chat-recorder-sync-protocol.md docs/session-persistence-sqlite.md`
 
 Expected: output includes all four terms.
 

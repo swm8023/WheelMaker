@@ -40,6 +40,9 @@ This change should:
 8. `finished` means "cacheable and usable as a retransmission cursor".
 9. `tool_call` and `plan` are `finished: true` even though later same-turn updates may replace their UI state.
 10. The product accepts that reconnect may not restore intermediate tool/plan states before prompt completion.
+11. `session.read(P, T)` is a delta after the client's finished cursor, not a full prompt snapshot response.
+12. The app does not locally persist optimistic `prompt_request` turns; the server-emitted `prompt_request finished=true` turn is authoritative.
+13. The server synthesizes a terminal `prompt_done finished=true` turn before moving past an incomplete non-empty prompt.
 
 ## Current Problems
 
@@ -218,12 +221,28 @@ For `tool_call` and `plan`, later same-turn updates may replace the in-memory UI
 
 When `prompt_request` arrives:
 
-1. Create or advance `sessionPromptState`.
-2. Add a `prompt_request` turn with `finished: true`.
-3. Publish `registry.session.message`.
-4. Update `sessions.session_sync_json` to the current prompt and turn.
+1. Before advancing to a new prompt, ensure any previous non-empty prompt has a terminal `prompt_done finished=true` turn.
+2. Create or advance `sessionPromptState`.
+3. Add a `prompt_request` turn with `finished: true`.
+4. Publish `registry.session.message`.
+5. Update `sessions.session_sync_json` to the current prompt and turn.
+
+The app does not create a local durable `prompt_request` for sent text. It waits for this server turn, and reconnect or `session.read` recovers it if the realtime event is missed.
 
 No prompt file is written yet.
+
+### Prompt Terminal Synthesis
+
+Every non-empty prompt must eventually have a terminal turn. The terminal turn is always `prompt_done finished=true`; `stopReason` explains why it was emitted:
+
+- `end_turn`: normal model completion.
+- `cancelled`: user cancellation.
+- `error`: server or agent error.
+- `interrupted`: the server is starting the next prompt and the previous prompt was still incomplete.
+- `server_restart`: startup recovery found an incomplete latest prompt.
+- `reload_recovered`: reload/resume recovered an unclosed prompt.
+
+If the server starts prompt 2, prompt 1 must already be terminal. A client that missed prompt 1's terminal turn can call `session.read(1, t)` and receive the synthesized `prompt_done`.
 
 ### Streaming Updates
 
@@ -282,6 +301,16 @@ Realtime handling:
 3. If `finished: true`, write it to cache and advance the finished cursor.
 4. If `finished: false`, do not write it to cache and do not advance the cursor.
 
+Realtime gap detection uses the local finished cursor `(P, T)` and the incoming turn `(Pi, Ti)`:
+
+- `Pi > P + 1`: prompt gap, call `session.read(sessionId, P, T)`.
+- `Pi == P + 1` and local prompt `P` is not terminal: prior prompt terminal was likely missed, call `session.read(sessionId, P, T)`.
+- `Pi == P + 1` and `Ti != 1`: new prompt start was missed, call `session.read(sessionId, P, T)`.
+- `Pi == P` and `Ti > T + 1`: turn gap inside the prompt, call `session.read(sessionId, P, T)`.
+- `Pi == P + 1`, prompt `P` is terminal, and `Ti == 1`: accept without repair.
+
+A prompt is terminal only after `prompt_done`.
+
 Reconnect handling:
 
 1. Call `session.list`.
@@ -304,6 +333,8 @@ Request:
 ```
 
 The cursor means: "the client has cached finished turns through this point".
+
+The response is a delta after that cursor. It is not a full snapshot of prompt `P` unless the cursor itself asks for that range, such as `(0, 0)` or `(P, 0)`.
 
 Response:
 
@@ -353,7 +384,7 @@ Read rules:
 
 - `(0, 0)` returns all persisted prompts plus the active prompt tail when present.
 - `(P, 0)` returns all turns for prompt `P` plus later prompts.
-- `(P, T)` returns turns after `T` in prompt `P` plus later prompts.
+- `(P, T)` returns turns after `T` in prompt `P` plus all turns in later prompts.
 - For finished prompts, read from prompt files.
 - For the active prompt, read from in-memory `sessionPromptState`.
 - Returned unfinished turns are valid UI updates but are not cacheable.
