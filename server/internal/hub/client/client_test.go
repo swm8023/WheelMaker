@@ -4656,6 +4656,57 @@ func TestHandleSessionRequestSessionDeleteRemovesSessionAndPrompts(t *testing.T)
 	}
 }
 
+func TestHandleSessionRequestSessionDeleteCleansAgentArtifacts(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	oldCleanup := cleanupSessionArtifacts
+	var cleanupCalls []struct {
+		projectName string
+		agentType   string
+		sessionID   string
+	}
+	cleanupSessionArtifacts = func(projectName, agentType, sessionID string) error {
+		cleanupCalls = append(cleanupCalls, struct {
+			projectName string
+			agentType   string
+			sessionID   string
+		}{projectName: projectName, agentType: agentType, sessionID: sessionID})
+		return nil
+	}
+	t.Cleanup(func() { cleanupSessionArtifacts = oldCleanup })
+
+	now := time.Now().UTC()
+	addRuntimeSession(c, "sess-codexapp-memory", "Delete CodexApp", "codexapp", now, now)
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-codexapp-stored",
+		ProjectName:  "proj1",
+		Status:       SessionPersisted,
+		AgentType:    "codexapp",
+		AgentJSON:    `{}`,
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Title:        "Stored CodexApp",
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	for _, sessionID := range []string{"sess-codexapp-memory", "sess-codexapp-stored"} {
+		if _, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(fmt.Sprintf(`{"sessionId":%q}`, sessionID))); err != nil {
+			t.Fatalf("HandleSessionRequest(session.delete %s): %v", sessionID, err)
+		}
+	}
+
+	if len(cleanupCalls) != 2 {
+		t.Fatalf("cleanup calls=%#v, want 2", cleanupCalls)
+	}
+	for _, call := range cleanupCalls {
+		if call.projectName != "proj1" || call.agentType != "codexapp" || !strings.HasPrefix(call.sessionID, "sess-codexapp-") {
+			t.Fatalf("cleanup call=%#v, want codexapp project/session", call)
+		}
+	}
+}
+
 func TestHandleSessionRequestSessionReloadClearsPromptStateBeforeReplay(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()

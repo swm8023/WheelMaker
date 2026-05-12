@@ -16,6 +16,27 @@ import (
 // Providers that ignore cwd can receive an empty string.
 type InstanceCreator func(ctx context.Context, cwd string) (Instance, error)
 
+type projectNameContextKey struct{}
+
+func WithProjectName(ctx context.Context, projectName string) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	projectName = strings.TrimSpace(projectName)
+	if projectName == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, projectNameContextKey{}, projectName)
+}
+
+func ProjectNameFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	value, _ := ctx.Value(projectNameContextKey{}).(string)
+	return strings.TrimSpace(value)
+}
+
 // ACPFactory resolves one provider enum to one instance creator.
 // A creator map contains both default built-ins and optional overrides.
 type ACPFactory struct {

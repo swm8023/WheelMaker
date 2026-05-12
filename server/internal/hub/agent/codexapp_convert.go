@@ -1,15 +1,30 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/swm8023/wheelmaker/internal/protocol"
 )
+
+var codexappMaxImageBytes = 20 * 1024 * 1024
+
+var codexappArtifactRootPathFunc = func() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".wheelmaker"), nil
+}
 
 type codexappRPCRequest struct {
 	ID     int64  `json:"id"`
@@ -613,6 +628,10 @@ func codexappNormalizeApprovalPreset(preset string) string {
 }
 
 func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput, error) {
+	return codexappPromptToInputWithArtifacts("", "", blocks)
+}
+
+func codexappPromptToInputWithArtifacts(projectName string, sessionID string, blocks []protocol.ContentBlock) ([]appServerUserInput, error) {
 	if len(blocks) == 0 {
 		return nil, errors.New("codexapp prompt is empty")
 	}
@@ -629,6 +648,12 @@ func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput
 				return nil, err
 			}
 			out = append(out, input)
+		case protocol.ContentBlockTypeImage:
+			input, err := codexappImageToInput(projectName, sessionID, block)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, input)
 		default:
 			return nil, fmt.Errorf("codexapp phase 1 does not support prompt content type %q", block.Type)
 		}
@@ -637,6 +662,159 @@ func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput
 		return nil, errors.New("codexapp prompt contains no text")
 	}
 	return out, nil
+}
+
+func codexappImageToInput(projectName string, sessionID string, block protocol.ContentBlock) (appServerUserInput, error) {
+	if strings.TrimSpace(block.Data) != "" {
+		path, err := codexappWriteImageArtifact(projectName, sessionID, block)
+		if err != nil {
+			return appServerUserInput{}, err
+		}
+		return appServerUserInput{Type: "localImage", Path: path}, nil
+	}
+	uriText := strings.TrimSpace(block.URI)
+	if uriText == "" {
+		return appServerUserInput{}, errors.New("codexapp image requires data or uri")
+	}
+	parsed, err := url.Parse(uriText)
+	if err != nil || parsed.Scheme == "" {
+		return appServerUserInput{}, fmt.Errorf("codexapp image uri is invalid: %q", block.URI)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "file":
+		path := codexappFileURIPath(parsed)
+		if !filepath.IsAbs(path) {
+			return appServerUserInput{}, fmt.Errorf("codexapp image file uri must resolve to an absolute path: %q", block.URI)
+		}
+		return appServerUserInput{Type: "localImage", Path: path}, nil
+	case "http", "https":
+		return appServerUserInput{Type: "image", URL: uriText}, nil
+	default:
+		return appServerUserInput{}, fmt.Errorf("codexapp image uri scheme %q is not supported", parsed.Scheme)
+	}
+}
+
+func codexappWriteImageArtifact(projectName string, sessionID string, block protocol.ContentBlock) (string, error) {
+	encoded := strings.TrimSpace(block.Data)
+	if encoded == "" {
+		return "", errors.New("codexapp image data is empty")
+	}
+	if base64.StdEncoding.DecodedLen(len(encoded)) > codexappMaxImageBytes+2 {
+		return "", fmt.Errorf("codexapp image exceeds %d bytes", codexappMaxImageBytes)
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", fmt.Errorf("codexapp image data is not valid base64: %w", err)
+	}
+	if len(data) == 0 {
+		return "", errors.New("codexapp image data is empty")
+	}
+	if len(data) > codexappMaxImageBytes {
+		return "", fmt.Errorf("codexapp image exceeds %d bytes", codexappMaxImageBytes)
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(block.MimeType))
+	if mimeType == "" {
+		mimeType = strings.ToLower(http.DetectContentType(data))
+	}
+	ext, ok := codexappImageExtension(mimeType)
+	if !ok {
+		return "", fmt.Errorf("codexapp image mime type %q is not supported", mimeType)
+	}
+	dir, err := codexappImageArtifactDir(projectName, sessionID)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, fmt.Sprintf("sha256-%x%s", sum, ext))
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// CleanupSessionArtifacts removes artifacts owned by an agent session.
+func CleanupSessionArtifacts(projectName, agentType, sessionID string) error {
+	if !strings.EqualFold(strings.TrimSpace(agentType), string(protocol.ACPProviderCodexApp)) {
+		return nil
+	}
+	return cleanupCodexappSessionArtifacts(projectName, sessionID)
+}
+
+func cleanupCodexappSessionArtifacts(projectName string, sessionID string) error {
+	dir, err := codexappImageArtifactDir(projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(dir)
+}
+
+func codexappImageArtifactDir(projectName string, sessionID string) (string, error) {
+	projectSegment, err := codexappSafePathSegment(projectName)
+	if err != nil {
+		return "", fmt.Errorf("codexapp image project name: %w", err)
+	}
+	sessionSegment, err := codexappSafePathSegment(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("codexapp image session id: %w", err)
+	}
+	root, err := codexappArtifactRootPathFunc()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, projectSegment, "images", sessionSegment), nil
+}
+
+func codexappImageExtension(mimeType string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/png":
+		return ".png", true
+	case "image/jpeg", "image/jpg":
+		return ".jpg", true
+	case "image/webp":
+		return ".webp", true
+	case "image/gif":
+		return ".gif", true
+	default:
+		return "", false
+	}
+}
+
+func codexappSafePathSegment(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", errors.New("value is empty")
+	}
+	var b strings.Builder
+	changed := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			b.WriteRune(r)
+			continue
+		}
+		changed = true
+		b.WriteByte('_')
+	}
+	segment := b.String()
+	if segment == "" || segment == "." || segment == ".." {
+		sum := sha256.Sum256([]byte(value))
+		return fmt.Sprintf("artifact-%x", sum[:6]), nil
+	}
+	if changed {
+		sum := sha256.Sum256([]byte(value))
+		segment = fmt.Sprintf("%s-%x", segment, sum[:6])
+	}
+	if strings.Contains(segment, "..") {
+		segment = strings.ReplaceAll(segment, "..", "__")
+	}
+	return segment, nil
 }
 
 func codexappResourceLinkToInput(block protocol.ContentBlock) (appServerUserInput, error) {

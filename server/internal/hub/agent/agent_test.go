@@ -1782,6 +1782,159 @@ func TestCodexAppPromptMapsResourceLinks(t *testing.T) {
 	}
 }
 
+func TestCodexAppSessionPromptSendsBase64ImageAsLocalImage(t *testing.T) {
+	oldRoot := codexappArtifactRootPathFunc
+	artifactRoot := t.TempDir()
+	codexappArtifactRootPathFunc = func() (string, error) { return artifactRoot, nil }
+	t.Cleanup(func() { codexappArtifactRootPathFunc = oldRoot })
+
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		method, _ := msg["method"].(string)
+		id := msg["id"]
+		switch method {
+		case "turn/start":
+			params := msg["params"].(map[string]any)
+			input := params["input"].([]any)
+			if len(input) != 2 {
+				t.Fatalf("turn/start input=%#v, want text + localImage", input)
+			}
+			textInput := input[0].(map[string]any)
+			if textInput["type"] != "text" || textInput["text"] != "describe" {
+				t.Fatalf("text input=%#v", textInput)
+			}
+			imageInput := input[1].(map[string]any)
+			imagePath, _ := imageInput["path"].(string)
+			if imageInput["type"] != "localImage" || imagePath == "" {
+				t.Fatalf("image input=%#v, want localImage path", imageInput)
+			}
+			if !strings.Contains(filepath.ToSlash(imagePath), "/Proj_Name-") ||
+				!strings.Contains(filepath.ToSlash(imagePath), "/images/thread-1/sha256-") ||
+				!strings.HasSuffix(imagePath, ".png") {
+				t.Fatalf("image path=%q, want project/session image artifact path", imagePath)
+			}
+			if _, err := os.Stat(imagePath); err != nil {
+				t.Fatalf("image artifact not written: %v", err)
+			}
+			_ = tr.emit(map[string]any{"id": id, "result": map[string]any{"turn": map[string]any{"id": "turn-1"}}})
+			_ = tr.emit(map[string]any{
+				"method": "turn/completed",
+				"params": map[string]any{"threadId": "thread-1", "turn": map[string]any{"id": "turn-1", "status": "completed"}},
+			})
+		default:
+			t.Errorf("unexpected app-server method %q", method)
+		}
+	}
+
+	conn := newCodexappConnWithRuntimeAndProject(rt, t.TempDir(), "Proj:Name")
+	conn.BindSessionID("thread-1")
+
+	var promptRes protocol.SessionPromptResult
+	if err := conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+		SessionID: "thread-1",
+		Prompt: []protocol.ContentBlock{
+			{Type: protocol.ContentBlockTypeText, Text: "describe"},
+			{
+				Type:     protocol.ContentBlockTypeImage,
+				MimeType: "image/png",
+				Data:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+			},
+		},
+	}, &promptRes); err != nil {
+		t.Fatalf("SessionPrompt: %v", err)
+	}
+	if promptRes.StopReason != protocol.StopReasonEndTurn {
+		t.Fatalf("stopReason=%q, want end_turn", promptRes.StopReason)
+	}
+}
+
+func TestCodexAppPromptMapsImageURIs(t *testing.T) {
+	input, err := codexappPromptToInputWithArtifacts("proj", "sess-1", []protocol.ContentBlock{
+		{Type: protocol.ContentBlockTypeImage, URI: "https://example.com/a.png"},
+		{Type: protocol.ContentBlockTypeImage, URI: "file:///D:/tmp/a.png"},
+	})
+	if err != nil {
+		t.Fatalf("codexappPromptToInputWithArtifacts: %v", err)
+	}
+	if len(input) != 2 {
+		t.Fatalf("input len=%d, want 2: %#v", len(input), input)
+	}
+	if input[0].Type != "image" || input[0].URL != "https://example.com/a.png" {
+		t.Fatalf("remote image input=%#v, want image url", input[0])
+	}
+	if input[1].Type != "localImage" || filepath.ToSlash(input[1].Path) != "D:/tmp/a.png" {
+		t.Fatalf("file image input=%#v, want localImage absolute path", input[1])
+	}
+}
+
+func TestCodexAppSessionPromptRejectsInvalidImageBeforeTurnStart(t *testing.T) {
+	tr := newFakeCodexappTransport()
+	rt := newCodexappRuntimeWithTransport(tr)
+	t.Cleanup(func() { _ = rt.close() })
+	tr.onSend = func(msg map[string]any) {
+		if method, _ := msg["method"].(string); method == "turn/start" {
+			t.Fatalf("turn/start sent for invalid image: %#v", msg)
+		}
+	}
+
+	conn := newCodexappConnWithRuntimeAndProject(rt, t.TempDir(), "proj")
+	conn.BindSessionID("thread-1")
+
+	var promptRes protocol.SessionPromptResult
+	err := conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
+		SessionID: "thread-1",
+		Prompt: []protocol.ContentBlock{
+			{Type: protocol.ContentBlockTypeText, Text: "describe"},
+			{Type: protocol.ContentBlockTypeImage, MimeType: "image/png", Data: "not-base64"},
+		},
+	}, &promptRes)
+	if err == nil || !strings.Contains(err.Error(), "valid base64") {
+		t.Fatalf("SessionPrompt err=%v, want invalid base64 before turn/start", err)
+	}
+}
+
+func TestCodexAppSessionPromptRejectsOversizedBase64Image(t *testing.T) {
+	oldMax := codexappMaxImageBytes
+	codexappMaxImageBytes = 4
+	t.Cleanup(func() { codexappMaxImageBytes = oldMax })
+
+	_, err := codexappPromptToInputWithArtifacts("proj", "sess-1", []protocol.ContentBlock{
+		{Type: protocol.ContentBlockTypeImage, MimeType: "image/png", Data: "MTIzNDU="},
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("codexappPromptToInputWithArtifacts err=%v, want size rejection", err)
+	}
+}
+
+func TestCodexAppCleanupSessionArtifactsRemovesImageDirectory(t *testing.T) {
+	oldRoot := codexappArtifactRootPathFunc
+	artifactRoot := t.TempDir()
+	codexappArtifactRootPathFunc = func() (string, error) { return artifactRoot, nil }
+	t.Cleanup(func() { codexappArtifactRootPathFunc = oldRoot })
+
+	path, err := codexappWriteImageArtifact("Proj:Name", "thread-1", protocol.ContentBlock{
+		Type:     protocol.ContentBlockTypeImage,
+		MimeType: "image/png",
+		Data:     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+	})
+	if err != nil {
+		t.Fatalf("codexappWriteImageArtifact: %v", err)
+	}
+	imageDir := filepath.Dir(path)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("image artifact not written: %v", err)
+	}
+
+	if err := CleanupSessionArtifacts("Proj:Name", string(protocol.ACPProviderCodexApp), "thread-1"); err != nil {
+		t.Fatalf("CleanupSessionArtifacts: %v", err)
+	}
+	if _, err := os.Stat(imageDir); !os.IsNotExist(err) {
+		t.Fatalf("image dir stat err=%v, want removed", err)
+	}
+}
+
 func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
@@ -1876,7 +2029,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	if initRes.AgentInfo == nil || initRes.AgentInfo.Name != "codexapp" {
 		t.Fatalf("agent info=%#v", initRes.AgentInfo)
 	}
-	if initRes.AgentCapabilities.PromptCapabilities == nil || initRes.AgentCapabilities.PromptCapabilities.Image {
+	if initRes.AgentCapabilities.PromptCapabilities == nil || !initRes.AgentCapabilities.PromptCapabilities.Image {
 		t.Fatalf("prompt capabilities=%#v", initRes.AgentCapabilities.PromptCapabilities)
 	}
 
@@ -1925,7 +2078,7 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	}
 }
 
-func TestCodexAppRejectsUnsupportedPhaseOneInputs(t *testing.T) {
+func TestCodexAppRejectsUnsupportedInputs(t *testing.T) {
 	tr := newFakeCodexappTransport()
 	rt := newCodexappRuntimeWithTransport(tr)
 	t.Cleanup(func() { _ = rt.close() })
@@ -1942,9 +2095,9 @@ func TestCodexAppRejectsUnsupportedPhaseOneInputs(t *testing.T) {
 	var promptRes protocol.SessionPromptResult
 	if err := conn.Send(context.Background(), protocol.MethodSessionPrompt, protocol.SessionPromptParams{
 		SessionID: "thread-1",
-		Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeImage, URI: "file:///tmp/a.png"}},
+		Prompt:    []protocol.ContentBlock{{Type: protocol.ContentBlockTypeAudio, Data: "abc"}},
 	}, &promptRes); err == nil {
-		t.Fatal("SessionPrompt accepted image input in phase 1")
+		t.Fatal("SessionPrompt accepted audio input")
 	}
 }
 

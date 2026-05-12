@@ -47,8 +47,8 @@ func codexappInstanceCreator(provider *codexAppProvider) InstanceCreator {
 	if provider == nil {
 		provider = NewCodexAppProvider()
 	}
-	return func(_ context.Context, cwd string) (Instance, error) {
-		conn, err := newOwnedCodexappConn(provider, cwd)
+	return func(ctx context.Context, cwd string) (Instance, error) {
+		conn, err := newOwnedCodexappConn(provider, cwd, ProjectNameFromContext(ctx))
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +124,7 @@ func codexappStoreThreadMapping(acpSessionID string, runtimeThreadID string) {
 	_ = os.WriteFile(path, raw, 0o600)
 }
 
-func newOwnedCodexappConn(provider *codexAppProvider, cwd string) (*codexappConn, error) {
+func newOwnedCodexappConn(provider *codexAppProvider, cwd string, projectName string) (*codexappConn, error) {
 	exe, args, env, err := provider.Launch()
 	if err != nil {
 		return nil, err
@@ -134,7 +134,7 @@ func newOwnedCodexappConn(provider *codexAppProvider, cwd string) (*codexappConn
 	if err := raw.Start(); err != nil {
 		return nil, err
 	}
-	return newCodexappConnWithRuntime(newCodexappRuntimeWithTransport(raw), cwd), nil
+	return newCodexappConnWithRuntimeAndProject(newCodexappRuntimeWithTransport(raw), cwd, projectName), nil
 }
 
 type codexappRuntime struct {
@@ -429,6 +429,7 @@ type codexappConn struct {
 	initializeRes protocol.InitializeResult
 	acpSessionID  string
 	threadID      string
+	projectName   string
 	config        codexappConfigState
 	activeTurnID  string
 	lastTurnID    string
@@ -447,10 +448,15 @@ type codexappPromptResult struct {
 var codexappCancelCompletionTimeout = 3 * time.Second
 
 func newCodexappConnWithRuntime(runtime *codexappRuntime, cwd string) *codexappConn {
+	return newCodexappConnWithRuntimeAndProject(runtime, cwd, "")
+}
+
+func newCodexappConnWithRuntimeAndProject(runtime *codexappRuntime, cwd string, projectName string) *codexappConn {
 	return &codexappConn{
-		runtime: runtime,
-		cwd:     cwd,
-		config:  newCodexappConfigState(),
+		runtime:     runtime,
+		cwd:         cwd,
+		projectName: strings.TrimSpace(projectName),
+		config:      newCodexappConfigState(),
 	}
 }
 
@@ -615,7 +621,7 @@ func (c *codexappConn) sendInitialize(ctx context.Context, result any) error {
 		AgentCapabilities: protocol.AgentCapabilities{
 			LoadSession: true,
 			PromptCapabilities: &protocol.PromptCapabilities{
-				Image:           false,
+				Image:           true,
 				Audio:           false,
 				EmbeddedContext: false,
 			},
@@ -717,13 +723,13 @@ func (c *codexappConn) sendSessionList(ctx context.Context, p protocol.SessionLi
 }
 
 func (c *codexappConn) sendSessionPrompt(ctx context.Context, p protocol.SessionPromptParams, result any) error {
-	input, err := codexappPromptToInput(p.Prompt)
-	if err != nil {
-		return err
-	}
 	threadID := c.runtimeThreadIDForSession(p.SessionID)
 	if threadID == "" {
 		return errors.New("codexapp session/prompt requires sessionId")
+	}
+	input, err := codexappPromptToInputWithArtifacts(c.projectName, p.SessionID, p.Prompt)
+	if err != nil {
+		return err
 	}
 	done := make(chan codexappPromptResult, 1)
 	c.mu.Lock()

@@ -426,11 +426,33 @@ Phase 1 只声明文本 prompt capability；`resource_link` 是 ACP 基线内容
 
 | ACP image | app-server input | 阶段 |
 |---|---|---|
-| `uri=file:///absolute/path.png` | `{type:"localImage", path}` | Phase 1.5 |
-| `uri=http(s)://...` | `{type:"image", url}` | Phase 1.5 |
-| `data=<base64>` | 写 temp file 后 `{type:"localImage", path}` | Phase 2 |
+| `uri=file:///absolute/path.png` | `{type:"localImage", path}` | 图片最小闭环 |
+| `uri=http(s)://...` | `{type:"image", url}` | 图片最小闭环 |
+| `data=<base64>` | 写 session-scoped temp file 后 `{type:"localImage", path}` | 图片最小闭环 |
 
-只有完整支持 ACP image 语义后才能把 `promptCapabilities.image` 改成 `true`。
+只有完整支持 ACP image 语义后才能把 `promptCapabilities.image` 改成 `true`。由于 WheelMaker Web App 与飞书当前都会把图片送成 ACP `image.data` base64，不能单独发布只支持 `uri` 的能力。
+
+图片临时文件生命周期：
+
+- base64 图片由 `codexapp` agent 写入 session-scoped 临时目录。
+- 临时目录按 projectName 与 ACP sessionId 分区，例如 `~/.wheelmaker/<projectName>/images/<sessionId>/...`。
+- `projectName` 与 `sessionId` 作为路径段使用前必须做 path-safe 处理，不能允许路径分隔符或 `..` 逃逸出项目 artifact 目录。
+- 临时目录不绑定 `AgentInstance` / `codexappConn` 生命周期；多 session 并存时，一个 session 被 suspend 或 instance close 不代表该 session 已结束。
+- `client` 只在真正删除 session 时调用通用 agent artifact cleanup hook，例如 `agent.CleanupSessionArtifacts(projectName, agentType, sessionID)`；`codexapp` 在 agent 包内清理自己的图片目录。
+- `turn/start` 后不能立即删除临时图片；app-server 可能异步读取 `localImage.path`。
+- `session.delete` 清理该 session 下的临时图片目录；orphan/TTL 清理作为后续兜底任务，避免长期未 delete 的历史图片无限累积。
+
+base64 图片落盘规则：
+
+- 文件名使用内容 hash：`sha256-<hex>.<ext>`。
+- 扩展名从 `mimeType` 推导：`image/png -> .png`、`image/jpeg -> .jpg`、`image/webp -> .webp`、`image/gif -> .gif`。
+- `mimeType` 缺失时，用解码后的 bytes 做内容嗅探；仍不是 `image/*` 则拒绝该 prompt。
+- 同一 session 内相同图片复用同一路径，不重复写。
+- 不使用用户传入的 `name` / `title` 作为文件名，避免路径注入和非法字符问题。
+- 单张 base64 图片解码后最大 `20 MiB`；多图不另设数量上限，但每张独立校验，任一图片超限则该 prompt 明确失败。
+- `image` 同时带 `data` 和 `uri` 时优先使用 `data`；只有 `data` 为空才处理 `uri`。
+- `file://` 图片不限制在 workspace 内；只校验可转换为本地绝对路径，实际读权限交给 app-server/Codex 的 sandbox 与审批策略处理。
+- prompt 中任一图片转换失败时，整条 `session/prompt` 失败；不得静默跳过坏图片后继续发送。
 
 ## 当前校准结论
 

@@ -23,6 +23,8 @@ const acpClientProtocolVersion = 1
 
 var acpClientInfo = &acp.AgentInfo{Name: "wheelmaker", Version: "0.1"}
 
+var cleanupSessionArtifacts = agent.CleanupSessionArtifacts
+
 type promptState struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -242,7 +244,7 @@ func (c *Client) createSessionState(ctx context.Context, agentType, title string
 		}
 	}
 
-	inst, err := creator(ctx, c.cwd)
+	inst, err := creator(agent.WithProjectName(ctx, c.projectName), c.cwd)
 	if err != nil {
 		return nil, fmt.Errorf("create session instance: %w", err)
 	}
@@ -1372,8 +1374,10 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	store := c.store
 	c.mu.Unlock()
 
+	agentType := ""
 	if sess != nil {
 		sess.mu.Lock()
+		agentType = sess.agentType
 		inst := sess.instance
 		sess.instance = nil
 		sess.ready = false
@@ -1384,12 +1388,25 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 			_ = inst.Close()
 		}
 	}
+	if agentType == "" && store != nil {
+		rec, err := store.LoadSession(ctx, c.projectName, sessionID)
+		if err != nil {
+			hubLogger(c.projectName).Warn("load session before artifact cleanup failed session=%s err=%v", sessionID, err)
+		} else if rec != nil {
+			agentType = rec.AgentType
+		}
+	}
 	if c.sessionRecorder != nil {
 		c.sessionRecorder.RemovePromptState(sessionID)
 	}
 	if store != nil {
 		if err := store.DeleteSession(ctx, c.projectName, sessionID); err != nil {
 			return err
+		}
+	}
+	if cleanupSessionArtifacts != nil {
+		if err := cleanupSessionArtifacts(c.projectName, agentType, sessionID); err != nil {
+			hubLogger(c.projectName).Warn("cleanup session artifacts failed agent=%s session=%s err=%v", agentType, sessionID, err)
 		}
 	}
 	return nil

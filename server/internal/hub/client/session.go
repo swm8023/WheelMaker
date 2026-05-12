@@ -425,7 +425,7 @@ func (s *Session) ensureInstance(ctx context.Context) error {
 	if creator == nil {
 		return fmt.Errorf("no agent registered for %q", s.agentType)
 	}
-	inst, err := creator(ctx, s.cwd)
+	inst, err := creator(agent.WithProjectName(ctx, s.projectName), s.cwd)
 	if err != nil {
 		return err
 	}
