@@ -263,6 +263,7 @@ const CHAT_SWIPE_REVEAL_THRESHOLD = 20;
 const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
+const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
@@ -278,6 +279,11 @@ function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
   const projectKey = activeProjectId.trim() || CHAT_DRAFT_KEY_PROJECT_FALLBACK;
   const sessionKey = sessionId.trim() || CHAT_NEW_DRAFT_SESSION_KEY;
   return `${projectKey}:${sessionKey}`;
+}
+
+function isChatScrolledNearBottom(container: HTMLElement): boolean {
+  const distance = container.scrollHeight - container.clientHeight - container.scrollTop;
+  return Math.max(0, distance) <= CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
@@ -2145,6 +2151,8 @@ function App() {
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatAutoScrollFollowRef = useRef(true);
+  const chatPointerScrollingRef = useRef(false);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
   const chatComposerActionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2287,6 +2295,49 @@ function App() {
     () => buildChatDraftKey(projectId, selectedChatId),
     [projectId, selectedChatId],
   );
+
+  const resizeChatComposerTextarea = useCallback(() => {
+    const input = chatComposerTextareaRef.current;
+    if (!input) {
+      return;
+    }
+    input.style.height = '0px';
+    const nextHeight = Math.max(36, Math.min(input.scrollHeight, 180));
+    input.style.height = `${nextHeight}px`;
+    input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
+  }, []);
+
+  const updateChatFollowModeFromScroll = useCallback(
+    (container = chatScrollRef.current) => {
+      if (!container) {
+        return;
+      }
+      chatAutoScrollFollowRef.current = isChatScrolledNearBottom(container);
+    },
+    [],
+  );
+
+  const scrollChatToBottom = useCallback((force = false) => {
+    if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      const container = chatScrollRef.current;
+      if (!container) {
+        return;
+      }
+      if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {
+        return;
+      }
+      container.scrollTop = container.scrollHeight;
+      chatAutoScrollFollowRef.current = true;
+    });
+  }, []);
+
+  const forceChatScrollToBottom = useCallback(() => {
+    chatAutoScrollFollowRef.current = true;
+    scrollChatToBottom(true);
+  }, [scrollChatToBottom]);
 
   useEffect(() => {
     if (!chatSlashMenuVisible) {
@@ -2681,29 +2732,24 @@ function App() {
   }, [chatSessions, chatSwipeOpenSessionId]);
 
 
-  useEffect(() => {
-    const input = chatComposerTextareaRef.current;
-    if (!input) {
-      return;
-    }
-    input.style.height = '0px';
-    const nextHeight = Math.max(36, Math.min(input.scrollHeight, 180));
-    input.style.height = `${nextHeight}px`;
-    input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
-  }, [chatComposerText]);
+  useLayoutEffect(() => {
+    resizeChatComposerTextarea();
+  }, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);
 
   useEffect(() => {
     if (tab !== 'chat') {
       return;
     }
-    const container = chatScrollRef.current;
-    if (!container) {
+    forceChatScrollToBottom();
+  }, [tab, selectedChatId, forceChatScrollToBottom]);
+
+  useEffect(() => {
+    if (tab !== 'chat') {
       return;
     }
-    window.requestAnimationFrame(() => {
-      container.scrollTop = container.scrollHeight;
-    });
-  }, [tab, selectedChatId, chatMessages, chatLoading]);
+    resizeChatComposerTextarea();
+    scrollChatToBottom();
+  }, [tab, selectedChatId, chatMessages, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -4730,6 +4776,7 @@ function App() {
 
     // Clear UI immediately after capturing text — before any async work
     resetChatComposer();
+    forceChatScrollToBottom();
     setChatSending(true);
     try {
       if (!selectedChatId) {
@@ -7118,20 +7165,30 @@ function App() {
             className="chat-main"
             style={chatKeyboardInset > 0 ? { paddingBottom: `${chatKeyboardInset}px` } : undefined}
           >
-            <div ref={chatScrollRef} className="scroll-panel chat-block">
-            {chatLoading ? (
-              <div className="muted block">Loading chat...</div>
-            ) : null}
-            {!chatLoading && chatPromptGroups.length === 0 ? (
-              <div className="empty-card">
-                <div className="empty-title">Start chatting</div>
-                <div className="empty-subtitle">
-                  Messages stream here for the current project.
+            <div
+              ref={chatScrollRef}
+              className="scroll-panel chat-block"
+              onScroll={event => updateChatFollowModeFromScroll(event.currentTarget)}
+              onPointerDown={() => { chatPointerScrollingRef.current = true; }}
+              onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
+              onPointerCancel={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
+              onTouchStart={() => { chatPointerScrollingRef.current = true; }}
+              onTouchEnd={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
+              onTouchCancel={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
+            >
+              {chatLoading ? (
+                <div className="muted block">Loading chat...</div>
+              ) : null}
+              {!chatLoading && chatPromptGroups.length === 0 ? (
+                <div className="empty-card">
+                  <div className="empty-title">Start chatting</div>
+                  <div className="empty-subtitle">
+                    Messages stream here for the current project.
+                  </div>
                 </div>
-              </div>
-            ) : null}
-            {renderedChatPromptGroups}
-          </div>
+              ) : null}
+              {renderedChatPromptGroups}
+            </div>
           <div className="chat-composer">
             <input
               ref={chatFileInputRef}
