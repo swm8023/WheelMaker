@@ -221,16 +221,17 @@ client.Session
 
 Approval preset 映射：
 
-| preset | approvalPolicy | thread sandbox | turn sandboxPolicy | 含义 |
+| 可见 preset | approvalPolicy | thread sandbox | turn sandboxPolicy | 含义 |
 |---|---|---|---|---|
-| `read_only` | `on-request` | `read-only` | `readOnly` | 只读分析，写入必须审批或失败 |
-| `ask` | `on-request` | `workspace-write` | `workspaceWrite` | 默认交互确认，工作区写入，敏感动作询问 |
-| `auto` | `on-failure` | `workspace-write` | `workspaceWrite` | 工作区内自动尝试，失败或升级时再询问 |
+| `auto` | `on-request` | `workspace-write` | `workspaceWrite` | 官方 App 默认交互模式；模型可主动请求审批 |
+| `read_only` | `on-request` | `read-only` | `readOnly` | 只读分析；写入必须审批或失败 |
 | `full` | `never` | `danger-full-access` | `dangerFullAccess` | 无沙箱、无审批，高信任场景 |
 
 规则：
 
-- `ask` 和 `auto` 必须是两个不同选项，不能把 `ask` canonicalize 成 `auto`。
+- `approval_preset` 可见选项必须与官方 App 对齐：`Auto`、`Read-only`、`Full Access`。
+- `ask` 只作为旧 ACP 配置值的输入兼容，进入 adapter 后 canonicalize 成 `auto`，不得继续作为可见选项返回。
+- `on-failure` 虽仍在 app-server `AskForApproval` 枚举中，但官方 CLI 已标记为 deprecated；交互默认使用 `on-request`。
 - `session/new`、`session/load`、`session/set_config_option` 都必须返回完整 `configOptions`。
 - `model` 变化后必须重新计算 `reasoning_effort.options`；旧 effort 不再支持时落到该模型默认值。
 - `model/list` 正式字段是 `data`，不是 `models`。
@@ -362,6 +363,18 @@ ACP `session/list` 转 `thread/list`。
 | `thread/tokenUsage/updated` | `usage_update`，若 ACP 类型支持 |
 | `warning` / `configWarning` / `deprecationNotice` | 先记录日志；只有用户可见时再转 ACP 文本 |
 
+`FileUpdateChange` 必须按官方 app-server schema 解码：
+
+```ts
+type FileUpdateChange = {
+  path: string
+  kind: { type: "add" } | { type: "delete" } | { type: "update", move_path: string | null }
+  diff: string
+}
+```
+
+不能把 `changes[].kind` 解成字符串；否则 `thread/resume` replay 历史 fileChange 时会在 `session/load` / config update 的 `ensureReady` 阶段失败。
+
 Tool-like item：
 
 | ThreadItem.type | ACP kind | title |
@@ -419,46 +432,38 @@ Phase 1 只声明文本 prompt capability；`resource_link` 是 ACP 基线内容
 
 只有完整支持 ACP image 语义后才能把 `promptCapabilities.image` 改成 `true`。
 
-## 本次代码审计结论
+## 当前校准结论
 
-本次复核官方 schema 与 ACP 文档后，发现并纳入 Phase 1 修复的偏差如下：
+本轮以 `codex app-server generate-ts --experimental` 生成的 0.129.0 官方 schema、CLI help 与 ACP 文档为准，Phase 1 必须维持以下约束：
 
-1. `model/list` 仍接受旧的 `models` 字段；应只按官方 `data` 解码。
-2. `approval_preset` 缺少 `ask` 选项，并且把 `ask` canonicalize 成 `auto`；应拆成两个不同 preset。
-3. `auto` 当前映射成 `on-request`；应映射为 `on-failure`。
-4. `turn/start.input.text` 缺少官方 `text_elements: []`。
-5. `sandboxPolicy` 省略了官方 schema 中 required 的 `networkAccess`、`excludeTmpdirEnvVar`、`excludeSlashTmp` 字段。
-6. `session/load` 不 replay `thread.turns`，但 `initialize` 声明了 `loadSession=true`。
-7. `item/started` 直接发 `tool_call_update`，跳过 ACP `tool_call pending`。
-8. `item/fileChange/patchUpdated` 未映射。
-9. `turn/plan/updated` 未映射，`plan` item 也不是完整列表替换语义。
-10. `item/permissions/requestApproval` 未处理。
-11. app-server runtime thread 与 ACP session id 强绑定，无法正确处理未 materialize rollout。
-12. `thread/name/updated`、`turn/completed` 等仍有旧字段兼容路径，应按官方字段收敛。
-13. 工具取消输出了非标准 ACP tool status `cancelled`。
-14. app-server notification/request 异步 goroutine 分发会破坏 ACP “updates before prompt result” 顺序。
-15. `session/cancel` 先取消本地 prompt context，可能让 prompt 返回 error 而不是 `stopReason=cancelled`。
-16. `resource_link` 被拒绝，但 ACP 基线要求所有 Agent 支持。
-17. `thread/resume` 返回空 turns 或 summary turns 时，没有 `thread/read includeTurns=true` 兜底。
+1. `model/list` 响应使用正式字段 `data`。
+2. `approval_preset` 可见选项为官方 App 的三项：`auto`、`read_only`、`full`。
+3. 旧配置值 `ask` 不再作为可见选项，但 adapter 需要输入兼容并归一为 `auto`。
+4. `auto` 使用交互推荐的 `approvalPolicy=on-request` 与 `workspace-write`；`on-failure` 已 deprecated，不作为默认交互模式。
+5. `turn/start.input.text` 必须带 `text_elements: []`。
+6. `turn/start.sandboxPolicy.workspaceWrite` 必须带 `networkAccess`、`excludeTmpdirEnvVar`、`excludeSlashTmp`。
+7. `FileUpdateChange.kind` 必须是官方对象 union，不能按 string 解码。
+8. `session/load` 必须 replay `thread.turns`，并在 turns 为空或 `itemsView != full` 时使用 `thread/read includeTurns=true` 兜底。
+9. app-server runtime thread id 与 ACP session id 只能在 agent 内部映射，不污染 client/session 上层。
+10. app-server notification/request 必须按 thread 串行转发，保证 ACP update 先于 prompt result。
+11. ACP tool lifecycle 必须先 `tool_call pending`，再 `tool_call_update`。
+12. ACP 工具状态只能输出 `pending`、`in_progress`、`completed`、`failed`。
+13. `resource_link` 是 ACP 基线能力；Phase 1 必须支持 file URI 与 non-file URI 的降级转换。
 
-## Phase 1 修复范围
+## Phase 1 范围
 
-本次 Phase 1 修复只做 agent 层：
+Phase 1 只做 agent 层，并保持对上层透明：
 
-- 更新转换文档。
-- 修正 config options：`read_only`、`ask`、`auto`、`full`。
-- 修正 `model/list.data`、`UserInput.text_elements`、`sandboxPolicy` 官方字段。
-- 引入 agent 内部 `acpSessionId -> runtimeThreadId`，支持未 materialize thread 的 agent 层重建。
-- per-thread 串行处理 app-server notification/request，保证 ACP update 顺序。
-- `session/load` 使用 `thread/read includeTurns=true` 兜底，并 replay 完整 turns 的基础文本、reasoning、plan、tool-like item。
-- `session/cancel` 先发 Agent cancel，再取消本地 context；`codexapp` 等待 `turn/completed interrupted` 或超时合成 `cancelled`。
-- 支持 ACP `resource_link`：本地 file URI 转 app-server `mention`，其他 URI 转文本说明。
-- 修正 tool lifecycle：`tool_call pending` 后再 `tool_call_update`。
-- 映射 `turn/plan/updated` 与 `item/fileChange/patchUpdated`。
-- 支持 `item/permissions/requestApproval` 的 fail-closed/allow-subset 转换。
-- 移除测试中的旧 app-server 字段假设。
+- 基础聊天：`initialize`、`session/new`、`session/load`、`session/prompt`、`session/cancel`、`session/list`。
+- Config 同步：`approval_preset`、`model`、`reasoning_effort` 在 `session/new`、`session/load`、`session/set_config_option` 中返回完整 options。
+- 官方协议字段：`model/list.data`、`UserInput.text_elements`、`SandboxPolicy` required 字段、`FileUpdateChange.kind` 对象 union。
+- Session 映射：agent 内部维护 `acpSessionId -> runtimeThreadId`，支持未 materialize thread 的 agent 层重建。
+- 历史 replay：基础文本、reasoning、plan、tool-like item、fileChange diff。
+- 实时事件：agent message delta、reasoning delta、plan update、fileChange patch update、tool start/completed。
+- 权限请求：command/file approval 转 ACP `session/request_permission`，permissions approval 使用 allow-subset / fail-closed。
+- 输入内容：text 与 resource_link；image/audio/resource 暂不声明能力。
 
-不在本次 Phase 1 做：
+不在 Phase 1 做：
 
 - 非空 ACP `mcpServers` materialization。
 - ACP image capability 开启。

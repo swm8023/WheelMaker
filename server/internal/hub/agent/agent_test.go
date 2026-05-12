@@ -1045,7 +1045,7 @@ func TestCodexAppFileChangePatchUpdatedEmitsDiffToolUpdate(t *testing.T) {
 			"itemId":   "patch-1",
 			"changes": []map[string]any{{
 				"path": "D:/Code/WheelMaker/server/main.go",
-				"kind": "update",
+				"kind": map[string]any{"type": "update", "move_path": nil},
 				"diff": "@@ -1 +1 @@",
 			}},
 		},
@@ -1071,6 +1071,36 @@ func TestCodexAppFileChangePatchUpdatedEmitsDiffToolUpdate(t *testing.T) {
 		update.Update.ToolCallContent[0].Path != "D:/Code/WheelMaker/server/main.go" ||
 		update.Update.ToolCallContent[0].NewText != "@@ -1 +1 @@" {
 		t.Fatalf("patch content=%#v", update.Update.ToolCallContent)
+	}
+}
+
+func TestCodexAppThreadResumeDecodesOfficialFileChangeKind(t *testing.T) {
+	raw := []byte(`{
+		"thread": {
+			"id": "thread-1",
+			"turns": [{
+				"id": "turn-1",
+				"itemsView": "full",
+				"status": "completed",
+				"items": [{
+					"id": "patch-1",
+					"type": "fileChange",
+					"status": "completed",
+					"changes": [{
+						"path": "D:/Code/WheelMaker/server/main.go",
+						"kind": { "type": "update", "move_path": null },
+						"diff": "@@ -1 +1 @@"
+					}]
+				}]
+			}]
+		}
+	}`)
+	var resp appServerThreadStartResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal official fileChange kind: %v", err)
+	}
+	if got := len(resp.Thread.Turns[0].Items[0].Changes); got != 1 {
+		t.Fatalf("fileChange changes len=%d, want 1", got)
 	}
 }
 
@@ -1633,8 +1663,8 @@ func TestCodexAppSessionLoadRecreatesUnmaterializedThreadInternally(t *testing.T
 func TestCodexAppApprovalPresetOptionsMatchOfficialModes(t *testing.T) {
 	state := newCodexappConfigState()
 	options := state.options()
-	if got := currentConfigValue(options, protocol.ConfigOptionIDApprovalPreset); got != "ask" {
-		t.Fatalf("default approval preset=%q, want ask", got)
+	if got := currentConfigValue(options, protocol.ConfigOptionIDApprovalPreset); got != "auto" {
+		t.Fatalf("default approval preset=%q, want auto", got)
 	}
 
 	var values []protocol.ConfigOptionValue
@@ -1645,9 +1675,8 @@ func TestCodexAppApprovalPresetOptionsMatchOfficialModes(t *testing.T) {
 		}
 	}
 	want := []protocol.ConfigOptionValue{
-		{Value: "read_only", Name: "Read-only"},
-		{Value: "ask", Name: "Ask"},
 		{Value: "auto", Name: "Auto"},
+		{Value: "read_only", Name: "Read-only"},
 		{Value: "full", Name: "Full Access"},
 	}
 	if !reflect.DeepEqual(values, want) {
@@ -1667,12 +1696,12 @@ func TestCodexAppApprovalProfilesMatchOfficialModes(t *testing.T) {
 		{
 			name:          "auto",
 			preset:        "auto",
-			approval:      "on-failure",
+			approval:      "on-request",
 			threadSandbox: "workspace-write",
 			turnSandbox:   "workspaceWrite",
 		},
 		{
-			name:          "ask",
+			name:          "legacy ask",
 			preset:        "ask",
 			approval:      "on-request",
 			threadSandbox: "workspace-write",
@@ -1710,13 +1739,13 @@ func TestCodexAppApprovalProfilesMatchOfficialModes(t *testing.T) {
 	}
 }
 
-func TestCodexAppAskPresetRemainsDistinctFromAuto(t *testing.T) {
+func TestCodexAppLegacyAskPresetNormalizesToAuto(t *testing.T) {
 	state := newCodexappConfigState()
 	if err := state.set(protocol.ConfigOptionIDApprovalPreset, "ask"); err != nil {
 		t.Fatalf("set ask preset: %v", err)
 	}
-	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDApprovalPreset); got != "ask" {
-		t.Fatalf("ask preset stored as %q, want ask", got)
+	if got := currentConfigValue(state.options(), protocol.ConfigOptionIDApprovalPreset); got != "auto" {
+		t.Fatalf("legacy ask preset stored as %q, want auto", got)
 	}
 }
 
@@ -1858,8 +1887,8 @@ func TestCodexAppInstanceBasicChatAndConfigOptions(t *testing.T) {
 	if newRes.SessionID != "thread-1" {
 		t.Fatalf("sessionId=%q", newRes.SessionID)
 	}
-	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "ask" {
-		t.Fatalf("config options missing ask approval preset: %#v", newRes.ConfigOptions)
+	if currentConfigValue(newRes.ConfigOptions, protocol.ConfigOptionIDApprovalPreset) != "auto" {
+		t.Fatalf("config options missing auto approval preset: %#v", newRes.ConfigOptions)
 	}
 	opts, err := inst.SessionSetConfigOption(context.Background(), protocol.SessionSetConfigOptionParams{
 		SessionID: "thread-1",

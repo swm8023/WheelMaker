@@ -284,11 +284,16 @@ type appServerThreadItem struct {
 }
 
 type appServerFileChange struct {
-	Path    string  `json:"path"`
-	Kind    string  `json:"kind,omitempty"`
-	Diff    string  `json:"diff,omitempty"`
-	OldText *string `json:"oldText,omitempty"`
-	NewText string  `json:"newText,omitempty"`
+	Path    string                   `json:"path"`
+	Kind    appServerPatchChangeKind `json:"kind,omitempty"`
+	Diff    string                   `json:"diff,omitempty"`
+	OldText *string                  `json:"oldText,omitempty"`
+	NewText string                   `json:"newText,omitempty"`
+}
+
+type appServerPatchChangeKind struct {
+	Type     string  `json:"type"`
+	MovePath *string `json:"move_path,omitempty"`
 }
 
 type appServerTurnEventParams struct {
@@ -376,7 +381,7 @@ type codexappConfigState struct {
 
 func newCodexappConfigState() codexappConfigState {
 	return codexappConfigState{
-		approvalPreset:  "ask",
+		approvalPreset:  "auto",
 		reasoningEffort: "medium",
 	}
 }
@@ -398,11 +403,10 @@ func (s codexappConfigState) options() []protocol.ConfigOption {
 			Name:         "Approval Preset",
 			Category:     protocol.ConfigOptionCategoryApprovalPreset,
 			Type:         "select",
-			CurrentValue: s.approvalPreset,
+			CurrentValue: codexappNormalizeApprovalPreset(s.approvalPreset),
 			Options: []protocol.ConfigOptionValue{
-				{Value: "read_only", Name: "Read-only"},
-				{Value: "ask", Name: "Ask"},
 				{Value: "auto", Name: "Auto"},
+				{Value: "read_only", Name: "Read-only"},
 				{Value: "full", Name: "Full Access"},
 			},
 		},
@@ -428,10 +432,11 @@ func (s codexappConfigState) options() []protocol.ConfigOption {
 func (s *codexappConfigState) set(id, value string) error {
 	switch id {
 	case protocol.ConfigOptionIDApprovalPreset:
-		if _, ok := codexappApprovalProfile(value); !ok {
+		normalized := codexappNormalizeApprovalPreset(value)
+		if _, ok := codexappApprovalProfile(normalized); !ok {
 			return fmt.Errorf("invalid approval preset %q", value)
 		}
-		s.approvalPreset = value
+		s.approvalPreset = normalized
 	case protocol.ConfigOptionIDModel:
 		if !s.modelAllowed(value) {
 			return fmt.Errorf("invalid model %q", value)
@@ -583,13 +588,11 @@ func (p codexappApprovalPreset) sandboxPolicy(cwd string) appServerSandbox {
 }
 
 func codexappApprovalProfile(preset string) (codexappApprovalPreset, bool) {
-	switch preset {
+	switch codexappNormalizeApprovalPreset(preset) {
 	case "read_only":
 		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "read-only", turnSandboxType: "readOnly"}, true
-	case "ask":
-		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
 	case "auto":
-		return codexappApprovalPreset{approvalPolicy: "on-failure", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
+		return codexappApprovalPreset{approvalPolicy: "on-request", threadSandbox: "workspace-write", turnSandboxType: "workspaceWrite"}, true
 	case "full":
 		return codexappApprovalPreset{
 			approvalPolicy:  "never",
@@ -600,6 +603,13 @@ func codexappApprovalProfile(preset string) (codexappApprovalPreset, bool) {
 	default:
 		return codexappApprovalPreset{}, false
 	}
+}
+
+func codexappNormalizeApprovalPreset(preset string) string {
+	if preset == "ask" {
+		return "auto"
+	}
+	return preset
 }
 
 func codexappPromptToInput(blocks []protocol.ContentBlock) ([]appServerUserInput, error) {
