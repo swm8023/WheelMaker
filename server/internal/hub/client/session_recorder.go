@@ -56,7 +56,7 @@ type sessionViewMessage struct {
 	PromptIndex int64  `json:"promptIndex"`
 	TurnIndex   int64  `json:"turnIndex"`
 	Content     string `json:"content"`
-	Done        bool   `json:"done,omitempty"`
+	Finished    bool   `json:"finished"`
 }
 
 type sessionTurnMessage struct {
@@ -65,12 +65,12 @@ type sessionTurnMessage struct {
 	payload     any
 	promptIndex int64
 	turnIndex   int64
-	done        bool
+	finished    bool
 }
 
 type sessionTurnReadMessage struct {
-	content string
-	done    bool
+	content  string
+	finished bool
 }
 
 type sessionPromptState struct {
@@ -292,7 +292,7 @@ func (r *SessionRecorder) ReadSessionPrompts(ctx context.Context, sessionID stri
 				PromptIndex: prompt.PromptIndex,
 				TurnIndex:   turnIndex,
 				Content:     normalizeJSONDoc(updateJSON.content, "{}"),
-				Done:        updateJSON.done,
+				Finished:    updateJSON.finished,
 			})
 		}
 	}
@@ -357,6 +357,7 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 		method:      event.method,
 		payload:     event.payload,
 		promptIndex: state.promptIndex,
+		finished:    !isSessionTextTurnMethod(event.method),
 	}
 
 	mergedTurnIndex := int64(0)
@@ -387,15 +388,7 @@ func (r *SessionRecorder) addMessageTurn(state *sessionPromptState, event parsed
 	}
 
 	updateJSON := buildIMContentJSON(turn.method, turn.payload)
-	publish := r.eventPublisher()
-	if publish != nil {
-		_ = publish("registry.session.message", map[string]any{
-			"sessionId":   turn.sessionID,
-			"promptIndex": turn.promptIndex,
-			"turnIndex":   turn.turnIndex,
-			"content":     updateJSON,
-		})
-	}
+	r.publishSessionTurn(turn, updateJSON)
 	state.updateTurn(turn, event.turnKey)
 	return nil
 }
@@ -406,20 +399,12 @@ func (r *SessionRecorder) publishOpenTextTurnDone(state *sessionPromptState) {
 	}
 	idx := len(state.turns) - 1
 	turn := state.turns[idx]
-	if turn.done || !isSessionTextTurnMethod(turn.method) {
+	if turn.finished || !isSessionTextTurnMethod(turn.method) {
 		return
 	}
-	turn.done = true
+	turn.finished = true
 	state.turns[idx] = turn
-	if publish := r.eventPublisher(); publish != nil {
-		_ = publish("registry.session.message", map[string]any{
-			"sessionId":   turn.sessionID,
-			"promptIndex": turn.promptIndex,
-			"turnIndex":   turn.turnIndex,
-			"content":     buildIMContentJSON(turn.method, turn.payload),
-			"done":        true,
-		})
-	}
+	r.publishSessionTurn(turn, buildIMContentJSON(turn.method, turn.payload))
 }
 
 func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsedEvent parsedSessionViewEvent) error {
@@ -449,21 +434,31 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	if err := r.upsertSessionProjection(ctx, event.SessionID, "", "", event.UpdatedAt, true); err != nil {
 		return err
 	}
-	if publish := r.eventPublisher(); publish != nil {
-		// Publish a terminal prompt_done turn so UI clients can clear in-progress state
-		// immediately without waiting for a full session reload.
-		doneJSON := buildIMContentJSON(acp.IMMethodPromptDone, acp.IMPromptResult{
-			StopReason: stopReason,
-		})
-		_ = publish("registry.session.message", map[string]any{
-			"sessionId":   event.SessionID,
-			"promptIndex": state.promptIndex,
-			"turnIndex":   state.nextTurnIndex,
-			"content":     doneJSON,
-		})
+	doneTurn := sessionTurnMessage{
+		sessionID:   event.SessionID,
+		method:      acp.IMMethodPromptDone,
+		payload:     acp.IMPromptResult{StopReason: stopReason},
+		promptIndex: state.promptIndex,
+		turnIndex:   state.nextTurnIndex,
+		finished:    true,
 	}
+	r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
 	delete(r.promptState, event.SessionID)
 	return nil
+}
+
+func (r *SessionRecorder) publishSessionTurn(turn sessionTurnMessage, updateJSON string) {
+	publish := r.eventPublisher()
+	if publish == nil {
+		return
+	}
+	_ = publish("registry.session.message", map[string]any{
+		"sessionId":   turn.sessionID,
+		"promptIndex": turn.promptIndex,
+		"turnIndex":   turn.turnIndex,
+		"content":     updateJSON,
+		"finished":    turn.finished,
+	})
 }
 
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, agentType, title string, updatedAt time.Time, titleIfEmptyOnly bool) error {
@@ -588,7 +583,7 @@ func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID stri
 	updates := make([]sessionTurnReadMessage, 0, len(state.turns))
 	for _, turn := range state.turns {
 		updateJSON := buildIMContentJSON(turn.method, turn.payload)
-		updates = append(updates, sessionTurnReadMessage{content: updateJSON, done: turn.done})
+		updates = append(updates, sessionTurnReadMessage{content: updateJSON, finished: turn.finished})
 	}
 	r.writeMu.Unlock()
 	return updates, nil
@@ -598,8 +593,8 @@ func sessionTurnReadMessagesFromStored(turns []string, finished bool) []sessionT
 	out := make([]sessionTurnReadMessage, 0, len(turns))
 	for _, turn := range turns {
 		out = append(out, sessionTurnReadMessage{
-			content: turn,
-			done:    finished && isSessionTextTurnContent(turn),
+			content:  turn,
+			finished: finished || !isSessionTextTurnContent(turn),
 		})
 	}
 	return out

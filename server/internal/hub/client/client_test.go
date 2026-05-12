@@ -2356,6 +2356,39 @@ func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEve
 	}
 }
 
+type publishedSessionEvent struct {
+	method  string
+	payload map[string]any
+}
+
+func captureSessionMessageEvents(t *testing.T, c *Client) *[]publishedSessionEvent {
+	t.Helper()
+	published := []publishedSessionEvent{}
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		published = append(published, publishedSessionEvent{method: method, payload: body})
+		return nil
+	})
+	return &published
+}
+
+func lastPublishedEvent(t *testing.T, published []publishedSessionEvent, method string) map[string]any {
+	t.Helper()
+	for i := len(published) - 1; i >= 0; i-- {
+		if published[i].method == method {
+			return published[i].payload
+		}
+	}
+	t.Fatalf("no published event for %s", method)
+	return nil
+}
+
 func writeClaudeSessionFixture(t *testing.T, homeDir, projectDirName, sessionID, cwd, title, assistant string) {
 	t.Helper()
 	projectDir := filepath.Join(homeDir, ".claude", "projects", projectDirName)
@@ -3285,6 +3318,65 @@ func TestSessionViewPublishMessageOmitsTurnID(t *testing.T) {
 	}
 	if _, ok := published["turnId"]; ok {
 		t.Fatalf("published payload unexpectedly contains turnId: %+v", published)
+	}
+}
+
+func TestSessionMessagePublishesFinishedFieldInsteadOfDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	published := captureSessionMessageEvents(t, c)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Finished Field")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	last := lastPublishedEvent(t, *published, "registry.session.message")
+	if _, ok := last["done"]; ok {
+		t.Fatalf("payload contains legacy done field: %#v", last)
+	}
+	if got := last["finished"]; got != true {
+		t.Fatalf("finished = %v, want true", got)
+	}
+}
+
+func TestPromptDoneIsPublishedAsFinishedRealTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	published := captureSessionMessageEvents(t, c)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Prompt Done Turn")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent answer: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent done: %v", err)
+	}
+
+	last := lastPublishedEvent(t, *published, "registry.session.message")
+	content := last["content"].(string)
+	var msg acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(content), &msg); err != nil {
+		t.Fatalf("unmarshal content: %v", err)
+	}
+	if msg.Method != acp.IMMethodPromptDone {
+		t.Fatalf("method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	}
+	if got := last["finished"]; got != true {
+		t.Fatalf("finished = %v, want true", got)
+	}
+	if got := last["turnIndex"].(int64); got != 3 {
+		t.Fatalf("turnIndex = %d, want 3", got)
 	}
 }
 
@@ -4319,19 +4411,19 @@ func TestSessionViewPromptFinishedMarksOpenTextTurnDone(t *testing.T) {
 		t.Fatalf("published len = %d, want at least 4", len(published))
 	}
 	doneTurn := published[len(published)-2]
-	if got := doneTurn["done"]; got != true {
-		t.Fatalf("done turn marker = %v, want true", got)
+	if got := doneTurn["finished"]; got != true {
+		t.Fatalf("finished turn marker = %v, want true", got)
 	}
 	if got := doneTurn["turnIndex"].(int64); got != 2 {
-		t.Fatalf("done turnIndex = %d, want 2", got)
+		t.Fatalf("finished turnIndex = %d, want 2", got)
 	}
 	content, _ := doneTurn["content"].(string)
 	update := decodeTurnSessionUpdate(t, content)
 	if strings.TrimSpace(update.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("done method = %q, want %q", update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
+		t.Fatalf("finished method = %q, want %q", update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
 	}
 	if text := extractTextChunk(update.Content); text != "hello" {
-		t.Fatalf("done text = %q, want hello", text)
+		t.Fatalf("finished text = %q, want hello", text)
 	}
 }
 
@@ -4486,11 +4578,11 @@ func TestSessionReadMarksCompletedTextTurnsDone(t *testing.T) {
 	if len(messages) != 3 {
 		t.Fatalf("messages len = %d, want 3", len(messages))
 	}
-	if messages[1].Done != true {
-		t.Fatalf("assistant done = %v, want true", messages[1].Done)
+	if messages[1].Finished != true {
+		t.Fatalf("assistant finished = %v, want true", messages[1].Finished)
 	}
-	if messages[2].Done != true {
-		t.Fatalf("thought done = %v, want true", messages[2].Done)
+	if messages[2].Finished != true {
+		t.Fatalf("thought finished = %v, want true", messages[2].Finished)
 	}
 }
 
