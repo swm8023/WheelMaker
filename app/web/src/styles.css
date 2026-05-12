@@ -255,6 +255,20 @@ body,
   text-overflow: ellipsis;
 }
 
+.header .project-wrap {
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
+.header .project-btn {
+  max-width: none;
+}
+
+.header .project-name {
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .drawer-project-header {
   flex: 0 0 auto;
   padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;

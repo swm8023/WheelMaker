@@ -33,6 +33,29 @@ function sameChatMessage(a: RegistryChatMessage | undefined, b: RegistryChatMess
   );
 }
 
+export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): {
+  promptIndex: number;
+  turnIndex: number;
+} {
+  return messages.reduce(
+    (latest, message) => {
+      if (message.method === 'prompt_done') {
+        return latest;
+      }
+      const promptIndex = message.promptIndex ?? 0;
+      const turnIndex = message.turnIndex ?? 0;
+      if (
+        promptIndex > latest.promptIndex ||
+        (promptIndex === latest.promptIndex && turnIndex > latest.turnIndex)
+      ) {
+        return { promptIndex, turnIndex };
+      }
+      return latest;
+    },
+    { promptIndex: 0, turnIndex: 0 },
+  );
+}
+
 export function reconcileSessionReadMessages(
   readMessages: RegistryChatMessage[],
   freshStoreMessages: RegistryChatMessage[],

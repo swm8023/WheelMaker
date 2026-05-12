@@ -171,6 +171,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('title="More config options"');
     expect(mainTsx).toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
     expect(mainTsx).toContain('text: chooseChatEntryText(previous.text, text),');
+    expect(mainTsx).toContain("const shouldRefreshCompletedPrompt = message.method === 'prompt_done';");
+    expect(mainTsx).toContain('!shouldRefreshCompletedPrompt &&');
+    expect(mainTsx).toContain('forceFull: true,');
     expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
     expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
     expect(mainTsx).toContain("className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
@@ -182,6 +185,12 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.header-bubble {');
     expect(stylesCss).toContain('.drawer-project-header {');
     expect(stylesCss).toContain('.drawer-project-pill {');
+    expect(stylesCss).toMatch(
+      /\.header \.project-btn \{[\s\S]*max-width: none;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.header \.project-name \{[\s\S]*overflow: visible;[\s\S]*text-overflow: clip;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
     expect(stylesCss).toContain('.floating-control-stack {');
     expect(stylesCss).toContain('.floating-nav-group {');

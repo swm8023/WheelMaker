@@ -18,7 +18,7 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
-import { reconcileSessionReadMessages } from './chatSync';
+import { getLatestSessionReadCursor, reconcileSessionReadMessages } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import {
@@ -497,26 +497,6 @@ function replaceChatMessagesFromPrompt(
   return nextMessages.reduce(
     (items, message) => upsertChatMessage(items, message),
     base,
-  );
-}
-
-function getLatestChatSyncCursor(messages: RegistryChatMessage[]): {
-  syncIndex: number;
-  syncSubIndex: number;
-} {
-  return messages.reduce(
-    (latest, message) => {
-      const syncIndex = message.promptIndex ?? 0;
-      const syncSubIndex = message.turnIndex ?? 0;
-      if (
-        syncIndex > latest.syncIndex ||
-        (syncIndex === latest.syncIndex && syncSubIndex > latest.syncSubIndex)
-      ) {
-        return { syncIndex, syncSubIndex };
-      }
-      return latest;
-    },
-    { syncIndex: 0, syncSubIndex: 0 },
   );
 }
 
@@ -4074,15 +4054,15 @@ function App() {
     chatMessageStoreRef.current[sessionId] = cachedMessages;
     chatPromptSnapshotsRef.current[sessionId] = [...cached.prompts];
 
-    const latest = getLatestChatSyncCursor(cachedMessages);
+    const latest = getLatestSessionReadCursor(cachedMessages);
     const cachedPromptIndex = Math.max(0, chatSyncIndexRef.current[sessionId] ?? 0);
     const cachedTurnIndex = Math.max(0, chatSyncSubIndexRef.current[sessionId] ?? 0);
     if (
-      latest.syncIndex > cachedPromptIndex ||
-      (latest.syncIndex === cachedPromptIndex && latest.syncSubIndex > cachedTurnIndex)
+      latest.promptIndex > cachedPromptIndex ||
+      (latest.promptIndex === cachedPromptIndex && latest.turnIndex > cachedTurnIndex)
     ) {
-      chatSyncIndexRef.current[sessionId] = latest.syncIndex;
-      chatSyncSubIndexRef.current[sessionId] = latest.syncSubIndex;
+      chatSyncIndexRef.current[sessionId] = latest.promptIndex;
+      chatSyncSubIndexRef.current[sessionId] = latest.turnIndex;
     } else {
       chatSyncIndexRef.current[sessionId] = cachedPromptIndex;
       chatSyncSubIndexRef.current[sessionId] = cachedTurnIndex;
@@ -4234,9 +4214,9 @@ function App() {
       chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
       chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
       setChatPromptSnapshotVersion(version => version + 1);
-      const latestSyncCursor = getLatestChatSyncCursor(nextMessages);
-      chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.syncIndex;
-      chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.syncSubIndex;
+      const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
+      chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.promptIndex;
+      chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
       setChatMessages(nextMessages);
@@ -5431,11 +5411,12 @@ function App() {
         const sessionId = message.sessionId;
         const messageState = msgStatus(message.method, message.param);
         const isSelectedSession = sessionId === chatSelectedIdRef.current;
+        const shouldRefreshCompletedPrompt = message.method === 'prompt_done';
         if (messageState === 'streaming') {
           setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
           setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
         }
-        if (message.method === 'prompt_done') {
+        if (shouldRefreshCompletedPrompt) {
           setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
           if (isSelectedSession) {
             setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
@@ -5471,8 +5452,9 @@ function App() {
         const currentPromptIndex = chatSyncIndexRef.current[sessionId] ?? 0;
         const currentTurnIndex = chatSyncSubIndexRef.current[sessionId] ?? 0;
         if (
-          incomingPromptIndex > currentPromptIndex ||
-          (incomingPromptIndex === currentPromptIndex && incomingTurnIndex > currentTurnIndex)
+          !shouldRefreshCompletedPrompt &&
+          (incomingPromptIndex > currentPromptIndex ||
+            (incomingPromptIndex === currentPromptIndex && incomingTurnIndex > currentTurnIndex))
         ) {
           chatSyncIndexRef.current[sessionId] = incomingPromptIndex;
           chatSyncSubIndexRef.current[sessionId] = incomingTurnIndex;
@@ -5487,6 +5469,13 @@ function App() {
 
         if (sessionId === chatSelectedIdRef.current) {
           setChatMessages(merged);
+        }
+        if (shouldRefreshCompletedPrompt && isSelectedSession) {
+          loadChatSession(sessionId, projectIdRef.current, {
+            forceFull: true,
+            preserveUserSelection: true,
+            selectionSnapshot: chatSelectedIdRef.current,
+          }).catch(() => undefined);
         }
       }
     });
