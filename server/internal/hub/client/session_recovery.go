@@ -161,6 +161,8 @@ func (r *sessionRecovery) sourceFor(agentType string) (recoverySource, error) {
 		return claudeRecoverySource{}, nil
 	case "codex":
 		return codexRecoverySource{}, nil
+	case "codexapp":
+		return codexappRecoverySource{}, nil
 	case "copilot":
 		return copilotRecoverySource{}, nil
 	default:
@@ -287,6 +289,7 @@ func (r *sessionRecovery) feedReplayToRecorder(ctx context.Context, sessionID st
 	}
 
 	hasPending := false
+	recordedAny := false
 	for _, u := range updates {
 		switch u.Update.SessionUpdate {
 		case acp.SessionUpdateConfigOptionUpdate,
@@ -298,19 +301,38 @@ func (r *sessionRecovery) feedReplayToRecorder(ctx context.Context, sessionID st
 		}
 
 		if u.Update.SessionUpdate == acp.SessionUpdateUserMessageChunk {
-			if hasPending {
+			if hasPending || recordedAny {
 				finishPrompt()
+				recordedAny = false
 			}
 			startPrompt(extractRecoveryUpdateText(u.Update.Content))
 			hasPending = true
 			continue
 		}
 
+		if !hasPending && !recordedAny {
+			if err := r.ensureReplayPromptState(ctx, sessionID, time.Now().UTC()); err != nil {
+				hubLogger(r.client.projectName).Warn("session.reload replay prompt init failed session=%s err=%v", sessionID, err)
+				return
+			}
+		}
 		recordUpdate(u)
+		recordedAny = true
 	}
-	if hasPending {
+	if hasPending || recordedAny {
 		finishPrompt()
 	}
+}
+
+func (r *sessionRecovery) ensureReplayPromptState(ctx context.Context, sessionID string, updatedAt time.Time) error {
+	recorder := r.client.sessionRecorder
+	if recorder == nil {
+		return nil
+	}
+	recorder.writeMu.Lock()
+	defer recorder.writeMu.Unlock()
+	_, err := recorder.ensurePromptStateLocked(ctx, sessionID, updatedAt)
+	return err
 }
 
 func extractRecoveryUpdateText(raw json.RawMessage) string {
@@ -637,6 +659,29 @@ func readCodexRecoverySessionPreview(path, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+type codexappRecoverySource struct{}
+
+func (codexappRecoverySource) AgentType() string { return "codexapp" }
+
+func (codexappRecoverySource) List(projectCWD string, managedIDs map[string]bool) ([]recoverySession, error) {
+	items, err := codexRecoverySource{}.List(projectCWD, managedIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].AgentType = "codexapp"
+	}
+	return items, nil
+}
+
+func (s codexappRecoverySource) Find(projectCWD, sessionID string, managedIDs map[string]bool) (*recoverySession, error) {
+	items, err := s.List(projectCWD, managedIDs)
+	if err != nil {
+		return nil, err
+	}
+	return findRecoverySession(items, sessionID), nil
 }
 
 type copilotRecoverySource struct{}

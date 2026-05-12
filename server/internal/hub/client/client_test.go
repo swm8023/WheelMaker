@@ -41,6 +41,7 @@ type testInjectedInstance struct {
 	cancelFn    func() error
 	initResult  acp.InitializeResult
 	loadResult  acp.SessionLoadResult
+	loadUpdates []acp.SessionUpdateParams
 	loadErr     error
 	newResult   *acp.SessionNewResult
 	listResult  acp.SessionListResult
@@ -363,6 +364,14 @@ func (i *testInjectedInstance) SessionNew(context.Context, acp.SessionNewParams)
 	return acp.SessionNewResult{SessionID: sid}, nil
 }
 func (i *testInjectedInstance) SessionLoad(context.Context, acp.SessionLoadParams) (acp.SessionLoadResult, error) {
+	for _, params := range i.loadUpdates {
+		if strings.TrimSpace(params.SessionID) == "" {
+			params.SessionID = i.sessionID
+		}
+		if i.callbacks != nil {
+			i.callbacks.SessionUpdate(params)
+		}
+	}
 	return i.loadResult, i.loadErr
 }
 func (i *testInjectedInstance) SessionList(context.Context, acp.SessionListParams) (acp.SessionListResult, error) {
@@ -2359,6 +2368,52 @@ func writeClaudeSessionFixture(t *testing.T, homeDir, projectDirName, sessionID,
 	}
 	sessionPath := filepath.Join(projectDir, sessionID+".jsonl")
 	if err := os.WriteFile(sessionPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", sessionPath, err)
+	}
+}
+
+func writeCodexSessionFixture(t *testing.T, homeDir, sessionID, cwd, title, assistant string) {
+	t.Helper()
+	codexDir := filepath.Join(homeDir, ".codex")
+	sessionDir := filepath.Join(codexDir, "sessions", "2026", "05", "12")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", sessionDir, err)
+	}
+	indexLine, err := json.Marshal(map[string]any{
+		"id":          sessionID,
+		"thread_name": title,
+		"updated_at":  "2026-05-12T08:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("marshal codex index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexDir, "session_index.jsonl"), append(indexLine, '\n'), 0o644); err != nil {
+		t.Fatalf("WriteFile codex index: %v", err)
+	}
+
+	metaLine, err := json.Marshal(map[string]any{
+		"type": "session_meta",
+		"payload": map[string]any{
+			"id":  sessionID,
+			"cwd": cwd,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal codex meta: %v", err)
+	}
+	doneLine, err := json.Marshal(map[string]any{
+		"type": "event_msg",
+		"payload": map[string]any{
+			"type":               "task_complete",
+			"last_agent_message": assistant,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal codex event: %v", err)
+	}
+	sessionPath := filepath.Join(sessionDir, "rollout-2026-05-12T08-00-00-"+sessionID+".jsonl")
+	content := string(metaLine) + "\n" + string(doneLine) + "\n"
+	if err := os.WriteFile(sessionPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", sessionPath, err)
 	}
 }
@@ -4561,6 +4616,112 @@ func TestHandleSessionRequestSessionReloadClearsPromptStateBeforeReplay(t *testi
 	c.sessionRecorder.writeMu.Unlock()
 	if hasPromptState {
 		t.Fatal("prompt state still present after reload failure")
+	}
+}
+
+func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC)
+	inst := &testInjectedInstance{
+		name:      "codexapp",
+		sessionID: "sess-codexapp",
+		initResult: acp.InitializeResult{
+			ProtocolVersion:   "0.1",
+			AgentCapabilities: acp.AgentCapabilities{LoadSession: true},
+		},
+		loadUpdates: []acp.SessionUpdateParams{{
+			SessionID: "sess-codexapp",
+			Update: acp.SessionUpdate{
+				SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+				Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "restored without user chunk"}),
+			},
+		}},
+	}
+	c.registry = agent.DefaultACPFactory().Clone()
+	c.registry.Register(acp.ACPProviderCodexApp, func(context.Context, string) (agent.Instance, error) {
+		return inst, nil
+	})
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-codexapp",
+		ProjectName:  "proj1",
+		Status:       SessionPersisted,
+		AgentType:    "codexapp",
+		AgentJSON:    `{}`,
+		CreatedAt:    now,
+		LastActiveAt: now,
+		Title:        "CodexApp reload",
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.reload", "proj1", json.RawMessage(`{"sessionId":"sess-codexapp"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.reload): %v", err)
+	}
+	body := resp.(map[string]any)
+	if body["ok"] != true {
+		t.Fatalf("reload response = %#v, want ok", body)
+	}
+
+	_, prompts, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-codexapp", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if len(prompts) != 1 {
+		t.Fatalf("prompts len = %d, want 1", len(prompts))
+	}
+	if len(messages) != 1 {
+		t.Fatalf("messages len = %d, want restored agent message, messages=%+v", len(messages), messages)
+	}
+	if !strings.Contains(messages[0].Content, "restored without user chunk") {
+		t.Fatalf("message content = %s, want restored agent text", messages[0].Content)
+	}
+}
+
+func TestHandleSessionRequestSessionResumeListSupportsCodexApp(t *testing.T) {
+	cwd := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
+	writeCodexSessionFixture(t, homeDir, "sess-codexapp-resume", cwd, "Resume CodexApp", "assistant preview")
+
+	c := newSessionViewTestClient(t)
+	c.cwd = cwd
+
+	resp, err := c.HandleSessionRequest(context.Background(), "session.resume.list", "proj1", json.RawMessage(`{"agentType":"codexapp"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.resume.list): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("response type = %T, want map", resp)
+	}
+	sessions, ok := body["sessions"].([]recoverySession)
+	if !ok {
+		t.Fatalf("sessions type = %T, want []recoverySession", body["sessions"])
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("sessions len = %d, want 1", len(sessions))
+	}
+	if sessions[0].SessionID != "sess-codexapp-resume" || sessions[0].AgentType != "codexapp" {
+		t.Fatalf("session = %+v, want codexapp resumable session", sessions[0])
+	}
+
+	importResp, err := c.HandleSessionRequest(context.Background(), "session.resume.import", "proj1", json.RawMessage(`{"agentType":"codexapp","sessionId":"sess-codexapp-resume"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.resume.import): %v", err)
+	}
+	importBody := importResp.(map[string]any)
+	if importBody["ok"] != true {
+		t.Fatalf("import response = %#v, want ok", importBody)
+	}
+	rec, err := c.store.LoadSession(context.Background(), "proj1", "sess-codexapp-resume")
+	if err != nil {
+		t.Fatalf("LoadSession imported: %v", err)
+	}
+	if rec == nil || rec.AgentType != "codexapp" {
+		t.Fatalf("imported record = %+v, want codexapp agent", rec)
 	}
 }
 
