@@ -29,8 +29,68 @@ function sameChatMessage(a: RegistryChatMessage | undefined, b: RegistryChatMess
     a.promptIndex === b.promptIndex &&
     a.turnIndex === b.turnIndex &&
     a.method === b.method &&
+    (a.done === true) === (b.done === true) &&
     JSON.stringify(a.param ?? {}) === JSON.stringify(b.param ?? {})
   );
+}
+
+function isTextTurnMessage(message: RegistryChatMessage): boolean {
+  return message.method === 'agent_message_chunk' || message.method === 'agent_thought_chunk';
+}
+
+export function replacePromptMessages(
+  list: RegistryChatMessage[],
+  nextMessages: RegistryChatMessage[],
+  promptIndex: number,
+  checkpointTurnIndex?: number,
+): RegistryChatMessage[] {
+  const base = list.filter(item => {
+    const itemPromptIndex = item.promptIndex ?? 0;
+    if (promptIndex <= 0) return false;
+    if (itemPromptIndex < promptIndex) return true;
+    if (itemPromptIndex === promptIndex && item.method === 'prompt_done') return true;
+    if (
+      itemPromptIndex === promptIndex &&
+      checkpointTurnIndex != null &&
+      checkpointTurnIndex > 0
+    ) {
+      return (item.turnIndex ?? 0) <= checkpointTurnIndex;
+    }
+    return itemPromptIndex > promptIndex;
+  });
+  return nextMessages.reduce(
+    (items, message) => upsertChatMessage(items, message),
+    base,
+  );
+}
+
+export function needsPromptTurnRefresh(
+  messages: RegistryChatMessage[],
+  promptDone: RegistryChatMessage,
+): boolean {
+  if (promptDone.method !== 'prompt_done') {
+    return false;
+  }
+  const sessionId = promptDone.sessionId;
+  const promptIndex = promptDone.promptIndex ?? 0;
+  if (!sessionId || promptIndex <= 0) {
+    return false;
+  }
+  let maxTurnIndex = 0;
+  for (const message of messages) {
+    if (message.sessionId !== sessionId || (message.promptIndex ?? 0) !== promptIndex) {
+      continue;
+    }
+    if (message.method === 'prompt_done') {
+      continue;
+    }
+    maxTurnIndex = Math.max(maxTurnIndex, message.turnIndex ?? 0);
+    if (isTextTurnMessage(message) && message.done !== true) {
+      return true;
+    }
+  }
+  const expectedMaxTurnIndex = Math.max(0, (promptDone.turnIndex ?? 0) - 1);
+  return expectedMaxTurnIndex > maxTurnIndex;
 }
 
 export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): {
@@ -40,6 +100,9 @@ export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): {
   return messages.reduce(
     (latest, message) => {
       if (message.method === 'prompt_done') {
+        return latest;
+      }
+      if (isTextTurnMessage(message) && message.done !== true) {
         return latest;
       }
       const promptIndex = message.promptIndex ?? 0;

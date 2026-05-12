@@ -138,6 +138,7 @@ export class RegistryRepository {
     if (promptIndex <= 0 || turnIndex <= 0) {
       return null;
     }
+    const done = input.done === true;
     const content = typeof input.content === 'string' ? input.content.trim() : '';
     if (content === '') {
       return null;
@@ -158,7 +159,7 @@ export class RegistryRepository {
           return null;
         }
       }
-      return { sessionId, promptIndex, turnIndex, method, param };
+      return { sessionId, promptIndex, turnIndex, method, param, done };
     } catch {
       return {
         sessionId,
@@ -166,6 +167,7 @@ export class RegistryRepository {
         turnIndex,
         method: 'system',
         param: { text: content },
+        done,
       };
     }
   }

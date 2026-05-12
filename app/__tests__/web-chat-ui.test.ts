@@ -50,7 +50,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatComposerText');
     expect(mainTsx).toContain('chatMessages');
     expect(mainTsx).toContain('session.message');
-    expect(mainTsx).toContain('return { sessionId, promptIndex, turnIndex, method, param };');
+    expect(mainTsx).toContain('return { sessionId, promptIndex, turnIndex, method, param, done };');
     expect(mainTsx).not.toContain('updateIndex');
     expect(mainTsx).not.toContain('await service.markSessionRead(');
     expect(mainTsx).toContain('chatSyncIndexRef');
@@ -172,8 +172,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
     expect(mainTsx).toContain('text: chooseChatEntryText(previous.text, text),');
     expect(mainTsx).toContain("const shouldRefreshCompletedPrompt = message.method === 'prompt_done';");
-    expect(mainTsx).toContain('!shouldRefreshCompletedPrompt &&');
-    expect(mainTsx).toContain('forceFull: true,');
+    expect(mainTsx).toContain('const latestSyncCursor = getLatestSessionReadCursor(merged);');
+    expect(mainTsx).toContain('needsPromptTurnRefresh(');
+    expect(mainTsx).toContain('refreshPromptTurns(');
+    expect(mainTsx).not.toContain('if (shouldRefreshCompletedPrompt && isSelectedSession) {\n          loadChatSession(sessionId, projectIdRef.current, {\n            forceFull: true,');
     expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
     expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
     expect(mainTsx).toContain("className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");

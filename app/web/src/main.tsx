@@ -18,7 +18,12 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
-import { getLatestSessionReadCursor, reconcileSessionReadMessages } from './chatSync';
+import {
+  getLatestSessionReadCursor,
+  needsPromptTurnRefresh,
+  reconcileSessionReadMessages,
+  replacePromptMessages,
+} from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import {
@@ -473,33 +478,6 @@ function upsertChatMessage(
   return copy;
 }
 
-function replaceChatMessagesFromPrompt(
-  list: RegistryChatMessage[],
-  nextMessages: RegistryChatMessage[],
-  promptIndex: number,
-  checkpointTurnIndex?: number,
-): RegistryChatMessage[] {
-  const base = list.filter(item => {
-    const si = item.promptIndex ?? 0;
-    if (promptIndex <= 0) return false;
-    if (si < promptIndex) return true;
-    // Preserve turns at-or-before checkpoint within the boundary prompt
-    // (server skips them, so they won't be in nextMessages)
-    if (
-      si === promptIndex &&
-      checkpointTurnIndex != null &&
-      checkpointTurnIndex > 0
-    ) {
-      return (item.turnIndex ?? 0) <= checkpointTurnIndex;
-    }
-    return false;
-  });
-  return nextMessages.reduce(
-    (items, message) => upsertChatMessage(items, message),
-    base,
-  );
-}
-
 // -- Message accessor helpers (all derived from method + param) --
 
 function msgRole(method: string): string {
@@ -687,6 +665,7 @@ function decodeSessionMessageFromEventPayload(
   const content = typeof payload.content === 'string' ? payload.content.trim() : '';
   const promptIndex = Number(payload.promptIndex ?? 0);
   const turnIndex = Number(payload.turnIndex ?? 0);
+  const done = payload.done === true;
   if (!sessionId || promptIndex <= 0 || turnIndex <= 0) {
     return null;
   }
@@ -709,7 +688,7 @@ function decodeSessionMessageFromEventPayload(
         return null;
       }
     }
-    return { sessionId, promptIndex, turnIndex, method, param };
+    return { sessionId, promptIndex, turnIndex, method, param, done };
   } catch {
     // Unparseable content: store as system message
     return {
@@ -718,6 +697,7 @@ function decodeSessionMessageFromEventPayload(
       turnIndex,
       method: 'system',
       param: { text: content },
+      done,
     };
   }
 }
@@ -4192,7 +4172,7 @@ function App() {
       if (useIncremental) {
         if (result.messages.length > 0) {
           const firstReturnedPromptIndex = result.messages[0].promptIndex;
-          nextMessages = replaceChatMessagesFromPrompt(
+          nextMessages = replacePromptMessages(
             existingMessages,
             result.messages,
             firstReturnedPromptIndex,
@@ -4231,6 +4211,46 @@ function App() {
       if (activeProjectId === projectIdRef.current) {
         setChatLoading(false);
       }
+    }
+  };
+
+  const refreshPromptTurns = async (
+    sessionId: string,
+    promptIndex: number,
+    activeProjectId = projectIdRef.current,
+    selectionSnapshot = chatSelectedIdRef.current,
+  ) => {
+    if (!activeProjectId || !sessionId || promptIndex <= 0) return false;
+    try {
+      const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
+      const result = await service.readSession(sessionId, promptIndex, 0);
+      if (activeProjectId !== projectIdRef.current) {
+        return false;
+      }
+      if (selectionSnapshot && chatSelectedIdRef.current !== selectionSnapshot) {
+        return false;
+      }
+      const fresh = chatMessageStoreRef.current[result.session.sessionId] ?? [];
+      let nextMessages = replacePromptMessages(fresh, result.messages, promptIndex);
+      nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
+
+      chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
+      chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
+      setChatPromptSnapshotVersion(version => version + 1);
+      const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
+      chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.promptIndex;
+      chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
+      setChatSessions(prev => mergeChatSession(prev, result.session));
+      if (result.session.sessionId === chatSelectedIdRef.current) {
+        setChatMessages(nextMessages);
+      }
+      persistChatSessionContent(result.session.sessionId, activeProjectId, result.session);
+      return true;
+    } catch (err) {
+      if (activeProjectId === projectIdRef.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      return false;
     }
   };
 
@@ -5448,34 +5468,30 @@ function App() {
         maybeNotifyChatMessage(message);
 
         const incomingPromptIndex = message.promptIndex ?? 0;
-        const incomingTurnIndex = message.turnIndex ?? 0;
-        const currentPromptIndex = chatSyncIndexRef.current[sessionId] ?? 0;
-        const currentTurnIndex = chatSyncSubIndexRef.current[sessionId] ?? 0;
-        if (
-          !shouldRefreshCompletedPrompt &&
-          (incomingPromptIndex > currentPromptIndex ||
-            (incomingPromptIndex === currentPromptIndex && incomingTurnIndex > currentTurnIndex))
-        ) {
-          chatSyncIndexRef.current[sessionId] = incomingPromptIndex;
-          chatSyncSubIndexRef.current[sessionId] = incomingTurnIndex;
-        }
-
         const merged = upsertChatMessage(
           chatMessageStoreRef.current[sessionId] ?? [],
           message,
         );
+        const latestSyncCursor = getLatestSessionReadCursor(merged);
+        chatSyncIndexRef.current[sessionId] = latestSyncCursor.promptIndex;
+        chatSyncSubIndexRef.current[sessionId] = latestSyncCursor.turnIndex;
         chatMessageStoreRef.current[sessionId] = merged;
         persistChatSessionContent(sessionId, projectIdRef.current, mergedSessionForCache);
 
         if (sessionId === chatSelectedIdRef.current) {
           setChatMessages(merged);
         }
-        if (shouldRefreshCompletedPrompt && isSelectedSession) {
-          loadChatSession(sessionId, projectIdRef.current, {
-            forceFull: true,
-            preserveUserSelection: true,
-            selectionSnapshot: chatSelectedIdRef.current,
-          }).catch(() => undefined);
+        if (
+          shouldRefreshCompletedPrompt &&
+          isSelectedSession &&
+          needsPromptTurnRefresh(merged, message)
+        ) {
+          refreshPromptTurns(
+            sessionId,
+            incomingPromptIndex,
+            projectIdRef.current,
+            chatSelectedIdRef.current,
+          ).catch(() => undefined);
         }
       }
     });

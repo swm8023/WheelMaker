@@ -27,6 +27,7 @@ export interface RegistrySessionMessage {
   turnIndex: number;
   method: string;
   param: Record<string, unknown>;
+  done?: boolean;
 }
 
 export interface RegistrySessionPlanEntry {
@@ -169,6 +170,7 @@ export interface RegistrySessionMessageEventPayload {
   promptIndex: number;
   turnIndex: number;
   content: string;
+  done?: boolean;
 }
 
 export type RegistryChatContentBlock = RegistrySessionContentBlock;

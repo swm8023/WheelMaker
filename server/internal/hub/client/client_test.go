@@ -4285,6 +4285,56 @@ func TestSessionViewPromptFinishedPublishesPromptDoneMessage(t *testing.T) {
 	}
 }
 
+func TestSessionViewPromptFinishedMarksOpenTextTurnDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	var published []map[string]any
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		published = append(published, body)
+		return nil
+	})
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Prompt Done Turn")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewAssistantChunkTextEvent("sess-1", "hello", "streaming")); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	if len(published) < 4 {
+		t.Fatalf("published len = %d, want at least 4", len(published))
+	}
+	doneTurn := published[len(published)-2]
+	if got := doneTurn["done"]; got != true {
+		t.Fatalf("done turn marker = %v, want true", got)
+	}
+	if got := doneTurn["turnIndex"].(int64); got != 2 {
+		t.Fatalf("done turnIndex = %d, want 2", got)
+	}
+	content, _ := doneTurn["content"].(string)
+	update := decodeTurnSessionUpdate(t, content)
+	if strings.TrimSpace(update.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
+		t.Fatalf("done method = %q, want %q", update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
+	}
+	if text := extractTextChunk(update.Content); text != "hello" {
+		t.Fatalf("done text = %q, want hello", text)
+	}
+}
+
 func TestSessionViewReadReturnsCheckpointPromptSnapshot(t *testing.T) {
 	c := newSessionViewTestClient(t)
 
@@ -4398,6 +4448,49 @@ func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 	update2 := decodeTurnSessionUpdate(t, turns[1])
 	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "hello world" {
 		t.Fatalf("assistant text = %q, want hello world", text)
+	}
+}
+
+func TestSessionReadMarksCompletedTextTurnsDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Read Done")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent user message: %v", err)
+	}
+	msg := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}), Status: "streaming"}
+	thought := acp.SessionUpdate{SessionUpdate: acp.SessionUpdateAgentThoughtChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "reason"}), Status: "streaming"}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", msg)); err != nil {
+		t.Fatalf("RecordEvent message update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", thought)); err != nil {
+		t.Fatalf("RecordEvent thought update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1", "promptIndex": int64(1)})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(messages))
+	}
+	if messages[1].Done != true {
+		t.Fatalf("assistant done = %v, want true", messages[1].Done)
+	}
+	if messages[2].Done != true {
+		t.Fatalf("thought done = %v, want true", messages[2].Done)
 	}
 }
 
