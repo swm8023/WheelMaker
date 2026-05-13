@@ -6633,6 +6633,21 @@ function App() {
         {!isWide ? (
           <div className="drawer-project-header">
             <div className="drawer-project-pill">
+              <button
+                type="button"
+                className="drawer-settings-icon-btn"
+                onClick={() => setSidebarSettingsOpen(value => !value)}
+                title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
+                aria-label={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
+              >
+                <span
+                  className={`codicon ${
+                    sidebarSettingsOpen
+                      ? 'codicon-arrow-left'
+                      : 'codicon-settings-gear'
+                  }`}
+                />
+              </button>
               <div
                 className="project-wrap"
                 onPointerDown={event => event.stopPropagation()}
@@ -6842,23 +6857,25 @@ function App() {
             renderSidebarMain()
           )}
         </div>
-        <div className="sidebar-footer">
-          <button
-            type="button"
-            className="sidebar-settings-btn"
-            onClick={() => setSidebarSettingsOpen(value => !value)}
-            title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
-          >
-            <span
-              className={`codicon ${
-                sidebarSettingsOpen
-                  ? 'codicon-arrow-left'
-                  : 'codicon-settings-gear'
-              }`}
-            />
-            <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
-          </button>
-        </div>
+        {isWide ? (
+          <div className="sidebar-footer">
+            <button
+              type="button"
+              className="sidebar-settings-btn"
+              onClick={() => setSidebarSettingsOpen(value => !value)}
+              title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
+            >
+              <span
+                className={`codicon ${
+                  sidebarSettingsOpen
+                    ? 'codicon-arrow-left'
+                    : 'codicon-settings-gear'
+                }`}
+              />
+              <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
+            </button>
+          </div>
+        ) : null}
       </>
     );
   };
@@ -7976,13 +7993,6 @@ function App() {
               {projectItem.path || '-'}
             </span>
           </div>
-          <span
-            className={`project-menu-state ${
-              projectItem.online ? 'online' : 'offline'
-            }`}
-          >
-            {projectItem.online ? 'online' : 'offline'}
-          </span>
           <span className="project-menu-hub">
             {projectItem.hubId || 'local-hub'}
           </span>

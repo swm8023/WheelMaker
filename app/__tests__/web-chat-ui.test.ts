@@ -164,6 +164,13 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('className="header-bubble"');
     expect(mainTsx).toContain('className="drawer-project-header"');
     expect(mainTsx).toContain('className="drawer-project-pill"');
+    expect(mainTsx).toContain('className="drawer-settings-icon-btn"');
+    expect(mainTsx).toMatch(
+      /className="drawer-project-pill"[\s\S]*?className="drawer-settings-icon-btn"[\s\S]*?className="project-wrap"/,
+    );
+    expect(mainTsx).toMatch(
+      /\{isWide \? \(\s*<div className="sidebar-footer">/,
+    );
     expect(mainTsx).toContain('className="floating-control-stack"');
     expect(mainTsx).toContain('className="floating-nav-group"');
     expect(mainTsx).toContain('className="drawer-toggle-bubble"');
@@ -206,6 +213,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chat-config-overflow-menu');
     expect(mainTsx).toContain('className="codicon codicon-settings-gear"');
     expect(mainTsx).toContain('className="codicon codicon-chevron-down"');
+    expect(mainTsx).not.toContain('project-menu-state');
+    expect(mainTsx).not.toContain("projectItem.online ? 'online' : 'offline'");
     expect(mainTsx).not.toContain('+{chatConfigOverflowOptions.length}');
     expect(mainTsx).toContain('title="More config options"');
     expect(mainTsx).toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
@@ -228,6 +237,14 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.header-bubble {');
     expect(stylesCss).toContain('.drawer-project-header {');
     expect(stylesCss).toContain('.drawer-project-pill {');
+    expect(stylesCss).toContain('.drawer-settings-icon-btn {');
+    expect(stylesCss).not.toContain('.project-menu-state');
+    expect(stylesCss).toMatch(
+      /\.project-menu-hub \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 18%, var\(--panel-2\)\);/,
+    );
+    expect(stylesCss).toMatch(
+      /\.project-menu-hub \{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 42%, transparent\);/,
+    );
     expect(stylesCss).toMatch(
       /\.header \.project-btn \{[\s\S]*max-width: none;[\s\S]*\}/,
     );
