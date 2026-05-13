@@ -20,9 +20,11 @@ import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
 import {
   getLatestSessionReadCursor,
+  isFinishedChatMessage,
   needsPromptTurnRefresh,
   reconcileSessionReadMessages,
   replacePromptMessages,
+  shouldRequestSessionReadForIncomingTurn,
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
@@ -671,7 +673,7 @@ function decodeSessionMessageFromEventPayload(
   const content = typeof payload.content === 'string' ? payload.content.trim() : '';
   const promptIndex = Number(payload.promptIndex ?? 0);
   const turnIndex = Number(payload.turnIndex ?? 0);
-  const done = payload.done === true;
+  const finished = payload.finished === true;
   if (!sessionId || promptIndex <= 0 || turnIndex <= 0) {
     return null;
   }
@@ -694,7 +696,7 @@ function decodeSessionMessageFromEventPayload(
         return null;
       }
     }
-    return { sessionId, promptIndex, turnIndex, method, param, done };
+    return { sessionId, promptIndex, turnIndex, method, param, finished };
   } catch {
     // Unparseable content: store as system message
     return {
@@ -703,9 +705,20 @@ function decodeSessionMessageFromEventPayload(
       turnIndex,
       method: 'system',
       param: { text: content },
-      done,
+      finished,
     };
   }
+}
+
+function terminalPromptIndexes(messages: RegistryChatMessage[]): Set<number> {
+  const terminal = new Set<number>();
+  for (const message of messages) {
+    const promptIndex = message.promptIndex ?? 0;
+    if (promptIndex > 0 && message.method === 'prompt_done' && isFinishedChatMessage(message)) {
+      terminal.add(promptIndex);
+    }
+  }
+  return terminal;
 }
 
 type ChatPromptEntryKind = 'tool' | 'thought' | 'plan' | 'message';
@@ -4169,7 +4182,8 @@ function App() {
       promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
       turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
     };
-    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, messages, prompts);
+    const cacheableMessages = messages.filter(isFinishedChatMessage);
+    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages, prompts);
     const targetSession = session ?? chatSessions.find(item => item.sessionId === sessionId);
     if (targetSession) {
       workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
@@ -5508,6 +5522,29 @@ function App() {
         const messageState = msgStatus(message.method, message.param);
         const isSelectedSession = sessionId === chatSelectedIdRef.current;
         const shouldRefreshCompletedPrompt = message.method === 'prompt_done';
+        const existingMessagesForSession = chatMessageStoreRef.current[sessionId] ?? [];
+        const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
+          {
+            cursor: {
+              promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
+              turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+            },
+            terminalPrompts: terminalPromptIndexes(existingMessagesForSession),
+          },
+          message,
+        );
+        if (readCursorForGap) {
+          chatSyncIndexRef.current[sessionId] = readCursorForGap.promptIndex;
+          chatSyncSubIndexRef.current[sessionId] = readCursorForGap.turnIndex;
+          if (isSelectedSession) {
+            loadChatSession(sessionId, projectIdRef.current, {
+              incremental: true,
+              preserveUserSelection: true,
+              selectionSnapshot: chatSelectedIdRef.current,
+            }).catch(() => undefined);
+          }
+          return;
+        }
         if (messageState === 'streaming') {
           setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
           setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
@@ -5545,7 +5582,7 @@ function App() {
 
         const incomingPromptIndex = message.promptIndex ?? 0;
         const merged = upsertChatMessage(
-          chatMessageStoreRef.current[sessionId] ?? [],
+          existingMessagesForSession,
           message,
         );
         const latestSyncCursor = getLatestSessionReadCursor(merged);

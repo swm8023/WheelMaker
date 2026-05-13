@@ -14,6 +14,8 @@ describe('web chat integration', () => {
     expect(registryTypes).toContain('export interface RegistrySessionMessage');
     expect(registryTypes).toContain('promptIndex: number;');
     expect(registryTypes).toContain('turnIndex: number;');
+    expect(registryTypes).toContain('finished: boolean;');
+    expect(registryTypes).not.toContain('done?: boolean;');
     expect(registryTypes).toContain('export interface RegistrySessionPromptSnapshot');
     expect(registryTypes).toContain('content?: string[];');
     expect(registryTypes).not.toContain('updateIndex: number;');
@@ -50,7 +52,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatComposerText');
     expect(mainTsx).toContain('chatMessages');
     expect(mainTsx).toContain('session.message');
-    expect(mainTsx).toContain('return { sessionId, promptIndex, turnIndex, method, param, done };');
+    expect(mainTsx).toContain('return { sessionId, promptIndex, turnIndex, method, param, finished };');
     expect(mainTsx).not.toContain('updateIndex');
     expect(mainTsx).not.toContain('await service.markSessionRead(');
     expect(mainTsx).toContain('chatSyncIndexRef');
@@ -193,6 +195,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('text: chooseChatEntryText(previous.text, text),');
     expect(mainTsx).toContain("const shouldRefreshCompletedPrompt = message.method === 'prompt_done';");
     expect(mainTsx).toContain('const latestSyncCursor = getLatestSessionReadCursor(merged);');
+    expect(mainTsx).toContain('const readCursorForGap = shouldRequestSessionReadForIncomingTurn(');
+    expect(mainTsx).toContain('messages.filter(isFinishedChatMessage)');
     expect(mainTsx).toContain('needsPromptTurnRefresh(');
     expect(mainTsx).toContain('refreshPromptTurns(');
     expect(mainTsx).not.toContain('if (shouldRefreshCompletedPrompt && isSelectedSession) {\n          loadChatSession(sessionId, projectIdRef.current, {\n            forceFull: true,');
