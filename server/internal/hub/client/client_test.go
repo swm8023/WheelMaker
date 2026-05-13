@@ -3433,6 +3433,47 @@ func TestSessionReadReturnsPromptDoneAsFinishedTurn(t *testing.T) {
 	}
 }
 
+func TestDuplicatePromptDoneDoesNotOverwriteStoredTurns(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Duplicate Prompt Done")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent answer: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent duplicate prompt finished: %v", err)
+	}
+
+	_, prompts, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if prompts[0].TurnIndex != 3 {
+		t.Fatalf("prompt turnIndex = %d, want 3", prompts[0].TurnIndex)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3; messages=%+v", len(messages), messages)
+	}
+	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, messages[1].Content).Content)); text != "answer" {
+		t.Fatalf("agent text = %q, want answer", text)
+	}
+	if messages[2].TurnIndex != 3 || messages[2].Finished != true {
+		t.Fatalf("prompt_done message = %#v, want turnIndex=3 finished=true", messages[2])
+	}
+}
+
 func TestSessionViewPublishMessageOmitsUpdateIndexAndPublishesMergedTurn(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()

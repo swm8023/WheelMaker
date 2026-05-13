@@ -415,6 +415,14 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	}
 	stopReason := strings.TrimSpace(result.StopReason)
 
+	alreadyFinished, err := r.latestPromptFinishedWithoutLiveStateLocked(ctx, event.SessionID)
+	if err != nil {
+		return err
+	}
+	if alreadyFinished {
+		return nil
+	}
+
 	state, err := r.ensurePromptStateLocked(ctx, event.SessionID, event.UpdatedAt)
 	if err != nil {
 		return err
@@ -446,6 +454,20 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
 	delete(r.promptState, event.SessionID)
 	return nil
+}
+
+func (r *SessionRecorder) latestPromptFinishedWithoutLiveStateLocked(ctx context.Context, sessionID string) (bool, error) {
+	if state, ok := r.promptState[sessionID]; ok && state != nil {
+		return false, nil
+	}
+	prompts, err := r.store.ListSessionPrompts(ctx, r.projectName, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if len(prompts) == 0 {
+		return false, nil
+	}
+	return sessionPromptRecordFinished(prompts[len(prompts)-1]), nil
 }
 
 func (r *SessionRecorder) publishSessionTurn(turn sessionTurnMessage, updateJSON string) {
