@@ -89,7 +89,7 @@ func TestBuildClientMigratesPromptHistoryFiles(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 
-	path := filepath.Join(baseDir, "session-history", "proj1", "sess-1", "prompts", "p000001.json")
+	path := filepath.Join(baseDir, "session", "proj1", "sess-1", "prompts", "p000001.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(%q): %v", path, err)

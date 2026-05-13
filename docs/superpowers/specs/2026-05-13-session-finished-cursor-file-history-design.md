@@ -107,7 +107,7 @@ This projection is used by `session.list`, reconnect checks, and diagnostics. It
 Prompt history is stored under the WheelMaker data directory:
 
 ```text
-session-history/
+session/
   <project-key>/
     <session-id>/
       manifest.json

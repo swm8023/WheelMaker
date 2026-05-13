@@ -897,13 +897,13 @@ sessions.session_sync_json TEXT NOT NULL DEFAULT '{}'
 Add the prompt file layout:
 
 ```text
-session-history/<project-key>/<session-id>/manifest.json
-session-history/<project-key>/<session-id>/prompts/p000001.json
+session/<project-key>/<session-id>/manifest.json
+session/<project-key>/<session-id>/prompts/p000001.json
 ```
 
 - [ ] **Step 3: Verify docs contain the new protocol terms**
 
-Run: `rg -n "finished|session_sync_json|prompt_done is a normal turn|session-history|server prompt_request is authoritative|session.read\\(P, T\\)" docs/app-chat-recorder-sync-protocol.zh-CN.md docs/app-chat-recorder-sync-protocol.md docs/session-persistence-sqlite.md`
+Run: `rg -n "finished|session_sync_json|prompt_done is a normal turn|session/|server prompt_request is authoritative|session.read\\(P, T\\)" docs/app-chat-recorder-sync-protocol.zh-CN.md docs/app-chat-recorder-sync-protocol.md docs/session-persistence-sqlite.md`
 
 Expected: output includes all four terms.
 

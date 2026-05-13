@@ -31,13 +31,13 @@
 当前实现使用统一数据库与文件历史组合：
 
 - SQLite：`~/.wheelmaker/db/client.sqlite3`
-- prompt 文件历史：`~/.wheelmaker/session-history/`
+- prompt 文件历史：`~/.wheelmaker/session/`
 
 SQLite 保留热索引、会话元数据、路由绑定与迁移兼容表。完整 prompt turn 正文迁移到文件：
 
 ```text
-session-history/<project-key>/<session-id>/manifest.json
-session-history/<project-key>/<session-id>/prompts/p000001.json
+session/<project-key>/<session-id>/manifest.json
+session/<project-key>/<session-id>/prompts/p000001.json
 ```
 
 `session_prompts.turns_json` 作为旧数据迁移来源保留；启动时全量导出到 prompt 文件，运行期 finished prompt 正文从文件读取，active prompt turns 从内存读取。
