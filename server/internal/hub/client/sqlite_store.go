@@ -157,10 +157,7 @@ func NewStore(dbPath string) (Store, error) {
 			return nil, err
 		}
 	} else {
-		// Migrate: add columns introduced after initial schema.
-		_, _ = db.Exec(`ALTER TABLE sessions ADD COLUMN session_sync_json TEXT NOT NULL DEFAULT '{}'`)
-		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`)
-		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`)
+		migrateExpectedStoreSchema(db)
 		if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
 			_ = db.Close()
 			return nil, err
@@ -209,7 +206,17 @@ func checkStoreSchemaDB(db *sql.DB, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("list sqlite tables: %w", err)
 	}
+	if len(existingTables) > 0 {
+		migrateExpectedStoreSchema(db)
+	}
 	return validateStoreSchema(db, dbPath, existingTables)
+}
+
+func migrateExpectedStoreSchema(db *sql.DB) {
+	// Migrate: add columns introduced after initial schema.
+	_, _ = db.Exec(`ALTER TABLE sessions ADD COLUMN session_sync_json TEXT NOT NULL DEFAULT '{}'`)
+	_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`)
 }
 
 func validateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {

@@ -2100,6 +2100,48 @@ func TestCheckStoreSchemaRejectsUnexpectedLegacyTable(t *testing.T) {
 	}
 }
 
+func TestCheckStoreSchemaMigratesSessionSyncJSONColumn(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
+
+	legacyDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	if _, err := legacyDB.Exec(sqliteSchema); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("init schema: %v", err)
+	}
+	if _, err := legacyDB.Exec(`
+		ALTER TABLE sessions DROP COLUMN session_sync_json;
+		INSERT INTO sessions (id, project_name, status, agent_type, agent_json, title, created_at, last_active_at)
+		VALUES ('sess-1', 'proj1', 1, 'codex', '{}', 'Existing session', '2026-05-13T00:00:00Z', '2026-05-13T00:00:00Z')
+	`); err != nil {
+		_ = legacyDB.Close()
+		t.Fatalf("create legacy sessions table: %v", err)
+	}
+	if err := legacyDB.Close(); err != nil {
+		t.Fatalf("close legacy db: %v", err)
+	}
+
+	if err := CheckStoreSchema(dbPath); err != nil {
+		t.Fatalf("CheckStoreSchema() error = %v", err)
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("reopen db: %v", err)
+	}
+	defer db.Close()
+
+	var sessionSyncJSON string
+	if err := db.QueryRow(`SELECT session_sync_json FROM sessions WHERE id = 'sess-1'`).Scan(&sessionSyncJSON); err != nil {
+		t.Fatalf("query migrated session_sync_json: %v", err)
+	}
+	if sessionSyncJSON != "{}" {
+		t.Fatalf("session_sync_json = %q, want {}", sessionSyncJSON)
+	}
+}
+
 func TestNewStoreRejectsExistingPartialSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "client.sqlite3")
 
