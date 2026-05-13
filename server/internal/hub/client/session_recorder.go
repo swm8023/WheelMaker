@@ -420,6 +420,15 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 		return err
 	}
 	r.publishOpenTextTurnDone(state)
+	doneTurn := sessionTurnMessage{
+		sessionID:   event.SessionID,
+		method:      acp.IMMethodPromptDone,
+		payload:     acp.IMPromptResult{StopReason: stopReason},
+		promptIndex: state.promptIndex,
+		turnIndex:   state.nextTurnIndex,
+		finished:    true,
+	}
+	state.updateTurn(doneTurn, "")
 	turnsJSON, turnIndex := encodePromptStateTurns(state)
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
 		SessionID:   event.SessionID,
@@ -433,14 +442,6 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	}
 	if err := r.upsertSessionProjection(ctx, event.SessionID, "", "", event.UpdatedAt, true); err != nil {
 		return err
-	}
-	doneTurn := sessionTurnMessage{
-		sessionID:   event.SessionID,
-		method:      acp.IMMethodPromptDone,
-		payload:     acp.IMPromptResult{StopReason: stopReason},
-		promptIndex: state.promptIndex,
-		turnIndex:   state.nextTurnIndex,
-		finished:    true,
 	}
 	r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
 	delete(r.promptState, event.SessionID)
