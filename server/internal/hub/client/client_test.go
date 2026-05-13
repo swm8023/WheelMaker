@@ -2341,6 +2341,46 @@ func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("decoded[1] = %q, want %q", decoded[1], normalizeJSONDoc(turn2JSON, `{}`))
 	}
 }
+
+func TestFileSessionHistoryWritesAndReadsPromptSnapshot(t *testing.T) {
+	store := newFileSessionHistoryStore(t.TempDir())
+	ctx := context.Background()
+
+	prompt := sessionHistoryPrompt{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		Title:       "hello",
+		ModelName:   "gpt-5",
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		Turns: []sessionHistoryTurn{
+			{TurnIndex: 1, Method: acp.IMMethodPromptRequest, Finished: true, Content: `{"method":"prompt_request"}`},
+			{TurnIndex: 2, Method: acp.IMMethodPromptDone, Finished: true, Content: `{"method":"prompt_done","param":{"stopReason":"end_turn"}}`},
+		},
+	}
+
+	if err := store.WritePrompt(ctx, "proj1", prompt); err != nil {
+		t.Fatalf("WritePrompt: %v", err)
+	}
+
+	loaded, err := store.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if loaded.SchemaVersion != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1", loaded.SchemaVersion)
+	}
+	if loaded.PromptIndex != 1 || len(loaded.Turns) != 2 {
+		t.Fatalf("loaded prompt = %#v", loaded)
+	}
+	if loaded.TurnIndex != 2 {
+		t.Fatalf("TurnIndex = %d, want 2", loaded.TurnIndex)
+	}
+	if loaded.Turns[1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want prompt_done", loaded.Turns[1].Method)
+	}
+}
+
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
