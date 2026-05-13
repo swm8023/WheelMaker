@@ -748,6 +748,7 @@ type ChatPromptGroup = {
 type ChatPromptGroupViewProps = {
   group: ChatPromptGroup;
   showSendingPending: boolean;
+  hideToolCalls: boolean;
   markdownComponents: Components;
   markdownUrlTransform: (value: string) => string;
 };
@@ -818,6 +819,7 @@ function groupImageBlocks(msgs: RegistryChatMessage[]): RegistrySessionContentBl
 const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
   group,
   showSendingPending,
+  hideToolCalls,
   markdownComponents,
   markdownUrlTransform,
 }: ChatPromptGroupViewProps) {
@@ -885,6 +887,9 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
         </div>
       ) : null}
       {group.entries.map(entry => {
+        if (hideToolCalls && entry.kind === 'tool') {
+          return null;
+        }
         if (entry.kind === 'tool') {
           return (
             <div key={entry.key} className="chat-tool-line" title={entry.text}>
@@ -2047,6 +2052,11 @@ function App() {
       ? persistedGlobal.showLineNumbers
       : true,
   );
+  const [hideToolCalls, setHideToolCalls] = useState(
+    typeof persistedGlobal.hideToolCalls === 'boolean'
+      ? persistedGlobal.hideToolCalls
+      : false,
+  );
   const codeFontFamily = useMemo(
     () => resolveCodeFontFamily(codeFont),
     [codeFont],
@@ -3027,6 +3037,7 @@ function App() {
       codeTabSize,
       wrapLines,
       showLineNumbers,
+      hideToolCalls,
       tab,
       selectedProjectId: projectId,
       floatingControlSlot,
@@ -3042,6 +3053,7 @@ function App() {
     codeTabSize,
     wrapLines,
     showLineNumbers,
+    hideToolCalls,
     tab,
     projectId,
     floatingControlSlot,
@@ -6659,6 +6671,14 @@ function App() {
                   />
                 </label>
                 <label className="switch-row sidebar-setting-row">
+                  <span>Hide Tool Calls</span>
+                  <input
+                    type="checkbox"
+                    checked={hideToolCalls}
+                    onChange={e => setHideToolCalls(e.target.checked)}
+                  />
+                </label>
+                <label className="switch-row sidebar-setting-row">
                   <span>Code Theme</span>
                   <select
                     className="sidebar-setting-select"
@@ -7156,12 +7176,13 @@ function App() {
           key={group.key}
           group={group}
           showSendingPending={chatSending && group.key === latestGroupKey}
+          hideToolCalls={hideToolCalls}
           markdownComponents={chatMarkdownComponents}
           markdownUrlTransform={chatMarkdownUrlTransform}
         />
       ));
     },
-    [chatPromptGroups, chatSending, chatMarkdownComponents, chatMarkdownUrlTransform],
+    [chatPromptGroups, chatSending, hideToolCalls, chatMarkdownComponents, chatMarkdownUrlTransform],
   );
   const renderMain = () => {
     const heavyDiffDeferred =

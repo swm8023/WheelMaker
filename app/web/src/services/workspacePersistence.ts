@@ -59,6 +59,7 @@ export type PersistedGlobalState = {
   codeTabSize: number;
   wrapLines: boolean;
   showLineNumbers: boolean;
+  hideToolCalls: boolean;
   tab: PersistedTab;
   selectedProjectId: string;
   floatingControlSlot: PersistedFloatingControlSlot;
@@ -120,6 +121,7 @@ const GLOBAL_KEYS = {
   codeTabSize: 'codeTabSize',
   wrapLines: 'wrapLines',
   showLineNumbers: 'showLineNumbers',
+  hideToolCalls: 'hideToolCalls',
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
   floatingControlSlot: 'floatingControlSlot',
@@ -138,6 +140,7 @@ function defaultGlobalState(): PersistedGlobalState {
     codeTabSize: DEFAULT_CODE_TAB_SIZE,
     wrapLines: false,
     showLineNumbers: true,
+    hideToolCalls: false,
     tab: 'file',
     selectedProjectId: '',
     floatingControlSlot: 'upper-middle',
@@ -229,6 +232,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     codeTabSize: typeof input.codeTabSize === 'number' && Number.isFinite(input.codeTabSize) ? input.codeTabSize : base.codeTabSize,
     wrapLines: typeof input.wrapLines === 'boolean' ? input.wrapLines : base.wrapLines,
     showLineNumbers: typeof input.showLineNumbers === 'boolean' ? input.showLineNumbers : base.showLineNumbers,
+    hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
     floatingControlSlot,
@@ -616,6 +620,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.codeTabSize, v: serialize(this.state.global.codeTabSize), updatedAt: now},
       {k: GLOBAL_KEYS.wrapLines, v: serialize(this.state.global.wrapLines), updatedAt: now},
       {k: GLOBAL_KEYS.showLineNumbers, v: serialize(this.state.global.showLineNumbers), updatedAt: now},
+      {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
@@ -894,6 +899,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.codeTabSize, v: serialize(next.codeTabSize), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.wrapLines, v: serialize(next.wrapLines), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.showLineNumbers, v: serialize(next.showLineNumbers), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
