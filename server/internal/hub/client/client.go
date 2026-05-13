@@ -116,11 +116,28 @@ func (c *Client) ProjectName() string {
 	return c.projectName
 }
 
+func (c *Client) SetSessionHistoryRoot(root string) {
+	if c == nil || c.sessionRecorder == nil {
+		return
+	}
+	root = strings.TrimSpace(root)
+	if root == "" {
+		c.sessionRecorder.historyStore = nil
+		return
+	}
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(root)
+}
+
 // Start loads persisted state.
 // Agent initialization is deferred until the first incoming IM event (lazy init).
 func (c *Client) Start(ctx context.Context) error {
 	if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, ""); err != nil {
 		return fmt.Errorf("client: ensure project row: %w", err)
+	}
+	if c.sessionRecorder != nil && c.sessionRecorder.historyStore != nil {
+		if err := migrateSessionPromptsToFiles(ctx, c.store, c.sessionRecorder.historyStore, c.projectName); err != nil {
+			return fmt.Errorf("client: migrate session history files: %w", err)
+		}
 	}
 	bindings, err := c.store.LoadRouteBindings(ctx, c.projectName)
 	if err != nil {

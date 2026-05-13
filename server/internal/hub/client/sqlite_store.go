@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	status INTEGER NOT NULL,
 	agent_type TEXT NOT NULL,
 	agent_json TEXT NOT NULL DEFAULT '{}',
+	session_sync_json TEXT NOT NULL DEFAULT '{}',
 	title TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	last_active_at TEXT NOT NULL
@@ -75,16 +76,17 @@ type PreferenceConfigOption struct {
 }
 
 type SessionRecord struct {
-	ID           string
-	ProjectName  string
-	Status       SessionStatus
-	AgentType    string
-	AgentJSON    string
-	Title        string
-	Agent        string
-	CreatedAt    time.Time
-	LastActiveAt time.Time
-	InMemory     bool
+	ID              string
+	ProjectName     string
+	Status          SessionStatus
+	AgentType       string
+	AgentJSON       string
+	SessionSyncJSON string
+	Title           string
+	Agent           string
+	CreatedAt       time.Time
+	LastActiveAt    time.Time
+	InMemory        bool
 }
 
 type AgentPreferenceRecord struct {
@@ -155,13 +157,14 @@ func NewStore(dbPath string) (Store, error) {
 			return nil, err
 		}
 	} else {
+		// Migrate: add columns introduced after initial schema.
+		_, _ = db.Exec(`ALTER TABLE sessions ADD COLUMN session_sync_json TEXT NOT NULL DEFAULT '{}'`)
+		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`)
+		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`)
 		if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
-		// Migrate: add columns introduced after initial schema.
-		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`)
-		_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`)
 	}
 	return &sqliteStore{db: db}, nil
 }
@@ -169,7 +172,7 @@ func NewStore(dbPath string) (Store, error) {
 var expectedStoreSchemaColumns = map[string][]string{
 	"projects":          {"project_name", "default_agent_type", "updated_at"},
 	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
-	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "title", "created_at", "last_active_at"},
+	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "session_sync_json", "title", "created_at", "last_active_at"},
 	"agent_preferences": {"project_name", "agent_type", "preference_json"},
 	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at", "turns_json", "turn_index", "model_name", "started_at"},
 }
@@ -461,7 +464,7 @@ func (s *sqliteStore) SaveAgentPreference(ctx context.Context, rec AgentPreferen
 
 func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, status, agent_type, agent_json, title, created_at, last_active_at
+		SELECT id, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
@@ -475,6 +478,7 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 		&status,
 		&rec.AgentType,
 		&rec.AgentJSON,
+		&rec.SessionSyncJSON,
 		&rec.Title,
 		&createdAt,
 		&lastActiveAt,
@@ -487,6 +491,7 @@ func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID st
 
 	rec.ProjectName = strings.TrimSpace(projectName)
 	rec.Status = SessionStatus(status)
+	rec.SessionSyncJSON = firstNonEmpty(rec.SessionSyncJSON, "{}")
 	rec.CreatedAt = parseStoreTime(createdAt)
 	rec.LastActiveAt = parseStoreTime(lastActiveAt)
 	return rec, nil
@@ -528,20 +533,27 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 			rec.CreatedAt = existing.CreatedAt
 		}
 		rec.LastActiveAt = maxTime(rec.LastActiveAt, existing.LastActiveAt)
+		if strings.TrimSpace(rec.SessionSyncJSON) == "" {
+			rec.SessionSyncJSON = firstNonEmpty(existing.SessionSyncJSON, "{}")
+		}
+	}
+	if strings.TrimSpace(rec.SessionSyncJSON) == "" {
+		rec.SessionSyncJSON = "{}"
 	}
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_name=excluded.project_name,
 			status=excluded.status,
 			agent_type=excluded.agent_type,
 			agent_json=excluded.agent_json,
+			session_sync_json=excluded.session_sync_json,
 			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
 			last_active_at=excluded.last_active_at
-	`, rec.ID, rec.ProjectName, int(rec.Status), rec.AgentType, rec.AgentJSON, rec.Title,
+	`, rec.ID, rec.ProjectName, int(rec.Status), rec.AgentType, rec.AgentJSON, rec.SessionSyncJSON, rec.Title,
 		formatStoreTime(rec.CreatedAt), formatStoreTime(rec.LastActiveAt),
 	)
 	if err != nil {
@@ -552,7 +564,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
+		SELECT id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE project_name = ?
 	`, strings.TrimSpace(projectName))
@@ -568,16 +580,18 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 		var status int
 		var agentType string
 		var agentJSON string
+		var sessionSyncJSON string
 		var storedTitle string
 		var createdAt string
 		var lastActiveAt string
-		if err := rows.Scan(&entry.ID, &entryProjectName, &status, &agentType, &agentJSON, &storedTitle, &createdAt, &lastActiveAt); err != nil {
+		if err := rows.Scan(&entry.ID, &entryProjectName, &status, &agentType, &agentJSON, &sessionSyncJSON, &storedTitle, &createdAt, &lastActiveAt); err != nil {
 			return nil, fmt.Errorf("scan session list entry: %w", err)
 		}
 		entry.ProjectName = strings.TrimSpace(entryProjectName)
 		entry.Status = SessionStatus(status)
 		entry.AgentType = strings.TrimSpace(agentType)
 		entry.AgentJSON = firstNonEmpty(strings.TrimSpace(agentJSON), "{}")
+		entry.SessionSyncJSON = firstNonEmpty(sessionSyncJSON, "{}")
 		entry.CreatedAt = parseStoreTime(createdAt)
 		entry.LastActiveAt = parseStoreTime(lastActiveAt)
 		entry.Agent, entry.Title = inferSessionListMetadata(agentType, agentJSON)
@@ -932,11 +946,11 @@ func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*S
 	var createdAt string
 	var lastActiveAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, project_name, status, agent_type, agent_json, title, created_at, last_active_at
+		SELECT id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
 		FROM sessions
 		WHERE id = ?
 		LIMIT 1
-	`, strings.TrimSpace(sessionID)).Scan(&rec.ID, &entryProjectName, &status, &rec.AgentType, &rec.AgentJSON, &rec.Title, &createdAt, &lastActiveAt)
+	`, strings.TrimSpace(sessionID)).Scan(&rec.ID, &entryProjectName, &status, &rec.AgentType, &rec.AgentJSON, &rec.SessionSyncJSON, &rec.Title, &createdAt, &lastActiveAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -947,6 +961,7 @@ func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*S
 	rec.Status = SessionStatus(status)
 	rec.AgentType = strings.TrimSpace(rec.AgentType)
 	rec.AgentJSON = firstNonEmpty(strings.TrimSpace(rec.AgentJSON), "{}")
+	rec.SessionSyncJSON = firstNonEmpty(rec.SessionSyncJSON, "{}")
 	rec.CreatedAt = parseStoreTime(createdAt)
 	rec.LastActiveAt = parseStoreTime(lastActiveAt)
 	return &rec, nil

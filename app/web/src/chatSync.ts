@@ -1,5 +1,10 @@
 import type { RegistryChatMessage } from './types/registry';
 
+export type SessionReadCursor = {
+  promptIndex: number;
+  turnIndex: number;
+};
+
 function chatMessageKey(message: RegistryChatMessage): string {
   return `${message.sessionId}:${message.promptIndex}:${message.turnIndex}`;
 }
@@ -29,9 +34,13 @@ function sameChatMessage(a: RegistryChatMessage | undefined, b: RegistryChatMess
     a.promptIndex === b.promptIndex &&
     a.turnIndex === b.turnIndex &&
     a.method === b.method &&
-    (a.done === true) === (b.done === true) &&
+    isFinishedChatMessage(a) === isFinishedChatMessage(b) &&
     JSON.stringify(a.param ?? {}) === JSON.stringify(b.param ?? {})
   );
+}
+
+export function isFinishedChatMessage(message: RegistryChatMessage): boolean {
+  return message.finished === true;
 }
 
 function isTextTurnMessage(message: RegistryChatMessage): boolean {
@@ -85,7 +94,7 @@ export function needsPromptTurnRefresh(
       continue;
     }
     maxTurnIndex = Math.max(maxTurnIndex, message.turnIndex ?? 0);
-    if (isTextTurnMessage(message) && message.done !== true) {
+    if (isTextTurnMessage(message) && !isFinishedChatMessage(message)) {
       return true;
     }
   }
@@ -93,16 +102,10 @@ export function needsPromptTurnRefresh(
   return expectedMaxTurnIndex > maxTurnIndex;
 }
 
-export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): {
-  promptIndex: number;
-  turnIndex: number;
-} {
+export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): SessionReadCursor {
   return messages.reduce(
     (latest, message) => {
-      if (message.method === 'prompt_done') {
-        return latest;
-      }
-      if (isTextTurnMessage(message) && message.done !== true) {
+      if (!isFinishedChatMessage(message)) {
         return latest;
       }
       const promptIndex = message.promptIndex ?? 0;
@@ -117,6 +120,37 @@ export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): {
     },
     { promptIndex: 0, turnIndex: 0 },
   );
+}
+
+export function shouldRequestSessionReadForIncomingTurn(
+  local: {cursor: SessionReadCursor; terminalPrompts: ReadonlySet<number>},
+  incoming: RegistryChatMessage,
+): SessionReadCursor | null {
+  const cursor = local.cursor;
+  const currentPromptIndex = cursor.promptIndex ?? 0;
+  const currentTurnIndex = cursor.turnIndex ?? 0;
+  const incomingPromptIndex = incoming.promptIndex ?? 0;
+  const incomingTurnIndex = incoming.turnIndex ?? 0;
+  if (incomingPromptIndex <= 0 || incomingTurnIndex <= 0) {
+    return null;
+  }
+  if (incomingPromptIndex > currentPromptIndex + 1) {
+    return cursor;
+  }
+  if (
+    incomingPromptIndex === currentPromptIndex + 1 &&
+    currentPromptIndex > 0 &&
+    !local.terminalPrompts.has(currentPromptIndex)
+  ) {
+    return cursor;
+  }
+  if (incomingPromptIndex === currentPromptIndex + 1 && incomingTurnIndex !== 1) {
+    return cursor;
+  }
+  if (incomingPromptIndex === currentPromptIndex && incomingTurnIndex > currentTurnIndex + 1) {
+    return cursor;
+  }
+  return null;
 }
 
 export function reconcileSessionReadMessages(

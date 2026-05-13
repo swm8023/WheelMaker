@@ -8,6 +8,8 @@
 
 **Tech Stack:** Go, SQLite, JSON files, TypeScript, React, Jest
 
+**Execution status (2026-05-13):** Tasks 1-7 are implemented and committed on `session-finished-cursor-file-history`. Task 8 verification passed through server tests, app Jest, `tsc:web`, and web release build; final repository gate is being executed after this status update.
+
 ---
 
 ### Task 1: Add the Finished Cursor Contract on Server

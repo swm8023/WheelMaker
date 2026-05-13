@@ -2185,6 +2185,95 @@ func TestStoreSessionProjectionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreSessionSyncJSONRoundTrip(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	want := `{"promptIndex":2,"turnIndex":4,"finished":true}`
+	rec := &SessionRecord{
+		ID:              "sess-sync",
+		ProjectName:     "proj1",
+		Status:          SessionActive,
+		AgentType:       "claude",
+		AgentJSON:       `{}`,
+		SessionSyncJSON: want,
+		CreatedAt:       time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt:    time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
+	}
+
+	if err := store.SaveSession(context.Background(), rec); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	loaded, err := store.LoadSession(context.Background(), "proj1", "sess-sync")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("LoadSession returned nil record")
+	}
+	if loaded.SessionSyncJSON != want {
+		t.Fatalf("LoadSession().SessionSyncJSON = %q, want %q", loaded.SessionSyncJSON, want)
+	}
+
+	entries, err := store.ListSessions(context.Background(), "proj1")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("ListSessions() len = %d, want 1", len(entries))
+	}
+	if entries[0].SessionSyncJSON != want {
+		t.Fatalf("ListSessions()[0].SessionSyncJSON = %q, want %q", entries[0].SessionSyncJSON, want)
+	}
+}
+
+func TestStoreSessionSyncJSONSurvivesMetadataSave(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	want := `{"promptIndex":2,"turnIndex":4,"finished":true}`
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:              "sess-sync",
+		ProjectName:     "proj1",
+		Status:          SessionActive,
+		AgentType:       "claude",
+		AgentJSON:       `{}`,
+		SessionSyncJSON: want,
+		CreatedAt:       time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt:    time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession initial: %v", err)
+	}
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-sync",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		Title:        "Updated Title",
+		LastActiveAt: time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession metadata: %v", err)
+	}
+
+	loaded, err := store.LoadSession(ctx, "proj1", "sess-sync")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded.SessionSyncJSON != want {
+		t.Fatalf("SessionSyncJSON = %q, want %q", loaded.SessionSyncJSON, want)
+	}
+}
+
 func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {
@@ -2252,6 +2341,307 @@ func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("decoded[1] = %q, want %q", decoded[1], normalizeJSONDoc(turn2JSON, `{}`))
 	}
 }
+
+func TestFileSessionHistoryWritesAndReadsPromptSnapshot(t *testing.T) {
+	store := newFileSessionHistoryStore(t.TempDir())
+	ctx := context.Background()
+
+	prompt := sessionHistoryPrompt{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		Title:       "hello",
+		ModelName:   "gpt-5",
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		Turns: []sessionHistoryTurn{
+			{TurnIndex: 1, Method: acp.IMMethodPromptRequest, Finished: true, Content: `{"method":"prompt_request"}`},
+			{TurnIndex: 2, Method: acp.IMMethodPromptDone, Finished: true, Content: `{"method":"prompt_done","param":{"stopReason":"end_turn"}}`},
+		},
+	}
+
+	if err := store.WritePrompt(ctx, "proj1", prompt); err != nil {
+		t.Fatalf("WritePrompt: %v", err)
+	}
+
+	loaded, err := store.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if loaded.SchemaVersion != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1", loaded.SchemaVersion)
+	}
+	if loaded.PromptIndex != 1 || len(loaded.Turns) != 2 {
+		t.Fatalf("loaded prompt = %#v", loaded)
+	}
+	if loaded.TurnIndex != 2 {
+		t.Fatalf("TurnIndex = %d, want 2", loaded.TurnIndex)
+	}
+	if loaded.Turns[1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want prompt_done", loaded.Turns[1].Method)
+	}
+}
+
+func TestMigrateSessionPromptsToFilesAppendsPromptDoneTurn(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	files := newFileSessionHistoryStore(t.TempDir())
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    mustRFC3339Time(t, "2026-05-13T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turnsJSON := EncodeStoredTurns([]string{
+		`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		`{"method":"agent_message_chunk","param":{"text":"answer"}}`,
+	})
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	if err := migrateSessionPromptsToFiles(ctx, store, files, "proj1"); err != nil {
+		t.Fatalf("migrateSessionPromptsToFiles: %v", err)
+	}
+
+	prompt, err := files.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if len(prompt.Turns) != 3 {
+		t.Fatalf("turns len = %d, want 3", len(prompt.Turns))
+	}
+	if prompt.Turns[2].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want prompt_done", prompt.Turns[2].Method)
+	}
+}
+
+func TestMigrateSessionPromptsToFilesDoesNotDuplicatePromptDoneTurn(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	files := newFileSessionHistoryStore(t.TempDir())
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    mustRFC3339Time(t, "2026-05-13T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turnsJSON := EncodeStoredTurns([]string{
+		`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		`{"method":"prompt_done","param":{"stopReason":"end_turn"}}`,
+	})
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	if err := migrateSessionPromptsToFiles(ctx, store, files, "proj1"); err != nil {
+		t.Fatalf("migrateSessionPromptsToFiles: %v", err)
+	}
+
+	prompt, err := files.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if len(prompt.Turns) != 2 {
+		t.Fatalf("turns len = %d, want 2", len(prompt.Turns))
+	}
+	if prompt.Turns[1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want prompt_done", prompt.Turns[1].Method)
+	}
+}
+
+func TestMigrateSessionPromptsToFilesUpdatesSessionSyncJSON(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	files := newFileSessionHistoryStore(t.TempDir())
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    mustRFC3339Time(t, "2026-05-13T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turnsJSON := EncodeStoredTurns([]string{
+		`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		`{"method":"agent_message_chunk","param":{"text":"answer"}}`,
+	})
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	if err := migrateSessionPromptsToFiles(ctx, store, files, "proj1"); err != nil {
+		t.Fatalf("migrateSessionPromptsToFiles: %v", err)
+	}
+
+	loaded, err := store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	var sync struct {
+		PromptIndex int64 `json:"promptIndex"`
+		TurnIndex   int64 `json:"turnIndex"`
+		Finished    bool  `json:"finished"`
+	}
+	if err := json.Unmarshal([]byte(loaded.SessionSyncJSON), &sync); err != nil {
+		t.Fatalf("unmarshal SessionSyncJSON: %v", err)
+	}
+	if sync.PromptIndex != 1 || sync.TurnIndex != 3 || !sync.Finished {
+		t.Fatalf("sync = %+v, want promptIndex=1 turnIndex=3 finished=true", sync)
+	}
+}
+
+func TestPromptFinishedWritesPromptFileBeforePublishingPromptDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+	observedPromptDone := false
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		content, ok := body["content"].(string)
+		if !ok {
+			t.Fatalf("content type = %T, want string", body["content"])
+		}
+		var turn acp.IMTurnMessage
+		if err := json.Unmarshal([]byte(content), &turn); err != nil {
+			t.Fatalf("unmarshal published turn: %v", err)
+		}
+		if turn.Method != acp.IMMethodPromptDone {
+			return nil
+		}
+		observedPromptDone = true
+		if _, err := c.sessionRecorder.historyStore.ReadPrompt(ctx, "proj1", "sess-1", 1); err != nil {
+			t.Fatalf("ReadPrompt during prompt_done publish: %v", err)
+		}
+		return nil
+	})
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "File Write Before Done")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent done: %v", err)
+	}
+
+	prompt, err := c.sessionRecorder.historyStore.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if !observedPromptDone {
+		t.Fatalf("prompt_done publish was not observed")
+	}
+	if len(prompt.Turns) == 0 {
+		t.Fatalf("stored prompt has no turns")
+	}
+	if prompt.Turns[len(prompt.Turns)-1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last stored method = %q, want prompt_done", prompt.Turns[len(prompt.Turns)-1].Method)
+	}
+}
+
+func TestSessionReadUsesFinishedCursorAndPromptFiles(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+
+	seedPromptWithTurns(t, c, ctx, "sess-1", "hello", []acp.SessionUpdate{
+		{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"})},
+	})
+
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 1, 1)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatalf("messages len = 0, want turns after cursor")
+	}
+	for _, message := range messages {
+		if message.PromptIndex == 1 && message.TurnIndex <= 1 {
+			t.Fatalf("returned message before cursor: %#v", message)
+		}
+	}
+}
+
+func TestStartingNextPromptSynthesizesInterruptedPromptDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Interrupted Prompt")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "first", nil)); err != nil {
+		t.Fatalf("RecordEvent first prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "second", nil)); err != nil {
+		t.Fatalf("RecordEvent second prompt: %v", err)
+	}
+
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 1, 1)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if !hasPromptDoneWithStopReason(t, messages, 1, "interrupted") {
+		t.Fatalf("messages missing interrupted prompt_done: %#v", messages)
+	}
+}
+
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
@@ -2354,6 +2744,39 @@ func sessionViewPromptFinishedEvent(sessionID, stopReason string) SessionViewEve
 			},
 		}),
 	}
+}
+
+type publishedSessionEvent struct {
+	method  string
+	payload map[string]any
+}
+
+func captureSessionMessageEvents(t *testing.T, c *Client) *[]publishedSessionEvent {
+	t.Helper()
+	published := []publishedSessionEvent{}
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		published = append(published, publishedSessionEvent{method: method, payload: body})
+		return nil
+	})
+	return &published
+}
+
+func lastPublishedEvent(t *testing.T, published []publishedSessionEvent, method string) map[string]any {
+	t.Helper()
+	for i := len(published) - 1; i >= 0; i-- {
+		if published[i].method == method {
+			return published[i].payload
+		}
+	}
+	t.Fatalf("no published event for %s", method)
+	return nil
 }
 
 func writeClaudeSessionFixture(t *testing.T, homeDir, projectDirName, sessionID, cwd, title, assistant string) {
@@ -3102,8 +3525,8 @@ func TestSessionViewAssistantChunksReusePreviousTurnByUpdateType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(messages))
 	}
 	update2 := decodeTurnSessionUpdate(t, messages[1].Content)
 	if text := extractTextChunk(update2.Content); text != "hello world" {
@@ -3288,6 +3711,159 @@ func TestSessionViewPublishMessageOmitsTurnID(t *testing.T) {
 	}
 }
 
+func TestSessionMessagePublishesFinishedFieldInsteadOfDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	published := captureSessionMessageEvents(t, c)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Finished Field")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	last := lastPublishedEvent(t, *published, "registry.session.message")
+	if _, ok := last["done"]; ok {
+		t.Fatalf("payload contains legacy done field: %#v", last)
+	}
+	if got := last["finished"]; got != true {
+		t.Fatalf("finished = %v, want true", got)
+	}
+}
+
+func TestPromptDoneIsPublishedAsFinishedRealTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	published := captureSessionMessageEvents(t, c)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Prompt Done Turn")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent answer: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent done: %v", err)
+	}
+
+	last := lastPublishedEvent(t, *published, "registry.session.message")
+	content := last["content"].(string)
+	var msg acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(content), &msg); err != nil {
+		t.Fatalf("unmarshal content: %v", err)
+	}
+	if msg.Method != acp.IMMethodPromptDone {
+		t.Fatalf("method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	}
+	if got := last["finished"]; got != true {
+		t.Fatalf("finished = %v, want true", got)
+	}
+	if got := last["turnIndex"].(int64); got != 3 {
+		t.Fatalf("turnIndex = %d, want 3", got)
+	}
+}
+
+func TestSessionReadReturnsPromptDoneAsFinishedTurn(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Read Prompt Done Turn")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent answer: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("HandleSessionRequest: %v", err)
+	}
+	body := resp.(map[string]any)
+	prompts := body["prompts"].([]sessionViewPromptSnapshot)
+	if prompts[0].TurnIndex != 3 {
+		t.Fatalf("prompt turnIndex = %d, want 3", prompts[0].TurnIndex)
+	}
+	messages := body["messages"].([]sessionViewMessage)
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(messages))
+	}
+	last := messages[2]
+	if last.TurnIndex != 3 {
+		t.Fatalf("prompt_done turnIndex = %d, want 3", last.TurnIndex)
+	}
+	if last.Finished != true {
+		t.Fatalf("prompt_done finished = %v, want true", last.Finished)
+	}
+	var msg acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(last.Content), &msg); err != nil {
+		t.Fatalf("unmarshal prompt_done content: %v", err)
+	}
+	if msg.Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want %q", msg.Method, acp.IMMethodPromptDone)
+	}
+}
+
+func TestDuplicatePromptDoneDoesNotOverwriteStoredTurns(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Duplicate Prompt Done")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent answer: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent duplicate prompt finished: %v", err)
+	}
+
+	_, prompts, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 0, 0)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if prompts[0].TurnIndex != 3 {
+		t.Fatalf("prompt turnIndex = %d, want 3", prompts[0].TurnIndex)
+	}
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3; messages=%+v", len(messages), messages)
+	}
+	if text := strings.TrimSpace(extractTextChunk(decodeTurnSessionUpdate(t, messages[1].Content).Content)); text != "answer" {
+		t.Fatalf("agent text = %q, want answer", text)
+	}
+	if messages[2].TurnIndex != 3 || messages[2].Finished != true {
+		t.Fatalf("prompt_done message = %#v, want turnIndex=3 finished=true", messages[2])
+	}
+}
+
 func TestSessionViewPublishMessageOmitsUpdateIndexAndPublishesMergedTurn(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
@@ -3400,8 +3976,8 @@ func TestSessionReadWithoutCheckpointReturnsPromptSnapshots(t *testing.T) {
 	if err := json.Unmarshal(rawMessages, &messages); err != nil {
 		t.Fatalf("json.Unmarshal(messages): %v", err)
 	}
-	if len(messages) != 4 {
-		t.Fatalf("messages len = %d, want 4", len(messages))
+	if len(messages) != 6 {
+		t.Fatalf("messages len = %d, want 6", len(messages))
 	}
 	if messages[0].PromptIndex != 1 || messages[0].TurnIndex != 1 {
 		t.Fatalf("messages[0] = %#v, want promptIndex=1 turnIndex=1", messages[0])
@@ -3409,11 +3985,17 @@ func TestSessionReadWithoutCheckpointReturnsPromptSnapshots(t *testing.T) {
 	if messages[1].PromptIndex != 1 || messages[1].TurnIndex != 2 {
 		t.Fatalf("messages[1] = %#v, want promptIndex=1 turnIndex=2", messages[1])
 	}
-	if messages[2].PromptIndex != 2 || messages[2].TurnIndex != 1 {
-		t.Fatalf("messages[2] = %#v, want promptIndex=2 turnIndex=1", messages[2])
+	if messages[2].PromptIndex != 1 || messages[2].TurnIndex != 3 {
+		t.Fatalf("messages[2] = %#v, want promptIndex=1 turnIndex=3", messages[2])
 	}
-	if messages[3].PromptIndex != 2 || messages[3].TurnIndex != 2 {
-		t.Fatalf("messages[3] = %#v, want promptIndex=2 turnIndex=2", messages[3])
+	if messages[3].PromptIndex != 2 || messages[3].TurnIndex != 1 {
+		t.Fatalf("messages[3] = %#v, want promptIndex=2 turnIndex=1", messages[3])
+	}
+	if messages[4].PromptIndex != 2 || messages[4].TurnIndex != 2 {
+		t.Fatalf("messages[4] = %#v, want promptIndex=2 turnIndex=2", messages[4])
+	}
+	if messages[5].PromptIndex != 2 || messages[5].TurnIndex != 3 {
+		t.Fatalf("messages[5] = %#v, want promptIndex=2 turnIndex=3", messages[5])
 	}
 }
 
@@ -3470,14 +4052,20 @@ func TestSessionReadReturnsCheckpointPromptSnapshotAndLaterPrompts(t *testing.T)
 	if err := json.Unmarshal(rawMessages, &messages); err != nil {
 		t.Fatalf("json.Unmarshal(messages): %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2 (only prompt 2 turns after cursor)", len(messages))
+	if len(messages) != 4 {
+		t.Fatalf("messages len = %d, want 4 (prompt 1 terminal plus prompt 2 turns after cursor)", len(messages))
 	}
-	if messages[0].PromptIndex != 2 || messages[0].TurnIndex != 1 {
-		t.Fatalf("messages[0] = %#v, want promptIndex=2 turnIndex=1", messages[0])
+	if messages[0].PromptIndex != 1 || messages[0].TurnIndex != 3 {
+		t.Fatalf("messages[0] = %#v, want promptIndex=1 turnIndex=3", messages[0])
 	}
-	if messages[1].PromptIndex != 2 || messages[1].TurnIndex != 2 {
-		t.Fatalf("messages[1] = %#v, want promptIndex=2 turnIndex=2", messages[1])
+	if messages[1].PromptIndex != 2 || messages[1].TurnIndex != 1 {
+		t.Fatalf("messages[1] = %#v, want promptIndex=2 turnIndex=1", messages[1])
+	}
+	if messages[2].PromptIndex != 2 || messages[2].TurnIndex != 2 {
+		t.Fatalf("messages[2] = %#v, want promptIndex=2 turnIndex=2", messages[2])
+	}
+	if messages[3].PromptIndex != 2 || messages[3].TurnIndex != 3 {
+		t.Fatalf("messages[3] = %#v, want promptIndex=2 turnIndex=3", messages[3])
 	}
 }
 
@@ -3839,8 +4427,8 @@ func TestSessionViewPersistsLegacySystemEventsButIgnoresACPSystemEvents(t *testi
 	}
 
 	turns := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + legacy system)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + legacy system + prompt_done)", len(turns))
 	}
 
 	msg := acp.IMTurnMessage{}
@@ -3947,8 +4535,8 @@ func TestSessionViewToolUpdatesReuseSingleMessage(t *testing.T) {
 	}
 
 	turns := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3", len(turns))
 	}
 	if got := decodeTurnSessionUpdate(t, turns[1]).Title; strings.TrimSpace(got) != "Build finished" {
 		t.Fatalf("turns[1].title = %q, want Build finished", got)
@@ -3986,8 +4574,8 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	}
 
 	stored := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
-	if len(stored) != 2 {
-		t.Fatalf("stored len = %d, want 2", len(stored))
+	if len(stored) != 3 {
+		t.Fatalf("stored len = %d, want 3", len(stored))
 	}
 	updateStored := decodeTurnSessionUpdate(t, stored[1])
 	if strings.TrimSpace(updateStored.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
@@ -4017,8 +4605,8 @@ func TestSessionViewPersistsSessionUpdateParamsPayload(t *testing.T) {
 	if err := json.Unmarshal(rawMessages, &messages); err != nil {
 		t.Fatalf("json.Unmarshal(messages): %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2", len(messages))
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(messages))
 	}
 	if messages[1].TurnIndex != 2 {
 		t.Fatalf("messages[1].TurnIndex = %d, want 2", messages[1].TurnIndex)
@@ -4063,8 +4651,8 @@ func TestSessionViewSessionUpdateMergeUsesACPUpdateType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
-	if len(messages) != 3 {
-		t.Fatalf("messages len = %d, want 3; messages=%+v", len(messages), messages)
+	if len(messages) != 4 {
+		t.Fatalf("messages len = %d, want 4; messages=%+v", len(messages), messages)
 	}
 	seen := map[string]string{}
 	for _, message := range messages {
@@ -4106,8 +4694,8 @@ func TestSessionViewKeepsUserMessageChunkTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSessionPrompts: %v", err)
 	}
-	if len(messages) != 2 {
-		t.Fatalf("messages len = %d, want 2; messages=%+v", len(messages), messages)
+	if len(messages) != 3 {
+		t.Fatalf("messages len = %d, want 3; messages=%+v", len(messages), messages)
 	}
 	if got := decodeTurnMethod(t, messages[1].Content); got != acp.SessionUpdateUserMessageChunk {
 		t.Fatalf("messages[1] method = %q, want %q", got, acp.SessionUpdateUserMessageChunk)
@@ -4319,19 +4907,19 @@ func TestSessionViewPromptFinishedMarksOpenTextTurnDone(t *testing.T) {
 		t.Fatalf("published len = %d, want at least 4", len(published))
 	}
 	doneTurn := published[len(published)-2]
-	if got := doneTurn["done"]; got != true {
-		t.Fatalf("done turn marker = %v, want true", got)
+	if got := doneTurn["finished"]; got != true {
+		t.Fatalf("finished turn marker = %v, want true", got)
 	}
 	if got := doneTurn["turnIndex"].(int64); got != 2 {
-		t.Fatalf("done turnIndex = %d, want 2", got)
+		t.Fatalf("finished turnIndex = %d, want 2", got)
 	}
 	content, _ := doneTurn["content"].(string)
 	update := decodeTurnSessionUpdate(t, content)
 	if strings.TrimSpace(update.SessionUpdate) != acp.SessionUpdateAgentMessageChunk {
-		t.Fatalf("done method = %q, want %q", update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
+		t.Fatalf("finished method = %q, want %q", update.SessionUpdate, acp.SessionUpdateAgentMessageChunk)
 	}
 	if text := extractTextChunk(update.Content); text != "hello" {
-		t.Fatalf("done text = %q, want hello", text)
+		t.Fatalf("finished text = %q, want hello", text)
 	}
 }
 
@@ -4442,8 +5030,8 @@ func TestSessionViewBufferedUpdatesReusePreviousTurnByUpdateType(t *testing.T) {
 	}
 
 	turns := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged assistant turn)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + merged assistant turn + prompt_done)", len(turns))
 	}
 	update2 := decodeTurnSessionUpdate(t, turns[1])
 	if text := strings.TrimSpace(extractTextChunk(update2.Content)); text != "hello world" {
@@ -4483,14 +5071,14 @@ func TestSessionReadMarksCompletedTextTurnsDone(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 3 {
-		t.Fatalf("messages len = %d, want 3", len(messages))
+	if len(messages) != 4 {
+		t.Fatalf("messages len = %d, want 4", len(messages))
 	}
-	if messages[1].Done != true {
-		t.Fatalf("assistant done = %v, want true", messages[1].Done)
+	if messages[1].Finished != true {
+		t.Fatalf("assistant finished = %v, want true", messages[1].Finished)
 	}
-	if messages[2].Done != true {
-		t.Fatalf("thought done = %v, want true", messages[2].Done)
+	if messages[2].Finished != true {
+		t.Fatalf("thought finished = %v, want true", messages[2].Finished)
 	}
 }
 
@@ -4531,8 +5119,8 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 	}
 	body := resp.(map[string]any)
 	messages := body["messages"].([]sessionViewMessage)
-	if len(messages) != 4 {
-		t.Fatalf("messages len = %d, want 4", len(messages))
+	if len(messages) != 5 {
+		t.Fatalf("messages len = %d, want 5", len(messages))
 	}
 
 	seen := map[string]bool{}
@@ -4815,8 +5403,8 @@ func TestHandleSessionRequestSessionReloadRecordsAgentOnlyReplay(t *testing.T) {
 	if len(prompts) != 1 {
 		t.Fatalf("prompts len = %d, want 1", len(prompts))
 	}
-	if len(messages) != 1 {
-		t.Fatalf("messages len = %d, want restored agent message, messages=%+v", len(messages), messages)
+	if len(messages) != 2 {
+		t.Fatalf("messages len = %d, want restored agent message plus prompt_done, messages=%+v", len(messages), messages)
 	}
 	if !strings.Contains(messages[0].Content, "restored without user chunk") {
 		t.Fatalf("message content = %s, want restored agent text", messages[0].Content)
@@ -5134,8 +5722,8 @@ func TestSessionViewToolCallAndUpdateMergeByToolCallID(t *testing.T) {
 	}
 
 	turns := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + merged tool turn + prompt_done)", len(turns))
 	}
 	toolTurn := turns[1]
 	update := decodeTurnSessionUpdate(t, toolTurn)
@@ -5179,8 +5767,8 @@ func TestSessionViewBufferedUpdatesDoNotLeakAcrossPrompts(t *testing.T) {
 
 	turnsPrompt1 := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
 	turnsPrompt2 := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 2)
-	if len(turnsPrompt1) != 2 || len(turnsPrompt2) != 2 {
-		t.Fatalf("turn counts = (%d,%d), want (2,2)", len(turnsPrompt1), len(turnsPrompt2))
+	if len(turnsPrompt1) != 3 || len(turnsPrompt2) != 3 {
+		t.Fatalf("turn counts = (%d,%d), want (3,3)", len(turnsPrompt1), len(turnsPrompt2))
 	}
 
 	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1])
@@ -5233,8 +5821,8 @@ func TestSessionViewToolCallTerminalUpdatesRemainSingleTurn(t *testing.T) {
 	}
 
 	turns := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
-	if len(turns) != 2 {
-		t.Fatalf("turns len = %d, want 2 (prompt + merged tool turn)", len(turns))
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3 (prompt + merged tool turn + prompt_done)", len(turns))
 	}
 	toolTurn := turns[1]
 	update := decodeTurnSessionUpdate(t, toolTurn)
@@ -5324,19 +5912,85 @@ func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T)
 		t.Fatalf("prompts len = %d, want 2", len(prompts))
 	}
 
-	// Prompt 1 was never finished – its turns are not persisted (new design: only persist on prompt end).
 	turnsPrompt1 := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
 	turnsPrompt2 := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 2)
-	if len(turnsPrompt1) != 0 {
-		t.Fatalf("prompt1 stored turns = %d, want 0 (no promptFinished)", len(turnsPrompt1))
+	if len(turnsPrompt1) != 3 {
+		t.Fatalf("prompt1 stored turns = %d, want 3 (prompt + chunk + interrupted prompt_done)", len(turnsPrompt1))
 	}
-	if len(turnsPrompt2) != 2 {
-		t.Fatalf("prompt2 stored turns = %d, want 2", len(turnsPrompt2))
+	if len(turnsPrompt2) != 3 {
+		t.Fatalf("prompt2 stored turns = %d, want 3", len(turnsPrompt2))
+	}
+	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1])
+	if text := extractTextChunk(update1.Content); text != "hello" {
+		t.Fatalf("prompt1 assistant text = %q, want %q", text, "hello")
+	}
+	if stopReason := decodePromptDoneStopReason(t, turnsPrompt1[2]); stopReason != "interrupted" {
+		t.Fatalf("prompt1 prompt_done stopReason = %q, want interrupted", stopReason)
 	}
 	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1])
 	if text := extractTextChunk(update2.Content); text != "world" {
 		t.Fatalf("prompt2 assistant text = %q, want %q", text, "world")
 	}
+}
+
+func seedPromptWithTurns(t *testing.T, c *Client, ctx context.Context, sessionID, promptText string, updates []acp.SessionUpdate) {
+	t.Helper()
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent(sessionID, promptText)); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent(sessionID, promptText, nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	for i, update := range updates {
+		if err := c.RecordEvent(ctx, sessionViewUpdateEvent(sessionID, update)); err != nil {
+			t.Fatalf("RecordEvent update #%d: %v", i+1, err)
+		}
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent(sessionID, acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+}
+
+func hasPromptDoneWithStopReason(t *testing.T, messages []sessionViewMessage, promptIndex int64, stopReason string) bool {
+	t.Helper()
+	for _, message := range messages {
+		if message.PromptIndex != promptIndex {
+			continue
+		}
+		var turn acp.IMTurnMessage
+		if err := json.Unmarshal([]byte(message.Content), &turn); err != nil {
+			t.Fatalf("unmarshal turn content: %v", err)
+		}
+		if turn.Method != acp.IMMethodPromptDone {
+			continue
+		}
+		var result acp.IMPromptResult
+		raw, err := json.Marshal(turn.Param)
+		if err != nil {
+			t.Fatalf("marshal prompt_done param: %v", err)
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("unmarshal prompt_done param: %v", err)
+		}
+		return result.StopReason == stopReason
+	}
+	return false
+}
+
+func decodePromptDoneStopReason(t *testing.T, raw string) string {
+	t.Helper()
+	var turn acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(raw), &turn); err != nil {
+		t.Fatalf("unmarshal prompt_done turn: %v", err)
+	}
+	if turn.Method != acp.IMMethodPromptDone {
+		t.Fatalf("turn method = %q, want %q", turn.Method, acp.IMMethodPromptDone)
+	}
+	var result acp.IMPromptResult
+	if err := json.Unmarshal(turn.Param, &result); err != nil {
+		t.Fatalf("unmarshal prompt_done param: %v", err)
+	}
+	return result.StopReason
 }
 
 // listStoredTurns reads the persisted turns for a completed prompt from session_prompts.turns_json.

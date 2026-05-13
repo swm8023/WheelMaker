@@ -28,6 +28,20 @@
 
 这样表结构无需 `project_name` 复合主键，读写路径也更清晰。
 
+当前实现使用统一数据库与文件历史组合：
+
+- SQLite：`~/.wheelmaker/db/client.sqlite3`
+- prompt 文件历史：`~/.wheelmaker/session-history/`
+
+SQLite 保留热索引、会话元数据、路由绑定与迁移兼容表。完整 prompt turn 正文迁移到文件：
+
+```text
+session-history/<project-key>/<session-id>/manifest.json
+session-history/<project-key>/<session-id>/prompts/p000001.json
+```
+
+`session_prompts.turns_json` 作为旧数据迁移来源保留；启动时全量导出到 prompt 文件，运行期 finished prompt 正文从文件读取，active prompt turns 从内存读取。
+
 ## 3. 表结构（DDL）
 
 ```sql
@@ -65,6 +79,20 @@ CREATE TABLE IF NOT EXISTS wm_instance_bindings (
   CHECK(mode IN ('shared', 'dedicated'))
 );
 ```
+
+当前统一 SQLite schema 的 `sessions` 表包含断线重连投影：
+
+```sql
+sessions.session_sync_json TEXT NOT NULL DEFAULT '{}'
+```
+
+`session_sync_json` 保存最新可重传 finished cursor 的 JSON，例如：
+
+```json
+{"promptIndex":12,"turnIndex":5,"finished":true}
+```
+
+客户端以自己的 finished cursor 调用 `session.read(P, T)`；服务端只返回该 cursor 之后的增量。
 
 ## 4. 索引与约束
 
