@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 )
 
 type sessionHistoryTurn struct {
@@ -32,6 +34,12 @@ type sessionHistoryPrompt struct {
 
 type fileSessionHistoryStore struct {
 	root string
+}
+
+type sessionSyncProjection struct {
+	PromptIndex int64 `json:"promptIndex"`
+	TurnIndex   int64 `json:"turnIndex"`
+	Finished    bool  `json:"finished"`
 }
 
 func newFileSessionHistoryStore(root string) *fileSessionHistoryStore {
@@ -90,6 +98,105 @@ func (s *fileSessionHistoryStore) ReadPrompt(ctx context.Context, projectName, s
 		return sessionHistoryPrompt{}, fmt.Errorf("decode prompt history: %w", err)
 	}
 	return prompt, nil
+}
+
+func migrateSessionPromptsToFiles(ctx context.Context, store Store, files *fileSessionHistoryStore, projectName string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if store == nil {
+		return fmt.Errorf("session store is required")
+	}
+	if files == nil {
+		return fmt.Errorf("session history files are required")
+	}
+	sessions, err := store.ListSessions(ctx, projectName)
+	if err != nil {
+		return fmt.Errorf("list sessions for prompt history migration: %w", err)
+	}
+	for _, session := range sessions {
+		prompts, err := store.ListSessionPrompts(ctx, projectName, session.ID)
+		if err != nil {
+			return fmt.Errorf("list prompts for history migration: %w", err)
+		}
+		latestSync := sessionSyncProjection{}
+		for _, prompt := range prompts {
+			turns, err := DecodeStoredTurns(prompt.TurnsJSON)
+			if err != nil {
+				return fmt.Errorf("decode prompt turns for migration: %w", err)
+			}
+			historyTurns := make([]sessionHistoryTurn, 0, len(turns)+1)
+			for i, content := range turns {
+				historyTurns = append(historyTurns, sessionHistoryTurn{
+					TurnIndex: int64(i + 1),
+					Method:    sessionHistoryMethodFromContent(content),
+					Finished:  true,
+					Content:   normalizeJSONDoc(content, `{}`),
+				})
+			}
+			if strings.TrimSpace(prompt.StopReason) != "" && !sessionHistoryTurnsEndWithPromptDone(historyTurns) {
+				content := buildIMContentJSON(acp.IMMethodPromptDone, acp.IMPromptResult{StopReason: strings.TrimSpace(prompt.StopReason)})
+				historyTurns = append(historyTurns, sessionHistoryTurn{
+					TurnIndex: int64(len(historyTurns) + 1),
+					Method:    acp.IMMethodPromptDone,
+					Finished:  true,
+					Content:   content,
+				})
+			}
+			if err := files.WritePrompt(ctx, projectName, sessionHistoryPrompt{
+				SessionID:   session.ID,
+				PromptIndex: prompt.PromptIndex,
+				Title:       prompt.Title,
+				ModelName:   prompt.ModelName,
+				StartedAt:   prompt.StartedAt,
+				UpdatedAt:   prompt.UpdatedAt,
+				StopReason:  prompt.StopReason,
+				Turns:       historyTurns,
+			}); err != nil {
+				return fmt.Errorf("write prompt history for migration: %w", err)
+			}
+			if len(historyTurns) > 0 {
+				lastTurn := historyTurns[len(historyTurns)-1]
+				latestSync = sessionSyncProjection{
+					PromptIndex: prompt.PromptIndex,
+					TurnIndex:   lastTurn.TurnIndex,
+					Finished:    lastTurn.Finished,
+				}
+			}
+		}
+		if latestSync.PromptIndex > 0 {
+			raw, err := json.Marshal(latestSync)
+			if err != nil {
+				return fmt.Errorf("marshal session sync projection: %w", err)
+			}
+			session.SessionSyncJSON = string(raw)
+			if err := store.SaveSession(ctx, &session); err != nil {
+				return fmt.Errorf("save migrated session sync projection: %w", err)
+			}
+		}
+	}
+	return nil
+}
+
+func sessionHistoryTurnsEndWithPromptDone(turns []sessionHistoryTurn) bool {
+	if len(turns) == 0 {
+		return false
+	}
+	return strings.TrimSpace(turns[len(turns)-1].Method) == acp.IMMethodPromptDone
+}
+
+func sessionHistoryMethodFromContent(content string) string {
+	var msg acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(content), &msg); err == nil && strings.TrimSpace(msg.Method) != "" {
+		return strings.TrimSpace(msg.Method)
+	}
+	var doc struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(content), &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.Method)
 }
 
 func replaceFile(tmp, path string) error {

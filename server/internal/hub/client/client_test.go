@@ -2381,6 +2381,164 @@ func TestFileSessionHistoryWritesAndReadsPromptSnapshot(t *testing.T) {
 	}
 }
 
+func TestMigrateSessionPromptsToFilesAppendsPromptDoneTurn(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	files := newFileSessionHistoryStore(t.TempDir())
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    mustRFC3339Time(t, "2026-05-13T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turnsJSON := EncodeStoredTurns([]string{
+		`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		`{"method":"agent_message_chunk","param":{"text":"answer"}}`,
+	})
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	if err := migrateSessionPromptsToFiles(ctx, store, files, "proj1"); err != nil {
+		t.Fatalf("migrateSessionPromptsToFiles: %v", err)
+	}
+
+	prompt, err := files.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if len(prompt.Turns) != 3 {
+		t.Fatalf("turns len = %d, want 3", len(prompt.Turns))
+	}
+	if prompt.Turns[2].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want prompt_done", prompt.Turns[2].Method)
+	}
+}
+
+func TestMigrateSessionPromptsToFilesDoesNotDuplicatePromptDoneTurn(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	files := newFileSessionHistoryStore(t.TempDir())
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    mustRFC3339Time(t, "2026-05-13T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turnsJSON := EncodeStoredTurns([]string{
+		`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		`{"method":"prompt_done","param":{"stopReason":"end_turn"}}`,
+	})
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	if err := migrateSessionPromptsToFiles(ctx, store, files, "proj1"); err != nil {
+		t.Fatalf("migrateSessionPromptsToFiles: %v", err)
+	}
+
+	prompt, err := files.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if len(prompt.Turns) != 2 {
+		t.Fatalf("turns len = %d, want 2", len(prompt.Turns))
+	}
+	if prompt.Turns[1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last method = %q, want prompt_done", prompt.Turns[1].Method)
+	}
+}
+
+func TestMigrateSessionPromptsToFilesUpdatesSessionSyncJSON(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	files := newFileSessionHistoryStore(t.TempDir())
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    mustRFC3339Time(t, "2026-05-13T10:00:00Z"),
+		LastActiveAt: mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	turnsJSON := EncodeStoredTurns([]string{
+		`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		`{"method":"agent_message_chunk","param":{"text":"answer"}}`,
+	})
+	if err := store.UpsertSessionPrompt(ctx, SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  "end_turn",
+		UpdatedAt:   mustRFC3339Time(t, "2026-05-13T10:01:00Z"),
+		TurnsJSON:   turnsJSON,
+		TurnIndex:   2,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+
+	if err := migrateSessionPromptsToFiles(ctx, store, files, "proj1"); err != nil {
+		t.Fatalf("migrateSessionPromptsToFiles: %v", err)
+	}
+
+	loaded, err := store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	var sync struct {
+		PromptIndex int64 `json:"promptIndex"`
+		TurnIndex   int64 `json:"turnIndex"`
+		Finished    bool  `json:"finished"`
+	}
+	if err := json.Unmarshal([]byte(loaded.SessionSyncJSON), &sync); err != nil {
+		t.Fatalf("unmarshal SessionSyncJSON: %v", err)
+	}
+	if sync.PromptIndex != 1 || sync.TurnIndex != 3 || !sync.Finished {
+		t.Fatalf("sync = %+v, want promptIndex=1 turnIndex=3 finished=true", sync)
+	}
+}
+
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
