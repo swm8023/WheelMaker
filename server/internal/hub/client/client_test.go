@@ -2539,6 +2539,109 @@ func TestMigrateSessionPromptsToFilesUpdatesSessionSyncJSON(t *testing.T) {
 	}
 }
 
+func TestPromptFinishedWritesPromptFileBeforePublishingPromptDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+	observedPromptDone := false
+	c.sessionRecorder.SetEventPublisher(func(method string, payload any) error {
+		if method != "registry.session.message" {
+			return nil
+		}
+		body, ok := payload.(map[string]any)
+		if !ok {
+			t.Fatalf("payload type = %T, want map[string]any", payload)
+		}
+		content, ok := body["content"].(string)
+		if !ok {
+			t.Fatalf("content type = %T, want string", body["content"])
+		}
+		var turn acp.IMTurnMessage
+		if err := json.Unmarshal([]byte(content), &turn); err != nil {
+			t.Fatalf("unmarshal published turn: %v", err)
+		}
+		if turn.Method != acp.IMMethodPromptDone {
+			return nil
+		}
+		observedPromptDone = true
+		if _, err := c.sessionRecorder.historyStore.ReadPrompt(ctx, "proj1", "sess-1", 1); err != nil {
+			t.Fatalf("ReadPrompt during prompt_done publish: %v", err)
+		}
+		return nil
+	})
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "File Write Before Done")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent done: %v", err)
+	}
+
+	prompt, err := c.sessionRecorder.historyStore.ReadPrompt(ctx, "proj1", "sess-1", 1)
+	if err != nil {
+		t.Fatalf("ReadPrompt: %v", err)
+	}
+	if !observedPromptDone {
+		t.Fatalf("prompt_done publish was not observed")
+	}
+	if len(prompt.Turns) == 0 {
+		t.Fatalf("stored prompt has no turns")
+	}
+	if prompt.Turns[len(prompt.Turns)-1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("last stored method = %q, want prompt_done", prompt.Turns[len(prompt.Turns)-1].Method)
+	}
+}
+
+func TestSessionReadUsesFinishedCursorAndPromptFiles(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+
+	seedPromptWithTurns(t, c, ctx, "sess-1", "hello", []acp.SessionUpdate{
+		{SessionUpdate: acp.SessionUpdateAgentMessageChunk, Content: mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "answer"})},
+	})
+
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 1, 1)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if len(messages) == 0 {
+		t.Fatalf("messages len = 0, want turns after cursor")
+	}
+	for _, message := range messages {
+		if message.PromptIndex == 1 && message.TurnIndex <= 1 {
+			t.Fatalf("returned message before cursor: %#v", message)
+		}
+	}
+}
+
+func TestStartingNextPromptSynthesizesInterruptedPromptDone(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+	c.sessionRecorder.historyStore = newFileSessionHistoryStore(t.TempDir())
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Interrupted Prompt")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "first", nil)); err != nil {
+		t.Fatalf("RecordEvent first prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "second", nil)); err != nil {
+		t.Fatalf("RecordEvent second prompt: %v", err)
+	}
+
+	_, _, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, "sess-1", 1, 1)
+	if err != nil {
+		t.Fatalf("ReadSessionPrompts: %v", err)
+	}
+	if !hasPromptDoneWithStopReason(t, messages, 1, "interrupted") {
+		t.Fatalf("messages missing interrupted prompt_done: %#v", messages)
+	}
+}
+
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
@@ -5809,19 +5912,85 @@ func TestSessionViewNextPromptFlushesPreviousWithoutPromptFinished(t *testing.T)
 		t.Fatalf("prompts len = %d, want 2", len(prompts))
 	}
 
-	// Prompt 1 was never finished – its turns are not persisted (new design: only persist on prompt end).
 	turnsPrompt1 := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 1)
 	turnsPrompt2 := listStoredTurns(ctx, t, c.store, "proj1", "sess-1", 2)
-	if len(turnsPrompt1) != 0 {
-		t.Fatalf("prompt1 stored turns = %d, want 0 (no promptFinished)", len(turnsPrompt1))
+	if len(turnsPrompt1) != 3 {
+		t.Fatalf("prompt1 stored turns = %d, want 3 (prompt + chunk + interrupted prompt_done)", len(turnsPrompt1))
 	}
 	if len(turnsPrompt2) != 3 {
 		t.Fatalf("prompt2 stored turns = %d, want 3", len(turnsPrompt2))
+	}
+	update1 := decodeTurnSessionUpdate(t, turnsPrompt1[1])
+	if text := extractTextChunk(update1.Content); text != "hello" {
+		t.Fatalf("prompt1 assistant text = %q, want %q", text, "hello")
+	}
+	if stopReason := decodePromptDoneStopReason(t, turnsPrompt1[2]); stopReason != "interrupted" {
+		t.Fatalf("prompt1 prompt_done stopReason = %q, want interrupted", stopReason)
 	}
 	update2 := decodeTurnSessionUpdate(t, turnsPrompt2[1])
 	if text := extractTextChunk(update2.Content); text != "world" {
 		t.Fatalf("prompt2 assistant text = %q, want %q", text, "world")
 	}
+}
+
+func seedPromptWithTurns(t *testing.T, c *Client, ctx context.Context, sessionID, promptText string, updates []acp.SessionUpdate) {
+	t.Helper()
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent(sessionID, promptText)); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent(sessionID, promptText, nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	for i, update := range updates {
+		if err := c.RecordEvent(ctx, sessionViewUpdateEvent(sessionID, update)); err != nil {
+			t.Fatalf("RecordEvent update #%d: %v", i+1, err)
+		}
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent(sessionID, acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+}
+
+func hasPromptDoneWithStopReason(t *testing.T, messages []sessionViewMessage, promptIndex int64, stopReason string) bool {
+	t.Helper()
+	for _, message := range messages {
+		if message.PromptIndex != promptIndex {
+			continue
+		}
+		var turn acp.IMTurnMessage
+		if err := json.Unmarshal([]byte(message.Content), &turn); err != nil {
+			t.Fatalf("unmarshal turn content: %v", err)
+		}
+		if turn.Method != acp.IMMethodPromptDone {
+			continue
+		}
+		var result acp.IMPromptResult
+		raw, err := json.Marshal(turn.Param)
+		if err != nil {
+			t.Fatalf("marshal prompt_done param: %v", err)
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("unmarshal prompt_done param: %v", err)
+		}
+		return result.StopReason == stopReason
+	}
+	return false
+}
+
+func decodePromptDoneStopReason(t *testing.T, raw string) string {
+	t.Helper()
+	var turn acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(raw), &turn); err != nil {
+		t.Fatalf("unmarshal prompt_done turn: %v", err)
+	}
+	if turn.Method != acp.IMMethodPromptDone {
+		t.Fatalf("turn method = %q, want %q", turn.Method, acp.IMMethodPromptDone)
+	}
+	var result acp.IMPromptResult
+	if err := json.Unmarshal(turn.Param, &result); err != nil {
+		t.Fatalf("unmarshal prompt_done param: %v", err)
+	}
+	return result.StopReason
 }
 
 // listStoredTurns reads the persisted turns for a completed prompt from session_prompts.turns_json.

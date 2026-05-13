@@ -99,6 +99,7 @@ type parsedSessionViewEvent struct {
 type SessionRecorder struct {
 	projectName  string
 	store        Store
+	historyStore *fileSessionHistoryStore
 	listSessions func(context.Context) ([]SessionRecord, error)
 
 	mu      sync.Mutex
@@ -306,7 +307,7 @@ func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event p
 		return fmt.Errorf("decode prompt request: unexpected payload type %T", event.payload)
 	}
 
-	state, err := r.nextPromptStateLocked(ctx, rawEvent.SessionID)
+	state, err := r.nextPromptStateLocked(ctx, rawEvent.SessionID, rawEvent.UpdatedAt)
 	if err != nil {
 		return err
 	}
@@ -427,32 +428,67 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	if err != nil {
 		return err
 	}
-	r.publishOpenTextTurnDone(state)
-	doneTurn := sessionTurnMessage{
-		sessionID:   event.SessionID,
-		method:      acp.IMMethodPromptDone,
-		payload:     acp.IMPromptResult{StopReason: stopReason},
-		promptIndex: state.promptIndex,
-		turnIndex:   state.nextTurnIndex,
-		finished:    true,
+	return r.finishPromptStateLocked(ctx, event.SessionID, state, stopReason, event.UpdatedAt, true)
+}
+
+func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID string, state *sessionPromptState, stopReason string, updatedAt time.Time, publishDone bool) error {
+	if state == nil {
+		return nil
 	}
-	state.updateTurn(doneTurn, "")
+	stopReason = strings.TrimSpace(stopReason)
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	needsPromptDone := !sessionPromptStateTerminal(state)
+	r.publishOpenTextTurnDone(state)
+
+	var doneTurn sessionTurnMessage
+	if needsPromptDone {
+		doneTurn = sessionTurnMessage{
+			sessionID:   sessionID,
+			method:      acp.IMMethodPromptDone,
+			payload:     acp.IMPromptResult{StopReason: stopReason},
+			promptIndex: state.promptIndex,
+			turnIndex:   state.nextTurnIndex,
+			finished:    true,
+		}
+		state.updateTurn(doneTurn, "")
+	}
+
+	if r.historyStore != nil {
+		history := promptHistoryFromState(sessionID, state, stopReason, updatedAt)
+		prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, state.promptIndex)
+		if err != nil {
+			return err
+		}
+		if prompt != nil {
+			history.Title = prompt.Title
+			history.ModelName = prompt.ModelName
+			history.StartedAt = prompt.StartedAt
+		}
+		if err := r.historyStore.WritePrompt(ctx, r.projectName, history); err != nil {
+			return err
+		}
+	}
+
 	turnsJSON, turnIndex := encodePromptStateTurns(state)
 	if err := r.store.UpsertSessionPrompt(ctx, SessionPromptRecord{
-		SessionID:   event.SessionID,
+		SessionID:   sessionID,
 		PromptIndex: state.promptIndex,
 		StopReason:  stopReason,
-		UpdatedAt:   event.UpdatedAt,
+		UpdatedAt:   updatedAt,
 		TurnsJSON:   turnsJSON,
 		TurnIndex:   turnIndex,
 	}); err != nil {
 		return err
 	}
-	if err := r.upsertSessionProjection(ctx, event.SessionID, "", "", event.UpdatedAt, true); err != nil {
+	if err := r.upsertSessionProjection(ctx, sessionID, "", "", updatedAt, true); err != nil {
 		return err
 	}
-	r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
-	delete(r.promptState, event.SessionID)
+	if publishDone && needsPromptDone {
+		r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
+	}
+	delete(r.promptState, sessionID)
 	return nil
 }
 
@@ -558,8 +594,8 @@ func encodePromptStateTurns(state *sessionPromptState) (string, int64) {
 	return EncodeStoredTurns(encodedTurns), int64(len(encodedTurns))
 }
 
-// promptTurnsForRead returns the persisted turns for a prompt.
-// For finished prompts the turns come from session_prompts.turns_json.
+// promptTurnsForRead returns the readable turns for a prompt.
+// Finished prompts prefer prompt history files and fall back to legacy turns_json.
 // For the active (in-flight) prompt, turns are taken from in-memory state.
 func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID string, promptIndex int64) ([]sessionTurnReadMessage, error) {
 	prompt, err := r.store.LoadSessionPrompt(ctx, r.projectName, sessionID, promptIndex)
@@ -567,7 +603,15 @@ func (r *SessionRecorder) promptTurnsForRead(ctx context.Context, sessionID stri
 		return nil, err
 	}
 	if prompt != nil && sessionPromptRecordFinished(*prompt) {
-		// Finished prompt – read from persisted turns_json.
+		if r.historyStore != nil {
+			history, err := r.historyStore.ReadPrompt(ctx, r.projectName, sessionID, promptIndex)
+			if err == nil {
+				return sessionTurnReadMessagesFromHistory(history.Turns), nil
+			}
+			if strings.TrimSpace(prompt.TurnsJSON) == "" {
+				return nil, err
+			}
+		}
 		turns, err := DecodeStoredTurns(prompt.TurnsJSON)
 		if err != nil {
 			return nil, err
@@ -623,9 +667,42 @@ func sessionTurnReadMessagesFromStored(turns []string, finished bool) []sessionT
 	return out
 }
 
+func sessionTurnReadMessagesFromHistory(turns []sessionHistoryTurn) []sessionTurnReadMessage {
+	out := make([]sessionTurnReadMessage, 0, len(turns))
+	for _, turn := range turns {
+		out = append(out, sessionTurnReadMessage{
+			content:  normalizeJSONDoc(turn.Content, "{}"),
+			finished: turn.Finished,
+		})
+	}
+	return out
+}
+
 func sessionPromptRecordFinished(prompt SessionPromptRecord) bool {
 	return strings.TrimSpace(prompt.StopReason) != "" ||
 		(prompt.TurnIndex > 0 && strings.TrimSpace(prompt.TurnsJSON) != "")
+}
+
+func promptHistoryFromState(sessionID string, state *sessionPromptState, stopReason string, updatedAt time.Time) sessionHistoryPrompt {
+	if state == nil {
+		return sessionHistoryPrompt{}
+	}
+	turns := make([]sessionHistoryTurn, 0, len(state.turns))
+	for _, turn := range state.turns {
+		turns = append(turns, sessionHistoryTurn{
+			TurnIndex: turn.turnIndex,
+			Method:    turn.method,
+			Finished:  turn.finished,
+			Content:   buildIMContentJSON(turn.method, turn.payload),
+		})
+	}
+	return sessionHistoryPrompt{
+		SessionID:   sessionID,
+		PromptIndex: state.promptIndex,
+		UpdatedAt:   updatedAt,
+		StopReason:  strings.TrimSpace(stopReason),
+		Turns:       turns,
+	}
 }
 
 func isSessionTextTurnContent(content string) bool {
@@ -678,7 +755,7 @@ func (s *sessionPromptState) updateTurn(turn sessionTurnMessage, turnKey string)
 	}
 }
 
-func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string) (*sessionPromptState, error) {
+func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (*sessionPromptState, error) {
 	state, err := r.currentPromptStateLocked(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -687,8 +764,20 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 		created := newSessionPromptState(1, 1)
 		return &created, nil
 	}
+	if len(state.turns) > 0 && !sessionPromptStateTerminal(state) {
+		if err := r.finishPromptStateLocked(ctx, sessionID, state, "interrupted", updatedAt, true); err != nil {
+			return nil, err
+		}
+	}
 	next := newSessionPromptState(state.promptIndex+1, 1)
 	return &next, nil
+}
+
+func sessionPromptStateTerminal(state *sessionPromptState) bool {
+	if state == nil || len(state.turns) == 0 {
+		return false
+	}
+	return strings.TrimSpace(state.turns[len(state.turns)-1].method) == acp.IMMethodPromptDone
 }
 
 func (r *SessionRecorder) ensurePromptStateLocked(ctx context.Context, sessionID string, updatedAt time.Time) (*sessionPromptState, error) {

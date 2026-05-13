@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
+	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 	_ "modernc.org/sqlite"
 )
@@ -42,6 +46,65 @@ func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 		t.Fatal("expected IM router for app config")
 	}
 	t.Cleanup(func() { _ = c.Close() })
+}
+
+func TestBuildClientMigratesPromptHistoryFiles(t *testing.T) {
+	baseDir := t.TempDir()
+	dbPath := filepath.Join(baseDir, "db", "client.sqlite3")
+	store, err := clientpkg.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	ctx := context.Background()
+	if err := store.SaveSession(ctx, &clientpkg.SessionRecord{
+		ID:           "sess-1",
+		ProjectName:  "proj1",
+		Status:       clientpkg.SessionActive,
+		AgentType:    "codex",
+		CreatedAt:    time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+		LastActiveAt: time.Date(2026, 5, 13, 10, 1, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
+		SessionID:   "sess-1",
+		PromptIndex: 1,
+		StopReason:  acp.StopReasonEndTurn,
+		UpdatedAt:   time.Date(2026, 5, 13, 10, 1, 0, 0, time.UTC),
+		TurnsJSON: clientpkg.EncodeStoredTurns([]string{
+			`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
+		}),
+		TurnIndex: 1,
+	}); err != nil {
+		t.Fatalf("UpsertSessionPrompt: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close store: %v", err)
+	}
+
+	h := New(&logger.AppConfig{}, dbPath)
+	c, err := h.buildClient(ctx, logger.ProjectConfig{Name: "proj1", Path: "."})
+	if err != nil {
+		t.Fatalf("buildClient: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	path := filepath.Join(baseDir, "session-history", "proj1", "sess-1", "prompts", "p000001.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+	var prompt struct {
+		Turns []struct {
+			Method string `json:"method"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal(raw, &prompt); err != nil {
+		t.Fatalf("unmarshal prompt history: %v", err)
+	}
+	if len(prompt.Turns) != 2 || prompt.Turns[1].Method != acp.IMMethodPromptDone {
+		t.Fatalf("prompt history turns = %#v, want prompt_done appended", prompt.Turns)
+	}
 }
 
 func TestBuildClient_RejectsInvalidFeishuConfig(t *testing.T) {
