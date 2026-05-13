@@ -3214,12 +3214,6 @@ function App() {
   );
   const floatingDragVisualState =
     floatingDragState?.active ? 'dragging' : floatingDragState?.pressing ? 'drag-ready' : 'idle';
-  const stopFloatingControlButtonPointerDown = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      event.stopPropagation();
-    },
-    [],
-  );
   const clearFloatingLongPressTimer = useCallback(() => {
     if (floatingLongPressTimerRef.current !== null) {
       window.clearTimeout(floatingLongPressTimerRef.current);
@@ -3253,7 +3247,7 @@ function App() {
     }, remaining);
   }, [clearFloatingCooldownTimer]);
   const beginFloatingPress = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
+    (event: React.PointerEvent<HTMLElement>) => {
       if (isWide || event.button !== 0) {
         return;
       }
@@ -3283,6 +3277,13 @@ function App() {
       }, 350);
     },
     [clearFloatingLongPressTimer, floatingControlTop, isWide],
+  );
+  const handleFloatingControlButtonPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      beginFloatingPress(event);
+      event.stopPropagation();
+    },
+    [beginFloatingPress],
   );
   const handleFloatingPointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -8106,7 +8107,7 @@ function App() {
             type="button"
             className="floating-nav-button"
             data-active={tab === 'chat'}
-            onPointerDown={stopFloatingControlButtonPointerDown}
+            onPointerDown={handleFloatingControlButtonPointerDown}
             onClick={() => handleFloatingNavSelect('chat')}
             title="Chat"
             aria-label="Chat"
@@ -8117,7 +8118,7 @@ function App() {
             type="button"
             className="floating-nav-button"
             data-active={tab === 'file'}
-            onPointerDown={stopFloatingControlButtonPointerDown}
+            onPointerDown={handleFloatingControlButtonPointerDown}
             onClick={() => handleFloatingNavSelect('file')}
             title="File"
             aria-label="File"
@@ -8128,7 +8129,7 @@ function App() {
             type="button"
             className="floating-nav-button"
             data-active={tab === 'git'}
-            onPointerDown={stopFloatingControlButtonPointerDown}
+            onPointerDown={handleFloatingControlButtonPointerDown}
             onClick={() => handleFloatingNavSelect('git')}
             title="Git"
             aria-label="Git"
@@ -8140,7 +8141,7 @@ function App() {
           type="button"
           className="drawer-toggle-bubble"
           data-active={drawerOpen}
-          onPointerDown={stopFloatingControlButtonPointerDown}
+          onPointerDown={handleFloatingControlButtonPointerDown}
           onClick={handleFloatingDrawerToggle}
           title="Toggle drawer"
           aria-label="Toggle drawer"
