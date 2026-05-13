@@ -167,6 +167,20 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="floating-control-stack"');
     expect(mainTsx).toContain('className="floating-nav-group"');
     expect(mainTsx).toContain('className="drawer-toggle-bubble"');
+    expect(mainTsx).toContain('const stopFloatingControlButtonPointerDown = useCallback(');
+    expect(mainTsx).toContain('event.stopPropagation();');
+    expect(mainTsx).toMatch(
+      /className="floating-nav-button"[\s\S]*?onPointerDown=\{stopFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{\(\) => handleFloatingNavSelect\('chat'\)\}/,
+    );
+    expect(mainTsx).toMatch(
+      /className="floating-nav-button"[\s\S]*?onPointerDown=\{stopFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{\(\) => handleFloatingNavSelect\('file'\)\}/,
+    );
+    expect(mainTsx).toMatch(
+      /className="floating-nav-button"[\s\S]*?onPointerDown=\{stopFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{\(\) => handleFloatingNavSelect\('git'\)\}/,
+    );
+    expect(mainTsx).toMatch(
+      /className="drawer-toggle-bubble"[\s\S]*?onPointerDown=\{stopFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{handleFloatingDrawerToggle\}/,
+    );
     expect(mainTsx).toContain('const [floatingControlSlot, setFloatingControlSlot] = useState<PersistedFloatingControlSlot>(');
     expect(mainTsx).toContain('const [floatingDragState, setFloatingDragState] = useState');
     expect(mainTsx).toContain('const [floatingKeyboardOffset, setFloatingKeyboardOffset] = useState(0);');

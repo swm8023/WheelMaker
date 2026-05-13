@@ -3214,6 +3214,12 @@ function App() {
   );
   const floatingDragVisualState =
     floatingDragState?.active ? 'dragging' : floatingDragState?.pressing ? 'drag-ready' : 'idle';
+  const stopFloatingControlButtonPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+    },
+    [],
+  );
   const clearFloatingLongPressTimer = useCallback(() => {
     if (floatingLongPressTimerRef.current !== null) {
       window.clearTimeout(floatingLongPressTimerRef.current);
@@ -8100,6 +8106,7 @@ function App() {
             type="button"
             className="floating-nav-button"
             data-active={tab === 'chat'}
+            onPointerDown={stopFloatingControlButtonPointerDown}
             onClick={() => handleFloatingNavSelect('chat')}
             title="Chat"
             aria-label="Chat"
@@ -8110,6 +8117,7 @@ function App() {
             type="button"
             className="floating-nav-button"
             data-active={tab === 'file'}
+            onPointerDown={stopFloatingControlButtonPointerDown}
             onClick={() => handleFloatingNavSelect('file')}
             title="File"
             aria-label="File"
@@ -8120,6 +8128,7 @@ function App() {
             type="button"
             className="floating-nav-button"
             data-active={tab === 'git'}
+            onPointerDown={stopFloatingControlButtonPointerDown}
             onClick={() => handleFloatingNavSelect('git')}
             title="Git"
             aria-label="Git"
@@ -8131,6 +8140,7 @@ function App() {
           type="button"
           className="drawer-toggle-bubble"
           data-active={drawerOpen}
+          onPointerDown={stopFloatingControlButtonPointerDown}
           onClick={handleFloatingDrawerToggle}
           title="Toggle drawer"
           aria-label="Toggle drawer"

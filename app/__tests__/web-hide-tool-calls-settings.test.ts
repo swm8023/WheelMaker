@@ -23,8 +23,8 @@ describe('web hide tool calls setting', () => {
     expect(mainTsx).toContain('const [hideToolCalls, setHideToolCalls] = useState(');
     expect(mainTsx).toContain('<span>Hide Tool Calls</span>');
     expect(mainTsx).toContain('hideToolCalls={hideToolCalls}');
-    expect(mainTsx).toContain(
-      "if (hideToolCalls && entry.kind === 'tool') {\n          return null;\n        }",
+    expect(mainTsx).toMatch(
+      /if \(hideToolCalls && entry\.kind === 'tool'\) \{\s*return null;\s*\}/,
     );
 
     const groupingStart = mainTsx.indexOf('function groupChatMessagesByPrompt(');
