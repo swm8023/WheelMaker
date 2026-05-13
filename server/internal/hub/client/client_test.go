@@ -2231,6 +2231,49 @@ func TestStoreSessionSyncJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreSessionSyncJSONSurvivesMetadataSave(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	want := `{"promptIndex":2,"turnIndex":4,"finished":true}`
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:              "sess-sync",
+		ProjectName:     "proj1",
+		Status:          SessionActive,
+		AgentType:       "claude",
+		AgentJSON:       `{}`,
+		SessionSyncJSON: want,
+		CreatedAt:       time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
+		LastActiveAt:    time.Date(2026, 4, 12, 10, 5, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession initial: %v", err)
+	}
+
+	if err := store.SaveSession(ctx, &SessionRecord{
+		ID:           "sess-sync",
+		ProjectName:  "proj1",
+		Status:       SessionActive,
+		AgentType:    "claude",
+		AgentJSON:    `{}`,
+		Title:        "Updated Title",
+		LastActiveAt: time.Date(2026, 4, 12, 10, 6, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("SaveSession metadata: %v", err)
+	}
+
+	loaded, err := store.LoadSession(ctx, "proj1", "sess-sync")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded.SessionSyncJSON != want {
+		t.Fatalf("SessionSyncJSON = %q, want %q", loaded.SessionSyncJSON, want)
+	}
+}
+
 func TestStoreSessionPromptTurnsJSONRoundTrip(t *testing.T) {
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))
 	if err != nil {

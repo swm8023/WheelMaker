@@ -518,9 +518,6 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 	if strings.TrimSpace(rec.AgentJSON) == "" {
 		rec.AgentJSON = "{}"
 	}
-	if rec.SessionSyncJSON == "" {
-		rec.SessionSyncJSON = "{}"
-	}
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = time.Now().UTC()
 	}
@@ -536,6 +533,12 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 			rec.CreatedAt = existing.CreatedAt
 		}
 		rec.LastActiveAt = maxTime(rec.LastActiveAt, existing.LastActiveAt)
+		if strings.TrimSpace(rec.SessionSyncJSON) == "" {
+			rec.SessionSyncJSON = firstNonEmpty(existing.SessionSyncJSON, "{}")
+		}
+	}
+	if strings.TrimSpace(rec.SessionSyncJSON) == "" {
+		rec.SessionSyncJSON = "{}"
 	}
 
 	_, err = s.db.ExecContext(ctx, `
