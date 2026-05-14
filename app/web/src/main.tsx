@@ -97,6 +97,8 @@ type WideProjectActionMenuState = {
   phase: 'agents' | 'sessions';
   agentType: string;
 };
+type MobileProjectActionMenuState = WideProjectActionMenuState;
+type SettingsDetailView = 'tokenStats' | null;
 type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
@@ -2147,7 +2149,7 @@ function App() {
     globalState =>
       createWorkspaceUiState({
         tab: globalState.tab ?? 'file',
-        desktopCollapsedProjectIds: globalState.desktopCollapsedProjectIds ?? [],
+        collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? [],
         floatingControlSlot: globalState.floatingControlSlot ?? 'upper-middle',
       }),
   );
@@ -2156,7 +2158,7 @@ function App() {
   const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;
   const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
   const sidebarCollapsed = workspaceUiState.desktop.sidebarCollapsed;
-  const desktopCollapsedProjectIds = workspaceUiState.desktop.collapsedProjectIds;
+  const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;
   const drawerOpen = workspaceUiState.mobile.drawerOpen;
   const sidebarSettingsOpen = workspaceUiState.shared.settingsOpen;
   const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;
@@ -2191,8 +2193,8 @@ function App() {
   const setSidebarCollapsed = useCallback((next: WorkspaceUiStateValue<boolean>) => {
     dispatchWorkspaceUi({ type: 'desktop/setSidebarCollapsed', next });
   }, []);
-  const setDesktopCollapsedProjectIds = useCallback((next: WorkspaceUiStateValue<string[]>) => {
-    dispatchWorkspaceUi({ type: 'desktop/setCollapsedProjectIds', next });
+  const setCollapsedProjectIds = useCallback((next: WorkspaceUiStateValue<string[]>) => {
+    dispatchWorkspaceUi({ type: 'shared/setCollapsedProjectIds', next });
   }, []);
   const setDrawerOpen = useCallback((next: WorkspaceUiStateValue<boolean>) => {
     dispatchWorkspaceUi({ type: 'mobile/setDrawerOpen', next });
@@ -2210,6 +2212,7 @@ function App() {
   const [databaseLoading, setDatabaseLoading] = useState(false);
   const [databaseError, setDatabaseError] = useState('');
   const [databaseDumpText, setDatabaseDumpText] = useState('');
+  const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);
   const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
   const [tokenStatsError, setTokenStatsError] = useState('');
   const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
@@ -2289,6 +2292,9 @@ function App() {
   const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
   const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
   const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
+  const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);
+  const [mobileProjectSessionErrors, setMobileProjectSessionErrors] = useState<Record<string, string>>({});
+  const [mobileProjectSessionsRefreshing, setMobileProjectSessionsRefreshing] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState('');
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -2846,7 +2852,9 @@ function App() {
   }, [projectId, chatSessions]);
 
   useEffect(() => {
-    if (!isWide || projects.length === 0) return;
+    const shouldHydrateProjectSessionIndex =
+      isWide || (!isWide && tab === 'chat' && drawerOpen);
+    if (!shouldHydrateProjectSessionIndex || projects.length === 0) return;
     setProjectSessionsByProjectId(prev => {
       const next = {...prev};
       for (const projectItem of projects) {
@@ -2859,7 +2867,7 @@ function App() {
       }
       return next;
     });
-  }, [isWide, projectIdListKey]);
+  }, [isWide, tab, drawerOpen, projectIdListKey]);
 
   useEffect(() => {
     if (!connected || !isWide || projects.length === 0) return;
@@ -3217,7 +3225,7 @@ function App() {
       tab,
       selectedProjectId: projectId,
       floatingControlSlot,
-      desktopCollapsedProjectIds,
+      collapsedProjectIds,
     });
   }, [
     address,
@@ -3234,7 +3242,7 @@ function App() {
     tab,
     projectId,
     floatingControlSlot,
-    desktopCollapsedProjectIds,
+    collapsedProjectIds,
   ]);
 
   useEffect(() => {
@@ -3567,8 +3575,15 @@ function App() {
     if (floatingClickCooldownUntilRef.current > Date.now()) {
       return;
     }
+    if (nextTab === tab) {
+      if (nextTab === 'chat' && drawerOpen) {
+        setDrawerOpen(false);
+      }
+      return;
+    }
     setTab(nextTab);
-  }, []);
+    setDrawerOpen(false);
+  }, [drawerOpen, tab, setDrawerOpen, setTab]);
   const handleFloatingDrawerToggle = useCallback(() => {
     if (floatingClickCooldownUntilRef.current > Date.now()) {
       return;
@@ -3620,13 +3635,19 @@ function App() {
   );
   const toggleWideProjectCollapsed = useCallback(
     (targetProjectId: string) => {
-      setDesktopCollapsedProjectIds(current =>
+      setWideProjectActionMenu(current =>
+        current?.projectId === targetProjectId ? null : current,
+      );
+      setMobileProjectActionMenu(current =>
+        current?.projectId === targetProjectId ? null : current,
+      );
+      setCollapsedProjectIds(current =>
         current.includes(targetProjectId)
           ? current.filter(item => item !== targetProjectId)
           : [...current, targetProjectId],
       );
     },
-    [setDesktopCollapsedProjectIds],
+    [setCollapsedProjectIds],
   );
   const agentInfoAgents = useMemo(() => {
     const names = new Map<string, string>();
@@ -4775,14 +4796,32 @@ function App() {
   ) => {
     handleDismissNewChatPicker();
     handleDismissResume();
-    setTokenStatsPanelOpen(false);
-    handleDismissAgentInfo();
+    setMobileProjectActionMenu(null);
     setWideProjectActionMenu({
       projectId: targetProjectId,
       kind,
       phase: 'agents',
       agentType: '',
     });
+  };
+
+  const openMobileProjectActionMenu = (
+    targetProjectId: string,
+    kind: 'new' | 'resume',
+  ) => {
+    handleDismissNewChatPicker();
+    handleDismissResume();
+    setWideProjectActionMenu(null);
+    setMobileProjectActionMenu(current =>
+      current?.projectId === targetProjectId && current.kind === kind
+        ? null
+        : {
+            projectId: targetProjectId,
+            kind,
+            phase: 'agents',
+            agentType: '',
+          },
+    );
   };
 
   const removeChatSessionFromState = (sessionId: string) => {
@@ -5524,11 +5563,11 @@ function App() {
   }, [mergeTokenProviders]);
 
   useEffect(() => {
-    if (!tokenStatsPanelOpen) {
+    if (settingsDetailView !== 'tokenStats') {
       return;
     }
     refreshTokenStats().catch(() => undefined);
-  }, [tokenStatsPanelOpen, refreshTokenStats]);
+  }, [settingsDetailView, refreshTokenStats]);
 
   useEffect(() => {
     if (!agentInfoPanelOpen) {
@@ -5634,10 +5673,18 @@ function App() {
     }
   };
 
-  const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {
+  const selectProjectChatSession = async (
+    targetProjectId: string,
+    sessionId: string,
+    options?: {closeMobileDrawer?: boolean},
+  ) => {
     if (!targetProjectId || !sessionId) return;
     workspaceStore.rememberSelectedChatSession(targetProjectId, sessionId);
     setWideProjectActionMenu(null);
+    setMobileProjectActionMenu(null);
+    if (options?.closeMobileDrawer) {
+      setDrawerOpen(false);
+    }
     if (targetProjectId !== projectIdRef.current) {
       await switchProject(targetProjectId);
     }
@@ -5653,7 +5700,15 @@ function App() {
     });
   };
 
-  const handleWideProjectCreateSession = async (targetProjectId: string, agentType: string) => {
+  const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {
+    await selectProjectChatSession(targetProjectId, sessionId);
+  };
+
+  const handleProjectCreateSession = async (
+    targetProjectId: string,
+    agentType: string,
+    options?: {closeMobileDrawer?: boolean},
+  ) => {
     const normalizedAgentType = agentType.trim();
     if (!targetProjectId || !normalizedAgentType) {
       setError('No agent selected for new session');
@@ -5677,10 +5732,18 @@ function App() {
         chatSyncSubIndexRef.current[session.sessionId] = 0;
         setChatMessages([]);
       }
-      await selectWideProjectSession(targetProjectId, session.sessionId);
+      await selectProjectChatSession(targetProjectId, session.sessionId, options);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const handleWideProjectCreateSession = async (targetProjectId: string, agentType: string) => {
+    await handleProjectCreateSession(targetProjectId, agentType);
+  };
+
+  const handleMobileProjectCreateSession = async (targetProjectId: string, agentType: string) => {
+    await handleProjectCreateSession(targetProjectId, agentType, {closeMobileDrawer: true});
   };
 
   const handleWideProjectResumeAgent = async (targetProjectId: string, agentType: string) => {
@@ -5759,6 +5822,71 @@ function App() {
     }
   };
 
+  const handleMobileProjectResumeAgent = async (targetProjectId: string, agentType: string) => {
+    const normalizedAgentType = agentType.trim();
+    if (!targetProjectId || !normalizedAgentType) {
+      setError('No agent selected for resume');
+      return;
+    }
+    setMobileProjectActionMenu({
+      projectId: targetProjectId,
+      kind: 'resume',
+      phase: 'sessions',
+      agentType: normalizedAgentType,
+    });
+    setResumeAgentType(normalizedAgentType);
+    setResumeLoading(true);
+    setResumeSessions([]);
+    try {
+      const sessions = await service.listProjectResumableSessions(targetProjectId, agentType);
+      setResumeSessions(sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setMobileProjectActionMenu(null);
+    } finally {
+      setResumeLoading(false);
+    }
+  };
+
+  const handleMobileProjectResumeImport = async (targetProjectId: string, agentType: string, sessionId: string) => {
+    if (!targetProjectId || !agentType || !sessionId) return;
+    setResumeLoading(true);
+    let importedSessionId = '';
+    try {
+      const imported = await service.importProjectResumedSession(targetProjectId, agentType, sessionId);
+      if (!imported.ok || !imported.session.sessionId) {
+        throw new Error('project session.resume.import returned ok=false');
+      }
+      importedSessionId = imported.session.sessionId;
+      const session = imported.session;
+      workspaceStore.rememberChatSession(targetProjectId, session, {turnIndex: 0});
+      workspaceStore.rememberSelectedChatSession(targetProjectId, importedSessionId);
+      setResumeSessions(prev => prev.filter(item => item.sessionId !== sessionId));
+      setProjectSessionsByProjectId(prev => ({
+        ...prev,
+        [targetProjectId]: mergeChatSession(prev[targetProjectId] ?? [], session),
+      }));
+      if (targetProjectId === projectIdRef.current) {
+        setChatSessions(prev => mergeChatSession(prev, session));
+      }
+      const reloaded = await service.reloadProjectSession(targetProjectId, importedSessionId);
+      if (!reloaded.ok) {
+        throw new Error('project session.reload returned ok=false');
+      }
+      chatMessageStoreRef.current[importedSessionId] = [];
+      chatSyncIndexRef.current[importedSessionId] = 0;
+      chatSyncSubIndexRef.current[importedSessionId] = 0;
+      await selectProjectChatSession(targetProjectId, importedSessionId, {closeMobileDrawer: true});
+    } catch (err) {
+      if (importedSessionId) {
+        setMobileProjectActionMenu(null);
+      }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResumeLoading(false);
+    }
+  };
+
   const refreshProject = async (options?: {silent?: boolean}) => {
     if (!connected || !projectId) return;
     if (refreshInFlightRef.current) return;
@@ -5811,6 +5939,63 @@ function App() {
       }
     }
   };
+
+  const refreshMobileChatProjectSessions = async () => {
+    if (!connected) return;
+    setMobileProjectSessionsRefreshing(true);
+    setRefreshingProject(true);
+    try {
+      const latestProjects = await service.listProjects();
+      setProjects(latestProjects);
+      setHasPendingProjectUpdates(false);
+      await Promise.all(
+        latestProjects.map(async projectItem => {
+          try {
+            const sessions = await service.listProjectSessions(projectItem.projectId);
+            const sortedSessions = sortChatSessions(sessions);
+            setProjectSessionsByProjectId(prev => ({
+              ...prev,
+              [projectItem.projectId]: sortedSessions,
+            }));
+            const cached = workspaceStore.hydrateChatSessions(projectItem.projectId);
+            const cursorBySessionId: Record<string, {turnIndex: number}> = {};
+            for (const entry of cached) {
+              cursorBySessionId[entry.session.sessionId] = entry.cursor;
+            }
+            workspaceStore.replaceChatSessions(
+              projectItem.projectId,
+              sortedSessions,
+              cursorBySessionId,
+            );
+            setMobileProjectSessionErrors(prev => {
+              if (!prev[projectItem.projectId]) return prev;
+              const next = {...prev};
+              delete next[projectItem.projectId];
+              return next;
+            });
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setMobileProjectSessionErrors(prev => ({
+              ...prev,
+              [projectItem.projectId]: message || 'Failed to refresh sessions',
+            }));
+          }
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMobileProjectSessionsRefreshing(false);
+      setRefreshingProject(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isWide || tab !== 'chat' || !drawerOpen || !connected) {
+      return;
+    }
+    refreshMobileChatProjectSessions().catch(() => undefined);
+  }, [isWide, tab, drawerOpen, connected, projectIdListKey]);
 
   useEffect(() => {
     const unsubscribeEvent = service.onEvent(event => {
@@ -6087,7 +6272,7 @@ function App() {
               <button
                 type="button"
                 className="chat-header-icon-btn"
-                title="Token stats"
+                title="Legacy token stats"
                 onClick={() => {
                   handleDismissNewChatPicker();
                   handleDismissResume();
@@ -6101,7 +6286,7 @@ function App() {
               <button
                 type="button"
                 className="chat-header-icon-btn"
-                title="Agent info"
+                title="Legacy agent info"
                 onClick={() => {
                   handleDismissNewChatPicker();
                   handleDismissResume();
@@ -6367,7 +6552,7 @@ function App() {
               <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
                 <div className="chat-session-group-title">{group.label}</div>
                 {group.sessions.map(session => (
-                  <div key={session.sessionId} className={`chat-session-swipe-row ${isChatSessionSwipeOpen(session.sessionId) ? 'open' : ''}`}>
+                  <div key={session.sessionId} className={`legacy-chat-session-swipe-row ${isChatSessionSwipeOpen(session.sessionId) ? 'open' : ''}`}>
                     <button
                       type="button"
                       className="chat-session-reload-action"
@@ -6942,7 +7127,76 @@ function App() {
     );
   };
 
-  const renderSettingsContent = (showSectionTitle: boolean) => (
+  const renderTokenStatsSettingsDetail = () => (
+    <div className="settings-detail-page token-stats-page">
+      <div className="settings-detail-header">
+        <button
+          type="button"
+          className="mobile-settings-back settings-detail-back"
+          onClick={() => setSettingsDetailView(null)}
+          aria-label="Back to settings"
+          title="Back"
+        >
+          <span className="codicon codicon-arrow-left" />
+        </button>
+        <div className="settings-detail-title">Token Stats</div>
+        <button
+          type="button"
+          className="token-stats-refresh-btn token-stats-refresh-inline"
+          onClick={() => {
+            refreshTokenStats().catch(() => undefined);
+          }}
+          disabled={tokenStatsLoading}
+        >
+          {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </div>
+      {tokenStatsUpdatedAt ? (
+        <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
+      ) : null}
+      {tokenStatsLoading ? (
+        <div className="muted block">Scanning online hubs...</div>
+      ) : null}
+      {tokenStatsError ? (
+        <div className="muted block token-stats-error">{tokenStatsError}</div>
+      ) : null}
+      {!tokenStatsLoading && tokenStatCards.length === 0 && !tokenStatsError ? (
+        <div className="muted block">No token accounts discovered.</div>
+      ) : null}
+      <div className="token-stats-account-list token-stats-account-list-flat">
+        {tokenStatCards.map(card => (
+          <div key={card.id} className="token-stats-account-item token-stats-account-item-flat">
+            <div className="token-stats-card-line token-stats-card-line-tags">
+              <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
+                {card.agentTag}
+              </span>
+              <span className={`token-stats-pill ${tokenTagVariantClass('hub', card.hubTag)}`}>
+                {card.hubTag}
+              </span>
+            </div>
+            <div className="token-stats-card-line token-stats-card-line-primary">
+              <span className="token-stats-account-name">{card.accountName}</span>
+            </div>
+            {card.message ? (
+              <div className="token-stats-account-error">{card.message}</div>
+            ) : null}
+            {card.secondaryLine ? (
+              <div className="token-stats-card-line">{card.secondaryLine}</div>
+            ) : null}
+            {card.tertiaryLine ? (
+              <div className="token-stats-card-line">{card.tertiaryLine}</div>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderSettingsContent = (showSectionTitle: boolean) => {
+    if (settingsDetailView === 'tokenStats') {
+      return renderTokenStatsSettingsDetail();
+    }
+    return (
     <>
       {showSectionTitle ? <div className="section-title">SETTINGS</div> : null}
       <div className="list settings-list">
@@ -7065,6 +7319,17 @@ function App() {
 
         <button
           type="button"
+          className="settings-detail-row"
+          onClick={() => {
+            setTokenStatsError('');
+            setSettingsDetailView('tokenStats');
+          }}
+        >
+          <span>Token Stats</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
           className="sidebar-clear-cache-btn"
           onClick={openDatabasePanel}
         >
@@ -7117,7 +7382,289 @@ function App() {
         ) : null}
       </div>
     </>
-  );
+    );
+  };
+
+  const renderMobileChatSessionSheet = () => {
+    return (
+      <>
+        <div className="mobile-chat-drawer-header">
+          <button
+            type="button"
+            className="drawer-settings-icon-btn"
+            onClick={() => {
+              setProjectMenuOpen(false);
+              setSettingsDetailView(null);
+              setSidebarSettingsOpen(true);
+            }}
+            title="Open settings"
+            aria-label="Open settings"
+          >
+            <span className="codicon codicon-settings-gear" />
+          </button>
+          <span className="mobile-chat-drawer-title">Chats</span>
+          <button
+            className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
+            onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
+            title={reconnecting ? 'Reconnecting...' : 'Refresh chats'}
+            disabled={mobileProjectSessionsRefreshing || reconnecting}
+          >
+            {mobileProjectSessionsRefreshing ? '...' : refreshButtonContent}
+          </button>
+        </div>
+        <div className="mobile-project-session-nav">
+          {projects.length === 0 ? (
+            <div className="chat-empty-hint">No projects available.</div>
+          ) : null}
+          {projects.map(projectItem => {
+            const targetProjectId = projectItem.projectId;
+            const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
+            const visibleCount =
+              wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
+            const visibleSessions = projectSessions.slice(0, visibleCount);
+            const collapsed = collapsedProjectIds.includes(targetProjectId);
+            const activeProject = targetProjectId === projectId;
+            const agents = getWideProjectAgents(projectItem, projectSessions);
+            const actionMenuOpen = mobileProjectActionMenu?.projectId === targetProjectId;
+            const activeMobileProjectActionMenu = actionMenuOpen
+              ? mobileProjectActionMenu
+              : null;
+            const projectHub = projectItem.hubId || 'local';
+            const projectHubVariant = tagVariantClass('wide-project-hub', projectItem.hubId || 'local');
+            const sessionError = mobileProjectSessionErrors[targetProjectId] ?? '';
+            return (
+              <div
+                key={`mobile-project:${targetProjectId}`}
+                className={`wide-project-section mobile-project-section${activeProject ? ' active' : ''}${
+                  collapsed ? ' collapsed' : ''
+                }`}
+              >
+                <div className="wide-project-row mobile-project-row">
+                  <button
+                    type="button"
+                    className="wide-project-toggle mobile-project-toggle"
+                    onClick={() => toggleWideProjectCollapsed(targetProjectId)}
+                    title={collapsed ? 'Expand project' : 'Collapse project'}
+                    aria-expanded={!collapsed}
+                  >
+                    <span
+                      className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon ${projectHubVariant}`}
+                    />
+                    <span className="wide-project-title-group">
+                      <span className="wide-project-name" title={projectItem.name}>
+                        {projectItem.name}
+                      </span>
+                      <span
+                        className={`wide-project-hub-tag ${projectHubVariant}`}
+                      >
+                        <span className="wide-project-hub-dot" aria-hidden="true" />
+                        <span className="wide-project-hub-label">{projectHub}</span>
+                      </span>
+                    </span>
+                  </button>
+                  <div className="wide-project-actions mobile-project-actions">
+                    <button
+                      type="button"
+                      className="wide-project-action-btn"
+                      title="New session"
+                      aria-label={`New session in ${projectItem.name}`}
+                      onPointerDown={event => event.stopPropagation()}
+                      onClick={event => {
+                        event.stopPropagation();
+                        openMobileProjectActionMenu(targetProjectId, 'new');
+                      }}
+                    >
+                      <span className="codicon codicon-add" />
+                    </button>
+                    <button
+                      type="button"
+                      className="wide-project-action-btn"
+                      title="Resume session"
+                      aria-label={`Resume session in ${projectItem.name}`}
+                      onPointerDown={event => event.stopPropagation()}
+                      onClick={event => {
+                        event.stopPropagation();
+                        openMobileProjectActionMenu(targetProjectId, 'resume');
+                      }}
+                    >
+                      <span className="codicon codicon-history" />
+                    </button>
+                  </div>
+                </div>
+                {activeMobileProjectActionMenu ? (
+                  <div className="mobile-project-action-panel">
+                    <div className="wide-project-action-title">
+                      <span
+                        className={`codicon ${
+                          activeMobileProjectActionMenu.kind === 'new'
+                            ? 'codicon-add'
+                            : 'codicon-history'
+                        }`}
+                      />
+                      <span className="wide-project-action-title-copy">
+                        <span className="wide-project-action-title-main">
+                          {activeMobileProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'}
+                        </span>
+                        <span className="wide-project-action-title-sub">
+                          {projectItem.name}
+                        </span>
+                      </span>
+                    </div>
+                    {activeMobileProjectActionMenu.phase === 'agents' ? (
+                      <>
+                        {agents.map(agentType => (
+                          <button
+                            key={`${targetProjectId}:mobile:${activeMobileProjectActionMenu.kind}:${agentType}`}
+                            type="button"
+                            className="wide-project-action-menu-item"
+                            onClick={() => {
+                              if (activeMobileProjectActionMenu.kind === 'new') {
+                                handleMobileProjectCreateSession(
+                                  targetProjectId,
+                                  agentType,
+                                ).catch(() => undefined);
+                              } else {
+                                handleMobileProjectResumeAgent(
+                                  targetProjectId,
+                                  agentType,
+                                ).catch(() => undefined);
+                              }
+                            }}
+                          >
+                            <span className="codicon codicon-sparkle" />
+                            <span>{agentType}</span>
+                          </button>
+                        ))}
+                        {agents.length === 0 ? (
+                          <div className="wide-project-action-empty">
+                            No agents available.
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="wide-project-action-back"
+                          onClick={() => {
+                            setResumeSessions([]);
+                            setResumeLoading(false);
+                            setMobileProjectActionMenu({
+                              ...activeMobileProjectActionMenu,
+                              phase: 'agents',
+                              agentType: '',
+                            });
+                          }}
+                        >
+                          <span className="codicon codicon-arrow-left" />
+                          <span>{activeMobileProjectActionMenu.agentType}</span>
+                        </button>
+                        {resumeLoading ? (
+                          <div className="wide-project-action-empty">
+                            Loading sessions...
+                          </div>
+                        ) : null}
+                        {!resumeLoading
+                          ? resumeSessions.map(session => (
+                              <button
+                                key={`${targetProjectId}:mobile-resume:${session.sessionId}`}
+                                type="button"
+                                className="wide-project-action-menu-item"
+                                onClick={() => {
+                                  handleMobileProjectResumeImport(
+                                    targetProjectId,
+                                    activeMobileProjectActionMenu.agentType,
+                                    session.sessionId,
+                                  ).catch(() => undefined);
+                                }}
+                              >
+                                <span className="codicon codicon-history" />
+                                <span>{session.title || session.sessionId}</span>
+                              </button>
+                            ))
+                          : null}
+                        {!resumeLoading && resumeSessions.length === 0 ? (
+                          <div className="wide-project-action-empty">
+                            No resumable sessions.
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+                {sessionError ? (
+                  <div className="mobile-project-session-error">
+                    <span>Session refresh failed.</span>
+                    <button
+                      type="button"
+                      onClick={() => refreshMobileChatProjectSessions().catch(() => undefined)}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : null}
+                {!collapsed ? (
+                  <div className="wide-project-session-list mobile-project-session-list">
+                    {visibleSessions.map(session => {
+                      const sessionAgent = (session.agentType || '').trim();
+                      return (
+                        <button
+                          type="button"
+                          key={`${targetProjectId}:mobile-session:${session.sessionId}`}
+                          className={`wide-session-row mobile-session-row${
+                            activeProject && selectedChatId === session.sessionId
+                              ? ' selected'
+                              : ''
+                          }`}
+                          onClick={() => {
+                            selectProjectChatSession(
+                              targetProjectId,
+                              session.sessionId,
+                              {closeMobileDrawer: true},
+                            ).catch(() => undefined);
+                          }}
+                        >
+                          <span className="wide-session-title">
+                            {session.title || session.sessionId}
+                          </span>
+                          {sessionAgent ? (
+                            <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
+                              {sessionAgent}
+                            </span>
+                          ) : null}
+                          <span className="wide-session-time" title={session.updatedAt || ''}>
+                            {formatCompactRelativeAge(session.updatedAt)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {projectSessions.length > visibleSessions.length ? (
+                      <button
+                        type="button"
+                        className="wide-project-show-more"
+                        onClick={() =>
+                          setWideProjectVisibleCounts(prev => ({
+                            ...prev,
+                            [targetProjectId]:
+                              visibleSessions.length + WIDE_PROJECT_SESSION_LIMIT,
+                          }))
+                        }
+                      >
+                        Show more
+                      </button>
+                    ) : null}
+                    {projectSessions.length === 0 ? (
+                      <div className="wide-project-empty">No sessions yet.</div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  };
 
   const renderWideProjectSessionNav = () => {
     return (
@@ -7131,7 +7678,7 @@ function App() {
           const visibleCount =
             wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
           const visibleSessions = projectSessions.slice(0, visibleCount);
-          const collapsed = desktopCollapsedProjectIds.includes(targetProjectId);
+          const collapsed = collapsedProjectIds.includes(targetProjectId);
           const activeProject = targetProjectId === projectId;
           const agents = getWideProjectAgents(projectItem, projectSessions);
           const actionMenuOpen = wideProjectActionMenu?.projectId === targetProjectId;
@@ -7362,10 +7909,13 @@ function App() {
   };
 
   const renderSidebar = () => {
+    const mobileSidebarMain = !isWide
+      ? tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()
+      : null;
 
     return (
       <>
-        {!isWide ? (
+        {!isWide && tab !== 'chat' ? (
           <div className="drawer-project-header">
             <button
               type="button"
@@ -7412,7 +7962,7 @@ function App() {
         <div className="sidebar-scroll">
           {isWide && sidebarSettingsOpen
             ? renderSettingsContent(true)
-            : isWide ? renderWideProjectSessionNav() : renderSidebarMain()}
+            : isWide ? renderWideProjectSessionNav() : mobileSidebarMain}
         </div>
         {isWide ? (
           <div className="sidebar-footer">

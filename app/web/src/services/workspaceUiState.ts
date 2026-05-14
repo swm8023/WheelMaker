@@ -20,10 +20,10 @@ export type WorkspaceUiState = {
   shared: {
     tab: PersistedTab;
     settingsOpen: boolean;
+    collapsedProjectIds: string[];
   };
   desktop: {
     sidebarCollapsed: boolean;
-    collapsedProjectIds: string[];
   };
   mobile: {
     drawerOpen: boolean;
@@ -41,6 +41,7 @@ export type WorkspaceUiStateInput = {
   tab?: unknown;
   settingsOpen?: unknown;
   sidebarCollapsed?: unknown;
+  collapsedProjectIds?: unknown;
   desktopCollapsedProjectIds?: unknown;
   drawerOpen?: unknown;
   floatingControlSlot?: unknown;
@@ -53,8 +54,8 @@ export type WorkspaceUiStateInput = {
 export type WorkspaceUiAction =
   | { type: 'shared/setTab'; next: WorkspaceUiStateValue<PersistedTab> }
   | { type: 'shared/setSettingsOpen'; next: WorkspaceUiStateValue<boolean> }
+  | { type: 'shared/setCollapsedProjectIds'; next: WorkspaceUiStateValue<string[]> }
   | { type: 'desktop/setSidebarCollapsed'; next: WorkspaceUiStateValue<boolean> }
-  | { type: 'desktop/setCollapsedProjectIds'; next: WorkspaceUiStateValue<string[]> }
   | { type: 'mobile/setDrawerOpen'; next: WorkspaceUiStateValue<boolean> }
   | {
       type: 'mobile/setFloatingControlSlot';
@@ -119,11 +120,15 @@ export function createWorkspaceUiState(input: WorkspaceUiStateInput = {}): Works
     shared: {
       tab: sanitizeTab(input.tab),
       settingsOpen: typeof input.settingsOpen === 'boolean' ? input.settingsOpen : false,
+      collapsedProjectIds: sanitizeStringList(
+        Array.isArray(input.collapsedProjectIds)
+          ? input.collapsedProjectIds
+          : input.desktopCollapsedProjectIds,
+      ),
     },
     desktop: {
       sidebarCollapsed:
         typeof input.sidebarCollapsed === 'boolean' ? input.sidebarCollapsed : false,
-      collapsedProjectIds: sanitizeStringList(input.desktopCollapsedProjectIds),
     },
     mobile: {
       drawerOpen: typeof input.drawerOpen === 'boolean' ? input.drawerOpen : false,
@@ -162,22 +167,22 @@ export function workspaceUiReducer(
           settingsOpen: !!resolveNext(state.shared.settingsOpen, action.next),
         },
       };
+    case 'shared/setCollapsedProjectIds':
+      return {
+        ...state,
+        shared: {
+          ...state.shared,
+          collapsedProjectIds: sanitizeStringList(
+            resolveNext(state.shared.collapsedProjectIds, action.next),
+          ),
+        },
+      };
     case 'desktop/setSidebarCollapsed':
       return {
         ...state,
         desktop: {
           ...state.desktop,
           sidebarCollapsed: !!resolveNext(state.desktop.sidebarCollapsed, action.next),
-        },
-      };
-    case 'desktop/setCollapsedProjectIds':
-      return {
-        ...state,
-        desktop: {
-          ...state.desktop,
-          collapsedProjectIds: sanitizeStringList(
-            resolveNext(state.desktop.collapsedProjectIds, action.next),
-          ),
         },
       };
     case 'mobile/setDrawerOpen':

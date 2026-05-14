@@ -188,7 +188,8 @@ describe('web chat integration', () => {
       /className="drawer-project-header"[\s\S]*?className="drawer-settings-icon-btn"[\s\S]*?className="drawer-project-pill"[\s\S]*?className="project-wrap"/,
     );
     expect(mainTsx).toContain('setSidebarSettingsOpen(true);');
-    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : renderSidebarMain()');
+    expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
+    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : mobileSidebarMain');
     expect(mainTsx).toContain('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (');
     expect(mainTsx).toContain('className="mobile-settings-screen"');
     expect(mainTsx).toContain('aria-modal="true"');
@@ -410,6 +411,55 @@ describe('web chat integration', () => {
 
     expect(drawerLayer).toBeGreaterThan(floatingLayer);
     expect(mobileSettingsLayer).toBeGreaterThan(drawerLayer);
+    expect(stylesCss).toContain('--mobile-floating-control-lane: 72px;');
+    expect(stylesCss).toMatch(
+      /\.drawer-overlay \{[\s\S]*right: var\(--mobile-floating-control-lane\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.drawer \{[\s\S]*width: min\(420px, calc\(100vw - var\(--mobile-floating-control-lane\) - env\(safe-area-inset-right, 0px\)\)\);[\s\S]*\}/,
+    );
+  });
+
+  test('mobile chat drawer uses a cross-project project session sheet', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);');
+    expect(mainTsx).toContain('const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);');
+    expect(mainTsx).toContain('const refreshMobileChatProjectSessions = async () => {');
+    expect(mainTsx).toContain('service.listProjectSessions(projectItem.projectId)');
+    expect(mainTsx).toContain('const renderMobileChatSessionSheet = () => {');
+    expect(mainTsx).toContain('className="mobile-chat-drawer-header"');
+    expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
+    expect(mainTsx).toContain('className="mobile-project-session-nav"');
+    expect(mainTsx).toContain('className="mobile-project-action-panel"');
+    expect(mainTsx).toContain('className="mobile-project-session-error"');
+    expect(mainTsx).toContain('if (!isWide) setDrawerOpen(false);');
+    expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
+    expect(mainTsx).toContain("setSettingsDetailView('tokenStats');");
+    expect(mainTsx).toContain("settingsDetailView === 'tokenStats'");
+    expect(mainTsx).not.toContain('title="Token stats"');
+    expect(mainTsx).not.toContain('title="Agent info"');
+    expect(mainTsx).not.toContain('className="chat-session-swipe-row');
+
+    const mobileSheetStart = mainTsx.indexOf('const renderMobileChatSessionSheet = () => {');
+    const mobileSheetEnd = mainTsx.indexOf('const renderSidebar = () => {', mobileSheetStart);
+    expect(mobileSheetStart).toBeGreaterThanOrEqual(0);
+    expect(mobileSheetEnd).toBeGreaterThan(mobileSheetStart);
+    const mobileSheet = mainTsx.slice(mobileSheetStart, mobileSheetEnd);
+    expect(mobileSheet).not.toContain('className="project-wrap"');
+    expect(mobileSheet).not.toContain('chat-session-reload-action');
+    expect(mobileSheet).not.toContain('chat-session-delete-action');
+    expect(mobileSheet).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
+    expect(mobileSheet).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
+
+    expect(stylesCss).toContain('.mobile-chat-drawer-header {');
+    expect(stylesCss).toContain('.mobile-project-session-nav {');
+    expect(stylesCss).toContain('.mobile-project-action-panel {');
+    expect(stylesCss).toContain('.mobile-project-session-error {');
+    expect(stylesCss).toContain('.settings-detail-header {');
+    expect(stylesCss).toContain('.settings-detail-row {');
   });
 
   test('wide layout uses a project session rail instead of the header project picker', () => {
@@ -433,7 +483,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("wideProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
     expect(mainTsx).toContain("const sessionAgent = (session.agentType || '').trim();");
     expect(mainTsx).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
-    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : renderSidebarMain()');
+    expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
+    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : mobileSidebarMain');
 
     const wideRailStart = mainTsx.indexOf('const renderWideProjectSessionNav = () => {');
     const wideRailEnd = mainTsx.indexOf('const renderSidebar = () => {', wideRailStart);

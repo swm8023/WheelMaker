@@ -35,7 +35,7 @@ describe('web responsive ui state', () => {
       settingsOpen: true,
       sidebarCollapsed: true,
       drawerOpen: true,
-      desktopCollapsedProjectIds: ['project-a', 'project-b', 'project-a'],
+      collapsedProjectIds: ['project-a', 'project-b', 'project-a'],
       floatingControlSlot: 'center',
       chatConfigOverflowOpen: true,
       chatKeyboardInset: 120,
@@ -54,10 +54,10 @@ describe('web responsive ui state', () => {
     expect(state.shared).toMatchObject({
       tab: 'git',
       settingsOpen: true,
+      collapsedProjectIds: ['project-a', 'project-b'],
     });
     expect(state.desktop).toMatchObject({
       sidebarCollapsed: true,
-      collapsedProjectIds: ['project-a', 'project-b'],
     });
     expect(state.mobile).toMatchObject({
       drawerOpen: true,
@@ -72,8 +72,8 @@ describe('web responsive ui state', () => {
     });
 
     expect(state.shared.settingsOpen).toBe(true);
+    expect(state.shared.collapsedProjectIds).toEqual(['project-a', 'project-b']);
     expect(state.desktop.sidebarCollapsed).toBe(true);
-    expect(state.desktop.collapsedProjectIds).toEqual(['project-a', 'project-b']);
     expect(state.mobile.floatingControlSlot).toBe('center');
     expect(state.mobile.drawerOpen).toBe(false);
     expect(state.mobile.chatConfigOverflowOpen).toBe(false);
@@ -91,7 +91,8 @@ describe('web responsive ui state', () => {
     expect(mainTsx).toContain('const layoutMode = resolveLayoutMode(windowWidth);');
     expect(mainTsx).toContain("const isWide = layoutMode === 'desktop';");
     expect(mainTsx).toContain('const [workspaceUiState, dispatchWorkspaceUi] = useReducer(');
-    expect(mainTsx).toContain('desktopCollapsedProjectIds: globalState.desktopCollapsedProjectIds ?? []');
-    expect(mainTsx).toContain('desktopCollapsedProjectIds,');
+    expect(mainTsx).toContain('collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? []');
+    expect(mainTsx).toContain('const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;');
+    expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'shared/setCollapsedProjectIds', next });");
   });
 });

@@ -12,6 +12,7 @@
   --danger: #f48771;
   --line-num: #858585;
   --wm-safe-area-top: env(safe-area-inset-top, 0px);
+  --mobile-floating-control-lane: 72px;
 }
 
 .theme-light {
@@ -456,6 +457,61 @@ body,
 
 .mobile-settings-screen .database-panel {
   margin: 10px;
+}
+
+.settings-detail-page {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+}
+
+.settings-detail-header {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  margin-bottom: 8px;
+}
+
+.settings-detail-back {
+  width: 34px;
+  height: 34px;
+}
+
+.settings-detail-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.settings-detail-row {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-detail-row:hover {
+  background: var(--hover);
 }
 
 .floating-control-stack-layer {
@@ -1530,6 +1586,92 @@ body,
 .wide-project-action-menu-item:hover,
 .wide-project-action-back:hover {
   background: var(--hover);
+}
+
+.mobile-chat-drawer-header {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.mobile-chat-drawer-title {
+  min-width: 0;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.mobile-project-session-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 9px 7px calc(env(safe-area-inset-bottom, 0px) + 18px);
+}
+
+.mobile-project-section {
+  margin-bottom: 8px;
+}
+
+.mobile-project-row {
+  min-height: 38px;
+  padding: 0 7px;
+}
+
+.mobile-project-toggle {
+  height: 36px;
+}
+
+.mobile-project-actions {
+  opacity: 1;
+}
+
+.mobile-project-action-panel {
+  margin: 2px 7px 8px 23px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-2) 74%, transparent);
+  padding: 5px;
+}
+
+.mobile-project-session-list {
+  padding-left: 23px;
+}
+
+.mobile-session-row {
+  min-height: 32px;
+}
+
+.mobile-project-session-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 8px 6px 23px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: color-mix(in srgb, var(--text) 74%, var(--danger));
+  font-size: 11px;
+}
+
+.mobile-project-session-error button {
+  border: none;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--text);
+  padding: 3px 7px;
+  font: inherit;
+  cursor: pointer;
 }
 
 
@@ -4096,6 +4238,7 @@ body,
 .drawer-overlay {
   position: fixed;
   inset: 46px 0 0 0;
+  right: var(--mobile-floating-control-lane);
   background: rgba(0, 0, 0, 0.28);
   opacity: 0;
   pointer-events: none;
@@ -4109,7 +4252,7 @@ body,
 }
 
 .drawer {
-  width: min(88vw, 340px);
+  width: min(420px, calc(100vw - var(--mobile-floating-control-lane) - env(safe-area-inset-right, 0px)));
   height: 100%;
   border-right: 1px solid var(--border);
   background: var(--panel);
@@ -4134,6 +4277,7 @@ body,
 
 .narrow-shell .drawer-overlay {
   inset: 0;
+  right: var(--mobile-floating-control-lane);
 }
 
 .narrow-shell .project-menu {

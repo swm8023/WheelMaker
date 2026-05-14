@@ -63,6 +63,7 @@ export type PersistedGlobalState = {
   tab: PersistedTab;
   selectedProjectId: string;
   floatingControlSlot: PersistedFloatingControlSlot;
+  collapsedProjectIds: string[];
   desktopCollapsedProjectIds: string[];
 };
 
@@ -124,6 +125,7 @@ const GLOBAL_KEYS = {
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
   floatingControlSlot: 'floatingControlSlot',
+  collapsedProjectIds: 'collapsedProjectIds',
   desktopCollapsedProjectIds: 'desktopCollapsedProjectIds',
 } as const;
 
@@ -144,6 +146,7 @@ function defaultGlobalState(): PersistedGlobalState {
     tab: 'file',
     selectedProjectId: '',
     floatingControlSlot: 'upper-middle',
+    collapsedProjectIds: [],
     desktopCollapsedProjectIds: [],
   };
 }
@@ -213,9 +216,11 @@ function sanitizeProjectCommitsState(input: Partial<PersistedProjectCommitsState
 function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): PersistedGlobalState {
   const base = defaultGlobalState();
   if (!input) return base;
-  const desktopCollapsedProjectIds = Array.isArray(input.desktopCollapsedProjectIds)
-    ? Array.from(new Set(input.desktopCollapsedProjectIds.filter(item => typeof item === 'string' && item)))
-    : base.desktopCollapsedProjectIds;
+  const collapsedProjectIds = Array.isArray(input.collapsedProjectIds)
+    ? Array.from(new Set(input.collapsedProjectIds.filter(item => typeof item === 'string' && item)))
+    : Array.isArray(input.desktopCollapsedProjectIds)
+      ? Array.from(new Set(input.desktopCollapsedProjectIds.filter(item => typeof item === 'string' && item)))
+      : base.collapsedProjectIds;
   const floatingControlSlot =
     input.floatingControlSlot === 'upper' ||
     input.floatingControlSlot === 'upper-middle' ||
@@ -239,7 +244,8 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
     floatingControlSlot,
-    desktopCollapsedProjectIds,
+    collapsedProjectIds,
+    desktopCollapsedProjectIds: collapsedProjectIds,
   };
 }
 
@@ -634,6 +640,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
+      {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(this.state.global.desktopCollapsedProjectIds), updatedAt: now},
     ];
 
@@ -910,6 +917,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(next.desktopCollapsedProjectIds), updatedAt: now});
     }).catch(() => undefined);
   }
