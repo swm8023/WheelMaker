@@ -229,7 +229,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const chatConfigDisplay = useMemo(() => {');
     expect(mainTsx).toContain('className="chat-config-options-shell"');
     expect(mainTsx).toContain('<div ref={chatConfigOptionsRef} className="chat-config-options">');
-    expect(mainTsx).toContain('{!isWide && chatConfigOverflowOptions.length > 0 ? (');
+    expect(mainTsx).toContain('{chatConfigOverflowOptions.length > 0 ? (');
     expect(mainTsx).toContain('className="chat-config-overflow-anchor"');
     expect(mainTsx).toContain('chat-config-overflow-button');
     expect(mainTsx).toContain('chat-config-overflow-menu');
@@ -301,6 +301,50 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.project-presence {');
     expect(stylesCss).not.toContain('.project-dirty {');
     expect(stylesCss).not.toContain('.chat-permission-button');
+  });
+
+  test('chat composer is a unified command frame with compact custom config pills', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('const CHAT_CONFIG_INLINE_LIMIT = 3;');
+    expect(mainTsx).toContain('const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);');
+    expect(mainTsx).toContain("const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');");
+    expect(mainTsx).toContain('selectedChatConfigOptions.length <= CHAT_CONFIG_INLINE_LIMIT');
+    expect(mainTsx).toContain('prioritized.slice(0, CHAT_CONFIG_INLINE_LIMIT)');
+    expect(mainTsx).toContain('className="chat-composer-frame"');
+    expect(mainTsx).toContain('className="chat-composer-input-row"');
+    expect(mainTsx).toContain('className="chat-composer-prompt-trigger"');
+    expect(mainTsx).toContain('title="Commands"');
+    expect(mainTsx).toContain("{'>'}");
+    expect(mainTsx).toContain('chatComposerText.length === 0 ? (');
+    expect(mainTsx).toContain('className="chat-composer-toolbar"');
+    expect(mainTsx).toContain('className="chat-composer-tools"');
+    expect(mainTsx).toContain('className="chat-tool-button chat-photo-button"');
+    expect(mainTsx).toContain('className="chat-tool-button chat-voice-button"');
+    expect(mainTsx).toContain('chatFileInputRef.current?.click();');
+    expect(mainTsx).toContain("setError('Voice input is not available yet.');");
+    expect(mainTsx).toContain('className="chat-config-pill"');
+    expect(mainTsx).toContain('className="chat-config-value-menu"');
+    expect(mainTsx).toContain('chat-config-value-option${selected ?');
+    expect(mainTsx).toContain('className="chat-config-overflow-group"');
+    expect(mainTsx).not.toContain('className="chat-action-menu chat-action-menu-inline');
+    expect(mainTsx).not.toContain('Photo Library');
+    expect(mainTsx).not.toContain('className="chat-config-select"');
+    expect(mainTsx).not.toContain('showChatConfigLabels');
+
+    expect(stylesCss).toContain('.chat-composer-frame {');
+    expect(stylesCss).toContain('.chat-composer-input-row {');
+    expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
+    expect(stylesCss).toContain('.chat-composer-toolbar {');
+    expect(stylesCss).toContain('.chat-composer-tools {');
+    expect(stylesCss).toContain('.chat-tool-button {');
+    expect(stylesCss).toContain('.chat-config-pill {');
+    expect(stylesCss).toContain('.chat-config-value-menu {');
+    expect(stylesCss).toContain('.chat-config-value-option {');
+    expect(stylesCss).toContain('.chat-config-overflow-group {');
+    expect(stylesCss).not.toContain('.chat-config-select {');
   });
 
   test('keeps the mobile project menu layer above floating controls', () => {

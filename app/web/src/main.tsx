@@ -281,6 +281,7 @@ const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
+const CHAT_CONFIG_INLINE_LIMIT = 3;
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
@@ -676,6 +677,32 @@ function chatConfigPriority(option: RegistrySessionConfigOption): number {
     return CHAT_CONFIG_PRIORITY_IDS.length + fuzzyRank;
   }
   return 99;
+}
+
+function chatConfigCurrentValue(option: RegistrySessionConfigOption): string {
+  const optionValues = option.options ?? [];
+  return option.currentValue || optionValues[0]?.value || '';
+}
+
+function chatConfigCurrentLabel(option: RegistrySessionConfigOption): string {
+  const currentValue = chatConfigCurrentValue(option);
+  const optionValues = option.options ?? [];
+  const currentOption = optionValues.find(item => item.value === currentValue);
+  return currentOption?.name || currentValue || option.name || option.id;
+}
+
+function chatConfigIconClass(option: RegistrySessionConfigOption): string {
+  const key = `${option.id || ''} ${option.name || ''}`.toLowerCase();
+  if (key.includes('model')) {
+    return 'codicon-symbol-class';
+  }
+  if (key.includes('effort') || key.includes('thought')) {
+    return 'codicon-pulse';
+  }
+  if (key.includes('mode') || key.includes('permission')) {
+    return 'codicon-shield';
+  }
+  return 'codicon-settings-gear';
 }
 
 function decodeSessionMessageFromEventPayload(
@@ -2233,10 +2260,9 @@ function App() {
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
-  const chatComposerActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
-  const chatConfigOptionsMeasureRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
   const wideProjectActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSelectedIdRef = useRef('');
@@ -2266,7 +2292,6 @@ function App() {
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatConfigFeedback, setChatConfigFeedback] = useState('');
-  const [showChatConfigLabels, setShowChatConfigLabels] = useState(false);
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
@@ -2278,7 +2303,8 @@ function App() {
   const chatDraftGenerationRef = useRef<Record<string, number>>({});
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
-  const [chatComposerActionMenuOpen, setChatComposerActionMenuOpen] = useState(false);
+  const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
+  const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
   const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
@@ -2300,13 +2326,13 @@ function App() {
   }, [selectedChatSession]);
 
   const chatConfigDisplay = useMemo(() => {
-    if (selectedChatConfigOptions.length === 0 || isWide) {
+    if (selectedChatConfigOptions.length === 0) {
       return {
         visible: selectedChatConfigOptions,
         overflow: [] as RegistrySessionConfigOption[],
       };
     }
-    if (selectedChatConfigOptions.length <= 3) {
+    if (selectedChatConfigOptions.length <= CHAT_CONFIG_INLINE_LIMIT) {
       return {
         visible: selectedChatConfigOptions,
         overflow: [] as RegistrySessionConfigOption[],
@@ -2320,11 +2346,13 @@ function App() {
         }
         return left.index - right.index;
       });
-    const visibleIds = new Set(prioritized.slice(0, 3).map(item => item.option.id));
+    const visibleIds = new Set(
+      prioritized.slice(0, CHAT_CONFIG_INLINE_LIMIT).map(item => item.option.id),
+    );
     const visible: RegistrySessionConfigOption[] = [];
     const overflow: RegistrySessionConfigOption[] = [];
     for (const option of selectedChatConfigOptions) {
-      if (visibleIds.has(option.id) && visible.length < 3) {
+      if (visibleIds.has(option.id) && visible.length < CHAT_CONFIG_INLINE_LIMIT) {
         visible.push(option);
         visibleIds.delete(option.id);
       } else {
@@ -2332,7 +2360,7 @@ function App() {
       }
     }
     return { visible, overflow };
-  }, [selectedChatConfigOptions, isWide]);
+  }, [selectedChatConfigOptions]);
 
   const chatSlashSkills = useMemo(() => {
     const currentProject = projects.find(item => item.projectId === projectId);
@@ -2367,7 +2395,12 @@ function App() {
     [chatSlashCommands, chatSlashQuery],
   );
 
-  const chatSlashMenuVisible = chatSlashCommandOptions.length > 0;
+  const chatSlashMenuOptions = useMemo(
+    () => (chatPromptMenuOpen ? chatSlashCommands : chatSlashCommandOptions),
+    [chatPromptMenuOpen, chatSlashCommands, chatSlashCommandOptions],
+  );
+
+  const chatSlashMenuVisible = chatSlashMenuOptions.length > 0;
 
 
   const currentChatDraftKey = useMemo(
@@ -2423,8 +2456,8 @@ function App() {
       setChatSlashActiveIndex(0);
       return;
     }
-    setChatSlashActiveIndex(prev => Math.max(0, Math.min(prev, chatSlashCommandOptions.length - 1)));
-  }, [chatSlashMenuVisible, chatSlashCommandOptions]);
+    setChatSlashActiveIndex(prev => Math.max(0, Math.min(prev, chatSlashMenuOptions.length - 1)));
+  }, [chatSlashMenuVisible, chatSlashMenuOptions]);
 
   useEffect(() => {
     if (!chatSlashMenuVisible) {
@@ -2439,7 +2472,7 @@ function App() {
       return;
     }
     activeItem.scrollIntoView({ block: 'nearest' });
-  }, [chatSlashMenuVisible, chatSlashActiveIndex, chatSlashCommandOptions]);
+  }, [chatSlashMenuVisible, chatSlashActiveIndex, chatSlashMenuOptions]);
 
   const saveChatComposerDraft = useCallback(
     (draftKey: string, text: string, attachments: ChatAttachment[]) => {
@@ -2491,6 +2524,9 @@ function App() {
   const applyChatSlashCommand = useCallback(
     (command: ChatSlashCommandOption) => {
       const next = `${command.name} `;
+      setChatPromptMenuOpen(false);
+      setChatConfigMenuOptionId('');
+      setChatConfigOverflowOpen(false);
       updateChatComposerText(next);
       window.requestAnimationFrame(() => {
         const input = chatComposerTextareaRef.current;
@@ -2501,27 +2537,21 @@ function App() {
         input.setSelectionRange(next.length, next.length);
       });
     },
-    [updateChatComposerText],
+    [setChatConfigOverflowOpen, updateChatComposerText],
   );
 
-
-  const triggerChatSlashInput = useCallback(() => {
-    const input = chatComposerTextareaRef.current;
-    const current = chatComposerTextRef.current;
-    const start = input?.selectionStart ?? current.length;
-    const end = input?.selectionEnd ?? current.length;
-    const next = `${current.slice(0, start)}/${current.slice(end)}`;
-    updateChatComposerText(next);
+  const openChatPromptMenu = useCallback(() => {
+    setChatConfigMenuOptionId('');
+    setChatConfigOverflowOpen(false);
+    setChatPromptMenuOpen(value => !value);
     window.requestAnimationFrame(() => {
       const target = chatComposerTextareaRef.current;
       if (!target) {
         return;
       }
-      const caret = start + 1;
       target.focus();
-      target.setSelectionRange(caret, caret);
     });
-  }, [updateChatComposerText]);
+  }, [setChatConfigOverflowOpen]);
 
   const getChatDraftGeneration = useCallback((draftKey: string) => {
     const normalizedDraftKey = draftKey.trim();
@@ -3067,20 +3097,6 @@ function App() {
     [],
   );
 
-  useLayoutEffect(() => {
-    if (!isWide || selectedChatConfigOptions.length === 0) {
-      setShowChatConfigLabels(false);
-      return;
-    }
-    const container = chatConfigOptionsRef.current;
-    const measure = chatConfigOptionsMeasureRef.current;
-    if (!container || !measure) {
-      return;
-    }
-    const nextVisible = measure.scrollWidth <= container.clientWidth;
-    setShowChatConfigLabels(prev => (prev === nextVisible ? prev : nextVisible));
-  }, [isWide, windowWidth, selectedChatConfigOptions, chatConfigUpdatingKey]);
-
   useEffect(() => {
     const onPointer = () => {
       setProjectMenuOpen(false);
@@ -3125,27 +3141,42 @@ function App() {
   }, [gitBranchPickerOpen, isWide]);
 
   useEffect(() => {
-    if (!chatComposerActionMenuOpen) return;
+    if (!chatPromptMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
-      if (target && chatComposerActionMenuRef.current?.contains(target)) return;
-      setChatComposerActionMenuOpen(false);
+      if (
+        target &&
+        (chatSlashMenuRef.current?.contains(target) ||
+          chatPromptButtonRef.current?.contains(target))
+      ) {
+        return;
+      }
+      setChatPromptMenuOpen(false);
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [chatComposerActionMenuOpen]);
+  }, [chatPromptMenuOpen]);
 
   useEffect(() => {
-    if (!chatComposerActionMenuOpen) {
-      return;
-    }
+    if (!chatPromptMenuOpen) return;
     if (chatComposerText.length > 0) {
-      setChatComposerActionMenuOpen(false);
+      setChatPromptMenuOpen(false);
     }
-  }, [chatComposerText, chatComposerActionMenuOpen]);
+  }, [chatComposerText, chatPromptMenuOpen]);
 
   useEffect(() => {
-    if (!chatConfigOverflowOpen || isWide) return;
+    if (!chatConfigMenuOptionId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && chatConfigOptionsRef.current?.contains(target)) return;
+      setChatConfigMenuOptionId('');
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [chatConfigMenuOptionId]);
+
+  useEffect(() => {
+    if (!chatConfigOverflowOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (target && chatConfigOverflowRef.current?.contains(target)) return;
@@ -3153,13 +3184,20 @@ function App() {
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [chatConfigOverflowOpen, isWide]);
+  }, [chatConfigOverflowOpen, setChatConfigOverflowOpen]);
 
   useEffect(() => {
-    if (isWide || chatConfigDisplay.overflow.length === 0) {
+    if (chatConfigDisplay.overflow.length === 0) {
       setChatConfigOverflowOpen(false);
     }
-  }, [isWide, chatConfigDisplay.overflow.length, selectedChatId]);
+  }, [chatConfigDisplay.overflow.length, selectedChatId, setChatConfigOverflowOpen]);
+
+  useEffect(() => {
+    if (!chatConfigMenuOptionId) return;
+    if (!chatConfigDisplay.visible.some(option => option.id === chatConfigMenuOptionId)) {
+      setChatConfigMenuOptionId('');
+    }
+  }, [chatConfigMenuOptionId, chatConfigDisplay.visible]);
 
   useEffect(() => {
     workspaceStore.rememberGlobalState({
@@ -7721,8 +7759,76 @@ function App() {
         })
       : '';
     const activeChatSlashCommand = chatSlashMenuVisible
-      ? chatSlashCommandOptions[Math.max(0, Math.min(chatSlashActiveIndex, chatSlashCommandOptions.length - 1))]
+      ? chatSlashMenuOptions[Math.max(0, Math.min(chatSlashActiveIndex, chatSlashMenuOptions.length - 1))]
       : null;
+    const renderChatConfigValueMenu = (option: RegistrySessionConfigOption) => {
+      const optionValues = option.options ?? [];
+      const currentValue = chatConfigCurrentValue(option);
+      if (optionValues.length === 0) {
+        return null;
+      }
+      return (
+        <div className="chat-config-value-menu" role="menu">
+          {optionValues.map(item => {
+            const selected = item.value === currentValue;
+            return (
+              <button
+                key={`${option.id}:${item.value}`}
+                type="button"
+                className={`chat-config-value-option${selected ? ' selected' : ''}`}
+                role="menuitemradio"
+                aria-checked={selected}
+                onClick={() => {
+                  setChatConfigMenuOptionId('');
+                  setChatConfigOverflowOpen(false);
+                  handleChatConfigOptionChange(option, item.value).catch(() => undefined);
+                }}
+              >
+                <span>{item.name || item.value}</span>
+                {selected ? (
+                  <span className="codicon codicon-check" aria-hidden="true" />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      );
+    };
+    const renderChatConfigPill = (option: RegistrySessionConfigOption) => {
+      const optionValues = option.options ?? [];
+      const optionLabel = option.name || option.id;
+      const currentLabel = chatConfigCurrentLabel(option);
+      const updating =
+        chatConfigUpdatingKey ===
+        `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
+      const open = chatConfigMenuOptionId === option.id;
+      return (
+        <div key={option.id} className="chat-config-item">
+          <button
+            type="button"
+            className="chat-config-pill"
+            disabled={updating || optionValues.length === 0}
+            title={optionLabel}
+            aria-label={optionLabel}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => {
+              setChatPromptMenuOpen(false);
+              setChatConfigOverflowOpen(false);
+              setChatConfigMenuOptionId(current => (current === option.id ? '' : option.id));
+            }}
+          >
+            <span
+              className={`codicon ${updating ? 'codicon-loading codicon-modifier-spin' : chatConfigIconClass(option)}`}
+              aria-hidden="true"
+            />
+            <span className="chat-config-pill-value">{currentLabel}</span>
+            <span className="codicon codicon-chevron-down" aria-hidden="true" />
+          </button>
+          {open ? renderChatConfigValueMenu(option) : null}
+        </div>
+      );
+    };
 
     if (tab === 'chat') {
       return (
@@ -7777,392 +7883,298 @@ function App() {
                 );
               }}
             />
-            {chatAttachments.length > 0 ? (
-              <div className="chat-attachment-preview-list">
-                {chatAttachments.map(attachment => (
-                  <div key={attachment.id} className="chat-attachment-preview">
-                    <img
-                      className="chat-attachment-thumb"
-                      src={`data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`}
-                      alt={attachment.name || 'attachment preview'}
-                    />
-                    <div className="chat-attachment-meta">
-                      <div className="chat-attachment-name">{attachment.name}</div>
-                    </div>
-                    <button
-                      type="button"
-                      className="chat-attachment-remove"
-                      onClick={() => removeChatAttachment(attachment.id)}
-                      title="Remove image"
-                      aria-label="Remove image"
-                    >
-                      <span className="codicon codicon-close" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <div className="chat-composer-main">
-              <button
-                type="button"
-                className="chat-action-button chat-slash-trigger"
-                onClick={triggerChatSlashInput}
-                title="Insert slash"
-                aria-label="Insert slash"
-              >/</button>
-              <div className="chat-composer-input-shell">
-                <textarea
-                  ref={chatComposerTextareaRef}
-                  rows={1}
-                  className={`chat-composer-input${chatComposerText.length === 0 ? ' has-inline-action' : ''}`}
-                  value={chatComposerText}
-                  onChange={event => updateChatComposerText(event.target.value)}
-                  onPaste={event => {
-                    if (!supportsChatClipboardImages) {
-                      return;
-                    }
-                    const attachmentDraftKey = currentChatDraftKeyRef.current;
-                    const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
-                    const items = Array.from(event.clipboardData?.items ?? []);
-                    const imageItems = items.filter(item =>
-                      item.type.toLowerCase().startsWith('image/'),
-                    );
-                    if (imageItems.length === 0) {
-                      return;
-                    }
-                    event.preventDefault();
-                    beginChatAttachmentRead(attachmentDraftKey);
-                    let readError = '';
-                    Promise.all(
-                      imageItems.map(async (item, index) => {
-                        const file = item.getAsFile();
-                        if (!file) {
-                          if (!readError) {
-                            readError = 'Clipboard image is unavailable';
-                          }
-                          return null;
-                        }
-                        try {
-                          return await readChatAttachmentFile(file, `pasted-image-${index + 1}.png`);
-                        } catch (err) {
-                          if (!readError) {
-                            readError = err instanceof Error ? err.message : String(err);
-                          }
-                          return null;
-                        }
-                      }),
-                    )
-                      .then(nextAttachments => {
-                        appendChatAttachments(
-                          nextAttachments.filter(
-                            (attachment): attachment is ChatAttachment => !!attachment,
-                          ),
-                          attachmentDraftKey,
-                          attachmentDraftGeneration,
-                        );
-                        if (readError) {
-                          setError(readError);
-                        }
-                      })
-                      .catch(err =>
-                        setError(err instanceof Error ? err.message : String(err)),
-                      )
-                      .finally(() => {
-                        endChatAttachmentRead(attachmentDraftKey);
-                      });
-                  }}
-                  onKeyDown={event => {
-                    if (chatSlashMenuVisible) {
-                      if (event.key === 'ArrowDown') {
-                        event.preventDefault();
-                        setChatSlashActiveIndex(prev => {
-                          if (chatSlashCommandOptions.length === 0) {
-                            return 0;
-                          }
-                          return (prev + 1) % chatSlashCommandOptions.length;
-                        });
-                        return;
-                      }
-                      if (event.key === 'ArrowUp') {
-                        event.preventDefault();
-                        setChatSlashActiveIndex(prev => {
-                          if (chatSlashCommandOptions.length === 0) {
-                            return 0;
-                          }
-                          return (prev - 1 + chatSlashCommandOptions.length) % chatSlashCommandOptions.length;
-                        });
-                        return;
-                      }
-                      if (event.key === 'Enter' && !event.altKey && !event.nativeEvent.isComposing) {
-                        if (!activeChatSlashCommand) {
-                          return;
-                        }
-                        event.preventDefault();
-                        applyChatSlashCommand(activeChatSlashCommand);
-                        return;
-                      }
-                    }
-                    if (!isWindowsPlatform) {
-                      return;
-                    }
-                    if (event.key !== 'Enter' || event.altKey || event.nativeEvent.isComposing) {
-                      return;
-                    }
-                    event.preventDefault();
-                    if (chatSending || chatAttachmentReadPending) {
-                      return;
-                    }
-                    sendChatMessage().catch(() => undefined);
-                  }}
-                  placeholder="Send a message..."
-                />
-                {chatSlashMenuVisible ? (
-                  <div ref={chatSlashMenuRef} className="chat-slash-menu" role="listbox" aria-label="Available skills">
-                    {chatSlashCommandOptions.map((option, index) => {
-                      const selected = index === chatSlashActiveIndex;
-                      return (
-                        <button
-                          key={option.name}
-                          type="button"
-                          className={`chat-slash-item${selected ? ' active' : ''}`}
-                          role="option"
-                          aria-selected={selected}
-                          onMouseEnter={() => setChatSlashActiveIndex(index)}
-                          onMouseDown={event => event.preventDefault()}
-                          onClick={() => applyChatSlashCommand(option)}
-                        >
-                          <span className="chat-slash-name">{option.name}</span>
-                          {option.description ? (
-                            <span className="chat-slash-description">{option.description}</span>
-                          ) : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : null}
-                {chatComposerText.length === 0 ? (
-                  <div
-                    ref={chatComposerActionMenuRef}
-                    className={`chat-action-menu chat-action-menu-inline${chatComposerActionMenuOpen ? ' open' : ''}`}
-                  >
-                    <button
-                      type="button"
-                      className="chat-action-menu-inline-toggle"
-                      onClick={() =>
-                        setChatComposerActionMenuOpen(prevOpen => !prevOpen)
-                      }
-                      title="Media actions"
-                      aria-label="Media actions"
-                      aria-haspopup="menu"
-                      aria-expanded={chatComposerActionMenuOpen}
-                    >
-                      <span className="codicon codicon-chevron-down" />
-                    </button>
-                    {chatComposerActionMenuOpen ? (
-                      <div className="chat-action-menu-panel" role="menu">
-                        <button
-                          type="button"
-                          className="chat-action-menu-item"
-                          role="menuitem"
-                          onClick={() => {
-                            setChatComposerActionMenuOpen(false);
-                            setError('Voice input is not available yet.');
-                          }}
-                        >
-                          <span className="codicon codicon-mic" />
-                          <span>Voice</span>
-                        </button>
-                        <button
-                          type="button"
-                          className="chat-action-menu-item"
-                          role="menuitem"
-                          onClick={() => {
-                            setChatComposerActionMenuOpen(false);
-                            chatFileInputRef.current?.click();
-                          }}
-                        >
-                          <span className="codicon codicon-file-media" />
-                          <span>Photo Library</span>
-                        </button>
+            <div className="chat-composer-frame">
+              {chatAttachments.length > 0 ? (
+                <div className="chat-attachment-preview-list">
+                  {chatAttachments.map(attachment => (
+                    <div key={attachment.id} className="chat-attachment-preview">
+                      <img
+                        className="chat-attachment-thumb"
+                        src={`data:${attachment.mimeType || 'image/png'};base64,${attachment.data}`}
+                        alt={attachment.name || 'attachment preview'}
+                      />
+                      <div className="chat-attachment-meta">
+                        <div className="chat-attachment-name">{attachment.name}</div>
                       </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                className="chat-send-button"
-                onClick={() => sendChatMessage().catch(() => undefined)}
-                disabled={chatSending || chatAttachmentReadPending}
-                title="Send"
-                aria-label="Send message"
-              >
-                <span
-                  className="codicon codicon-send"
-                />
-              </button>
-            </div>
-            {selectedChatConfigOptions.length > 0 ? (
-              <div className="chat-config-options-wrap">
-                <div className="chat-config-options-shell">
-                  <div ref={chatConfigOptionsRef} className="chat-config-options">
-                    {chatConfigOptions.map(option => {
-                      const optionValues = option.options ?? [];
-                      const currentValue =
-                        option.currentValue || optionValues[0]?.value || '';
-                      const hasChoices = optionValues.length > 0;
-                      const updating =
-                        chatConfigUpdatingKey ===
-                        `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
-                      const optionLabel = option.name || option.id;
-                      return (
-                        <div key={option.id} className="chat-config-item">
-                          {isWide && showChatConfigLabels ? (
-                            <span className="chat-config-item-label" title={optionLabel}>
-                              {optionLabel}
-                            </span>
-                          ) : null}
-                          <select
-                            className="chat-config-select"
-                            value={currentValue}
-                            disabled={updating || !hasChoices}
-                            title={option.name || option.id}
-                            aria-label={option.name || option.id}
-                            onChange={event => {
-                              handleChatConfigOptionChange(
-                                option,
-                                event.target.value,
-                              ).catch(() => undefined);
-                            }}
-                          >
-                            {!optionValues.some(item => item.value === currentValue) &&
-                            currentValue ? (
-                              <option value={currentValue}>{currentValue}</option>
-                            ) : null}
-                            {optionValues.map(item => (
-                              <option
-                                key={`${option.id}:${item.value}`}
-                                value={item.value}
-                              >
-                                {item.name || item.value}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {!isWide && chatConfigOverflowOptions.length > 0 ? (
-                    <div ref={chatConfigOverflowRef} className="chat-config-overflow-anchor">
                       <button
                         type="button"
-                        className="chat-config-overflow-button"
-                        aria-label={`Show ${chatConfigOverflowOptions.length} more config options`}
-                        aria-expanded={chatConfigOverflowOpen}
-                        title="More config options"
-                        onClick={() => setChatConfigOverflowOpen(prev => !prev)}
+                        className="chat-attachment-remove"
+                        onClick={() => removeChatAttachment(attachment.id)}
+                        title="Remove image"
+                        aria-label="Remove image"
                       >
-                        <span className="codicon codicon-settings-gear" aria-hidden="true" />
-                        <span className="codicon codicon-chevron-down" aria-hidden="true" />
+                        <span className="codicon codicon-close" />
                       </button>
-                      {chatConfigOverflowOpen ? (
-                        <div className="chat-config-overflow-menu" aria-label="More config options">
-                          {chatConfigOverflowOptions.map(option => {
-                            const optionValues = option.options ?? [];
-                            const currentValue =
-                              option.currentValue || optionValues[0]?.value || '';
-                            const hasChoices = optionValues.length > 0;
-                            const updating =
-                              chatConfigUpdatingKey ===
-                              `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
-                            const optionLabel = option.name || option.id;
-                            return (
-                              <div key={`overflow:${option.id}`} className="chat-config-item">
-                                <span className="chat-config-item-label" title={optionLabel}>
-                                  {optionLabel}
-                                </span>
-                                <select
-                                  className="chat-config-select"
-                                  value={currentValue}
-                                  disabled={updating || !hasChoices}
-                                  title={optionLabel}
-                                  aria-label={optionLabel}
-                                  onChange={event => {
-                                    handleChatConfigOptionChange(
-                                      option,
-                                      event.target.value,
-                                    ).catch(() => undefined);
-                                  }}
-                                >
-                                  {!optionValues.some(item => item.value === currentValue) &&
-                                  currentValue ? (
-                                    <option value={currentValue}>{currentValue}</option>
-                                  ) : null}
-                                  {optionValues.map(item => (
-                                    <option
-                                      key={`overflow:${option.id}:${item.value}`}
-                                      value={item.value}
-                                    >
-                                      {item.name || item.value}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            );
-                          })}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="chat-composer-input-row">
+                {chatComposerText.length === 0 ? (
+                  <button
+                    ref={chatPromptButtonRef}
+                    type="button"
+                    className="chat-composer-prompt-trigger"
+                    onClick={openChatPromptMenu}
+                    title="Commands"
+                    aria-label="Commands"
+                    aria-haspopup="listbox"
+                    aria-expanded={chatPromptMenuOpen}
+                  >
+                    {'>'}
+                  </button>
+                ) : null}
+                <div className="chat-composer-input-shell">
+                  <textarea
+                    ref={chatComposerTextareaRef}
+                    rows={1}
+                    className="chat-composer-input"
+                    value={chatComposerText}
+                    onChange={event => updateChatComposerText(event.target.value)}
+                    onPaste={event => {
+                      if (!supportsChatClipboardImages) {
+                        return;
+                      }
+                      const attachmentDraftKey = currentChatDraftKeyRef.current;
+                      const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);
+                      const items = Array.from(event.clipboardData?.items ?? []);
+                      const imageItems = items.filter(item =>
+                        item.type.toLowerCase().startsWith('image/'),
+                      );
+                      if (imageItems.length === 0) {
+                        return;
+                      }
+                      event.preventDefault();
+                      beginChatAttachmentRead(attachmentDraftKey);
+                      let readError = '';
+                      Promise.all(
+                        imageItems.map(async (item, index) => {
+                          const file = item.getAsFile();
+                          if (!file) {
+                            if (!readError) {
+                              readError = 'Clipboard image is unavailable';
+                            }
+                            return null;
+                          }
+                          try {
+                            return await readChatAttachmentFile(file, `pasted-image-${index + 1}.png`);
+                          } catch (err) {
+                            if (!readError) {
+                              readError = err instanceof Error ? err.message : String(err);
+                            }
+                            return null;
+                          }
+                        }),
+                      )
+                        .then(nextAttachments => {
+                          appendChatAttachments(
+                            nextAttachments.filter(
+                              (attachment): attachment is ChatAttachment => !!attachment,
+                            ),
+                            attachmentDraftKey,
+                            attachmentDraftGeneration,
+                          );
+                          if (readError) {
+                            setError(readError);
+                          }
+                        })
+                        .catch(err =>
+                          setError(err instanceof Error ? err.message : String(err)),
+                        )
+                        .finally(() => {
+                          endChatAttachmentRead(attachmentDraftKey);
+                        });
+                    }}
+                    onKeyDown={event => {
+                      if (chatSlashMenuVisible) {
+                        if (event.key === 'ArrowDown') {
+                          event.preventDefault();
+                          setChatSlashActiveIndex(prev => {
+                            if (chatSlashMenuOptions.length === 0) {
+                              return 0;
+                            }
+                            return (prev + 1) % chatSlashMenuOptions.length;
+                          });
+                          return;
+                        }
+                        if (event.key === 'ArrowUp') {
+                          event.preventDefault();
+                          setChatSlashActiveIndex(prev => {
+                            if (chatSlashMenuOptions.length === 0) {
+                              return 0;
+                            }
+                            return (prev - 1 + chatSlashMenuOptions.length) % chatSlashMenuOptions.length;
+                          });
+                          return;
+                        }
+                        if (event.key === 'Enter' && !event.altKey && !event.nativeEvent.isComposing) {
+                          if (!activeChatSlashCommand) {
+                            return;
+                          }
+                          event.preventDefault();
+                          applyChatSlashCommand(activeChatSlashCommand);
+                          return;
+                        }
+                      }
+                      if (!isWindowsPlatform) {
+                        return;
+                      }
+                      if (event.key !== 'Enter' || event.altKey || event.nativeEvent.isComposing) {
+                        return;
+                      }
+                      event.preventDefault();
+                      if (chatSending || chatAttachmentReadPending) {
+                        return;
+                      }
+                      sendChatMessage().catch(() => undefined);
+                    }}
+                    placeholder="Send a message..."
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="chat-send-button"
+                  onClick={() => sendChatMessage().catch(() => undefined)}
+                  disabled={chatSending || chatAttachmentReadPending}
+                  title="Send"
+                  aria-label="Send message"
+                >
+                  <span className="codicon codicon-send" />
+                </button>
+              </div>
+              {chatSlashMenuVisible ? (
+                <div ref={chatSlashMenuRef} className="chat-slash-menu" role="listbox" aria-label="Available skills">
+                  {chatSlashMenuOptions.map((option, index) => {
+                    const selected = index === chatSlashActiveIndex;
+                    return (
+                      <button
+                        key={option.name}
+                        type="button"
+                        className={`chat-slash-item${selected ? ' active' : ''}`}
+                        role="option"
+                        aria-selected={selected}
+                        onMouseEnter={() => setChatSlashActiveIndex(index)}
+                        onMouseDown={event => event.preventDefault()}
+                        onClick={() => applyChatSlashCommand(option)}
+                      >
+                        <span className="chat-slash-name">{option.name}</span>
+                        {option.description ? (
+                          <span className="chat-slash-description">{option.description}</span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+              <div className="chat-composer-toolbar">
+                <div className="chat-composer-tools">
+                  <button
+                    type="button"
+                    className="chat-tool-button chat-photo-button"
+                    onClick={() => {
+                      setChatPromptMenuOpen(false);
+                      setChatConfigMenuOptionId('');
+                      setChatConfigOverflowOpen(false);
+                      chatFileInputRef.current?.click();
+                    }}
+                    title="Image"
+                    aria-label="Attach image"
+                  >
+                    <span className="codicon codicon-file-media" />
+                  </button>
+                  <button
+                    type="button"
+                    className="chat-tool-button chat-voice-button"
+                    onClick={() => {
+                      setChatPromptMenuOpen(false);
+                      setChatConfigMenuOptionId('');
+                      setChatConfigOverflowOpen(false);
+                      setError('Voice input is not available yet.');
+                    }}
+                    title="Voice"
+                    aria-label="Voice input"
+                  >
+                    <span className="codicon codicon-mic" />
+                  </button>
+                </div>
+                {selectedChatConfigOptions.length > 0 ? (
+                  <div className="chat-config-options-wrap">
+                    <div className="chat-config-options-shell">
+                      <div ref={chatConfigOptionsRef} className="chat-config-options">
+                        {chatConfigOptions.map(option => renderChatConfigPill(option))}
+                      </div>
+                      {chatConfigOverflowOptions.length > 0 ? (
+                        <div ref={chatConfigOverflowRef} className="chat-config-overflow-anchor">
+                          <button
+                            type="button"
+                            className="chat-config-overflow-button"
+                            aria-label={`Show ${chatConfigOverflowOptions.length} more config options`}
+                            aria-expanded={chatConfigOverflowOpen}
+                            title="More config options"
+                            onClick={() => {
+                              setChatPromptMenuOpen(false);
+                              setChatConfigMenuOptionId('');
+                              setChatConfigOverflowOpen(prev => !prev);
+                            }}
+                          >
+                            <span className="codicon codicon-ellipsis" aria-hidden="true" />
+                            <span className="codicon codicon-chevron-down" aria-hidden="true" />
+                          </button>
+                          {chatConfigOverflowOpen ? (
+                            <div className="chat-config-overflow-menu" aria-label="More config options">
+                              {chatConfigOverflowOptions.map(option => {
+                                const optionValues = option.options ?? [];
+                                const currentValue = chatConfigCurrentValue(option);
+                                const updating =
+                                  chatConfigUpdatingKey ===
+                                  `${selectedChatSession?.sessionId ?? ''}:${option.id}`;
+                                const optionLabel = option.name || option.id;
+                                return (
+                                  <div key={`overflow:${option.id}`} className="chat-config-overflow-group">
+                                    <div className="chat-config-item-label" title={optionLabel}>
+                                      {optionLabel}
+                                    </div>
+                                    <div className="chat-config-overflow-values">
+                                      {optionValues.map(item => {
+                                        const selected = item.value === currentValue;
+                                        return (
+                                          <button
+                                            key={`overflow:${option.id}:${item.value}`}
+                                            type="button"
+                                            className={`chat-config-value-option${selected ? ' selected' : ''}`}
+                                            disabled={updating}
+                                            aria-pressed={selected}
+                                            onClick={() => {
+                                              setChatConfigOverflowOpen(false);
+                                              handleChatConfigOptionChange(
+                                                option,
+                                                item.value,
+                                              ).catch(() => undefined);
+                                            }}
+                                          >
+                                            <span>{item.name || item.value}</span>
+                                            {selected ? (
+                                              <span className="codicon codicon-check" aria-hidden="true" />
+                                            ) : null}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
-                  ) : null}
-                </div>
-                {isWide ? (
-                  <div
-                    ref={chatConfigOptionsMeasureRef}
-                    className="chat-config-options chat-config-options-measure"
-                    aria-hidden="true"
-                  >
-                    {chatConfigOptions.map(option => {
-                      const optionValues = option.options ?? [];
-                      const currentValue =
-                        option.currentValue || optionValues[0]?.value || '';
-                      const hasChoices = optionValues.length > 0;
-                      const optionLabel = option.name || option.id;
-                      return (
-                        <div key={`measure:${option.id}`} className="chat-config-item">
-                          <span className="chat-config-item-label" title={optionLabel}>
-                            {optionLabel}
-                          </span>
-                          <select
-                            className="chat-config-select"
-                            value={currentValue}
-                            disabled={!hasChoices}
-                            title={option.name || option.id}
-                            aria-hidden="true"
-                            onChange={() => undefined}
-                          >
-                            {!optionValues.some(item => item.value === currentValue) &&
-                            currentValue ? (
-                              <option value={currentValue}>{currentValue}</option>
-                            ) : null}
-                            {optionValues.map(item => (
-                              <option
-                                key={`measure:${option.id}:${item.value}`}
-                                value={item.value}
-                              >
-                                {item.name || item.value}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      );
-                    })}
                   </div>
                 ) : null}
               </div>
-            ) : null}
-            {chatConfigFeedback ? (
-              <div className="chat-config-feedback muted">{chatConfigFeedback}</div>
-            ) : null}
+              {chatConfigFeedback ? (
+                <div className="chat-config-feedback muted">{chatConfigFeedback}</div>
+              ) : null}
+            </div>
           </div>
           </div>
         </div>
