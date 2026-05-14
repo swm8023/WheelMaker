@@ -6626,28 +6626,202 @@ function App() {
     );
   };
 
+  const renderSettingsContent = (showSectionTitle: boolean) => (
+    <>
+      {showSectionTitle ? <div className="section-title">SETTINGS</div> : null}
+      <div className="list settings-list">
+        <label className="switch-row sidebar-setting-row">
+          <span>Dark Mode</span>
+          <input
+            type="checkbox"
+            checked={themeMode === 'dark'}
+            onChange={e =>
+              setThemeMode(e.target.checked ? 'dark' : 'light')
+            }
+          />
+        </label>
+        <label className="switch-row sidebar-setting-row">
+          <span>Hide Tool Calls</span>
+          <input
+            type="checkbox"
+            checked={hideToolCalls}
+            onChange={e => setHideToolCalls(e.target.checked)}
+          />
+        </label>
+        <label className="switch-row sidebar-setting-row">
+          <span>Code Theme</span>
+          <select
+            className="sidebar-setting-select"
+            value={codeTheme}
+            onChange={event => {
+              const next = event.target.value;
+              if (isCodeThemeId(next)) setCodeTheme(next);
+            }}
+          >
+            <option
+              key={CODE_THEME_OPTIONS[0].id}
+              value={CODE_THEME_OPTIONS[0].id}
+            >
+              {CODE_THEME_OPTIONS[0].label}
+            </option>
+            {CODE_THEME_OPTION_GROUPS.map(group => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map(item => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label className="switch-row sidebar-setting-row">
+          <span>Code Font</span>
+          <select
+            className="sidebar-setting-select"
+            value={codeFont}
+            onChange={event => {
+              const next = event.target.value;
+              if (isCodeFontId(next)) setCodeFont(next);
+            }}
+          >
+            {CODE_FONT_OPTIONS.map(item => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="switch-row sidebar-setting-row">
+          <span>Font Size</span>
+          <select
+            className="sidebar-setting-select"
+            value={String(codeFontSize)}
+            onChange={event => {
+              setCodeFontSize(
+                clampCodeFontSize(Number(event.target.value)),
+              );
+            }}
+          >
+            {CODE_FONT_SIZE_OPTIONS.map(size => (
+              <option key={size} value={size}>
+                {size}px
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="switch-row sidebar-setting-row">
+          <span>Line Height</span>
+          <select
+            className="sidebar-setting-select"
+            value={String(codeLineHeight)}
+            onChange={event => {
+              setCodeLineHeight(
+                clampCodeLineHeight(Number(event.target.value)),
+              );
+            }}
+          >
+            {CODE_LINE_HEIGHT_OPTIONS.map(v => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="switch-row sidebar-setting-row">
+          <span>Tab Size</span>
+          <select
+            className="sidebar-setting-select"
+            value={String(codeTabSize)}
+            onChange={event => {
+              setCodeTabSize(
+                clampCodeTabSize(Number(event.target.value)),
+              );
+            }}
+          >
+            {CODE_TAB_SIZE_OPTIONS.map(v => (
+              <option key={v} value={v}>
+                {v}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <button
+          type="button"
+          className="sidebar-clear-cache-btn"
+          onClick={openDatabasePanel}
+        >
+          Database
+        </button>
+        <button
+          type="button"
+          className="sidebar-clear-cache-btn"
+          onClick={clearLocalCache}
+        >
+          Clear Local Cache (Keep Token)
+        </button>
+        {databasePanelOpen ? (
+          <div className="database-panel">
+            <div className="database-panel-header">
+              <strong>Local Database</strong>
+              <div className="database-panel-actions">
+                <button
+                  type="button"
+                  className="git-section-btn"
+                  onClick={exportDatabaseDump}
+                  disabled={databaseLoading || !!databaseError || !databaseDumpText}
+                  title="Export current database dump"
+                >
+                  Export
+                </button>
+                <button
+                  type="button"
+                  className="git-section-btn"
+                  onClick={() => {
+                    setDatabasePanelOpen(false);
+                    setDatabaseError('');
+                  }}
+                  aria-label="Close database panel"
+                >
+                  <span className="codicon codicon-close" />
+                </button>
+              </div>
+            </div>
+            {databaseLoading ? (
+              <div className="muted block">Loading database...</div>
+            ) : null}
+            {databaseError ? (
+              <div className="error">Database error: {databaseError}</div>
+            ) : null}
+            {!databaseLoading && !databaseError ? (
+              <pre className="database-dump">{databaseDumpText}</pre>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+
   const renderSidebar = () => {
 
     return (
       <>
         {!isWide ? (
           <div className="drawer-project-header">
+            <button
+              type="button"
+              className="drawer-settings-icon-btn"
+              onClick={() => {
+                setProjectMenuOpen(false);
+                setSidebarSettingsOpen(true);
+              }}
+              title="Open settings"
+              aria-label="Open settings"
+            >
+              <span className="codicon codicon-settings-gear" />
+            </button>
             <div className="drawer-project-pill">
-              <button
-                type="button"
-                className="drawer-settings-icon-btn"
-                onClick={() => setSidebarSettingsOpen(value => !value)}
-                title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
-                aria-label={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
-              >
-                <span
-                  className={`codicon ${
-                    sidebarSettingsOpen
-                      ? 'codicon-arrow-left'
-                      : 'codicon-settings-gear'
-                  }`}
-                />
-              </button>
               <div
                 className="project-wrap"
                 onPointerDown={event => event.stopPropagation()}
@@ -6678,184 +6852,7 @@ function App() {
           </div>
         ) : null}
         <div className="sidebar-scroll">
-          {sidebarSettingsOpen ? (
-            <>
-              <div className="section-title">SETTINGS</div>
-              <div className="list">
-                <label className="switch-row sidebar-setting-row">
-                  <span>Dark Mode</span>
-                  <input
-                    type="checkbox"
-                    checked={themeMode === 'dark'}
-                    onChange={e =>
-                      setThemeMode(e.target.checked ? 'dark' : 'light')
-                    }
-                  />
-                </label>
-                <label className="switch-row sidebar-setting-row">
-                  <span>Hide Tool Calls</span>
-                  <input
-                    type="checkbox"
-                    checked={hideToolCalls}
-                    onChange={e => setHideToolCalls(e.target.checked)}
-                  />
-                </label>
-                <label className="switch-row sidebar-setting-row">
-                  <span>Code Theme</span>
-                  <select
-                    className="sidebar-setting-select"
-                    value={codeTheme}
-                    onChange={event => {
-                      const next = event.target.value;
-                      if (isCodeThemeId(next)) setCodeTheme(next);
-                    }}
-                  >
-                    <option
-                      key={CODE_THEME_OPTIONS[0].id}
-                      value={CODE_THEME_OPTIONS[0].id}
-                    >
-                      {CODE_THEME_OPTIONS[0].label}
-                    </option>
-                    {CODE_THEME_OPTION_GROUPS.map(group => (
-                      <optgroup key={group.label} label={group.label}>
-                        {group.options.map(item => (
-                          <option key={item.id} value={item.id}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </label>
-                <label className="switch-row sidebar-setting-row">
-                  <span>Code Font</span>
-                  <select
-                    className="sidebar-setting-select"
-                    value={codeFont}
-                    onChange={event => {
-                      const next = event.target.value;
-                      if (isCodeFontId(next)) setCodeFont(next);
-                    }}
-                  >
-                    {CODE_FONT_OPTIONS.map(item => (
-                      <option key={item.id} value={item.id}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="switch-row sidebar-setting-row">
-                  <span>Font Size</span>
-                  <select
-                    className="sidebar-setting-select"
-                    value={String(codeFontSize)}
-                    onChange={event => {
-                      setCodeFontSize(
-                        clampCodeFontSize(Number(event.target.value)),
-                      );
-                    }}
-                  >
-                    {CODE_FONT_SIZE_OPTIONS.map(size => (
-                      <option key={size} value={size}>
-                        {size}px
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="switch-row sidebar-setting-row">
-                  <span>Line Height</span>
-                  <select
-                    className="sidebar-setting-select"
-                    value={String(codeLineHeight)}
-                    onChange={event => {
-                      setCodeLineHeight(
-                        clampCodeLineHeight(Number(event.target.value)),
-                      );
-                    }}
-                  >
-                    {CODE_LINE_HEIGHT_OPTIONS.map(v => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="switch-row sidebar-setting-row">
-                  <span>Tab Size</span>
-                  <select
-                    className="sidebar-setting-select"
-                    value={String(codeTabSize)}
-                    onChange={event => {
-                      setCodeTabSize(
-                        clampCodeTabSize(Number(event.target.value)),
-                      );
-                    }}
-                  >
-                    {CODE_TAB_SIZE_OPTIONS.map(v => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <button
-                  type="button"
-                  className="sidebar-clear-cache-btn"
-                  onClick={openDatabasePanel}
-                >
-                  Database
-                </button>
-                <button
-                  type="button"
-                  className="sidebar-clear-cache-btn"
-                  onClick={clearLocalCache}
-                >
-                  Clear Local Cache (Keep Token)
-                </button>
-                {databasePanelOpen ? (
-                  <div className="database-panel">
-                    <div className="database-panel-header">
-                      <strong>Local Database</strong>
-                      <div className="database-panel-actions">
-                        <button
-                          type="button"
-                          className="git-section-btn"
-                          onClick={exportDatabaseDump}
-                          disabled={databaseLoading || !!databaseError || !databaseDumpText}
-                          title="Export current database dump"
-                        >
-                          Export
-                        </button>
-                        <button
-                          type="button"
-                          className="git-section-btn"
-                          onClick={() => {
-                            setDatabasePanelOpen(false);
-                            setDatabaseError('');
-                          }}
-                          aria-label="Close database panel"
-                        >
-                          <span className="codicon codicon-close" />
-                        </button>
-                      </div>
-                    </div>
-                    {databaseLoading ? (
-                      <div className="muted block">Loading database...</div>
-                    ) : null}
-                    {databaseError ? (
-                      <div className="error">Database error: {databaseError}</div>
-                    ) : null}
-                    {!databaseLoading && !databaseError ? (
-                      <pre className="database-dump">{databaseDumpText}</pre>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </>
-          ) : (
-            renderSidebarMain()
-          )}
+          {isWide && sidebarSettingsOpen ? renderSettingsContent(true) : renderSidebarMain()}
         </div>
         {isWide ? (
           <div className="sidebar-footer">
@@ -8163,11 +8160,40 @@ function App() {
     </div>
   ) : null;
 
+  const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (
+    <div
+      className="mobile-settings-screen"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+    >
+      <div className="mobile-settings-nav">
+        <button
+          type="button"
+          className="mobile-settings-back"
+          onClick={() => setSidebarSettingsOpen(false)}
+          aria-label="Back to drawer"
+          title="Back"
+        >
+          <span className="codicon codicon-arrow-left" />
+        </button>
+        <div className="mobile-settings-title">Settings</div>
+        <div aria-hidden="true" />
+      </div>
+      <div className="mobile-settings-scroll">
+        <div className="mobile-settings-group">
+          {renderSettingsContent(false)}
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className={`workspace theme-${themeMode}${!isWide ? ' narrow-shell' : ''}`}>
       <style>{setiFontCss}</style>
       {wideHeader}
       {floatingControlStack}
+      {mobileSettingsScreen}
 
       <div className="body">
         {isWide && !sidebarCollapsed ? (

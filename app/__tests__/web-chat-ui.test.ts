@@ -166,8 +166,19 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="drawer-project-pill"');
     expect(mainTsx).toContain('className="drawer-settings-icon-btn"');
     expect(mainTsx).toMatch(
-      /className="drawer-project-pill"[\s\S]*?className="drawer-settings-icon-btn"[\s\S]*?className="project-wrap"/,
+      /className="drawer-project-header"[\s\S]*?className="drawer-settings-icon-btn"[\s\S]*?className="drawer-project-pill"[\s\S]*?className="project-wrap"/,
     );
+    expect(mainTsx).toContain('setSidebarSettingsOpen(true);');
+    expect(mainTsx).toMatch(
+      /\{isWide && sidebarSettingsOpen \? renderSettingsContent\(true\) : renderSidebarMain\(\)\}/,
+    );
+    expect(mainTsx).toContain('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (');
+    expect(mainTsx).toContain('className="mobile-settings-screen"');
+    expect(mainTsx).toContain('aria-modal="true"');
+    expect(mainTsx).toContain('className="mobile-settings-nav"');
+    expect(mainTsx).toContain('className="mobile-settings-back"');
+    expect(mainTsx).toContain('<div className="mobile-settings-title">Settings</div>');
+    expect(mainTsx).toContain('className="mobile-settings-group"');
     expect(mainTsx).toMatch(
       /\{isWide \? \(\s*<div className="sidebar-footer">/,
     );
@@ -238,6 +249,12 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.drawer-project-header {');
     expect(stylesCss).toContain('.drawer-project-pill {');
     expect(stylesCss).toContain('.drawer-settings-icon-btn {');
+    expect(stylesCss).toContain('.mobile-settings-screen {');
+    expect(stylesCss).toContain('.mobile-settings-nav {');
+    expect(stylesCss).toContain('.mobile-settings-back {');
+    expect(stylesCss).toContain('.mobile-settings-group {');
+    expect(stylesCss).toContain('.mobile-settings-screen .sidebar-setting-row {');
+    expect(stylesCss).toContain('.mobile-settings-screen .sidebar-clear-cache-btn {');
     expect(stylesCss).not.toContain('.project-menu-state');
     expect(stylesCss).toMatch(
       /\.project-menu-hub \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 18%, var\(--panel-2\)\);/,
