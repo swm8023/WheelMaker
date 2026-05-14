@@ -946,6 +946,15 @@ function stashJSONCellValue(raw) {
   return key;
 }
 
+function displayDBColumnName(tableName, columnName) {
+  const table = String(tableName || '').toLowerCase();
+  const col = String(columnName || '').toLowerCase();
+  if (table === 'sessions' && col === 'session_sync_json') {
+    return 'View JSON';
+  }
+  return String(columnName || '');
+}
+
 function openJSONModal(key, columnName, tableName) {
   const body = $('json-modal-body');
   const modal = $('json-modal');
@@ -1370,7 +1379,7 @@ function renderDBTables(db) {
     } else {
       html += '<div class="db-table-wrap"><table class="reg-table"><thead><tr>';
       for (const col of t.columns) {
-        html += '<th>' + esc(col) + '</th>';
+        html += '<th>' + esc(displayDBColumnName(t.name, col)) + '</th>';
       }
       html += '</tr></thead><tbody>';
       for (const row of t.rows) {
@@ -1383,6 +1392,7 @@ function renderDBTables(db) {
           const isSessionTurnsTable = tableName === 'session_turns';
           const colName = col.toLowerCase();
           const isAgentJSON = isSessionsTable && colName === 'agent_json';
+          const isSessionSyncJSON = isSessionsTable && colName === 'session_sync_json';
           const isTurnUpdateJSON = isSessionTurnsTable && colName === 'update_json';
           const isJSONColumn = colName.endsWith('_json');
           const isStatus = isSessionsTable && colName === 'status';
@@ -1425,7 +1435,8 @@ function renderDBTables(db) {
             }
             const safeCol = col.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             const safeTable = tableName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-            html += '<td><span class="tbl-muted">' + esc(summary) + '</span> <button type="button" class="json-cell-btn" onclick="openJSONModal(\'' + key + '\', \'' + safeCol + '\', \'' + safeTable + '\')">View JSON</button></td>';
+            const viewButton = '<button type="button" class="json-cell-btn" onclick="openJSONModal(\'' + key + '\', \'' + safeCol + '\', \'' + safeTable + '\')">View JSON</button>';
+            html += isSessionSyncJSON ? ('<td>' + viewButton + '</td>') : ('<td><span class="tbl-muted">' + esc(summary) + '</span> ' + viewButton + '</td>');
             continue;
           }
           if (isStatus) {

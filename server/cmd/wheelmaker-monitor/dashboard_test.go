@@ -84,6 +84,18 @@ func TestDashboardHTML_HasGenericJSONCellViewHook(t *testing.T) {
 	}
 }
 
+func TestDashboardHTML_ShowsSessionSyncJSONAsViewJSON(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "displayDBColumnName(t.name, col)") {
+		t.Fatalf("dashboard should render database column display labels")
+	}
+	if !strings.Contains(dashboardHTML, "table === 'sessions' && col === 'session_sync_json'") {
+		t.Fatalf("dashboard should special-case sessions.session_sync_json")
+	}
+	if !strings.Contains(dashboardHTML, "isSessionSyncJSON ?") {
+		t.Fatalf("dashboard should render session_sync_json cells as a View JSON action")
+	}
+}
+
 func TestDashboardHTML_UsesAgentJSONAndUnifiedSessionIdentity(t *testing.T) {
 	if strings.Contains(dashboardHTML, "ACP Session") {
 		t.Fatalf("dashboard should not render ACP Session once session.id is unified")
