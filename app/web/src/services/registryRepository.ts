@@ -228,25 +228,20 @@ export class RegistryRepository {
     const latestTurnIndex = typeof payload.latestTurnIndex === 'number' && Number.isFinite(payload.latestTurnIndex)
       ? Math.max(0, Math.trunc(payload.latestTurnIndex))
       : 0;
-    const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
-      sessionId,
-      title: sessionId,
-      preview: '',
-      updatedAt: '',
-      messageCount: 0,
-      latestTurnIndex,
-    };
-    normalizedSession.latestTurnIndex = latestTurnIndex;
+    const normalizedSession = this.normalizeSessionSummary(payload.session);
+    if (normalizedSession) {
+      normalizedSession.latestTurnIndex = latestTurnIndex;
+    }
 
     const normalizedMessages: RegistrySessionMessage[] = (Array.isArray(payload.turns) ? payload.turns : [])
-      .map(item => this.normalizeSessionWireMessage(item, normalizedSession.sessionId))
+      .map(item => this.normalizeSessionWireMessage(item, normalizedSession?.sessionId ?? sessionId))
       .filter((item): item is RegistrySessionMessage => !!item)
       .sort((a, b) => {
         return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
       });
 
     return {
-      session: normalizedSession,
+      ...(normalizedSession ? {session: normalizedSession} : {}),
       prompts: [],
       messages: normalizedMessages,
       latestTurnIndex,

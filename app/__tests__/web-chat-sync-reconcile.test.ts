@@ -9,7 +9,6 @@ import type { RegistryChatMessage } from '../web/src/types/registry';
 
 const message = (text: string): RegistryChatMessage => ({
   sessionId: 'sess-1',
-  promptIndex: 1,
   turnIndex: 2,
   method: 'agent_message_chunk',
   param: { text },
@@ -31,7 +30,6 @@ describe('chat session read reconciliation', () => {
     const cursor = getLatestSessionReadCursor([
       {
         sessionId: 'sess-1',
-        promptIndex: 1,
         turnIndex: 1,
         method: 'prompt_request',
         param: { contentBlocks: [] },
@@ -43,14 +41,13 @@ describe('chat session read reconciliation', () => {
       },
     ]);
 
-    expect(cursor).toEqual({ promptIndex: 1, turnIndex: 1 });
+    expect(cursor).toEqual({ turnIndex: 1 });
   });
 
   test('treats prompt_done as a normal finished cursor turn', () => {
     const cursor = getLatestSessionReadCursor([
       {
         sessionId: 'sess-1',
-        promptIndex: 1,
         turnIndex: 1,
         method: 'prompt_request',
         param: { contentBlocks: [] },
@@ -58,7 +55,6 @@ describe('chat session read reconciliation', () => {
       },
       {
         sessionId: 'sess-1',
-        promptIndex: 1,
         turnIndex: 2,
         method: 'prompt_done',
         param: { stopReason: 'end_turn' },
@@ -66,14 +62,13 @@ describe('chat session read reconciliation', () => {
       },
     ]);
 
-    expect(cursor).toEqual({ promptIndex: 1, turnIndex: 2 });
+    expect(cursor).toEqual({ turnIndex: 2 });
   });
 
   test('advances the persisted read cursor after a text turn is done', () => {
     const cursor = getLatestSessionReadCursor([
       {
         sessionId: 'sess-1',
-        promptIndex: 1,
         turnIndex: 1,
         method: 'prompt_request',
         param: { contentBlocks: [] },
@@ -82,29 +77,27 @@ describe('chat session read reconciliation', () => {
       { ...message('complete'), finished: true },
     ]);
 
-    expect(cursor).toEqual({ promptIndex: 1, turnIndex: 2 });
+    expect(cursor).toEqual({ turnIndex: 2 });
   });
 
-  test('detects open or missing text turns when prompt_done arrives', () => {
+  test('does not request prompt reconstruction in turn-only protocol', () => {
     const promptDone: RegistryChatMessage = {
       sessionId: 'sess-1',
-      promptIndex: 1,
       turnIndex: 4,
       method: 'prompt_done',
       param: { stopReason: 'end_turn' },
       finished: true,
     };
 
-    expect(needsPromptTurnRefresh([message('partial')], promptDone)).toBe(true);
-    expect(needsPromptTurnRefresh([{ ...message('complete'), finished: true }], promptDone)).toBe(true);
+    expect(needsPromptTurnRefresh([message('partial')], promptDone)).toBe(false);
+    expect(needsPromptTurnRefresh([{ ...message('complete'), finished: true }], promptDone)).toBe(false);
     expect(
       needsPromptTurnRefresh(
         [
-          { sessionId: 'sess-1', promptIndex: 1, turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+          { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
           { ...message('complete'), finished: true },
           {
             sessionId: 'sess-1',
-            promptIndex: 1,
             turnIndex: 3,
             method: 'agent_thought_chunk',
             param: { text: 'done thinking' },
@@ -116,75 +109,66 @@ describe('chat session read reconciliation', () => {
     ).toBe(false);
   });
 
-  test('replaces only the requested prompt when refreshing prompt turns', () => {
+  test('keeps checkpointed turns and merges returned turn delta', () => {
     const refreshed = replacePromptMessages(
       [
-        { sessionId: 'sess-1', promptIndex: 1, turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+        { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
         message('stale'),
-        { sessionId: 'sess-1', promptIndex: 1, turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
-        { sessionId: 'sess-1', promptIndex: 2, turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+        { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
+        { sessionId: 'sess-1', turnIndex: 4, method: 'prompt_request', param: {}, finished: true },
       ],
       [
-        { sessionId: 'sess-1', promptIndex: 1, turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
         { ...message('complete'), finished: true },
+        { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
+        { sessionId: 'sess-1', turnIndex: 4, method: 'prompt_request', param: {}, finished: true },
       ],
+      0,
       1,
     );
 
     expect(refreshed).toEqual([
-      { sessionId: 'sess-1', promptIndex: 1, turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+      { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
       { ...message('complete'), finished: true },
-      { sessionId: 'sess-1', promptIndex: 1, turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
-      { sessionId: 'sess-1', promptIndex: 2, turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+      { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
+      { sessionId: 'sess-1', turnIndex: 4, method: 'prompt_request', param: {}, finished: true },
     ]);
   });
 
-  test('requests a read when the next prompt arrives before the previous prompt is terminal', () => {
+  test('does not request a read for the next contiguous turn', () => {
     const local = {
-      cursor: { promptIndex: 1, turnIndex: 3 },
+      cursor: { turnIndex: 3 },
       terminalPrompts: new Set<number>(),
     };
     const incoming: RegistryChatMessage = {
       sessionId: 'sess-1',
-      promptIndex: 2,
-      turnIndex: 1,
+      turnIndex: 4,
       method: 'prompt_request',
       param: {},
       finished: true,
     };
 
-    expect(shouldRequestSessionReadForIncomingTurn(local, incoming)).toEqual({ promptIndex: 1, turnIndex: 3 });
+    expect(shouldRequestSessionReadForIncomingTurn(local, incoming)).toBeNull();
   });
 
-  test('requests a read when a prompt or turn gap is detected', () => {
+  test('requests a read when a turn gap is detected', () => {
     const local = {
-      cursor: { promptIndex: 1, turnIndex: 3 },
+      cursor: { turnIndex: 3 },
       terminalPrompts: new Set<number>([1]),
     };
 
     expect(shouldRequestSessionReadForIncomingTurn(local, {
       sessionId: 'sess-1',
-      promptIndex: 3,
-      turnIndex: 1,
-      method: 'prompt_request',
-      param: {},
-      finished: true,
-    })).toEqual({ promptIndex: 1, turnIndex: 3 });
-    expect(shouldRequestSessionReadForIncomingTurn(local, {
-      sessionId: 'sess-1',
-      promptIndex: 2,
-      turnIndex: 2,
-      method: 'agent_message_chunk',
-      param: {},
-      finished: true,
-    })).toEqual({ promptIndex: 1, turnIndex: 3 });
-    expect(shouldRequestSessionReadForIncomingTurn(local, {
-      sessionId: 'sess-1',
-      promptIndex: 1,
       turnIndex: 5,
       method: 'agent_message_chunk',
       param: {},
       finished: true,
-    })).toEqual({ promptIndex: 1, turnIndex: 3 });
+    })).toEqual({ turnIndex: 3 });
+    expect(shouldRequestSessionReadForIncomingTurn(local, {
+      sessionId: 'sess-1',
+      turnIndex: 4,
+      method: 'agent_message_chunk',
+      param: {},
+      finished: true,
+    })).toBeNull();
   });
 });

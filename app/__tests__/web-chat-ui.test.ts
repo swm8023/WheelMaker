@@ -22,11 +22,11 @@ describe('web chat integration', () => {
     expect(registryTypes).not.toContain('lastIndex');
     expect(repositoryTs).toContain("method: 'session.list'");
     expect(repositoryTs).toContain("method: 'session.read'");
-    expect(repositoryTs).toContain('payload: promptIndex > 0 || turnIndex > 0 ? {sessionId, promptIndex, turnIndex} : {sessionId}');
-    expect(repositoryTs).toContain('messages?: unknown[];');
-    expect(repositoryTs).toContain('Array.isArray(payload.messages) ? payload.messages : []');
-    expect(repositoryTs).toContain('prompts?: unknown[];');
-    expect(repositoryTs).toContain('const serverPrompts = Array.isArray(payload.prompts)');
+    expect(repositoryTs).toContain('payload: turnIndex > 0 ? {sessionId, afterTurnIndex: turnIndex} : {sessionId}');
+    expect(repositoryTs).toContain('turns?: unknown[];');
+    expect(repositoryTs).toContain('Array.isArray(payload.turns) ? payload.turns : []');
+    expect(repositoryTs).toContain('prompts: []');
+    expect(registryTypes).toContain('session?: RegistrySessionSummary;');
     expect(repositoryTs).not.toContain('afterIndex');
     expect(repositoryTs).not.toContain('afterSubIndex');
     expect(repositoryTs).toContain("method: 'session.new'");
@@ -52,7 +52,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatComposerText');
     expect(mainTsx).toContain('chatMessages');
     expect(mainTsx).toContain('session.message');
-    expect(mainTsx).toContain('return { sessionId, promptIndex, turnIndex, method, param, finished };');
+    expect(mainTsx).toContain('return { sessionId, turnIndex, method, param, finished };');
     expect(mainTsx).not.toContain('updateIndex');
     expect(mainTsx).not.toContain('await service.markSessionRead(');
     expect(mainTsx).toContain('chatSyncIndexRef');
@@ -62,7 +62,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('preserveUserSelection');
     expect(mainTsx).toContain('const shouldSyncSelectedSession =');
     expect(mainTsx).toContain('selectionSnapshot');
-    expect(mainTsx).toContain('chatSelectedIdRef.current = result.session.sessionId');
+    expect(mainTsx).toContain('chatSelectedIdRef.current = resultSessionId');
     expect(mainTsx).toContain('sessionId');
     expect(mainTsx).toContain('const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);');
     expect(mainTsx).toContain('const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);');

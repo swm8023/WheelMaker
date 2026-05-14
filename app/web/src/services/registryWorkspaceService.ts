@@ -237,12 +237,12 @@ export class RegistryWorkspaceService {
     return this.repository.listSessions(this.session.selectedProjectId);
   }
 
-  async readSession(sessionId: string, promptIndex = 0, turnIndex = 0): Promise<{session: RegistrySessionSummary; prompts: RegistrySessionReadResponse['prompts']; messages: RegistrySessionMessage[]}> {
+  async readSession(sessionId: string, promptIndex = 0, turnIndex = 0): Promise<RegistrySessionReadResponse> {
     if (!this.session || !this.repository) {
       return {
-        session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0, latestTurnIndex: 0},
         prompts: [],
         messages: [],
+        latestTurnIndex: 0,
       };
     }
     return this.repository.readSession(this.session.selectedProjectId, sessionId, promptIndex, turnIndex);

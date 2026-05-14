@@ -83,7 +83,7 @@ export interface RegistrySessionPromptSnapshot {
 }
 
 export interface RegistrySessionReadResponse {
-  session: RegistrySessionSummary;
+  session?: RegistrySessionSummary;
   prompts: RegistrySessionPromptSnapshot[];
   messages: RegistrySessionMessage[];
   latestTurnIndex: number;

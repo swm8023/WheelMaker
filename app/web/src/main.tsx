@@ -4245,6 +4245,7 @@ function App() {
       ) {
         return;
       }
+      const resultSessionId = result.session?.sessionId || sessionId;
 
       let nextMessages: RegistryChatMessage[];
       if (useIncremental) {
@@ -4265,21 +4266,24 @@ function App() {
       // Reconcile: live session.message events may have landed in the store
       // during the await. Fold only post-request changes back in so old cache
       // entries cannot overwrite newer session.read results.
-      const fresh = chatMessageStoreRef.current[result.session.sessionId] ?? [];
+      const fresh = chatMessageStoreRef.current[resultSessionId] ?? [];
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
-      chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
-      chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
+      chatMessageStoreRef.current[resultSessionId] = nextMessages;
+      chatPromptSnapshotsRef.current[resultSessionId] = result.prompts;
       setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[result.session.sessionId] = 0;
-      chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
-      setChatSessions(prev => mergeChatSession(prev, result.session));
-      setSelectedChatId(result.session.sessionId);
-      chatSelectedIdRef.current = result.session.sessionId;
-      workspaceStore.rememberSelectedChatSession(activeProjectId, result.session.sessionId);
+      chatSyncIndexRef.current[resultSessionId] = 0;
+      chatSyncSubIndexRef.current[resultSessionId] = latestSyncCursor.turnIndex;
+      const resultSession = result.session;
+      if (resultSession) {
+        setChatSessions(prev => mergeChatSession(prev, resultSession));
+      }
+      setSelectedChatId(resultSessionId);
+      chatSelectedIdRef.current = resultSessionId;
+      workspaceStore.rememberSelectedChatSession(activeProjectId, resultSessionId);
       setChatMessages(nextMessages);
-      persistChatSessionContent(result.session.sessionId, activeProjectId, result.session);
+      persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       return true;
     } catch (err) {
       if (activeProjectId === projectIdRef.current) {
@@ -4310,21 +4314,25 @@ function App() {
       if (selectionSnapshot && chatSelectedIdRef.current !== selectionSnapshot) {
         return false;
       }
-      const fresh = chatMessageStoreRef.current[result.session.sessionId] ?? [];
+      const resultSessionId = result.session?.sessionId || sessionId;
+      const fresh = chatMessageStoreRef.current[resultSessionId] ?? [];
       let nextMessages = replacePromptMessages(fresh, result.messages, 0, checkpointTurnIndex);
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
-      chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
-      chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
+      chatMessageStoreRef.current[resultSessionId] = nextMessages;
+      chatPromptSnapshotsRef.current[resultSessionId] = result.prompts;
       setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[result.session.sessionId] = 0;
-      chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
-      setChatSessions(prev => mergeChatSession(prev, result.session));
-      if (result.session.sessionId === chatSelectedIdRef.current) {
+      chatSyncIndexRef.current[resultSessionId] = 0;
+      chatSyncSubIndexRef.current[resultSessionId] = latestSyncCursor.turnIndex;
+      const resultSession = result.session;
+      if (resultSession) {
+        setChatSessions(prev => mergeChatSession(prev, resultSession));
+      }
+      if (resultSessionId === chatSelectedIdRef.current) {
         setChatMessages(nextMessages);
       }
-      persistChatSessionContent(result.session.sessionId, activeProjectId, result.session);
+      persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       return true;
     } catch (err) {
       if (activeProjectId === projectIdRef.current) {
