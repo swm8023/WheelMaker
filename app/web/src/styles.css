@@ -3778,7 +3778,7 @@ body,
   opacity: 0;
   pointer-events: none;
   transition: opacity 140ms ease;
-  z-index: 15;
+  z-index: 50;
 }
 
 .drawer-overlay.show {

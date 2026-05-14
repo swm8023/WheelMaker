@@ -1,6 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 
+function cssRuleBlock(stylesCss: string, selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = stylesCss.match(new RegExp(`${escapedSelector} \\{([\\s\\S]*?)\\}`));
+  return match?.[1] ?? '';
+}
+
+function cssNumericProperty(stylesCss: string, selector: string, property: string): number {
+  const block = cssRuleBlock(stylesCss, selector);
+  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = block.match(new RegExp(`${escapedProperty}:\\s*(\\d+)\\s*;`));
+  return match ? Number(match[1]) : Number.NaN;
+}
+
 describe('web chat integration', () => {
   test('defines registry session protocol and uses real chat UI instead of placeholder sessions', () => {
     const projectRoot = path.join(__dirname, '..');
@@ -290,5 +303,17 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.project-presence {');
     expect(stylesCss).not.toContain('.project-dirty {');
     expect(stylesCss).not.toContain('.chat-permission-button');
+  });
+
+  test('keeps the mobile project menu layer above floating controls', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    const drawerLayer = cssNumericProperty(stylesCss, '.drawer-overlay', 'z-index');
+    const floatingLayer = cssNumericProperty(stylesCss, '.floating-control-stack-layer', 'z-index');
+    const mobileSettingsLayer = cssNumericProperty(stylesCss, '.mobile-settings-screen', 'z-index');
+
+    expect(drawerLayer).toBeGreaterThan(floatingLayer);
+    expect(mobileSettingsLayer).toBeGreaterThan(drawerLayer);
   });
 });
