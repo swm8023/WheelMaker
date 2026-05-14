@@ -3124,24 +3124,24 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 12px;
   background: var(--panel);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-  padding: 8px;
+  padding: 6px;
 }
 
 .chat-composer-input-row {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
 }
 
 .chat-composer-prompt-trigger {
-  width: 28px;
-  height: 34px;
+  width: 22px;
+  height: 32px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
@@ -3170,13 +3170,13 @@ body,
 .chat-composer-input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 36px;
+  min-height: 32px;
   max-height: 180px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text);
-  padding: 7px 0;
+  padding: 4px 0;
   font: inherit;
   line-height: 1.45;
   resize: none;
@@ -3527,8 +3527,9 @@ body,
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 14;
-  min-width: min(240px, calc(100vw - 32px));
-  max-width: min(340px, calc(100vw - 32px));
+  width: max-content;
+  min-width: 100%;
+  max-width: min(320px, calc(100vw - 24px));
   max-height: 42vh;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -3539,6 +3540,16 @@ body,
   flex-direction: column;
   gap: 2px;
   padding: 5px;
+}
+
+.chat-config-options .chat-config-item:first-child:not(:only-child) .chat-config-value-menu {
+  left: 0;
+  right: auto;
+}
+
+.chat-config-options .chat-config-item:only-child .chat-config-value-menu {
+  left: auto;
+  right: 0;
 }
 
 .chat-config-value-option {

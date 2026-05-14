@@ -353,13 +353,28 @@ describe('web chat integration', () => {
       /\.chat-composer::before \{[\s\S]*height: 14px;[\s\S]*transform: translateY\(calc\(-100% \+ 4px\)\);/,
     );
     expect(stylesCss).toContain('.chat-composer-frame {');
+    expect(stylesCss).toMatch(
+      /\.chat-composer-frame \{[\s\S]*gap: 6px;[\s\S]*padding: 6px;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-composer-input-row {');
+    expect(stylesCss).toMatch(
+      /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
+    expect(stylesCss).toMatch(
+      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 32px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-composer-input \{[\s\S]*min-height: 32px;[\s\S]*padding: 4px 0;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toContain('.chat-composer-tools {');
     expect(stylesCss).toContain('.chat-tool-button {');
     expect(stylesCss).toContain('.chat-config-pill {');
     expect(stylesCss).toContain('.chat-config-value-menu {');
+    expect(stylesCss).toMatch(
+      /\.chat-config-value-menu \{[\s\S]*width: max-content;[\s\S]*min-width: 100%;[\s\S]*max-width: min\(320px, calc\(100vw - 24px\)\);[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-config-value-option {');
     expect(stylesCss).toContain('.chat-config-value-menu .chat-config-value-option {');
     expect(stylesCss).toMatch(
@@ -369,6 +384,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-config-value-label \{[\s\S]*overflow-wrap: anywhere;[\s\S]*text-align: left;[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-config-options .chat-config-item:first-child:not(:only-child) .chat-config-value-menu {');
+    expect(stylesCss).toContain('.chat-config-options .chat-config-item:only-child .chat-config-value-menu {');
     expect(stylesCss).toContain('.chat-config-overflow-group {');
     expect(stylesCss).not.toContain('.chat-config-select {');
     expect(stylesCss).not.toContain('.chat-config-feedback {');
