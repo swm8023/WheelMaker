@@ -7135,6 +7135,8 @@ function App() {
           const activeProject = targetProjectId === projectId;
           const agents = getWideProjectAgents(projectItem, projectSessions);
           const actionMenuOpen = wideProjectActionMenu?.projectId === targetProjectId;
+          const projectHub = projectItem.hubId || 'local';
+          const projectHubVariant = tagVariantClass('wide-project-hub', projectItem.hubId || 'local');
           return (
             <div
               key={`wide-project:${targetProjectId}`}
@@ -7151,16 +7153,17 @@ function App() {
                   aria-expanded={!collapsed}
                 >
                   <span
-                    className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon`}
+                    className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon ${projectHubVariant}`}
                   />
                   <span className="wide-project-title-group">
                     <span className="wide-project-name" title={projectItem.name}>
                       {projectItem.name}
                     </span>
                     <span
-                      className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', projectItem.hubId || 'local')}`}
+                      className={`wide-project-hub-tag ${projectHubVariant}`}
                     >
-                      {projectItem.hubId || 'local'}
+                      <span className="wide-project-hub-dot" aria-hidden="true" />
+                      <span className="wide-project-hub-label">{projectHub}</span>
                     </span>
                   </span>
                 </button>

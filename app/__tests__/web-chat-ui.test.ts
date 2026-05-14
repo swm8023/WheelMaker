@@ -389,6 +389,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="wide-project-title-group"');
     expect(mainTsx).toContain("collapsed ? 'codicon-folder' : 'codicon-folder-opened'");
     expect(mainTsx).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
+    expect(mainTsx).toContain('className="wide-project-hub-dot"');
+    expect(mainTsx).toContain('className="wide-project-hub-label"');
     expect(mainTsx).toContain('className="wide-project-session-list"');
     expect(mainTsx).toContain('className="wide-project-action-btn"');
     expect(mainTsx).toContain('className="wide-project-action-popover"');
@@ -419,6 +421,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-project-folder-icon {');
     expect(stylesCss).toContain('.wide-project-title-group {');
     expect(stylesCss).toContain('.wide-project-hub-tag {');
+    expect(stylesCss).toContain('.wide-project-hub-dot {');
+    expect(stylesCss).toContain('.wide-project-hub-label {');
     expect(stylesCss).toContain('.wide-project-hub-0 {');
     expect(stylesCss).toContain('.wide-project-action-btn {');
     expect(stylesCss).toContain('.wide-project-action-title {');
@@ -427,6 +431,15 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-session-agent-0 {');
     expect(stylesCss).toContain('.wide-session-time {');
     expect(stylesCss).toContain('.wide-project-action-popover {');
+    expect(stylesCss).toMatch(
+      /\.wide-session-row \{[\s\S]*min-height: 28px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.wide-session-title \{[\s\S]*font-weight: 400;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.wide-project-hub-tag \{[\s\S]*border: none;[\s\S]*background: transparent;[\s\S]*\}/,
+    );
   });
 
   test('wide project session rail actions use project-scoped chat flows', () => {
