@@ -149,6 +149,4 @@ Code placement:
 ## 11. Related Documents
 
 - [registry-protocol.md](./registry-protocol.md) — Full Registry Protocol 2.2 specification
-- [app-chat-recorder-sync-protocol.md](./app-chat-recorder-sync-protocol.md) — App Chat protocol (session.* APIs, realtime events, message decode, sync model)
-- [session-recorder-record-event.md](./session-recorder-record-event.md) — Internal implementation analysis of SessionRecorder
-- [session-persistence-sqlite.md](./session-persistence-sqlite.md) — SQLite session persistence schema
+- [session-management-and-sync.zh-CN.md](./session-management-and-sync.zh-CN.md) — Session conversation management, turn file serialization, and app/web sync model

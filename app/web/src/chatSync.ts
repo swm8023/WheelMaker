@@ -43,10 +43,9 @@ function isTextTurnMessage(message: RegistryChatMessage): boolean {
   return message.method === 'agent_message_chunk' || message.method === 'agent_thought_chunk';
 }
 
-export function replacePromptMessages(
+export function replaceSessionMessages(
   list: RegistryChatMessage[],
   nextMessages: RegistryChatMessage[],
-  _promptIndex: number,
   checkpointTurnIndex?: number,
 ): RegistryChatMessage[] {
   const base = list.filter(item => {
@@ -85,7 +84,7 @@ export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): Ses
 }
 
 export function shouldRequestSessionReadForIncomingTurn(
-  local: {cursor: SessionReadCursor; terminalPrompts: ReadonlySet<number>},
+  local: {cursor: SessionReadCursor},
   incoming: RegistryChatMessage,
 ): SessionReadCursor | null {
   const cursor = local.cursor;

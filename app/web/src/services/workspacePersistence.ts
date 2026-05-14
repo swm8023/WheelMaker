@@ -66,7 +66,6 @@ export type PersistedGlobalState = {
 };
 
 export type PersistedChatCursor = {
-  promptIndex?: number;
   turnIndex: number;
 };
 
@@ -315,7 +314,6 @@ type RawChatSessionContentRow = {
   projectId: string;
   sessionId: string;
   messagesJson: string;
-  promptsJson?: string;
   updatedAt: number;
 };
 

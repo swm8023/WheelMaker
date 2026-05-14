@@ -23,7 +23,7 @@ import {
   isFinishedChatMessage,
   needsPromptTurnRefresh,
   reconcileSessionReadMessages,
-  replacePromptMessages,
+  replaceSessionMessages,
   shouldRequestSessionReadForIncomingTurn,
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
@@ -56,7 +56,6 @@ import type {
   RegistryChatSession,
   RegistryResumableSession,
   RegistrySessionContentBlock,
-  RegistrySessionPromptSnapshot,
   RegistrySessionConfigOption,
   RegistryFsEntry,
   RegistryFsInfo,
@@ -385,7 +384,7 @@ function mergeChatSession(
   const existing = list.find(item => item.sessionId === next.sessionId);
   const merged: RegistryChatSession = {
     sessionId: next.sessionId,
-    title: next.title ?? existing?.title ?? next.sessionId,
+    title: next.title ?? existing?.title ?? '',
     preview: next.preview ?? existing?.preview ?? '',
     updatedAt: next.updatedAt ?? existing?.updatedAt ?? '',
     messageCount: next.messageCount ?? existing?.messageCount ?? 0,
@@ -706,11 +705,6 @@ function decodeSessionMessageFromEventPayload(
   }
 }
 
-function terminalPromptIndexes(messages: RegistryChatMessage[]): Set<number> {
-  void messages;
-  return new Set<number>();
-}
-
 type ChatPromptEntryKind = 'tool' | 'thought' | 'plan' | 'message';
 
 type ChatPromptEntry = {
@@ -724,7 +718,7 @@ type ChatPromptEntry = {
 
 type ChatPromptGroup = {
   key: string;
-  promptIndex: number;
+  groupIndex: number;
   userMessages: RegistryChatMessage[];
   entries: ChatPromptEntry[];
   modelName: string;
@@ -956,12 +950,11 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
 
 function groupChatMessagesByPrompt(
   messages: RegistryChatMessage[],
-  _promptSnapshots?: RegistrySessionPromptSnapshot[],
 ): ChatPromptGroup[] {
   const groups = new Map<string, ChatPromptGroup>();
   const entryIndexByKey = new Map<string, number>();
   let entryOrder = 0;
-  let promptIndex = 0;
+  let groupIndex = 0;
   let currentGroupKey = '';
 
   const ordered = [...messages].sort((a, b) => {
@@ -970,15 +963,15 @@ function groupChatMessagesByPrompt(
 
   for (const message of ordered) {
     if (message.method === 'prompt_request' || !currentGroupKey) {
-      promptIndex += 1;
-      currentGroupKey = `prompt:${promptIndex}`;
+      groupIndex += 1;
+      currentGroupKey = `prompt:${groupIndex}`;
     }
     const groupKey = currentGroupKey || `msg:${message.sessionId}:${message.turnIndex}`;
     const existing =
       groups.get(groupKey) ??
       ({
         key: groupKey,
-        promptIndex,
+        groupIndex,
         userMessages: [],
         entries: [],
         modelName: '',
@@ -1087,7 +1080,7 @@ function groupChatMessagesByPrompt(
     });
   }
 
-  return [...groups.values()].sort((a, b) => a.promptIndex - b.promptIndex);
+  return [...groups.values()].sort((a, b) => a.groupIndex - b.groupIndex);
 }
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
@@ -2185,8 +2178,6 @@ function App() {
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
-  const chatPromptSnapshotsRef = useRef<Record<string, RegistrySessionPromptSnapshot[]>>({});
-  const [chatPromptSnapshotVersion, setChatPromptSnapshotVersion] = useState(0);
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const newChatFlowGuardRef = useRef(false);
   const chatSwipeSessionIdRef = useRef('');
@@ -4093,8 +4084,6 @@ function App() {
     chatSyncIndexRef.current = {};
     chatSyncSubIndexRef.current = {};
     chatMessageStoreRef.current = {};
-    chatPromptSnapshotsRef.current = {};
-    setChatPromptSnapshotVersion(version => version + 1);
   };
 
   const hydrateChatSessionContentFromCache = (
@@ -4114,7 +4103,6 @@ function App() {
 
     const cachedMessages = [...cached.messages];
     chatMessageStoreRef.current[sessionId] = cachedMessages;
-    chatPromptSnapshotsRef.current[sessionId] = [...cached.prompts];
 
     const latest = getLatestSessionReadCursor(cachedMessages);
     const cachedTurnIndex = Math.max(0, chatSyncSubIndexRef.current[sessionId] ?? 0);
@@ -4125,7 +4113,6 @@ function App() {
       chatSyncIndexRef.current[sessionId] = 0;
       chatSyncSubIndexRef.current[sessionId] = cachedTurnIndex;
     }
-    setChatPromptSnapshotVersion(version => version + 1);
     return cachedMessages;
   };
 
@@ -4190,12 +4177,11 @@ function App() {
   ) => {
     if (!activeProjectId || !sessionId) return;
     const messages = chatMessageStoreRef.current[sessionId] ?? [];
-    const prompts = chatPromptSnapshotsRef.current[sessionId] ?? [];
     const cursor = {
       turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
     };
     const cacheableMessages = messages.filter(isFinishedChatMessage);
-    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages, prompts);
+    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages);
     const targetSession = session ?? chatSessions.find(item => item.sessionId === sessionId);
     if (targetSession) {
       workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
@@ -4232,7 +4218,6 @@ function App() {
       const useIncremental = requestedIncremental && !fallbackToFullRead;
       const result = await service.readSession(
         sessionId,
-        0,
         useIncremental ? checkpointTurnIndex : 0,
       );
       if (activeProjectId !== projectIdRef.current) {
@@ -4250,10 +4235,9 @@ function App() {
       let nextMessages: RegistryChatMessage[];
       if (useIncremental) {
         if (result.messages.length > 0) {
-          nextMessages = replacePromptMessages(
+          nextMessages = replaceSessionMessages(
             existingMessages,
             result.messages,
-            0,
             checkpointTurnIndex,
           );
         } else {
@@ -4270,8 +4254,6 @@ function App() {
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
       chatMessageStoreRef.current[resultSessionId] = nextMessages;
-      chatPromptSnapshotsRef.current[resultSessionId] = result.prompts;
-      setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
       chatSyncIndexRef.current[resultSessionId] = 0;
       chatSyncSubIndexRef.current[resultSessionId] = latestSyncCursor.turnIndex;
@@ -4297,9 +4279,8 @@ function App() {
     }
   };
 
-  const refreshPromptTurns = async (
+  const refreshSessionTurns = async (
     sessionId: string,
-    _promptIndex: number,
     activeProjectId = projectIdRef.current,
     selectionSnapshot = chatSelectedIdRef.current,
   ) => {
@@ -4307,7 +4288,7 @@ function App() {
     try {
       const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
       const checkpointTurnIndex = chatSyncSubIndexRef.current[sessionId] ?? 0;
-      const result = await service.readSession(sessionId, 0, checkpointTurnIndex);
+      const result = await service.readSession(sessionId, checkpointTurnIndex);
       if (activeProjectId !== projectIdRef.current) {
         return false;
       }
@@ -4316,12 +4297,10 @@ function App() {
       }
       const resultSessionId = result.session?.sessionId || sessionId;
       const fresh = chatMessageStoreRef.current[resultSessionId] ?? [];
-      let nextMessages = replacePromptMessages(fresh, result.messages, 0, checkpointTurnIndex);
+      let nextMessages = replaceSessionMessages(fresh, result.messages, checkpointTurnIndex);
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
       chatMessageStoreRef.current[resultSessionId] = nextMessages;
-      chatPromptSnapshotsRef.current[resultSessionId] = result.prompts;
-      setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
       chatSyncIndexRef.current[resultSessionId] = 0;
       chatSyncSubIndexRef.current[resultSessionId] = latestSyncCursor.turnIndex;
@@ -4584,11 +4563,9 @@ function App() {
     const nextMessageStore = {...chatMessageStoreRef.current};
     const nextSyncIndex = {...chatSyncIndexRef.current};
     const nextSyncSubIndex = {...chatSyncSubIndexRef.current};
-    const nextSnapshots = {...chatPromptSnapshotsRef.current};
     delete nextMessageStore[sessionId];
     delete nextSyncIndex[sessionId];
     delete nextSyncSubIndex[sessionId];
-    delete nextSnapshots[sessionId];
     const sessionDraftKey = buildChatDraftKey(projectIdRef.current, sessionId);
     setChatComposerDrafts(prev => {
       if (!(sessionDraftKey in prev)) {
@@ -4601,7 +4578,6 @@ function App() {
     chatMessageStoreRef.current = nextMessageStore;
     chatSyncIndexRef.current = nextSyncIndex;
     chatSyncSubIndexRef.current = nextSyncSubIndex;
-    chatPromptSnapshotsRef.current = nextSnapshots;
     const activeProjectId = projectIdRef.current;
     if (activeProjectId) {
       if (workspaceStore.getSelectedChatSessionId(activeProjectId) === sessionId) {
@@ -4609,7 +4585,6 @@ function App() {
       }
       workspaceStore.deleteChatSession(activeProjectId, sessionId);
     }
-    setChatPromptSnapshotVersion(version => version + 1);
   };
 
   const handleDeleteChatSession = async (sessionId: string) => {
@@ -4619,7 +4594,7 @@ function App() {
     }
 
     const confirmed = window.confirm(
-      'Delete this session and all related prompts? This action cannot be undone.',
+      'Delete this session and its chat history? This action cannot be undone.',
     );
     if (!confirmed) {
       setChatSwipeOpenSessionId('');
@@ -4656,7 +4631,6 @@ function App() {
       chatSyncIndexRef.current[normalizedSessionId] = 0;
       chatSyncSubIndexRef.current[normalizedSessionId] = 0;
       chatMessageStoreRef.current[normalizedSessionId] = [];
-      chatPromptSnapshotsRef.current[normalizedSessionId] = [];
       persistChatSessionContent(normalizedSessionId, projectIdRef.current);
       // Reload the session messages if currently selected
       if (chatSelectedIdRef.current === normalizedSessionId) {
@@ -4840,7 +4814,6 @@ function App() {
         setChatSessions(prev =>
           mergeChatSession(prev, {
             sessionId: nextSessionId,
-            title: trimmedText || firstAttachmentName || nextSessionId,
             preview: trimmedText || firstAttachmentName || '',
             updatedAt: new Date().toISOString(),
             messageCount: 0,
@@ -5543,7 +5516,6 @@ function App() {
             cursor: {
               turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
             },
-            terminalPrompts: terminalPromptIndexes(existingMessagesForSession),
           },
           message,
         );
@@ -5575,13 +5547,8 @@ function App() {
         let mergedSessionForCache: RegistryChatSession | undefined;
         setChatSessions(prev => {
           const existing = prev.find(item => item.sessionId === sessionId);
-          const fallbackTitle =
-            msgRole(message.method) === 'user' && messageText
-              ? messageText.slice(0, 120)
-              : existing?.title || sessionId;
           const next = mergeChatSession(prev, {
             sessionId,
-            title: fallbackTitle,
             preview: messageText || existing?.preview || '',
             updatedAt: existing?.updatedAt || '',
             messageCount: existing?.messageCount ?? 0,
@@ -5612,9 +5579,8 @@ function App() {
           isSelectedSession &&
           needsPromptTurnRefresh(merged, message)
         ) {
-          refreshPromptTurns(
+          refreshSessionTurns(
             sessionId,
-            0,
             projectIdRef.current,
             chatSelectedIdRef.current,
           ).catch(() => undefined);
@@ -6978,13 +6944,9 @@ function App() {
 
   const chatPromptGroups = useMemo(
     () => {
-      const currentSessionId = chatSelectedIdRef.current;
-      const snapshots = currentSessionId
-        ? chatPromptSnapshotsRef.current[currentSessionId]
-        : undefined;
-      return groupChatMessagesByPrompt(chatMessages, snapshots);
+      return groupChatMessagesByPrompt(chatMessages);
     },
-    [chatMessages, chatPromptSnapshotVersion],
+    [chatMessages],
   );
 
   const resolveChatFileLink = (

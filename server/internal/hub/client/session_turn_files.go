@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -113,6 +114,19 @@ func (s *fileSessionTurnStore) ReadTurns(ctx context.Context, projectName, sessi
 		})
 	}
 	return out, nil
+}
+
+func (s *fileSessionTurnStore) DeleteTurns(ctx context.Context, projectName, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	if err := os.RemoveAll(s.turnDir(projectName, sessionID)); err != nil {
+		return fmt.Errorf("delete turn dir: %w", err)
+	}
+	return nil
 }
 
 func (s *fileSessionTurnStore) latestTurnIndex(ctx context.Context, projectName, sessionID string) (int64, error) {
@@ -324,4 +338,23 @@ func turnHeaderState(header []byte, fileNo int64) (int, int64, error) {
 func turnSlot(header []byte, slot int) (uint32, uint32) {
 	pos := 8 + slot*sessionTurnFileMetaSize
 	return binary.LittleEndian.Uint32(header[pos : pos+4]), binary.LittleEndian.Uint32(header[pos+4 : pos+8])
+}
+
+func safeHistoryPathPart(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "_"
+	}
+	replacer := strings.NewReplacer(
+		"\\", "_",
+		"/", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		`"`, "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	)
+	return replacer.Replace(value)
 }

@@ -56,7 +56,6 @@ export type CachedChatSession = {
 
 export type CachedChatSessionContent = {
   messages: RegistryChatMessage[];
-  prompts: [];
 };
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
@@ -230,7 +229,6 @@ export class WorkspaceStore {
     if (!cached) return null;
     return {
       messages: Array.isArray(cached.messages) ? cached.messages : [],
-      prompts: [],
     };
   }
 
@@ -262,10 +260,8 @@ export class WorkspaceStore {
     projectId: string,
     sessionId: string,
     messages: RegistryChatMessage[],
-    prompts: unknown[],
   ): void {
     if (!projectId || !sessionId) return;
-    void prompts;
     this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages);
   }
 

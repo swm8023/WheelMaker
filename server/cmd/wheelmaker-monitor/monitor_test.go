@@ -85,7 +85,7 @@ func TestGetLogs_DebugOmitsTimeLevelAndDedupsSessionID(t *testing.T) {
 	}
 }
 
-func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
+func TestGetDBTablesDoesNotIncludeLegacyPromptTable(t *testing.T) {
 	base := t.TempDir()
 	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
 	if err != nil {
@@ -104,13 +104,6 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 		LastActiveAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
-	}
-	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
-		SessionID:   "sess-1",
-		PromptIndex: 1,
-		UpdatedAt:   time.Date(2026, 4, 12, 10, 1, 0, 0, time.UTC),
-	}); err != nil {
-		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
 	mon := NewMonitor(base)
 	res := mon.GetDBTables()
@@ -198,7 +191,7 @@ func TestParseMonitorSessionTurnDoesNotUseUpdateIndexAsSubIndex(t *testing.T) {
 	}
 }
 
-func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T) {
+func TestExecuteActionClearSessionHistoryResetsSessionSync(t *testing.T) {
 	base := t.TempDir()
 	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
 	if err != nil {
@@ -218,14 +211,6 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 		LastActiveAt: now,
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
-	}
-	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
-		SessionID:   "sess-1",
-		PromptIndex: 1,
-		Title:       "hello",
-		UpdatedAt:   now,
-	}); err != nil {
-		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
 	mon := NewMonitor(base)
 	if err := mon.ExecuteActionByHub(context.Background(), "", "clear-session-history"); err != nil {

@@ -122,11 +122,9 @@ func (c *Client) SetSessionHistoryRoot(root string) {
 	}
 	root = strings.TrimSpace(root)
 	if root == "" {
-		c.sessionRecorder.historyStore = nil
 		c.sessionRecorder.turnStore = nil
 		return
 	}
-	c.sessionRecorder.historyStore = nil
 	c.sessionRecorder.turnStore = newFileSessionTurnStore(root)
 }
 
@@ -557,13 +555,13 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 				"params": sessionViewSessionNewParams{
 					SessionID: sess.acpSessionID,
 					AgentType: sess.agentType,
-					Title:     firstNonEmpty(req.Title, sess.acpSessionID),
+					Title:     strings.TrimSpace(req.Title),
 				},
 			}),
 		}); err != nil {
 			return nil, err
 		}
-		summary, _, _, err := c.sessionRecorder.ReadSessionPrompts(ctx, sess.acpSessionID, 0, 0)
+		summary, err := c.sessionRecorder.ReadSessionSummary(ctx, sess.acpSessionID)
 		if err != nil {
 			return nil, err
 		}

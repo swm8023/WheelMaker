@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -82,19 +81,6 @@ type AgentPreferenceRecord struct {
 	PreferenceJSON string
 }
 
-type SessionPromptRecord struct {
-	PromptID    string
-	SessionID   string
-	PromptIndex int64
-	Title       string
-	StopReason  string
-	UpdatedAt   time.Time
-	TurnsJSON   string
-	TurnIndex   int64
-	ModelName   string
-	StartedAt   time.Time
-}
-
 type Store interface {
 	LoadRouteBindings(ctx context.Context, projectName string) (map[string]string, error)
 	SaveRouteBinding(ctx context.Context, projectName, routeKey, sessionID string) error
@@ -106,21 +92,14 @@ type Store interface {
 	SaveSession(ctx context.Context, rec *SessionRecord) error
 	ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error)
 	DeleteSession(ctx context.Context, projectName, sessionID string) error
-	DeleteSessionPrompts(ctx context.Context, projectName, sessionID string) error
 	LoadAgentPreference(ctx context.Context, projectName, agentType string) (*AgentPreferenceRecord, error)
 	SaveAgentPreference(ctx context.Context, rec AgentPreferenceRecord) error
-	UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error
-	LoadSessionPrompt(ctx context.Context, projectName, sessionID string, promptIndex int64) (*SessionPromptRecord, error)
-	ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error)
-	ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error)
 	Close() error
 }
 
 type sqliteStore struct {
-	db              *sql.DB
-	writeMu         sync.Mutex
-	legacyPromptMu  sync.Mutex
-	legacyPromptMap map[string]SessionPromptRecord
+	db      *sql.DB
+	writeMu sync.Mutex
 }
 
 func NewStore(dbPath string) (Store, error) {
@@ -146,13 +125,12 @@ func NewStore(dbPath string) (Store, error) {
 			return nil, err
 		}
 	} else {
-		migrateExpectedStoreSchema(db)
 		if err := validateStoreSchema(db, dbPath, existingTables); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
 	}
-	return &sqliteStore{db: db, legacyPromptMap: map[string]SessionPromptRecord{}}, nil
+	return &sqliteStore{db: db}, nil
 }
 
 var expectedStoreSchemaColumns = map[string][]string{
@@ -194,30 +172,7 @@ func checkStoreSchemaDB(db *sql.DB, dbPath string) error {
 	if err != nil {
 		return fmt.Errorf("list sqlite tables: %w", err)
 	}
-	if len(existingTables) > 0 {
-		migrateExpectedStoreSchema(db)
-	}
 	return validateStoreSchema(db, dbPath, existingTables)
-}
-
-func migrateExpectedStoreSchema(db *sql.DB) {
-	// Migrate: add columns introduced after initial schema.
-	_, _ = db.Exec(`ALTER TABLE sessions ADD COLUMN session_sync_json TEXT NOT NULL DEFAULT '{}'`)
-	if cols, err := sqliteTableColumns(db, "sessions"); err == nil {
-		hasUpdatedAt := false
-		hasLastActiveAt := false
-		for _, col := range cols {
-			if col == "updated_at" {
-				hasUpdatedAt = true
-			}
-			if col == "last_active_at" {
-				hasLastActiveAt = true
-			}
-		}
-		if !hasUpdatedAt && hasLastActiveAt {
-			_, _ = db.Exec(`ALTER TABLE sessions RENAME COLUMN last_active_at TO updated_at`)
-		}
-	}
 }
 
 func validateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {
@@ -620,31 +575,6 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 	return entries, nil
 }
 
-func (s *sqliteStore) DeleteSessionPrompts(ctx context.Context, projectName, sessionID string) error {
-	projectName = strings.TrimSpace(projectName)
-	sessionID = strings.TrimSpace(sessionID)
-	if projectName == "" {
-		return fmt.Errorf("project name is required")
-	}
-	if sessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-
-	if rec, err := s.LoadSession(ctx, projectName, sessionID); err != nil {
-		return err
-	} else if rec == nil {
-		return nil
-	}
-	s.legacyPromptMu.Lock()
-	defer s.legacyPromptMu.Unlock()
-	for key, prompt := range s.legacyPromptMap {
-		if prompt.SessionID == sessionID {
-			delete(s.legacyPromptMap, key)
-		}
-	}
-	return nil
-}
-
 func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID string) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -684,122 +614,7 @@ func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID 
 		return fmt.Errorf("commit delete session: %w", err)
 	}
 	tx = nil
-	s.legacyPromptMu.Lock()
-	for key, prompt := range s.legacyPromptMap {
-		if prompt.SessionID == sessionID {
-			delete(s.legacyPromptMap, key)
-		}
-	}
-	s.legacyPromptMu.Unlock()
 	return nil
-}
-
-func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error {
-	rec.SessionID = strings.TrimSpace(rec.SessionID)
-	if rec.SessionID == "" {
-		return fmt.Errorf("session id is required")
-	}
-	if rec.PromptIndex <= 0 {
-		return fmt.Errorf("prompt index is required")
-	}
-	if rec.UpdatedAt.IsZero() {
-		rec.UpdatedAt = time.Now()
-	}
-	s.legacyPromptMu.Lock()
-	defer s.legacyPromptMu.Unlock()
-	if s.legacyPromptMap == nil {
-		s.legacyPromptMap = map[string]SessionPromptRecord{}
-	}
-	key := legacySessionPromptKey(rec.SessionID, rec.PromptIndex)
-	existing := s.legacyPromptMap[key]
-	if strings.TrimSpace(existing.SessionID) != "" {
-		if strings.TrimSpace(rec.Title) == "" {
-			rec.Title = existing.Title
-		}
-		if strings.TrimSpace(rec.StopReason) == "" {
-			rec.StopReason = existing.StopReason
-		}
-		rec.UpdatedAt = maxTime(rec.UpdatedAt, existing.UpdatedAt)
-		if strings.TrimSpace(rec.TurnsJSON) == "" {
-			rec.TurnsJSON = existing.TurnsJSON
-			rec.TurnIndex = existing.TurnIndex
-		}
-		if strings.TrimSpace(rec.ModelName) == "" {
-			rec.ModelName = existing.ModelName
-		}
-		rec.StartedAt = minNonZeroTime(rec.StartedAt, existing.StartedAt)
-	}
-	turnsJSON := strings.TrimSpace(rec.TurnsJSON)
-	rec.TurnsJSON = turnsJSON
-	rec.Title = strings.TrimSpace(rec.Title)
-	rec.StopReason = strings.TrimSpace(rec.StopReason)
-	rec.ModelName = strings.TrimSpace(rec.ModelName)
-	rec.PromptID = formatPromptSeq(rec.PromptIndex)
-	s.legacyPromptMap[key] = rec
-	return nil
-}
-
-func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessionID string, promptIndex int64) (*SessionPromptRecord, error) {
-	if promptIndex <= 0 {
-		return nil, nil
-	}
-	projectName = strings.TrimSpace(projectName)
-	sessionID = strings.TrimSpace(sessionID)
-	rec, err := s.LoadSession(ctx, projectName, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if rec == nil {
-		return nil, nil
-	}
-	s.legacyPromptMu.Lock()
-	defer s.legacyPromptMu.Unlock()
-	prompt, ok := s.legacyPromptMap[legacySessionPromptKey(sessionID, promptIndex)]
-	if !ok {
-		return nil, nil
-	}
-	prompt.PromptID = formatPromptSeq(prompt.PromptIndex)
-	return &prompt, nil
-}
-
-func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error) {
-	projectName = strings.TrimSpace(projectName)
-	sessionID = strings.TrimSpace(sessionID)
-	rec, err := s.LoadSession(ctx, projectName, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if rec == nil {
-		return nil, nil
-	}
-	out := []SessionPromptRecord{}
-	s.legacyPromptMu.Lock()
-	for _, prompt := range s.legacyPromptMap {
-		if prompt.SessionID != sessionID {
-			continue
-		}
-		prompt.PromptID = formatPromptSeq(prompt.PromptIndex)
-		out = append(out, prompt)
-	}
-	s.legacyPromptMu.Unlock()
-	sort.Slice(out, func(i, j int) bool {
-		return out[i].PromptIndex < out[j].PromptIndex
-	})
-	return out, nil
-}
-
-func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error) {
-	prompts, err := s.ListSessionPrompts(ctx, projectName, sessionID)
-	if err != nil {
-		return nil, err
-	}
-	out := []SessionPromptRecord{}
-	for _, prompt := range prompts {
-		if prompt.PromptIndex > afterPromptIndex {
-			out = append(out, prompt)
-		}
-	}
-	return out, nil
 }
 
 func (s *sqliteStore) Close() error {
@@ -818,48 +633,11 @@ func normalizeJSONDoc(raw string, fallback string) string {
 	return raw
 }
 
-// EncodeStoredTurns serialises an ordered turn JSON array for storage in
-// session_prompts.turns_json. Returns "" when turns is empty.
-func EncodeStoredTurns(turns []string) string {
-	if len(turns) == 0 {
-		return ""
-	}
-	entries := make([]string, 0, len(turns))
-	for _, updateJSON := range turns {
-		entries = append(entries, normalizeJSONDoc(updateJSON, `{}`))
-	}
-	raw, err := json.Marshal(entries)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
-}
-
-// DecodeStoredTurns parses session_prompts.turns_json back to an ordered turn JSON string slice.
-func DecodeStoredTurns(turnsJSON string) ([]string, error) {
-	turnsJSON = strings.TrimSpace(turnsJSON)
-	if turnsJSON == "" {
-		return nil, nil
-	}
-	entries := []string{}
-	if err := json.Unmarshal([]byte(turnsJSON), &entries); err != nil {
-		return nil, fmt.Errorf("decode turns_json: %w", err)
-	}
-	for i := range entries {
-		entries[i] = normalizeJSONDoc(entries[i], `{}`)
-	}
-	return entries, nil
-}
-
 func validateRouteKey(routeKey string) error {
 	if strings.TrimSpace(routeKey) == "" {
 		return fmt.Errorf("route key is required")
 	}
 	return nil
-}
-
-func formatPromptSeq(promptIndex int64) string {
-	return fmt.Sprintf("p%d", promptIndex)
 }
 
 func maxInt64(v int64, fallback int64) int64 {
@@ -884,19 +662,6 @@ func formatStoreTime(ts time.Time) string {
 		return ""
 	}
 	return ts.In(time.Local).Format(time.RFC3339Nano)
-}
-
-func minNonZeroTime(left, right time.Time) time.Time {
-	switch {
-	case left.IsZero():
-		return right
-	case right.IsZero():
-		return left
-	case right.Before(left):
-		return right
-	default:
-		return left
-	}
 }
 
 func maxTime(left, right time.Time) time.Time {
@@ -938,27 +703,6 @@ func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*S
 	rec.CreatedAt = parseStoreTime(createdAt)
 	rec.LastActiveAt = parseStoreTime(lastActiveAt)
 	return &rec, nil
-}
-
-func (s *sqliteStore) loadSessionPromptByID(ctx context.Context, sessionID string, promptIndex int64) (*SessionPromptRecord, error) {
-	if promptIndex <= 0 {
-		return nil, nil
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.legacyPromptMu.Lock()
-	defer s.legacyPromptMu.Unlock()
-	rec, ok := s.legacyPromptMap[legacySessionPromptKey(sessionID, promptIndex)]
-	if !ok {
-		return nil, nil
-	}
-	rec.PromptID = formatPromptSeq(rec.PromptIndex)
-	return &rec, nil
-}
-
-func legacySessionPromptKey(sessionID string, promptIndex int64) string {
-	return strings.TrimSpace(sessionID) + "\x00" + strconv.FormatInt(promptIndex, 10)
 }
 
 func inferSessionListMetadata(agentType, agentJSON string) (string, string) {

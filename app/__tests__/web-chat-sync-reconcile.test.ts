@@ -2,7 +2,7 @@ import {
   getLatestSessionReadCursor,
   needsPromptTurnRefresh,
   reconcileSessionReadMessages,
-  replacePromptMessages,
+  replaceSessionMessages,
   shouldRequestSessionReadForIncomingTurn,
 } from '../web/src/chatSync';
 import type { RegistryChatMessage } from '../web/src/types/registry';
@@ -110,7 +110,7 @@ describe('chat session read reconciliation', () => {
   });
 
   test('keeps checkpointed turns and merges returned turn delta', () => {
-    const refreshed = replacePromptMessages(
+    const refreshed = replaceSessionMessages(
       [
         { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
         message('stale'),
@@ -122,7 +122,6 @@ describe('chat session read reconciliation', () => {
         { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
         { sessionId: 'sess-1', turnIndex: 4, method: 'prompt_request', param: {}, finished: true },
       ],
-      0,
       1,
     );
 
@@ -137,7 +136,6 @@ describe('chat session read reconciliation', () => {
   test('does not request a read for the next contiguous turn', () => {
     const local = {
       cursor: { turnIndex: 3 },
-      terminalPrompts: new Set<number>(),
     };
     const incoming: RegistryChatMessage = {
       sessionId: 'sess-1',
@@ -153,7 +151,6 @@ describe('chat session read reconciliation', () => {
   test('requests a read when a turn gap is detected', () => {
     const local = {
       cursor: { turnIndex: 3 },
-      terminalPrompts: new Set<number>([1]),
     };
 
     expect(shouldRequestSessionReadForIncomingTurn(local, {

@@ -998,9 +998,6 @@ function renderParsedJSONContent(raw, columnName, tableName) {
   if (col === 'agent_json') {
     return renderAgentJSONContent(raw);
   }
-  if (table === 'session_prompts' && col === 'turns_json') {
-    return renderSessionPromptsTurnsContent(raw);
-  }
   return renderGenericJSONContent(raw);
 }
 
@@ -1054,92 +1051,6 @@ function normalizeConfigOptionName(opt) {
   if (rawName) return rawName;
   if (opt && opt.id) return String(opt.id);
   return '-';
-}
-
-function renderSessionPromptsTurnsContent(raw) {
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (_) {
-    return '<pre class="json-code">' + esc(raw) + '</pre>';
-  }
-  if (!Array.isArray(parsed)) {
-    return '<pre class="json-code">' + esc(JSON.stringify(parsed, null, 2)) + '</pre>';
-  }
-  if (parsed.length === 0) {
-    return '<div class="empty-state">No turns</div>';
-  }
-  let html = '<div class="turn-list">';
-  for (let i = 0; i < parsed.length; i++) {
-    const turn = parsePromptTurnEntry(parsed[i]);
-    html += '<div class="turn-item">';
-    html += '<div class="turn-head">' +
-      '<span class="turn-index">#' + String(i + 1) + '</span>' +
-      '<span class="badge badge-blue">' + esc(turn.role) + '</span>' +
-      '<span class="turn-method">' + esc(turn.method) + '</span>' +
-      '</div>';
-    html += '<div class="turn-body">' + esc(turn.body) + '</div>';
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function parsePromptTurnEntry(rawEntry) {
-  const fallback = { role: 'system', method: 'unknown', body: '' };
-  const text = typeof rawEntry === 'string' ? rawEntry : JSON.stringify(rawEntry || {});
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch (_) {
-    fallback.body = text;
-    return fallback;
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    fallback.body = JSON.stringify(parsed);
-    return fallback;
-  }
-  const method = parsed.method && String(parsed.method).trim() ? String(parsed.method).trim() : 'unknown';
-  const param = parsed.param && typeof parsed.param === 'object' ? parsed.param : {};
-  let role = 'assistant';
-  let body = '';
-  if (method === 'im.prompt.request') {
-    role = 'user';
-    const blocks = Array.isArray(param.contentBlocks) ? param.contentBlocks : [];
-    const parts = [];
-    for (const block of blocks) {
-      if (block && String(block.type || '').trim() === 'text' && String(block.text || '').trim() !== '') {
-        parts.push(String(block.text).trim());
-      }
-    }
-    body = parts.join('\n');
-  } else if (method === 'im.agent.message' || method === 'im.agent.thought') {
-    role = 'assistant';
-    body = String(param.text || '').trim();
-  } else if (method === 'im.system') {
-    role = 'system';
-    body = String(param.text || '').trim();
-  } else if (method === 'session.update') {
-    const update = param.update && typeof param.update === 'object' ? param.update : {};
-    const sessionUpdate = String(update.sessionUpdate || '').trim();
-    const content = update.content;
-    role = sessionUpdate === 'user_message_chunk' ? 'user' : 'assistant';
-    if (typeof content === 'string') {
-      body = content.trim();
-    } else if (content && typeof content === 'object' && typeof content.text === 'string') {
-      body = content.text.trim();
-    }
-    if (!body) {
-      body = sessionUpdate || JSON.stringify(update);
-    }
-  } else if (method === 'im.prompt.done') {
-    role = 'system';
-    body = String(param.stopReason || '').trim();
-  }
-  if (!body) {
-    body = JSON.stringify(param && Object.keys(param).length > 0 ? param : parsed, null, 2);
-  }
-  return { role, method, body };
 }
 
 function summarizeAgentJSON(raw) {

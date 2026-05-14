@@ -1347,10 +1347,8 @@ Registry 即将关闭客户端连接时提前通知：
 
 ## 10. 相关文档
 
-- [app-chat-recorder-sync-protocol.zh-CN.md](./app-chat-recorder-sync-protocol.zh-CN.md) — App Chat 协议（session.* 族方法、实时事件、消息解码、同步模型）
-- [session-recorder-record-event.md](./session-recorder-record-event.md) — SessionRecorder 内部实现分析
+- [session-management-and-sync.zh-CN.md](./session-management-and-sync.zh-CN.md) — Session 对话管理、turn 文件序列化和 app/web 同步模型
 - [global-protocol.md](./global-protocol.md) — Global Protocol 封装设计
-- [session-persistence-sqlite.md](./session-persistence-sqlite.md) — SQLite 会话持久化 schema
 - [architecture-3.0.md](./architecture-3.0.md) — 架构设计 3.0
 
 ## 11. 版本历史

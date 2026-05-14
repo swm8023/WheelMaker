@@ -11,7 +11,6 @@ import (
 	"time"
 
 	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
-	acp "github.com/swm8023/wheelmaker/internal/protocol"
 	logger "github.com/swm8023/wheelmaker/internal/shared"
 	_ "modernc.org/sqlite"
 )
@@ -64,18 +63,6 @@ func TestBuildClientStartsWithSessionTurnStore(t *testing.T) {
 		LastActiveAt: time.Date(2026, 5, 13, 10, 1, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
-	}
-	if err := store.UpsertSessionPrompt(ctx, clientpkg.SessionPromptRecord{
-		SessionID:   "sess-1",
-		PromptIndex: 1,
-		StopReason:  acp.StopReasonEndTurn,
-		UpdatedAt:   time.Date(2026, 5, 13, 10, 1, 0, 0, time.UTC),
-		TurnsJSON: clientpkg.EncodeStoredTurns([]string{
-			`{"method":"prompt_request","param":{"contentBlocks":[{"type":"text","text":"hello"}]}}`,
-		}),
-		TurnIndex: 1,
-	}); err != nil {
-		t.Fatalf("UpsertSessionPrompt: %v", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close store: %v", err)

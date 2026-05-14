@@ -72,19 +72,8 @@ export interface RegistrySessionSummary {
 
 
 
-export interface RegistrySessionPromptSnapshot {
-  sessionId: string;
-  promptIndex: number;
-  turnIndex: number;
-  modelName?: string;
-  durationMs?: number;
-  finished?: boolean;
-  content?: string[];
-}
-
 export interface RegistrySessionReadResponse {
   session?: RegistrySessionSummary;
-  prompts: RegistrySessionPromptSnapshot[];
   messages: RegistrySessionMessage[];
   latestTurnIndex: number;
 }

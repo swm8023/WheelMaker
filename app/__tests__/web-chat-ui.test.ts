@@ -12,20 +12,19 @@ describe('web chat integration', () => {
 
     expect(registryTypes).toContain('export interface RegistrySessionSummary');
     expect(registryTypes).toContain('export interface RegistrySessionMessage');
-    expect(registryTypes).toContain('promptIndex: number;');
+    expect(registryTypes).not.toContain('promptIndex: number;');
     expect(registryTypes).toContain('turnIndex: number;');
     expect(registryTypes).toContain('finished: boolean;');
     expect(registryTypes).not.toContain('done?: boolean;');
-    expect(registryTypes).toContain('export interface RegistrySessionPromptSnapshot');
-    expect(registryTypes).toContain('content?: string[];');
+    expect(registryTypes).not.toContain('export interface RegistrySessionPromptSnapshot');
     expect(registryTypes).not.toContain('updateIndex: number;');
     expect(registryTypes).not.toContain('lastIndex');
     expect(repositoryTs).toContain("method: 'session.list'");
     expect(repositoryTs).toContain("method: 'session.read'");
-    expect(repositoryTs).toContain('payload: turnIndex > 0 ? {sessionId, afterTurnIndex: turnIndex} : {sessionId}');
+    expect(repositoryTs).toContain('payload: afterTurnIndex > 0 ? {sessionId, afterTurnIndex} : {sessionId}');
     expect(repositoryTs).toContain('turns?: unknown[];');
     expect(repositoryTs).toContain('Array.isArray(payload.turns) ? payload.turns : []');
-    expect(repositoryTs).toContain('prompts: []');
+    expect(repositoryTs).not.toContain('prompts: []');
     expect(registryTypes).toContain('session?: RegistrySessionSummary;');
     expect(repositoryTs).not.toContain('afterIndex');
     expect(repositoryTs).not.toContain('afterSubIndex');
@@ -56,7 +55,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('updateIndex');
     expect(mainTsx).not.toContain('await service.markSessionRead(');
     expect(mainTsx).toContain('chatSyncIndexRef');
-    expect(mainTsx).toContain('const [chatPromptSnapshotVersion, setChatPromptSnapshotVersion] = useState(0);');
+    expect(mainTsx).not.toContain('chatPromptSnapshotVersion');
     expect(mainTsx).toContain('nextSessions.some(session => session.sessionId === currentSelection)');
     expect(mainTsx).not.toContain('result.lastIndex < afterIndex');
     expect(mainTsx).toContain('preserveUserSelection');
@@ -154,7 +153,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('setHasPendingProjectUpdates(true);');
     expect(mainTsx).toContain('if (!silent) {');
     expect(mainTsx).toContain('setHasPendingProjectUpdates(false);');
-    expect(mainTsx).toContain('setChatPromptSnapshotVersion(version => version + 1);');
+    expect(mainTsx).not.toContain('setChatPromptSnapshotVersion(version => version + 1);');
     expect(mainTsx).toContain('setChatSessions(prev => {');
     expect(mainTsx).toContain('const byId = new Map(prev.map(item => [item.sessionId, item]));');
     expect(mainTsx).toContain('const merged = mergeChatSession(next, session);');
@@ -235,7 +234,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const readCursorForGap = shouldRequestSessionReadForIncomingTurn(');
     expect(mainTsx).toContain('messages.filter(isFinishedChatMessage)');
     expect(mainTsx).toContain('needsPromptTurnRefresh(');
-    expect(mainTsx).toContain('refreshPromptTurns(');
+    expect(mainTsx).toContain('refreshSessionTurns(');
     expect(mainTsx).not.toContain('if (shouldRefreshCompletedPrompt && isSelectedSession) {\n          loadChatSession(sessionId, projectIdRef.current, {\n            forceFull: true,');
     expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
     expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');

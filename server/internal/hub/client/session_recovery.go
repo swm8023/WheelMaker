@@ -107,7 +107,7 @@ func (r *sessionRecovery) ImportResumableSession(ctx context.Context, agentType,
 	}
 	summary := sessionViewSummary{
 		SessionID: sessionID,
-		Title:     firstNonEmpty(strings.TrimSpace(info.Title), sessionID),
+		Title:     strings.TrimSpace(info.Title),
 		UpdatedAt: lastActiveAt.UTC().Format(time.RFC3339),
 		AgentType: rec.AgentType,
 	}
@@ -119,11 +119,20 @@ func (r *sessionRecovery) ReloadSession(ctx context.Context, sessionID string) (
 	if sessionID == "" {
 		return nil, fmt.Errorf("sessionId is required")
 	}
-	if err := r.client.store.DeleteSessionPrompts(ctx, r.client.projectName, sessionID); err != nil {
-		return nil, fmt.Errorf("delete session prompts: %w", err)
+	rec, err := r.client.store.LoadSession(ctx, r.client.projectName, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session: %w", err)
+	}
+	if rec != nil {
+		rec.SessionSyncJSON = sessionSyncJSON(0)
+		if err := r.client.store.SaveSession(ctx, rec); err != nil {
+			return nil, fmt.Errorf("reset session sync: %w", err)
+		}
 	}
 	if r.client.sessionRecorder != nil {
-		r.client.sessionRecorder.RemovePromptState(sessionID)
+		if err := r.client.sessionRecorder.ResetSessionTurns(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("reset session turns: %w", err)
+		}
 	}
 	sess, err := r.client.SessionByID(ctx, sessionID)
 	if err != nil {
@@ -311,7 +320,7 @@ func (r *sessionRecovery) feedReplayToRecorder(ctx context.Context, sessionID st
 		}
 
 		if !hasPending && !recordedAny {
-			if err := r.ensureReplayPromptState(ctx, sessionID, time.Now().UTC()); err != nil {
+			if err := r.ensureReplayPromptState(ctx, sessionID); err != nil {
 				hubLogger(r.client.projectName).Warn("session.reload replay prompt init failed session=%s err=%v", sessionID, err)
 				return
 			}
@@ -324,14 +333,14 @@ func (r *sessionRecovery) feedReplayToRecorder(ctx context.Context, sessionID st
 	}
 }
 
-func (r *sessionRecovery) ensureReplayPromptState(ctx context.Context, sessionID string, updatedAt time.Time) error {
+func (r *sessionRecovery) ensureReplayPromptState(ctx context.Context, sessionID string) error {
 	recorder := r.client.sessionRecorder
 	if recorder == nil {
 		return nil
 	}
 	recorder.writeMu.Lock()
 	defer recorder.writeMu.Unlock()
-	_, err := recorder.ensurePromptStateLocked(ctx, sessionID, updatedAt)
+	_, err := recorder.ensurePromptStateLocked(ctx, sessionID)
 	return err
 }
 

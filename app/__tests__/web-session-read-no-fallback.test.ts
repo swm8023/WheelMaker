@@ -8,15 +8,22 @@ describe('registry session.read', () => {
         type: 'response',
         payload: {
           latestTurnIndex: 7,
-          turns: [],
+          turns: [
+            {
+              turnIndex: 4,
+              content: JSON.stringify({method: 'agent_message_chunk', param: {text: 'missing session id'}}),
+              finished: true,
+            },
+          ],
         },
       }),
     } as unknown as RegistryClient;
     const repository = new RegistryRepository(client);
 
-    const result = await repository.readSession('project-1', 'sess-1', 0, 3);
+    const result = await repository.readSession('project-1', 'sess-1', 3);
 
     expect(result.session).toBeUndefined();
+    expect(result.messages).toEqual([]);
     expect(result.latestTurnIndex).toBe(7);
   });
 });
