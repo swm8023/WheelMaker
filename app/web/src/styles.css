@@ -12,7 +12,7 @@
   --danger: #f48771;
   --line-num: #858585;
   --wm-safe-area-top: env(safe-area-inset-top, 0px);
-  --mobile-floating-control-lane: 72px;
+  --mobile-floating-control-lane: 54px;
 }
 
 .theme-light {
@@ -4237,13 +4237,12 @@ body,
 
 .drawer-overlay {
   position: fixed;
-  inset: 46px 0 0 0;
-  right: var(--mobile-floating-control-lane);
+  inset: 0;
   background: rgba(0, 0, 0, 0.28);
   opacity: 0;
   pointer-events: none;
   transition: opacity 140ms ease;
-  z-index: 50;
+  z-index: 43;
 }
 
 .drawer-overlay.show {
@@ -4252,8 +4251,9 @@ body,
 }
 
 .drawer {
-  width: min(420px, calc(100vw - var(--mobile-floating-control-lane) - env(safe-area-inset-right, 0px)));
-  height: 100%;
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(440px, calc(100vw - var(--mobile-floating-control-lane) - env(safe-area-inset-right, 0px)));
   border-right: 1px solid var(--border);
   background: var(--panel);
   transform: translateX(-100%);
@@ -4261,6 +4261,7 @@ body,
   display: flex;
   flex-direction: column;
   min-height: 0;
+  z-index: 50;
 }
 
 .drawer.show {
@@ -4273,11 +4274,6 @@ body,
 
 .narrow-shell .workspace-right {
   width: 100%;
-}
-
-.narrow-shell .drawer-overlay {
-  inset: 0;
-  right: var(--mobile-floating-control-lane);
 }
 
 .narrow-shell .project-menu {

@@ -72,14 +72,13 @@ export function MobileShell({
       <div
         className={`drawer-overlay ${drawerOpen ? 'show' : ''}`}
         onClick={onCloseDrawer}
+      />
+      <aside
+        className={`drawer ${drawerOpen ? 'show' : ''}`}
+        onClick={event => event.stopPropagation()}
       >
-        <aside
-          className={`drawer ${drawerOpen ? 'show' : ''}`}
-          onClick={event => event.stopPropagation()}
-        >
-          {sidebar}
-        </aside>
-      </div>
+        {sidebar}
+      </aside>
     </div>
   );
 }

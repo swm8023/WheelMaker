@@ -401,22 +401,27 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-config-feedback {');
   });
 
-  test('keeps the mobile project menu layer above floating controls', () => {
+  test('keeps the mobile drawer wide while preserving floating control clicks and backdrop dismissal', () => {
     const projectRoot = path.join(__dirname, '..');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
-    const drawerLayer = cssNumericProperty(stylesCss, '.drawer-overlay', 'z-index');
+    const backdropLayer = cssNumericProperty(stylesCss, '.drawer-overlay', 'z-index');
+    const drawerLayer = cssNumericProperty(stylesCss, '.drawer', 'z-index');
     const floatingLayer = cssNumericProperty(stylesCss, '.floating-control-stack-layer', 'z-index');
     const mobileSettingsLayer = cssNumericProperty(stylesCss, '.mobile-settings-screen', 'z-index');
 
+    expect(backdropLayer).toBeLessThan(floatingLayer);
     expect(drawerLayer).toBeGreaterThan(floatingLayer);
     expect(mobileSettingsLayer).toBeGreaterThan(drawerLayer);
-    expect(stylesCss).toContain('--mobile-floating-control-lane: 72px;');
+    expect(stylesCss).toContain('--mobile-floating-control-lane: 54px;');
     expect(stylesCss).toMatch(
+      /\.drawer-overlay \{[\s\S]*inset: 0;[\s\S]*z-index: 43;[\s\S]*\}/,
+    );
+    expect(stylesCss).not.toMatch(
       /\.drawer-overlay \{[\s\S]*right: var\(--mobile-floating-control-lane\);[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.drawer \{[\s\S]*width: min\(420px, calc\(100vw - var\(--mobile-floating-control-lane\) - env\(safe-area-inset-right, 0px\)\)\);[\s\S]*\}/,
+      /\.drawer \{[\s\S]*position: fixed;[\s\S]*width: min\(440px, calc\(100vw - var\(--mobile-floating-control-lane\) - env\(safe-area-inset-right, 0px\)\)\);[\s\S]*z-index: 50;[\s\S]*\}/,
     );
   });
 
