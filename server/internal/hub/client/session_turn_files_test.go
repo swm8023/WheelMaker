@@ -72,6 +72,12 @@ func TestFileSessionTurnStoreWritesVersion2FilesWith256Turns(t *testing.T) {
 	if version := binary.LittleEndian.Uint16(firstRaw[4:6]); version != 2 {
 		t.Fatalf("first turn file version = %d, want 2", version)
 	}
+	if code := firstRaw[6]; code != 0 {
+		t.Fatalf("first turn file chunk size code = %d, want 0", code)
+	}
+	if reserved := firstRaw[7]; reserved != 0 {
+		t.Fatalf("first turn file reserved byte = %d, want 0", reserved)
+	}
 	if occupied := countOccupiedTurnSlots(t, firstRaw, 256); occupied != 256 {
 		t.Fatalf("first turn file occupied slots = %d, want 256", occupied)
 	}
@@ -83,6 +89,12 @@ func TestFileSessionTurnStoreWritesVersion2FilesWith256Turns(t *testing.T) {
 	}
 	if version := binary.LittleEndian.Uint16(secondRaw[4:6]); version != 2 {
 		t.Fatalf("second turn file version = %d, want 2", version)
+	}
+	if code := secondRaw[6]; code != 0 {
+		t.Fatalf("second turn file chunk size code = %d, want 0", code)
+	}
+	if reserved := secondRaw[7]; reserved != 0 {
+		t.Fatalf("second turn file reserved byte = %d, want 0", reserved)
 	}
 	if occupied := countOccupiedTurnSlots(t, secondRaw, 256); occupied != 1 {
 		t.Fatalf("second turn file occupied slots = %d, want 1", occupied)
@@ -106,75 +118,15 @@ func TestFileSessionTurnStoreWritesVersion2FilesWith256Turns(t *testing.T) {
 	}
 }
 
-func TestFileSessionTurnStoreReadsLegacyVersion1Files(t *testing.T) {
+func TestFileSessionTurnStoreRejectsLegacyVersion1Files(t *testing.T) {
 	root := t.TempDir()
 	store := newFileSessionTurnStore(root)
 	ctx := context.Background()
 
-	contents := make([]string, 130)
-	for i := range contents {
-		contents[i] = fmt.Sprintf(`{"method":"system","param":{"text":"legacy-%03d"}}`, i+1)
-	}
-	writeLegacyV1TurnFiles(t, root, "proj1", "sess-1", contents)
+	writeLegacyV1TurnFiles(t, root, "proj1", "sess-1", []string{`{"method":"system","param":{"text":"legacy"}}`})
 
-	turns, err := store.ReadTurns(ctx, "proj1", "sess-1", 127, 130)
-	if err != nil {
-		t.Fatalf("ReadTurns: %v", err)
-	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3", len(turns))
-	}
-	for i, turn := range turns {
-		wantIndex := int64(128 + i)
-		if turn.TurnIndex != wantIndex {
-			t.Fatalf("turn[%d].TurnIndex = %d, want %d", i, turn.TurnIndex, wantIndex)
-		}
-		if turn.Content != contents[wantIndex-1] {
-			t.Fatalf("turn[%d].Content = %q, want %q", i, turn.Content, contents[wantIndex-1])
-		}
-	}
-}
-
-func TestFileSessionTurnStoreAppendsLegacyVersion1Files(t *testing.T) {
-	root := t.TempDir()
-	store := newFileSessionTurnStore(root)
-	ctx := context.Background()
-
-	contents := make([]string, 130)
-	for i := range contents {
-		contents[i] = fmt.Sprintf(`{"method":"system","param":{"text":"legacy-%03d"}}`, i+1)
-	}
-	writeLegacyV1TurnFiles(t, root, "proj1", "sess-1", contents)
-
-	latest, err := store.WriteTurns(ctx, "proj1", "sess-1", 131, []string{`{"method":"system","param":{"text":"legacy-131"}}`})
-	if err != nil {
-		t.Fatalf("WriteTurns: %v", err)
-	}
-	if latest != 131 {
-		t.Fatalf("latest = %d, want 131", latest)
-	}
-
-	secondFile := filepath.Join(store.turnDir("proj1", "sess-1"), "t000001.bin")
-	secondRaw, err := os.ReadFile(secondFile)
-	if err != nil {
-		t.Fatalf("ReadFile second legacy turn file: %v", err)
-	}
-	if version := binary.LittleEndian.Uint16(secondRaw[4:6]); version != 1 {
-		t.Fatalf("second legacy turn file version = %d, want 1", version)
-	}
-	if occupied := countOccupiedTurnSlots(t, secondRaw, 128); occupied != 3 {
-		t.Fatalf("second legacy turn file occupied slots = %d, want 3", occupied)
-	}
-
-	turns, err := store.ReadTurns(ctx, "proj1", "sess-1", 128, 131)
-	if err != nil {
-		t.Fatalf("ReadTurns: %v", err)
-	}
-	if len(turns) != 3 {
-		t.Fatalf("turns len = %d, want 3", len(turns))
-	}
-	if turns[2].Content != `{"method":"system","param":{"text":"legacy-131"}}` {
-		t.Fatalf("turn[2].Content = %q", turns[2].Content)
+	if _, err := store.ReadTurns(ctx, "proj1", "sess-1", 0, 1); err == nil {
+		t.Fatalf("ReadTurns with legacy v1 file unexpectedly succeeded")
 	}
 }
 
