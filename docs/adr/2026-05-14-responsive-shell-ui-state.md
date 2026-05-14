@@ -43,5 +43,6 @@ The first implementation slice introduces:
 - `responsiveLayout.ts` for the 900px Layout Mode rule.
 - `workspaceUiState.ts` for root UI state creation and reducer transitions.
 - A compatibility bridge in `main.tsx` that keeps existing variable names while sourcing the first migrated UI fields from the reducer.
+- `shell/ResponsiveShell.tsx` for the desktop/mobile Responsive Shell split while keeping Chat/File/Git content shared.
 
-The next slices should continue moving UI-only state into Workspace UI State before extracting `DesktopShell` and `MobileShell`.
+The next slices should continue moving UI-only state into Workspace UI State and then extract focused shell surfaces such as Settings and drawer-specific overlays.

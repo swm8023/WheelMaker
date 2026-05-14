@@ -18,6 +18,7 @@ declare const require: (id: string) => any;
 
 import { getDefaultRegistryAddress, toRegistryWsUrl } from './runtime';
 import { initializePWAFoundation } from './pwa';
+import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
   getLatestSessionReadCursor,
   isFinishedChatMessage,
@@ -8203,33 +8204,19 @@ function App() {
   ) : null;
 
   return (
-    <div className={`workspace theme-${themeMode}${!isWide ? ' narrow-shell' : ''}`}>
-      <style>{setiFontCss}</style>
-      {wideHeader}
-      {floatingControlStack}
-      {mobileSettingsScreen}
-
-      <div className="body">
-        {isWide && !sidebarCollapsed ? (
-          <aside className="workspace-left">{renderSidebar()}</aside>
-        ) : null}
-        <main className="workspace-right">{renderMain()}</main>
-      </div>
-
-      {!isWide ? (
-        <div
-          className={`drawer-overlay ${drawerOpen ? 'show' : ''}`}
-          onClick={() => setDrawerOpen(false)}
-        >
-          <aside
-            className={`drawer ${drawerOpen ? 'show' : ''}`}
-            onClick={event => event.stopPropagation()}
-          >
-            {renderSidebar()}
-          </aside>
-        </div>
-      ) : null}
-    </div>
+    <ResponsiveShell
+      mode={layoutMode}
+      themeMode={themeMode}
+      setiFontCss={setiFontCss}
+      desktopHeader={wideHeader}
+      floatingControlStack={floatingControlStack}
+      mobileSettingsScreen={mobileSettingsScreen}
+      sidebar={renderSidebar()}
+      main={renderMain()}
+      sidebarCollapsed={sidebarCollapsed}
+      drawerOpen={drawerOpen}
+      onCloseDrawer={() => setDrawerOpen(false)}
+    />
   );
 }
 
