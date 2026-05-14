@@ -1263,12 +1263,24 @@ body,
   background: transparent;
   color: var(--text);
   display: grid;
-  grid-template-columns: 14px 15px minmax(0, 1fr) auto;
+  grid-template-columns: 17px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   padding: 0;
   text-align: left;
   cursor: pointer;
+}
+
+.wide-project-folder-icon {
+  color: color-mix(in srgb, var(--text) 74%, var(--accent));
+  font-size: 15px;
+}
+
+.wide-project-title-group {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .wide-project-name {
@@ -1281,15 +1293,26 @@ body,
 }
 
 .wide-project-hub-tag {
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  --hub-accent: var(--accent);
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--hub-accent) 46%, transparent);
   border-radius: 999px;
   padding: 2px 7px;
-  color: color-mix(in srgb, var(--text) 82%, var(--accent));
-  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  color: color-mix(in srgb, var(--text) 74%, var(--hub-accent));
+  background: color-mix(in srgb, var(--hub-accent) 18%, var(--panel-2));
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
+
+.wide-project-hub-0 { --hub-accent: #00a6a6; }
+.wide-project-hub-1 { --hub-accent: #2f9e44; }
+.wide-project-hub-2 { --hub-accent: #bc6c25; }
+.wide-project-hub-3 { --hub-accent: #4f86c6; }
+.wide-project-hub-4 { --hub-accent: #c879ff; }
+.wide-project-hub-5 { --hub-accent: #d9480f; }
+.wide-project-hub-6 { --hub-accent: #038c7f; }
+.wide-project-hub-7 { --hub-accent: #7b6cb8; }
 
 .wide-project-actions {
   display: inline-flex;
@@ -1324,7 +1347,7 @@ body,
 }
 
 .wide-project-session-list {
-  padding: 3px 0 2px 30px;
+  padding: 3px 0 2px 23px;
 }
 
 .wide-session-row {
@@ -1335,9 +1358,9 @@ body,
   background: transparent;
   color: color-mix(in srgb, var(--text) 76%, transparent);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   padding: 0 9px;
   cursor: pointer;
   text-align: left;
@@ -1361,6 +1384,33 @@ body,
   white-space: nowrap;
   font-weight: 600;
 }
+
+.wide-session-agent-tag {
+  --agent-accent: var(--accent);
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--agent-accent) 42%, transparent);
+  border-radius: 999px;
+  padding: 1px 6px;
+  color: color-mix(in srgb, var(--text) 72%, var(--agent-accent));
+  background: color-mix(in srgb, var(--agent-accent) 12%, transparent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.wide-session-agent-0 { --agent-accent: #5aa9e6; }
+.wide-session-agent-1 { --agent-accent: #7bd88f; }
+.wide-session-agent-2 { --agent-accent: #f7b267; }
+.wide-session-agent-3 { --agent-accent: #b197fc; }
+.wide-session-agent-4 { --agent-accent: #4dd4ac; }
+.wide-session-agent-5 { --agent-accent: #ff8787; }
+.wide-session-agent-6 { --agent-accent: #74c0fc; }
+.wide-session-agent-7 { --agent-accent: #ffd43b; }
 
 .wide-session-time {
   color: var(--muted);
@@ -1402,6 +1452,44 @@ body,
   background: var(--panel);
   box-shadow: var(--soft-shadow);
   padding: 6px;
+}
+
+.wide-project-action-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 7px 9px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.wide-project-action-title .codicon {
+  color: color-mix(in srgb, var(--text) 74%, var(--accent));
+  font-size: 15px;
+}
+
+.wide-project-action-title-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.wide-project-action-title-main {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.wide-project-action-title-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .wide-project-action-menu-item,

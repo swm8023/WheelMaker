@@ -383,12 +383,28 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('const WIDE_PROJECT_SESSION_LIMIT = 5;');
+    expect(mainTsx).toContain('function tagVariantClass(prefix: string, value: string): string {');
     expect(mainTsx).toContain('const renderWideProjectSessionNav = () => {');
     expect(mainTsx).toContain('className="wide-project-session-nav"');
+    expect(mainTsx).toContain('className="wide-project-title-group"');
+    expect(mainTsx).toContain("collapsed ? 'codicon-folder' : 'codicon-folder-opened'");
+    expect(mainTsx).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
     expect(mainTsx).toContain('className="wide-project-session-list"');
     expect(mainTsx).toContain('className="wide-project-action-btn"');
     expect(mainTsx).toContain('className="wide-project-action-popover"');
+    expect(mainTsx).toContain('className="wide-project-action-title"');
+    expect(mainTsx).toContain("wideProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
+    expect(mainTsx).toContain("const sessionAgent = (session.agentType || '').trim();");
+    expect(mainTsx).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
     expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : renderSidebarMain()');
+
+    const wideRailStart = mainTsx.indexOf('const renderWideProjectSessionNav = () => {');
+    const wideRailEnd = mainTsx.indexOf('const renderSidebar = () => {', wideRailStart);
+    expect(wideRailStart).toBeGreaterThanOrEqual(0);
+    expect(wideRailEnd).toBeGreaterThan(wideRailStart);
+    const wideRail = mainTsx.slice(wideRailStart, wideRailEnd);
+    expect(wideRail).not.toContain('codicon-chevron-right');
+    expect(wideRail).not.toContain('codicon-chevron-down');
 
     const wideHeaderStart = mainTsx.indexOf('const wideHeader = isWide ? (');
     const wideHeaderEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', wideHeaderStart);
@@ -400,13 +416,17 @@ describe('web chat integration', () => {
 
     expect(stylesCss).toContain('.wide-project-session-nav {');
     expect(stylesCss).toContain('.wide-project-row {');
+    expect(stylesCss).toContain('.wide-project-folder-icon {');
+    expect(stylesCss).toContain('.wide-project-title-group {');
     expect(stylesCss).toContain('.wide-project-hub-tag {');
+    expect(stylesCss).toContain('.wide-project-hub-0 {');
     expect(stylesCss).toContain('.wide-project-action-btn {');
+    expect(stylesCss).toContain('.wide-project-action-title {');
     expect(stylesCss).toContain('.wide-session-row {');
+    expect(stylesCss).toContain('.wide-session-agent-tag {');
+    expect(stylesCss).toContain('.wide-session-agent-0 {');
     expect(stylesCss).toContain('.wide-session-time {');
     expect(stylesCss).toContain('.wide-project-action-popover {');
-    expect(mainTsx).not.toContain('className="wide-project-action-title"');
-    expect(stylesCss).not.toContain('.wide-project-action-title');
   });
 
   test('wide project session rail actions use project-scoped chat flows', () => {

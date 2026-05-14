@@ -330,6 +330,16 @@ function nearestFloatingSlot(
 }
 
 
+function tagVariantClass(prefix: string, value: string): string {
+  const normalized = value.trim().toLowerCase();
+  let hash = 0;
+  for (let index = 0; index < normalized.length; index += 1) {
+    hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
+  }
+  return `${prefix}-${hash % 8}`;
+}
+
+
 function normalizeChatSlashCommandName(name: string): string {
   const normalized = name.trim();
   if (!normalized) {
@@ -5392,15 +5402,9 @@ function App() {
   }, []);
 
   const tokenTagVariantClass = useCallback((scope: 'agent' | 'hub', value: string): string => {
-    const normalized = value.trim().toLowerCase();
-    let hash = 0;
-    for (let index = 0; index < normalized.length; index += 1) {
-      hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;
-    }
-    const variant = hash % 8;
     return scope === 'agent'
-      ? `token-stats-pill-agent-${variant}`
-      : `token-stats-pill-hub-${variant}`;
+      ? tagVariantClass('token-stats-pill-agent', value)
+      : tagVariantClass('token-stats-pill-hub', value);
   }, []);
 
   const formatCodexUsageLine = useCallback((label: '5h Usage' | 'Week Usage', value?: string): string => {
@@ -7147,16 +7151,17 @@ function App() {
                   aria-expanded={!collapsed}
                 >
                   <span
-                    className={`codicon ${
-                      collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'
-                    }`}
+                    className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon`}
                   />
-                  <span className="codicon codicon-folder" />
-                  <span className="wide-project-name" title={projectItem.name}>
-                    {projectItem.name}
-                  </span>
-                  <span className="wide-project-hub-tag">
-                    {projectItem.hubId || 'local'}
+                  <span className="wide-project-title-group">
+                    <span className="wide-project-name" title={projectItem.name}>
+                      {projectItem.name}
+                    </span>
+                    <span
+                      className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', projectItem.hubId || 'local')}`}
+                    >
+                      {projectItem.hubId || 'local'}
+                    </span>
                   </span>
                 </button>
                 <div className="wide-project-actions">
@@ -7192,6 +7197,23 @@ function App() {
                     ref={wideProjectActionMenuRef}
                     className="wide-project-action-popover"
                   >
+                    <div className="wide-project-action-title">
+                      <span
+                        className={`codicon ${
+                          wideProjectActionMenu.kind === 'new'
+                            ? 'codicon-add'
+                            : 'codicon-history'
+                        }`}
+                      />
+                      <span className="wide-project-action-title-copy">
+                        <span className="wide-project-action-title-main">
+                          {wideProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'}
+                        </span>
+                        <span className="wide-project-action-title-sub">
+                          {projectItem.name}
+                        </span>
+                      </span>
+                    </div>
                     {wideProjectActionMenu.phase === 'agents' ? (
                       <>
                         {agents.map(agentType => (
@@ -7277,30 +7299,38 @@ function App() {
               </div>
               {!collapsed ? (
                 <div className="wide-project-session-list">
-                  {visibleSessions.map(session => (
-                    <button
-                      type="button"
-                      key={`${targetProjectId}:${session.sessionId}`}
-                      className={`wide-session-row${
-                        activeProject && selectedChatId === session.sessionId
-                          ? ' selected'
-                          : ''
-                      }`}
-                      onClick={() => {
-                        selectWideProjectSession(
-                          targetProjectId,
-                          session.sessionId,
-                        ).catch(() => undefined);
-                      }}
-                    >
-                      <span className="wide-session-title">
-                        {session.title || session.sessionId}
-                      </span>
-                      <span className="wide-session-time" title={session.updatedAt || ''}>
-                        {formatCompactRelativeAge(session.updatedAt)}
-                      </span>
-                    </button>
-                  ))}
+                  {visibleSessions.map(session => {
+                    const sessionAgent = (session.agentType || '').trim();
+                    return (
+                      <button
+                        type="button"
+                        key={`${targetProjectId}:${session.sessionId}`}
+                        className={`wide-session-row${
+                          activeProject && selectedChatId === session.sessionId
+                            ? ' selected'
+                            : ''
+                        }`}
+                        onClick={() => {
+                          selectWideProjectSession(
+                            targetProjectId,
+                            session.sessionId,
+                          ).catch(() => undefined);
+                        }}
+                      >
+                        <span className="wide-session-title">
+                          {session.title || session.sessionId}
+                        </span>
+                        {sessionAgent ? (
+                          <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
+                            {sessionAgent}
+                          </span>
+                        ) : null}
+                        <span className="wide-session-time" title={session.updatedAt || ''}>
+                          {formatCompactRelativeAge(session.updatedAt)}
+                        </span>
+                      </button>
+                    );
+                  })}
                   {projectSessions.length > visibleSessions.length ? (
                     <button
                       type="button"
