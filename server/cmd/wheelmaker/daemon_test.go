@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/swm8023/wheelmaker/internal/shared"
 )
 
 func TestSanitizeWorkerArgs(t *testing.T) {
@@ -11,6 +13,22 @@ func TestSanitizeWorkerArgs(t *testing.T) {
 	got := sanitizeWorkerArgs(in)
 	if len(got) != 2 || got[0] != "--foo" || got[1] != "bar" {
 		t.Fatalf("sanitizeWorkerArgs()=%v", got)
+	}
+}
+
+func TestGuardianWorkerSpecsSkipRegistryWorkerWhenRegistryListenDisabled(t *testing.T) {
+	cfg := shared.RegistryConfig{
+		Listen: false,
+		Server: "wss://registry.example/ws",
+		Port:   28800,
+	}
+	specs := guardianWorkerSpecs([]string{"--foo", "bar"}, cfg)
+
+	if len(specs) != 1 {
+		t.Fatalf("guardianWorkerSpecs() len=%d want 1 specs=%v", len(specs), specs)
+	}
+	if specs[0].markerFlag != hubWorkerArg {
+		t.Fatalf("guardianWorkerSpecs()[0].markerFlag=%q want %q", specs[0].markerFlag, hubWorkerArg)
 	}
 }
 

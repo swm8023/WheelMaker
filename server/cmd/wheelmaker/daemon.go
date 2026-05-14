@@ -10,6 +10,8 @@ import (
 	"slices"
 	"syscall"
 	"time"
+
+	"github.com/swm8023/wheelmaker/internal/shared"
 )
 
 const guardianInterval = 30 * time.Second
@@ -45,10 +47,11 @@ func runGuardianWithContext(ctx context.Context, workerArgs []string) error {
 	exeName := filepath.Base(exePath)
 	baseArgs := sanitizeWorkerArgs(workerArgs)
 
-	specs := []*workerSpec{
-		{name: "hub", markerFlag: hubWorkerArg, args: append(append([]string{}, baseArgs...), hubWorkerArg)},
-		{name: "registry", markerFlag: registryWorkerArg, args: append(append([]string{}, baseArgs...), registryWorkerArg)},
+	registryCfg, err := loadGuardianRegistryConfig()
+	if err != nil {
+		return err
 	}
+	specs := guardianWorkerSpecs(baseArgs, registryCfg)
 
 	reconcile := func() {
 		for _, spec := range specs {
@@ -74,6 +77,29 @@ func runGuardianWithContext(ctx context.Context, workerArgs []string) error {
 			reconcile()
 		}
 	}
+}
+
+func loadGuardianRegistryConfig() (shared.RegistryConfig, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return shared.RegistryConfig{}, fmt.Errorf("home dir: %w", err)
+	}
+	cfgPath := filepath.Join(home, ".wheelmaker", "config.json")
+	cfg, err := shared.LoadConfig(cfgPath)
+	if err != nil {
+		return shared.RegistryConfig{}, fmt.Errorf("cannot load config.json at %s: %w", cfgPath, err)
+	}
+	return cfg.Registry, nil
+}
+
+func guardianWorkerSpecs(baseArgs []string, registryCfg shared.RegistryConfig) []*workerSpec {
+	specs := []*workerSpec{
+		{name: "hub", markerFlag: hubWorkerArg, args: append(append([]string{}, baseArgs...), hubWorkerArg)},
+	}
+	if registryCfg.Listen {
+		specs = append(specs, &workerSpec{name: "registry", markerFlag: registryWorkerArg, args: append(append([]string{}, baseArgs...), registryWorkerArg)})
+	}
+	return specs
 }
 
 func sanitizeWorkerArgs(args []string) []string {
