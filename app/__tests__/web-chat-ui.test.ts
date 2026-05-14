@@ -153,7 +153,13 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
     expect(stylesCss).toContain('.chat-composer::before {');
-    expect(stylesCss).toContain('transform: translateY(calc(-100% + 4px));');
+    expect(stylesCss).toMatch(
+      /\.chat-composer \{[\s\S]*--chat-composer-frame-top: 12px;[\s\S]*--chat-composer-fade-distance: 28px;[\s\S]*margin-top: calc\(-1 \* var\(--chat-composer-frame-top\)\);[\s\S]*padding: var\(--chat-composer-frame-top\) 14px 12px;[\s\S]*background: transparent;/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-composer::before \{[\s\S]*top: calc\(var\(--chat-composer-frame-top\) - var\(--chat-composer-fade-distance\)\);[\s\S]*height: var\(--chat-composer-fade-distance\);[\s\S]*transparent 0%,[\s\S]*color-mix\(in srgb, var\(--bg\) 22%, transparent\) 34%,[\s\S]*color-mix\(in srgb, var\(--bg\) 78%, transparent\) 76%,[\s\S]*var\(--bg\) 100%/,
+    );
+    expect(stylesCss).not.toContain('transform: translateY(calc(-100% + 4px));');
     expect(stylesCss).toContain('.chat-session-item');
     expect(stylesCss).toContain('.chat-attachment-preview-list {');
     expect(stylesCss).toContain('.chat-config-overflow-anchor {');
@@ -350,7 +356,10 @@ describe('web chat integration', () => {
       /button,\s*\[role='button'\],\s*\[role='menuitemradio'\],\s*\[role='option'\]\s*\{[\s\S]*-webkit-tap-highlight-color: transparent;/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-composer::before \{[\s\S]*height: 14px;[\s\S]*transform: translateY\(calc\(-100% \+ 4px\)\);/,
+      /\.chat-composer \{[\s\S]*--chat-composer-frame-top: 12px;[\s\S]*--chat-composer-fade-distance: 28px;[\s\S]*background: transparent;/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-composer::before \{[\s\S]*top: calc\(var\(--chat-composer-frame-top\) - var\(--chat-composer-fade-distance\)\);[\s\S]*height: var\(--chat-composer-fade-distance\);/,
     );
     expect(stylesCss).toContain('.chat-composer-frame {');
     expect(stylesCss).toMatch(

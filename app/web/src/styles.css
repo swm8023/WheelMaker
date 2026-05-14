@@ -3096,11 +3096,13 @@ body,
 }
 
 .chat-composer {
+  --chat-composer-frame-top: 12px;
+  --chat-composer-fade-distance: 28px;
   position: relative;
   z-index: 1;
-  margin-top: -16px;
-  padding: 18px 14px 12px;
-  background: var(--bg);
+  margin-top: calc(-1 * var(--chat-composer-frame-top));
+  padding: var(--chat-composer-frame-top) 14px 12px;
+  background: transparent;
 }
 
 .chat-composer::before {
@@ -3108,14 +3110,14 @@ body,
   position: absolute;
   left: 0;
   right: 0;
-  top: 0;
-  height: 14px;
-  transform: translateY(calc(-100% + 4px));
+  top: calc(var(--chat-composer-frame-top) - var(--chat-composer-fade-distance));
+  height: var(--chat-composer-fade-distance);
   pointer-events: none;
   background: linear-gradient(
     180deg,
     transparent 0%,
-    color-mix(in srgb, var(--bg) 74%, transparent) 56%,
+    color-mix(in srgb, var(--bg) 22%, transparent) 34%,
+    color-mix(in srgb, var(--bg) 78%, transparent) 76%,
     var(--bg) 100%
   );
 }
