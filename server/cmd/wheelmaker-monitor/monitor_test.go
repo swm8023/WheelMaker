@@ -213,8 +213,30 @@ func TestExecuteActionClearSessionHistoryResetsSessionSync(t *testing.T) {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	mon := NewMonitor(base)
+	sessionRoot := filepath.Join(base, "db", "session")
+	oldSessionRoot := filepath.Join(base, "session")
+	if err := os.MkdirAll(filepath.Join(sessionRoot, "proj1", "sess-1", "turns"), 0o755); err != nil {
+		t.Fatalf("mkdir session root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionRoot, "proj1", "sess-1", "turns", "t000000.bin"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write session turn file: %v", err)
+	}
+
 	if err := mon.ExecuteActionByHub(context.Background(), "", "clear-session-history"); err != nil {
 		t.Fatalf("ExecuteActionByHub(clear-session-history): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessionRoot, "proj1", "sess-1", "turns", "t000000.bin")); err == nil {
+		t.Fatalf("clear-session-history should remove db/session turn files")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat db/session turn file: %v", err)
+	}
+	if info, err := os.Stat(sessionRoot); err != nil || !info.IsDir() {
+		t.Fatalf("db/session root should be recreated, info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(oldSessionRoot); err == nil {
+		t.Fatalf("clear-session-history should not create old session root")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat old session root: %v", err)
 	}
 
 	rec, err := store.LoadSession(ctx, "proj1", "sess-1")

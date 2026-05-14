@@ -349,7 +349,7 @@ func (c *MonitorCore) clearSessionHistory() error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	sessionDir := filepath.Join(c.BaseDir, "session")
+	sessionDir := filepath.Join(c.BaseDir, "db", "session")
 	if err := os.RemoveAll(sessionDir); err != nil {
 		return err
 	}
