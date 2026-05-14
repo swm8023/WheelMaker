@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -12,11 +13,36 @@ import (
 )
 
 const (
-	sessionTurnFileMagic    = "WMT2"
-	sessionTurnFileVersion  = uint16(1)
-	sessionTurnsPerFile     = 128
-	sessionTurnFileMetaSize = 8
-	sessionTurnFileHeadSize = 4 + 2 + 2 + sessionTurnsPerFile*sessionTurnFileMetaSize
+	sessionTurnFileMagic          = "WMT2"
+	sessionTurnFileVersion        = uint16(2)
+	sessionTurnFileLegacyVersion  = uint16(1)
+	sessionTurnFilePreambleSize   = 8
+	sessionTurnFileMetaSize       = 8
+	sessionTurnsPerFileLegacy     = 128
+	sessionTurnsPerFile           = 256
+	sessionTurnFileHeadSize       = sessionTurnFilePreambleSize + sessionTurnsPerFile*sessionTurnFileMetaSize
+	sessionTurnFileLegacyHeadSize = sessionTurnFilePreambleSize + sessionTurnsPerFileLegacy*sessionTurnFileMetaSize
+)
+
+var errTurnNotFound = errors.New("turn not found")
+
+type sessionTurnFileFormat struct {
+	version      uint16
+	turnsPerFile int
+	headSize     int
+}
+
+var (
+	sessionTurnFileCurrentFormat = sessionTurnFileFormat{
+		version:      sessionTurnFileVersion,
+		turnsPerFile: sessionTurnsPerFile,
+		headSize:     sessionTurnFileHeadSize,
+	}
+	sessionTurnFileLegacyFormat = sessionTurnFileFormat{
+		version:      sessionTurnFileLegacyVersion,
+		turnsPerFile: sessionTurnsPerFileLegacy,
+		headSize:     sessionTurnFileLegacyHeadSize,
+	}
 )
 
 type sessionViewTurn struct {
@@ -71,6 +97,10 @@ func (s *fileSessionTurnStore) WriteTurns(ctx context.Context, projectName, sess
 	if startTurnIndex != latest+1 {
 		return 0, fmt.Errorf("start turn index %d does not follow latest turn index %d", startTurnIndex, latest)
 	}
+	format, err := s.activeTurnFileFormat(ctx, projectName, sessionID)
+	if err != nil {
+		return 0, err
+	}
 	next := startTurnIndex
 	for _, content := range contents {
 		if err := ctx.Err(); err != nil {
@@ -82,7 +112,7 @@ func (s *fileSessionTurnStore) WriteTurns(ctx context.Context, projectName, sess
 		if len(content) > math.MaxUint32 {
 			return 0, fmt.Errorf("turn content too large")
 		}
-		if err := s.writeTurn(ctx, projectName, sessionID, next, []byte(content)); err != nil {
+		if err := s.writeTurn(ctx, projectName, sessionID, format, next, []byte(content)); err != nil {
 			return 0, err
 		}
 		next++
@@ -100,9 +130,13 @@ func (s *fileSessionTurnStore) ReadTurns(ctx context.Context, projectName, sessi
 	if latestTurnIndex <= afterTurnIndex {
 		return nil, nil
 	}
+	format, err := s.activeTurnFileFormat(ctx, projectName, sessionID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]sessionViewTurn, 0, latestTurnIndex-afterTurnIndex)
 	for turnIndex := afterTurnIndex + 1; turnIndex <= latestTurnIndex; turnIndex++ {
-		content, err := s.readTurn(ctx, projectName, sessionID, turnIndex)
+		content, err := s.readTurn(ctx, projectName, sessionID, format, turnIndex)
 		if err != nil {
 			return nil, err
 		}
@@ -161,11 +195,36 @@ func (s *fileSessionTurnStore) latestTurnIndex(ctx context.Context, projectName,
 	return latest, nil
 }
 
-func (s *fileSessionTurnStore) writeTurn(ctx context.Context, projectName, sessionID string, turnIndex int64, content []byte) error {
+func (s *fileSessionTurnStore) activeTurnFileFormat(ctx context.Context, projectName, sessionID string) (sessionTurnFileFormat, error) {
+	if err := ctx.Err(); err != nil {
+		return sessionTurnFileFormat{}, err
+	}
+	dir := s.turnDir(projectName, sessionID)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return sessionTurnFileCurrentFormat, nil
+	}
+	if err != nil {
+		return sessionTurnFileFormat{}, fmt.Errorf("read turn dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		var fileNo int64
+		if _, err := fmt.Sscanf(entry.Name(), "t%06d.bin", &fileNo); err != nil {
+			continue
+		}
+		return readTurnFileFormat(filepath.Join(dir, entry.Name()))
+	}
+	return sessionTurnFileCurrentFormat, nil
+}
+
+func (s *fileSessionTurnStore) writeTurn(ctx context.Context, projectName, sessionID string, format sessionTurnFileFormat, turnIndex int64, content []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	path, fileNo, slot := s.turnPath(projectName, sessionID, turnIndex)
+	path, fileNo, slot := s.turnPath(projectName, sessionID, format, turnIndex)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir turn dir: %w", err)
 	}
@@ -174,11 +233,14 @@ func (s *fileSessionTurnStore) writeTurn(ctx context.Context, projectName, sessi
 		return fmt.Errorf("open turn file: %w", err)
 	}
 	defer f.Close()
-	header, err := readOrInitTurnHeader(f)
+	header, actualFormat, err := readOrInitTurnHeader(f, format)
 	if err != nil {
 		return fmt.Errorf("read turn header: %w", err)
 	}
-	firstEmpty, end, err := turnHeaderState(header, fileNo)
+	if actualFormat.version != format.version {
+		return fmt.Errorf("turn file version %d does not match active session version %d", actualFormat.version, format.version)
+	}
+	firstEmpty, end, err := turnHeaderState(header, actualFormat, fileNo)
 	if err != nil {
 		return err
 	}
@@ -197,7 +259,7 @@ func (s *fileSessionTurnStore) writeTurn(ctx context.Context, projectName, sessi
 	if err := f.Sync(); err != nil {
 		return fmt.Errorf("sync turn body: %w", err)
 	}
-	slotOffset := int64(8 + slot*sessionTurnFileMetaSize)
+	slotOffset := int64(sessionTurnFilePreambleSize + slot*sessionTurnFileMetaSize)
 	slotBuf := make([]byte, sessionTurnFileMetaSize)
 	binary.LittleEndian.PutUint32(slotBuf[0:4], uint32(end))
 	binary.LittleEndian.PutUint32(slotBuf[4:8], uint32(len(content)))
@@ -210,54 +272,52 @@ func (s *fileSessionTurnStore) writeTurn(ctx context.Context, projectName, sessi
 	return nil
 }
 
-func (s *fileSessionTurnStore) readTurn(ctx context.Context, projectName, sessionID string, turnIndex int64) ([]byte, error) {
+func (s *fileSessionTurnStore) readTurn(ctx context.Context, projectName, sessionID string, format sessionTurnFileFormat, turnIndex int64) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	path, _, slot := s.turnPath(projectName, sessionID, turnIndex)
-	raw, err := os.ReadFile(path)
+	path, _, slot := s.turnPath(projectName, sessionID, format, turnIndex)
+	raw, actualFormat, err := readTurnFileBytes(path)
 	if err != nil {
-		return nil, fmt.Errorf("read turn file: %w", err)
-	}
-	if len(raw) < sessionTurnFileHeadSize {
-		return nil, fmt.Errorf("turn file header too short")
-	}
-	if err := validateTurnHeader(raw[:sessionTurnFileHeadSize]); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("turn %d: %w", turnIndex, errTurnNotFound)
+		}
 		return nil, err
 	}
-	offset, length := turnSlot(raw[:sessionTurnFileHeadSize], slot)
+	if actualFormat.version != format.version {
+		return nil, fmt.Errorf("turn file version %d does not match active session version %d", actualFormat.version, format.version)
+	}
+	if slot < 0 || slot >= actualFormat.turnsPerFile {
+		return nil, fmt.Errorf("turn %d: %w", turnIndex, errTurnNotFound)
+	}
+	header := raw[:actualFormat.headSize]
+	offset, length := turnSlot(header, slot)
 	if offset == 0 || length == 0 {
-		return nil, fmt.Errorf("turn %d not found", turnIndex)
+		return nil, fmt.Errorf("turn %d: %w", turnIndex, errTurnNotFound)
 	}
 	end := int(offset) + int(length)
-	if int(offset) < sessionTurnFileHeadSize || end > len(raw) {
+	if int(offset) < actualFormat.headSize || end > len(raw) {
 		return nil, fmt.Errorf("turn %d slot points outside file", turnIndex)
 	}
-	return raw[offset:end], nil
+	return raw[int(offset):end], nil
 }
 
 func (s *fileSessionTurnStore) latestTurnIndexInFile(path string, fileNo int64) (int64, error) {
-	raw, err := os.ReadFile(path)
+	raw, format, err := readTurnFileBytes(path)
 	if err != nil {
-		return 0, fmt.Errorf("read turn file: %w", err)
-	}
-	if len(raw) < sessionTurnFileHeadSize {
-		return 0, fmt.Errorf("turn file header too short")
-	}
-	header := raw[:sessionTurnFileHeadSize]
-	if err := validateTurnHeader(header); err != nil {
 		return 0, err
 	}
+	header := raw[:format.headSize]
 	latest := int64(0)
-	for slot := 0; slot < sessionTurnsPerFile; slot++ {
+	for slot := 0; slot < format.turnsPerFile; slot++ {
 		offset, length := turnSlot(header, slot)
 		if offset == 0 || length == 0 {
 			break
 		}
-		if int(offset) < sessionTurnFileHeadSize || int(offset)+int(length) > len(raw) {
+		if int(offset) < format.headSize || int(offset)+int(length) > len(raw) {
 			return 0, fmt.Errorf("turn slot %d points outside file", slot)
 		}
-		latest = fileNo*sessionTurnsPerFile + int64(slot) + 1
+		latest = fileNo*int64(format.turnsPerFile) + int64(slot) + 1
 	}
 	return latest, nil
 }
@@ -266,64 +326,116 @@ func (s *fileSessionTurnStore) turnDir(projectName, sessionID string) string {
 	return filepath.Join(s.root, safeHistoryPathPart(projectName), safeHistoryPathPart(sessionID), "turns")
 }
 
-func (s *fileSessionTurnStore) turnPath(projectName, sessionID string, turnIndex int64) (string, int64, int) {
-	fileNo := (turnIndex - 1) / sessionTurnsPerFile
-	slot := int((turnIndex - 1) % sessionTurnsPerFile)
+func (s *fileSessionTurnStore) turnPath(projectName, sessionID string, format sessionTurnFileFormat, turnIndex int64) (string, int64, int) {
+	fileNo := (turnIndex - 1) / int64(format.turnsPerFile)
+	slot := int((turnIndex - 1) % int64(format.turnsPerFile))
 	path := filepath.Join(s.turnDir(projectName, sessionID), fmt.Sprintf("t%06d.bin", fileNo))
 	return path, fileNo, slot
 }
 
-func readOrInitTurnHeader(f *os.File) ([]byte, error) {
+func readOrInitTurnHeader(f *os.File, format sessionTurnFileFormat) ([]byte, sessionTurnFileFormat, error) {
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
+		return nil, sessionTurnFileFormat{}, err
 	}
 	if info.Size() == 0 {
-		header := make([]byte, sessionTurnFileHeadSize)
+		header := make([]byte, format.headSize)
 		copy(header[0:4], sessionTurnFileMagic)
-		binary.LittleEndian.PutUint16(header[4:6], sessionTurnFileVersion)
+		binary.LittleEndian.PutUint16(header[4:6], format.version)
 		if _, err := f.WriteAt(header, 0); err != nil {
-			return nil, err
+			return nil, sessionTurnFileFormat{}, err
 		}
-		return header, nil
+		return header, format, nil
 	}
-	if info.Size() < sessionTurnFileHeadSize {
-		return nil, fmt.Errorf("turn file header too short")
+	if info.Size() < sessionTurnFilePreambleSize {
+		return nil, sessionTurnFileFormat{}, fmt.Errorf("turn file header too short")
 	}
-	header := make([]byte, sessionTurnFileHeadSize)
+	preamble := make([]byte, sessionTurnFilePreambleSize)
+	if _, err := f.ReadAt(preamble, 0); err != nil {
+		return nil, sessionTurnFileFormat{}, err
+	}
+	actualFormat, err := detectTurnFileFormat(preamble)
+	if err != nil {
+		return nil, sessionTurnFileFormat{}, err
+	}
+	if info.Size() < int64(actualFormat.headSize) {
+		return nil, sessionTurnFileFormat{}, fmt.Errorf("turn file header too short")
+	}
+	header := make([]byte, actualFormat.headSize)
 	if _, err := f.ReadAt(header, 0); err != nil {
-		return nil, err
+		return nil, sessionTurnFileFormat{}, err
 	}
-	if err := validateTurnHeader(header); err != nil {
-		return nil, err
+	if _, err := validateTurnHeader(header); err != nil {
+		return nil, sessionTurnFileFormat{}, err
 	}
-	return header, nil
+	return header, actualFormat, nil
 }
 
-func validateTurnHeader(header []byte) error {
-	if len(header) < sessionTurnFileHeadSize {
-		return fmt.Errorf("turn file header too short")
+func readTurnFileFormat(path string) (sessionTurnFileFormat, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return sessionTurnFileFormat{}, fmt.Errorf("read turn file: %w", err)
+	}
+	defer f.Close()
+	preamble := make([]byte, sessionTurnFilePreambleSize)
+	if _, err := io.ReadFull(f, preamble); err != nil {
+		return sessionTurnFileFormat{}, fmt.Errorf("turn file header too short")
+	}
+	return detectTurnFileFormat(preamble)
+}
+
+func readTurnFileBytes(path string) ([]byte, sessionTurnFileFormat, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, sessionTurnFileFormat{}, fmt.Errorf("read turn file: %w", err)
+	}
+	format, err := validateTurnHeader(raw)
+	if err != nil {
+		return nil, sessionTurnFileFormat{}, err
+	}
+	return raw, format, nil
+}
+
+func validateTurnHeader(header []byte) (sessionTurnFileFormat, error) {
+	format, err := detectTurnFileFormat(header)
+	if err != nil {
+		return sessionTurnFileFormat{}, err
+	}
+	if len(header) < format.headSize {
+		return sessionTurnFileFormat{}, fmt.Errorf("turn file header too short")
+	}
+	return format, nil
+}
+
+func detectTurnFileFormat(header []byte) (sessionTurnFileFormat, error) {
+	if len(header) < sessionTurnFilePreambleSize {
+		return sessionTurnFileFormat{}, fmt.Errorf("turn file header too short")
 	}
 	if string(header[0:4]) != sessionTurnFileMagic {
-		return fmt.Errorf("invalid turn file magic")
+		return sessionTurnFileFormat{}, fmt.Errorf("invalid turn file magic")
 	}
-	if version := binary.LittleEndian.Uint16(header[4:6]); version != sessionTurnFileVersion {
-		return fmt.Errorf("unsupported turn file version %d", version)
+	version := binary.LittleEndian.Uint16(header[4:6])
+	switch version {
+	case sessionTurnFileVersion:
+		return sessionTurnFileCurrentFormat, nil
+	case sessionTurnFileLegacyVersion:
+		return sessionTurnFileLegacyFormat, nil
+	default:
+		return sessionTurnFileFormat{}, fmt.Errorf("unsupported turn file version %d", version)
 	}
-	return nil
 }
 
-func turnHeaderState(header []byte, fileNo int64) (int, int64, error) {
-	if err := validateTurnHeader(header); err != nil {
+func turnHeaderState(header []byte, format sessionTurnFileFormat, fileNo int64) (int, int64, error) {
+	if _, err := validateTurnHeader(header); err != nil {
 		return 0, 0, err
 	}
-	end := int64(sessionTurnFileHeadSize)
-	for slot := 0; slot < sessionTurnsPerFile; slot++ {
+	end := int64(format.headSize)
+	for slot := 0; slot < format.turnsPerFile; slot++ {
 		offset, length := turnSlot(header, slot)
 		if offset == 0 || length == 0 {
 			return slot, end, nil
 		}
-		if int(offset) < sessionTurnFileHeadSize {
+		if int(offset) < format.headSize {
 			return 0, 0, fmt.Errorf("turn file %d slot %d offset before body", fileNo, slot)
 		}
 		nextEnd := int64(offset) + int64(length)
@@ -332,11 +444,11 @@ func turnHeaderState(header []byte, fileNo int64) (int, int64, error) {
 		}
 		end = nextEnd
 	}
-	return sessionTurnsPerFile, end, nil
+	return format.turnsPerFile, end, nil
 }
 
 func turnSlot(header []byte, slot int) (uint32, uint32) {
-	pos := 8 + slot*sessionTurnFileMetaSize
+	pos := sessionTurnFilePreambleSize + slot*sessionTurnFileMetaSize
 	return binary.LittleEndian.Uint32(header[pos : pos+4]), binary.LittleEndian.Uint32(header[pos+4 : pos+8])
 }
 

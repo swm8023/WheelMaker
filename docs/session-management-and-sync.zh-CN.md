@@ -60,14 +60,22 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 
 文件格式：
 
-- 每个文件保存 128 个 turn。
-- 文件头：`WMT2` magic、version、128 个 slot。
+- 当前写入格式是 `WMT2` v2，每个文件保存 256 个 turn。
+- 文件头：`WMT2` magic、version、256 个 slot。
 - 每个 slot 保存 body 的 `offset` 和 `len`。
 - body 保存对应 turn 的 `content` bytes。
 - turn index 由文件号和 slot 推导。
 - 已写入文件的 turn 视为 `finished=true`。
 
 写入顺序是先 append body，再同步文件，再写 header slot，再同步 header。header 未写成功时 slot 仍为 0，读路径不会把该 turn 视为存在。
+
+兼容与转换：
+
+- 旧格式是 `WMT2` v1，每个文件保存 128 个 turn。
+- 服务端读路径可以识别 v1/128 和 v2/256，但同一个 session 的 active `turns` 目录内不能混用版本。
+- 新 session 写 v2/256；尚未转换的 v1 session 在部署窗口内仍可按 v1 继续追加，避免升级时打断现有会话。
+- `scripts/convert_session_turn_files_256.ps1` 是保留的一键转换脚本：先全量校验所有 session turn 文件，写入临时 v2/256 目录并复读比对，再把原 `turns` 目录改名为 `turns.backup-v1-*`，最后替换为新的 `turns`。
+- 转换脚本支持 `-DryRun`，用于只扫描校验和报告待转换目录。
 
 ## 4. 服务端读写流程
 
