@@ -42,10 +42,13 @@ type IMTurnMessage struct {
 
 type IMPromptRequest struct {
 	ContentBlocks []ContentBlock `json:"contentBlocks,omitempty"`
+	ModelName     string         `json:"modelName,omitempty"`
+	CreatedAt     string         `json:"createdAt,omitempty"`
 }
 
 type IMPromptResult struct {
-	StopReason string `json:"stopReason"`
+	StopReason  string `json:"stopReason"`
+	CompletedAt string `json:"completedAt,omitempty"`
 }
 
 type IMTextResult struct {

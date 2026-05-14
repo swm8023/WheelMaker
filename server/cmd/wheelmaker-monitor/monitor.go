@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	hubpkg "github.com/swm8023/wheelmaker/internal/hub"
+	clientpkg "github.com/swm8023/wheelmaker/internal/hub/client"
 	rp "github.com/swm8023/wheelmaker/internal/protocol"
 	"github.com/swm8023/wheelmaker/internal/shared"
 	_ "modernc.org/sqlite"
@@ -476,7 +477,7 @@ func (m *Monitor) GetDBTables() *DBTablesResult {
 	}
 	defer db.Close()
 
-	tableNames := []string{"projects", "route_bindings", "sessions", "agent_preferences", "session_prompts"}
+	tableNames := []string{"projects", "route_bindings", "sessions", "agent_preferences"}
 	tables := make([]DBTable, 0, len(tableNames))
 
 	for _, name := range tableNames {
@@ -539,7 +540,7 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 	defer db.Close()
 
 	query := `
-		SELECT id, project_name, status, title, created_at, last_active_at
+		SELECT id, project_name, status, title, created_at, updated_at
 		FROM sessions`
 	args := []any{}
 	projectName = strings.TrimSpace(projectName)
@@ -547,7 +548,7 @@ func (m *Monitor) ListSessions(projectName string, limit int) ([]MonitorSessionS
 		query += ` WHERE project_name = ?`
 		args = append(args, projectName)
 	}
-	query += ` ORDER BY last_active_at DESC`
+	query += ` ORDER BY updated_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
@@ -582,17 +583,16 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer db.Close()
 
 	query := `
-		SELECT s.project_name, p.session_id, p.prompt_index, p.updated_at, p.turns_json
-		FROM session_prompts p
-		JOIN sessions s ON s.id = p.session_id
-		WHERE p.session_id = ?`
+		SELECT project_name, id, updated_at, session_sync_json
+		FROM sessions
+		WHERE id = ?`
 	args := []any{strings.TrimSpace(sessionID)}
 	projectName = strings.TrimSpace(projectName)
 	if projectName != "" {
-		query += ` AND s.project_name = ?`
+		query += ` AND project_name = ?`
 		args = append(args, projectName)
 	}
-	query += ` ORDER BY p.prompt_index ASC`
+	query += ` ORDER BY updated_at ASC`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -601,35 +601,33 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 	defer rows.Close()
 
 	type monitorMessageRow struct {
-		Message     MonitorSessionMessage
-		PromptIndex int64
-		TurnIndex   int64
+		Message   MonitorSessionMessage
+		TurnIndex int64
 	}
 	all := make([]monitorMessageRow, 0)
 	fallbackIndex := int64(0)
 	for rows.Next() {
-		var promptIndex int64
-		var promptUpdatedAt string
-		var turnsJSON string
+		var sessionUpdatedAt string
+		var sessionSyncJSON string
 		var itemProjectName, itemSessionID string
-		if err := rows.Scan(&itemProjectName, &itemSessionID, &promptIndex, &promptUpdatedAt, &turnsJSON); err != nil {
+		if err := rows.Scan(&itemProjectName, &itemSessionID, &sessionUpdatedAt, &sessionSyncJSON); err != nil {
 			return nil, err
 		}
-		turnsJSON = strings.TrimSpace(turnsJSON)
-		if turnsJSON == "" {
+		latestTurnIndex := monitorLatestPersistedTurnIndex(sessionSyncJSON)
+		if latestTurnIndex <= 0 {
 			continue
 		}
-		entries := []string{}
-		if jsonErr := json.Unmarshal([]byte(turnsJSON), &entries); jsonErr != nil {
-			continue
+		entries, err := clientpkg.ReadSessionTurnFiles(context.Background(), filepath.Join(m.baseDir, "session"), itemProjectName, itemSessionID, 0, latestTurnIndex)
+		if err != nil {
+			return nil, err
 		}
 		for i, updateJSON := range entries {
 			var item MonitorSessionMessage
 			item.ProjectName = itemProjectName
 			item.SessionID = itemSessionID
 			fallbackIndex++
-			item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, promptUpdatedAt, fallbackIndex)
-			all = append(all, monitorMessageRow{Message: item, PromptIndex: promptIndex, TurnIndex: int64(i + 1)})
+			item.Method, item.Role, item.Kind, item.Body, item.Status, item.RequestID, item.Index, item.SubIndex, item.Source, item.Time = parseMonitorSessionTurn(updateJSON, sessionUpdatedAt, fallbackIndex)
+			all = append(all, monitorMessageRow{Message: item, TurnIndex: int64(i + 1)})
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -644,9 +642,6 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 		}
 		if left.Message.SubIndex != right.Message.SubIndex {
 			return left.Message.SubIndex < right.Message.SubIndex
-		}
-		if left.PromptIndex != right.PromptIndex {
-			return left.PromptIndex < right.PromptIndex
 		}
 		return left.TurnIndex < right.TurnIndex
 	})
@@ -805,6 +800,19 @@ func parseMonitorSessionTurn(updateJSON, promptUpdatedAt string, fallbackIndex i
 		kind = method
 	}
 	return method, role, kind, body, status, requestID, index, subIndex, source, ts
+}
+
+func monitorLatestPersistedTurnIndex(raw string) int64 {
+	var payload struct {
+		LatestPersistedTurnIndex int64 `json:"latestPersistedTurnIndex"`
+	}
+	if err := json.Unmarshal([]byte(firstNonEmpty(strings.TrimSpace(raw), "{}")), &payload); err != nil {
+		return 0
+	}
+	if payload.LatestPersistedTurnIndex < 0 {
+		return 0
+	}
+	return payload.LatestPersistedTurnIndex
 }
 
 func isLegacyMonitorACPMethod(method string) bool {

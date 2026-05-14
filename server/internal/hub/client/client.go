@@ -123,9 +123,11 @@ func (c *Client) SetSessionHistoryRoot(root string) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		c.sessionRecorder.historyStore = nil
+		c.sessionRecorder.turnStore = nil
 		return
 	}
-	c.sessionRecorder.historyStore = newFileSessionHistoryStore(root)
+	c.sessionRecorder.historyStore = nil
+	c.sessionRecorder.turnStore = newFileSessionTurnStore(root)
 }
 
 // Start loads persisted state.
@@ -133,11 +135,6 @@ func (c *Client) SetSessionHistoryRoot(root string) {
 func (c *Client) Start(ctx context.Context) error {
 	if err := c.store.SaveProjectDefaultAgent(ctx, c.projectName, ""); err != nil {
 		return fmt.Errorf("client: ensure project row: %w", err)
-	}
-	if c.sessionRecorder != nil && c.sessionRecorder.historyStore != nil {
-		if err := migrateSessionPromptsToFiles(ctx, c.store, c.sessionRecorder.historyStore, c.projectName); err != nil {
-			return fmt.Errorf("client: migrate session history files: %w", err)
-		}
 	}
 	bindings, err := c.store.LoadRouteBindings(ctx, c.projectName)
 	if err != nil {
@@ -522,19 +519,17 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		return map[string]any{"sessions": sessions}, nil
 	case "session.read":
 		var req struct {
-			SessionID   string `json:"sessionId"`
-			PromptIndex int64  `json:"promptIndex,omitempty"`
-			TurnIndex   int64  `json:"turnIndex,omitempty"`
+			SessionID      string `json:"sessionId"`
+			AfterTurnIndex int64  `json:"afterTurnIndex,omitempty"`
 		}
 		if err := decodeSessionRequestPayload(payload, &req); err != nil {
 			return nil, fmt.Errorf("invalid session.read payload: %w", err)
 		}
-		summary, prompts, messages, err := c.sessionRecorder.ReadSessionPrompts(ctx, req.SessionID, req.PromptIndex, req.TurnIndex)
+		latestTurnIndex, turns, err := c.sessionRecorder.ReadSessionTurns(ctx, req.SessionID, req.AfterTurnIndex)
 		if err != nil {
 			return nil, err
 		}
-		summary.ConfigOptions = c.sessionConfigOptions(ctx, req.SessionID)
-		return map[string]any{"session": summary, "prompts": prompts, "messages": messages}, nil
+		return map[string]any{"latestTurnIndex": latestTurnIndex, "turns": turns}, nil
 	case "session.new":
 		var req struct {
 			AgentType string `json:"agentType"`

@@ -1554,7 +1554,7 @@ async function doAction(action) {
 }
 
 async function clearSessionHistory() {
-  if (!confirm('Clear all rows from session_prompts and session_turns?')) {
+  if (!confirm('Clear persisted session turn files and reset session sync cursors?')) {
     return;
   }
   const msg = $('action-msg');

@@ -105,6 +105,9 @@ export class RegistryRepository {
       messageCount: typeof input.messageCount === 'number' && Number.isFinite(input.messageCount) ? input.messageCount : 0,
       unreadCount: typeof input.unreadCount === 'number' && Number.isFinite(input.unreadCount) ? input.unreadCount : undefined,
       agentType: typeof input.agentType === 'string' ? input.agentType : undefined,
+      latestTurnIndex: typeof input.latestTurnIndex === 'number' && Number.isFinite(input.latestTurnIndex)
+        ? Math.max(0, Math.trunc(input.latestTurnIndex))
+        : undefined,
       configOptions: Array.isArray(input.configOptions)
         ? input.configOptions
             .map(item => this.normalizeSessionConfigOption(item))
@@ -129,13 +132,10 @@ export class RegistryRepository {
     if (!sessionId) {
       return null;
     }
-    const promptIndex = typeof input.promptIndex === 'number' && Number.isFinite(input.promptIndex)
-      ? Math.trunc(input.promptIndex)
-      : 0;
     const turnIndex = typeof input.turnIndex === 'number' && Number.isFinite(input.turnIndex)
       ? Math.trunc(input.turnIndex)
       : 0;
-    if (promptIndex <= 0 || turnIndex <= 0) {
+    if (turnIndex <= 0) {
       return null;
     }
     const finished = input.finished === true || input.done === true;
@@ -159,11 +159,10 @@ export class RegistryRepository {
           return null;
         }
       }
-      return { sessionId, promptIndex, turnIndex, method, param, finished };
+      return { sessionId, turnIndex, method, param, finished };
     } catch {
       return {
         sessionId,
-        promptIndex,
         turnIndex,
         method: 'system',
         param: { text: content },
@@ -178,8 +177,7 @@ export class RegistryRepository {
   ): RegistrySessionPromptSnapshot[] {
     const byPrompt = new Map<number, RegistrySessionPromptSnapshot>();
     for (const message of messages) {
-      const promptIndex = message.promptIndex ?? 0;
-      if (promptIndex <= 0) continue;
+      const promptIndex = byPrompt.size + 1;
       const existing = byPrompt.get(promptIndex);
       const turnIndex = message.turnIndex ?? 0;
       if (!existing) {
@@ -212,67 +210,46 @@ export class RegistryRepository {
   private async readSessionByMethod(
     projectId: string,
     sessionId: string,
-    promptIndex: number,
+    _promptIndex: number,
     turnIndex: number,
     method: 'session.read',
   ): Promise<RegistrySessionReadResponse> {
     const resp = await this.client.request({
       method,
       projectId,
-      payload: promptIndex > 0 || turnIndex > 0 ? {sessionId, promptIndex, turnIndex} : {sessionId},
+      payload: turnIndex > 0 ? {sessionId, afterTurnIndex: turnIndex} : {sessionId},
       timeoutMs: 15000,
     });
     const payload = (resp.payload ?? {}) as {
       session?: unknown;
-      prompts?: unknown[];
-      messages?: unknown[];
+      latestTurnIndex?: unknown;
+      turns?: unknown[];
     };
+    const latestTurnIndex = typeof payload.latestTurnIndex === 'number' && Number.isFinite(payload.latestTurnIndex)
+      ? Math.max(0, Math.trunc(payload.latestTurnIndex))
+      : 0;
     const normalizedSession = this.normalizeSessionSummary(payload.session) ?? {
       sessionId,
       title: sessionId,
       preview: '',
       updatedAt: '',
       messageCount: 0,
+      latestTurnIndex,
     };
+    normalizedSession.latestTurnIndex = latestTurnIndex;
 
-    const normalizedMessages: RegistrySessionMessage[] = (Array.isArray(payload.messages) ? payload.messages : [])
+    const normalizedMessages: RegistrySessionMessage[] = (Array.isArray(payload.turns) ? payload.turns : [])
       .map(item => this.normalizeSessionWireMessage(item, normalizedSession.sessionId))
       .filter((item): item is RegistrySessionMessage => !!item)
       .sort((a, b) => {
-        const promptDelta = (a.promptIndex ?? 0) - (b.promptIndex ?? 0);
-        if (promptDelta !== 0) return promptDelta;
         return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
       });
 
-    // Use server-provided prompt snapshots (model, duration) when available.
-    const serverPrompts = Array.isArray(payload.prompts)
-      ? payload.prompts
-          .map((p: unknown) => {
-            if (!p || typeof p !== 'object') return null;
-            const item = p as Record<string, unknown>;
-            return {
-              sessionId: normalizedSession.sessionId,
-              promptIndex: typeof item.promptIndex === 'number' ? item.promptIndex : 0,
-              turnIndex: typeof item.turnIndex === 'number' ? item.turnIndex : 0,
-              modelName: typeof item.modelName === 'string' ? item.modelName : '',
-              durationMs: typeof item.durationMs === 'number' ? item.durationMs : 0,
-              finished: typeof item.finished === 'boolean' ? item.finished : false,
-            };
-          })
-          .filter(item => !!item && item.promptIndex > 0) as RegistrySessionPromptSnapshot[]
-      : [];
-
-    if (serverPrompts.length > 0) {
-      return {
-        session: normalizedSession,
-        prompts: serverPrompts,
-        messages: normalizedMessages,
-      };
-    }
     return {
       session: normalizedSession,
-      prompts: this.derivePromptSnapshotsFromMessages(normalizedMessages, normalizedSession.sessionId),
+      prompts: [],
       messages: normalizedMessages,
+      latestTurnIndex,
     };
   }
   async initialize(url: string, token?: string): Promise<void> {

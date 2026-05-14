@@ -240,7 +240,7 @@ export class RegistryWorkspaceService {
   async readSession(sessionId: string, promptIndex = 0, turnIndex = 0): Promise<{session: RegistrySessionSummary; prompts: RegistrySessionReadResponse['prompts']; messages: RegistrySessionMessage[]}> {
     if (!this.session || !this.repository) {
       return {
-        session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0},
+        session: {sessionId, title: sessionId, preview: '', updatedAt: '', messageCount: 0, latestTurnIndex: 0},
         prompts: [],
         messages: [],
       };

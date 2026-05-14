@@ -123,8 +123,8 @@ func TestGetDBTablesIncludesPromptTurnTables(t *testing.T) {
 			foundPrompts = true
 		}
 	}
-	if !foundPrompts {
-		t.Fatalf("session_prompts table missing: %#v", res.Tables)
+	if foundPrompts {
+		t.Fatalf("session_prompts table unexpectedly present: %#v", res.Tables)
 	}
 }
 
@@ -232,18 +232,14 @@ func TestExecuteActionClearSessionHistoryDeletesPromptAndTurnTables(t *testing.T
 		t.Fatalf("ExecuteActionByHub(clear-session-history): %v", err)
 	}
 
-	prompts, err := store.ListSessionPrompts(ctx, "proj1", "sess-1")
-	if err != nil {
-		t.Fatalf("ListSessionPrompts: %v", err)
-	}
-	if len(prompts) != 0 {
-		t.Fatalf("prompts len = %d, want 0", len(prompts))
-	}
 	rec, err := store.LoadSession(ctx, "proj1", "sess-1")
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
 	if rec == nil {
 		t.Fatalf("LoadSession returned nil, want existing session record")
+	}
+	if rec.SessionSyncJSON != `{"latestPersistedTurnIndex":0}` {
+		t.Fatalf("SessionSyncJSON = %q, want latestPersistedTurnIndex=0", rec.SessionSyncJSON)
 	}
 }

@@ -1,5 +1,7 @@
 # Registry <-> App Chat 协议（当前实现）
 
+> 当前实现已切到全局 `turnIndex` 与二进制 session turn 文件。`promptIndex` 只保留在部分历史说明中，不再属于实时/补读协议。最新持久化设计见 [session-turn-binary-history-design.zh-CN.md](./session-turn-binary-history-design.zh-CN.md)。
+
 ## 1. 范围
 
 本文档描述 web 客户端（`role=client`）与 registry/hub 运行时之间的 **当前** app chat 协议。

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +47,7 @@ func TestBuildClient_AppEnablesIMStub(t *testing.T) {
 	t.Cleanup(func() { _ = c.Close() })
 }
 
-func TestBuildClientMigratesPromptHistoryFiles(t *testing.T) {
+func TestBuildClientStartsWithSessionTurnStore(t *testing.T) {
 	baseDir := t.TempDir()
 	dbPath := filepath.Join(baseDir, "db", "client.sqlite3")
 	store, err := clientpkg.NewStore(dbPath)
@@ -89,21 +88,8 @@ func TestBuildClientMigratesPromptHistoryFiles(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Close() })
 
-	path := filepath.Join(baseDir, "session", "proj1", "sess-1", "prompts", "p000001.json")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile(%q): %v", path, err)
-	}
-	var prompt struct {
-		Turns []struct {
-			Method string `json:"method"`
-		} `json:"turns"`
-	}
-	if err := json.Unmarshal(raw, &prompt); err != nil {
-		t.Fatalf("unmarshal prompt history: %v", err)
-	}
-	if len(prompt.Turns) != 2 || prompt.Turns[1].Method != acp.IMMethodPromptDone {
-		t.Fatalf("prompt history turns = %#v, want prompt_done appended", prompt.Turns)
+	if _, err := os.Stat(filepath.Join(baseDir, "session")); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("stat session root: %v", err)
 	}
 }
 

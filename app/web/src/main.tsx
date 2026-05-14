@@ -470,14 +470,12 @@ function upsertChatMessage(
   list: RegistryChatMessage[],
   next: RegistryChatMessage,
 ): RegistryChatMessage[] {
-  const key = `${next.sessionId}:${next.promptIndex}:${next.turnIndex}`;
+  const key = `${next.sessionId}:${next.turnIndex}`;
   const index = list.findIndex(
-    item => `${item.sessionId}:${item.promptIndex}:${item.turnIndex}` === key,
+    item => `${item.sessionId}:${item.turnIndex}` === key,
   );
   if (index < 0) {
     return [...list, next].sort((a, b) => {
-      const pd = (a.promptIndex ?? 0) - (b.promptIndex ?? 0);
-      if (pd !== 0) return pd;
       return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
     });
   }
@@ -671,10 +669,9 @@ function decodeSessionMessageFromEventPayload(
 ): RegistryChatMessage | null {
   const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
   const content = typeof payload.content === 'string' ? payload.content.trim() : '';
-  const promptIndex = Number(payload.promptIndex ?? 0);
   const turnIndex = Number(payload.turnIndex ?? 0);
   const finished = payload.finished === true;
-  if (!sessionId || promptIndex <= 0 || turnIndex <= 0) {
+  if (!sessionId || turnIndex <= 0) {
     return null;
   }
   if (!content) {
@@ -696,12 +693,11 @@ function decodeSessionMessageFromEventPayload(
         return null;
       }
     }
-    return { sessionId, promptIndex, turnIndex, method, param, finished };
+    return { sessionId, turnIndex, method, param, finished };
   } catch {
     // Unparseable content: store as system message
     return {
       sessionId,
-      promptIndex,
       turnIndex,
       method: 'system',
       param: { text: content },
@@ -711,14 +707,8 @@ function decodeSessionMessageFromEventPayload(
 }
 
 function terminalPromptIndexes(messages: RegistryChatMessage[]): Set<number> {
-  const terminal = new Set<number>();
-  for (const message of messages) {
-    const promptIndex = message.promptIndex ?? 0;
-    if (promptIndex > 0 && message.method === 'prompt_done' && isFinishedChatMessage(message)) {
-      terminal.add(promptIndex);
-    }
-  }
-  return terminal;
+  void messages;
+  return new Set<number>();
 }
 
 type ChatPromptEntryKind = 'tool' | 'thought' | 'plan' | 'message';
@@ -966,25 +956,24 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
 
 function groupChatMessagesByPrompt(
   messages: RegistryChatMessage[],
-  promptSnapshots?: RegistrySessionPromptSnapshot[],
+  _promptSnapshots?: RegistrySessionPromptSnapshot[],
 ): ChatPromptGroup[] {
   const groups = new Map<string, ChatPromptGroup>();
   const entryIndexByKey = new Map<string, number>();
   let entryOrder = 0;
+  let promptIndex = 0;
+  let currentGroupKey = '';
 
   const ordered = [...messages].sort((a, b) => {
-    const pd = (a.promptIndex ?? 0) - (b.promptIndex ?? 0);
-    if (pd !== 0) return pd;
     return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
   });
 
   for (const message of ordered) {
-    const promptIndex = message.promptIndex ?? 0;
-    const groupKey =
-      promptIndex > 0 ? `prompt:${promptIndex}` : `msg:${message.sessionId}:${message.turnIndex}`;
-    const snapshot = Array.isArray(promptSnapshots)
-      ? promptSnapshots.find(s => s.promptIndex === promptIndex)
-      : undefined;
+    if (message.method === 'prompt_request' || !currentGroupKey) {
+      promptIndex += 1;
+      currentGroupKey = `prompt:${promptIndex}`;
+    }
+    const groupKey = currentGroupKey || `msg:${message.sessionId}:${message.turnIndex}`;
     const existing =
       groups.get(groupKey) ??
       ({
@@ -992,9 +981,9 @@ function groupChatMessagesByPrompt(
         promptIndex,
         userMessages: [],
         entries: [],
-        modelName: snapshot?.modelName ?? '',
-        durationMs: snapshot?.durationMs ?? 0,
-        finished: snapshot?.finished ?? false,
+        modelName: '',
+        durationMs: 0,
+        finished: false,
         hasPromptRequest: false,
         hasResponseActivity: false,
         hasPromptDone: false,
@@ -1003,7 +992,14 @@ function groupChatMessagesByPrompt(
     if (message.method === 'prompt_done') {
       existing.hasPromptDone = true;
       existing.finished = true;
+      const completedAt = typeof message.param.completedAt === 'string' ? Date.parse(message.param.completedAt) : NaN;
+      const request = existing.userMessages.find(item => item.method === 'prompt_request');
+      const createdAt = typeof request?.param.createdAt === 'string' ? Date.parse(request.param.createdAt) : NaN;
+      if (Number.isFinite(completedAt) && Number.isFinite(createdAt) && completedAt >= createdAt) {
+        existing.durationMs = completedAt - createdAt;
+      }
       groups.set(groupKey, existing);
+      currentGroupKey = '';
       continue;
     }
 
@@ -1013,6 +1009,9 @@ function groupChatMessagesByPrompt(
       existing.userMessages.push(message);
       if (message.method === 'prompt_request') {
         existing.hasPromptRequest = true;
+        existing.modelName = typeof message.param.modelName === 'string'
+          ? message.param.modelName
+          : existing.modelName;
       }
     } else {
       existing.hasResponseActivity = true;
@@ -1051,7 +1050,7 @@ function groupChatMessagesByPrompt(
         const dedupeKey =
           turnIndex > 0
             ? `${groupKey}:${kind}:turn:${turnIndex}`
-            : `${groupKey}:${kind}:msg:${message.sessionId}:${message.promptIndex}:${message.turnIndex}`;
+            : `${groupKey}:${kind}:msg:${message.sessionId}:${message.turnIndex}`;
         const existingIndex = entryIndexByKey.get(dedupeKey);
         if (typeof existingIndex === 'number') {
           const previous = existing.entries[existingIndex];
@@ -4118,16 +4117,12 @@ function App() {
     chatPromptSnapshotsRef.current[sessionId] = [...cached.prompts];
 
     const latest = getLatestSessionReadCursor(cachedMessages);
-    const cachedPromptIndex = Math.max(0, chatSyncIndexRef.current[sessionId] ?? 0);
     const cachedTurnIndex = Math.max(0, chatSyncSubIndexRef.current[sessionId] ?? 0);
-    if (
-      latest.promptIndex > cachedPromptIndex ||
-      (latest.promptIndex === cachedPromptIndex && latest.turnIndex > cachedTurnIndex)
-    ) {
-      chatSyncIndexRef.current[sessionId] = latest.promptIndex;
+    if (latest.turnIndex > cachedTurnIndex) {
+      chatSyncIndexRef.current[sessionId] = 0;
       chatSyncSubIndexRef.current[sessionId] = latest.turnIndex;
     } else {
-      chatSyncIndexRef.current[sessionId] = cachedPromptIndex;
+      chatSyncIndexRef.current[sessionId] = 0;
       chatSyncSubIndexRef.current[sessionId] = cachedTurnIndex;
     }
     setChatPromptSnapshotVersion(version => version + 1);
@@ -4150,7 +4145,7 @@ function App() {
     for (const cached of cachedSessions) {
       const sessionId = cached.session.sessionId;
       if (!sessionId) continue;
-      chatSyncIndexRef.current[sessionId] = cached.cursor.promptIndex || 0;
+      chatSyncIndexRef.current[sessionId] = 0;
       chatSyncSubIndexRef.current[sessionId] = cached.cursor.turnIndex || 0;
     }
 
@@ -4177,12 +4172,11 @@ function App() {
 
   const persistChatSessionsIndex = (activeProjectId = projectIdRef.current) => {
     if (!activeProjectId) return;
-    const cursorBySessionId: Record<string, {promptIndex: number; turnIndex: number}> = {};
+    const cursorBySessionId: Record<string, {turnIndex: number}> = {};
     for (const session of chatSessions) {
       const sessionId = session.sessionId;
       if (!sessionId) continue;
       cursorBySessionId[sessionId] = {
-        promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
         turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
       };
     }
@@ -4198,7 +4192,6 @@ function App() {
     const messages = chatMessageStoreRef.current[sessionId] ?? [];
     const prompts = chatPromptSnapshotsRef.current[sessionId] ?? [];
     const cursor = {
-      promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
       turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
     };
     const cacheableMessages = messages.filter(isFinishedChatMessage);
@@ -4229,20 +4222,17 @@ function App() {
       // consistent with the cursor. Live session.message events may
       // mutate chatMessageStoreRef during the network round-trip.
       const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
-      const checkpointPromptIndex = requestedIncremental
-        ? chatSyncIndexRef.current[sessionId] ?? 0
-        : 0;
       const checkpointTurnIndex = requestedIncremental
         ? chatSyncSubIndexRef.current[sessionId] ?? 0
         : 0;
       const fallbackToFullRead =
         requestedIncremental &&
         existingMessages.length === 0 &&
-        (checkpointPromptIndex > 0 || checkpointTurnIndex > 0);
+        checkpointTurnIndex > 0;
       const useIncremental = requestedIncremental && !fallbackToFullRead;
       const result = await service.readSession(
         sessionId,
-        useIncremental ? checkpointPromptIndex : 0,
+        0,
         useIncremental ? checkpointTurnIndex : 0,
       );
       if (activeProjectId !== projectIdRef.current) {
@@ -4259,11 +4249,10 @@ function App() {
       let nextMessages: RegistryChatMessage[];
       if (useIncremental) {
         if (result.messages.length > 0) {
-          const firstReturnedPromptIndex = result.messages[0].promptIndex;
           nextMessages = replacePromptMessages(
             existingMessages,
             result.messages,
-            firstReturnedPromptIndex,
+            0,
             checkpointTurnIndex,
           );
         } else {
@@ -4283,7 +4272,7 @@ function App() {
       chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
       setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.promptIndex;
+      chatSyncIndexRef.current[result.session.sessionId] = 0;
       chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
       setChatSessions(prev => mergeChatSession(prev, result.session));
       setSelectedChatId(result.session.sessionId);
@@ -4306,14 +4295,15 @@ function App() {
 
   const refreshPromptTurns = async (
     sessionId: string,
-    promptIndex: number,
+    _promptIndex: number,
     activeProjectId = projectIdRef.current,
     selectionSnapshot = chatSelectedIdRef.current,
   ) => {
-    if (!activeProjectId || !sessionId || promptIndex <= 0) return false;
+    if (!activeProjectId || !sessionId) return false;
     try {
       const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
-      const result = await service.readSession(sessionId, promptIndex, 0);
+      const checkpointTurnIndex = chatSyncSubIndexRef.current[sessionId] ?? 0;
+      const result = await service.readSession(sessionId, 0, checkpointTurnIndex);
       if (activeProjectId !== projectIdRef.current) {
         return false;
       }
@@ -4321,14 +4311,14 @@ function App() {
         return false;
       }
       const fresh = chatMessageStoreRef.current[result.session.sessionId] ?? [];
-      let nextMessages = replacePromptMessages(fresh, result.messages, promptIndex);
+      let nextMessages = replacePromptMessages(fresh, result.messages, 0, checkpointTurnIndex);
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
       chatMessageStoreRef.current[result.session.sessionId] = nextMessages;
       chatPromptSnapshotsRef.current[result.session.sessionId] = result.prompts;
       setChatPromptSnapshotVersion(version => version + 1);
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[result.session.sessionId] = latestSyncCursor.promptIndex;
+      chatSyncIndexRef.current[result.session.sessionId] = 0;
       chatSyncSubIndexRef.current[result.session.sessionId] = latestSyncCursor.turnIndex;
       setChatSessions(prev => mergeChatSession(prev, result.session));
       if (result.session.sessionId === chatSelectedIdRef.current) {
@@ -4375,12 +4365,11 @@ function App() {
         return next;
       });
 
-      const cursorBySessionId: Record<string, {promptIndex: number; turnIndex: number}> = {};
+      const cursorBySessionId: Record<string, {turnIndex: number}> = {};
       for (const session of nextSessions) {
         const sessionId = session.sessionId;
         if (!sessionId) continue;
         cursorBySessionId[sessionId] = {
-          promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
           turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
         };
       }
@@ -5075,7 +5064,7 @@ function App() {
     message: RegistryChatMessage,
     session?: RegistryChatSession,
   ) => {
-    const messageKey = `${message.sessionId}:${message.promptIndex}:${message.turnIndex}`;
+    const messageKey = `${message.sessionId}:${message.turnIndex}`;
     if (!message.sessionId || msgRole(message.method) === 'user') {
       return;
     }
@@ -5514,7 +5503,6 @@ function App() {
         if (payload.session?.sessionId) {
           setChatSessions(prev => mergeChatSession(prev, payload.session!));
           workspaceStore.rememberChatSession(projectIdRef.current, payload.session, {
-            promptIndex: chatSyncIndexRef.current[payload.session.sessionId] ?? 0,
             turnIndex: chatSyncSubIndexRef.current[payload.session.sessionId] ?? 0,
           });
           if (payload.session?.sessionId === chatSelectedIdRef.current) {
@@ -5545,7 +5533,6 @@ function App() {
         const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
           {
             cursor: {
-              promptIndex: chatSyncIndexRef.current[sessionId] ?? 0,
               turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
             },
             terminalPrompts: terminalPromptIndexes(existingMessagesForSession),
@@ -5553,7 +5540,7 @@ function App() {
           message,
         );
         if (readCursorForGap) {
-          chatSyncIndexRef.current[sessionId] = readCursorForGap.promptIndex;
+          chatSyncIndexRef.current[sessionId] = 0;
           chatSyncSubIndexRef.current[sessionId] = readCursorForGap.turnIndex;
           if (isSelectedSession) {
             loadChatSession(sessionId, projectIdRef.current, {
@@ -5599,13 +5586,12 @@ function App() {
 
         maybeNotifyChatMessage(message);
 
-        const incomingPromptIndex = message.promptIndex ?? 0;
         const merged = upsertChatMessage(
           existingMessagesForSession,
           message,
         );
         const latestSyncCursor = getLatestSessionReadCursor(merged);
-        chatSyncIndexRef.current[sessionId] = latestSyncCursor.promptIndex;
+        chatSyncIndexRef.current[sessionId] = 0;
         chatSyncSubIndexRef.current[sessionId] = latestSyncCursor.turnIndex;
         chatMessageStoreRef.current[sessionId] = merged;
         persistChatSessionContent(sessionId, projectIdRef.current, mergedSessionForCache);
@@ -5620,7 +5606,7 @@ function App() {
         ) {
           refreshPromptTurns(
             sessionId,
-            incomingPromptIndex,
+            0,
             projectIdRef.current,
             chatSelectedIdRef.current,
           ).catch(() => undefined);

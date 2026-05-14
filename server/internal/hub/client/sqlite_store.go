@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	session_sync_json TEXT NOT NULL DEFAULT '{}',
 	title TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
-	last_active_at TEXT NOT NULL
+	updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_preferences (
 	project_name TEXT NOT NULL,
@@ -47,22 +48,8 @@ CREATE TABLE IF NOT EXISTS agent_preferences (
 	preference_json TEXT NOT NULL DEFAULT '{}',
 	PRIMARY KEY (project_name, agent_type)
 );
-
-CREATE TABLE IF NOT EXISTS session_prompts (
-	session_id TEXT NOT NULL,
-	prompt_index INTEGER NOT NULL,
-	title TEXT NOT NULL DEFAULT '',
-	stop_reason TEXT NOT NULL DEFAULT '',
-	updated_at TEXT NOT NULL DEFAULT '',
-	turns_json TEXT NOT NULL DEFAULT '',
-	turn_index INTEGER NOT NULL DEFAULT 0,
-	model_name TEXT NOT NULL DEFAULT '',
-	started_at TEXT NOT NULL DEFAULT '',
-	PRIMARY KEY (session_id, prompt_index)
-);
 CREATE INDEX IF NOT EXISTS idx_route_bindings_project ON route_bindings(project_name);
-CREATE INDEX IF NOT EXISTS idx_sessions_project_last_active ON sessions(project_name, last_active_at DESC);
-CREATE INDEX IF NOT EXISTS idx_session_prompts_session_prompt ON session_prompts(session_id, prompt_index);
+CREATE INDEX IF NOT EXISTS idx_sessions_project_updated_at ON sessions(project_name, updated_at DESC);
 `
 
 type PreferenceState struct {
@@ -130,8 +117,10 @@ type Store interface {
 }
 
 type sqliteStore struct {
-	db      *sql.DB
-	writeMu sync.Mutex
+	db              *sql.DB
+	writeMu         sync.Mutex
+	legacyPromptMu  sync.Mutex
+	legacyPromptMap map[string]SessionPromptRecord
 }
 
 func NewStore(dbPath string) (Store, error) {
@@ -163,15 +152,14 @@ func NewStore(dbPath string) (Store, error) {
 			return nil, err
 		}
 	}
-	return &sqliteStore{db: db}, nil
+	return &sqliteStore{db: db, legacyPromptMap: map[string]SessionPromptRecord{}}, nil
 }
 
 var expectedStoreSchemaColumns = map[string][]string{
 	"projects":          {"project_name", "default_agent_type", "updated_at"},
 	"route_bindings":    {"project_name", "route_key", "session_id", "created_at", "updated_at"},
-	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "session_sync_json", "title", "created_at", "last_active_at"},
+	"sessions":          {"id", "project_name", "status", "agent_type", "agent_json", "session_sync_json", "title", "created_at", "updated_at"},
 	"agent_preferences": {"project_name", "agent_type", "preference_json"},
-	"session_prompts":   {"session_id", "prompt_index", "title", "stop_reason", "updated_at", "turns_json", "turn_index", "model_name", "started_at"},
 }
 
 type StoreSchemaMismatchError struct {
@@ -215,8 +203,21 @@ func checkStoreSchemaDB(db *sql.DB, dbPath string) error {
 func migrateExpectedStoreSchema(db *sql.DB) {
 	// Migrate: add columns introduced after initial schema.
 	_, _ = db.Exec(`ALTER TABLE sessions ADD COLUMN session_sync_json TEXT NOT NULL DEFAULT '{}'`)
-	_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN model_name TEXT NOT NULL DEFAULT ''`)
-	_, _ = db.Exec(`ALTER TABLE session_prompts ADD COLUMN started_at TEXT NOT NULL DEFAULT ''`)
+	if cols, err := sqliteTableColumns(db, "sessions"); err == nil {
+		hasUpdatedAt := false
+		hasLastActiveAt := false
+		for _, col := range cols {
+			if col == "updated_at" {
+				hasUpdatedAt = true
+			}
+			if col == "last_active_at" {
+				hasLastActiveAt = true
+			}
+		}
+		if !hasUpdatedAt && hasLastActiveAt {
+			_, _ = db.Exec(`ALTER TABLE sessions RENAME COLUMN last_active_at TO updated_at`)
+		}
+	}
 }
 
 func validateStoreSchema(db *sql.DB, dbPath string, existingTables map[string]struct{}) error {
@@ -471,7 +472,7 @@ func (s *sqliteStore) SaveAgentPreference(ctx context.Context, rec AgentPreferen
 
 func (s *sqliteStore) LoadSession(ctx context.Context, projectName, sessionID string) (*SessionRecord, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
+		SELECT id, status, agent_type, agent_json, session_sync_json, title, created_at, updated_at
 		FROM sessions
 		WHERE project_name = ? AND id = ?
 	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
@@ -550,7 +551,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO sessions (
-			id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
+			id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			project_name=excluded.project_name,
@@ -559,7 +560,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 			agent_json=excluded.agent_json,
 			session_sync_json=excluded.session_sync_json,
 			title=CASE WHEN excluded.title != '' THEN excluded.title ELSE sessions.title END,
-			last_active_at=excluded.last_active_at
+			updated_at=excluded.updated_at
 	`, rec.ID, rec.ProjectName, int(rec.Status), rec.AgentType, rec.AgentJSON, rec.SessionSyncJSON, rec.Title,
 		formatStoreTime(rec.CreatedAt), formatStoreTime(rec.LastActiveAt),
 	)
@@ -571,7 +572,7 @@ func (s *sqliteStore) SaveSession(ctx context.Context, rec *SessionRecord) error
 
 func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]SessionRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
+		SELECT id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, updated_at
 		FROM sessions
 		WHERE project_name = ?
 	`, strings.TrimSpace(projectName))
@@ -620,9 +621,6 @@ func (s *sqliteStore) ListSessions(ctx context.Context, projectName string) ([]S
 }
 
 func (s *sqliteStore) DeleteSessionPrompts(ctx context.Context, projectName, sessionID string) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
 	projectName = strings.TrimSpace(projectName)
 	sessionID = strings.TrimSpace(sessionID)
 	if projectName == "" {
@@ -632,13 +630,17 @@ func (s *sqliteStore) DeleteSessionPrompts(ctx context.Context, projectName, ses
 		return fmt.Errorf("session id is required")
 	}
 
-	if _, err := s.db.ExecContext(ctx, `
-		DELETE FROM session_prompts
-		WHERE session_id IN (
-			SELECT id FROM sessions WHERE project_name = ? AND id = ?
-		)
-	`, projectName, sessionID); err != nil {
-		return fmt.Errorf("delete session prompts: %w", err)
+	if rec, err := s.LoadSession(ctx, projectName, sessionID); err != nil {
+		return err
+	} else if rec == nil {
+		return nil
+	}
+	s.legacyPromptMu.Lock()
+	defer s.legacyPromptMu.Unlock()
+	for key, prompt := range s.legacyPromptMap {
+		if prompt.SessionID == sessionID {
+			delete(s.legacyPromptMap, key)
+		}
 	}
 	return nil
 }
@@ -667,14 +669,6 @@ func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID 
 	}()
 
 	if _, err := tx.ExecContext(ctx, `
-		DELETE FROM session_prompts
-		WHERE session_id IN (
-			SELECT id FROM sessions WHERE project_name = ? AND id = ?
-		)
-	`, projectName, sessionID); err != nil {
-		return fmt.Errorf("delete session prompts: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM route_bindings
 		WHERE project_name = ? AND session_id = ?
 	`, projectName, sessionID); err != nil {
@@ -690,13 +684,17 @@ func (s *sqliteStore) DeleteSession(ctx context.Context, projectName, sessionID 
 		return fmt.Errorf("commit delete session: %w", err)
 	}
 	tx = nil
+	s.legacyPromptMu.Lock()
+	for key, prompt := range s.legacyPromptMap {
+		if prompt.SessionID == sessionID {
+			delete(s.legacyPromptMap, key)
+		}
+	}
+	s.legacyPromptMu.Unlock()
 	return nil
 }
 
 func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPromptRecord) error {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-
 	rec.SessionID = strings.TrimSpace(rec.SessionID)
 	if rec.SessionID == "" {
 		return fmt.Errorf("session id is required")
@@ -707,11 +705,14 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 	if rec.UpdatedAt.IsZero() {
 		rec.UpdatedAt = time.Now()
 	}
-	existing, err := s.loadSessionPromptByID(ctx, rec.SessionID, rec.PromptIndex)
-	if err != nil {
-		return err
+	s.legacyPromptMu.Lock()
+	defer s.legacyPromptMu.Unlock()
+	if s.legacyPromptMap == nil {
+		s.legacyPromptMap = map[string]SessionPromptRecord{}
 	}
-	if existing != nil {
+	key := legacySessionPromptKey(rec.SessionID, rec.PromptIndex)
+	existing := s.legacyPromptMap[key]
+	if strings.TrimSpace(existing.SessionID) != "" {
 		if strings.TrimSpace(rec.Title) == "" {
 			rec.Title = existing.Title
 		}
@@ -729,20 +730,12 @@ func (s *sqliteStore) UpsertSessionPrompt(ctx context.Context, rec SessionPrompt
 		rec.StartedAt = minNonZeroTime(rec.StartedAt, existing.StartedAt)
 	}
 	turnsJSON := strings.TrimSpace(rec.TurnsJSON)
-	if _, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_prompts (session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index, model_name, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(session_id, prompt_index) DO UPDATE SET
-			title = excluded.title,
-			stop_reason = excluded.stop_reason,
-			updated_at = excluded.updated_at,
-			turns_json = excluded.turns_json,
-			turn_index = excluded.turn_index,
-			model_name = excluded.model_name,
-			started_at = excluded.started_at
-	`, rec.SessionID, rec.PromptIndex, strings.TrimSpace(rec.Title), strings.TrimSpace(rec.StopReason), formatStoreTime(rec.UpdatedAt), turnsJSON, rec.TurnIndex, strings.TrimSpace(rec.ModelName), formatStoreTime(rec.StartedAt)); err != nil {
-		return fmt.Errorf("upsert session prompt: %w", err)
-	}
+	rec.TurnsJSON = turnsJSON
+	rec.Title = strings.TrimSpace(rec.Title)
+	rec.StopReason = strings.TrimSpace(rec.StopReason)
+	rec.ModelName = strings.TrimSpace(rec.ModelName)
+	rec.PromptID = formatPromptSeq(rec.PromptIndex)
+	s.legacyPromptMap[key] = rec
 	return nil
 }
 
@@ -750,90 +743,63 @@ func (s *sqliteStore) LoadSessionPrompt(ctx context.Context, projectName, sessio
 	if promptIndex <= 0 {
 		return nil, nil
 	}
-	var rec SessionPromptRecord
-	var updatedAt string
-	var startedAt string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index, p.model_name, p.started_at
-		FROM session_prompts p
-		JOIN sessions s ON s.id = p.session_id
-		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index = ?
-		LIMIT 1
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt)
-	if err == sql.ErrNoRows {
+	projectName = strings.TrimSpace(projectName)
+	sessionID = strings.TrimSpace(sessionID)
+	rec, err := s.LoadSession(ctx, projectName, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if rec == nil {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("load session prompt: %w", err)
+	s.legacyPromptMu.Lock()
+	defer s.legacyPromptMu.Unlock()
+	prompt, ok := s.legacyPromptMap[legacySessionPromptKey(sessionID, promptIndex)]
+	if !ok {
+		return nil, nil
 	}
-	rec.UpdatedAt = parseStoreTime(updatedAt)
-	if startedAt != "" {
-		rec.StartedAt = parseStoreTime(startedAt)
-	}
-	rec.PromptID = formatPromptSeq(rec.PromptIndex)
-	return &rec, nil
+	prompt.PromptID = formatPromptSeq(prompt.PromptIndex)
+	return &prompt, nil
 }
 
 func (s *sqliteStore) ListSessionPrompts(ctx context.Context, projectName, sessionID string) ([]SessionPromptRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index, p.model_name, p.started_at
-		FROM session_prompts p
-		JOIN sessions s ON s.id = p.session_id
-		WHERE s.project_name = ? AND p.session_id = ?
-		ORDER BY p.prompt_index ASC
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID))
+	projectName = strings.TrimSpace(projectName)
+	sessionID = strings.TrimSpace(sessionID)
+	rec, err := s.LoadSession(ctx, projectName, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("list session prompts: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-
+	if rec == nil {
+		return nil, nil
+	}
 	out := []SessionPromptRecord{}
-	for rows.Next() {
-		var rec SessionPromptRecord
-		var updatedAt string
-		var startedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt); err != nil {
-			return nil, fmt.Errorf("scan session prompt: %w", err)
+	s.legacyPromptMu.Lock()
+	for _, prompt := range s.legacyPromptMap {
+		if prompt.SessionID != sessionID {
+			continue
 		}
-		rec.UpdatedAt = parseStoreTime(updatedAt)
-		if startedAt != "" {
-			rec.StartedAt = parseStoreTime(startedAt)
-		}
-		rec.PromptID = formatPromptSeq(rec.PromptIndex)
-		out = append(out, rec)
+		prompt.PromptID = formatPromptSeq(prompt.PromptIndex)
+		out = append(out, prompt)
 	}
-	return out, rows.Err()
+	s.legacyPromptMu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].PromptIndex < out[j].PromptIndex
+	})
+	return out, nil
 }
 
 func (s *sqliteStore) ListSessionPromptsAfterIndex(ctx context.Context, projectName, sessionID string, afterPromptIndex int64) ([]SessionPromptRecord, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT p.session_id, p.prompt_index, p.title, p.stop_reason, p.updated_at, p.turns_json, p.turn_index, p.model_name, p.started_at
-		FROM session_prompts p
-		JOIN sessions s ON s.id = p.session_id
-		WHERE s.project_name = ? AND p.session_id = ? AND p.prompt_index > ?
-		ORDER BY p.prompt_index ASC
-	`, strings.TrimSpace(projectName), strings.TrimSpace(sessionID), afterPromptIndex)
+	prompts, err := s.ListSessionPrompts(ctx, projectName, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("list session prompts after index: %w", err)
+		return nil, err
 	}
-	defer rows.Close()
-
 	out := []SessionPromptRecord{}
-	for rows.Next() {
-		var rec SessionPromptRecord
-		var updatedAt string
-		var startedAt string
-		if err := rows.Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt); err != nil {
-			return nil, fmt.Errorf("scan session prompt after index: %w", err)
+	for _, prompt := range prompts {
+		if prompt.PromptIndex > afterPromptIndex {
+			out = append(out, prompt)
 		}
-		rec.UpdatedAt = parseStoreTime(updatedAt)
-		if startedAt != "" {
-			rec.StartedAt = parseStoreTime(startedAt)
-		}
-		rec.PromptID = formatPromptSeq(rec.PromptIndex)
-		out = append(out, rec)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *sqliteStore) Close() error {
@@ -953,7 +919,7 @@ func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*S
 	var createdAt string
 	var lastActiveAt string
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, last_active_at
+		SELECT id, project_name, status, agent_type, agent_json, session_sync_json, title, created_at, updated_at
 		FROM sessions
 		WHERE id = ?
 		LIMIT 1
@@ -975,24 +941,24 @@ func (s *sqliteStore) loadSessionByID(ctx context.Context, sessionID string) (*S
 }
 
 func (s *sqliteStore) loadSessionPromptByID(ctx context.Context, sessionID string, promptIndex int64) (*SessionPromptRecord, error) {
-	var rec SessionPromptRecord
-	var updatedAt string
-	var startedAt string
-	err := s.db.QueryRowContext(ctx, `
-		SELECT session_id, prompt_index, title, stop_reason, updated_at, turns_json, turn_index, model_name, started_at
-		FROM session_prompts
-		WHERE session_id = ? AND prompt_index = ?
-		LIMIT 1
-	`, strings.TrimSpace(sessionID), promptIndex).Scan(&rec.SessionID, &rec.PromptIndex, &rec.Title, &rec.StopReason, &updatedAt, &rec.TurnsJSON, &rec.TurnIndex, &rec.ModelName, &startedAt)
-	if err == sql.ErrNoRows {
+	if promptIndex <= 0 {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("load session prompt by id: %w", err)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	rec.UpdatedAt = parseStoreTime(updatedAt)
-	rec.StartedAt = parseStoreTime(startedAt)
+	s.legacyPromptMu.Lock()
+	defer s.legacyPromptMu.Unlock()
+	rec, ok := s.legacyPromptMap[legacySessionPromptKey(sessionID, promptIndex)]
+	if !ok {
+		return nil, nil
+	}
+	rec.PromptID = formatPromptSeq(rec.PromptIndex)
 	return &rec, nil
+}
+
+func legacySessionPromptKey(sessionID string, promptIndex int64) string {
+	return strings.TrimSpace(sessionID) + "\x00" + strconv.FormatInt(promptIndex, 10)
 }
 
 func inferSessionListMetadata(agentType, agentJSON string) (string, string) {

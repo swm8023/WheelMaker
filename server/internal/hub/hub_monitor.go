@@ -280,7 +280,7 @@ func (c *MonitorCore) GetDBTables() *DBTablesResult {
 		return &DBTablesResult{Error: "open database: " + err.Error()}
 	}
 	defer db.Close()
-	tableNames := []string{"projects", "route_bindings", "sessions", "session_prompts"}
+	tableNames := []string{"projects", "route_bindings", "sessions", "agent_preferences"}
 	tables := make([]DBTable, 0, len(tableNames))
 	for _, name := range tableNames {
 		rows, err := db.Query("SELECT * FROM " + name)
@@ -343,10 +343,17 @@ func (c *MonitorCore) clearSessionHistory() error {
 		_ = tx.Rollback()
 	}()
 
-	if _, err := tx.Exec(`DELETE FROM session_prompts`); err != nil {
+	if _, err := tx.Exec(`UPDATE sessions SET session_sync_json = '{"latestPersistedTurnIndex":0}'`); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
+		return err
+	}
+	sessionDir := filepath.Join(c.BaseDir, "session")
+	if err := os.RemoveAll(sessionDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return err
 	}
 	if c.ResetSessionPromptState != nil {

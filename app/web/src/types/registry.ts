@@ -23,7 +23,6 @@ export interface RegistrySessionContentBlock {
 
 export interface RegistrySessionMessage {
   sessionId: string;
-  promptIndex: number;
   turnIndex: number;
   method: string;
   param: Record<string, unknown>;
@@ -66,6 +65,7 @@ export interface RegistrySessionSummary {
   messageCount: number;
   unreadCount?: number;
   agentType?: string;
+  latestTurnIndex?: number;
   configOptions?: RegistrySessionConfigOption[];
   commands?: RegistrySessionCommand[];
 }
@@ -86,6 +86,7 @@ export interface RegistrySessionReadResponse {
   session: RegistrySessionSummary;
   prompts: RegistrySessionPromptSnapshot[];
   messages: RegistrySessionMessage[];
+  latestTurnIndex: number;
 }
 
 export interface RegistryTokenProvider {
@@ -167,7 +168,6 @@ export interface RegistryTokenScanResult {
 
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
-  promptIndex: number;
   turnIndex: number;
   content: string;
   finished?: boolean;

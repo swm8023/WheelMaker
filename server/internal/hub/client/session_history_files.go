@@ -37,9 +37,7 @@ type fileSessionHistoryStore struct {
 }
 
 type sessionSyncProjection struct {
-	PromptIndex int64 `json:"promptIndex"`
-	TurnIndex   int64 `json:"turnIndex"`
-	Finished    bool  `json:"finished"`
+	LatestPersistedTurnIndex int64 `json:"latestPersistedTurnIndex"`
 }
 
 func newFileSessionHistoryStore(root string) *fileSessionHistoryStore {
@@ -119,7 +117,7 @@ func migrateSessionPromptsToFiles(ctx context.Context, store Store, files *fileS
 		if err != nil {
 			return fmt.Errorf("list prompts for history migration: %w", err)
 		}
-		latestSync := sessionSyncProjection{}
+		latestTurnIndex := int64(0)
 		for _, prompt := range prompts {
 			turns, err := DecodeStoredTurns(prompt.TurnsJSON)
 			if err != nil {
@@ -156,16 +154,11 @@ func migrateSessionPromptsToFiles(ctx context.Context, store Store, files *fileS
 				return fmt.Errorf("write prompt history for migration: %w", err)
 			}
 			if len(historyTurns) > 0 {
-				lastTurn := historyTurns[len(historyTurns)-1]
-				latestSync = sessionSyncProjection{
-					PromptIndex: prompt.PromptIndex,
-					TurnIndex:   lastTurn.TurnIndex,
-					Finished:    lastTurn.Finished,
-				}
+				latestTurnIndex += int64(len(historyTurns))
 			}
 		}
-		if latestSync.PromptIndex > 0 {
-			raw, err := json.Marshal(latestSync)
+		if latestTurnIndex > 0 {
+			raw, err := json.Marshal(sessionSyncProjection{LatestPersistedTurnIndex: latestTurnIndex})
 			if err != nil {
 				return fmt.Errorf("marshal session sync projection: %w", err)
 			}

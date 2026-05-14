@@ -1,12 +1,11 @@
 import type { RegistryChatMessage } from './types/registry';
 
 export type SessionReadCursor = {
-  promptIndex: number;
   turnIndex: number;
 };
 
 function chatMessageKey(message: RegistryChatMessage): string {
-  return `${message.sessionId}:${message.promptIndex}:${message.turnIndex}`;
+  return `${message.sessionId}:${message.turnIndex}`;
 }
 
 function upsertChatMessage(
@@ -17,8 +16,6 @@ function upsertChatMessage(
   const index = list.findIndex(item => chatMessageKey(item) === key);
   if (index < 0) {
     return [...list, next].sort((a, b) => {
-      const pd = (a.promptIndex ?? 0) - (b.promptIndex ?? 0);
-      if (pd !== 0) return pd;
       return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
     });
   }
@@ -31,7 +28,6 @@ function sameChatMessage(a: RegistryChatMessage | undefined, b: RegistryChatMess
   if (!a) return false;
   return (
     a.sessionId === b.sessionId &&
-    a.promptIndex === b.promptIndex &&
     a.turnIndex === b.turnIndex &&
     a.method === b.method &&
     isFinishedChatMessage(a) === isFinishedChatMessage(b) &&
@@ -50,22 +46,12 @@ function isTextTurnMessage(message: RegistryChatMessage): boolean {
 export function replacePromptMessages(
   list: RegistryChatMessage[],
   nextMessages: RegistryChatMessage[],
-  promptIndex: number,
+  _promptIndex: number,
   checkpointTurnIndex?: number,
 ): RegistryChatMessage[] {
   const base = list.filter(item => {
-    const itemPromptIndex = item.promptIndex ?? 0;
-    if (promptIndex <= 0) return false;
-    if (itemPromptIndex < promptIndex) return true;
-    if (itemPromptIndex === promptIndex && item.method === 'prompt_done') return true;
-    if (
-      itemPromptIndex === promptIndex &&
-      checkpointTurnIndex != null &&
-      checkpointTurnIndex > 0
-    ) {
-      return (item.turnIndex ?? 0) <= checkpointTurnIndex;
-    }
-    return itemPromptIndex > promptIndex;
+    if (checkpointTurnIndex == null || checkpointTurnIndex <= 0) return false;
+    return (item.turnIndex ?? 0) <= checkpointTurnIndex;
   });
   return nextMessages.reduce(
     (items, message) => upsertChatMessage(items, message),
@@ -77,29 +63,9 @@ export function needsPromptTurnRefresh(
   messages: RegistryChatMessage[],
   promptDone: RegistryChatMessage,
 ): boolean {
-  if (promptDone.method !== 'prompt_done') {
-    return false;
-  }
-  const sessionId = promptDone.sessionId;
-  const promptIndex = promptDone.promptIndex ?? 0;
-  if (!sessionId || promptIndex <= 0) {
-    return false;
-  }
-  let maxTurnIndex = 0;
-  for (const message of messages) {
-    if (message.sessionId !== sessionId || (message.promptIndex ?? 0) !== promptIndex) {
-      continue;
-    }
-    if (message.method === 'prompt_done') {
-      continue;
-    }
-    maxTurnIndex = Math.max(maxTurnIndex, message.turnIndex ?? 0);
-    if (isTextTurnMessage(message) && !isFinishedChatMessage(message)) {
-      return true;
-    }
-  }
-  const expectedMaxTurnIndex = Math.max(0, (promptDone.turnIndex ?? 0) - 1);
-  return expectedMaxTurnIndex > maxTurnIndex;
+  void messages;
+  void promptDone;
+  return false;
 }
 
 export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): SessionReadCursor {
@@ -108,17 +74,13 @@ export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): Ses
       if (!isFinishedChatMessage(message)) {
         return latest;
       }
-      const promptIndex = message.promptIndex ?? 0;
       const turnIndex = message.turnIndex ?? 0;
-      if (
-        promptIndex > latest.promptIndex ||
-        (promptIndex === latest.promptIndex && turnIndex > latest.turnIndex)
-      ) {
-        return { promptIndex, turnIndex };
+      if (turnIndex > latest.turnIndex) {
+        return { turnIndex };
       }
       return latest;
     },
-    { promptIndex: 0, turnIndex: 0 },
+    { turnIndex: 0 },
   );
 }
 
@@ -127,27 +89,12 @@ export function shouldRequestSessionReadForIncomingTurn(
   incoming: RegistryChatMessage,
 ): SessionReadCursor | null {
   const cursor = local.cursor;
-  const currentPromptIndex = cursor.promptIndex ?? 0;
   const currentTurnIndex = cursor.turnIndex ?? 0;
-  const incomingPromptIndex = incoming.promptIndex ?? 0;
   const incomingTurnIndex = incoming.turnIndex ?? 0;
-  if (incomingPromptIndex <= 0 || incomingTurnIndex <= 0) {
+  if (incomingTurnIndex <= 0) {
     return null;
   }
-  if (incomingPromptIndex > currentPromptIndex + 1) {
-    return cursor;
-  }
-  if (
-    incomingPromptIndex === currentPromptIndex + 1 &&
-    currentPromptIndex > 0 &&
-    !local.terminalPrompts.has(currentPromptIndex)
-  ) {
-    return cursor;
-  }
-  if (incomingPromptIndex === currentPromptIndex + 1 && incomingTurnIndex !== 1) {
-    return cursor;
-  }
-  if (incomingPromptIndex === currentPromptIndex && incomingTurnIndex > currentTurnIndex + 1) {
+  if (incomingTurnIndex > currentTurnIndex + 1) {
     return cursor;
   }
   return null;

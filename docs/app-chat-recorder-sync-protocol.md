@@ -1,5 +1,7 @@
 # Registry <-> App Chat Protocol (Current)
 
+> The current implementation uses a session-global `turnIndex` and binary session turn files. `promptIndex` remains in some historical notes only and is no longer part of the realtime or read protocol. See [session-turn-binary-history-design.zh-CN.md](./session-turn-binary-history-design.zh-CN.md) for the latest persistence design.
+
 ## 1. Scope
 
 This document describes the **current** app chat protocol between web app client (`role=client`) and registry/hub runtime.

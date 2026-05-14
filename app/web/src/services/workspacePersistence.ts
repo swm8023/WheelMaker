@@ -1,4 +1,4 @@
-import type {RegistryChatMessage, RegistryChatSession, RegistryGitCommit, RegistryGitCommitFile, RegistrySessionPromptSnapshot} from '../types/registry';
+import type {RegistryChatMessage, RegistryChatSession, RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
 import {
   DEFAULT_CODE_FONT,
   DEFAULT_CODE_FONT_SIZE,
@@ -66,7 +66,7 @@ export type PersistedGlobalState = {
 };
 
 export type PersistedChatCursor = {
-  promptIndex: number;
+  promptIndex?: number;
   turnIndex: number;
 };
 
@@ -77,7 +77,6 @@ export type PersistedChatSessionEntry = {
 
 export type PersistedChatSessionContent = {
   messages: RegistryChatMessage[];
-  prompts: RegistrySessionPromptSnapshot[];
 };
 
 type PersistedWorkspaceState = {
@@ -90,7 +89,7 @@ export type WorkspaceDatabaseDump = {
   projects: Array<{projectId: string; stateJson: string; updatedAt: number}>;
   projectCommits: Array<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>;
   chatSessionIndex: Array<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>;
-  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; updatedAt: number}>;
+  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; messagesJson: string; updatedAt: number}>;
   fileCache: Array<{k: string; hash: string; v: string; updatedAt: number}>;
   diffCache: Array<{k: string; v: string; updatedAt: number}>;
   meta: Array<{k: string; v: string; updatedAt: number}>;
@@ -100,7 +99,7 @@ export type WorkspaceDatabaseDump = {
 const LOCAL_ADDRESS_KEY = 'wheelmaker.workspace.address';
 const LOCAL_TOKEN_KEY = 'wheelmaker.workspace.token';
 const WORKSPACE_DB_NAME = 'wheelmaker.workspace.db';
-const WORKSPACE_DB_VERSION = 4;
+const WORKSPACE_DB_VERSION = 5;
 const TABLE_GLOBAL_KV = 'wm_global_kv';
 const TABLE_PROJECT_STATE = 'wm_project_state';
 const TABLE_PROJECT_COMMITS = 'wm_project_commits';
@@ -175,7 +174,6 @@ function defaultWorkspaceState(): PersistedWorkspaceState {
 
 function defaultChatCursor(): PersistedChatCursor {
   return {
-    promptIndex: 0,
     turnIndex: 0,
   };
 }
@@ -183,9 +181,8 @@ function defaultChatCursor(): PersistedChatCursor {
 function sanitizeChatCursor(input: Partial<PersistedChatCursor> | undefined): PersistedChatCursor {
   const base = defaultChatCursor();
   if (!input) return base;
-  const promptIndex = Number.isFinite(input.promptIndex) ? Math.max(0, Math.floor(Number(input.promptIndex))) : base.promptIndex;
   const turnIndex = Number.isFinite(input.turnIndex) ? Math.max(0, Math.floor(Number(input.turnIndex))) : base.turnIndex;
-  return {promptIndex, turnIndex};
+  return {turnIndex};
 }
 
 function sanitizeProjectState(input: Partial<PersistedProjectState> | undefined): PersistedProjectState {
@@ -318,7 +315,7 @@ type RawChatSessionContentRow = {
   projectId: string;
   sessionId: string;
   messagesJson: string;
-  promptsJson: string;
+  promptsJson?: string;
   updatedAt: number;
 };
 
@@ -347,8 +344,10 @@ class WorkspaceDatabase {
     }
     this.openPromise = new Promise((resolve, reject) => {
       const req = globalThis.indexedDB.open(WORKSPACE_DB_NAME, WORKSPACE_DB_VERSION);
-      req.onupgradeneeded = () => {
+      req.onupgradeneeded = (event) => {
         const db = req.result;
+        const tx = req.transaction;
+        const oldVersion = event.oldVersion;
         if (!db.objectStoreNames.contains(TABLE_GLOBAL_KV)) {
           db.createObjectStore(TABLE_GLOBAL_KV, {keyPath: 'k'});
         }
@@ -372,6 +371,13 @@ class WorkspaceDatabase {
         }
         if (!db.objectStoreNames.contains(TABLE_META)) {
           db.createObjectStore(TABLE_META, {keyPath: 'k'});
+        }
+        if (oldVersion > 0 && oldVersion < 5 && tx) {
+          for (const name of [TABLE_CHAT_SESSION_INDEX, TABLE_CHAT_SESSION_CONTENT]) {
+            if (db.objectStoreNames.contains(name)) {
+              tx.objectStore(name).clear();
+            }
+          }
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -566,10 +572,8 @@ export class WorkspacePersistenceRepository {
 
     for (const row of contentRows) {
       const messages = tryParse<RegistryChatMessage[]>(row.messagesJson, []);
-      const prompts = tryParse<RegistrySessionPromptSnapshot[]>(row.promptsJson, []);
       this.chatSessionContent.set(row.k, {
         messages: Array.isArray(messages) ? messages : [],
-        prompts: Array.isArray(prompts) ? prompts : [],
       });
     }
   }
@@ -670,7 +674,6 @@ export class WorkspacePersistenceRepository {
         projectId,
         sessionId,
         messagesJson: serialize(content.messages),
-        promptsJson: serialize(content.prompts),
         updatedAt: now,
       });
     }
@@ -853,14 +856,12 @@ export class WorkspacePersistenceRepository {
     projectId: string,
     sessionId: string,
     messages: RegistryChatMessage[],
-    prompts: RegistrySessionPromptSnapshot[],
   ): void {
     if (!projectId || !sessionId) return;
     const key = chatSessionKey(projectId, sessionId);
     const now = Date.now();
     const payload: PersistedChatSessionContent = {
       messages: Array.isArray(messages) ? messages : [],
-      prompts: Array.isArray(prompts) ? prompts : [],
     };
     this.chatSessionContent.set(key, payload);
     void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
@@ -868,7 +869,6 @@ export class WorkspacePersistenceRepository {
       projectId,
       sessionId,
       messagesJson: serialize(payload.messages),
-      promptsJson: serialize(payload.prompts),
       updatedAt: now,
     })).catch(() => undefined);
   }
@@ -1048,7 +1048,7 @@ export class WorkspacePersistenceRepository {
       this.db.getAllRows<{projectId: string; stateJson: string; updatedAt: number}>(TABLE_PROJECT_STATE),
       this.db.getAllRows<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>(TABLE_PROJECT_COMMITS),
       this.db.getAllRows<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_INDEX),
-      this.db.getAllRows<{k: string; projectId: string; sessionId: string; messagesJson: string; promptsJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
+      this.db.getAllRows<{k: string; projectId: string; sessionId: string; messagesJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
       this.db.getAllRows<{k: string; hash: string; v: string; updatedAt: number}>(TABLE_FILE_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_DIFF_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),

@@ -5,7 +5,6 @@ import type {
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryProject,
-  RegistrySessionPromptSnapshot,
 } from '../types/registry';
 import {
   WorkspacePersistenceRepository,
@@ -57,7 +56,7 @@ export type CachedChatSession = {
 
 export type CachedChatSessionContent = {
   messages: RegistryChatMessage[];
-  prompts: RegistrySessionPromptSnapshot[];
+  prompts: [];
 };
 
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
@@ -77,14 +76,10 @@ function diffCacheKey(sha: string, path: string): string {
 }
 
 function sanitizeCursor(cursor: Partial<PersistedChatCursor> | undefined): PersistedChatCursor {
-  const promptIndex = Number.isFinite(cursor?.promptIndex)
-    ? Math.max(0, Math.floor(Number(cursor?.promptIndex)))
-    : 0;
   const turnIndex = Number.isFinite(cursor?.turnIndex)
     ? Math.max(0, Math.floor(Number(cursor?.turnIndex)))
     : 0;
   return {
-    promptIndex,
     turnIndex,
   };
 }
@@ -235,7 +230,7 @@ export class WorkspaceStore {
     if (!cached) return null;
     return {
       messages: Array.isArray(cached.messages) ? cached.messages : [],
-      prompts: Array.isArray(cached.prompts) ? cached.prompts : [],
+      prompts: [],
     };
   }
 
@@ -267,10 +262,11 @@ export class WorkspaceStore {
     projectId: string,
     sessionId: string,
     messages: RegistryChatMessage[],
-    prompts: RegistrySessionPromptSnapshot[],
+    prompts: unknown[],
   ): void {
     if (!projectId || !sessionId) return;
-    this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages, prompts);
+    void prompts;
+    this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages);
   }
 
   deleteChatSession(projectId: string, sessionId: string): void {
