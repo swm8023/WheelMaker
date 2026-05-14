@@ -413,7 +413,7 @@ describe('web chat integration', () => {
     expect(backdropLayer).toBeLessThan(floatingLayer);
     expect(drawerLayer).toBeGreaterThan(floatingLayer);
     expect(mobileSettingsLayer).toBeGreaterThan(drawerLayer);
-    expect(stylesCss).toContain('--mobile-floating-control-lane: 54px;');
+    expect(stylesCss).toContain('--mobile-floating-control-lane: 56px;');
     expect(stylesCss).toMatch(
       /\.drawer-overlay \{[\s\S]*inset: 0;[\s\S]*z-index: 43;[\s\S]*\}/,
     );
@@ -473,11 +473,20 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('const WIDE_PROJECT_SESSION_LIMIT = 5;');
+    expect(mainTsx).toContain('const PROJECT_PIN_LONG_PRESS_MS = 450;');
     expect(mainTsx).toContain('function tagVariantClass(prefix: string, value: string): string {');
+    expect(mainTsx).toContain('const sortedProjectItems = useMemo(() => sortProjectsByPin(projects, pinnedProjectIds), [projects, pinnedProjectIds]);');
+    expect(mainTsx).toContain('const togglePinnedProject = useCallback(');
+    expect(mainTsx).toContain('const startProjectPinLongPress = useCallback(');
+    expect(mainTsx).toContain('const consumeProjectPinLongPressClick = useCallback(');
     expect(mainTsx).toContain('const renderWideProjectSessionNav = () => {');
     expect(mainTsx).toContain('className="wide-project-session-nav"');
     expect(mainTsx).toContain('className="wide-project-title-group"');
     expect(mainTsx).toContain("collapsed ? 'codicon-folder' : 'codicon-folder-opened'");
+    expect(mainTsx).toContain("className=\"codicon codicon-pinned wide-project-pin-badge\"");
+    expect(mainTsx).toContain('onPointerDown={event => startProjectPinLongPress(targetProjectId, event)}');
+    expect(mainTsx).toContain('onPointerUp={finishProjectPinLongPress}');
+    expect(mainTsx).toContain('onContextMenu={event => event.preventDefault()}');
     expect(mainTsx).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
     expect(mainTsx).toContain('className="wide-project-hub-dot"');
     expect(mainTsx).toContain('className="wide-project-hub-label"');
@@ -509,7 +518,9 @@ describe('web chat integration', () => {
 
     expect(stylesCss).toContain('.wide-project-session-nav {');
     expect(stylesCss).toContain('.wide-project-row {');
+    expect(stylesCss).toContain('.wide-project-folder-wrap {');
     expect(stylesCss).toContain('.wide-project-folder-icon {');
+    expect(stylesCss).toContain('.wide-project-pin-badge {');
     expect(stylesCss).toContain('.wide-project-title-group {');
     expect(stylesCss).toContain('.wide-project-hub-tag {');
     expect(stylesCss).toContain('.wide-project-hub-dot {');
@@ -530,6 +541,9 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toMatch(
       /\.wide-project-hub-tag \{[\s\S]*border: none;[\s\S]*background: transparent;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.wide-project-pin-badge \{[\s\S]*position: absolute;[\s\S]*right: -4px;[\s\S]*top: -5px;[\s\S]*\}/,
     );
   });
 

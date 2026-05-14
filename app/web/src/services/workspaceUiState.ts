@@ -21,6 +21,7 @@ export type WorkspaceUiState = {
     tab: PersistedTab;
     settingsOpen: boolean;
     collapsedProjectIds: string[];
+    pinnedProjectIds: string[];
   };
   desktop: {
     sidebarCollapsed: boolean;
@@ -43,6 +44,7 @@ export type WorkspaceUiStateInput = {
   sidebarCollapsed?: unknown;
   collapsedProjectIds?: unknown;
   desktopCollapsedProjectIds?: unknown;
+  pinnedProjectIds?: unknown;
   drawerOpen?: unknown;
   floatingControlSlot?: unknown;
   chatConfigOverflowOpen?: unknown;
@@ -55,6 +57,7 @@ export type WorkspaceUiAction =
   | { type: 'shared/setTab'; next: WorkspaceUiStateValue<PersistedTab> }
   | { type: 'shared/setSettingsOpen'; next: WorkspaceUiStateValue<boolean> }
   | { type: 'shared/setCollapsedProjectIds'; next: WorkspaceUiStateValue<string[]> }
+  | { type: 'shared/setPinnedProjectIds'; next: WorkspaceUiStateValue<string[]> }
   | { type: 'desktop/setSidebarCollapsed'; next: WorkspaceUiStateValue<boolean> }
   | { type: 'mobile/setDrawerOpen'; next: WorkspaceUiStateValue<boolean> }
   | {
@@ -125,6 +128,7 @@ export function createWorkspaceUiState(input: WorkspaceUiStateInput = {}): Works
           ? input.collapsedProjectIds
           : input.desktopCollapsedProjectIds,
       ),
+      pinnedProjectIds: sanitizeStringList(input.pinnedProjectIds),
     },
     desktop: {
       sidebarCollapsed:
@@ -174,6 +178,16 @@ export function workspaceUiReducer(
           ...state.shared,
           collapsedProjectIds: sanitizeStringList(
             resolveNext(state.shared.collapsedProjectIds, action.next),
+          ),
+        },
+      };
+    case 'shared/setPinnedProjectIds':
+      return {
+        ...state,
+        shared: {
+          ...state.shared,
+          pinnedProjectIds: sanitizeStringList(
+            resolveNext(state.shared.pinnedProjectIds, action.next),
           ),
         },
       };

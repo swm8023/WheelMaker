@@ -36,6 +36,7 @@ describe('web responsive ui state', () => {
       sidebarCollapsed: true,
       drawerOpen: true,
       collapsedProjectIds: ['project-a', 'project-b', 'project-a'],
+      pinnedProjectIds: ['project-c', 'project-a', 'project-c'],
       floatingControlSlot: 'center',
       chatConfigOverflowOpen: true,
       chatKeyboardInset: 120,
@@ -55,6 +56,7 @@ describe('web responsive ui state', () => {
       tab: 'git',
       settingsOpen: true,
       collapsedProjectIds: ['project-a', 'project-b'],
+      pinnedProjectIds: ['project-c', 'project-a'],
     });
     expect(state.desktop).toMatchObject({
       sidebarCollapsed: true,
@@ -73,6 +75,7 @@ describe('web responsive ui state', () => {
 
     expect(state.shared.settingsOpen).toBe(true);
     expect(state.shared.collapsedProjectIds).toEqual(['project-a', 'project-b']);
+    expect(state.shared.pinnedProjectIds).toEqual(['project-c', 'project-a']);
     expect(state.desktop.sidebarCollapsed).toBe(true);
     expect(state.mobile.floatingControlSlot).toBe('center');
     expect(state.mobile.drawerOpen).toBe(false);
@@ -80,6 +83,41 @@ describe('web responsive ui state', () => {
     expect(state.transient.chatKeyboardInset).toBe(0);
     expect(state.transient.floatingKeyboardOffset).toBe(0);
     expect(state.transient.floatingDragState).toBeNull();
+
+    state = workspaceUiReducer(state, {
+      type: 'shared/setPinnedProjectIds',
+      next: ['project-b', 'project-b', 'project-c'],
+    });
+
+    expect(state.shared.pinnedProjectIds).toEqual(['project-b', 'project-c']);
+  });
+
+  test('sorts pinned projects above unpinned projects while preserving registry order', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const modulePath = path.join(projectRoot, 'web', 'src', 'services', 'projectNavigation.ts');
+
+    expect(fs.existsSync(modulePath)).toBe(true);
+
+    const {
+      sortProjectsByPin,
+      togglePinnedProjectId,
+    } = require(modulePath);
+
+    const projects = [
+      { projectId: 'project-a', name: 'A' },
+      { projectId: 'project-b', name: 'B' },
+      { projectId: 'project-c', name: 'C' },
+      { projectId: 'project-d', name: 'D' },
+    ];
+
+    expect(sortProjectsByPin(projects, ['project-c', 'missing', 'project-a']).map(item => item.projectId)).toEqual([
+      'project-a',
+      'project-c',
+      'project-b',
+      'project-d',
+    ]);
+    expect(togglePinnedProjectId(['project-a'], 'project-c')).toEqual(['project-a', 'project-c']);
+    expect(togglePinnedProjectId(['project-a', 'project-c'], 'project-a')).toEqual(['project-c']);
   });
 
   test('main web app uses the responsive layout and workspace ui state modules', () => {
@@ -92,7 +130,10 @@ describe('web responsive ui state', () => {
     expect(mainTsx).toContain("const isWide = layoutMode === 'desktop';");
     expect(mainTsx).toContain('const [workspaceUiState, dispatchWorkspaceUi] = useReducer(');
     expect(mainTsx).toContain('collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? []');
+    expect(mainTsx).toContain('pinnedProjectIds: globalState.pinnedProjectIds ?? []');
     expect(mainTsx).toContain('const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;');
+    expect(mainTsx).toContain('const pinnedProjectIds = workspaceUiState.shared.pinnedProjectIds;');
     expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'shared/setCollapsedProjectIds', next });");
+    expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'shared/setPinnedProjectIds', next });");
   });
 });

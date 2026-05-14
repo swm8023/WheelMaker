@@ -65,6 +65,7 @@ export type PersistedGlobalState = {
   floatingControlSlot: PersistedFloatingControlSlot;
   collapsedProjectIds: string[];
   desktopCollapsedProjectIds: string[];
+  pinnedProjectIds: string[];
 };
 
 export type PersistedChatCursor = {
@@ -127,6 +128,7 @@ const GLOBAL_KEYS = {
   floatingControlSlot: 'floatingControlSlot',
   collapsedProjectIds: 'collapsedProjectIds',
   desktopCollapsedProjectIds: 'desktopCollapsedProjectIds',
+  pinnedProjectIds: 'pinnedProjectIds',
 } as const;
 
 function defaultGlobalState(): PersistedGlobalState {
@@ -148,6 +150,7 @@ function defaultGlobalState(): PersistedGlobalState {
     floatingControlSlot: 'upper-middle',
     collapsedProjectIds: [],
     desktopCollapsedProjectIds: [],
+    pinnedProjectIds: [],
   };
 }
 
@@ -221,6 +224,9 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     : Array.isArray(input.desktopCollapsedProjectIds)
       ? Array.from(new Set(input.desktopCollapsedProjectIds.filter(item => typeof item === 'string' && item)))
       : base.collapsedProjectIds;
+  const pinnedProjectIds = Array.isArray(input.pinnedProjectIds)
+    ? Array.from(new Set(input.pinnedProjectIds.filter(item => typeof item === 'string' && item)))
+    : base.pinnedProjectIds;
   const floatingControlSlot =
     input.floatingControlSlot === 'upper' ||
     input.floatingControlSlot === 'upper-middle' ||
@@ -246,6 +252,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     floatingControlSlot,
     collapsedProjectIds,
     desktopCollapsedProjectIds: collapsedProjectIds,
+    pinnedProjectIds,
   };
 }
 
@@ -642,6 +649,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
       {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(this.state.global.desktopCollapsedProjectIds), updatedAt: now},
+      {k: GLOBAL_KEYS.pinnedProjectIds, v: serialize(this.state.global.pinnedProjectIds), updatedAt: now},
     ];
 
     for (const row of globalRows) {
@@ -919,6 +927,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(next.desktopCollapsedProjectIds), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.pinnedProjectIds, v: serialize(next.pinnedProjectIds), updatedAt: now});
     }).catch(() => undefined);
   }
 

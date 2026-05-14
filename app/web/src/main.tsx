@@ -30,6 +30,7 @@ import {
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
+import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
 import {
   CODE_FONT_OPTIONS,
@@ -285,6 +286,7 @@ const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
 const WIDE_PROJECT_SESSION_LIMIT = 5;
+const PROJECT_PIN_LONG_PRESS_MS = 450;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 let mermaidRenderSequence = 0;
@@ -2150,6 +2152,7 @@ function App() {
       createWorkspaceUiState({
         tab: globalState.tab ?? 'file',
         collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? [],
+        pinnedProjectIds: globalState.pinnedProjectIds ?? [],
         floatingControlSlot: globalState.floatingControlSlot ?? 'upper-middle',
       }),
   );
@@ -2159,6 +2162,7 @@ function App() {
   const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
   const sidebarCollapsed = workspaceUiState.desktop.sidebarCollapsed;
   const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;
+  const pinnedProjectIds = workspaceUiState.shared.pinnedProjectIds;
   const drawerOpen = workspaceUiState.mobile.drawerOpen;
   const sidebarSettingsOpen = workspaceUiState.shared.settingsOpen;
   const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;
@@ -2171,6 +2175,8 @@ function App() {
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
+  const projectPinLongPressTimerRef = useRef<number | null>(null);
+  const projectPinLongPressTargetRef = useRef('');
   const layoutModeRef = useRef(layoutMode);
   const setTab = useCallback((next: WorkspaceUiStateValue<Tab>) => {
     dispatchWorkspaceUi({ type: 'shared/setTab', next });
@@ -2195,6 +2201,9 @@ function App() {
   }, []);
   const setCollapsedProjectIds = useCallback((next: WorkspaceUiStateValue<string[]>) => {
     dispatchWorkspaceUi({ type: 'shared/setCollapsedProjectIds', next });
+  }, []);
+  const setPinnedProjectIds = useCallback((next: WorkspaceUiStateValue<string[]>) => {
+    dispatchWorkspaceUi({ type: 'shared/setPinnedProjectIds', next });
   }, []);
   const setDrawerOpen = useCallback((next: WorkspaceUiStateValue<boolean>) => {
     dispatchWorkspaceUi({ type: 'mobile/setDrawerOpen', next });
@@ -2807,6 +2816,7 @@ function App() {
     () => projects.map(item => item.projectId).join('|'),
     [projects],
   );
+  const sortedProjectItems = useMemo(() => sortProjectsByPin(projects, pinnedProjectIds), [projects, pinnedProjectIds]);
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -3226,6 +3236,7 @@ function App() {
       selectedProjectId: projectId,
       floatingControlSlot,
       collapsedProjectIds,
+      pinnedProjectIds,
     });
   }, [
     address,
@@ -3243,6 +3254,7 @@ function App() {
     projectId,
     floatingControlSlot,
     collapsedProjectIds,
+    pinnedProjectIds,
   ]);
 
   useEffect(() => {
@@ -3649,6 +3661,68 @@ function App() {
     },
     [setCollapsedProjectIds],
   );
+  const clearProjectPinLongPress = useCallback(() => {
+    if (projectPinLongPressTimerRef.current !== null) {
+      window.clearTimeout(projectPinLongPressTimerRef.current);
+      projectPinLongPressTimerRef.current = null;
+    }
+  }, []);
+  const togglePinnedProject = useCallback(
+    (targetProjectId: string) => {
+      setPinnedProjectIds(current => togglePinnedProjectId(current, targetProjectId));
+    },
+    [setPinnedProjectIds],
+  );
+  const startProjectPinLongPress = useCallback(
+    (targetProjectId: string, event: React.PointerEvent<HTMLButtonElement>) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      clearProjectPinLongPress();
+      projectPinLongPressTargetRef.current = '';
+      const target = event.currentTarget;
+      if (target.setPointerCapture) {
+        try {
+          target.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer capture is best-effort; the timer still covers normal press flows.
+        }
+      }
+      projectPinLongPressTimerRef.current = window.setTimeout(() => {
+        projectPinLongPressTimerRef.current = null;
+        projectPinLongPressTargetRef.current = targetProjectId;
+        togglePinnedProject(targetProjectId);
+      }, PROJECT_PIN_LONG_PRESS_MS);
+    },
+    [clearProjectPinLongPress, togglePinnedProject],
+  );
+  const finishProjectPinLongPress = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      clearProjectPinLongPress();
+      const target = event.currentTarget;
+      if (target.hasPointerCapture?.(event.pointerId)) {
+        try {
+          target.releasePointerCapture(event.pointerId);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [clearProjectPinLongPress],
+  );
+  const consumeProjectPinLongPressClick = useCallback(
+    (targetProjectId: string, event: React.MouseEvent<HTMLButtonElement>): boolean => {
+      if (projectPinLongPressTargetRef.current !== targetProjectId) {
+        return false;
+      }
+      projectPinLongPressTargetRef.current = '';
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    },
+    [],
+  );
+  useEffect(() => clearProjectPinLongPress, [clearProjectPinLongPress]);
   const agentInfoAgents = useMemo(() => {
     const names = new Map<string, string>();
     const skillsByKey = new Map<string, string[]>();
@@ -7416,13 +7490,14 @@ function App() {
           {projects.length === 0 ? (
             <div className="chat-empty-hint">No projects available.</div>
           ) : null}
-          {projects.map(projectItem => {
+          {sortedProjectItems.map(projectItem => {
             const targetProjectId = projectItem.projectId;
             const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
             const visibleCount =
               wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
             const visibleSessions = projectSessions.slice(0, visibleCount);
             const collapsed = collapsedProjectIds.includes(targetProjectId);
+            const pinnedProject = pinnedProjectIds.includes(targetProjectId);
             const activeProject = targetProjectId === projectId;
             const agents = getWideProjectAgents(projectItem, projectSessions);
             const actionMenuOpen = mobileProjectActionMenu?.projectId === targetProjectId;
@@ -7435,7 +7510,7 @@ function App() {
             return (
               <div
                 key={`mobile-project:${targetProjectId}`}
-                className={`wide-project-section mobile-project-section${activeProject ? ' active' : ''}${
+                className={`wide-project-section mobile-project-section${activeProject ? ' active' : ''}${pinnedProject ? ' pinned' : ''}${
                   collapsed ? ' collapsed' : ''
                 }`}
               >
@@ -7443,13 +7518,28 @@ function App() {
                   <button
                     type="button"
                     className="wide-project-toggle mobile-project-toggle"
-                    onClick={() => toggleWideProjectCollapsed(targetProjectId)}
+                    onPointerDown={event => startProjectPinLongPress(targetProjectId, event)}
+                    onPointerUp={finishProjectPinLongPress}
+                    onPointerCancel={finishProjectPinLongPress}
+                    onPointerLeave={finishProjectPinLongPress}
+                    onContextMenu={event => event.preventDefault()}
+                    onClick={event => {
+                      if (consumeProjectPinLongPressClick(targetProjectId, event)) {
+                        return;
+                      }
+                      toggleWideProjectCollapsed(targetProjectId);
+                    }}
                     title={collapsed ? 'Expand project' : 'Collapse project'}
                     aria-expanded={!collapsed}
                   >
-                    <span
-                      className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon ${projectHubVariant}`}
-                    />
+                    <span className="wide-project-folder-wrap">
+                      <span
+                        className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon ${projectHubVariant}`}
+                      />
+                      {pinnedProject ? (
+                        <span className="codicon codicon-pinned wide-project-pin-badge" aria-hidden="true" />
+                      ) : null}
+                    </span>
                     <span className="wide-project-title-group">
                       <span className="wide-project-name" title={projectItem.name}>
                         {projectItem.name}
@@ -7672,13 +7762,14 @@ function App() {
         {projects.length === 0 ? (
           <div className="chat-empty-hint">No projects available.</div>
         ) : null}
-        {projects.map(projectItem => {
+        {sortedProjectItems.map(projectItem => {
           const targetProjectId = projectItem.projectId;
           const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
           const visibleCount =
             wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
           const visibleSessions = projectSessions.slice(0, visibleCount);
           const collapsed = collapsedProjectIds.includes(targetProjectId);
+          const pinnedProject = pinnedProjectIds.includes(targetProjectId);
           const activeProject = targetProjectId === projectId;
           const agents = getWideProjectAgents(projectItem, projectSessions);
           const actionMenuOpen = wideProjectActionMenu?.projectId === targetProjectId;
@@ -7687,7 +7778,7 @@ function App() {
           return (
             <div
               key={`wide-project:${targetProjectId}`}
-              className={`wide-project-section${activeProject ? ' active' : ''}${
+              className={`wide-project-section${activeProject ? ' active' : ''}${pinnedProject ? ' pinned' : ''}${
                 collapsed ? ' collapsed' : ''
               }`}
             >
@@ -7695,13 +7786,28 @@ function App() {
                 <button
                   type="button"
                   className="wide-project-toggle"
-                  onClick={() => toggleWideProjectCollapsed(targetProjectId)}
+                  onPointerDown={event => startProjectPinLongPress(targetProjectId, event)}
+                  onPointerUp={finishProjectPinLongPress}
+                  onPointerCancel={finishProjectPinLongPress}
+                  onPointerLeave={finishProjectPinLongPress}
+                  onContextMenu={event => event.preventDefault()}
+                  onClick={event => {
+                    if (consumeProjectPinLongPressClick(targetProjectId, event)) {
+                      return;
+                    }
+                    toggleWideProjectCollapsed(targetProjectId);
+                  }}
                   title={collapsed ? 'Expand project' : 'Collapse project'}
                   aria-expanded={!collapsed}
                 >
-                  <span
-                    className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon ${projectHubVariant}`}
-                  />
+                  <span className="wide-project-folder-wrap">
+                    <span
+                      className={`codicon ${collapsed ? 'codicon-folder' : 'codicon-folder-opened'} wide-project-folder-icon ${projectHubVariant}`}
+                    />
+                    {pinnedProject ? (
+                      <span className="codicon codicon-pinned wide-project-pin-badge" aria-hidden="true" />
+                    ) : null}
+                  </span>
                   <span className="wide-project-title-group">
                     <span className="wide-project-name" title={projectItem.name}>
                       {projectItem.name}
