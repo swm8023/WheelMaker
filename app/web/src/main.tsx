@@ -7806,7 +7806,7 @@ function App() {
                   handleChatConfigOptionChange(option, item.value).catch(() => undefined);
                 }}
               >
-                <span>{item.name || item.value}</span>
+                <span className="chat-config-value-label">{item.name || item.value}</span>
                 {selected ? (
                   <span className="codicon codicon-check" aria-hidden="true" />
                 ) : null}
@@ -8172,7 +8172,7 @@ function App() {
                                               ).catch(() => undefined);
                                             }}
                                           >
-                                            <span>{item.name || item.value}</span>
+                                            <span className="chat-config-value-label">{item.name || item.value}</span>
                                             {selected ? (
                                               <span className="codicon codicon-check" aria-hidden="true" />
                                             ) : null}

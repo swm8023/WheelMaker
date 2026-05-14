@@ -329,6 +329,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="chat-config-pill"');
     expect(mainTsx).toContain('className="chat-config-value-menu"');
     expect(mainTsx).toContain('chat-config-value-option${selected ?');
+    expect(mainTsx).toContain('className="chat-config-value-label"');
     expect(mainTsx).toContain('className="chat-config-overflow-group"');
     expect(mainTsx).not.toContain('className="chat-action-menu chat-action-menu-inline');
     expect(mainTsx).not.toContain('Photo Library');
@@ -360,6 +361,14 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-config-pill {');
     expect(stylesCss).toContain('.chat-config-value-menu {');
     expect(stylesCss).toContain('.chat-config-value-option {');
+    expect(stylesCss).toContain('.chat-config-value-menu .chat-config-value-option {');
+    expect(stylesCss).toMatch(
+      /\.chat-config-value-menu \.chat-config-value-option \{[\s\S]*width: 100%;[\s\S]*height: auto;[\s\S]*align-items: flex-start;[\s\S]*padding: 6px 8px;[\s\S]*line-height: 1.25;/,
+    );
+    expect(stylesCss).toContain('.chat-config-value-label {');
+    expect(stylesCss).toMatch(
+      /\.chat-config-value-label \{[\s\S]*overflow-wrap: anywhere;[\s\S]*text-align: left;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-config-overflow-group {');
     expect(stylesCss).not.toContain('.chat-config-select {');
     expect(stylesCss).not.toContain('.chat-config-feedback {');

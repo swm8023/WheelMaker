@@ -3527,8 +3527,8 @@ body,
   right: 0;
   bottom: calc(100% + 8px);
   z-index: 14;
-  min-width: 164px;
-  max-width: min(260px, calc(100vw - 32px));
+  min-width: min(240px, calc(100vw - 32px));
+  max-width: min(340px, calc(100vw - 32px));
   max-height: 42vh;
   overflow-y: auto;
   border: 1px solid var(--border);
@@ -3557,6 +3557,21 @@ body,
   cursor: pointer;
 }
 
+.chat-config-value-menu .chat-config-value-option {
+  width: 100%;
+  height: auto;
+  align-items: flex-start;
+  padding: 6px 8px;
+  line-height: 1.25;
+}
+
+.chat-config-value-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
 .chat-config-value-option:hover,
 .chat-config-value-option.selected {
   background: var(--hover);
@@ -3570,6 +3585,8 @@ body,
 .chat-config-value-option .codicon {
   color: var(--accent);
   font-size: 12px;
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .chat-sessions-header {
