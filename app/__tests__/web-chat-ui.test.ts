@@ -77,7 +77,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };");
     expect(mainTsx).toContain('const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);');
     expect(mainTsx).toContain('const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);');
-    expect(mainTsx).toContain('const [chatConfigOverflowOpen, setChatConfigOverflowOpen] = useState(false);');
+    expect(mainTsx).toContain('const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;');
+    expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'mobile/setChatConfigOverflowOpen', next });");
     expect(mainTsx).toContain('const chatAttachmentsRef = useRef<ChatAttachment[]>([]);');
     expect(mainTsx).toContain('const chatAutoScrollFollowRef = useRef(true);');
     expect(mainTsx).toContain('const chatPointerScrollingRef = useRef(false);');
@@ -201,9 +202,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toMatch(
       /className="drawer-toggle-bubble"[\s\S]*?onPointerDown=\{handleFloatingControlButtonPointerDown\}[\s\S]*?onClick=\{handleFloatingDrawerToggle\}/,
     );
-    expect(mainTsx).toContain('const [floatingControlSlot, setFloatingControlSlot] = useState<PersistedFloatingControlSlot>(');
-    expect(mainTsx).toContain('const [floatingDragState, setFloatingDragState] = useState');
-    expect(mainTsx).toContain('const [floatingKeyboardOffset, setFloatingKeyboardOffset] = useState(0);');
+    expect(mainTsx).toContain('const floatingControlSlot = workspaceUiState.mobile.floatingControlSlot;');
+    expect(mainTsx).toContain('const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;');
+    expect(mainTsx).toContain('const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;');
     expect(mainTsx).not.toContain('style={narrowContentInsetStyle}');
     expect(mainTsx).toContain('className="breadcrumb-title"');
     expect(mainTsx).toContain('className="breadcrumb-project-name"');

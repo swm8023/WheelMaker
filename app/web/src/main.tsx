@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import setiThemeJson from '@codingame/monaco-vscode-theme-seti-default-extension/resources/vs-seti-icon-theme.json';
 import setiFontUrl from '@codingame/monaco-vscode-theme-seti-default-extension/resources/seti.woff';
@@ -29,6 +29,7 @@ import {
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
+import { resolveLayoutMode } from './services/responsiveLayout';
 import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
@@ -49,6 +50,11 @@ import {
 } from './services/shikiRenderer';
 import { WorkspaceController } from './services/workspaceController';
 import { WorkspaceStore } from './services/workspaceStore';
+import {
+  createWorkspaceUiState,
+  workspaceUiReducer,
+  type WorkspaceUiStateValue,
+} from './services/workspaceUiState';
 import type { PersistedFloatingControlSlot } from './services/workspacePersistence';
 import type {
   RegistryChatContentBlock,
@@ -2060,7 +2066,8 @@ function App() {
   const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
   const [windowHeight, setWindowHeight] = useState<number>(window.innerHeight);
   const [safeAreaTopInset, setSafeAreaTopInset] = useState<number>(() => readSafeAreaTopInset());
-  const isWide = windowWidth >= 900;
+  const layoutMode = resolveLayoutMode(windowWidth);
+  const isWide = layoutMode === 'desktop';
   const supportsChatClipboardImages = useMemo(() => {
     const userAgent = window.navigator.userAgent || '';
     const platform = window.navigator.platform || '';
@@ -2089,23 +2096,66 @@ function App() {
     [],
   );
 
-  const [tab, setTab] = useState<Tab>(persistedGlobal.tab ?? 'file');
-  const tabRef = useRef<Tab>(persistedGlobal.tab ?? 'file');
-  const [floatingControlSlot, setFloatingControlSlot] = useState<PersistedFloatingControlSlot>(
-    persistedGlobal.floatingControlSlot ?? 'upper-middle',
+  const [workspaceUiState, dispatchWorkspaceUi] = useReducer(
+    workspaceUiReducer,
+    persistedGlobal,
+    globalState =>
+      createWorkspaceUiState({
+        tab: globalState.tab ?? 'file',
+        floatingControlSlot: globalState.floatingControlSlot ?? 'upper-middle',
+      }),
   );
-  const [floatingDragState, setFloatingDragState] = useState<FloatingDragState | null>(null);
+  const tab = workspaceUiState.shared.tab as Tab;
+  const floatingControlSlot = workspaceUiState.mobile.floatingControlSlot;
+  const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;
+  const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
+  const sidebarCollapsed = workspaceUiState.desktop.sidebarCollapsed;
+  const drawerOpen = workspaceUiState.mobile.drawerOpen;
+  const sidebarSettingsOpen = workspaceUiState.shared.settingsOpen;
+  const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;
+  const chatKeyboardInset = workspaceUiState.transient.chatKeyboardInset;
+  const tabRef = useRef<Tab>(tab);
   const floatingDragStateRef = useRef<FloatingDragState | null>(null);
-  const [floatingKeyboardOffset, setFloatingKeyboardOffset] = useState(0);
   const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
   const floatingLongPressTimerRef = useRef<number | null>(null);
   const floatingCooldownTimerRef = useRef<number | null>(null);
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [sidebarSettingsOpen, setSidebarSettingsOpen] = useState(false);
+  const layoutModeRef = useRef(layoutMode);
+  const setTab = useCallback((next: WorkspaceUiStateValue<Tab>) => {
+    dispatchWorkspaceUi({ type: 'shared/setTab', next });
+  }, []);
+  const setFloatingControlSlot = useCallback(
+    (next: WorkspaceUiStateValue<PersistedFloatingControlSlot>) => {
+      dispatchWorkspaceUi({ type: 'mobile/setFloatingControlSlot', next });
+    },
+    [],
+  );
+  const setFloatingDragState = useCallback(
+    (next: WorkspaceUiStateValue<FloatingDragState | null>) => {
+      dispatchWorkspaceUi({ type: 'transient/setFloatingDragState', next });
+    },
+    [],
+  );
+  const setFloatingKeyboardOffset = useCallback((next: WorkspaceUiStateValue<number>) => {
+    dispatchWorkspaceUi({ type: 'transient/setFloatingKeyboardOffset', next });
+  }, []);
+  const setSidebarCollapsed = useCallback((next: WorkspaceUiStateValue<boolean>) => {
+    dispatchWorkspaceUi({ type: 'desktop/setSidebarCollapsed', next });
+  }, []);
+  const setDrawerOpen = useCallback((next: WorkspaceUiStateValue<boolean>) => {
+    dispatchWorkspaceUi({ type: 'mobile/setDrawerOpen', next });
+  }, []);
+  const setSidebarSettingsOpen = useCallback((next: WorkspaceUiStateValue<boolean>) => {
+    dispatchWorkspaceUi({ type: 'shared/setSettingsOpen', next });
+  }, []);
+  const setChatConfigOverflowOpen = useCallback((next: WorkspaceUiStateValue<boolean>) => {
+    dispatchWorkspaceUi({ type: 'mobile/setChatConfigOverflowOpen', next });
+  }, []);
+  const setChatKeyboardInset = useCallback((next: WorkspaceUiStateValue<number>) => {
+    dispatchWorkspaceUi({ type: 'transient/setChatKeyboardInset', next });
+  }, []);
   const [databasePanelOpen, setDatabasePanelOpen] = useState(false);
   const [databaseLoading, setDatabaseLoading] = useState(false);
   const [databaseError, setDatabaseError] = useState('');
@@ -2200,11 +2250,9 @@ function App() {
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatConfigFeedback, setChatConfigFeedback] = useState('');
   const [showChatConfigLabels, setShowChatConfigLabels] = useState(false);
-  const [chatConfigOverflowOpen, setChatConfigOverflowOpen] = useState(false);
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
-  const [chatKeyboardInset, setChatKeyboardInset] = useState(0);
   const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
   const chatComposerTextRef = useRef('');
   const chatAttachmentsRef = useRef<ChatAttachment[]>([]);
@@ -2788,6 +2836,18 @@ function App() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  useEffect(() => {
+    if (layoutModeRef.current === layoutMode) {
+      return;
+    }
+    dispatchWorkspaceUi({
+      type: 'layout/modeChanged',
+      from: layoutModeRef.current,
+      to: layoutMode,
+    });
+    layoutModeRef.current = layoutMode;
+  }, [layoutMode]);
+
   useLayoutEffect(() => {
     if (isWide) {
       return;
@@ -2883,12 +2943,6 @@ function App() {
       window.removeEventListener('orientationchange', scheduleUpdate);
     };
   }, [isWide, tab]);
-
-  useEffect(() => {
-    if (isWide) {
-      setDrawerOpen(false);
-    }
-  }, [isWide]);
 
   useEffect(() => {
     if (!isWide) {
