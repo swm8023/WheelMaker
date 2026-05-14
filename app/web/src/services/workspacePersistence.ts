@@ -63,6 +63,7 @@ export type PersistedGlobalState = {
   tab: PersistedTab;
   selectedProjectId: string;
   floatingControlSlot: PersistedFloatingControlSlot;
+  desktopCollapsedProjectIds: string[];
 };
 
 export type PersistedChatCursor = {
@@ -123,6 +124,7 @@ const GLOBAL_KEYS = {
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
   floatingControlSlot: 'floatingControlSlot',
+  desktopCollapsedProjectIds: 'desktopCollapsedProjectIds',
 } as const;
 
 function defaultGlobalState(): PersistedGlobalState {
@@ -142,6 +144,7 @@ function defaultGlobalState(): PersistedGlobalState {
     tab: 'file',
     selectedProjectId: '',
     floatingControlSlot: 'upper-middle',
+    desktopCollapsedProjectIds: [],
   };
 }
 
@@ -210,8 +213,12 @@ function sanitizeProjectCommitsState(input: Partial<PersistedProjectCommitsState
 function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): PersistedGlobalState {
   const base = defaultGlobalState();
   if (!input) return base;
+  const desktopCollapsedProjectIds = Array.isArray(input.desktopCollapsedProjectIds)
+    ? Array.from(new Set(input.desktopCollapsedProjectIds.filter(item => typeof item === 'string' && item)))
+    : base.desktopCollapsedProjectIds;
   const floatingControlSlot =
     input.floatingControlSlot === 'upper' ||
+    input.floatingControlSlot === 'upper-middle' ||
     input.floatingControlSlot === 'center' ||
     input.floatingControlSlot === 'lower-middle'
       ? input.floatingControlSlot
@@ -232,6 +239,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
     floatingControlSlot,
+    desktopCollapsedProjectIds,
   };
 }
 
@@ -626,6 +634,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
+      {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(this.state.global.desktopCollapsedProjectIds), updatedAt: now},
     ];
 
     for (const row of globalRows) {
@@ -901,6 +910,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(next.desktopCollapsedProjectIds), updatedAt: now});
     }).catch(() => undefined);
   }
 

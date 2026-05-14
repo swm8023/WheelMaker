@@ -91,6 +91,12 @@ type PendingNewChatDraft = {
   text: string;
   blocks: RegistryChatContentBlock[];
 };
+type WideProjectActionMenuState = {
+  projectId: string;
+  kind: 'new' | 'resume';
+  phase: 'agents' | 'sessions';
+  agentType: string;
+};
 type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
@@ -275,6 +281,7 @@ const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
+const WIDE_PROJECT_SESSION_LIMIT = 5;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 let mermaidRenderSequence = 0;
@@ -2103,6 +2110,7 @@ function App() {
     globalState =>
       createWorkspaceUiState({
         tab: globalState.tab ?? 'file',
+        desktopCollapsedProjectIds: globalState.desktopCollapsedProjectIds ?? [],
         floatingControlSlot: globalState.floatingControlSlot ?? 'upper-middle',
       }),
   );
@@ -2111,6 +2119,7 @@ function App() {
   const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;
   const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
   const sidebarCollapsed = workspaceUiState.desktop.sidebarCollapsed;
+  const desktopCollapsedProjectIds = workspaceUiState.desktop.collapsedProjectIds;
   const drawerOpen = workspaceUiState.mobile.drawerOpen;
   const sidebarSettingsOpen = workspaceUiState.shared.settingsOpen;
   const chatConfigOverflowOpen = workspaceUiState.mobile.chatConfigOverflowOpen;
@@ -2144,6 +2153,9 @@ function App() {
   }, []);
   const setSidebarCollapsed = useCallback((next: WorkspaceUiStateValue<boolean>) => {
     dispatchWorkspaceUi({ type: 'desktop/setSidebarCollapsed', next });
+  }, []);
+  const setDesktopCollapsedProjectIds = useCallback((next: WorkspaceUiStateValue<string[]>) => {
+    dispatchWorkspaceUi({ type: 'desktop/setCollapsedProjectIds', next });
   }, []);
   const setDrawerOpen = useCallback((next: WorkspaceUiStateValue<boolean>) => {
     dispatchWorkspaceUi({ type: 'mobile/setDrawerOpen', next });
@@ -2226,6 +2238,7 @@ function App() {
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsMeasureRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
+  const wideProjectActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSelectedIdRef = useRef('');
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
@@ -2237,6 +2250,9 @@ function App() {
   const chatSwipeStartXRef = useRef(0);
   const chatSwipeSuppressClickRef = useRef(false);
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
+  const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
+  const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
+  const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
   const [selectedChatId, setSelectedChatId] = useState('');
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
@@ -2742,6 +2758,10 @@ function App() {
   const [allowLargeDiffRender, setAllowLargeDiffRender] = useState(false);
   const [diffText, setDiffText] = useState('');
   const [diffLoading, setDiffLoading] = useState(false);
+  const projectIdListKey = useMemo(
+    () => projects.map(item => item.projectId).join('|'),
+    [projects],
+  );
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -2777,6 +2797,76 @@ function App() {
     }
     loadChatSessions(activeProjectId, preferredChatSelection).catch(() => undefined);
   }, [tab, connected, projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setProjectSessionsByProjectId(prev => ({
+      ...prev,
+      [projectId]: chatSessions,
+    }));
+  }, [projectId, chatSessions]);
+
+  useEffect(() => {
+    if (!isWide || projects.length === 0) return;
+    setProjectSessionsByProjectId(prev => {
+      const next = {...prev};
+      for (const projectItem of projects) {
+        const cachedSessions = workspaceStore
+          .hydrateChatSessions(projectItem.projectId)
+          .map(entry => entry.session);
+        if (cachedSessions.length > 0 || !next[projectItem.projectId]) {
+          next[projectItem.projectId] = sortChatSessions(cachedSessions);
+        }
+      }
+      return next;
+    });
+  }, [isWide, projectIdListKey]);
+
+  useEffect(() => {
+    if (!connected || !isWide || projects.length === 0) return;
+    let cancelled = false;
+    for (const projectItem of projects) {
+      service
+        .listProjectSessions(projectItem.projectId)
+        .then(sessions => {
+          if (cancelled) return;
+          const sortedSessions = sortChatSessions(sessions);
+          setProjectSessionsByProjectId(prev => ({
+            ...prev,
+            [projectItem.projectId]: sortedSessions,
+          }));
+          const cached = workspaceStore.hydrateChatSessions(projectItem.projectId);
+          const cursorBySessionId: Record<string, {turnIndex: number}> = {};
+          for (const entry of cached) {
+            cursorBySessionId[entry.session.sessionId] = entry.cursor;
+          }
+          workspaceStore.replaceChatSessions(
+            projectItem.projectId,
+            sortedSessions,
+            cursorBySessionId,
+          );
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [connected, isWide, projectIdListKey]);
+
+  useEffect(() => {
+    if (!wideProjectActionMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && wideProjectActionMenuRef.current?.contains(target)) {
+        return;
+      }
+      setWideProjectActionMenu(null);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+    };
+  }, [wideProjectActionMenu]);
 
 
   useEffect(() => {
@@ -3087,6 +3177,7 @@ function App() {
       tab,
       selectedProjectId: projectId,
       floatingControlSlot,
+      desktopCollapsedProjectIds,
     });
   }, [
     address,
@@ -3103,6 +3194,7 @@ function App() {
     tab,
     projectId,
     floatingControlSlot,
+    desktopCollapsedProjectIds,
   ]);
 
   useEffect(() => {
@@ -3463,6 +3555,39 @@ function App() {
     }
     return agents;
   }, [project?.agents, project?.agent, chatSessions]);
+  const getWideProjectAgents = useCallback(
+    (projectItem: RegistryProject, sessions: RegistryChatSession[]): string[] => {
+      const seen = new Set<string>();
+      const agents: string[] = [];
+      const append = (value?: string) => {
+        const normalized = (value || '').trim();
+        if (!normalized) return;
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        agents.push(normalized);
+      };
+      for (const item of projectItem.agents ?? []) {
+        append(item);
+      }
+      append(projectItem.agent);
+      for (const session of sessions) {
+        append(session.agentType);
+      }
+      return agents;
+    },
+    [],
+  );
+  const toggleWideProjectCollapsed = useCallback(
+    (targetProjectId: string) => {
+      setDesktopCollapsedProjectIds(current =>
+        current.includes(targetProjectId)
+          ? current.filter(item => item !== targetProjectId)
+          : [...current, targetProjectId],
+      );
+    },
+    [setDesktopCollapsedProjectIds],
+  );
   const agentInfoAgents = useMemo(() => {
     const names = new Map<string, string>();
     const skillsByKey = new Map<string, string[]>();
@@ -4604,6 +4729,22 @@ function App() {
     setSelectedAgentInfoName('');
   };
 
+  const openWideProjectActionMenu = (
+    targetProjectId: string,
+    kind: 'new' | 'resume',
+  ) => {
+    handleDismissNewChatPicker();
+    handleDismissResume();
+    setTokenStatsPanelOpen(false);
+    handleDismissAgentInfo();
+    setWideProjectActionMenu({
+      projectId: targetProjectId,
+      kind,
+      phase: 'agents',
+      agentType: '',
+    });
+  };
+
   const removeChatSessionFromState = (sessionId: string) => {
     if (!sessionId) return;
     setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
@@ -5459,6 +5600,131 @@ function App() {
         .catch(() => undefined);
     } finally {
       setLoadingProject(false);
+    }
+  };
+
+  const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {
+    if (!targetProjectId || !sessionId) return;
+    workspaceStore.rememberSelectedChatSession(targetProjectId, sessionId);
+    setWideProjectActionMenu(null);
+    if (targetProjectId !== projectIdRef.current) {
+      await switchProject(targetProjectId);
+    }
+    setTab('chat');
+    setSelectedChatId(sessionId);
+    chatSelectedIdRef.current = sessionId;
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+    setChatMessages(hydrateChatSessionContentFromCache(sessionId, targetProjectId));
+    await loadChatSession(sessionId, targetProjectId, {
+      incremental: true,
+      preserveUserSelection: true,
+      selectionSnapshot: sessionId,
+    });
+  };
+
+  const handleWideProjectCreateSession = async (targetProjectId: string, agentType: string) => {
+    const normalizedAgentType = agentType.trim();
+    if (!targetProjectId || !normalizedAgentType) {
+      setError('No agent selected for new session');
+      return;
+    }
+    try {
+      const result = await service.createProjectSession(targetProjectId, agentType, '');
+      if (!result.ok || !result.session.sessionId) {
+        throw new Error('project session.create returned ok=false');
+      }
+      const session = result.session;
+      workspaceStore.rememberChatSession(targetProjectId, session, {turnIndex: 0});
+      setProjectSessionsByProjectId(prev => ({
+        ...prev,
+        [targetProjectId]: mergeChatSession(prev[targetProjectId] ?? [], session),
+      }));
+      if (targetProjectId === projectIdRef.current) {
+        setChatSessions(prev => mergeChatSession(prev, session));
+        chatMessageStoreRef.current[session.sessionId] = [];
+        chatSyncIndexRef.current[session.sessionId] = 0;
+        chatSyncSubIndexRef.current[session.sessionId] = 0;
+        setChatMessages([]);
+      }
+      await selectWideProjectSession(targetProjectId, session.sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleWideProjectResumeAgent = async (targetProjectId: string, agentType: string) => {
+    const normalizedAgentType = agentType.trim();
+    if (!targetProjectId || !normalizedAgentType) {
+      setError('No agent selected for resume');
+      return;
+    }
+    setWideProjectActionMenu({
+      projectId: targetProjectId,
+      kind: 'resume',
+      phase: 'sessions',
+      agentType: normalizedAgentType,
+    });
+    setResumeAgentType(normalizedAgentType);
+    setResumeLoading(true);
+    setResumeSessions([]);
+    try {
+      const sessions = await service.listProjectResumableSessions(targetProjectId, agentType);
+      setResumeSessions(sessions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setWideProjectActionMenu(null);
+    } finally {
+      setResumeLoading(false);
+    }
+  };
+
+  const handleWideProjectResumeImport = async (targetProjectId: string, agentType: string, sessionId: string) => {
+    if (!targetProjectId || !agentType || !sessionId) return;
+    setResumeLoading(true);
+    let importedSessionId = '';
+    try {
+      const imported = await service.importProjectResumedSession(targetProjectId, agentType, sessionId);
+      if (!imported.ok || !imported.session.sessionId) {
+        throw new Error('project session.resume.import returned ok=false');
+      }
+      importedSessionId = imported.session.sessionId;
+      const session = imported.session;
+      workspaceStore.rememberChatSession(targetProjectId, session, {turnIndex: 0});
+      workspaceStore.rememberSelectedChatSession(targetProjectId, importedSessionId);
+      setResumeSessions(prev => prev.filter(item => item.sessionId !== sessionId));
+      setProjectSessionsByProjectId(prev => ({
+        ...prev,
+        [targetProjectId]: mergeChatSession(prev[targetProjectId] ?? [], session),
+      }));
+      if (targetProjectId === projectIdRef.current) {
+        setChatSessions(prev => mergeChatSession(prev, session));
+      }
+      const reloaded = await service.reloadProjectSession(targetProjectId, importedSessionId);
+      if (!reloaded.ok) {
+        throw new Error('project session.reload returned ok=false');
+      }
+      chatMessageStoreRef.current[importedSessionId] = [];
+      chatSyncIndexRef.current[importedSessionId] = 0;
+      chatSyncSubIndexRef.current[importedSessionId] = 0;
+      if (targetProjectId !== projectIdRef.current) {
+        await switchProject(targetProjectId);
+      }
+      setTab('chat');
+      setSelectedChatId(importedSessionId);
+      chatSelectedIdRef.current = importedSessionId;
+      setChatMessages([]);
+      const loaded = await loadChatSession(importedSessionId, targetProjectId, { forceFull: true });
+      if (!loaded) {
+        throw new Error('Failed to load resumed session history');
+      }
+      setWideProjectActionMenu(null);
+    } catch (err) {
+      if (importedSessionId) {
+        setWideProjectActionMenu(null);
+      }
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResumeLoading(false);
     }
   };
 
@@ -6822,6 +7088,219 @@ function App() {
     </>
   );
 
+  const renderWideProjectSessionNav = () => {
+    return (
+      <div className="wide-project-session-nav">
+        {projects.length === 0 ? (
+          <div className="chat-empty-hint">No projects available.</div>
+        ) : null}
+        {projects.map(projectItem => {
+          const targetProjectId = projectItem.projectId;
+          const projectSessions = projectSessionsByProjectId[targetProjectId] ?? [];
+          const visibleCount =
+            wideProjectVisibleCounts[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
+          const visibleSessions = projectSessions.slice(0, visibleCount);
+          const collapsed = desktopCollapsedProjectIds.includes(targetProjectId);
+          const activeProject = targetProjectId === projectId;
+          const agents = getWideProjectAgents(projectItem, projectSessions);
+          const actionMenuOpen = wideProjectActionMenu?.projectId === targetProjectId;
+          return (
+            <div
+              key={`wide-project:${targetProjectId}`}
+              className={`wide-project-section${activeProject ? ' active' : ''}${
+                collapsed ? ' collapsed' : ''
+              }`}
+            >
+              <div className="wide-project-row">
+                <button
+                  type="button"
+                  className="wide-project-toggle"
+                  onClick={() => toggleWideProjectCollapsed(targetProjectId)}
+                  title={collapsed ? 'Expand project' : 'Collapse project'}
+                  aria-expanded={!collapsed}
+                >
+                  <span
+                    className={`codicon ${
+                      collapsed ? 'codicon-chevron-right' : 'codicon-chevron-down'
+                    }`}
+                  />
+                  <span className="codicon codicon-folder" />
+                  <span className="wide-project-name" title={projectItem.name}>
+                    {projectItem.name}
+                  </span>
+                  <span className="wide-project-hub-tag">
+                    {projectItem.hubId || 'local'}
+                  </span>
+                </button>
+                <div className="wide-project-actions">
+                  <button
+                    type="button"
+                    className="wide-project-action-btn"
+                    title="New session"
+                    aria-label={`New session in ${projectItem.name}`}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={event => {
+                      event.stopPropagation();
+                      openWideProjectActionMenu(targetProjectId, 'new');
+                    }}
+                  >
+                    <span className="codicon codicon-add" />
+                  </button>
+                  <button
+                    type="button"
+                    className="wide-project-action-btn"
+                    title="Resume session"
+                    aria-label={`Resume session in ${projectItem.name}`}
+                    onPointerDown={event => event.stopPropagation()}
+                    onClick={event => {
+                      event.stopPropagation();
+                      openWideProjectActionMenu(targetProjectId, 'resume');
+                    }}
+                  >
+                    <span className="codicon codicon-history" />
+                  </button>
+                </div>
+                {actionMenuOpen ? (
+                  <div
+                    ref={wideProjectActionMenuRef}
+                    className="wide-project-action-popover"
+                  >
+                    {wideProjectActionMenu.phase === 'agents' ? (
+                      <>
+                        {agents.map(agentType => (
+                          <button
+                            key={`${targetProjectId}:${wideProjectActionMenu.kind}:${agentType}`}
+                            type="button"
+                            className="wide-project-action-menu-item"
+                            onClick={() => {
+                              if (wideProjectActionMenu.kind === 'new') {
+                                handleWideProjectCreateSession(
+                                  targetProjectId,
+                                  agentType,
+                                ).catch(() => undefined);
+                              } else {
+                                handleWideProjectResumeAgent(
+                                  targetProjectId,
+                                  agentType,
+                                ).catch(() => undefined);
+                              }
+                            }}
+                          >
+                            <span className="codicon codicon-sparkle" />
+                            <span>{agentType}</span>
+                          </button>
+                        ))}
+                        {agents.length === 0 ? (
+                          <div className="wide-project-action-empty">
+                            No agents available.
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="wide-project-action-back"
+                          onClick={() => {
+                            setResumeSessions([]);
+                            setResumeLoading(false);
+                            setWideProjectActionMenu({
+                              ...wideProjectActionMenu,
+                              phase: 'agents',
+                              agentType: '',
+                            });
+                          }}
+                        >
+                          <span className="codicon codicon-arrow-left" />
+                          <span>{wideProjectActionMenu.agentType}</span>
+                        </button>
+                        {resumeLoading ? (
+                          <div className="wide-project-action-empty">
+                            Loading sessions...
+                          </div>
+                        ) : null}
+                        {!resumeLoading
+                          ? resumeSessions.map(session => (
+                              <button
+                                key={`${targetProjectId}:resume:${session.sessionId}`}
+                                type="button"
+                                className="wide-project-action-menu-item"
+                                onClick={() => {
+                                  handleWideProjectResumeImport(
+                                    targetProjectId,
+                                    wideProjectActionMenu.agentType,
+                                    session.sessionId,
+                                  ).catch(() => undefined);
+                                }}
+                              >
+                                <span className="codicon codicon-history" />
+                                <span>{session.title || session.sessionId}</span>
+                              </button>
+                            ))
+                          : null}
+                        {!resumeLoading && resumeSessions.length === 0 ? (
+                          <div className="wide-project-action-empty">
+                            No resumable sessions.
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              {!collapsed ? (
+                <div className="wide-project-session-list">
+                  {visibleSessions.map(session => (
+                    <button
+                      type="button"
+                      key={`${targetProjectId}:${session.sessionId}`}
+                      className={`wide-session-row${
+                        activeProject && selectedChatId === session.sessionId
+                          ? ' selected'
+                          : ''
+                      }`}
+                      onClick={() => {
+                        selectWideProjectSession(
+                          targetProjectId,
+                          session.sessionId,
+                        ).catch(() => undefined);
+                      }}
+                    >
+                      <span className="wide-session-title">
+                        {session.title || session.sessionId}
+                      </span>
+                      <span className="wide-session-time" title={session.updatedAt || ''}>
+                        {formatCompactRelativeAge(session.updatedAt)}
+                      </span>
+                    </button>
+                  ))}
+                  {projectSessions.length > visibleSessions.length ? (
+                    <button
+                      type="button"
+                      className="wide-project-show-more"
+                      onClick={() =>
+                        setWideProjectVisibleCounts(prev => ({
+                          ...prev,
+                          [targetProjectId]:
+                            visibleSessions.length + WIDE_PROJECT_SESSION_LIMIT,
+                        }))
+                      }
+                    >
+                      Show more
+                    </button>
+                  ) : null}
+                  {projectSessions.length === 0 ? (
+                    <div className="wide-project-empty">No sessions yet.</div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderSidebar = () => {
 
     return (
@@ -6871,7 +7350,9 @@ function App() {
           </div>
         ) : null}
         <div className="sidebar-scroll">
-          {isWide && sidebarSettingsOpen ? renderSettingsContent(true) : renderSidebarMain()}
+          {isWide && sidebarSettingsOpen
+            ? renderSettingsContent(true)
+            : isWide ? renderWideProjectSessionNav() : renderSidebarMain()}
         </div>
         {isWide ? (
           <div className="sidebar-footer">
@@ -8037,26 +8518,6 @@ function App() {
           }`}
         />
       </button>
-
-      <div
-        className="project-wrap"
-        onPointerDown={event => event.stopPropagation()}
-      >
-        <button
-          className="project-btn"
-          onClick={() => setProjectMenuOpen(value => !value)}
-        >
-          <span className="project-arrow codicon codicon-chevron-down" />
-          <span className="project-name" title={currentProjectName}>
-            {currentProjectName}
-          </span>
-          {loadingProject || refreshingProject || reconnecting ? (
-            <span className="muted">...</span>
-          ) : null}
-        </button>
-        {projectMenu}
-      </div>
-
       <button
         className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
         onClick={() => refreshProject().catch(() => undefined)}

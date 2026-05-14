@@ -1220,6 +1220,204 @@ body,
   background: #094771;
 }
 
+.wide-project-session-nav {
+  padding: 10px 7px 18px;
+  overflow: auto;
+}
+
+.wide-project-section {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+.wide-project-section.active .wide-project-row {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.wide-project-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 6px;
+  border-radius: 8px;
+}
+
+.wide-project-row:hover {
+  background: var(--hover);
+}
+
+.wide-project-toggle {
+  min-width: 0;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 14px 15px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wide-project-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wide-project-hub-tag {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: color-mix(in srgb, var(--text) 82%, var(--accent));
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.wide-project-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.36;
+  transition: opacity 120ms ease;
+}
+
+.wide-project-row:hover .wide-project-actions,
+.wide-project-section.active .wide-project-actions {
+  opacity: 1;
+}
+
+.wide-project-action-btn {
+  width: 26px;
+  height: 26px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.wide-project-action-btn:hover {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--hover);
+  color: var(--text);
+}
+
+.wide-project-session-list {
+  padding: 3px 0 2px 30px;
+}
+
+.wide-session-row {
+  width: 100%;
+  min-height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 76%, transparent);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 0 9px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wide-session-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.wide-session-row.selected {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.wide-session-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.wide-session-time {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.wide-project-show-more,
+.wide-project-empty,
+.wide-project-action-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wide-project-show-more {
+  border: none;
+  background: transparent;
+  padding: 7px 9px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wide-project-show-more:hover {
+  color: var(--text);
+}
+
+.wide-project-empty {
+  padding: 7px 9px;
+}
+
+.wide-project-action-popover {
+  position: absolute;
+  top: 34px;
+  right: 4px;
+  width: min(260px, 78vw);
+  z-index: 35;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--soft-shadow);
+  padding: 6px;
+}
+
+.wide-project-action-menu-item,
+.wide-project-action-back {
+  width: 100%;
+  min-height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.wide-project-action-menu-item:hover,
+.wide-project-action-back:hover {
+  background: var(--hover);
+}
+
 
 .chat-session-group {
   padding-bottom: 6px;

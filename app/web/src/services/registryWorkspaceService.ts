@@ -237,6 +237,13 @@ export class RegistryWorkspaceService {
     return this.repository.listSessions(this.session.selectedProjectId);
   }
 
+  async listProjectSessions(projectId: string): Promise<RegistrySessionSummary[]> {
+    if (!this.repository) {
+      return [];
+    }
+    return this.repository.listSessions(projectId);
+  }
+
   async readSession(sessionId: string, afterTurnIndex = 0): Promise<RegistrySessionReadResponse> {
     if (!this.session || !this.repository) {
       return {
@@ -252,6 +259,13 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.createSession(this.session.selectedProjectId, agentType, title);
+  }
+
+  async createProjectSession(projectId: string, agentType: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.createSession(projectId, agentType, title);
   }
 
   async sendSessionMessage(payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
@@ -275,6 +289,13 @@ export class RegistryWorkspaceService {
     return this.repository.listResumableSessions(this.session.selectedProjectId, agentType);
   }
 
+  async listProjectResumableSessions(projectId: string, agentType: string): Promise<RegistryResumableSession[]> {
+    if (!this.repository) {
+      return [];
+    }
+    return this.repository.listResumableSessions(projectId, agentType);
+  }
+
   async importResumedSession(agentType: string, sessionId: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
@@ -282,11 +303,25 @@ export class RegistryWorkspaceService {
     return this.repository.importResumedSession(this.session.selectedProjectId, agentType, sessionId);
   }
 
+  async importProjectResumedSession(projectId: string, agentType: string, sessionId: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.importResumedSession(projectId, agentType, sessionId);
+  }
+
   async reloadSession(sessionId: string): Promise<{ok: boolean; sessionId: string}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
     }
     return this.repository.reloadSession(this.session.selectedProjectId, sessionId);
+  }
+
+  async reloadProjectSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.reloadSession(projectId, sessionId);
   }
 
   async setSessionConfig(payload: {sessionId: string; configId: string; value: string}): Promise<{ok: boolean; sessionId: string; configOptions: RegistrySessionConfigOption[]}> {

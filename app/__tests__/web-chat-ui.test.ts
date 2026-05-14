@@ -182,9 +182,7 @@ describe('web chat integration', () => {
       /className="drawer-project-header"[\s\S]*?className="drawer-settings-icon-btn"[\s\S]*?className="drawer-project-pill"[\s\S]*?className="project-wrap"/,
     );
     expect(mainTsx).toContain('setSidebarSettingsOpen(true);');
-    expect(mainTsx).toMatch(
-      /\{isWide && sidebarSettingsOpen \? renderSettingsContent\(true\) : renderSidebarMain\(\)\}/,
-    );
+    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : renderSidebarMain()');
     expect(mainTsx).toContain('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (');
     expect(mainTsx).toContain('className="mobile-settings-screen"');
     expect(mainTsx).toContain('aria-modal="true"');
@@ -315,5 +313,57 @@ describe('web chat integration', () => {
 
     expect(drawerLayer).toBeGreaterThan(floatingLayer);
     expect(mobileSettingsLayer).toBeGreaterThan(drawerLayer);
+  });
+
+  test('wide layout uses a project session rail instead of the header project picker', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('const WIDE_PROJECT_SESSION_LIMIT = 5;');
+    expect(mainTsx).toContain('const renderWideProjectSessionNav = () => {');
+    expect(mainTsx).toContain('className="wide-project-session-nav"');
+    expect(mainTsx).toContain('className="wide-project-session-list"');
+    expect(mainTsx).toContain('className="wide-project-action-btn"');
+    expect(mainTsx).toContain('className="wide-project-action-popover"');
+    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : renderSidebarMain()');
+
+    const wideHeaderStart = mainTsx.indexOf('const wideHeader = isWide ? (');
+    const wideHeaderEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', wideHeaderStart);
+    expect(wideHeaderStart).toBeGreaterThanOrEqual(0);
+    expect(wideHeaderEnd).toBeGreaterThan(wideHeaderStart);
+    const wideHeader = mainTsx.slice(wideHeaderStart, wideHeaderEnd);
+    expect(wideHeader).not.toContain('className="project-wrap"');
+    expect(wideHeader).not.toContain('className="project-btn"');
+
+    expect(stylesCss).toContain('.wide-project-session-nav {');
+    expect(stylesCss).toContain('.wide-project-row {');
+    expect(stylesCss).toContain('.wide-project-hub-tag {');
+    expect(stylesCss).toContain('.wide-project-action-btn {');
+    expect(stylesCss).toContain('.wide-session-row {');
+    expect(stylesCss).toContain('.wide-session-time {');
+    expect(stylesCss).toContain('.wide-project-action-popover {');
+    expect(mainTsx).not.toContain('className="wide-project-action-title"');
+    expect(stylesCss).not.toContain('.wide-project-action-title');
+  });
+
+  test('wide project session rail actions use project-scoped chat flows', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain('const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {');
+    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSession(targetProjectId, sessionId);');
+    expect(mainTsx).toContain('if (targetProjectId !== projectIdRef.current) {');
+    expect(mainTsx).toContain('await switchProject(targetProjectId);');
+    expect(mainTsx).toContain("setTab('chat');");
+    expect(mainTsx).toContain('loadChatSession(sessionId, targetProjectId, {');
+    expect(mainTsx).toContain('const handleWideProjectCreateSession = async (targetProjectId: string, agentType: string) => {');
+    expect(mainTsx).toContain("const result = await service.createProjectSession(targetProjectId, agentType, '');");
+    expect(mainTsx).toContain('const handleWideProjectResumeAgent = async (targetProjectId: string, agentType: string) => {');
+    expect(mainTsx).toContain('const sessions = await service.listProjectResumableSessions(targetProjectId, agentType);');
+    expect(mainTsx).toContain('const handleWideProjectResumeImport = async (targetProjectId: string, agentType: string, sessionId: string) => {');
+    expect(mainTsx).toContain('const imported = await service.importProjectResumedSession(targetProjectId, agentType, sessionId);');
+    expect(mainTsx).toContain('const reloaded = await service.reloadProjectSession(targetProjectId, importedSessionId);');
+    expect(mainTsx).toContain('wideProjectActionMenuRef.current?.contains(target)');
   });
 });

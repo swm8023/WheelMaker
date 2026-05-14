@@ -23,6 +23,7 @@ export type WorkspaceUiState = {
   };
   desktop: {
     sidebarCollapsed: boolean;
+    collapsedProjectIds: string[];
   };
   mobile: {
     drawerOpen: boolean;
@@ -40,6 +41,7 @@ export type WorkspaceUiStateInput = {
   tab?: unknown;
   settingsOpen?: unknown;
   sidebarCollapsed?: unknown;
+  desktopCollapsedProjectIds?: unknown;
   drawerOpen?: unknown;
   floatingControlSlot?: unknown;
   chatConfigOverflowOpen?: unknown;
@@ -52,6 +54,7 @@ export type WorkspaceUiAction =
   | { type: 'shared/setTab'; next: WorkspaceUiStateValue<PersistedTab> }
   | { type: 'shared/setSettingsOpen'; next: WorkspaceUiStateValue<boolean> }
   | { type: 'desktop/setSidebarCollapsed'; next: WorkspaceUiStateValue<boolean> }
+  | { type: 'desktop/setCollapsedProjectIds'; next: WorkspaceUiStateValue<string[]> }
   | { type: 'mobile/setDrawerOpen'; next: WorkspaceUiStateValue<boolean> }
   | {
       type: 'mobile/setFloatingControlSlot';
@@ -97,6 +100,12 @@ function sanitizeInset(value: unknown): number {
     : 0;
 }
 
+function sanitizeStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? Array.from(new Set(value.filter(item => typeof item === 'string' && item)))
+    : [];
+}
+
 function resetTransientState(): WorkspaceUiState['transient'] {
   return {
     chatKeyboardInset: 0,
@@ -114,6 +123,7 @@ export function createWorkspaceUiState(input: WorkspaceUiStateInput = {}): Works
     desktop: {
       sidebarCollapsed:
         typeof input.sidebarCollapsed === 'boolean' ? input.sidebarCollapsed : false,
+      collapsedProjectIds: sanitizeStringList(input.desktopCollapsedProjectIds),
     },
     mobile: {
       drawerOpen: typeof input.drawerOpen === 'boolean' ? input.drawerOpen : false,
@@ -158,6 +168,16 @@ export function workspaceUiReducer(
         desktop: {
           ...state.desktop,
           sidebarCollapsed: !!resolveNext(state.desktop.sidebarCollapsed, action.next),
+        },
+      };
+    case 'desktop/setCollapsedProjectIds':
+      return {
+        ...state,
+        desktop: {
+          ...state.desktop,
+          collapsedProjectIds: sanitizeStringList(
+            resolveNext(state.desktop.collapsedProjectIds, action.next),
+          ),
         },
       };
     case 'mobile/setDrawerOpen':
