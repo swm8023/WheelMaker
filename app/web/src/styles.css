@@ -33,6 +33,13 @@
   box-sizing: border-box;
 }
 
+button,
+[role='button'],
+[role='menuitemradio'],
+[role='option'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
 html,
 body,
 #root {
@@ -2995,8 +3002,8 @@ body,
   left: 0;
   right: 0;
   top: 0;
-  height: 20px;
-  transform: translateY(calc(-100% + 6px));
+  height: 14px;
+  transform: translateY(calc(-100% + 4px));
   pointer-events: none;
   background: linear-gradient(
     180deg,
@@ -3279,13 +3286,6 @@ body,
   flex: 0 1 auto;
   min-width: 0;
   overflow: visible;
-}
-
-
-.chat-config-feedback {
-  font-size: 11px;
-  line-height: 1.2;
-  margin-top: 2px;
 }
 
 

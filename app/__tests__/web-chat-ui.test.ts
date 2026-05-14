@@ -153,7 +153,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain("const [chatSessions] = useState(['General', 'WheelMaker App', 'Go Service']);");
     expect(stylesCss).toContain('.chat-composer');
     expect(stylesCss).toContain('.chat-composer::before {');
-    expect(stylesCss).toContain('transform: translateY(calc(-100% + 6px));');
+    expect(stylesCss).toContain('transform: translateY(calc(-100% + 4px));');
     expect(stylesCss).toContain('.chat-session-item');
     expect(stylesCss).toContain('.chat-attachment-preview-list {');
     expect(stylesCss).toContain('.chat-config-overflow-anchor {');
@@ -318,7 +318,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="chat-composer-prompt-trigger"');
     expect(mainTsx).toContain('title="Commands"');
     expect(mainTsx).toContain("{'>'}");
-    expect(mainTsx).toContain('chatComposerText.length === 0 ? (');
+    expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
+    expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
     expect(mainTsx).toContain('className="chat-composer-tools"');
     expect(mainTsx).toContain('className="chat-tool-button chat-photo-button"');
@@ -333,7 +334,23 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('Photo Library');
     expect(mainTsx).not.toContain('className="chat-config-select"');
     expect(mainTsx).not.toContain('showChatConfigLabels');
+    expect(mainTsx).not.toContain('chatConfigFeedback');
+    expect(mainTsx).not.toContain('Applying config');
 
+    const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
+    const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = async', configChangeStart);
+    const configChangeBody = mainTsx.slice(configChangeStart, configChangeEnd);
+    const setConfigCall = configChangeBody.indexOf('const result = await service.setSessionConfig');
+    expect(setConfigCall).toBeGreaterThanOrEqual(0);
+    expect(configChangeBody.indexOf('applyChatSessionConfigOptions')).toBeGreaterThan(setConfigCall);
+    expect(configChangeBody).not.toContain('setChatSessions(prev =>');
+
+    expect(stylesCss).toMatch(
+      /button,\s*\[role='button'\],\s*\[role='menuitemradio'\],\s*\[role='option'\]\s*\{[\s\S]*-webkit-tap-highlight-color: transparent;/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-composer::before \{[\s\S]*height: 14px;[\s\S]*transform: translateY\(calc\(-100% \+ 4px\)\);/,
+    );
     expect(stylesCss).toContain('.chat-composer-frame {');
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
@@ -345,6 +362,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-config-value-option {');
     expect(stylesCss).toContain('.chat-config-overflow-group {');
     expect(stylesCss).not.toContain('.chat-config-select {');
+    expect(stylesCss).not.toContain('.chat-config-feedback {');
   });
 
   test('keeps the mobile project menu layer above floating controls', () => {

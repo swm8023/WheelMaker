@@ -2291,7 +2291,6 @@ function App() {
   const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
-  const [chatConfigFeedback, setChatConfigFeedback] = useState('');
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
@@ -3156,13 +3155,6 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [chatPromptMenuOpen]);
-
-  useEffect(() => {
-    if (!chatPromptMenuOpen) return;
-    if (chatComposerText.length > 0) {
-      setChatPromptMenuOpen(false);
-    }
-  }, [chatComposerText, chatPromptMenuOpen]);
 
   useEffect(() => {
     if (!chatConfigMenuOptionId) return;
@@ -5092,7 +5084,6 @@ function App() {
     }
     const updatingKey = `${sessionId}:${configId}`;
     setChatConfigUpdatingKey(updatingKey);
-    setChatConfigFeedback('Applying config...');
 
     try {
       const result = await service.setSessionConfig({
@@ -5106,11 +5097,9 @@ function App() {
       if (result.configOptions.length > 0) {
         applyChatSessionConfigOptions(result.sessionId || sessionId, result.configOptions);
       }
-      setChatConfigFeedback('');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
-      setChatConfigFeedback('Config update failed: ' + message);
     } finally {
       setChatConfigUpdatingKey(prev => (prev === updatingKey ? '' : prev));
     }
@@ -7910,20 +7899,18 @@ function App() {
                 </div>
               ) : null}
               <div className="chat-composer-input-row">
-                {chatComposerText.length === 0 ? (
-                  <button
-                    ref={chatPromptButtonRef}
-                    type="button"
-                    className="chat-composer-prompt-trigger"
-                    onClick={openChatPromptMenu}
-                    title="Commands"
-                    aria-label="Commands"
-                    aria-haspopup="listbox"
-                    aria-expanded={chatPromptMenuOpen}
-                  >
-                    {'>'}
-                  </button>
-                ) : null}
+                <button
+                  ref={chatPromptButtonRef}
+                  type="button"
+                  className="chat-composer-prompt-trigger"
+                  onClick={openChatPromptMenu}
+                  title="Commands"
+                  aria-label="Commands"
+                  aria-haspopup="listbox"
+                  aria-expanded={chatPromptMenuOpen}
+                >
+                  {'>'}
+                </button>
                 <div className="chat-composer-input-shell">
                   <textarea
                     ref={chatComposerTextareaRef}
@@ -8171,9 +8158,6 @@ function App() {
                   </div>
                 ) : null}
               </div>
-              {chatConfigFeedback ? (
-                <div className="chat-config-feedback muted">{chatConfigFeedback}</div>
-              ) : null}
             </div>
           </div>
           </div>
