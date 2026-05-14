@@ -68,19 +68,31 @@ export function needsPromptTurnRefresh(
 }
 
 export function getLatestSessionReadCursor(messages: RegistryChatMessage[]): SessionReadCursor {
-  return messages.reduce(
-    (latest, message) => {
-      if (!isFinishedChatMessage(message)) {
-        return latest;
-      }
-      const turnIndex = message.turnIndex ?? 0;
-      if (turnIndex > latest.turnIndex) {
-        return { turnIndex };
-      }
-      return latest;
-    },
-    { turnIndex: 0 },
-  );
+  const finishedTurns = new Set<number>();
+  for (const message of messages) {
+    if (!isFinishedChatMessage(message)) {
+      continue;
+    }
+    const turnIndex = Math.trunc(message.turnIndex ?? 0);
+    if (turnIndex > 0) {
+      finishedTurns.add(turnIndex);
+    }
+  }
+  let turnIndex = 0;
+  while (finishedTurns.has(turnIndex + 1)) {
+    turnIndex += 1;
+  }
+  return {turnIndex};
+}
+
+export function reconcileCachedSessionReadCursor(
+  _storedCursor: SessionReadCursor | undefined,
+  cachedMessages: RegistryChatMessage[] | null | undefined,
+): SessionReadCursor {
+  if (!cachedMessages || cachedMessages.length === 0) {
+    return {turnIndex: 0};
+  }
+  return getLatestSessionReadCursor(cachedMessages);
 }
 
 export function shouldRequestSessionReadForIncomingTurn(

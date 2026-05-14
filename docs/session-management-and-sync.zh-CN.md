@@ -115,7 +115,7 @@ type Cursor = { turnIndex: number };
 - 本地消息 identity 是 `sessionId:turnIndex`。
 - 服务端返回的每个 turn 必须带 `sessionId`，客户端不会用 read 请求里的 session id 兜底。
 - 本地持久缓存只保存 `finished=true` 的消息。
-- cursor 是本地已缓存 finished turn 的最大 `turnIndex`。
+- cursor 是本地已连续缓存 finished turn 的最大 `turnIndex`；如果本地缓存出现缺口，cursor 必须回退到缺口前。
 - 收到实时 `session.message` 后按 `sessionId:turnIndex` upsert。
 - 只有 `finished=true` 的 turn 推进 cursor。
 - 如果 incoming `turnIndex > cursor.turnIndex + 1`，说明漏收，客户端用当前 cursor 调 `session.read` 补读。

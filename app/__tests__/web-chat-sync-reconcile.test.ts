@@ -1,5 +1,6 @@
 import {
   getLatestSessionReadCursor,
+  reconcileCachedSessionReadCursor,
   needsPromptTurnRefresh,
   reconcileSessionReadMessages,
   replaceSessionMessages,
@@ -78,6 +79,20 @@ describe('chat session read reconciliation', () => {
     ]);
 
     expect(cursor).toEqual({ turnIndex: 2 });
+  });
+
+  test('restores cursor from contiguous cached content instead of trusting stale session index', () => {
+    expect(
+      reconcileCachedSessionReadCursor(
+        { turnIndex: 5 },
+        [
+          { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+          { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: {}, finished: true },
+        ],
+      ),
+    ).toEqual({ turnIndex: 1 });
+
+    expect(reconcileCachedSessionReadCursor({ turnIndex: 5 }, [])).toEqual({ turnIndex: 0 });
   });
 
   test('does not request prompt reconstruction in turn-only protocol', () => {

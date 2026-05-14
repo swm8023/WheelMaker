@@ -22,6 +22,7 @@ import {
   getLatestSessionReadCursor,
   isFinishedChatMessage,
   needsPromptTurnRefresh,
+  reconcileCachedSessionReadCursor,
   reconcileSessionReadMessages,
   replaceSessionMessages,
   shouldRequestSessionReadForIncomingTurn,
@@ -4097,6 +4098,10 @@ function App() {
       if (inMemoryMessages.length === 0) {
         chatSyncIndexRef.current[sessionId] = 0;
         chatSyncSubIndexRef.current[sessionId] = 0;
+      } else {
+        const cursor = getLatestSessionReadCursor(inMemoryMessages);
+        chatSyncIndexRef.current[sessionId] = 0;
+        chatSyncSubIndexRef.current[sessionId] = cursor.turnIndex;
       }
       return inMemoryMessages;
     }
@@ -4104,15 +4109,12 @@ function App() {
     const cachedMessages = [...cached.messages];
     chatMessageStoreRef.current[sessionId] = cachedMessages;
 
-    const latest = getLatestSessionReadCursor(cachedMessages);
-    const cachedTurnIndex = Math.max(0, chatSyncSubIndexRef.current[sessionId] ?? 0);
-    if (latest.turnIndex > cachedTurnIndex) {
-      chatSyncIndexRef.current[sessionId] = 0;
-      chatSyncSubIndexRef.current[sessionId] = latest.turnIndex;
-    } else {
-      chatSyncIndexRef.current[sessionId] = 0;
-      chatSyncSubIndexRef.current[sessionId] = cachedTurnIndex;
-    }
+    const cursor = reconcileCachedSessionReadCursor(
+      {turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0},
+      cachedMessages,
+    );
+    chatSyncIndexRef.current[sessionId] = 0;
+    chatSyncSubIndexRef.current[sessionId] = cursor.turnIndex;
     return cachedMessages;
   };
 
@@ -4132,8 +4134,10 @@ function App() {
     for (const cached of cachedSessions) {
       const sessionId = cached.session.sessionId;
       if (!sessionId) continue;
+      const content = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
+      const cursor = reconcileCachedSessionReadCursor(cached.cursor, content?.messages ?? []);
       chatSyncIndexRef.current[sessionId] = 0;
-      chatSyncSubIndexRef.current[sessionId] = cached.cursor.turnIndex || 0;
+      chatSyncSubIndexRef.current[sessionId] = cursor.turnIndex;
     }
 
     const currentSelection =
