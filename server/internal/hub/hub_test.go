@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,14 +56,20 @@ func TestBuildClientStartsWithSessionTurnStore(t *testing.T) {
 	}
 	ctx := context.Background()
 	if err := store.SaveSession(ctx, &clientpkg.SessionRecord{
-		ID:           "sess-1",
-		ProjectName:  "proj1",
-		Status:       clientpkg.SessionActive,
-		AgentType:    "codex",
-		CreatedAt:    time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
-		LastActiveAt: time.Date(2026, 5, 13, 10, 1, 0, 0, time.UTC),
+		ID:              "sess-1",
+		ProjectName:     "proj1",
+		Status:          clientpkg.SessionActive,
+		AgentType:       "codex",
+		SessionSyncJSON: `{"latestPersistedTurnIndex":1}`,
+		CreatedAt:       time.Date(2026, 5, 13, 10, 0, 0, 0, time.UTC),
+		LastActiveAt:    time.Date(2026, 5, 13, 10, 1, 0, 0, time.UTC),
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
+	}
+	if _, err := clientpkg.WriteSessionTurnFiles(ctx, filepath.Join(baseDir, "db", "session"), "proj1", "sess-1", 1, []string{
+		`{"method":"agent_message_chunk","param":{"text":"from-db-session"}}`,
+	}); err != nil {
+		t.Fatalf("WriteSessionTurnFiles: %v", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close store: %v", err)
@@ -77,6 +84,29 @@ func TestBuildClientStartsWithSessionTurnStore(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(baseDir, "session")); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("stat session root: %v", err)
+	}
+	payload, err := json.Marshal(map[string]any{"sessionId": "sess-1"})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	resp, err := c.HandleSessionRequest(ctx, "session.read", "proj1", payload)
+	if err != nil {
+		t.Fatalf("session.read: %v", err)
+	}
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	var body struct {
+		Turns []struct {
+			Content string `json:"content"`
+		} `json:"turns"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(body.Turns) != 1 || !strings.Contains(body.Turns[0].Content, "from-db-session") {
+		t.Fatalf("turns=%+v, want db/session turn", body.Turns)
 	}
 }
 

@@ -1810,8 +1810,8 @@ func TestCodexAppSessionPromptSendsBase64ImageAsLocalImage(t *testing.T) {
 			if imageInput["type"] != "localImage" || imagePath == "" {
 				t.Fatalf("image input=%#v, want localImage path", imageInput)
 			}
-			if !strings.Contains(filepath.ToSlash(imagePath), "/Proj_Name-") ||
-				!strings.Contains(filepath.ToSlash(imagePath), "/images/thread-1/sha256-") ||
+			if !strings.Contains(filepath.ToSlash(imagePath), "/db/session/Proj_Name-") ||
+				!strings.Contains(filepath.ToSlash(imagePath), "/thread-1/images/sha256-") ||
 				!strings.HasSuffix(imagePath, ".png") {
 				t.Fatalf("image path=%q, want project/session image artifact path", imagePath)
 			}

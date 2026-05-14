@@ -79,7 +79,7 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	defer store.Close()
 
 	ctx := context.Background()
-	if _, err := clientpkg.WriteSessionTurnFiles(ctx, filepath.Join(base, "session"), "proj1", "sess-1", 1, []string{
+	if _, err := clientpkg.WriteSessionTurnFiles(ctx, filepath.Join(base, "db", "session"), "proj1", "sess-1", 1, []string{
 		`{"method":"session/prompt","params":{"prompt":[{"type":"text","text":"hello"}]}}`,
 	}); err != nil {
 		t.Fatalf("WriteSessionTurnFiles: %v", err)

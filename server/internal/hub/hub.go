@@ -97,7 +97,7 @@ func (h *Hub) buildIMClient(ctx context.Context, pc logger.ProjectConfig, cwd st
 		return nil, fmt.Errorf("new store: %w", err)
 	}
 	c := client.New(store, pc.Name, cwd)
-	c.SetSessionHistoryRoot(filepath.Join(filepath.Dir(filepath.Dir(h.dbPath)), "session"))
+	c.SetSessionHistoryRoot(filepath.Join(filepath.Dir(h.dbPath), "session"))
 	c.SetSessionViewSink(c)
 	h.clientsByName[pc.Name] = c
 

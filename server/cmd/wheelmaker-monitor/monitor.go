@@ -617,7 +617,7 @@ func (m *Monitor) GetSessionMessages(sessionID, projectName string, afterIndex, 
 		if latestTurnIndex <= 0 {
 			continue
 		}
-		entries, err := clientpkg.ReadSessionTurnFiles(context.Background(), filepath.Join(m.baseDir, "session"), itemProjectName, itemSessionID, 0, latestTurnIndex)
+		entries, err := clientpkg.ReadSessionTurnFiles(context.Background(), filepath.Join(m.baseDir, "db", "session"), itemProjectName, itemSessionID, 0, latestTurnIndex)
 		if err != nil {
 			return nil, err
 		}

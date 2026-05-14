@@ -435,7 +435,7 @@ Phase 1 只声明文本 prompt capability；`resource_link` 是 ACP 基线内容
 图片临时文件生命周期：
 
 - base64 图片由 `codexapp` agent 写入 session-scoped 临时目录。
-- 临时目录按 projectName 与 ACP sessionId 分区，例如 `~/.wheelmaker/<projectName>/images/<sessionId>/...`。
+- 临时目录放在 session 资源目录内，例如 `~/.wheelmaker/db/session/<projectName>/<sessionId>/images/...`。
 - `projectName` 与 `sessionId` 作为路径段使用前必须做 path-safe 处理，不能允许路径分隔符或 `..` 逃逸出项目 artifact 目录。
 - 临时目录不绑定 `AgentInstance` / `codexappConn` 生命周期；多 session 并存时，一个 session 被 suspend 或 instance close 不代表该 session 已结束。
 - `client` 只在真正删除 session 时调用通用 agent artifact cleanup hook，例如 `agent.CleanupSessionArtifacts(projectName, agentType, sessionID)`；`codexapp` 在 agent 包内清理自己的图片目录。

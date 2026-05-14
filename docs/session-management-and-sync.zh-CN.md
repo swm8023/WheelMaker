@@ -55,7 +55,7 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 路径：
 
 ```text
-~/.wheelmaker/session/<projectName>/<sessionId>/turns/t000000.bin
+~/.wheelmaker/db/session/<projectName>/<sessionId>/turns/t000000.bin
 ```
 
 文件格式：

@@ -769,7 +769,7 @@ func codexappImageArtifactDir(projectName string, sessionID string) (string, err
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, projectSegment, "images", sessionSegment), nil
+	return filepath.Join(root, "db", "session", projectSegment, sessionSegment, "images"), nil
 }
 
 func codexappImageExtension(mimeType string) (string, bool) {
