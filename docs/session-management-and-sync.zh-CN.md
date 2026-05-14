@@ -39,6 +39,7 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 
 - 不再有 `promptIndex`、`turnId`、`updateIndex`。
 - `content` 是 IM turn JSON，包含 `method` 和 `param`。
+- 服务端对客户端暴露的 `turnIndex` 必须连续；语义上为空的 turn 也必须返回一条非空 JSON `content`，不能跳过 index。
 - `prompt_request.param` 会写入 `createdAt` 和当前 `modelName`。
 - `prompt_done.param` 会写入 `completedAt` 和 `stopReason`。
 - 实时消息和 `session.read` 返回都使用 `finished`；旧的 `done` 字段不参与解析。
