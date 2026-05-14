@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { transformSync } from '@babel/core';
 
 describe('web responsive shell split', () => {
   test('defines desktop and mobile shells behind one responsive shell module', () => {
@@ -22,6 +23,23 @@ describe('web responsive shell split', () => {
     expect(shellTsx).toMatch(
       /export function MobileShell[\s\S]*?className=\{`workspace theme-\$\{themeMode\} narrow-shell`\}[\s\S]*?className=\{`drawer-overlay \$\{drawerOpen \? 'show' : ''\}`\}/,
     );
+  });
+
+  test('keeps the React runtime import required by the web JSX transform', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const shellPath = path.join(projectRoot, 'web', 'src', 'shell', 'ResponsiveShell.tsx');
+    const shellTsx = fs.readFileSync(shellPath, 'utf8');
+
+    const output =
+      transformSync(shellTsx, {
+        filename: shellPath,
+        babelrc: false,
+        configFile: false,
+        presets: ['@babel/preset-env', '@babel/preset-react', '@babel/preset-typescript'],
+      })?.code ?? '';
+
+    expect(output).toMatch(/\.createElement\(/);
+    expect(output).toMatch(/require\(["']react["']\)|from ["']react["']/);
   });
 
   test('main delegates shell structure instead of owning desktop and mobile containers inline', () => {
