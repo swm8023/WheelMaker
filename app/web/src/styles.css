@@ -167,6 +167,98 @@ body,
   animation: wmFadeIn 160ms ease-out;
 }
 
+.desktop-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.desktop-shell > .body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.desktop-activity-bar {
+  flex: 0 0 48px;
+  width: 48px;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel-3) 86%, black 14%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+}
+
+.desktop-activity-primary,
+.desktop-activity-secondary {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.desktop-activity-secondary {
+  margin-top: auto;
+}
+
+.desktop-activity-button {
+  position: relative;
+  width: 48px;
+  height: 44px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+
+.desktop-activity-button .codicon {
+  font-size: 22px;
+}
+
+.desktop-activity-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.desktop-activity-button.active {
+  color: var(--text);
+}
+
+.desktop-activity-button.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+
+.desktop-activity-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.desktop-activity-button:disabled:hover {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+}
+
+.desktop-activity-button.refresh-btn.has-update-badge::after {
+  top: 7px;
+  right: 10px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--panel-3) 86%, black 14%);
+}
+
 .header {
   height: 46px;
   border-bottom: 1px solid var(--border);
@@ -768,6 +860,28 @@ body,
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.sidebar-title-row {
+  flex: 0 0 34px;
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  background: color-mix(in srgb, var(--panel) 92%, var(--panel-3));
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: color-mix(in srgb, var(--muted) 78%, var(--text));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-title-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-footer {

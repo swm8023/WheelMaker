@@ -11,7 +11,7 @@ type ShellContentProps = {
 };
 
 export type DesktopShellProps = ShellContentProps & {
-  desktopHeader: ReactNode;
+  desktopActivityBar: ReactNode;
   sidebarCollapsed: boolean;
 };
 
@@ -30,7 +30,7 @@ export type ResponsiveShellProps = DesktopShellProps &
 export function DesktopShell({
   themeMode,
   setiFontCss,
-  desktopHeader,
+  desktopActivityBar,
   sidebar,
   main,
   sidebarCollapsed,
@@ -38,12 +38,14 @@ export function DesktopShell({
   return (
     <div className={`workspace theme-${themeMode}`}>
       <style>{setiFontCss}</style>
-      {desktopHeader}
-      <div className="body">
-        {!sidebarCollapsed ? (
-          <aside className="workspace-left">{sidebar}</aside>
-        ) : null}
-        <main className="workspace-right">{main}</main>
+      <div className="desktop-shell">
+        {desktopActivityBar}
+        <div className="body">
+          {!sidebarCollapsed ? (
+            <aside className="workspace-left">{sidebar}</aside>
+          ) : null}
+          <main className="workspace-right">{main}</main>
+        </div>
       </div>
     </div>
   );

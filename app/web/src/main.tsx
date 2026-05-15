@@ -3610,6 +3610,29 @@ function App() {
     }
     setDrawerOpen(value => !value);
   }, []);
+  const handleDesktopActivitySelect = useCallback((nextTab: Tab) => {
+    if (sidebarSettingsOpen) {
+      setSidebarSettingsOpen(false);
+      if (nextTab !== tab) {
+        setTab(nextTab);
+      }
+      setSidebarCollapsed(false);
+      return;
+    }
+    if (nextTab === tab) {
+      setSidebarCollapsed(value => !value);
+      return;
+    }
+    setTab(nextTab);
+    setSidebarCollapsed(false);
+  }, [sidebarSettingsOpen, tab, setSidebarSettingsOpen, setSidebarCollapsed, setTab]);
+  const handleDesktopSettingsSelect = useCallback(() => {
+    const nextOpen = !sidebarSettingsOpen;
+    setSidebarSettingsOpen(nextOpen);
+    if (nextOpen) {
+      setSidebarCollapsed(false);
+    }
+  }, [sidebarSettingsOpen, setSidebarSettingsOpen, setSidebarCollapsed]);
   const availableChatAgents = useMemo(() => {
     const seen = new Set<string>();
     const agents: string[] = [];
@@ -6560,7 +6583,7 @@ function App() {
     [chatSessions],
   );
 
-  const renderSidebarMain = () => {
+  const renderSidebarMain = (showSectionTitle = true) => {
     if (tab === 'chat') {
       return (
         <>
@@ -6964,7 +6987,7 @@ function App() {
     if (tab === 'file') {
       return (
         <>
-          <div className="section-title">EXPLORER</div>
+          {showSectionTitle ? <div className="section-title">EXPLORER</div> : null}
           <div className="list">{renderFileTree('.', 0)}</div>
         </>
       );
@@ -8304,6 +8327,16 @@ function App() {
     const mobileSidebarMain = !isWide
       ? tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()
       : null;
+    const wideSidebarTitle = sidebarSettingsOpen
+      ? 'SETTINGS'
+      : tab === 'chat'
+      ? 'CHAT'
+      : tab === 'file'
+      ? 'EXPLORER'
+      : 'SOURCE CONTROL';
+    const wideSidebarMain = sidebarSettingsOpen
+      ? renderSettingsContent(false)
+      : tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false);
 
     return (
       <>
@@ -8351,30 +8384,14 @@ function App() {
             </div>
           </div>
         ) : null}
-        <div className="sidebar-scroll">
-          {isWide && sidebarSettingsOpen
-            ? renderSettingsContent(true)
-            : isWide ? renderWideProjectSessionNav() : mobileSidebarMain}
-        </div>
         {isWide ? (
-          <div className="sidebar-footer">
-            <button
-              type="button"
-              className="sidebar-settings-btn"
-              onClick={() => setSidebarSettingsOpen(value => !value)}
-              title={sidebarSettingsOpen ? 'Back to sidebar' : 'Open settings'}
-            >
-              <span
-                className={`codicon ${
-                  sidebarSettingsOpen
-                    ? 'codicon-arrow-left'
-                    : 'codicon-settings-gear'
-                }`}
-              />
-              <span>{sidebarSettingsOpen ? 'Back' : 'Settings'}</span>
-            </button>
+          <div className="sidebar-title-row">
+            <span className="sidebar-title-text">{wideSidebarTitle}</span>
           </div>
         ) : null}
+        <div className="sidebar-scroll">
+          {isWide ? wideSidebarMain : mobileSidebarMain}
+        </div>
       </>
     );
   };
@@ -9473,57 +9490,63 @@ function App() {
     <span className="codicon codicon-refresh" />
   );
 
-  const wideHeader = isWide ? (
-    <header className="header">
-      <button
-        className="header-btn"
-        onClick={() => {
-          setSidebarCollapsed(value => !value);
-        }}
-      >
-        <span
-          className={`codicon ${
-            sidebarCollapsed
-              ? 'codicon-layout-sidebar-left-off'
-              : 'codicon-layout-sidebar-left'
-          }`}
-        />
-      </button>
-      <button
-        className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
-        onClick={() => refreshProject().catch(() => undefined)}
-        title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
-        disabled={refreshingProject || reconnecting}
-      >
-        {refreshButtonContent}
-      </button>
-
-      <div className="header-spacer" />
-
-      <div className="tabs">
+  const desktopActivityBar = isWide ? (
+    <nav className="desktop-activity-bar" aria-label="Workspace navigation">
+      <div className="desktop-activity-primary">
         <button
-          className={`tab ${tab === 'chat' ? 'active' : ''}`}
-          onClick={() => setTab('chat')}
+          type="button"
+          className={`desktop-activity-button${tab === 'chat' && !sidebarSettingsOpen ? ' active' : ''}`}
+          onClick={() => handleDesktopActivitySelect('chat')}
+          title="Chat"
+          aria-label="Chat"
         >
-          <span className="codicon codicon-comment-discussion tab-icon" />
-          <span className="tab-label">CHAT</span>
+          <span className="codicon codicon-comment-discussion" />
         </button>
         <button
-          className={`tab ${tab === 'file' ? 'active' : ''}`}
-          onClick={() => setTab('file')}
+          type="button"
+          className={`desktop-activity-button${tab === 'file' && !sidebarSettingsOpen ? ' active' : ''}`}
+          onClick={() => handleDesktopActivitySelect('file')}
+          title="File"
+          aria-label="File"
         >
-          <span className="codicon codicon-files tab-icon" />
-          <span className="tab-label">FILE</span>
+          <span className="codicon codicon-files" />
         </button>
         <button
-          className={`tab ${tab === 'git' ? 'active' : ''}`}
-          onClick={() => setTab('git')}
+          type="button"
+          className={`desktop-activity-button${tab === 'git' && !sidebarSettingsOpen ? ' active' : ''}`}
+          onClick={() => handleDesktopActivitySelect('git')}
+          title="Git"
+          aria-label="Git"
         >
-          <span className="codicon codicon-source-control tab-icon" />
-          <span className="tab-label">GIT</span>
+          <span className="codicon codicon-source-control" />
         </button>
       </div>
-    </header>
+      <div className="desktop-activity-secondary">
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen ? ' active' : ''}`}
+          onClick={handleDesktopSettingsSelect}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <span className="codicon codicon-settings-gear" />
+        </button>
+        <button
+          type="button"
+          className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
+          onClick={() => refreshProject().catch(() => undefined)}
+          title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
+          aria-label={reconnecting ? 'Reconnecting' : 'Refresh project'}
+          disabled={refreshingProject || reconnecting}
+        >
+          {refreshingProject || reconnecting ? (
+            <span className="codicon codicon-loading codicon-modifier-spin" />
+          ) : (
+            <span className="codicon codicon-refresh" />
+          )}
+        </button>
+      </div>
+    </nav>
   ) : null;
 
   const floatingControlStack = !isWide ? (
@@ -9640,7 +9663,7 @@ function App() {
       mode={layoutMode}
       themeMode={themeMode}
       setiFontCss={setiFontCss}
-      desktopHeader={wideHeader}
+      desktopActivityBar={desktopActivityBar}
       floatingControlStack={floatingControlStack}
       mobileSettingsScreen={mobileSettingsScreen}
       sidebar={renderSidebar()}

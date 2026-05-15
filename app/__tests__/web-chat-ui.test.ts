@@ -189,7 +189,9 @@ describe('web chat integration', () => {
     );
     expect(mainTsx).toContain('setSidebarSettingsOpen(true);');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
-    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : mobileSidebarMain');
+    expect(mainTsx).toContain("tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false)");
+    expect(mainTsx).toContain('className="sidebar-title-row"');
+    expect(mainTsx).toContain('className="desktop-activity-bar"');
     expect(mainTsx).toContain('const mobileSettingsScreen = !isWide && sidebarSettingsOpen ? (');
     expect(mainTsx).toContain('className="mobile-settings-screen"');
     expect(mainTsx).toContain('aria-modal="true"');
@@ -197,9 +199,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="mobile-settings-back"');
     expect(mainTsx).toContain('<div className="mobile-settings-title">Settings</div>');
     expect(mainTsx).toContain('className="mobile-settings-group"');
-    expect(mainTsx).toMatch(
-      /\{isWide \? \(\s*<div className="sidebar-footer">/,
-    );
+    expect(mainTsx).not.toContain('className="sidebar-footer"');
     expect(mainTsx).toContain('className="floating-control-stack"');
     expect(mainTsx).toContain('className="floating-nav-group"');
     expect(mainTsx).toContain('className="drawer-toggle-bubble"');
@@ -257,7 +257,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('if (shouldRefreshCompletedPrompt && isSelectedSession) {\n          loadChatSession(sessionId, projectIdRef.current, {\n            forceFull: true,');
     expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
     expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
-    expect(mainTsx).toContain("className={`header-btn refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
+    expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');
     expect(stylesCss).not.toContain('.status-bar {');
@@ -517,7 +517,12 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('renderProjectSessionActionStrip(targetProjectId, session.sessionId)');
     expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
-    expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : mobileSidebarMain');
+    expect(mainTsx).toContain("tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false)");
+    expect(mainTsx).toContain('sidebarSettingsOpen\n      ? renderSettingsContent(false)');
+    expect(mainTsx).toContain('const wideSidebarTitle = sidebarSettingsOpen');
+    expect(mainTsx).toContain('className="sidebar-title-row"');
+    expect(mainTsx).toContain('const handleDesktopActivitySelect = useCallback((nextTab: Tab) => {');
+    expect(mainTsx).toContain('const handleDesktopSettingsSelect = useCallback(() => {');
 
     const wideRailStart = mainTsx.indexOf('const renderWideProjectSessionNav = () => {');
     const wideRailEnd = mainTsx.indexOf('const renderSidebar = () => {', wideRailStart);
@@ -527,15 +532,29 @@ describe('web chat integration', () => {
     expect(wideRail).not.toContain('codicon-chevron-right');
     expect(wideRail).not.toContain('codicon-chevron-down');
 
-    const wideHeaderStart = mainTsx.indexOf('const wideHeader = isWide ? (');
-    const wideHeaderEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', wideHeaderStart);
-    expect(wideHeaderStart).toBeGreaterThanOrEqual(0);
-    expect(wideHeaderEnd).toBeGreaterThan(wideHeaderStart);
-    const wideHeader = mainTsx.slice(wideHeaderStart, wideHeaderEnd);
-    expect(wideHeader).not.toContain('className="project-wrap"');
-    expect(wideHeader).not.toContain('className="project-btn"');
+    expect(mainTsx).not.toContain('const wideHeader = isWide ? (');
+    expect(mainTsx).not.toContain('className="header"');
+
+    const activityBarStart = mainTsx.indexOf('const desktopActivityBar = isWide ? (');
+    const activityBarEnd = mainTsx.indexOf('const floatingControlStack = !isWide ? (', activityBarStart);
+    expect(activityBarStart).toBeGreaterThanOrEqual(0);
+    expect(activityBarEnd).toBeGreaterThan(activityBarStart);
+    const activityBar = mainTsx.slice(activityBarStart, activityBarEnd);
+    expect(activityBar).toContain('className="desktop-activity-bar"');
+    expect(activityBar).toContain("onClick={() => handleDesktopActivitySelect('chat')}");
+    expect(activityBar).toContain("onClick={() => handleDesktopActivitySelect('file')}");
+    expect(activityBar).toContain("onClick={() => handleDesktopActivitySelect('git')}");
+    expect(activityBar).toContain('onClick={handleDesktopSettingsSelect}');
+    expect(activityBar).toContain('onClick={() => refreshProject().catch(() => undefined)}');
+    expect(activityBar).not.toContain('className="project-wrap"');
+    expect(activityBar).not.toContain('className="project-btn"');
+    expect(activityBar).not.toContain('className="tabs"');
 
     expect(stylesCss).toContain('.wide-project-session-nav {');
+    expect(stylesCss).toContain('.desktop-activity-bar {');
+    expect(stylesCss).toContain('.desktop-activity-button {');
+    expect(stylesCss).toContain('.desktop-activity-button.active::before {');
+    expect(stylesCss).toContain('.sidebar-title-row {');
     expect(stylesCss).toContain('.wide-project-row {');
     expect(stylesCss).toContain('.wide-project-folder-wrap {');
     expect(stylesCss).toContain('.wide-project-folder-icon {');

@@ -16,9 +16,10 @@ describe('web responsive shell split', () => {
     expect(shellTsx).toContain('export function MobileShell(');
     expect(shellTsx).toContain('export function ResponsiveShell(');
     expect(shellTsx).toContain("mode === 'desktop'");
+    expect(shellTsx).toContain('desktopActivityBar: ReactNode;');
 
     expect(shellTsx).toMatch(
-      /export function DesktopShell[\s\S]*?className=\{`workspace theme-\$\{themeMode\}`\}[\s\S]*?<aside className="workspace-left">\{sidebar\}<\/aside>/,
+      /export function DesktopShell[\s\S]*?desktopActivityBar[\s\S]*?className=\{`workspace theme-\$\{themeMode\}`\}[\s\S]*?\{desktopActivityBar\}[\s\S]*?<aside className="workspace-left">\{sidebar\}<\/aside>/,
     );
     expect(shellTsx).toMatch(
       /export function MobileShell[\s\S]*?className=\{`workspace theme-\$\{themeMode\} narrow-shell`\}[\s\S]*?className=\{`drawer-overlay \$\{drawerOpen \? 'show' : ''\}`\}/,
@@ -55,7 +56,7 @@ describe('web responsive shell split', () => {
     expect(mainTsx).toContain("import { ResponsiveShell } from './shell/ResponsiveShell';");
     expect(mainTsx).toContain('<ResponsiveShell');
     expect(mainTsx).toContain('mode={layoutMode}');
-    expect(mainTsx).toContain('desktopHeader={wideHeader}');
+    expect(mainTsx).toContain('desktopActivityBar={desktopActivityBar}');
     expect(mainTsx).toContain('floatingControlStack={floatingControlStack}');
     expect(mainTsx).toContain('mobileSettingsScreen={mobileSettingsScreen}');
     expect(mainTsx).toContain('sidebar={renderSidebar()}');
