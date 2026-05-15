@@ -99,6 +99,10 @@ type WideProjectActionMenuState = {
   agentType: string;
 };
 type MobileProjectActionMenuState = WideProjectActionMenuState;
+type ProjectSessionActionMenuState = {
+  projectId: string;
+  sessionId: string;
+};
 type SettingsDetailView = 'tokenStats' | null;
 type ChatComposerDraft = {
   text: string;
@@ -287,6 +291,7 @@ const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as 
 const CHAT_CONFIG_INLINE_LIMIT = 3;
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
+const PROJECT_SESSION_LONG_PRESS_MS = 450;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 let mermaidRenderSequence = 0;
@@ -2177,6 +2182,8 @@ function App() {
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
   const projectPinLongPressTimerRef = useRef<number | null>(null);
   const projectPinLongPressTargetRef = useRef('');
+  const projectSessionLongPressTimerRef = useRef<number | null>(null);
+  const projectSessionLongPressTargetRef = useRef('');
   const layoutModeRef = useRef(layoutMode);
   const setTab = useCallback((next: WorkspaceUiStateValue<Tab>) => {
     dispatchWorkspaceUi({ type: 'shared/setTab', next });
@@ -2302,6 +2309,7 @@ function App() {
   const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
   const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
   const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);
+  const [projectSessionActionMenu, setProjectSessionActionMenu] = useState<ProjectSessionActionMenuState | null>(null);
   const [mobileProjectSessionErrors, setMobileProjectSessionErrors] = useState<Record<string, string>>({});
   const [mobileProjectSessionsRefreshing, setMobileProjectSessionsRefreshing] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState('');
@@ -3723,6 +3731,90 @@ function App() {
     [],
   );
   useEffect(() => clearProjectPinLongPress, [clearProjectPinLongPress]);
+  const clearProjectSessionLongPress = useCallback(() => {
+    if (projectSessionLongPressTimerRef.current !== null) {
+      window.clearTimeout(projectSessionLongPressTimerRef.current);
+      projectSessionLongPressTimerRef.current = null;
+    }
+  }, []);
+  const projectSessionActionKey = (targetProjectId: string, sessionId: string) =>
+    `${targetProjectId}:${sessionId}`;
+  const startProjectSessionLongPress = useCallback(
+    (
+      targetProjectId: string,
+      sessionId: string,
+      event: React.PointerEvent<HTMLButtonElement>,
+    ) => {
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return;
+      }
+      clearProjectSessionLongPress();
+      projectSessionLongPressTargetRef.current = '';
+      const target = event.currentTarget;
+      if (target.setPointerCapture) {
+        try {
+          target.setPointerCapture(event.pointerId);
+        } catch {
+          // ignore
+        }
+      }
+      projectSessionLongPressTimerRef.current = window.setTimeout(() => {
+        projectSessionLongPressTimerRef.current = null;
+        projectSessionLongPressTargetRef.current = projectSessionActionKey(
+          targetProjectId,
+          sessionId,
+        );
+        setProjectSessionActionMenu({projectId: targetProjectId, sessionId});
+      }, PROJECT_SESSION_LONG_PRESS_MS);
+    },
+    [clearProjectSessionLongPress],
+  );
+  const finishProjectSessionLongPress = useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      clearProjectSessionLongPress();
+      const target = event.currentTarget;
+      if (target.hasPointerCapture?.(event.pointerId)) {
+        try {
+          target.releasePointerCapture(event.pointerId);
+        } catch {
+          // ignore
+        }
+      }
+    },
+    [clearProjectSessionLongPress],
+  );
+  const consumeProjectSessionLongPressClick = useCallback(
+    (
+      targetProjectId: string,
+      sessionId: string,
+      event: React.MouseEvent<HTMLButtonElement>,
+    ): boolean => {
+      if (
+        projectSessionLongPressTargetRef.current !==
+        projectSessionActionKey(targetProjectId, sessionId)
+      ) {
+        return false;
+      }
+      projectSessionLongPressTargetRef.current = '';
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    },
+    [],
+  );
+  useEffect(() => clearProjectSessionLongPress, [clearProjectSessionLongPress]);
+  useEffect(() => {
+    if (!projectSessionActionMenu) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target?.closest('.project-session-row-wrap')) {
+        return;
+      }
+      setProjectSessionActionMenu(null);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [projectSessionActionMenu]);
   const agentInfoAgents = useMemo(() => {
     const names = new Map<string, string>();
     const skillsByKey = new Map<string, string[]>();
@@ -4507,6 +4599,24 @@ function App() {
     }
   };
 
+  const clearProjectSessionCache = (
+    targetProjectId: string,
+    sessionId: string,
+  ) => {
+    chatSyncIndexRef.current[sessionId] = 0;
+    chatSyncSubIndexRef.current[sessionId] = 0;
+    chatMessageStoreRef.current[sessionId] = [];
+    workspaceStore.rememberChatSessionContent(targetProjectId, sessionId, []);
+    const targetSession =
+      projectSessionsByProjectId[targetProjectId]?.find(item => item.sessionId === sessionId) ??
+      (targetProjectId === projectIdRef.current
+        ? chatSessions.find(item => item.sessionId === sessionId)
+        : undefined);
+    if (targetSession) {
+      workspaceStore.rememberChatSession(targetProjectId, targetSession, {turnIndex: 0});
+    }
+  };
+
   const loadChatSession = async (
     sessionId: string,
     activeProjectId = projectIdRef.current,
@@ -4940,6 +5050,40 @@ function App() {
     }
   };
 
+  const removeProjectChatSessionFromState = (
+    targetProjectId: string,
+    sessionId: string,
+  ) => {
+    if (!targetProjectId || !sessionId) return;
+    setProjectSessionsByProjectId(prev => ({
+      ...prev,
+      [targetProjectId]: (prev[targetProjectId] ?? []).filter(
+        item => item.sessionId !== sessionId,
+      ),
+    }));
+    if (targetProjectId === projectIdRef.current) {
+      setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
+      setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
+      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+      if (chatSelectedIdRef.current === sessionId) {
+        setSelectedChatId('');
+        chatSelectedIdRef.current = '';
+        setChatMessages([]);
+        workspaceStore.rememberSelectedChatSession(targetProjectId, '');
+      }
+      const nextMessageStore = {...chatMessageStoreRef.current};
+      const nextSyncIndex = {...chatSyncIndexRef.current};
+      const nextSyncSubIndex = {...chatSyncSubIndexRef.current};
+      delete nextMessageStore[sessionId];
+      delete nextSyncIndex[sessionId];
+      delete nextSyncSubIndex[sessionId];
+      chatMessageStoreRef.current = nextMessageStore;
+      chatSyncIndexRef.current = nextSyncIndex;
+      chatSyncSubIndexRef.current = nextSyncSubIndex;
+    }
+    workspaceStore.deleteChatSession(targetProjectId, sessionId);
+  };
+
   const handleDeleteChatSession = async (sessionId: string) => {
     const normalizedSessionId = sessionId.trim();
     if (!normalizedSessionId || chatDeletingSessionId) {
@@ -4990,6 +5134,63 @@ function App() {
         setChatMessages([]);
         await loadChatSession(normalizedSessionId, projectIdRef.current, { forceFull: true });
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatReloadingSessionId('');
+    }
+  };
+
+  const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || chatDeletingSessionId) {
+      return;
+    }
+    const confirmed = window.confirm(
+      'Delete this session and its chat history? This action cannot be undone.',
+    );
+    if (!confirmed) {
+      setProjectSessionActionMenu(null);
+      return;
+    }
+    setChatDeletingSessionId(normalizedSessionId);
+    try {
+      const result = await service.deleteProjectSession(targetProjectId, normalizedSessionId);
+      if (!result.ok) {
+        throw new Error('session.delete returned ok=false');
+      }
+      removeProjectChatSessionFromState(
+        targetProjectId,
+        result.sessionId || normalizedSessionId,
+      );
+      setProjectSessionActionMenu(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatDeletingSessionId('');
+    }
+  };
+
+  const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || chatReloadingSessionId) {
+      return;
+    }
+    setChatReloadingSessionId(normalizedSessionId);
+    try {
+      const result = await service.reloadProjectSession(targetProjectId, normalizedSessionId);
+      if (!result.ok) {
+        throw new Error('session.reload returned ok=false');
+      }
+      clearProjectSessionCache(targetProjectId, normalizedSessionId);
+      if (
+        targetProjectId === projectIdRef.current &&
+        chatSelectedIdRef.current === normalizedSessionId
+      ) {
+        setChatMessages([]);
+        await loadChatSession(normalizedSessionId, targetProjectId, { forceFull: true });
+      }
+      setProjectSessionActionMenu(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -5959,6 +6160,59 @@ function App() {
     } finally {
       setResumeLoading(false);
     }
+  };
+
+  const renderProjectSessionActionStrip = (targetProjectId: string, sessionId: string) => {
+    if (
+      projectSessionActionMenu?.projectId !== targetProjectId ||
+      projectSessionActionMenu.sessionId !== sessionId
+    ) {
+      return null;
+    }
+    return (
+      <div className="project-session-action-strip">
+        <button
+          type="button"
+          className="project-session-action-btn reload"
+          title="Reload session"
+          aria-label="Reload session"
+          disabled={chatReloadingSessionId === sessionId}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => {
+            event.stopPropagation();
+            handleReloadProjectSession(targetProjectId, sessionId).catch(() => undefined);
+          }}
+        >
+          <span
+            className={`codicon ${
+              chatReloadingSessionId === sessionId
+                ? 'codicon-loading codicon-modifier-spin'
+                : 'codicon-refresh'
+            }`}
+          />
+        </button>
+        <button
+          type="button"
+          className="project-session-action-btn delete"
+          title="Delete session"
+          aria-label="Delete session"
+          disabled={chatDeletingSessionId === sessionId}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => {
+            event.stopPropagation();
+            handleDeleteProjectSession(targetProjectId, sessionId).catch(() => undefined);
+          }}
+        >
+          <span
+            className={`codicon ${
+              chatDeletingSessionId === sessionId
+                ? 'codicon-loading codicon-modifier-spin'
+                : 'codicon-trash'
+            }`}
+          />
+        </button>
+      </div>
+    );
   };
 
   const refreshProject = async (options?: {silent?: boolean}) => {
@@ -7697,35 +7951,51 @@ function App() {
                   <div className="wide-project-session-list mobile-project-session-list">
                     {visibleSessions.map(session => {
                       const sessionAgent = (session.agentType || '').trim();
+                      const sessionActionsOpen =
+                        projectSessionActionMenu?.projectId === targetProjectId &&
+                        projectSessionActionMenu.sessionId === session.sessionId;
                       return (
-                        <button
-                          type="button"
+                        <div
                           key={`${targetProjectId}:mobile-session:${session.sessionId}`}
-                          className={`wide-session-row mobile-session-row${
-                            activeProject && selectedChatId === session.sessionId
-                              ? ' selected'
-                              : ''
-                          }`}
-                          onClick={() => {
-                            selectProjectChatSession(
-                              targetProjectId,
-                              session.sessionId,
-                              {closeMobileDrawer: true},
-                            ).catch(() => undefined);
-                          }}
+                          className={`project-session-row-wrap${sessionActionsOpen ? ' actions-open' : ''}`}
                         >
-                          <span className="wide-session-title">
-                            {session.title || session.sessionId}
-                          </span>
-                          {sessionAgent ? (
-                            <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
-                              {sessionAgent}
+                          <button
+                            type="button"
+                            className={`wide-session-row mobile-session-row${
+                              activeProject && selectedChatId === session.sessionId
+                                ? ' selected'
+                                : ''
+                            }`}
+                            onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}
+                            onPointerUp={finishProjectSessionLongPress}
+                            onPointerCancel={finishProjectSessionLongPress}
+                            onPointerLeave={finishProjectSessionLongPress}
+                            onContextMenu={event => event.preventDefault()}
+                            onClick={event => {
+                              if (consumeProjectSessionLongPressClick(targetProjectId, session.sessionId, event)) {
+                                return;
+                              }
+                              selectProjectChatSession(
+                                targetProjectId,
+                                session.sessionId,
+                                {closeMobileDrawer: true},
+                              ).catch(() => undefined);
+                            }}
+                          >
+                            <span className="wide-session-title">
+                              {session.title || session.sessionId}
                             </span>
-                          ) : null}
-                          <span className="wide-session-time" title={session.updatedAt || ''}>
-                            {formatCompactRelativeAge(session.updatedAt)}
-                          </span>
-                        </button>
+                            {sessionAgent ? (
+                              <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
+                                {sessionAgent}
+                              </span>
+                            ) : null}
+                            <span className="wide-session-time" title={session.updatedAt || ''}>
+                              {formatCompactRelativeAge(session.updatedAt)}
+                            </span>
+                          </button>
+                          {renderProjectSessionActionStrip(targetProjectId, session.sessionId)}
+                        </div>
                       );
                     })}
                     {projectSessions.length > visibleSessions.length ? (
@@ -7957,34 +8227,50 @@ function App() {
                 <div className="wide-project-session-list">
                   {visibleSessions.map(session => {
                     const sessionAgent = (session.agentType || '').trim();
+                    const sessionActionsOpen =
+                      projectSessionActionMenu?.projectId === targetProjectId &&
+                      projectSessionActionMenu.sessionId === session.sessionId;
                     return (
-                      <button
-                        type="button"
+                      <div
                         key={`${targetProjectId}:${session.sessionId}`}
-                        className={`wide-session-row${
-                          activeProject && selectedChatId === session.sessionId
-                            ? ' selected'
-                            : ''
-                        }`}
-                        onClick={() => {
-                          selectWideProjectSession(
-                            targetProjectId,
-                            session.sessionId,
-                          ).catch(() => undefined);
-                        }}
+                        className={`project-session-row-wrap${sessionActionsOpen ? ' actions-open' : ''}`}
                       >
-                        <span className="wide-session-title">
-                          {session.title || session.sessionId}
-                        </span>
-                        {sessionAgent ? (
-                          <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
-                            {sessionAgent}
+                        <button
+                          type="button"
+                          className={`wide-session-row${
+                            activeProject && selectedChatId === session.sessionId
+                              ? ' selected'
+                              : ''
+                          }`}
+                          onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}
+                          onPointerUp={finishProjectSessionLongPress}
+                          onPointerCancel={finishProjectSessionLongPress}
+                          onPointerLeave={finishProjectSessionLongPress}
+                          onContextMenu={event => event.preventDefault()}
+                          onClick={event => {
+                            if (consumeProjectSessionLongPressClick(targetProjectId, session.sessionId, event)) {
+                              return;
+                            }
+                            selectWideProjectSession(
+                              targetProjectId,
+                              session.sessionId,
+                            ).catch(() => undefined);
+                          }}
+                        >
+                          <span className="wide-session-title">
+                            {session.title || session.sessionId}
                           </span>
-                        ) : null}
-                        <span className="wide-session-time" title={session.updatedAt || ''}>
-                          {formatCompactRelativeAge(session.updatedAt)}
-                        </span>
-                      </button>
+                          {sessionAgent ? (
+                            <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', sessionAgent)}`}>
+                              {sessionAgent}
+                            </span>
+                          ) : null}
+                          <span className="wide-session-time" title={session.updatedAt || ''}>
+                            {formatCompactRelativeAge(session.updatedAt)}
+                          </span>
+                        </button>
+                        {renderProjectSessionActionStrip(targetProjectId, session.sessionId)}
+                      </div>
                     );
                   })}
                   {projectSessions.length > visibleSessions.length ? (

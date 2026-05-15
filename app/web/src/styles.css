@@ -1452,7 +1452,13 @@ body,
   padding: 2px 0 4px 23px;
 }
 
+.project-session-row-wrap {
+  position: relative;
+  min-width: 0;
+}
+
 .wide-session-row {
+  position: relative;
   width: 100%;
   min-height: 28px;
   border: none;
@@ -1466,6 +1472,8 @@ body,
   padding: 0 8px;
   cursor: pointer;
   text-align: left;
+  user-select: none;
+  touch-action: manipulation;
 }
 
 .wide-session-row:hover {
@@ -1477,6 +1485,75 @@ body,
   background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
   color: var(--text);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.project-session-row-wrap.actions-open .wide-session-row::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 88px;
+  border-radius: 0 6px 6px 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--panel) 84%, transparent) 42%,
+    var(--panel)
+  );
+}
+
+.project-session-action-strip {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  bottom: 2px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+}
+
+.project-session-action-btn {
+  width: 25px;
+  height: 25px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.project-session-action-btn.reload {
+  color: color-mix(in srgb, var(--text) 76%, var(--accent));
+}
+
+.project-session-action-btn.delete {
+  color: color-mix(in srgb, var(--danger) 84%, var(--text));
+}
+
+.project-session-action-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.project-session-action-btn.delete:hover {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+}
+
+.project-session-action-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 .wide-session-title {

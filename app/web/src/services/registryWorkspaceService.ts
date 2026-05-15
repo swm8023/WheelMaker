@@ -282,6 +282,13 @@ export class RegistryWorkspaceService {
     return this.repository.deleteSession(this.session.selectedProjectId, sessionId);
   }
 
+  async deleteProjectSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.deleteSession(projectId, sessionId);
+  }
+
   async listResumableSessions(agentType: string): Promise<RegistryResumableSession[]> {
     if (!this.session || !this.repository) {
       return [];

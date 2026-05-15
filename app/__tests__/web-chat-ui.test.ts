@@ -460,8 +460,9 @@ describe('web chat integration', () => {
     expect(mobileSheetEnd).toBeGreaterThan(mobileSheetStart);
     const mobileSheet = mainTsx.slice(mobileSheetStart, mobileSheetEnd);
     expect(mobileSheet).not.toContain('className="project-wrap"');
-    expect(mobileSheet).not.toContain('chat-session-reload-action');
-    expect(mobileSheet).not.toContain('chat-session-delete-action');
+    expect(mobileSheet).toContain('renderProjectSessionActionStrip(targetProjectId, session.sessionId)');
+    expect(mobileSheet).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
+    expect(mobileSheet).not.toContain('chat-session-swipe-row');
     expect(mobileSheet).toContain("tagVariantClass('wide-project-hub', projectItem.hubId || 'local')");
     expect(mobileSheet).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
 
@@ -503,6 +504,18 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("wideProjectActionMenu.kind === 'new' ? 'New Session' : 'Resume Session'");
     expect(mainTsx).toContain("const sessionAgent = (session.agentType || '').trim();");
     expect(mainTsx).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
+    expect(mainTsx).toContain('const [projectSessionActionMenu, setProjectSessionActionMenu] = useState<ProjectSessionActionMenuState | null>(null);');
+    expect(mainTsx).toContain('const PROJECT_SESSION_LONG_PRESS_MS = 450;');
+    expect(mainTsx).toContain('const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {');
+    expect(mainTsx).toContain('const result = await service.deleteProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).toContain('const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {');
+    expect(mainTsx).toContain('const result = await service.reloadProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).toContain('const renderProjectSessionActionStrip = (targetProjectId: string, sessionId: string) => {');
+    expect(mainTsx).toContain('className="project-session-action-strip"');
+    expect(mainTsx).toContain('className="project-session-action-btn reload"');
+    expect(mainTsx).toContain('className="project-session-action-btn delete"');
+    expect(mainTsx).toContain('renderProjectSessionActionStrip(targetProjectId, session.sessionId)');
+    expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain('isWide ? renderWideProjectSessionNav() : mobileSidebarMain');
 
@@ -535,12 +548,19 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-project-action-btn {');
     expect(stylesCss).toContain('.wide-project-action-title {');
     expect(stylesCss).toContain('.wide-session-row {');
+    expect(stylesCss).toContain('.project-session-row-wrap {');
+    expect(stylesCss).toContain('.project-session-action-strip {');
+    expect(stylesCss).toContain('.project-session-action-btn.reload {');
+    expect(stylesCss).toContain('.project-session-action-btn.delete {');
     expect(stylesCss).toContain('.wide-session-agent-tag {');
     expect(stylesCss).toContain('.wide-session-agent-0 {');
     expect(stylesCss).toContain('.wide-session-time {');
     expect(stylesCss).toContain('.wide-project-action-popover {');
     expect(stylesCss).toMatch(
       /\.wide-session-row \{[\s\S]*min-height: 28px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.project-session-row-wrap.actions-open \.wide-session-row::after \{[\s\S]*background: linear-gradient\([\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.wide-session-title \{[\s\S]*font-weight: 400;[\s\S]*\}/,
