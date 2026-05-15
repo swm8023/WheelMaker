@@ -734,13 +734,13 @@ body,
 .breadcrumb-project-name {
   flex: 0 0 auto;
   max-width: none;
-  border-radius: 999px;
-  padding: 1px 8px 1px 10px;
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 54%, transparent);
+  border-radius: 8px;
+  padding: 1px 8px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
   white-space: nowrap;
   font-weight: 700;
-  color: color-mix(in srgb, var(--text) 88%, var(--accent));
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
 }
 
 .breadcrumb-separator {

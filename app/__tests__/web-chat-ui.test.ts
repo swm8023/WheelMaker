@@ -303,8 +303,10 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.breadcrumb-project-name {');
     expect(stylesCss).not.toContain('max-width: min(42%, 160px);');
     expect(stylesCss).toMatch(
-      /\.breadcrumb-project-name \{[\s\S]*flex: 0 0 auto;[\s\S]*max-width: none;[\s\S]*background: color-mix\(in srgb, var\(--accent\) 18%, transparent\);[\s\S]*box-shadow: inset 3px 0 0 var\(--accent\);[\s\S]*\}/,
+      /\.breadcrumb-project-name \{[\s\S]*flex: 0 0 auto;[\s\S]*max-width: none;[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 54%, transparent\);[\s\S]*border-radius: 8px;[\s\S]*background: color-mix\(in srgb, var\(--accent\) 13%, var\(--panel\)\);[\s\S]*color: color-mix\(in srgb, var\(--accent\) 78%, var\(--text\)\);[\s\S]*\}/,
     );
+    const breadcrumbProjectBlock = stylesCss.match(/\.breadcrumb-project-name \{[\s\S]*?\n    \}/)?.[0] ?? '';
+    expect(breadcrumbProjectBlock).not.toContain('box-shadow: inset 3px 0 0 var(--accent);');
     expect(stylesCss).toMatch(
       /\.breadcrumb-current \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;[\s\S]*text-overflow: ellipsis;[\s\S]*\}/,
     );
