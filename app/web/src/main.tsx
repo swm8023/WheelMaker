@@ -33,6 +33,11 @@ import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
 import {
+  buildTokenStatCards,
+  type TokenProviderSectionView,
+  type TokenStatCardView,
+} from './tokenStatsView';
+import {
   CODE_FONT_OPTIONS,
   CODE_THEME_OPTIONS,
   CODE_THEME_OPTION_GROUPS,
@@ -76,7 +81,6 @@ import type {
   RegistryGitCommitFile,
   RegistryGitStatus,
   RegistryProject,
-  RegistryTokenProviderAccount,
   RegistryTokenScanResult,
 } from './types/registry';
 import './styles.css';
@@ -120,27 +124,6 @@ type WorkingTreeFileEntry = {
   path: string;
   status: string;
   scope: 'staged' | 'unstaged' | 'untracked';
-};
-type TokenProviderAccountView = RegistryTokenProviderAccount & {
-  hubId: string;
-  projectId: string;
-  providerId: string;
-  providerName: string;
-};
-
-type TokenProviderSectionView = {
-  id: string;
-  name: string;
-  accounts: TokenProviderAccountView[];
-};
-type TokenStatCardView = {
-  id: string;
-  accountName: string;
-  agentTag: string;
-  hubTag: string;
-  message?: string;
-  secondaryLine: string;
-  tertiaryLine: string;
 };
 type SessionFlagMap = Record<string, true>;
 type FloatingDragState = {
@@ -5814,7 +5797,7 @@ function App() {
           for (const account of accounts) {
             section.accounts.push({
               ...account,
-              id: `${entry.hubId}:${account.id || account.alias || account.displayName || 'account'}`,
+              id: account.id || account.alias || account.displayName || 'account',
               hubId: entry.hubId,
               projectId: entry.projectId,
               providerId: section.id,
@@ -5838,92 +5821,16 @@ function App() {
     [],
   );
 
-  const normalizeTokenTagLabel = useCallback((value: string | undefined, fallback: string): string => {
-    const normalized = (value || '').trim();
-    return normalized || fallback;
-  }, []);
-
   const tokenTagVariantClass = useCallback((scope: 'agent' | 'hub', value: string): string => {
     return scope === 'agent'
       ? tagVariantClass('token-stats-pill-agent', value)
       : tagVariantClass('token-stats-pill-hub', value);
   }, []);
 
-  const formatCodexUsageLine = useCallback((label: '5h Usage' | 'Week Usage', value?: string): string => {
-    const normalized = (value || '').trim();
-    return `${label}: ${normalized || '-'}`;
-  }, []);
-
-  const formatCopilotRequestLine = useCallback((account: TokenProviderAccountView): string => {
-    const usedKnown = typeof account.premiumRequestsUsed === 'number';
-    const remainingKnown = typeof account.premiumRequestsRemaining === 'number';
-    const used: number = usedKnown ? account.premiumRequestsUsed ?? 0 : 0;
-    const remaining: number = remainingKnown ? account.premiumRequestsRemaining ?? 0 : 0;
-    const usedText = usedKnown ? used.toLocaleString() : '-';
-    if (!usedKnown || !remainingKnown) {
-      return `Request Used: ${usedText} / - · -`;
-    }
-    const total = used + remaining;
-    const percent = total > 0 ? `${((used / total) * 100).toFixed(1)}%` : '0.0%';
-    return `Request Used: ${used.toLocaleString()} / ${total.toLocaleString()} · ${percent}`;
-  }, []);
-
-  const tokenStatCards = useMemo((): TokenStatCardView[] => {
-    const cards: TokenStatCardView[] = [];
-    for (const provider of tokenStatsProviders) {
-      const agentTag = normalizeTokenTagLabel(
-        provider.name || provider.id,
-        (provider.id || 'unknown').toUpperCase(),
-      );
-      for (const account of provider.accounts) {
-        const accountNameCandidates = [
-          (account.email || '').trim(),
-          (account.displayName || '').trim(),
-          (account.alias || '').trim(),
-        ].filter(Boolean);
-        const accountName =
-          accountNameCandidates.find(name => !/^current(?:\s+account)?$/i.test(name)) ||
-          accountNameCandidates[0] ||
-          '(unnamed)';
-        const hubTag = normalizeTokenTagLabel(account.hubId, 'local');
-        const usageTotal = (account.usage?.rows || []).reduce(
-          (sum, row) => sum + (row.totalTokens || 0),
-          0,
-        );
-
-        let secondaryLine = '-';
-        let tertiaryLine = '';
-        if (provider.id === 'codex') {
-          secondaryLine = formatCodexUsageLine('5h Usage', account.fiveHourLimit);
-          tertiaryLine = formatCodexUsageLine('Week Usage', account.weeklyLimit);
-        } else if (provider.id === 'copilot') {
-          secondaryLine = formatCopilotRequestLine(account);
-          tertiaryLine = '';
-        } else if (provider.id === 'deepseek') {
-          secondaryLine = `Balance: ${(account.balance?.items || [])
-            .map(item => `${item.currency}:${item.totalBalance}`)
-            .join(' | ') || '-'}`;
-          tertiaryLine = `Tokens: ${usageTotal.toLocaleString()}`;
-        }
-
-        cards.push({
-          id: account.id,
-          accountName,
-          agentTag,
-          hubTag,
-          message: account.message,
-          secondaryLine,
-          tertiaryLine,
-        });
-      }
-    }
-    return cards;
-  }, [
-    formatCodexUsageLine,
-    formatCopilotRequestLine,
-    normalizeTokenTagLabel,
-    tokenStatsProviders,
-  ]);
+  const tokenStatCards = useMemo(
+    (): TokenStatCardView[] => buildTokenStatCards(tokenStatsProviders),
+    [tokenStatsProviders],
+  );
 
   const refreshTokenStats = useCallback(async () => {
     setTokenStatsLoading(true);
@@ -6890,9 +6797,11 @@ function App() {
                         <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
                           {card.agentTag}
                         </span>
-                        <span className={`token-stats-pill ${tokenTagVariantClass('hub', card.hubTag)}`}>
-                          {card.hubTag}
-                        </span>
+                        {card.hubTags.map(hubTag => (
+                          <span key={hubTag} className={`token-stats-pill ${tokenTagVariantClass('hub', hubTag)}`}>
+                            {hubTag}
+                          </span>
+                        ))}
                       </div>
                       <div className="token-stats-card-line token-stats-card-line-primary">
                         <span className="token-stats-account-name">{card.accountName}</span>
@@ -7626,9 +7535,11 @@ function App() {
               <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
                 {card.agentTag}
               </span>
-              <span className={`token-stats-pill ${tokenTagVariantClass('hub', card.hubTag)}`}>
-                {card.hubTag}
-              </span>
+              {card.hubTags.map(hubTag => (
+                <span key={hubTag} className={`token-stats-pill ${tokenTagVariantClass('hub', hubTag)}`}>
+                  {hubTag}
+                </span>
+              ))}
             </div>
             <div className="token-stats-card-line token-stats-card-line-primary">
               <span className="token-stats-account-name">{card.accountName}</span>
