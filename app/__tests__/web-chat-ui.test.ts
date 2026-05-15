@@ -627,9 +627,11 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.wide-session-agent-0 {');
     expect(stylesCss).toContain('.wide-session-time {');
     expect(stylesCss).toContain('.wide-project-action-popover {');
-    expect(stylesCss).toMatch(
-      /\.wide-session-row \{[\s\S]*min-height: 28px;[\s\S]*\}/,
-    );
+    expect(stylesCss).toMatch(/\.wide-project-row \{[^}]*min-height: 32px;[^}]*\}/);
+    expect(stylesCss).toMatch(/\.wide-project-toggle \{[^}]*height: 30px;[^}]*\}/);
+    expect(stylesCss).toMatch(/\.wide-session-row \{[^}]*min-height: 26px;[^}]*\}/);
+    expect(stylesCss).toMatch(/\.mobile-session-row \{[^}]*min-height: 30px;[^}]*\}/);
+    expect(stylesCss).toContain('font-size: 10.5px;');
     const selectedSessionRowBlock = stylesCss.match(/\.wide-session-row\.selected \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(selectedSessionRowBlock).toContain('background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));');
     expect(selectedSessionRowBlock).not.toContain('box-shadow: inset 3px 0 0 var(--accent);');

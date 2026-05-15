@@ -1438,13 +1438,13 @@ body,
 }
 
 .wide-project-session-nav {
-  padding: 10px 7px 18px;
+  padding: 8px 7px 16px;
   overflow: auto;
 }
 
 .wide-project-section {
   position: relative;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .wide-project-section.active .wide-project-row {
@@ -1456,10 +1456,10 @@ body,
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 6px;
-  border-radius: 8px;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 5px;
+  border-radius: 7px;
 }
 
 .wide-project-row:hover {
@@ -1468,14 +1468,14 @@ body,
 
 .wide-project-toggle {
   min-width: 0;
-  height: 32px;
+  height: 30px;
   border: none;
   background: transparent;
   color: var(--text);
   display: grid;
-  grid-template-columns: 17px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr);
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 0;
   text-align: left;
   cursor: pointer;
@@ -1485,8 +1485,8 @@ body,
 
 .wide-project-folder-wrap {
   position: relative;
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1495,7 +1495,7 @@ body,
 .wide-project-folder-icon {
   --hub-accent: var(--accent);
   color: color-mix(in srgb, var(--text) 62%, var(--hub-accent));
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .wide-project-pin-badge {
@@ -1513,7 +1513,7 @@ body,
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 
 .wide-project-name {
@@ -1521,7 +1521,7 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
 }
 
@@ -1534,19 +1534,19 @@ body,
   color: var(--muted);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   padding: 0;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 600;
   text-transform: uppercase;
 }
 
 .wide-project-hub-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   background: var(--hub-accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--hub-accent) 14%, transparent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--hub-accent) 14%, transparent);
 }
 
 .wide-project-hub-label {
@@ -1568,7 +1568,7 @@ body,
 .wide-project-actions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   opacity: 0.36;
   transition: opacity 120ms ease;
 }
@@ -1579,10 +1579,10 @@ body,
 }
 
 .wide-project-action-btn {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--muted);
   display: inline-flex;
@@ -1598,7 +1598,7 @@ body,
 }
 
 .wide-project-session-list {
-  padding: 2px 0 4px 23px;
+  padding: 1px 0 3px 21px;
 }
 
 .project-session-row-wrap {
@@ -1609,7 +1609,7 @@ body,
 .wide-session-row {
   position: relative;
   width: 100%;
-  min-height: 28px;
+  min-height: 26px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -1617,8 +1617,8 @@ body,
   display: grid;
   grid-template-columns: 13px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 5px;
-  padding: 0 8px;
+  gap: 4px;
+  padding: 0 6px;
   cursor: pointer;
   text-align: left;
   user-select: none;
@@ -1637,7 +1637,7 @@ body,
 
 .session-state-marker {
   width: 13px;
-  height: 16px;
+  height: 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1647,12 +1647,12 @@ body,
 
 .session-state-marker.running {
   color: #68a8e8;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .session-state-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
   background: transparent;
 }
@@ -1686,9 +1686,9 @@ body,
 
 .project-session-action-strip {
   position: absolute;
-  top: 2px;
+  top: 1px;
   right: 2px;
-  bottom: 2px;
+  bottom: 1px;
   z-index: 3;
   display: inline-flex;
   align-items: center;
@@ -1701,8 +1701,8 @@ body,
 }
 
 .project-session-action-btn {
-  width: 25px;
-  height: 25px;
+  width: 23px;
+  height: 23px;
   border: none;
   border-radius: 5px;
   background: transparent;
@@ -1741,24 +1741,26 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12.5px;
   font-weight: 400;
+  line-height: 1.2;
 }
 
 .wide-session-agent-tag {
   --agent-accent: var(--accent);
-  max-width: 74px;
+  max-width: 68px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   border: 1px solid color-mix(in srgb, var(--agent-accent) 42%, transparent);
   border-radius: 999px;
-  padding: 1px 6px;
+  padding: 0 5px;
   color: color-mix(in srgb, var(--text) 72%, var(--agent-accent));
   background: color-mix(in srgb, var(--agent-accent) 12%, transparent);
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  line-height: 1.35;
+  line-height: 1.25;
   text-transform: uppercase;
 }
 
@@ -1773,7 +1775,9 @@ body,
 
 .wide-session-time {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
+  min-width: 22px;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -1781,13 +1785,13 @@ body,
 .wide-project-empty,
 .wide-project-action-empty {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .wide-project-show-more {
   border: none;
   background: transparent;
-  padding: 7px 9px;
+  padding: 5px 7px;
   cursor: pointer;
   text-align: left;
 }
@@ -1797,12 +1801,12 @@ body,
 }
 
 .wide-project-empty {
-  padding: 7px 9px;
+  padding: 5px 7px;
 }
 
 .wide-project-action-popover {
   position: absolute;
-  top: 34px;
+  top: 32px;
   right: 4px;
   width: min(260px, 78vw);
   z-index: 35;
@@ -1920,19 +1924,19 @@ body,
 }
 
 .mobile-project-action-panel {
-  margin: 2px 7px 8px 23px;
+  margin: 2px 7px 6px 21px;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel-2) 74%, transparent);
-  padding: 5px;
+  padding: 4px;
 }
 
 .mobile-project-session-list {
-  padding-left: 23px;
+  padding-left: 21px;
 }
 
 .mobile-session-row {
-  min-height: 32px;
+  min-height: 30px;
 }
 
 .mobile-project-session-error {
