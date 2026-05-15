@@ -168,6 +168,7 @@ body,
 }
 
 .desktop-shell {
+  --desktop-side-surface: color-mix(in srgb, var(--panel) 62%, var(--panel-3));
   flex: 1;
   min-height: 0;
   display: flex;
@@ -185,7 +186,7 @@ body,
   width: 48px;
   min-height: 0;
   border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel-3) 86%, black 14%);
+  background: var(--desktop-side-surface);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -236,8 +237,8 @@ body,
   content: '';
   position: absolute;
   left: 0;
-  top: 9px;
-  bottom: 9px;
+  top: 5px;
+  bottom: 5px;
   width: 2px;
   border-radius: 0 2px 2px 0;
   background: var(--accent);
@@ -256,7 +257,7 @@ body,
 .desktop-activity-button.refresh-btn.has-update-badge::after {
   top: 7px;
   right: 10px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--panel-3) 86%, black 14%);
+  box-shadow: 0 0 0 2px var(--desktop-side-surface);
 }
 
 .header {
@@ -866,7 +867,7 @@ body,
   flex: 0 0 34px;
   min-height: 34px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
-  background: color-mix(in srgb, var(--panel) 92%, var(--panel-3));
+  background: var(--desktop-side-surface);
   display: flex;
   align-items: center;
   padding: 0 12px;
@@ -1338,7 +1339,7 @@ body,
   min-width: 220px;
   max-width: 40vw;
   border-right: 1px solid var(--border);
-  background: var(--panel);
+  background: var(--desktop-side-surface);
   display: flex;
   flex-direction: column;
   min-height: 0;

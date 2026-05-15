@@ -546,15 +546,28 @@ describe('web chat integration', () => {
     expect(activityBar).toContain("onClick={() => handleDesktopActivitySelect('git')}");
     expect(activityBar).toContain('onClick={handleDesktopSettingsSelect}');
     expect(activityBar).toContain('onClick={() => refreshProject().catch(() => undefined)}');
+    expect(activityBar.indexOf("title={reconnecting ? 'Reconnecting...' : 'Refresh project'}")).toBeLessThan(
+      activityBar.indexOf('title="Settings"'),
+    );
     expect(activityBar).not.toContain('className="project-wrap"');
     expect(activityBar).not.toContain('className="project-btn"');
     expect(activityBar).not.toContain('className="tabs"');
 
     expect(stylesCss).toContain('.wide-project-session-nav {');
+    expect(stylesCss).toContain('--desktop-side-surface: color-mix(in srgb, var(--panel) 62%, var(--panel-3));');
     expect(stylesCss).toContain('.desktop-activity-bar {');
     expect(stylesCss).toContain('.desktop-activity-button {');
     expect(stylesCss).toContain('.desktop-activity-button.active::before {');
     expect(stylesCss).toContain('.sidebar-title-row {');
+    expect(stylesCss).toMatch(
+      /\.desktop-activity-bar \{[\s\S]*background: var\(--desktop-side-surface\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.workspace-left \{[\s\S]*background: var\(--desktop-side-surface\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.desktop-activity-button\.active::before \{[\s\S]*top: 5px;[\s\S]*bottom: 5px;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.wide-project-row {');
     expect(stylesCss).toContain('.wide-project-folder-wrap {');
     expect(stylesCss).toContain('.wide-project-folder-icon {');

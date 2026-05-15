@@ -9524,15 +9524,6 @@ function App() {
       <div className="desktop-activity-secondary">
         <button
           type="button"
-          className={`desktop-activity-button${sidebarSettingsOpen ? ' active' : ''}`}
-          onClick={handleDesktopSettingsSelect}
-          title="Settings"
-          aria-label="Settings"
-        >
-          <span className="codicon codicon-settings-gear" />
-        </button>
-        <button
-          type="button"
           className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}
           onClick={() => refreshProject().catch(() => undefined)}
           title={reconnecting ? 'Reconnecting...' : 'Refresh project'}
@@ -9544,6 +9535,15 @@ function App() {
           ) : (
             <span className="codicon codicon-refresh" />
           )}
+        </button>
+        <button
+          type="button"
+          className={`desktop-activity-button${sidebarSettingsOpen ? ' active' : ''}`}
+          onClick={handleDesktopSettingsSelect}
+          title="Settings"
+          aria-label="Settings"
+        >
+          <span className="codicon codicon-settings-gear" />
         </button>
       </div>
     </nav>
