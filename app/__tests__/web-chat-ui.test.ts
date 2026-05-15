@@ -47,7 +47,7 @@ describe('web chat integration', () => {
     expect(repositoryTs).toContain('async createSession(projectId: string, agentType: string, title?: string)');
     expect(repositoryTs).toContain('payload: title?.trim() ? {agentType, title: title.trim()} : {agentType}');
     expect(repositoryTs).toContain("method: 'session.send'");
-    expect(repositoryTs).not.toContain("method: 'session.markRead'");
+    expect(repositoryTs).toContain("method: 'session.markRead'");
     expect(repositoryTs).not.toContain('turnId = typeof input.turnId');
     expect(repositoryTs).not.toContain("method: 'chat.permission.respond'");
     expect(workspaceServiceTs).toContain('async listSessions(');
@@ -55,7 +55,8 @@ describe('web chat integration', () => {
     expect(workspaceServiceTs).toContain('async createSession(');
     expect(workspaceServiceTs).toContain('async createSession(agentType: string, title?: string)');
     expect(workspaceServiceTs).toContain('async sendSessionMessage(');
-    expect(workspaceServiceTs).not.toContain('async markSessionRead(');
+    expect(workspaceServiceTs).toContain('async markSessionRead(');
+    expect(workspaceServiceTs).toContain('async markProjectSessionRead(');
     expect(workspaceServiceTs).not.toContain('async respondToSessionPermission(');
     expect(workspaceServiceTs).toContain('private eventListeners = new Set');
     expect(workspaceServiceTs).toContain('private closeListeners = new Set');
@@ -66,7 +67,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('session.message');
     expect(mainTsx).toContain('return { sessionId, turnIndex, method, param, finished };');
     expect(mainTsx).not.toContain('updateIndex');
-    expect(mainTsx).not.toContain('await service.markSessionRead(');
+    expect(mainTsx).toContain('service.markProjectSessionRead(activeProjectId, sessionId, cursor)');
     expect(mainTsx).toContain('chatSyncIndexRef');
     expect(mainTsx).not.toContain('chatPromptSnapshotVersion');
     expect(mainTsx).toContain('nextSessions.some(session => session.sessionId === currentSelection)');
@@ -263,7 +264,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('needsPromptTurnRefresh(');
     expect(mainTsx).toContain('refreshSessionTurns(');
     expect(mainTsx).not.toContain('if (shouldRefreshCompletedPrompt && isSelectedSession) {\n          loadChatSession(sessionId, projectIdRef.current, {\n            forceFull: true,');
-    expect(mainTsx).toContain('if (payload.session?.sessionId === chatSelectedIdRef.current) {');
+    expect(mainTsx).toContain("payload.session?.sessionId === chatSelectedIdRef.current");
     expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
     expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');

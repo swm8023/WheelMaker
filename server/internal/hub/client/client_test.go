@@ -2443,6 +2443,19 @@ func lastPublishedEvent(t *testing.T, published []publishedSessionEvent, method 
 	return nil
 }
 
+func sessionSummaryMap(t *testing.T, summary any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(summary)
+	if err != nil {
+		t.Fatalf("marshal session summary: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("unmarshal session summary: %v", err)
+	}
+	return out
+}
+
 func writeClaudeSessionFixture(t *testing.T, homeDir, projectDirName, sessionID, cwd, title, assistant string) {
 	t.Helper()
 	projectDir := filepath.Join(homeDir, ".claude", "projects", projectDirName)
@@ -3999,6 +4012,110 @@ func TestSessionRecorderPromptTimingUpdatesSessionSummaryAndDuration(t *testing.
 	}
 }
 
+func TestSessionSummaryExposesRunningDoneAndReadState(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Status")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt started: %v", err)
+	}
+
+	runningSessions, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("list running sessions: %v", err)
+	}
+	if len(runningSessions) != 1 {
+		t.Fatalf("running sessions len = %d, want 1", len(runningSessions))
+	}
+	runningSummary := sessionSummaryMap(t, runningSessions[0])
+	if got := runningSummary["running"]; got != true {
+		t.Fatalf("running summary running = %#v, want true", got)
+	}
+	if got := runningSummary["lastDoneTurnIndex"]; got != float64(0) {
+		t.Fatalf("running summary lastDoneTurnIndex = %#v, want 0", got)
+	}
+	if got := runningSummary["lastReadTurnIndex"]; got != float64(0) {
+		t.Fatalf("running summary lastReadTurnIndex = %#v, want 0", got)
+	}
+
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "failed")); err != nil {
+		t.Fatalf("RecordEvent prompt failed: %v", err)
+	}
+
+	doneSessions, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("list done sessions: %v", err)
+	}
+	doneSummary := sessionSummaryMap(t, doneSessions[0])
+	if got := doneSummary["running"]; got != false {
+		t.Fatalf("done summary running = %#v, want false", got)
+	}
+	if got := doneSummary["lastDoneTurnIndex"]; got != float64(2) {
+		t.Fatalf("done summary lastDoneTurnIndex = %#v, want 2", got)
+	}
+	if got := doneSummary["lastDoneSuccess"]; got != false {
+		t.Fatalf("done summary lastDoneSuccess = %#v, want false", got)
+	}
+	if got := doneSummary["lastReadTurnIndex"]; got != float64(0) {
+		t.Fatalf("done summary lastReadTurnIndex = %#v, want 0", got)
+	}
+}
+
+func TestHandleSessionRequestMarkReadPersistsReadCursor(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	ctx := context.Background()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Read Cursor")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "run", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "end_turn")); err != nil {
+		t.Fatalf("RecordEvent finished: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.markRead", "proj1", []byte(`{"sessionId":"sess-1","lastReadTurnIndex":2}`))
+	if err != nil {
+		t.Fatalf("session.markRead: %v", err)
+	}
+	body := resp.(map[string]any)
+	if got := body["ok"]; got != true {
+		t.Fatalf("session.markRead ok = %#v, want true", got)
+	}
+	session := sessionSummaryMap(t, body["session"])
+	if got := session["lastReadTurnIndex"]; got != float64(2) {
+		t.Fatalf("marked summary lastReadTurnIndex = %#v, want 2", got)
+	}
+
+	if _, err := c.HandleSessionRequest(ctx, "session.markRead", "proj1", []byte(`{"sessionId":"sess-1","lastReadTurnIndex":1}`)); err != nil {
+		t.Fatalf("session.markRead lower cursor: %v", err)
+	}
+	sessions, err := c.listSessionViews(ctx)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	summary := sessionSummaryMap(t, sessions[0])
+	if got := summary["lastReadTurnIndex"]; got != float64(2) {
+		t.Fatalf("summary lastReadTurnIndex after lower mark = %#v, want 2", got)
+	}
+
+	rec, err := c.store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	var projection map[string]any
+	if err := json.Unmarshal([]byte(rec.SessionSyncJSON), &projection); err != nil {
+		t.Fatalf("unmarshal projection: %v", err)
+	}
+	if got := projection["lastReadTurnIndex"]; got != float64(2) {
+		t.Fatalf("projection lastReadTurnIndex = %#v, want 2", got)
+	}
+}
+
 func TestSessionRecorderPromptFinishWithoutLiveStateSeedsPromptTimes(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
@@ -4840,11 +4957,11 @@ func TestSessionReadDerivesRoleAndKindFromACPUpdateTypes(t *testing.T) {
 		t.Fatalf("missing tool call update, messages=%+v", messages)
 	}
 }
-func TestHandleSessionRequestMarkReadIsUnsupported(t *testing.T) {
+func TestHandleSessionRequestMarkReadRequiresSessionID(t *testing.T) {
 	c := newSessionViewTestClient(t)
-	_, err := c.HandleSessionRequest(context.Background(), "session.markRead", "proj1", []byte(`{"sessionId":"sess-1"}`))
+	_, err := c.HandleSessionRequest(context.Background(), "session.markRead", "proj1", []byte(`{"lastReadTurnIndex":1}`))
 	if err == nil {
-		t.Fatalf("expected session.markRead to be unsupported")
+		t.Fatalf("expected session.markRead to require sessionId")
 	}
 }
 

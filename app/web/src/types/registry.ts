@@ -66,6 +66,10 @@ export interface RegistrySessionSummary {
   unreadCount?: number;
   agentType?: string;
   latestTurnIndex?: number;
+  running?: boolean;
+  lastDoneTurnIndex?: number;
+  lastDoneSuccess?: boolean;
+  lastReadTurnIndex?: number;
   configOptions?: RegistrySessionConfigOption[];
   commands?: RegistrySessionCommand[];
 }

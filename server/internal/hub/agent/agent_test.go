@@ -30,6 +30,15 @@ func TestFormatACPLogLine_MinimalShape(t *testing.T) {
 	}
 }
 
+func TestCodexAppStopReasonPreservesFailedPromptStatus(t *testing.T) {
+	if got := codexappStopReason("failed"); got != protocol.StopReasonFailed {
+		t.Fatalf("codexappStopReason(failed) = %q, want %q", got, protocol.StopReasonFailed)
+	}
+	if got := codexappStopReason("error"); got != protocol.StopReasonFailed {
+		t.Fatalf("codexappStopReason(error) = %q, want %q", got, protocol.StopReasonFailed)
+	}
+}
+
 func TestRedactACPPayload_JSONKeys(t *testing.T) {
 	raw := []byte(`{"authorization":"Bearer X","nested":{"token":"abc","password":"p"}}`)
 	redacted := redactACPPayload(raw)

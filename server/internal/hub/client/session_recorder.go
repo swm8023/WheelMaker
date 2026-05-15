@@ -35,16 +35,23 @@ type SessionViewSink interface {
 }
 
 type sessionViewSummary struct {
-	SessionID       string             `json:"sessionId"`
-	Title           string             `json:"title"`
-	UpdatedAt       string             `json:"updatedAt"`
-	AgentType       string             `json:"agentType,omitempty"`
-	LatestTurnIndex int64              `json:"latestTurnIndex"`
-	ConfigOptions   []acp.ConfigOption `json:"configOptions,omitempty"`
+	SessionID         string             `json:"sessionId"`
+	Title             string             `json:"title"`
+	UpdatedAt         string             `json:"updatedAt"`
+	AgentType         string             `json:"agentType,omitempty"`
+	LatestTurnIndex   int64              `json:"latestTurnIndex"`
+	Running           bool               `json:"running"`
+	LastDoneTurnIndex int64              `json:"lastDoneTurnIndex"`
+	LastDoneSuccess   bool               `json:"lastDoneSuccess"`
+	LastReadTurnIndex int64              `json:"lastReadTurnIndex"`
+	ConfigOptions     []acp.ConfigOption `json:"configOptions,omitempty"`
 }
 
 type sessionSyncProjection struct {
 	LatestPersistedTurnIndex int64 `json:"latestPersistedTurnIndex"`
+	LastDoneTurnIndex        int64 `json:"lastDoneTurnIndex,omitempty"`
+	LastDoneSuccess          *bool `json:"lastDoneSuccess,omitempty"`
+	LastReadTurnIndex        int64 `json:"lastReadTurnIndex,omitempty"`
 }
 
 type sessionTurnMessage struct {
@@ -317,6 +324,38 @@ func (r *SessionRecorder) ReadSessionTurns(ctx context.Context, sessionID string
 	return latestTurnIndex, turns, nil
 }
 
+func (r *SessionRecorder) MarkSessionRead(ctx context.Context, sessionID string, lastReadTurnIndex int64) (sessionViewSummary, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return sessionViewSummary{}, fmt.Errorf("sessionId is required")
+	}
+	if lastReadTurnIndex < 0 {
+		lastReadTurnIndex = 0
+	}
+	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
+	if err != nil {
+		return sessionViewSummary{}, err
+	}
+	if rec == nil {
+		return sessionViewSummary{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	if projection.LastDoneTurnIndex > 0 && lastReadTurnIndex > projection.LastDoneTurnIndex {
+		lastReadTurnIndex = projection.LastDoneTurnIndex
+	}
+	if lastReadTurnIndex > projection.LastReadTurnIndex {
+		projection.LastReadTurnIndex = lastReadTurnIndex
+		rec.SessionSyncJSON = sessionSyncProjectionJSON(projection)
+		if err := r.store.SaveSession(ctx, rec); err != nil {
+			return sessionViewSummary{}, err
+		}
+		summary := r.sessionViewSummaryFromRecord(*rec)
+		r.publishSessionUpdated(summary)
+		return summary, nil
+	}
+	return r.sessionViewSummaryFromRecord(*rec), nil
+}
+
 func (r *SessionRecorder) handlePromptStartedLocked(ctx context.Context, event parsedSessionViewEvent) error {
 	rawEvent := event.raw
 	request, ok := event.payload.(acp.IMPromptRequest)
@@ -546,13 +585,16 @@ func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessio
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromRecordLocked(rec SessionRecord) sessionViewSummary {
-	latestTurnIndex := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	latestTurnIndex := projection.LatestPersistedTurnIndex
+	running := false
 	if state := r.promptState[rec.ID]; state != nil {
 		for _, turn := range state.turns {
 			if turn.turnIndex > latestTurnIndex {
 				latestTurnIndex = turn.turnIndex
 			}
 		}
+		running = !sessionPromptStateTerminal(state)
 	}
 	for _, turn := range r.finishedTurns[rec.ID] {
 		if turn.TurnIndex > latestTurnIndex {
@@ -565,6 +607,10 @@ func (r *SessionRecorder) sessionViewSummaryFromRecordLocked(rec SessionRecord) 
 		rec.LastActiveAt,
 		rec.AgentType,
 		latestTurnIndex,
+		running,
+		projection.LastDoneTurnIndex,
+		projection.LastDoneSuccess != nil && *projection.LastDoneSuccess,
+		projection.LastReadTurnIndex,
 	)
 }
 
@@ -576,13 +622,26 @@ func (r *SessionRecorder) publishSessionUpdated(summary sessionViewSummary) {
 	_ = publish("registry.session.updated", map[string]any{"session": summary})
 }
 
-func buildSessionViewSummary(sessionID, title string, lastActiveAt time.Time, agentType string, latestTurnIndex int64) sessionViewSummary {
+func buildSessionViewSummary(
+	sessionID, title string,
+	lastActiveAt time.Time,
+	agentType string,
+	latestTurnIndex int64,
+	running bool,
+	lastDoneTurnIndex int64,
+	lastDoneSuccess bool,
+	lastReadTurnIndex int64,
+) sessionViewSummary {
 	return sessionViewSummary{
-		SessionID:       strings.TrimSpace(sessionID),
-		Title:           strings.TrimSpace(title),
-		UpdatedAt:       lastActiveAt.UTC().Format(time.RFC3339),
-		AgentType:       strings.TrimSpace(agentType),
-		LatestTurnIndex: maxInt64(0, latestTurnIndex),
+		SessionID:         strings.TrimSpace(sessionID),
+		Title:             strings.TrimSpace(title),
+		UpdatedAt:         lastActiveAt.UTC().Format(time.RFC3339),
+		AgentType:         strings.TrimSpace(agentType),
+		LatestTurnIndex:   maxInt64(0, latestTurnIndex),
+		Running:           running,
+		LastDoneTurnIndex: maxInt64(0, lastDoneTurnIndex),
+		LastDoneSuccess:   lastDoneSuccess,
+		LastReadTurnIndex: maxInt64(0, lastReadTurnIndex),
 	}
 }
 
@@ -602,6 +661,8 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 	contents := make([]string, 0, len(ordered))
 	startTurnIndex := int64(0)
 	latestTurnIndex := persistedLatest
+	lastDoneTurnIndex := int64(0)
+	lastDoneSuccess := false
 	for _, turn := range ordered {
 		if turn.turnIndex <= persistedLatest {
 			continue
@@ -611,6 +672,10 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 		}
 		contents = append(contents, buildIMContentJSON(turn.method, turn.payload))
 		latestTurnIndex = turn.turnIndex
+		if turn.method == acp.IMMethodPromptDone {
+			lastDoneTurnIndex = turn.turnIndex
+			lastDoneSuccess = sessionDoneTurnSuccess(turn)
+		}
 	}
 	if len(contents) == 0 {
 		return nil
@@ -634,7 +699,13 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 			})
 		}
 	}
-	rec.SessionSyncJSON = sessionSyncJSON(latestTurnIndex)
+	projection := sessionSyncProjectionFromJSON(rec.SessionSyncJSON)
+	projection.LatestPersistedTurnIndex = latestTurnIndex
+	if lastDoneTurnIndex > 0 {
+		projection.LastDoneTurnIndex = lastDoneTurnIndex
+		projection.LastDoneSuccess = boolPtr(lastDoneSuccess)
+	}
+	rec.SessionSyncJSON = sessionSyncProjectionJSON(projection)
 	rec.LastActiveAt = updatedAt
 	if err := r.store.SaveSession(ctx, rec); err != nil {
 		return err
@@ -643,14 +714,7 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 }
 
 func sessionSyncLatestPersistedTurnIndex(raw string) int64 {
-	var sync sessionSyncProjection
-	if err := json.Unmarshal([]byte(firstNonEmpty(strings.TrimSpace(raw), "{}")), &sync); err != nil {
-		return 0
-	}
-	if sync.LatestPersistedTurnIndex < 0 {
-		return 0
-	}
-	return sync.LatestPersistedTurnIndex
+	return sessionSyncProjectionFromJSON(raw).LatestPersistedTurnIndex
 }
 
 func sessionSyncJSON(latestPersistedTurnIndex int64) string {
@@ -662,6 +726,48 @@ func sessionSyncJSON(latestPersistedTurnIndex int64) string {
 		return "{}"
 	}
 	return string(raw)
+}
+
+func sessionSyncProjectionFromJSON(raw string) sessionSyncProjection {
+	var sync sessionSyncProjection
+	if err := json.Unmarshal([]byte(firstNonEmpty(strings.TrimSpace(raw), "{}")), &sync); err != nil {
+		return sessionSyncProjection{}
+	}
+	return normalizeSessionSyncProjection(sync)
+}
+
+func normalizeSessionSyncProjection(sync sessionSyncProjection) sessionSyncProjection {
+	if sync.LatestPersistedTurnIndex < 0 {
+		sync.LatestPersistedTurnIndex = 0
+	}
+	if sync.LastDoneTurnIndex < 0 {
+		sync.LastDoneTurnIndex = 0
+	}
+	if sync.LastReadTurnIndex < 0 {
+		sync.LastReadTurnIndex = 0
+	}
+	return sync
+}
+
+func sessionSyncProjectionJSON(sync sessionSyncProjection) string {
+	sync = normalizeSessionSyncProjection(sync)
+	raw, err := json.Marshal(sync)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func sessionDoneTurnSuccess(turn sessionTurnMessage) bool {
+	result, ok := turn.payload.(acp.IMPromptResult)
+	if !ok {
+		return true
+	}
+	return strings.TrimSpace(result.StopReason) != acp.StopReasonFailed
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func sortedSessionTurns(turns []sessionTurnMessage) []sessionTurnMessage {

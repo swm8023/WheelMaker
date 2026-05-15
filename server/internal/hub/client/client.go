@@ -528,6 +528,19 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		return map[string]any{"latestTurnIndex": latestTurnIndex, "turns": turns}, nil
+	case "session.markRead":
+		var req struct {
+			SessionID         string `json:"sessionId"`
+			LastReadTurnIndex int64  `json:"lastReadTurnIndex,omitempty"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.markRead payload: %w", err)
+		}
+		summary, err := c.sessionRecorder.MarkSessionRead(ctx, req.SessionID, req.LastReadTurnIndex)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "session": summary}, nil
 	case "session.new":
 		var req struct {
 			AgentType string `json:"agentType"`
@@ -1342,6 +1355,9 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 		}
 		if strings.TrimSpace(storedEntry.Title) != "" {
 			entries[i].Title = storedEntry.Title
+		}
+		if strings.TrimSpace(storedEntry.SessionSyncJSON) != "" {
+			entries[i].SessionSyncJSON = storedEntry.SessionSyncJSON
 		}
 		if !storedEntry.LastActiveAt.IsZero() {
 			entries[i].LastActiveAt = storedEntry.LastActiveAt

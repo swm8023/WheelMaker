@@ -888,6 +888,8 @@ func codexappStopReason(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "cancelled", "canceled", "interrupted":
 		return protocol.StopReasonCancelled
+	case "failed", "error":
+		return protocol.StopReasonFailed
 	case "max_tokens":
 		return protocol.StopReasonMaxTokens
 	default:

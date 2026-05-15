@@ -29,6 +29,10 @@ import {
   shouldRequestSessionReadForIncomingTurn,
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
+import {
+  getChatSessionVisualState,
+  type ChatSessionVisualState,
+} from './chatSessionState';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -420,6 +424,11 @@ function mergeChatSession(
     messageCount: next.messageCount ?? existing?.messageCount ?? 0,
     unreadCount: next.unreadCount ?? existing?.unreadCount,
     agentType: next.agentType ?? existing?.agentType,
+    latestTurnIndex: next.latestTurnIndex ?? existing?.latestTurnIndex,
+    running: next.running ?? existing?.running,
+    lastDoneTurnIndex: next.lastDoneTurnIndex ?? existing?.lastDoneTurnIndex,
+    lastDoneSuccess: next.lastDoneSuccess ?? existing?.lastDoneSuccess,
+    lastReadTurnIndex: next.lastReadTurnIndex ?? existing?.lastReadTurnIndex,
     configOptions:
       next.configOptions ??
       (existing?.configOptions
@@ -433,6 +442,20 @@ function mergeChatSession(
   };
   const filtered = list.filter(item => item.sessionId !== next.sessionId);
   return sortChatSessions([merged, ...filtered]);
+}
+
+function mergeProjectSessionMap(
+  map: Record<string, RegistryChatSession[]>,
+  projectId: string,
+  session: Partial<RegistryChatSession> & {sessionId: string},
+): Record<string, RegistryChatSession[]> {
+  if (!projectId || !session.sessionId) {
+    return map;
+  }
+  return {
+    ...map,
+    [projectId]: mergeChatSession(map[projectId] ?? [], session),
+  };
 }
 
 function addSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFlagMap {
@@ -4755,6 +4778,75 @@ function App() {
     }
   };
 
+  const rememberChatSessionSummary = (
+    activeProjectId: string,
+    session: Partial<RegistryChatSession> & {sessionId: string},
+  ) => {
+    if (!activeProjectId || !session.sessionId) return;
+    setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, activeProjectId, session));
+    if (activeProjectId === projectIdRef.current) {
+      setChatSessions(prev => mergeChatSession(prev, session));
+    }
+  };
+
+  const markChatSessionRead = async (
+    activeProjectId: string,
+    sessionId: string,
+    lastReadTurnIndex: number,
+  ) => {
+    const cursor = Math.max(0, Math.trunc(lastReadTurnIndex));
+    if (!activeProjectId || !sessionId || cursor <= 0) return;
+    try {
+      const result = await service.markProjectSessionRead(activeProjectId, sessionId, cursor);
+      if (!result.ok) return;
+      const sessionPatch = result.session ?? {sessionId, lastReadTurnIndex: cursor};
+      rememberChatSessionSummary(activeProjectId, sessionPatch);
+      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+      if (result.session) {
+        workspaceStore.rememberChatSession(activeProjectId, result.session, {
+          turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+        });
+      }
+    } catch {
+      // The next session.list/session.updated response will reconcile read state.
+    }
+  };
+
+  const resolveSessionVisualState = (session: RegistryChatSession): ChatSessionVisualState => {
+    const state = getChatSessionVisualState(session);
+    if (state !== 'idle') {
+      return state;
+    }
+    if (chatRunningSessionFlags[session.sessionId]) {
+      return 'running';
+    }
+    if (chatCompletedUnopenedFlags[session.sessionId]) {
+      return 'completed-unviewed';
+    }
+    return 'idle';
+  };
+
+  const renderSessionStateMarker = (session: RegistryChatSession) => {
+    const state = resolveSessionVisualState(session);
+    const title =
+      state === 'running'
+        ? 'In progress'
+        : state === 'failed-unviewed'
+          ? 'Failed, click to view'
+          : state === 'completed-unviewed'
+            ? 'Completed, click to view'
+            : undefined;
+    return (
+      <span className={`session-state-marker ${state}`} title={title}>
+        {state === 'running' ? (
+          <span className="codicon codicon-loading codicon-modifier-spin" />
+        ) : state === 'completed-unviewed' || state === 'failed-unviewed' ? (
+          <span className="session-state-dot" />
+        ) : null}
+      </span>
+    );
+  };
+
   const clearProjectSessionCache = (
     targetProjectId: string,
     sessionId: string,
@@ -4851,6 +4943,17 @@ function App() {
       workspaceStore.rememberSelectedChatSession(activeProjectId, resultSessionId);
       setChatMessages(nextMessages);
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
+      const knownSession =
+        resultSession ??
+        projectSessionsByProjectId[activeProjectId]?.find(item => item.sessionId === resultSessionId) ??
+        chatSessions.find(item => item.sessionId === resultSessionId);
+      if ((knownSession?.lastDoneTurnIndex ?? 0) > (knownSession?.lastReadTurnIndex ?? 0)) {
+        markChatSessionRead(
+          activeProjectId,
+          resultSessionId,
+          knownSession?.lastDoneTurnIndex ?? 0,
+        ).catch(() => undefined);
+      }
       return true;
     } catch (err) {
       if (activeProjectId === projectIdRef.current) {
@@ -6424,18 +6527,24 @@ function App() {
         }
       }
       if (event.method === 'session.updated') {
-        if (eventProjectId && eventProjectId !== projectIdRef.current) {
-          return;
-        }
         const payload = (event.payload ?? {}) as {
           session?: RegistryChatSession;
         };
         if (payload.session?.sessionId) {
-          setChatSessions(prev => mergeChatSession(prev, payload.session!));
-          workspaceStore.rememberChatSession(projectIdRef.current, payload.session, {
-            turnIndex: chatSyncSubIndexRef.current[payload.session.sessionId] ?? 0,
-          });
-          if (payload.session?.sessionId === chatSelectedIdRef.current) {
+          const targetProjectId = eventProjectId || projectIdRef.current;
+          if (targetProjectId) {
+            setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, targetProjectId, payload.session!));
+          }
+          if (!eventProjectId || eventProjectId === projectIdRef.current) {
+            setChatSessions(prev => mergeChatSession(prev, payload.session!));
+            workspaceStore.rememberChatSession(projectIdRef.current, payload.session, {
+              turnIndex: chatSyncSubIndexRef.current[payload.session.sessionId] ?? 0,
+            });
+          }
+          if (
+            (!eventProjectId || eventProjectId === projectIdRef.current) &&
+            payload.session?.sessionId === chatSelectedIdRef.current
+          ) {
             loadChatSession(payload.session.sessionId, projectIdRef.current, {
               incremental: true,
               preserveUserSelection: true,
@@ -6493,6 +6602,16 @@ function App() {
           }
         }
         const messageText = msgText(message.method, message.param);
+        const sessionStatePatch: Partial<RegistryChatSession> =
+          shouldRefreshCompletedPrompt
+            ? {
+                running: false,
+                lastDoneTurnIndex: message.turnIndex ?? 0,
+                lastDoneSuccess: messageText.trim() !== 'failed',
+              }
+            : messageState === 'streaming'
+              ? {running: true}
+              : {};
         let mergedSessionForCache: RegistryChatSession | undefined;
         setChatSessions(prev => {
           const existing = prev.find(item => item.sessionId === sessionId);
@@ -6503,10 +6622,17 @@ function App() {
             messageCount: existing?.messageCount ?? 0,
             unreadCount: existing?.unreadCount,
             agentType: existing?.agentType,
+            ...sessionStatePatch,
           });
           mergedSessionForCache = next.find(item => item.sessionId === sessionId);
           return next;
         });
+        if (Object.keys(sessionStatePatch).length > 0) {
+          setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, projectIdRef.current, {
+            sessionId,
+            ...sessionStatePatch,
+          }));
+        }
 
         maybeNotifyChatMessage(message);
 
@@ -6522,6 +6648,13 @@ function App() {
 
         if (sessionId === chatSelectedIdRef.current) {
           setChatMessages(merged);
+        }
+        if (shouldRefreshCompletedPrompt && isSelectedSession) {
+          markChatSessionRead(
+            projectIdRef.current,
+            sessionId,
+            message.turnIndex ?? 0,
+          ).catch(() => undefined);
         }
         if (
           shouldRefreshCompletedPrompt &&
@@ -7013,21 +7146,9 @@ function App() {
                       <span className="file-dot codicon codicon-comment-discussion" />
                       <span className="label chat-session-meta">
                         <span className="chat-session-title-row">
+                          {renderSessionStateMarker(session)}
                           <span className="chat-session-title">
                             {session.title || session.sessionId}
-                          </span>
-                          <span className="chat-session-indicators">
-                            {chatRunningSessionFlags[session.sessionId] ? (
-                              <span className="chat-session-running" title="In progress">
-                                <span className="codicon codicon-loading codicon-modifier-spin" />
-                              </span>
-                            ) : null}
-                            {!chatRunningSessionFlags[session.sessionId] && chatCompletedUnopenedFlags[session.sessionId] ? (
-                              <span
-                                className="chat-session-completed-hint"
-                                title="Completed, click to view"
-                              />
-                            ) : null}
                           </span>
                         </span>
                         <span className="chat-session-updated muted" title={session.updatedAt || ''}>
@@ -8066,6 +8187,7 @@ function App() {
                               ).catch(() => undefined);
                             }}
                           >
+                            {renderSessionStateMarker(session)}
                             <span className="wide-session-title">
                               {session.title || session.sessionId}
                             </span>
@@ -8341,6 +8463,7 @@ function App() {
                             ).catch(() => undefined);
                           }}
                         >
+                          {renderSessionStateMarker(session)}
                           <span className="wide-session-title">
                             {session.title || session.sessionId}
                           </span>

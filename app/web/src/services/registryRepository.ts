@@ -105,6 +105,14 @@ export class RegistryRepository {
       latestTurnIndex: typeof input.latestTurnIndex === 'number' && Number.isFinite(input.latestTurnIndex)
         ? Math.max(0, Math.trunc(input.latestTurnIndex))
         : undefined,
+      running: input.running === true,
+      lastDoneTurnIndex: typeof input.lastDoneTurnIndex === 'number' && Number.isFinite(input.lastDoneTurnIndex)
+        ? Math.max(0, Math.trunc(input.lastDoneTurnIndex))
+        : undefined,
+      lastDoneSuccess: typeof input.lastDoneSuccess === 'boolean' ? input.lastDoneSuccess : undefined,
+      lastReadTurnIndex: typeof input.lastReadTurnIndex === 'number' && Number.isFinite(input.lastReadTurnIndex)
+        ? Math.max(0, Math.trunc(input.lastReadTurnIndex))
+        : undefined,
       configOptions: Array.isArray(input.configOptions)
         ? input.configOptions
             .map(item => this.normalizeSessionConfigOption(item))
@@ -477,6 +485,30 @@ export class RegistryRepository {
 
   async readSession(projectId: string, sessionId: string, afterTurnIndex = 0): Promise<RegistrySessionReadResponse> {
     return this.readSessionByMethod(projectId, sessionId, afterTurnIndex, 'session.read');
+  }
+
+  async markSessionRead(
+    projectId: string,
+    sessionId: string,
+    lastReadTurnIndex: number,
+  ): Promise<{ok: boolean; session?: RegistrySessionSummary}> {
+    const cursor = Number.isFinite(lastReadTurnIndex)
+      ? Math.max(0, Math.trunc(lastReadTurnIndex))
+      : 0;
+    const resp = await this.client.request({
+      method: 'session.markRead',
+      projectId,
+      payload: {
+        sessionId,
+        lastReadTurnIndex: cursor,
+      },
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; session?: unknown};
+    return {
+      ok: body.ok ?? false,
+      session: this.normalizeSessionSummary(body.session) ?? undefined,
+    };
   }
 
   async createSession(projectId: string, agentType: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {

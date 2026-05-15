@@ -254,6 +254,24 @@ export class RegistryWorkspaceService {
     return this.repository.readSession(this.session.selectedProjectId, sessionId, afterTurnIndex);
   }
 
+  async markSessionRead(sessionId: string, lastReadTurnIndex: number): Promise<{ok: boolean; session?: RegistrySessionSummary}> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.markSessionRead(this.session.selectedProjectId, sessionId, lastReadTurnIndex);
+  }
+
+  async markProjectSessionRead(
+    projectId: string,
+    sessionId: string,
+    lastReadTurnIndex: number,
+  ): Promise<{ok: boolean; session?: RegistrySessionSummary}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.markSessionRead(projectId, sessionId, lastReadTurnIndex);
+  }
+
   async createSession(agentType: string, title?: string): Promise<{ok: boolean; session: RegistrySessionSummary}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');

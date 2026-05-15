@@ -1615,9 +1615,9 @@ body,
   background: transparent;
   color: color-mix(in srgb, var(--text) 76%, transparent);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: 13px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   padding: 0 8px;
   cursor: pointer;
   text-align: left;
@@ -1633,6 +1633,38 @@ body,
 .wide-session-row.selected {
   background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));
   color: var(--text);
+}
+
+.session-state-marker {
+  width: 13px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, var(--text) 38%, transparent);
+  flex: 0 0 13px;
+}
+
+.session-state-marker.running {
+  color: #68a8e8;
+  font-size: 12px;
+}
+
+.session-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.session-state-marker.completed-unviewed .session-state-dot {
+  background: #4fbf6b;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #4fbf6b 18%, transparent);
+}
+
+.session-state-marker.failed-unviewed .session-state-dot {
+  background: #f46d6d;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #f46d6d 18%, transparent);
 }
 
 .project-session-row-wrap.actions-open .wide-session-row::after {

@@ -87,19 +87,20 @@ const (
 	StopReasonMaxTurnRequests = "max_turn_requests"
 	StopReasonRefusal         = "refusal"
 	StopReasonCancelled       = "cancelled"
+	StopReasonFailed          = "failed"
 )
 
 // ACPProvider identifies a built-in ACP provider preset.
 type ACPProvider string
 
 const (
-	ACPProviderCodex       ACPProvider = "codex"
-	ACPProviderClaude      ACPProvider = "claude"
-	ACPProviderCopilot     ACPProvider = "copilot"
+	ACPProviderCodex     ACPProvider = "codex"
+	ACPProviderClaude    ACPProvider = "claude"
+	ACPProviderCopilot   ACPProvider = "copilot"
 	ACPProviderMyflicker ACPProvider = "myflicker"
-	ACPProviderOpenCode    ACPProvider = "opencode"
-	ACPProviderCodeBuddy   ACPProvider = "codebuddy"
-	ACPProviderCodexApp    ACPProvider = "codexapp"
+	ACPProviderOpenCode  ACPProvider = "opencode"
+	ACPProviderCodeBuddy ACPProvider = "codebuddy"
+	ACPProviderCodexApp  ACPProvider = "codexapp"
 )
 
 var acpProviders = []ACPProvider{ACPProviderCodex, ACPProviderClaude, ACPProviderCopilot, ACPProviderMyflicker, ACPProviderOpenCode, ACPProviderCodeBuddy, ACPProviderCodexApp}

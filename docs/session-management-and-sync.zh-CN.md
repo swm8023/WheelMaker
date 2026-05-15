@@ -12,13 +12,22 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 - `sessions.agent_type` / `sessions.agent_json`：agent 类型和运行态快照。
 - `sessions.title`：会话标题，通常由最新用户 prompt 更新；服务端和 app 不再用 session id 或消息内容合成 fallback 标题。
 - `sessions.created_at` / `sessions.updated_at`：创建时间和最后活动时间。`updated_at` 在 prompt start 和 prompt done 时都会更新，保存时不会被更旧的事件时间回退。
-- `sessions.session_sync_json`：同步投影，目前只保存：
+- `sessions.session_sync_json`：同步投影，保存服务端内部落盘进度和会话级 read/done cursor：
 
 ```json
-{"latestPersistedTurnIndex":132}
+{
+  "latestPersistedTurnIndex": 132,
+  "lastDoneTurnIndex": 132,
+  "lastDoneSuccess": true,
+  "lastReadTurnIndex": 128
+}
 ```
 
-`latestPersistedTurnIndex` 表示已经写入 turn 文件的最大 turn。服务端列 session 时会再叠加内存中的 live turn，得到返回给客户端的 `latestTurnIndex`。
+- `latestPersistedTurnIndex` 表示已经写入 turn 文件的最大 turn。它不直接暴露给 app/web。
+- `lastDoneTurnIndex` 表示最近一个 `prompt_done` turn。
+- `lastDoneSuccess` 由 `prompt_done.param.stopReason !== "failed"` 推导。
+- `lastReadTurnIndex` 表示该 session 已被任意客户端查看到的最大 done turn。当前没有 viewer 概念，因此是 session 级全局 read cursor。
+- 服务端列 session 时会再叠加内存中的 live turn，得到返回给客户端的 `latestTurnIndex`。
 
 ## 2. Turn 语义
 
@@ -112,6 +121,14 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 - 如果当前 session 有 live prompt state，再追加内存中 `turnIndex > afterTurnIndex` 且尚未持久化的 turns。
 - 返回内容按 `turnIndex` 升序排序。
 
+`session.markRead` 请求：
+
+```json
+{"sessionId":"sess-1","lastReadTurnIndex":132}
+```
+
+服务端把 `lastReadTurnIndex` 按 `max(old, incoming)` 写入 `session_sync_json`，并返回更新后的 session summary。客户端只在用户打开 session，或当前可见 session 收到 `prompt_done` 后调用；列表刷新和后台事件不能清 read cursor。
+
 `session.reload` 会清除该 session 的内存 turn state、删除该 session 的 turn 文件、把 `session_sync_json` 重置为 `latestPersistedTurnIndex=0`，然后从 agent replay 回灌。
 
 ## 5. App/Web 同步
@@ -133,6 +150,7 @@ type Cursor = { turnIndex: number };
 - 如果 incoming `turnIndex > cursor.turnIndex + 1`，说明漏收，客户端用当前 cursor 调 `session.read` 补读。
 - `session.read` 返回的 turns 会和等待期间收到的实时消息 reconcile，避免旧缓存覆盖新流式内容。
 - UI 可以按 `prompt_request` / `prompt_done` 临时分组展示对话，但这只是渲染派生状态，不参与协议和缓存 cursor。
+- UI 列表状态只看 session summary：`running=true` 显示进行中；否则当 `lastDoneTurnIndex > lastReadTurnIndex` 时，`lastDoneSuccess=false` 显示失败未查看，其他情况显示完成未查看。
 
 打开项目、切换 tab、切换 session 时，补读流程异步执行，不阻塞 UI 交互。
 
