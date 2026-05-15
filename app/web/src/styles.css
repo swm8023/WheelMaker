@@ -3489,6 +3489,45 @@ body,
   white-space: nowrap;
 }
 
+.chat-prompt-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.chat-prompt-action-button {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.chat-prompt-action-button .codicon {
+  font-size: 13px;
+}
+
+.chat-prompt-action-button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.chat-prompt-action-button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.chat-prompt-action-button:disabled:hover {
+  color: var(--muted);
+  background: transparent;
+}
+
 .chat-composer {
   --chat-composer-frame-top: 12px;
   --chat-composer-fade-distance: 28px;

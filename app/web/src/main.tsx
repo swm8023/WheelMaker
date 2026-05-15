@@ -67,6 +67,7 @@ import {
   type WorkspaceUiStateValue,
 } from './services/workspaceUiState';
 import type { PersistedFloatingControlSlot } from './services/workspacePersistence';
+import { buildPromptAgentMarkdown } from './chatPromptCopy';
 import type {
   RegistryChatContentBlock,
   RegistryChatMessage,
@@ -855,6 +856,26 @@ function groupImageBlocks(msgs: RegistryChatMessage[]): RegistrySessionContentBl
   return blocks;
 }
 
+async function writeTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', 'true');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
   group,
   showSendingPending,
@@ -869,6 +890,16 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
     .trim();
   const imageBlocks = groupImageBlocks(group.userMessages);
   const hasPromptContent = group.userMessages.length > 0 || imageBlocks.length > 0;
+  const hasCopyableAgentMessage = group.entries.some(
+    entry => entry.kind === 'message' && entry.text.trim(),
+  );
+  const copyPromptAgentMarkdown = async () => {
+    const markdown = buildPromptAgentMarkdown(group.entries);
+    if (!markdown) {
+      return;
+    }
+    await writeTextToClipboard(markdown);
+  };
   const promptStatus = (() => {
     if (!hasPromptContent) {
       return null as 'sent' | 'responding' | 'done' | null;
@@ -995,6 +1026,20 @@ const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
             By {group.modelName || 'unknown'}
             {group.durationMs > 0 ? ` · ${formatPromptDurationMs(group.durationMs)}` : ''}
           </span>
+          <div className="chat-prompt-actions" aria-label="Prompt actions">
+            <button
+              type="button"
+              className="chat-prompt-action-button"
+              onClick={() => {
+                copyPromptAgentMarkdown().catch(() => undefined);
+              }}
+              disabled={!hasCopyableAgentMessage}
+              title="Copy response"
+              aria-label="Copy response markdown"
+            >
+              <span className="codicon codicon-copy" />
+            </button>
+          </div>
         </div>
       ) : null}
     </div>

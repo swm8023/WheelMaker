@@ -168,6 +168,14 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('className="status-bar"');
     expect(mainTsx).not.toContain('gitStatusSummary');
     expect(mainTsx).not.toContain('chat-thought-label');
+    expect(mainTsx).toContain("import { buildPromptAgentMarkdown } from './chatPromptCopy';");
+    expect(mainTsx).toContain('const markdown = buildPromptAgentMarkdown(group.entries);');
+    expect(mainTsx).toContain('className="chat-prompt-actions"');
+    expect(mainTsx).toContain('className="chat-prompt-action-button"');
+    expect(mainTsx).toContain('aria-label="Copy response markdown"');
+    expect(mainTsx).toContain('codicon codicon-copy');
+    expect(stylesCss).toContain('.chat-prompt-actions {');
+    expect(stylesCss).toContain('.chat-prompt-action-button {');
     expect(mainTsx).toContain('const [hasPendingProjectUpdates, setHasPendingProjectUpdates] = useState(false);');
     expect(mainTsx).toContain('if (!eventProjectId || eventProjectId === projectIdRef.current) {');
     expect(mainTsx).toContain('setHasPendingProjectUpdates(true);');
