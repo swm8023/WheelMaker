@@ -301,7 +301,13 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('-webkit-tap-highlight-color: transparent;');
     expect(stylesCss).toContain('.breadcrumb-title {');
     expect(stylesCss).toContain('.breadcrumb-project-name {');
-    expect(stylesCss).toContain('max-width: min(42%, 160px);');
+    expect(stylesCss).not.toContain('max-width: min(42%, 160px);');
+    expect(stylesCss).toMatch(
+      /\.breadcrumb-project-name \{[\s\S]*flex: 0 0 auto;[\s\S]*max-width: none;[\s\S]*background: color-mix\(in srgb, var\(--accent\) 18%, transparent\);[\s\S]*box-shadow: inset 3px 0 0 var\(--accent\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.breadcrumb-current \{[\s\S]*min-width: 0;[\s\S]*overflow: hidden;[\s\S]*text-overflow: ellipsis;[\s\S]*\}/,
+    );
     expect(mainTsx).toContain('chatAttachments.map(attachment => (');
     expect(mainTsx).toContain('onClick={() => removeChatAttachment(attachment.id)}');
     expect(mainTsx).toContain('disabled={chatSending || chatAttachmentReadPending}');
