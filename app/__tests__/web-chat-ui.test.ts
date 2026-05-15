@@ -370,7 +370,7 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-frame {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-frame \{[\s\S]*gap: 6px;[\s\S]*padding: 6px;[\s\S]*\}/,
+      /\.chat-composer-frame \{[\s\S]*gap: 2px;[\s\S]*padding: 5px 6px 4px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toMatch(
@@ -378,12 +378,15 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 32px;[\s\S]*\}/,
+      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 28px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-composer-input \{[\s\S]*min-height: 32px;[\s\S]*padding: 4px 0;[\s\S]*\}/,
+      /\.chat-composer-input \{[\s\S]*min-height: 28px;[\s\S]*padding: 2px 0;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-toolbar {');
+    expect(stylesCss).toMatch(
+      /\.chat-composer-toolbar \{[\s\S]*min-height: 28px;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-composer-tools {');
     expect(stylesCss).toContain('.chat-tool-button {');
     expect(stylesCss).toContain('.chat-config-pill {');
@@ -566,7 +569,10 @@ describe('web chat integration', () => {
       /\.workspace-left \{[\s\S]*background: var\(--desktop-side-surface\);[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.desktop-activity-button\.active::before \{[\s\S]*top: 5px;[\s\S]*bottom: 5px;[\s\S]*\}/,
+      /\.desktop-activity-button\.active::before \{[\s\S]*top: 0;[\s\S]*bottom: 0;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.sidebar-title-row \{[\s\S]*border-bottom: 0;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.wide-project-row {');
     expect(stylesCss).toContain('.wide-project-folder-wrap {');

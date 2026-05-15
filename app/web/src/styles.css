@@ -237,8 +237,8 @@ body,
   content: '';
   position: absolute;
   left: 0;
-  top: 5px;
-  bottom: 5px;
+  top: 0;
+  bottom: 0;
   width: 2px;
   border-radius: 0 2px 2px 0;
   background: var(--accent);
@@ -866,7 +866,7 @@ body,
 .sidebar-title-row {
   flex: 0 0 34px;
   min-height: 34px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-bottom: 0;
   background: var(--desktop-side-surface);
   display: flex;
   align-items: center;
@@ -3487,12 +3487,12 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 12px;
   background: var(--panel);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-  padding: 6px;
+  padding: 5px 6px 4px;
 }
 
 .chat-composer-input-row {
@@ -3504,7 +3504,7 @@ body,
 
 .chat-composer-prompt-trigger {
   width: 22px;
-  height: 32px;
+  height: 28px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
@@ -3514,6 +3514,9 @@ body,
   font-size: 16px;
   font-weight: 700;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
 }
 
@@ -3533,13 +3536,13 @@ body,
 .chat-composer-input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 32px;
+  min-height: 28px;
   max-height: 180px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text);
-  padding: 4px 0;
+  padding: 2px 0;
   font: inherit;
   line-height: 1.45;
   resize: none;
@@ -3638,7 +3641,7 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 30px;
+  min-height: 28px;
   min-width: 0;
 }
 
