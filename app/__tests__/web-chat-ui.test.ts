@@ -376,14 +376,20 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 26px;[\s\S]*\}/,
+      /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 32px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 26px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-composer-input \{[\s\S]*min-height: 26px;[\s\S]*padding: 5px 0 0;[\s\S]*\}/,
+      /\.chat-composer-input \{[\s\S]*min-height: 30px;[\s\S]*padding: 5px 0 1px;[\s\S]*font-size: 14px;[\s\S]*line-height: 1.4;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-send-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toMatch(

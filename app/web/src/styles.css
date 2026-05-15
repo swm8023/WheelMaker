@@ -3533,20 +3533,20 @@ body,
   display: flex;
   align-items: flex-start;
   gap: 5px;
-  min-height: 26px;
+  min-height: 32px;
   min-width: 0;
 }
 
 .chat-composer-prompt-trigger {
   width: 22px;
-  height: 26px;
+  height: 30px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
   background: transparent;
   color: color-mix(in srgb, var(--accent) 84%, var(--text));
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1;
   display: inline-flex;
@@ -3571,15 +3571,16 @@ body,
 .chat-composer-input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 26px;
+  min-height: 30px;
   max-height: 180px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text);
-  padding: 5px 0 0;
+  padding: 5px 0 1px;
   font: inherit;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.4;
   resize: none;
 }
 
@@ -3650,8 +3651,8 @@ body,
 }
 
 .chat-send-button {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--accent) 54%, transparent);
   border-radius: 8px;
@@ -3664,7 +3665,7 @@ body,
 }
 
 .chat-send-button .codicon {
-  font-size: 16px;
+  font-size: 15px;
 }
 
 .chat-send-button:hover {
