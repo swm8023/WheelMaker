@@ -1,4 +1,7 @@
-import { getChatSessionVisualState } from '../web/src/chatSessionState';
+import {
+  getChatSessionVisualState,
+  isChatSessionRunningMessage,
+} from '../web/src/chatSessionState';
 
 describe('web chat session visual state', () => {
   test('prioritizes running, then unread failed, then unread completed', () => {
@@ -49,5 +52,31 @@ describe('web chat session visual state', () => {
       lastDoneSuccess: true,
       lastReadTurnIndex: 4,
     })).toBe('idle');
+  });
+
+  test('marks a session running from prompt start and streaming turns', () => {
+    expect(isChatSessionRunningMessage({
+      sessionId: 's1',
+      turnIndex: 1,
+      method: 'prompt_request',
+      param: {},
+      finished: true,
+    })).toBe(true);
+
+    expect(isChatSessionRunningMessage({
+      sessionId: 's1',
+      turnIndex: 2,
+      method: 'agent_message_chunk',
+      param: {text: 'partial'},
+      finished: false,
+    })).toBe(true);
+
+    expect(isChatSessionRunningMessage({
+      sessionId: 's1',
+      turnIndex: 3,
+      method: 'prompt_done',
+      param: {stopReason: 'end_turn'},
+      finished: true,
+    })).toBe(false);
   });
 });

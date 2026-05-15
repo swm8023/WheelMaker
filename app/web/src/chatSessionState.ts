@@ -1,4 +1,4 @@
-import type { RegistryChatSession } from './types/registry';
+import type { RegistryChatMessage, RegistryChatSession } from './types/registry';
 
 export type ChatSessionVisualState =
   | 'idle'
@@ -27,4 +27,27 @@ export function getChatSessionVisualState(session: Pick<
   return session.lastDoneSuccess === false
     ? 'failed-unviewed'
     : 'completed-unviewed';
+}
+
+export function isChatSessionRunningMessage(message: Pick<
+  RegistryChatMessage,
+  'method' | 'param'
+>): boolean {
+  switch (message.method) {
+    case 'prompt_request':
+    case 'user_message_chunk':
+    case 'agent_message_chunk':
+    case 'agent_thought_chunk':
+    case 'agent_plan':
+      return true;
+    case 'tool_call': {
+      const status =
+        typeof message.param?.status === 'string'
+          ? message.param.status.trim().toLowerCase()
+          : '';
+      return status === 'streaming' || status === 'running' || status === 'in_progress';
+    }
+    default:
+      return false;
+  }
 }

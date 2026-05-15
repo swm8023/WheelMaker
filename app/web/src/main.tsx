@@ -31,6 +31,7 @@ import {
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import {
   getChatSessionVisualState,
+  isChatSessionRunningMessage,
   type ChatSessionVisualState,
 } from './chatSessionState';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
@@ -565,29 +566,6 @@ function msgKind(method: string): string {
     default:
       return 'message';
   }
-}
-
-function msgStatus(method: string, param: Record<string, unknown>): string {
-  const streamingMethods = [
-    'user_message_chunk',
-    'agent_message_chunk',
-    'agent_thought_chunk',
-    'agent_plan',
-  ];
-  if (streamingMethods.includes(method)) {
-    return 'streaming';
-  }
-  if (method === 'tool_call') {
-    const s = typeof param.status === 'string' ? param.status.trim().toLowerCase() : '';
-    if (s === 'streaming' || s === 'running' || s === 'in_progress') {
-      return 'streaming';
-    }
-    if (s === 'need_action' || s === 'needs_action') {
-      return 'needs_action';
-    }
-    return 'done';
-  }
-  return 'done';
 }
 
 function extractTextFromACPContent(content: unknown): string {
@@ -4789,6 +4767,38 @@ function App() {
     }
   };
 
+  const markChatSessionRunning = (
+    activeProjectId: string,
+    sessionId: string,
+    preview = '',
+  ) => {
+    if (!activeProjectId || !sessionId) return;
+    setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+    rememberChatSessionSummary(activeProjectId, {
+      sessionId,
+      running: true,
+      ...(preview
+        ? {
+            preview,
+            updatedAt: new Date().toISOString(),
+          }
+        : {}),
+    });
+  };
+
+  const clearChatSessionRunning = (
+    activeProjectId: string,
+    sessionId: string,
+  ) => {
+    if (!activeProjectId || !sessionId) return;
+    setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
+    rememberChatSessionSummary(activeProjectId, {
+      sessionId,
+      running: false,
+    });
+  };
+
   const markChatSessionRead = async (
     activeProjectId: string,
     sessionId: string,
@@ -5139,14 +5149,17 @@ function App() {
       return;
     }
     newChatFlowGuardRef.current = true;
+    let createdSessionId = '';
     try {
       const sessionId = await createChatSession(agentType, draft.title);
+      createdSessionId = sessionId;
       setNewChatAgentPickerOpen(false);
       setPendingNewChatDraft(null);
       if (!sessionId) {
         return;
       }
       if (draft.text.trim() || draft.blocks.length > 0) {
+        markChatSessionRunning(projectIdRef.current, sessionId, draft.text || draft.title);
         await service.sendSessionMessage({
           sessionId,
           text: draft.text,
@@ -5154,6 +5167,11 @@ function App() {
         });
       }
       resetChatComposer();
+    } catch (err) {
+      if (createdSessionId) {
+        clearChatSessionRunning(projectIdRef.current, createdSessionId);
+      }
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       newChatFlowGuardRef.current = false;
     }
@@ -5595,6 +5613,7 @@ function App() {
     resetChatComposer();
     forceChatScrollToBottom();
     setChatSending(true);
+    let optimisticRunningSessionId = '';
     try {
       if (!selectedChatId) {
         const started = beginNewChatFlow({
@@ -5612,14 +5631,15 @@ function App() {
       if (!sessionId) {
         return;
       }
+      optimisticRunningSessionId = sessionId;
+      markChatSessionRunning(projectIdRef.current, sessionId, trimmedText || firstAttachmentName);
       const result = await service.sendSessionMessage({
         sessionId,
         text: trimmedText,
         blocks,
       });
       const nextSessionId = result.sessionId || sessionId;
-      setChatRunningSessionFlags(prev => addSessionFlag(prev, nextSessionId));
-      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, nextSessionId));
+      markChatSessionRunning(projectIdRef.current, nextSessionId, trimmedText || firstAttachmentName);
       setSelectedChatId(nextSessionId);
       chatSelectedIdRef.current = nextSessionId;
       workspaceStore.rememberSelectedChatSession(projectIdRef.current, nextSessionId);
@@ -5634,6 +5654,9 @@ function App() {
         );
       }
     } catch (err) {
+      if (optimisticRunningSessionId) {
+        clearChatSessionRunning(projectIdRef.current, optimisticRunningSessionId);
+      }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setChatSending(false);
@@ -6567,10 +6590,14 @@ function App() {
           return;
         }
         const sessionId = message.sessionId;
-        const messageState = msgStatus(message.method, message.param);
         const isSelectedSession = sessionId === chatSelectedIdRef.current;
         const shouldRefreshCompletedPrompt = message.method === 'prompt_done';
+        const shouldMarkSessionRunning = isChatSessionRunningMessage(message);
         const existingMessagesForSession = chatMessageStoreRef.current[sessionId] ?? [];
+        if (shouldMarkSessionRunning) {
+          setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
+          setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+        }
         const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
           {
             cursor: {
@@ -6591,10 +6618,6 @@ function App() {
           }
           return;
         }
-        if (messageState === 'streaming') {
-          setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
-          setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
-        }
         if (shouldRefreshCompletedPrompt) {
           setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
           if (isSelectedSession) {
@@ -6611,7 +6634,7 @@ function App() {
                 lastDoneTurnIndex: message.turnIndex ?? 0,
                 lastDoneSuccess: messageText.trim() !== 'failed',
               }
-            : messageState === 'streaming'
+            : shouldMarkSessionRunning
               ? {running: true}
               : {};
         let mergedSessionForCache: RegistryChatSession | undefined;
