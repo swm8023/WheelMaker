@@ -289,6 +289,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('padding: calc(var(--wm-safe-area-top) + 8px) 8px 10px;');
     expect(stylesCss).toContain('.floating-control-stack {');
     expect(stylesCss).toContain('.floating-nav-group {');
+    expect(stylesCss).toMatch(
+      /\.floating-nav-group \{[\s\S]*width: 50px;[\s\S]*grid-template-rows: repeat\(3, 40px\);[\s\S]*padding: 4px;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.floating-nav-indicator {');
     expect(stylesCss).toMatch(
       /\.floating-nav-indicator \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 28%, transparent\);[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 32%, transparent\);/,
@@ -618,6 +621,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.wide-session-row \{[\s\S]*min-height: 28px;[\s\S]*\}/,
     );
+    const selectedSessionRowBlock = stylesCss.match(/\.wide-session-row\.selected \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(selectedSessionRowBlock).toContain('background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));');
+    expect(selectedSessionRowBlock).not.toContain('box-shadow: inset 3px 0 0 var(--accent);');
     expect(stylesCss).toMatch(
       /\.project-session-row-wrap.actions-open \.wide-session-row::after \{[\s\S]*background: linear-gradient\([\s\S]*\}/,
     );
