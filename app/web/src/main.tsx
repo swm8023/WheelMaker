@@ -6373,6 +6373,7 @@ function App() {
                 : 'codicon-refresh'
             }`}
           />
+          <span className="project-session-action-label">Reload</span>
         </button>
         <button
           type="button"
@@ -6393,6 +6394,7 @@ function App() {
                 : 'codicon-trash'
             }`}
           />
+          <span className="project-session-action-label">Delete</span>
         </button>
       </div>
     );

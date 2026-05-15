@@ -1673,7 +1673,7 @@ body,
   top: 0;
   right: 0;
   bottom: 0;
-  width: 88px;
+  width: min(162px, 68%);
   border-radius: 0 6px 6px 0;
   pointer-events: none;
   background: linear-gradient(
@@ -1684,47 +1684,75 @@ body,
   );
 }
 
+.project-session-row-wrap.actions-open .wide-session-row {
+  min-height: 34px;
+}
+
 .project-session-action-strip {
   position: absolute;
   top: 1px;
   right: 2px;
   bottom: 1px;
   z-index: 3;
+  width: min(154px, 64%);
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   padding: 2px;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 7px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--panel-2) 92%, transparent);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
 }
 
 .project-session-action-btn {
-  width: 23px;
-  height: 23px;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 28px;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+  padding: 0 8px;
   cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.project-session-action-btn .codicon {
+  flex: 0 0 auto;
   font-size: 13px;
+}
+
+.project-session-action-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-session-action-btn.reload {
   color: color-mix(in srgb, var(--text) 76%, var(--accent));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .project-session-action-btn.delete {
   color: color-mix(in srgb, var(--danger) 84%, var(--text));
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .project-session-action-btn:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+.project-session-action-btn.reload:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .project-session-action-btn.delete:hover {
