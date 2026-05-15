@@ -542,6 +542,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="project-session-action-btn delete"');
     expect(mainTsx).toContain('className="project-session-action-label">Reload</span>');
     expect(mainTsx).toContain('className="project-session-action-label">Delete</span>');
+    expect(mainTsx).toContain("if (target?.closest('.project-session-action-btn')) {");
+    expect(mainTsx).not.toContain("target?.closest('.project-session-row-wrap')");
     expect(mainTsx).toContain('renderProjectSessionActionStrip(targetProjectId, session.sessionId)');
     expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
@@ -641,17 +643,18 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.project-session-row-wrap.actions-open \.wide-session-row::after \{[\s\S]*background: linear-gradient\([\s\S]*\}/,
     );
-    expect(stylesCss).toMatch(
-      /\.project-session-row-wrap\.actions-open \.wide-session-row \{[^}]*min-height: 34px;[^}]*\}/,
-    );
+    expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
     expect(stylesCss).toMatch(
       /\.project-session-row-wrap\.actions-open \.wide-session-row::after \{[^}]*width: min\(162px, 68%\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-action-strip \{[^}]*width: min\(154px, 64%\);[^}]*\}/,
+      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(154px, 64%\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.project-session-action-btn \{[^}]*height: 28px;[^}]*gap: 5px;[^}]*padding: 0 8px;[^}]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.project-session-action-btn\.reload \{[^}]*background: color-mix\(in srgb, #2f9e44 18%, transparent\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.wide-session-title \{[\s\S]*font-weight: 400;[\s\S]*\}/,

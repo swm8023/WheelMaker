@@ -1684,21 +1684,18 @@ body,
   );
 }
 
-.project-session-row-wrap.actions-open .wide-session-row {
-  min-height: 34px;
-}
-
 .project-session-action-strip {
   position: absolute;
-  top: 1px;
+  top: 50%;
   right: 2px;
-  bottom: 1px;
+  height: 30px;
+  transform: translateY(-50%);
   z-index: 3;
   width: min(154px, 64%);
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px;
+  padding: 0 2px;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--panel-2) 92%, transparent);
@@ -1737,8 +1734,8 @@ body,
 }
 
 .project-session-action-btn.reload {
-  color: color-mix(in srgb, var(--text) 76%, var(--accent));
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: color-mix(in srgb, #2f9e44 82%, var(--text));
+  background: color-mix(in srgb, #2f9e44 18%, transparent);
 }
 
 .project-session-action-btn.delete {
@@ -1752,7 +1749,7 @@ body,
 }
 
 .project-session-action-btn.reload:hover {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, #2f9e44 26%, transparent);
 }
 
 .project-session-action-btn.delete:hover {

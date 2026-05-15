@@ -3986,7 +3986,7 @@ function App() {
     if (!projectSessionActionMenu) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target?.closest('.project-session-row-wrap')) {
+      if (target?.closest('.project-session-action-btn')) {
         return;
       }
       setProjectSessionActionMenu(null);
