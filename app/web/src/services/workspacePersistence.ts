@@ -63,6 +63,7 @@ export type PersistedGlobalState = {
   tab: PersistedTab;
   selectedProjectId: string;
   floatingControlSlot: PersistedFloatingControlSlot;
+  desktopSidebarWidth: number;
   collapsedProjectIds: string[];
   desktopCollapsedProjectIds: string[];
   pinnedProjectIds: string[];
@@ -126,6 +127,7 @@ const GLOBAL_KEYS = {
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
   floatingControlSlot: 'floatingControlSlot',
+  desktopSidebarWidth: 'desktopSidebarWidth',
   collapsedProjectIds: 'collapsedProjectIds',
   desktopCollapsedProjectIds: 'desktopCollapsedProjectIds',
   pinnedProjectIds: 'pinnedProjectIds',
@@ -148,6 +150,7 @@ function defaultGlobalState(): PersistedGlobalState {
     tab: 'file',
     selectedProjectId: '',
     floatingControlSlot: 'upper-middle',
+    desktopSidebarWidth: 380,
     collapsedProjectIds: [],
     desktopCollapsedProjectIds: [],
     pinnedProjectIds: [],
@@ -234,6 +237,10 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     input.floatingControlSlot === 'lower-middle'
       ? input.floatingControlSlot
       : 'upper-middle';
+  const sanitizeDesktopSidebarWidth = (value: unknown, fallback: number): number => {
+    const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+    return Math.min(560, Math.max(320, Math.round(numeric)));
+  };
   return {
     address: typeof input.address === 'string' ? input.address : base.address,
     token: typeof input.token === 'string' ? input.token : base.token,
@@ -250,6 +257,7 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
     floatingControlSlot,
+    desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),
     collapsedProjectIds,
     desktopCollapsedProjectIds: collapsedProjectIds,
     pinnedProjectIds,
@@ -647,6 +655,7 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
+      {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now},
       {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(this.state.global.desktopCollapsedProjectIds), updatedAt: now},
       {k: GLOBAL_KEYS.pinnedProjectIds, v: serialize(this.state.global.pinnedProjectIds), updatedAt: now},
@@ -925,6 +934,7 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopCollapsedProjectIds, v: serialize(next.desktopCollapsedProjectIds), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.pinnedProjectIds, v: serialize(next.pinnedProjectIds), updatedAt: now});

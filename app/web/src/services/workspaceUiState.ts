@@ -6,6 +6,10 @@ import type {
 
 export type WorkspaceUiStateValue<T> = T | ((current: T) => T);
 
+export const DESKTOP_SIDEBAR_WIDTH_MIN = 320;
+export const DESKTOP_SIDEBAR_WIDTH_DEFAULT = 380;
+export const DESKTOP_SIDEBAR_WIDTH_MAX = 560;
+
 export type WorkspaceFloatingDragState = {
   active: boolean;
   pressing: boolean;
@@ -25,6 +29,7 @@ export type WorkspaceUiState = {
   };
   desktop: {
     sidebarCollapsed: boolean;
+    sidebarWidth: number;
   };
   mobile: {
     drawerOpen: boolean;
@@ -42,6 +47,7 @@ export type WorkspaceUiStateInput = {
   tab?: unknown;
   settingsOpen?: unknown;
   sidebarCollapsed?: unknown;
+  desktopSidebarWidth?: unknown;
   collapsedProjectIds?: unknown;
   desktopCollapsedProjectIds?: unknown;
   pinnedProjectIds?: unknown;
@@ -59,6 +65,7 @@ export type WorkspaceUiAction =
   | { type: 'shared/setCollapsedProjectIds'; next: WorkspaceUiStateValue<string[]> }
   | { type: 'shared/setPinnedProjectIds'; next: WorkspaceUiStateValue<string[]> }
   | { type: 'desktop/setSidebarCollapsed'; next: WorkspaceUiStateValue<boolean> }
+  | { type: 'desktop/setSidebarWidth'; next: WorkspaceUiStateValue<number> }
   | { type: 'mobile/setDrawerOpen'; next: WorkspaceUiStateValue<boolean> }
   | {
       type: 'mobile/setFloatingControlSlot';
@@ -104,6 +111,17 @@ function sanitizeInset(value: unknown): number {
     : 0;
 }
 
+export function sanitizeDesktopSidebarWidth(
+  value: unknown,
+  fallback = DESKTOP_SIDEBAR_WIDTH_DEFAULT,
+): number {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.min(
+    DESKTOP_SIDEBAR_WIDTH_MAX,
+    Math.max(DESKTOP_SIDEBAR_WIDTH_MIN, Math.round(numeric)),
+  );
+}
+
 function sanitizeStringList(value: unknown): string[] {
   return Array.isArray(value)
     ? Array.from(new Set(value.filter(item => typeof item === 'string' && item)))
@@ -133,6 +151,7 @@ export function createWorkspaceUiState(input: WorkspaceUiStateInput = {}): Works
     desktop: {
       sidebarCollapsed:
         typeof input.sidebarCollapsed === 'boolean' ? input.sidebarCollapsed : false,
+      sidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth),
     },
     mobile: {
       drawerOpen: typeof input.drawerOpen === 'boolean' ? input.drawerOpen : false,
@@ -197,6 +216,17 @@ export function workspaceUiReducer(
         desktop: {
           ...state.desktop,
           sidebarCollapsed: !!resolveNext(state.desktop.sidebarCollapsed, action.next),
+        },
+      };
+    case 'desktop/setSidebarWidth':
+      return {
+        ...state,
+        desktop: {
+          ...state.desktop,
+          sidebarWidth: sanitizeDesktopSidebarWidth(
+            resolveNext(state.desktop.sidebarWidth, action.next),
+            state.desktop.sidebarWidth,
+          ),
         },
       };
     case 'mobile/setDrawerOpen':

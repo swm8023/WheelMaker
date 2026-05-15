@@ -26,14 +26,22 @@ describe('web responsive ui state', () => {
     expect(fs.existsSync(modulePath)).toBe(true);
 
     const {
+      DESKTOP_SIDEBAR_WIDTH_DEFAULT,
+      DESKTOP_SIDEBAR_WIDTH_MAX,
+      DESKTOP_SIDEBAR_WIDTH_MIN,
       createWorkspaceUiState,
       workspaceUiReducer,
     } = require(modulePath);
+
+    expect(DESKTOP_SIDEBAR_WIDTH_DEFAULT).toBe(380);
+    expect(DESKTOP_SIDEBAR_WIDTH_MIN).toBe(320);
+    expect(DESKTOP_SIDEBAR_WIDTH_MAX).toBe(560);
 
     let state = createWorkspaceUiState({
       tab: 'git',
       settingsOpen: true,
       sidebarCollapsed: true,
+      desktopSidebarWidth: 420,
       drawerOpen: true,
       collapsedProjectIds: ['project-a', 'project-b', 'project-a'],
       pinnedProjectIds: ['project-c', 'project-a', 'project-c'],
@@ -60,7 +68,10 @@ describe('web responsive ui state', () => {
     });
     expect(state.desktop).toMatchObject({
       sidebarCollapsed: true,
+      sidebarWidth: 420,
     });
+    expect(createWorkspaceUiState({ desktopSidebarWidth: 200 }).desktop.sidebarWidth).toBe(320);
+    expect(createWorkspaceUiState({ desktopSidebarWidth: 700 }).desktop.sidebarWidth).toBe(560);
     expect(state.mobile).toMatchObject({
       drawerOpen: true,
       floatingControlSlot: 'center',
@@ -77,6 +88,7 @@ describe('web responsive ui state', () => {
     expect(state.shared.collapsedProjectIds).toEqual(['project-a', 'project-b']);
     expect(state.shared.pinnedProjectIds).toEqual(['project-c', 'project-a']);
     expect(state.desktop.sidebarCollapsed).toBe(true);
+    expect(state.desktop.sidebarWidth).toBe(420);
     expect(state.mobile.floatingControlSlot).toBe('center');
     expect(state.mobile.drawerOpen).toBe(false);
     expect(state.mobile.chatConfigOverflowOpen).toBe(false);
@@ -90,6 +102,13 @@ describe('web responsive ui state', () => {
     });
 
     expect(state.shared.pinnedProjectIds).toEqual(['project-b', 'project-c']);
+
+    state = workspaceUiReducer(state, {
+      type: 'desktop/setSidebarWidth',
+      next: 999,
+    });
+
+    expect(state.desktop.sidebarWidth).toBe(560);
   });
 
   test('sorts pinned projects above unpinned projects while preserving registry order', () => {
@@ -130,10 +149,32 @@ describe('web responsive ui state', () => {
     expect(mainTsx).toContain("const isWide = layoutMode === 'desktop';");
     expect(mainTsx).toContain('const [workspaceUiState, dispatchWorkspaceUi] = useReducer(');
     expect(mainTsx).toContain('collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? []');
+    expect(mainTsx).toContain('desktopSidebarWidth: globalState.desktopSidebarWidth');
     expect(mainTsx).toContain('pinnedProjectIds: globalState.pinnedProjectIds ?? []');
+    expect(mainTsx).toContain('const desktopSidebarWidth = workspaceUiState.desktop.sidebarWidth;');
     expect(mainTsx).toContain('const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;');
     expect(mainTsx).toContain('const pinnedProjectIds = workspaceUiState.shared.pinnedProjectIds;');
+    expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'desktop/setSidebarWidth', next });");
     expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'shared/setCollapsedProjectIds', next });");
     expect(mainTsx).toContain("dispatchWorkspaceUi({ type: 'shared/setPinnedProjectIds', next });");
+  });
+
+  test('persists desktop sidebar width as global app state', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const persistenceTs = fs.readFileSync(
+      path.join(projectRoot, 'web', 'src', 'services', 'workspacePersistence.ts'),
+      'utf8',
+    );
+
+    expect(persistenceTs).toContain('desktopSidebarWidth: number;');
+    expect(persistenceTs).toContain("desktopSidebarWidth: 'desktopSidebarWidth',");
+    expect(persistenceTs).toContain('desktopSidebarWidth: 380,');
+    expect(persistenceTs).toContain('desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),');
+    expect(persistenceTs).toContain(
+      '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now}',
+    );
+    expect(persistenceTs).toContain(
+      '{k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now}',
+    );
   });
 });

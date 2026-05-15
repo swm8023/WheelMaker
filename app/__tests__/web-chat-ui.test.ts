@@ -370,25 +370,28 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-composer-frame {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-frame \{[\s\S]*gap: 2px;[\s\S]*padding: 5px 6px 4px;[\s\S]*\}/,
+      /\.chat-composer-frame \{[\s\S]*gap: 0;[\s\S]*padding: 5px 6px 3px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-input-row {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*\}/,
+      /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 26px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 28px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 26px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-composer-input \{[\s\S]*min-height: 28px;[\s\S]*padding: 2px 0;[\s\S]*\}/,
+      /\.chat-composer-input \{[\s\S]*min-height: 26px;[\s\S]*padding: 5px 0 0;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-toolbar \{[\s\S]*min-height: 28px;[\s\S]*\}/,
+      /\.chat-composer-toolbar \{[\s\S]*min-height: 24px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-composer-tools {');
     expect(stylesCss).toContain('.chat-tool-button {');
+    expect(stylesCss).toMatch(
+      /\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/,
+    );
     expect(stylesCss).toContain('.chat-config-pill {');
     expect(stylesCss).toContain('.chat-config-value-menu {');
     expect(stylesCss).toMatch(
@@ -526,6 +529,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="sidebar-title-row"');
     expect(mainTsx).toContain('const handleDesktopActivitySelect = useCallback((nextTab: Tab) => {');
     expect(mainTsx).toContain('const handleDesktopSettingsSelect = useCallback(() => {');
+    expect(mainTsx).toContain('const beginDesktopSidebarResize = useCallback(');
+    expect(mainTsx).toContain('className={`desktop-sidebar-resize-handle${desktopSidebarResizing ?');
+    expect(mainTsx).toContain('desktopSidebarWidth={effectiveDesktopSidebarWidth}');
 
     const wideRailStart = mainTsx.indexOf('const renderWideProjectSessionNav = () => {');
     const wideRailEnd = mainTsx.indexOf('const renderSidebar = () => {', wideRailStart);
@@ -567,6 +573,13 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toMatch(
       /\.workspace-left \{[\s\S]*background: var\(--desktop-side-surface\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.workspace-left \{[\s\S]*width: var\(--desktop-sidebar-width, 380px\);[\s\S]*min-width: 320px;[\s\S]*max-width: min\(560px, 45vw\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toContain('.desktop-sidebar-resize-handle {');
+    expect(stylesCss).toMatch(
+      /\.desktop-sidebar-resize-handle \{[\s\S]*cursor: ew-resize;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.desktop-activity-button\.active::before \{[\s\S]*top: 0;[\s\S]*bottom: 0;[\s\S]*\}/,

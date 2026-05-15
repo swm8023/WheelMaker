@@ -1335,9 +1335,10 @@ body,
 }
 
 .workspace-left {
-  width: 320px;
-  min-width: 220px;
-  max-width: 40vw;
+  position: relative;
+  width: var(--desktop-sidebar-width, 380px);
+  min-width: 320px;
+  max-width: min(560px, 45vw);
   border-right: 1px solid var(--border);
   background: var(--desktop-side-surface);
   display: flex;
@@ -1345,6 +1346,39 @@ body,
   min-height: 0;
   overflow: hidden;
   animation: wmSlideInLeft 180ms ease-out;
+}
+
+.desktop-sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 8;
+  width: 8px;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.desktop-sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 3px;
+  width: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 64%, transparent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.desktop-sidebar-resize-handle:hover::after,
+.desktop-sidebar-resize-handle.resizing::after {
+  opacity: 1;
 }
 
 .workspace-right {
@@ -3487,24 +3521,25 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   border-radius: 12px;
   background: var(--panel);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-  padding: 5px 6px 4px;
+  padding: 5px 6px 3px;
 }
 
 .chat-composer-input-row {
   display: flex;
   align-items: flex-start;
   gap: 5px;
+  min-height: 26px;
   min-width: 0;
 }
 
 .chat-composer-prompt-trigger {
   width: 22px;
-  height: 28px;
+  height: 26px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
@@ -3536,13 +3571,13 @@ body,
 .chat-composer-input {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 28px;
+  min-height: 26px;
   max-height: 180px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--text);
-  padding: 2px 0;
+  padding: 5px 0 0;
   font: inherit;
   line-height: 1.45;
   resize: none;
@@ -3641,7 +3676,7 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 28px;
+  min-height: 24px;
   min-width: 0;
 }
 
@@ -3653,8 +3688,8 @@ body,
 }
 
 .chat-tool-button {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: none;
   border-radius: 7px;
   background: transparent;

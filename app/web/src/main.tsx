@@ -53,7 +53,11 @@ import {
 import { WorkspaceController } from './services/workspaceController';
 import { WorkspaceStore } from './services/workspaceStore';
 import {
+  DESKTOP_SIDEBAR_WIDTH_DEFAULT,
+  DESKTOP_SIDEBAR_WIDTH_MAX,
+  DESKTOP_SIDEBAR_WIDTH_MIN,
   createWorkspaceUiState,
+  sanitizeDesktopSidebarWidth,
   workspaceUiReducer,
   type WorkspaceUiStateValue,
 } from './services/workspaceUiState';
@@ -147,6 +151,12 @@ type FloatingDragState = {
   startTop: number;
   currentTop: number;
   cooldownUntil: number;
+};
+type DesktopSidebarResizeState = {
+  pointerId: number;
+  originX: number;
+  startWidth: number;
+  currentWidth: number;
 };
 type SetiThemeSection = {
   file: string;
@@ -292,6 +302,7 @@ const CHAT_CONFIG_INLINE_LIMIT = 3;
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
+const DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO = 0.45;
 const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;
 const EMPTY_CHAT_COMPOSER_DRAFT: ChatComposerDraft = { text: '', attachments: [] };
 let mermaidRenderSequence = 0;
@@ -2157,6 +2168,7 @@ function App() {
       createWorkspaceUiState({
         tab: globalState.tab ?? 'file',
         collapsedProjectIds: globalState.collapsedProjectIds ?? globalState.desktopCollapsedProjectIds ?? [],
+        desktopSidebarWidth: globalState.desktopSidebarWidth,
         pinnedProjectIds: globalState.pinnedProjectIds ?? [],
         floatingControlSlot: globalState.floatingControlSlot ?? 'upper-middle',
       }),
@@ -2166,6 +2178,7 @@ function App() {
   const floatingDragState = workspaceUiState.transient.floatingDragState as FloatingDragState | null;
   const floatingKeyboardOffset = workspaceUiState.transient.floatingKeyboardOffset;
   const sidebarCollapsed = workspaceUiState.desktop.sidebarCollapsed;
+  const desktopSidebarWidth = workspaceUiState.desktop.sidebarWidth;
   const collapsedProjectIds = workspaceUiState.shared.collapsedProjectIds;
   const pinnedProjectIds = workspaceUiState.shared.pinnedProjectIds;
   const drawerOpen = workspaceUiState.mobile.drawerOpen;
@@ -2180,6 +2193,7 @@ function App() {
   const floatingClickCooldownUntilRef = useRef(0);
   const floatingIgnoreLostCaptureRef = useRef(false);
   const floatingControlStackRef = useRef<HTMLDivElement | null>(null);
+  const desktopSidebarResizeRef = useRef<DesktopSidebarResizeState | null>(null);
   const projectPinLongPressTimerRef = useRef<number | null>(null);
   const projectPinLongPressTargetRef = useRef('');
   const projectSessionLongPressTimerRef = useRef<number | null>(null);
@@ -2206,6 +2220,9 @@ function App() {
   const setSidebarCollapsed = useCallback((next: WorkspaceUiStateValue<boolean>) => {
     dispatchWorkspaceUi({ type: 'desktop/setSidebarCollapsed', next });
   }, []);
+  const setDesktopSidebarWidth = useCallback((next: WorkspaceUiStateValue<number>) => {
+    dispatchWorkspaceUi({ type: 'desktop/setSidebarWidth', next });
+  }, []);
   const setCollapsedProjectIds = useCallback((next: WorkspaceUiStateValue<string[]>) => {
     dispatchWorkspaceUi({ type: 'shared/setCollapsedProjectIds', next });
   }, []);
@@ -2229,6 +2246,8 @@ function App() {
   const [databaseError, setDatabaseError] = useState('');
   const [databaseDumpText, setDatabaseDumpText] = useState('');
   const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);
+  const [desktopSidebarResizing, setDesktopSidebarResizing] = useState(false);
+  const [desktopSidebarDraftWidth, setDesktopSidebarDraftWidth] = useState<number | null>(null);
   const [tokenStatsLoading, setTokenStatsLoading] = useState(false);
   const [tokenStatsError, setTokenStatsError] = useState('');
   const [tokenStatsUpdatedAt, setTokenStatsUpdatedAt] = useState('');
@@ -3243,6 +3262,7 @@ function App() {
       tab,
       selectedProjectId: projectId,
       floatingControlSlot,
+      desktopSidebarWidth,
       collapsedProjectIds,
       pinnedProjectIds,
     });
@@ -3261,6 +3281,7 @@ function App() {
     tab,
     projectId,
     floatingControlSlot,
+    desktopSidebarWidth,
     collapsedProjectIds,
     pinnedProjectIds,
   ]);
@@ -3633,6 +3654,90 @@ function App() {
       setSidebarCollapsed(false);
     }
   }, [sidebarSettingsOpen, setSidebarSettingsOpen, setSidebarCollapsed]);
+  const clampDesktopSidebarWidthForViewport = useCallback((width: number) => {
+    const viewportMax = windowWidth > 0
+      ? Math.floor(windowWidth * DESKTOP_SIDEBAR_VIEWPORT_MAX_RATIO)
+      : DESKTOP_SIDEBAR_WIDTH_MAX;
+    const maxWidth = Math.max(
+      DESKTOP_SIDEBAR_WIDTH_MIN,
+      Math.min(DESKTOP_SIDEBAR_WIDTH_MAX, viewportMax),
+    );
+    return Math.min(
+      maxWidth,
+      Math.max(DESKTOP_SIDEBAR_WIDTH_MIN, Math.round(width)),
+    );
+  }, [windowWidth]);
+  const effectiveDesktopSidebarWidth = useMemo(
+    () => clampDesktopSidebarWidthForViewport(
+      desktopSidebarDraftWidth ?? desktopSidebarWidth,
+    ),
+    [clampDesktopSidebarWidthForViewport, desktopSidebarDraftWidth, desktopSidebarWidth],
+  );
+  const commitDesktopSidebarResize = useCallback(() => {
+    const resizeState = desktopSidebarResizeRef.current;
+    if (resizeState) {
+      setDesktopSidebarWidth(resizeState.currentWidth);
+    }
+    desktopSidebarResizeRef.current = null;
+    setDesktopSidebarDraftWidth(null);
+    setDesktopSidebarResizing(false);
+  }, [setDesktopSidebarWidth]);
+  const beginDesktopSidebarResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isWide) return;
+    event.preventDefault();
+    event.stopPropagation();
+    desktopSidebarResizeRef.current = {
+      pointerId: event.pointerId,
+      originX: event.clientX,
+      startWidth: effectiveDesktopSidebarWidth,
+      currentWidth: effectiveDesktopSidebarWidth,
+    };
+    setDesktopSidebarDraftWidth(effectiveDesktopSidebarWidth);
+    setDesktopSidebarResizing(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [effectiveDesktopSidebarWidth, isWide]);
+  const moveDesktopSidebarResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const resizeState = desktopSidebarResizeRef.current;
+    if (!resizeState || resizeState.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    const nextWidth = resizeState.startWidth + event.clientX - resizeState.originX;
+    const clampedWidth = clampDesktopSidebarWidthForViewport(nextWidth);
+    desktopSidebarResizeRef.current = {
+      ...resizeState,
+      currentWidth: clampedWidth,
+    };
+    setDesktopSidebarDraftWidth(clampedWidth);
+  }, [clampDesktopSidebarWidthForViewport]);
+  const finishDesktopSidebarResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const resizeState = desktopSidebarResizeRef.current;
+    if (!resizeState || resizeState.pointerId !== event.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    commitDesktopSidebarResize();
+    try {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // Pointer capture may already be released by the browser.
+    }
+  }, [commitDesktopSidebarResize]);
+  const resetDesktopSidebarWidth = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    desktopSidebarResizeRef.current = null;
+    setDesktopSidebarDraftWidth(null);
+    setDesktopSidebarResizing(false);
+    setDesktopSidebarWidth(
+      sanitizeDesktopSidebarWidth(
+        clampDesktopSidebarWidthForViewport(DESKTOP_SIDEBAR_WIDTH_DEFAULT),
+      ),
+    );
+  }, [clampDesktopSidebarWidthForViewport, setDesktopSidebarWidth]);
   const availableChatAgents = useMemo(() => {
     const seen = new Set<string>();
     const agents: string[] = [];
@@ -8392,6 +8497,20 @@ function App() {
         <div className="sidebar-scroll">
           {isWide ? wideSidebarMain : mobileSidebarMain}
         </div>
+        {isWide ? (
+          <button
+            type="button"
+            className={`desktop-sidebar-resize-handle${desktopSidebarResizing ? ' resizing' : ''}`}
+            aria-label="Resize sidebar"
+            title="Resize sidebar"
+            onPointerDown={beginDesktopSidebarResize}
+            onPointerMove={moveDesktopSidebarResize}
+            onPointerUp={finishDesktopSidebarResize}
+            onPointerCancel={finishDesktopSidebarResize}
+            onLostPointerCapture={commitDesktopSidebarResize}
+            onDoubleClick={resetDesktopSidebarWidth}
+          />
+        ) : null}
       </>
     );
   };
@@ -9664,6 +9783,7 @@ function App() {
       themeMode={themeMode}
       setiFontCss={setiFontCss}
       desktopActivityBar={desktopActivityBar}
+      desktopSidebarWidth={effectiveDesktopSidebarWidth}
       floatingControlStack={floatingControlStack}
       mobileSettingsScreen={mobileSettingsScreen}
       sidebar={renderSidebar()}

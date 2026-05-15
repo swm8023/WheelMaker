@@ -13,6 +13,7 @@ type ShellContentProps = {
 export type DesktopShellProps = ShellContentProps & {
   desktopActivityBar: ReactNode;
   sidebarCollapsed: boolean;
+  desktopSidebarWidth: number;
 };
 
 export type MobileShellProps = ShellContentProps & {
@@ -34,11 +35,15 @@ export function DesktopShell({
   sidebar,
   main,
   sidebarCollapsed,
+  desktopSidebarWidth,
 }: DesktopShellProps) {
   return (
     <div className={`workspace theme-${themeMode}`}>
       <style>{setiFontCss}</style>
-      <div className="desktop-shell">
+      <div
+        className="desktop-shell"
+        style={{ '--desktop-sidebar-width': `${desktopSidebarWidth}px` } as React.CSSProperties}
+      >
         {desktopActivityBar}
         <div className="body">
           {!sidebarCollapsed ? (
