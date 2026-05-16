@@ -679,11 +679,14 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(/\.wide-project-toggle \{[^}]*height: 30px;[^}]*\}/);
     expect(stylesCss).toMatch(/\.wide-session-row \{[^}]*min-height: 26px;[^}]*\}/);
     const wideSessionRowBlock = stylesCss.match(/\.wide-session-row \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(wideSessionRowBlock).toContain('grid-template-columns: 9px minmax(0, 1fr) auto auto;');
-    expect(wideSessionRowBlock).toContain('gap: 2px;');
+    expect(wideSessionRowBlock).toContain('grid-template-columns: 6px minmax(0, 1fr) auto auto;');
+    expect(wideSessionRowBlock).toContain('gap: 5px;');
     const sessionStateMarkerBlock = stylesCss.match(/\.session-state-marker \{[\s\S]*?\n\}/)?.[0] ?? '';
-    expect(sessionStateMarkerBlock).toContain('width: 9px;');
-    expect(sessionStateMarkerBlock).toContain('flex: 0 0 9px;');
+    expect(sessionStateMarkerBlock).toContain('width: 6px;');
+    expect(sessionStateMarkerBlock).toContain('flex: 0 0 6px;');
+    expect(sessionStateMarkerBlock).toContain('transform: translateX(-1px);');
+    const sessionStateRunningBlock = stylesCss.match(/\.session-state-marker\.running \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(sessionStateRunningBlock).toContain('font-size: 10px;');
     expect(stylesCss).toMatch(/\.mobile-session-row \{[^}]*min-height: 30px;[^}]*\}/);
     expect(stylesCss).toContain('font-size: 10.5px;');
     expect(stylesCss).toContain('.wide-project-folder-icon.codicon-folder {');

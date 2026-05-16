@@ -1632,9 +1632,9 @@ body,
   background: transparent;
   color: color-mix(in srgb, var(--text) 76%, transparent);
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr) auto auto;
+  grid-template-columns: 6px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 2px;
+  gap: 5px;
   padding: 0 6px;
   cursor: pointer;
   text-align: left;
@@ -1653,18 +1653,19 @@ body,
 }
 
 .session-state-marker {
-  width: 9px;
+  width: 6px;
   height: 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: color-mix(in srgb, var(--text) 38%, transparent);
-  flex: 0 0 9px;
+  flex: 0 0 6px;
+  transform: translateX(-1px);
 }
 
 .session-state-marker.running {
   color: #68a8e8;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .session-state-dot {
