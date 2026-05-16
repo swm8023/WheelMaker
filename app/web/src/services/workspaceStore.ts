@@ -7,6 +7,10 @@ import type {
   RegistryProject,
 } from '../types/registry';
 import {
+  chatSessionKeyFromParts,
+  type ChatSessionKey,
+} from '../chat/chatSessionKey';
+import {
   WorkspacePersistenceRepository,
   type PersistedChatCursor,
   type PersistedGlobalState,
@@ -240,6 +244,39 @@ export class WorkspaceStore {
   rememberSelectedChatSession(projectId: string, sessionId: string): void {
     if (!projectId) return;
     this.persistence.patchProjectState(projectId, { selectedChatSessionId: sessionId.trim() });
+  }
+
+  getSelectedChatSessionKey(): ChatSessionKey | null {
+    const global = this.persistence.getGlobalState();
+    return chatSessionKeyFromParts(
+      global.selectedChatProjectId || '',
+      global.selectedChatSessionId || '',
+    );
+  }
+
+  rememberSelectedChatSessionKey(key: ChatSessionKey | null): void {
+    const normalized = key
+      ? chatSessionKeyFromParts(key.projectId, key.sessionId)
+      : null;
+    this.persistence.patchGlobalState({
+      selectedChatProjectId: normalized?.projectId ?? '',
+      selectedChatSessionId: normalized?.sessionId ?? '',
+    });
+  }
+
+  migrateSelectedChatSessionKey(projectId: string): ChatSessionKey | null {
+    const existing = this.getSelectedChatSessionKey();
+    if (existing) {
+      return existing;
+    }
+    const fallback = chatSessionKeyFromParts(
+      projectId,
+      this.getSelectedChatSessionId(projectId),
+    );
+    if (fallback) {
+      this.rememberSelectedChatSessionKey(fallback);
+    }
+    return fallback;
   }
 
   replaceChatSessions(projectId: string, sessions: RegistryChatSession[], cursorBySessionId: Record<string, PersistedChatCursor>): void {
