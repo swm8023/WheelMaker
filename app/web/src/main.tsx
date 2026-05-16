@@ -34,6 +34,11 @@ import {
   isChatSessionRunningMessage,
   type ChatSessionVisualState,
 } from './chatSessionState';
+import {
+  chatSessionKeyFromParts,
+  encodeChatSessionKey,
+  type ChatSessionKey,
+} from './chat/chatSessionKey';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -2295,6 +2300,7 @@ function App() {
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
   const wideProjectActionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSelectedIdRef = useRef('');
+  const selectedChatKeyRef = useRef<ChatSessionKey | null>(null);
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
@@ -2308,6 +2314,7 @@ function App() {
   const [mobileProjectSessionErrors, setMobileProjectSessionErrors] = useState<Record<string, string>>({});
   const [mobileProjectSessionsRefreshing, setMobileProjectSessionsRefreshing] = useState(false);
   const [selectedChatId, setSelectedChatId] = useState('');
+  const [selectedChatKey, setSelectedChatKey] = useState<ChatSessionKey | null>(null);
   const [chatMessages, setChatMessages] = useState<RegistryChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
@@ -2333,9 +2340,22 @@ function App() {
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
 
+  const selectedChatEncodedKey = useMemo(
+    () => encodeChatSessionKey(selectedChatKey),
+    [selectedChatKey],
+  );
+
   const selectedChatSession = useMemo(
-    () => chatSessions.find(item => item.sessionId === selectedChatId),
-    [chatSessions, selectedChatId],
+    () => {
+      if (!selectedChatKey) {
+        return undefined;
+      }
+      const sessions =
+        projectSessionsByProjectId[selectedChatKey.projectId] ??
+        (selectedChatKey.projectId === projectId ? chatSessions : []);
+      return sessions.find(item => item.sessionId === selectedChatKey.sessionId);
+    },
+    [chatSessions, projectId, projectSessionsByProjectId, selectedChatKey],
   );
 
   const selectedChatConfigOptions = useMemo(() => {
@@ -2421,9 +2441,22 @@ function App() {
 
 
   const currentChatDraftKey = useMemo(
-    () => buildChatDraftKey(projectId, selectedChatId),
-    [projectId, selectedChatId],
+    () => buildChatDraftKey(selectedChatKey?.projectId ?? projectId, selectedChatId),
+    [projectId, selectedChatId, selectedChatKey?.projectId],
   );
+
+  const buildChatRuntimeKey = (
+    activeProjectId: string,
+    sessionId: string,
+  ): string => encodeChatSessionKey(chatSessionKeyFromParts(activeProjectId, sessionId));
+
+  const applySelectedChatKey = (key: ChatSessionKey | null) => {
+    selectedChatKeyRef.current = key;
+    setSelectedChatKey(key);
+    const sessionId = key?.sessionId ?? '';
+    chatSelectedIdRef.current = sessionId;
+    setSelectedChatId(sessionId);
+  };
 
   const resizeChatComposerTextarea = useCallback(() => {
     const input = chatComposerTextareaRef.current;
@@ -2766,11 +2799,11 @@ function App() {
   }, [currentChatDraftKey]);
 
   useEffect(() => {
-    if (!selectedChatId) {
+    if (!selectedChatEncodedKey) {
       return;
     }
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, selectedChatId));
-  }, [selectedChatId]);
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, selectedChatEncodedKey));
+  }, [selectedChatEncodedKey]);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -2827,6 +2860,9 @@ function App() {
     chatSelectedIdRef.current = selectedChatId;
   }, [selectedChatId]);
   useEffect(() => {
+    selectedChatKeyRef.current = selectedChatKey;
+  }, [selectedChatKey]);
+  useEffect(() => {
     floatingDragStateRef.current = floatingDragState;
   }, [floatingDragState]);
   useEffect(() => {
@@ -2838,12 +2874,17 @@ function App() {
     if (!connected || !activeProjectId) {
       return;
     }
-    const preferredChatSelection =
-      chatSelectedIdRef.current || workspaceStore.getSelectedChatSessionId(activeProjectId);
-    if (preferredChatSelection && !chatSelectedIdRef.current) {
-      hydrateChatSessionsFromCache(activeProjectId, preferredChatSelection);
+    const preferredChatKey =
+      selectedChatKeyRef.current ||
+      workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
+    if (preferredChatKey && !selectedChatKeyRef.current) {
+      applySelectedChatKey(preferredChatKey);
+      hydrateChatSessionsFromCache(preferredChatKey.projectId, preferredChatKey.sessionId);
     }
-    loadChatSessions(activeProjectId, preferredChatSelection).catch(() => undefined);
+    loadChatSessions(
+      preferredChatKey?.projectId ?? activeProjectId,
+      preferredChatKey?.sessionId ?? '',
+    ).catch(() => undefined);
   }, [tab, connected, projectId]);
 
   useEffect(() => {
@@ -4482,8 +4523,11 @@ function App() {
     setChatSessions([]);
     setChatRunningSessionFlags({});
     setChatCompletedUnopenedFlags({});
-    setSelectedChatId(preferredSelection);
-    chatSelectedIdRef.current = preferredSelection;
+    applySelectedChatKey(
+      preferredSelection
+        ? chatSessionKeyFromParts(projectIdRef.current, preferredSelection)
+        : null,
+    );
     chatSyncIndexRef.current = {};
     chatSyncSubIndexRef.current = {};
     chatMessageStoreRef.current = {};
@@ -4494,29 +4538,30 @@ function App() {
     activeProjectId = projectIdRef.current,
   ): RegistryChatMessage[] => {
     if (!activeProjectId || !sessionId) return [];
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
     const cached = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
     if (!cached) {
-      const inMemoryMessages = chatMessageStoreRef.current[sessionId] ?? [];
+      const inMemoryMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
       if (inMemoryMessages.length === 0) {
-        chatSyncIndexRef.current[sessionId] = 0;
-        chatSyncSubIndexRef.current[sessionId] = 0;
+        chatSyncIndexRef.current[runtimeKey] = 0;
+        chatSyncSubIndexRef.current[runtimeKey] = 0;
       } else {
         const cursor = getLatestSessionReadCursor(inMemoryMessages);
-        chatSyncIndexRef.current[sessionId] = 0;
-        chatSyncSubIndexRef.current[sessionId] = cursor.turnIndex;
+        chatSyncIndexRef.current[runtimeKey] = 0;
+        chatSyncSubIndexRef.current[runtimeKey] = cursor.turnIndex;
       }
       return inMemoryMessages;
     }
 
     const cachedMessages = [...cached.messages];
-    chatMessageStoreRef.current[sessionId] = cachedMessages;
+    chatMessageStoreRef.current[runtimeKey] = cachedMessages;
 
     const cursor = reconcileCachedSessionReadCursor(
-      {turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0},
+      {turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0},
       cachedMessages,
     );
-    chatSyncIndexRef.current[sessionId] = 0;
-    chatSyncSubIndexRef.current[sessionId] = cursor.turnIndex;
+    chatSyncIndexRef.current[runtimeKey] = 0;
+    chatSyncSubIndexRef.current[runtimeKey] = cursor.turnIndex;
     return cachedMessages;
   };
 
@@ -4532,26 +4577,36 @@ function App() {
 
     const sessionRows = cachedSessions.map(item => item.session);
     setChatSessions(sortChatSessions(sessionRows));
+    setProjectSessionsByProjectId(prev => ({
+      ...prev,
+      [activeProjectId]: sortChatSessions(sessionRows),
+    }));
 
     for (const cached of cachedSessions) {
       const sessionId = cached.session.sessionId;
       if (!sessionId) continue;
       const content = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
       const cursor = reconcileCachedSessionReadCursor(cached.cursor, content?.messages ?? []);
-      chatSyncIndexRef.current[sessionId] = 0;
-      chatSyncSubIndexRef.current[sessionId] = cursor.turnIndex;
+      const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
+      chatSyncIndexRef.current[runtimeKey] = 0;
+      chatSyncSubIndexRef.current[runtimeKey] = cursor.turnIndex;
     }
 
+    const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
     const currentSelection =
       preferredSelection ||
-      chatSelectedIdRef.current ||
+      (selectedChatKeyRef.current?.projectId === activeProjectId
+        ? selectedChatKeyRef.current.sessionId
+        : '') ||
+      (persistedSelection?.projectId === activeProjectId
+        ? persistedSelection.sessionId
+        : '') ||
       workspaceStore.getSelectedChatSessionId(activeProjectId);
     if (!currentSelection) {
       setChatMessages([]);
       return;
     }
-    chatSelectedIdRef.current = currentSelection;
-    setSelectedChatId(currentSelection);
+    applySelectedChatKey(chatSessionKeyFromParts(activeProjectId, currentSelection));
     if (sessionRows.some(item => item.sessionId === currentSelection)) {
       const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setChatMessages(cachedMessages);
@@ -4569,8 +4624,9 @@ function App() {
     for (const session of chatSessions) {
       const sessionId = session.sessionId;
       if (!sessionId) continue;
+      const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
       cursorBySessionId[sessionId] = {
-        turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+        turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
       };
     }
     workspaceStore.replaceChatSessions(activeProjectId, chatSessions, cursorBySessionId);
@@ -4582,13 +4638,17 @@ function App() {
     session?: RegistryChatSession,
   ) => {
     if (!activeProjectId || !sessionId) return;
-    const messages = chatMessageStoreRef.current[sessionId] ?? [];
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
+    const messages = chatMessageStoreRef.current[runtimeKey] ?? [];
     const cursor = {
-      turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+      turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
     };
     const cacheableMessages = messages.filter(isFinishedChatMessage);
     workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages);
-    const targetSession = session ?? chatSessions.find(item => item.sessionId === sessionId);
+    const targetSession =
+      session ??
+      projectSessionsByProjectId[activeProjectId]?.find(item => item.sessionId === sessionId) ??
+      chatSessions.find(item => item.sessionId === sessionId);
     if (targetSession) {
       workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
     }
@@ -4611,8 +4671,9 @@ function App() {
     preview = '',
   ) => {
     if (!activeProjectId || !sessionId) return;
-    setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
+    setChatRunningSessionFlags(prev => addSessionFlag(prev, runtimeKey));
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
     rememberChatSessionSummary(activeProjectId, {
       sessionId,
       running: true,
@@ -4630,7 +4691,8 @@ function App() {
     sessionId: string,
   ) => {
     if (!activeProjectId || !sessionId) return;
-    setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
+    setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
     rememberChatSessionSummary(activeProjectId, {
       sessionId,
       running: false,
@@ -4649,10 +4711,11 @@ function App() {
       if (!result.ok) return;
       const sessionPatch = result.session ?? {sessionId, lastReadTurnIndex: cursor};
       rememberChatSessionSummary(activeProjectId, sessionPatch);
-      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+      const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
+      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
       if (result.session) {
         workspaceStore.rememberChatSession(activeProjectId, result.session, {
-          turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+          turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
         });
       }
     } catch {
@@ -4660,22 +4723,23 @@ function App() {
     }
   };
 
-  const resolveSessionVisualState = (session: RegistryChatSession): ChatSessionVisualState => {
+  const resolveSessionVisualState = (session: RegistryChatSession, activeProjectId = projectIdRef.current): ChatSessionVisualState => {
     const state = getChatSessionVisualState(session);
     if (state !== 'idle') {
       return state;
     }
-    if (chatRunningSessionFlags[session.sessionId]) {
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, session.sessionId);
+    if (chatRunningSessionFlags[runtimeKey]) {
       return 'running';
     }
-    if (chatCompletedUnopenedFlags[session.sessionId]) {
+    if (chatCompletedUnopenedFlags[runtimeKey]) {
       return 'completed-unviewed';
     }
     return 'idle';
   };
 
-  const renderSessionStateMarker = (session: RegistryChatSession) => {
-    const state = resolveSessionVisualState(session);
+  const renderSessionStateMarker = (session: RegistryChatSession, activeProjectId = projectIdRef.current) => {
+    const state = resolveSessionVisualState(session, activeProjectId);
     const title =
       state === 'running'
         ? 'In progress'
@@ -4699,9 +4763,10 @@ function App() {
     targetProjectId: string,
     sessionId: string,
   ) => {
-    chatSyncIndexRef.current[sessionId] = 0;
-    chatSyncSubIndexRef.current[sessionId] = 0;
-    chatMessageStoreRef.current[sessionId] = [];
+    const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
+    chatSyncIndexRef.current[runtimeKey] = 0;
+    chatSyncSubIndexRef.current[runtimeKey] = 0;
+    chatMessageStoreRef.current[runtimeKey] = [];
     workspaceStore.rememberChatSessionContent(targetProjectId, sessionId, []);
     const targetSession =
       projectSessionsByProjectId[targetProjectId]?.find(item => item.sessionId === sessionId) ??
@@ -4724,6 +4789,7 @@ function App() {
     },
   ) => {
     if (!activeProjectId || !sessionId) return false;
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
     setChatLoading(true);
     try {
       const requestedIncremental = options?.forceFull
@@ -4732,25 +4798,27 @@ function App() {
       // Snapshot existing messages BEFORE the await so the base is
       // consistent with the cursor. Live session.message events may
       // mutate chatMessageStoreRef during the network round-trip.
-      const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
+      const existingMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
       const checkpointTurnIndex = requestedIncremental
-        ? chatSyncSubIndexRef.current[sessionId] ?? 0
+        ? chatSyncSubIndexRef.current[runtimeKey] ?? 0
         : 0;
       const fallbackToFullRead =
         requestedIncremental &&
         existingMessages.length === 0 &&
         checkpointTurnIndex > 0;
       const useIncremental = requestedIncremental && !fallbackToFullRead;
-      const result = await service.readSession(
+      const result = await service.readProjectSession(
+        activeProjectId,
         sessionId,
         useIncremental ? checkpointTurnIndex : 0,
       );
-      if (activeProjectId !== projectIdRef.current) {
-        return false;
-      }
+      const selectionSnapshot = options?.selectionSnapshot ?? '';
+      const currentSelectedRuntimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
       if (
         options?.preserveUserSelection &&
-        chatSelectedIdRef.current !== (options.selectionSnapshot ?? '') &&
+        selectionSnapshot &&
+        currentSelectedRuntimeKey !== selectionSnapshot &&
+        chatSelectedIdRef.current !== selectionSnapshot &&
         chatSelectedIdRef.current !== sessionId
       ) {
         return;
@@ -4775,20 +4843,24 @@ function App() {
       // Reconcile: live session.message events may have landed in the store
       // during the await. Fold only post-request changes back in so old cache
       // entries cannot overwrite newer session.read results.
-      const fresh = chatMessageStoreRef.current[resultSessionId] ?? [];
+      const resultRuntimeKey = buildChatRuntimeKey(activeProjectId, resultSessionId);
+      const fresh = chatMessageStoreRef.current[resultRuntimeKey] ?? [];
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
-      chatMessageStoreRef.current[resultSessionId] = nextMessages;
+      chatMessageStoreRef.current[resultRuntimeKey] = nextMessages;
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[resultSessionId] = 0;
-      chatSyncSubIndexRef.current[resultSessionId] = latestSyncCursor.turnIndex;
+      chatSyncIndexRef.current[resultRuntimeKey] = 0;
+      chatSyncSubIndexRef.current[resultRuntimeKey] = latestSyncCursor.turnIndex;
       const resultSession = result.session;
       if (resultSession) {
-        setChatSessions(prev => mergeChatSession(prev, resultSession));
+        setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, activeProjectId, resultSession));
+        if (activeProjectId === projectIdRef.current) {
+          setChatSessions(prev => mergeChatSession(prev, resultSession));
+        }
       }
-      setSelectedChatId(resultSessionId);
-      chatSelectedIdRef.current = resultSessionId;
-      workspaceStore.rememberSelectedChatSession(activeProjectId, resultSessionId);
+      const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, resultSessionId);
+      applySelectedChatKey(nextSelectedKey);
+      workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
       setChatMessages(nextMessages);
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       const knownSession =
@@ -4804,14 +4876,10 @@ function App() {
       }
       return true;
     } catch (err) {
-      if (activeProjectId === projectIdRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(err instanceof Error ? err.message : String(err));
       return false;
     } finally {
-      if (activeProjectId === projectIdRef.current) {
-        setChatLoading(false);
-      }
+      setChatLoading(false);
     }
   };
 
@@ -4821,38 +4889,39 @@ function App() {
     selectionSnapshot = chatSelectedIdRef.current,
   ) => {
     if (!activeProjectId || !sessionId) return false;
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
     try {
-      const existingMessages = chatMessageStoreRef.current[sessionId] ?? [];
-      const checkpointTurnIndex = chatSyncSubIndexRef.current[sessionId] ?? 0;
-      const result = await service.readSession(sessionId, checkpointTurnIndex);
-      if (activeProjectId !== projectIdRef.current) {
-        return false;
-      }
-      if (selectionSnapshot && chatSelectedIdRef.current !== selectionSnapshot) {
+      const existingMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
+      const checkpointTurnIndex = chatSyncSubIndexRef.current[runtimeKey] ?? 0;
+      const result = await service.readProjectSession(activeProjectId, sessionId, checkpointTurnIndex);
+      const currentSelectedRuntimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
+      if (selectionSnapshot && currentSelectedRuntimeKey !== selectionSnapshot && chatSelectedIdRef.current !== selectionSnapshot) {
         return false;
       }
       const resultSessionId = result.session?.sessionId || sessionId;
-      const fresh = chatMessageStoreRef.current[resultSessionId] ?? [];
+      const resultRuntimeKey = buildChatRuntimeKey(activeProjectId, resultSessionId);
+      const fresh = chatMessageStoreRef.current[resultRuntimeKey] ?? [];
       let nextMessages = replaceSessionMessages(fresh, result.messages, checkpointTurnIndex);
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
 
-      chatMessageStoreRef.current[resultSessionId] = nextMessages;
+      chatMessageStoreRef.current[resultRuntimeKey] = nextMessages;
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[resultSessionId] = 0;
-      chatSyncSubIndexRef.current[resultSessionId] = latestSyncCursor.turnIndex;
+      chatSyncIndexRef.current[resultRuntimeKey] = 0;
+      chatSyncSubIndexRef.current[resultRuntimeKey] = latestSyncCursor.turnIndex;
       const resultSession = result.session;
       if (resultSession) {
-        setChatSessions(prev => mergeChatSession(prev, resultSession));
+        setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, activeProjectId, resultSession));
+        if (activeProjectId === projectIdRef.current) {
+          setChatSessions(prev => mergeChatSession(prev, resultSession));
+        }
       }
-      if (resultSessionId === chatSelectedIdRef.current) {
+      if (encodeChatSessionKey(selectedChatKeyRef.current) === resultRuntimeKey) {
         setChatMessages(nextMessages);
       }
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       return true;
     } catch (err) {
-      if (activeProjectId === projectIdRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(err instanceof Error ? err.message : String(err));
       return false;
     }
   };
@@ -4863,11 +4932,12 @@ function App() {
   ) => {
     if (!activeProjectId) return;
     try {
-      const sessions = sortChatSessions(await service.listSessions());
-      if (activeProjectId !== projectIdRef.current) {
-        return;
-      }
+      const sessions = sortChatSessions(await service.listProjectSessions(activeProjectId));
       const nextSessions = sessions;
+      setProjectSessionsByProjectId(prev => ({
+        ...prev,
+        [activeProjectId]: nextSessions,
+      }));
       setChatSessions(prev => {
         const byId = new Map(prev.map(item => [item.sessionId, item]));
         let next: RegistryChatSession[] = [];
@@ -4892,15 +4962,22 @@ function App() {
       for (const session of nextSessions) {
         const sessionId = session.sessionId;
         if (!sessionId) continue;
+        const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
         cursorBySessionId[sessionId] = {
-          turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+          turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
         };
       }
       workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
 
+      const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
       let currentSelection =
         preferredSelection ||
-        chatSelectedIdRef.current ||
+        (selectedChatKeyRef.current?.projectId === activeProjectId
+          ? selectedChatKeyRef.current.sessionId
+          : '') ||
+        (persistedSelection?.projectId === activeProjectId
+          ? persistedSelection.sessionId
+          : '') ||
         workspaceStore.getSelectedChatSessionId(activeProjectId) ||
         '';
       if (currentSelection && !nextSessions.some(session => session.sessionId === currentSelection)) {
@@ -4908,26 +4985,25 @@ function App() {
       }
       currentSelection = currentSelection || nextSessions[0]?.sessionId || '';
       if (!currentSelection) {
-        setSelectedChatId('');
+        applySelectedChatKey(null);
         setChatMessages([]);
         return;
       }
-      chatSelectedIdRef.current = currentSelection;
-      setSelectedChatId(currentSelection);
-      workspaceStore.rememberSelectedChatSession(activeProjectId, currentSelection);
+      const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, currentSelection);
+      applySelectedChatKey(nextSelectedKey);
+      workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
       const cachedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
+      const runtimeKey = buildChatRuntimeKey(activeProjectId, currentSelection);
       setChatMessages(cachedSelection.length > 0
         ? cachedSelection
-        : (chatMessageStoreRef.current[currentSelection] ?? []));
+        : (chatMessageStoreRef.current[runtimeKey] ?? []));
       loadChatSession(currentSelection, activeProjectId, {
         incremental: true,
         preserveUserSelection: true,
-        selectionSnapshot: currentSelection,
+        selectionSnapshot: runtimeKey,
       }).catch(() => undefined);
     } catch (err) {
-      if (activeProjectId === projectIdRef.current) {
-        setError(err instanceof Error ? err.message : String(err));
-      }
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
   const resetChatComposer = () => {
@@ -4992,24 +5068,24 @@ function App() {
     }));
     if (targetProjectId === projectIdRef.current) {
       setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
-      setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
-      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
-      if (chatSelectedIdRef.current === sessionId) {
-        setSelectedChatId('');
-        chatSelectedIdRef.current = '';
+    }
+    const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
+    setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
+    if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
+        applySelectedChatKey(null);
         setChatMessages([]);
-        workspaceStore.rememberSelectedChatSession(targetProjectId, '');
-      }
+        workspaceStore.rememberSelectedChatSessionKey(null);
+    }
       const nextMessageStore = {...chatMessageStoreRef.current};
       const nextSyncIndex = {...chatSyncIndexRef.current};
       const nextSyncSubIndex = {...chatSyncSubIndexRef.current};
-      delete nextMessageStore[sessionId];
-      delete nextSyncIndex[sessionId];
-      delete nextSyncSubIndex[sessionId];
+      delete nextMessageStore[runtimeKey];
+      delete nextSyncIndex[runtimeKey];
+      delete nextSyncSubIndex[runtimeKey];
       chatMessageStoreRef.current = nextMessageStore;
       chatSyncIndexRef.current = nextSyncIndex;
       chatSyncSubIndexRef.current = nextSyncSubIndex;
-    }
     workspaceStore.deleteChatSession(targetProjectId, sessionId);
   };
 
@@ -5055,9 +5131,9 @@ function App() {
         throw new Error('session.reload returned ok=false');
       }
       clearProjectSessionCache(targetProjectId, normalizedSessionId);
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, normalizedSessionId);
       if (
-        targetProjectId === projectIdRef.current &&
-        chatSelectedIdRef.current === normalizedSessionId
+        encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey
       ) {
         setChatMessages([]);
         await loadChatSession(normalizedSessionId, targetProjectId, { forceFull: true });
@@ -5087,7 +5163,8 @@ function App() {
       data: attachment.data,
     } satisfies RegistryChatContentBlock)));
     const firstAttachmentName = chatAttachments[0]?.name || '';
-    if (!selectedChatId) {
+    const selectedKey = selectedChatKeyRef.current;
+    if (!selectedKey) {
       setError('Select or create a chat session first.');
       return;
     }
@@ -5097,36 +5174,33 @@ function App() {
     forceChatScrollToBottom();
     setChatSending(true);
     let optimisticRunningSessionId = '';
+    const selectedProjectId = selectedKey.projectId;
     try {
-      const sessionId = selectedChatId;
+      const sessionId = selectedKey.sessionId;
       if (!sessionId) {
         return;
       }
       optimisticRunningSessionId = sessionId;
-      markChatSessionRunning(projectIdRef.current, sessionId, trimmedText || firstAttachmentName);
-      const result = await service.sendSessionMessage({
+      markChatSessionRunning(selectedProjectId, sessionId, trimmedText || firstAttachmentName);
+      const result = await service.sendProjectSessionMessage(selectedProjectId, {
         sessionId,
         text: trimmedText,
         blocks,
       });
       const nextSessionId = result.sessionId || sessionId;
-      markChatSessionRunning(projectIdRef.current, nextSessionId, trimmedText || firstAttachmentName);
-      setSelectedChatId(nextSessionId);
-      chatSelectedIdRef.current = nextSessionId;
-      workspaceStore.rememberSelectedChatSession(projectIdRef.current, nextSessionId);
-      if (!chatSessions.find(item => item.sessionId === nextSessionId)) {
-        setChatSessions(prev =>
-          mergeChatSession(prev, {
-            sessionId: nextSessionId,
-            preview: trimmedText || firstAttachmentName || '',
-            updatedAt: new Date().toISOString(),
-            messageCount: 0,
-          }),
-        );
-      }
+      markChatSessionRunning(selectedProjectId, nextSessionId, trimmedText || firstAttachmentName);
+      const nextSelectedKey = chatSessionKeyFromParts(selectedProjectId, nextSessionId);
+      applySelectedChatKey(nextSelectedKey);
+      workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
+      rememberChatSessionSummary(selectedProjectId, {
+        sessionId: nextSessionId,
+        preview: trimmedText || firstAttachmentName || '',
+        updatedAt: new Date().toISOString(),
+        messageCount: 0,
+      });
     } catch (err) {
       if (optimisticRunningSessionId) {
-        clearChatSessionRunning(projectIdRef.current, optimisticRunningSessionId);
+        clearChatSessionRunning(selectedProjectId, optimisticRunningSessionId);
       }
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -5135,35 +5209,46 @@ function App() {
   };
 
   const applyChatSessionConfigOptions = (
+    activeProjectId: string,
     sessionId: string,
     configOptions: RegistrySessionConfigOption[],
   ) => {
-    if (!sessionId) return;
-    setChatSessions(prev => {
-      const existing = prev.find(item => item.sessionId === sessionId);
-      if (!existing) return prev;
-      return mergeChatSession(prev, {
-        ...existing,
+    if (!activeProjectId || !sessionId) return;
+    setProjectSessionsByProjectId(prev => {
+      const existing = prev[activeProjectId]?.find(item => item.sessionId === sessionId);
+      return mergeProjectSessionMap(prev, activeProjectId, {
+        ...(existing ?? {sessionId}),
         configOptions,
       });
     });
+    if (activeProjectId === projectIdRef.current) {
+      setChatSessions(prev => {
+        const existing = prev.find(item => item.sessionId === sessionId);
+        if (!existing) return prev;
+        return mergeChatSession(prev, {
+          ...existing,
+          configOptions,
+        });
+      });
+    }
   };
 
   const handleChatConfigOptionChange = async (
     option: RegistrySessionConfigOption,
     value: string,
   ) => {
-    const sessionId = chatSelectedIdRef.current.trim();
+    const selectedKey = selectedChatKeyRef.current;
+    const sessionId = selectedKey?.sessionId.trim() ?? '';
     const configId = option.id.trim();
     const nextValue = value;
-    if (!sessionId || !configId || !nextValue || nextValue === option.currentValue) {
+    if (!selectedKey || !sessionId || !configId || !nextValue || nextValue === option.currentValue) {
       return;
     }
-    const updatingKey = `${sessionId}:${configId}`;
+    const updatingKey = `${encodeChatSessionKey(selectedKey)}:${configId}`;
     setChatConfigUpdatingKey(updatingKey);
 
     try {
-      const result = await service.setSessionConfig({
+      const result = await service.setProjectSessionConfig(selectedKey.projectId, {
         sessionId,
         configId,
         value: nextValue,
@@ -5172,7 +5257,7 @@ function App() {
         throw new Error('session.setConfig returned ok=false');
       }
       if (result.configOptions.length > 0) {
-        applyChatSessionConfigOptions(result.sessionId || sessionId, result.configOptions);
+        applyChatSessionConfigOptions(selectedKey.projectId, result.sessionId || sessionId, result.configOptions);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -5237,7 +5322,7 @@ function App() {
     connectInFlightRef.current = true;
     const trimmedToken = tokenRef.current.trim();
     const nextAddress = addressRef.current.trim();
-    const previousSelectedChatId = chatSelectedIdRef.current;
+    const previousSelectedChatKey = selectedChatKeyRef.current;
     setError('');
     clearReconnectTimer();
     if (!silentReconnect) {
@@ -5247,9 +5332,15 @@ function App() {
     try {
       const ws = toRegistryWsUrl(nextAddress);
       const result = await workspaceController.connect(ws, trimmedToken);
-      const preferredSelectedChatId =
-        previousSelectedChatId.trim() ||
-        workspaceStore.getSelectedChatSessionId(result.hydrated.projectId);
+      const persistedSelectedChatKey = workspaceStore.migrateSelectedChatSessionKey(result.hydrated.projectId);
+      const preferredSelectedChatKey =
+        previousSelectedChatKey ||
+        persistedSelectedChatKey ||
+        chatSessionKeyFromParts(
+          result.hydrated.projectId,
+          workspaceStore.getSelectedChatSessionId(result.hydrated.projectId),
+        );
+      const preferredSelectedChatId = preferredSelectedChatKey?.sessionId ?? '';
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       captureSelectedFileScrollPosition();
@@ -5271,22 +5362,30 @@ function App() {
       setReconnecting(false);
       setConnected(true);
       if (!silentReconnect) {
-        clearChatRuntimeState(preferredSelectedChatId);
-        hydrateChatSessionsFromCache(result.hydrated.projectId, preferredSelectedChatId);
+        clearChatRuntimeState();
+        if (preferredSelectedChatKey) {
+          applySelectedChatKey(preferredSelectedChatKey);
+          hydrateChatSessionsFromCache(preferredSelectedChatKey.projectId, preferredSelectedChatKey.sessionId);
+        } else {
+          hydrateChatSessionsFromCache(result.hydrated.projectId, '');
+        }
       }
       if (silentReconnect) {
         const shouldSyncSelectedSession =
           tabRef.current === 'chat' &&
-          !!preferredSelectedChatId;
+          !!preferredSelectedChatKey;
         if (shouldSyncSelectedSession) {
-          await loadChatSession(preferredSelectedChatId, result.hydrated.projectId, {
+          await loadChatSession(preferredSelectedChatKey.sessionId, preferredSelectedChatKey.projectId, {
             incremental: true,
             preserveUserSelection: true,
-            selectionSnapshot: preferredSelectedChatId,
+            selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),
           });
         }
       } else if (tabRef.current === 'chat') {
-        loadChatSessions(result.hydrated.projectId, preferredSelectedChatId).catch(() => undefined);
+        loadChatSessions(
+          preferredSelectedChatKey?.projectId ?? result.hydrated.projectId,
+          preferredSelectedChatId,
+        ).catch(() => undefined);
       }
       workspaceController
         .validateExpandedDirectories(
@@ -5590,9 +5689,6 @@ function App() {
       setProjects(result.projects);
       setHasPendingProjectUpdates(false);
       applyHydratedProjectState(result.hydrated);
-      const preferredChatSelection = workspaceStore.getSelectedChatSessionId(result.hydrated.projectId);
-      clearChatRuntimeState(preferredChatSelection);
-      hydrateChatSessionsFromCache(result.hydrated.projectId, preferredChatSelection);
       workspaceController
         .validateExpandedDirectories(
           result.hydrated.projectId,
@@ -5616,24 +5712,23 @@ function App() {
     options?: {closeMobileDrawer?: boolean},
   ) => {
     if (!targetProjectId || !sessionId) return;
-    workspaceStore.rememberSelectedChatSession(targetProjectId, sessionId);
+    const nextSelectedKey = chatSessionKeyFromParts(targetProjectId, sessionId);
+    if (!nextSelectedKey) return;
+    workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
     setWideProjectActionMenu(null);
     setMobileProjectActionMenu(null);
     if (options?.closeMobileDrawer) {
       setDrawerOpen(false);
     }
-    if (targetProjectId !== projectIdRef.current) {
-      await switchProject(targetProjectId);
-    }
     setTab('chat');
-    setSelectedChatId(sessionId);
-    chatSelectedIdRef.current = sessionId;
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+    applySelectedChatKey(nextSelectedKey);
+    const runtimeKey = encodeChatSessionKey(nextSelectedKey);
+    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
     setChatMessages(hydrateChatSessionContentFromCache(sessionId, targetProjectId));
     await loadChatSession(sessionId, targetProjectId, {
       incremental: true,
       preserveUserSelection: true,
-      selectionSnapshot: sessionId,
+      selectionSnapshot: runtimeKey,
     });
   };
 
@@ -5662,12 +5757,12 @@ function App() {
         ...prev,
         [targetProjectId]: mergeChatSession(prev[targetProjectId] ?? [], session),
       }));
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, session.sessionId);
+      chatMessageStoreRef.current[runtimeKey] = [];
+      chatSyncIndexRef.current[runtimeKey] = 0;
+      chatSyncSubIndexRef.current[runtimeKey] = 0;
       if (targetProjectId === projectIdRef.current) {
         setChatSessions(prev => mergeChatSession(prev, session));
-        chatMessageStoreRef.current[session.sessionId] = [];
-        chatSyncIndexRef.current[session.sessionId] = 0;
-        chatSyncSubIndexRef.current[session.sessionId] = 0;
-        setChatMessages([]);
       }
       await selectProjectChatSession(targetProjectId, session.sessionId, options);
     } catch (err) {
@@ -5720,7 +5815,8 @@ function App() {
       importedSessionId = imported.session.sessionId;
       const session = imported.session;
       workspaceStore.rememberChatSession(targetProjectId, session, {turnIndex: 0});
-      workspaceStore.rememberSelectedChatSession(targetProjectId, importedSessionId);
+      const selectedKey = chatSessionKeyFromParts(targetProjectId, importedSessionId);
+      workspaceStore.rememberSelectedChatSessionKey(selectedKey);
       setResumeSessions(prev => prev.filter(item => item.sessionId !== sessionId));
       setProjectSessionsByProjectId(prev => ({
         ...prev,
@@ -5733,15 +5829,12 @@ function App() {
       if (!reloaded.ok) {
         throw new Error('project session.reload returned ok=false');
       }
-      chatMessageStoreRef.current[importedSessionId] = [];
-      chatSyncIndexRef.current[importedSessionId] = 0;
-      chatSyncSubIndexRef.current[importedSessionId] = 0;
-      if (targetProjectId !== projectIdRef.current) {
-        await switchProject(targetProjectId);
-      }
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, importedSessionId);
+      chatMessageStoreRef.current[runtimeKey] = [];
+      chatSyncIndexRef.current[runtimeKey] = 0;
+      chatSyncSubIndexRef.current[runtimeKey] = 0;
       setTab('chat');
-      setSelectedChatId(importedSessionId);
-      chatSelectedIdRef.current = importedSessionId;
+      applySelectedChatKey(selectedKey);
       setChatMessages([]);
       const loaded = await loadChatSession(importedSessionId, targetProjectId, { forceFull: true });
       if (!loaded) {
@@ -5795,7 +5888,7 @@ function App() {
       importedSessionId = imported.session.sessionId;
       const session = imported.session;
       workspaceStore.rememberChatSession(targetProjectId, session, {turnIndex: 0});
-      workspaceStore.rememberSelectedChatSession(targetProjectId, importedSessionId);
+      workspaceStore.rememberSelectedChatSessionKey(chatSessionKeyFromParts(targetProjectId, importedSessionId));
       setResumeSessions(prev => prev.filter(item => item.sessionId !== sessionId));
       setProjectSessionsByProjectId(prev => ({
         ...prev,
@@ -5808,9 +5901,10 @@ function App() {
       if (!reloaded.ok) {
         throw new Error('project session.reload returned ok=false');
       }
-      chatMessageStoreRef.current[importedSessionId] = [];
-      chatSyncIndexRef.current[importedSessionId] = 0;
-      chatSyncSubIndexRef.current[importedSessionId] = 0;
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, importedSessionId);
+      chatMessageStoreRef.current[runtimeKey] = [];
+      chatSyncIndexRef.current[runtimeKey] = 0;
+      chatSyncSubIndexRef.current[runtimeKey] = 0;
       await selectProjectChatSession(targetProjectId, importedSessionId, {closeMobileDrawer: true});
     } catch (err) {
       if (importedSessionId) {
@@ -7044,7 +7138,6 @@ function App() {
             const visibleSessions = projectSessions.slice(0, visibleCount);
             const collapsed = collapsedProjectIds.includes(targetProjectId);
             const pinnedProject = pinnedProjectIds.includes(targetProjectId);
-            const activeProject = targetProjectId === projectId;
             const agents = getWideProjectAgents(projectItem, projectSessions);
             const actionMenuOpen = mobileProjectActionMenu?.projectId === targetProjectId;
             const activeMobileProjectActionMenu = actionMenuOpen
@@ -7056,7 +7149,7 @@ function App() {
             return (
               <div
                 key={`mobile-project:${targetProjectId}`}
-                className={`wide-project-section mobile-project-section${activeProject ? ' active' : ''}${pinnedProject ? ' pinned' : ''}${
+                  className={`wide-project-section mobile-project-section${targetProjectId === projectId ? ' active' : ''}${pinnedProject ? ' pinned' : ''}${
                   collapsed ? ' collapsed' : ''
                 }`}
               >
@@ -7254,7 +7347,7 @@ function App() {
                           <button
                             type="button"
                             className={`wide-session-row mobile-session-row${
-                              activeProject && selectedChatId === session.sessionId
+                              selectedChatEncodedKey === buildChatRuntimeKey(targetProjectId, session.sessionId)
                                 ? ' selected'
                                 : ''
                             }`}
@@ -7274,7 +7367,7 @@ function App() {
                               ).catch(() => undefined);
                             }}
                           >
-                            {renderSessionStateMarker(session)}
+                            {renderSessionStateMarker(session, targetProjectId)}
                             <span className="wide-session-title">
                               {session.title || session.sessionId}
                             </span>
@@ -7333,7 +7426,6 @@ function App() {
           const visibleSessions = projectSessions.slice(0, visibleCount);
           const collapsed = collapsedProjectIds.includes(targetProjectId);
           const pinnedProject = pinnedProjectIds.includes(targetProjectId);
-          const activeProject = targetProjectId === projectId;
           const agents = getWideProjectAgents(projectItem, projectSessions);
           const actionMenuOpen = wideProjectActionMenu?.projectId === targetProjectId;
           const projectHub = projectItem.hubId || 'local';
@@ -7341,7 +7433,7 @@ function App() {
           return (
             <div
               key={`wide-project:${targetProjectId}`}
-              className={`wide-project-section${activeProject ? ' active' : ''}${pinnedProject ? ' pinned' : ''}${
+              className={`wide-project-section${targetProjectId === projectId ? ' active' : ''}${pinnedProject ? ' pinned' : ''}${
                 collapsed ? ' collapsed' : ''
               }`}
             >
@@ -7531,7 +7623,7 @@ function App() {
                         <button
                           type="button"
                           className={`wide-session-row${
-                            activeProject && selectedChatId === session.sessionId
+                            selectedChatEncodedKey === buildChatRuntimeKey(targetProjectId, session.sessionId)
                               ? ' selected'
                               : ''
                           }`}
@@ -7550,7 +7642,7 @@ function App() {
                             ).catch(() => undefined);
                           }}
                         >
-                          {renderSessionStateMarker(session)}
+                          {renderSessionStateMarker(session, targetProjectId)}
                           <span className="wide-session-title">
                             {session.title || session.sessionId}
                           </span>
