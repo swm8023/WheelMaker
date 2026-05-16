@@ -118,7 +118,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('useLayoutEffect(() => {');
     expect(mainTsx).toContain('resizeChatComposerTextarea();');
     expect(mainTsx).toContain('}, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
-    expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);');
+    expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);');
     expect(mainTsx).toMatch(
       /onScroll=\{event => \{[\s\S]*updateChatFollowModeFromScroll\(event\.currentTarget\);[\s\S]*expandSelectedChatWindowEarlier\(event\.currentTarget\);[\s\S]*\}\}/,
     );

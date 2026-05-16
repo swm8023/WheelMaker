@@ -46,6 +46,7 @@ import {
   type ChatTurnWindow,
 } from './chat/chatTurnWindow';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
+import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -127,6 +128,12 @@ type SettingsDetailView = 'tokenStats' | null;
 type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
+};
+type PendingChatPrompt = {
+  sessionId: string;
+  blocks: RegistryChatContentBlock[];
+  createdAt: string;
+  turnIndex: number;
 };
 type ChatSlashCommandOption = {
   name: string;
@@ -500,6 +507,30 @@ function upsertChatMessage(
   return copy;
 }
 
+function nextPromptTurnIndex(messages: RegistryChatMessage[]): number {
+  return Math.max(
+    0,
+    ...messages.map(message => Math.max(0, Math.trunc(message.turnIndex ?? 0))),
+  ) + 1;
+}
+
+function buildPendingPromptMessage(prompt: PendingChatPrompt): RegistryChatMessage {
+  return {
+    sessionId: prompt.sessionId,
+    turnIndex: prompt.turnIndex,
+    method: 'prompt_request',
+    param: {
+      contentBlocks: prompt.blocks,
+      createdAt: prompt.createdAt,
+    },
+    finished: false,
+  };
+}
+
+function isPromptStartMessage(message: RegistryChatMessage): boolean {
+  return message.method === 'prompt_request' || message.method === 'user_message_chunk';
+}
+
 // -- Message accessor helpers (all derived from method + param) --
 
 function msgRole(method: string): string {
@@ -795,6 +826,7 @@ async function writeTextToClipboard(text: string): Promise<void> {
 type ChatTurnViewProps = {
   message: RegistryChatMessage;
   promptRequest?: RegistryChatMessage;
+  promptStatus?: ChatPromptStatus;
   hideToolCalls: boolean;
   markdownComponents: Components;
   markdownUrlTransform: (value: string) => string;
@@ -805,6 +837,7 @@ type ChatTurnViewProps = {
 const ChatTurnView = React.memo(function ChatTurnView({
   message,
   promptRequest,
+  promptStatus = null,
   hideToolCalls,
   markdownComponents,
   markdownUrlTransform,
@@ -818,9 +851,20 @@ const ChatTurnView = React.memo(function ChatTurnView({
     const imageBlocks = groupImageBlocks([message]);
     return (
       <div className="chat-prompt-group">
-        {text ? (
+        {text || promptStatus ? (
           <div className="chat-prompt-user-row">
-            <div className="chat-prompt-user">{text}</div>
+            {text ? (
+              <div className="chat-prompt-user">{text}</div>
+            ) : null}
+            {promptStatus === 'responding' ? (
+              <span className="chat-prompt-status chat-prompt-status-responding" title="Responding">
+                <span className="chat-prompt-status-dots" aria-hidden="true">
+                  <span>.</span>
+                  <span>.</span>
+                  <span>.</span>
+                </span>
+              </span>
+            ) : null}
           </div>
         ) : null}
         {imageBlocks.length > 0 ? (
@@ -2145,9 +2189,11 @@ function App() {
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
   const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
   const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
+  const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState<Record<string, PendingChatPrompt>>({});
   const chatComposerTextRef = useRef('');
   const chatAttachmentsRef = useRef<ChatAttachment[]>([]);
   const chatComposerDraftsRef = useRef<Record<string, ChatComposerDraft>>({});
+  const chatPendingPromptsByKeyRef = useRef<Record<string, PendingChatPrompt>>({});
   const chatAttachmentReadCountRef = useRef<Record<string, number>>({});
   const chatDraftGenerationRef = useRef<Record<string, number>>({});
   const currentChatDraftKeyRef = useRef('');
@@ -2651,6 +2697,10 @@ function App() {
   }, [chatComposerDrafts]);
 
   useEffect(() => {
+    chatPendingPromptsByKeyRef.current = chatPendingPromptsByKey;
+  }, [chatPendingPromptsByKey]);
+
+  useEffect(() => {
     const draft =
       chatComposerDraftsRef.current[currentChatDraftKey] ??
       EMPTY_CHAT_COMPOSER_DRAFT;
@@ -2896,7 +2946,7 @@ function App() {
     }
     resizeChatComposerTextarea();
     scrollChatToBottom();
-  }, [tab, selectedChatId, chatMessages, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);
+  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -4767,6 +4817,7 @@ function App() {
       const resultRuntimeKey = buildChatRuntimeKey(activeProjectId, resultSessionId);
       const fresh = chatMessageStoreRef.current[resultRuntimeKey] ?? [];
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
+      forgetPendingPromptIfResolved(resultRuntimeKey, nextMessages);
 
       chatMessageStoreRef.current[resultRuntimeKey] = nextMessages;
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
@@ -4824,6 +4875,7 @@ function App() {
       const fresh = chatMessageStoreRef.current[resultRuntimeKey] ?? [];
       let nextMessages = replaceSessionMessages(fresh, result.messages, checkpointTurnIndex);
       nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
+      forgetPendingPromptIfResolved(resultRuntimeKey, nextMessages);
 
       chatMessageStoreRef.current[resultRuntimeKey] = nextMessages;
       const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
@@ -4940,6 +4992,62 @@ function App() {
     saveChatComposerDraft(currentChatDraftKeyRef.current, '', []);
     if (chatFileInputRef.current) {
       chatFileInputRef.current.value = '';
+    }
+  };
+
+  const rememberPendingChatPrompt = (runtimeKey: string, prompt: PendingChatPrompt) => {
+    if (!runtimeKey) return;
+    const next = {
+      ...chatPendingPromptsByKeyRef.current,
+      [runtimeKey]: prompt,
+    };
+    chatPendingPromptsByKeyRef.current = next;
+    setChatPendingPromptsByKey(next);
+  };
+
+  const forgetPendingChatPrompt = (runtimeKey: string) => {
+    if (!runtimeKey || !chatPendingPromptsByKeyRef.current[runtimeKey]) return;
+    const next = {
+      ...chatPendingPromptsByKeyRef.current,
+    };
+    delete next[runtimeKey];
+    chatPendingPromptsByKeyRef.current = next;
+    setChatPendingPromptsByKey(next);
+  };
+
+  const movePendingChatPrompt = (
+    fromRuntimeKey: string,
+    toRuntimeKey: string,
+    sessionId: string,
+  ) => {
+    if (!fromRuntimeKey || !toRuntimeKey || fromRuntimeKey === toRuntimeKey) return;
+    const prompt = chatPendingPromptsByKeyRef.current[fromRuntimeKey];
+    if (!prompt) return;
+    const next = {
+      ...chatPendingPromptsByKeyRef.current,
+      [toRuntimeKey]: {
+        ...prompt,
+        sessionId,
+      },
+    };
+    delete next[fromRuntimeKey];
+    chatPendingPromptsByKeyRef.current = next;
+    setChatPendingPromptsByKey(next);
+  };
+
+  const forgetPendingPromptIfResolved = (
+    runtimeKey: string,
+    messages: RegistryChatMessage[],
+  ) => {
+    const pendingPrompt = chatPendingPromptsByKeyRef.current[runtimeKey];
+    if (!pendingPrompt) return;
+    const resolved = messages.some(message =>
+      message.sessionId === pendingPrompt.sessionId &&
+      isPromptStartMessage(message) &&
+      (message.turnIndex ?? 0) >= pendingPrompt.turnIndex,
+    );
+    if (resolved) {
+      forgetPendingChatPrompt(runtimeKey);
     }
   };
 
@@ -5093,18 +5201,27 @@ function App() {
       setError('Select or create a chat session first.');
       return;
     }
+    const selectedProjectId = selectedKey.projectId;
+    const sessionId = selectedKey.sessionId;
+    if (!sessionId) {
+      setError('Select or create a chat session first.');
+      return;
+    }
+    const runtimeKey = buildChatRuntimeKey(selectedProjectId, sessionId);
+    const createdAt = new Date().toISOString();
+    rememberPendingChatPrompt(runtimeKey, {
+      sessionId,
+      blocks: blocks.map(block => ({...block})),
+      createdAt,
+      turnIndex: nextPromptTurnIndex(chatMessageStoreRef.current[runtimeKey] ?? []),
+    });
 
     // Clear UI immediately after capturing text — before any async work
     resetChatComposer();
     forceChatScrollToBottom();
     setChatSending(true);
     let optimisticRunningSessionId = '';
-    const selectedProjectId = selectedKey.projectId;
     try {
-      const sessionId = selectedKey.sessionId;
-      if (!sessionId) {
-        return;
-      }
       optimisticRunningSessionId = sessionId;
       markChatSessionRunning(selectedProjectId, sessionId, trimmedText || firstAttachmentName);
       const result = await service.sendProjectSessionMessage(selectedProjectId, {
@@ -5113,6 +5230,9 @@ function App() {
         blocks,
       });
       const nextSessionId = result.sessionId || sessionId;
+      if (nextSessionId !== sessionId) {
+        movePendingChatPrompt(runtimeKey, buildChatRuntimeKey(selectedProjectId, nextSessionId), nextSessionId);
+      }
       markChatSessionRunning(selectedProjectId, nextSessionId, trimmedText || firstAttachmentName);
       const nextSelectedKey = chatSessionKeyFromParts(selectedProjectId, nextSessionId);
       applySelectedChatKey(nextSelectedKey);
@@ -5127,6 +5247,7 @@ function App() {
       if (optimisticRunningSessionId) {
         clearChatSessionRunning(selectedProjectId, optimisticRunningSessionId);
       }
+      forgetPendingChatPrompt(runtimeKey);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setChatSending(false);
@@ -6117,6 +6238,9 @@ function App() {
         }
         const sessionId = message.sessionId;
         const runtimeKey = buildChatRuntimeKey(eventProjectId, sessionId);
+        if (message.method === 'prompt_request') {
+          forgetPendingChatPrompt(runtimeKey);
+        }
         const isSelectedSession = encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey;
         const knownProjectSessions = projectSessionsByProjectIdRef.current[eventProjectId] ?? [];
         const knownSession = knownProjectSessions.some(session => session.sessionId === sessionId);
@@ -8080,11 +8204,15 @@ function App() {
     const copyRange = message.method === 'prompt_done'
       ? buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex)
       : null;
+    const promptStatus = isPromptStartMessage(message)
+      ? resolvePromptTurnStatus(selectedFullChatMessages, message)
+      : null;
     return (
       <ChatTurnView
         key={`${selectedChatEncodedKey}:${message.turnIndex}:${message.method}`}
         message={message}
         promptRequest={message.method === 'prompt_done' ? findPromptRequestForDone(doneTurnIndex) : undefined}
+        promptStatus={promptStatus}
         hideToolCalls={hideToolCalls}
         markdownComponents={chatMarkdownComponents}
         markdownUrlTransform={chatMarkdownUrlTransform}
@@ -8097,6 +8225,19 @@ function App() {
       />
     );
   });
+  const selectedPendingPrompt = selectedChatEncodedKey
+    ? chatPendingPromptsByKey[selectedChatEncodedKey]
+    : undefined;
+  const renderedPendingChatTurn = selectedPendingPrompt ? (
+    <ChatTurnView
+      key={`${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`}
+      message={buildPendingPromptMessage(selectedPendingPrompt)}
+      promptStatus="responding"
+      hideToolCalls={hideToolCalls}
+      markdownComponents={chatMarkdownComponents}
+      markdownUrlTransform={chatMarkdownUrlTransform}
+    />
+  ) : null;
   const renderMain = () => {
     const heavyDiffDeferred =
       !!selectedDiff &&
@@ -8221,7 +8362,7 @@ function App() {
               {chatLoading ? (
                 <div className="muted block">Loading chat...</div>
               ) : null}
-              {!chatLoading && chatMessages.length === 0 ? (
+              {!chatLoading && chatMessages.length === 0 && !selectedPendingPrompt ? (
                 <div className="empty-card">
                   <div className="empty-title">Start chatting</div>
                   <div className="empty-subtitle">
@@ -8230,8 +8371,9 @@ function App() {
                 </div>
               ) : null}
               {renderedChatTurns}
+              {renderedPendingChatTurn}
             </div>
-          {chatShowScrollToBottom ? (
+            {chatShowScrollToBottom ? (
             <button
               type="button"
               className="chat-scroll-bottom-button"

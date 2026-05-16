@@ -28,6 +28,24 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
   });
 
+  test('renders prompt responding status and optimistic pending prompt while sending', () => {
+    const main = readMain();
+
+    expect(main).toContain("import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';");
+    expect(main).toContain('promptStatus?: ChatPromptStatus;');
+    expect(main).toContain("promptStatus === 'responding'");
+    expect(main).toContain('className="chat-prompt-status-dots"');
+    expect(main).toContain('const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState');
+    expect(main).toContain('rememberPendingChatPrompt(runtimeKey, {');
+    expect(main).toContain('forgetPendingChatPrompt(runtimeKey);');
+    expect(main).toContain('chatMessages.length === 0 && !selectedPendingPrompt');
+
+    const pendingIndex = main.indexOf('rememberPendingChatPrompt(runtimeKey, {');
+    const sendIndex = main.indexOf('const result = await service.sendProjectSessionMessage(selectedProjectId, {');
+    expect(pendingIndex).toBeGreaterThanOrEqual(0);
+    expect(sendIndex).toBeGreaterThan(pendingIndex);
+  });
+
   test('shows a scroll-to-bottom button when the user is away from the bottom', () => {
     const main = readMain();
 
