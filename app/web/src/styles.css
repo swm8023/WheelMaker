@@ -1494,8 +1494,17 @@ body,
 
 .wide-project-folder-icon {
   --hub-accent: var(--accent);
-  color: color-mix(in srgb, var(--text) 62%, var(--hub-accent));
+  color: color-mix(in srgb, var(--hub-accent) 72%, var(--text));
   font-size: 14px;
+}
+
+.wide-project-folder-icon.codicon-folder {
+  color: color-mix(in srgb, var(--muted) 74%, var(--hub-accent));
+}
+
+.wide-project-folder-icon.codicon-folder-opened {
+  color: color-mix(in srgb, var(--hub-accent) 82%, var(--text));
+  text-shadow: 0 0 8px color-mix(in srgb, var(--hub-accent) 30%, transparent);
 }
 
 .wide-project-pin-badge {
@@ -1623,9 +1632,9 @@ body,
   background: transparent;
   color: color-mix(in srgb, var(--text) 76%, transparent);
   display: grid;
-  grid-template-columns: 13px minmax(0, 1fr) auto auto;
+  grid-template-columns: 9px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding: 0 6px;
   cursor: pointer;
   text-align: left;
@@ -1644,13 +1653,13 @@ body,
 }
 
 .session-state-marker {
-  width: 13px;
+  width: 9px;
   height: 15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: color-mix(in srgb, var(--text) 38%, transparent);
-  flex: 0 0 13px;
+  flex: 0 0 9px;
 }
 
 .session-state-marker.running {

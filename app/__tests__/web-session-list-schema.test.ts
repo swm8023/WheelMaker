@@ -29,7 +29,7 @@ describe('web session list schema', () => {
     expect(mainTsx).toContain('service.markProjectSessionRead(activeProjectId, sessionId, cursor)');
     expect(mainTsx).toContain('rememberChatSessionSummary(eventProjectId, payload.session);');
     expect(mainTsx).toContain('workspaceStore.rememberChatSession(eventProjectId, payload.session, {');
-    expect(stylesCss).toContain('grid-template-columns: 13px minmax(0, 1fr) auto auto;');
+    expect(stylesCss).toContain('grid-template-columns: 9px minmax(0, 1fr) auto auto;');
     expect(stylesCss).toContain('.session-state-marker.running');
     expect(stylesCss).toContain('.session-state-marker.failed-unviewed .session-state-dot');
     expect(repositoryTs).not.toContain('input.chatId');
