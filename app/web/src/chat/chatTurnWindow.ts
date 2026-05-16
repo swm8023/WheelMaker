@@ -1,11 +1,12 @@
 import type { RegistryChatMessage } from '../types/registry';
 
 export const DEFAULT_TURN_WINDOW_SIZE = 200;
-export const TURN_WINDOW_EXPAND_SIZE = 200;
+export const TURN_WINDOW_STEP_SIZE = 100;
+export const TURN_WINDOW_EDGE_THRESHOLD = 25;
 
 export type ChatTurnWindow = {
-  startTurnIndex: number;
-  endTurnIndex: number;
+  startIndex: number;
+  endIndex: number;
 };
 
 function positiveTurnIndex(message: RegistryChatMessage): number {
@@ -17,51 +18,106 @@ function sortedTurns(turns: RegistryChatMessage[]): RegistryChatMessage[] {
   return [...turns].sort((left, right) => positiveTurnIndex(left) - positiveTurnIndex(right));
 }
 
+function orderedTurns(turns: RegistryChatMessage[]): RegistryChatMessage[] {
+  return sortedTurns(turns).filter(message => positiveTurnIndex(message) > 0);
+}
+
+function normalizedWindowSize(size: number): number {
+  return Math.max(1, Math.trunc(size));
+}
+
+function normalizedStep(size: number, step: number): number {
+  return Math.max(1, Math.min(normalizedWindowSize(size), Math.trunc(step)));
+}
+
 export function createLatestTurnWindow(
   turns: RegistryChatMessage[],
   size = DEFAULT_TURN_WINDOW_SIZE,
+  step = TURN_WINDOW_STEP_SIZE,
 ): ChatTurnWindow {
-  const ordered = sortedTurns(turns).filter(message => positiveTurnIndex(message) > 0);
-  if (ordered.length === 0) {
-    return { startTurnIndex: 0, endTurnIndex: 0 };
+  const count = orderedTurns(turns).length;
+  if (count === 0) {
+    return { startIndex: 0, endIndex: 0 };
   }
-  const normalizedSize = Math.max(1, Math.trunc(size));
-  const latest = positiveTurnIndex(ordered[ordered.length - 1]);
-  const first = positiveTurnIndex(ordered[0]);
+  const normalizedSize = normalizedWindowSize(size);
+  const normalizedStepSize = normalizedStep(normalizedSize, step);
+  const startIndex = Math.max(0, count - normalizedStepSize);
   return {
-    startTurnIndex: Math.max(first, latest - normalizedSize + 1),
-    endTurnIndex: latest,
+    startIndex,
+    endIndex: startIndex + normalizedSize,
   };
 }
 
 export function expandTurnWindowEarlier(
   turns: RegistryChatMessage[],
   window: ChatTurnWindow,
-  size = TURN_WINDOW_EXPAND_SIZE,
+  step = TURN_WINDOW_STEP_SIZE,
+  size = DEFAULT_TURN_WINDOW_SIZE,
 ): ChatTurnWindow {
-  const ordered = sortedTurns(turns).filter(message => positiveTurnIndex(message) > 0);
-  if (ordered.length === 0 || window.endTurnIndex <= 0) {
-    return { startTurnIndex: 0, endTurnIndex: 0 };
+  const count = orderedTurns(turns).length;
+  if (count === 0 || window.endIndex <= 0) {
+    return { startIndex: 0, endIndex: 0 };
   }
-  const first = positiveTurnIndex(ordered[0]);
-  const normalizedSize = Math.max(1, Math.trunc(size));
+  const normalizedSize = normalizedWindowSize(size);
+  const normalizedStepSize = normalizedStep(normalizedSize, step);
+  const startIndex = Math.max(0, Math.min(window.startIndex, count) - normalizedStepSize);
   return {
-    startTurnIndex: Math.max(first, window.startTurnIndex - normalizedSize),
-    endTurnIndex: window.endTurnIndex,
+    startIndex,
+    endIndex: startIndex + normalizedSize,
   };
+}
+
+export function expandTurnWindowLater(
+  turns: RegistryChatMessage[],
+  window: ChatTurnWindow,
+  step = TURN_WINDOW_STEP_SIZE,
+  size = DEFAULT_TURN_WINDOW_SIZE,
+): ChatTurnWindow {
+  const count = orderedTurns(turns).length;
+  if (count === 0 || window.endIndex <= 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+  const normalizedSize = normalizedWindowSize(size);
+  const normalizedStepSize = normalizedStep(normalizedSize, step);
+  const latestStartIndex = Math.max(0, count - normalizedStepSize);
+  const startIndex = Math.min(
+    latestStartIndex,
+    Math.max(0, window.startIndex + normalizedStepSize),
+  );
+  return {
+    startIndex,
+    endIndex: startIndex + normalizedSize,
+  };
+}
+
+export function followLatestTurnWindow(
+  turns: RegistryChatMessage[],
+  window: ChatTurnWindow,
+  threshold = TURN_WINDOW_EDGE_THRESHOLD,
+  size = DEFAULT_TURN_WINDOW_SIZE,
+  step = TURN_WINDOW_STEP_SIZE,
+): ChatTurnWindow {
+  const count = orderedTurns(turns).length;
+  if (count === 0) {
+    return { startIndex: 0, endIndex: 0 };
+  }
+  const edgeThreshold = Math.max(0, Math.trunc(threshold));
+  if (window.endIndex <= 0 || window.endIndex - count < edgeThreshold) {
+    return createLatestTurnWindow(turns, size, step);
+  }
+  return window;
 }
 
 export function sliceTurnsForWindow(
   turns: RegistryChatMessage[],
   window: ChatTurnWindow,
 ): RegistryChatMessage[] {
-  if (window.startTurnIndex <= 0 || window.endTurnIndex <= 0) {
+  if (window.endIndex <= 0) {
     return [];
   }
-  return sortedTurns(turns).filter(message => {
-    const turnIndex = positiveTurnIndex(message);
-    return turnIndex >= window.startTurnIndex && turnIndex <= window.endTurnIndex;
-  });
+  const startIndex = Math.max(0, Math.trunc(window.startIndex));
+  const endIndex = Math.max(startIndex, Math.trunc(window.endIndex));
+  return orderedTurns(turns).slice(startIndex, endIndex);
 }
 
 export function hasContinuousTurnRange(

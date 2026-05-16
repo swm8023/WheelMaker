@@ -24,6 +24,8 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('createLatestTurnWindow(fullMessages)');
     expect(main).toContain('sliceTurnsForWindow(fullMessages, nextWindow)');
     expect(main).toContain('expandTurnWindowEarlier(fullMessages, currentWindow)');
+    expect(main).toContain('expandTurnWindowLater(fullMessages, currentWindow)');
+    expect(main).toContain('followLatestTurnWindow(fullMessages, currentWindow)');
     expect(main).toContain('buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex)');
     expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
   });
@@ -50,9 +52,9 @@ describe('web chat turn rendering', () => {
     const main = readMain();
 
     expect(main).toContain('const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);');
-    expect(main).toContain('setChatShowScrollToBottom(!nearBottom);');
+    expect(main).toContain('setChatShowScrollToBottom(!followsLatest);');
     expect(main).toContain('className="chat-scroll-bottom-button"');
     expect(main).toContain('className="chat-scroll-bottom-glyph"');
-    expect(main).toContain('expandSelectedChatWindowEarlier(event.currentTarget);');
+    expect(main).toContain('updateSelectedChatWindowFromScroll(event.currentTarget, direction);');
   });
 });

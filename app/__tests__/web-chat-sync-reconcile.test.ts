@@ -163,6 +163,29 @@ describe('chat session read reconciliation', () => {
     expect(shouldRequestSessionReadForIncomingTurn(local, incoming)).toBeNull();
   });
 
+  test('does not request a read when unfinished local turns are contiguous', () => {
+    const local = {
+      cursor: { turnIndex: 3 },
+      messages: [
+        {
+          sessionId: 'sess-1',
+          turnIndex: 4,
+          method: 'prompt_request',
+          param: {},
+          finished: false,
+        },
+      ],
+    };
+
+    expect(shouldRequestSessionReadForIncomingTurn(local, {
+      sessionId: 'sess-1',
+      turnIndex: 5,
+      method: 'agent_message_chunk',
+      param: {},
+      finished: false,
+    })).toBeNull();
+  });
+
   test('requests a read when a turn gap is detected', () => {
     const local = {
       cursor: { turnIndex: 3 },
@@ -182,5 +205,28 @@ describe('chat session read reconciliation', () => {
       param: {},
       finished: true,
     })).toBeNull();
+  });
+
+  test('requests a gap read from the latest contiguous local turn', () => {
+    const local = {
+      cursor: { turnIndex: 3 },
+      messages: [
+        {
+          sessionId: 'sess-1',
+          turnIndex: 4,
+          method: 'prompt_request',
+          param: {},
+          finished: false,
+        },
+      ],
+    };
+
+    expect(shouldRequestSessionReadForIncomingTurn(local, {
+      sessionId: 'sess-1',
+      turnIndex: 6,
+      method: 'agent_message_chunk',
+      param: {},
+      finished: false,
+    })).toEqual({ turnIndex: 4 });
   });
 });

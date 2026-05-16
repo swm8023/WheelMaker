@@ -39,10 +39,6 @@ export function isFinishedChatMessage(message: RegistryChatMessage): boolean {
   return message.finished === true;
 }
 
-function isTextTurnMessage(message: RegistryChatMessage): boolean {
-  return message.method === 'agent_message_chunk' || message.method === 'agent_thought_chunk';
-}
-
 export function replaceSessionMessages(
   list: RegistryChatMessage[],
   nextMessages: RegistryChatMessage[],
@@ -59,11 +55,9 @@ export function replaceSessionMessages(
 }
 
 export function needsPromptTurnRefresh(
-  messages: RegistryChatMessage[],
-  promptDone: RegistryChatMessage,
+  _messages: RegistryChatMessage[],
+  _promptDone: RegistryChatMessage,
 ): boolean {
-  void messages;
-  void promptDone;
   return false;
 }
 
@@ -96,7 +90,7 @@ export function reconcileCachedSessionReadCursor(
 }
 
 export function shouldRequestSessionReadForIncomingTurn(
-  local: {cursor: SessionReadCursor},
+  local: {cursor: SessionReadCursor; messages?: RegistryChatMessage[]},
   incoming: RegistryChatMessage,
 ): SessionReadCursor | null {
   const cursor = local.cursor;
@@ -105,8 +99,17 @@ export function shouldRequestSessionReadForIncomingTurn(
   if (incomingTurnIndex <= 0) {
     return null;
   }
-  if (incomingTurnIndex > currentTurnIndex + 1) {
-    return cursor;
+  const localTurnIndexes = new Set(
+    (local.messages ?? [])
+      .map(message => Math.trunc(message.turnIndex ?? 0))
+      .filter(turnIndex => turnIndex > currentTurnIndex),
+  );
+  let contiguousTurnIndex = currentTurnIndex;
+  while (localTurnIndexes.has(contiguousTurnIndex + 1)) {
+    contiguousTurnIndex += 1;
+  }
+  if (incomingTurnIndex > contiguousTurnIndex + 1) {
+    return {turnIndex: contiguousTurnIndex};
   }
   return null;
 }

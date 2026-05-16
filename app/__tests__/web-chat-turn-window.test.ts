@@ -1,6 +1,8 @@
 import {
   createLatestTurnWindow,
   expandTurnWindowEarlier,
+  expandTurnWindowLater,
+  followLatestTurnWindow,
   hasContinuousTurnRange,
   sliceTurnsForWindow,
 } from '../web/src/chat/chatTurnWindow';
@@ -17,31 +19,54 @@ function turn(turnIndex: number): RegistryChatMessage {
 }
 
 describe('chat turn window helpers', () => {
-  test('creates the latest bounded window by raw turn index', () => {
+  test('creates the latest bounded window by message offset with future buffer', () => {
     const turns = Array.from({ length: 250 }, (_, index) => turn(index + 1));
 
     expect(createLatestTurnWindow(turns)).toEqual({
-      startTurnIndex: 51,
-      endTurnIndex: 250,
+      startIndex: 150,
+      endIndex: 350,
     });
   });
 
-  test('expands the window earlier without changing the end boundary', () => {
+  test('moves the fixed-size window earlier', () => {
     const turns = Array.from({ length: 450 }, (_, index) => turn(index + 1));
     const latest = createLatestTurnWindow(turns);
 
     const expanded = expandTurnWindowEarlier(turns, latest);
     const expandedAgain = expandTurnWindowEarlier(turns, expanded);
 
-    expect(latest).toEqual({ startTurnIndex: 251, endTurnIndex: 450 });
-    expect(expanded).toEqual({ startTurnIndex: 51, endTurnIndex: 450 });
-    expect(expandedAgain).toEqual({ startTurnIndex: 1, endTurnIndex: 450 });
+    expect(latest).toEqual({ startIndex: 350, endIndex: 550 });
+    expect(expanded).toEqual({ startIndex: 250, endIndex: 450 });
+    expect(expandedAgain).toEqual({ startIndex: 150, endIndex: 350 });
   });
 
-  test('slices visible turns inclusively and sorts by turn index', () => {
+  test('moves the fixed-size window later toward latest', () => {
+    const turns = Array.from({ length: 450 }, (_, index) => turn(index + 1));
+
+    const moved = expandTurnWindowLater(turns, {startIndex: 150, endIndex: 350});
+    const latest = expandTurnWindowLater(turns, moved);
+
+    expect(moved).toEqual({startIndex: 250, endIndex: 450});
+    expect(latest).toEqual({startIndex: 350, endIndex: 550});
+  });
+
+  test('follow mode refreshes latest only when future buffer is low', () => {
+    const turns = Array.from({ length: 250 }, (_, index) => turn(index + 1));
+
+    expect(followLatestTurnWindow(turns, {startIndex: 50, endIndex: 300})).toEqual({
+      startIndex: 50,
+      endIndex: 300,
+    });
+    expect(followLatestTurnWindow(turns, {startIndex: 25, endIndex: 274})).toEqual({
+      startIndex: 150,
+      endIndex: 350,
+    });
+  });
+
+  test('slices visible turns by message offset and sorts by turn index', () => {
     const visible = sliceTurnsForWindow([turn(4), turn(2), turn(3), turn(1)], {
-      startTurnIndex: 2,
-      endTurnIndex: 3,
+      startIndex: 1,
+      endIndex: 3,
     });
 
     expect(visible.map(item => item.turnIndex)).toEqual([2, 3]);

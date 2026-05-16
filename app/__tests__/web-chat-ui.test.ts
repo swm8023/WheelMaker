@@ -108,8 +108,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('function isChatScrolledNearBottom(container: HTMLElement): boolean {');
     expect(mainTsx).toContain('const updateChatFollowModeFromScroll = useCallback(');
     expect(mainTsx).toContain('const nearBottom = isChatScrolledNearBottom(container);');
-    expect(mainTsx).toContain('chatAutoScrollFollowRef.current = nearBottom;');
-    expect(mainTsx).toContain('setChatShowScrollToBottom(!nearBottom);');
+    expect(mainTsx).toContain('chatAutoScrollFollowRef.current = followsLatest;');
+    expect(mainTsx).toContain('setChatShowScrollToBottom(!followsLatest);');
     expect(mainTsx).toContain('const scrollChatToBottom = useCallback((force = false) => {');
     expect(mainTsx).toContain('if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {');
     expect(mainTsx).toContain('const forceChatScrollToBottom = useCallback(() => {');
@@ -120,7 +120,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('}, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
     expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);');
     expect(mainTsx).toMatch(
-      /onScroll=\{event => \{[\s\S]*updateChatFollowModeFromScroll\(event\.currentTarget\);[\s\S]*expandSelectedChatWindowEarlier\(event\.currentTarget\);[\s\S]*\}\}/,
+      /onScroll=\{event => \{[\s\S]*updateChatFollowModeFromScroll\(event\.currentTarget\);[\s\S]*updateSelectedChatWindowFromScroll\(event\.currentTarget, direction\);[\s\S]*\}\}/,
     );
     expect(mainTsx).toContain('onPointerDown={() => { chatPointerScrollingRef.current = true; }}');
     expect(mainTsx).toContain('onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}');
@@ -303,8 +303,10 @@ describe('web chat integration', () => {
     expect(eventRunningApply).toBeGreaterThan(eventRunningSignal);
     expect(eventGapRead).toBeGreaterThan(eventRunningApply);
     expect(mainTsx).toContain('const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);');
-    expect(mainTsx).toContain('encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey');
-    expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, eventProjectId, {');
+    const sessionUpdatedBlockStart = mainTsx.indexOf("if (event.method === 'session.updated') {");
+    const sessionMessageBlockStart = mainTsx.indexOf("if (event.method === 'session.message') {");
+    const sessionUpdatedBlock = mainTsx.slice(sessionUpdatedBlockStart, sessionMessageBlockStart);
+    expect(sessionUpdatedBlock).not.toContain('loadChatSession(');
     expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');

@@ -42,6 +42,8 @@ import {
 import {
   createLatestTurnWindow,
   expandTurnWindowEarlier,
+  expandTurnWindowLater,
+  followLatestTurnWindow,
   sliceTurnsForWindow,
   type ChatTurnWindow,
 } from './chat/chatTurnWindow';
@@ -493,9 +495,9 @@ function upsertChatMessage(
   list: RegistryChatMessage[],
   next: RegistryChatMessage,
 ): RegistryChatMessage[] {
-  const key = `${next.sessionId}:${next.turnIndex}`;
+  const key = chatMessageDomKey(next);
   const index = list.findIndex(
-    item => `${item.sessionId}:${item.turnIndex}` === key,
+    item => chatMessageDomKey(item) === key,
   );
   if (index < 0) {
     return [...list, next].sort((a, b) => {
@@ -505,6 +507,10 @@ function upsertChatMessage(
   const copy = [...list];
   copy[index] = next;
   return copy;
+}
+
+function chatMessageDomKey(message: Pick<RegistryChatMessage, 'sessionId' | 'turnIndex'>): string {
+  return `${message.sessionId}:${message.turnIndex}`;
 }
 
 function nextPromptTurnIndex(messages: RegistryChatMessage[]): number {
@@ -992,6 +998,31 @@ const ChatTurnView = React.memo(function ChatTurnView({
     </div>
   );
 });
+
+function shouldRenderChatTurn(
+  message: RegistryChatMessage,
+  hideToolCalls: boolean,
+  promptStatus: ChatPromptStatus,
+): boolean {
+  const text = msgText(message.method, message.param).trim();
+  if (message.method === 'prompt_request' || message.method === 'user_message_chunk') {
+    return !!text || !!promptStatus || groupImageBlocks([message]).length > 0;
+  }
+  if (message.method === 'prompt_done') {
+    return true;
+  }
+  const kind = msgKind(message.method);
+  if (kind === 'tool') {
+    return !hideToolCalls && !!text;
+  }
+  if (kind === 'thought') {
+    return !!text;
+  }
+  if (kind === 'plan') {
+    return msgPlanEntries(message.method, message.param).length > 0 || !!text;
+  }
+  return !!text;
+}
 
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
@@ -2147,6 +2178,7 @@ function App() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
+  const chatLastScrollTopRef = useRef(0);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2159,6 +2191,7 @@ function App() {
   const chatSyncIndexRef = useRef<Record<string, number>>({});
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
+  const chatMessagesRef = useRef<RegistryChatMessage[]>([]);
   const chatVisibleWindowRef = useRef<Record<string, ChatTurnWindow>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const chatIndexFullRefreshInFlightRef = useRef(false);
@@ -2314,24 +2347,29 @@ function App() {
     sessionId: string,
   ): string => encodeChatSessionKey(chatSessionKeyFromParts(activeProjectId, sessionId));
 
-  const setVisibleChatMessagesForRuntimeKey = (
+  const setVisibleChatMessagesForRuntimeKey = useCallback((
     runtimeKey: string,
     fullMessages: RegistryChatMessage[],
-    options?: { resetToLatest?: boolean },
+    options?: { resetToLatest?: boolean; followLatest?: boolean },
   ) => {
     if (!runtimeKey) {
+      chatMessagesRef.current = [];
       setChatMessages([]);
       return;
     }
-    const nextWindow =
-      options?.resetToLatest || !chatVisibleWindowRef.current[runtimeKey]
-        ? createLatestTurnWindow(fullMessages)
-        : chatVisibleWindowRef.current[runtimeKey];
+    const currentWindow = chatVisibleWindowRef.current[runtimeKey];
+    const nextWindow = options?.resetToLatest || !currentWindow
+      ? createLatestTurnWindow(fullMessages)
+      : options?.followLatest
+        ? followLatestTurnWindow(fullMessages, currentWindow)
+        : currentWindow;
     chatVisibleWindowRef.current[runtimeKey] = nextWindow;
     if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
-      setChatMessages(sliceTurnsForWindow(fullMessages, nextWindow));
+      const visibleMessages = sliceTurnsForWindow(fullMessages, nextWindow);
+      chatMessagesRef.current = visibleMessages;
+      setChatMessages(visibleMessages);
     }
-  };
+  }, []);
 
   const applySelectedChatKey = (key: ChatSessionKey | null) => {
     selectedChatKeyRef.current = key;
@@ -2358,8 +2396,17 @@ function App() {
         return;
       }
       const nearBottom = isChatScrolledNearBottom(container);
-      chatAutoScrollFollowRef.current = nearBottom;
-      setChatShowScrollToBottom(!nearBottom);
+      const runtimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
+      const fullMessages = runtimeKey ? chatMessageStoreRef.current[runtimeKey] ?? [] : [];
+      const currentWindow = runtimeKey ? chatVisibleWindowRef.current[runtimeKey] : undefined;
+      const coversKnownLatest =
+        !runtimeKey ||
+        fullMessages.length === 0 ||
+        !currentWindow ||
+        currentWindow.endIndex >= fullMessages.length;
+      const followsLatest = nearBottom && coversKnownLatest;
+      chatAutoScrollFollowRef.current = followsLatest;
+      setChatShowScrollToBottom(!followsLatest);
     },
     [],
   );
@@ -2382,15 +2429,63 @@ function App() {
   }, []);
 
   const forceChatScrollToBottom = useCallback(() => {
+    const runtimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
+    if (runtimeKey) {
+      setVisibleChatMessagesForRuntimeKey(
+        runtimeKey,
+        chatMessageStoreRef.current[runtimeKey] ?? [],
+        {resetToLatest: true},
+      );
+    }
     chatAutoScrollFollowRef.current = true;
     setChatShowScrollToBottom(false);
     scrollChatToBottom(true);
-  }, [scrollChatToBottom]);
+  }, [scrollChatToBottom, setVisibleChatMessagesForRuntimeKey]);
 
-  const expandSelectedChatWindowEarlier = useCallback((container: HTMLElement) => {
-    if (container.scrollTop > 120) {
-      return;
+  const visibleChatMessageElements = (container: HTMLElement): HTMLElement[] => {
+    const containerRect = container.getBoundingClientRect();
+    return Array.from(container.querySelectorAll<HTMLElement>('[data-chat-message-key]'))
+      .filter(element => {
+        const rect = element.getBoundingClientRect();
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
+      });
+  };
+
+  const chatScrollAnchor = (
+    container: HTMLElement,
+    direction: 'up' | 'down',
+  ): { key: string; top: number } | null => {
+    const visible = visibleChatMessageElements(container);
+    const element = direction === 'up' ? visible[0] : visible[visible.length - 1];
+    const key = element?.dataset.chatMessageKey ?? '';
+    if (!element || !key) {
+      return null;
     }
+    return {
+      key,
+      top: element.getBoundingClientRect().top,
+    };
+  };
+
+  const restoreChatScrollAnchor = (
+    key: string,
+    previousTop: number,
+  ) => {
+    window.requestAnimationFrame(() => {
+      const container = chatScrollRef.current;
+      if (!container) {
+        return;
+      }
+      const nextElement = Array.from(container.querySelectorAll<HTMLElement>('[data-chat-message-key]'))
+        .find(element => element.dataset.chatMessageKey === key);
+      if (!nextElement) {
+        return;
+      }
+      container.scrollTop += nextElement.getBoundingClientRect().top - previousTop;
+    });
+  };
+
+  const updateSelectedChatWindowFromScroll = (container: HTMLElement, direction: 'up' | 'down') => {
     const runtimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
     if (!runtimeKey) {
       return;
@@ -2399,21 +2494,43 @@ function App() {
     const currentWindow =
       chatVisibleWindowRef.current[runtimeKey] ??
       createLatestTurnWindow(fullMessages);
-    const expandedWindow = expandTurnWindowEarlier(fullMessages, currentWindow);
-    if (expandedWindow.startTurnIndex === currentWindow.startTurnIndex) {
+    const boundaryAnchor = chatScrollAnchor(container, direction);
+    const boundaryKey = boundaryAnchor?.key ?? '';
+    const boundaryIndex = boundaryKey
+      ? chatMessagesRef.current.findIndex(message => chatMessageDomKey(message) === boundaryKey)
+      : -1;
+    const boundaryAbsoluteIndex = boundaryIndex >= 0
+      ? currentWindow.startIndex + boundaryIndex
+      : -1;
+    const distanceToWindowEdge = boundaryAbsoluteIndex >= 0
+      ? direction === 'up'
+        ? boundaryAbsoluteIndex - currentWindow.startIndex
+        : currentWindow.endIndex - boundaryAbsoluteIndex - 1
+      : Number.POSITIVE_INFINITY;
+    const nearPixelEdge = direction === 'up'
+      ? container.scrollTop <= 120
+      : isChatScrolledNearBottom(container);
+    if (distanceToWindowEdge >= 25 && !nearPixelEdge) {
       return;
     }
-    const previousScrollHeight = container.scrollHeight;
+    const expandedWindow = direction === 'up'
+      ? expandTurnWindowEarlier(fullMessages, currentWindow)
+      : expandTurnWindowLater(fullMessages, currentWindow);
+    if (
+      expandedWindow.startIndex === currentWindow.startIndex &&
+      expandedWindow.endIndex === currentWindow.endIndex
+    ) {
+      return;
+    }
+    const anchor = boundaryAnchor ?? chatScrollAnchor(container, direction === 'up' ? 'down' : 'up');
     chatVisibleWindowRef.current[runtimeKey] = expandedWindow;
-    setChatMessages(sliceTurnsForWindow(fullMessages, expandedWindow));
-    window.requestAnimationFrame(() => {
-      const nextContainer = chatScrollRef.current;
-      if (!nextContainer) {
-        return;
-      }
-      nextContainer.scrollTop += nextContainer.scrollHeight - previousScrollHeight;
-    });
-  }, []);
+    const visibleMessages = sliceTurnsForWindow(fullMessages, expandedWindow);
+    chatMessagesRef.current = visibleMessages;
+    setChatMessages(visibleMessages);
+    if (anchor) {
+      restoreChatScrollAnchor(anchor.key, anchor.top);
+    }
+  };
 
   useEffect(() => {
     if (!chatSlashMenuVisible) {
@@ -2699,6 +2816,10 @@ function App() {
   useEffect(() => {
     chatPendingPromptsByKeyRef.current = chatPendingPromptsByKey;
   }, [chatPendingPromptsByKey]);
+
+  useEffect(() => {
+    chatMessagesRef.current = chatMessages;
+  }, [chatMessages]);
 
   useEffect(() => {
     const draft =
@@ -6205,13 +6326,6 @@ function App() {
           workspaceStore.rememberChatSession(eventProjectId, payload.session, {
             turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
           });
-          if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
-            loadChatSession(payload.session.sessionId, eventProjectId, {
-              incremental: true,
-              preserveUserSelection: true,
-              selectionSnapshot: runtimeKey,
-            }).catch(() => undefined);
-          }
         }
         return;
       }
@@ -6231,9 +6345,6 @@ function App() {
         }
         const sessionId = message.sessionId;
         const runtimeKey = buildChatRuntimeKey(eventProjectId, sessionId);
-        if (message.method === 'prompt_request') {
-          forgetPendingChatPrompt(runtimeKey);
-        }
         const isSelectedSession = encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey;
         const knownProjectSessions = projectSessionsByProjectIdRef.current[eventProjectId] ?? [];
         const knownSession = knownProjectSessions.some(session => session.sessionId === sessionId);
@@ -6296,6 +6407,7 @@ function App() {
             cursor: {
               turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
             },
+            messages: existingMessagesForSession,
           },
           message,
         );
@@ -6325,7 +6437,12 @@ function App() {
         persistChatSessionContent(sessionId, eventProjectId, mergedSessionForCache);
 
         if (isSelectedSession) {
-          setVisibleChatMessagesForRuntimeKey(runtimeKey, merged);
+          setVisibleChatMessagesForRuntimeKey(runtimeKey, merged, {
+            followLatest: chatAutoScrollFollowRef.current,
+          });
+        }
+        if (message.method === 'prompt_request') {
+          forgetPendingChatPrompt(runtimeKey);
         }
         if (shouldRefreshCompletedPrompt && isSelectedSession) {
           markChatSessionRead(
@@ -8204,22 +8321,29 @@ function App() {
     const promptStatus = isPromptStartMessage(message)
       ? resolvePromptTurnStatus(selectedFullChatMessages, message)
       : null;
+    if (!shouldRenderChatTurn(message, hideToolCalls, promptStatus)) {
+      return null;
+    }
     return (
-      <ChatTurnView
+      <div
         key={`${selectedChatEncodedKey}:${message.turnIndex}:${message.method}`}
-        message={message}
-        promptRequest={message.method === 'prompt_done' ? findPromptRequestForDone(doneTurnIndex) : undefined}
-        promptStatus={promptStatus}
-        hideToolCalls={hideToolCalls}
-        markdownComponents={chatMarkdownComponents}
-        markdownUrlTransform={chatMarkdownUrlTransform}
-        copyDisabled={copyRange ? !copyRange.ok : true}
-        onCopyPromptDone={
-          message.method === 'prompt_done'
-            ? () => copyPromptDoneMarkdown(doneTurnIndex).catch(() => undefined)
-            : undefined
-        }
-      />
+        data-chat-message-key={chatMessageDomKey(message)}
+      >
+        <ChatTurnView
+          message={message}
+          promptRequest={message.method === 'prompt_done' ? findPromptRequestForDone(doneTurnIndex) : undefined}
+          promptStatus={promptStatus}
+          hideToolCalls={hideToolCalls}
+          markdownComponents={chatMarkdownComponents}
+          markdownUrlTransform={chatMarkdownUrlTransform}
+          copyDisabled={copyRange ? !copyRange.ok : true}
+          onCopyPromptDone={
+            message.method === 'prompt_done'
+              ? () => copyPromptDoneMarkdown(doneTurnIndex).catch(() => undefined)
+              : undefined
+          }
+        />
+      </div>
     );
   });
   const selectedPendingPrompt = selectedChatEncodedKey
@@ -8346,8 +8470,11 @@ function App() {
               ref={chatScrollRef}
               className="scroll-panel chat-block"
               onScroll={event => {
+                const nextScrollTop = event.currentTarget.scrollTop;
+                const direction = nextScrollTop >= chatLastScrollTopRef.current ? 'down' : 'up';
+                chatLastScrollTopRef.current = nextScrollTop;
                 updateChatFollowModeFromScroll(event.currentTarget);
-                expandSelectedChatWindowEarlier(event.currentTarget);
+                updateSelectedChatWindowFromScroll(event.currentTarget, direction);
               }}
               onPointerDown={() => { chatPointerScrollingRef.current = true; }}
               onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
