@@ -8239,7 +8239,9 @@ function App() {
               title="Scroll to bottom"
               aria-label="Scroll to bottom"
             >
-              <span className="codicon codicon-arrow-down" />
+              <span className="chat-scroll-bottom-glyph" aria-hidden="true">
+                <span className="codicon codicon-arrow-down" />
+              </span>
             </button>
           ) : null}
           <div className="chat-composer">

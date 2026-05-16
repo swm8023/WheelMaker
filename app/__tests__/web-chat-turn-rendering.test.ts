@@ -34,6 +34,7 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);');
     expect(main).toContain('setChatShowScrollToBottom(!nearBottom);');
     expect(main).toContain('className="chat-scroll-bottom-button"');
+    expect(main).toContain('className="chat-scroll-bottom-glyph"');
     expect(main).toContain('expandSelectedChatWindowEarlier(event.currentTarget);');
   });
 });

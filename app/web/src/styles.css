@@ -3475,11 +3475,11 @@ body,
 
 .chat-scroll-bottom-button {
   position: absolute;
-  right: 22px;
+  right: 20px;
   bottom: 92px;
   z-index: 5;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 88%, var(--panel));
@@ -3493,6 +3493,31 @@ body,
 
 .chat-scroll-bottom-button:hover {
   background: var(--hover);
+}
+
+.chat-scroll-bottom-glyph {
+  position: relative;
+  width: 16px;
+  height: 18px;
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.chat-scroll-bottom-glyph .codicon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.chat-scroll-bottom-glyph::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 1px;
+  height: 1.5px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .chat-composer {
