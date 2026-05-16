@@ -84,7 +84,6 @@ import {
   type WorkspaceUiStateValue,
 } from './services/workspaceUiState';
 import type { PersistedFloatingControlSlot } from './services/workspacePersistence';
-import { buildPromptAgentMarkdown } from './chatPromptCopy';
 import type {
   RegistryChatContentBlock,
   RegistryChatMessage,
@@ -626,22 +625,6 @@ function msgPlanEntries(
   return entries;
 }
 
-function chooseChatEntryText(previousText: string, nextText: string): string {
-  if (!previousText) {
-    return nextText;
-  }
-  if (!nextText) {
-    return previousText;
-  }
-  if (nextText.length >= previousText.length) {
-    return nextText;
-  }
-  if (previousText.startsWith(nextText)) {
-    return previousText;
-  }
-  return nextText;
-}
-
 function chatConfigPriority(option: RegistrySessionConfigOption): number {
   const id = (option.id || '').trim().toLowerCase();
   const label = (option.name || '').trim().toLowerCase();
@@ -726,38 +709,6 @@ function decodeSessionMessageFromEventPayload(
   }
 }
 
-type ChatPromptEntryKind = 'tool' | 'thought' | 'plan' | 'message';
-
-type ChatPromptEntry = {
-  key: string;
-  kind: ChatPromptEntryKind;
-  text: string;
-  turnIndex: number;
-  order: number;
-  planEntries?: { content: string; status?: string }[];
-};
-
-type ChatPromptGroup = {
-  key: string;
-  groupIndex: number;
-  userMessages: RegistryChatMessage[];
-  entries: ChatPromptEntry[];
-  modelName: string;
-  durationMs: number;
-  finished: boolean;
-  hasPromptRequest: boolean;
-  hasResponseActivity: boolean;
-  hasPromptDone: boolean;
-};
-
-type ChatPromptGroupViewProps = {
-  group: ChatPromptGroup;
-  showSendingPending: boolean;
-  hideToolCalls: boolean;
-  markdownComponents: Components;
-  markdownUrlTransform: (value: string) => string;
-};
-
 const CollapsibleThought = React.memo(function CollapsibleThought({
   text,
   markdownComponents,
@@ -840,176 +791,6 @@ async function writeTextToClipboard(text: string): Promise<void> {
     document.body.removeChild(textarea);
   }
 }
-
-const ChatPromptGroupView = React.memo(function ChatPromptGroupView({
-  group,
-  showSendingPending,
-  hideToolCalls,
-  markdownComponents,
-  markdownUrlTransform,
-}: ChatPromptGroupViewProps) {
-  const userText = group.userMessages
-    .map(m => msgText(m.method, m.param).trim())
-    .filter(Boolean)
-    .join('\n')
-    .trim();
-  const imageBlocks = groupImageBlocks(group.userMessages);
-  const hasPromptContent = group.userMessages.length > 0 || imageBlocks.length > 0;
-  const hasCopyableAgentMessage = group.entries.some(
-    entry => entry.kind === 'message' && entry.text.trim(),
-  );
-  const copyPromptAgentMarkdown = async () => {
-    const markdown = buildPromptAgentMarkdown(group.entries);
-    if (!markdown) {
-      return;
-    }
-    await writeTextToClipboard(markdown);
-  };
-  const promptStatus = (() => {
-    if (!hasPromptContent) {
-      return null as 'sent' | 'responding' | 'done' | null;
-    }
-    if (group.hasPromptDone || group.finished) {
-      return 'done' as const;
-    }
-    if (group.hasResponseActivity || group.hasPromptRequest) {
-      return 'responding' as const;
-    }
-    if (showSendingPending) {
-      return 'sent' as const;
-    }
-    return null;
-  })();
-
-  return (
-    <div className="chat-prompt-group">
-      {userText || promptStatus ? (
-        <div className="chat-prompt-user-row">
-          {userText ? (
-            <div className="chat-prompt-user">{userText}</div>
-          ) : null}
-          {promptStatus === 'sent' ? (
-            <span className="chat-prompt-status chat-prompt-status-sent" title="Sent">
-              <span className="codicon codicon-loading codicon-modifier-spin" />
-            </span>
-          ) : null}
-          {promptStatus === 'responding' ? (
-            <span className="chat-prompt-status chat-prompt-status-responding" title="Responding">
-              <span className="chat-prompt-status-dots" aria-hidden="true">
-                <span>.</span>
-                <span>.</span>
-                <span>.</span>
-              </span>
-            </span>
-          ) : null}
-          {promptStatus === 'done' ? (
-            <span className="chat-prompt-status chat-prompt-status-done" title="Completed">
-              <span className="codicon codicon-check" />
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {imageBlocks.length > 0 ? (
-        <div className="chat-image-strip">
-          {imageBlocks.map((block, index) => (
-            <img
-              key={`${group.key}:img:${index}`}
-              className="chat-inline-image"
-              src={`data:${block.mimeType || 'image/png'};base64,${block.data}`}
-              alt="chat attachment"
-            />
-          ))}
-        </div>
-      ) : null}
-      {group.entries.map(entry => {
-        if (hideToolCalls && entry.kind === 'tool') {
-          return null;
-        }
-        if (entry.kind === 'tool') {
-          return (
-            <div key={entry.key} className="chat-tool-line" title={entry.text}>
-              <span className="codicon codicon-tools" />
-              <span>{entry.text}</span>
-            </div>
-          );
-        }
-        if (entry.kind === 'thought') {
-          return (
-            <CollapsibleThought
-              key={entry.key}
-              text={entry.text}
-              markdownComponents={markdownComponents}
-              markdownUrlTransform={markdownUrlTransform}
-            />
-          );
-        }
-        if (entry.kind === 'plan') {
-          const planEntries = entry.planEntries ?? [];
-          if (planEntries.length === 0) {
-            return null;
-          }
-          return (
-            <div key={entry.key} className="chat-plan-block">
-              <div className="chat-plan-title">
-                <span className="codicon codicon-checklist" />
-                <span>Plan</span>
-              </div>
-              <ul className="chat-plan-list">
-                {planEntries.map((item, index) => {
-                  const done = isPlanEntryCompleted(item.status);
-                  return (
-                    <li
-                      key={`${entry.key}:plan:${index}`}
-                      className={done ? 'done' : ''}
-                    >
-                      <span className="chat-plan-marker">{done ? '✓' : '○'}</span>
-                      <span>{item.content}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          );
-        }
-        return (
-          <div key={entry.key} className="chat-main-message">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm, remarkMath]}
-              urlTransform={markdownUrlTransform}
-              rehypePlugins={[rehypeKatex]}
-              components={markdownComponents}
-            >
-              {entry.text}
-            </ReactMarkdown>
-          </div>
-        );
-      })}
-      {group.finished ? (
-        <div className="chat-prompt-separator">
-          <hr />
-          <span className="chat-prompt-separator-label">
-            By {group.modelName || 'unknown'}
-            {group.durationMs > 0 ? ` · ${formatPromptDurationMs(group.durationMs)}` : ''}
-          </span>
-          <div className="chat-prompt-actions" aria-label="Prompt actions">
-            <button
-              type="button"
-              className="chat-prompt-action-button"
-              onClick={() => {
-                copyPromptAgentMarkdown().catch(() => undefined);
-              }}
-              disabled={!hasCopyableAgentMessage}
-              title="Copy response"
-              aria-label="Copy response markdown"
-            >
-              <span className="codicon codicon-copy" />
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-});
 
 type ChatTurnViewProps = {
   message: RegistryChatMessage;
@@ -1168,142 +949,6 @@ const ChatTurnView = React.memo(function ChatTurnView({
   );
 });
 
-// -- Prompt separator helpers --
-
-function groupChatMessagesByPrompt(
-  messages: RegistryChatMessage[],
-): ChatPromptGroup[] {
-  const groups = new Map<string, ChatPromptGroup>();
-  const entryIndexByKey = new Map<string, number>();
-  let entryOrder = 0;
-  let groupIndex = 0;
-  let currentGroupKey = '';
-
-  const ordered = [...messages].sort((a, b) => {
-    return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
-  });
-
-  for (const message of ordered) {
-    if (message.method === 'prompt_request' || !currentGroupKey) {
-      groupIndex += 1;
-      currentGroupKey = `prompt:${groupIndex}`;
-    }
-    const groupKey = currentGroupKey || `msg:${message.sessionId}:${message.turnIndex}`;
-    const existing =
-      groups.get(groupKey) ??
-      ({
-        key: groupKey,
-        groupIndex,
-        userMessages: [],
-        entries: [],
-        modelName: '',
-        durationMs: 0,
-        finished: false,
-        hasPromptRequest: false,
-        hasResponseActivity: false,
-        hasPromptDone: false,
-      } as ChatPromptGroup);
-
-    if (message.method === 'prompt_done') {
-      existing.hasPromptDone = true;
-      existing.finished = true;
-      const completedAt = typeof message.param.completedAt === 'string' ? Date.parse(message.param.completedAt) : NaN;
-      const request = existing.userMessages.find(item => item.method === 'prompt_request');
-      const createdAt = typeof request?.param.createdAt === 'string' ? Date.parse(request.param.createdAt) : NaN;
-      if (Number.isFinite(completedAt) && Number.isFinite(createdAt) && completedAt >= createdAt) {
-        existing.durationMs = completedAt - createdAt;
-      }
-      groups.set(groupKey, existing);
-      currentGroupKey = '';
-      continue;
-    }
-
-    const role = msgRole(message.method);
-
-    if (role === 'user') {
-      existing.userMessages.push(message);
-      if (message.method === 'prompt_request') {
-        existing.hasPromptRequest = true;
-        existing.modelName = typeof message.param.modelName === 'string'
-          ? message.param.modelName
-          : existing.modelName;
-      }
-    } else {
-      existing.hasResponseActivity = true;
-      const kindStr = msgKind(message.method);
-      let kind: ChatPromptEntryKind | null = null;
-      let text = '';
-      let planEntries: { content: string; status?: string }[] = [];
-
-      if (kindStr === 'tool') {
-        kind = 'tool';
-        text = msgText(message.method, message.param).replace(/\s+/g, ' ').trim();
-      } else if (kindStr === 'thought') {
-        kind = 'thought';
-        text = msgText(message.method, message.param).trim();
-      } else if (kindStr === 'plan') {
-        kind = 'plan';
-        planEntries = msgPlanEntries(message.method, message.param);
-        if (planEntries.length === 0) {
-          const rawText = msgText(message.method, message.param).trim();
-          if (rawText) {
-            planEntries = rawText
-              .split('\n')
-              .map(line => line.trim())
-              .filter(Boolean)
-              .map(content => ({ content }));
-          }
-        }
-        text = planEntries.map(item => item.content).join('\n').trim();
-      } else {
-        kind = 'message';
-        text = msgText(message.method, message.param).trim();
-      }
-
-      if (kind && text) {
-        const turnIndex = message.turnIndex ?? 0;
-        const dedupeKey =
-          turnIndex > 0
-            ? `${groupKey}:${kind}:turn:${turnIndex}`
-            : `${groupKey}:${kind}:msg:${message.sessionId}:${message.turnIndex}`;
-        const existingIndex = entryIndexByKey.get(dedupeKey);
-        if (typeof existingIndex === 'number') {
-          const previous = existing.entries[existingIndex];
-          existing.entries[existingIndex] = {
-            ...previous,
-            text: chooseChatEntryText(previous.text, text),
-            turnIndex,
-            planEntries: kind === 'plan' ? planEntries : previous.planEntries,
-          };
-        } else {
-          existing.entries.push({
-            key: dedupeKey,
-            kind,
-            text,
-            turnIndex,
-            order: entryOrder,
-            planEntries: kind === 'plan' ? planEntries : undefined,
-          });
-          entryIndexByKey.set(dedupeKey, existing.entries.length - 1);
-          entryOrder += 1;
-        }
-      }
-    }
-
-    groups.set(groupKey, existing);
-  }
-
-  for (const group of groups.values()) {
-    group.entries.sort((a, b) => {
-      if (a.turnIndex > 0 && b.turnIndex > 0 && a.turnIndex !== b.turnIndex) {
-        return a.turnIndex - b.turnIndex;
-      }
-      return a.order - b.order;
-    });
-  }
-
-  return [...groups.values()].sort((a, b) => a.groupIndex - b.groupIndex);
-}
 function formatChatTimestamp(value: string): string {
   if (!value) return '';
   const parsed = new Date(value);
@@ -2464,6 +2109,7 @@ function App() {
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
   const wideProjectActionMenuRef = useRef<HTMLDivElement | null>(null);
+  const projectSessionSentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const chatSelectedIdRef = useRef('');
   const selectedChatKeyRef = useRef<ChatSessionKey | null>(null);
   const chatSyncIndexRef = useRef<Record<string, number>>({});
@@ -3065,6 +2711,54 @@ function App() {
     [projects],
   );
   const sortedProjectItems = useMemo(() => sortProjectsByPin(projects, pinnedProjectIds), [projects, pinnedProjectIds]);
+  const projectSessionCountKey = useMemo(
+    () => Object.entries(projectSessionsByProjectId)
+      .map(([entryProjectId, sessions]) => `${entryProjectId}:${sessions.length}`)
+      .sort()
+      .join('|'),
+    [projectSessionsByProjectId],
+  );
+
+  const expandProjectSessionVisibleCount = useCallback((targetProjectId: string) => {
+    const total = projectSessionsByProjectIdRef.current[targetProjectId]?.length ?? 0;
+    if (total <= 0) {
+      return;
+    }
+    setWideProjectVisibleCounts(prev => {
+      const current = prev[targetProjectId] ?? WIDE_PROJECT_SESSION_LIMIT;
+      if (current >= total) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [targetProjectId]: Math.min(total, current + WIDE_PROJECT_SESSION_LIMIT),
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) {
+            continue;
+          }
+          const targetProjectId = (entry.target as HTMLElement).dataset.projectId || '';
+          expandProjectSessionVisibleCount(targetProjectId);
+        }
+      },
+      {root: null, rootMargin: '180px 0px'},
+    );
+    for (const element of Object.values(projectSessionSentinelRefs.current)) {
+      if (element) {
+        observer.observe(element);
+      }
+    }
+    return () => observer.disconnect();
+  }, [expandProjectSessionVisibleCount, projectIdListKey, projectSessionCountKey, wideProjectVisibleCounts]);
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -7675,19 +7369,14 @@ function App() {
                       );
                     })}
                     {projectSessions.length > visibleSessions.length ? (
-                      <button
-                        type="button"
-                        className="wide-project-show-more"
-                        onClick={() =>
-                          setWideProjectVisibleCounts(prev => ({
-                            ...prev,
-                            [targetProjectId]:
-                              visibleSessions.length + WIDE_PROJECT_SESSION_LIMIT,
-                          }))
-                        }
-                      >
-                        Show more
-                      </button>
+                      <div
+                        ref={node => {
+                          projectSessionSentinelRefs.current[targetProjectId] = node;
+                        }}
+                        className="wide-project-session-sentinel"
+                        data-project-id={targetProjectId}
+                        aria-hidden="true"
+                      />
                     ) : null}
                     {projectSessions.length === 0 ? (
                       <div className="wide-project-empty">No sessions yet.</div>
@@ -7950,19 +7639,14 @@ function App() {
                     );
                   })}
                   {projectSessions.length > visibleSessions.length ? (
-                    <button
-                      type="button"
-                      className="wide-project-show-more"
-                      onClick={() =>
-                        setWideProjectVisibleCounts(prev => ({
-                          ...prev,
-                          [targetProjectId]:
-                            visibleSessions.length + WIDE_PROJECT_SESSION_LIMIT,
-                        }))
-                      }
-                    >
-                      Show more
-                    </button>
+                    <div
+                      ref={node => {
+                        projectSessionSentinelRefs.current[targetProjectId] = node;
+                      }}
+                      className="wide-project-session-sentinel"
+                      data-project-id={targetProjectId}
+                      aria-hidden="true"
+                    />
                   ) : null}
                   {projectSessions.length === 0 ? (
                     <div className="wide-project-empty">No sessions yet.</div>

@@ -62,11 +62,11 @@ describe('web responsive shell split', () => {
     expect(mainTsx).toContain('sidebar={renderSidebar()}');
     expect(mainTsx).toContain('main={renderMain()}');
 
-    const appReturnStart = mainTsx.indexOf('return (\n    <ResponsiveShell');
-    const appReturnEnd = mainTsx.indexOf('\n  );\n}', appReturnStart);
-    expect(appReturnStart).toBeGreaterThanOrEqual(0);
-    expect(appReturnEnd).toBeGreaterThan(appReturnStart);
-    const appReturn = mainTsx.slice(appReturnStart, appReturnEnd);
+    const appShellStart = mainTsx.indexOf('<ResponsiveShell');
+    const appShellEnd = mainTsx.indexOf('/>', appShellStart);
+    expect(appShellStart).toBeGreaterThanOrEqual(0);
+    expect(appShellEnd).toBeGreaterThan(appShellStart);
+    const appReturn = mainTsx.slice(appShellStart, appShellEnd);
 
     expect(appReturn).not.toContain('className="body"');
     expect(appReturn).not.toContain('className={`drawer-overlay');
