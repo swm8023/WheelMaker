@@ -101,11 +101,6 @@ type ChatAttachment = {
   mimeType: string;
   data: string;
 };
-type PendingNewChatDraft = {
-  title: string;
-  text: string;
-  blocks: RegistryChatContentBlock[];
-};
 type WideProjectActionMenuState = {
   projectId: string;
   kind: 'new' | 'resume';
@@ -277,11 +272,6 @@ const CODE_LINE_HEIGHT_OPTIONS = [1.35, 1.45, 1.5, 1.6, 1.7] as const;
 const CODE_TAB_SIZE_OPTIONS = [2, 4, 8] as const;
 const RECONNECT_RETRY_DELAY_MS = 1000;
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
-const CHAT_SWIPE_DELETE_WIDTH = 78;
-const CHAT_SWIPE_RELOAD_WIDTH = 72;
-const CHAT_SWIPE_TOTAL_ACTIONS_WIDTH = CHAT_SWIPE_DELETE_WIDTH + CHAT_SWIPE_RELOAD_WIDTH;
-const CHAT_SWIPE_REVEAL_THRESHOLD = 20;
-const CHAT_SWIPE_OPEN_THRESHOLD = 56;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
@@ -480,44 +470,6 @@ function removeSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFla
   return next;
 }
 
-
-type ChatSessionGroup = {
-  agentKey: string;
-  label: string;
-  sessions: RegistryChatSession[];
-};
-
-function sessionUpdatedAtSortKey(session?: RegistryChatSession): string {
-  return session?.updatedAt || '';
-}
-
-function groupChatSessionsByAgent(
-  sessions: RegistryChatSession[],
-): ChatSessionGroup[] {
-  const grouped = new Map<string, RegistryChatSession[]>();
-  for (const session of sortChatSessions(sessions)) {
-    const agentKey = (session.agentType || '').trim() || 'unknown';
-    const bucket = grouped.get(agentKey) ?? [];
-    bucket.push(session);
-    grouped.set(agentKey, bucket);
-  }
-
-  const groups = Array.from(grouped.entries()).map(([agentKey, items]) => ({
-    agentKey,
-    label: agentKey === 'unknown' ? 'Unknown Agent' : agentKey,
-    sessions: sortChatSessions(items),
-  }));
-
-  groups.sort((a, b) => {
-    const aUpdated = sessionUpdatedAtSortKey(a.sessions[0]);
-    const bUpdated = sessionUpdatedAtSortKey(b.sessions[0]);
-    const updatedDelta = compareUpdatedAtDesc(aUpdated, bUpdated);
-    if (updatedDelta !== 0) return updatedDelta;
-    return a.label.localeCompare(b.label);
-  });
-
-  return groups;
-}
 
 function upsertChatMessage(
   list: RegistryChatMessage[],
@@ -2347,11 +2299,6 @@ function App() {
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
-  const newChatFlowGuardRef = useRef(false);
-  const chatSwipeSessionIdRef = useRef('');
-  const chatSwipePointerIdRef = useRef<number | null>(null);
-  const chatSwipeStartXRef = useRef(0);
-  const chatSwipeSuppressClickRef = useRef(false);
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
   const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
@@ -2366,9 +2313,6 @@ function App() {
   const [chatSending, setChatSending] = useState(false);
   const [chatDeletingSessionId, setChatDeletingSessionId] = useState('');
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
-  const [chatSwipeOpenSessionId, setChatSwipeOpenSessionId] = useState('');
-  const [chatSwipeDraggingSessionId, setChatSwipeDraggingSessionId] = useState('');
-  const [chatSwipeDraggingOffset, setChatSwipeDraggingOffset] = useState(0);
   const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
@@ -2386,15 +2330,8 @@ function App() {
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
-  const [newChatAgentPickerOpen, setNewChatAgentPickerOpen] = useState(false);
-  const [pendingNewChatDraft, setPendingNewChatDraft] = useState<PendingNewChatDraft | null>(null);
-  const [resumeAgentPickerOpen, setResumeAgentPickerOpen] = useState(false);
-  const [resumeAgentType, setResumeAgentType] = useState('');
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
-  const [tokenStatsPanelOpen, setTokenStatsPanelOpen] = useState(false);
-  const [agentInfoPanelOpen, setAgentInfoPanelOpen] = useState(false);
-  const [selectedAgentInfoName, setSelectedAgentInfoName] = useState('');
 
   const selectedChatSession = useMemo(
     () => chatSessions.find(item => item.sessionId === selectedChatId),
@@ -2980,22 +2917,6 @@ function App() {
       window.removeEventListener('pointerdown', handlePointerDown);
     };
   }, [wideProjectActionMenu]);
-
-
-  useEffect(() => {
-    if (!chatSwipeOpenSessionId) {
-      return;
-    }
-    const stillExists = chatSessions.some(
-      session => session.sessionId === chatSwipeOpenSessionId,
-    );
-    if (stillExists) {
-      return;
-    }
-    setChatSwipeOpenSessionId('');
-    setChatSwipeDraggingSessionId('');
-    setChatSwipeDraggingOffset(0);
-  }, [chatSessions, chatSwipeOpenSessionId]);
 
 
   useLayoutEffect(() => {
@@ -3767,26 +3688,6 @@ function App() {
       ),
     );
   }, [clampDesktopSidebarWidthForViewport, setDesktopSidebarWidth]);
-  const availableChatAgents = useMemo(() => {
-    const seen = new Set<string>();
-    const agents: string[] = [];
-    const append = (value?: string) => {
-      const normalized = (value || '').trim();
-      if (!normalized) return;
-      const key = normalized.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      agents.push(normalized);
-    };
-    for (const item of project?.agents ?? []) {
-      append(item);
-    }
-    append(project?.agent);
-    for (const session of chatSessions) {
-      append(session.agentType);
-    }
-    return agents;
-  }, [project?.agents, project?.agent, chatSessions]);
   const getWideProjectAgents = useCallback(
     (projectItem: RegistryProject, sessions: RegistryChatSession[]): string[] => {
       const seen = new Set<string>();
@@ -3972,69 +3873,6 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [projectSessionActionMenu]);
-  const agentInfoAgents = useMemo(() => {
-    const names = new Map<string, string>();
-    const skillsByKey = new Map<string, string[]>();
-    const registerAgentName = (value?: string) => {
-      const normalized = (value || '').trim();
-      if (!normalized) {
-        return;
-      }
-      const key = normalized.toLowerCase();
-      if (!names.has(key)) {
-        names.set(key, normalized);
-      }
-      if (!skillsByKey.has(key)) {
-        skillsByKey.set(key, []);
-      }
-    };
-    const registerSkills = (name: string, skills?: string[]) => {
-      registerAgentName(name);
-      const key = name.trim().toLowerCase();
-      if (!key) {
-        return;
-      }
-      const existing = skillsByKey.get(key) ?? [];
-      const seen = new Set(existing.map(item => item.toLowerCase()));
-      for (const skill of skills ?? []) {
-        const normalized = (skill || '').trim();
-        if (!normalized) {
-          continue;
-        }
-        const skillKey = normalized.toLowerCase();
-        if (seen.has(skillKey)) {
-          continue;
-        }
-        seen.add(skillKey);
-        existing.push(normalized);
-      }
-      existing.sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
-      skillsByKey.set(key, existing);
-    };
-
-    for (const profile of project?.agentProfiles ?? []) {
-      registerSkills(profile.name, profile.skills);
-    }
-    for (const name of project?.agents ?? []) {
-      registerAgentName(name);
-    }
-    registerAgentName(project?.agent);
-    for (const session of chatSessions) {
-      registerAgentName(session.agentType);
-    }
-
-    return Array.from(names.entries())
-      .map(([key, name]) => ({
-        name,
-        skills: skillsByKey.get(key) ?? [],
-      }))
-      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
-  }, [project?.agentProfiles, project?.agents, project?.agent, chatSessions]);
-
-  const selectedAgentInfo = useMemo(
-    () => agentInfoAgents.find(item => item.name === selectedAgentInfoName) ?? null,
-    [agentInfoAgents, selectedAgentInfoName],
-  );
   currentProjectRef.current = currentProject;
   expandedDirsRef.current = expandedDirs;
   selectedFileRef.current = selectedFile;
@@ -5092,38 +4930,6 @@ function App() {
       }
     }
   };
-  const createChatSession = async (agentType: string, title = '') => {
-    const normalizedAgentType = agentType.trim();
-    if (!normalizedAgentType) {
-      setError('No agent selected for new session');
-      return '';
-    }
-    try {
-      const result = await service.createSession(normalizedAgentType, title);
-      if (!result.session.sessionId) {
-        throw new Error('Session was created without a sessionId');
-      }
-      setChatSessions(prev => mergeChatSession(prev, result.session));
-      setSelectedChatId(result.session.sessionId);
-      chatSelectedIdRef.current = result.session.sessionId;
-      workspaceStore.rememberSelectedChatSession(projectIdRef.current, result.session.sessionId);
-      chatMessageStoreRef.current[result.session.sessionId] = [];
-      chatSyncIndexRef.current[result.session.sessionId] = 0;
-      chatSyncSubIndexRef.current[result.session.sessionId] = 0;
-      setChatMessages([]);
-      return result.session.sessionId;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      return '';
-    }
-  };
-
-  const beginNewChatFlow = (draft: PendingNewChatDraft): boolean => {
-    setPendingNewChatDraft(draft);
-    setNewChatAgentPickerOpen(true);
-    return true;
-  };
-
   const resetChatComposer = () => {
     chatComposerTextRef.current = '';
     chatAttachmentsRef.current = [];
@@ -5136,127 +4942,16 @@ function App() {
     }
   };
 
-  const completeNewChatFlow = async (agentType: string) => {
-    if (newChatFlowGuardRef.current) {
-      return;
-    }
-    if (chatAttachmentReadPending) {
-      setError('Wait for images to finish loading.');
-      return;
-    }
-    const draft = pendingNewChatDraft;
-    if (!draft) {
-      return;
-    }
-    newChatFlowGuardRef.current = true;
-    let createdSessionId = '';
-    try {
-      const sessionId = await createChatSession(agentType, draft.title);
-      createdSessionId = sessionId;
-      setNewChatAgentPickerOpen(false);
-      setPendingNewChatDraft(null);
-      if (!sessionId) {
-        return;
-      }
-      if (draft.text.trim() || draft.blocks.length > 0) {
-        markChatSessionRunning(projectIdRef.current, sessionId, draft.text || draft.title);
-        await service.sendSessionMessage({
-          sessionId,
-          text: draft.text,
-          blocks: draft.blocks,
-        });
-      }
-      resetChatComposer();
-    } catch (err) {
-      if (createdSessionId) {
-        clearChatSessionRunning(projectIdRef.current, createdSessionId);
-      }
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      newChatFlowGuardRef.current = false;
-    }
-    if (!isWide) {
-      setDrawerOpen(false);
-    }
-  };
-
-  const handleResumePickAgent = async (agentType: string) => {
-    setResumeAgentType(agentType);
-    setResumeLoading(true);
-    setResumeSessions([]);
-    try {
-      const sessions = await service.listResumableSessions(agentType);
-      setResumeSessions(sessions);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setResumeAgentPickerOpen(false);
-    } finally {
-      setResumeLoading(false);
-    }
-  };
-
-  const handleResumeBackToAgents = () => {
-    setResumeAgentType('');
+  const resetProjectResumeState = () => {
     setResumeSessions([]);
     setResumeLoading(false);
-  };
-
-  const handleResumeImport = async (agentType: string, sessionId: string) => {
-    setResumeLoading(true);
-    let importedSessionId = '';
-    try {
-      const imported = await service.importResumedSession(agentType, sessionId);
-      if (!imported.ok || !imported.session.sessionId) {
-        throw new Error('session.resume.import returned ok=false');
-      }
-      importedSessionId = imported.session.sessionId;
-      setResumeSessions(prev => prev.filter(item => item.sessionId !== importedSessionId));
-      setChatSessions(prev => mergeChatSession(prev, imported.session));
-      const reloaded = await service.reloadSession(importedSessionId);
-      if (!reloaded.ok) {
-        throw new Error('session.reload returned ok=false');
-      }
-      chatMessageStoreRef.current[importedSessionId] = [];
-      chatSyncIndexRef.current[importedSessionId] = 0;
-      chatSyncSubIndexRef.current[importedSessionId] = 0;
-      const loaded = await loadChatSession(importedSessionId, projectIdRef.current, { forceFull: true });
-      if (!loaded) {
-        throw new Error('Failed to load resumed session history');
-      }
-      handleDismissResume();
-    } catch (err) {
-      if (importedSessionId) {
-        handleDismissResume();
-      }
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setResumeLoading(false);
-    }
-  };
-
-  const handleDismissResume = () => {
-    setResumeAgentPickerOpen(false);
-    setResumeAgentType('');
-    setResumeSessions([]);
-    setResumeLoading(false);
-  };
-
-  const handleDismissNewChatPicker = () => {
-    setNewChatAgentPickerOpen(false);
-    setPendingNewChatDraft(null);
-  };
-
-  const handleDismissAgentInfo = () => {
-    setAgentInfoPanelOpen(false);
-    setSelectedAgentInfoName('');
   };
 
   const openWideProjectActionMenu = (
     targetProjectId: string,
     kind: 'new' | 'resume',
   ) => {
-    handleDismissNewChatPicker();
-    handleDismissResume();
+    resetProjectResumeState();
     setMobileProjectActionMenu(null);
     setWideProjectActionMenu({
       projectId: targetProjectId,
@@ -5270,8 +4965,7 @@ function App() {
     targetProjectId: string,
     kind: 'new' | 'resume',
   ) => {
-    handleDismissNewChatPicker();
-    handleDismissResume();
+    resetProjectResumeState();
     setWideProjectActionMenu(null);
     setMobileProjectActionMenu(current =>
       current?.projectId === targetProjectId && current.kind === kind
@@ -5283,48 +4977,6 @@ function App() {
             agentType: '',
           },
     );
-  };
-
-  const removeChatSessionFromState = (sessionId: string) => {
-    if (!sessionId) return;
-    setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
-    setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
-    if (chatSelectedIdRef.current === sessionId) {
-      setSelectedChatId('');
-      chatSelectedIdRef.current = '';
-      setChatMessages([]);
-    }
-    if (chatSwipeOpenSessionId === sessionId) {
-      setChatSwipeOpenSessionId('');
-      setChatSwipeDraggingSessionId('');
-      setChatSwipeDraggingOffset(0);
-    }
-    const nextMessageStore = {...chatMessageStoreRef.current};
-    const nextSyncIndex = {...chatSyncIndexRef.current};
-    const nextSyncSubIndex = {...chatSyncSubIndexRef.current};
-    delete nextMessageStore[sessionId];
-    delete nextSyncIndex[sessionId];
-    delete nextSyncSubIndex[sessionId];
-    const sessionDraftKey = buildChatDraftKey(projectIdRef.current, sessionId);
-    setChatComposerDrafts(prev => {
-      if (!(sessionDraftKey in prev)) {
-        return prev;
-      }
-      const next = { ...prev };
-      delete next[sessionDraftKey];
-      return next;
-    });
-    chatMessageStoreRef.current = nextMessageStore;
-    chatSyncIndexRef.current = nextSyncIndex;
-    chatSyncSubIndexRef.current = nextSyncSubIndex;
-    const activeProjectId = projectIdRef.current;
-    if (activeProjectId) {
-      if (workspaceStore.getSelectedChatSessionId(activeProjectId) === sessionId) {
-        workspaceStore.rememberSelectedChatSession(activeProjectId, '');
-      }
-      workspaceStore.deleteChatSession(activeProjectId, sessionId);
-    }
   };
 
   const removeProjectChatSessionFromState = (
@@ -5359,63 +5011,6 @@ function App() {
       chatSyncSubIndexRef.current = nextSyncSubIndex;
     }
     workspaceStore.deleteChatSession(targetProjectId, sessionId);
-  };
-
-  const handleDeleteChatSession = async (sessionId: string) => {
-    const normalizedSessionId = sessionId.trim();
-    if (!normalizedSessionId || chatDeletingSessionId) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      'Delete this session and its chat history? This action cannot be undone.',
-    );
-    if (!confirmed) {
-      setChatSwipeOpenSessionId('');
-      return;
-    }
-
-    setChatDeletingSessionId(normalizedSessionId);
-    try {
-      const result = await service.deleteSession(normalizedSessionId);
-      if (!result.ok) {
-        throw new Error('session.delete returned ok=false');
-      }
-      removeChatSessionFromState(result.sessionId || normalizedSessionId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setChatDeletingSessionId('');
-    }
-  };
-
-  const handleReloadChatSession = async (sessionId: string) => {
-    const normalizedSessionId = sessionId.trim();
-    if (!normalizedSessionId || chatReloadingSessionId) {
-      return;
-    }
-    setChatReloadingSessionId(normalizedSessionId);
-    setChatSwipeOpenSessionId('');
-    try {
-      const result = await service.reloadSession(normalizedSessionId);
-      if (!result.ok) {
-        throw new Error('session.reload returned ok=false');
-      }
-      // Reset sync state so next load fetches from prompt 0
-      chatSyncIndexRef.current[normalizedSessionId] = 0;
-      chatSyncSubIndexRef.current[normalizedSessionId] = 0;
-      chatMessageStoreRef.current[normalizedSessionId] = [];
-      persistChatSessionContent(normalizedSessionId, projectIdRef.current);
-      // Reload the session messages if currently selected
-      if (chatSelectedIdRef.current === normalizedSessionId) {
-        setChatMessages([]);
-        await loadChatSession(normalizedSessionId, projectIdRef.current, { forceFull: true });
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setChatReloadingSessionId('');
-    }
   };
 
   const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {
@@ -5475,122 +5070,6 @@ function App() {
     }
   };
 
-  const resolveChatSessionSwipeOffset = (sessionId: string): number => {
-    if (chatSwipeDraggingSessionId === sessionId) {
-      return chatSwipeDraggingOffset;
-    }
-    return chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH : 0;
-  };
-
-
-  const isChatSessionSwipeOpen = (sessionId: string): boolean => {
-    if (chatSwipeOpenSessionId === sessionId) {
-      return true;
-    }
-    if (chatSwipeDraggingSessionId !== sessionId) {
-      return false;
-    }
-    return chatSwipeDraggingOffset <= -CHAT_SWIPE_REVEAL_THRESHOLD;
-  };
-  const beginChatSessionSwipe = (
-    event: React.PointerEvent<HTMLDivElement>,
-    sessionId: string,
-  ) => {
-    if (!event.isPrimary) {
-      return;
-    }
-    if (event.pointerType === 'mouse' && event.button !== 0) {
-      return;
-    }
-    chatSwipePointerIdRef.current = event.pointerId;
-    chatSwipeSessionIdRef.current = sessionId;
-    chatSwipeStartXRef.current = event.clientX;
-    chatSwipeSuppressClickRef.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setChatSwipeDraggingSessionId(sessionId);
-    setChatSwipeDraggingOffset(
-      chatSwipeOpenSessionId === sessionId ? -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH : 0,
-    );
-  };
-
-  const moveChatSessionSwipe = (
-    event: React.PointerEvent<HTMLDivElement>,
-    sessionId: string,
-  ) => {
-    if (
-      chatSwipeSessionIdRef.current !== sessionId ||
-      chatSwipePointerIdRef.current !== event.pointerId
-    ) {
-      return;
-    }
-    const startX = chatSwipeStartXRef.current;
-    const currentX = event.clientX;
-    const deltaX = currentX - startX;
-    if (Math.abs(deltaX) > 6) {
-      chatSwipeSuppressClickRef.current = true;
-      event.preventDefault();
-    }
-    const anchoredDelta =
-      chatSwipeOpenSessionId === sessionId
-        ? deltaX - CHAT_SWIPE_TOTAL_ACTIONS_WIDTH
-        : deltaX;
-    const nextOffset = Math.max(
-      -CHAT_SWIPE_TOTAL_ACTIONS_WIDTH,
-      Math.min(0, anchoredDelta),
-    );
-    setChatSwipeDraggingOffset(nextOffset);
-  };
-
-  const endChatSessionSwipe = (
-    event: React.PointerEvent<HTMLDivElement>,
-    sessionId: string,
-  ) => {
-    if (
-      chatSwipeSessionIdRef.current !== sessionId ||
-      chatSwipePointerIdRef.current !== event.pointerId
-    ) {
-      return;
-    }
-    const shouldOpen = chatSwipeDraggingOffset <= -CHAT_SWIPE_OPEN_THRESHOLD;
-    setChatSwipeOpenSessionId(shouldOpen ? sessionId : '');
-    setChatSwipeDraggingSessionId('');
-    setChatSwipeDraggingOffset(0);
-    chatSwipeSessionIdRef.current = '';
-    chatSwipePointerIdRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  const selectChatSession = (sessionId: string) => {
-    if (!sessionId) {
-      return;
-    }
-    if (chatSwipeSuppressClickRef.current) {
-      chatSwipeSuppressClickRef.current = false;
-      return;
-    }
-    if (chatSwipeOpenSessionId) {
-      if (chatSwipeOpenSessionId === sessionId) {
-        setChatSwipeOpenSessionId('');
-        return;
-      }
-      setChatSwipeOpenSessionId('');
-    }
-    chatSelectedIdRef.current = sessionId;
-    workspaceStore.rememberSelectedChatSession(projectIdRef.current, sessionId);
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
-    setSelectedChatId(sessionId);
-    setChatMessages(hydrateChatSessionContentFromCache(sessionId, projectIdRef.current));
-    loadChatSession(sessionId, projectIdRef.current, {
-      incremental: true,
-      preserveUserSelection: true,
-      selectionSnapshot: sessionId,
-    }).catch(() => undefined);
-    if (!isWide) setDrawerOpen(false);
-  };
-
-
   const sendChatMessage = async () => {
     if (chatAttachmentReadPending) {
       setError('Wait for images to finish loading.');
@@ -5608,6 +5087,10 @@ function App() {
       data: attachment.data,
     } satisfies RegistryChatContentBlock)));
     const firstAttachmentName = chatAttachments[0]?.name || '';
+    if (!selectedChatId) {
+      setError('Select or create a chat session first.');
+      return;
+    }
 
     // Clear UI immediately after capturing text — before any async work
     resetChatComposer();
@@ -5615,18 +5098,6 @@ function App() {
     setChatSending(true);
     let optimisticRunningSessionId = '';
     try {
-      if (!selectedChatId) {
-        const started = beginNewChatFlow({
-          title: trimmedText || firstAttachmentName || '',
-          text: trimmedText,
-          blocks,
-        });
-        if (!started) {
-          return;
-        }
-        setChatSending(false);
-        return;
-      }
       const sessionId = selectedChatId;
       if (!sessionId) {
         return;
@@ -6050,21 +5521,6 @@ function App() {
     refreshTokenStats().catch(() => undefined);
   }, [settingsDetailView, refreshTokenStats]);
 
-  useEffect(() => {
-    if (!agentInfoPanelOpen) {
-      return;
-    }
-    if (agentInfoAgents.length === 0) {
-      if (selectedAgentInfoName) {
-        setSelectedAgentInfoName('');
-      }
-      return;
-    }
-    if (!selectedAgentInfoName || !agentInfoAgents.some(item => item.name === selectedAgentInfoName)) {
-      setSelectedAgentInfoName(agentInfoAgents[0].name);
-    }
-  }, [agentInfoPanelOpen, agentInfoAgents, selectedAgentInfoName]);
-
   const formatDatabaseDump = (dump: Awaited<ReturnType<typeof workspaceStore.dumpDatabase>>): string => {
     return JSON.stringify(
       {
@@ -6239,7 +5695,6 @@ function App() {
       phase: 'sessions',
       agentType: normalizedAgentType,
     });
-    setResumeAgentType(normalizedAgentType);
     setResumeLoading(true);
     setResumeSessions([]);
     try {
@@ -6315,7 +5770,6 @@ function App() {
       phase: 'sessions',
       agentType: normalizedAgentType,
     });
-    setResumeAgentType(normalizedAgentType);
     setResumeLoading(true);
     setResumeSessions([]);
     try {
@@ -6793,402 +6247,7 @@ function App() {
     });
   };
 
-  const groupedChatSessions = useMemo(
-    () => groupChatSessionsByAgent(chatSessions),
-    [chatSessions],
-  );
-
   const renderSidebarMain = (showSectionTitle = true) => {
-    if (tab === 'chat') {
-      return (
-        <>
-          <div className="chat-sessions-header">
-            <span className="chat-sessions-title">Chat</span>
-            <div className="chat-sessions-actions">
-              <button
-                type="button"
-                className="chat-header-icon-btn"
-                title="New session"
-                onClick={() => {
-                  setTokenStatsPanelOpen(false);
-                  handleDismissAgentInfo();
-                  setResumeAgentPickerOpen(false);
-                  setResumeSessions([]);
-                  beginNewChatFlow({ title: '', text: '', blocks: [] });
-                }}
-              >
-                <span className="codicon codicon-add" />
-              </button>
-              <button
-                type="button"
-                className="chat-header-icon-btn"
-                title="Resume session"
-                onClick={() => {
-                  setTokenStatsPanelOpen(false);
-                  handleDismissAgentInfo();
-                  handleDismissNewChatPicker();
-                  setResumeAgentType('');
-                  setResumeSessions([]);
-                  setResumeLoading(false);
-                  setResumeAgentPickerOpen(true);
-                }}
-              >
-                <span className="codicon codicon-history" />
-              </button>
-              <button
-                type="button"
-                className="chat-header-icon-btn"
-                title="Legacy token stats"
-                onClick={() => {
-                  handleDismissNewChatPicker();
-                  handleDismissResume();
-                  handleDismissAgentInfo();
-                  setTokenStatsError('');
-                  setTokenStatsPanelOpen(true);
-                }}
-              >
-                <span className="codicon codicon-graph" />
-              </button>
-              <button
-                type="button"
-                className="chat-header-icon-btn"
-                title="Legacy agent info"
-                onClick={() => {
-                  handleDismissNewChatPicker();
-                  handleDismissResume();
-                  setTokenStatsPanelOpen(false);
-                  setAgentInfoPanelOpen(true);
-                }}
-              >
-                <span className="codicon codicon-account" />
-              </button>
-</div>
-          </div>
-          {chatSessions.length === 0 && !resumeAgentPickerOpen && !newChatAgentPickerOpen && !tokenStatsPanelOpen && !agentInfoPanelOpen ? (
-            <div className="chat-empty-hint">Start a new chat or resume a previous session</div>
-          ) : null}
-          {resumeAgentPickerOpen ? (
-            <div className="chat-agent-picker-card chat-agent-picker-overlay">
-              <div className="chat-agent-picker-header">
-                <div className="chat-agent-picker-header-main">
-                  <span className="codicon codicon-history" />
-                  <span className="chat-agent-picker-title">Resume Session</span>
-                </div>
-                <button
-                  type="button"
-                  className="chat-agent-picker-close"
-                  onClick={handleDismissResume}
-                  disabled={resumeLoading}
-                  aria-label="Close resume picker"
-                >
-                  <span className="codicon codicon-close" />
-                </button>
-              </div>
-              {resumeSessions.length === 0 && !resumeLoading ? (
-                <>
-                  <div className="chat-agent-picker-subtitle">Select an agent to find past sessions</div>
-                  <div className="chat-agent-picker-actions">
-                    {availableChatAgents.map(agentType => (
-                      <button
-                        key={agentType}
-                        type="button"
-                        className="chat-agent-btn"
-                        disabled={resumeLoading}
-                        onClick={() => { handleResumePickAgent(agentType).catch(() => undefined); }}
-                      >
-                        <span className="codicon codicon-sparkle" />
-                        <span>{agentType.charAt(0).toUpperCase() + agentType.slice(1)}</span>
-                      </button>
-                    ))}
-                    {availableChatAgents.length === 0 ? (
-                      <div className="muted block">No agent available.</div>
-                    ) : null}
-                  </div>
-                </>
-              ) : null}
-              {resumeLoading ? (
-                <div className="chat-agent-picker-loading">Loading sessions…</div>
-              ) : null}
-              {resumeSessions.length > 0 ? (
-                <>
-                  <button
-                    type="button"
-                    className="chat-agent-picker-back"
-                    onClick={handleResumeBackToAgents}
-                    disabled={resumeLoading}
-                  >
-                    <span className="codicon codicon-arrow-left" />
-                    <span>Change agent</span>
-                  </button>
-                  <div className="chat-agent-picker-subtitle">Import the selected session and reload its history immediately</div>
-                  <div className="chat-resume-list">
-                  {resumeSessions.map(s => (
-                    <button
-                      type="button"
-                      key={s.sessionId}
-                      className="chat-resume-item"
-                      disabled={resumeLoading}
-                      onClick={() => { handleResumeImport(resumeAgentType, s.sessionId).catch(() => undefined); }}
-                    >
-                      <span className="chat-resume-item-title">
-                        {s.title || s.sessionId}
-                      </span>
-                      {s.preview && s.preview !== s.title ? (
-                        <span className="chat-resume-item-preview">
-                          {s.preview.length > 120 ? s.preview.slice(0, 120) + '…' : s.preview}
-                        </span>
-                      ) : null}
-                      <span className="chat-resume-item-meta">
-                        <span>{formatCompactRelativeAge(s.updatedAt)}</span>
-                        {s.messageCount > 0 ? <span>{s.messageCount} messages</span> : null}
-                      </span>
-                    </button>
-                  ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          ) : null}
-                    {tokenStatsPanelOpen ? (
-            <div className="chat-agent-picker-card chat-agent-picker-overlay token-stats-overlay-card">
-              <div className="chat-agent-picker-header">
-                <div className="chat-agent-picker-header-main">
-                  <span className="codicon codicon-graph" />
-                  <span className="chat-agent-picker-title">Token Stats</span>
-                </div>
-                <div className="token-stats-header-actions">
-                  <button
-                    type="button"
-                    className="token-stats-refresh-btn token-stats-refresh-inline"
-                    onClick={() => {
-                      refreshTokenStats().catch(() => undefined);
-                    }}
-                    disabled={tokenStatsLoading}
-                  >
-                    {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-agent-picker-close"
-                    onClick={() => {
-                      setTokenStatsPanelOpen(false);
-                    }}
-                    aria-label="Close token stats"
-                  >
-                    <span className="codicon codicon-close" />
-                  </button>
-                </div>
-              </div>
-              <div className="list token-stats-page token-stats-compact-page">
-                {tokenStatsUpdatedAt ? (
-                  <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
-                ) : null}
-                {tokenStatsLoading ? (
-                  <div className="muted block">Scanning online hubs...</div>
-                ) : null}
-                {tokenStatsError ? (
-                  <div className="muted block token-stats-error">{tokenStatsError}</div>
-                ) : null}
-                {!tokenStatsLoading && tokenStatCards.length === 0 && !tokenStatsError ? (
-                  <div className="muted block">No token accounts discovered.</div>
-                ) : null}
-
-                <div className="token-stats-account-list token-stats-account-list-flat">
-                  {tokenStatCards.map(card => (
-                    <div key={card.id} className="token-stats-account-item token-stats-account-item-flat">
-                      <div className="token-stats-card-line token-stats-card-line-tags">
-                        <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
-                          {card.agentTag}
-                        </span>
-                        {card.hubTags.map(hubTag => (
-                          <span key={hubTag} className={`token-stats-pill ${tokenTagVariantClass('hub', hubTag)}`}>
-                            {hubTag}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="token-stats-card-line token-stats-card-line-primary">
-                        <span className="token-stats-account-name">{card.accountName}</span>
-                      </div>
-                      {card.message ? (
-                        <div className="token-stats-account-error">{card.message}</div>
-                      ) : null}
-                      {card.secondaryLine ? (
-                        <div className="token-stats-card-line">{card.secondaryLine}</div>
-                      ) : null}
-                      {card.tertiaryLine ? (
-                        <div className="token-stats-card-line">{card.tertiaryLine}</div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : null}
-          {agentInfoPanelOpen ? (
-            <div className="chat-agent-picker-card chat-agent-picker-overlay agent-info-overlay-card">
-              <div className="chat-agent-picker-header">
-                <div className="chat-agent-picker-header-main">
-                  <span className="codicon codicon-account" />
-                  <span className="chat-agent-picker-title">Agent Info</span>
-                </div>
-                <button
-                  type="button"
-                  className="chat-agent-picker-close"
-                  onClick={handleDismissAgentInfo}
-                  aria-label="Close agent info"
-                >
-                  <span className="codicon codicon-close" />
-                </button>
-              </div>
-              <div className="chat-agent-picker-subtitle">Select an agent to view discovered skills</div>
-              {agentInfoAgents.length === 0 ? (
-                <div className="muted block">No agents available.</div>
-              ) : (
-                <>
-                  <div className="chat-agent-picker-actions">
-                    {agentInfoAgents.map(item => (
-                      <button
-                        key={item.name}
-                        type="button"
-                        className={`chat-agent-btn${selectedAgentInfoName === item.name ? ' selected' : ''}`}
-                        onClick={() => {
-                          setSelectedAgentInfoName(item.name);
-                        }}
-                      >
-                        <span className="codicon codicon-sparkle" />
-                        <span>{item.name}</span>
-                      </button>
-                    ))}
-                  </div>
-                  {selectedAgentInfo ? (
-                    <div className="agent-info-detail-card">
-                      <div className="token-stats-card-title">{selectedAgentInfo.name}</div>
-                      {selectedAgentInfo.skills.length === 0 ? (
-                        <div className="muted block">No skills discovered.</div>
-                      ) : (
-                        <div className="agent-info-skill-list">
-                          {selectedAgentInfo.skills.map(skill => (
-                            <div key={skill} className="agent-info-skill-item">{skill}</div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
-          ) : null}
-          {newChatAgentPickerOpen && pendingNewChatDraft ? (
-            <div className="chat-agent-picker-card chat-agent-picker-overlay">
-              <div className="chat-agent-picker-header">
-                <div className="chat-agent-picker-header-main">
-                  <span className="codicon codicon-add" />
-                  <span className="chat-agent-picker-title">New Session</span>
-                </div>
-                <button
-                  type="button"
-                  className="chat-agent-picker-close"
-                  onClick={handleDismissNewChatPicker}
-                  aria-label="Close new session picker"
-                >
-                  <span className="codicon codicon-close" />
-                </button>
-              </div>
-              <div className="chat-agent-picker-subtitle">Choose an agent</div>
-              <div className="chat-agent-picker-actions">
-                {availableChatAgents.map(agentType => (
-                  <button
-                    key={agentType}
-                    type="button"
-                    className="chat-agent-btn"
-                    onClick={() => {
-                      completeNewChatFlow(agentType).catch(() => undefined);
-                    }}
-                  >
-                    <span className="codicon codicon-sparkle" />
-                    <span>{agentType.charAt(0).toUpperCase() + agentType.slice(1)}</span>
-                  </button>
-                ))}
-              </div>
-              {availableChatAgents.length === 0 ? (
-                <div className="muted block">No agents available.</div>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="list">
-            {groupedChatSessions.map(group => (
-              <div key={`chat-group:${group.agentKey}`} className="chat-session-group">
-                <div className="chat-session-group-title">{group.label}</div>
-                {group.sessions.map(session => (
-                  <div key={session.sessionId} className={`legacy-chat-session-swipe-row ${isChatSessionSwipeOpen(session.sessionId) ? 'open' : ''}`}>
-                    <button
-                      type="button"
-                      className="chat-session-reload-action"
-                      disabled={chatReloadingSessionId === session.sessionId}
-                      onClick={event => {
-                        event.stopPropagation();
-                        handleReloadChatSession(session.sessionId).catch(() => undefined);
-                      }}
-                    >
-                      {chatReloadingSessionId === session.sessionId ? '...' : 'Reload'}
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-session-delete-action"
-                      disabled={chatDeletingSessionId === session.sessionId}
-                      onClick={event => {
-                        event.stopPropagation();
-                        handleDeleteChatSession(session.sessionId).catch(() => undefined);
-                      }}
-                    >
-                      {chatDeletingSessionId === session.sessionId ? '...' : 'Delete'}
-                    </button>
-                    <div
-                      className={`item chat-session-item ${
-                        selectedChatId === session.sessionId ? 'selected' : ''
-                      } ${
-                        chatSwipeDraggingSessionId === session.sessionId ? 'swiping' : ''
-                      }`}
-                      style={{
-                        transform: `translateX(${resolveChatSessionSwipeOffset(session.sessionId)}px)`
-                      }}
-                      onClick={() => {
-                        selectChatSession(session.sessionId);
-                      }}
-                      onPointerDown={event => {
-                        beginChatSessionSwipe(event, session.sessionId);
-                      }}
-                      onPointerMove={event => {
-                        moveChatSessionSwipe(event, session.sessionId);
-                      }}
-                      onPointerUp={event => {
-                        endChatSessionSwipe(event, session.sessionId);
-                      }}
-                      onPointerCancel={event => {
-                        endChatSessionSwipe(event, session.sessionId);
-                      }}
-                    >
-                      <span className="file-dot codicon codicon-comment-discussion" />
-                      <span className="label chat-session-meta">
-                        <span className="chat-session-title-row">
-                          {renderSessionStateMarker(session)}
-                          <span className="chat-session-title">
-                            {session.title || session.sessionId}
-                          </span>
-                        </span>
-                        <span className="chat-session-updated muted" title={session.updatedAt || ''}>
-                          {formatCompactRelativeAge(session.updatedAt)}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </>
-      );
-    }
     if (tab === 'file') {
       return (
         <>
@@ -7196,6 +6255,9 @@ function App() {
           <div className="list">{renderFileTree('.', 0)}</div>
         </>
       );
+    }
+    if (tab !== 'git') {
+      return null;
     }
 
     const popoverFiles = commitPopover

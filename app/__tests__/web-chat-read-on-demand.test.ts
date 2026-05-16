@@ -31,7 +31,7 @@ describe('web chat read-on-demand behavior', () => {
     expect(workspaceStoreTs).toContain('rememberSelectedChatSession(projectId: string, sessionId: string): void {');
     expect(mainTsx).toContain('workspaceStore.getSelectedChatSessionId(activeProjectId)');
     expect(mainTsx).toContain('nextSessions[0]?.sessionId ||');
-    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSession(projectIdRef.current, sessionId);');
+    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSession(targetProjectId, sessionId);');
     expect(mainTsx).toContain('loadChatSession(currentSelection, activeProjectId, {');
   });
 });
