@@ -62,6 +62,8 @@ export type PersistedGlobalState = {
   hideToolCalls: boolean;
   tab: PersistedTab;
   selectedProjectId: string;
+  selectedChatProjectId: string;
+  selectedChatSessionId: string;
   floatingControlSlot: PersistedFloatingControlSlot;
   desktopSidebarWidth: number;
   collapsedProjectIds: string[];
@@ -126,6 +128,8 @@ const GLOBAL_KEYS = {
   hideToolCalls: 'hideToolCalls',
   tab: 'tab',
   selectedProjectId: 'selectedProjectId',
+  selectedChatProjectId: 'selectedChatProjectId',
+  selectedChatSessionId: 'selectedChatSessionId',
   floatingControlSlot: 'floatingControlSlot',
   desktopSidebarWidth: 'desktopSidebarWidth',
   collapsedProjectIds: 'collapsedProjectIds',
@@ -149,6 +153,8 @@ function defaultGlobalState(): PersistedGlobalState {
     hideToolCalls: false,
     tab: 'file',
     selectedProjectId: '',
+    selectedChatProjectId: '',
+    selectedChatSessionId: '',
     floatingControlSlot: 'upper-middle',
     desktopSidebarWidth: 380,
     collapsedProjectIds: [],
@@ -256,6 +262,8 @@ function sanitizeGlobalState(input: Partial<PersistedGlobalState> | undefined): 
     hideToolCalls: typeof input.hideToolCalls === 'boolean' ? input.hideToolCalls : base.hideToolCalls,
     tab: input.tab === 'chat' || input.tab === 'git' ? input.tab : 'file',
     selectedProjectId: typeof input.selectedProjectId === 'string' ? input.selectedProjectId : base.selectedProjectId,
+    selectedChatProjectId: typeof input.selectedChatProjectId === 'string' ? input.selectedChatProjectId : base.selectedChatProjectId,
+    selectedChatSessionId: typeof input.selectedChatSessionId === 'string' ? input.selectedChatSessionId : base.selectedChatSessionId,
     floatingControlSlot,
     desktopSidebarWidth: sanitizeDesktopSidebarWidth(input.desktopSidebarWidth, base.desktopSidebarWidth),
     collapsedProjectIds,
@@ -654,6 +662,8 @@ export class WorkspacePersistenceRepository {
       {k: GLOBAL_KEYS.hideToolCalls, v: serialize(this.state.global.hideToolCalls), updatedAt: now},
       {k: GLOBAL_KEYS.tab, v: serialize(this.state.global.tab), updatedAt: now},
       {k: GLOBAL_KEYS.selectedProjectId, v: serialize(this.state.global.selectedProjectId), updatedAt: now},
+      {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(this.state.global.selectedChatProjectId), updatedAt: now},
+      {k: GLOBAL_KEYS.selectedChatSessionId, v: serialize(this.state.global.selectedChatSessionId), updatedAt: now},
       {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(this.state.global.floatingControlSlot), updatedAt: now},
       {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(this.state.global.desktopSidebarWidth), updatedAt: now},
       {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(this.state.global.collapsedProjectIds), updatedAt: now},
@@ -933,6 +943,8 @@ export class WorkspacePersistenceRepository {
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.hideToolCalls, v: serialize(next.hideToolCalls), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.tab, v: serialize(next.tab), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedProjectId, v: serialize(next.selectedProjectId), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatProjectId, v: serialize(next.selectedChatProjectId), updatedAt: now});
+      await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.selectedChatSessionId, v: serialize(next.selectedChatSessionId), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.floatingControlSlot, v: serialize(next.floatingControlSlot), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.desktopSidebarWidth, v: serialize(next.desktopSidebarWidth), updatedAt: now});
       await this.db.putRow(TABLE_GLOBAL_KV, {k: GLOBAL_KEYS.collapsedProjectIds, v: serialize(next.collapsedProjectIds), updatedAt: now});

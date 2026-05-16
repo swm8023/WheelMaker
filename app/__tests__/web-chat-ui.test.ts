@@ -75,7 +75,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('preserveUserSelection');
     expect(mainTsx).toContain('const shouldSyncSelectedSession =');
     expect(mainTsx).toContain('selectionSnapshot');
-    expect(mainTsx).toContain('chatSelectedIdRef.current = resultSessionId');
+    expect(mainTsx).toContain('const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, resultSessionId);');
+    expect(mainTsx).toContain('applySelectedChatKey(nextSelectedKey);');
+    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);');
     expect(mainTsx).toContain('sessionId');
     expect(mainTsx).not.toContain('newChatAgentPickerOpen');
     expect(mainTsx).not.toContain('resumeAgentPickerOpen');
@@ -105,7 +107,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;');
     expect(mainTsx).toContain('function isChatScrolledNearBottom(container: HTMLElement): boolean {');
     expect(mainTsx).toContain('const updateChatFollowModeFromScroll = useCallback(');
-    expect(mainTsx).toContain('chatAutoScrollFollowRef.current = isChatScrolledNearBottom(container);');
+    expect(mainTsx).toContain('const nearBottom = isChatScrolledNearBottom(container);');
+    expect(mainTsx).toContain('chatAutoScrollFollowRef.current = nearBottom;');
+    expect(mainTsx).toContain('setChatShowScrollToBottom(!nearBottom);');
     expect(mainTsx).toContain('const scrollChatToBottom = useCallback((force = false) => {');
     expect(mainTsx).toContain('if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {');
     expect(mainTsx).toContain('const forceChatScrollToBottom = useCallback(() => {');
@@ -115,7 +119,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('resizeChatComposerTextarea();');
     expect(mainTsx).toContain('}, [resizeChatComposerTextarea, chatComposerText, tab, selectedChatId, currentChatDraftKey]);');
     expect(mainTsx).toContain('}, [tab, selectedChatId, chatMessages, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);');
-    expect(mainTsx).toContain('onScroll={event => updateChatFollowModeFromScroll(event.currentTarget)}');
+    expect(mainTsx).toMatch(
+      /onScroll=\{event => \{[\s\S]*updateChatFollowModeFromScroll\(event\.currentTarget\);[\s\S]*expandSelectedChatWindowEarlier\(event\.currentTarget\);[\s\S]*\}\}/,
+    );
     expect(mainTsx).toContain('onPointerDown={() => { chatPointerScrollingRef.current = true; }}');
     expect(mainTsx).toContain('onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}');
     expect(mainTsx).toContain('onTouchStart={() => { chatPointerScrollingRef.current = true; }}');
@@ -179,17 +185,17 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('className="status-bar"');
     expect(mainTsx).not.toContain('gitStatusSummary');
     expect(mainTsx).not.toContain('chat-thought-label');
-    expect(mainTsx).toContain("import { buildPromptAgentMarkdown } from './chatPromptCopy';");
-    expect(mainTsx).toContain('const markdown = buildPromptAgentMarkdown(group.entries);');
+    expect(mainTsx).toContain("import { buildPromptDoneCopyRange } from './chat/chatCopyRange';");
+    expect(mainTsx).toContain('const copyRange = message.method === \'prompt_done\'');
     expect(mainTsx).toContain('className="chat-prompt-actions"');
     expect(mainTsx).toContain('className="chat-prompt-action-button"');
     expect(mainTsx).toContain('aria-label="Copy response markdown"');
     expect(mainTsx).toContain('codicon codicon-copy');
     expect(stylesCss).toContain('.chat-prompt-actions {');
     expect(stylesCss).toContain('.chat-prompt-action-button {');
-    const sendExistingStart = mainTsx.indexOf('const sessionId = selectedChatId;');
-    const firstRunningMark = mainTsx.indexOf('markChatSessionRunning(projectIdRef.current, sessionId,', sendExistingStart);
-    const sendAwait = mainTsx.indexOf('const result = await service.sendSessionMessage({', sendExistingStart);
+    const sendExistingStart = mainTsx.indexOf('const selectedKey = selectedChatKeyRef.current;');
+    const firstRunningMark = mainTsx.indexOf('markChatSessionRunning(selectedProjectId, sessionId,', sendExistingStart);
+    const sendAwait = mainTsx.indexOf('const result = await service.sendProjectSessionMessage(selectedProjectId, {', sendExistingStart);
     expect(sendExistingStart).toBeGreaterThanOrEqual(0);
     expect(firstRunningMark).toBeGreaterThan(sendExistingStart);
     expect(sendAwait).toBeGreaterThan(firstRunningMark);
@@ -271,8 +277,9 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain("projectItem.online ? 'online' : 'offline'");
     expect(mainTsx).not.toContain('+{chatConfigOverflowOptions.length}');
     expect(mainTsx).toContain('title="More config options"');
-    expect(mainTsx).toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
-    expect(mainTsx).toContain('text: chooseChatEntryText(previous.text, text),');
+    expect(mainTsx).not.toContain('function chooseChatEntryText(previousText: string, nextText: string): string {');
+    expect(mainTsx).not.toContain('text: chooseChatEntryText(previous.text, text),');
+    expect(mainTsx).not.toContain('function groupChatMessagesByPrompt(');
     expect(mainTsx).toContain("const shouldRefreshCompletedPrompt = message.method === 'prompt_done';");
     expect(mainTsx).toContain('const shouldMarkSessionRunning = isChatSessionRunningMessage(message);');
     expect(mainTsx).toContain('if (shouldMarkSessionRunning) {');
@@ -288,8 +295,9 @@ describe('web chat integration', () => {
     expect(eventRunningSignal).toBeGreaterThanOrEqual(0);
     expect(eventRunningApply).toBeGreaterThan(eventRunningSignal);
     expect(eventGapRead).toBeGreaterThan(eventRunningApply);
-    expect(mainTsx).toContain("payload.session?.sessionId === chatSelectedIdRef.current");
-    expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, projectIdRef.current, {');
+    expect(mainTsx).toContain('const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);');
+    expect(mainTsx).toContain('encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey');
+    expect(mainTsx).toContain('loadChatSession(payload.session.sessionId, eventProjectId, {');
     expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');
@@ -392,8 +400,9 @@ describe('web chat integration', () => {
     const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
     const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = async', configChangeStart);
     const configChangeBody = mainTsx.slice(configChangeStart, configChangeEnd);
-    const setConfigCall = configChangeBody.indexOf('const result = await service.setSessionConfig');
+    const setConfigCall = configChangeBody.indexOf('const result = await service.setProjectSessionConfig');
     expect(setConfigCall).toBeGreaterThanOrEqual(0);
+    expect(configChangeBody).toContain('selectedKey.projectId');
     expect(configChangeBody.indexOf('applyChatSessionConfigOptions')).toBeGreaterThan(setConfigCall);
     expect(configChangeBody).not.toContain('setChatSessions(prev =>');
 
@@ -489,7 +498,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);');
     expect(mainTsx).toContain('const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);');
     expect(mainTsx).toContain('const refreshMobileChatProjectSessions = async () => {');
-    expect(mainTsx).toContain('service.listProjectSessions(projectItem.projectId)');
+    expect(mainTsx).toContain('await refreshChatIndex();');
+    expect(mainTsx).toContain('latestProjects.map(projectItem =>');
+    expect(mainTsx).toContain('refreshChatProjectSessions(projectItem.projectId)');
     expect(mainTsx).toContain('const renderMobileChatSessionSheet = () => {');
     expect(mainTsx).toContain('className="mobile-chat-drawer-header"');
     expect(mainTsx).toContain('<span className="mobile-chat-drawer-title">Chats</span>');
@@ -572,7 +583,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain("tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false)");
-    expect(mainTsx).toContain('sidebarSettingsOpen\n      ? renderSettingsContent(false)');
+    expect(mainTsx).toContain('const wideSidebarMain = sidebarSettingsOpen');
+    expect(mainTsx).toContain('? renderSettingsContent(false)');
     expect(mainTsx).toContain('const wideSidebarTitle = sidebarSettingsOpen');
     expect(mainTsx).toContain('className="sidebar-title-row"');
     expect(mainTsx).toContain('const handleDesktopActivitySelect = useCallback((nextTab: Tab) => {');
@@ -708,11 +720,18 @@ describe('web chat integration', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
     expect(mainTsx).toContain('const selectWideProjectSession = async (targetProjectId: string, sessionId: string) => {');
-    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSession(targetProjectId, sessionId);');
-    expect(mainTsx).toContain('if (targetProjectId !== projectIdRef.current) {');
-    expect(mainTsx).toContain('await switchProject(targetProjectId);');
+    expect(mainTsx).toContain('const selectProjectChatSession = async (');
+    expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);');
     expect(mainTsx).toContain("setTab('chat');");
     expect(mainTsx).toContain('loadChatSession(sessionId, targetProjectId, {');
+    const selectProjectStart = mainTsx.indexOf('const selectProjectChatSession = async (');
+    const selectProjectEnd = mainTsx.indexOf('const selectWideProjectSession = async', selectProjectStart);
+    expect(selectProjectStart).toBeGreaterThanOrEqual(0);
+    expect(selectProjectEnd).toBeGreaterThan(selectProjectStart);
+    const selectProjectBody = mainTsx.slice(selectProjectStart, selectProjectEnd);
+    expect(selectProjectBody).not.toContain('switchProject(');
+    expect(selectProjectBody).toContain('hydrateChatSessionContentFromCache(sessionId, targetProjectId)');
+    expect(selectProjectBody).toContain('selectionSnapshot: runtimeKey');
     expect(mainTsx).toContain('const handleWideProjectCreateSession = async (targetProjectId: string, agentType: string) => {');
     expect(mainTsx).toContain("const result = await service.createProjectSession(targetProjectId, agentType, '');");
     expect(mainTsx).toContain('const handleWideProjectResumeAgent = async (targetProjectId: string, agentType: string) => {');

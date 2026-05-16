@@ -22,7 +22,8 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('const shouldSyncSelectedSession =');
     expect(mainTsx).toContain('incremental: true,');
     expect(mainTsx).toContain('preserveUserSelection: true,');
-    expect(mainTsx).toContain('selectionSnapshot: preferredSelectedChatId,');
+    expect(mainTsx).toContain('selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),');
+    expect(mainTsx).toContain('await refreshChatIndex();');
   });
 
   test('uses pwa foreground supervisor for background suspend and resume reconnect', () => {
@@ -53,7 +54,7 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('message: RegistryChatMessage,');
     expect(mainTsx).toContain('session?: RegistryChatSession,');
     expect(mainTsx).toContain('const message = decodeSessionMessageFromEventPayload(payload);');
-    expect(mainTsx).toContain('maybeNotifyChatMessage(message);');
+    expect(mainTsx).toContain('maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);');
     expect(mainTsx).toContain(".showLocalNotification({ title, body, url: '/' })");
   });
 

@@ -254,6 +254,16 @@ export class RegistryWorkspaceService {
     return this.repository.readSession(this.session.selectedProjectId, sessionId, afterTurnIndex);
   }
 
+  async readProjectSession(projectId: string, sessionId: string, afterTurnIndex = 0): Promise<RegistrySessionReadResponse> {
+    if (!this.repository) {
+      return {
+        messages: [],
+        latestTurnIndex: 0,
+      };
+    }
+    return this.repository.readSession(projectId, sessionId, afterTurnIndex);
+  }
+
   async markSessionRead(sessionId: string, lastReadTurnIndex: number): Promise<{ok: boolean; session?: RegistrySessionSummary}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');
@@ -291,6 +301,13 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.sendSessionMessage(this.session.selectedProjectId, payload);
+  }
+
+  async sendProjectSessionMessage(projectId: string, payload: {sessionId: string; text?: string; blocks?: unknown[]}): Promise<{ok: boolean; sessionId: string}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.sendSessionMessage(projectId, payload);
   }
 
   async deleteSession(sessionId: string): Promise<{ok: boolean; sessionId: string}> {
@@ -354,6 +371,13 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.setSessionConfig(this.session.selectedProjectId, payload);
+  }
+
+  async setProjectSessionConfig(projectId: string, payload: {sessionId: string; configId: string; value: string}): Promise<{ok: boolean; sessionId: string; configOptions: RegistrySessionConfigOption[]}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.setSessionConfig(projectId, payload);
   }
 
   async scanTokenStats(projectId?: string): Promise<RegistryTokenScanResult> {

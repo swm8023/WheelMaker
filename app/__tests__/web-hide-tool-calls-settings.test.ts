@@ -24,15 +24,15 @@ describe('web hide tool calls setting', () => {
     expect(mainTsx).toContain('<span>Hide Tool Calls</span>');
     expect(mainTsx).toContain('hideToolCalls={hideToolCalls}');
     expect(mainTsx).toMatch(
-      /if \(hideToolCalls && entry\.kind === 'tool'\) \{\s*return null;\s*\}/,
+      /if \(hideToolCalls && kind === 'tool'\) \{\s*return null;\s*\}/,
     );
 
-    const groupingStart = mainTsx.indexOf('function groupChatMessagesByPrompt(');
-    const groupingEnd = mainTsx.indexOf('function formatChatTimestamp(', groupingStart);
-    expect(groupingStart).toBeGreaterThanOrEqual(0);
-    expect(groupingEnd).toBeGreaterThan(groupingStart);
-    const groupingFunction = mainTsx.slice(groupingStart, groupingEnd);
-    expect(groupingFunction).toContain("kind = 'tool';");
-    expect(groupingFunction).not.toContain('hideToolCalls');
+    const turnStart = mainTsx.indexOf('const ChatTurnView = React.memo(function ChatTurnView(');
+    const turnEnd = mainTsx.indexOf('function formatChatTimestamp(', turnStart);
+    expect(turnStart).toBeGreaterThanOrEqual(0);
+    expect(turnEnd).toBeGreaterThan(turnStart);
+    const turnView = mainTsx.slice(turnStart, turnEnd);
+    expect(turnView).toContain("if (kind === 'tool') {");
+    expect(turnView).not.toContain('groupChatMessagesByPrompt');
   });
 });
