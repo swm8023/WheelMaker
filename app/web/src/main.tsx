@@ -2244,6 +2244,7 @@ function App() {
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [projectId, setProjectId] = useState('');
   const projectIdRef = useRef('');
+  const projectsRef = useRef<RegistryProject[]>([]);
   const currentProjectRef = useRef<RegistryProject | null>(null);
   const knownProjectRevRef = useRef('');
   const knownGitRevRef = useRef('');
@@ -2305,8 +2306,13 @@ function App() {
   const chatSyncSubIndexRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
+  const chatIndexFullRefreshInFlightRef = useRef(false);
+  const chatIndexFullRefreshDirtyRef = useRef(false);
+  const chatProjectRefreshInFlightRef = useRef<Record<string, boolean>>({});
+  const chatProjectRefreshDirtyRef = useRef<Record<string, boolean>>({});
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
   const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
+  const projectSessionsByProjectIdRef = useRef<Record<string, RegistryChatSession[]>>({});
   const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
   const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
   const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);
@@ -2862,6 +2868,9 @@ function App() {
   useEffect(() => {
     selectedChatKeyRef.current = selectedChatKey;
   }, [selectedChatKey]);
+  useEffect(() => {
+    projectSessionsByProjectIdRef.current = projectSessionsByProjectId;
+  }, [projectSessionsByProjectId]);
   useEffect(() => {
     floatingDragStateRef.current = floatingDragState;
   }, [floatingDragState]);
@@ -3915,6 +3924,7 @@ function App() {
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [projectSessionActionMenu]);
   currentProjectRef.current = currentProject;
+  projectsRef.current = projects;
   expandedDirsRef.current = expandedDirs;
   selectedFileRef.current = selectedFile;
 
@@ -5387,6 +5397,7 @@ function App() {
           preferredSelectedChatId,
         ).catch(() => undefined);
       }
+      await refreshChatIndex();
       workspaceController
         .validateExpandedDirectories(
           result.hydrated.projectId,
@@ -5447,8 +5458,10 @@ function App() {
   const maybeNotifyChatMessage = (
     message: RegistryChatMessage,
     session?: RegistryChatSession,
+    activeProjectId = '',
   ) => {
-    const messageKey = `${message.sessionId}:${message.turnIndex}`;
+    const runtimeKey = buildChatRuntimeKey(activeProjectId, message.sessionId);
+    const messageKey = `${runtimeKey}:${message.turnIndex}`;
     if (!message.sessionId || msgRole(message.method) === 'user') {
       return;
     }
@@ -5457,7 +5470,7 @@ function App() {
     }
     const isVisible =
       typeof document !== 'undefined' && document.visibilityState === 'visible';
-    if (isVisible && message.sessionId === chatSelectedIdRef.current) {
+    if (isVisible && runtimeKey && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
       return;
     }
 
@@ -6024,62 +6037,104 @@ function App() {
     }
   };
 
-  const refreshMobileChatProjectSessions = async () => {
-    if (!connected) return;
+  const rememberProjectSessionList = (
+    targetProjectId: string,
+    sessions: RegistryChatSession[],
+  ) => {
+    const sortedSessions = sortChatSessions(sessions);
+    setProjectSessionsByProjectId(prev => ({
+      ...prev,
+      [targetProjectId]: sortedSessions,
+    }));
+    if (targetProjectId === projectIdRef.current) {
+      setChatSessions(sortedSessions);
+    }
+    const cached = workspaceStore.hydrateChatSessions(targetProjectId);
+    const cursorBySessionId: Record<string, {turnIndex: number}> = {};
+    for (const entry of cached) {
+      const sessionId = entry.session.sessionId;
+      if (!sessionId) continue;
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
+      cursorBySessionId[sessionId] = {
+        turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? entry.cursor.turnIndex,
+      };
+    }
+    for (const session of sortedSessions) {
+      const sessionId = session.sessionId;
+      if (!sessionId || cursorBySessionId[sessionId]) continue;
+      const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
+      cursorBySessionId[sessionId] = {
+        turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+      };
+    }
+    workspaceStore.replaceChatSessions(targetProjectId, sortedSessions, cursorBySessionId);
+  };
+
+  const refreshChatProjectSessions = async (targetProjectId: string) => {
+    if ((!connected && !connectInFlightRef.current) || !targetProjectId) return;
+    if (chatProjectRefreshInFlightRef.current[targetProjectId]) {
+      chatProjectRefreshDirtyRef.current[targetProjectId] = true;
+      return;
+    }
+    chatProjectRefreshInFlightRef.current[targetProjectId] = true;
+    try {
+      do {
+        chatProjectRefreshDirtyRef.current[targetProjectId] = false;
+        try {
+          const sessions = await service.listProjectSessions(targetProjectId);
+          rememberProjectSessionList(targetProjectId, sessions);
+          setMobileProjectSessionErrors(prev => {
+            if (!prev[targetProjectId]) return prev;
+            const next = {...prev};
+            delete next[targetProjectId];
+            return next;
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setMobileProjectSessionErrors(prev => ({
+            ...prev,
+            [targetProjectId]: message || 'Failed to refresh sessions',
+          }));
+        }
+      } while (chatProjectRefreshDirtyRef.current[targetProjectId]);
+    } finally {
+      chatProjectRefreshInFlightRef.current[targetProjectId] = false;
+    }
+  };
+
+  const refreshChatIndex = async () => {
+    if (!connected && !connectInFlightRef.current) return;
+    if (chatIndexFullRefreshInFlightRef.current) {
+      chatIndexFullRefreshDirtyRef.current = true;
+      return;
+    }
+    chatIndexFullRefreshInFlightRef.current = true;
     setMobileProjectSessionsRefreshing(true);
     setRefreshingProject(true);
     try {
-      const latestProjects = await service.listProjects();
-      setProjects(latestProjects);
-      setHasPendingProjectUpdates(false);
-      await Promise.all(
-        latestProjects.map(async projectItem => {
-          try {
-            const sessions = await service.listProjectSessions(projectItem.projectId);
-            const sortedSessions = sortChatSessions(sessions);
-            setProjectSessionsByProjectId(prev => ({
-              ...prev,
-              [projectItem.projectId]: sortedSessions,
-            }));
-            const cached = workspaceStore.hydrateChatSessions(projectItem.projectId);
-            const cursorBySessionId: Record<string, {turnIndex: number}> = {};
-            for (const entry of cached) {
-              cursorBySessionId[entry.session.sessionId] = entry.cursor;
-            }
-            workspaceStore.replaceChatSessions(
-              projectItem.projectId,
-              sortedSessions,
-              cursorBySessionId,
-            );
-            setMobileProjectSessionErrors(prev => {
-              if (!prev[projectItem.projectId]) return prev;
-              const next = {...prev};
-              delete next[projectItem.projectId];
-              return next;
-            });
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            setMobileProjectSessionErrors(prev => ({
-              ...prev,
-              [projectItem.projectId]: message || 'Failed to refresh sessions',
-            }));
-          }
-        }),
-      );
+      do {
+        chatIndexFullRefreshDirtyRef.current = false;
+        const latestProjects = await service.listProjects();
+        setProjects(latestProjects);
+        setHasPendingProjectUpdates(false);
+        await Promise.all(
+          latestProjects.map(projectItem =>
+            refreshChatProjectSessions(projectItem.projectId),
+          ),
+        );
+      } while (chatIndexFullRefreshDirtyRef.current);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      chatIndexFullRefreshInFlightRef.current = false;
       setMobileProjectSessionsRefreshing(false);
       setRefreshingProject(false);
     }
   };
 
-  useEffect(() => {
-    if (isWide || tab !== 'chat' || !drawerOpen || !connected) {
-      return;
-    }
-    refreshMobileChatProjectSessions().catch(() => undefined);
-  }, [isWide, tab, drawerOpen, connected, projectIdListKey]);
+  const refreshMobileChatProjectSessions = async () => {
+    await refreshChatIndex();
+  };
 
   useEffect(() => {
     const unsubscribeEvent = service.onEvent(event => {
@@ -6100,35 +6155,38 @@ function App() {
         }
       }
       if (event.method === 'session.updated') {
+        if (!eventProjectId) {
+          return;
+        }
+        if (!projectsRef.current.some(item => item.projectId === eventProjectId)) {
+          refreshChatIndex().catch(() => undefined);
+          return;
+        }
         const payload = (event.payload ?? {}) as {
           session?: RegistryChatSession;
         };
         if (payload.session?.sessionId) {
-          const targetProjectId = eventProjectId || projectIdRef.current;
-          if (targetProjectId) {
-            setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, targetProjectId, payload.session!));
-          }
-          if (!eventProjectId || eventProjectId === projectIdRef.current) {
-            setChatSessions(prev => mergeChatSession(prev, payload.session!));
-            workspaceStore.rememberChatSession(projectIdRef.current, payload.session, {
-              turnIndex: chatSyncSubIndexRef.current[payload.session.sessionId] ?? 0,
-            });
-          }
-          if (
-            (!eventProjectId || eventProjectId === projectIdRef.current) &&
-            payload.session?.sessionId === chatSelectedIdRef.current
-          ) {
-            loadChatSession(payload.session.sessionId, projectIdRef.current, {
+          const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);
+          rememberChatSessionSummary(eventProjectId, payload.session);
+          workspaceStore.rememberChatSession(eventProjectId, payload.session, {
+            turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+          });
+          if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
+            loadChatSession(payload.session.sessionId, eventProjectId, {
               incremental: true,
               preserveUserSelection: true,
-              selectionSnapshot: chatSelectedIdRef.current,
+              selectionSnapshot: runtimeKey,
             }).catch(() => undefined);
           }
         }
         return;
       }
       if (event.method === 'session.message') {
-        if (eventProjectId && eventProjectId !== projectIdRef.current) {
+        if (!eventProjectId) {
+          return;
+        }
+        if (!projectsRef.current.some(item => item.projectId === eventProjectId)) {
+          refreshChatIndex().catch(() => undefined);
           return;
         }
         const payload = (event.payload ??
@@ -6138,40 +6196,47 @@ function App() {
           return;
         }
         const sessionId = message.sessionId;
-        const isSelectedSession = sessionId === chatSelectedIdRef.current;
+        const runtimeKey = buildChatRuntimeKey(eventProjectId, sessionId);
+        const isSelectedSession = encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey;
+        const knownProjectSessions = projectSessionsByProjectIdRef.current[eventProjectId] ?? [];
+        const knownSession = knownProjectSessions.some(session => session.sessionId === sessionId);
+        if (!knownSession && !isSelectedSession) {
+          refreshChatProjectSessions(eventProjectId).catch(() => undefined);
+          return;
+        }
         const shouldRefreshCompletedPrompt = message.method === 'prompt_done';
         const shouldMarkSessionRunning = isChatSessionRunningMessage(message);
-        const existingMessagesForSession = chatMessageStoreRef.current[sessionId] ?? [];
+        const existingMessagesForSession = chatMessageStoreRef.current[runtimeKey] ?? [];
         if (shouldMarkSessionRunning) {
-          setChatRunningSessionFlags(prev => addSessionFlag(prev, sessionId));
-          setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+          setChatRunningSessionFlags(prev => addSessionFlag(prev, runtimeKey));
+          setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
         }
         const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
           {
             cursor: {
-              turnIndex: chatSyncSubIndexRef.current[sessionId] ?? 0,
+              turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
             },
           },
           message,
         );
         if (readCursorForGap) {
-          chatSyncIndexRef.current[sessionId] = 0;
-          chatSyncSubIndexRef.current[sessionId] = readCursorForGap.turnIndex;
+          chatSyncIndexRef.current[runtimeKey] = 0;
+          chatSyncSubIndexRef.current[runtimeKey] = readCursorForGap.turnIndex;
           if (isSelectedSession) {
-            loadChatSession(sessionId, projectIdRef.current, {
+            loadChatSession(sessionId, eventProjectId, {
               incremental: true,
               preserveUserSelection: true,
-              selectionSnapshot: chatSelectedIdRef.current,
+              selectionSnapshot: runtimeKey,
             }).catch(() => undefined);
           }
           return;
         }
         if (shouldRefreshCompletedPrompt) {
-          setChatRunningSessionFlags(prev => removeSessionFlag(prev, sessionId));
+          setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
           if (isSelectedSession) {
-            setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, sessionId));
+            setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
           } else {
-            setChatCompletedUnopenedFlags(prev => addSessionFlag(prev, sessionId));
+            setChatCompletedUnopenedFlags(prev => addSessionFlag(prev, runtimeKey));
           }
         }
         const messageText = msgText(message.method, message.param);
@@ -6185,46 +6250,45 @@ function App() {
             : shouldMarkSessionRunning
               ? {running: true}
               : {};
-        let mergedSessionForCache: RegistryChatSession | undefined;
-        setChatSessions(prev => {
-          const existing = prev.find(item => item.sessionId === sessionId);
-          const next = mergeChatSession(prev, {
-            sessionId,
-            preview: messageText || existing?.preview || '',
-            updatedAt: existing?.updatedAt || '',
-            messageCount: existing?.messageCount ?? 0,
-            unreadCount: existing?.unreadCount,
-            agentType: existing?.agentType,
-            ...sessionStatePatch,
-          });
-          mergedSessionForCache = next.find(item => item.sessionId === sessionId);
-          return next;
-        });
-        if (Object.keys(sessionStatePatch).length > 0) {
-          setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, projectIdRef.current, {
-            sessionId,
-            ...sessionStatePatch,
-          }));
+        const existingSession = knownProjectSessions.find(item => item.sessionId === sessionId);
+        const sessionPatchForIndex = {
+          sessionId,
+          preview: messageText || existingSession?.preview || '',
+          updatedAt: existingSession?.updatedAt || '',
+          messageCount: existingSession?.messageCount ?? 0,
+          unreadCount: existingSession?.unreadCount,
+          agentType: existingSession?.agentType,
+          ...sessionStatePatch,
+        };
+        const mergedSessionForCache = mergeChatSession(
+          knownProjectSessions,
+          sessionPatchForIndex,
+        ).find(item => item.sessionId === sessionId);
+        setProjectSessionsByProjectId(prev =>
+          mergeProjectSessionMap(prev, eventProjectId, sessionPatchForIndex),
+        );
+        if (eventProjectId === projectIdRef.current) {
+          setChatSessions(prev => mergeChatSession(prev, mergedSessionForCache ?? sessionPatchForIndex));
         }
 
-        maybeNotifyChatMessage(message);
+        maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);
 
         const merged = upsertChatMessage(
           existingMessagesForSession,
           message,
         );
         const latestSyncCursor = getLatestSessionReadCursor(merged);
-        chatSyncIndexRef.current[sessionId] = 0;
-        chatSyncSubIndexRef.current[sessionId] = latestSyncCursor.turnIndex;
-        chatMessageStoreRef.current[sessionId] = merged;
-        persistChatSessionContent(sessionId, projectIdRef.current, mergedSessionForCache);
+        chatSyncIndexRef.current[runtimeKey] = 0;
+        chatSyncSubIndexRef.current[runtimeKey] = latestSyncCursor.turnIndex;
+        chatMessageStoreRef.current[runtimeKey] = merged;
+        persistChatSessionContent(sessionId, eventProjectId, mergedSessionForCache);
 
-        if (sessionId === chatSelectedIdRef.current) {
+        if (isSelectedSession) {
           setChatMessages(merged);
         }
         if (shouldRefreshCompletedPrompt && isSelectedSession) {
           markChatSessionRead(
-            projectIdRef.current,
+            eventProjectId,
             sessionId,
             message.turnIndex ?? 0,
           ).catch(() => undefined);
@@ -6236,8 +6300,8 @@ function App() {
         ) {
           refreshSessionTurns(
             sessionId,
-            projectIdRef.current,
-            chatSelectedIdRef.current,
+            eventProjectId,
+            runtimeKey,
           ).catch(() => undefined);
         }
       }
