@@ -23,10 +23,12 @@ describe('web session list schema', () => {
     expect(registryTypes).toContain('lastDoneTurnIndex?: number;');
     expect(registryTypes).toContain('lastDoneSuccess?: boolean;');
     expect(registryTypes).toContain('lastReadTurnIndex?: number;');
-    expect(mainTsx).toContain('const renderSessionStateMarker = (session: RegistryChatSession) => {');
+    expect(mainTsx).toContain('const renderSessionStateMarker = (session: RegistryChatSession, activeProjectId = projectIdRef.current) => {');
+    expect(mainTsx).toContain('const runtimeKey = buildChatRuntimeKey(activeProjectId, session.sessionId);');
     expect(mainTsx).toContain('getChatSessionVisualState(session)');
     expect(mainTsx).toContain('service.markProjectSessionRead(activeProjectId, sessionId, cursor)');
-    expect(mainTsx).toContain('setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, targetProjectId, payload.session!));');
+    expect(mainTsx).toContain('rememberChatSessionSummary(eventProjectId, payload.session);');
+    expect(mainTsx).toContain('workspaceStore.rememberChatSession(eventProjectId, payload.session, {');
     expect(stylesCss).toContain('grid-template-columns: 13px minmax(0, 1fr) auto auto;');
     expect(stylesCss).toContain('.session-state-marker.running');
     expect(stylesCss).toContain('.session-state-marker.failed-unviewed .session-state-dot');
