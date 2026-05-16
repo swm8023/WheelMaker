@@ -29,6 +29,26 @@ export function getChatSessionVisualState(session: Pick<
     : 'completed-unviewed';
 }
 
+export function resolveChatSessionVisualState(
+  session: Pick<
+    RegistryChatSession,
+    'running' | 'lastDoneTurnIndex' | 'lastDoneSuccess' | 'lastReadTurnIndex'
+  >,
+  local: { running?: boolean; completedUnviewed?: boolean } = {},
+): ChatSessionVisualState {
+  if (local.running || session.running === true) {
+    return 'running';
+  }
+  const state = getChatSessionVisualState({
+    ...session,
+    running: false,
+  });
+  if (state !== 'idle') {
+    return state;
+  }
+  return local.completedUnviewed ? 'completed-unviewed' : 'idle';
+}
+
 export function isChatSessionRunningMessage(message: Pick<
   RegistryChatMessage,
   'method' | 'param'

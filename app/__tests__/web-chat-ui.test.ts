@@ -285,6 +285,13 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('if (shouldMarkSessionRunning) {');
     expect(mainTsx).toContain('const latestSyncCursor = getLatestSessionReadCursor(merged);');
     expect(mainTsx).toContain('const readCursorForGap = shouldRequestSessionReadForIncomingTurn(');
+    const promptDoneSignal = mainTsx.indexOf("const shouldRefreshCompletedPrompt = message.method === 'prompt_done';");
+    const promptDoneStateApply = mainTsx.indexOf('if (shouldRefreshCompletedPrompt) {', promptDoneSignal);
+    const promptGapRead = mainTsx.indexOf('if (readCursorForGap) {', promptDoneSignal);
+    expect(promptDoneSignal).toBeGreaterThanOrEqual(0);
+    expect(promptDoneStateApply).toBeGreaterThan(promptDoneSignal);
+    expect(promptGapRead).toBeGreaterThan(promptDoneStateApply);
+    expect(mainTsx).toContain('lastReadTurnIndex: isSelectedSession && completedTurnIndex > 0');
     expect(mainTsx).toContain('messages.filter(isFinishedChatMessage)');
     expect(mainTsx).toContain('needsPromptTurnRefresh(');
     expect(mainTsx).toContain('refreshSessionTurns(');

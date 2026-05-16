@@ -1,6 +1,7 @@
 import {
   getChatSessionVisualState,
   isChatSessionRunningMessage,
+  resolveChatSessionVisualState,
 } from '../web/src/chatSessionState';
 
 describe('web chat session visual state', () => {
@@ -52,6 +53,23 @@ describe('web chat session visual state', () => {
       lastDoneSuccess: true,
       lastReadTurnIndex: 4,
     })).toBe('idle');
+  });
+
+  test('local running state overrides stale completed-unviewed summary', () => {
+    expect(resolveChatSessionVisualState({
+      sessionId: 's5',
+      title: '',
+      preview: '',
+      updatedAt: '',
+      messageCount: 0,
+      running: false,
+      lastDoneTurnIndex: 4,
+      lastDoneSuccess: true,
+      lastReadTurnIndex: 3,
+    }, {
+      running: true,
+      completedUnviewed: false,
+    })).toBe('running');
   });
 
   test('marks a session running from prompt start and streaming turns', () => {

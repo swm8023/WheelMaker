@@ -30,8 +30,8 @@ import {
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import {
-  getChatSessionVisualState,
   isChatSessionRunningMessage,
+  resolveChatSessionVisualState as resolveChatSessionVisualStateValue,
   type ChatSessionVisualState,
 } from './chatSessionState';
 import {
@@ -4695,18 +4695,11 @@ function App() {
   };
 
   const resolveSessionVisualState = (session: RegistryChatSession, activeProjectId = projectIdRef.current): ChatSessionVisualState => {
-    const state = getChatSessionVisualState(session);
-    if (state !== 'idle') {
-      return state;
-    }
     const runtimeKey = buildChatRuntimeKey(activeProjectId, session.sessionId);
-    if (chatRunningSessionFlags[runtimeKey]) {
-      return 'running';
-    }
-    if (chatCompletedUnopenedFlags[runtimeKey]) {
-      return 'completed-unviewed';
-    }
-    return 'idle';
+    return resolveChatSessionVisualStateValue(session, {
+      running: !!chatRunningSessionFlags[runtimeKey],
+      completedUnviewed: !!chatCompletedUnopenedFlags[runtimeKey],
+    });
   };
 
   const renderSessionStateMarker = (session: RegistryChatSession, activeProjectId = projectIdRef.current) => {
@@ -6255,26 +6248,6 @@ function App() {
           setChatRunningSessionFlags(prev => addSessionFlag(prev, runtimeKey));
           setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
         }
-        const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
-          {
-            cursor: {
-              turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
-            },
-          },
-          message,
-        );
-        if (readCursorForGap) {
-          chatSyncIndexRef.current[runtimeKey] = 0;
-          chatSyncSubIndexRef.current[runtimeKey] = readCursorForGap.turnIndex;
-          if (isSelectedSession) {
-            loadChatSession(sessionId, eventProjectId, {
-              incremental: true,
-              preserveUserSelection: true,
-              selectionSnapshot: runtimeKey,
-            }).catch(() => undefined);
-          }
-          return;
-        }
         if (shouldRefreshCompletedPrompt) {
           setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
           if (isSelectedSession) {
@@ -6284,12 +6257,16 @@ function App() {
           }
         }
         const messageText = msgText(message.method, message.param);
+        const completedTurnIndex = Math.max(0, Math.trunc(message.turnIndex ?? 0));
         const sessionStatePatch: Partial<RegistryChatSession> =
           shouldRefreshCompletedPrompt
             ? {
                 running: false,
-                lastDoneTurnIndex: message.turnIndex ?? 0,
+                lastDoneTurnIndex: completedTurnIndex,
                 lastDoneSuccess: messageText.trim() !== 'failed',
+                lastReadTurnIndex: isSelectedSession && completedTurnIndex > 0
+                  ? completedTurnIndex
+                  : undefined,
               }
             : shouldMarkSessionRunning
               ? {running: true}
@@ -6313,6 +6290,26 @@ function App() {
         );
         if (eventProjectId === projectIdRef.current) {
           setChatSessions(prev => mergeChatSession(prev, mergedSessionForCache ?? sessionPatchForIndex));
+        }
+        const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
+          {
+            cursor: {
+              turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+            },
+          },
+          message,
+        );
+        if (readCursorForGap) {
+          chatSyncIndexRef.current[runtimeKey] = 0;
+          chatSyncSubIndexRef.current[runtimeKey] = readCursorForGap.turnIndex;
+          if (isSelectedSession) {
+            loadChatSession(sessionId, eventProjectId, {
+              incremental: true,
+              preserveUserSelection: true,
+              selectionSnapshot: runtimeKey,
+            }).catch(() => undefined);
+          }
+          return;
         }
 
         maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);
