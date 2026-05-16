@@ -3057,6 +3057,7 @@ body,
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 .chat-block {
@@ -3469,6 +3470,35 @@ body,
 .chat-prompt-action-button:disabled:hover {
   color: var(--muted);
   background: transparent;
+}
+
+.chat-prompt-failure-line {
+  flex-basis: 100%;
+  margin-left: auto;
+  font-size: 11px;
+  color: #f85149;
+}
+
+.chat-scroll-bottom-button {
+  position: absolute;
+  right: 22px;
+  bottom: 92px;
+  z-index: 5;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 88%, var(--panel));
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 28%, transparent);
+}
+
+.chat-scroll-bottom-button:hover {
+  background: var(--hover);
 }
 
 .chat-composer {
