@@ -686,6 +686,18 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.wide-project-hub-tag \{[\s\S]*border: none;[\s\S]*background: transparent;[\s\S]*\}/,
     );
+    const wideProjectTitleGroupBlock = stylesCss.match(/\.wide-project-title-group \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectTitleGroupBlock).toContain('overflow: hidden;');
+    const wideProjectNameBlock = stylesCss.match(/\.wide-project-name \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectNameBlock).toContain('flex: 0 0 auto;');
+    expect(wideProjectNameBlock).toContain('max-width: 100%;');
+    const wideProjectHubTagBlock = stylesCss.match(/\.wide-project-hub-tag \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectHubTagBlock).toContain('flex: 1 1 0;');
+    expect(wideProjectHubTagBlock).toContain('min-width: 0;');
+    expect(wideProjectHubTagBlock).toContain('max-width: max-content;');
+    expect(wideProjectHubTagBlock).toContain('overflow: hidden;');
+    const wideProjectHubLabelBlock = stylesCss.match(/\.wide-project-hub-label \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(wideProjectHubLabelBlock).toContain('flex: 1 1 auto;');
     expect(stylesCss).toMatch(
       /\.wide-project-pin-badge \{[\s\S]*position: absolute;[\s\S]*right: -4px;[\s\S]*top: -5px;[\s\S]*\}/,
     );

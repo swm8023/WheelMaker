@@ -1514,10 +1514,13 @@ body,
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  overflow: hidden;
 }
 
 .wide-project-name {
+  flex: 0 0 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1527,7 +1530,10 @@ body,
 
 .wide-project-hub-tag {
   --hub-accent: var(--accent);
-  flex: 0 0 auto;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: max-content;
+  overflow: hidden;
   border: none;
   border-radius: 999px;
   background: transparent;
@@ -1542,6 +1548,7 @@ body,
 }
 
 .wide-project-hub-dot {
+  flex: 0 0 auto;
   width: 5px;
   height: 5px;
   border-radius: 999px;
@@ -1550,6 +1557,7 @@ body,
 }
 
 .wide-project-hub-label {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
