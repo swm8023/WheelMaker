@@ -127,6 +127,11 @@ type ProjectSessionActionMenuState = {
   projectId: string;
   sessionId: string;
 };
+type ArchiveConfirmTarget = {
+  projectId: string;
+  sessionId: string;
+  title: string;
+};
 type SettingsDetailView = 'tokenStats' | 'ccSwitch' | null;
 type ChatComposerDraft = {
   text: string;
@@ -2214,9 +2219,9 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatSending, setChatSending] = useState(false);
   const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);
-  const [chatDeletingSessionId, setChatDeletingSessionId] = useState('');
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
   const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
+  const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<ArchiveConfirmTarget | null>(null);
   const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
@@ -5238,36 +5243,6 @@ function App() {
     workspaceStore.deleteChatSession(targetProjectId, sessionId);
   };
 
-  const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {
-    const normalizedSessionId = sessionId.trim();
-    if (!targetProjectId || !normalizedSessionId || chatDeletingSessionId) {
-      return;
-    }
-    const confirmed = window.confirm(
-      'Delete this session and its chat history? This action cannot be undone.',
-    );
-    if (!confirmed) {
-      setProjectSessionActionMenu(null);
-      return;
-    }
-    setChatDeletingSessionId(normalizedSessionId);
-    try {
-      const result = await service.deleteProjectSession(targetProjectId, normalizedSessionId);
-      if (!result.ok) {
-        throw new Error('session.delete returned ok=false');
-      }
-      removeProjectChatSessionFromState(
-        targetProjectId,
-        result.sessionId || normalizedSessionId,
-      );
-      setProjectSessionActionMenu(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setChatDeletingSessionId('');
-    }
-  };
-
   const handleArchiveProjectSession = async (targetProjectId: string, sessionId: string) => {
     const normalizedSessionId = sessionId.trim();
     if (!targetProjectId || !normalizedSessionId || chatArchivingSessionId) {
@@ -5284,11 +5259,25 @@ function App() {
         result.sessionId || normalizedSessionId,
       );
       setProjectSessionActionMenu(null);
+      setArchiveConfirmTarget(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setChatArchivingSessionId('');
     }
+  };
+
+  const requestArchiveProjectSession = (targetProjectId: string, session: RegistrySessionSummary) => {
+    const normalizedSessionId = session.sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || session.running || chatArchivingSessionId) {
+      return;
+    }
+    setProjectSessionActionMenu(null);
+    setArchiveConfirmTarget({
+      projectId: targetProjectId,
+      sessionId: normalizedSessionId,
+      title: (session.title || '').trim(),
+    });
   };
 
   const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {
@@ -6113,8 +6102,7 @@ function App() {
     const sessionId = session.sessionId;
     const sessionActionDisabled = !!session.running ||
       chatReloadingSessionId === sessionId ||
-      chatArchivingSessionId === sessionId ||
-      chatDeletingSessionId === sessionId;
+      chatArchivingSessionId === sessionId;
     return (
       <div className="project-session-action-strip">
         <button
@@ -6147,7 +6135,7 @@ function App() {
           onPointerDown={event => event.stopPropagation()}
           onClick={event => {
             event.stopPropagation();
-            handleArchiveProjectSession(targetProjectId, sessionId).catch(() => undefined);
+            requestArchiveProjectSession(targetProjectId, session);
           }}
         >
           <span
@@ -6158,27 +6146,6 @@ function App() {
             }`}
           />
           <span className="project-session-action-label">Archive</span>
-        </button>
-        <button
-          type="button"
-          className="project-session-action-btn delete"
-          title="Delete session"
-          aria-label="Delete session"
-          disabled={sessionActionDisabled}
-          onPointerDown={event => event.stopPropagation()}
-          onClick={event => {
-            event.stopPropagation();
-            handleDeleteProjectSession(targetProjectId, sessionId).catch(() => undefined);
-          }}
-        >
-          <span
-            className={`codicon ${
-              chatDeletingSessionId === sessionId
-                ? 'codicon-loading codicon-modifier-spin'
-                : 'codicon-trash'
-            }`}
-          />
-          <span className="project-session-action-label">Delete</span>
         </button>
       </div>
     );
@@ -9469,21 +9436,91 @@ function App() {
     </div>
   ) : null;
 
+  const archiveConfirmBusy = archiveConfirmTarget
+    ? chatArchivingSessionId === archiveConfirmTarget.sessionId
+    : false;
+  const archiveConfirmTitle = archiveConfirmTarget?.title || 'Untitled session';
+  const sessionArchiveConfirmDialog = archiveConfirmTarget ? (
+    <div
+      className="session-archive-confirm-backdrop"
+      role="presentation"
+      onPointerDown={() => {
+        if (!archiveConfirmBusy) {
+          setArchiveConfirmTarget(null);
+        }
+      }}
+    >
+      <div
+        className="session-archive-confirm-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="session-archive-confirm-title"
+        onPointerDown={event => event.stopPropagation()}
+      >
+        <div className="session-archive-confirm-icon">
+          <span className="codicon codicon-archive" />
+        </div>
+        <div className="session-archive-confirm-content">
+          <div id="session-archive-confirm-title" className="session-archive-confirm-title">
+            Archive session?
+          </div>
+          <div className="session-archive-confirm-name">{archiveConfirmTitle}</div>
+          <div className="session-archive-confirm-copy">
+            Archived sessions leave the chat list. Sessions with fewer than 3 turns are permanently removed.
+          </div>
+        </div>
+        <div className="session-archive-confirm-actions">
+          <button
+            type="button"
+            className="session-archive-confirm-btn secondary"
+            disabled={archiveConfirmBusy}
+            onClick={() => setArchiveConfirmTarget(null)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="session-archive-confirm-btn primary"
+            disabled={archiveConfirmBusy}
+            onClick={() => {
+              handleArchiveProjectSession(
+                archiveConfirmTarget.projectId,
+                archiveConfirmTarget.sessionId,
+              ).catch(() => undefined);
+            }}
+          >
+            <span
+              className={`codicon ${
+                archiveConfirmBusy
+                  ? 'codicon-loading codicon-modifier-spin'
+                  : 'codicon-archive'
+              }`}
+            />
+            Archive
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
-    <ResponsiveShell
-      mode={layoutMode}
-      themeMode={themeMode}
-      setiFontCss={setiFontCss}
-      desktopActivityBar={desktopActivityBar}
-      desktopSidebarWidth={effectiveDesktopSidebarWidth}
-      floatingControlStack={floatingControlStack}
-      mobileSettingsScreen={mobileSettingsScreen}
-      sidebar={renderSidebar()}
-      main={renderMain()}
-      sidebarCollapsed={sidebarCollapsed}
-      drawerOpen={drawerOpen}
-      onCloseDrawer={() => setDrawerOpen(false)}
-    />
+    <>
+      <ResponsiveShell
+        mode={layoutMode}
+        themeMode={themeMode}
+        setiFontCss={setiFontCss}
+        desktopActivityBar={desktopActivityBar}
+        desktopSidebarWidth={effectiveDesktopSidebarWidth}
+        floatingControlStack={floatingControlStack}
+        mobileSettingsScreen={mobileSettingsScreen}
+        sidebar={renderSidebar()}
+        main={renderMain()}
+        sidebarCollapsed={sidebarCollapsed}
+        drawerOpen={drawerOpen}
+        onCloseDrawer={() => setDrawerOpen(false)}
+      />
+      {sessionArchiveConfirmDialog}
+    </>
   );
 }
 

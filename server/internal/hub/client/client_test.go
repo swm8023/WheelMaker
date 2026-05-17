@@ -5106,135 +5106,97 @@ func TestHandleSessionRequestMarkReadRequiresSessionID(t *testing.T) {
 	}
 }
 
-func TestHandleSessionRequestSessionDeleteRemovesSessionAndPrompts(t *testing.T) {
+func TestHandleSessionRequestSessionDeleteIsUnsupported(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	ctx := context.Background()
 
 	now := time.Now().UTC()
-	addRuntimeSession(c, "sess-1", "Delete Target", "claude", now, now)
-	c.mu.Lock()
-	c.routeMap["im:app:chat-1"] = "sess-1"
-	c.mu.Unlock()
-
-	c.sessionRecorder.writeMu.Lock()
-	c.sessionRecorder.promptState["sess-1"] = &sessionPromptState{nextTurnIndex: 2}
-	c.sessionRecorder.writeMu.Unlock()
-
-	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-1", "Delete Target")); err != nil {
-		t.Fatalf("RecordEvent session created: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-1", "hello", nil)); err != nil {
-		t.Fatalf("RecordEvent prompt: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-1", acp.SessionUpdate{
-		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
-		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"}),
-	})); err != nil {
-		t.Fatalf("RecordEvent update: %v", err)
-	}
-	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-1", "")); err != nil {
-		t.Fatalf("RecordEvent prompt finished: %v", err)
-	}
-
-	_, storedTurns, err := c.sessionRecorder.ReadSessionTurns(ctx, "sess-1", 0)
-	if err != nil {
-		t.Fatalf("ReadSessionTurns before delete: %v", err)
-	}
-	if len(storedTurns) == 0 {
-		t.Fatal("expected stored turns before delete")
-	}
-
-	resp, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(`{"sessionId":"  sess-1  "}`))
-	if err != nil {
-		t.Fatalf("HandleSessionRequest(session.delete): %v", err)
-	}
-	body, ok := resp.(map[string]any)
-	if !ok {
-		t.Fatalf("session.delete response type = %T, want map[string]any", resp)
-	}
-	if body["ok"] != true || body["sessionId"] != "sess-1" {
-		t.Fatalf("unexpected session.delete response body: %#v", body)
-	}
-
-	c.mu.Lock()
-	_, inMemory := c.sessions["sess-1"]
-	_, routeMapped := c.routeMap["im:app:chat-1"]
-	c.mu.Unlock()
-	if inMemory {
-		t.Fatal("session still present in memory after delete")
-	}
-	if routeMapped {
-		t.Fatal("route binding still present after delete")
-	}
-
-	c.sessionRecorder.writeMu.Lock()
-	_, hasPromptState := c.sessionRecorder.promptState["sess-1"]
-	c.sessionRecorder.writeMu.Unlock()
-	if hasPromptState {
-		t.Fatal("prompt state still present after delete")
-	}
-
-	storedSession, err := c.store.LoadSession(ctx, "proj1", "sess-1")
-	if err != nil {
-		t.Fatalf("LoadSession after delete: %v", err)
-	}
-	if storedSession != nil {
-		t.Fatalf("stored session still exists after delete: %+v", storedSession)
-	}
-
-	if _, _, err := c.sessionRecorder.ReadSessionTurns(ctx, "sess-1", 0); err == nil || !strings.Contains(err.Error(), "session not found") {
-		t.Fatalf("ReadSessionTurns err = %v, want session not found", err)
-	}
-}
-
-func TestHandleSessionRequestSessionDeleteCleansAgentArtifacts(t *testing.T) {
-	c := newSessionViewTestClient(t)
-	ctx := context.Background()
-
-	oldCleanup := cleanupSessionArtifacts
-	var cleanupCalls []struct {
-		projectName string
-		agentType   string
-		sessionID   string
-	}
-	cleanupSessionArtifacts = func(projectName, agentType, sessionID string) error {
-		cleanupCalls = append(cleanupCalls, struct {
-			projectName string
-			agentType   string
-			sessionID   string
-		}{projectName: projectName, agentType: agentType, sessionID: sessionID})
-		return nil
-	}
-	t.Cleanup(func() { cleanupSessionArtifacts = oldCleanup })
-
-	now := time.Now().UTC()
-	addRuntimeSession(c, "sess-codexapp-memory", "Delete CodexApp", "codexapp", now, now)
 	if err := c.store.SaveSession(ctx, &SessionRecord{
-		ID:           "sess-codexapp-stored",
-		ProjectName:  "proj1",
-		Status:       SessionPersisted,
-		AgentType:    "codexapp",
-		AgentJSON:    `{}`,
-		CreatedAt:    now,
-		LastActiveAt: now,
-		Title:        "Stored CodexApp",
+		ID:              "sess-1",
+		ProjectName:     "proj1",
+		Status:          SessionPersisted,
+		AgentType:       "claude",
+		AgentJSON:       `{}`,
+		SessionSyncJSON: sessionSyncJSON(3),
+		CreatedAt:       now,
+		LastActiveAt:    now,
+		Title:           "Delete Target",
 	}); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
-	for _, sessionID := range []string{"sess-codexapp-memory", "sess-codexapp-stored"} {
-		if _, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(fmt.Sprintf(`{"sessionId":%q}`, sessionID))); err != nil {
-			t.Fatalf("HandleSessionRequest(session.delete %s): %v", sessionID, err)
-		}
+	_, err := c.HandleSessionRequest(ctx, "session.delete", "proj1", json.RawMessage(`{"sessionId":"sess-1"}`))
+	if err == nil || !strings.Contains(err.Error(), "unsupported session method") {
+		t.Fatalf("HandleSessionRequest(session.delete) err = %v, want unsupported method", err)
 	}
 
-	if len(cleanupCalls) != 2 {
-		t.Fatalf("cleanup calls=%#v, want 2", cleanupCalls)
+	storedSession, err := c.store.LoadSession(ctx, "proj1", "sess-1")
+	if err != nil {
+		t.Fatalf("LoadSession after unsupported delete: %v", err)
 	}
-	for _, call := range cleanupCalls {
-		if call.projectName != "proj1" || call.agentType != "codexapp" || !strings.HasPrefix(call.sessionID, "sess-codexapp-") {
-			t.Fatalf("cleanup call=%#v, want codexapp project/session", call)
-		}
+	if storedSession == nil {
+		t.Fatal("unsupported session.delete removed the session")
+	}
+}
+
+func TestHandleSessionRequestSessionArchiveShortSessionDeletesWithoutArchive(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	historyRoot := filepath.Join(t.TempDir(), "db", "session")
+	c.SetSessionHistoryRoot(historyRoot)
+	ctx := context.Background()
+
+	oldCleanup := cleanupSessionArtifacts
+	var cleanupCalls []struct{ projectName, agentType, sessionID string }
+	cleanupSessionArtifacts = func(projectName, agentType, sessionID string) error {
+		cleanupCalls = append(cleanupCalls, struct{ projectName, agentType, sessionID string }{projectName, agentType, sessionID})
+		return nil
+	}
+	t.Cleanup(func() { cleanupSessionArtifacts = oldCleanup })
+
+	now := time.Date(2026, 5, 17, 10, 15, 0, 0, time.UTC)
+	addRuntimeSession(c, "sess-short", "Short Archive Target", "codexapp", now, now)
+	c.mu.Lock()
+	c.routeMap["im:app:short"] = "sess-short"
+	c.mu.Unlock()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-short", "Short Archive Target")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-short", "tiny", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-short", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.archive", "proj1", json.RawMessage(`{"sessionId":"sess-short"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.archive): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok || body["ok"] != true || body["sessionId"] != "sess-short" {
+		t.Fatalf("unexpected session.archive response body: %#v", resp)
+	}
+
+	if _, err := os.Stat(filepath.Join(filepath.Dir(historyRoot), "session-archive")); !os.IsNotExist(err) {
+		t.Fatalf("archive root stat err = %v, want no archive written for short session", err)
+	}
+	storedSession, err := c.store.LoadSession(ctx, "proj1", "sess-short")
+	if err != nil {
+		t.Fatalf("LoadSession after short archive: %v", err)
+	}
+	if storedSession != nil {
+		t.Fatalf("short session still exists after archive: %+v", storedSession)
+	}
+	c.mu.Lock()
+	_, inMemory := c.sessions["sess-short"]
+	_, routeMapped := c.routeMap["im:app:short"]
+	c.mu.Unlock()
+	if inMemory || routeMapped {
+		t.Fatalf("short session still active after archive inMemory=%v routeMapped=%v", inMemory, routeMapped)
+	}
+	if len(cleanupCalls) != 1 || cleanupCalls[0].projectName != "proj1" || cleanupCalls[0].agentType != "codexapp" || cleanupCalls[0].sessionID != "sess-short" {
+		t.Fatalf("cleanup calls=%#v, want codexapp short session cleanup", cleanupCalls)
 	}
 }
 
@@ -5351,7 +5313,7 @@ func TestHandleSessionRequestSessionArchiveFillsMissingTurnsWithGap(t *testing.T
 		Status:          SessionPersisted,
 		AgentType:       "claude",
 		Title:           "Gap Target",
-		SessionSyncJSON: sessionSyncJSON(2),
+		SessionSyncJSON: sessionSyncJSON(3),
 		CreatedAt:       now,
 		LastActiveAt:    now,
 	}); err != nil {
@@ -5364,8 +5326,8 @@ func TestHandleSessionRequestSessionArchiveFillsMissingTurnsWithGap(t *testing.T
 
 	manifest := readArchiveManifestForTest(t, historyRoot, "proj1")
 	entry := manifest.Sessions["sess-gap"]
-	if entry.TurnCount != 2 || entry.GapCount != 2 {
-		t.Fatalf("manifest counters = turnCount:%d gapCount:%d, want 2/2", entry.TurnCount, entry.GapCount)
+	if entry.TurnCount != 3 || entry.GapCount != 3 {
+		t.Fatalf("manifest counters = turnCount:%d gapCount:%d, want 3/3", entry.TurnCount, entry.GapCount)
 	}
 	rawWMT2, _ := readArchivedSessionPayloadForTest(t, historyRoot, "proj1", entry)
 	contents := decodeWMT2ContentsForTest(t, rawWMT2, entry.TurnCount)
@@ -5377,7 +5339,7 @@ func TestHandleSessionRequestSessionArchiveFillsMissingTurnsWithGap(t *testing.T
 }
 
 func TestHandleSessionRequestSessionMutationsRejectRunningSession(t *testing.T) {
-	for _, method := range []string{"session.archive", "session.delete", "session.reload"} {
+	for _, method := range []string{"session.archive", "session.reload"} {
 		t.Run(method, func(t *testing.T) {
 			c := newSessionViewTestClient(t)
 			c.SetSessionHistoryRoot(filepath.Join(t.TempDir(), "db", "session"))

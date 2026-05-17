@@ -1710,7 +1710,7 @@ body,
   height: 30px;
   transform: translateY(-50%);
   z-index: 3;
-  width: min(228px, 76%);
+  width: min(156px, 64%);
   display: none;
   align-items: center;
   gap: 4px;
@@ -1768,11 +1768,6 @@ body,
   background: color-mix(in srgb, #2b6cb0 14%, transparent);
 }
 
-.project-session-action-btn.delete {
-  color: color-mix(in srgb, var(--danger) 84%, var(--text));
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-}
-
 .project-session-action-btn:hover {
   background: var(--hover);
   color: var(--text);
@@ -1786,12 +1781,117 @@ body,
   background: color-mix(in srgb, #2b6cb0 22%, transparent);
 }
 
-.project-session-action-btn.delete:hover {
-  background: color-mix(in srgb, var(--danger) 18%, transparent);
-}
-
 .project-session-action-btn:disabled {
   opacity: 0.7;
+  cursor: default;
+}
+
+.session-archive-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(8px);
+}
+
+.session-archive-confirm-dialog {
+  width: min(420px, calc(100vw - 28px));
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 96%, var(--panel-2));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
+}
+
+.session-archive-confirm-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: color-mix(in srgb, #2b6cb0 88%, var(--text));
+  background: color-mix(in srgb, #2b6cb0 16%, transparent);
+}
+
+.session-archive-confirm-icon .codicon {
+  font-size: 17px;
+}
+
+.session-archive-confirm-content {
+  min-width: 0;
+}
+
+.session-archive-confirm-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.session-archive-confirm-name {
+  margin-top: 5px;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-archive-confirm-copy {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.session-archive-confirm-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.session-archive-confirm-btn {
+  min-height: 32px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.session-archive-confirm-btn.secondary {
+  color: var(--muted);
+  background: var(--panel-2);
+}
+
+.session-archive-confirm-btn.primary {
+  color: #fff;
+  border-color: color-mix(in srgb, #2b6cb0 68%, transparent);
+  background: color-mix(in srgb, #2b6cb0 86%, #111);
+}
+
+.session-archive-confirm-btn:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.session-archive-confirm-btn:disabled {
+  opacity: 0.72;
   cursor: default;
 }
 

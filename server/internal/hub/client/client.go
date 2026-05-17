@@ -670,17 +670,6 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			"sessionId":     sess.acpSessionID,
 			"configOptions": options,
 		}, nil
-	case "session.delete":
-		var req struct {
-			SessionID string `json:"sessionId"`
-		}
-		if err := decodeSessionRequestPayload(payload, &req); err != nil {
-			return nil, fmt.Errorf("invalid session.delete payload: %w", err)
-		}
-		if err := c.DeleteSession(ctx, req.SessionID); err != nil {
-			return nil, err
-		}
-		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
 	case "session.send":
 		var req struct {
 			SessionID string             `json:"sessionId"`
@@ -1470,17 +1459,6 @@ func (c *Client) ArchiveSession(ctx context.Context, sessionID string) error {
 	if c.sessionIsRunning(sessionID) {
 		return fmt.Errorf("session %s is running", sessionID)
 	}
-	if c.archiveStore == nil {
-		return fmt.Errorf("session archive store is required")
-	}
-
-	alreadyArchived, err := c.archiveStore.HasSession(ctx, c.projectName, sessionID)
-	if err != nil {
-		return err
-	}
-	if alreadyArchived {
-		return c.deleteActiveSession(ctx, sessionID, false)
-	}
 
 	rec, err := c.store.LoadSession(ctx, c.projectName, sessionID)
 	if err != nil {
@@ -1490,6 +1468,19 @@ func (c *Client) ArchiveSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
 	latestTurnIndex := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
+	if latestTurnIndex < 3 {
+		return c.deleteActiveSession(ctx, sessionID, false)
+	}
+	if c.archiveStore == nil {
+		return fmt.Errorf("session archive store is required")
+	}
+	alreadyArchived, err := c.archiveStore.HasSession(ctx, c.projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	if alreadyArchived {
+		return c.deleteActiveSession(ctx, sessionID, false)
+	}
 	contents, gapCount, err := c.sessionRecorder.ReadPersistedTurnContentsForArchive(ctx, sessionID, latestTurnIndex)
 	if err != nil {
 		return err

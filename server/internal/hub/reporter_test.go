@@ -356,7 +356,7 @@ func TestReporterRespondsToSessionSetConfigRequests(t *testing.T) {
 
 }
 
-func TestReporterRespondsToSessionDeleteRequests(t *testing.T) {
+func TestReporterRejectsSessionDeleteRequests(t *testing.T) {
 	reqSeen := make(chan testEnvelope, 1)
 	respSeen := make(chan testEnvelope, 1)
 	errSeen := make(chan error, 1)
@@ -459,11 +459,14 @@ func TestReporterRespondsToSessionDeleteRequests(t *testing.T) {
 	case err := <-errSeen:
 		t.Fatalf("fake registry error: %v", err)
 	case resp := <-respSeen:
-		if resp.Type != "response" || resp.Method != "session.delete" {
+		if resp.Type != "error" || resp.Method != "session.delete" {
 			t.Fatalf("unexpected session.delete response: %#v", resp)
 		}
-		if handler.lastMethod != "session.delete" || !strings.Contains(handler.lastBody, "\"sessionId\":\"sess-1\"") {
-			t.Fatalf("handler saw method=%q body=%q", handler.lastMethod, handler.lastBody)
+		if resp.Payload["message"] != "unsupported method on hub" {
+			t.Fatalf("session.delete error payload=%#v, want unsupported method on hub", resp.Payload)
+		}
+		if handler.lastMethod != "" || handler.lastBody != "" {
+			t.Fatalf("handler should not see session.delete, saw method=%q body=%q", handler.lastMethod, handler.lastBody)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("did not receive session.delete response from reporter")

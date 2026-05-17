@@ -576,21 +576,25 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("tagVariantClass('wide-session-agent', sessionAgent)");
     expect(mainTsx).toContain('const [projectSessionActionMenu, setProjectSessionActionMenu] = useState<ProjectSessionActionMenuState | null>(null);');
     expect(mainTsx).toContain('const PROJECT_SESSION_LONG_PRESS_MS = 450;');
-    expect(mainTsx).toContain('const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {');
-    expect(mainTsx).toContain('const result = await service.deleteProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).not.toContain('const handleDeleteProjectSession = async (targetProjectId: string, sessionId: string) => {');
+    expect(mainTsx).not.toContain('service.deleteProjectSession(');
     expect(mainTsx).toContain('const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.reloadProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).toContain('const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<ArchiveConfirmTarget | null>(null);');
     expect(mainTsx).toContain('const handleArchiveProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).toContain('const sessionArchiveConfirmDialog = archiveConfirmTarget ? (');
+    expect(mainTsx).toContain('className="session-archive-confirm-backdrop"');
+    expect(mainTsx).toContain('Sessions with fewer than 3 turns are permanently removed.');
     expect(mainTsx).toContain('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
     expect(mainTsx).toContain('className="project-session-action-strip"');
     expect(mainTsx).toContain('className="project-session-action-btn reload"');
     expect(mainTsx).toContain('className="project-session-action-btn archive"');
-    expect(mainTsx).toContain('className="project-session-action-btn delete"');
+    expect(mainTsx).not.toContain('className="project-session-action-btn delete"');
     expect(mainTsx).toContain('const sessionActionDisabled = !!session.running ||');
     expect(mainTsx).toContain('className="project-session-action-label">Reload</span>');
     expect(mainTsx).toContain('className="project-session-action-label">Archive</span>');
-    expect(mainTsx).toContain('className="project-session-action-label">Delete</span>');
+    expect(mainTsx).not.toContain('className="project-session-action-label">Delete</span>');
     expect(mainTsx).toContain("if (target?.closest('.project-session-action-btn')) {");
     expect(mainTsx).not.toContain("target?.closest('.project-session-row-wrap')");
     expect(mainTsx).toContain('renderProjectSessionActionStrip(targetProjectId, session)');
@@ -682,7 +686,10 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.project-session-row-wrap {');
     expect(stylesCss).toContain('.project-session-action-strip {');
     expect(stylesCss).toContain('.project-session-action-btn.reload {');
-    expect(stylesCss).toContain('.project-session-action-btn.delete {');
+    expect(stylesCss).toContain('.project-session-action-btn.archive {');
+    expect(stylesCss).not.toContain('.project-session-action-btn.delete {');
+    expect(stylesCss).toContain('.session-archive-confirm-backdrop {');
+    expect(stylesCss).toContain('.session-archive-confirm-dialog {');
     expect(stylesCss).toContain('.project-session-action-label {');
     expect(stylesCss).toContain('.wide-session-agent-tag {');
     expect(stylesCss).toContain('.wide-session-agent-0 {');
@@ -719,7 +726,7 @@ describe('web chat integration', () => {
       /\.project-session-row-wrap\.actions-open \.wide-session-row::after \{[^}]*width: min\(236px, 80%\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(228px, 76%\);[^}]*\}/,
+      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(156px, 64%\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.project-session-action-strip \{[^}]*display: none;[^}]*\}/,

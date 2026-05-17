@@ -440,7 +440,7 @@ Phase 1 只声明文本 prompt capability；`resource_link` 是 ACP 基线内容
 - 临时目录不绑定 `AgentInstance` / `codexappConn` 生命周期；多 session 并存时，一个 session 被 suspend 或 instance close 不代表该 session 已结束。
 - `client` 只在真正删除 session 时调用通用 agent artifact cleanup hook，例如 `agent.CleanupSessionArtifacts(projectName, agentType, sessionID)`；`codexapp` 在 agent 包内清理自己的图片目录。
 - `turn/start` 后不能立即删除临时图片；app-server 可能异步读取 `localImage.path`。
-- `session.delete` 清理该 session 下的临时图片目录；orphan/TTL 清理作为后续兜底任务，避免长期未 delete 的历史图片无限累积。
+- `session.archive` 成功移出 active session 时清理该 session 下的临时图片目录；turn 总数 `< 3` 的短会话会直接永久删除并清理同一目录。orphan/TTL 清理作为后续兜底任务，避免长期未归档的历史图片无限累积。
 
 base64 图片落盘规则：
 

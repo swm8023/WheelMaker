@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -650,42 +651,6 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 	mustWriteJSON(t, client, testEnvelope{
 		RequestID: 4,
 		Type:      "request",
-		Method:    "session.delete",
-		ProjectID: "hub-a:server",
-		Payload: map[string]any{
-			"sessionId": "sess-1",
-		},
-	})
-
-	forwardedDelete := mustReadEnvelope(t, hub)
-	if forwardedDelete.Method != "session.delete" {
-		t.Fatalf("forwarded.method=%q, want session.delete", forwardedDelete.Method)
-	}
-	if forwardedDelete.ProjectID != "hub-a:server" {
-		t.Fatalf("forwarded.projectId=%q, want hub-a:server", forwardedDelete.ProjectID)
-	}
-	forwardDeletePayload := forwardedDelete.Payload
-	if forwardDeletePayload["sessionId"] != "sess-1" {
-		t.Fatalf("forwarded delete payload=%v", forwardDeletePayload)
-	}
-
-	mustWriteJSON(t, hub, testEnvelope{
-		RequestID: forwardedDelete.RequestID,
-		Type:      "response",
-		Method:    "session.delete",
-		ProjectID: forwardedDelete.ProjectID,
-		Payload: map[string]any{
-			"ok": true,
-		},
-	})
-	deleteResp := mustReadEnvelope(t, client)
-	if deleteResp.Type != "response" || deleteResp.Method != "session.delete" {
-		t.Fatalf("unexpected session.delete response: %#v", deleteResp)
-	}
-
-	mustWriteJSON(t, client, testEnvelope{
-		RequestID: 5,
-		Type:      "request",
 		Method:    "session.archive",
 		ProjectID: "hub-a:server",
 		Payload: map[string]any{
@@ -719,6 +684,24 @@ func TestSessionForwardingAndSessionEventBroadcast(t *testing.T) {
 		t.Fatalf("unexpected session.archive response: %#v", archiveResp)
 	}
 
+	mustWriteJSON(t, client, testEnvelope{
+		RequestID: 5,
+		Type:      "request",
+		Method:    "session.delete",
+		ProjectID: "hub-a:server",
+		Payload: map[string]any{
+			"sessionId": "sess-1",
+		},
+	})
+	_ = client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	deleteResp := mustReadEnvelope(t, client)
+	_ = client.SetReadDeadline(time.Time{})
+	if deleteResp.Type != "error" || deleteResp.Method != "session.delete" {
+		t.Fatalf("unexpected session.delete response: %#v", deleteResp)
+	}
+	if deleteResp.Payload["message"] != "unsupported method" {
+		t.Fatalf("session.delete error payload=%#v, want unsupported method", deleteResp.Payload)
+	}
 }
 
 func TestConnectInitMonitorRole(t *testing.T) {
