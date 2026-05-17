@@ -127,12 +127,15 @@ type ProjectSessionActionMenuState = {
   projectId: string;
   sessionId: string;
 };
-type ArchiveConfirmTarget = {
-  projectId: string;
-  sessionId: string;
-  title: string;
-};
-type SettingsDetailView = 'tokenStats' | 'ccSwitch' | null;
+type ConfirmTarget =
+  | {
+      kind: 'archive';
+      projectId: string;
+      sessionId: string;
+      title: string;
+    }
+  | {kind: 'clearCache'};
+type SettingsDetailView = 'tokenStats' | 'ccSwitch' | 'database' | null;
 type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
@@ -2221,8 +2224,8 @@ function App() {
   const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
   const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
-  const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<ArchiveConfirmTarget | null>(null);
-  const [archiveConfirmError, setArchiveConfirmError] = useState('');
+  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
+  const [confirmError, setConfirmError] = useState('');
   const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
@@ -5249,7 +5252,7 @@ function App() {
     if (!targetProjectId || !normalizedSessionId || chatArchivingSessionId) {
       return;
     }
-    setArchiveConfirmError('');
+    setConfirmError('');
     setChatArchivingSessionId(normalizedSessionId);
     try {
       const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);
@@ -5261,11 +5264,11 @@ function App() {
         result.sessionId || normalizedSessionId,
       );
       setProjectSessionActionMenu(null);
-      setArchiveConfirmTarget(null);
-      setArchiveConfirmError('');
+      setConfirmTarget(null);
+      setConfirmError('');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setArchiveConfirmError(message);
+      setConfirmError(message);
       setError(message);
     } finally {
       setChatArchivingSessionId('');
@@ -5278,8 +5281,9 @@ function App() {
       return;
     }
     setProjectSessionActionMenu(null);
-    setArchiveConfirmError('');
-    setArchiveConfirmTarget({
+    setConfirmError('');
+    setConfirmTarget({
+      kind: 'archive',
       projectId: targetProjectId,
       sessionId: normalizedSessionId,
       title: (session.title || '').trim(),
@@ -5856,11 +5860,12 @@ function App() {
     URL.revokeObjectURL(objectUrl);
   };
 
+  const requestClearLocalCache = () => {
+    setConfirmError('');
+    setConfirmTarget({kind: 'clearCache'});
+  };
+
   const clearLocalCache = () => {
-    const confirmed = window.confirm(
-      'Clear all local cache data except token and address?',
-    );
-    if (!confirmed) return;
     workspaceStore.clearLocalCachePreservingToken();
     window.location.reload();
   };
@@ -7079,8 +7084,19 @@ function App() {
     );
   };
 
-  const renderTokenStatsSettingsDetail = () => (
-    <div className="settings-detail-page token-stats-page">
+  const renderSettingsSection = (title: string, rows: React.ReactNode) => (
+    <section className="settings-section" aria-label={title}>
+      <div className="settings-section-title">{title}</div>
+      <div className="settings-section-rows">{rows}</div>
+    </section>
+  );
+
+  const renderSettingsDetailShell = (
+    title: string,
+    content: React.ReactNode,
+    actions?: React.ReactNode,
+  ) => (
+    <div className="settings-detail-page">
       <div className="settings-detail-header">
         <button
           type="button"
@@ -7091,60 +7107,69 @@ function App() {
         >
           <span className="codicon codicon-arrow-left" />
         </button>
-        <div className="settings-detail-title">Token Stats</div>
-        <button
-          type="button"
-          className="token-stats-refresh-btn token-stats-refresh-inline"
-          onClick={() => {
-            refreshTokenStats().catch(() => undefined);
-          }}
-          disabled={tokenStatsLoading}
-        >
-          {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
-        </button>
+        <div className="settings-detail-title">{title}</div>
+        {actions ?? <span className="settings-detail-header-spacer" aria-hidden="true" />}
       </div>
-      {tokenStatsUpdatedAt ? (
-        <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
-      ) : null}
-      {tokenStatsLoading ? (
-        <div className="muted block">Scanning online hubs...</div>
-      ) : null}
-      {tokenStatsError ? (
-        <div className="muted block token-stats-error">{tokenStatsError}</div>
-      ) : null}
-      {!tokenStatsLoading && tokenStatCards.length === 0 && !tokenStatsError ? (
-        <div className="muted block">No token accounts discovered.</div>
-      ) : null}
-      <div className="token-stats-account-list token-stats-account-list-flat">
-        {tokenStatCards.map(card => (
-          <div key={card.id} className="token-stats-account-item token-stats-account-item-flat">
-            <div className="token-stats-card-line token-stats-card-line-tags">
-              <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
-                {card.agentTag}
-              </span>
-              {card.hubTags.map(hubTag => (
-                <span key={hubTag} className={`token-stats-pill ${tokenTagVariantClass('hub', hubTag)}`}>
-                  {hubTag}
-                </span>
-              ))}
-            </div>
-            <div className="token-stats-card-line token-stats-card-line-primary">
-              <span className="token-stats-account-name">{card.accountName}</span>
-            </div>
-            {card.message ? (
-              <div className="token-stats-account-error">{card.message}</div>
-            ) : null}
-            {card.secondaryLine ? (
-              <div className="token-stats-card-line">{card.secondaryLine}</div>
-            ) : null}
-            {card.tertiaryLine ? (
-              <div className="token-stats-card-line">{card.tertiaryLine}</div>
-            ) : null}
-          </div>
-        ))}
-      </div>
+      <div className="settings-detail-body">{content}</div>
     </div>
   );
+
+  const renderTokenStatsSettingsDetail = () =>
+    renderSettingsDetailShell(
+      'Token Stats',
+      <>
+        {tokenStatsUpdatedAt ? (
+          <div className="muted block">Updated: {tokenStatsUpdatedAt}</div>
+        ) : null}
+        {tokenStatsLoading ? (
+          <div className="muted block">Scanning online hubs...</div>
+        ) : null}
+        {tokenStatsError ? (
+          <div className="muted block settings-metadata-error">{tokenStatsError}</div>
+        ) : null}
+        {!tokenStatsLoading && tokenStatCards.length === 0 && !tokenStatsError ? (
+          <div className="muted block">No token accounts discovered.</div>
+        ) : null}
+        <div className="settings-metadata-list token-stats-account-list-flat">
+          {tokenStatCards.map(card => (
+            <div key={card.id} className="settings-metadata-card">
+              <div className="settings-metadata-line settings-metadata-line-tags">
+                <span className={`token-stats-pill ${tokenTagVariantClass('agent', card.agentTag)}`}>
+                  {card.agentTag}
+                </span>
+                {card.hubTags.map(hubTag => (
+                  <span key={hubTag} className={`token-stats-pill ${tokenTagVariantClass('hub', hubTag)}`}>
+                    {hubTag}
+                  </span>
+                ))}
+              </div>
+              <div className="settings-metadata-line settings-metadata-line-primary">
+                <span className="settings-metadata-title">{card.accountName}</span>
+              </div>
+              {card.message ? (
+                <div className="settings-metadata-error">{card.message}</div>
+              ) : null}
+              {card.secondaryLine ? (
+                <div className="settings-metadata-line">{card.secondaryLine}</div>
+              ) : null}
+              {card.tertiaryLine ? (
+                <div className="settings-metadata-line">{card.tertiaryLine}</div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </>,
+      <button
+        type="button"
+        className="token-stats-refresh-btn token-stats-refresh-inline"
+        onClick={() => {
+          refreshTokenStats().catch(() => undefined);
+        }}
+        disabled={tokenStatsLoading}
+      >
+        {tokenStatsLoading ? 'Refreshing...' : 'Refresh'}
+      </button>,
+    );
 
   const renderCCSwitchSettingsDetail = () => {
     const activeHub = (currentProject?.hubId || 'unknown').trim() || 'unknown';
@@ -7176,24 +7201,12 @@ function App() {
       })
       .filter(item => item.profiles.length > 0);
 
-    return (
-      <div className="settings-detail-page token-stats-page">
-        <div className="settings-detail-header">
-          <button
-            type="button"
-            className="mobile-settings-back settings-detail-back"
-            onClick={() => setSettingsDetailView(null)}
-            aria-label="Back to settings"
-            title="Back"
-          >
-            <span className="codicon codicon-arrow-left" />
-          </button>
-          <div className="settings-detail-title">CC Switch</div>
-          <span className="token-stats-refresh-placeholder" aria-hidden="true" />
-        </div>
-        <div className="token-stats-account-list token-stats-account-list-flat">
-          <div className="token-stats-account-item token-stats-account-item-flat">
-            <div className="token-stats-card-line token-stats-card-line-tags">
+    return renderSettingsDetailShell(
+      'CC Switch',
+      <>
+        <div className="settings-metadata-list">
+          <div className="settings-metadata-card">
+            <div className="settings-metadata-line settings-metadata-line-tags">
               <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', activeHub)}`}>
                 <span className="wide-project-hub-dot" aria-hidden="true" />
                 <span className="wide-project-hub-label">Hub: {activeHub}</span>
@@ -7204,8 +7217,8 @@ function App() {
             </div>
           </div>
           {profileCards.map(card => (
-            <div key={`cc-switch:${card.projectId}`} className="token-stats-account-item token-stats-account-item-flat">
-              <div className="token-stats-card-line token-stats-card-line-tags">
+            <div key={`cc-switch:${card.projectId}`} className="settings-metadata-card">
+              <div className="settings-metadata-line settings-metadata-line-tags">
                 <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', card.projectHub)}`}>
                   <span className="wide-project-hub-dot" aria-hidden="true" />
                   <span className="wide-project-hub-label">{card.projectHub}</span>
@@ -7219,11 +7232,11 @@ function App() {
                   </span>
                 ))}
               </div>
-              <div className="token-stats-card-line token-stats-card-line-primary">
-                <span className="token-stats-account-name" title={card.projectName}>{card.projectName}</span>
+              <div className="settings-metadata-line settings-metadata-line-primary">
+                <span className="settings-metadata-title" title={card.projectName}>{card.projectName}</span>
               </div>
               {card.profiles.map(profile => (
-                <div key={`cc-switch:${card.projectId}:profile:${profile.profileName}`} className="token-stats-card-line">
+                <div key={`cc-switch:${card.projectId}:profile:${profile.profileName}`} className="settings-metadata-line">
                   <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', profile.profileName)}`}>
                     {profile.profileName}
                   </span>
@@ -7236,9 +7249,34 @@ function App() {
         {profileCards.length === 0 ? (
           <div className="muted block">No CC Switch profile metadata found.</div>
         ) : null}
-      </div>
+      </>,
     );
   };
+
+  const renderDatabaseSettingsDetail = () =>
+    renderSettingsDetailShell(
+      'Database',
+      <>
+        {databaseLoading ? (
+          <div className="muted block">Loading database...</div>
+        ) : null}
+        {databaseError ? (
+          <div className="error">Database error: {databaseError}</div>
+        ) : null}
+        {!databaseLoading && !databaseError ? (
+          <pre className="settings-database-dump">{databaseDumpText}</pre>
+        ) : null}
+      </>,
+      <button
+        type="button"
+        className="git-section-btn"
+        onClick={exportDatabaseDump}
+        disabled={databaseLoading || !!databaseError || !databaseDumpText}
+        title="Export current database dump"
+      >
+        Export
+      </button>,
+    );
 
   const renderSettingsContent = (showSectionTitle: boolean) => {
     if (settingsDetailView === 'ccSwitch') {
@@ -7247,11 +7285,15 @@ function App() {
     if (settingsDetailView === 'tokenStats') {
       return renderTokenStatsSettingsDetail();
     }
+    if (settingsDetailView === 'database') {
+      return renderDatabaseSettingsDetail();
+    }
     return (
     <>
       {showSectionTitle ? <div className="section-title">SETTINGS</div> : null}
-      <div className="list settings-list">
-        <label className="switch-row sidebar-setting-row">
+      <div className="settings-list">
+        {renderSettingsSection('Appearance', (
+        <label className="settings-row sidebar-setting-row">
           <span>Dark Mode</span>
           <input
             type="checkbox"
@@ -7261,7 +7303,10 @@ function App() {
             }
           />
         </label>
-        <label className="switch-row sidebar-setting-row">
+        ))}
+        {renderSettingsSection('Chat', (
+        <>
+        <label className="settings-row sidebar-setting-row">
           <span>Hide Tool Calls</span>
           <input
             type="checkbox"
@@ -7269,7 +7314,32 @@ function App() {
             onChange={e => setHideToolCalls(e.target.checked)}
           />
         </label>
-        <label className="switch-row sidebar-setting-row">
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setSettingsDetailView('ccSwitch');
+          }}
+        >
+          <span>CC Switch</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-row settings-detail-row"
+          onClick={() => {
+            setTokenStatsError('');
+            setSettingsDetailView('tokenStats');
+          }}
+        >
+          <span>Token Stats</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        </>
+        ))}
+        {renderSettingsSection('Code Display', (
+        <>
+        <label className="settings-row sidebar-setting-row">
           <span>Code Theme</span>
           <select
             className="sidebar-setting-select"
@@ -7296,7 +7366,7 @@ function App() {
             ))}
           </select>
         </label>
-        <label className="switch-row sidebar-setting-row">
+        <label className="settings-row sidebar-setting-row">
           <span>Code Font</span>
           <select
             className="sidebar-setting-select"
@@ -7313,7 +7383,7 @@ function App() {
             ))}
           </select>
         </label>
-        <label className="switch-row sidebar-setting-row">
+        <label className="settings-row sidebar-setting-row">
           <span>Font Size</span>
           <select
             className="sidebar-setting-select"
@@ -7331,7 +7401,7 @@ function App() {
             ))}
           </select>
         </label>
-        <label className="switch-row sidebar-setting-row">
+        <label className="settings-row sidebar-setting-row">
           <span>Line Height</span>
           <select
             className="sidebar-setting-select"
@@ -7349,7 +7419,7 @@ function App() {
             ))}
           </select>
         </label>
-        <label className="switch-row sidebar-setting-row">
+        <label className="settings-row sidebar-setting-row">
           <span>Tab Size</span>
           <select
             className="sidebar-setting-select"
@@ -7367,80 +7437,31 @@ function App() {
             ))}
           </select>
         </label>
-
+        </>
+        ))}
+        {renderSettingsSection('Storage', (
+        <>
         <button
           type="button"
-          className="settings-detail-row"
+          className="settings-row settings-detail-row"
           onClick={() => {
-            setSettingsDetailView('ccSwitch');
+            setSettingsDetailView('database');
+            openDatabasePanel();
           }}
         >
-          <span>CC Switch</span>
+          <span>Database</span>
           <span className="codicon codicon-chevron-right" />
         </button>
         <button
           type="button"
-          className="settings-detail-row"
-          onClick={() => {
-            setTokenStatsError('');
-            setSettingsDetailView('tokenStats');
-          }}
+          className="settings-row settings-danger-row"
+          onClick={requestClearLocalCache}
         >
-          <span>Token Stats</span>
-          <span className="codicon codicon-chevron-right" />
+          <span>Clear Local Cache</span>
+          <span className="codicon codicon-trash" />
         </button>
-        <button
-          type="button"
-          className="sidebar-clear-cache-btn"
-          onClick={openDatabasePanel}
-        >
-          Database
-        </button>
-        <button
-          type="button"
-          className="sidebar-clear-cache-btn"
-          onClick={clearLocalCache}
-        >
-          Clear Local Cache (Keep Token)
-        </button>
-        {databasePanelOpen ? (
-          <div className="database-panel">
-            <div className="database-panel-header">
-              <strong>Local Database</strong>
-              <div className="database-panel-actions">
-                <button
-                  type="button"
-                  className="git-section-btn"
-                  onClick={exportDatabaseDump}
-                  disabled={databaseLoading || !!databaseError || !databaseDumpText}
-                  title="Export current database dump"
-                >
-                  Export
-                </button>
-                <button
-                  type="button"
-                  className="git-section-btn"
-                  onClick={() => {
-                    setDatabasePanelOpen(false);
-                    setDatabaseError('');
-                  }}
-                  aria-label="Close database panel"
-                >
-                  <span className="codicon codicon-close" />
-                </button>
-              </div>
-            </div>
-            {databaseLoading ? (
-              <div className="muted block">Loading database...</div>
-            ) : null}
-            {databaseError ? (
-              <div className="error">Database error: {databaseError}</div>
-            ) : null}
-            {!databaseLoading && !databaseError ? (
-              <pre className="database-dump">{databaseDumpText}</pre>
-            ) : null}
-          </div>
-        ) : null}
+        </>
+        ))}
       </div>
     </>
     );
@@ -7455,7 +7476,6 @@ function App() {
             className="drawer-settings-icon-btn"
             onClick={() => {
               setProjectMenuOpen(false);
-              setSettingsDetailView(null);
               setSidebarSettingsOpen(true);
             }}
             title="Open settings"
@@ -9442,74 +9462,101 @@ function App() {
     </div>
   ) : null;
 
-  const archiveConfirmBusy = archiveConfirmTarget
-    ? chatArchivingSessionId === archiveConfirmTarget.sessionId
+  const archiveTarget = confirmTarget?.kind === 'archive' ? confirmTarget : null;
+  const confirmBusy = archiveTarget
+    ? chatArchivingSessionId === archiveTarget.sessionId
     : false;
-  const archiveConfirmTitle = archiveConfirmTarget?.title || 'Untitled session';
-  const sessionArchiveConfirmDialog = archiveConfirmTarget ? (
+  const confirmTitle = confirmTarget?.kind === 'clearCache'
+    ? 'Clear local cache?'
+    : 'Archive session?';
+  const confirmName = confirmTarget?.kind === 'clearCache'
+    ? 'Token and server address will be preserved.'
+    : archiveTarget?.title || 'Untitled session';
+  const confirmCopy = confirmTarget?.kind === 'clearCache'
+    ? 'The app will reload after local cached workspace data is cleared.'
+    : 'Archived sessions leave the chat list.';
+  const confirmIcon = confirmTarget?.kind === 'clearCache'
+    ? 'codicon-trash'
+    : 'codicon-archive';
+  const confirmPrimaryLabel = confirmTarget?.kind === 'clearCache'
+    ? 'Clear Cache'
+    : 'Archive';
+  const confirmPrimaryClassName = confirmTarget?.kind === 'clearCache'
+    ? 'app-confirm-btn primary danger'
+    : 'app-confirm-btn primary';
+  const confirmIconClassName = confirmTarget?.kind === 'clearCache'
+    ? 'app-confirm-icon danger'
+    : 'app-confirm-icon';
+  const handleConfirmPrimary = () => {
+    if (!confirmTarget) {
+      return;
+    }
+    if (confirmTarget.kind === 'clearCache') {
+      clearLocalCache();
+      return;
+    }
+    handleArchiveProjectSession(
+      confirmTarget.projectId,
+      confirmTarget.sessionId,
+    ).catch(() => undefined);
+  };
+  const appConfirmDialog = confirmTarget ? (
     <div
-      className="session-archive-confirm-backdrop"
+      className="app-confirm-backdrop"
       role="presentation"
       onPointerDown={() => {
-        if (!archiveConfirmBusy) {
-          setArchiveConfirmError('');
-          setArchiveConfirmTarget(null);
+        if (!confirmBusy) {
+          setConfirmError('');
+          setConfirmTarget(null);
         }
       }}
     >
       <div
-        className="session-archive-confirm-dialog"
+        className="app-confirm-dialog"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="session-archive-confirm-title"
+        aria-labelledby="app-confirm-title"
         onPointerDown={event => event.stopPropagation()}
       >
-        <div className="session-archive-confirm-icon">
-          <span className="codicon codicon-archive" />
+        <div className={confirmIconClassName}>
+          <span className={`codicon ${confirmIcon}`} />
         </div>
-        <div className="session-archive-confirm-content">
-          <div id="session-archive-confirm-title" className="session-archive-confirm-title">
-            Archive session?
+        <div className="app-confirm-content">
+          <div id="app-confirm-title" className="app-confirm-title">
+            {confirmTitle}
           </div>
-          <div className="session-archive-confirm-name">{archiveConfirmTitle}</div>
-          <div className="session-archive-confirm-copy">
-            Archived sessions leave the chat list.
-          </div>
-          {archiveConfirmError ? (
-            <div className="session-archive-confirm-error">{archiveConfirmError}</div>
+          <div className="app-confirm-name">{confirmName}</div>
+          <div className="app-confirm-copy">{confirmCopy}</div>
+          {confirmError ? (
+            <div className="app-confirm-error">{confirmError}</div>
           ) : null}
         </div>
-        <div className="session-archive-confirm-actions">
+        <div className="app-confirm-actions">
           <button
             type="button"
-            className="session-archive-confirm-btn secondary"
-            disabled={archiveConfirmBusy}
+            className="app-confirm-btn secondary"
+            disabled={confirmBusy}
             onClick={() => {
-              setArchiveConfirmError('');
-              setArchiveConfirmTarget(null);
+              setConfirmError('');
+              setConfirmTarget(null);
             }}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="session-archive-confirm-btn primary"
-            disabled={archiveConfirmBusy}
-            onClick={() => {
-              handleArchiveProjectSession(
-                archiveConfirmTarget.projectId,
-                archiveConfirmTarget.sessionId,
-              ).catch(() => undefined);
-            }}
+            className={confirmPrimaryClassName}
+            disabled={confirmBusy}
+            onClick={handleConfirmPrimary}
           >
             <span
               className={`codicon ${
-                archiveConfirmBusy
+                confirmBusy
                   ? 'codicon-loading codicon-modifier-spin'
-                  : 'codicon-archive'
+                  : confirmIcon
               }`}
             />
-            Archive
+            {confirmPrimaryLabel}
           </button>
         </div>
       </div>
@@ -9532,7 +9579,7 @@ function App() {
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
       />
-      {sessionArchiveConfirmDialog}
+      {appConfirmDialog}
     </>
   );
 }

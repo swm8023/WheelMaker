@@ -21,6 +21,7 @@ describe('web hide tool calls setting', () => {
     );
 
     expect(mainTsx).toContain('const [hideToolCalls, setHideToolCalls] = useState(');
+    expect(mainTsx).toContain("renderSettingsSection('Chat'");
     expect(mainTsx).toContain('<span>Hide Tool Calls</span>');
     expect(mainTsx).toContain('hideToolCalls={hideToolCalls}');
     expect(mainTsx).toMatch(

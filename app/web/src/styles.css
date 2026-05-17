@@ -502,17 +502,15 @@ body,
 }
 
 .mobile-settings-group {
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--panel);
+  overflow: visible;
+  background: transparent;
 }
 
 .mobile-settings-screen .settings-list {
   overflow: visible;
 }
 
-.mobile-settings-screen .sidebar-setting-row {
+.mobile-settings-screen .settings-row {
   min-height: 52px;
   margin: 0;
   padding: 0 14px;
@@ -522,7 +520,7 @@ body,
   background: transparent;
 }
 
-.mobile-settings-screen .sidebar-setting-row:hover {
+.mobile-settings-screen .settings-row:hover {
   background: var(--hover);
 }
 
@@ -531,25 +529,8 @@ body,
   border-radius: 999px;
 }
 
-.mobile-settings-screen .sidebar-clear-cache-btn {
-  width: 100%;
+.mobile-settings-screen .settings-danger-row {
   min-height: 52px;
-  margin: 0;
-  padding: 0 14px;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-}
-
-.mobile-settings-screen .sidebar-clear-cache-btn:hover {
-  background: var(--hover);
-}
-
-.mobile-settings-screen .database-panel {
-  margin: 10px;
 }
 
 .settings-detail-page {
@@ -586,6 +567,17 @@ body,
   color: var(--text);
 }
 
+.settings-detail-header-spacer {
+  width: 34px;
+  height: 34px;
+}
+
+.settings-detail-body {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+}
+
 .settings-detail-row {
   width: 100%;
   min-height: 52px;
@@ -605,6 +597,69 @@ body,
 
 .settings-detail-row:hover {
   background: var(--hover);
+}
+
+.settings-metadata-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.settings-metadata-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.settings-metadata-line {
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.settings-metadata-line-primary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.settings-metadata-line-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.settings-metadata-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.settings-metadata-error {
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.settings-database-dump {
+  margin: 0;
+  max-height: min(62vh, 520px);
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 86%, black 14%);
+  white-space: pre;
+  font-family: 'JetBrains Mono', Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .floating-control-stack-layer {
@@ -912,10 +967,73 @@ body,
   background: var(--hover);
 }
 
-.sidebar-setting-row {
-  margin: 8px;
-  border: 1px solid var(--border);
+.settings-list {
+  display: grid;
+  gap: 12px;
+  padding: 8px;
+}
+
+.settings-section {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.settings-section-title {
+  padding: 0 2px;
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.settings-section-rows {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 6px;
   background: var(--panel);
+}
+
+.settings-row {
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.settings-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-row:hover {
+  background: var(--hover);
+}
+
+.sidebar-setting-row {
+  background: transparent;
+}
+
+.settings-danger-row {
+  color: var(--danger);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.settings-danger-row:hover {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
 .sidebar-setting-select {
@@ -1233,20 +1351,6 @@ body,
     grid-template-columns: 1fr 1fr;
   }
 }
-.sidebar-clear-cache-btn {
-  width: calc(100% - 16px);
-  margin: 8px;
-  border: 1px solid var(--danger);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--danger);
-  min-height: 32px;
-  padding: 0 10px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
 .database-panel {
   margin: 8px;
   border: 1px solid var(--border);
@@ -1784,7 +1888,7 @@ body,
   cursor: default;
 }
 
-.session-archive-confirm-backdrop {
+.app-confirm-backdrop {
   position: fixed;
   inset: 0;
   z-index: 90;
@@ -1795,7 +1899,7 @@ body,
   backdrop-filter: blur(8px);
 }
 
-.session-archive-confirm-dialog {
+.app-confirm-dialog {
   width: min(420px, calc(100vw - 28px));
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr);
@@ -1807,7 +1911,7 @@ body,
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34);
 }
 
-.session-archive-confirm-icon {
+.app-confirm-icon {
   width: 34px;
   height: 34px;
   border-radius: 8px;
@@ -1818,22 +1922,27 @@ body,
   background: color-mix(in srgb, #2b6cb0 16%, transparent);
 }
 
-.session-archive-confirm-icon .codicon {
+.app-confirm-icon.danger {
+  color: color-mix(in srgb, var(--danger) 88%, var(--text));
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.app-confirm-icon .codicon {
   font-size: 17px;
 }
 
-.session-archive-confirm-content {
+.app-confirm-content {
   min-width: 0;
 }
 
-.session-archive-confirm-title {
+.app-confirm-title {
   color: var(--text);
   font-size: 14px;
   font-weight: 700;
   line-height: 1.25;
 }
 
-.session-archive-confirm-name {
+.app-confirm-name {
   margin-top: 5px;
   max-width: 100%;
   color: var(--muted);
@@ -1844,21 +1953,21 @@ body,
   white-space: nowrap;
 }
 
-.session-archive-confirm-copy {
+.app-confirm-copy {
   margin-top: 9px;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.session-archive-confirm-error {
+.app-confirm-error {
   margin-top: 9px;
   color: #fca5a5;
   font-size: 12px;
   line-height: 1.4;
 }
 
-.session-archive-confirm-actions {
+.app-confirm-actions {
   grid-column: 1 / -1;
   display: flex;
   justify-content: flex-end;
@@ -1866,7 +1975,7 @@ body,
   margin-top: 4px;
 }
 
-.session-archive-confirm-btn {
+.app-confirm-btn {
   min-height: 32px;
   border-radius: 7px;
   border: 1px solid var(--border);
@@ -1880,22 +1989,27 @@ body,
   cursor: pointer;
 }
 
-.session-archive-confirm-btn.secondary {
+.app-confirm-btn.secondary {
   color: var(--muted);
   background: var(--panel-2);
 }
 
-.session-archive-confirm-btn.primary {
+.app-confirm-btn.primary {
   color: #fff;
   border-color: color-mix(in srgb, #2b6cb0 68%, transparent);
   background: color-mix(in srgb, #2b6cb0 86%, #111);
 }
 
-.session-archive-confirm-btn:hover:not(:disabled) {
+.app-confirm-btn.primary.danger {
+  border-color: color-mix(in srgb, var(--danger) 74%, transparent);
+  background: color-mix(in srgb, var(--danger) 86%, #111);
+}
+
+.app-confirm-btn:hover:not(:disabled) {
   filter: brightness(1.06);
 }
 
-.session-archive-confirm-btn:disabled {
+.app-confirm-btn:disabled {
   opacity: 0.72;
   cursor: default;
 }

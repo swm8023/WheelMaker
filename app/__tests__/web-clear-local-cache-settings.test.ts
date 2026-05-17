@@ -8,11 +8,24 @@ describe('web clear local cache settings', () => {
     const workspaceStore = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'workspaceStore.ts'), 'utf8');
     const workspacePersistence = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'services', 'workspacePersistence.ts'), 'utf8');
 
-    expect(mainTsx).toContain('Clear Local Cache (Keep Token)');
-    expect(mainTsx).toContain('window.confirm(');
-    expect(mainTsx).toContain('Clear all local cache data except token and address?');
+    expect(mainTsx).toContain('Clear Local Cache');
+    expect(mainTsx).not.toContain('Clear Local Cache (Keep Token)');
+    const clearCacheStart = mainTsx.indexOf('const requestClearLocalCache = () => {');
+    const switchProjectStart = mainTsx.indexOf('const switchProject = async', clearCacheStart);
+    expect(clearCacheStart).toBeGreaterThanOrEqual(0);
+    expect(switchProjectStart).toBeGreaterThan(clearCacheStart);
+    const clearCacheFlow = mainTsx.slice(clearCacheStart, switchProjectStart);
+    expect(clearCacheFlow).not.toContain('window.confirm(');
+    expect(mainTsx).toContain('type ConfirmTarget =');
+    expect(mainTsx).toContain("kind: 'clearCache'");
+    expect(mainTsx).toContain("setConfirmTarget({kind: 'clearCache'});");
+    expect(mainTsx).toContain('Clear local cache?');
+    expect(mainTsx).toContain('Token and server address will be preserved.');
     expect(mainTsx).toContain('workspaceStore.clearLocalCachePreservingToken();');
     expect(mainTsx).toContain('window.location.reload();');
+    expect(mainTsx).toContain('const appConfirmDialog = confirmTarget ? (');
+    expect(mainTsx).toContain('className="app-confirm-backdrop"');
+    expect(mainTsx).toContain("'app-confirm-btn primary danger'");
 
     expect(workspaceStore).toContain('clearLocalCachePreservingToken(): void {');
     expect(workspaceStore).toContain('this.persistence.clearCachePreservingToken();');

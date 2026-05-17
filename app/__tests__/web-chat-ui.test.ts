@@ -321,8 +321,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.mobile-settings-nav {');
     expect(stylesCss).toContain('.mobile-settings-back {');
     expect(stylesCss).toContain('.mobile-settings-group {');
-    expect(stylesCss).toContain('.mobile-settings-screen .sidebar-setting-row {');
-    expect(stylesCss).toContain('.mobile-settings-screen .sidebar-clear-cache-btn {');
+    expect(stylesCss).toContain('.mobile-settings-screen .settings-row {');
+    expect(stylesCss).toContain('.mobile-settings-screen .settings-danger-row {');
     expect(stylesCss).not.toContain('.project-menu-state');
     expect(stylesCss).toMatch(
       /\.project-menu-hub \{[\s\S]*background: color-mix\(in srgb, var\(--accent\) 18%, var\(--panel-2\)\);/,
@@ -504,6 +504,7 @@ describe('web chat integration', () => {
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
+    expect(mainTsx).toContain("type SettingsDetailView = 'tokenStats' | 'ccSwitch' | 'database' | null;");
     expect(mainTsx).toContain('const [settingsDetailView, setSettingsDetailView] = useState<SettingsDetailView>(null);');
     expect(mainTsx).toContain('const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);');
     expect(mainTsx).toContain('const refreshMobileChatProjectSessions = async () => {');
@@ -520,6 +521,23 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain("setSettingsDetailView('tokenStats');");
     expect(mainTsx).toContain("settingsDetailView === 'tokenStats'");
+    expect(mainTsx).toContain('const renderSettingsSection = (title: string, rows: React.ReactNode) => (');
+    expect(mainTsx).toContain("renderSettingsSection('Appearance'");
+    expect(mainTsx).toContain("renderSettingsSection('Chat'");
+    expect(mainTsx).toContain("renderSettingsSection('Code Display'");
+    expect(mainTsx).toContain("renderSettingsSection('Storage'");
+    const appearanceSettingsIndex = mainTsx.indexOf("renderSettingsSection('Appearance'");
+    const chatSettingsIndex = mainTsx.indexOf("renderSettingsSection('Chat'");
+    const codeDisplaySettingsIndex = mainTsx.indexOf("renderSettingsSection('Code Display'");
+    const storageSettingsIndex = mainTsx.indexOf("renderSettingsSection('Storage'");
+    expect(appearanceSettingsIndex).toBeLessThan(chatSettingsIndex);
+    expect(chatSettingsIndex).toBeLessThan(codeDisplaySettingsIndex);
+    expect(codeDisplaySettingsIndex).toBeLessThan(storageSettingsIndex);
+    expect(mainTsx).toContain("setSettingsDetailView('database');");
+    expect(mainTsx).toContain("settingsDetailView === 'database'");
+    expect(mainTsx).toContain('renderDatabaseSettingsDetail()');
+    expect(mainTsx).toContain('className="settings-section-title"');
+    expect(mainTsx).toContain('className="settings-row settings-detail-row"');
     expect(mainTsx).not.toContain('title="Token stats"');
     expect(mainTsx).not.toContain('title="Agent info"');
     expect(mainTsx).not.toContain('className="chat-session-swipe-row');
@@ -542,6 +560,11 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.mobile-project-session-error {');
     expect(stylesCss).toContain('.settings-detail-header {');
     expect(stylesCss).toContain('.settings-detail-row {');
+    expect(stylesCss).toContain('.settings-section-title {');
+    expect(stylesCss).toContain('.settings-row {');
+    expect(stylesCss).toContain('.settings-danger-row {');
+    expect(stylesCss).toContain('.settings-metadata-list {');
+    expect(stylesCss).toContain('.settings-database-dump {');
   });
 
   test('wide layout uses a project session rail instead of the header project picker', () => {
@@ -580,16 +603,16 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('service.deleteProjectSession(');
     expect(mainTsx).toContain('const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.reloadProjectSession(targetProjectId, normalizedSessionId);');
-    expect(mainTsx).toContain('const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<ArchiveConfirmTarget | null>(null);');
-    expect(mainTsx).toContain("const [archiveConfirmError, setArchiveConfirmError] = useState('');");
+    expect(mainTsx).toContain('const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);');
+    expect(mainTsx).toContain("const [confirmError, setConfirmError] = useState('');");
     expect(mainTsx).toContain('const handleArchiveProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);');
     expect(mainTsx).toContain('const message = err instanceof Error ? err.message : String(err);');
-    expect(mainTsx).toContain('setArchiveConfirmError(message);');
-    expect(mainTsx).toContain('const sessionArchiveConfirmDialog = archiveConfirmTarget ? (');
-    expect(mainTsx).toContain('className="session-archive-confirm-backdrop"');
+    expect(mainTsx).toContain('setConfirmError(message);');
+    expect(mainTsx).toContain('const appConfirmDialog = confirmTarget ? (');
+    expect(mainTsx).toContain('className="app-confirm-backdrop"');
     expect(mainTsx).toContain('Archived sessions leave the chat list.');
-    expect(mainTsx).toContain('className="session-archive-confirm-error"');
+    expect(mainTsx).toContain('className="app-confirm-error"');
     expect(mainTsx).not.toContain('Sessions with fewer than 3 turns are permanently removed.');
     expect(mainTsx).toContain('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
     expect(mainTsx).toContain('className="project-session-action-strip"');
@@ -693,9 +716,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.project-session-action-btn.reload {');
     expect(stylesCss).toContain('.project-session-action-btn.archive {');
     expect(stylesCss).not.toContain('.project-session-action-btn.delete {');
-    expect(stylesCss).toContain('.session-archive-confirm-backdrop {');
-    expect(stylesCss).toContain('.session-archive-confirm-dialog {');
-    expect(stylesCss).toContain('.session-archive-confirm-error {');
+    expect(stylesCss).toContain('.app-confirm-backdrop {');
+    expect(stylesCss).toContain('.app-confirm-dialog {');
+    expect(stylesCss).toContain('.app-confirm-error {');
     expect(stylesCss).toContain('.project-session-action-label {');
     expect(stylesCss).toContain('.wide-session-agent-tag {');
     expect(stylesCss).toContain('.wide-session-agent-0 {');
