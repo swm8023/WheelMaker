@@ -7445,19 +7445,6 @@ function App() {
           >
             <span className="codicon codicon-settings-gear" />
           </button>
-          <button
-            type="button"
-            className="drawer-settings-icon-btn"
-            onClick={() => {
-              setProjectMenuOpen(false);
-              setSidebarSettingsOpen(true);
-              setSettingsDetailView('ccSwitch');
-            }}
-            title="Open CC Switch"
-            aria-label="Open CC Switch"
-          >
-            <span className="codicon codicon-plug" />
-          </button>
           <span className="mobile-chat-drawer-title">Chats</span>
           <button
             className={`header-btn refresh-btn drawer-project-refresh${hasPendingProjectUpdates && !mobileProjectSessionsRefreshing && !reconnecting ? ' has-update-badge' : ''}`}
