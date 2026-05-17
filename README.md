@@ -118,7 +118,8 @@ Notes:
 
 - `registry.listen: true` means Machine A hosts the registry server.
 - `registry.port` is the internal registry port.
-- `registry.token` is shared by other hubs and Web clients.
+- `registry.token` is shared by other hubs, Web clients, and the monitor login page.
+- `wheelmaker-monitor` refuses to start when `registry.token` is empty.
 - `registry.hubId` should be stable and recognizable, for example `hub-a`.
 - `monitor.port` is the internal monitor port that Nginx forwards to.
 
@@ -157,7 +158,7 @@ Machine B does not expose the public entrypoint. It only reports projects to Mac
 Notes:
 
 - `registry.server` can be `https://machine-a.example.com:28800`. WheelMaker will convert it to `wss://.../ws`.
-- `registry.token` must match Machine A.
+- `registry.token` must match Machine A and is required by the monitor login page.
 - `hubId` must be unique, for example `hub-b`.
 - `listen: false` means Machine B does not host its own registry listener.
 
@@ -330,7 +331,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/signal_update_now.ps
 After deployment:
 
 1. Open `https://<host>:28800/` and confirm the Web UI loads.
-2. Open `https://<host>:28800/monitor/` and confirm the monitor page loads.
+2. Open `https://<host>:28800/monitor/`, enter `registry.token`, and confirm the monitor page loads.
 3. Confirm Machine B points `registry.server` at Machine A.
 4. Confirm both machines use the same `registry.token`.
 5. Confirm projects from multiple hubs appear in the UI.

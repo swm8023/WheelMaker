@@ -21,7 +21,7 @@
     "listen": true,
     "port": 9630,
     "server": "127.0.0.1",
-    "token": "",
+    "token": "replace-with-shared-token",
     "hubId": "dev-hub"
   },
   "monitor": {
@@ -31,7 +31,6 @@
     "level": "warn"
   }
 }
-
 
 
 

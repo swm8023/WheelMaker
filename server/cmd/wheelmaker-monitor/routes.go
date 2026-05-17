@@ -9,40 +9,44 @@ import (
 )
 
 func registerRoutes(mux *http.ServeMux, mon *Monitor) {
-	registerRoutesAtPrefix(mux, mon, "")
-	registerRoutesAtPrefix(mux, mon, "/monitor")
+	auth := newMonitorAuthenticator(mon.authToken)
+	registerRoutesAtPrefix(mux, mon, "", auth)
+	registerRoutesAtPrefix(mux, mon, "/monitor", auth)
 }
 
-func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string) {
+func registerRoutesAtPrefix(mux *http.ServeMux, mon *Monitor, prefix string, auth *monitorAuthenticator) {
 	// API endpoints
-	mux.HandleFunc("GET "+prefix+"/api/overview", handleOverview(mon))
-	mux.HandleFunc("GET "+prefix+"/api/hubs", handleHubs(mon))
-	mux.HandleFunc("GET "+prefix+"/api/projects", handleProjects(mon))
-	mux.HandleFunc("GET "+prefix+"/api/status", handleStatus(mon))
-	mux.HandleFunc("GET "+prefix+"/api/config", handleConfig(mon))
-	mux.HandleFunc("GET "+prefix+"/api/db", handleDBTables(mon))
-	mux.HandleFunc("GET "+prefix+"/api/sessions", handleSessions(mon))
-	mux.HandleFunc("GET "+prefix+"/api/sessions/{sessionID}/messages", handleSessionMessages(mon))
-	mux.HandleFunc("GET "+prefix+"/api/logs", handleLogs(mon))
-	mux.HandleFunc("GET "+prefix+"/api/registry", handleRegistry(mon))
-	mux.HandleFunc("POST "+prefix+"/api/action/restart", handleAction(mon, "restart"))
-	mux.HandleFunc("POST "+prefix+"/api/action/restart-monitor", handleAction(mon, "restart-monitor"))
-	mux.HandleFunc("POST "+prefix+"/api/action/stop", handleAction(mon, "stop"))
-	mux.HandleFunc("POST "+prefix+"/api/action/start", handleAction(mon, "start"))
-	mux.HandleFunc("POST "+prefix+"/api/action/update-publish", handleAction(mon, "update-publish"))
-	mux.HandleFunc("POST "+prefix+"/api/action/clear-session-history", handleAction(mon, "clear-session-history"))
+	mux.HandleFunc("POST "+prefix+"/api/auth/login", auth.handleLogin())
+	mux.HandleFunc("POST "+prefix+"/api/auth/logout", auth.handleLogout())
+	mux.HandleFunc("GET "+prefix+"/api/auth/status", auth.handleStatus())
+	mux.HandleFunc("GET "+prefix+"/api/overview", auth.protectAPI(handleOverview(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/hubs", auth.protectAPI(handleHubs(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/projects", auth.protectAPI(handleProjects(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/status", auth.protectAPI(handleStatus(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/config", auth.protectAPI(handleConfig(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/db", auth.protectAPI(handleDBTables(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/sessions", auth.protectAPI(handleSessions(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/sessions/{sessionID}/messages", auth.protectAPI(handleSessionMessages(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/logs", auth.protectAPI(handleLogs(mon)))
+	mux.HandleFunc("GET "+prefix+"/api/registry", auth.protectAPI(handleRegistry(mon)))
+	mux.HandleFunc("POST "+prefix+"/api/action/restart", auth.protectAPI(handleAction(mon, "restart")))
+	mux.HandleFunc("POST "+prefix+"/api/action/restart-monitor", auth.protectAPI(handleAction(mon, "restart-monitor")))
+	mux.HandleFunc("POST "+prefix+"/api/action/stop", auth.protectAPI(handleAction(mon, "stop")))
+	mux.HandleFunc("POST "+prefix+"/api/action/start", auth.protectAPI(handleAction(mon, "start")))
+	mux.HandleFunc("POST "+prefix+"/api/action/update-publish", auth.protectAPI(handleAction(mon, "update-publish")))
+	mux.HandleFunc("POST "+prefix+"/api/action/clear-session-history", auth.protectAPI(handleAction(mon, "clear-session-history")))
 
 	// PWA resources
-	mux.HandleFunc("GET "+prefix+"/manifest.webmanifest", handleManifest())
-	mux.HandleFunc("GET "+prefix+"/service-worker.js", handleServiceWorker())
-	mux.HandleFunc("GET "+prefix+"/icons/icon.svg", handleIcon())
+	mux.HandleFunc("GET "+prefix+"/manifest.webmanifest", auth.protectPage(handleManifest()))
+	mux.HandleFunc("GET "+prefix+"/service-worker.js", auth.protectPage(handleServiceWorker()))
+	mux.HandleFunc("GET "+prefix+"/icons/icon.svg", auth.protectPage(handleIcon()))
 
 	// Web dashboard
 	root := prefix + "/"
 	if prefix == "" {
 		root = "/"
 	}
-	mux.HandleFunc("GET "+root, handleDashboard())
+	mux.HandleFunc("GET "+root, auth.protectPage(handleDashboard()))
 }
 
 func handleOverview(mon *Monitor) http.HandlerFunc {

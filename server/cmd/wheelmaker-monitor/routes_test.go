@@ -17,12 +17,14 @@ import (
 
 func TestActionUpdatePublishWritesFullUpdateSignal(t *testing.T) {
 	baseDir := t.TempDir()
+	writeMonitorTestConfig(t, baseDir, testMonitorToken)
 	mon := NewMonitor(baseDir)
 
 	mux := http.NewServeMux()
 	registerRoutes(mux, mon)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/action/update-publish", nil)
+	authorizeMonitorRequest(req)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -42,6 +44,7 @@ func TestActionUpdatePublishWritesFullUpdateSignal(t *testing.T) {
 
 func TestActionClearSessionHistoryRoute(t *testing.T) {
 	baseDir := t.TempDir()
+	writeMonitorTestConfig(t, baseDir, testMonitorToken)
 	store, err := clientpkg.NewStore(filepath.Join(baseDir, "db", "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -54,6 +57,7 @@ func TestActionClearSessionHistoryRoute(t *testing.T) {
 	registerRoutes(mux, mon)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/action/clear-session-history", nil)
+	authorizeMonitorRequest(req)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -72,6 +76,7 @@ func TestActionClearSessionHistoryRoute(t *testing.T) {
 
 func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	base := t.TempDir()
+	writeMonitorTestConfig(t, base, testMonitorToken)
 	store, err := clientpkg.NewStore(filepath.Join(base, "db", "client.sqlite3"))
 	if err != nil {
 		t.Fatalf("NewStore: %v", err)
@@ -103,6 +108,7 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	registerRoutes(mux, mon)
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/sessions", nil)
+	authorizeMonitorRequest(listReq)
 	listRR := httptest.NewRecorder()
 	mux.ServeHTTP(listRR, listReq)
 	if listRR.Code != http.StatusOK {
@@ -119,6 +125,7 @@ func TestSessionAPIListsSessionsAndMessages(t *testing.T) {
 	}
 
 	msgReq := httptest.NewRequest(http.MethodGet, "/api/sessions/sess-1/messages?limit=10", nil)
+	authorizeMonitorRequest(msgReq)
 	msgRR := httptest.NewRecorder()
 	mux.ServeHTTP(msgRR, msgReq)
 	if msgRR.Code != http.StatusOK {
@@ -191,7 +198,9 @@ func (s *stubHubTransport) ProjectList(context.Context, string) ([]RegistryProje
 }
 
 func TestRoutes_StatusByHubID(t *testing.T) {
-	mon := NewMonitor(t.TempDir())
+	base := t.TempDir()
+	writeMonitorTestConfig(t, base, testMonitorToken)
+	mon := NewMonitor(base)
 	stub := &stubHubTransport{}
 	mon.transport = stub
 	mon.defaultHubID = "hub-a"
@@ -200,6 +209,7 @@ func TestRoutes_StatusByHubID(t *testing.T) {
 	registerRoutes(mux, mon)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status?hubId=hub-2", nil)
+	authorizeMonitorRequest(req)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -212,7 +222,9 @@ func TestRoutes_StatusByHubID(t *testing.T) {
 }
 
 func TestRoutes_ActionByHubID(t *testing.T) {
-	mon := NewMonitor(t.TempDir())
+	base := t.TempDir()
+	writeMonitorTestConfig(t, base, testMonitorToken)
+	mon := NewMonitor(base)
 	stub := &stubHubTransport{}
 	mon.transport = stub
 	mon.defaultHubID = "hub-a"
@@ -221,6 +233,7 @@ func TestRoutes_ActionByHubID(t *testing.T) {
 	registerRoutes(mux, mon)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/action/restart?hubId=hub-9", nil)
+	authorizeMonitorRequest(req)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -237,6 +250,7 @@ func TestRoutes_ActionByHubID(t *testing.T) {
 
 func TestRoutes_LocalActionBypassesTransport(t *testing.T) {
 	baseDir := t.TempDir()
+	writeMonitorTestConfig(t, baseDir, testMonitorToken)
 	mon := NewMonitor(baseDir)
 	stub := &stubHubTransport{actionErr: errors.New("registry down")}
 	mon.transport = stub
@@ -246,6 +260,7 @@ func TestRoutes_LocalActionBypassesTransport(t *testing.T) {
 	registerRoutes(mux, mon)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/action/update-publish?hubId=local-hub", nil)
+	authorizeMonitorRequest(req)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 
@@ -262,7 +277,9 @@ func TestRoutes_LocalActionBypassesTransport(t *testing.T) {
 }
 
 func TestRoutes_RemoteStartReturnsStructuredPolicyError(t *testing.T) {
-	mon := NewMonitor(t.TempDir())
+	base := t.TempDir()
+	writeMonitorTestConfig(t, base, testMonitorToken)
+	mon := NewMonitor(base)
 	stub := &stubHubTransport{}
 	mon.transport = stub
 	mon.defaultHubID = "local-hub"
@@ -271,6 +288,7 @@ func TestRoutes_RemoteStartReturnsStructuredPolicyError(t *testing.T) {
 	registerRoutes(mux, mon)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/action/start?hubId=remote-hub", nil)
+	authorizeMonitorRequest(req)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 

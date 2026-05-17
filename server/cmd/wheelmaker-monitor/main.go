@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	shared "github.com/swm8023/wheelmaker/internal/shared"
 	"github.com/swm8023/wheelmaker/internal/shared/winsvc"
 )
 
@@ -45,12 +44,16 @@ func run() error {
 		baseDir = filepath.Join(home, ".wheelmaker")
 	}
 
+	cfg, err := loadMonitorRuntimeConfig(baseDir)
+	if err != nil {
+		return err
+	}
+
 	// Determine listen address: flag > config > default
 	addr := *addrFlag
 	if addr == "" {
 		port := defaultMonitorPort
-		cfgPath := filepath.Join(baseDir, "config.json")
-		if cfg, err := shared.LoadConfig(cfgPath); err == nil && cfg.Monitor.Port > 0 {
+		if cfg.Monitor.Port > 0 {
 			port = cfg.Monitor.Port
 		}
 		addr = fmt.Sprintf(":%d", port)

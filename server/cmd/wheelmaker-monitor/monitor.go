@@ -31,6 +31,7 @@ type Monitor struct {
 	mu           sync.RWMutex
 	transport    HubTransport
 	defaultHubID string
+	authToken    string
 }
 
 const (
@@ -75,6 +76,7 @@ func NewMonitor(baseDir string) *Monitor {
 	m := &Monitor{
 		baseDir:      baseDir,
 		defaultHubID: defaultHubID,
+		authToken:    strings.TrimSpace(cfg.Registry.Token),
 	}
 	m.transport = newHubTransport(monitorTransportConfig{
 		BaseDir:      baseDir,

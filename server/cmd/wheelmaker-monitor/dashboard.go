@@ -16,6 +16,13 @@ func handleDashboard() http.HandlerFunc {
 	}
 }
 
+func handleMonitorLoginPage() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(renderMonitorLoginHTML(r.URL.Path)))
+	}
+}
+
 func renderDashboardHTML(path string) string {
 	base := pwaBasePath(path)
 	replacer := strings.NewReplacer(
@@ -24,6 +31,139 @@ func renderDashboardHTML(path string) string {
 	)
 	return replacer.Replace(dashboardHTML)
 }
+
+func renderMonitorLoginHTML(path string) string {
+	base := pwaBasePath(path)
+	replacer := strings.NewReplacer("__WM_BASE_PATH__", base)
+	return replacer.Replace(monitorLoginHTML)
+}
+
+const monitorLoginHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0e1520">
+<title>WheelMaker Monitor Login</title>
+<style>
+:root {
+  --bg: #080c11;
+  --panel: #0e1520;
+  --panel-2: #141e2c;
+  --border: #1a2535;
+  --border-hi: #243347;
+  --text: #dde5ee;
+  --muted: #7b8796;
+  --accent: #3b82f6;
+  --danger: #ef4444;
+  --mono: 'Consolas', 'Courier New', monospace;
+}
+* { box-sizing: border-box; }
+html, body { min-height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  display: flex;
+}
+.page { display: flex; min-height: 100vh; width: 100%; padding: 20px; }
+.connect {
+  margin: auto;
+  width: min(520px, 92vw);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 20px;
+}
+.connect h3 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 0 10px;
+  outline: none;
+  font: inherit;
+}
+.input:focus { border-color: var(--accent); }
+.button {
+  width: 100%;
+  min-height: 36px;
+  margin-top: 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #0d2040;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.button:disabled { opacity: .55; cursor: wait; }
+.error {
+  margin-top: 10px;
+  min-height: 18px;
+  color: var(--danger);
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <form id="login-form" class="connect">
+    <h3>Connect to WheelMaker Monitor</h3>
+    <input id="token" class="input" type="password" autocomplete="current-password" placeholder="Token" autofocus>
+    <button id="login-btn" class="button" type="submit">Connect</button>
+    <div id="login-error" class="error"></div>
+  </form>
+</div>
+<script>
+const appBasePath = '__WM_BASE_PATH__';
+function appURL(rel) {
+  const clean = String(rel || '').replace(/^\/+/, '');
+  return appBasePath + clean;
+}
+document.getElementById('login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const token = document.getElementById('token').value;
+  const btn = document.getElementById('login-btn');
+  const err = document.getElementById('login-error');
+  err.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Connecting...';
+  try {
+    const res = await fetch(window.location.origin + appURL('api/auth/login'), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token})
+    });
+    if (!res.ok) {
+      let message = 'Login failed';
+      try {
+        const data = await res.json();
+        if (data && data.error) message = data.error;
+      } catch (_) {}
+      err.textContent = message;
+      return;
+    }
+    window.location.replace(window.location.origin + appBasePath);
+  } catch (e) {
+    err.textContent = e && e.message ? e.message : 'Login failed';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Connect';
+  }
+});
+</script>
+</body>
+</html>
+`
 
 const dashboardHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -728,6 +868,7 @@ html, body {
     </div>
     <button class="tbtn" onclick="refresh()">Refresh</button>
     <button class="tbtn" onclick="doAction('restart-monitor')">Restart Monitor</button>
+    <button class="tbtn" onclick="logoutMonitor()">Logout</button>
   </div>
 
   <div class="body">
@@ -866,6 +1007,25 @@ function appURL(rel) {
   return appBasePath + clean;
 }
 
+function readCookie(name) {
+  const prefix = name + '=';
+  const parts = document.cookie ? document.cookie.split(';') : [];
+  for (const part of parts) {
+    const item = part.trim();
+    if (item.startsWith(prefix)) return decodeURIComponent(item.substring(prefix.length));
+  }
+  return '';
+}
+
+function monitorCSRFHeaders() {
+  const csrf = readCookie('wm_monitor_csrf');
+  return csrf ? {'X-WheelMaker-Monitor-CSRF': csrf} : {};
+}
+
+function monitorPostOptions() {
+  return { method: 'POST', headers: monitorCSRFHeaders() };
+}
+
 function initPWA() {
   const manifest = $('wm-manifest');
   if (manifest) manifest.setAttribute('href', appURL('manifest.webmanifest'));
@@ -895,6 +1055,10 @@ async function api(path) {
     fullPath += (fullPath.includes('?') ? '&' : '?') + 'hubId=' + encodeURIComponent(selectedHubId);
   }
   const res = await fetch(window.location.origin + appURL('api/' + fullPath));
+  if (res.status === 401) {
+    window.location.replace(window.location.origin + appBasePath);
+    return {};
+  }
   return res.json();
 }
 
@@ -1459,7 +1623,7 @@ async function doAction(action) {
   msg.style.color = 'var(--text-dim)';
   try {
     const path = action === 'restart-monitor' ? 'api/action/' + action : hubPath('api/action/' + action);
-    const res  = await fetch(window.location.origin + appURL(path), { method: 'POST' });
+    const res  = await fetch(window.location.origin + appURL(path), monitorPostOptions());
     const data = await apiErrorFromResponse(res);
     if (data.error) {
       msg.textContent = 'Error: ' + data.error + (data.hint ? ' | Hint: ' + data.hint : '');
@@ -1483,7 +1647,7 @@ async function clearSessionHistory() {
   msg.textContent = 'clear-session-history\u2026';
   msg.style.color = 'var(--text-dim)';
   try {
-    const res = await fetch(window.location.origin + appURL(hubPath('api/action/clear-session-history')), { method: 'POST' });
+    const res = await fetch(window.location.origin + appURL(hubPath('api/action/clear-session-history')), monitorPostOptions());
     const data = await apiErrorFromResponse(res);
     if (data.error) {
       msg.textContent = 'Error: ' + data.error + (data.hint ? ' | Hint: ' + data.hint : '');
@@ -1497,6 +1661,13 @@ async function clearSessionHistory() {
     msg.textContent = 'Request failed: ' + e.message;
     msg.style.color = 'var(--red)';
   }
+}
+
+async function logoutMonitor() {
+  try {
+    await fetch(window.location.origin + appURL('api/auth/logout'), monitorPostOptions());
+  } catch (_) {}
+  window.location.replace(window.location.origin + appBasePath);
 }
 
 initPWA();

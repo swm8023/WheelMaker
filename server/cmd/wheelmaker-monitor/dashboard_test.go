@@ -114,6 +114,24 @@ func TestDashboardHTML_HasUpdatePublishAction(t *testing.T) {
 	}
 }
 
+func TestDashboardHTML_HasMonitorLogoutAction(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "logoutMonitor()") {
+		t.Fatalf("dashboard should provide monitor logout action")
+	}
+	if !strings.Contains(dashboardHTML, "Logout") {
+		t.Fatalf("dashboard should render logout button text")
+	}
+}
+
+func TestDashboardHTML_SendsMonitorCSRFHeaderForActions(t *testing.T) {
+	if !strings.Contains(dashboardHTML, "X-WheelMaker-Monitor-CSRF") {
+		t.Fatalf("dashboard should send monitor csrf header for post actions")
+	}
+	if !strings.Contains(dashboardHTML, "wm_monitor_csrf") {
+		t.Fatalf("dashboard should read monitor csrf cookie")
+	}
+}
+
 func TestDashboardHTML_HasHubSelectorUnderTopbar(t *testing.T) {
 	if !strings.Contains(dashboardHTML, `id="hub-select"`) {
 		t.Fatalf("dashboard should include hub selector")
