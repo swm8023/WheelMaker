@@ -308,6 +308,8 @@ describe('web chat integration', () => {
     const sessionMessageBlockStart = mainTsx.indexOf("if (event.method === 'session.message') {");
     const sessionUpdatedBlock = mainTsx.slice(sessionUpdatedBlockStart, sessionMessageBlockStart);
     expect(sessionUpdatedBlock).not.toContain('loadChatSession(');
+    expect(sessionUpdatedBlock).toContain('if (shouldClearLocalChatSessionRunning(payload.session)) {');
+    expect(sessionUpdatedBlock).toContain('setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));');
     expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');

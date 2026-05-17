@@ -32,6 +32,7 @@ import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import {
   isChatSessionRunningMessage,
   resolveChatSessionVisualState as resolveChatSessionVisualStateValue,
+  shouldClearLocalChatSessionRunning,
   type ChatSessionVisualState,
 } from './chatSessionState';
 import {
@@ -6477,6 +6478,9 @@ function App() {
         };
         if (payload.session?.sessionId) {
           const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);
+          if (shouldClearLocalChatSessionRunning(payload.session)) {
+            setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
+          }
           rememberChatSessionSummary(eventProjectId, payload.session);
           workspaceStore.rememberChatSession(eventProjectId, payload.session, {
             turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,

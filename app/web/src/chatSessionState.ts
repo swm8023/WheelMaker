@@ -49,17 +49,24 @@ export function resolveChatSessionVisualState(
   return local.completedUnviewed ? 'completed-unviewed' : 'idle';
 }
 
+export function shouldClearLocalChatSessionRunning(
+  session: Pick<RegistryChatSession, 'running'>,
+): boolean {
+  return session.running === false;
+}
+
 export function isChatSessionRunningMessage(message: Pick<
   RegistryChatMessage,
-  'method' | 'param'
+  'method' | 'param' | 'finished'
 >): boolean {
   switch (message.method) {
     case 'prompt_request':
     case 'user_message_chunk':
+      return true;
     case 'agent_message_chunk':
     case 'agent_thought_chunk':
     case 'agent_plan':
-      return true;
+      return message.finished !== true;
     case 'tool_call': {
       const status =
         typeof message.param?.status === 'string'

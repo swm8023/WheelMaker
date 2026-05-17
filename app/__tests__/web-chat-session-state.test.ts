@@ -2,6 +2,7 @@ import {
   getChatSessionVisualState,
   isChatSessionRunningMessage,
   resolveChatSessionVisualState,
+  shouldClearLocalChatSessionRunning,
 } from '../web/src/chatSessionState';
 
 describe('web chat session visual state', () => {
@@ -72,6 +73,18 @@ describe('web chat session visual state', () => {
     })).toBe('running');
   });
 
+  test('clears local running state when an authoritative summary reports not running', () => {
+    expect(shouldClearLocalChatSessionRunning({
+      running: false,
+    })).toBe(true);
+
+    expect(shouldClearLocalChatSessionRunning({
+      running: true,
+    })).toBe(false);
+
+    expect(shouldClearLocalChatSessionRunning({})).toBe(false);
+  });
+
   test('marks a session running from prompt start and streaming turns', () => {
     expect(isChatSessionRunningMessage({
       sessionId: 's1',
@@ -88,6 +101,14 @@ describe('web chat session visual state', () => {
       param: {text: 'partial'},
       finished: false,
     })).toBe(true);
+
+    expect(isChatSessionRunningMessage({
+      sessionId: 's1',
+      turnIndex: 2,
+      method: 'agent_message_chunk',
+      param: {text: 'complete'},
+      finished: true,
+    })).toBe(false);
 
     expect(isChatSessionRunningMessage({
       sessionId: 's1',
