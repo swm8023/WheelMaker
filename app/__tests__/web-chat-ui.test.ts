@@ -595,6 +595,12 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain("target?.closest('.project-session-row-wrap')");
     expect(mainTsx).toContain('renderProjectSessionActionStrip(targetProjectId, session)');
     expect(mainTsx).toContain('onPointerDown={event => startProjectSessionLongPress(targetProjectId, session.sessionId, event)}');
+    const actionStripStart = mainTsx.indexOf('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
+    const actionStripEnd = mainTsx.indexOf('const refreshProject = async', actionStripStart);
+    expect(actionStripStart).toBeGreaterThanOrEqual(0);
+    expect(actionStripEnd).toBeGreaterThan(actionStripStart);
+    const actionStrip = mainTsx.slice(actionStripStart, actionStripEnd);
+    expect(actionStrip).not.toContain('return null;');
     expect(mainTsx).toContain("tab === 'chat' && !isWide ? renderMobileChatSessionSheet() : renderSidebarMain()");
     expect(mainTsx).toContain("tab === 'chat' ? renderWideProjectSessionNav() : renderSidebarMain(false)");
     expect(mainTsx).toContain('const wideSidebarMain = sidebarSettingsOpen');
@@ -706,7 +712,7 @@ describe('web chat integration', () => {
     expect(selectedSessionRowBlock).toContain('background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));');
     expect(selectedSessionRowBlock).not.toContain('box-shadow: inset 3px 0 0 var(--accent);');
     expect(stylesCss).toMatch(
-      /\.project-session-row-wrap.actions-open \.wide-session-row::after \{[\s\S]*background: linear-gradient\([\s\S]*\}/,
+      /\.project-session-row-wrap:hover \.wide-session-row::after,[\s\S]*\.project-session-row-wrap:focus-within \.wide-session-row::after,[\s\S]*\.project-session-row-wrap\.actions-open \.wide-session-row::after \{[\s\S]*background: linear-gradient\([\s\S]*\}/,
     );
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
     expect(stylesCss).toMatch(
@@ -714,6 +720,12 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toMatch(
       /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(228px, 76%\);[^}]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.project-session-action-strip \{[^}]*display: none;[^}]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.project-session-row-wrap:hover \.project-session-action-strip,[\s\S]*\.project-session-row-wrap:focus-within \.project-session-action-strip,[\s\S]*\.project-session-row-wrap\.actions-open \.project-session-action-strip \{[\s\S]*display: inline-flex;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.project-session-action-btn \{[^}]*height: 28px;[^}]*gap: 5px;[^}]*padding: 0 8px;[^}]*\}/,

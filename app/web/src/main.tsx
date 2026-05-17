@@ -6111,12 +6111,6 @@ function App() {
 
   const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {
     const sessionId = session.sessionId;
-    if (
-      projectSessionActionMenu?.projectId !== targetProjectId ||
-      projectSessionActionMenu.sessionId !== sessionId
-    ) {
-      return null;
-    }
     const sessionActionDisabled = !!session.running ||
       chatReloadingSessionId === sessionId ||
       chatArchivingSessionId === sessionId ||
