@@ -696,8 +696,9 @@ body,
 .floating-nav-group,
 .drawer-toggle-bubble {
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--panel) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(3px);
 }
 
 .floating-nav-group {
@@ -707,8 +708,6 @@ body,
   grid-template-rows: repeat(3, 40px);
   padding: 4px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 46%, transparent);
-  backdrop-filter: blur(6px);
   overflow: hidden;
 }
 
@@ -750,7 +749,6 @@ body,
   width: 48px;
   height: 48px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--panel) 78%, transparent);
   color: var(--text);
   display: inline-flex;
   align-items: center;
