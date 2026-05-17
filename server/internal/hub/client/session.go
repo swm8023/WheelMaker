@@ -914,6 +914,15 @@ func (s *Session) Suspend(ctx context.Context) error {
 	return s.persistSession(ctx)
 }
 
+func (s *Session) isRunning() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.prompt.ctx != nil || s.prompt.cancel != nil || s.prompt.updatesCh != nil || s.prompt.currentCh != nil
+}
+
 // SessionUpdate receives session/update notifications from the agent.
 func (s *Session) SessionUpdate(params acp.SessionUpdateParams) {
 	s.mu.Lock()

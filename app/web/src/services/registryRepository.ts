@@ -560,6 +560,20 @@ export class RegistryRepository {
     };
   }
 
+  async archiveSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    const resp = await this.client.request({
+      method: 'session.archive',
+      projectId,
+      payload: {sessionId},
+      timeoutMs: 30000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string};
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? sessionId,
+    };
+  }
+
   async setSessionConfig(
     projectId: string,
     payload: {sessionId: string; configId: string; value: string},

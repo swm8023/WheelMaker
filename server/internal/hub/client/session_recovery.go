@@ -119,6 +119,9 @@ func (r *sessionRecovery) ReloadSession(ctx context.Context, sessionID string) (
 	if sessionID == "" {
 		return nil, fmt.Errorf("sessionId is required")
 	}
+	if r.client.sessionIsRunning(sessionID) {
+		return nil, fmt.Errorf("session %s is running", sessionID)
+	}
 	rec, err := r.client.store.LoadSession(ctx, r.client.projectName, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load session: %w", err)

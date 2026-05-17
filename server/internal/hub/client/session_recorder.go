@@ -167,6 +167,88 @@ func (r *SessionRecorder) ResetSessionTurns(ctx context.Context, sessionID strin
 	return r.turnStore.DeleteTurns(ctx, r.projectName, sessionID)
 }
 
+func (r *SessionRecorder) DeleteSessionData(ctx context.Context, sessionID string) error {
+	if r == nil {
+		return nil
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
+	r.RemovePromptState(sessionID)
+	if r.turnStore == nil {
+		return nil
+	}
+	return r.turnStore.DeleteSession(ctx, r.projectName, sessionID)
+}
+
+func (r *SessionRecorder) HasUnfinishedPrompt(sessionID string) bool {
+	if r == nil {
+		return false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	state := r.promptState[sessionID]
+	return state != nil && len(state.turns) > 0 && !sessionPromptStateTerminal(state)
+}
+
+func (r *SessionRecorder) ReadPersistedTurnContentsForArchive(ctx context.Context, sessionID string, latestTurnIndex int64) ([]string, int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	if r == nil {
+		return nil, 0, fmt.Errorf("session recorder is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, 0, fmt.Errorf("session id is required")
+	}
+	if latestTurnIndex <= 0 {
+		return nil, 0, nil
+	}
+
+	contents := make([]string, 0, latestTurnIndex)
+	gapCount := 0
+	if r.turnStore != nil {
+		for turnIndex := int64(1); turnIndex <= latestTurnIndex; turnIndex++ {
+			if err := ctx.Err(); err != nil {
+				return nil, 0, err
+			}
+			content, err := r.turnStore.readTurn(ctx, r.projectName, sessionID, turnIndex)
+			if err != nil || len(content) == 0 {
+				contents = append(contents, archiveGapTurnJSON())
+				gapCount++
+				continue
+			}
+			contents = append(contents, string(content))
+		}
+		return contents, gapCount, nil
+	}
+
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+	byIndex := map[int64]string{}
+	for _, turn := range r.finishedTurns[sessionID] {
+		if turn.TurnIndex > 0 && turn.TurnIndex <= latestTurnIndex && strings.TrimSpace(turn.Content) != "" {
+			byIndex[turn.TurnIndex] = turn.Content
+		}
+	}
+	for turnIndex := int64(1); turnIndex <= latestTurnIndex; turnIndex++ {
+		content := byIndex[turnIndex]
+		if strings.TrimSpace(content) == "" {
+			contents = append(contents, archiveGapTurnJSON())
+			gapCount++
+			continue
+		}
+		contents = append(contents, content)
+	}
+	return contents, gapCount, nil
+}
+
 func (r *SessionRecorder) SetEventPublisher(publish func(method string, payload any) error) {
 	r.mu.Lock()
 	r.publish = publish

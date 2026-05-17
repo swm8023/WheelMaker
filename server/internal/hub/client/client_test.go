@@ -2,11 +2,15 @@ package client
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -3106,6 +3110,143 @@ func TestExtractUpdateTextSupportsExpectedShapes(t *testing.T) {
 	}
 }
 
+type archiveManifestForTest struct {
+	Version  int                                    `json:"version"`
+	Sessions map[string]archiveManifestEntryForTest `json:"sessions"`
+}
+
+type archiveManifestEntryForTest struct {
+	SessionID          string `json:"sessionId"`
+	ProjectName        string `json:"projectName"`
+	Title              string `json:"title"`
+	AgentType          string `json:"agentType"`
+	Storage            string `json:"storage"`
+	File               string `json:"file"`
+	Offset             int64  `json:"offset"`
+	Length             int64  `json:"length"`
+	UncompressedLength int64  `json:"uncompressedLength"`
+	Codec              string `json:"codec"`
+	SHA256             string `json:"sha256"`
+	UncompressedSHA256 string `json:"uncompressedSha256"`
+	TurnCount          int    `json:"turnCount"`
+	GapCount           int    `json:"gapCount"`
+	WMT2Version        int    `json:"wmt2Version"`
+	ChunkSizeCode      int    `json:"chunkSizeCode"`
+	ArchivedAt         string `json:"archivedAt"`
+	CreatedAt          string `json:"createdAt"`
+	UpdatedAt          string `json:"updatedAt"`
+}
+
+func readArchiveManifestForTest(t *testing.T, historyRoot, projectName string) archiveManifestForTest {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(historyRoot), "session-archive", safeHistoryPathPart(projectName), "manifest.json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile archive manifest: %v", err)
+	}
+	var manifest archiveManifestForTest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatalf("Unmarshal archive manifest: %v", err)
+	}
+	if manifest.Version != 1 {
+		t.Fatalf("manifest version = %d, want 1", manifest.Version)
+	}
+	if manifest.Sessions == nil {
+		t.Fatal("manifest sessions map is nil")
+	}
+	return manifest
+}
+
+func readArchivedSessionPayloadForTest(t *testing.T, historyRoot, projectName string, entry archiveManifestEntryForTest) ([]byte, []byte) {
+	t.Helper()
+	path := filepath.Join(filepath.Dir(historyRoot), "session-archive", safeHistoryPathPart(projectName), entry.File)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile archive pack: %v", err)
+	}
+	if entry.Offset < 0 || entry.Length <= 0 || entry.Offset+entry.Length > int64(len(raw)) {
+		t.Fatalf("archive segment offset/length outside pack: offset=%d length=%d pack=%d", entry.Offset, entry.Length, len(raw))
+	}
+	segment := raw[entry.Offset : entry.Offset+entry.Length]
+	if len(segment) < 26 {
+		t.Fatalf("archive segment too short: %d", len(segment))
+	}
+	if string(segment[0:4]) != "WMSA" {
+		t.Fatalf("archive segment magic = %q, want WMSA", string(segment[0:4]))
+	}
+	if version := binary.LittleEndian.Uint16(segment[4:6]); version != 1 {
+		t.Fatalf("archive segment version = %d, want 1", version)
+	}
+	if codec := segment[6]; codec != 1 {
+		t.Fatalf("archive segment codec = %d, want gzip codec 1", codec)
+	}
+	sessionIDLen := int(binary.LittleEndian.Uint16(segment[8:10]))
+	payloadLen := int64(binary.LittleEndian.Uint64(segment[10:18]))
+	uncompressedLen := int64(binary.LittleEndian.Uint64(segment[18:26]))
+	payloadStart := 26 + sessionIDLen
+	payloadEnd := payloadStart + int(payloadLen)
+	if payloadStart > len(segment) || payloadEnd != len(segment) {
+		t.Fatalf("archive segment payload bounds invalid: start=%d end=%d len=%d", payloadStart, payloadEnd, len(segment))
+	}
+	if gotSessionID := string(segment[26:payloadStart]); gotSessionID != entry.SessionID {
+		t.Fatalf("archive segment sessionID = %q, want %q", gotSessionID, entry.SessionID)
+	}
+	if uncompressedLen != entry.UncompressedLength {
+		t.Fatalf("archive segment uncompressedLen = %d, want %d", uncompressedLen, entry.UncompressedLength)
+	}
+	compressedPayload := segment[payloadStart:payloadEnd]
+	reader, err := gzip.NewReader(bytes.NewReader(compressedPayload))
+	if err != nil {
+		t.Fatalf("NewReader gzip payload: %v", err)
+	}
+	defer reader.Close()
+	uncompressed, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("ReadAll gzip payload: %v", err)
+	}
+	if int64(len(uncompressed)) != uncompressedLen {
+		t.Fatalf("uncompressed payload len = %d, want %d", len(uncompressed), uncompressedLen)
+	}
+	return uncompressed, segment
+}
+
+func decodeWMT2ContentsForTest(t *testing.T, raw []byte, turnCount int) []string {
+	t.Helper()
+	if len(raw) < 8 {
+		t.Fatalf("WMT2 payload too short: %d", len(raw))
+	}
+	if string(raw[0:4]) != sessionTurnFileMagic {
+		t.Fatalf("WMT2 magic = %q, want %s", string(raw[0:4]), sessionTurnFileMagic)
+	}
+	if version := binary.LittleEndian.Uint16(raw[4:6]); version != sessionTurnFileVersion {
+		t.Fatalf("WMT2 version = %d, want %d", version, sessionTurnFileVersion)
+	}
+	code := raw[6]
+	capacity := 256 << code
+	if turnCount > capacity {
+		t.Fatalf("turnCount = %d exceeds WMT2 capacity %d", turnCount, capacity)
+	}
+	headerSize := sessionTurnFilePreambleSize + capacity*sessionTurnFileMetaSize
+	if len(raw) < headerSize {
+		t.Fatalf("WMT2 payload len = %d, want at least header %d", len(raw), headerSize)
+	}
+	contents := make([]string, 0, turnCount)
+	for slot := 0; slot < turnCount; slot++ {
+		pos := sessionTurnFilePreambleSize + slot*sessionTurnFileMetaSize
+		offset := binary.LittleEndian.Uint32(raw[pos : pos+4])
+		length := binary.LittleEndian.Uint32(raw[pos+4 : pos+8])
+		if offset == 0 || length == 0 {
+			t.Fatalf("WMT2 slot %d is empty", slot)
+		}
+		end := int(offset) + int(length)
+		if int(offset) < headerSize || end > len(raw) {
+			t.Fatalf("WMT2 slot %d points outside payload", slot)
+		}
+		contents = append(contents, string(raw[int(offset):end]))
+	}
+	return contents
+}
+
 func TestSessionViewCreatedEventSilentlyHandlesMalformedTitle(t *testing.T) {
 	c := newSessionViewTestClient(t)
 	event := SessionViewEvent{
@@ -5094,6 +5235,190 @@ func TestHandleSessionRequestSessionDeleteCleansAgentArtifacts(t *testing.T) {
 		if call.projectName != "proj1" || call.agentType != "codexapp" || !strings.HasPrefix(call.sessionID, "sess-codexapp-") {
 			t.Fatalf("cleanup call=%#v, want codexapp project/session", call)
 		}
+	}
+}
+
+func TestHandleSessionRequestSessionArchiveWritesPackAndDeletesActiveSession(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	historyRoot := filepath.Join(t.TempDir(), "db", "session")
+	c.SetSessionHistoryRoot(historyRoot)
+	ctx := context.Background()
+
+	now := time.Date(2026, 5, 17, 10, 30, 0, 0, time.UTC)
+	addRuntimeSession(c, "sess-archive", "Archive Target", "claude", now, now)
+	c.mu.Lock()
+	c.routeMap["im:app:archive"] = "sess-archive"
+	c.mu.Unlock()
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-archive", "Archive Target")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptEvent("sess-archive", "hello", nil)); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewUpdateEvent("sess-archive", acp.SessionUpdate{
+		SessionUpdate: acp.SessionUpdateAgentMessageChunk,
+		Content:       mustJSON(acp.ContentBlock{Type: acp.ContentBlockTypeText, Text: "world"}),
+	})); err != nil {
+		t.Fatalf("RecordEvent update: %v", err)
+	}
+	if err := c.RecordEvent(ctx, sessionViewPromptFinishedEvent("sess-archive", acp.StopReasonEndTurn)); err != nil {
+		t.Fatalf("RecordEvent prompt finished: %v", err)
+	}
+
+	sessionDir := filepath.Join(historyRoot, safeHistoryPathPart("proj1"), safeHistoryPathPart("sess-archive"))
+	if _, err := os.Stat(sessionDir); err != nil {
+		t.Fatalf("expected source session dir before archive: %v", err)
+	}
+
+	resp, err := c.HandleSessionRequest(ctx, "session.archive", "proj1", json.RawMessage(`{"sessionId":"sess-archive"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.archive): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok {
+		t.Fatalf("session.archive response type = %T, want map[string]any", resp)
+	}
+	if body["ok"] != true || body["sessionId"] != "sess-archive" {
+		t.Fatalf("unexpected session.archive response body: %#v", body)
+	}
+
+	storedSession, err := c.store.LoadSession(ctx, "proj1", "sess-archive")
+	if err != nil {
+		t.Fatalf("LoadSession after archive: %v", err)
+	}
+	if storedSession != nil {
+		t.Fatalf("stored session still exists after archive: %+v", storedSession)
+	}
+	c.mu.Lock()
+	_, inMemory := c.sessions["sess-archive"]
+	_, routeMapped := c.routeMap["im:app:archive"]
+	c.mu.Unlock()
+	if inMemory {
+		t.Fatal("session still present in memory after archive")
+	}
+	if routeMapped {
+		t.Fatal("route binding still present after archive")
+	}
+	if _, err := os.Stat(sessionDir); !os.IsNotExist(err) {
+		t.Fatalf("source session dir stat err = %v, want not exist", err)
+	}
+
+	manifest := readArchiveManifestForTest(t, historyRoot, "proj1")
+	entry := manifest.Sessions["sess-archive"]
+	if entry.SessionID != "sess-archive" || entry.ProjectName != "proj1" || entry.Title != "hello" {
+		t.Fatalf("unexpected manifest entry identity: %#v", entry)
+	}
+	if entry.Storage != "pack" || entry.File != "archive.pack" || entry.Codec != "gzip" {
+		t.Fatalf("unexpected manifest storage fields: %#v", entry)
+	}
+	if entry.TurnCount != 3 || entry.GapCount != 0 || entry.WMT2Version != 2 || entry.ChunkSizeCode != 0 {
+		t.Fatalf("unexpected manifest counters: %#v", entry)
+	}
+
+	rawWMT2, compressedSegment := readArchivedSessionPayloadForTest(t, historyRoot, "proj1", entry)
+	if got := fmt.Sprintf("%x", sha256.Sum256(compressedSegment)); got != entry.SHA256 {
+		t.Fatalf("compressed sha256 = %s, want %s", got, entry.SHA256)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(rawWMT2)); got != entry.UncompressedSHA256 {
+		t.Fatalf("uncompressed sha256 = %s, want %s", got, entry.UncompressedSHA256)
+	}
+	contents := decodeWMT2ContentsForTest(t, rawWMT2, entry.TurnCount)
+	if len(contents) != 3 {
+		t.Fatalf("archive turn contents len = %d, want 3", len(contents))
+	}
+	if !strings.Contains(contents[0], acp.IMMethodPromptRequest) {
+		t.Fatalf("first archived turn = %s, want prompt request", contents[0])
+	}
+	if !strings.Contains(contents[1], "world") {
+		t.Fatalf("second archived turn = %s, want agent message", contents[1])
+	}
+	if !strings.Contains(contents[2], acp.IMMethodPromptDone) {
+		t.Fatalf("third archived turn = %s, want prompt done", contents[2])
+	}
+}
+
+func TestHandleSessionRequestSessionArchiveFillsMissingTurnsWithGap(t *testing.T) {
+	c := newSessionViewTestClient(t)
+	historyRoot := filepath.Join(t.TempDir(), "db", "session")
+	c.SetSessionHistoryRoot(historyRoot)
+	ctx := context.Background()
+
+	now := time.Date(2026, 5, 17, 11, 0, 0, 0, time.UTC)
+	if err := c.store.SaveSession(ctx, &SessionRecord{
+		ID:              "sess-gap",
+		ProjectName:     "proj1",
+		Status:          SessionPersisted,
+		AgentType:       "claude",
+		Title:           "Gap Target",
+		SessionSyncJSON: sessionSyncJSON(2),
+		CreatedAt:       now,
+		LastActiveAt:    now,
+	}); err != nil {
+		t.Fatalf("SaveSession: %v", err)
+	}
+
+	if _, err := c.HandleSessionRequest(ctx, "session.archive", "proj1", json.RawMessage(`{"sessionId":"sess-gap"}`)); err != nil {
+		t.Fatalf("HandleSessionRequest(session.archive): %v", err)
+	}
+
+	manifest := readArchiveManifestForTest(t, historyRoot, "proj1")
+	entry := manifest.Sessions["sess-gap"]
+	if entry.TurnCount != 2 || entry.GapCount != 2 {
+		t.Fatalf("manifest counters = turnCount:%d gapCount:%d, want 2/2", entry.TurnCount, entry.GapCount)
+	}
+	rawWMT2, _ := readArchivedSessionPayloadForTest(t, historyRoot, "proj1", entry)
+	contents := decodeWMT2ContentsForTest(t, rawWMT2, entry.TurnCount)
+	for i, content := range contents {
+		if !strings.Contains(content, "session/archive_gap") || !strings.Contains(content, "missing_turn") {
+			t.Fatalf("content[%d] = %s, want archive gap turn", i, content)
+		}
+	}
+}
+
+func TestHandleSessionRequestSessionMutationsRejectRunningSession(t *testing.T) {
+	for _, method := range []string{"session.archive", "session.delete", "session.reload"} {
+		t.Run(method, func(t *testing.T) {
+			c := newSessionViewTestClient(t)
+			c.SetSessionHistoryRoot(filepath.Join(t.TempDir(), "db", "session"))
+			ctx := context.Background()
+			now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+			if err := c.store.SaveSession(ctx, &SessionRecord{
+				ID:              "sess-running",
+				ProjectName:     "proj1",
+				Status:          SessionPersisted,
+				AgentType:       "claude",
+				Title:           "Running Target",
+				SessionSyncJSON: sessionSyncJSON(0),
+				CreatedAt:       now,
+				LastActiveAt:    now,
+			}); err != nil {
+				t.Fatalf("SaveSession: %v", err)
+			}
+			c.sessionRecorder.writeMu.Lock()
+			state := newSessionPromptState(1)
+			state.updateTurn(sessionTurnMessage{
+				sessionID: "sess-running",
+				method:    acp.IMMethodPromptRequest,
+				payload:   acp.IMPromptRequest{ContentBlocks: []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "still running"}}},
+				turnIndex: 1,
+				finished:  true,
+			}, "")
+			c.sessionRecorder.promptState["sess-running"] = &state
+			c.sessionRecorder.writeMu.Unlock()
+
+			_, err := c.HandleSessionRequest(ctx, method, "proj1", json.RawMessage(`{"sessionId":"sess-running"}`))
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "running") {
+				t.Fatalf("HandleSessionRequest(%s) err = %v, want running rejection", method, err)
+			}
+			storedSession, loadErr := c.store.LoadSession(ctx, "proj1", "sess-running")
+			if loadErr != nil {
+				t.Fatalf("LoadSession after rejected mutation: %v", loadErr)
+			}
+			if storedSession == nil {
+				t.Fatal("running session was deleted after rejected mutation")
+			}
+		})
 	}
 }
 

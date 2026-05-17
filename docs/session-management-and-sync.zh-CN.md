@@ -167,3 +167,114 @@ type Cursor = { turnIndex: number };
 - app/web 侧 `prompts` read response 缓存。
 
 历史迁移已经完成，后续版本启动时只做当前 SQLite schema 严格校验，不再执行旧结构自动迁移。
+
+## 7. Session 归档
+
+`session.archive` 用于把非运行中的普通 session 移出常规会话系统，同时把已完成正文保留到冷归档文件。归档后 v1 不支持恢复、不提供归档列表/读取 API、不进入 monitor，也不提供 Feishu `/archive` 命令。
+
+归档和删除的区别：
+
+- `session.archive`：先写归档 pack 和 manifest，成功后删除 `sessions` / `route_bindings`，再删除原 `db/session/<projectName>/<sessionId>` 目录。
+- `session.delete`：直接删除普通 session 索引和原 session 目录，不写归档，也不触碰已存在归档。
+
+`session.archive`、`session.delete`、`session.reload` 都必须拒绝运行中的 session。running 判定以服务端内存态为准：如果 session 仍有 active prompt 或 recorder 中存在未 terminal 的 prompt state，则返回错误；客户端的 `running` 字段只用于禁用按钮。
+
+归档目录：
+
+```text
+~/.wheelmaker/db/session-archive/<projectName>/
+  archive.pack
+  manifest.json
+```
+
+其中 `<projectName>` 使用和普通 session 历史相同的 safe path segment。归档不保留 images；原 session 目录删除时一并删除图片。
+
+### 7.1 Manifest
+
+`manifest.json` 是归档索引的 source of truth，按 session id 做 map upsert。时间字段统一为 UTC RFC3339。
+
+```json
+{
+  "version": 1,
+  "updatedAt": "2026-05-17T12:34:56Z",
+  "sessions": {
+    "019e...": {
+      "sessionId": "019e...",
+      "projectName": "WheelMaker",
+      "title": "...",
+      "agentType": "codexapp",
+      "createdAt": "2026-05-12T00:34:13Z",
+      "updatedAt": "2026-05-17T12:00:00Z",
+      "archivedAt": "2026-05-17T12:34:56Z",
+      "turnCount": 932,
+      "gapCount": 0,
+      "storage": "pack",
+      "file": "archive.pack",
+      "offset": 123456,
+      "length": 9876,
+      "uncompressedLength": 45678,
+      "codec": "gzip",
+      "sha256": "...",
+      "uncompressedSha256": "...",
+      "wmt2Version": 2,
+      "chunkSizeCode": 2
+    }
+  }
+}
+```
+
+manifest 只保存索引和元信息，不保存 `agent_json`、`session_sync_json`、route binding 或图片信息。
+
+### 7.2 Pack Segment
+
+归档 pack 是 append-only。每个 session 作为一个独立 gzip segment 追加到 `archive.pack`。v1 不做 compact；manifest 未引用的 orphan bytes 会被忽略。
+
+每个 segment 的外层 header：
+
+```text
+0..3   magic = "WMSA"
+4..5   version = 1
+6      codec = 1  // gzip
+7      reserved = 0
+8..9   sessionIDLen uint16 little-endian
+10..17 payloadLen uint64 little-endian
+18..25 uncompressedLen uint64 little-endian
+26..   sessionID bytes
+...    gzip(WMT2 bytes)
+```
+
+manifest 的 `offset` 指向 WMSA segment header 起点，`length` 是整个 segment 长度。
+
+### 7.3 WMT2 聚合
+
+segment 解压后的 payload 是一个标准 WMT2 v2 文件，只是 `chunkSizeCode` 可大于 0。容量公式：
+
+```text
+turnCapacity = 256 << chunkSizeCode
+headerSize = 8 + turnCapacity * 8
+```
+
+归档时按 `turnCount` 选择能容纳所有 turns 的最小 `chunkSizeCode`，上限为 `chunkSizeCode <= 10`，即最多 `262144` turns。普通热 session 写入仍固定使用 `chunkSizeCode=0`、`256` turns/file，不改变热路径效率。
+
+归档读取源是 `1..latestPersistedTurnIndex`。如果某个 turn 文件或 slot 缺失，归档写入非空 gap turn 占位，保持 turn index 连续：
+
+```json
+{"method":"session/archive_gap","param":{"reason":"missing_turn"}}
+```
+
+manifest 记录 `gapCount`。WMT2 slot 不能使用 `len=0` 表示 gap，因为现有格式把 offset 或 len 为 0 视为不存在。
+
+### 7.4 写入和失败语义
+
+归档写入顺序：
+
+1. 校验 session 非 running。
+2. 从 `sessions` 读取元信息和 `latestPersistedTurnIndex`。
+3. 读取普通 turn 文件并生成单 session WMT2 bytes，缺 turn 写 gap turn。
+4. gzip 压缩 WMT2 bytes，计算压缩前后 SHA-256。
+5. 持 project 级进程内锁 append WMSA segment 到 `archive.pack` 并 fsync。
+6. 读取并 upsert `manifest.json`，写 temp 文件后 rename。
+7. 删除 `route_bindings` 和 `sessions`。
+8. 删除原 `db/session/<projectName>/<sessionId>` 目录。
+
+1-6 任一步失败都不能删除 active index。7-8 失败时 manifest 已存在；下一次 `session.archive` 对同一 session 应幂等地继续尝试删除 active index 和原目录。

@@ -95,6 +95,7 @@ import type {
   RegistryResumableSession,
   RegistrySessionContentBlock,
   RegistrySessionConfigOption,
+  RegistrySessionSummary,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -2215,6 +2216,7 @@ function App() {
   const [chatShowScrollToBottom, setChatShowScrollToBottom] = useState(false);
   const [chatDeletingSessionId, setChatDeletingSessionId] = useState('');
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
+  const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
   const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
@@ -5266,6 +5268,29 @@ function App() {
     }
   };
 
+  const handleArchiveProjectSession = async (targetProjectId: string, sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    if (!targetProjectId || !normalizedSessionId || chatArchivingSessionId) {
+      return;
+    }
+    setChatArchivingSessionId(normalizedSessionId);
+    try {
+      const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);
+      if (!result.ok) {
+        throw new Error('session.archive returned ok=false');
+      }
+      removeProjectChatSessionFromState(
+        targetProjectId,
+        result.sessionId || normalizedSessionId,
+      );
+      setProjectSessionActionMenu(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setChatArchivingSessionId('');
+    }
+  };
+
   const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {
     const normalizedSessionId = sessionId.trim();
     if (!targetProjectId || !normalizedSessionId || chatReloadingSessionId) {
@@ -6084,13 +6109,18 @@ function App() {
     }
   };
 
-  const renderProjectSessionActionStrip = (targetProjectId: string, sessionId: string) => {
+  const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {
+    const sessionId = session.sessionId;
     if (
       projectSessionActionMenu?.projectId !== targetProjectId ||
       projectSessionActionMenu.sessionId !== sessionId
     ) {
       return null;
     }
+    const sessionActionDisabled = !!session.running ||
+      chatReloadingSessionId === sessionId ||
+      chatArchivingSessionId === sessionId ||
+      chatDeletingSessionId === sessionId;
     return (
       <div className="project-session-action-strip">
         <button
@@ -6098,7 +6128,7 @@ function App() {
           className="project-session-action-btn reload"
           title="Reload session"
           aria-label="Reload session"
-          disabled={chatReloadingSessionId === sessionId}
+          disabled={sessionActionDisabled}
           onPointerDown={event => event.stopPropagation()}
           onClick={event => {
             event.stopPropagation();
@@ -6116,10 +6146,31 @@ function App() {
         </button>
         <button
           type="button"
+          className="project-session-action-btn archive"
+          title="Archive session"
+          aria-label="Archive session"
+          disabled={sessionActionDisabled}
+          onPointerDown={event => event.stopPropagation()}
+          onClick={event => {
+            event.stopPropagation();
+            handleArchiveProjectSession(targetProjectId, sessionId).catch(() => undefined);
+          }}
+        >
+          <span
+            className={`codicon ${
+              chatArchivingSessionId === sessionId
+                ? 'codicon-loading codicon-modifier-spin'
+                : 'codicon-archive'
+            }`}
+          />
+          <span className="project-session-action-label">Archive</span>
+        </button>
+        <button
+          type="button"
           className="project-session-action-btn delete"
           title="Delete session"
           aria-label="Delete session"
-          disabled={chatDeletingSessionId === sessionId}
+          disabled={sessionActionDisabled}
           onPointerDown={event => event.stopPropagation()}
           onClick={event => {
             event.stopPropagation();
@@ -7709,7 +7760,7 @@ function App() {
                               {formatCompactRelativeAge(session.updatedAt)}
                             </span>
                           </button>
-                          {renderProjectSessionActionStrip(targetProjectId, session.sessionId)}
+                          {renderProjectSessionActionStrip(targetProjectId, session)}
                         </div>
                       );
                     })}
@@ -7979,7 +8030,7 @@ function App() {
                             {formatCompactRelativeAge(session.updatedAt)}
                           </span>
                         </button>
-                        {renderProjectSessionActionStrip(targetProjectId, session.sessionId)}
+                        {renderProjectSessionActionStrip(targetProjectId, session)}
                       </div>
                     );
                   })}

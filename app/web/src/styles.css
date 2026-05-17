@@ -1690,7 +1690,7 @@ body,
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(162px, 68%);
+  width: min(236px, 80%);
   border-radius: 0 6px 6px 0;
   pointer-events: none;
   background: linear-gradient(
@@ -1708,7 +1708,7 @@ body,
   height: 30px;
   transform: translateY(-50%);
   z-index: 3;
-  width: min(154px, 64%);
+  width: min(228px, 76%);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -1755,6 +1755,11 @@ body,
   background: color-mix(in srgb, #2f9e44 18%, transparent);
 }
 
+.project-session-action-btn.archive {
+  color: color-mix(in srgb, #2b6cb0 86%, var(--text));
+  background: color-mix(in srgb, #2b6cb0 14%, transparent);
+}
+
 .project-session-action-btn.delete {
   color: color-mix(in srgb, var(--danger) 84%, var(--text));
   background: color-mix(in srgb, var(--danger) 10%, transparent);
@@ -1767,6 +1772,10 @@ body,
 
 .project-session-action-btn.reload:hover {
   background: color-mix(in srgb, #2f9e44 26%, transparent);
+}
+
+.project-session-action-btn.archive:hover {
+  background: color-mix(in srgb, #2b6cb0 22%, transparent);
 }
 
 .project-session-action-btn.delete:hover {

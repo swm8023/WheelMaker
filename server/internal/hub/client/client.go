@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -77,6 +78,7 @@ type Client struct {
 	stopPersistCh  chan struct{} // closed to stop the persist timer goroutine
 
 	sessionRecorder *SessionRecorder
+	archiveStore    *sessionArchiveStore
 	viewSink        SessionViewSink
 	httpClient      *http.Client
 	deepSeekBaseURL string
@@ -123,9 +125,11 @@ func (c *Client) SetSessionHistoryRoot(root string) {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		c.sessionRecorder.turnStore = nil
+		c.archiveStore = nil
 		return
 	}
 	c.sessionRecorder.turnStore = newFileSessionTurnStore(root)
+	c.archiveStore = newSessionArchiveStore(filepath.Join(filepath.Dir(root), "session-archive"))
 }
 
 // Start loads persisted state.
@@ -605,6 +609,17 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, fmt.Errorf("invalid session.reload payload: %w", err)
 		}
 		return c.recovery().ReloadSession(ctx, req.SessionID)
+	case "session.archive":
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.archive payload: %w", err)
+		}
+		if err := c.ArchiveSession(ctx, req.SessionID); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
 	case "session.token.providers":
 		return map[string]any{
 			"providers": []map[string]any{
@@ -1384,9 +1399,16 @@ func (c *Client) ListSessions(ctx context.Context) ([]SessionRecord, error) {
 }
 
 func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	return c.deleteActiveSession(ctx, sessionID, true)
+}
+
+func (c *Client) deleteActiveSession(ctx context.Context, sessionID string, rejectRunning bool) error {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return fmt.Errorf("session id is required")
+	}
+	if rejectRunning && c.sessionIsRunning(sessionID) {
+		return fmt.Errorf("session %s is running", sessionID)
 	}
 
 	c.mu.Lock()
@@ -1422,12 +1444,14 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 			agentType = rec.AgentType
 		}
 	}
-	if c.sessionRecorder != nil {
-		c.sessionRecorder.RemovePromptState(sessionID)
-	}
 	if store != nil {
 		if err := store.DeleteSession(ctx, c.projectName, sessionID); err != nil {
 			return err
+		}
+	}
+	if c.sessionRecorder != nil {
+		if err := c.sessionRecorder.DeleteSessionData(ctx, sessionID); err != nil {
+			return fmt.Errorf("delete session data: %w", err)
 		}
 	}
 	if cleanupSessionArtifacts != nil {
@@ -1436,6 +1460,58 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 		}
 	}
 	return nil
+}
+
+func (c *Client) ArchiveSession(ctx context.Context, sessionID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if c.sessionIsRunning(sessionID) {
+		return fmt.Errorf("session %s is running", sessionID)
+	}
+	if c.archiveStore == nil {
+		return fmt.Errorf("session archive store is required")
+	}
+
+	alreadyArchived, err := c.archiveStore.HasSession(ctx, c.projectName, sessionID)
+	if err != nil {
+		return err
+	}
+	if alreadyArchived {
+		return c.deleteActiveSession(ctx, sessionID, false)
+	}
+
+	rec, err := c.store.LoadSession(ctx, c.projectName, sessionID)
+	if err != nil {
+		return fmt.Errorf("load session: %w", err)
+	}
+	if rec == nil {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	latestTurnIndex := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
+	contents, gapCount, err := c.sessionRecorder.ReadPersistedTurnContentsForArchive(ctx, sessionID, latestTurnIndex)
+	if err != nil {
+		return err
+	}
+	if _, _, err := c.archiveStore.AppendSession(ctx, *rec, contents, gapCount); err != nil {
+		return err
+	}
+	return c.deleteActiveSession(ctx, sessionID, false)
+}
+
+func (c *Client) sessionIsRunning(sessionID string) bool {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return false
+	}
+	c.mu.Lock()
+	sess := c.sessions[sessionID]
+	c.mu.Unlock()
+	if sess != nil && sess.isRunning() {
+		return true
+	}
+	return c.sessionRecorder != nil && c.sessionRecorder.HasUnfinishedPrompt(sessionID)
 }
 
 func (c *Client) clientListSessions() ([]SessionRecord, error) {

@@ -132,6 +132,19 @@ func (s *fileSessionTurnStore) DeleteTurns(ctx context.Context, projectName, ses
 	return nil
 }
 
+func (s *fileSessionTurnStore) DeleteSession(ctx context.Context, projectName, sessionID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s == nil {
+		return nil
+	}
+	if err := os.RemoveAll(s.sessionDir(projectName, sessionID)); err != nil {
+		return fmt.Errorf("delete session dir: %w", err)
+	}
+	return nil
+}
+
 func (s *fileSessionTurnStore) latestTurnIndex(ctx context.Context, projectName, sessionID string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -267,7 +280,11 @@ func (s *fileSessionTurnStore) latestTurnIndexInFile(path string, fileNo int64) 
 }
 
 func (s *fileSessionTurnStore) turnDir(projectName, sessionID string) string {
-	return filepath.Join(s.root, safeHistoryPathPart(projectName), safeHistoryPathPart(sessionID), "turns")
+	return filepath.Join(s.sessionDir(projectName, sessionID), "turns")
+}
+
+func (s *fileSessionTurnStore) sessionDir(projectName, sessionID string) string {
+	return filepath.Join(s.root, safeHistoryPathPart(projectName), safeHistoryPathPart(sessionID))
 }
 
 func (s *fileSessionTurnStore) turnPath(projectName, sessionID string, turnIndex int64) (string, int64, int) {
