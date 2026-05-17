@@ -1,4 +1,4 @@
-import {extractChatOptionReplies} from '../web/src/chat/chatOptionReplies';
+import {extractChatOptionReplies, splitChatOptionReplyText} from '../web/src/chat/chatOptionReplies';
 
 describe('chat option reply extraction', () => {
   test('extracts contiguous A/B/C line-start choices', () => {
@@ -34,5 +34,37 @@ describe('chat option reply extraction', () => {
       '',
       'A. Only one visible choice',
     ].join('\n'))).toEqual([]);
+  });
+
+  test('splits the latest choice block so the original option lines can be replaced inline', () => {
+    expect(splitChatOptionReplyText([
+      'Pick one:',
+      '',
+      'A. Apply the small change',
+      'B. Keep the existing behavior',
+      '',
+      'Only reply with the letter.',
+    ].join('\n'))).toEqual([
+      {type: 'markdown', text: 'Pick one:\n\n'},
+      {type: 'option', reply: {label: 'A', text: 'Apply the small change'}},
+      {type: 'option', reply: {label: 'B', text: 'Keep the existing behavior'}},
+      {type: 'markdown', text: '\n\nOnly reply with the letter.'},
+    ]);
+  });
+
+  test('splits only the latest valid choice block in a message', () => {
+    expect(splitChatOptionReplyText([
+      'Previous notes:',
+      'A. Old option',
+      'B. Old alternative',
+      '',
+      'Current choice:',
+      'A. Send A',
+      'B. Send B',
+    ].join('\n'))).toEqual([
+      {type: 'markdown', text: 'Previous notes:\nA. Old option\nB. Old alternative\n\nCurrent choice:\n'},
+      {type: 'option', reply: {label: 'A', text: 'Send A'}},
+      {type: 'option', reply: {label: 'B', text: 'Send B'}},
+    ]);
   });
 });

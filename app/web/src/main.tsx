@@ -48,7 +48,7 @@ import {
   type ChatTurnWindow,
 } from './chat/chatTurnWindow';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
-import { extractChatOptionReplies, type ChatOptionReply } from './chat/chatOptionReplies';
+import { extractChatOptionReplies, splitChatOptionReplyText, type ChatOptionReply } from './chat/chatOptionReplies';
 import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
@@ -1002,34 +1002,50 @@ const ChatTurnView = React.memo(function ChatTurnView({
   if (!text) {
     return null;
   }
+  const optionReplyParts = optionReplies.length > 0 ? splitChatOptionReplyText(text) : [];
   return (
     <div className="chat-main-message">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        urlTransform={markdownUrlTransform}
-        rehypePlugins={[rehypeKatex]}
-        components={markdownComponents}
-      >
-        {text}
-      </ReactMarkdown>
-      {optionReplies.length > 0 ? (
-        <div className="chat-option-replies" aria-label="Reply options">
-          {optionReplies.map(option => (
-            <button
-              key={option.label}
-              type="button"
-              className="chat-option-reply-button"
-              onClick={() => onSelectOptionReply?.(option.label)}
-              disabled={optionRepliesDisabled}
-              title={option.text}
-              aria-label={`Reply ${option.label}`}
-            >
-              <span className="chat-option-reply-label">{option.label}</span>
-              <span className="chat-option-reply-text">{option.text}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {optionReplyParts.length > 0 ? (
+        optionReplyParts.map((part, index) => {
+          if (part.type === 'markdown') {
+            return part.text ? (
+              <ReactMarkdown
+                key={`markdown:${index}`}
+                remarkPlugins={[remarkGfm, remarkMath]}
+                urlTransform={markdownUrlTransform}
+                rehypePlugins={[rehypeKatex]}
+                components={markdownComponents}
+              >
+                {part.text}
+              </ReactMarkdown>
+            ) : null;
+          }
+          return (
+            <div key={`option:${part.reply.label}:${index}`} className="chat-option-reply-line">
+              <button
+                type="button"
+                className="chat-option-reply-inline-button"
+                onClick={() => onSelectOptionReply?.(part.reply.label)}
+                disabled={optionRepliesDisabled}
+                title={part.reply.text}
+                aria-label={`Reply ${part.reply.label}: ${part.reply.text}`}
+              >
+                <span className="chat-option-reply-label">{part.reply.label}.</span>
+                <span className="chat-option-reply-text">{part.reply.text}</span>
+              </button>
+            </div>
+          );
+        })
+      ) : (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          urlTransform={markdownUrlTransform}
+          rehypePlugins={[rehypeKatex]}
+          components={markdownComponents}
+        >
+          {text}
+        </ReactMarkdown>
+      )}
     </div>
   );
 });
