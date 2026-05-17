@@ -52,6 +52,44 @@ describe('chat option reply extraction', () => {
     ]);
   });
 
+  test('keeps explanatory paragraphs as markdown between selectable option headings', () => {
+    const text = [
+      '第一个问题：**“消息已发送成功”的判定边界应该是哪一个？**',
+      '',
+      'A. `session.send` 返回 `ok=true` 就算发送成功。  ',
+      '推荐度低。它只能说明请求处理过，不一定说明 UI 已收到并对上了服务端 turn。',
+      '',
+      'B. 服务端发布并被前端收到对应的 `prompt_request` turn 后，才算发送成功。  ',
+      '**推荐。** 这能区分“本地已点发送”“服务端已接收/落库”“AI 正在回复”。',
+      '',
+      'C. 收到第一段 AI 回复后才算成功。  ',
+      '太晚。模型排队或长时间思考时会误判为未发送。',
+      '',
+      '我的推荐是 **B**。',
+    ].join('\n');
+
+    expect(extractChatOptionReplies(text)).toEqual([
+      {label: 'A', text: '`session.send` 返回 `ok=true` 就算发送成功。'},
+      {label: 'B', text: '服务端发布并被前端收到对应的 `prompt_request` turn 后，才算发送成功。'},
+      {label: 'C', text: '收到第一段 AI 回复后才算成功。'},
+    ]);
+    expect(splitChatOptionReplyText(text)).toEqual([
+      {type: 'markdown', text: '第一个问题：**“消息已发送成功”的判定边界应该是哪一个？**\n\n'},
+      {type: 'option', reply: {label: 'A', text: '`session.send` 返回 `ok=true` 就算发送成功。'}},
+      {type: 'markdown', text: '\n推荐度低。它只能说明请求处理过，不一定说明 UI 已收到并对上了服务端 turn。\n\n'},
+      {
+        type: 'option',
+        reply: {
+          label: 'B',
+          text: '服务端发布并被前端收到对应的 `prompt_request` turn 后，才算发送成功。',
+        },
+      },
+      {type: 'markdown', text: '\n**推荐。** 这能区分“本地已点发送”“服务端已接收/落库”“AI 正在回复”。\n\n'},
+      {type: 'option', reply: {label: 'C', text: '收到第一段 AI 回复后才算成功。'}},
+      {type: 'markdown', text: '\n太晚。模型排队或长时间思考时会误判为未发送。\n\n我的推荐是 **B**。'},
+    ]);
+  });
+
   test('splits only the latest valid choice block in a message', () => {
     expect(splitChatOptionReplyText([
       'Previous notes:',
