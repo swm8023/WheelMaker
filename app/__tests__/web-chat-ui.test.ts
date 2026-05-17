@@ -371,6 +371,24 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.chat-permission-button');
   });
 
+  test('chat breadcrumb title uses the selected session project', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    const chatProjectNameStart = mainTsx.indexOf('const chatBreadcrumbProjectName = useMemo(');
+    const chatLabelStart = mainTsx.indexOf('const chatBreadcrumbLabel = useMemo(', chatProjectNameStart);
+    expect(chatProjectNameStart).toBeGreaterThanOrEqual(0);
+    expect(chatLabelStart).toBeGreaterThan(chatProjectNameStart);
+
+    const chatProjectNameBlock = mainTsx.slice(chatProjectNameStart, chatLabelStart);
+    expect(chatProjectNameBlock).toContain('selectedChatKey?.projectId');
+    expect(chatProjectNameBlock).toContain('projects.find(item => item.projectId === selectedProjectId)?.name');
+    expect(chatProjectNameBlock).toContain('breadcrumbProjectName');
+    expect(mainTsx).toContain('renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)');
+    expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, fileBreadcrumbLabel)');
+    expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)');
+  });
+
   test('chat composer is a unified command frame with compact custom config pills', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');

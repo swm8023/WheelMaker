@@ -3425,6 +3425,17 @@ function App() {
     () => (currentProjectName || '').trim() || 'Project',
     [currentProjectName],
   );
+  const chatBreadcrumbProjectName = useMemo(
+    () => {
+      const selectedProjectId = selectedChatKey?.projectId;
+      if (!selectedProjectId || selectedProjectId === projectId) {
+        return breadcrumbProjectName;
+      }
+      const selectedProjectName = projects.find(item => item.projectId === selectedProjectId)?.name;
+      return selectedProjectName || 'Project';
+    },
+    [breadcrumbProjectName, projectId, projects, selectedChatKey?.projectId],
+  );
   const fileBreadcrumbLabel = useMemo(
     () => splitPathForDisplay(selectedFile).fileName || 'No Selected File',
     [selectedFile],
@@ -3438,9 +3449,9 @@ function App() {
     [selectedDiff],
   );
   const renderBreadcrumbTitle = useCallback(
-    (label: string) => (
+    (projectName: string, label: string) => (
       <div className="breadcrumb-title">
-        <span className="breadcrumb-project-name">{breadcrumbProjectName}</span>
+        <span className="breadcrumb-project-name">{projectName}</span>
         <span className="breadcrumb-separator" aria-hidden="true">
           &gt;
         </span>
@@ -3449,7 +3460,7 @@ function App() {
         </span>
       </div>
     ),
-    [breadcrumbProjectName],
+    [],
   );
   const floatingBounds = useMemo(() => {
     if (isWide) {
@@ -8604,7 +8615,7 @@ function App() {
                 CHAT - {selectedChatSession?.title || 'New Session'}
               </>
             ) : (
-              renderBreadcrumbTitle(chatBreadcrumbLabel)
+              renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)
             )}
           </div>
           <div
@@ -8969,7 +8980,7 @@ function App() {
                 {selectedFile || 'Select a file'}
               </span>
             ) : (
-              renderBreadcrumbTitle(fileBreadcrumbLabel)
+              renderBreadcrumbTitle(breadcrumbProjectName, fileBreadcrumbLabel)
             )}
             <div className="view-tools">{renderViewTools()}</div>
           </div>
@@ -9194,7 +9205,7 @@ function App() {
               {selectedDiff || 'Select a changed file'}
             </span>
           ) : (
-            renderBreadcrumbTitle(gitBreadcrumbLabel)
+            renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)
           )}
           <div className="view-tools">{renderViewTools()}</div>
         </div>
