@@ -698,7 +698,7 @@ body,
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   background: color-mix(in srgb, var(--panel) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(2px);
 }
 
 .floating-nav-group {

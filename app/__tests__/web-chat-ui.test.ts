@@ -607,7 +607,7 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(stylesCss).toMatch(
-      /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(3px\);[\s\S]*\}/,
+      /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(2px\);[\s\S]*\}/,
     );
     expect(stylesCss).not.toContain('background: color-mix(in srgb, var(--panel) 78%, transparent);');
   });
