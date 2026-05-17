@@ -698,7 +698,7 @@ body,
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
   background: color-mix(in srgb, var(--panel) 34%, transparent);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(1px);
 }
 
 .floating-nav-group {
@@ -3617,6 +3617,11 @@ body,
   text-align: left;
   font: inherit;
   line-height: 1.35;
+}
+
+.chat-option-reply-inline-button,
+.chat-scroll-bottom-button {
+  backdrop-filter: blur(1px);
 }
 
 .chat-option-reply-inline-button {

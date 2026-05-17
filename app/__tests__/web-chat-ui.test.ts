@@ -529,6 +529,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-option-reply-inline-button \{[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
     );
+    expect(stylesCss).toMatch(
+      /\.chat-option-reply-inline-button,\s*\.chat-scroll-bottom-button \{[\s\S]*backdrop-filter: blur\(1px\);[\s\S]*\}/,
+    );
     const historicalOptionBlocks = stylesCss.match(/\.chat-option-reply-static \{[\s\S]*?\n\}/g) ?? [];
     const historicalOptionBlock = historicalOptionBlocks[historicalOptionBlocks.length - 1] ?? '';
     expect(historicalOptionBlock).toContain('border-color: var(--border);');
@@ -548,6 +551,7 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-scroll-bottom-button {');
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toMatch(
       /\.chat-composer-toolbar \{[\s\S]*min-height: 24px;[\s\S]*\}/,
@@ -607,7 +611,7 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(stylesCss).toMatch(
-      /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(2px\);[\s\S]*\}/,
+      /\.floating-nav-group,\s*\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 34%, transparent\);[\s\S]*backdrop-filter: blur\(1px\);[\s\S]*\}/,
     );
     expect(stylesCss).not.toContain('background: color-mix(in srgb, var(--panel) 78%, transparent);');
   });
