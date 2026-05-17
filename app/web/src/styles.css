@@ -3608,9 +3608,8 @@ body,
 .chat-option-reply-inline-button,
 .chat-option-reply-static {
   max-width: min(100%, 560px);
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border: 1px solid;
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-1) 88%, var(--accent));
   color: inherit;
   min-height: 30px;
   padding: 5px 9px 5px 8px;
@@ -3623,6 +3622,8 @@ body,
 }
 
 .chat-option-reply-inline-button {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--surface-1) 88%, var(--accent));
   cursor: pointer;
 }
 
@@ -3642,7 +3643,13 @@ body,
 }
 
 .chat-option-reply-static {
-  opacity: 0.76;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--panel) 92%, var(--text) 4%);
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+}
+
+.chat-option-reply-static .chat-option-reply-label {
+  color: var(--muted);
 }
 
 .chat-option-reply-label {

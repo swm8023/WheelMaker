@@ -49,6 +49,7 @@ import {
 } from './chat/chatTurnWindow';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import { extractChatOptionReplies, splitChatOptionReplyText, type ChatOptionReply } from './chat/chatOptionReplies';
+import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
@@ -2673,22 +2674,28 @@ function App() {
 
   const applyChatSlashCommand = useCallback(
     (command: ChatSlashCommandOption) => {
-      const next = `${command.name} `;
+      const input = chatComposerTextareaRef.current;
+      const inserted = insertChatSlashCommandText(
+        chatComposerText,
+        command.name,
+        input?.selectionStart ?? chatComposerText.length,
+        input?.selectionEnd ?? input?.selectionStart ?? chatComposerText.length,
+      );
       setChatPromptMenuOpen(false);
       setChatQuickReplyMenuOpen(false);
       setChatConfigMenuOptionId('');
       setChatConfigOverflowOpen(false);
-      updateChatComposerText(next);
+      updateChatComposerText(inserted.text);
       window.requestAnimationFrame(() => {
         const input = chatComposerTextareaRef.current;
         if (!input) {
           return;
         }
         input.focus();
-        input.setSelectionRange(next.length, next.length);
+        input.setSelectionRange(inserted.selectionStart, inserted.selectionEnd);
       });
     },
-    [setChatConfigOverflowOpen, updateChatComposerText],
+    [chatComposerText, setChatConfigOverflowOpen, updateChatComposerText],
   );
 
   const openChatPromptMenu = useCallback(() => {

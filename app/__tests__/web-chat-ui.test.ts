@@ -443,6 +443,8 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('showChatConfigLabels');
     expect(mainTsx).not.toContain('chatConfigFeedback');
     expect(mainTsx).not.toContain('Applying config');
+    expect(mainTsx).toContain("import { insertChatSlashCommandText } from './chat/chatSlashInsertion';");
+    expect(mainTsx).toContain('const inserted = insertChatSlashCommandText(');
 
     const quickReplyMenuOpenStart = mainTsx.indexOf('const openChatQuickReplyMenu = useCallback(() => {');
     const quickReplyMenuOpenEnd = mainTsx.indexOf('const getChatDraftGeneration = useCallback', quickReplyMenuOpenStart);
@@ -483,6 +485,18 @@ describe('web chat integration', () => {
     expect(configChangeBody.indexOf('applyChatSessionConfigOptions')).toBeGreaterThan(setConfigCall);
     expect(configChangeBody).not.toContain('setChatSessions(prev =>');
 
+    const slashApplyStart = mainTsx.indexOf('const applyChatSlashCommand = useCallback(');
+    const slashApplyEnd = mainTsx.indexOf('const openChatPromptMenu = useCallback', slashApplyStart);
+    expect(slashApplyStart).toBeGreaterThanOrEqual(0);
+    expect(slashApplyEnd).toBeGreaterThan(slashApplyStart);
+    const slashApplyBody = mainTsx.slice(slashApplyStart, slashApplyEnd);
+    expect(slashApplyBody).toContain('insertChatSlashCommandText(');
+    expect(slashApplyBody).toContain('chatComposerText,');
+    expect(slashApplyBody).toContain('input?.selectionStart ?? chatComposerText.length');
+    expect(slashApplyBody).toContain('updateChatComposerText(inserted.text);');
+    expect(slashApplyBody).toContain('input.setSelectionRange(inserted.selectionStart, inserted.selectionEnd);');
+    expect(slashApplyBody).not.toContain('updateChatComposerText(next);');
+
     expect(stylesCss).toMatch(
       /button,\s*\[role='button'\],\s*\[role='menuitemradio'\],\s*\[role='option'\]\s*\{[\s\S]*-webkit-tap-highlight-color: transparent;/,
     );
@@ -513,7 +527,13 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-option-reply-inline-button {');
     expect(stylesCss).toContain('.chat-option-reply-static {');
     expect(stylesCss).toMatch(
-      /\.chat-option-reply-inline-button,\s*\.chat-option-reply-static \{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
+      /\.chat-option-reply-inline-button \{[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-option-reply-static \{[\s\S]*border-color: var\(--border\);[\s\S]*background: color-mix\(in srgb, var\(--panel\) 92%, var\(--text\) 4%\);/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-option-reply-static \.chat-option-reply-label \{[\s\S]*color: var\(--muted\);[\s\S]*\}/,
     );
     expect(stylesCss).not.toContain('.chat-option-replies {');
     expect(stylesCss).not.toContain('.chat-option-reply-button {');
