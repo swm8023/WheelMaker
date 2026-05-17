@@ -52,6 +52,7 @@ import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import { extractChatOptionReplies, splitChatOptionReplyText, type ChatOptionReply } from './chat/chatOptionReplies';
 import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
+import { shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -3064,14 +3065,6 @@ function App() {
   }, [tab, connected, projectId]);
 
   useEffect(() => {
-    if (!projectId) return;
-    setProjectSessionsByProjectId(prev => ({
-      ...prev,
-      [projectId]: chatSessions,
-    }));
-  }, [projectId, chatSessions]);
-
-  useEffect(() => {
     const shouldHydrateProjectSessionIndex =
       isWide || (!isWide && tab === 'chat' && drawerOpen);
     if (!shouldHydrateProjectSessionIndex || projects.length === 0) return;
@@ -4781,10 +4774,13 @@ function App() {
     }
 
     const sessionRows = cachedSessions.map(item => item.session);
-    setChatSessions(sortChatSessions(sessionRows));
+    const sortedSessionRows = sortChatSessions(sessionRows);
+    if (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)) {
+      setChatSessions(sortedSessionRows);
+    }
     setProjectSessionsByProjectId(prev => ({
       ...prev,
-      [activeProjectId]: sortChatSessions(sessionRows),
+      [activeProjectId]: sortedSessionRows,
     }));
 
     for (const cached of cachedSessions) {
@@ -4824,20 +4820,6 @@ function App() {
     }
   };
 
-  const persistChatSessionsIndex = (activeProjectId = projectIdRef.current) => {
-    if (!activeProjectId) return;
-    const cursorBySessionId: Record<string, {turnIndex: number}> = {};
-    for (const session of chatSessions) {
-      const sessionId = session.sessionId;
-      if (!sessionId) continue;
-      const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
-      cursorBySessionId[sessionId] = {
-        turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
-      };
-    }
-    workspaceStore.replaceChatSessions(activeProjectId, chatSessions, cursorBySessionId);
-  };
-
   const persistChatSessionContent = (
     sessionId: string,
     activeProjectId = projectIdRef.current,
@@ -4854,7 +4836,9 @@ function App() {
     const targetSession =
       session ??
       projectSessionsByProjectId[activeProjectId]?.find(item => item.sessionId === sessionId) ??
-      chatSessions.find(item => item.sessionId === sessionId);
+      (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)
+        ? chatSessions.find(item => item.sessionId === sessionId)
+        : undefined);
     if (targetSession) {
       workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
     }
@@ -5066,7 +5050,9 @@ function App() {
       const knownSession =
         resultSession ??
         projectSessionsByProjectId[activeProjectId]?.find(item => item.sessionId === resultSessionId) ??
-        chatSessions.find(item => item.sessionId === resultSessionId);
+        (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)
+          ? chatSessions.find(item => item.sessionId === resultSessionId)
+          : undefined);
       if ((knownSession?.lastDoneTurnIndex ?? 0) > (knownSession?.lastReadTurnIndex ?? 0)) {
         markChatSessionRead(
           activeProjectId,
@@ -5139,25 +5125,27 @@ function App() {
         ...prev,
         [activeProjectId]: nextSessions,
       }));
-      setChatSessions(prev => {
-        const byId = new Map(prev.map(item => [item.sessionId, item]));
-        let next: RegistryChatSession[] = [];
-        for (const item of nextSessions) {
-          const existing = byId.get(item.sessionId);
-          const session =
-            existing &&
-            (item.configOptions === undefined || item.commands === undefined)
-              ? {
-                  ...item,
-                  configOptions: item.configOptions ?? existing.configOptions,
-                  commands: item.commands ?? existing.commands,
-                }
-              : item;
-          const merged = mergeChatSession(next, session);
-          next = merged;
-        }
-        return next;
-      });
+      if (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)) {
+        setChatSessions(prev => {
+          const byId = new Map(prev.map(item => [item.sessionId, item]));
+          let next: RegistryChatSession[] = [];
+          for (const item of nextSessions) {
+            const existing = byId.get(item.sessionId);
+            const session =
+              existing &&
+              (item.configOptions === undefined || item.commands === undefined)
+                ? {
+                    ...item,
+                    configOptions: item.configOptions ?? existing.configOptions,
+                    commands: item.commands ?? existing.commands,
+                  }
+                : item;
+            const merged = mergeChatSession(next, session);
+            next = merged;
+          }
+          return next;
+        });
+      }
 
       const cursorBySessionId: Record<string, {turnIndex: number}> = {};
       for (const session of nextSessions) {
@@ -5835,12 +5823,6 @@ function App() {
     });
   }, [address, autoConnecting, connected]);
 
-  useEffect(() => {
-    const activeProjectId = projectIdRef.current;
-    if (!activeProjectId) return;
-    persistChatSessionsIndex(activeProjectId);
-  }, [chatSessions]);
-
   const mergeTokenProviders = useCallback(
     (entries: Array<{hubId: string; projectId: string; result: RegistryTokenScanResult}>): TokenProviderSectionView[] => {
       const sections = new Map<string, TokenProviderSectionView>();
@@ -6357,7 +6339,7 @@ function App() {
       ...prev,
       [targetProjectId]: sortedSessions,
     }));
-    if (targetProjectId === projectIdRef.current) {
+    if (shouldUpdateCurrentProjectSessions(targetProjectId, projectIdRef.current)) {
       setChatSessions(sortedSessions);
     }
     const cached = workspaceStore.hydrateChatSessions(targetProjectId);

@@ -42,6 +42,13 @@ export function createChatIndexState(): ChatIndexState {
   };
 }
 
+export function shouldUpdateCurrentProjectSessions(
+  activeProjectId: string,
+  currentProjectId: string,
+): boolean {
+  return !!activeProjectId && activeProjectId === currentProjectId;
+}
+
 function compareUpdatedAtDesc(left: string, right: string): number {
   if (left === right) {
     return 0;

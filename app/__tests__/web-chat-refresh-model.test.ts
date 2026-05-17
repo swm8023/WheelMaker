@@ -33,4 +33,13 @@ describe('web chat refresh model', () => {
     expect(main).toContain('const runtimeKey = buildChatRuntimeKey(eventProjectId, sessionId);');
     expect(main).not.toContain('const targetProjectId = eventProjectId || projectIdRef.current;');
   });
+
+  test('project session lists are never mirrored from unscoped chatSessions state', () => {
+    const main = readMain();
+
+    expect(main).toContain('shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)');
+    expect(main).toContain('shouldUpdateCurrentProjectSessions(targetProjectId, projectIdRef.current)');
+    expect(main).not.toContain('[projectId]: chatSessions');
+    expect(main).not.toContain('persistChatSessionsIndex(activeProjectId);');
+  });
 });

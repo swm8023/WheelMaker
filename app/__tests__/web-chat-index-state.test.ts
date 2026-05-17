@@ -6,6 +6,7 @@ import {
   mergeChatIndexSession,
   requestChatIndexFullRefresh,
   requestChatIndexProjectRefresh,
+  shouldUpdateCurrentProjectSessions,
   sortChatIndexProjects,
 } from '../web/src/chat/chatIndexState';
 import type { RegistryChatSession, RegistryProject } from '../web/src/types/registry';
@@ -142,5 +143,11 @@ describe('chat index state helpers', () => {
     state = finishChatIndexProjectRefresh(state, 'p1');
     expect(state.refresh.projectRefreshInFlight.p1).toBe(false);
     expect(state.refresh.projectErrors.p1).toBeUndefined();
+  });
+
+  test('updates legacy current-project sessions only for the workspace project', () => {
+    expect(shouldUpdateCurrentProjectSessions('p1', 'p1')).toBe(true);
+    expect(shouldUpdateCurrentProjectSessions('p-selected', 'p-workspace')).toBe(false);
+    expect(shouldUpdateCurrentProjectSessions('', 'p-workspace')).toBe(false);
   });
 });
