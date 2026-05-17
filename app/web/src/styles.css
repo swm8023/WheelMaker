@@ -3933,8 +3933,8 @@ body,
   bottom: calc(100% + 8px);
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
+  gap: 6px;
+  padding: 5px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
@@ -3943,11 +3943,11 @@ body,
 }
 
 .chat-quick-reply-item {
-  min-width: 30px;
-  height: 28px;
-  border: 0;
+  min-width: 44px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
   border-radius: 7px;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface-1) 88%, var(--accent));
   color: var(--text);
   cursor: pointer;
   font-size: 12px;
@@ -3959,7 +3959,13 @@ body,
 }
 
 .chat-quick-reply-item:hover {
-  background: var(--hover);
+  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
+  background: color-mix(in srgb, var(--surface-1) 78%, var(--accent));
+}
+
+.chat-quick-reply-item:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 2px;
 }
 
 .chat-slash-menu {

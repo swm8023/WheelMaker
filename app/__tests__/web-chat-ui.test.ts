@@ -396,7 +396,8 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('const CHAT_CONFIG_INLINE_LIMIT = 3;');
-    expect(mainTsx).toContain("const CHAT_QUICK_REPLY_OPTIONS = ['A', 'B', 'C', '确认', '接受'];");
+    expect(mainTsx).toContain("const CHAT_QUICK_REPLY_OPTIONS = ['确认', '接受'];");
+    expect(mainTsx).not.toContain("const CHAT_QUICK_REPLY_OPTIONS = ['A', 'B', 'C', '确认', '接受'];");
     expect(mainTsx).toContain('const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);');
     expect(mainTsx).toContain('const [chatQuickReplyMenuOpen, setChatQuickReplyMenuOpen] = useState(false);');
     expect(mainTsx).toContain("const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');");
@@ -409,7 +410,6 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('aria-label="Quick replies"');
     expect(mainTsx).toContain('className="chat-quick-reply-menu"');
     expect(mainTsx).toContain('const handleChatQuickReplySelect = (option: string) => {');
-    expect(mainTsx).toContain('chatComposerTextareaRef.current?.blur();');
     expect(mainTsx).toContain('onClick={() => handleChatQuickReplySelect(option)}');
     expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
@@ -449,8 +449,30 @@ describe('web chat integration', () => {
     expect(quickReplyMenuOpenStart).toBeGreaterThanOrEqual(0);
     expect(quickReplyMenuOpenEnd).toBeGreaterThan(quickReplyMenuOpenStart);
     const quickReplyMenuOpenBody = mainTsx.slice(quickReplyMenuOpenStart, quickReplyMenuOpenEnd);
-    expect(quickReplyMenuOpenBody).toContain('chatComposerTextareaRef.current?.blur();');
+    expect(quickReplyMenuOpenBody).not.toContain('chatComposerTextareaRef.current?.blur();');
     expect(quickReplyMenuOpenBody).not.toContain('target.focus();');
+
+    const quickReplySelectStart = mainTsx.indexOf('const handleChatQuickReplySelect = (option: string) => {');
+    const quickReplySelectEnd = mainTsx.indexOf('const applyChatSessionConfigOptions = (', quickReplySelectStart);
+    expect(quickReplySelectStart).toBeGreaterThanOrEqual(0);
+    expect(quickReplySelectEnd).toBeGreaterThan(quickReplySelectStart);
+    const quickReplySelectBody = mainTsx.slice(quickReplySelectStart, quickReplySelectEnd);
+    expect(quickReplySelectBody).not.toContain('chatComposerTextareaRef.current?.blur();');
+
+    const quickReplyTriggerStart = mainTsx.indexOf('className="chat-composer-quick-trigger"');
+    const quickReplyTriggerEnd = mainTsx.indexOf('className="chat-composer-input-shell"', quickReplyTriggerStart);
+    expect(quickReplyTriggerStart).toBeGreaterThanOrEqual(0);
+    expect(quickReplyTriggerEnd).toBeGreaterThan(quickReplyTriggerStart);
+    const quickReplyTriggerBlock = mainTsx.slice(quickReplyTriggerStart, quickReplyTriggerEnd);
+    expect(quickReplyTriggerBlock).toContain('onPointerDown={event => event.preventDefault()}');
+
+    const quickReplyItemStart = mainTsx.indexOf('className="chat-quick-reply-item"');
+    const quickReplyItemEnd = mainTsx.indexOf('onClick={() => handleChatQuickReplySelect(option)}', quickReplyItemStart);
+    expect(quickReplyItemStart).toBeGreaterThanOrEqual(0);
+    expect(quickReplyItemEnd).toBeGreaterThan(quickReplyItemStart);
+    const quickReplyItemBlock = mainTsx.slice(quickReplyItemStart, quickReplyItemEnd);
+    expect(quickReplyItemBlock).toContain('onPointerDown={event => event.preventDefault()}');
+    expect(quickReplyItemBlock).not.toContain('onMouseDown={event => event.preventDefault()}');
 
     const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
     const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = async', configChangeStart);
@@ -484,6 +506,9 @@ describe('web chat integration', () => {
     );
     expect(stylesCss).toContain('.chat-quick-reply-menu {');
     expect(stylesCss).toContain('.chat-quick-reply-item {');
+    expect(stylesCss).toMatch(
+      /\.chat-quick-reply-item \{[\s\S]*min-width: 44px;[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
+    );
     expect(stylesCss).toContain('.chat-option-reply-line {');
     expect(stylesCss).toContain('.chat-option-reply-inline-button {');
     expect(stylesCss).toContain('.chat-option-reply-static {');

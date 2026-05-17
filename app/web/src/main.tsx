@@ -308,7 +308,7 @@ const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
-const CHAT_QUICK_REPLY_OPTIONS = ['A', 'B', 'C', '确认', '接受'];
+const CHAT_QUICK_REPLY_OPTIONS = ['确认', '接受'];
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
@@ -2709,7 +2709,6 @@ function App() {
     setChatPromptMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
-    chatComposerTextareaRef.current?.blur();
     setChatQuickReplyMenuOpen(value => !value);
   }, [setChatConfigOverflowOpen]);
 
@@ -5515,7 +5514,6 @@ function App() {
   };
 
   const handleChatQuickReplySelect = (option: string) => {
-    chatComposerTextareaRef.current?.blur();
     sendDirectChatText(option).catch(() => undefined);
   };
 
@@ -8862,6 +8860,7 @@ function App() {
                   ref={chatQuickReplyButtonRef}
                   type="button"
                   className="chat-composer-quick-trigger"
+                  onPointerDown={event => event.preventDefault()}
                   onClick={openChatQuickReplyMenu}
                   title="Quick replies"
                   aria-label="Quick replies"
@@ -8996,7 +8995,7 @@ function App() {
                       type="button"
                       className="chat-quick-reply-item"
                       role="menuitem"
-                      onMouseDown={event => event.preventDefault()}
+                      onPointerDown={event => event.preventDefault()}
                       onClick={() => handleChatQuickReplySelect(option)}
                     >
                       {option}
