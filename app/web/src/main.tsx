@@ -48,6 +48,7 @@ import {
   type ChatTurnWindow,
 } from './chat/chatTurnWindow';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
+import { extractChatOptionReplies, type ChatOptionReply } from './chat/chatOptionReplies';
 import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
@@ -307,6 +308,7 @@ const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
+const CHAT_QUICK_REPLY_OPTIONS = ['A', 'B', 'C', '确认', '接受'];
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
@@ -847,6 +849,9 @@ type ChatTurnViewProps = {
   markdownUrlTransform: (value: string) => string;
   copyDisabled?: boolean;
   onCopyPromptDone?: () => void;
+  optionReplies?: ChatOptionReply[];
+  optionRepliesDisabled?: boolean;
+  onSelectOptionReply?: (label: string) => void;
 };
 
 const ChatTurnView = React.memo(function ChatTurnView({
@@ -858,6 +863,9 @@ const ChatTurnView = React.memo(function ChatTurnView({
   markdownUrlTransform,
   copyDisabled = true,
   onCopyPromptDone,
+  optionReplies = [],
+  optionRepliesDisabled = false,
+  onSelectOptionReply,
 }: ChatTurnViewProps) {
   const text = msgText(message.method, message.param).trim();
   const kind = msgKind(message.method);
@@ -1004,6 +1012,24 @@ const ChatTurnView = React.memo(function ChatTurnView({
       >
         {text}
       </ReactMarkdown>
+      {optionReplies.length > 0 ? (
+        <div className="chat-option-replies" aria-label="Reply options">
+          {optionReplies.map(option => (
+            <button
+              key={option.label}
+              type="button"
+              className="chat-option-reply-button"
+              onClick={() => onSelectOptionReply?.(option.label)}
+              disabled={optionRepliesDisabled}
+              title={option.text}
+              aria-label={`Reply ${option.label}`}
+            >
+              <span className="chat-option-reply-label">{option.label}</span>
+              <span className="chat-option-reply-text">{option.text}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -2190,6 +2216,8 @@ function App() {
   const chatLastScrollTopRef = useRef(0);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
+  const chatQuickReplyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const chatQuickReplyMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
@@ -2243,6 +2271,7 @@ function App() {
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
+  const [chatQuickReplyMenuOpen, setChatQuickReplyMenuOpen] = useState(false);
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
@@ -2617,6 +2646,7 @@ function App() {
     (command: ChatSlashCommandOption) => {
       const next = `${command.name} `;
       setChatPromptMenuOpen(false);
+      setChatQuickReplyMenuOpen(false);
       setChatConfigMenuOptionId('');
       setChatConfigOverflowOpen(false);
       updateChatComposerText(next);
@@ -2633,9 +2663,24 @@ function App() {
   );
 
   const openChatPromptMenu = useCallback(() => {
+    setChatQuickReplyMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
     setChatPromptMenuOpen(value => !value);
+    window.requestAnimationFrame(() => {
+      const target = chatComposerTextareaRef.current;
+      if (!target) {
+        return;
+      }
+      target.focus();
+    });
+  }, [setChatConfigOverflowOpen]);
+
+  const openChatQuickReplyMenu = useCallback(() => {
+    setChatPromptMenuOpen(false);
+    setChatConfigMenuOptionId('');
+    setChatConfigOverflowOpen(false);
+    setChatQuickReplyMenuOpen(value => !value);
     window.requestAnimationFrame(() => {
       const target = chatComposerTextareaRef.current;
       if (!target) {
@@ -3302,6 +3347,23 @@ function App() {
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
   }, [chatPromptMenuOpen]);
+
+  useEffect(() => {
+    if (!chatQuickReplyMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (
+        target &&
+        (chatQuickReplyMenuRef.current?.contains(target) ||
+          chatQuickReplyButtonRef.current?.contains(target))
+      ) {
+        return;
+      }
+      setChatQuickReplyMenuOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [chatQuickReplyMenuOpen]);
 
   useEffect(() => {
     if (!chatConfigMenuOptionId) return;
@@ -5328,23 +5390,31 @@ function App() {
     }
   };
 
-  const sendChatMessage = async () => {
-    if (chatAttachmentReadPending) {
+  const sendChatMessage = async (options: {
+    textOverride?: string;
+    attachmentsOverride?: ChatAttachment[];
+    preserveComposer?: boolean;
+  } = {}) => {
+    if (chatSending) {
+      return;
+    }
+    const sourceAttachments = options.attachmentsOverride ?? chatAttachments;
+    if (sourceAttachments.length > 0 && chatAttachmentReadPending) {
       setError('Wait for images to finish loading.');
       return;
     }
-    const trimmedText = chatComposerText.trim();
-    if (!trimmedText && chatAttachments.length === 0) return;
+    const trimmedText = (options.textOverride ?? chatComposerText).trim();
+    if (!trimmedText && sourceAttachments.length === 0) return;
     const blocks: RegistryChatContentBlock[] = [];
     if (trimmedText) {
       blocks.push({ type: 'text', text: trimmedText });
     }
-    blocks.push(...chatAttachments.map(attachment => ({
+    blocks.push(...sourceAttachments.map(attachment => ({
       type: 'image',
       mimeType: attachment.mimeType,
       data: attachment.data,
     } satisfies RegistryChatContentBlock)));
-    const firstAttachmentName = chatAttachments[0]?.name || '';
+    const firstAttachmentName = sourceAttachments[0]?.name || '';
     const selectedKey = selectedChatKeyRef.current;
     if (!selectedKey) {
       setError('Select or create a chat session first.');
@@ -5365,8 +5435,10 @@ function App() {
       turnIndex: nextPromptTurnIndex(chatMessageStoreRef.current[runtimeKey] ?? []),
     });
 
-    // Clear UI immediately after capturing text — before any async work
-    resetChatComposer();
+    if (!options.preserveComposer) {
+      // Clear UI immediately after capturing text before any async work.
+      resetChatComposer();
+    }
     forceChatScrollToBottom();
     setChatSending(true);
     let optimisticRunningSessionId = '';
@@ -5401,6 +5473,22 @@ function App() {
     } finally {
       setChatSending(false);
     }
+  };
+
+  const sendDirectChatText = async (text: string) => {
+    const normalizedText = text.trim();
+    if (!normalizedText) {
+      return;
+    }
+    setChatQuickReplyMenuOpen(false);
+    setChatPromptMenuOpen(false);
+    setChatConfigMenuOptionId('');
+    setChatConfigOverflowOpen(false);
+    await sendChatMessage({
+      textOverride: normalizedText,
+      attachmentsOverride: [],
+      preserveComposer: true,
+    });
   };
 
   const applyChatSessionConfigOptions = (
@@ -8469,6 +8557,36 @@ function App() {
     await writeTextToClipboard(result.markdown);
   };
 
+  const selectedPendingPrompt = selectedChatEncodedKey
+    ? chatPendingPromptsByKey[selectedChatEncodedKey]
+    : undefined;
+
+  const latestSelectableOptionReplyMessageKey = (() => {
+    if (selectedPendingPrompt) {
+      return '';
+    }
+    const ordered = [...selectedFullChatMessages].sort((left, right) => (left.turnIndex ?? 0) - (right.turnIndex ?? 0));
+    const latestUserTurnIndex = Math.max(
+      0,
+      ...ordered
+        .filter(message => isPromptStartMessage(message))
+        .map(message => Math.max(0, Math.trunc(message.turnIndex ?? 0))),
+    );
+    const latestAssistantMessage = [...ordered]
+      .reverse()
+      .find(message =>
+        message.method === 'agent_message_chunk' &&
+        Math.max(0, Math.trunc(message.turnIndex ?? 0)) > latestUserTurnIndex,
+      );
+    if (!latestAssistantMessage) {
+      return '';
+    }
+    const text = msgText(latestAssistantMessage.method, latestAssistantMessage.param).trim();
+    return extractChatOptionReplies(text).length > 0
+      ? chatMessageDomKey(latestAssistantMessage)
+      : '';
+  })();
+
   const renderedChatTurns = chatMessages.map(message => {
     const doneTurnIndex = message.turnIndex ?? 0;
     const copyRange = message.method === 'prompt_done'
@@ -8477,6 +8595,12 @@ function App() {
     const promptStatus = isPromptStartMessage(message)
       ? resolvePromptTurnStatus(selectedFullChatMessages, message)
       : null;
+    const text = msgText(message.method, message.param).trim();
+    const optionReplies =
+      message.method === 'agent_message_chunk' &&
+      chatMessageDomKey(message) === latestSelectableOptionReplyMessageKey
+        ? extractChatOptionReplies(text)
+        : [];
     if (!shouldRenderChatTurn(message, hideToolCalls, promptStatus)) {
       return null;
     }
@@ -8493,6 +8617,9 @@ function App() {
           markdownComponents={chatMarkdownComponents}
           markdownUrlTransform={chatMarkdownUrlTransform}
           copyDisabled={copyRange ? !copyRange.ok : true}
+          optionReplies={optionReplies}
+          optionRepliesDisabled={chatSending}
+          onSelectOptionReply={label => sendDirectChatText(label).catch(() => undefined)}
           onCopyPromptDone={
             message.method === 'prompt_done'
               ? () => copyPromptDoneMarkdown(doneTurnIndex).catch(() => undefined)
@@ -8502,9 +8629,6 @@ function App() {
       </div>
     );
   });
-  const selectedPendingPrompt = selectedChatEncodedKey
-    ? chatPendingPromptsByKey[selectedChatEncodedKey]
-    : undefined;
   const renderedPendingChatTurn = selectedPendingPrompt ? (
     <ChatTurnView
       key={`${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`}
@@ -8707,16 +8831,16 @@ function App() {
               ) : null}
               <div className="chat-composer-input-row">
                 <button
-                  ref={chatPromptButtonRef}
+                  ref={chatQuickReplyButtonRef}
                   type="button"
-                  className="chat-composer-prompt-trigger"
-                  onClick={openChatPromptMenu}
-                  title="Commands"
-                  aria-label="Commands"
-                  aria-haspopup="listbox"
-                  aria-expanded={chatPromptMenuOpen}
+                  className="chat-composer-quick-trigger"
+                  onClick={openChatQuickReplyMenu}
+                  title="Quick replies"
+                  aria-label="Quick replies"
+                  aria-haspopup="menu"
+                  aria-expanded={chatQuickReplyMenuOpen}
                 >
-                  {'>'}
+                  <span className="chat-quick-trigger-label">A</span>
                 </button>
                 <div className="chat-composer-input-shell">
                   <textarea
@@ -8836,6 +8960,22 @@ function App() {
                   <span className="codicon codicon-send" />
                 </button>
               </div>
+              {chatQuickReplyMenuOpen ? (
+                <div ref={chatQuickReplyMenuRef} className="chat-quick-reply-menu" role="menu" aria-label="Quick replies">
+                  {CHAT_QUICK_REPLY_OPTIONS.map(option => (
+                    <button
+                      key={option}
+                      type="button"
+                      className="chat-quick-reply-item"
+                      role="menuitem"
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => sendDirectChatText(option).catch(() => undefined)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {chatSlashMenuVisible ? (
                 <div ref={chatSlashMenuRef} className="chat-slash-menu" role="listbox" aria-label="Available skills">
                   {chatSlashMenuOptions.map((option, index) => {
@@ -8864,9 +9004,22 @@ function App() {
                 <div className="chat-composer-tools">
                   <button
                     type="button"
+                    ref={chatPromptButtonRef}
+                    className="chat-tool-button chat-skill-button"
+                    onClick={openChatPromptMenu}
+                    title="Skills"
+                    aria-label="Open skills"
+                    aria-haspopup="listbox"
+                    aria-expanded={chatPromptMenuOpen}
+                  >
+                    <span className="codicon codicon-symbol-keyword" />
+                  </button>
+                  <button
+                    type="button"
                     className="chat-tool-button chat-photo-button"
                     onClick={() => {
                       setChatPromptMenuOpen(false);
+                      setChatQuickReplyMenuOpen(false);
                       setChatConfigMenuOptionId('');
                       setChatConfigOverflowOpen(false);
                       chatFileInputRef.current?.click();
@@ -8875,20 +9028,6 @@ function App() {
                     aria-label="Attach image"
                   >
                     <span className="codicon codicon-file-media" />
-                  </button>
-                  <button
-                    type="button"
-                    className="chat-tool-button chat-voice-button"
-                    onClick={() => {
-                      setChatPromptMenuOpen(false);
-                      setChatConfigMenuOptionId('');
-                      setChatConfigOverflowOpen(false);
-                      setError('Voice input is not available yet.');
-                    }}
-                    title="Voice"
-                    aria-label="Voice input"
-                  >
-                    <span className="codicon codicon-mic" />
                   </button>
                 </div>
                 {selectedChatConfigOptions.length > 0 ? (

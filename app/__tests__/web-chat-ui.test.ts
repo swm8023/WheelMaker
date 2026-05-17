@@ -151,8 +151,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const attachmentDraftGeneration = getChatDraftGeneration(attachmentDraftKey);');
     expect(mainTsx).toContain('appendChatAttachments(');
     expect(mainTsx).toContain('attachments,');
-    expect(mainTsx).toContain('blocks.push(...chatAttachments.map(attachment => ({');
-    expect(mainTsx).toContain("if (chatAttachmentReadPending) {");
+    expect(mainTsx).toContain('const sourceAttachments = options.attachmentsOverride ?? chatAttachments;');
+    expect(mainTsx).toContain('blocks.push(...sourceAttachments.map(attachment => ({');
+    expect(mainTsx).toContain("if (sourceAttachments.length > 0 && chatAttachmentReadPending) {");
     expect(mainTsx).toContain("setError('Wait for images to finish loading.');");
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).toContain('multiple');
@@ -395,23 +396,33 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('const CHAT_CONFIG_INLINE_LIMIT = 3;');
+    expect(mainTsx).toContain("const CHAT_QUICK_REPLY_OPTIONS = ['A', 'B', 'C', '确认', '接受'];");
     expect(mainTsx).toContain('const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);');
+    expect(mainTsx).toContain('const [chatQuickReplyMenuOpen, setChatQuickReplyMenuOpen] = useState(false);');
     expect(mainTsx).toContain("const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');");
     expect(mainTsx).toContain('selectedChatConfigOptions.length <= CHAT_CONFIG_INLINE_LIMIT');
     expect(mainTsx).toContain('prioritized.slice(0, CHAT_CONFIG_INLINE_LIMIT)');
     expect(mainTsx).toContain('className="chat-composer-frame"');
     expect(mainTsx).toContain('className="chat-composer-input-row"');
-    expect(mainTsx).toContain('className="chat-composer-prompt-trigger"');
-    expect(mainTsx).toContain('title="Commands"');
-    expect(mainTsx).toContain("{'>'}");
+    expect(mainTsx).toContain('className="chat-composer-quick-trigger"');
+    expect(mainTsx).toContain('title="Quick replies"');
+    expect(mainTsx).toContain('aria-label="Quick replies"');
+    expect(mainTsx).toContain('className="chat-quick-reply-menu"');
+    expect(mainTsx).toContain('sendDirectChatText(option)');
     expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
     expect(mainTsx).toContain('className="chat-composer-tools"');
+    expect(mainTsx).toContain('className="chat-tool-button chat-skill-button"');
+    expect(mainTsx).toContain('title="Skills"');
     expect(mainTsx).toContain('className="chat-tool-button chat-photo-button"');
-    expect(mainTsx).toContain('className="chat-tool-button chat-voice-button"');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
-    expect(mainTsx).toContain("setError('Voice input is not available yet.');");
+    expect(mainTsx).not.toContain('chat-voice-button');
+    expect(mainTsx).not.toContain("setError('Voice input is not available yet.');");
+    expect(mainTsx).toContain('extractChatOptionReplies(text)');
+    expect(mainTsx).toContain('className="chat-option-replies"');
+    expect(mainTsx).toContain('onSelectOptionReply?: (label: string) => void;');
+    expect(mainTsx).toContain('if (selectedPendingPrompt) {');
     expect(mainTsx).toContain('className="chat-config-pill"');
     expect(mainTsx).toContain('className="chat-config-value-menu"');
     expect(mainTsx).toContain('chat-config-value-option${selected ?');
@@ -450,10 +461,14 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 32px;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('.chat-composer-prompt-trigger {');
+    expect(stylesCss).toContain('.chat-composer-quick-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-prompt-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-quick-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-quick-reply-menu {');
+    expect(stylesCss).toContain('.chat-quick-reply-item {');
+    expect(stylesCss).toContain('.chat-option-replies {');
+    expect(stylesCss).toContain('.chat-option-reply-button {');
     expect(stylesCss).toMatch(
       /\.chat-composer-input \{[\s\S]*min-height: 30px;[\s\S]*padding: 5px 0 1px;[\s\S]*font-size: 14px;[\s\S]*line-height: 1.4;[\s\S]*\}/,
     );
