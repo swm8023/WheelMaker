@@ -126,7 +126,7 @@ type ProjectSessionActionMenuState = {
   projectId: string;
   sessionId: string;
 };
-type SettingsDetailView = 'tokenStats' | null;
+type SettingsDetailView = 'tokenStats' | 'ccSwitch' | null;
 type ChatComposerDraft = {
   text: string;
   attachments: ChatAttachment[];
@@ -7128,7 +7128,104 @@ function App() {
     </div>
   );
 
+  const renderCCSwitchSettingsDetail = () => {
+    const activeHub = (currentProject?.hubId || 'unknown').trim() || 'unknown';
+    const activeAgent = (selectedChatSession?.agentType || '').trim() || '-';
+    const profileCards = projects
+      .map(projectItem => {
+        const projectHub = (projectItem.hubId || 'local').trim() || 'local';
+        const projectSessions = projectSessionsByProjectId[projectItem.projectId] ?? [];
+        const projectAgents = getWideProjectAgents(projectItem, projectSessions);
+        const profiles = (projectItem.agentProfiles ?? [])
+          .map(profile => {
+            const profileName = (profile.name || '').trim();
+            if (!profileName) {
+              return null;
+            }
+            const skills = (profile.skills ?? [])
+              .map(skill => (skill || '').trim())
+              .filter(Boolean);
+            return { profileName, skills };
+          })
+          .filter((item): item is { profileName: string; skills: string[] } => item !== null);
+        return {
+          projectId: projectItem.projectId,
+          projectName: projectItem.name,
+          projectHub,
+          projectAgents,
+          profiles,
+        };
+      })
+      .filter(item => item.profiles.length > 0);
+
+    return (
+      <div className="settings-detail-page token-stats-page">
+        <div className="settings-detail-header">
+          <button
+            type="button"
+            className="mobile-settings-back settings-detail-back"
+            onClick={() => setSettingsDetailView(null)}
+            aria-label="Back to settings"
+            title="Back"
+          >
+            <span className="codicon codicon-arrow-left" />
+          </button>
+          <div className="settings-detail-title">CC Switch</div>
+          <span className="token-stats-refresh-placeholder" aria-hidden="true" />
+        </div>
+        <div className="token-stats-account-list token-stats-account-list-flat">
+          <div className="token-stats-account-item token-stats-account-item-flat">
+            <div className="token-stats-card-line token-stats-card-line-tags">
+              <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', activeHub)}`}>
+                <span className="wide-project-hub-dot" aria-hidden="true" />
+                <span className="wide-project-hub-label">Hub: {activeHub}</span>
+              </span>
+              <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', activeAgent)}`}>
+                Agent: {activeAgent}
+              </span>
+            </div>
+          </div>
+          {profileCards.map(card => (
+            <div key={`cc-switch:${card.projectId}`} className="token-stats-account-item token-stats-account-item-flat">
+              <div className="token-stats-card-line token-stats-card-line-tags">
+                <span className={`wide-project-hub-tag ${tagVariantClass('wide-project-hub', card.projectHub)}`}>
+                  <span className="wide-project-hub-dot" aria-hidden="true" />
+                  <span className="wide-project-hub-label">{card.projectHub}</span>
+                </span>
+                {card.projectAgents.map(agent => (
+                  <span
+                    key={`cc-switch:${card.projectId}:agent:${agent}`}
+                    className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}
+                  >
+                    {agent}
+                  </span>
+                ))}
+              </div>
+              <div className="token-stats-card-line token-stats-card-line-primary">
+                <span className="token-stats-account-name" title={card.projectName}>{card.projectName}</span>
+              </div>
+              {card.profiles.map(profile => (
+                <div key={`cc-switch:${card.projectId}:profile:${profile.profileName}`} className="token-stats-card-line">
+                  <span className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', profile.profileName)}`}>
+                    {profile.profileName}
+                  </span>
+                  {profile.skills.length > 0 ? ` · ${profile.skills.join(', ')}` : ' · No skills'}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+        {profileCards.length === 0 ? (
+          <div className="muted block">No CC Switch profile metadata found.</div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderSettingsContent = (showSectionTitle: boolean) => {
+    if (settingsDetailView === 'ccSwitch') {
+      return renderCCSwitchSettingsDetail();
+    }
     if (settingsDetailView === 'tokenStats') {
       return renderTokenStatsSettingsDetail();
     }
@@ -7257,6 +7354,16 @@ function App() {
           type="button"
           className="settings-detail-row"
           onClick={() => {
+            setSettingsDetailView('ccSwitch');
+          }}
+        >
+          <span>CC Switch</span>
+          <span className="codicon codicon-chevron-right" />
+        </button>
+        <button
+          type="button"
+          className="settings-detail-row"
+          onClick={() => {
             setTokenStatsError('');
             setSettingsDetailView('tokenStats');
           }}
@@ -7337,6 +7444,19 @@ function App() {
             aria-label="Open settings"
           >
             <span className="codicon codicon-settings-gear" />
+          </button>
+          <button
+            type="button"
+            className="drawer-settings-icon-btn"
+            onClick={() => {
+              setProjectMenuOpen(false);
+              setSidebarSettingsOpen(true);
+              setSettingsDetailView('ccSwitch');
+            }}
+            title="Open CC Switch"
+            aria-label="Open CC Switch"
+          >
+            <span className="codicon codicon-plug" />
           </button>
           <span className="mobile-chat-drawer-title">Chats</span>
           <button
