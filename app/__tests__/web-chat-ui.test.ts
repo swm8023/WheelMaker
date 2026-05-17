@@ -581,11 +581,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const handleReloadProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.reloadProjectSession(targetProjectId, normalizedSessionId);');
     expect(mainTsx).toContain('const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<ArchiveConfirmTarget | null>(null);');
+    expect(mainTsx).toContain("const [archiveConfirmError, setArchiveConfirmError] = useState('');");
     expect(mainTsx).toContain('const handleArchiveProjectSession = async (targetProjectId: string, sessionId: string) => {');
     expect(mainTsx).toContain('const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);');
+    expect(mainTsx).toContain('const message = err instanceof Error ? err.message : String(err);');
+    expect(mainTsx).toContain('setArchiveConfirmError(message);');
     expect(mainTsx).toContain('const sessionArchiveConfirmDialog = archiveConfirmTarget ? (');
     expect(mainTsx).toContain('className="session-archive-confirm-backdrop"');
-    expect(mainTsx).toContain('Sessions with fewer than 3 turns are permanently removed.');
+    expect(mainTsx).toContain('Archived sessions leave the chat list.');
+    expect(mainTsx).toContain('className="session-archive-confirm-error"');
+    expect(mainTsx).not.toContain('Sessions with fewer than 3 turns are permanently removed.');
     expect(mainTsx).toContain('const renderProjectSessionActionStrip = (targetProjectId: string, session: RegistrySessionSummary) => {');
     expect(mainTsx).toContain('className="project-session-action-strip"');
     expect(mainTsx).toContain('className="project-session-action-btn reload"');
@@ -690,6 +695,7 @@ describe('web chat integration', () => {
     expect(stylesCss).not.toContain('.project-session-action-btn.delete {');
     expect(stylesCss).toContain('.session-archive-confirm-backdrop {');
     expect(stylesCss).toContain('.session-archive-confirm-dialog {');
+    expect(stylesCss).toContain('.session-archive-confirm-error {');
     expect(stylesCss).toContain('.project-session-action-label {');
     expect(stylesCss).toContain('.wide-session-agent-tag {');
     expect(stylesCss).toContain('.wide-session-agent-0 {');

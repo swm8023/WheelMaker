@@ -2222,6 +2222,7 @@ function App() {
   const [chatReloadingSessionId, setChatReloadingSessionId] = useState('');
   const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
   const [archiveConfirmTarget, setArchiveConfirmTarget] = useState<ArchiveConfirmTarget | null>(null);
+  const [archiveConfirmError, setArchiveConfirmError] = useState('');
   const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
   const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
@@ -5248,6 +5249,7 @@ function App() {
     if (!targetProjectId || !normalizedSessionId || chatArchivingSessionId) {
       return;
     }
+    setArchiveConfirmError('');
     setChatArchivingSessionId(normalizedSessionId);
     try {
       const result = await service.archiveProjectSession(targetProjectId, normalizedSessionId);
@@ -5260,8 +5262,11 @@ function App() {
       );
       setProjectSessionActionMenu(null);
       setArchiveConfirmTarget(null);
+      setArchiveConfirmError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setArchiveConfirmError(message);
+      setError(message);
     } finally {
       setChatArchivingSessionId('');
     }
@@ -5273,6 +5278,7 @@ function App() {
       return;
     }
     setProjectSessionActionMenu(null);
+    setArchiveConfirmError('');
     setArchiveConfirmTarget({
       projectId: targetProjectId,
       sessionId: normalizedSessionId,
@@ -9446,6 +9452,7 @@ function App() {
       role="presentation"
       onPointerDown={() => {
         if (!archiveConfirmBusy) {
+          setArchiveConfirmError('');
           setArchiveConfirmTarget(null);
         }
       }}
@@ -9466,15 +9473,21 @@ function App() {
           </div>
           <div className="session-archive-confirm-name">{archiveConfirmTitle}</div>
           <div className="session-archive-confirm-copy">
-            Archived sessions leave the chat list. Sessions with fewer than 3 turns are permanently removed.
+            Archived sessions leave the chat list.
           </div>
+          {archiveConfirmError ? (
+            <div className="session-archive-confirm-error">{archiveConfirmError}</div>
+          ) : null}
         </div>
         <div className="session-archive-confirm-actions">
           <button
             type="button"
             className="session-archive-confirm-btn secondary"
             disabled={archiveConfirmBusy}
-            onClick={() => setArchiveConfirmTarget(null)}
+            onClick={() => {
+              setArchiveConfirmError('');
+              setArchiveConfirmTarget(null);
+            }}
           >
             Cancel
           </button>

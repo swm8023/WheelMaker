@@ -1851,6 +1851,13 @@ body,
   line-height: 1.45;
 }
 
+.session-archive-confirm-error {
+  margin-top: 9px;
+  color: #fca5a5;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .session-archive-confirm-actions {
   grid-column: 1 / -1;
   display: flex;
