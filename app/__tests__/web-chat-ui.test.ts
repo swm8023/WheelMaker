@@ -408,7 +408,9 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('title="Quick replies"');
     expect(mainTsx).toContain('aria-label="Quick replies"');
     expect(mainTsx).toContain('className="chat-quick-reply-menu"');
-    expect(mainTsx).toContain('sendDirectChatText(option)');
+    expect(mainTsx).toContain('const handleChatQuickReplySelect = (option: string) => {');
+    expect(mainTsx).toContain('chatComposerTextareaRef.current?.blur();');
+    expect(mainTsx).toContain('onClick={() => handleChatQuickReplySelect(option)}');
     expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
@@ -437,6 +439,14 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('showChatConfigLabels');
     expect(mainTsx).not.toContain('chatConfigFeedback');
     expect(mainTsx).not.toContain('Applying config');
+
+    const quickReplyMenuOpenStart = mainTsx.indexOf('const openChatQuickReplyMenu = useCallback(() => {');
+    const quickReplyMenuOpenEnd = mainTsx.indexOf('const getChatDraftGeneration = useCallback', quickReplyMenuOpenStart);
+    expect(quickReplyMenuOpenStart).toBeGreaterThanOrEqual(0);
+    expect(quickReplyMenuOpenEnd).toBeGreaterThan(quickReplyMenuOpenStart);
+    const quickReplyMenuOpenBody = mainTsx.slice(quickReplyMenuOpenStart, quickReplyMenuOpenEnd);
+    expect(quickReplyMenuOpenBody).toContain('chatComposerTextareaRef.current?.blur();');
+    expect(quickReplyMenuOpenBody).not.toContain('target.focus();');
 
     const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
     const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = async', configChangeStart);

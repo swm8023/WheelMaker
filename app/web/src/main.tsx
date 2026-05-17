@@ -2696,14 +2696,8 @@ function App() {
     setChatPromptMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
+    chatComposerTextareaRef.current?.blur();
     setChatQuickReplyMenuOpen(value => !value);
-    window.requestAnimationFrame(() => {
-      const target = chatComposerTextareaRef.current;
-      if (!target) {
-        return;
-      }
-      target.focus();
-    });
   }, [setChatConfigOverflowOpen]);
 
   const getChatDraftGeneration = useCallback((draftKey: string) => {
@@ -5505,6 +5499,11 @@ function App() {
       attachmentsOverride: [],
       preserveComposer: true,
     });
+  };
+
+  const handleChatQuickReplySelect = (option: string) => {
+    chatComposerTextareaRef.current?.blur();
+    sendDirectChatText(option).catch(() => undefined);
   };
 
   const applyChatSessionConfigOptions = (
@@ -8985,7 +8984,7 @@ function App() {
                       className="chat-quick-reply-item"
                       role="menuitem"
                       onMouseDown={event => event.preventDefault()}
-                      onClick={() => sendDirectChatText(option).catch(() => undefined)}
+                      onClick={() => handleChatQuickReplySelect(option)}
                     >
                       {option}
                     </button>
