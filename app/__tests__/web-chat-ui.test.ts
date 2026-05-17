@@ -580,6 +580,18 @@ describe('web chat integration', () => {
     );
   });
 
+  test('keeps the mobile three-tab floating nav translucent over content', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(stylesCss).toMatch(
+      /\.floating-nav-group \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 46%, transparent\);[\s\S]*backdrop-filter: blur\(6px\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.drawer-toggle-bubble \{[\s\S]*background: color-mix\(in srgb, var\(--panel\) 78%, transparent\);[\s\S]*\}/,
+    );
+  });
+
   test('mobile chat drawer uses a cross-project project session sheet', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
