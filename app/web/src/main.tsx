@@ -1002,10 +1002,12 @@ const ChatTurnView = React.memo(function ChatTurnView({
   if (!text) {
     return null;
   }
-  const optionReplyParts = optionReplies.length > 0 ? splitChatOptionReplyText(text) : [];
+  const optionReplyParts = splitChatOptionReplyText(text);
+  const hasOptionReplyParts = optionReplyParts.some(part => part.type === 'option');
+  const selectableOptionReplies = optionReplies.length > 0;
   return (
     <div className="chat-main-message">
-      {optionReplyParts.length > 0 ? (
+      {hasOptionReplyParts ? (
         optionReplyParts.map((part, index) => {
           if (part.type === 'markdown') {
             return part.text ? (
@@ -1020,19 +1022,30 @@ const ChatTurnView = React.memo(function ChatTurnView({
               </ReactMarkdown>
             ) : null;
           }
+          const optionContent = (
+            <>
+              <span className="chat-option-reply-label">{part.reply.label}.</span>
+              <span className="chat-option-reply-text">{part.reply.text}</span>
+            </>
+          );
           return (
             <div key={`option:${part.reply.label}:${index}`} className="chat-option-reply-line">
-              <button
-                type="button"
-                className="chat-option-reply-inline-button"
-                onClick={() => onSelectOptionReply?.(part.reply.label)}
-                disabled={optionRepliesDisabled}
-                title={part.reply.text}
-                aria-label={`Reply ${part.reply.label}: ${part.reply.text}`}
-              >
-                <span className="chat-option-reply-label">{part.reply.label}.</span>
-                <span className="chat-option-reply-text">{part.reply.text}</span>
-              </button>
+              {selectableOptionReplies ? (
+                <button
+                  type="button"
+                  className="chat-option-reply-inline-button"
+                  onClick={() => onSelectOptionReply?.(part.reply.label)}
+                  disabled={optionRepliesDisabled}
+                  title={part.reply.text}
+                  aria-label={`Reply ${part.reply.label}: ${part.reply.text}`}
+                >
+                  {optionContent}
+                </button>
+              ) : (
+                <div className="chat-option-reply-static" title={part.reply.text}>
+                  {optionContent}
+                </div>
+              )}
             </div>
           );
         })

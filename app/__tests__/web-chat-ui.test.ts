@@ -423,8 +423,12 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain("setError('Voice input is not available yet.');");
     expect(mainTsx).toContain('extractChatOptionReplies(text)');
     expect(mainTsx).toContain('splitChatOptionReplyText(text)');
+    expect(mainTsx).toContain('const optionReplyParts = splitChatOptionReplyText(text);');
+    expect(mainTsx).toContain("const hasOptionReplyParts = optionReplyParts.some(part => part.type === 'option');");
+    expect(mainTsx).toContain('const selectableOptionReplies = optionReplies.length > 0;');
     expect(mainTsx).toContain('className="chat-option-reply-line"');
     expect(mainTsx).toContain('className="chat-option-reply-inline-button"');
+    expect(mainTsx).toContain('className="chat-option-reply-static"');
     expect(mainTsx).not.toContain('className="chat-option-replies"');
     expect(mainTsx).toContain('onSelectOptionReply?: (label: string) => void;');
     expect(mainTsx).toContain('if (selectedPendingPrompt) {');
@@ -482,6 +486,10 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-quick-reply-item {');
     expect(stylesCss).toContain('.chat-option-reply-line {');
     expect(stylesCss).toContain('.chat-option-reply-inline-button {');
+    expect(stylesCss).toContain('.chat-option-reply-static {');
+    expect(stylesCss).toMatch(
+      /\.chat-option-reply-inline-button,\s*\.chat-option-reply-static \{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
+    );
     expect(stylesCss).not.toContain('.chat-option-replies {');
     expect(stylesCss).not.toContain('.chat-option-reply-button {');
     expect(stylesCss).toMatch(
