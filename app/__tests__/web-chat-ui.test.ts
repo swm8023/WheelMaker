@@ -726,7 +726,7 @@ describe('web chat integration', () => {
       /\.project-session-row-wrap\.actions-open \.wide-session-row::after \{[^}]*width: min\(236px, 80%\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(156px, 64%\);[^}]*\}/,
+      /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(188px, calc\(100% - 4px\)\);[^}]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.project-session-action-strip \{[^}]*display: none;[^}]*\}/,

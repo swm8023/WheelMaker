@@ -1710,7 +1710,7 @@ body,
   height: 30px;
   transform: translateY(-50%);
   z-index: 3;
-  width: min(156px, 64%);
+  width: min(188px, calc(100% - 4px));
   display: none;
   align-items: center;
   gap: 4px;
