@@ -529,9 +529,11 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-option-reply-inline-button \{[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
     );
-    expect(stylesCss).toMatch(
-      /\.chat-option-reply-static \{[\s\S]*border-color: var\(--border\);[\s\S]*background: color-mix\(in srgb, var\(--panel\) 92%, var\(--text\) 4%\);/,
-    );
+    const historicalOptionBlocks = stylesCss.match(/\.chat-option-reply-static \{[\s\S]*?\n\}/g) ?? [];
+    const historicalOptionBlock = historicalOptionBlocks[historicalOptionBlocks.length - 1] ?? '';
+    expect(historicalOptionBlock).toContain('border-color: var(--border);');
+    expect(historicalOptionBlock).toContain('background: transparent;');
+    expect(historicalOptionBlock).not.toContain('background: color-mix');
     expect(stylesCss).toMatch(
       /\.chat-option-reply-static \.chat-option-reply-label \{[\s\S]*color: var\(--muted\);[\s\S]*\}/,
     );

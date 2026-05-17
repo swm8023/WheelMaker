@@ -3642,7 +3642,7 @@ body,
 
 .chat-option-reply-static {
   border-color: var(--border);
-  background: color-mix(in srgb, var(--panel) 92%, var(--text) 4%);
+  background: transparent;
   color: color-mix(in srgb, var(--text) 72%, var(--muted));
 }
 
