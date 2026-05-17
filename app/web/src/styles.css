@@ -1721,8 +1721,6 @@ body,
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
 }
 
-.project-session-row-wrap:hover .project-session-action-strip,
-.project-session-row-wrap:focus-within .project-session-action-strip,
 .project-session-row-wrap.actions-open .project-session-action-strip {
   display: inline-flex;
 }

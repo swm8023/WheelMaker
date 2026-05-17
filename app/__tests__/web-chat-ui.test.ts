@@ -732,8 +732,10 @@ describe('web chat integration', () => {
       /\.project-session-action-strip \{[^}]*display: none;[^}]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.project-session-row-wrap:hover \.project-session-action-strip,[\s\S]*\.project-session-row-wrap:focus-within \.project-session-action-strip,[\s\S]*\.project-session-row-wrap\.actions-open \.project-session-action-strip \{[\s\S]*display: inline-flex;[\s\S]*\}/,
+      /\.project-session-row-wrap\.actions-open \.project-session-action-strip \{[\s\S]*display: inline-flex;[\s\S]*\}/,
     );
+    expect(stylesCss).not.toContain('.project-session-row-wrap:hover .project-session-action-strip');
+    expect(stylesCss).not.toContain('.project-session-row-wrap:focus-within .project-session-action-strip');
     expect(stylesCss).toMatch(
       /\.project-session-action-btn \{[^}]*height: 28px;[^}]*gap: 5px;[^}]*padding: 0 8px;[^}]*\}/,
     );
