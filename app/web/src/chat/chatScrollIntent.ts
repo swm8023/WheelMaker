@@ -24,6 +24,22 @@ export function shouldHandleChatVirtualWindowScroll(programmaticScroll: boolean)
   return !programmaticScroll;
 }
 
+export type ChatVirtualScrollDirection = 'forward' | 'backward' | null;
+
+export function shouldAdjustChatVirtualItemSizeChange(input: {
+  isScrolling: boolean;
+  itemEnd: number;
+  itemStart: number;
+  scrollDirection: ChatVirtualScrollDirection;
+  scrollOffset: number | null | undefined;
+}): boolean {
+  const scrollOffset = Math.max(0, input.scrollOffset ?? 0);
+  if (input.isScrolling && input.scrollDirection === 'backward') {
+    return input.itemEnd <= scrollOffset;
+  }
+  return input.itemStart < scrollOffset;
+}
+
 export function resolveChatBottomScrollTop(input: {
   scrollHeight: number;
   clientHeight: number;

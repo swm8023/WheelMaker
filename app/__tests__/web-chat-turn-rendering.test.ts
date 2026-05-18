@@ -39,6 +39,9 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain('virtualizer.getVirtualItems().map(virtualItem => {');
     expect(virtualList).toContain('getItemKey: index => displayIndex.items[index]?.key ?? index,');
     expect(virtualList).toContain('estimateSize: index => (displayIndex.items[index]?.estimatedHeight ?? 120) + rowGap,');
+    expect(virtualList).toContain('useAnimationFrameWithResizeObserver: true,');
+    expect(virtualList).toContain('virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>');
+    expect(virtualList).toContain('shouldAdjustChatVirtualItemSizeChange({');
     expect(virtualList).toContain("paddingBottom: `${rowGap}px`,");
     expect(main).toContain("import {buildChatDisplayIndex} from './chat/chatDisplayIndex';");
     expect(main).toContain("import {ChatVirtualTurnList} from './chat/ChatVirtualTurnList';");

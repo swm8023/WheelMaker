@@ -1,6 +1,7 @@
 import React from 'react';
 import {useVirtualizer, type VirtualItem} from '@tanstack/react-virtual';
 import type {ChatDisplayIndex, ChatDisplayIndexItem} from './chatDisplayIndex';
+import {shouldAdjustChatVirtualItemSizeChange} from './chatScrollIntent';
 
 export type ChatVirtualTurnListProps = {
   scrollRef: React.RefObject<HTMLElement | null>;
@@ -22,8 +23,18 @@ export function ChatVirtualTurnList({
     getScrollElement: () => scrollRef.current,
     getItemKey: index => displayIndex.items[index]?.key ?? index,
     estimateSize: index => (displayIndex.items[index]?.estimatedHeight ?? 120) + rowGap,
+    useAnimationFrameWithResizeObserver: true,
     overscan,
   });
+
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+    shouldAdjustChatVirtualItemSizeChange({
+      isScrolling: instance.isScrolling,
+      itemEnd: item.end,
+      itemStart: item.start,
+      scrollDirection: instance.scrollDirection,
+      scrollOffset: instance.scrollOffset,
+    });
 
   return (
     <div

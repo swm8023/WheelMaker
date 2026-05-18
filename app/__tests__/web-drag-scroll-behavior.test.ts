@@ -6,6 +6,7 @@ import {
   nextChatUserScrollLockUntil,
   resolveChatBottomScrollTop,
   resolveChatSessionReadWindowUpdate,
+  shouldAdjustChatVirtualItemSizeChange,
   shouldAutoScrollChatToBottom,
   shouldHandleChatVirtualWindowScroll,
 } from '../web/src/chat/chatScrollIntent';
@@ -49,6 +50,44 @@ describe('web drag scroll behavior', () => {
   test('ignores programmatic chat scrolls for virtual window expansion', () => {
     expect(shouldHandleChatVirtualWindowScroll(true)).toBe(false);
     expect(shouldHandleChatVirtualWindowScroll(false)).toBe(true);
+  });
+
+  test('does not compensate virtual row resize while the user scrolls backward', () => {
+    expect(shouldAdjustChatVirtualItemSizeChange({
+      itemEnd: 620,
+      isScrolling: true,
+      itemStart: 400,
+      scrollDirection: 'backward',
+      scrollOffset: 500,
+    })).toBe(false);
+    expect(shouldAdjustChatVirtualItemSizeChange({
+      itemEnd: 460,
+      isScrolling: true,
+      itemStart: 400,
+      scrollDirection: 'backward',
+      scrollOffset: 500,
+    })).toBe(true);
+    expect(shouldAdjustChatVirtualItemSizeChange({
+      itemEnd: 620,
+      isScrolling: true,
+      itemStart: 400,
+      scrollDirection: 'forward',
+      scrollOffset: 500,
+    })).toBe(true);
+    expect(shouldAdjustChatVirtualItemSizeChange({
+      itemEnd: 620,
+      isScrolling: false,
+      itemStart: 400,
+      scrollDirection: null,
+      scrollOffset: 500,
+    })).toBe(true);
+    expect(shouldAdjustChatVirtualItemSizeChange({
+      itemEnd: 820,
+      isScrolling: true,
+      itemStart: 700,
+      scrollDirection: 'forward',
+      scrollOffset: 500,
+    })).toBe(false);
   });
 
   test('uses content resize observation instead of forced multi-frame scroll retries', () => {
