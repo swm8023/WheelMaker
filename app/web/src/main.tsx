@@ -2259,6 +2259,7 @@ function App() {
   const [tokenStatsProviders, setTokenStatsProviders] = useState<TokenProviderSectionView[]>([]);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
 
   const [projects, setProjects] = useState<RegistryProject[]>([]);
   const [projectId, setProjectId] = useState('');
@@ -4270,11 +4271,13 @@ function App() {
 
     if (!preserveFileView) {
       fileReadSeqRef.current += 1;
+      dirHashRef.current = {};
       fileHashRef.current = {};
       fileCacheRef.current = {};
     }
     expandedDirsRef.current = hydrated.expandedDirs;
     selectedFileRef.current = hydrated.selectedFile;
+    projectIdRef.current = hydrated.projectId;
     setProjectId(hydrated.projectId);
     setDirEntries(hydrated.dirEntries);
     setExpandedDirs(hydrated.expandedDirs);
@@ -4301,6 +4304,7 @@ function App() {
     setWorkingTreeFiles([]);
     setGitLoadedProjectId('');
     setProjectMenuOpen(false);
+    setWorkspaceProjectMenuOpen(false);
     setSidebarSettingsOpen(false);
     if (!isWide) setDrawerOpen(false);
   };
@@ -4472,12 +4476,13 @@ function App() {
     });
   };
 
-  const loadDirectory = async (path: string) => {
+  const loadDirectory = async (path: string, options?: {projectId?: string}) => {
     if (loadingDirs[path]) return;
+    const targetProjectId = options?.projectId || projectIdRef.current || projectId;
     setLoadingDirs(prev => ({ ...prev, [path]: true }));
     try {
-      const persistedCache = projectId
-        ? workspaceStore.getCachedDirectory(projectId, path)
+      const persistedCache = targetProjectId
+        ? workspaceStore.getCachedDirectory(targetProjectId, path)
         : null;
       const knownHash =
         dirHashRef.current[path] || persistedCache?.hash || '';
@@ -4493,8 +4498,8 @@ function App() {
         }
         if (result.hash) {
           dirHashRef.current[path] = result.hash;
-          if (projectId && Array.isArray(cachedEntries)) {
-            workspaceStore.cacheDirectory(projectId, path, result.hash, cachedEntries);
+          if (targetProjectId && Array.isArray(cachedEntries)) {
+            workspaceStore.cacheDirectory(targetProjectId, path, result.hash, cachedEntries);
           }
         }
         return;
@@ -4506,8 +4511,8 @@ function App() {
       if (nextHash) {
         dirHashRef.current[path] = nextHash;
       }
-      if (projectId) {
-        workspaceStore.cacheDirectory(projectId, path, nextHash, entries);
+      if (targetProjectId) {
+        workspaceStore.cacheDirectory(targetProjectId, path, nextHash, entries);
       }
     } finally {
       setLoadingDirs(prev => {
@@ -4632,7 +4637,7 @@ function App() {
   }, [projectId, selectedFile]);
 
   const loadGit = async (preferredRefs?: string[]) => {
-    const targetProjectId = projectId;
+    const targetProjectId = projectIdRef.current || projectId;
     if (!targetProjectId) return;
     setGitLoading(true);
     setGitError('');
@@ -6207,6 +6212,68 @@ function App() {
     window.location.reload();
   };
 
+  const syncWorkspaceProject = async (
+    nextProjectId: string,
+    options?: {reason?: 'chat' | 'manual'},
+  ) => {
+    if (!nextProjectId || nextProjectId === projectIdRef.current) {
+      setWorkspaceProjectMenuOpen(false);
+      return;
+    }
+    if (!projectsRef.current.some(item => item.projectId === nextProjectId)) {
+      if (options?.reason !== 'chat') {
+        setError('Project is no longer available');
+      }
+      setWorkspaceProjectMenuOpen(false);
+      return;
+    }
+
+    captureSelectedFileScrollPosition();
+    const previousProjectId = projectIdRef.current;
+    if (previousProjectId) {
+      workspaceStore.rememberProjectSnapshot(previousProjectId, {
+        expandedDirs: expandedDirsRef.current,
+        selectedFile: selectedFileRef.current,
+        pinnedFiles,
+        gitCurrentBranch,
+        commits,
+        selectedCommit,
+        commitFilesBySha,
+        selectedDiff,
+      });
+    }
+
+    try {
+      const result = await workspaceController.switchProjectLightweight(nextProjectId);
+      projectsRef.current = result.projects;
+      setProjects(result.projects);
+      setHasPendingProjectUpdates(false);
+      workspaceStore.rememberGlobalState({
+        selectedProjectId: nextProjectId,
+      });
+      skipNextSelectedFileAutoReadRef.current =
+        tabRef.current !== 'file' && !!result.hydrated.selectedFile;
+      applyHydratedProjectState(result.hydrated);
+      setWorkspaceProjectMenuOpen(false);
+      setError('');
+
+      if (tabRef.current === 'file') {
+        loadDirectory('.', {projectId: nextProjectId}).catch(err =>
+          setError(err instanceof Error ? err.message : String(err)),
+        );
+      } else if (tabRef.current === 'git') {
+        loadGit().catch(err =>
+          setGitError(err instanceof Error ? err.message : String(err)),
+        );
+      }
+    } catch (err) {
+      if (options?.reason !== 'chat') {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+      setWorkspaceProjectMenuOpen(false);
+    }
+  };
+
   const switchProject = async (nextProjectId: string) => {
     setLoadingProject(true);
     try {
@@ -6240,6 +6307,7 @@ function App() {
     const nextSelectedKey = chatSessionKeyFromParts(targetProjectId, sessionId);
     if (!nextSelectedKey) return;
     workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
+    syncWorkspaceProject(targetProjectId, {reason: 'chat'}).catch(() => undefined);
     setWideProjectActionMenu(null);
     setMobileProjectActionMenu(null);
     if (options?.closeMobileDrawer) {
@@ -6923,10 +6991,55 @@ function App() {
     });
   };
 
+  const renderWorkspaceProjectSelector = () => {
+    const currentWorkspaceProject = projects.find(item => item.projectId === projectId);
+    return (
+      <div className="workspace-project-selector">
+        <div className="workspace-project-label">WORKSPACE</div>
+        <div className="workspace-project-control">
+          <button
+            type="button"
+            className="workspace-project-button"
+            onClick={() => setWorkspaceProjectMenuOpen(prev => !prev)}
+            title={currentWorkspaceProject?.path || currentProjectName}
+          >
+            <span className="workspace-project-name">
+              {currentWorkspaceProject?.name || currentProjectName}
+            </span>
+            <span className="codicon codicon-chevron-down" />
+          </button>
+          {workspaceProjectMenuOpen ? (
+            <div className="workspace-project-menu">
+              {sortedProjectItems.map(projectItem => (
+                <button
+                  key={`workspace:${projectItem.projectId}`}
+                  type="button"
+                  className={`workspace-project-menu-item ${
+                    projectItem.projectId === projectId ? 'selected' : ''
+                  }`}
+                  onClick={() =>
+                    syncWorkspaceProject(projectItem.projectId, {reason: 'manual'}).catch(() => undefined)
+                  }
+                  title={projectItem.path || projectItem.projectId}
+                >
+                  <span className="workspace-project-menu-name">{projectItem.name}</span>
+                  <span className="workspace-project-menu-path">
+                    {projectItem.path || projectItem.hubId || projectItem.projectId}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
   const renderSidebarMain = (showSectionTitle = true) => {
     if (tab === 'file') {
       return (
         <>
+          {isWide ? renderWorkspaceProjectSelector() : null}
           {showSectionTitle ? <div className="section-title">EXPLORER</div> : null}
           <div className="list">{renderFileTree('.', 0)}</div>
         </>
@@ -6963,6 +7076,7 @@ function App() {
         : `${gitSelectedBranches.length} branches`;
     return (
       <>
+        {isWide ? renderWorkspaceProjectSelector() : null}
         <div className="section-title git-section-title">
           <span className="git-section-main">GRAPH</span>
           <span className="git-section-meta">{`${graphItemsCount} items`}</span>
@@ -9712,7 +9826,7 @@ function App() {
             projectItem.projectId === projectId ? 'selected' : ''
           }`}
           onClick={() =>
-            switchProject(projectItem.projectId).catch(() => undefined)
+            syncWorkspaceProject(projectItem.projectId, {reason: 'manual'}).catch(() => undefined)
           }
         >
           <div className="project-menu-main">

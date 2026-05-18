@@ -158,6 +158,11 @@ export class WorkspaceStore {
     };
   }
 
+  hydrateCachedProject(projectId: string): HydratedProjectState {
+    const cachedRoot = this.getCachedDirectory(projectId, '.');
+    return this.hydrateProject(projectId, cachedRoot?.entries ?? []);
+  }
+
   rememberProjectSnapshot(projectId: string, snapshot: ProjectSnapshot): void {
     if (!projectId) return;
     this.persistence.patchProjectState(projectId, {

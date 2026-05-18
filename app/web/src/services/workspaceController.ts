@@ -49,6 +49,15 @@ export class WorkspaceController {
     };
   }
 
+  async switchProjectLightweight(projectId: string): Promise<ProjectLoadResult> {
+    const session = await this.service.selectProjectLightweight(projectId);
+    return {
+      projects: session.projects,
+      rootEntries: [],
+      hydrated: this.store.hydrateCachedProject(session.selectedProjectId),
+    };
+  }
+
   async validateExpandedDirectories(
     projectId: string,
     rootEntries: RegistryFsEntry[],

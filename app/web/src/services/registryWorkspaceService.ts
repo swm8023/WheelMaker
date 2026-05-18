@@ -132,6 +132,17 @@ export class RegistryWorkspaceService {
     return this.session;
   }
 
+  async selectProjectLightweight(projectId: string): Promise<WorkspaceSession> {
+    if (!this.session || !this.repository) {
+      throw new Error('session is not ready');
+    }
+    if (!this.session.projects.some(project => project.projectId === projectId)) {
+      throw new Error('Project is no longer available');
+    }
+    this.session = {...this.session, selectedProjectId: projectId};
+    return this.session;
+  }
+
   async listDirectory(path: string, knownHash?: string): Promise<{entries: RegistryFsEntry[]; hash?: string; notModified: boolean}> {
     if (!this.session || !this.repository) {
       return {entries: [], hash: '', notModified: false};

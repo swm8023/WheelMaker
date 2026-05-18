@@ -39,6 +39,7 @@ describe('main chat composite key migration', () => {
     expect(main).toContain('const [selectedChatKey, setSelectedChatKey] = useState<ChatSessionKey | null>(null);');
     expect(main).toContain('encodeChatSessionKey(');
     expect(selectProjectChatSessionBody).not.toContain('switchProject(');
+    expect(selectProjectChatSessionBody).toContain('syncWorkspaceProject(targetProjectId');
     expect(selectProjectChatSessionBody).toContain('workspaceStore.rememberSelectedChatSessionKey');
   });
 
