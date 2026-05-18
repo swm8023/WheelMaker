@@ -16,7 +16,7 @@
 - Modify: `app/web/src/chat/chatOptionReplies.ts`
 - Test: `app/__tests__/web-chat-option-replies.test.ts`
 
-- [ ] **Step 1: Write failing parser tests**
+- [x] **Step 1: Write failing parser tests**
 
 Add tests for:
 
@@ -59,13 +59,13 @@ test('splits the confirmation sentence while preserving surrounding markdown', (
 });
 ```
 
-- [ ] **Step 2: Run parser test and verify RED**
+- [x] **Step 2: Run parser test and verify RED**
 
 Run: `cd app && npm test -- --runInBand __tests__/web-chat-option-replies.test.ts`
 
 Expected: FAIL because `extractChatConfirmationReply` and `splitChatConfirmationReplyText` are not exported.
 
-- [ ] **Step 3: Implement minimal parser helpers**
+- [x] **Step 3: Implement minimal parser helpers**
 
 Add:
 
@@ -82,7 +82,7 @@ export type ChatConfirmationReplyTextPart =
 
 Implement `extractChatConfirmationReply(text)` and `splitChatConfirmationReplyText(text)` by scanning non-code-fence lines near the end of the text. Return no confirmation when `extractChatOptionReplies(text)` is non-empty.
 
-- [ ] **Step 4: Run parser test and verify GREEN**
+- [x] **Step 4: Run parser test and verify GREEN**
 
 Run: `cd app && npm test -- --runInBand __tests__/web-chat-option-replies.test.ts`
 
@@ -95,7 +95,7 @@ Expected: PASS.
 - Modify: `app/web/src/styles.css`
 - Test: `app/__tests__/web-chat-ui.test.ts`
 
-- [ ] **Step 1: Write failing UI source assertions**
+- [x] **Step 1: Write failing UI source assertions**
 
 Assert that `main.tsx` imports and uses the new helpers:
 
@@ -119,13 +119,13 @@ expect(stylesCss).toContain('.chat-confirmation-reply-check {');
 expect(stylesCss).toContain('.chat-confirmation-reply-text {');
 ```
 
-- [ ] **Step 2: Run UI test and verify RED**
+- [x] **Step 2: Run UI test and verify RED**
 
 Run: `cd app && npm test -- --runInBand __tests__/web-chat-ui.test.ts`
 
 Expected: FAIL because confirmation helpers and classes are not wired.
 
-- [ ] **Step 3: Implement UI wiring**
+- [x] **Step 3: Implement UI wiring**
 
 Update `ChatTurnViewProps` with:
 
@@ -138,11 +138,11 @@ In `ChatTurnView`, render `splitChatConfirmationReplyText(text)` only when `conf
 
 In latest-message selection, compute confirmation data only when `extractChatOptionReplies(text).length === 0`, and pass it only to the latest eligible assistant message.
 
-- [ ] **Step 4: Add CSS**
+- [x] **Step 4: Add CSS**
 
 Add compact inline styles next to the existing option reply CSS. The action should look like an inline framed sentence with a small check frame, not a large separate button.
 
-- [ ] **Step 5: Run UI test and verify GREEN**
+- [x] **Step 5: Run UI test and verify GREEN**
 
 Run: `cd app && npm test -- --runInBand __tests__/web-chat-ui.test.ts`
 
@@ -157,25 +157,25 @@ Expected: PASS.
 - Verify: `app/__tests__/web-chat-option-replies.test.ts`
 - Verify: `app/__tests__/web-chat-ui.test.ts`
 
-- [ ] **Step 1: Run targeted parser and UI tests**
+- [x] **Step 1: Run targeted parser and UI tests**
 
 Run: `cd app && npm test -- --runInBand __tests__/web-chat-option-replies.test.ts __tests__/web-chat-ui.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 2: Run TypeScript check**
+- [x] **Step 2: Run TypeScript check**
 
 Run: `cd app && npm run tsc:web`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run app test suite**
+- [x] **Step 3: Run app test suite**
 
 Run: `cd app && npm test -- --runInBand`
 
 Expected: PASS.
 
-- [ ] **Step 4: Run diff whitespace check**
+- [x] **Step 4: Run diff whitespace check**
 
 Run: `git diff --check`
 
