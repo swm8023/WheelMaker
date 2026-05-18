@@ -89,10 +89,10 @@ Requirements:
 - `launchctl`
 - the agent CLIs you plan to use, already installed and logged in for the current user
 
-Run from the repository root:
+One-shot refresh from the repository root:
 
 ```bash
-bash scripts/refresh_server.sh
+bash deploy.sh
 ```
 
 The macOS refresh flow will:
@@ -109,6 +109,16 @@ The macOS refresh flow will:
   - `com.wheelmaker.updater`
 
 Lifecycle commands:
+
+```bash
+bash deploy.sh status
+bash deploy.sh start
+bash deploy.sh stop
+bash deploy.sh restart
+bash deploy.sh uninstall
+```
+
+Or call the underlying script directly:
 
 ```bash
 bash scripts/refresh_server.sh status
