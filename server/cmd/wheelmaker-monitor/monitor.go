@@ -40,10 +40,15 @@ const (
 	updaterServiceName    = "WheelMakerUpdater"
 	manualSignalFileName  = "update-now.signal"
 	fullUpdateSignalToken = "full-update"
+
+	launchAgentHubLabel     = "com.wheelmaker.hub"
+	launchAgentMonitorLabel = "com.wheelmaker.monitor"
+	launchAgentUpdaterLabel = "com.wheelmaker.updater"
 )
 
 var errServiceNotInstalled = errors.New("service not installed")
 var debugSessionPrefixRe = regexp.MustCompile(`\{([0-9a-fA-F-]{36})\s+([^}]*)\}`)
+var monitorGOOS = runtime.GOOS
 
 type ActionError struct {
 	Code    string
@@ -282,7 +287,7 @@ func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
 		return nil, err
 	}
 	running := len(procs) > 0
-	if runtime.GOOS == "windows" && len(svcInfos) > 0 {
+	if monitorGOOS == "windows" && len(svcInfos) > 0 {
 		for _, svc := range svcInfos {
 			if strings.EqualFold(svc.Name, wheelmakerServiceName) && strings.EqualFold(svc.Status, "Running") {
 				running = true
@@ -299,7 +304,10 @@ func (m *Monitor) GetServiceStatus() (*ServiceStatus, error) {
 }
 
 func listManagedServices() ([]ServiceInfo, error) {
-	if runtime.GOOS != "windows" {
+	if monitorGOOS == "darwin" {
+		return listLaunchAgentServices()
+	}
+	if monitorGOOS != "windows" {
 		return nil, nil
 	}
 	names := []string{wheelmakerServiceName, monitorServiceName, updaterServiceName}
@@ -339,8 +347,66 @@ $obj | ConvertTo-Json -Compress`, name, name)
 	return info, nil
 }
 
+func allLaunchAgentLabels() []string {
+	return []string{launchAgentHubLabel, launchAgentMonitorLabel, launchAgentUpdaterLabel}
+}
+
+func managedLaunchAgentLabels() []string {
+	return []string{launchAgentHubLabel, launchAgentUpdaterLabel}
+}
+
+func launchAgentDomain() string {
+	return fmt.Sprintf("gui/%d", os.Getuid())
+}
+
+func launchAgentTarget(label string) string {
+	return launchAgentDomain() + "/" + label
+}
+
+func launchAgentPlistPath(home string, label string) string {
+	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+}
+
+func parseLaunchAgentServiceInfo(label string, installed bool, output []byte) ServiceInfo {
+	if !installed {
+		return ServiceInfo{Name: label, Installed: false, Status: "NotInstalled", StartType: "-"}
+	}
+	text := strings.ToLower(string(output))
+	status := "Stopped"
+	if strings.Contains(text, "state = running") || strings.Contains(text, "pid =") {
+		status = "Running"
+	}
+	return ServiceInfo{Name: label, Installed: true, Status: status, StartType: "LaunchAgent"}
+}
+
+func listLaunchAgentServices() ([]ServiceInfo, error) {
+	infos := make([]ServiceInfo, 0, len(allLaunchAgentLabels()))
+	for _, label := range allLaunchAgentLabels() {
+		info, err := getLaunchAgentServiceInfo(label)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func getLaunchAgentServiceInfo(label string) (ServiceInfo, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ServiceInfo{}, fmt.Errorf("home dir: %w", err)
+	}
+	plist := launchAgentPlistPath(home, label)
+	installed := fileExists(plist)
+	out, err := exec.Command("launchctl", "print", launchAgentTarget(label)).CombinedOutput()
+	if err != nil {
+		return parseLaunchAgentServiceInfo(label, installed, nil), nil
+	}
+	return parseLaunchAgentServiceInfo(label, true, out), nil
+}
+
 func listWheelmakerProcesses() ([]ProcessInfo, error) {
-	if runtime.GOOS != "windows" {
+	if monitorGOOS != "windows" {
 		return listProcessesUnix()
 	}
 	return listProcessesWindows()
@@ -1156,7 +1222,16 @@ func parseLine(line string) LogEntry {
 
 // RestartService restarts the wheelmaker service using internal process control.
 func (m *Monitor) RestartService() error {
-	if runtime.GOOS == "windows" {
+	if monitorGOOS == "darwin" {
+		err := restartManagedLaunchAgents()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
+	if monitorGOOS == "windows" {
 		err := restartManagedRuntimeServices()
 		if err == nil {
 			return nil
@@ -1174,7 +1249,16 @@ func (m *Monitor) RestartService() error {
 
 // StopService stops the wheelmaker service using internal process control.
 func (m *Monitor) StopService() error {
-	if runtime.GOOS != "windows" {
+	if monitorGOOS == "darwin" {
+		err := stopManagedLaunchAgents()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
+	if monitorGOOS != "windows" {
 		procs, err := listProcessesUnix()
 		if err != nil {
 			return err
@@ -1222,7 +1306,16 @@ exit 1`
 
 // StartService starts the wheelmaker service using internal process control.
 func (m *Monitor) StartService() error {
-	if runtime.GOOS == "windows" {
+	if monitorGOOS == "darwin" {
+		err := startManagedLaunchAgents()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
+	if monitorGOOS == "windows" {
 		err := startManagedRuntimeServices()
 		if err == nil {
 			return nil
@@ -1262,7 +1355,21 @@ func (m *Monitor) TriggerUpdatePublish() error {
 
 // RestartMonitor restarts the monitor process itself.
 func (m *Monitor) RestartMonitor() error {
-	if runtime.GOOS == "windows" {
+	if monitorGOOS == "darwin" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr == nil && fileExists(launchAgentPlistPath(home, launchAgentMonitorLabel)) {
+			cmd := exec.Command("launchctl", "kickstart", "-k", launchAgentTarget(launchAgentMonitorLabel))
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("schedule monitor LaunchAgent restart: %w", err)
+			}
+			go func() {
+				time.Sleep(120 * time.Millisecond)
+				os.Exit(0)
+			}()
+			return nil
+		}
+	}
+	if monitorGOOS == "windows" {
 		exists, err := windowsServiceExists(monitorServiceName)
 		if err != nil {
 			return err
@@ -1287,7 +1394,7 @@ func (m *Monitor) RestartMonitor() error {
 		return err
 	}
 
-	if runtime.GOOS == "windows" {
+	if monitorGOOS == "windows" {
 		script := fmt.Sprintf(
 			"Start-Sleep -Milliseconds 900; Start-Process -FilePath %q -ArgumentList @('-dir', %q) -WindowStyle Hidden",
 			monitorExe,
@@ -1314,7 +1421,7 @@ func (m *Monitor) RestartMonitor() error {
 
 func (m *Monitor) resolveWheelmakerExecutable() (string, error) {
 	name := "wheelmaker"
-	if runtime.GOOS == "windows" {
+	if monitorGOOS == "windows" {
 		name += ".exe"
 	}
 	candidates := []string{
@@ -1333,7 +1440,7 @@ func (m *Monitor) resolveWheelmakerExecutable() (string, error) {
 
 func (m *Monitor) resolveMonitorExecutable() (string, error) {
 	name := "wheelmaker-monitor"
-	if runtime.GOOS == "windows" {
+	if monitorGOOS == "windows" {
 		name += ".exe"
 	}
 	candidates := make([]string, 0, 3)
@@ -1359,6 +1466,78 @@ func fileExists(path string) bool {
 		return false
 	}
 	return !info.IsDir()
+}
+
+func startManagedLaunchAgents() error {
+	return runManagedLaunchAgentAction("start")
+}
+
+func stopManagedLaunchAgents() error {
+	return runManagedLaunchAgentAction("stop")
+}
+
+func restartManagedLaunchAgents() error {
+	return runManagedLaunchAgentAction("restart")
+}
+
+func runManagedLaunchAgentAction(action string) error {
+	performed := false
+	errs := make([]string, 0)
+	for _, label := range managedLaunchAgentLabels() {
+		err := runLaunchAgentAction(label, action)
+		if err == nil {
+			performed = true
+			continue
+		}
+		if errors.Is(err, errServiceNotInstalled) {
+			continue
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", label, err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s LaunchAgent failed: %s", action, strings.Join(errs, "; "))
+	}
+	if !performed {
+		return errServiceNotInstalled
+	}
+	return nil
+}
+
+func runLaunchAgentAction(label string, action string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	plist := launchAgentPlistPath(home, label)
+	if !fileExists(plist) {
+		return errServiceNotInstalled
+	}
+	target := launchAgentTarget(label)
+	switch action {
+	case "start":
+		_ = exec.Command("launchctl", "bootout", target).Run()
+		if out, err := exec.Command("launchctl", "bootstrap", launchAgentDomain(), plist).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl bootstrap %s: %w (%s)", label, err, strings.TrimSpace(string(out)))
+		}
+		if out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl kickstart %s: %w (%s)", label, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	case "stop":
+		_ = exec.Command("launchctl", "bootout", target).Run()
+		return nil
+	case "restart":
+		_ = exec.Command("launchctl", "bootout", target).Run()
+		if out, err := exec.Command("launchctl", "bootstrap", launchAgentDomain(), plist).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl bootstrap %s: %w (%s)", label, err, strings.TrimSpace(string(out)))
+		}
+		if out, err := exec.Command("launchctl", "kickstart", "-k", target).CombinedOutput(); err != nil {
+			return fmt.Errorf("launchctl kickstart %s: %w (%s)", label, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported LaunchAgent action: %s", action)
+	}
 }
 
 func windowsServiceExists(serviceName string) (bool, error) {

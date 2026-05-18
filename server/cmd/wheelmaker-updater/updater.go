@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -24,6 +25,8 @@ const (
 	triggerReasonManualFullUpdate = "manual-full-update"
 	fullUpdateSignalToken         = "full-update"
 )
+
+var runtimeGOOS = runtime.GOOS
 
 type UpdaterConfig struct {
 	RepoDir    string
@@ -174,30 +177,22 @@ func parseManualSignalReason(raw string) string {
 func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner, skipUpdate bool) error {
 	logger.Info("[updater] run refresh script begin")
 
-	refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
-	if _, err := os.Stat(refreshScript); err != nil {
+	invocation, err := refreshInvocationForOS(cfg, skipUpdate, runtimeGOOS)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(invocation.scriptPath); err != nil {
 		return fmt.Errorf("refresh script missing: %w", err)
 	}
 
-	args := []string{
-		"-NoProfile",
-		"-ExecutionPolicy", "Bypass",
-		"-File", refreshScript,
-		"-InstallDir", cfg.InstallDir,
-		"-SkipUpdaterInstall",
-		"-SkipServiceConfig",
-	}
-	if skipUpdate {
-		args = append(args, "-SkipUpdate")
-	}
-	logger.Info("[updater] invoke powershell %s", strings.Join(args, " "))
+	logger.Info("[updater] invoke %s %s", invocation.command, strings.Join(invocation.args, " "))
 
-	_, err := runner.CombinedOutput(ctx, cfg.RepoDir, "powershell", args...)
+	_, err = runner.CombinedOutput(ctx, cfg.RepoDir, invocation.command, invocation.args...)
 	if err != nil {
 		return err
 	}
 
-	if !skipUpdate {
+	if !skipUpdate && !invocation.refreshPublishesWeb {
 		appDir := filepath.Join(cfg.RepoDir, "app")
 		logger.Info("[updater] publish web release begin")
 		if _, err := runner.CombinedOutput(ctx, appDir, "npm", "run", "build:web:release"); err != nil {
@@ -208,6 +203,57 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 
 	logger.Info("[updater] run refresh script complete")
 	return nil
+}
+
+type refreshInvocation struct {
+	scriptPath          string
+	command             string
+	args                []string
+	refreshPublishesWeb bool
+}
+
+func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (refreshInvocation, error) {
+	switch goos {
+	case "windows":
+		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.ps1")
+		args := []string{
+			"-NoProfile",
+			"-ExecutionPolicy", "Bypass",
+			"-File", refreshScript,
+			"-InstallDir", cfg.InstallDir,
+			"-SkipUpdaterInstall",
+			"-SkipServiceConfig",
+		}
+		if skipUpdate {
+			args = append(args, "-SkipUpdate")
+		}
+		return refreshInvocation{
+			scriptPath:          refreshScript,
+			command:             "powershell",
+			args:                args,
+			refreshPublishesWeb: false,
+		}, nil
+	case "darwin":
+		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.sh")
+		args := []string{
+			refreshScript,
+			"--repo-root", cfg.RepoDir,
+			"--install-dir", cfg.InstallDir,
+			"--skip-updater-install",
+			"--skip-service-config",
+		}
+		if skipUpdate {
+			args = append(args, "--skip-update", "--skip-web-publish")
+		}
+		return refreshInvocation{
+			scriptPath:          refreshScript,
+			command:             "bash",
+			args:                args,
+			refreshPublishesWeb: true,
+		}, nil
+	default:
+		return refreshInvocation{}, fmt.Errorf("unsupported updater platform: %s", goos)
+	}
 }
 
 func validateConfig(cfg UpdaterConfig) error {
@@ -231,12 +277,23 @@ func validateConfig(cfg UpdaterConfig) error {
 }
 
 func validateCommands() error {
-	for _, name := range []string{"powershell"} {
+	for _, name := range requiredCommandsForOS(runtimeGOOS) {
 		if _, err := exec.LookPath(name); err != nil {
 			return fmt.Errorf("required command not found: %s", name)
 		}
 	}
 	return nil
+}
+
+func requiredCommandsForOS(goos string) []string {
+	switch goos {
+	case "windows":
+		return []string{"powershell"}
+	case "darwin":
+		return []string{"bash", "git", "go", "node", "npm", "npx", "launchctl"}
+	default:
+		return nil
+	}
 }
 
 func parseDailyTime(v string) (int, int, error) {

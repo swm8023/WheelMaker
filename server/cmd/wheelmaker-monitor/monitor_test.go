@@ -33,6 +33,42 @@ func TestResolveLogFilePath_PrefersLogDir(t *testing.T) {
 	}
 }
 
+func TestLaunchAgentLabels(t *testing.T) {
+	all := allLaunchAgentLabels()
+	want := []string{launchAgentHubLabel, launchAgentMonitorLabel, launchAgentUpdaterLabel}
+	if strings.Join(all, ",") != strings.Join(want, ",") {
+		t.Fatalf("labels=%#v want %#v", all, want)
+	}
+	managed := managedLaunchAgentLabels()
+	if strings.Join(managed, ",") != strings.Join([]string{launchAgentHubLabel, launchAgentUpdaterLabel}, ",") {
+		t.Fatalf("managed labels=%#v", managed)
+	}
+}
+
+func TestLaunchAgentPlistPath(t *testing.T) {
+	home := filepath.Join("Users", "me")
+	got := launchAgentPlistPath(home, launchAgentHubLabel)
+	want := filepath.Join(home, "Library", "LaunchAgents", launchAgentHubLabel+".plist")
+	if got != want {
+		t.Fatalf("plist path=%q want %q", got, want)
+	}
+}
+
+func TestParseLaunchAgentServiceInfo(t *testing.T) {
+	running := parseLaunchAgentServiceInfo(launchAgentHubLabel, true, []byte("state = running\npid = 123\n"))
+	if !running.Installed || running.Status != "Running" || running.StartType != "LaunchAgent" {
+		t.Fatalf("running info=%#v", running)
+	}
+	stopped := parseLaunchAgentServiceInfo(launchAgentHubLabel, true, []byte("state = waiting\n"))
+	if stopped.Status != "Stopped" {
+		t.Fatalf("stopped info=%#v", stopped)
+	}
+	missing := parseLaunchAgentServiceInfo(launchAgentHubLabel, false, nil)
+	if missing.Installed || missing.Status != "NotInstalled" {
+		t.Fatalf("missing info=%#v", missing)
+	}
+}
+
 func TestResolveLogFilePath_FallbackOldRoot(t *testing.T) {
 	base := t.TempDir()
 	m := NewMonitor(base)
