@@ -3690,6 +3690,59 @@ body,
   color: var(--muted);
 }
 
+.chat-confirmation-reply-line {
+  margin: 2px 0 4px;
+}
+
+.chat-confirmation-reply-action {
+  max-width: min(100%, 620px);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 7px;
+  text-align: left;
+  font: inherit;
+  line-height: 1.45;
+  cursor: pointer;
+}
+
+.chat-confirmation-reply-check {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-1) 90%, var(--accent));
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-confirmation-reply-text {
+  color: inherit;
+}
+
+.chat-confirmation-reply-action:hover .chat-confirmation-reply-check {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--surface-1) 80%, var(--accent));
+}
+
+.chat-confirmation-reply-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 2px;
+  border-radius: 7px;
+}
+
+.chat-confirmation-reply-action:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
 .chat-option-reply-label {
   flex: 0 0 auto;
   min-width: 1.5em;

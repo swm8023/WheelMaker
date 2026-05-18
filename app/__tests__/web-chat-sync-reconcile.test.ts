@@ -2,6 +2,7 @@ import {
   getLatestSessionReadCursor,
   reconcileCachedSessionReadCursor,
   needsPromptTurnRefresh,
+  mergeIncomingSessionMessage,
   reconcileSessionReadMessages,
   replaceSessionMessages,
   shouldRequestSessionReadForIncomingTurn,
@@ -228,5 +229,28 @@ describe('chat session read reconciliation', () => {
       param: {},
       finished: false,
     })).toEqual({ turnIndex: 4 });
+  });
+
+  test('keeps an incoming live turn when also requesting a gap read', () => {
+    const incoming: RegistryChatMessage = {
+      sessionId: 'sess-1',
+      turnIndex: 5,
+      method: 'agent_message_chunk',
+      param: { text: 'live turn' },
+      finished: false,
+    };
+
+    const result = mergeIncomingSessionMessage({
+      cursor: { turnIndex: 3 },
+      messages: [
+        { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+        { sessionId: 'sess-1', turnIndex: 2, method: 'agent_message_chunk', param: { text: 'done' }, finished: true },
+        { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: { stopReason: 'end_turn' }, finished: true },
+      ],
+    }, incoming);
+
+    expect(result.gapReadCursor).toEqual({ turnIndex: 3 });
+    expect(result.messages).toContainEqual(incoming);
+    expect(result.cursor).toEqual({ turnIndex: 3 });
   });
 });

@@ -22,11 +22,11 @@ import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
   getLatestSessionReadCursor,
   isFinishedChatMessage,
+  mergeIncomingSessionMessage,
   needsPromptTurnRefresh,
   reconcileCachedSessionReadCursor,
   reconcileSessionReadMessages,
   replaceSessionMessages,
-  shouldRequestSessionReadForIncomingTurn,
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import {
@@ -49,7 +49,14 @@ import {
   type ChatTurnWindow,
 } from './chat/chatTurnWindow';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
-import { extractChatOptionReplies, splitChatOptionReplyText, type ChatOptionReply } from './chat/chatOptionReplies';
+import {
+  extractChatConfirmationReply,
+  extractChatOptionReplies,
+  splitChatConfirmationReplyText,
+  splitChatOptionReplyText,
+  type ChatConfirmationReply,
+  type ChatOptionReply,
+} from './chat/chatOptionReplies';
 import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
@@ -508,24 +515,6 @@ function removeSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFla
 }
 
 
-function upsertChatMessage(
-  list: RegistryChatMessage[],
-  next: RegistryChatMessage,
-): RegistryChatMessage[] {
-  const key = chatMessageDomKey(next);
-  const index = list.findIndex(
-    item => chatMessageDomKey(item) === key,
-  );
-  if (index < 0) {
-    return [...list, next].sort((a, b) => {
-      return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
-    });
-  }
-  const copy = [...list];
-  copy[index] = next;
-  return copy;
-}
-
 function chatMessageDomKey(message: Pick<RegistryChatMessage, 'sessionId' | 'turnIndex'>): string {
   return `${message.sessionId}:${message.turnIndex}`;
 }
@@ -860,6 +849,8 @@ type ChatTurnViewProps = {
   optionReplies?: ChatOptionReply[];
   optionRepliesDisabled?: boolean;
   onSelectOptionReply?: (label: string) => void;
+  confirmationReply?: ChatConfirmationReply | null;
+  onSelectConfirmationReply?: (replyText: string) => void;
   onRetryPendingPrompt?: () => void;
   onEditPendingPrompt?: () => void;
 };
@@ -876,6 +867,8 @@ const ChatTurnView = React.memo(function ChatTurnView({
   optionReplies = [],
   optionRepliesDisabled = false,
   onSelectOptionReply,
+  confirmationReply = null,
+  onSelectConfirmationReply,
   onRetryPendingPrompt,
   onEditPendingPrompt,
 }: ChatTurnViewProps) {
@@ -1036,8 +1029,14 @@ const ChatTurnView = React.memo(function ChatTurnView({
     return null;
   }
   const optionReplyParts = splitChatOptionReplyText(text);
+  const confirmationReplyParts = splitChatConfirmationReplyText(text);
   const hasOptionReplyParts = optionReplyParts.some(part => part.type === 'option');
   const selectableOptionReplies = optionReplies.length > 0;
+  const selectableConfirmationReply = optionReplies.length === 0 ? confirmationReply : null;
+  const hasConfirmationReplyParts =
+    !!selectableConfirmationReply &&
+    !hasOptionReplyParts &&
+    confirmationReplyParts.some(part => part.type === 'confirmation');
   return (
     <div className="chat-main-message">
       {hasOptionReplyParts ? (
@@ -1079,6 +1078,39 @@ const ChatTurnView = React.memo(function ChatTurnView({
                   {optionContent}
                 </div>
               )}
+            </div>
+          );
+        })
+      ) : hasConfirmationReplyParts ? (
+        confirmationReplyParts.map((part, index) => {
+          if (part.type === 'markdown') {
+            return part.text ? (
+              <ReactMarkdown
+                key={`markdown:${index}`}
+                remarkPlugins={[remarkGfm, remarkMath]}
+                urlTransform={markdownUrlTransform}
+                rehypePlugins={[rehypeKatex]}
+                components={markdownComponents}
+              >
+                {part.text}
+              </ReactMarkdown>
+            ) : null;
+          }
+          return (
+            <div key={`confirmation:${index}`} className="chat-confirmation-reply-line">
+              <button
+                type="button"
+                className="chat-confirmation-reply-action"
+                onClick={() => onSelectConfirmationReply?.(part.reply.replyText)}
+                disabled={optionRepliesDisabled}
+                title={part.reply.replyText}
+                aria-label={`Reply ${part.reply.replyText}: ${part.reply.sentence}`}
+              >
+                <span className="chat-confirmation-reply-check" aria-hidden="true">
+                  <span className="codicon codicon-check" />
+                </span>
+                <span className="chat-confirmation-reply-text">{part.reply.sentence}</span>
+              </button>
             </div>
           );
         })
@@ -6706,7 +6738,9 @@ function App() {
         if (eventProjectId === projectIdRef.current) {
           setChatSessions(prev => mergeChatSession(prev, mergedSessionForCache ?? sessionPatchForIndex));
         }
-        const readCursorForGap = shouldRequestSessionReadForIncomingTurn(
+        maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);
+
+        const incomingMerge = mergeIncomingSessionMessage(
           {
             cursor: {
               turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
@@ -6715,26 +6749,8 @@ function App() {
           },
           message,
         );
-        if (readCursorForGap) {
-          chatSyncIndexRef.current[runtimeKey] = 0;
-          chatSyncSubIndexRef.current[runtimeKey] = readCursorForGap.turnIndex;
-          if (isSelectedSession) {
-            loadChatSession(sessionId, eventProjectId, {
-              incremental: true,
-              preserveUserSelection: true,
-              selectionSnapshot: runtimeKey,
-            }).catch(() => undefined);
-          }
-          return;
-        }
-
-        maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);
-
-        const merged = upsertChatMessage(
-          existingMessagesForSession,
-          message,
-        );
-        const latestSyncCursor = getLatestSessionReadCursor(merged);
+        const merged = incomingMerge.messages;
+        const latestSyncCursor = incomingMerge.cursor;
         chatSyncIndexRef.current[runtimeKey] = 0;
         chatSyncSubIndexRef.current[runtimeKey] = latestSyncCursor.turnIndex;
         chatMessageStoreRef.current[runtimeKey] = merged;
@@ -6744,6 +6760,17 @@ function App() {
           setVisibleChatMessagesForRuntimeKey(runtimeKey, merged, {
             followLatest: chatAutoScrollFollowRef.current,
           });
+        }
+        if (incomingMerge.gapReadCursor) {
+          chatSyncIndexRef.current[runtimeKey] = 0;
+          chatSyncSubIndexRef.current[runtimeKey] = incomingMerge.gapReadCursor.turnIndex;
+          if (isSelectedSession) {
+            refreshSessionTurns(
+              sessionId,
+              eventProjectId,
+              runtimeKey,
+            ).catch(() => undefined);
+          }
         }
         if (message.method === 'prompt_request') {
           forgetPendingChatPrompt(runtimeKey);
@@ -8757,9 +8784,13 @@ function App() {
   const selectedChatPromptCancelling =
     !!selectedChatEncodedKey && chatCancellingRuntimeKey === selectedChatEncodedKey;
 
-  const latestSelectableOptionReplyMessageKey = (() => {
+  const latestSelectableAssistantReply = (() => {
     if (selectedPendingPrompt) {
-      return '';
+      return {
+        messageKey: '',
+        hasOptionReplies: false,
+        confirmationReply: null as ChatConfirmationReply | null,
+      };
     }
     const ordered = [...selectedFullChatMessages].sort((left, right) => (left.turnIndex ?? 0) - (right.turnIndex ?? 0));
     const latestUserTurnIndex = Math.max(
@@ -8775,13 +8806,23 @@ function App() {
         Math.max(0, Math.trunc(message.turnIndex ?? 0)) > latestUserTurnIndex,
       );
     if (!latestAssistantMessage) {
-      return '';
+      return {
+        messageKey: '',
+        hasOptionReplies: false,
+        confirmationReply: null as ChatConfirmationReply | null,
+      };
     }
     const text = msgText(latestAssistantMessage.method, latestAssistantMessage.param).trim();
-    return extractChatOptionReplies(text).length > 0
-      ? chatMessageDomKey(latestAssistantMessage)
-      : '';
+    const latestOptionReplies = extractChatOptionReplies(text);
+    return {
+      messageKey: chatMessageDomKey(latestAssistantMessage),
+      hasOptionReplies: latestOptionReplies.length > 0,
+      confirmationReply: latestOptionReplies.length === 0 ? extractChatConfirmationReply(text) : null,
+    };
   })();
+  const latestSelectableOptionReplyMessageKey = latestSelectableAssistantReply.hasOptionReplies
+    ? latestSelectableAssistantReply.messageKey
+    : '';
 
   const renderedChatTurns = chatMessages.map(message => {
     const doneTurnIndex = message.turnIndex ?? 0;
@@ -8797,6 +8838,12 @@ function App() {
       chatMessageDomKey(message) === latestSelectableOptionReplyMessageKey
         ? extractChatOptionReplies(text)
         : [];
+    const confirmationReply =
+      message.method === 'agent_message_chunk' &&
+      chatMessageDomKey(message) === latestSelectableAssistantReply.messageKey &&
+      optionReplies.length === 0
+        ? latestSelectableAssistantReply.confirmationReply
+        : null;
     if (!shouldRenderChatTurn(message, hideToolCalls, promptStatus)) {
       return null;
     }
@@ -8815,7 +8862,9 @@ function App() {
           copyDisabled={copyRange ? !copyRange.ok : true}
           optionReplies={optionReplies}
           optionRepliesDisabled={chatSending}
+          confirmationReply={confirmationReply}
           onSelectOptionReply={label => sendDirectChatText(label).catch(() => undefined)}
+          onSelectConfirmationReply={replyText => sendDirectChatText(replyText).catch(() => undefined)}
           onCopyPromptDone={
             message.method === 'prompt_done'
               ? () => copyPromptDoneMarkdown(doneTurnIndex).catch(() => undefined)

@@ -7,8 +7,19 @@ export type ChatOptionReplyTextPart =
   | {type: 'markdown'; text: string}
   | {type: 'option'; reply: ChatOptionReply};
 
+export type ChatConfirmationReply = {
+  sentence: string;
+  replyText: '确认' | '接受' | '同意';
+};
+
+export type ChatConfirmationReplyTextPart =
+  | {type: 'markdown'; text: string}
+  | {type: 'confirmation'; reply: ChatConfirmationReply};
+
 const OPTION_LINE_PATTERN = /^\s*([A-H])\.\s+(.+?)\s*$/;
 const OPTION_LABELS = 'ABCDEFGH';
+const CONFIRMATION_TAIL_WINDOW_CHARS = 700;
+const QUESTION_SENTENCE_PATTERN = /[^。！？?？\r\n]*[？?]/g;
 
 type ChatOptionReplyBlock = {
   entries: ChatOptionReplyEntry[];
@@ -17,6 +28,12 @@ type ChatOptionReplyBlock = {
 type ChatOptionReplyEntry = {
   reply: ChatOptionReply;
   line: number;
+};
+
+type ChatConfirmationReplyMatch = {
+  reply: ChatConfirmationReply;
+  start: number;
+  end: number;
 };
 
 function optionLabelIndex(label: string): number {
@@ -114,6 +131,102 @@ export function splitChatOptionReplyText(text: string): ChatOptionReplyTextPart[
   if (afterLines.length > 0) {
     const leadingBreak = cursor > 0 ? '\n' : '';
     parts.push({type: 'markdown', text: `${leadingBreak}${afterLines.join('\n')}`});
+  }
+  return parts;
+}
+
+function confirmationReplyText(sentence: string): ChatConfirmationReply['replyText'] | null {
+  const compact = sentence.replace(/\s+/g, '');
+  if (!/[？?]$/.test(compact)) {
+    return null;
+  }
+  if (/^你[^？?]{0,80}接受/.test(compact)) {
+    return '接受';
+  }
+  if (/^你[^？?]{0,80}同意/.test(compact)) {
+    return '同意';
+  }
+  if (/^确认/.test(compact) || /^你[^？?]{0,80}确认/.test(compact)) {
+    return '确认';
+  }
+  if (/^你(?!认为)[^？?]{0,80}认/.test(compact)) {
+    return '确认';
+  }
+  return null;
+}
+
+function findLatestConfirmationReplyMatch(text: string): ChatConfirmationReplyMatch | null {
+  if (!text || extractChatOptionReplies(text).length > 0) {
+    return null;
+  }
+
+  const tailStart = Math.max(0, text.length - CONFIRMATION_TAIL_WINDOW_CHARS);
+  const linePattern = /([^\r\n]*)(\r?\n|$)/g;
+  let inCodeFence = false;
+  let latest: ChatConfirmationReplyMatch | null = null;
+  let lineMatch: RegExpExecArray | null;
+
+  while ((lineMatch = linePattern.exec(text)) !== null) {
+    if (lineMatch[0] === '' && lineMatch.index >= text.length) {
+      break;
+    }
+    const line = lineMatch[1];
+    const lineStart = lineMatch.index;
+    if (isFenceLine(line)) {
+      inCodeFence = !inCodeFence;
+      continue;
+    }
+    if (inCodeFence) {
+      continue;
+    }
+
+    let sentenceMatch: RegExpExecArray | null;
+    QUESTION_SENTENCE_PATTERN.lastIndex = 0;
+    while ((sentenceMatch = QUESTION_SENTENCE_PATTERN.exec(line)) !== null) {
+      const rawSentence = sentenceMatch[0];
+      const leadingWhitespace = rawSentence.match(/^\s*/)?.[0].length ?? 0;
+      const sentence = rawSentence.trim();
+      if (!sentence) {
+        continue;
+      }
+      const start = lineStart + sentenceMatch.index + leadingWhitespace;
+      if (start < tailStart) {
+        continue;
+      }
+      const replyText = confirmationReplyText(sentence);
+      if (!replyText) {
+        continue;
+      }
+      latest = {
+        reply: {sentence, replyText},
+        start,
+        end: start + sentence.length,
+      };
+    }
+  }
+
+  return latest;
+}
+
+export function extractChatConfirmationReply(text: string): ChatConfirmationReply | null {
+  return findLatestConfirmationReplyMatch(text)?.reply ?? null;
+}
+
+export function splitChatConfirmationReplyText(text: string): ChatConfirmationReplyTextPart[] {
+  const match = findLatestConfirmationReplyMatch(text);
+  if (!match) {
+    return text ? [{type: 'markdown', text}] : [];
+  }
+
+  const parts: ChatConfirmationReplyTextPart[] = [];
+  const before = text.slice(0, match.start);
+  if (before) {
+    parts.push({type: 'markdown', text: before});
+  }
+  parts.push({type: 'confirmation', reply: match.reply});
+  const after = text.slice(match.end);
+  if (after) {
+    parts.push({type: 'markdown', text: after});
   }
   return parts;
 }

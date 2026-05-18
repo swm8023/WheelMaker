@@ -4,6 +4,12 @@ export type SessionReadCursor = {
   turnIndex: number;
 };
 
+export type IncomingSessionMessageMergeResult = {
+  messages: RegistryChatMessage[];
+  cursor: SessionReadCursor;
+  gapReadCursor: SessionReadCursor | null;
+};
+
 function chatMessageKey(message: RegistryChatMessage): string {
   return `${message.sessionId}:${message.turnIndex}`;
 }
@@ -112,6 +118,19 @@ export function shouldRequestSessionReadForIncomingTurn(
     return {turnIndex: contiguousTurnIndex};
   }
   return null;
+}
+
+export function mergeIncomingSessionMessage(
+  local: {cursor: SessionReadCursor; messages: RegistryChatMessage[]},
+  incoming: RegistryChatMessage,
+): IncomingSessionMessageMergeResult {
+  const gapReadCursor = shouldRequestSessionReadForIncomingTurn(local, incoming);
+  const messages = upsertChatMessage(local.messages, incoming);
+  return {
+    messages,
+    cursor: getLatestSessionReadCursor(messages),
+    gapReadCursor,
+  };
 }
 
 export function reconcileSessionReadMessages(

@@ -1,4 +1,9 @@
-import {extractChatOptionReplies, splitChatOptionReplyText} from '../web/src/chat/chatOptionReplies';
+import {
+  extractChatConfirmationReply,
+  extractChatOptionReplies,
+  splitChatConfirmationReplyText,
+  splitChatOptionReplyText,
+} from '../web/src/chat/chatOptionReplies';
 
 describe('chat option reply extraction', () => {
   test('extracts contiguous A/B/C line-start choices', () => {
@@ -103,6 +108,38 @@ describe('chat option reply extraction', () => {
       {type: 'markdown', text: 'Previous notes:\nA. Old option\nB. Old alternative\n\nCurrent choice:\n'},
       {type: 'option', reply: {label: 'A', text: 'Send A'}},
       {type: 'option', reply: {label: 'B', text: 'Send B'}},
+    ]);
+  });
+
+  test('extracts trailing Chinese confirmation replies with mapped reply text', () => {
+    expect(extractChatConfirmationReply('我的推荐是 B。你认这个边界吗？')).toEqual({
+      sentence: '你认这个边界吗？',
+      replyText: '确认',
+    });
+    expect(extractChatConfirmationReply('确认这个修正版？')).toEqual({
+      sentence: '确认这个修正版？',
+      replyText: '确认',
+    });
+    expect(extractChatConfirmationReply('你同意这个定义吗？')).toEqual({
+      sentence: '你同意这个定义吗？',
+      replyText: '同意',
+    });
+    expect(extractChatConfirmationReply('你接受这个例外吗？还是你要更强规则？')).toEqual({
+      sentence: '你接受这个例外吗？',
+      replyText: '接受',
+    });
+  });
+
+  test('does not extract confirmation replies from option prompts, code fences, or English text', () => {
+    expect(extractChatConfirmationReply(['A. 确认', 'B. 接受'].join('\n'))).toBeNull();
+    expect(extractChatConfirmationReply(['```text', '确认这个修正版？', '```'].join('\n'))).toBeNull();
+    expect(extractChatConfirmationReply('Does this look right?')).toBeNull();
+  });
+
+  test('splits the confirmation sentence while preserving surrounding markdown', () => {
+    expect(splitChatConfirmationReplyText('前文 **说明**。你同意这个定义吗？')).toEqual([
+      {type: 'markdown', text: '前文 **说明**。'},
+      {type: 'confirmation', reply: {sentence: '你同意这个定义吗？', replyText: '同意'}},
     ]);
   });
 });
