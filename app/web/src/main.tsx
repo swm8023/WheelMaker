@@ -9276,7 +9276,7 @@ function App() {
                     aria-haspopup="listbox"
                     aria-expanded={chatPromptMenuOpen}
                   >
-                    <span className="codicon codicon-symbol-keyword" />
+                    <span className="codicon codicon-wand" />
                   </button>
                   <button
                     type="button"
@@ -9288,10 +9288,10 @@ function App() {
                       setChatConfigOverflowOpen(false);
                       chatFileInputRef.current?.click();
                     }}
-                    title="Image"
+                    title="Attach image"
                     aria-label="Attach image"
                   >
-                    <span className="codicon codicon-file-media" />
+                    <span className="codicon codicon-device-camera" />
                   </button>
                 </div>
                 {selectedChatConfigOptions.length > 0 ? (

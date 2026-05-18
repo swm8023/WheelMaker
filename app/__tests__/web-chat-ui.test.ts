@@ -446,7 +446,11 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="chat-composer-tools"');
     expect(mainTsx).toContain('className="chat-tool-button chat-skill-button"');
     expect(mainTsx).toContain('title="Skills"');
+    expect(mainTsx).toContain('codicon-wand');
+    expect(mainTsx).not.toContain('codicon-symbol-keyword');
     expect(mainTsx).toContain('className="chat-tool-button chat-photo-button"');
+    expect(mainTsx).toContain('codicon-device-camera');
+    expect(mainTsx).not.toContain('codicon-file-media');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
     expect(mainTsx).not.toContain('chat-voice-button');
     expect(mainTsx).not.toContain("setError('Voice input is not available yet.');");
@@ -609,6 +613,15 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-tool-button {');
     expect(stylesCss).toMatch(
       /\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-tool-button \{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--border\) 78%, transparent\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 72%, transparent\);/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-skill-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-photo-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-config-pill {');
     expect(stylesCss).toContain('.chat-config-value-menu {');

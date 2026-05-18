@@ -4241,9 +4241,9 @@ body,
 .chat-tool-button {
   width: 24px;
   height: 24px;
-  border: none;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
   border-radius: 7px;
-  background: transparent;
+  background: color-mix(in srgb, var(--surface-1) 72%, transparent);
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
@@ -4251,8 +4251,17 @@ body,
   justify-content: center;
 }
 
+.chat-skill-button {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.chat-photo-button {
+  color: color-mix(in srgb, #4db6ac 72%, var(--text));
+}
+
 .chat-tool-button:hover {
-  background: var(--hover);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--hover) 82%, var(--surface-1));
   color: var(--text);
 }
 
