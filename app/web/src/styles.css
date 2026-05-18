@@ -3371,6 +3371,7 @@ body,
 }
 
 .chat-main {
+  --chat-history-bottom-buffer: 56px;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -3380,11 +3381,17 @@ body,
 }
 
 .chat-block {
-  padding: 18px 18px;
-  scrollbar-gutter: stable both-edges;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  padding: 18px 18px var(--chat-history-bottom-buffer);
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.chat-virtual-list {
+  flex: 0 0 auto;
 }
 
 .chat-prompt-group {

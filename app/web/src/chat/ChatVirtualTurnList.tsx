@@ -6,19 +6,22 @@ export type ChatVirtualTurnListProps = {
   scrollRef: React.RefObject<HTMLElement | null>;
   displayIndex: ChatDisplayIndex;
   overscan?: number;
+  rowGap?: number;
   renderItem: (item: ChatDisplayIndexItem, virtualItem: VirtualItem) => React.ReactNode;
 };
 
 export function ChatVirtualTurnList({
   scrollRef,
   displayIndex,
-  overscan = 8,
+  overscan = 12,
+  rowGap = 14,
   renderItem,
 }: ChatVirtualTurnListProps) {
   const virtualizer = useVirtualizer({
     count: displayIndex.items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: index => displayIndex.items[index]?.estimatedHeight ?? 120,
+    getItemKey: index => displayIndex.items[index]?.key ?? index,
+    estimateSize: index => (displayIndex.items[index]?.estimatedHeight ?? 120) + rowGap,
     overscan,
   });
 
@@ -45,6 +48,8 @@ export function ChatVirtualTurnList({
               top: 0,
               left: 0,
               width: '100%',
+              boxSizing: 'border-box',
+              paddingBottom: `${rowGap}px`,
               transform: `translateY(${virtualItem.start}px)`,
             }}
           >

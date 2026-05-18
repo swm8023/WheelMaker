@@ -61,10 +61,14 @@ import {
 } from './chat/chatOptionReplies';
 import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
+  CHAT_BOTTOM_SCROLL_RETRY_FRAMES,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatBottomScrollTop,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
+  shouldHandleChatVirtualWindowScroll,
+  shouldRetryChatBottomScroll,
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
@@ -2568,6 +2572,9 @@ function App() {
       if (!container) {
         return;
       }
+      if (!shouldHandleChatVirtualWindowScroll(chatProgrammaticScrollRef.current)) {
+        return;
+      }
       const nearBottom = isChatScrolledNearBottom(container);
       const followsLatest = nearBottom;
       chatAutoScrollFollowRef.current = followsLatest;
@@ -2590,28 +2597,43 @@ function App() {
     if (!canScroll()) {
       return;
     }
-    window.requestAnimationFrame(() => {
-      const container = chatScrollRef.current;
-      if (!container) {
-        return;
-      }
-      if (!canScroll()) {
-        return;
-      }
-      const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-      if (Math.abs(container.scrollTop - nextScrollTop) <= 1) {
-        chatAutoScrollFollowRef.current = true;
-        setChatShowScrollToBottom(false);
-        return;
-      }
-      chatProgrammaticScrollRef.current = true;
-      container.scrollTop = nextScrollTop;
-      chatAutoScrollFollowRef.current = true;
-      setChatShowScrollToBottom(false);
+    const finishProgrammaticScroll = () => {
       window.setTimeout(() => {
         chatProgrammaticScrollRef.current = false;
       }, 0);
-    });
+    };
+    const run = (remainingFrames: number) => {
+      window.requestAnimationFrame(() => {
+        const container = chatScrollRef.current;
+        if (!container) {
+          finishProgrammaticScroll();
+          return;
+        }
+        if (!canScroll()) {
+          finishProgrammaticScroll();
+          return;
+        }
+        const nextScrollTop = resolveChatBottomScrollTop({
+          scrollHeight: container.scrollHeight,
+          clientHeight: container.clientHeight,
+        });
+        chatProgrammaticScrollRef.current = true;
+        container.scrollTop = nextScrollTop;
+        chatAutoScrollFollowRef.current = true;
+        setChatShowScrollToBottom(false);
+        if (shouldRetryChatBottomScroll({
+          remainingFrames,
+          currentScrollTop: container.scrollTop,
+          targetScrollTop: nextScrollTop,
+          keepSettling: remainingFrames > 1,
+        })) {
+          run(remainingFrames - 1);
+          return;
+        }
+        finishProgrammaticScroll();
+      });
+    };
+    run(CHAT_BOTTOM_SCROLL_RETRY_FRAMES);
   }, []);
 
   const forceChatScrollToBottom = useCallback(() => {
