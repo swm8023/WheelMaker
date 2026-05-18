@@ -18,6 +18,18 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+if [[ ! -x "app/node_modules/.bin/webpack" ]]; then
+  cat >&2 <<'MESSAGE'
+[FAILED] app web dependencies are not installed.
+
+Run this once, then rerun deploy.sh:
+  cd app
+  npm ci --include=dev
+  cd ..
+MESSAGE
+  exit 1
+fi
+
 if [[ ! -x "scripts/refresh_server.sh" ]]; then
   chmod +x "scripts/refresh_server.sh"
 fi

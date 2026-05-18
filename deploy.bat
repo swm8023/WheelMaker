@@ -11,6 +11,17 @@ echo.
 echo ============================================
 echo.
 
+if not exist "%~dp0app\node_modules\.bin\webpack.cmd" (
+  echo [FAILED] app web dependencies are not installed.
+  echo.
+  echo Run this once, then rerun deploy.bat:
+  echo   cd /d "%~dp0app"
+  echo   npm ci --include=dev
+  echo.
+  pause
+  exit /b 1
+)
+
 REM ---- prefer PowerShell 7 (pwsh); auto-install via winget if missing ----
 where pwsh >nul 2>&1
 if %errorlevel% equ 0 goto :run_script

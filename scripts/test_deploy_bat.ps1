@@ -37,9 +37,12 @@ function Assert-Ordered {
 }
 
 Assert-Contains -Text $deployBat -Needle "update + build + stop + deploy + start + publish web"
+Assert-Contains -Text $deployBat -Needle 'app\node_modules\.bin\webpack.cmd'
+Assert-Contains -Text $deployBat -Needle 'npm ci --include=dev'
 Assert-Contains -Text $deployBat -Needle 'pushd "%~dp0app"'
 Assert-Contains -Text $deployBat -Needle "npm run build:web:release"
 Assert-Contains -Text $deployBat -Needle "[FAILED] web publish exited with code"
+Assert-Ordered -Text $deployBat -First "app\node_modules\.bin\webpack.cmd" -Second "scripts\refresh_server.ps1"
 Assert-Ordered -Text $deployBat -First "scripts\refresh_server.ps1" -Second "npm run build:web:release"
 
 Write-Host "deploy.bat web publish checks passed"
