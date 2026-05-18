@@ -23,9 +23,7 @@ if [[ ! -x "app/node_modules/.bin/webpack" ]]; then
 [FAILED] app web dependencies are not installed.
 
 Run this once, then rerun deploy.sh:
-  cd app
-  npm ci --include=dev
-  cd ..
+  (cd app && npm ci --include=dev)
 MESSAGE
   exit 1
 fi

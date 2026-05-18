@@ -15,8 +15,7 @@ if not exist "%~dp0app\node_modules\.bin\webpack.cmd" (
   echo [FAILED] app web dependencies are not installed.
   echo.
   echo Run this once, then rerun deploy.bat:
-  echo   cd /d "%~dp0app"
-  echo   npm ci --include=dev
+  echo   cd /d "%~dp0app" ^&^& npm ci --include=dev
   echo.
   pause
   exit /b 1
