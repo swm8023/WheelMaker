@@ -459,11 +459,12 @@ func listProcessesUnix() ([]ProcessInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list processes: %w", err)
 	}
+	return parseUnixWheelmakerProcessesFromPS(out), nil
+}
+
+func parseUnixWheelmakerProcessesFromPS(out []byte) []ProcessInfo {
 	var procs []ProcessInfo
 	for _, line := range strings.Split(string(out), "\n") {
-		if !strings.Contains(line, "wheelmaker") || strings.Contains(line, "wheelmaker-monitor") {
-			continue
-		}
 		fields := strings.Fields(line)
 		if len(fields) < 7 {
 			continue
@@ -474,10 +475,13 @@ func listProcessesUnix() ([]ProcessInfo, error) {
 		}
 		startedAt := formatUnixStartedAt(fields[1:6])
 		cmdline := strings.Join(fields[6:], " ")
+		if filepath.Base(fields[6]) != "wheelmaker" {
+			continue
+		}
 		role := classifyRole(cmdline)
 		procs = append(procs, ProcessInfo{PID: pid, Role: role, StartedAt: startedAt})
 	}
-	return procs, nil
+	return procs
 }
 
 func formatUnixStartedAt(parts []string) string {

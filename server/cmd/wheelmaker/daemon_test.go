@@ -42,6 +42,22 @@ func TestChooseKeepPID(t *testing.T) {
 	}
 }
 
+func TestParseWorkerProcessesFromPSAcceptsPathComm(t *testing.T) {
+	out := []byte(`123 /Users/me/.wheelmaker/bin/wheelmaker /Users/me/.wheelmaker/bin/wheelmaker --hub-worker
+124 /Users/me/.wheelmaker/bin/wheelmaker /Users/me/.wheelmaker/bin/wheelmaker --registry-worker
+125 /Users/me/.wheelmaker/bin/wheelmaker-updater /Users/me/.wheelmaker/bin/wheelmaker-updater --repo /repo
+126 bash bash -lc wheelmaker --hub-worker
+`)
+
+	workers, err := parseWorkerProcessesFromPS(out, "wheelmaker", "--hub-worker")
+	if err != nil {
+		t.Fatalf("parseWorkerProcessesFromPS() error = %v", err)
+	}
+	if len(workers) != 1 || workers[0].PID != 123 {
+		t.Fatalf("workers=%#v, want only pid 123", workers)
+	}
+}
+
 func TestConfigureWorkerCommandIOToDevNull(t *testing.T) {
 	cmd := exec.Command("wheelmaker.exe", "--hub-worker")
 	restore, err := configureWorkerCommandIO(cmd)

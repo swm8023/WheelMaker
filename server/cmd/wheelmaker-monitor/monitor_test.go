@@ -69,6 +69,25 @@ func TestParseLaunchAgentServiceInfo(t *testing.T) {
 	}
 }
 
+func TestParseUnixWheelmakerProcessesExcludesUpdaterAndShell(t *testing.T) {
+	out := []byte(`123 Mon May 18 20:01:02 2026 /Users/me/.wheelmaker/bin/wheelmaker -d
+124 Mon May 18 20:01:03 2026 /Users/me/.wheelmaker/bin/wheelmaker --hub-worker
+125 Mon May 18 20:01:04 2026 /Users/me/.wheelmaker/bin/wheelmaker-updater --repo /repo
+126 Mon May 18 20:01:05 2026 bash -lc wheelmaker --hub-worker
+`)
+
+	procs := parseUnixWheelmakerProcessesFromPS(out)
+	if len(procs) != 2 {
+		t.Fatalf("processes=%#v, want guardian and hub worker only", procs)
+	}
+	if procs[0].PID != 123 || procs[0].Role != "guardian" {
+		t.Fatalf("first process=%#v, want guardian pid 123", procs[0])
+	}
+	if procs[1].PID != 124 || procs[1].Role != "hub-worker" {
+		t.Fatalf("second process=%#v, want hub-worker pid 124", procs[1])
+	}
+}
+
 func TestResolveLogFilePath_FallbackOldRoot(t *testing.T) {
 	base := t.TempDir()
 	m := NewMonitor(base)
