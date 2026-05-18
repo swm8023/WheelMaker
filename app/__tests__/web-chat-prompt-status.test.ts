@@ -1,4 +1,5 @@
 import {
+  resolvePromptDoneStatus,
   resolvePromptTurnStatus,
   type ChatPromptStatus,
 } from '../web/src/chat/chatPromptStatus';
@@ -42,5 +43,29 @@ describe('web chat prompt status', () => {
     ], message(1, 'prompt_request'));
 
     expect(status).toBe('responding');
+  });
+
+  test('maps non-normal prompt stop reasons to compact status labels', () => {
+    expect(resolvePromptDoneStatus({stopReason: 'cancelled'})).toEqual({
+      kind: 'cancelled',
+      label: 'Cancelled',
+      message: '',
+    });
+    expect(resolvePromptDoneStatus({stopReason: 'canceled'})).toEqual({
+      kind: 'cancelled',
+      label: 'Cancelled',
+      message: '',
+    });
+    expect(resolvePromptDoneStatus({stopReason: 'interrupted'})).toEqual({
+      kind: 'interrupted',
+      label: 'Interrupted',
+      message: '',
+    });
+    expect(resolvePromptDoneStatus({stopReason: 'failed', message: 'agent crashed'})).toEqual({
+      kind: 'failed',
+      label: 'Failed',
+      message: 'agent crashed',
+    });
+    expect(resolvePromptDoneStatus({stopReason: 'end_turn'})).toBe(null);
   });
 });

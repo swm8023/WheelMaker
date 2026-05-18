@@ -363,7 +363,10 @@ func sessionViewEventToIMTurnMessage(event SessionViewEvent) (acp.IMTurnMessage,
 			if len(envelope.Result) == 0 || string(envelope.Result) == "null" || json.Unmarshal(envelope.Result, &result) != nil {
 				return acp.IMTurnMessage{}, false
 			}
-			return makeIMTurnMessage(acp.IMMethodPromptDone, acp.IMPromptResult{StopReason: strings.TrimSpace(result.StopReason)})
+			return makeIMTurnMessage(acp.IMMethodPromptDone, acp.IMPromptResult{
+				StopReason: strings.TrimSpace(result.StopReason),
+				Message:    strings.TrimSpace(result.Message),
+			})
 		default:
 			return acp.IMTurnMessage{}, false
 		}
@@ -800,6 +803,23 @@ func (s *Session) cancelPrompt() error {
 	return err
 }
 
+func (s *Session) recordPromptDone(stopReason string, message string) {
+	s.recordSessionViewEvent(SessionViewEvent{
+		Type:      SessionViewEventTypeACP,
+		SessionID: s.acpSessionID,
+		Content: acp.BuildACPContentJSON(acp.MethodSessionPrompt, map[string]any{
+			"result": acp.SessionPromptResult{
+				StopReason: strings.TrimSpace(stopReason),
+				Message:    strings.TrimSpace(message),
+			},
+		}),
+	})
+}
+
+func (s *Session) recordPromptFailed(message string) {
+	s.recordPromptDone(acp.StopReasonFailed, message)
+}
+
 func (s *Session) toRecord() (*SessionRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1050,12 +1070,12 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 	defer s.promptMu.Unlock()
 	ctx := context.Background()
 	if err := s.ensureInstance(ctx); err != nil {
-		s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
+		s.recordPromptFailed(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 		return
 	}
 
 	if err := s.ensureReadyAndNotify(ctx); err != nil {
-		s.reply(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
+		s.recordPromptFailed(fmt.Sprintf("No active session: %v. %s", err, s.connectHint()))
 		return
 	}
 
@@ -1064,7 +1084,7 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 		if isAgentExitError(err) && !s.agentProcessAlive() {
 			_ = s.resetDeadConnection(err)
 		}
-		s.reply(fmt.Sprintf("Prompt error: %v", err))
+		s.recordPromptFailed(fmt.Sprintf("Prompt error: %v", err))
 		return
 	}
 
@@ -1087,6 +1107,14 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 			}
 			observe.MarkActivity(time.Now(), true)
 			if ev.err != nil {
+				if errors.Is(ev.err, context.Canceled) {
+					s.recordPromptDone(acp.StopReasonCancelled, "")
+					s.mu.Lock()
+					s.prompt.currentCh = nil
+					s.mu.Unlock()
+					observeTicker.Stop()
+					return
+				}
 				recovered := false
 				if !s.agentProcessAlive() && s.resetDeadConnection(ev.err) {
 					if recErr := s.ensureInstance(ctx); recErr == nil {
@@ -1095,9 +1123,9 @@ func (s *Session) handlePromptBlocks(blocks []acp.ContentBlock) {
 					}
 				}
 				if recovered {
-					s.reply("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
+					s.recordPromptFailed("Agent process exited and was reconnected. Please resend if this reply was interrupted.")
 				} else {
-					s.reply(fmt.Sprintf("Agent error: %v", ev.err))
+					s.recordPromptFailed(fmt.Sprintf("Agent error: %v", ev.err))
 				}
 				s.mu.Lock()
 				s.prompt.currentCh = nil

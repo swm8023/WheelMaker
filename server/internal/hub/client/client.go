@@ -705,6 +705,26 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 			return nil, err
 		}
 		return map[string]any{"ok": true, "sessionId": strings.TrimSpace(req.SessionID)}, nil
+	case "session.cancel":
+		var req struct {
+			SessionID string `json:"sessionId"`
+		}
+		if err := decodeSessionRequestPayload(payload, &req); err != nil {
+			return nil, fmt.Errorf("invalid session.cancel payload: %w", err)
+		}
+		sessionID := strings.TrimSpace(req.SessionID)
+		if sessionID == "" {
+			return nil, fmt.Errorf("sessionId is required")
+		}
+		sess, err := c.SessionByID(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		sess.setIMSource(im.ChatRef{ChannelID: "app", ChatID: sessionID})
+		if err := sess.cancelPrompt(); err != nil {
+			return nil, err
+		}
+		return map[string]any{"ok": true, "sessionId": sessionID}, nil
 	default:
 		return nil, fmt.Errorf("unsupported session method: %s", method)
 	}

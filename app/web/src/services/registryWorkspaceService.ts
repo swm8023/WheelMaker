@@ -310,6 +310,13 @@ export class RegistryWorkspaceService {
     return this.repository.sendSessionMessage(projectId, payload);
   }
 
+  async cancelProjectSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    if (!this.repository) {
+      throw new Error('session is not ready');
+    }
+    return this.repository.cancelSession(projectId, sessionId);
+  }
+
   async archiveSession(sessionId: string): Promise<{ok: boolean; sessionId: string}> {
     if (!this.session || !this.repository) {
       throw new Error('session is not ready');

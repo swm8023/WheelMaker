@@ -559,14 +559,15 @@ func (r *SessionRecorder) handlePromptFinishedLocked(ctx context.Context, parsed
 	if err != nil {
 		return err
 	}
-	return r.finishPromptStateLocked(ctx, event.SessionID, state, stopReason, event.UpdatedAt, true)
+	return r.finishPromptStateLocked(ctx, event.SessionID, state, stopReason, strings.TrimSpace(result.Message), event.UpdatedAt, true)
 }
 
-func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID string, state *sessionPromptState, stopReason string, updatedAt time.Time, publishDone bool) error {
+func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID string, state *sessionPromptState, stopReason string, message string, updatedAt time.Time, publishDone bool) error {
 	if state == nil {
 		return nil
 	}
 	stopReason = strings.TrimSpace(stopReason)
+	message = strings.TrimSpace(message)
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
@@ -578,7 +579,7 @@ func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID
 		doneTurn = sessionTurnMessage{
 			sessionID: sessionID,
 			method:    acp.IMMethodPromptDone,
-			payload:   acp.IMPromptResult{StopReason: stopReason, CompletedAt: updatedAt.UTC().Format(time.RFC3339Nano)},
+			payload:   acp.IMPromptResult{StopReason: stopReason, CompletedAt: updatedAt.UTC().Format(time.RFC3339Nano), Message: message},
 			turnIndex: state.nextTurnIndex,
 			finished:  true,
 		}
@@ -927,7 +928,7 @@ func (r *SessionRecorder) nextPromptStateLocked(ctx context.Context, sessionID s
 		return &created, nil
 	}
 	if len(state.turns) > 0 && !sessionPromptStateTerminal(state) {
-		if err := r.finishPromptStateLocked(ctx, sessionID, state, "interrupted", updatedAt, true); err != nil {
+		if err := r.finishPromptStateLocked(ctx, sessionID, state, "interrupted", "", updatedAt, true); err != nil {
 			return nil, err
 		}
 	}
@@ -1091,7 +1092,10 @@ func parseSessionViewEvent(event SessionViewEvent) (parsedSessionViewEvent, erro
 			promptResult := acp.SessionPromptResult{}
 			ok := jsonDecodeAt(contentRaw, "result", &promptResult)
 			if ok {
-				parsed.setJSONMessage(acp.IMMethodPromptDone, acp.IMPromptResult{StopReason: strings.TrimSpace(promptResult.StopReason)}, "")
+				parsed.setJSONMessage(acp.IMMethodPromptDone, acp.IMPromptResult{
+					StopReason: strings.TrimSpace(promptResult.StopReason),
+					Message:    strings.TrimSpace(promptResult.Message),
+				}, "")
 				return parsed, nil
 			}
 			params := acp.SessionPromptParams{}

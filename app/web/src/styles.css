@@ -3359,6 +3359,14 @@ body,
   min-width: 18px;
 }
 
+.chat-prompt-status-confirming {
+  color: color-mix(in srgb, var(--muted) 88%, var(--accent));
+}
+
+.chat-prompt-status-confirming .codicon {
+  font-size: 12px;
+}
+
 .chat-prompt-status-dots {
   display: inline-flex;
   gap: 1px;
@@ -3402,6 +3410,33 @@ body,
 .chat-prompt-status-done .codicon {
   font-size: 11px;
   font-weight: 700;
+}
+
+.chat-prompt-delivery-line {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  margin-top: -2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-prompt-delivery-line button {
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 0 7px;
+}
+
+.chat-prompt-delivery-line button:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .chat-tool-stack {
@@ -3725,6 +3760,7 @@ body,
 .chat-prompt-separator {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   margin-top: 16px;
   gap: 8px;
 }
@@ -3737,9 +3773,33 @@ body,
 }
 
 .chat-prompt-separator-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.chat-prompt-stop-reason {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.chat-prompt-stop-reason.cancelled,
+.chat-prompt-stop-reason.interrupted {
+  color: color-mix(in srgb, var(--muted) 84%, var(--text));
+}
+
+.chat-prompt-stop-reason.failed {
+  border-color: color-mix(in srgb, #f85149 58%, var(--border));
+  color: #f85149;
 }
 
 .chat-prompt-actions {
@@ -3781,10 +3841,14 @@ body,
   background: transparent;
 }
 
-.chat-prompt-failure-line {
+.chat-prompt-result-line {
   flex-basis: 100%;
   margin-left: auto;
   font-size: 11px;
+  color: var(--muted);
+}
+
+.chat-prompt-result-line.failed {
   color: #f85149;
 }
 
@@ -4042,6 +4106,13 @@ body,
   max-width: 62%;
 }
 
+.chat-send-control {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
 .chat-send-button {
   width: 32px;
   height: 32px;
@@ -4062,6 +4133,40 @@ body,
 
 .chat-send-button:hover {
   background: var(--hover);
+}
+
+.chat-cancel-button {
+  position: absolute;
+  right: -5px;
+  bottom: -6px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 999px;
+  background: var(--panel);
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  cursor: default;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  opacity: 0.62;
+}
+
+.chat-cancel-button .codicon {
+  font-size: 10px;
+}
+
+.chat-cancel-button.active {
+  border-color: color-mix(in srgb, #f85149 58%, var(--border));
+  background: color-mix(in srgb, #f85149 13%, var(--panel));
+  color: #f85149;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.chat-cancel-button.active:hover {
+  background: color-mix(in srgb, #f85149 18%, var(--panel));
 }
 
 .chat-composer-toolbar {

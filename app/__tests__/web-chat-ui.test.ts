@@ -152,8 +152,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('appendChatAttachments(');
     expect(mainTsx).toContain('attachments,');
     expect(mainTsx).toContain('const sourceAttachments = options.attachmentsOverride ?? chatAttachments;');
-    expect(mainTsx).toContain('blocks.push(...sourceAttachments.map(attachment => ({');
-    expect(mainTsx).toContain("if (sourceAttachments.length > 0 && chatAttachmentReadPending) {");
+    expect(mainTsx).toContain('blocksOverride?: RegistryChatContentBlock[];');
+    expect(mainTsx).toContain('const blocks: RegistryChatContentBlock[] = options.blocksOverride');
+    expect(mainTsx).toContain('...sourceAttachments.map(attachment => ({');
+    expect(mainTsx).toContain("if (!options.blocksOverride && sourceAttachments.length > 0 && chatAttachmentReadPending) {");
     expect(mainTsx).toContain("setError('Wait for images to finish loading.');");
     expect(mainTsx).toContain('type="file"');
     expect(mainTsx).toContain('multiple');
@@ -194,12 +196,21 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('codicon codicon-copy');
     expect(stylesCss).toContain('.chat-prompt-actions {');
     expect(stylesCss).toContain('.chat-prompt-action-button {');
-    const sendExistingStart = mainTsx.indexOf('const selectedKey = selectedChatKeyRef.current;');
-    const firstRunningMark = mainTsx.indexOf('markChatSessionRunning(selectedProjectId, sessionId,', sendExistingStart);
+    const sendExistingStart = mainTsx.indexOf('const sendChatMessage = async');
+    const sendEnd = mainTsx.indexOf('const sendDirectChatText = async (text: string) => {', sendExistingStart);
+    const sendBlock = mainTsx.slice(sendExistingStart, sendEnd);
     const sendAwait = mainTsx.indexOf('const result = await service.sendProjectSessionMessage(selectedProjectId, {', sendExistingStart);
     expect(sendExistingStart).toBeGreaterThanOrEqual(0);
-    expect(firstRunningMark).toBeGreaterThan(sendExistingStart);
-    expect(sendAwait).toBeGreaterThan(firstRunningMark);
+    expect(sendEnd).toBeGreaterThan(sendExistingStart);
+    expect(sendBlock).toContain("if (trimmedText === '/cancel' && sourceAttachments.length === 0 && !options.blocksOverride) {");
+    expect(sendBlock).toContain("setError('Use the stop button to cancel in app.');");
+    expect(sendBlock).toContain('rememberPendingChatPrompt(runtimeKey, {');
+    expect(sendBlock).toContain("status: 'confirming',");
+    expect(sendBlock).toContain('const result = await service.sendProjectSessionMessage(selectedProjectId, {');
+    expect(sendBlock).toContain('if (!result.ok) {');
+    expect(sendBlock).toContain('markPendingChatPromptUndelivered(runtimeKey');
+    expect(sendBlock).not.toContain('markChatSessionRunning(');
+    expect(sendAwait).toBeGreaterThan(sendExistingStart);
     expect(mainTsx).toContain('const [hasPendingProjectUpdates, setHasPendingProjectUpdates] = useState(false);');
     expect(mainTsx).toContain('if (!eventProjectId || eventProjectId === projectIdRef.current) {');
     expect(mainTsx).toContain('setHasPendingProjectUpdates(true);');
@@ -416,6 +427,11 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
+    expect(mainTsx).toContain('className="chat-send-control"');
+    expect(mainTsx).toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
+    expect(mainTsx).toContain('title={selectedChatPromptRunning ? \'Cancel prompt\' : \'No prompt running\'}');
+    expect(mainTsx).toContain('aria-label="Cancel prompt"');
+    expect(mainTsx).toContain('codicon-debug-stop');
     expect(mainTsx).toContain('className="chat-composer-tools"');
     expect(mainTsx).toContain('className="chat-tool-button chat-skill-button"');
     expect(mainTsx).toContain('title="Skills"');
@@ -550,6 +566,12 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-send-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-send-control {');
+    expect(stylesCss).toContain('.chat-cancel-button {');
+    expect(stylesCss).toMatch(
+      /\.chat-cancel-button \{[\s\S]*position: absolute;[\s\S]*right: -5px;[\s\S]*bottom: -6px;[\s\S]*width: 18px;[\s\S]*height: 18px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toContain(".chat-cancel-button.active {");
     expect(stylesCss).toMatch(
       /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
     );

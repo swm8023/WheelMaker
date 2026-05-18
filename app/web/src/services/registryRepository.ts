@@ -546,6 +546,20 @@ export class RegistryRepository {
     };
   }
 
+  async cancelSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
+    const resp = await this.client.request({
+      method: 'session.cancel',
+      projectId,
+      payload: {sessionId},
+      timeoutMs: 15000,
+    });
+    const body = (resp.payload ?? {}) as {ok?: boolean; sessionId?: string};
+    return {
+      ok: body.ok ?? false,
+      sessionId: body.sessionId ?? sessionId,
+    };
+  }
+
   async archiveSession(projectId: string, sessionId: string): Promise<{ok: boolean; sessionId: string}> {
     const resp = await this.client.request({
       method: 'session.archive',

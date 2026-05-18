@@ -6,6 +6,7 @@ describe('registry workspace project-scoped chat service methods', () => {
     const repository = {
       readSession: jest.fn().mockResolvedValue({ messages: [], latestTurnIndex: 0 }),
       sendSessionMessage: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1' }),
+      cancelSession: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1' }),
       setSessionConfig: jest.fn().mockResolvedValue({ ok: true, sessionId: 's1', configOptions: [] }),
     };
 
@@ -23,6 +24,7 @@ describe('registry workspace project-scoped chat service methods', () => {
       sessionId: 's1',
       text: 'hello',
     });
+    await (service as any).cancelProjectSession('chat-project', 's1');
     await (service as any).setProjectSessionConfig('chat-project', {
       sessionId: 's1',
       configId: 'model',
@@ -34,6 +36,7 @@ describe('registry workspace project-scoped chat service methods', () => {
       sessionId: 's1',
       text: 'hello',
     });
+    expect(repository.cancelSession).toHaveBeenCalledWith('chat-project', 's1');
     expect(repository.setSessionConfig).toHaveBeenCalledWith('chat-project', {
       sessionId: 's1',
       configId: 'model',

@@ -51,7 +51,7 @@ import {
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import { extractChatOptionReplies, splitChatOptionReplyText, type ChatOptionReply } from './chat/chatOptionReplies';
 import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
-import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
+import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
@@ -149,6 +149,8 @@ type PendingChatPrompt = {
   blocks: RegistryChatContentBlock[];
   createdAt: string;
   turnIndex: number;
+  status: 'confirming' | 'undelivered';
+  errorMessage?: string;
 };
 type ChatSlashCommandOption = {
   name: string;
@@ -308,6 +310,7 @@ const RECONNECT_GRACE_PERIOD_MS = 30_000;
 const CHAT_NEW_DRAFT_SESSION_KEY = '__new__';
 const CHAT_DRAFT_KEY_PROJECT_FALLBACK = '__no_project__';
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;
+const CHAT_PENDING_CONFIRM_TIMEOUT_MS = 5000;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
@@ -542,6 +545,8 @@ function buildPendingPromptMessage(prompt: PendingChatPrompt): RegistryChatMessa
     param: {
       contentBlocks: prompt.blocks,
       createdAt: prompt.createdAt,
+      pendingStatus: prompt.status,
+      message: prompt.errorMessage,
     },
     finished: false,
   };
@@ -855,6 +860,8 @@ type ChatTurnViewProps = {
   optionReplies?: ChatOptionReply[];
   optionRepliesDisabled?: boolean;
   onSelectOptionReply?: (label: string) => void;
+  onRetryPendingPrompt?: () => void;
+  onEditPendingPrompt?: () => void;
 };
 
 const ChatTurnView = React.memo(function ChatTurnView({
@@ -869,6 +876,8 @@ const ChatTurnView = React.memo(function ChatTurnView({
   optionReplies = [],
   optionRepliesDisabled = false,
   onSelectOptionReply,
+  onRetryPendingPrompt,
+  onEditPendingPrompt,
 }: ChatTurnViewProps) {
   const text = msgText(message.method, message.param).trim();
   const kind = msgKind(message.method);
@@ -891,6 +900,11 @@ const ChatTurnView = React.memo(function ChatTurnView({
                 </span>
               </span>
             ) : null}
+            {promptStatus === 'confirming' ? (
+              <span className="chat-prompt-status chat-prompt-status-confirming" title="Sending">
+                <span className="codicon codicon-sync" aria-hidden="true" />
+              </span>
+            ) : null}
           </div>
         ) : null}
         {imageBlocks.length > 0 ? (
@@ -903,6 +917,17 @@ const ChatTurnView = React.memo(function ChatTurnView({
                 alt="chat attachment"
               />
             ))}
+          </div>
+        ) : null}
+        {promptStatus === 'undelivered' ? (
+          <div className="chat-prompt-delivery-line">
+            <span>Not delivered</span>
+            <button type="button" onClick={() => onRetryPendingPrompt?.()}>
+              Retry
+            </button>
+            <button type="button" onClick={() => onEditPendingPrompt?.()}>
+              Edit
+            </button>
           </div>
         ) : null}
       </div>
@@ -918,13 +943,18 @@ const ChatTurnView = React.memo(function ChatTurnView({
     const modelName = typeof promptRequest?.param.modelName === 'string'
       ? promptRequest.param.modelName
       : '';
-    const failed = text.toLowerCase() === 'failed';
+    const doneStatus = resolvePromptDoneStatus(message.param);
     return (
       <div className="chat-prompt-separator">
         <hr />
         <span className="chat-prompt-separator-label">
           By {modelName || 'unknown'}
           {durationMs > 0 ? ` · ${formatPromptDurationMs(durationMs)}` : ''}
+          {doneStatus ? (
+            <span className={`chat-prompt-stop-reason ${doneStatus.kind}`}>
+              {doneStatus.label}
+            </span>
+          ) : null}
         </span>
         <div className="chat-prompt-actions" aria-label="Prompt actions">
           <button
@@ -938,9 +968,9 @@ const ChatTurnView = React.memo(function ChatTurnView({
             <span className="codicon codicon-copy" />
           </button>
         </div>
-        {failed ? (
-          <div className="chat-prompt-failure-line">
-            Response failed.
+        {doneStatus ? (
+          <div className={`chat-prompt-result-line ${doneStatus.kind}`}>
+            {doneStatus.message || `Response ${doneStatus.label.toLowerCase()}.`}
           </div>
         ) : null}
       </div>
@@ -2294,10 +2324,12 @@ function App() {
   const [chatAttachmentReadPending, setChatAttachmentReadPending] = useState(false);
   const [chatComposerDrafts, setChatComposerDrafts] = useState<Record<string, ChatComposerDraft>>({});
   const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState<Record<string, PendingChatPrompt>>({});
+  const [chatCancellingRuntimeKey, setChatCancellingRuntimeKey] = useState('');
   const chatComposerTextRef = useRef('');
   const chatAttachmentsRef = useRef<ChatAttachment[]>([]);
   const chatComposerDraftsRef = useRef<Record<string, ChatComposerDraft>>({});
   const chatPendingPromptsByKeyRef = useRef<Record<string, PendingChatPrompt>>({});
+  const chatPendingPromptTimersRef = useRef<Record<string, number>>({});
   const chatAttachmentReadCountRef = useRef<Record<string, number>>({});
   const chatDraftGenerationRef = useRef<Record<string, number>>({});
   const currentChatDraftKeyRef = useRef('');
@@ -2903,6 +2935,15 @@ function App() {
   useEffect(() => {
     chatPendingPromptsByKeyRef.current = chatPendingPromptsByKey;
   }, [chatPendingPromptsByKey]);
+
+  useEffect(() => {
+    return () => {
+      for (const timerId of Object.values(chatPendingPromptTimersRef.current)) {
+        window.clearTimeout(timerId);
+      }
+      chatPendingPromptTimersRef.current = {};
+    };
+  }, []);
 
   useEffect(() => {
     chatMessagesRef.current = chatMessages;
@@ -5211,18 +5252,56 @@ function App() {
     }
   };
 
+  const clearPendingChatPromptTimer = (runtimeKey: string) => {
+    const timerId = chatPendingPromptTimersRef.current[runtimeKey];
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      const nextTimers = {...chatPendingPromptTimersRef.current};
+      delete nextTimers[runtimeKey];
+      chatPendingPromptTimersRef.current = nextTimers;
+    }
+  };
+
+  const markPendingChatPromptUndelivered = (runtimeKey: string, errorMessage = 'Server did not confirm receipt.') => {
+    const pending = chatPendingPromptsByKeyRef.current[runtimeKey];
+    if (!pending || pending.status === 'undelivered') return;
+    clearPendingChatPromptTimer(runtimeKey);
+    const next = {
+      ...chatPendingPromptsByKeyRef.current,
+      [runtimeKey]: {
+        ...pending,
+        status: 'undelivered' as const,
+        errorMessage,
+      },
+    };
+    chatPendingPromptsByKeyRef.current = next;
+    setChatPendingPromptsByKey(next);
+    setChatSending(false);
+  };
+
   const rememberPendingChatPrompt = (runtimeKey: string, prompt: PendingChatPrompt) => {
     if (!runtimeKey) return;
+    clearPendingChatPromptTimer(runtimeKey);
     const next = {
       ...chatPendingPromptsByKeyRef.current,
       [runtimeKey]: prompt,
     };
     chatPendingPromptsByKeyRef.current = next;
     setChatPendingPromptsByKey(next);
+    if (prompt.status === 'confirming') {
+      const timerId = window.setTimeout(() => {
+        markPendingChatPromptUndelivered(runtimeKey);
+      }, CHAT_PENDING_CONFIRM_TIMEOUT_MS);
+      chatPendingPromptTimersRef.current = {
+        ...chatPendingPromptTimersRef.current,
+        [runtimeKey]: timerId,
+      };
+    }
   };
 
   const forgetPendingChatPrompt = (runtimeKey: string) => {
     if (!runtimeKey || !chatPendingPromptsByKeyRef.current[runtimeKey]) return;
+    clearPendingChatPromptTimer(runtimeKey);
     const next = {
       ...chatPendingPromptsByKeyRef.current,
     };
@@ -5239,6 +5318,7 @@ function App() {
     if (!fromRuntimeKey || !toRuntimeKey || fromRuntimeKey === toRuntimeKey) return;
     const prompt = chatPendingPromptsByKeyRef.current[fromRuntimeKey];
     if (!prompt) return;
+    clearPendingChatPromptTimer(fromRuntimeKey);
     const next = {
       ...chatPendingPromptsByKeyRef.current,
       [toRuntimeKey]: {
@@ -5249,6 +5329,15 @@ function App() {
     delete next[fromRuntimeKey];
     chatPendingPromptsByKeyRef.current = next;
     setChatPendingPromptsByKey(next);
+    if (prompt.status === 'confirming') {
+      const timerId = window.setTimeout(() => {
+        markPendingChatPromptUndelivered(toRuntimeKey);
+      }, CHAT_PENDING_CONFIRM_TIMEOUT_MS);
+      chatPendingPromptTimersRef.current = {
+        ...chatPendingPromptTimersRef.current,
+        [toRuntimeKey]: timerId,
+      };
+    }
   };
 
   const forgetPendingPromptIfResolved = (
@@ -5411,28 +5500,35 @@ function App() {
   const sendChatMessage = async (options: {
     textOverride?: string;
     attachmentsOverride?: ChatAttachment[];
+    blocksOverride?: RegistryChatContentBlock[];
     preserveComposer?: boolean;
   } = {}) => {
     if (chatSending) {
       return;
     }
     const sourceAttachments = options.attachmentsOverride ?? chatAttachments;
-    if (sourceAttachments.length > 0 && chatAttachmentReadPending) {
+    if (!options.blocksOverride && sourceAttachments.length > 0 && chatAttachmentReadPending) {
       setError('Wait for images to finish loading.');
       return;
     }
     const trimmedText = (options.textOverride ?? chatComposerText).trim();
-    if (!trimmedText && sourceAttachments.length === 0) return;
-    const blocks: RegistryChatContentBlock[] = [];
-    if (trimmedText) {
-      blocks.push({ type: 'text', text: trimmedText });
+    if (trimmedText === '/cancel' && sourceAttachments.length === 0 && !options.blocksOverride) {
+      setError('Use the stop button to cancel in app.');
+      return;
     }
-    blocks.push(...sourceAttachments.map(attachment => ({
-      type: 'image',
-      mimeType: attachment.mimeType,
-      data: attachment.data,
-    } satisfies RegistryChatContentBlock)));
+    const blocks: RegistryChatContentBlock[] = options.blocksOverride
+      ? options.blocksOverride.map(block => ({...block}))
+      : [
+          ...(trimmedText ? [{ type: 'text', text: trimmedText } satisfies RegistryChatContentBlock] : []),
+          ...sourceAttachments.map(attachment => ({
+            type: 'image',
+            mimeType: attachment.mimeType,
+            data: attachment.data,
+          } satisfies RegistryChatContentBlock)),
+        ];
+    if (blocks.length === 0) return;
     const firstAttachmentName = sourceAttachments[0]?.name || '';
+    const previewText = trimmedText || firstAttachmentName || msgText('prompt_request', {contentBlocks: blocks}).trim();
     const selectedKey = selectedChatKeyRef.current;
     if (!selectedKey) {
       setError('Select or create a chat session first.');
@@ -5451,6 +5547,7 @@ function App() {
       blocks: blocks.map(block => ({...block})),
       createdAt,
       turnIndex: nextPromptTurnIndex(chatMessageStoreRef.current[runtimeKey] ?? []),
+      status: 'confirming',
     });
 
     if (!options.preserveComposer) {
@@ -5459,35 +5556,26 @@ function App() {
     }
     forceChatScrollToBottom();
     setChatSending(true);
-    let optimisticRunningSessionId = '';
     try {
-      optimisticRunningSessionId = sessionId;
-      markChatSessionRunning(selectedProjectId, sessionId, trimmedText || firstAttachmentName);
       const result = await service.sendProjectSessionMessage(selectedProjectId, {
         sessionId,
-        text: trimmedText,
+        text: trimmedText || previewText,
         blocks,
       });
+      if (!result.ok) {
+        throw new Error('session.send returned ok=false');
+      }
       const nextSessionId = result.sessionId || sessionId;
       if (nextSessionId !== sessionId) {
         movePendingChatPrompt(runtimeKey, buildChatRuntimeKey(selectedProjectId, nextSessionId), nextSessionId);
       }
-      markChatSessionRunning(selectedProjectId, nextSessionId, trimmedText || firstAttachmentName);
       const nextSelectedKey = chatSessionKeyFromParts(selectedProjectId, nextSessionId);
       applySelectedChatKey(nextSelectedKey);
       workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
-      rememberChatSessionSummary(selectedProjectId, {
-        sessionId: nextSessionId,
-        preview: trimmedText || firstAttachmentName || '',
-        updatedAt: new Date().toISOString(),
-        messageCount: 0,
-      });
     } catch (err) {
-      if (optimisticRunningSessionId) {
-        clearChatSessionRunning(selectedProjectId, optimisticRunningSessionId);
-      }
-      forgetPendingChatPrompt(runtimeKey);
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      markPendingChatPromptUndelivered(runtimeKey, message);
+      setError(message);
     } finally {
       setChatSending(false);
     }
@@ -5511,6 +5599,79 @@ function App() {
 
   const handleChatQuickReplySelect = (option: string) => {
     sendDirectChatText(option).catch(() => undefined);
+  };
+
+  const buildChatAttachmentsFromBlocks = (blocks: RegistryChatContentBlock[]): ChatAttachment[] => {
+    const attachments: ChatAttachment[] = [];
+    for (const [index, block] of blocks.entries()) {
+      const blockType = typeof block.type === 'string' ? block.type.trim().toLowerCase() : '';
+      const data = typeof block.data === 'string' ? block.data : '';
+      if (blockType !== 'image' || !data) {
+        continue;
+      }
+      chatAttachmentIdRef.current += 1;
+      attachments.push({
+        id: `chat-attachment-${chatAttachmentIdRef.current}`,
+        name: `undelivered-image-${index + 1}.png`,
+        mimeType: typeof block.mimeType === 'string' && block.mimeType ? block.mimeType : 'image/png',
+        data,
+      });
+    }
+    return attachments;
+  };
+
+  const retryPendingChatPrompt = (runtimeKey: string) => {
+    const pending = chatPendingPromptsByKeyRef.current[runtimeKey];
+    if (!pending) return;
+    sendChatMessage({
+      textOverride: '',
+      attachmentsOverride: [],
+      blocksOverride: pending.blocks,
+      preserveComposer: true,
+    }).catch(() => undefined);
+  };
+
+  const editPendingChatPrompt = (runtimeKey: string) => {
+    const pending = chatPendingPromptsByKeyRef.current[runtimeKey];
+    if (!pending) return;
+    if (
+      (chatComposerTextRef.current.trim() || chatAttachmentsRef.current.length > 0) &&
+      !window.confirm('Replace the current draft with this undelivered message?')
+    ) {
+      return;
+    }
+    const text = extractTextFromACPContent(pending.blocks);
+    const attachments = buildChatAttachmentsFromBlocks(pending.blocks);
+    chatComposerTextRef.current = text;
+    chatAttachmentsRef.current = attachments;
+    bumpChatDraftGeneration(currentChatDraftKeyRef.current);
+    setChatComposerText(text);
+    setChatAttachments(attachments);
+    saveChatComposerDraft(currentChatDraftKeyRef.current, text, attachments);
+    forgetPendingChatPrompt(runtimeKey);
+    window.setTimeout(resizeChatComposerTextarea, 0);
+  };
+
+  const cancelSelectedChatPrompt = async () => {
+    const selectedKey = selectedChatKeyRef.current;
+    if (!selectedKey?.sessionId) {
+      return;
+    }
+    const runtimeKey = encodeChatSessionKey(selectedKey);
+    if (!runtimeKey || chatCancellingRuntimeKey === runtimeKey) {
+      return;
+    }
+    setChatCancellingRuntimeKey(runtimeKey);
+    setError('');
+    try {
+      const result = await service.cancelProjectSession(selectedKey.projectId, selectedKey.sessionId);
+      if (!result.ok) {
+        throw new Error('session.cancel returned ok=false');
+      }
+    } catch (err) {
+      setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   const applyChatSessionConfigOptions = (
@@ -6462,6 +6623,7 @@ function App() {
           const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);
           if (shouldClearLocalChatSessionRunning(payload.session)) {
             setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
+            setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
           }
           rememberChatSessionSummary(eventProjectId, payload.session);
           workspaceStore.rememberChatSession(eventProjectId, payload.session, {
@@ -6502,6 +6664,7 @@ function App() {
         }
         if (shouldRefreshCompletedPrompt) {
           setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
+          setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
           if (isSelectedSession) {
             setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
           } else {
@@ -8579,6 +8742,20 @@ function App() {
   const selectedPendingPrompt = selectedChatEncodedKey
     ? chatPendingPromptsByKey[selectedChatEncodedKey]
     : undefined;
+  const selectedChatHasOpenPromptTurn = selectedFullChatMessages.some(message =>
+    isPromptStartMessage(message) &&
+    resolvePromptTurnStatus(selectedFullChatMessages, message) === 'responding',
+  );
+  const selectedChatPromptRunning =
+    !!selectedChatEncodedKey &&
+    !selectedPendingPrompt &&
+    (
+      selectedChatSession?.running === true ||
+      chatRunningSessionFlags[selectedChatEncodedKey] === true ||
+      selectedChatHasOpenPromptTurn
+    );
+  const selectedChatPromptCancelling =
+    !!selectedChatEncodedKey && chatCancellingRuntimeKey === selectedChatEncodedKey;
 
   const latestSelectableOptionReplyMessageKey = (() => {
     if (selectedPendingPrompt) {
@@ -8652,10 +8829,12 @@ function App() {
     <ChatTurnView
       key={`${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`}
       message={buildPendingPromptMessage(selectedPendingPrompt)}
-      promptStatus="responding"
+      promptStatus={selectedPendingPrompt.status}
       hideToolCalls={hideToolCalls}
       markdownComponents={chatMarkdownComponents}
       markdownUrlTransform={chatMarkdownUrlTransform}
+      onRetryPendingPrompt={() => retryPendingChatPrompt(selectedChatEncodedKey)}
+      onEditPendingPrompt={() => editPendingChatPrompt(selectedChatEncodedKey)}
     />
   ) : null;
   const renderMain = () => {
@@ -8969,16 +9148,32 @@ function App() {
                     placeholder="Send a message..."
                   />
                 </div>
-                <button
-                  type="button"
-                  className="chat-send-button"
-                  onClick={() => sendChatMessage().catch(() => undefined)}
-                  disabled={chatSending || chatAttachmentReadPending}
-                  title="Send"
-                  aria-label="Send message"
-                >
-                  <span className="codicon codicon-send" />
-                </button>
+                <div className="chat-send-control">
+                  <button
+                    type="button"
+                    className="chat-send-button"
+                    onClick={() => sendChatMessage().catch(() => undefined)}
+                    disabled={chatSending || chatAttachmentReadPending}
+                    title="Send"
+                    aria-label="Send message"
+                  >
+                    <span className="codicon codicon-send" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`chat-cancel-button${selectedChatPromptRunning ? ' active' : ''}`}
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
+                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
+                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
+                    aria-label="Cancel prompt"
+                  >
+                    <span
+                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
+                      aria-hidden="true"
+                    />
+                  </button>
+                </div>
               </div>
               {chatQuickReplyMenuOpen ? (
                 <div ref={chatQuickReplyMenuRef} className="chat-quick-reply-menu" role="menu" aria-label="Quick replies">

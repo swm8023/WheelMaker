@@ -1,6 +1,12 @@
 import type { RegistryChatMessage } from '../types/registry';
 
-export type ChatPromptStatus = 'responding' | null;
+export type ChatPromptStatus = 'confirming' | 'responding' | 'undelivered' | null;
+
+export type ChatPromptDoneStatus = {
+  kind: 'cancelled' | 'interrupted' | 'failed';
+  label: string;
+  message: string;
+};
 
 function positiveTurnIndex(message: RegistryChatMessage): number {
   const turnIndex = Number(message.turnIndex);
@@ -39,4 +45,23 @@ export function resolvePromptTurnStatus(
     }
   }
   return 'responding';
+}
+
+export function resolvePromptDoneStatus(param: Record<string, unknown>): ChatPromptDoneStatus | null {
+  const stopReason = typeof param.stopReason === 'string'
+    ? param.stopReason.trim().toLowerCase()
+    : '';
+  const message = typeof param.message === 'string' ? param.message.trim() : '';
+  switch (stopReason) {
+    case 'cancelled':
+    case 'canceled':
+      return {kind: 'cancelled', label: 'Cancelled', message};
+    case 'interrupted':
+      return {kind: 'interrupted', label: 'Interrupted', message};
+    case 'failed':
+    case 'error':
+      return {kind: 'failed', label: 'Failed', message};
+    default:
+      return null;
+  }
 }

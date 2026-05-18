@@ -30,15 +30,23 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
   });
 
-  test('renders prompt responding status and optimistic pending prompt while sending', () => {
+  test('renders prompt responding status and delivery states for pending prompts', () => {
     const main = readMain();
 
-    expect(main).toContain("import { resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';");
+    expect(main).toContain("import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';");
     expect(main).toContain('promptStatus?: ChatPromptStatus;');
     expect(main).toContain("promptStatus === 'responding'");
+    expect(main).toContain("promptStatus === 'confirming'");
+    expect(main).toContain("promptStatus === 'undelivered'");
     expect(main).toContain('className="chat-prompt-status-dots"');
+    expect(main).toContain('className="chat-prompt-delivery-line"');
+    expect(main).toContain('onRetryPendingPrompt?: () => void;');
+    expect(main).toContain('onEditPendingPrompt?: () => void;');
     expect(main).toContain('const [chatPendingPromptsByKey, setChatPendingPromptsByKey] = useState');
+    expect(main).toContain('const chatPendingPromptTimersRef = useRef<Record<string, number>>({});');
     expect(main).toContain('rememberPendingChatPrompt(runtimeKey, {');
+    expect(main).toContain("status: 'confirming',");
+    expect(main).toContain('markPendingChatPromptUndelivered(runtimeKey');
     expect(main).toContain('forgetPendingChatPrompt(runtimeKey);');
     expect(main).toContain('chatMessages.length === 0 && !selectedPendingPrompt');
 
@@ -46,6 +54,30 @@ describe('web chat turn rendering', () => {
     const sendIndex = main.indexOf('const result = await service.sendProjectSessionMessage(selectedProjectId, {');
     expect(pendingIndex).toBeGreaterThanOrEqual(0);
     expect(sendIndex).toBeGreaterThan(pendingIndex);
+  });
+
+  test('renders prompt done stop reason labels without disabling copied partial output', () => {
+    const main = readMain();
+
+    expect(main).toContain('const doneStatus = resolvePromptDoneStatus(message.param);');
+    expect(main).toContain('className={`chat-prompt-stop-reason ${doneStatus.kind}`}');
+    expect(main).toContain('className={`chat-prompt-result-line ${doneStatus.kind}`}');
+    expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
+    expect(main).not.toContain("copyDisabled={failed ? true :");
+  });
+
+  test('renders a persistent composer cancel button driven by running session state', () => {
+    const main = readMain();
+
+    expect(main).toContain('const selectedChatPromptRunning =');
+    expect(main).toContain('selectedChatSession?.running === true');
+    expect(main).toContain('chatRunningSessionFlags[selectedChatEncodedKey] === true');
+    expect(main).toContain('const [chatCancellingRuntimeKey, setChatCancellingRuntimeKey] = useState');
+    expect(main).toContain('const cancelSelectedChatPrompt = async () => {');
+    expect(main).toContain('service.cancelProjectSession(selectedKey.projectId, selectedKey.sessionId)');
+    expect(main).toContain('className="chat-send-control"');
+    expect(main).toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
+    expect(main).toContain('disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}');
   });
 
   test('shows a scroll-to-bottom button when the user is away from the bottom', () => {

@@ -6457,3 +6457,111 @@ func TestHandleSessionRequest_SessionSendSlashSkills(t *testing.T) {
 		t.Fatalf("skills reply missing skill name: %q", reply)
 	}
 }
+
+func TestHandleSessionRequestSessionCancelUsesCancelAPIWithoutPrompt(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-cancel-api"}
+	c := newTestClient(t, mock)
+
+	resp, err := c.HandleSessionRequest(context.Background(), "session.cancel", "proj1", json.RawMessage(`{"sessionId":"sess-cancel-api"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.cancel): %v", err)
+	}
+	body, ok := resp.(map[string]any)
+	if !ok || body["ok"] != true || body["sessionId"] != "sess-cancel-api" {
+		t.Fatalf("response = %#v, want ok=true sessionId=sess-cancel-api", resp)
+	}
+	if mock.cancelCalls != 1 {
+		t.Fatalf("cancelCalls = %d, want 1", mock.cancelCalls)
+	}
+	if len(mock.promptCalls) != 0 {
+		t.Fatalf("promptCalls = %v, want no prompt text", mock.promptCalls)
+	}
+}
+
+func TestPromptToSessionRecordsFailedPromptDoneOnAgentError(t *testing.T) {
+	mock := &mockSession{
+		agentName: "codex",
+		sessionID: "sess-prompt-error",
+		promptFn: func(string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
+			return nil, acp.SessionPromptResult{}, errors.New("agent crashed")
+		},
+	}
+	c := newTestClient(t, mock)
+	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-prompt-error", "Prompt Error")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	if err := c.PromptToSession(context.Background(), "sess-prompt-error", im.ChatRef{ChannelID: "app", ChatID: "sess-prompt-error"}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "hello"}}); err != nil {
+		t.Fatalf("PromptToSession: %v", err)
+	}
+	_, turns, err := c.sessionRecorder.ReadSessionTurns(context.Background(), "sess-prompt-error", 0)
+	if err != nil {
+		t.Fatalf("ReadSessionTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want prompt_request + failed prompt_done: %+v", len(turns), turns)
+	}
+	if stopReason := decodePromptDoneStopReason(t, turns[1].Content); stopReason != acp.StopReasonFailed {
+		t.Fatalf("prompt_done stopReason = %q, want failed", stopReason)
+	}
+	param := decodeTurnParamMap(t, turns[1].Content)
+	if !strings.Contains(fmt.Sprint(param["message"]), "agent crashed") {
+		t.Fatalf("prompt_done message = %#v, want agent error", param["message"])
+	}
+}
+
+func TestHandleSessionRequestSessionCancelFinishesPromptAsCancelled(t *testing.T) {
+	mock := &mockSession{agentName: "codex", sessionID: "sess-cancel-running"}
+	c := newTestClient(t, mock)
+	if err := c.RecordEvent(context.Background(), sessionViewCreatedEvent("sess-cancel-running", "Cancel Running")); err != nil {
+		t.Fatalf("RecordEvent session created: %v", err)
+	}
+
+	started := make(chan struct{})
+	releaseUpdates := make(chan struct{})
+	var cancelCalls int
+	c.InjectForwarder("codex", "sess-cancel-running", func(ctx context.Context, _ string) (<-chan acp.SessionUpdateParams, acp.SessionPromptResult, error) {
+		ch := make(chan acp.SessionUpdateParams)
+		close(started)
+		go func() {
+			defer close(ch)
+			<-releaseUpdates
+		}()
+		<-ctx.Done()
+		close(releaseUpdates)
+		return ch, acp.SessionPromptResult{}, ctx.Err()
+	}, func() error {
+		cancelCalls++
+		return nil
+	})
+
+	done := make(chan error, 1)
+	go func() {
+		done <- c.PromptToSession(context.Background(), "sess-cancel-running", im.ChatRef{ChannelID: "app", ChatID: "sess-cancel-running"}, []acp.ContentBlock{{Type: acp.ContentBlockTypeText, Text: "please stop"}})
+	}()
+	<-started
+
+	resp, err := c.HandleSessionRequest(context.Background(), "session.cancel", "proj1", json.RawMessage(`{"sessionId":"sess-cancel-running"}`))
+	if err != nil {
+		t.Fatalf("HandleSessionRequest(session.cancel): %v", err)
+	}
+	if body, ok := resp.(map[string]any); !ok || body["ok"] != true {
+		t.Fatalf("response = %#v, want ok=true", resp)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("PromptToSession: %v", err)
+	}
+	if cancelCalls != 1 {
+		t.Fatalf("cancelCalls = %d, want 1", cancelCalls)
+	}
+	_, turns, err := c.sessionRecorder.ReadSessionTurns(context.Background(), "sess-cancel-running", 0)
+	if err != nil {
+		t.Fatalf("ReadSessionTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want prompt_request + cancelled prompt_done: %+v", len(turns), turns)
+	}
+	if stopReason := decodePromptDoneStopReason(t, turns[1].Content); stopReason != acp.StopReasonCancelled {
+		t.Fatalf("prompt_done stopReason = %q, want cancelled", stopReason)
+	}
+}

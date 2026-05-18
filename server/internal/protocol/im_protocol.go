@@ -49,6 +49,7 @@ type IMPromptRequest struct {
 type IMPromptResult struct {
 	StopReason  string `json:"stopReason"`
 	CompletedAt string `json:"completedAt,omitempty"`
+	Message     string `json:"message,omitempty"`
 }
 
 type IMTextResult struct {

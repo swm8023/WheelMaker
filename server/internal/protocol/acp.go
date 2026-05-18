@@ -159,6 +159,7 @@ type SessionPromptParams struct {
 // SessionPromptResult is the final result after a prompt completes.
 type SessionPromptResult struct {
 	StopReason string `json:"stopReason"`
+	Message    string `json:"message,omitempty"`
 }
 
 // SessionCancelParams cancels an in-progress prompt.
