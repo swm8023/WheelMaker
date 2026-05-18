@@ -28,6 +28,22 @@ function createFakePersistence(globalPatch: Record<string, unknown> = {}) {
   };
 }
 
+function createFakeChatPersistence() {
+  let entries: Array<{ session: any; cursor: any }> = [];
+  return {
+    getProjectChatSessions: jest.fn(() => entries),
+    replaceProjectChatSessions: jest.fn((_projectId: string, nextEntries: Array<{ session: any; cursor: any }>) => {
+      entries = nextEntries;
+    }),
+    patchProjectChatSession: jest.fn((_projectId: string, session: any, cursor: any) => {
+      entries = [
+        ...entries.filter(entry => entry.session.sessionId !== session.sessionId),
+        { session, cursor },
+      ];
+    }),
+  };
+}
+
 describe('global selected chat session persistence', () => {
   test('remembers and restores one global project-scoped chat key', () => {
     const persistence = createFakePersistence();
@@ -76,5 +92,85 @@ describe('global selected chat session persistence', () => {
       sessionId: 'global-session',
     });
     expect(persistence.patchGlobalState).not.toHaveBeenCalled();
+  });
+});
+
+describe('chat session index persistence', () => {
+  test('preserves config options and commands when patching with a summary that omits them', () => {
+    const persistence = createFakeChatPersistence();
+    const store = new WorkspaceStore(persistence as any);
+
+    store.replaceChatSessions('p1', [
+      {
+        sessionId: 's1',
+        title: 'Session',
+        preview: '',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        messageCount: 1,
+        configOptions: [{ id: 'model', currentValue: 'gpt-5.3-codex' }],
+        commands: [{ name: '/plan' }],
+      },
+    ], { s1: { turnIndex: 3 } });
+
+    store.rememberChatSession('p1', {
+      sessionId: 's1',
+      title: 'Session',
+      preview: 'updated',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+      messageCount: 2,
+    }, { turnIndex: 4 });
+
+    expect(persistence.patchProjectChatSession).toHaveBeenLastCalledWith(
+      'p1',
+      expect.objectContaining({
+        sessionId: 's1',
+        preview: 'updated',
+        configOptions: [{ id: 'model', currentValue: 'gpt-5.3-codex' }],
+        commands: [{ name: '/plan' }],
+      }),
+      { turnIndex: 4 },
+    );
+  });
+
+  test('preserves config options and commands when replacing with summaries that omit them', () => {
+    const persistence = createFakeChatPersistence();
+    const store = new WorkspaceStore(persistence as any);
+
+    store.replaceChatSessions('p1', [
+      {
+        sessionId: 's1',
+        title: 'Session',
+        preview: '',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        messageCount: 1,
+        configOptions: [{ id: 'mode', currentValue: 'code' }],
+        commands: [{ name: '/status' }],
+      },
+    ], { s1: { turnIndex: 3 } });
+
+    store.replaceChatSessions('p1', [
+      {
+        sessionId: 's1',
+        title: 'Session',
+        preview: 'listed',
+        updatedAt: '2026-01-03T00:00:00.000Z',
+        messageCount: 3,
+      },
+    ], { s1: { turnIndex: 5 } });
+
+    expect(persistence.replaceProjectChatSessions).toHaveBeenLastCalledWith(
+      'p1',
+      [
+        {
+          session: expect.objectContaining({
+            sessionId: 's1',
+            preview: 'listed',
+            configOptions: [{ id: 'mode', currentValue: 'code' }],
+            commands: [{ name: '/status' }],
+          }),
+          cursor: { turnIndex: 5 },
+        },
+      ],
+    );
   });
 });

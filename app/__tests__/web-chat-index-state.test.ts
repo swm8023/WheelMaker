@@ -3,6 +3,7 @@ import {
   createChatIndexState,
   finishChatIndexFullRefresh,
   finishChatIndexProjectRefresh,
+  mergeChatSessionList,
   mergeChatIndexSession,
   requestChatIndexFullRefresh,
   requestChatIndexProjectRefresh,
@@ -74,6 +75,39 @@ describe('chat index state helpers', () => {
       title: 's1',
       preview: 'new preview',
       updatedAt: '2026-01-02T00:00:00.000Z',
+    });
+  });
+
+  test('preserves config options and commands when refreshed session list omits them', () => {
+    const existing: RegistryChatSession[] = [
+      {
+        ...session('s1', '2026-01-02T00:00:00.000Z'),
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            currentValue: 'gpt-5.3-codex',
+            options: [{ value: 'gpt-5.3-codex', name: 'GPT 5.3 Codex' }],
+          },
+        ],
+        commands: [{ name: '/plan', description: 'Plan' }],
+      },
+    ];
+
+    const merged = mergeChatSessionList(existing, [
+      {
+        ...session('s1', '2026-01-03T00:00:00.000Z'),
+        preview: 'new preview',
+      },
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      sessionId: 's1',
+      preview: 'new preview',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+      configOptions: existing[0].configOptions,
+      commands: existing[0].commands,
     });
   });
 

@@ -225,9 +225,10 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('if (!silent) {');
     expect(mainTsx).toContain('setHasPendingProjectUpdates(false);');
     expect(mainTsx).not.toContain('setChatPromptSnapshotVersion(version => version + 1);');
-    expect(mainTsx).toContain('setChatSessions(prev => {');
-    expect(mainTsx).toContain('const byId = new Map(prev.map(item => [item.sessionId, item]));');
-    expect(mainTsx).toContain('const merged = mergeChatSession(next, session);');
+    expect(mainTsx).toContain('const nextSessions = mergeChatSessionList(knownSessions, listedSessions);');
+    expect(mainTsx).toContain('setChatSessions(prev => mergeChatSessionList(prev, listedSessions));');
+    expect(mainTsx).toContain('const mergedSessions = mergeChatSessionList(knownSessions, sortedSessions);');
+    expect(mainTsx).toContain('return mergeChatSession([projectSession], currentProjectSession)[0];');
     expect(mainTsx).toContain('const CHAT_CONFIG_PRIORITY_IDS = [');
     expect(mainTsx).toContain("const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought']");
     expect(mainTsx).toContain("const FLOATING_CONTROL_SLOT_ORDER = ['upper', 'upper-middle', 'center', 'lower-middle'] as const;");
@@ -338,7 +339,8 @@ describe('web chat integration', () => {
     const sessionUpdatedBlock = mainTsx.slice(sessionUpdatedBlockStart, sessionMessageBlockStart);
     expect(sessionUpdatedBlock).not.toContain('loadChatSession(');
     expect(sessionUpdatedBlock).toContain('if (payload.session.running === false) {');
-    expect(sessionUpdatedBlock).toContain('rememberChatSessionSummary(eventProjectId, payload.session);');
+    expect(sessionUpdatedBlock).toContain('const mergedSession = mergeKnownChatSessionForProject(eventProjectId, payload.session);');
+    expect(sessionUpdatedBlock).toContain('rememberChatSessionSummary(eventProjectId, mergedSession);');
     expect(mainTsx).toContain("className={`desktop-activity-button refresh-btn${hasPendingProjectUpdates && !refreshingProject && !reconnecting ? ' has-update-badge' : ''}`}");
     expect(mainTsx).not.toContain('project-presence');
     expect(mainTsx).not.toContain('project-dirty');

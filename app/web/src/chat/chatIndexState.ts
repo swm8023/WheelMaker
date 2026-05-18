@@ -147,6 +147,28 @@ export function mergeChatIndexSession(
   };
 }
 
+export function mergeChatSessionList(
+  existing: RegistryChatSession[],
+  incoming: RegistryChatSession[],
+): RegistryChatSession[] {
+  const byId = new Map(existing.map(session => [session.sessionId, session]));
+  const nextById = new Map<string, RegistryChatSession>();
+  for (const item of incoming) {
+    const previous = nextById.get(item.sessionId) ?? byId.get(item.sessionId);
+    const merged =
+      previous &&
+      (item.configOptions === undefined || item.commands === undefined)
+        ? {
+            ...item,
+            configOptions: item.configOptions ?? previous.configOptions,
+            commands: item.commands ?? previous.commands,
+          }
+        : item;
+    nextById.set(item.sessionId, merged);
+  }
+  return sortChatSessions(Array.from(nextById.values()));
+}
+
 function projectKnown(state: ChatIndexState, projectId: string): boolean {
   return state.projects.some(project => project.projectId === projectId);
 }

@@ -67,7 +67,7 @@ import {
   shouldAutoScrollChatToBottom,
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
-import { shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
+import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -498,6 +498,17 @@ function mergeProjectSessionMap(
     ...map,
     [projectId]: mergeChatSession(map[projectId] ?? [], session),
   };
+}
+
+function mergeKnownChatSessions(
+  left: RegistryChatSession[],
+  right: RegistryChatSession[],
+): RegistryChatSession[] {
+  let merged = left;
+  for (const session of right) {
+    merged = mergeChatSession(merged, session);
+  }
+  return merged;
 }
 
 
@@ -2294,6 +2305,7 @@ function App() {
   const chatProjectRefreshInFlightRef = useRef<Record<string, boolean>>({});
   const chatProjectRefreshDirtyRef = useRef<Record<string, boolean>>({});
   const [chatSessions, setChatSessions] = useState<RegistryChatSession[]>([]);
+  const chatSessionsRef = useRef<RegistryChatSession[]>([]);
   const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
   const projectSessionsByProjectIdRef = useRef<Record<string, RegistryChatSession[]>>({});
   const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
@@ -2335,6 +2347,22 @@ function App() {
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
   const [resumeLoading, setResumeLoading] = useState(false);
 
+  function knownChatSessionsForProject(targetProjectId: string): RegistryChatSession[] {
+    const projectSessions = projectSessionsByProjectIdRef.current[targetProjectId] ?? [];
+    if (!shouldUpdateCurrentProjectSessions(targetProjectId, projectIdRef.current)) {
+      return projectSessions;
+    }
+    return mergeKnownChatSessions(projectSessions, chatSessionsRef.current);
+  }
+
+  function mergeKnownChatSessionForProject(
+    targetProjectId: string,
+    session: RegistryChatSession,
+  ): RegistryChatSession {
+    return mergeChatSession(knownChatSessionsForProject(targetProjectId), session)
+      .find(item => item.sessionId === session.sessionId) ?? session;
+  }
+
   const selectedChatEncodedKey = useMemo(
     () => encodeChatSessionKey(selectedChatKey),
     [selectedChatKey],
@@ -2345,10 +2373,16 @@ function App() {
       if (!selectedChatKey) {
         return undefined;
       }
-      const sessions =
-        projectSessionsByProjectId[selectedChatKey.projectId] ??
-        (selectedChatKey.projectId === projectId ? chatSessions : []);
-      return sessions.find(item => item.sessionId === selectedChatKey.sessionId);
+      const projectSession = projectSessionsByProjectId[selectedChatKey.projectId]
+        ?.find(item => item.sessionId === selectedChatKey.sessionId);
+      const currentProjectSession =
+        selectedChatKey.projectId === projectId
+          ? chatSessions.find(item => item.sessionId === selectedChatKey.sessionId)
+          : undefined;
+      if (projectSession && currentProjectSession) {
+        return mergeChatSession([projectSession], currentProjectSession)[0];
+      }
+      return projectSession ?? currentProjectSession;
     },
     [chatSessions, projectId, projectSessionsByProjectId, selectedChatKey],
   );
@@ -3025,6 +3059,9 @@ function App() {
     selectedChatKeyRef.current = selectedChatKey;
   }, [selectedChatKey]);
   useEffect(() => {
+    chatSessionsRef.current = chatSessions;
+  }, [chatSessions]);
+  useEffect(() => {
     projectSessionsByProjectIdRef.current = projectSessionsByProjectId;
   }, [projectSessionsByProjectId]);
   useEffect(() => {
@@ -3062,8 +3099,14 @@ function App() {
         const cachedSessions = workspaceStore
           .hydrateChatSessions(projectItem.projectId)
           .map(entry => entry.session);
-        if (cachedSessions.length > 0 || !next[projectItem.projectId]) {
-          next[projectItem.projectId] = sortChatSessions(cachedSessions);
+        const sortedCachedSessions = sortChatSessions(cachedSessions);
+        if (sortedCachedSessions.length > 0) {
+          next[projectItem.projectId] = mergeChatSessionList(
+            next[projectItem.projectId] ?? [],
+            sortedCachedSessions,
+          );
+        } else if (!next[projectItem.projectId]) {
+          next[projectItem.projectId] = [];
         }
       }
       return next;
@@ -3079,9 +3122,14 @@ function App() {
         .then(sessions => {
           if (cancelled) return;
           const sortedSessions = sortChatSessions(sessions);
+          const knownSessions = knownChatSessionsForProject(projectItem.projectId);
+          const mergedSessions = mergeChatSessionList(knownSessions, sortedSessions);
           setProjectSessionsByProjectId(prev => ({
             ...prev,
-            [projectItem.projectId]: sortedSessions,
+            [projectItem.projectId]: mergeChatSessionList(
+              prev[projectItem.projectId] ?? knownSessions,
+              sortedSessions,
+            ),
           }));
           const cached = workspaceStore.hydrateChatSessions(projectItem.projectId);
           const cursorBySessionId: Record<string, {turnIndex: number}> = {};
@@ -3090,7 +3138,7 @@ function App() {
           }
           workspaceStore.replaceChatSessions(
             projectItem.projectId,
-            sortedSessions,
+            mergedSessions,
             cursorBySessionId,
           );
         })
@@ -4764,13 +4812,19 @@ function App() {
     }
 
     const sessionRows = cachedSessions.map(item => item.session);
-    const sortedSessionRows = sortChatSessions(sessionRows);
+    const sortedSessionRows = mergeChatSessionList(
+      knownChatSessionsForProject(activeProjectId),
+      sortChatSessions(sessionRows),
+    );
     if (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)) {
-      setChatSessions(sortedSessionRows);
+      setChatSessions(prev => mergeChatSessionList(prev, sortedSessionRows));
     }
     setProjectSessionsByProjectId(prev => ({
       ...prev,
-      [activeProjectId]: sortedSessionRows,
+      [activeProjectId]: mergeChatSessionList(
+        prev[activeProjectId] ?? knownChatSessionsForProject(activeProjectId),
+        sortedSessionRows,
+      ),
     }));
 
     for (const cached of cachedSessions) {
@@ -4831,12 +4885,14 @@ function App() {
       const cacheableMessages = messages.filter(isFinishedChatMessage);
       workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages);
     }
-    const targetSession =
-      session ??
+    const knownSession =
       projectSessionsByProjectId[activeProjectId]?.find(item => item.sessionId === sessionId) ??
       (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)
         ? chatSessions.find(item => item.sessionId === sessionId)
         : undefined);
+    const targetSession = session
+      ? mergeKnownChatSessionForProject(activeProjectId, session)
+      : knownSession;
     if (targetSession) {
       workspaceStore.rememberChatSession(activeProjectId, targetSession, cursor);
     }
@@ -4867,9 +4923,11 @@ function App() {
       rememberChatSessionSummary(activeProjectId, sessionPatch);
       const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
       if (result.session) {
-        workspaceStore.rememberChatSession(activeProjectId, result.session, {
-          turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
-        });
+        workspaceStore.rememberChatSession(
+          activeProjectId,
+          mergeKnownChatSessionForProject(activeProjectId, result.session),
+          { turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0 },
+        );
       }
     } catch {
       // The next session.list/session.updated response will reconcile read state.
@@ -5081,32 +5139,18 @@ function App() {
   ) => {
     if (!activeProjectId) return;
     try {
-      const sessions = sortChatSessions(await service.listProjectSessions(activeProjectId));
-      const nextSessions = sessions;
+      const listedSessions = sortChatSessions(await service.listProjectSessions(activeProjectId));
+      const knownSessions = knownChatSessionsForProject(activeProjectId);
+      const nextSessions = mergeChatSessionList(knownSessions, listedSessions);
       setProjectSessionsByProjectId(prev => ({
         ...prev,
-        [activeProjectId]: nextSessions,
+        [activeProjectId]: mergeChatSessionList(
+          prev[activeProjectId] ?? knownSessions,
+          listedSessions,
+        ),
       }));
       if (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)) {
-        setChatSessions(prev => {
-          const byId = new Map(prev.map(item => [item.sessionId, item]));
-          let next: RegistryChatSession[] = [];
-          for (const item of nextSessions) {
-            const existing = byId.get(item.sessionId);
-            const session =
-              existing &&
-              (item.configOptions === undefined || item.commands === undefined)
-                ? {
-                    ...item,
-                    configOptions: item.configOptions ?? existing.configOptions,
-                    commands: item.commands ?? existing.commands,
-                  }
-                : item;
-            const merged = mergeChatSession(next, session);
-            next = merged;
-          }
-          return next;
-        });
+        setChatSessions(prev => mergeChatSessionList(prev, listedSessions));
       }
 
       const cursorBySessionId: Record<string, {turnIndex: number}> = {};
@@ -6480,13 +6524,18 @@ function App() {
     targetProjectId: string,
     sessions: RegistryChatSession[],
   ) => {
-    const sortedSessions = sortChatSessions(sessions);
+    const listedSessions = sortChatSessions(sessions);
+    const knownSessions = knownChatSessionsForProject(targetProjectId);
+    const nextSessions = mergeChatSessionList(knownSessions, listedSessions);
     setProjectSessionsByProjectId(prev => ({
       ...prev,
-      [targetProjectId]: sortedSessions,
+      [targetProjectId]: mergeChatSessionList(
+        prev[targetProjectId] ?? knownSessions,
+        listedSessions,
+      ),
     }));
     if (shouldUpdateCurrentProjectSessions(targetProjectId, projectIdRef.current)) {
-      setChatSessions(sortedSessions);
+      setChatSessions(prev => mergeChatSessionList(prev, listedSessions));
     }
     const cached = workspaceStore.hydrateChatSessions(targetProjectId);
     const cursorBySessionId: Record<string, {turnIndex: number}> = {};
@@ -6498,7 +6547,7 @@ function App() {
         turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? entry.cursor.turnIndex,
       };
     }
-    for (const session of sortedSessions) {
+    for (const session of nextSessions) {
       const sessionId = session.sessionId;
       if (!sessionId || cursorBySessionId[sessionId]) continue;
       const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
@@ -6506,7 +6555,7 @@ function App() {
         turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
       };
     }
-    workspaceStore.replaceChatSessions(targetProjectId, sortedSessions, cursorBySessionId);
+    workspaceStore.replaceChatSessions(targetProjectId, nextSessions, cursorBySessionId);
   };
 
   const refreshChatProjectSessions = async (targetProjectId: string) => {
@@ -6617,8 +6666,9 @@ function App() {
           if (payload.session.running === false) {
             setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
           }
-          rememberChatSessionSummary(eventProjectId, payload.session);
-          workspaceStore.rememberChatSession(eventProjectId, payload.session, {
+          const mergedSession = mergeKnownChatSessionForProject(eventProjectId, payload.session);
+          rememberChatSessionSummary(eventProjectId, mergedSession);
+          workspaceStore.rememberChatSession(eventProjectId, mergedSession, {
             turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
           });
         }

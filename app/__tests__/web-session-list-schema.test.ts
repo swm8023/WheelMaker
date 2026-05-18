@@ -27,8 +27,9 @@ describe('web session list schema', () => {
     expect(mainTsx).toContain('return resolveChatSessionVisualStateValue(session);');
     expect(mainTsx).not.toContain('resolveChatSessionVisualStateValue(session, {');
     expect(mainTsx).toContain('service.markProjectSessionRead(activeProjectId, sessionId, cursor)');
-    expect(mainTsx).toContain('rememberChatSessionSummary(eventProjectId, payload.session);');
-    expect(mainTsx).toContain('workspaceStore.rememberChatSession(eventProjectId, payload.session, {');
+    expect(mainTsx).toContain('const mergedSession = mergeKnownChatSessionForProject(eventProjectId, payload.session);');
+    expect(mainTsx).toContain('rememberChatSessionSummary(eventProjectId, mergedSession);');
+    expect(mainTsx).toContain('workspaceStore.rememberChatSession(eventProjectId, mergedSession, {');
     expect(stylesCss).toContain('grid-template-columns: 9px minmax(0, 1fr) auto auto;');
     expect(stylesCss).toContain('.session-state-marker.running');
     expect(stylesCss).toContain('.session-state-marker.failed-unviewed .session-state-dot');

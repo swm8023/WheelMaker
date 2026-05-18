@@ -66,6 +66,24 @@ export type CachedChatSessionContent = {
   messages: RegistryChatMessage[];
 };
 
+function mergeCachedChatSessionSummary(
+  existing: RegistryChatSession | undefined,
+  next: RegistryChatSession,
+): RegistryChatSession {
+  if (!existing) {
+    return next;
+  }
+  return {
+    ...next,
+    configOptions:
+      next.configOptions ??
+      (existing.configOptions ? [...existing.configOptions] : undefined),
+    commands:
+      next.commands ??
+      (existing.commands ? [...existing.commands] : undefined),
+  };
+}
+
 function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
   return [...entries].sort((a, b) => {
     if (a.kind === 'dir' && b.kind !== 'dir') return -1;
@@ -302,8 +320,14 @@ export class WorkspaceStore {
 
   replaceChatSessions(projectId: string, sessions: RegistryChatSession[], cursorBySessionId: Record<string, PersistedChatCursor>): void {
     if (!projectId) return;
+    const existingById = new Map(
+      this.hydrateChatSessions(projectId).map(entry => [
+        entry.session.sessionId,
+        entry.session,
+      ]),
+    );
     const payload = sessions.map(session => ({
-      session,
+      session: mergeCachedChatSessionSummary(existingById.get(session.sessionId), session),
       cursor: sanitizeCursor(cursorBySessionId[session.sessionId]),
     }));
     this.persistence.replaceProjectChatSessions(projectId, payload);
@@ -311,7 +335,11 @@ export class WorkspaceStore {
 
   rememberChatSession(projectId: string, session: RegistryChatSession, cursor: PersistedChatCursor): void {
     if (!projectId || !session.sessionId) return;
-    this.persistence.patchProjectChatSession(projectId, session, sanitizeCursor(cursor));
+    const existing = this.hydrateChatSessions(projectId)
+      .find(entry => entry.session.sessionId === session.sessionId)
+      ?.session;
+    const mergedSession = mergeCachedChatSessionSummary(existing, session);
+    this.persistence.patchProjectChatSession(projectId, mergedSession, sanitizeCursor(cursor));
   }
 
   rememberChatSessionContent(
