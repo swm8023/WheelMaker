@@ -4,6 +4,7 @@ import {
   CHAT_USER_SCROLL_LOCK_MS,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
   shouldHandleChatVirtualWindowScroll,
 } from '../web/src/chat/chatScrollIntent';
@@ -47,6 +48,27 @@ describe('web drag scroll behavior', () => {
   test('ignores programmatic chat scrolls for virtual window expansion', () => {
     expect(shouldHandleChatVirtualWindowScroll(true)).toBe(false);
     expect(shouldHandleChatVirtualWindowScroll(false)).toBe(true);
+  });
+
+  test('keeps incremental session reads from resetting a history scroll window', () => {
+    expect(
+      resolveChatSessionReadWindowUpdate({
+        useIncremental: true,
+        followsLatest: false,
+      }),
+    ).toEqual({followLatest: false});
+    expect(
+      resolveChatSessionReadWindowUpdate({
+        useIncremental: true,
+        followsLatest: true,
+      }),
+    ).toEqual({followLatest: true});
+    expect(
+      resolveChatSessionReadWindowUpdate({
+        useIncremental: false,
+        followsLatest: false,
+      }),
+    ).toEqual({resetToLatest: true});
   });
 
   test('keeps responding prompt animation from changing chat scroll overflow', () => {

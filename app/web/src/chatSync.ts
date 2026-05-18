@@ -41,6 +41,59 @@ function sameChatMessage(a: RegistryChatMessage | undefined, b: RegistryChatMess
   );
 }
 
+function normalizeCachedChatMessage(raw: unknown, expectedSessionId = ''): RegistryChatMessage | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const input = raw as Partial<RegistryChatMessage>;
+  const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
+  if (!sessionId || (expectedSessionId && sessionId !== expectedSessionId)) {
+    return null;
+  }
+  const rawTurnIndex = Number(input.turnIndex ?? 0);
+  const turnIndex = Number.isFinite(rawTurnIndex) ? Math.trunc(rawTurnIndex) : 0;
+  if (turnIndex <= 0) {
+    return null;
+  }
+  const method = typeof input.method === 'string' ? input.method.trim() : '';
+  if (!method) {
+    return null;
+  }
+  const param =
+    input.param != null &&
+    typeof input.param === 'object' &&
+    !Array.isArray(input.param)
+      ? input.param as Record<string, unknown>
+      : {};
+  return {
+    sessionId,
+    turnIndex,
+    method,
+    param,
+    finished: input.finished === true,
+  };
+}
+
+export function sanitizeCachedSessionMessages(
+  messages: unknown,
+  expectedSessionId = '',
+): RegistryChatMessage[] {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+  const byTurnKey = new Map<string, RegistryChatMessage>();
+  for (const raw of messages) {
+    const message = normalizeCachedChatMessage(raw, expectedSessionId);
+    if (!message) {
+      continue;
+    }
+    byTurnKey.set(chatMessageKey(message), message);
+  }
+  return Array.from(byTurnKey.values()).sort((left, right) => {
+    return (left.turnIndex ?? 0) - (right.turnIndex ?? 0);
+  });
+}
+
 export function isFinishedChatMessage(message: RegistryChatMessage): boolean {
   return message.finished === true;
 }

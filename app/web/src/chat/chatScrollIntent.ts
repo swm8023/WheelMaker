@@ -23,3 +23,18 @@ export function shouldAutoScrollChatToBottom(input: {
 export function shouldHandleChatVirtualWindowScroll(programmaticScroll: boolean): boolean {
   return !programmaticScroll;
 }
+
+export type ChatSessionReadWindowUpdate = {
+  resetToLatest?: true;
+  followLatest?: boolean;
+};
+
+export function resolveChatSessionReadWindowUpdate(input: {
+  useIncremental: boolean;
+  followsLatest: boolean;
+}): ChatSessionReadWindowUpdate {
+  if (input.useIncremental) {
+    return {followLatest: input.followsLatest};
+  }
+  return {resetToLatest: true};
+}

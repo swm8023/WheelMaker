@@ -5,6 +5,7 @@ import {
   mergeIncomingSessionMessage,
   reconcileSessionReadMessages,
   replaceSessionMessages,
+  sanitizeCachedSessionMessages,
   shouldRequestSessionReadForIncomingTurn,
 } from '../web/src/chatSync';
 import type { RegistryChatMessage } from '../web/src/types/registry';
@@ -94,6 +95,28 @@ describe('chat session read reconciliation', () => {
     ).toEqual({ turnIndex: 1 });
 
     expect(reconcileCachedSessionReadCursor({ turnIndex: 5 }, [])).toEqual({ turnIndex: 0 });
+  });
+
+  test('repairs cached session messages before they drive cursors and windows', () => {
+    const repaired = sanitizeCachedSessionMessages(
+      [
+        { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: {}, finished: true },
+        { sessionId: 'other', turnIndex: 2, method: 'agent_message_chunk', param: {}, finished: true },
+        { sessionId: 'sess-1', turnIndex: 0, method: 'agent_message_chunk', param: {}, finished: true },
+        { sessionId: 'sess-1', turnIndex: 2, method: 'agent_message_chunk', param: { text: 'stale' }, finished: true },
+        { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+        { sessionId: 'sess-1', turnIndex: 2, method: 'agent_message_chunk', param: { text: 'fresh' }, finished: true },
+        null,
+      ],
+      'sess-1',
+    );
+
+    expect(repaired).toEqual([
+      { sessionId: 'sess-1', turnIndex: 1, method: 'prompt_request', param: {}, finished: true },
+      { sessionId: 'sess-1', turnIndex: 2, method: 'agent_message_chunk', param: { text: 'fresh' }, finished: true },
+      { sessionId: 'sess-1', turnIndex: 3, method: 'prompt_done', param: {}, finished: true },
+    ]);
+    expect(reconcileCachedSessionReadCursor({ turnIndex: 8 }, repaired)).toEqual({ turnIndex: 3 });
   });
 
   test('does not request prompt reconstruction in turn-only protocol', () => {

@@ -10,6 +10,7 @@ import {
   chatSessionKeyFromParts,
   type ChatSessionKey,
 } from '../chat/chatSessionKey';
+import { sanitizeCachedSessionMessages } from '../chatSync';
 import {
   WorkspacePersistenceRepository,
   type PersistedChatCursor,
@@ -237,7 +238,7 @@ export class WorkspaceStore {
     const cached = this.persistence.getProjectChatSessionContent(projectId, sessionId);
     if (!cached) return null;
     return {
-      messages: Array.isArray(cached.messages) ? cached.messages : [],
+      messages: sanitizeCachedSessionMessages(cached.messages, sessionId),
     };
   }
 
@@ -304,7 +305,11 @@ export class WorkspaceStore {
     messages: RegistryChatMessage[],
   ): void {
     if (!projectId || !sessionId) return;
-    this.persistence.patchProjectChatSessionContent(projectId, sessionId, messages);
+    this.persistence.patchProjectChatSessionContent(
+      projectId,
+      sessionId,
+      sanitizeCachedSessionMessages(messages, sessionId),
+    );
   }
 
   deleteChatSession(projectId: string, sessionId: string): void {

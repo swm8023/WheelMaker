@@ -61,6 +61,7 @@ import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
+  resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
   shouldHandleChatVirtualWindowScroll,
 } from './chat/chatScrollIntent';
@@ -2503,12 +2504,19 @@ function App() {
       return;
     }
     const currentWindow = chatVisibleWindowRef.current[runtimeKey];
-    const nextWindow = options?.resetToLatest || !currentWindow
+    const resettingToLatest = options?.resetToLatest || !currentWindow;
+    const nextWindow = resettingToLatest
       ? createLatestTurnWindow(fullMessages)
       : options?.followLatest
         ? followLatestTurnWindow(fullMessages, currentWindow)
         : currentWindow;
     chatVisibleWindowRef.current[runtimeKey] = nextWindow;
+    if (resettingToLatest && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
+      chatAutoScrollFollowRef.current = true;
+      chatUserScrollLockUntilRef.current = 0;
+      chatPointerScrollingRef.current = false;
+      setChatShowScrollToBottom(false);
+    }
     if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
       const visibleMessages = sliceTurnsForWindow(fullMessages, nextWindow);
       chatMessagesRef.current = visibleMessages;
@@ -5157,7 +5165,14 @@ function App() {
       const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, resultSessionId);
       applySelectedChatKey(nextSelectedKey);
       workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
-      setVisibleChatMessagesForRuntimeKey(resultRuntimeKey, nextMessages, {resetToLatest: true});
+      setVisibleChatMessagesForRuntimeKey(
+        resultRuntimeKey,
+        nextMessages,
+        resolveChatSessionReadWindowUpdate({
+          useIncremental,
+          followsLatest: chatAutoScrollFollowRef.current,
+        }),
+      );
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       const knownSession =
         resultSession ??

@@ -89,4 +89,16 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('className="chat-scroll-bottom-glyph"');
     expect(main).toContain('updateSelectedChatWindowFromScroll(event.currentTarget, direction);');
   });
+
+  test('resets follow-bottom intent only for explicit latest-window resets', () => {
+    const main = readMain();
+
+    expect(main).toContain('resolveChatSessionReadWindowUpdate({');
+    expect(main).toContain('useIncremental,');
+    expect(main).toContain('followsLatest: chatAutoScrollFollowRef.current,');
+    expect(main).toContain('const resettingToLatest = options?.resetToLatest || !currentWindow;');
+    expect(main).toContain('if (resettingToLatest && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {');
+    expect(main).toContain('chatAutoScrollFollowRef.current = true;');
+    expect(main).toContain('chatUserScrollLockUntilRef.current = 0;');
+  });
 });
