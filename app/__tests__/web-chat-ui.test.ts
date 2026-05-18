@@ -104,6 +104,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('const chatAttachmentsRef = useRef<ChatAttachment[]>([]);');
     expect(mainTsx).toContain('const chatAutoScrollFollowRef = useRef(true);');
     expect(mainTsx).toContain('const chatPointerScrollingRef = useRef(false);');
+    expect(mainTsx).toContain('const chatUserScrollLockUntilRef = useRef(0);');
+    expect(mainTsx).toContain('const chatProgrammaticScrollRef = useRef(false);');
     expect(mainTsx).toContain('const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 80;');
     expect(mainTsx).toContain('function isChatScrolledNearBottom(container: HTMLElement): boolean {');
     expect(mainTsx).toContain('const updateChatFollowModeFromScroll = useCallback(');
@@ -111,7 +113,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('chatAutoScrollFollowRef.current = followsLatest;');
     expect(mainTsx).toContain('setChatShowScrollToBottom(!followsLatest);');
     expect(mainTsx).toContain('const scrollChatToBottom = useCallback((force = false) => {');
-    expect(mainTsx).toContain('if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {');
+    expect(mainTsx).toContain('shouldAutoScrollChatToBottom({');
     expect(mainTsx).toContain('const forceChatScrollToBottom = useCallback(() => {');
     expect(mainTsx).toContain('chatAutoScrollFollowRef.current = true;');
     expect(mainTsx).toContain('scrollChatToBottom(true);');
@@ -122,6 +124,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toMatch(
       /onScroll=\{event => \{[\s\S]*updateChatFollowModeFromScroll\(event\.currentTarget\);[\s\S]*updateSelectedChatWindowFromScroll\(event\.currentTarget, direction\);[\s\S]*\}\}/,
     );
+    expect(mainTsx).toContain('onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}');
+    expect(mainTsx).toContain('shouldHandleChatVirtualWindowScroll(chatProgrammaticScrollRef.current)');
     expect(mainTsx).toContain('onPointerDown={() => { chatPointerScrollingRef.current = true; }}');
     expect(mainTsx).toContain('onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}');
     expect(mainTsx).toContain('onTouchStart={() => { chatPointerScrollingRef.current = true; }}');

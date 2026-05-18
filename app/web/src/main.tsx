@@ -58,6 +58,12 @@ import {
   type ChatOptionReply,
 } from './chat/chatOptionReplies';
 import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
+import {
+  isChatUserScrollLocked,
+  nextChatUserScrollLockUntil,
+  shouldAutoScrollChatToBottom,
+  shouldHandleChatVirtualWindowScroll,
+} from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
@@ -2307,6 +2313,8 @@ function App() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
+  const chatUserScrollLockUntilRef = useRef(0);
+  const chatProgrammaticScrollRef = useRef(false);
   const chatLastScrollTopRef = useRef(0);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2547,8 +2555,18 @@ function App() {
     [],
   );
 
+  const markChatUserScrollIntent = useCallback(() => {
+    chatUserScrollLockUntilRef.current = nextChatUserScrollLockUntil();
+  }, []);
+
   const scrollChatToBottom = useCallback((force = false) => {
-    if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {
+    const canScroll = () => shouldAutoScrollChatToBottom({
+      force,
+      followsLatest: chatAutoScrollFollowRef.current,
+      pointerScrolling: chatPointerScrollingRef.current,
+      userScrollLocked: isChatUserScrollLocked(chatUserScrollLockUntilRef.current),
+    });
+    if (!canScroll()) {
       return;
     }
     window.requestAnimationFrame(() => {
@@ -2556,11 +2574,22 @@ function App() {
       if (!container) {
         return;
       }
-      if (!force && (!chatAutoScrollFollowRef.current || chatPointerScrollingRef.current)) {
+      if (!canScroll()) {
         return;
       }
-      container.scrollTop = container.scrollHeight;
+      const nextScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      if (Math.abs(container.scrollTop - nextScrollTop) <= 1) {
+        chatAutoScrollFollowRef.current = true;
+        setChatShowScrollToBottom(false);
+        return;
+      }
+      chatProgrammaticScrollRef.current = true;
+      container.scrollTop = nextScrollTop;
       chatAutoScrollFollowRef.current = true;
+      setChatShowScrollToBottom(false);
+      window.setTimeout(() => {
+        chatProgrammaticScrollRef.current = false;
+      }, 0);
     });
   }, []);
 
@@ -9001,8 +9030,11 @@ function App() {
                 const direction = nextScrollTop >= chatLastScrollTopRef.current ? 'down' : 'up';
                 chatLastScrollTopRef.current = nextScrollTop;
                 updateChatFollowModeFromScroll(event.currentTarget);
-                updateSelectedChatWindowFromScroll(event.currentTarget, direction);
+                if (shouldHandleChatVirtualWindowScroll(chatProgrammaticScrollRef.current)) {
+                  updateSelectedChatWindowFromScroll(event.currentTarget, direction);
+                }
               }}
+              onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}
               onPointerDown={() => { chatPointerScrollingRef.current = true; }}
               onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
               onPointerCancel={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
