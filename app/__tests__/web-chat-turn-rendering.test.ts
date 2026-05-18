@@ -14,6 +14,11 @@ function readVirtualList(): string {
   );
 }
 
+function readStyles(): string {
+  const projectRoot = path.join(__dirname, '..');
+  return fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+}
+
 describe('web chat turn rendering', () => {
   test('renders chat turns through the virtual display index instead of prompt groups', () => {
     const main = readMain();
@@ -40,6 +45,16 @@ describe('web chat turn rendering', () => {
     expect(main).not.toContain("from './chat/chatTurnWindow'");
     expect(main).toContain('buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex)');
     expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
+  });
+
+  test('matches virtual row gap to the normal markdown paragraph gap', () => {
+    const virtualList = readVirtualList();
+    const styles = readStyles();
+    const paragraphMargin = styles.match(/\.chat-main-message p,[\s\S]*?margin: 0 0 (\d+)px 0;/)?.[1] ?? '';
+
+    expect(paragraphMargin).toBe('7');
+    expect(virtualList).toContain('rowGap = 7,');
+    expect(virtualList).not.toContain('overscan = 12');
   });
 
   test('renders prompt responding status and delivery states for pending prompts', () => {

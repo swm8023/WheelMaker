@@ -13,8 +13,8 @@ export type ChatVirtualTurnListProps = {
 export function ChatVirtualTurnList({
   scrollRef,
   displayIndex,
-  overscan = 12,
-  rowGap = 14,
+  overscan = 8,
+  rowGap = 7,
   renderItem,
 }: ChatVirtualTurnListProps) {
   const virtualizer = useVirtualizer({

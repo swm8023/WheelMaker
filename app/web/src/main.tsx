@@ -61,14 +61,12 @@ import {
 } from './chat/chatOptionReplies';
 import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
-  CHAT_BOTTOM_SCROLL_RETRY_FRAMES,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
   resolveChatBottomScrollTop,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
   shouldHandleChatVirtualWindowScroll,
-  shouldRetryChatBottomScroll,
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
@@ -2602,38 +2600,26 @@ function App() {
         chatProgrammaticScrollRef.current = false;
       }, 0);
     };
-    const run = (remainingFrames: number) => {
-      window.requestAnimationFrame(() => {
-        const container = chatScrollRef.current;
-        if (!container) {
-          finishProgrammaticScroll();
-          return;
-        }
-        if (!canScroll()) {
-          finishProgrammaticScroll();
-          return;
-        }
-        const nextScrollTop = resolveChatBottomScrollTop({
-          scrollHeight: container.scrollHeight,
-          clientHeight: container.clientHeight,
-        });
-        chatProgrammaticScrollRef.current = true;
-        container.scrollTop = nextScrollTop;
-        chatAutoScrollFollowRef.current = true;
-        setChatShowScrollToBottom(false);
-        if (shouldRetryChatBottomScroll({
-          remainingFrames,
-          currentScrollTop: container.scrollTop,
-          targetScrollTop: nextScrollTop,
-          keepSettling: remainingFrames > 1,
-        })) {
-          run(remainingFrames - 1);
-          return;
-        }
+    window.requestAnimationFrame(() => {
+      const container = chatScrollRef.current;
+      if (!container) {
         finishProgrammaticScroll();
+        return;
+      }
+      if (!canScroll()) {
+        finishProgrammaticScroll();
+        return;
+      }
+      const nextScrollTop = resolveChatBottomScrollTop({
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
       });
-    };
-    run(CHAT_BOTTOM_SCROLL_RETRY_FRAMES);
+      chatProgrammaticScrollRef.current = true;
+      container.scrollTop = nextScrollTop;
+      chatAutoScrollFollowRef.current = true;
+      setChatShowScrollToBottom(false);
+      finishProgrammaticScroll();
+    });
   }, []);
 
   const forceChatScrollToBottom = useCallback(() => {
@@ -8870,6 +8856,35 @@ function App() {
     selectedFullChatMessages,
     selectedPendingPrompt,
   ]);
+
+  useEffect(() => {
+    if (tab !== 'chat' || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+    const container = chatScrollRef.current;
+    if (!container) {
+      return;
+    }
+    const target = container.querySelector<HTMLElement>('.chat-virtual-list') ?? container;
+    let raf = 0;
+    const observer = new ResizeObserver(() => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        scrollChatToBottom(false);
+      });
+    });
+    observer.observe(target);
+    return () => {
+      if (raf) {
+        window.cancelAnimationFrame(raf);
+      }
+      observer.disconnect();
+    };
+  }, [tab, selectedChatId, chatDisplayIndex.items.length, scrollChatToBottom]);
+
   const renderChatMessageTurn = (message: RegistryChatMessage) => {
     const doneTurnIndex = message.turnIndex ?? 0;
     const copyRange = message.method === 'prompt_done'

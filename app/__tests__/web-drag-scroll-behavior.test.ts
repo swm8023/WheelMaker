@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  CHAT_BOTTOM_SCROLL_RETRY_FRAMES,
   CHAT_USER_SCROLL_LOCK_MS,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
@@ -9,7 +8,6 @@ import {
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
   shouldHandleChatVirtualWindowScroll,
-  shouldRetryChatBottomScroll,
 } from '../web/src/chat/chatScrollIntent';
 
 describe('web drag scroll behavior', () => {
@@ -53,24 +51,17 @@ describe('web drag scroll behavior', () => {
     expect(shouldHandleChatVirtualWindowScroll(false)).toBe(true);
   });
 
-  test('retries bottom scroll while virtual row measurements settle', () => {
+  test('uses content resize observation instead of forced multi-frame scroll retries', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 
-    expect(CHAT_BOTTOM_SCROLL_RETRY_FRAMES).toBeGreaterThanOrEqual(3);
     expect(resolveChatBottomScrollTop({scrollHeight: 1200, clientHeight: 500})).toBe(700);
     expect(resolveChatBottomScrollTop({scrollHeight: 300, clientHeight: 500})).toBe(0);
-    expect(shouldRetryChatBottomScroll({
-      remainingFrames: 2,
-      currentScrollTop: 640,
-      targetScrollTop: 700,
-    })).toBe(true);
-    expect(shouldRetryChatBottomScroll({
-      remainingFrames: 0,
-      currentScrollTop: 640,
-      targetScrollTop: 700,
-    })).toBe(false);
-    expect(mainTsx).toContain('run(CHAT_BOTTOM_SCROLL_RETRY_FRAMES);');
+    expect(mainTsx).toContain('new ResizeObserver(() => {');
+    expect(mainTsx).toContain("container.querySelector<HTMLElement>('.chat-virtual-list') ?? container");
+    expect(mainTsx).toContain('scrollChatToBottom(false);');
+    expect(mainTsx).not.toContain('run(CHAT_BOTTOM_SCROLL_RETRY_FRAMES);');
+    expect(mainTsx).not.toContain('keepSettling:');
   });
 
   test('keeps incremental session reads from resetting a history scroll window', () => {
