@@ -20,6 +20,28 @@ describe('chat option reply extraction', () => {
     ]);
   });
 
+  test('extracts numeric choices only when a choice context is nearby', () => {
+    expect(extractChatOptionReplies([
+      '第二个问题：更新动作要支持到什么粒度？',
+      '',
+      '可选：',
+      '1. 只支持单包更新',
+      '2. 单包 + 全部更新',
+      '3. 只展示版本，更新仍交给部署脚本/命令行',
+    ].join('\n'))).toEqual([
+      {label: '1', text: '只支持单包更新'},
+      {label: '2', text: '单包 + 全部更新'},
+      {label: '3', text: '只展示版本，更新仍交给部署脚本/命令行'},
+    ]);
+
+    expect(extractChatOptionReplies([
+      '当前实现的事实：',
+      '1. Session 状态来自 session_summary。',
+      '2. 流式更新只更新当前 turn。',
+      '3. 虚拟列表会复用节点。',
+    ].join('\n'))).toEqual([]);
+  });
+
   test('rejects summaries and plan labels that are not active choices', () => {
     expect(extractChatOptionReplies([
       'Samples:',
@@ -95,6 +117,28 @@ describe('chat option reply extraction', () => {
     ]);
   });
 
+  test('splits numeric choices while preserving explanatory paragraphs', () => {
+    const text = [
+      '第四个问题：白名单第一版具体放哪些包？',
+      '',
+      '可选：',
+      '1. 第一版只放上面 5 个。  ',
+      '最小可用，避免维护面扩大。',
+      '',
+      '2. 把当前支持的所有 provider 包都放进去。',
+      '',
+      '我的推荐是 **1**。',
+    ].join('\n');
+
+    expect(splitChatOptionReplyText(text)).toEqual([
+      {type: 'markdown', text: '第四个问题：白名单第一版具体放哪些包？\n\n可选：\n'},
+      {type: 'option', reply: {label: '1', text: '第一版只放上面 5 个。'}},
+      {type: 'markdown', text: '\n最小可用，避免维护面扩大。\n\n'},
+      {type: 'option', reply: {label: '2', text: '把当前支持的所有 provider 包都放进去。'}},
+      {type: 'markdown', text: '\n\n我的推荐是 **1**。'},
+    ]);
+  });
+
   test('splits only the latest valid choice block in a message', () => {
     expect(splitChatOptionReplyText([
       'Previous notes:',
@@ -127,6 +171,18 @@ describe('chat option reply extraction', () => {
     expect(extractChatConfirmationReply('你接受这个例外吗？还是你要更强规则？')).toEqual({
       sentence: '你接受这个例外吗？',
       replyText: '接受',
+    });
+    expect(extractChatConfirmationReply('版本状态的来源只看“全局 npm 安装”可以吗？')).toEqual({
+      sentence: '版本状态的来源只看“全局 npm 安装”可以吗？',
+      replyText: '确认',
+    });
+    expect(extractChatConfirmationReply('点击 Install/Update 前要不要二次确认？')).toEqual({
+      sentence: '点击 Install/Update 前要不要二次确认？',
+      replyText: '确认',
+    });
+    expect(extractChatConfirmationReply('read response 的 turns 是否必须是 raw 连续的？')).toEqual({
+      sentence: 'read response 的 turns 是否必须是 raw 连续的？',
+      replyText: '确认',
     });
   });
 

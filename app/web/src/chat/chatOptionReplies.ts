@@ -16,8 +16,11 @@ export type ChatConfirmationReplyTextPart =
   | {type: 'markdown'; text: string}
   | {type: 'confirmation'; reply: ChatConfirmationReply};
 
-const OPTION_LINE_PATTERN = /^\s*([A-H])\.\s+(.+?)\s*$/;
-const OPTION_LABELS = 'ABCDEFGH';
+const OPTION_LINE_PATTERN = /^\s*([A-H1-9])\.\s+(.+?)\s*$/;
+const LETTER_OPTION_LABELS = 'ABCDEFGH';
+const NUMBER_OPTION_LABELS = '123456789';
+const NUMERIC_CHOICE_CONTEXT_PATTERN =
+  /可选|选项|候选|请选择|请选|选哪个|选哪一个|要哪个|要哪一个|回复数字|回复序号|选一个|二选一|三选一/;
 const CONFIRMATION_TAIL_WINDOW_CHARS = 700;
 const QUESTION_SENTENCE_PATTERN = /[^。！？?？\r\n]*[？?]/g;
 
@@ -28,7 +31,10 @@ type ChatOptionReplyBlock = {
 type ChatOptionReplyEntry = {
   reply: ChatOptionReply;
   line: number;
+  kind: ChatOptionReplyKind;
 };
+
+type ChatOptionReplyKind = 'letter' | 'number';
 
 type ChatConfirmationReplyMatch = {
   reply: ChatConfirmationReply;
@@ -36,19 +42,43 @@ type ChatConfirmationReplyMatch = {
   end: number;
 };
 
-function optionLabelIndex(label: string): number {
-  return OPTION_LABELS.indexOf(label.toUpperCase());
+function optionLabelKind(label: string): ChatOptionReplyKind | null {
+  if (LETTER_OPTION_LABELS.includes(label.toUpperCase())) {
+    return 'letter';
+  }
+  if (NUMBER_OPTION_LABELS.includes(label)) {
+    return 'number';
+  }
+  return null;
+}
+
+function optionLabelIndex(label: string, kind: ChatOptionReplyKind): number {
+  if (kind === 'letter') {
+    return LETTER_OPTION_LABELS.indexOf(label.toUpperCase());
+  }
+  return NUMBER_OPTION_LABELS.indexOf(label);
 }
 
 function isFenceLine(line: string): boolean {
   return line.trimStart().startsWith('```');
 }
 
-function validOptionBlock(block: ChatOptionReplyEntry[]): boolean {
+function hasNumericChoiceContext(lines: string[], firstOptionLine: number): boolean {
+  const contextLines = lines.slice(Math.max(0, firstOptionLine - 4), firstOptionLine);
+  return NUMERIC_CHOICE_CONTEXT_PATTERN.test(contextLines.join('\n'));
+}
+
+function validOptionBlock(block: ChatOptionReplyEntry[], lines: string[]): boolean {
   if (block.length < 2) {
     return false;
   }
-  return block.every((item, index) => optionLabelIndex(item.reply.label) === index);
+  const kind = block[0].kind;
+  if (kind === 'number' && !hasNumericChoiceContext(lines, block[0].line)) {
+    return false;
+  }
+  return block.every(
+    (item, index) => item.kind === kind && optionLabelIndex(item.reply.label, kind) === index,
+  );
 }
 
 function findLatestOptionReplyBlock(text: string): ChatOptionReplyBlock | null {
@@ -58,7 +88,7 @@ function findLatestOptionReplyBlock(text: string): ChatOptionReplyBlock | null {
   let latestValidBlock: ChatOptionReplyBlock | null = null;
 
   const finishBlock = () => {
-    if (validOptionBlock(currentBlock)) {
+    if (validOptionBlock(currentBlock, lines)) {
       latestValidBlock = {
         entries: currentBlock,
       };
@@ -80,25 +110,26 @@ function findLatestOptionReplyBlock(text: string): ChatOptionReplyBlock | null {
       continue;
     }
     const label = match[1].toUpperCase();
-    const labelIndex = optionLabelIndex(label);
+    const kind = optionLabelKind(label);
     const textValue = match[2].trim();
-    if (labelIndex < 0 || !textValue) {
+    if (!kind || !textValue) {
       finishBlock();
       continue;
     }
+    const labelIndex = optionLabelIndex(label, kind);
     if (labelIndex === 0) {
       finishBlock();
-      currentBlock = [{reply: {label, text: textValue}, line: index}];
+      currentBlock = [{reply: {label, text: textValue}, line: index, kind}];
       continue;
     }
     if (currentBlock.length === 0) {
       continue;
     }
-    if (labelIndex !== currentBlock.length) {
+    if (kind !== currentBlock[0].kind || labelIndex !== currentBlock.length) {
       finishBlock();
       continue;
     }
-    currentBlock = [...currentBlock, {reply: {label, text: textValue}, line: index}];
+    currentBlock = [...currentBlock, {reply: {label, text: textValue}, line: index, kind}];
   }
   finishBlock();
 
@@ -150,6 +181,19 @@ function confirmationReplyText(sentence: string): ChatConfirmationReply['replyTe
     return '确认';
   }
   if (/^你(?!认为)[^？?]{0,80}认/.test(compact)) {
+    return '确认';
+  }
+  if (
+    /是否[^？?]{0,120}[？?]$/.test(compact) ||
+    /要不要[^？?]{0,120}[？?]$/.test(compact) ||
+    /需不需要[^？?]{0,120}[？?]$/.test(compact) ||
+    /能不能[^？?]{0,120}[？?]$/.test(compact) ||
+    /可不可以[^？?]{0,120}[？?]$/.test(compact) ||
+    /行不行[^？?]{0,120}[？?]$/.test(compact) ||
+    /可以吗[？?]$/.test(compact) ||
+    /要[^？?]{1,80}吗[？?]$/.test(compact) ||
+    /需要[^？?]{1,80}吗[？?]$/.test(compact)
+  ) {
     return '确认';
   }
   return null;
