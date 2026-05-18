@@ -9090,6 +9090,7 @@ function App() {
                 <ChatVirtualTurnList
                   scrollRef={chatScrollRef}
                   displayIndex={chatDisplayIndex}
+                  runtimeKey={selectedChatEncodedKey}
                   renderItem={renderChatVirtualItem}
                 />
               ) : null}

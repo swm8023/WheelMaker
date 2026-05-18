@@ -35,16 +35,24 @@ describe('web chat turn rendering', () => {
     const main = readMain();
     const virtualList = readVirtualList();
 
-    expect(virtualList).toContain("import {useVirtualizer, type VirtualItem} from '@tanstack/react-virtual';");
-    expect(virtualList).toContain('virtualizer.getVirtualItems().map(virtualItem => {');
+    expect(virtualList).toContain('measureElement as measureVirtualElement,');
+    expect(virtualList).toContain('useVirtualizer,');
+    expect(virtualList).toContain('virtualItems.map(virtualItem => {');
+    expect(virtualList).toContain('runtimeKey: string;');
     expect(virtualList).toContain('getItemKey: index => displayIndex.items[index]?.key ?? index,');
-    expect(virtualList).toContain('estimateSize: index => (displayIndex.items[index]?.estimatedHeight ?? 120) + rowGap,');
+    expect(virtualList).toContain('estimateSize: index => resolveChatVirtualItemEstimate({');
+    expect(virtualList).toContain('writeChatVirtualMeasuredHeight(chatVirtualHeightCache, {');
+    expect(virtualList).toContain('resolveChatVirtualAnchor({');
+    expect(virtualList).toContain('resolveChatVirtualAnchorScrollTop({');
+    expect(virtualList).toContain('preserveAnchorDuringMeasureRef.current = true;');
+    expect(virtualList).toContain('selectChatVirtualPremeasureItems({');
     expect(virtualList).toContain('useAnimationFrameWithResizeObserver: true,');
     expect(virtualList).toContain('virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>');
     expect(virtualList).toContain('shouldAdjustChatVirtualItemSizeChange({');
     expect(virtualList).toContain("paddingBottom: `${rowGap}px`,");
     expect(main).toContain("import {buildChatDisplayIndex} from './chat/chatDisplayIndex';");
     expect(main).toContain("import {ChatVirtualTurnList} from './chat/ChatVirtualTurnList';");
+    expect(main).toContain('runtimeKey={selectedChatEncodedKey}');
     expect(main).not.toContain("from './chat/chatTurnWindow'");
     expect(main).toContain('buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex)');
     expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
