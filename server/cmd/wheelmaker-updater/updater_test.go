@@ -162,6 +162,74 @@ func TestRunUpdateRound_DarwinManualSignalSkipsUpdateAndWebPublish(t *testing.T)
 	}
 }
 
+func TestRunUpdateRound_LinuxRunsRefreshShell(t *testing.T) {
+	old := runtimeGOOS
+	runtimeGOOS = "linux"
+	defer func() { runtimeGOOS = old }()
+
+	repoDir := t.TempDir()
+	scriptsDir := filepath.Join(repoDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	refreshPath := filepath.Join(scriptsDir, "refresh_server_linux.sh")
+	if err := os.WriteFile(refreshPath, []byte(""), 0o755); err != nil {
+		t.Fatalf("write refresh script: %v", err)
+	}
+
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: "/home/test/.wheelmaker/bin"}
+	f := &fakeRunner{results: map[string]fakeResult{}}
+
+	if err := runUpdateRound(context.Background(), cfg, f, false); err != nil {
+		t.Fatalf("runUpdateRound: %v", err)
+	}
+
+	if len(f.calls) != 1 {
+		t.Fatalf("expected one linux refresh call, got %d", len(f.calls))
+	}
+	call := f.calls[0]
+	if call.name != "bash" {
+		t.Fatalf("command=%q want bash", call.name)
+	}
+	args := strings.Join(call.args, " ")
+	if !strings.Contains(args, refreshPath) || !strings.Contains(args, "--install-dir /home/test/.wheelmaker/bin") {
+		t.Fatalf("unexpected args: %s", args)
+	}
+	if !strings.Contains(args, "--skip-updater-install") || !strings.Contains(args, "--skip-service-config") {
+		t.Fatalf("linux updater should skip self-install and service config, got: %s", args)
+	}
+	if strings.Contains(args, "--skip-web-publish") {
+		t.Fatalf("full update should publish web through refresh_server_linux.sh: %s", args)
+	}
+}
+
+func TestRunUpdateRound_LinuxManualSignalSkipsUpdateAndWebPublish(t *testing.T) {
+	old := runtimeGOOS
+	runtimeGOOS = "linux"
+	defer func() { runtimeGOOS = old }()
+
+	repoDir := t.TempDir()
+	scriptsDir := filepath.Join(repoDir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
+		t.Fatalf("mkdir scripts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "refresh_server_linux.sh"), []byte(""), 0o755); err != nil {
+		t.Fatalf("write refresh script: %v", err)
+	}
+
+	cfg := UpdaterConfig{RepoDir: repoDir, InstallDir: "/home/test/.wheelmaker/bin"}
+	f := &fakeRunner{results: map[string]fakeResult{}}
+
+	if err := runUpdateRound(context.Background(), cfg, f, true); err != nil {
+		t.Fatalf("runUpdateRound: %v", err)
+	}
+
+	args := strings.Join(f.calls[0].args, " ")
+	if !strings.Contains(args, "--skip-update") || !strings.Contains(args, "--skip-web-publish") {
+		t.Fatalf("manual signal should skip update and web publish, got: %s", args)
+	}
+}
+
 func TestRequiredCommandsForOS(t *testing.T) {
 	if got := requiredCommandsForOS("windows"); !reflect.DeepEqual(got, []string{"powershell"}) {
 		t.Fatalf("windows commands=%#v", got)
@@ -176,6 +244,18 @@ func TestRequiredCommandsForOS(t *testing.T) {
 		}
 		if !found {
 			t.Fatalf("darwin commands missing %s: %#v", want, darwin)
+		}
+	}
+	linux := requiredCommandsForOS("linux")
+	for _, want := range []string{"bash", "git", "go", "node", "npm", "npx", "systemctl"} {
+		found := false
+		for _, got := range linux {
+			if got == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("linux commands missing %s: %#v", want, linux)
 		}
 	}
 }

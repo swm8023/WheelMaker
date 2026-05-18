@@ -13,10 +13,18 @@ cat <<'BANNER'
 ============================================
 BANNER
 
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "[FAILED] deploy.sh is macOS-only. Use deploy.bat on Windows." >&2
-  exit 1
-fi
+case "$(uname -s)" in
+  Darwin)
+    refresh_script="scripts/refresh_server.sh"
+    ;;
+  Linux)
+    refresh_script="scripts/refresh_server_linux.sh"
+    ;;
+  *)
+    echo "[FAILED] deploy.sh supports macOS and Linux. Use deploy.bat on Windows." >&2
+    exit 1
+    ;;
+esac
 
 if [[ ! -x "app/node_modules/.bin/webpack" ]]; then
   cat >&2 <<'MESSAGE'
@@ -28,11 +36,11 @@ MESSAGE
   exit 1
 fi
 
-if [[ ! -x "scripts/refresh_server.sh" ]]; then
-  chmod +x "scripts/refresh_server.sh"
+if [[ ! -x "$refresh_script" ]]; then
+  chmod +x "$refresh_script"
 fi
 
-bash "scripts/refresh_server.sh" "$@"
+bash "$refresh_script" "$@"
 
 echo
 echo "[OK] deploy complete"

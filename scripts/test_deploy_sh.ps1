@@ -18,11 +18,14 @@ function Assert-Contains {
 
 Assert-Contains "WheelMaker All-in-One Deploy"
 Assert-Contains "scripts/refresh_server.sh"
+Assert-Contains "scripts/refresh_server_linux.sh"
 Assert-Contains "app/node_modules/.bin/webpack"
 Assert-Contains "(cd app && npm ci --include=dev)"
-Assert-Contains 'bash "scripts/refresh_server.sh" "$@"'
+Assert-Contains 'refresh_script="scripts/refresh_server.sh"'
+Assert-Contains 'refresh_script="scripts/refresh_server_linux.sh"'
+Assert-Contains 'bash "$refresh_script" "$@"'
 Assert-Contains "publish web"
-Assert-Contains "deploy.sh is macOS-only"
+Assert-Contains "deploy.sh supports macOS and Linux"
 Assert-Contains "deploy.bat on Windows"
 
 Write-Host "deploy.sh source checks passed"

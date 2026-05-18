@@ -251,6 +251,24 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			args:                args,
 			refreshPublishesWeb: true,
 		}, nil
+	case "linux":
+		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server_linux.sh")
+		args := []string{
+			refreshScript,
+			"--repo-root", cfg.RepoDir,
+			"--install-dir", cfg.InstallDir,
+			"--skip-updater-install",
+			"--skip-service-config",
+		}
+		if skipUpdate {
+			args = append(args, "--skip-update", "--skip-web-publish")
+		}
+		return refreshInvocation{
+			scriptPath:          refreshScript,
+			command:             "bash",
+			args:                args,
+			refreshPublishesWeb: true,
+		}, nil
 	default:
 		return refreshInvocation{}, fmt.Errorf("unsupported updater platform: %s", goos)
 	}
@@ -291,6 +309,8 @@ func requiredCommandsForOS(goos string) []string {
 		return []string{"powershell"}
 	case "darwin":
 		return []string{"bash", "git", "go", "node", "npm", "npx", "launchctl"}
+	case "linux":
+		return []string{"bash", "git", "go", "node", "npm", "npx", "systemctl"}
 	default:
 		return nil
 	}
