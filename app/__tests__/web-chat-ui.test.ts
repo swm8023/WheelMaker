@@ -442,10 +442,11 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('prioritized.slice(0, CHAT_CONFIG_INLINE_LIMIT)');
     expect(mainTsx).toContain('className="chat-composer-frame"');
     expect(mainTsx).toContain('className="chat-composer-input-row"');
-    expect(mainTsx).toContain('className="chat-composer-skill-trigger"');
+    expect(mainTsx).toContain('className={`chat-composer-stop-trigger${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title="Skills"');
     expect(mainTsx).toContain('aria-label="Open skills"');
-    expect(mainTsx).toContain('codicon-terminal');
+    expect(mainTsx).not.toContain('className="chat-composer-skill-trigger"');
+    expect(mainTsx).not.toContain('codicon-terminal');
     expect(mainTsx).not.toContain('className="chat-composer-quick-trigger"');
     expect(mainTsx).not.toContain('title="Quick replies"');
     expect(mainTsx).not.toContain('aria-label="Quick replies"');
@@ -462,6 +463,8 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
     expect(mainTsx).toContain('codicon-debug-stop');
     expect(mainTsx).toContain('className="chat-composer-tools"');
+    expect(mainTsx).toContain('className="chat-tool-button chat-slash-button"');
+    expect(mainTsx).toContain('className="chat-slash-symbol"');
     expect(mainTsx).toContain('className="chat-tool-button chat-mention-button"');
     expect(mainTsx).toContain('title="Mention files"');
     expect(mainTsx).toContain('aria-label="Mention files"');
@@ -477,7 +480,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('codicon-device-camera');
     expect(mainTsx).not.toContain('codicon-file-media');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
-    expect(mainTsx).toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
+    expect(mainTsx).not.toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).not.toContain('chat-voice-button');
     expect(mainTsx).not.toContain("setError('Voice input is not available yet.');");
     expect(mainTsx).toContain('extractChatOptionReplies(text)');
@@ -515,15 +518,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("import { insertChatSlashCommandText } from './chat/chatSlashInsertion';");
     expect(mainTsx).toContain('const inserted = insertChatSlashCommandText(');
 
-    const skillTriggerClassStart = mainTsx.indexOf('className="chat-composer-skill-trigger"');
-    const skillTriggerStart = mainTsx.lastIndexOf('<button', skillTriggerClassStart);
-    const skillTriggerEnd = mainTsx.indexOf('className="chat-composer-input-shell"', skillTriggerStart);
-    expect(skillTriggerStart).toBeGreaterThanOrEqual(0);
-    expect(skillTriggerEnd).toBeGreaterThan(skillTriggerStart);
-    const skillTriggerBlock = mainTsx.slice(skillTriggerStart, skillTriggerEnd);
-    expect(skillTriggerBlock).toContain('ref={chatPromptButtonRef}');
-    expect(skillTriggerBlock).toContain('onPointerDown={event => event.preventDefault()}');
-    expect(skillTriggerBlock).toContain('onClick={openChatPromptMenu}');
+    const stopTriggerClassStart = mainTsx.indexOf('className={`chat-composer-stop-trigger${selectedChatPromptRunning ? \' active\' : \'\'}`}');
+    const stopTriggerStart = mainTsx.lastIndexOf('<button', stopTriggerClassStart);
+    const stopTriggerEnd = mainTsx.indexOf('className="chat-composer-input-shell"', stopTriggerStart);
+    expect(stopTriggerStart).toBeGreaterThanOrEqual(0);
+    expect(stopTriggerEnd).toBeGreaterThan(stopTriggerStart);
+    const stopTriggerBlock = mainTsx.slice(stopTriggerStart, stopTriggerEnd);
+    expect(stopTriggerBlock).toContain('onPointerDown={event => event.preventDefault()}');
+    expect(stopTriggerBlock).toContain('onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}');
+    expect(stopTriggerBlock).toContain('disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}');
+    expect(stopTriggerBlock).toContain("selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'");
 
     const promptMenuOpenStart = mainTsx.indexOf('const openChatPromptMenu = useCallback(() => {');
     const promptMenuOpenEnd = mainTsx.indexOf('const openChatFileMentionMenu = useCallback(() => {', promptMenuOpenStart);
@@ -550,9 +554,14 @@ describe('web chat integration', () => {
     expect(toolsStart).toBeGreaterThanOrEqual(0);
     expect(toolsEnd).toBeGreaterThan(toolsStart);
     const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
-    expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThanOrEqual(0);
+    expect(toolsBlock.indexOf('chat-slash-button')).toBeGreaterThanOrEqual(0);
+    expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThan(toolsBlock.indexOf('chat-slash-button'));
     expect(toolsBlock.indexOf('chat-photo-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
-    expect(toolsBlock.indexOf('chat-stop-button')).toBeGreaterThan(toolsBlock.indexOf('chat-photo-button'));
+    expect(toolsBlock).not.toContain('chat-stop-button');
+    const slashButtonStart = toolsBlock.indexOf('chat-slash-button');
+    const slashButtonBlock = toolsBlock.slice(toolsBlock.lastIndexOf('<button', slashButtonStart), toolsBlock.indexOf('</button>', slashButtonStart));
+    expect(slashButtonBlock).toContain('ref={chatPromptButtonRef}');
+    expect(slashButtonBlock).toContain('onClick={openChatPromptMenu}');
 
     const configPillStart = mainTsx.indexOf('const renderChatConfigPill = (option: RegistrySessionConfigOption) => {');
     const configPillEnd = mainTsx.indexOf('if (tab === \'chat\')', configPillStart);
@@ -600,10 +609,12 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 32px;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('.chat-composer-skill-trigger {');
+    expect(stylesCss).toContain('.chat-composer-stop-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-skill-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-stop-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-composer-stop-trigger.active {');
+    expect(stylesCss).not.toContain('.chat-composer-skill-trigger {');
     expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
     expect(stylesCss).not.toContain('.chat-quick-trigger-label {');
     expect(stylesCss).not.toContain('.chat-quick-reply-menu {');
@@ -661,6 +672,10 @@ describe('web chat integration', () => {
       /\.chat-tool-button \{[\s\S]*border: none;[\s\S]*background: transparent;/,
     );
     expect(stylesCss).toMatch(
+      /\.chat-slash-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toContain('.chat-slash-symbol {');
+    expect(stylesCss).toMatch(
       /\.chat-mention-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-mention-symbol {');
@@ -668,12 +683,8 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-photo-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
     );
-    expect(stylesCss).toMatch(
-      /\.chat-stop-button \{[\s\S]*color: color-mix\(in srgb, var\(--muted\) 82%, var\(--text\)\);[\s\S]*\}/,
-    );
-    expect(stylesCss).toMatch(
-      /\.chat-stop-button\.active \{[\s\S]*color: #f85149;[\s\S]*\}/,
-    );
+    expect(stylesCss).not.toContain('.chat-stop-button {');
+    expect(stylesCss).not.toContain('.chat-stop-button.active {');
     expect(stylesCss).toContain('.chat-config-pill {');
     expect(stylesCss).toContain('.chat-config-value-menu {');
     expect(stylesCss).toMatch(

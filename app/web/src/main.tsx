@@ -9148,17 +9148,18 @@ function App() {
               ) : null}
               <div className="chat-composer-input-row">
                 <button
-                  ref={chatPromptButtonRef}
                   type="button"
-                  className="chat-composer-skill-trigger"
+                  className={`chat-composer-stop-trigger${selectedChatPromptRunning ? ' active' : ''}`}
                   onPointerDown={event => event.preventDefault()}
-                  onClick={openChatPromptMenu}
-                  title="Skills"
-                  aria-label="Open skills"
-                  aria-haspopup="listbox"
-                  aria-expanded={chatPromptMenuOpen}
+                  onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
+                  disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
+                  title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
+                  aria-label="Cancel prompt"
                 >
-                  <span className="codicon codicon-terminal" aria-hidden="true" />
+                  <span
+                    className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
+                    aria-hidden="true"
+                  />
                 </button>
                 <div className="chat-composer-input-shell">
                   <textarea
@@ -9313,6 +9314,19 @@ function App() {
                 <div className="chat-composer-tools">
                   <button
                     type="button"
+                    ref={chatPromptButtonRef}
+                    className="chat-tool-button chat-slash-button"
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={openChatPromptMenu}
+                    title="Skills"
+                    aria-label="Open skills"
+                    aria-haspopup="listbox"
+                    aria-expanded={chatPromptMenuOpen}
+                  >
+                    <span className="chat-slash-symbol">/</span>
+                  </button>
+                  <button
+                    type="button"
                     ref={chatFileMentionButtonRef}
                     className="chat-tool-button chat-mention-button"
                     onPointerDown={event => event.preventDefault()}
@@ -9338,20 +9352,6 @@ function App() {
                     aria-label="Attach image"
                   >
                     <span className="codicon codicon-device-camera" />
-                  </button>
-                  <button
-                    type="button"
-                    className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? ' active' : ''}`}
-                    onPointerDown={event => event.preventDefault()}
-                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
-                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
-                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
-                    aria-label="Cancel prompt"
-                  >
-                    <span
-                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
-                      aria-hidden="true"
-                    />
                   </button>
                 </div>
                 {selectedChatConfigOptions.length > 0 ? (

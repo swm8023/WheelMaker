@@ -4085,14 +4085,15 @@ body,
   min-width: 0;
 }
 
-.chat-composer-skill-trigger {
+.chat-composer-stop-trigger {
   width: 22px;
   height: 30px;
   flex: 0 0 auto;
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: color-mix(in srgb, var(--accent) 84%, var(--text));
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  opacity: 0.66;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -4100,12 +4101,24 @@ body,
   cursor: pointer;
 }
 
-.chat-composer-skill-trigger:hover,
-.chat-composer-skill-trigger[aria-expanded='true'] {
+.chat-composer-stop-trigger:not(:disabled):hover {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.chat-composer-skill-trigger .codicon {
+.chat-composer-stop-trigger.active {
+  color: #f85149;
+  opacity: 1;
+}
+
+.chat-composer-stop-trigger.active:hover {
+  color: #ff6b62;
+}
+
+.chat-composer-stop-trigger:disabled {
+  cursor: default;
+}
+
+.chat-composer-stop-trigger .codicon {
   font-size: 15px;
 }
 
@@ -4283,8 +4296,19 @@ body,
   justify-content: center;
 }
 
+.chat-slash-button {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
 .chat-mention-button {
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.chat-slash-symbol {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .chat-mention-symbol {
@@ -4298,24 +4322,9 @@ body,
   color: color-mix(in srgb, #4db6ac 72%, var(--text));
 }
 
-.chat-stop-button {
-  color: color-mix(in srgb, var(--muted) 82%, var(--text));
-  opacity: 0.66;
-}
-
-.chat-stop-button.active {
-  color: #f85149;
-  cursor: pointer;
-  opacity: 1;
-}
-
 .chat-tool-button:hover {
   background: var(--hover);
   color: var(--text);
-}
-
-.chat-stop-button.active:hover {
-  color: #ff6b62;
 }
 
 .chat-tool-button:disabled {
