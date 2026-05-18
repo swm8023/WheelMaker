@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -22,8 +23,9 @@ const (
 	sessionTurnFileHeadSize      = sessionTurnFilePreambleSize + sessionTurnsPerFile*sessionTurnFileMetaSize
 )
 
+var errSessionTurnMissing = errors.New("session turn missing")
+
 type sessionViewTurn struct {
-	SessionID string `json:"sessionId"`
 	TurnIndex int64  `json:"turnIndex"`
 	Content   string `json:"content"`
 	Finished  bool   `json:"finished"`
@@ -107,10 +109,20 @@ func (s *fileSessionTurnStore) ReadTurns(ctx context.Context, projectName, sessi
 	for turnIndex := afterTurnIndex + 1; turnIndex <= latestTurnIndex; turnIndex++ {
 		content, err := s.readTurn(ctx, projectName, sessionID, turnIndex)
 		if err != nil {
-			return nil, err
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, ctxErr
+			}
+			if !errors.Is(err, errSessionTurnMissing) {
+				return nil, err
+			}
+			out = append(out, sessionViewTurn{
+				TurnIndex: turnIndex,
+				Content:   sessionGapTurnJSON(turnIndex),
+				Finished:  true,
+			})
+			continue
 		}
 		out = append(out, sessionViewTurn{
-			SessionID: sessionID,
 			TurnIndex: turnIndex,
 			Content:   string(content),
 			Finished:  true,
@@ -232,6 +244,9 @@ func (s *fileSessionTurnStore) readTurn(ctx context.Context, projectName, sessio
 	}
 	path, _, slot := s.turnPath(projectName, sessionID, turnIndex)
 	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, fmt.Errorf("%w: turn file %d", errSessionTurnMissing, turnIndex)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("read turn file: %w", err)
 	}
@@ -244,7 +259,7 @@ func (s *fileSessionTurnStore) readTurn(ctx context.Context, projectName, sessio
 	}
 	offset, length := turnSlot(header, slot)
 	if offset == 0 || length == 0 {
-		return nil, fmt.Errorf("turn %d not found", turnIndex)
+		return nil, fmt.Errorf("%w: turn %d", errSessionTurnMissing, turnIndex)
 	}
 	end := int(offset) + int(length)
 	if int(offset) < sessionTurnFileHeadSize || end > len(raw) {
@@ -292,6 +307,10 @@ func (s *fileSessionTurnStore) turnPath(projectName, sessionID string, turnIndex
 	slot := int((turnIndex - 1) % sessionTurnsPerFile)
 	path := filepath.Join(s.turnDir(projectName, sessionID), fmt.Sprintf("t%06d.bin", fileNo))
 	return path, fileNo, slot
+}
+
+func sessionGapTurnJSON(turnIndex int64) string {
+	return buildIMContentJSON("session/gap", map[string]any{"reason": "missing_turn", "turnIndex": turnIndex})
 }
 
 func readOrInitTurnHeader(f *os.File) ([]byte, error) {

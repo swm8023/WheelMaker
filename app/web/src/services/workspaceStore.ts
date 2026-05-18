@@ -5,7 +5,9 @@ import type {
   RegistryGitCommit,
   RegistryGitCommitFile,
   RegistryProject,
+  RegistrySessionTurn,
 } from '../types/registry';
+import {decodeSessionTurnToMessage} from '../chat/chatWire';
 import {
   chatSessionKeyFromParts,
   type ChatSessionKey,
@@ -60,6 +62,7 @@ export type CachedChatSession = {
 };
 
 export type CachedChatSessionContent = {
+  turns: RegistrySessionTurn[];
   messages: RegistryChatMessage[];
 };
 
@@ -85,6 +88,14 @@ function sanitizeCursor(cursor: Partial<PersistedChatCursor> | undefined): Persi
     : 0;
   return {
     turnIndex,
+  };
+}
+
+function chatMessageToRawTurn(message: RegistryChatMessage): RegistrySessionTurn {
+  return {
+    turnIndex: Math.trunc(message.turnIndex ?? 0),
+    content: JSON.stringify({method: message.method, param: message.param ?? {}}),
+    finished: message.finished === true,
   };
 }
 
@@ -237,8 +248,12 @@ export class WorkspaceStore {
     if (!projectId || !sessionId) return null;
     const cached = this.persistence.getProjectChatSessionContent(projectId, sessionId);
     if (!cached) return null;
+    const turns = Array.isArray(cached.turns) ? cached.turns : [];
     return {
-      messages: sanitizeCachedSessionMessages(cached.messages, sessionId),
+      turns,
+      messages: turns
+        .map(turn => decodeSessionTurnToMessage(sessionId, turn))
+        .filter((item): item is RegistryChatMessage => !!item),
     };
   }
 
@@ -305,11 +320,21 @@ export class WorkspaceStore {
     messages: RegistryChatMessage[],
   ): void {
     if (!projectId || !sessionId) return;
+    const sanitizedMessages = sanitizeCachedSessionMessages(messages, sessionId);
     this.persistence.patchProjectChatSessionContent(
       projectId,
       sessionId,
-      sanitizeCachedSessionMessages(messages, sessionId),
+      sanitizedMessages.map(chatMessageToRawTurn),
     );
+  }
+
+  rememberChatSessionTurns(
+    projectId: string,
+    sessionId: string,
+    turns: RegistrySessionTurn[],
+  ): void {
+    if (!projectId || !sessionId) return;
+    this.persistence.patchProjectChatSessionContent(projectId, sessionId, turns);
   }
 
   deleteChatSession(projectId: string, sessionId: string): void {

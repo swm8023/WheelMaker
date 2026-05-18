@@ -25,7 +25,8 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('incremental: true,');
     expect(mainTsx).toContain('preserveUserSelection: true,');
     expect(mainTsx).toContain('selectionSnapshot: encodeChatSessionKey(preferredSelectedChatKey),');
-    expect(mainTsx).toContain('if (useIncremental) {');
+    expect(mainTsx).toContain('useIncremental ? checkpointTurnIndex : 0,');
+    expect(mainTsx).toContain('applySessionReadResult(');
     expect(workspacePersistenceTs).toContain('selectedChatProjectId: string;');
     expect(workspacePersistenceTs).toContain('selectedChatSessionId: string;');
     expect(workspaceStoreTs).toContain('getSelectedChatSessionId(projectId: string): string {');

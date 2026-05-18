@@ -22,32 +22,34 @@ import { ResponsiveShell } from './shell/ResponsiveShell';
 import {
   getLatestSessionReadCursor,
   isFinishedChatMessage,
-  mergeIncomingSessionMessage,
   needsPromptTurnRefresh,
-  reconcileCachedSessionReadCursor,
-  reconcileSessionReadMessages,
-  replaceSessionMessages,
 } from './chatSync';
 import { compareUpdatedAtDesc, formatPromptDurationMs } from './sessionTime';
 import {
-  isChatSessionRunningMessage,
   resolveChatSessionVisualState as resolveChatSessionVisualStateValue,
-  shouldClearLocalChatSessionRunning,
   type ChatSessionVisualState,
 } from './chatSessionState';
 import {
   chatSessionKeyFromParts,
+  decodeChatSessionKey,
   encodeChatSessionKey,
   type ChatSessionKey,
 } from './chat/chatSessionKey';
+import {decodeSessionTurnToMessage, normalizeSessionMessagePayload} from './chat/chatWire';
 import {
-  createLatestTurnWindow,
-  expandTurnWindowEarlier,
-  expandTurnWindowLater,
-  followLatestTurnWindow,
-  sliceTurnsForWindow,
-  type ChatTurnWindow,
-} from './chat/chatTurnWindow';
+  applySessionReadResult,
+  buildMergedRawTurns,
+  createEmptyChatTurnStore,
+  hydrateFinishedStore,
+  mergeRealtimeTurn,
+  shouldReadRepairForIncomingTurn,
+  type ChatTurnStoreState,
+} from './chat/chatTurnStores';
+import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
+import {createChatReadRepairQueue} from './chat/chatReadRepair';
+import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
+import {createChatActiveRuntimeSet} from './chat/chatActiveRuntimeSet';
+import {ChatVirtualTurnList} from './chat/ChatVirtualTurnList';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import {
   extractChatConfirmationReply,
@@ -63,7 +65,6 @@ import {
   nextChatUserScrollLockUntil,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
-  shouldHandleChatVirtualWindowScroll,
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
@@ -114,6 +115,7 @@ import type {
   RegistrySessionContentBlock,
   RegistrySessionConfigOption,
   RegistrySessionSummary,
+  RegistrySessionTurn,
   RegistryFsEntry,
   RegistryFsInfo,
   RegistryGitCommit,
@@ -175,7 +177,6 @@ type WorkingTreeFileEntry = {
   status: string;
   scope: 'staged' | 'unstaged' | 'untracked';
 };
-type SessionFlagMap = Record<string, true>;
 type FloatingDragState = {
   active: boolean;
   pressing: boolean;
@@ -499,27 +500,6 @@ function mergeProjectSessionMap(
   };
 }
 
-function addSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFlagMap {
-  if (!sessionId || flags[sessionId]) {
-    return flags;
-  }
-  return {
-    ...flags,
-    [sessionId]: true,
-  };
-}
-
-function removeSessionFlag(flags: SessionFlagMap, sessionId: string): SessionFlagMap {
-  if (!sessionId || !flags[sessionId]) {
-    return flags;
-  }
-  const next = {
-    ...flags,
-  };
-  delete next[sessionId];
-  return next;
-}
-
 
 function chatMessageDomKey(message: Pick<RegistryChatMessage, 'sessionId' | 'turnIndex'>): string {
   return `${message.sessionId}:${message.turnIndex}`;
@@ -721,43 +701,9 @@ function chatConfigIconClass(option: RegistrySessionConfigOption): string {
 function decodeSessionMessageFromEventPayload(
   payload: RegistryChatMessageEventPayload,
 ): RegistryChatMessage | null {
-  const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '';
-  const content = typeof payload.content === 'string' ? payload.content.trim() : '';
-  const turnIndex = Number(payload.turnIndex ?? 0);
-  const finished = payload.finished === true;
-  if (!sessionId || turnIndex <= 0) {
-    return null;
-  }
-  if (!content) {
-    return null;
-  }
-  try {
-    const doc = JSON.parse(content) as Record<string, unknown>;
-    const method = typeof doc.method === 'string' ? doc.method.trim() : '';
-    const param =
-      doc.param != null && typeof doc.param === 'object' && !Array.isArray(doc.param)
-        ? (doc.param as Record<string, unknown>)
-        : {};
-    // Skip Claude command system messages (<command-name>, <local-command-*, etc.)
-    if (method === 'user_message_chunk') {
-      const text = typeof param.text === 'string' ? param.text : '';
-      if (
-        /^<(command-name|command-message|command-args|local-command-caveat|local-command-stdout)[\s>]/.test(text)
-      ) {
-        return null;
-      }
-    }
-    return { sessionId, turnIndex, method, param, finished };
-  } catch {
-    // Unparseable content: store as system message
-    return {
-      sessionId,
-      turnIndex,
-      method: 'system',
-      param: { text: content },
-      finished,
-    };
-  }
+  const normalized = normalizeSessionMessagePayload(payload);
+  if (!normalized) return null;
+  return decodeSessionTurnToMessage(normalized.sessionId, normalized.turn);
 }
 
 const CollapsibleThought = React.memo(function CollapsibleThought({
@@ -2316,7 +2262,6 @@ function App() {
   const chatPointerScrollingRef = useRef(false);
   const chatUserScrollLockUntilRef = useRef(0);
   const chatProgrammaticScrollRef = useRef(false);
-  const chatLastScrollTopRef = useRef(0);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatFileMentionButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2328,11 +2273,21 @@ function App() {
   const projectSessionSentinelRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const chatSelectedIdRef = useRef('');
   const selectedChatKeyRef = useRef<ChatSessionKey | null>(null);
-  const chatSyncIndexRef = useRef<Record<string, number>>({});
-  const chatSyncSubIndexRef = useRef<Record<string, number>>({});
+  const chatFinishedCursorRef = useRef<Record<string, number>>({});
   const chatMessageStoreRef = useRef<Record<string, RegistryChatMessage[]>>({});
+  const chatTurnStoreRef = useRef<Record<string, ChatTurnStoreState>>({});
+  const chatReadRepairQueueRef = useRef(createChatReadRepairQueue());
+  const chatDurablePersistQueueRef = useRef(createChatDurablePersistQueue(runtimeKey => {
+    const key = decodeChatSessionKey(runtimeKey);
+    if (!key) return;
+    const state = chatTurnStoreRef.current[runtimeKey];
+    workspaceStore.rememberChatSessionTurns(key.projectId, key.sessionId, state?.finished ?? []);
+  }, 5000));
+  const chatActiveRuntimeSetRef = useRef(createChatActiveRuntimeSet({
+    capacity: 5,
+    flushSession: runtimeKey => chatDurablePersistQueueRef.current.flush(runtimeKey),
+  }));
   const chatMessagesRef = useRef<RegistryChatMessage[]>([]);
-  const chatVisibleWindowRef = useRef<Record<string, ChatTurnWindow>>({});
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const chatIndexFullRefreshInFlightRef = useRef(false);
   const chatIndexFullRefreshDirtyRef = useRef(false);
@@ -2357,8 +2312,6 @@ function App() {
   const [chatArchivingSessionId, setChatArchivingSessionId] = useState('');
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
   const [confirmError, setConfirmError] = useState('');
-  const [chatRunningSessionFlags, setChatRunningSessionFlags] = useState<SessionFlagMap>({});
-  const [chatCompletedUnopenedFlags, setChatCompletedUnopenedFlags] = useState<SessionFlagMap>({});
   const [chatConfigUpdatingKey, setChatConfigUpdatingKey] = useState('');
   const [chatComposerText, setChatComposerText] = useState('');
   const [chatAttachments, setChatAttachments] = useState<ChatAttachment[]>([]);
@@ -2492,6 +2445,48 @@ function App() {
     sessionId: string,
   ): string => encodeChatSessionKey(chatSessionKeyFromParts(activeProjectId, sessionId));
 
+  const ensureChatTurnStore = (runtimeKey: string): ChatTurnStoreState => {
+    const existing = chatTurnStoreRef.current[runtimeKey];
+    if (existing) return existing;
+    const created = createEmptyChatTurnStore();
+    chatTurnStoreRef.current[runtimeKey] = created;
+    return created;
+  };
+
+  const decodeRawTurnsForSession = (
+    sessionId: string,
+    turns: RegistrySessionTurn[],
+  ): RegistryChatMessage[] => turns
+    .map(turn => decodeSessionTurnToMessage(sessionId, turn))
+    .filter((item): item is RegistryChatMessage => !!item);
+
+  const messagesFromTurnStore = (
+    runtimeKey: string,
+    sessionId: string,
+  ): RegistryChatMessage[] => {
+    const state = chatTurnStoreRef.current[runtimeKey];
+    if (!state) return [];
+    return decodeRawTurnsForSession(sessionId, buildMergedRawTurns(state));
+  };
+
+  const markChatSessionTurnsDirty = (runtimeKey: string): void => {
+    chatActiveRuntimeSetRef.current.markDirty(runtimeKey);
+    chatDurablePersistQueueRef.current.markDirty(runtimeKey);
+  };
+
+  const activateChatRuntime = (
+    runtimeKey: string,
+    options: {selected?: boolean; running?: boolean} = {},
+  ): void => {
+    chatActiveRuntimeSetRef.current.activate(runtimeKey, options).then(result => {
+      for (const evictedKey of result.evicted) {
+        delete chatTurnStoreRef.current[evictedKey];
+        delete chatMessageStoreRef.current[evictedKey];
+        delete chatFinishedCursorRef.current[evictedKey];
+      }
+    }).catch(() => undefined);
+  };
+
   const setVisibleChatMessagesForRuntimeKey = useCallback((
     runtimeKey: string,
     fullMessages: RegistryChatMessage[],
@@ -2502,14 +2497,7 @@ function App() {
       setChatMessages([]);
       return;
     }
-    const currentWindow = chatVisibleWindowRef.current[runtimeKey];
-    const resettingToLatest = options?.resetToLatest || !currentWindow;
-    const nextWindow = resettingToLatest
-      ? createLatestTurnWindow(fullMessages)
-      : options?.followLatest
-        ? followLatestTurnWindow(fullMessages, currentWindow)
-        : currentWindow;
-    chatVisibleWindowRef.current[runtimeKey] = nextWindow;
+    const resettingToLatest = options?.resetToLatest === true;
     if (resettingToLatest && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
       chatAutoScrollFollowRef.current = true;
       chatUserScrollLockUntilRef.current = 0;
@@ -2517,9 +2505,8 @@ function App() {
       setChatShowScrollToBottom(false);
     }
     if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
-      const visibleMessages = sliceTurnsForWindow(fullMessages, nextWindow);
-      chatMessagesRef.current = visibleMessages;
-      setChatMessages(visibleMessages);
+      chatMessagesRef.current = fullMessages;
+      setChatMessages(fullMessages);
     }
   }, []);
 
@@ -2548,15 +2535,7 @@ function App() {
         return;
       }
       const nearBottom = isChatScrolledNearBottom(container);
-      const runtimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
-      const fullMessages = runtimeKey ? chatMessageStoreRef.current[runtimeKey] ?? [] : [];
-      const currentWindow = runtimeKey ? chatVisibleWindowRef.current[runtimeKey] : undefined;
-      const coversKnownLatest =
-        !runtimeKey ||
-        fullMessages.length === 0 ||
-        !currentWindow ||
-        currentWindow.endIndex >= fullMessages.length;
-      const followsLatest = nearBottom && coversKnownLatest;
+      const followsLatest = nearBottom;
       chatAutoScrollFollowRef.current = followsLatest;
       setChatShowScrollToBottom(!followsLatest);
     },
@@ -2614,96 +2593,6 @@ function App() {
     setChatShowScrollToBottom(false);
     scrollChatToBottom(true);
   }, [scrollChatToBottom, setVisibleChatMessagesForRuntimeKey]);
-
-  const visibleChatMessageElements = (container: HTMLElement): HTMLElement[] => {
-    const containerRect = container.getBoundingClientRect();
-    return Array.from(container.querySelectorAll<HTMLElement>('[data-chat-message-key]'))
-      .filter(element => {
-        const rect = element.getBoundingClientRect();
-        return rect.bottom > containerRect.top && rect.top < containerRect.bottom;
-      });
-  };
-
-  const chatScrollAnchor = (
-    container: HTMLElement,
-    direction: 'up' | 'down',
-  ): { key: string; top: number } | null => {
-    const visible = visibleChatMessageElements(container);
-    const element = direction === 'up' ? visible[0] : visible[visible.length - 1];
-    const key = element?.dataset.chatMessageKey ?? '';
-    if (!element || !key) {
-      return null;
-    }
-    return {
-      key,
-      top: element.getBoundingClientRect().top,
-    };
-  };
-
-  const restoreChatScrollAnchor = (
-    key: string,
-    previousTop: number,
-  ) => {
-    window.requestAnimationFrame(() => {
-      const container = chatScrollRef.current;
-      if (!container) {
-        return;
-      }
-      const nextElement = Array.from(container.querySelectorAll<HTMLElement>('[data-chat-message-key]'))
-        .find(element => element.dataset.chatMessageKey === key);
-      if (!nextElement) {
-        return;
-      }
-      container.scrollTop += nextElement.getBoundingClientRect().top - previousTop;
-    });
-  };
-
-  const updateSelectedChatWindowFromScroll = (container: HTMLElement, direction: 'up' | 'down') => {
-    const runtimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
-    if (!runtimeKey) {
-      return;
-    }
-    const fullMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
-    const currentWindow =
-      chatVisibleWindowRef.current[runtimeKey] ??
-      createLatestTurnWindow(fullMessages);
-    const boundaryAnchor = chatScrollAnchor(container, direction);
-    const boundaryKey = boundaryAnchor?.key ?? '';
-    const boundaryIndex = boundaryKey
-      ? chatMessagesRef.current.findIndex(message => chatMessageDomKey(message) === boundaryKey)
-      : -1;
-    const boundaryAbsoluteIndex = boundaryIndex >= 0
-      ? currentWindow.startIndex + boundaryIndex
-      : -1;
-    const distanceToWindowEdge = boundaryAbsoluteIndex >= 0
-      ? direction === 'up'
-        ? boundaryAbsoluteIndex - currentWindow.startIndex
-        : currentWindow.endIndex - boundaryAbsoluteIndex - 1
-      : Number.POSITIVE_INFINITY;
-    const nearPixelEdge = direction === 'up'
-      ? container.scrollTop <= 120
-      : isChatScrolledNearBottom(container);
-    if (distanceToWindowEdge >= 25 && !nearPixelEdge) {
-      return;
-    }
-    const expandedWindow = direction === 'up'
-      ? expandTurnWindowEarlier(fullMessages, currentWindow)
-      : expandTurnWindowLater(fullMessages, currentWindow);
-    if (
-      expandedWindow.startIndex === currentWindow.startIndex &&
-      expandedWindow.endIndex === currentWindow.endIndex
-    ) {
-      return;
-    }
-    const anchor = boundaryAnchor ?? chatScrollAnchor(container, direction === 'up' ? 'down' : 'up');
-    chatVisibleWindowRef.current[runtimeKey] = expandedWindow;
-    const visibleMessages = sliceTurnsForWindow(fullMessages, expandedWindow);
-    chatMessagesRef.current = visibleMessages;
-    setChatMessages(visibleMessages);
-    if (anchor) {
-      restoreChatScrollAnchor(anchor.key, anchor.top);
-    }
-  };
 
   useEffect(() => {
     if (!chatSlashMenuVisible) {
@@ -3029,13 +2918,6 @@ function App() {
       chatFileInputRef.current.value = '';
     }
   }, [currentChatDraftKey]);
-
-  useEffect(() => {
-    if (!selectedChatEncodedKey) {
-      return;
-    }
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, selectedChatEncodedKey));
-  }, [selectedChatEncodedKey]);
 
   const [gitLoading, setGitLoading] = useState(false);
   const [gitError, setGitError] = useState('');
@@ -4834,16 +4716,14 @@ function App() {
   const clearChatRuntimeState = (preferredSelection = '') => {
     setChatMessages([]);
     setChatSessions([]);
-    setChatRunningSessionFlags({});
-    setChatCompletedUnopenedFlags({});
     applySelectedChatKey(
       preferredSelection
         ? chatSessionKeyFromParts(projectIdRef.current, preferredSelection)
         : null,
     );
-    chatSyncIndexRef.current = {};
-    chatSyncSubIndexRef.current = {};
+    chatFinishedCursorRef.current = {};
     chatMessageStoreRef.current = {};
+    chatTurnStoreRef.current = {};
   };
 
   const hydrateChatSessionContentFromCache = (
@@ -4856,25 +4736,20 @@ function App() {
     if (!cached) {
       const inMemoryMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
       if (inMemoryMessages.length === 0) {
-        chatSyncIndexRef.current[runtimeKey] = 0;
-        chatSyncSubIndexRef.current[runtimeKey] = 0;
+        chatFinishedCursorRef.current[runtimeKey] = 0;
       } else {
         const cursor = getLatestSessionReadCursor(inMemoryMessages);
-        chatSyncIndexRef.current[runtimeKey] = 0;
-        chatSyncSubIndexRef.current[runtimeKey] = cursor.turnIndex;
+        chatFinishedCursorRef.current[runtimeKey] = cursor.turnIndex;
       }
       return inMemoryMessages;
     }
 
     const cachedMessages = [...cached.messages];
+    chatTurnStoreRef.current[runtimeKey] = hydrateFinishedStore(cached.turns);
     chatMessageStoreRef.current[runtimeKey] = cachedMessages;
 
-    const cursor = reconcileCachedSessionReadCursor(
-      {turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0},
-      cachedMessages,
-    );
-    chatSyncIndexRef.current[runtimeKey] = 0;
-    chatSyncSubIndexRef.current[runtimeKey] = cursor.turnIndex;
+    const cursor = chatTurnStoreRef.current[runtimeKey].cursor;
+    chatFinishedCursorRef.current[runtimeKey] = cursor.turnIndex;
     return cachedMessages;
   };
 
@@ -4902,10 +4777,12 @@ function App() {
       const sessionId = cached.session.sessionId;
       if (!sessionId) continue;
       const content = workspaceStore.getCachedChatSessionContent(activeProjectId, sessionId);
-      const cursor = reconcileCachedSessionReadCursor(cached.cursor, content?.messages ?? []);
       const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
-      chatSyncIndexRef.current[runtimeKey] = 0;
-      chatSyncSubIndexRef.current[runtimeKey] = cursor.turnIndex;
+      if (content) {
+        chatTurnStoreRef.current[runtimeKey] = hydrateFinishedStore(content.turns);
+      }
+      const cursor = chatTurnStoreRef.current[runtimeKey]?.cursor ?? cached.cursor;
+      chatFinishedCursorRef.current[runtimeKey] = cursor.turnIndex;
     }
 
     const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
@@ -4924,6 +4801,7 @@ function App() {
     }
     applySelectedChatKey(chatSessionKeyFromParts(activeProjectId, currentSelection));
     const runtimeKey = buildChatRuntimeKey(activeProjectId, currentSelection);
+    activateChatRuntime(runtimeKey, {selected: true});
     if (sessionRows.some(item => item.sessionId === currentSelection)) {
       const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setVisibleChatMessagesForRuntimeKey(runtimeKey, cachedMessages, {resetToLatest: true});
@@ -4943,11 +4821,16 @@ function App() {
     if (!activeProjectId || !sessionId) return;
     const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
     const messages = chatMessageStoreRef.current[runtimeKey] ?? [];
+    const turnState = chatTurnStoreRef.current[runtimeKey];
     const cursor = {
-      turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+      turnIndex: turnState?.cursor.turnIndex ?? chatFinishedCursorRef.current[runtimeKey] ?? 0,
     };
-    const cacheableMessages = messages.filter(isFinishedChatMessage);
-    workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages);
+    if (turnState) {
+      workspaceStore.rememberChatSessionTurns(activeProjectId, sessionId, turnState.finished);
+    } else {
+      const cacheableMessages = messages.filter(isFinishedChatMessage);
+      workspaceStore.rememberChatSessionContent(activeProjectId, sessionId, cacheableMessages);
+    }
     const targetSession =
       session ??
       projectSessionsByProjectId[activeProjectId]?.find(item => item.sessionId === sessionId) ??
@@ -4970,40 +4853,6 @@ function App() {
     }
   };
 
-  const markChatSessionRunning = (
-    activeProjectId: string,
-    sessionId: string,
-    preview = '',
-  ) => {
-    if (!activeProjectId || !sessionId) return;
-    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
-    setChatRunningSessionFlags(prev => addSessionFlag(prev, runtimeKey));
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
-    rememberChatSessionSummary(activeProjectId, {
-      sessionId,
-      running: true,
-      ...(preview
-        ? {
-            preview,
-            updatedAt: new Date().toISOString(),
-          }
-        : {}),
-    });
-  };
-
-  const clearChatSessionRunning = (
-    activeProjectId: string,
-    sessionId: string,
-  ) => {
-    if (!activeProjectId || !sessionId) return;
-    const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
-    setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
-    rememberChatSessionSummary(activeProjectId, {
-      sessionId,
-      running: false,
-    });
-  };
-
   const markChatSessionRead = async (
     activeProjectId: string,
     sessionId: string,
@@ -5017,10 +4866,9 @@ function App() {
       const sessionPatch = result.session ?? {sessionId, lastReadTurnIndex: cursor};
       rememberChatSessionSummary(activeProjectId, sessionPatch);
       const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
-      setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
       if (result.session) {
         workspaceStore.rememberChatSession(activeProjectId, result.session, {
-          turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+          turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
         });
       }
     } catch {
@@ -5029,11 +4877,8 @@ function App() {
   };
 
   const resolveSessionVisualState = (session: RegistryChatSession, activeProjectId = projectIdRef.current): ChatSessionVisualState => {
-    const runtimeKey = buildChatRuntimeKey(activeProjectId, session.sessionId);
-    return resolveChatSessionVisualStateValue(session, {
-      running: !!chatRunningSessionFlags[runtimeKey],
-      completedUnviewed: !!chatCompletedUnopenedFlags[runtimeKey],
-    });
+    void activeProjectId;
+    return resolveChatSessionVisualStateValue(session);
   };
 
   const renderSessionStateMarker = (session: RegistryChatSession, activeProjectId = projectIdRef.current) => {
@@ -5062,10 +4907,10 @@ function App() {
     sessionId: string,
   ) => {
     const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
-    chatSyncIndexRef.current[runtimeKey] = 0;
-    chatSyncSubIndexRef.current[runtimeKey] = 0;
+    chatFinishedCursorRef.current[runtimeKey] = 0;
     chatMessageStoreRef.current[runtimeKey] = [];
-    workspaceStore.rememberChatSessionContent(targetProjectId, sessionId, []);
+    chatTurnStoreRef.current[runtimeKey] = createEmptyChatTurnStore();
+    workspaceStore.rememberChatSessionTurns(targetProjectId, sessionId, []);
     const targetSession =
       projectSessionsByProjectId[targetProjectId]?.find(item => item.sessionId === sessionId) ??
       (targetProjectId === projectIdRef.current
@@ -5096,9 +4941,13 @@ function App() {
       // Snapshot existing messages BEFORE the await so the base is
       // consistent with the cursor. Live session.message events may
       // mutate chatMessageStoreRef during the network round-trip.
-      const existingMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
+      const turnState = ensureChatTurnStore(runtimeKey);
+      const existingStoreMessages = messagesFromTurnStore(runtimeKey, sessionId);
+      const existingMessages = existingStoreMessages.length > 0
+        ? existingStoreMessages
+        : chatMessageStoreRef.current[runtimeKey] ?? [];
       const checkpointTurnIndex = requestedIncremental
-        ? chatSyncSubIndexRef.current[runtimeKey] ?? 0
+        ? turnState.cursor.turnIndex
         : 0;
       const fallbackToFullRead =
         requestedIncremental &&
@@ -5121,35 +4970,21 @@ function App() {
       ) {
         return;
       }
-      const resultSessionId = result.session?.sessionId || sessionId;
-
-      let nextMessages: RegistryChatMessage[];
-      if (useIncremental) {
-        if (result.messages.length > 0) {
-          nextMessages = replaceSessionMessages(
-            existingMessages,
-            result.messages,
-            checkpointTurnIndex,
-          );
-        } else {
-          nextMessages = existingMessages;
-        }
-      } else {
-        nextMessages = result.messages;
-      }
-
-      // Reconcile: live session.message events may have landed in the store
-      // during the await. Fold only post-request changes back in so old cache
-      // entries cannot overwrite newer session.read results.
+      const resultSessionId = result.sessionId || result.session?.sessionId || sessionId;
       const resultRuntimeKey = buildChatRuntimeKey(activeProjectId, resultSessionId);
-      const fresh = chatMessageStoreRef.current[resultRuntimeKey] ?? [];
-      nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
+      const resultTurnState = ensureChatTurnStore(resultRuntimeKey);
+      applySessionReadResult(
+        resultTurnState,
+        useIncremental ? checkpointTurnIndex : 0,
+        result.turns,
+        result.latestTurnIndex,
+      );
+      const nextMessages = messagesFromTurnStore(resultRuntimeKey, resultSessionId);
       forgetPendingPromptIfResolved(resultRuntimeKey, nextMessages);
 
       chatMessageStoreRef.current[resultRuntimeKey] = nextMessages;
-      const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[resultRuntimeKey] = 0;
-      chatSyncSubIndexRef.current[resultRuntimeKey] = latestSyncCursor.turnIndex;
+      const latestSyncCursor = resultTurnState.cursor;
+      chatFinishedCursorRef.current[resultRuntimeKey] = latestSyncCursor.turnIndex;
       const resultSession = result.session;
       if (resultSession) {
         setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, activeProjectId, resultSession));
@@ -5159,6 +4994,7 @@ function App() {
       }
       const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, resultSessionId);
       applySelectedChatKey(nextSelectedKey);
+      activateChatRuntime(resultRuntimeKey, {selected: true, running: result.session?.running === true});
       workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
       setVisibleChatMessagesForRuntimeKey(
         resultRuntimeKey,
@@ -5199,24 +5035,28 @@ function App() {
     if (!activeProjectId || !sessionId) return false;
     const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
     try {
-      const existingMessages = chatMessageStoreRef.current[runtimeKey] ?? [];
-      const checkpointTurnIndex = chatSyncSubIndexRef.current[runtimeKey] ?? 0;
+      const turnState = ensureChatTurnStore(runtimeKey);
+      const checkpointTurnIndex = turnState.cursor.turnIndex;
       const result = await service.readProjectSession(activeProjectId, sessionId, checkpointTurnIndex);
       const currentSelectedRuntimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
       if (selectionSnapshot && currentSelectedRuntimeKey !== selectionSnapshot && chatSelectedIdRef.current !== selectionSnapshot) {
         return false;
       }
-      const resultSessionId = result.session?.sessionId || sessionId;
+      const resultSessionId = result.sessionId || result.session?.sessionId || sessionId;
       const resultRuntimeKey = buildChatRuntimeKey(activeProjectId, resultSessionId);
-      const fresh = chatMessageStoreRef.current[resultRuntimeKey] ?? [];
-      let nextMessages = replaceSessionMessages(fresh, result.messages, checkpointTurnIndex);
-      nextMessages = reconcileSessionReadMessages(nextMessages, fresh, existingMessages);
+      const resultTurnState = ensureChatTurnStore(resultRuntimeKey);
+      applySessionReadResult(
+        resultTurnState,
+        checkpointTurnIndex,
+        result.turns,
+        result.latestTurnIndex,
+      );
+      const nextMessages = messagesFromTurnStore(resultRuntimeKey, resultSessionId);
       forgetPendingPromptIfResolved(resultRuntimeKey, nextMessages);
 
       chatMessageStoreRef.current[resultRuntimeKey] = nextMessages;
-      const latestSyncCursor = getLatestSessionReadCursor(nextMessages);
-      chatSyncIndexRef.current[resultRuntimeKey] = 0;
-      chatSyncSubIndexRef.current[resultRuntimeKey] = latestSyncCursor.turnIndex;
+      const latestSyncCursor = resultTurnState.cursor;
+      chatFinishedCursorRef.current[resultRuntimeKey] = latestSyncCursor.turnIndex;
       const resultSession = result.session;
       if (resultSession) {
         setProjectSessionsByProjectId(prev => mergeProjectSessionMap(prev, activeProjectId, resultSession));
@@ -5275,10 +5115,13 @@ function App() {
         if (!sessionId) continue;
         const runtimeKey = buildChatRuntimeKey(activeProjectId, sessionId);
         cursorBySessionId[sessionId] = {
-          turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+          turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
         };
       }
       workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
+      for (const session of nextSessions.filter(item => item.running === true).slice(0, 5)) {
+        activateChatRuntime(buildChatRuntimeKey(activeProjectId, session.sessionId), {running: true});
+      }
 
       const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
       let currentSelection =
@@ -5305,6 +5148,10 @@ function App() {
       workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
       const cachedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       const runtimeKey = buildChatRuntimeKey(activeProjectId, currentSelection);
+      activateChatRuntime(runtimeKey, {
+        selected: true,
+        running: nextSessions.find(session => session.sessionId === currentSelection)?.running === true,
+      });
       setVisibleChatMessagesForRuntimeKey(
         runtimeKey,
         cachedSelection.length > 0
@@ -5489,22 +5336,17 @@ function App() {
       setChatSessions(prev => prev.filter(item => item.sessionId !== sessionId));
     }
     const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
-    setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
     if (encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
         applySelectedChatKey(null);
         setChatMessages([]);
         workspaceStore.rememberSelectedChatSessionKey(null);
     }
       const nextMessageStore = {...chatMessageStoreRef.current};
-      const nextSyncIndex = {...chatSyncIndexRef.current};
-      const nextSyncSubIndex = {...chatSyncSubIndexRef.current};
+      const nextFinishedCursor = {...chatFinishedCursorRef.current};
       delete nextMessageStore[runtimeKey];
-      delete nextSyncIndex[runtimeKey];
-      delete nextSyncSubIndex[runtimeKey];
+      delete nextFinishedCursor[runtimeKey];
       chatMessageStoreRef.current = nextMessageStore;
-      chatSyncIndexRef.current = nextSyncIndex;
-      chatSyncSubIndexRef.current = nextSyncSubIndex;
+      chatFinishedCursorRef.current = nextFinishedCursor;
     workspaceStore.deleteChatSession(targetProjectId, sessionId);
   };
 
@@ -6327,7 +6169,7 @@ function App() {
     setTab('chat');
     applySelectedChatKey(nextSelectedKey);
     const runtimeKey = encodeChatSessionKey(nextSelectedKey);
-    setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
+    activateChatRuntime(runtimeKey, {selected: true});
     setChatMessages([]);
     setVisibleChatMessagesForRuntimeKey(
       runtimeKey,
@@ -6368,8 +6210,8 @@ function App() {
       }));
       const runtimeKey = buildChatRuntimeKey(targetProjectId, session.sessionId);
       chatMessageStoreRef.current[runtimeKey] = [];
-      chatSyncIndexRef.current[runtimeKey] = 0;
-      chatSyncSubIndexRef.current[runtimeKey] = 0;
+      chatTurnStoreRef.current[runtimeKey] = createEmptyChatTurnStore();
+      chatFinishedCursorRef.current[runtimeKey] = 0;
       if (targetProjectId === projectIdRef.current) {
         setChatSessions(prev => mergeChatSession(prev, session));
       }
@@ -6440,8 +6282,8 @@ function App() {
       }
       const runtimeKey = buildChatRuntimeKey(targetProjectId, importedSessionId);
       chatMessageStoreRef.current[runtimeKey] = [];
-      chatSyncIndexRef.current[runtimeKey] = 0;
-      chatSyncSubIndexRef.current[runtimeKey] = 0;
+      chatTurnStoreRef.current[runtimeKey] = createEmptyChatTurnStore();
+      chatFinishedCursorRef.current[runtimeKey] = 0;
       setTab('chat');
       applySelectedChatKey(selectedKey);
       setChatMessages([]);
@@ -6512,8 +6354,8 @@ function App() {
       }
       const runtimeKey = buildChatRuntimeKey(targetProjectId, importedSessionId);
       chatMessageStoreRef.current[runtimeKey] = [];
-      chatSyncIndexRef.current[runtimeKey] = 0;
-      chatSyncSubIndexRef.current[runtimeKey] = 0;
+      chatTurnStoreRef.current[runtimeKey] = createEmptyChatTurnStore();
+      chatFinishedCursorRef.current[runtimeKey] = 0;
       await selectProjectChatSession(targetProjectId, importedSessionId, {closeMobileDrawer: true});
     } catch (err) {
       if (importedSessionId) {
@@ -6653,7 +6495,7 @@ function App() {
       if (!sessionId) continue;
       const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
       cursorBySessionId[sessionId] = {
-        turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? entry.cursor.turnIndex,
+        turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? entry.cursor.turnIndex,
       };
     }
     for (const session of sortedSessions) {
@@ -6661,7 +6503,7 @@ function App() {
       if (!sessionId || cursorBySessionId[sessionId]) continue;
       const runtimeKey = buildChatRuntimeKey(targetProjectId, sessionId);
       cursorBySessionId[sessionId] = {
-        turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+        turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
       };
     }
     workspaceStore.replaceChatSessions(targetProjectId, sortedSessions, cursorBySessionId);
@@ -6764,13 +6606,20 @@ function App() {
         };
         if (payload.session?.sessionId) {
           const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);
-          if (shouldClearLocalChatSessionRunning(payload.session)) {
-            setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
+          if (payload.session.running === true || encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
+            activateChatRuntime(runtimeKey, {
+              selected: encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey,
+              running: payload.session.running === true,
+            });
+          } else {
+            chatActiveRuntimeSetRef.current.setRunning(runtimeKey, false);
+          }
+          if (payload.session.running === false) {
             setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
           }
           rememberChatSessionSummary(eventProjectId, payload.session);
           workspaceStore.rememberChatSession(eventProjectId, payload.session, {
-            turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
+            turnIndex: chatFinishedCursorRef.current[runtimeKey] ?? 0,
           });
         }
         return;
@@ -6783,9 +6632,11 @@ function App() {
           refreshChatIndex().catch(() => undefined);
           return;
         }
-        const payload = (event.payload ??
-          {}) as RegistryChatMessageEventPayload;
-        const message = decodeSessionMessageFromEventPayload(payload);
+        const payload = (event.payload ?? {}) as RegistryChatMessageEventPayload;
+        const normalizedPayload = normalizeSessionMessagePayload(payload);
+        const message = normalizedPayload
+          ? decodeSessionTurnToMessage(normalizedPayload.sessionId, normalizedPayload.turn)
+          : decodeSessionMessageFromEventPayload(payload);
         if (!message) {
           return;
         }
@@ -6798,95 +6649,44 @@ function App() {
           refreshChatProjectSessions(eventProjectId).catch(() => undefined);
           return;
         }
-        const shouldRefreshCompletedPrompt = message.method === 'prompt_done';
-        const shouldMarkSessionRunning = isChatSessionRunningMessage(message);
-        const existingMessagesForSession = chatMessageStoreRef.current[runtimeKey] ?? [];
-        if (shouldMarkSessionRunning) {
-          setChatRunningSessionFlags(prev => addSessionFlag(prev, runtimeKey));
-          setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
+        if (!isSelectedSession && !chatActiveRuntimeSetRef.current.isActive(runtimeKey)) {
+          return;
         }
-        if (shouldRefreshCompletedPrompt) {
-          setChatRunningSessionFlags(prev => removeSessionFlag(prev, runtimeKey));
-          setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
-          if (isSelectedSession) {
-            setChatCompletedUnopenedFlags(prev => removeSessionFlag(prev, runtimeKey));
-          } else {
-            setChatCompletedUnopenedFlags(prev => addSessionFlag(prev, runtimeKey));
-          }
-        }
-        const messageText = msgText(message.method, message.param);
-        const completedTurnIndex = Math.max(0, Math.trunc(message.turnIndex ?? 0));
-        const sessionStatePatch: Partial<RegistryChatSession> =
-          shouldRefreshCompletedPrompt
-            ? {
-                running: false,
-                lastDoneTurnIndex: completedTurnIndex,
-                lastDoneSuccess: messageText.trim() !== 'failed',
-                lastReadTurnIndex: isSelectedSession && completedTurnIndex > 0
-                  ? completedTurnIndex
-                  : undefined,
-              }
-            : shouldMarkSessionRunning
-              ? {running: true}
-              : {};
         const existingSession = knownProjectSessions.find(item => item.sessionId === sessionId);
-        const sessionPatchForIndex = {
-          sessionId,
-          preview: messageText || existingSession?.preview || '',
-          updatedAt: existingSession?.updatedAt || '',
-          messageCount: existingSession?.messageCount ?? 0,
-          unreadCount: existingSession?.unreadCount,
-          agentType: existingSession?.agentType,
-          ...sessionStatePatch,
-        };
-        const mergedSessionForCache = mergeChatSession(
-          knownProjectSessions,
-          sessionPatchForIndex,
-        ).find(item => item.sessionId === sessionId);
-        setProjectSessionsByProjectId(prev =>
-          mergeProjectSessionMap(prev, eventProjectId, sessionPatchForIndex),
-        );
-        if (eventProjectId === projectIdRef.current) {
-          setChatSessions(prev => mergeChatSession(prev, mergedSessionForCache ?? sessionPatchForIndex));
-        }
-        maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);
+        maybeNotifyChatMessage(message, existingSession, eventProjectId);
 
-        const incomingMerge = mergeIncomingSessionMessage(
-          {
-            cursor: {
-              turnIndex: chatSyncSubIndexRef.current[runtimeKey] ?? 0,
-            },
-            messages: existingMessagesForSession,
-          },
-          message,
-        );
-        const merged = incomingMerge.messages;
-        const latestSyncCursor = incomingMerge.cursor;
-        chatSyncIndexRef.current[runtimeKey] = 0;
-        chatSyncSubIndexRef.current[runtimeKey] = latestSyncCursor.turnIndex;
+        const turnState = ensureChatTurnStore(runtimeKey);
+        const incomingTurn = normalizedPayload?.turn ?? {
+          turnIndex: message.turnIndex ?? 0,
+          content: JSON.stringify({method: message.method, param: message.param}),
+          finished: message.finished === true,
+        };
+        const gapReadCursor = shouldReadRepairForIncomingTurn(turnState, incomingTurn);
+        mergeRealtimeTurn(turnState, incomingTurn);
+        const merged = messagesFromTurnStore(runtimeKey, sessionId);
+        const latestSyncCursor = turnState.cursor;
+        chatFinishedCursorRef.current[runtimeKey] = latestSyncCursor.turnIndex;
         chatMessageStoreRef.current[runtimeKey] = merged;
-        persistChatSessionContent(sessionId, eventProjectId, mergedSessionForCache);
+        if (incomingTurn.finished) {
+          markChatSessionTurnsDirty(runtimeKey);
+        }
 
         if (isSelectedSession) {
           setVisibleChatMessagesForRuntimeKey(runtimeKey, merged, {
             followLatest: chatAutoScrollFollowRef.current,
           });
         }
-        if (incomingMerge.gapReadCursor) {
-          chatSyncIndexRef.current[runtimeKey] = 0;
-          chatSyncSubIndexRef.current[runtimeKey] = incomingMerge.gapReadCursor.turnIndex;
-          if (isSelectedSession) {
-            refreshSessionTurns(
-              sessionId,
-              eventProjectId,
-              runtimeKey,
-            ).catch(() => undefined);
-          }
+        if (gapReadCursor) {
+          chatReadRepairQueueRef.current.request(runtimeKey, gapReadCursor.turnIndex, async cursor => {
+            chatFinishedCursorRef.current[runtimeKey] = cursor;
+            await refreshSessionTurns(sessionId, eventProjectId, runtimeKey);
+          }).catch(() => undefined);
         }
         if (message.method === 'prompt_request') {
           forgetPendingChatPrompt(runtimeKey);
         }
-        if (shouldRefreshCompletedPrompt && isSelectedSession) {
+        if (message.method === 'prompt_done' && isSelectedSession) {
+          setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
           markChatSessionRead(
             eventProjectId,
             sessionId,
@@ -6894,7 +6694,7 @@ function App() {
           ).catch(() => undefined);
         }
         if (
-          shouldRefreshCompletedPrompt &&
+          message.method === 'prompt_done' &&
           isSelectedSession &&
           needsPromptTurnRefresh(merged, message)
         ) {
@@ -8935,7 +8735,6 @@ function App() {
     !selectedPendingPrompt &&
     (
       selectedChatSession?.running === true ||
-      chatRunningSessionFlags[selectedChatEncodedKey] === true ||
       selectedChatHasOpenPromptTurn
     );
   const selectedChatPromptCancelling =
@@ -8981,7 +8780,25 @@ function App() {
     ? latestSelectableAssistantReply.messageKey
     : '';
 
-  const renderedChatTurns = chatMessages.map(message => {
+  const chatDisplayIndex = useMemo(() => buildChatDisplayIndex(chatMessages, {
+    shouldRender: message => {
+      const promptStatus = isPromptStartMessage(message)
+        ? resolvePromptTurnStatus(selectedFullChatMessages, message)
+        : null;
+      return shouldRenderChatTurn(message, hideToolCalls, promptStatus);
+    },
+    pendingKey: selectedPendingPrompt
+      ? `${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`
+      : undefined,
+    pendingEstimatedHeight: 120,
+  }), [
+    chatMessages,
+    hideToolCalls,
+    selectedChatEncodedKey,
+    selectedFullChatMessages,
+    selectedPendingPrompt,
+  ]);
+  const renderChatMessageTurn = (message: RegistryChatMessage) => {
     const doneTurnIndex = message.turnIndex ?? 0;
     const copyRange = message.method === 'prompt_done'
       ? buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex)
@@ -9030,19 +8847,26 @@ function App() {
         />
       </div>
     );
-  });
-  const renderedPendingChatTurn = selectedPendingPrompt ? (
-    <ChatTurnView
-      key={`${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`}
-      message={buildPendingPromptMessage(selectedPendingPrompt)}
-      promptStatus={selectedPendingPrompt.status}
-      hideToolCalls={hideToolCalls}
-      markdownComponents={chatMarkdownComponents}
-      markdownUrlTransform={chatMarkdownUrlTransform}
-      onRetryPendingPrompt={() => retryPendingChatPrompt(selectedChatEncodedKey)}
-      onEditPendingPrompt={() => editPendingChatPrompt(selectedChatEncodedKey)}
-    />
-  ) : null;
+  };
+  const renderChatVirtualItem = (displayItem: typeof chatDisplayIndex.items[number]) => {
+    const sourceMessage = displayItem.kind === 'turn'
+      ? chatMessages[displayItem.sourceIndex]
+      : undefined;
+    const content = displayItem.kind === 'pending' && selectedPendingPrompt ? (
+      <ChatTurnView
+        message={buildPendingPromptMessage(selectedPendingPrompt)}
+        promptStatus={selectedPendingPrompt.status}
+        hideToolCalls={hideToolCalls}
+        markdownComponents={chatMarkdownComponents}
+        markdownUrlTransform={chatMarkdownUrlTransform}
+        onRetryPendingPrompt={() => retryPendingChatPrompt(selectedChatEncodedKey)}
+        onEditPendingPrompt={() => editPendingChatPrompt(selectedChatEncodedKey)}
+      />
+    ) : sourceMessage ? (
+      renderChatMessageTurn(sourceMessage)
+    ) : null;
+    return content;
+  };
   const renderMain = () => {
     const heavyDiffDeferred =
       !!selectedDiff &&
@@ -9154,13 +8978,7 @@ function App() {
               ref={chatScrollRef}
               className="scroll-panel chat-block"
               onScroll={event => {
-                const nextScrollTop = event.currentTarget.scrollTop;
-                const direction = nextScrollTop >= chatLastScrollTopRef.current ? 'down' : 'up';
-                chatLastScrollTopRef.current = nextScrollTop;
                 updateChatFollowModeFromScroll(event.currentTarget);
-                if (shouldHandleChatVirtualWindowScroll(chatProgrammaticScrollRef.current)) {
-                  updateSelectedChatWindowFromScroll(event.currentTarget, direction);
-                }
               }}
               onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}
               onPointerDown={() => { chatPointerScrollingRef.current = true; }}
@@ -9181,8 +8999,13 @@ function App() {
                   </div>
                 </div>
               ) : null}
-              {renderedChatTurns}
-              {renderedPendingChatTurn}
+              {chatDisplayIndex.items.length > 0 ? (
+                <ChatVirtualTurnList
+                  scrollRef={chatScrollRef}
+                  displayIndex={chatDisplayIndex}
+                  renderItem={renderChatVirtualItem}
+                />
+              ) : null}
             </div>
             {chatShowScrollToBottom ? (
             <button

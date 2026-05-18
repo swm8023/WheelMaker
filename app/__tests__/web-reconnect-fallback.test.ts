@@ -53,8 +53,8 @@ describe('web reconnect fallback behavior', () => {
     expect(mainTsx).toContain('const maybeNotifyChatMessage = (');
     expect(mainTsx).toContain('message: RegistryChatMessage,');
     expect(mainTsx).toContain('session?: RegistryChatSession,');
-    expect(mainTsx).toContain('const message = decodeSessionMessageFromEventPayload(payload);');
-    expect(mainTsx).toContain('maybeNotifyChatMessage(message, mergedSessionForCache, eventProjectId);');
+    expect(mainTsx).toContain('const normalizedPayload = normalizeSessionMessagePayload(payload);');
+    expect(mainTsx).toContain('maybeNotifyChatMessage(message, existingSession, eventProjectId);');
     expect(mainTsx).toContain(".showLocalNotification({ title, body, url: '/' })");
   });
 

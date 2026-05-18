@@ -8,6 +8,12 @@ import {
   sanitizeCachedSessionMessages,
   shouldRequestSessionReadForIncomingTurn,
 } from '../web/src/chatSync';
+import {
+  decodeSessionTurnToMessage,
+  normalizeSessionMessagePayload,
+  normalizeSessionReadPayload,
+  normalizeSessionWireTurn,
+} from '../web/src/chat/chatWire';
 import type { RegistryChatMessage } from '../web/src/types/registry';
 
 const message = (text: string): RegistryChatMessage => ({
@@ -19,6 +25,69 @@ const message = (text: string): RegistryChatMessage => ({
 });
 
 describe('chat session read reconciliation', () => {
+  test('normalizes raw session.message payload and rejects legacy flat payload', () => {
+    const payload = {
+      sessionId: 'sess-1',
+      turn: {
+        turnIndex: 4,
+        content: '{"method":"agent_message_chunk","param":{"text":"raw"}}',
+        finished: false,
+      },
+    };
+
+    expect(normalizeSessionMessagePayload(payload)).toEqual({
+      sessionId: 'sess-1',
+      turn: {
+        turnIndex: 4,
+        content: '{"method":"agent_message_chunk","param":{"text":"raw"}}',
+        finished: false,
+      },
+    });
+    expect(normalizeSessionMessagePayload({
+      sessionId: 'sess-1',
+      turnIndex: 4,
+      content: '{}',
+      finished: true,
+    })).toBeNull();
+  });
+
+  test('normalizes raw session.read payload only when top-level session id matches', () => {
+    const payload = {
+      sessionId: 'sess-1',
+      latestTurnIndex: 7,
+      session: {sessionId: 'sess-1', title: 'Task', updatedAt: '', messageCount: 0},
+      turns: [
+        {turnIndex: 6, content: '{"method":"agent_message_chunk","param":{"text":"ok"}}', finished: true},
+      ],
+    };
+
+    expect(normalizeSessionReadPayload(payload, 'sess-1')?.turns).toEqual([
+      {turnIndex: 6, content: '{"method":"agent_message_chunk","param":{"text":"ok"}}', finished: true},
+    ]);
+    expect(normalizeSessionReadPayload({...payload, sessionId: 'other'}, 'sess-1')).toBeNull();
+  });
+
+  test('raw turn normalization does not parse content but decode can parse for rendering', () => {
+    const raw = normalizeSessionWireTurn({
+      turnIndex: 2,
+      content: '{not valid json',
+      finished: false,
+    });
+    expect(raw).toEqual({turnIndex: 2, content: '{not valid json', finished: false});
+
+    expect(decodeSessionTurnToMessage('sess-1', {
+      turnIndex: 2,
+      content: '{"method":"agent_message_chunk","param":{"text":"hello"}}',
+      finished: true,
+    })).toEqual({
+      sessionId: 'sess-1',
+      turnIndex: 2,
+      method: 'agent_message_chunk',
+      param: {text: 'hello'},
+      finished: true,
+    });
+  });
+
   test('keeps a live same-turn update that arrives while session.read is in flight', () => {
     const existing = [message('partial')];
     const readResult = [message('partial')];

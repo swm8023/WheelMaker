@@ -24,8 +24,8 @@ describe('web session list schema', () => {
     expect(registryTypes).toContain('lastDoneSuccess?: boolean;');
     expect(registryTypes).toContain('lastReadTurnIndex?: number;');
     expect(mainTsx).toContain('const renderSessionStateMarker = (session: RegistryChatSession, activeProjectId = projectIdRef.current) => {');
-    expect(mainTsx).toContain('const runtimeKey = buildChatRuntimeKey(activeProjectId, session.sessionId);');
-    expect(mainTsx).toContain('resolveChatSessionVisualStateValue(session, {');
+    expect(mainTsx).toContain('return resolveChatSessionVisualStateValue(session);');
+    expect(mainTsx).not.toContain('resolveChatSessionVisualStateValue(session, {');
     expect(mainTsx).toContain('service.markProjectSessionRead(activeProjectId, sessionId, cursor)');
     expect(mainTsx).toContain('rememberChatSessionSummary(eventProjectId, payload.session);');
     expect(mainTsx).toContain('workspaceStore.rememberChatSession(eventProjectId, payload.session, {');

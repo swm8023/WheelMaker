@@ -6,26 +6,35 @@ function readMain(): string {
   return fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
 }
 
+function readVirtualList(): string {
+  const projectRoot = path.join(__dirname, '..');
+  return fs.readFileSync(
+    path.join(projectRoot, 'web', 'src', 'chat', 'ChatVirtualTurnList.tsx'),
+    'utf8',
+  );
+}
+
 describe('web chat turn rendering', () => {
-  test('renders visible turns directly instead of prompt groups', () => {
+  test('renders chat turns through the virtual display index instead of prompt groups', () => {
     const main = readMain();
 
     expect(main).toContain('const ChatTurnView = React.memo');
-    expect(main).toContain('const renderedChatTurns = chatMessages.map');
-    expect(main).toContain('{renderedChatTurns}');
+    expect(main).toContain('const chatDisplayIndex = useMemo(() => buildChatDisplayIndex(chatMessages');
+    expect(main).toContain('<ChatVirtualTurnList');
     expect(main).not.toContain('const chatPromptGroups = useMemo');
     expect(main).not.toContain('const renderedChatPromptGroups = useMemo');
     expect(main).not.toContain('{renderedChatPromptGroups}');
   });
 
-  test('uses turn windows and full-store prompt copy', () => {
+  test('uses virtualized display metadata and full-store prompt copy', () => {
     const main = readMain();
+    const virtualList = readVirtualList();
 
-    expect(main).toContain('createLatestTurnWindow(fullMessages)');
-    expect(main).toContain('sliceTurnsForWindow(fullMessages, nextWindow)');
-    expect(main).toContain('expandTurnWindowEarlier(fullMessages, currentWindow)');
-    expect(main).toContain('expandTurnWindowLater(fullMessages, currentWindow)');
-    expect(main).toContain('followLatestTurnWindow(fullMessages, currentWindow)');
+    expect(virtualList).toContain("import {useVirtualizer, type VirtualItem} from '@tanstack/react-virtual';");
+    expect(virtualList).toContain('virtualizer.getVirtualItems().map(virtualItem => {');
+    expect(main).toContain("import {buildChatDisplayIndex} from './chat/chatDisplayIndex';");
+    expect(main).toContain("import {ChatVirtualTurnList} from './chat/ChatVirtualTurnList';");
+    expect(main).not.toContain("from './chat/chatTurnWindow'");
     expect(main).toContain('buildPromptDoneCopyRange(selectedFullChatMessages, doneTurnIndex)');
     expect(main).toContain('copyDisabled={copyRange ? !copyRange.ok : true}');
   });
@@ -71,7 +80,7 @@ describe('web chat turn rendering', () => {
 
     expect(main).toContain('const selectedChatPromptRunning =');
     expect(main).toContain('selectedChatSession?.running === true');
-    expect(main).toContain('chatRunningSessionFlags[selectedChatEncodedKey] === true');
+    expect(main).not.toContain('chatRunningSessionFlags[selectedChatEncodedKey] === true');
     expect(main).toContain('const [chatCancellingRuntimeKey, setChatCancellingRuntimeKey] = useState');
     expect(main).toContain('const cancelSelectedChatPrompt = async () => {');
     expect(main).toContain('service.cancelProjectSession(selectedKey.projectId, selectedKey.sessionId)');
@@ -87,7 +96,7 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('setChatShowScrollToBottom(!followsLatest);');
     expect(main).toContain('className="chat-scroll-bottom-button"');
     expect(main).toContain('className="chat-scroll-bottom-glyph"');
-    expect(main).toContain('updateSelectedChatWindowFromScroll(event.currentTarget, direction);');
+    expect(main).not.toContain('updateSelectedChatWindowFromScroll(event.currentTarget, direction);');
   });
 
   test('resets follow-bottom intent only for explicit latest-window resets', () => {
@@ -96,7 +105,7 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('resolveChatSessionReadWindowUpdate({');
     expect(main).toContain('useIncremental,');
     expect(main).toContain('followsLatest: chatAutoScrollFollowRef.current,');
-    expect(main).toContain('const resettingToLatest = options?.resetToLatest || !currentWindow;');
+    expect(main).toContain('const resettingToLatest = options?.resetToLatest === true;');
     expect(main).toContain('if (resettingToLatest && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {');
     expect(main).toContain('chatAutoScrollFollowRef.current = true;');
     expect(main).toContain('chatUserScrollLockUntilRef.current = 0;');

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -171,6 +172,56 @@ func TestFileSessionTurnStorePreservesEmptySemanticTurns(t *testing.T) {
 		if turn.Content != contents[i] {
 			t.Fatalf("turns[%d].Content = %q, want %q", i, turn.Content, contents[i])
 		}
+	}
+}
+
+func TestFileSessionTurnStoreProjectsMissingDurableSlotAsGapTurn(t *testing.T) {
+	root := t.TempDir()
+	store := newFileSessionTurnStore(root)
+	ctx := context.Background()
+
+	contents := []string{
+		`{"method":"prompt_request","param":{"contentBlocks":[]}}`,
+		`{"method":"agent_message_chunk","param":{"text":"lost"}}`,
+		`{"method":"prompt_done","param":{"stopReason":"end_turn"}}`,
+	}
+	if _, err := store.WriteTurns(ctx, "proj1", "sess-1", 1, contents); err != nil {
+		t.Fatalf("WriteTurns: %v", err)
+	}
+	path, _, slot := store.turnPath("proj1", "sess-1", 2)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile turn file: %v", err)
+	}
+	slotOffset := sessionTurnFilePreambleSize + slot*sessionTurnFileMetaSize
+	binary.LittleEndian.PutUint32(raw[slotOffset:slotOffset+4], 0)
+	binary.LittleEndian.PutUint32(raw[slotOffset+4:slotOffset+8], 0)
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("WriteFile corrupted turn file: %v", err)
+	}
+
+	turns, err := store.ReadTurns(ctx, "proj1", "sess-1", 0, 3)
+	if err != nil {
+		t.Fatalf("ReadTurns: %v", err)
+	}
+	if len(turns) != 3 {
+		t.Fatalf("turns len = %d, want 3", len(turns))
+	}
+	if turns[1].TurnIndex != 2 || !turns[1].Finished {
+		t.Fatalf("gap turn metadata = %+v, want turnIndex=2 finished=true", turns[1])
+	}
+	var msg struct {
+		Method string         `json:"method"`
+		Param  map[string]any `json:"param"`
+	}
+	if err := json.Unmarshal([]byte(turns[1].Content), &msg); err != nil {
+		t.Fatalf("unmarshal gap turn: %v", err)
+	}
+	if msg.Method != "session/gap" {
+		t.Fatalf("gap method = %q, want session/gap", msg.Method)
+	}
+	if got := msg.Param["turnIndex"]; got != float64(2) {
+		t.Fatalf("gap param turnIndex = %v, want 2", got)
 	}
 }
 

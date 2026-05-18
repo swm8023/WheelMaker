@@ -392,7 +392,6 @@ func (r *SessionRecorder) ReadSessionTurns(ctx context.Context, sessionID string
 				continue
 			}
 			turns = append(turns, sessionViewTurn{
-				SessionID: sessionID,
 				TurnIndex: turn.turnIndex,
 				Content:   buildIMContentJSON(turn.method, turn.payload),
 				Finished:  turn.finished,
@@ -589,12 +588,14 @@ func (r *SessionRecorder) finishPromptStateLocked(ctx context.Context, sessionID
 	if err := r.persistSessionStateTurnsLocked(ctx, sessionID, state, updatedAt); err != nil {
 		return err
 	}
-	if err := r.upsertSessionProjection(ctx, sessionID, "", "", updatedAt, true); err != nil {
+	summary, err := r.upsertSessionProjectionWithPublish(ctx, sessionID, "", "", updatedAt, true, false)
+	if err != nil {
 		return err
 	}
 	if publishDone && needsPromptDone {
 		r.publishSessionTurn(doneTurn, buildIMContentJSON(doneTurn.method, doneTurn.payload))
 	}
+	r.publishSessionUpdated(summary)
 	r.nextTurnIndex[sessionID] = state.nextTurnIndex
 	delete(r.promptState, sessionID)
 	return nil
@@ -621,16 +622,23 @@ func (r *SessionRecorder) publishSessionTurn(turn sessionTurnMessage, updateJSON
 	}
 	_ = publish("registry.session.message", map[string]any{
 		"sessionId": turn.sessionID,
-		"turnIndex": turn.turnIndex,
-		"content":   updateJSON,
-		"finished":  turn.finished,
+		"turn": map[string]any{
+			"turnIndex": turn.turnIndex,
+			"content":   updateJSON,
+			"finished":  turn.finished,
+		},
 	})
 }
 
 func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID, agentType, title string, updatedAt time.Time, titleIfEmptyOnly bool) error {
+	_, err := r.upsertSessionProjectionWithPublish(ctx, sessionID, agentType, title, updatedAt, titleIfEmptyOnly, true)
+	return err
+}
+
+func (r *SessionRecorder) upsertSessionProjectionWithPublish(ctx context.Context, sessionID, agentType, title string, updatedAt time.Time, titleIfEmptyOnly bool, publish bool) (sessionViewSummary, error) {
 	rec, err := r.store.LoadSession(ctx, r.projectName, sessionID)
 	if err != nil {
-		return err
+		return sessionViewSummary{}, err
 	}
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
@@ -638,14 +646,14 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 	if rec == nil {
 		agentType = strings.TrimSpace(agentType)
 		if agentType == "" {
-			return fmt.Errorf("session agent type is required")
+			return sessionViewSummary{}, fmt.Errorf("session agent type is required")
 		}
 		rec = &SessionRecord{ID: sessionID, ProjectName: r.projectName, Status: SessionActive, AgentType: agentType, CreatedAt: updatedAt, LastActiveAt: updatedAt}
 	} else if strings.TrimSpace(rec.AgentType) == "" && strings.TrimSpace(agentType) != "" {
 		rec.AgentType = strings.TrimSpace(agentType)
 	}
 	if strings.TrimSpace(rec.AgentType) == "" {
-		return fmt.Errorf("session agent type is required")
+		return sessionViewSummary{}, fmt.Errorf("session agent type is required")
 	}
 	title = strings.TrimSpace(title)
 	if title != "" {
@@ -655,10 +663,13 @@ func (r *SessionRecorder) upsertSessionProjection(ctx context.Context, sessionID
 	}
 	rec.LastActiveAt = updatedAt
 	if err := r.store.SaveSession(ctx, rec); err != nil {
-		return err
+		return sessionViewSummary{}, err
 	}
-	r.publishSessionUpdated(r.sessionViewSummaryFromRecordLocked(*rec))
-	return nil
+	summary := r.sessionViewSummaryFromRecordLocked(*rec)
+	if publish {
+		r.publishSessionUpdated(summary)
+	}
+	return summary, nil
 }
 
 func (r *SessionRecorder) sessionViewSummaryFromRecord(rec SessionRecord) sessionViewSummary {
@@ -775,7 +786,6 @@ func (r *SessionRecorder) persistSessionStateTurnsLocked(ctx context.Context, se
 	} else {
 		for i, content := range contents {
 			r.finishedTurns[sessionID] = append(r.finishedTurns[sessionID], sessionViewTurn{
-				SessionID: sessionID,
 				TurnIndex: startTurnIndex + int64(i),
 				Content:   normalizeJSONDoc(content, "{}"),
 				Finished:  true,

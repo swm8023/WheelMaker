@@ -1,8 +1,6 @@
 import {
   getChatSessionVisualState,
-  isChatSessionRunningMessage,
   resolveChatSessionVisualState,
-  shouldClearLocalChatSessionRunning,
 } from '../web/src/chatSessionState';
 
 describe('web chat session visual state', () => {
@@ -56,9 +54,21 @@ describe('web chat session visual state', () => {
     })).toBe('idle');
   });
 
-  test('local running state overrides stale completed-unviewed summary', () => {
+  test('resolve visual state trusts the authoritative session summary only', () => {
     expect(resolveChatSessionVisualState({
       sessionId: 's5',
+      title: '',
+      preview: '',
+      updatedAt: '',
+      messageCount: 0,
+      running: true,
+      lastDoneTurnIndex: 4,
+      lastDoneSuccess: true,
+      lastReadTurnIndex: 3,
+    })).toBe('running');
+
+    expect(resolveChatSessionVisualState({
+      sessionId: 's6',
       title: '',
       preview: '',
       updatedAt: '',
@@ -67,55 +77,6 @@ describe('web chat session visual state', () => {
       lastDoneTurnIndex: 4,
       lastDoneSuccess: true,
       lastReadTurnIndex: 3,
-    }, {
-      running: true,
-      completedUnviewed: false,
-    })).toBe('running');
-  });
-
-  test('clears local running state when an authoritative summary reports not running', () => {
-    expect(shouldClearLocalChatSessionRunning({
-      running: false,
-    })).toBe(true);
-
-    expect(shouldClearLocalChatSessionRunning({
-      running: true,
-    })).toBe(false);
-
-    expect(shouldClearLocalChatSessionRunning({})).toBe(false);
-  });
-
-  test('marks a session running from prompt start and streaming turns', () => {
-    expect(isChatSessionRunningMessage({
-      sessionId: 's1',
-      turnIndex: 1,
-      method: 'prompt_request',
-      param: {},
-      finished: true,
-    })).toBe(true);
-
-    expect(isChatSessionRunningMessage({
-      sessionId: 's1',
-      turnIndex: 2,
-      method: 'agent_message_chunk',
-      param: {text: 'partial'},
-      finished: false,
-    })).toBe(true);
-
-    expect(isChatSessionRunningMessage({
-      sessionId: 's1',
-      turnIndex: 2,
-      method: 'agent_message_chunk',
-      param: {text: 'complete'},
-      finished: true,
-    })).toBe(false);
-
-    expect(isChatSessionRunningMessage({
-      sessionId: 's1',
-      turnIndex: 3,
-      method: 'prompt_done',
-      param: {stopReason: 'end_turn'},
-      finished: true,
-    })).toBe(false);
+    })).toBe('completed-unviewed');
   });
 });

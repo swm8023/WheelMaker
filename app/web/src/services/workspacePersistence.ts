@@ -1,4 +1,4 @@
-import type {RegistryChatMessage, RegistryChatSession, RegistryGitCommit, RegistryGitCommitFile} from '../types/registry';
+import type {RegistryChatSession, RegistryGitCommit, RegistryGitCommitFile, RegistrySessionTurn} from '../types/registry';
 import {
   DEFAULT_CODE_FONT,
   DEFAULT_CODE_FONT_SIZE,
@@ -81,7 +81,7 @@ export type PersistedChatSessionEntry = {
 };
 
 export type PersistedChatSessionContent = {
-  messages: RegistryChatMessage[];
+  turns: RegistrySessionTurn[];
 };
 
 type PersistedWorkspaceState = {
@@ -94,7 +94,7 @@ export type WorkspaceDatabaseDump = {
   projects: Array<{projectId: string; stateJson: string; updatedAt: number}>;
   projectCommits: Array<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>;
   chatSessionIndex: Array<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>;
-  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; messagesJson: string; updatedAt: number}>;
+  chatSessionContent: Array<{k: string; projectId: string; sessionId: string; turnsJson: string; updatedAt: number}>;
   fileCache: Array<{k: string; hash: string; v: string; updatedAt: number}>;
   diffCache: Array<{k: string; v: string; updatedAt: number}>;
   meta: Array<{k: string; v: string; updatedAt: number}>;
@@ -104,7 +104,7 @@ export type WorkspaceDatabaseDump = {
 const LOCAL_ADDRESS_KEY = 'wheelmaker.workspace.address';
 const LOCAL_TOKEN_KEY = 'wheelmaker.workspace.token';
 const WORKSPACE_DB_NAME = 'wheelmaker.workspace.db';
-const WORKSPACE_DB_VERSION = 5;
+const WORKSPACE_DB_VERSION = 6;
 const TABLE_GLOBAL_KV = 'wm_global_kv';
 const TABLE_PROJECT_STATE = 'wm_project_state';
 const TABLE_PROJECT_COMMITS = 'wm_project_commits';
@@ -200,6 +200,25 @@ function sanitizeChatCursor(input: Partial<PersistedChatCursor> | undefined): Pe
   if (!input) return base;
   const turnIndex = Number.isFinite(input.turnIndex) ? Math.max(0, Math.floor(Number(input.turnIndex))) : base.turnIndex;
   return {turnIndex};
+}
+
+function sanitizePersistedTurns(input: unknown): RegistrySessionTurn[] {
+  if (!Array.isArray(input)) return [];
+  const byIndex = new Map<number, RegistrySessionTurn>();
+  for (const raw of input) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    const item = raw as Partial<RegistrySessionTurn>;
+    const turnIndex = Number.isFinite(item.turnIndex)
+      ? Math.trunc(Number(item.turnIndex))
+      : 0;
+    if (turnIndex <= 0 || typeof item.content !== 'string' || item.content === '') continue;
+    byIndex.set(turnIndex, {
+      turnIndex,
+      content: item.content,
+      finished: item.finished === true,
+    });
+  }
+  return Array.from(byIndex.values()).sort((a, b) => a.turnIndex - b.turnIndex);
 }
 
 function sanitizeProjectState(input: Partial<PersistedProjectState> | undefined): PersistedProjectState {
@@ -350,7 +369,7 @@ type RawChatSessionContentRow = {
   k: string;
   projectId: string;
   sessionId: string;
-  messagesJson: string;
+  turnsJson?: string;
   updatedAt: number;
 };
 
@@ -407,8 +426,17 @@ class WorkspaceDatabase {
         if (!db.objectStoreNames.contains(TABLE_META)) {
           db.createObjectStore(TABLE_META, {keyPath: 'k'});
         }
-        if (oldVersion > 0 && oldVersion < 5 && tx) {
-          for (const name of [TABLE_CHAT_SESSION_INDEX, TABLE_CHAT_SESSION_CONTENT]) {
+        if (oldVersion > 0 && oldVersion < 6 && tx) {
+          for (const name of [
+            TABLE_GLOBAL_KV,
+            TABLE_PROJECT_STATE,
+            TABLE_PROJECT_COMMITS,
+            TABLE_CHAT_SESSION_INDEX,
+            TABLE_CHAT_SESSION_CONTENT,
+            TABLE_FILE_CACHE,
+            TABLE_DIFF_CACHE,
+            TABLE_META,
+          ]) {
             if (db.objectStoreNames.contains(name)) {
               tx.objectStore(name).clear();
             }
@@ -547,6 +575,11 @@ export class WorkspacePersistenceRepository {
 
     this.state = this.fromDbRows(globalRows, projectRows);
     this.restoreProjectCommits(projectCommitRows);
+    if (this.hasIncompatibleChatContentRows(chatContentRows)) {
+      await this.resetPersistentCacheAfterIncompatibleSchema();
+      return;
+    }
+
     this.restoreChatSessions(chatIndexRows, chatContentRows);
     this.restoreDiffCache(diffRows);
     this.restoreFileCache(fileRows);
@@ -606,11 +639,33 @@ export class WorkspacePersistenceRepository {
     }
 
     for (const row of contentRows) {
-      const messages = tryParse<RegistryChatMessage[]>(row.messagesJson, []);
+      const turns = tryParse<RegistrySessionTurn[]>(row.turnsJson ?? '[]', []);
       this.chatSessionContent.set(row.k, {
-        messages: Array.isArray(messages) ? messages : [],
+        turns: sanitizePersistedTurns(turns),
       });
     }
+  }
+
+  private hasIncompatibleChatContentRows(rows: RawChatSessionContentRow[]): boolean {
+    return rows.some(row => typeof row.turnsJson !== 'string');
+  }
+
+  private async resetPersistentCacheAfterIncompatibleSchema(): Promise<void> {
+    const localIdentity = this.readLocalIdentityState();
+    const preservedToken = localIdentity.token || this.state.global.token;
+    const preservedAddress = localIdentity.address || this.state.global.address;
+    this.state = defaultWorkspaceState();
+    this.state.global.token = preservedToken;
+    this.state.global.address = preservedAddress;
+    this.saveLocalIdentityState({address: preservedAddress, token: preservedToken});
+    for (const key of Object.keys(this.projectCommits)) {
+      delete this.projectCommits[key];
+    }
+    this.chatSessionIndex.clear();
+    this.chatSessionContent.clear();
+    this.diffCache.clear();
+    this.fileCache.clear();
+    await this.saveAllStateToDb();
   }
   private restoreDiffCache(rows: RawDiffCacheRow[]): void {
     this.diffCache.clear();
@@ -714,7 +769,7 @@ export class WorkspacePersistenceRepository {
         k,
         projectId,
         sessionId,
-        messagesJson: serialize(content.messages),
+        turnsJson: serialize(content.turns),
         updatedAt: now,
       });
     }
@@ -896,20 +951,20 @@ export class WorkspacePersistenceRepository {
   patchProjectChatSessionContent(
     projectId: string,
     sessionId: string,
-    messages: RegistryChatMessage[],
+    turns: RegistrySessionTurn[],
   ): void {
     if (!projectId || !sessionId) return;
     const key = chatSessionKey(projectId, sessionId);
     const now = Date.now();
     const payload: PersistedChatSessionContent = {
-      messages: Array.isArray(messages) ? messages : [],
+      turns: sanitizePersistedTurns(turns),
     };
     this.chatSessionContent.set(key, payload);
     void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
       k: key,
       projectId,
       sessionId,
-      messagesJson: serialize(payload.messages),
+      turnsJson: serialize(payload.turns),
       updatedAt: now,
     })).catch(() => undefined);
   }
@@ -1074,6 +1129,7 @@ export class WorkspacePersistenceRepository {
         TABLE_CHAT_SESSION_CONTENT,
         TABLE_DIFF_CACHE,
         TABLE_FILE_CACHE,
+        TABLE_META,
       ]);
       await this.db.putRow(TABLE_META, {
         k: 'schemaVersion',
@@ -1095,7 +1151,7 @@ export class WorkspacePersistenceRepository {
       this.db.getAllRows<{projectId: string; stateJson: string; updatedAt: number}>(TABLE_PROJECT_STATE),
       this.db.getAllRows<{projectId: string; commitsJson: string; commitFilesByShaJson: string; updatedAt: number}>(TABLE_PROJECT_COMMITS),
       this.db.getAllRows<{k: string; projectId: string; sessionId: string; sessionJson: string; cursorJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_INDEX),
-      this.db.getAllRows<{k: string; projectId: string; sessionId: string; messagesJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
+      this.db.getAllRows<{k: string; projectId: string; sessionId: string; turnsJson: string; updatedAt: number}>(TABLE_CHAT_SESSION_CONTENT),
       this.db.getAllRows<{k: string; hash: string; v: string; updatedAt: number}>(TABLE_FILE_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_DIFF_CACHE),
       this.db.getAllRows<{k: string; v: string; updatedAt: number}>(TABLE_META),

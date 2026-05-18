@@ -1,4 +1,8 @@
 import { RegistryClient } from './registryClient';
+import {
+  decodeSessionTurnToMessage,
+  normalizeSessionReadPayload,
+} from '../chat/chatWire';
 import type {
   RegistryEnvelope,
   RegistryFsInfo,
@@ -18,6 +22,7 @@ import type {
   RegistrySessionMessageEventPayload,
   RegistrySessionReadResponse,
   RegistrySessionSummary,
+  RegistrySessionTurn,
   RegistrySyncCheckPayload,
   RegistrySyncCheckResponse,
   RegistryTokenProvider,
@@ -126,54 +131,6 @@ export class RegistryRepository {
     };
   }
 
-  private normalizeSessionWireMessage(raw: unknown): RegistrySessionMessage | null {
-    if (!raw || typeof raw !== 'object') {
-      return null;
-    }
-    const input = raw as Record<string, unknown>;
-    const sessionId = typeof input.sessionId === 'string' ? input.sessionId.trim() : '';
-    if (!sessionId) {
-      return null;
-    }
-    const turnIndex = typeof input.turnIndex === 'number' && Number.isFinite(input.turnIndex)
-      ? Math.trunc(input.turnIndex)
-      : 0;
-    if (turnIndex <= 0) {
-      return null;
-    }
-    const finished = input.finished === true;
-    const content = typeof input.content === 'string' ? input.content.trim() : '';
-    if (content === '') {
-      return null;
-    }
-    try {
-      const doc = JSON.parse(content) as Record<string, unknown>;
-      const method = typeof doc.method === 'string' ? doc.method.trim() : '';
-      const param =
-        doc.param != null && typeof doc.param === 'object' && !Array.isArray(doc.param)
-          ? (doc.param as Record<string, unknown>)
-          : {};
-      // Skip Claude command system messages.
-      if (method === 'user_message_chunk') {
-        const text = typeof param.text === 'string' ? param.text : '';
-        if (
-          /^<(command-name|command-message|command-args|local-command-caveat|local-command-stdout)[\s>]/.test(text)
-        ) {
-          return null;
-        }
-      }
-      return { sessionId, turnIndex, method, param, finished };
-    } catch {
-      return {
-        sessionId,
-        turnIndex,
-        method: 'system',
-        param: { text: content },
-        finished,
-      };
-    }
-  }
-
   private async listSessionsByMethod(projectId: string, method: 'session.list'): Promise<RegistrySessionSummary[]> {
     const resp = await this.client.request({
       method,
@@ -200,6 +157,7 @@ export class RegistryRepository {
       timeoutMs: 15000,
     });
     const payload = (resp.payload ?? {}) as {
+      sessionId?: unknown;
       session?: unknown;
       latestTurnIndex?: unknown;
       turns?: unknown[];
@@ -207,22 +165,33 @@ export class RegistryRepository {
     const latestTurnIndex = typeof payload.latestTurnIndex === 'number' && Number.isFinite(payload.latestTurnIndex)
       ? Math.max(0, Math.trunc(payload.latestTurnIndex))
       : 0;
-    const normalizedSession = this.normalizeSessionSummary(payload.session);
-    if (normalizedSession) {
-      normalizedSession.latestTurnIndex = latestTurnIndex;
+    const normalized = normalizeSessionReadPayload(
+      payload,
+      sessionId,
+      raw => this.normalizeSessionSummary(raw),
+    );
+    if (!normalized) {
+      return {
+        sessionId: '',
+        turns: [],
+        messages: [],
+        latestTurnIndex,
+      };
     }
-
-    const normalizedMessages: RegistrySessionMessage[] = (Array.isArray(payload.turns) ? payload.turns : [])
-      .map(item => this.normalizeSessionWireMessage(item))
-      .filter((item): item is RegistrySessionMessage => !!item)
-      .sort((a, b) => {
-        return (a.turnIndex ?? 0) - (b.turnIndex ?? 0);
-      });
+    if (normalized.session) {
+      normalized.session.latestTurnIndex = normalized.latestTurnIndex;
+    }
+    const normalizedTurns: RegistrySessionTurn[] = normalized.turns;
+    const normalizedMessages: RegistrySessionMessage[] = normalizedTurns
+      .map(turn => decodeSessionTurnToMessage(normalized.sessionId, turn))
+      .filter((item): item is RegistrySessionMessage => !!item);
 
     return {
-      ...(normalizedSession ? {session: normalizedSession} : {}),
+      sessionId: normalized.sessionId,
+      turns: normalizedTurns,
+      ...(normalized.session ? {session: normalized.session} : {}),
       messages: normalizedMessages,
-      latestTurnIndex,
+      latestTurnIndex: normalized.latestTurnIndex,
     };
   }
   async initialize(url: string, token?: string): Promise<void> {

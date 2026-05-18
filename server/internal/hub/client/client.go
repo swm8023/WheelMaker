@@ -531,7 +531,11 @@ func (c *Client) HandleSessionRequest(ctx context.Context, method string, _ stri
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"latestTurnIndex": latestTurnIndex, "turns": turns}, nil
+		summary, err := c.sessionRecorder.ReadSessionSummary(ctx, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"sessionId": strings.TrimSpace(req.SessionID), "latestTurnIndex": latestTurnIndex, "session": summary, "turns": turns}, nil
 	case "session.markRead":
 		var req struct {
 			SessionID         string `json:"sessionId"`

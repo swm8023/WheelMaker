@@ -29,6 +29,12 @@ export interface RegistrySessionMessage {
   finished: boolean;
 }
 
+export interface RegistrySessionTurn {
+  turnIndex: number;
+  content: string;
+  finished: boolean;
+}
+
 export interface RegistrySessionPlanEntry {
   content: string;
   status?: string;
@@ -77,7 +83,9 @@ export interface RegistrySessionSummary {
 
 
 export interface RegistrySessionReadResponse {
+  sessionId: string;
   session?: RegistrySessionSummary;
+  turns: RegistrySessionTurn[];
   messages: RegistrySessionMessage[];
   latestTurnIndex: number;
 }
@@ -161,9 +169,7 @@ export interface RegistryTokenScanResult {
 
 export interface RegistrySessionMessageEventPayload {
   sessionId: string;
-  turnIndex: number;
-  content: string;
-  finished?: boolean;
+  turn: RegistrySessionTurn;
 }
 
 export type RegistryChatContentBlock = RegistrySessionContentBlock;

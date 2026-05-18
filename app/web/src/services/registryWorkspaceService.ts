@@ -258,6 +258,8 @@ export class RegistryWorkspaceService {
   async readSession(sessionId: string, afterTurnIndex = 0): Promise<RegistrySessionReadResponse> {
     if (!this.session || !this.repository) {
       return {
+        sessionId: '',
+        turns: [],
         messages: [],
         latestTurnIndex: 0,
       };
@@ -268,6 +270,8 @@ export class RegistryWorkspaceService {
   async readProjectSession(projectId: string, sessionId: string, afterTurnIndex = 0): Promise<RegistrySessionReadResponse> {
     if (!this.repository) {
       return {
+        sessionId: '',
+        turns: [],
         messages: [],
         latestTurnIndex: 0,
       };

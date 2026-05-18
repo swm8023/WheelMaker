@@ -1,6 +1,6 @@
 # Session 对话管理与同步
 
-本文是当前 session 对话链路的唯一设计说明。旧的 `session_prompts`、`turns_json`、`promptIndex` 游标和一次性迁移工具都已移除；运行期协议只暴露 session 级全局 `turnIndex`。
+本文是 session 对话链路的基础协议与存储说明。当前 turn-first 同步、状态和显示重构的完整策略见 [chat-turn-sync-state-display-design.zh-CN.md](./chat-turn-sync-state-display-design.zh-CN.md)。旧的 `session_prompts`、`turns_json`、`promptIndex` 游标和一次性迁移工具都已移除；运行期协议只暴露 session 级全局 `turnIndex`。
 
 ## 1. 数据模型
 
@@ -33,28 +33,44 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 
 一个 session 内所有消息共享单调递增的 `turnIndex`，从 1 开始。`prompt_request`、agent message、thought、plan、tool call、`prompt_done` 都是普通 turn。
 
-实时事件统一为：
+服务端、app source store、IndexedDB 都使用同一个 raw turn shape：
+
+```ts
+type RegistrySessionTurn = {
+  turnIndex: number;
+  content: string;
+  finished: boolean;
+};
+```
+
+实时 `session.message` 事件 payload 统一为：
 
 ```json
 {
   "sessionId": "sess-1",
-  "turnIndex": 12,
-  "content": "{\"method\":\"agent_message_chunk\",\"param\":{\"text\":\"...\"}}",
-  "finished": false
+  "turn": {
+    "turnIndex": 12,
+    "content": "{\"method\":\"agent_message_chunk\",\"param\":{\"text\":\"...\"}}",
+    "finished": false
+  }
 }
 ```
 
 规则：
 
 - 不再有 `promptIndex`、`turnId`、`updateIndex`。
+- `sessionId` 只在 payload 顶层；`turn` 内不重复 `sessionId`。
+- 不兼容旧的扁平 `{sessionId, turnIndex, content, finished}` payload。
 - `content` 是 IM turn JSON，包含 `method` 和 `param`。
+- source store 和 IndexedDB 原样保存 `content`，不 parse-normalize 后重新 stringify。
 - 服务端对客户端暴露的 `turnIndex` 必须连续；语义上为空的 turn 也必须返回一条非空 JSON `content`，不能跳过 index。
 - `prompt_request.param` 会写入 `createdAt` 和当前 `modelName`。
 - `prompt_done.param` 会写入 `completedAt` 和 `stopReason`。
 - 实时消息和 `session.read` 返回都使用 `finished`；旧的 `done` 字段不参与解析。
 - tool call 按 tool call id 合并到同一个 turn。
 - 连续 `agent_message_chunk` 或连续 `agent_thought_chunk` 合并到同一个 turn。
-- 文本流式 turn 先以 `finished=false` 发布；当下一个 turn 或 `prompt_done` 到来时，服务端用同一个 `turnIndex` 重发完整内容并标记 `finished=true`。
+- 文本/思考流式 turn 可以先以 `finished=false` 发布；服务端必须保证一个 session 最多只有当前尾部 turn 是 `finished=false`，不能出现中间 unfinished。
+- 当下一个 turn 或 `prompt_done` 到来时，服务端用同一个 `turnIndex` 重发完整内容并标记 `finished=true`，再发布更大的 turn。
 - 如果新 prompt 到来时上一个 prompt 还没有 terminal turn，服务端先合成 `prompt_done(stopReason="interrupted")`，再开始新 prompt。
 
 ## 3. 序列化
@@ -108,18 +124,33 @@ SQLite 只保存会话索引和热状态，不保存对话正文：
 
 ```json
 {
+  "sessionId": "sess-1",
   "latestTurnIndex": 132,
+  "session": {
+    "sessionId": "sess-1",
+    "latestTurnIndex": 132,
+    "running": false,
+    "lastDoneTurnIndex": 132,
+    "lastDoneSuccess": true,
+    "lastReadTurnIndex": 128
+  },
   "turns": [
-    {"sessionId":"sess-1","turnIndex":129,"content":"...","finished":true}
+    {"turnIndex":129,"content":"...","finished":true}
   ]
 }
 ```
 
 读取顺序：
 
+- response 顶层必须带 `sessionId`，客户端必须校验它与请求 session 一致。
+- `turns[]` 内不带 `sessionId`。
+- `session` summary 随 read 返回，方便激活 session 时一次同步 turns 和列表状态。
 - `afterTurnIndex < latestPersistedTurnIndex` 时，从 turn 文件读取持久化增量。
 - 如果当前 session 有 live prompt state，再追加内存中 `turnIndex > afterTurnIndex` 且尚未持久化的 turns。
-- 返回内容按 `turnIndex` 升序排序。
+- 返回内容按 `turnIndex` 升序排序，并覆盖 `afterTurnIndex+1..latestTurnIndex` 的连续区间。
+- 语义缺失的 durable slot 在 read projection 中合成 `session/gap` turn，不写回 WMT2。
+- `turns` 为空只允许在 `latestTurnIndex <= afterTurnIndex`。
+- read response 最多包含一个 `finished=false` turn，且只能是返回区间的最后一条。
 
 `session.markRead` 请求：
 
@@ -141,16 +172,23 @@ type Cursor = { turnIndex: number };
 
 同步规则：
 
-- 本地消息 identity 是 `sessionId:turnIndex`。
-- 服务端返回的每个 turn 必须带 `sessionId`，客户端不会用 read 请求里的 session id 兜底。
-- 本地持久缓存只保存 `finished=true` 的消息。
+- 本地 raw turn identity 是 `sessionId:turnIndex`，但 wire/read 的 turn body 内不携带 `sessionId`。
+- 本地持久缓存只保存 raw finished prefix：`1..Finished Cursor`。
 - cursor 是本地已连续缓存 finished turn 的最大 `turnIndex`；如果本地缓存出现缺口，cursor 必须回退到缺口前。
-- 收到实时 `session.message` 后按 `sessionId:turnIndex` upsert。
-- 只有 `finished=true` 的 turn 推进 cursor。
-- 如果 incoming `turnIndex > cursor.turnIndex + 1`，说明漏收，客户端用当前 cursor 调 `session.read` 补读。
-- `session.read` 返回的 turns 会和等待期间收到的实时消息 reconcile，避免旧缓存覆盖新流式内容。
-- UI 可以按 `prompt_request` / `prompt_done` 临时分组展示对话，但这只是渲染派生状态，不参与协议和缓存 cursor。
-- UI 列表状态只看 session summary：`running=true` 显示进行中；否则当 `lastDoneTurnIndex > lastReadTurnIndex` 时，`lastDoneSuccess=false` 显示失败未查看，其他情况显示完成未查看。
+- IndexedDB 保存 raw `turnsJson` 和 `cursorJson`；旧 `messagesJson` 或旧 schema/version 检测失败时，不做兼容迁移，除 token / 认证凭据外清空本地持久缓存并重建表，再由 `session.read` 重新补。
+- finished prefix 变更后 5 秒 debounce 持久化；切换 session、切后台、断连前需要 flush。
+- app/web 维护 Active Turn Runtime Set，默认 N=5。set 内 session 接收 `session.message`、执行 gap read repair、维护 raw source store；set 外 session 的 `session.message` 不写 cache、不补读，只等待 `session.updated`/list/read summary 刷新状态。
+- 用户打开一个不在 active set 内的 session 时，先 hydrate 本地 finished prefix，再无条件调用 `session.read(after=Finished Cursor)`。
+- 用户切回已经在 active set 内的 session 时，不无条件 read，直接用内存 raw store 重建显示视图。
+- 收到 active set 内的实时 `session.message` 后，校验顶层 `sessionId` 和 `turn` shape，然后 upsert raw turn。
+- 只有连续的 `finished=true` turn 推进 Finished Cursor。
+- 如果 incoming `turnIndex > cursor.turnIndex + 1`，说明漏收，客户端用当前 cursor 调 `session.read` 补读；因此 `cursor=10` 收到 `12/false` 会 read，收到 `11/false` 不 read，之后收到 `12/true` 仍会因为 `12 > 10+1` read。
+- 同一 session 最多一个 read in flight；等待期间新 gap 只设置 dirty flag，当前 read 返回后如仍不连续再读一次。
+- `session.read` 返回的 turns 视为服务端权威结果，覆盖响应区间，并和等待期间收到的实时消息 reconcile，避免旧缓存覆盖新流式内容。
+- `session.message` 只更新 turn store，不更新 title、preview、running、done、read、unread 状态。
+- UI 列表状态只看 Session Summary：`running=true` 显示进行中；否则当 `lastDoneTurnIndex > lastReadTurnIndex` 时，`lastDoneSuccess=false` 显示失败未查看，其他情况显示完成未查看。
+- 选中 session 的显示视图由 raw source store 派生完整轻量 Display Index，再由 `@tanstack/react-virtual` 只挂载 visible + overscan items。上滑/下滑只改变 virtualizer range，不触发 server read。
+- 尾部锁定时新 turn 和 streaming 高度增长跟随到底；用户离开底部后保持当前锚点并显示回到底部 affordance。
 
 打开项目、切换 tab、切换 session 时，补读流程异步执行，不阻塞 UI 交互。
 

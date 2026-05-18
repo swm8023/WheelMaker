@@ -1,4 +1,4 @@
-import type { RegistryChatMessage, RegistryChatSession } from './types/registry';
+import type { RegistryChatSession } from './types/registry';
 
 export type ChatSessionVisualState =
   | 'idle'
@@ -34,47 +34,6 @@ export function resolveChatSessionVisualState(
     RegistryChatSession,
     'running' | 'lastDoneTurnIndex' | 'lastDoneSuccess' | 'lastReadTurnIndex'
   >,
-  local: { running?: boolean; completedUnviewed?: boolean } = {},
 ): ChatSessionVisualState {
-  if (local.running || session.running === true) {
-    return 'running';
-  }
-  const state = getChatSessionVisualState({
-    ...session,
-    running: false,
-  });
-  if (state !== 'idle') {
-    return state;
-  }
-  return local.completedUnviewed ? 'completed-unviewed' : 'idle';
-}
-
-export function shouldClearLocalChatSessionRunning(
-  session: Pick<RegistryChatSession, 'running'>,
-): boolean {
-  return session.running === false;
-}
-
-export function isChatSessionRunningMessage(message: Pick<
-  RegistryChatMessage,
-  'method' | 'param' | 'finished'
->): boolean {
-  switch (message.method) {
-    case 'prompt_request':
-    case 'user_message_chunk':
-      return true;
-    case 'agent_message_chunk':
-    case 'agent_thought_chunk':
-    case 'agent_plan':
-      return message.finished !== true;
-    case 'tool_call': {
-      const status =
-        typeof message.param?.status === 'string'
-          ? message.param.status.trim().toLowerCase()
-          : '';
-      return status === 'streaming' || status === 'running' || status === 'in_progress';
-    }
-    default:
-      return false;
-  }
+  return getChatSessionVisualState(session);
 }
