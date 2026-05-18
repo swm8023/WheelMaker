@@ -328,7 +328,6 @@ const CHAT_PENDING_CONFIRM_TIMEOUT_MS = 5000;
 const CHAT_CONFIG_PRIORITY_IDS = ['mode', 'model', 'effort'] as const;
 const CHAT_CONFIG_PRIORITY_MATCHERS = ['mode', 'model', 'effort', 'thought'] as const;
 const CHAT_CONFIG_INLINE_LIMIT = 3;
-const CHAT_QUICK_REPLY_OPTIONS = ['确认', '接受'];
 const WIDE_PROJECT_SESSION_LIMIT = 5;
 const PROJECT_PIN_LONG_PRESS_MS = 450;
 const PROJECT_SESSION_LONG_PRESS_MS = 450;
@@ -2320,8 +2319,8 @@ function App() {
   const chatLastScrollTopRef = useRef(0);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
-  const chatQuickReplyButtonRef = useRef<HTMLButtonElement | null>(null);
-  const chatQuickReplyMenuRef = useRef<HTMLDivElement | null>(null);
+  const chatFileMentionButtonRef = useRef<HTMLButtonElement | null>(null);
+  const chatFileMentionMenuRef = useRef<HTMLDivElement | null>(null);
   const chatSlashMenuRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOptionsRef = useRef<HTMLDivElement | null>(null);
   const chatConfigOverflowRef = useRef<HTMLDivElement | null>(null);
@@ -2377,7 +2376,7 @@ function App() {
   const currentChatDraftKeyRef = useRef('');
   const chatAttachmentIdRef = useRef(0);
   const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);
-  const [chatQuickReplyMenuOpen, setChatQuickReplyMenuOpen] = useState(false);
+  const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);
   const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');
   const [chatSlashActiveIndex, setChatSlashActiveIndex] = useState(0);
   const [resumeSessions, setResumeSessions] = useState<RegistryResumableSession[]>([]);
@@ -2480,7 +2479,7 @@ function App() {
     [chatPromptMenuOpen, chatSlashCommands, chatSlashCommandOptions],
   );
 
-  const chatSlashMenuVisible = chatSlashMenuOptions.length > 0;
+  const chatSlashMenuVisible = !chatFileMentionMenuOpen && chatSlashMenuOptions.length > 0;
 
 
   const currentChatDraftKey = useMemo(
@@ -2786,7 +2785,7 @@ function App() {
         input?.selectionEnd ?? input?.selectionStart ?? chatComposerText.length,
       );
       setChatPromptMenuOpen(false);
-      setChatQuickReplyMenuOpen(false);
+      setChatFileMentionMenuOpen(false);
       setChatConfigMenuOptionId('');
       setChatConfigOverflowOpen(false);
       updateChatComposerText(inserted.text);
@@ -2803,24 +2802,20 @@ function App() {
   );
 
   const openChatPromptMenu = useCallback(() => {
-    setChatQuickReplyMenuOpen(false);
+    setChatFileMentionMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
     setChatPromptMenuOpen(value => !value);
     window.requestAnimationFrame(() => {
-      const target = chatComposerTextareaRef.current;
-      if (!target) {
-        return;
-      }
-      target.focus();
+      chatComposerTextareaRef.current?.focus();
     });
   }, [setChatConfigOverflowOpen]);
 
-  const openChatQuickReplyMenu = useCallback(() => {
+  const openChatFileMentionMenu = useCallback(() => {
     setChatPromptMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
-    setChatQuickReplyMenuOpen(value => !value);
+    setChatFileMentionMenuOpen(value => !value);
   }, [setChatConfigOverflowOpen]);
 
   const getChatDraftGeneration = useCallback((draftKey: string) => {
@@ -3483,21 +3478,21 @@ function App() {
   }, [chatPromptMenuOpen]);
 
   useEffect(() => {
-    if (!chatQuickReplyMenuOpen) return;
+    if (!chatFileMentionMenuOpen) return;
     const onPointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (
         target &&
-        (chatQuickReplyMenuRef.current?.contains(target) ||
-          chatQuickReplyButtonRef.current?.contains(target))
+        (chatFileMentionMenuRef.current?.contains(target) ||
+          chatFileMentionButtonRef.current?.contains(target))
       ) {
         return;
       }
-      setChatQuickReplyMenuOpen(false);
+      setChatFileMentionMenuOpen(false);
     };
     window.addEventListener('pointerdown', onPointerDown);
     return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [chatQuickReplyMenuOpen]);
+  }, [chatFileMentionMenuOpen]);
 
   useEffect(() => {
     if (!chatConfigMenuOptionId) return;
@@ -5672,7 +5667,7 @@ function App() {
     if (!normalizedText) {
       return;
     }
-    setChatQuickReplyMenuOpen(false);
+    setChatFileMentionMenuOpen(false);
     setChatPromptMenuOpen(false);
     setChatConfigMenuOptionId('');
     setChatConfigOverflowOpen(false);
@@ -5681,10 +5676,6 @@ function App() {
       attachmentsOverride: [],
       preserveComposer: true,
     });
-  };
-
-  const handleChatQuickReplySelect = (option: string) => {
-    sendDirectChatText(option).catch(() => undefined);
   };
 
   const buildChatAttachmentsFromBlocks = (blocks: RegistryChatContentBlock[]): ChatAttachment[] => {
@@ -9127,6 +9118,7 @@ function App() {
             aria-expanded={open}
             onClick={() => {
               setChatPromptMenuOpen(false);
+              setChatFileMentionMenuOpen(false);
               setChatConfigOverflowOpen(false);
               setChatConfigMenuOptionId(current => (current === option.id ? '' : option.id));
             }}
@@ -9136,7 +9128,6 @@ function App() {
               aria-hidden="true"
             />
             <span className="chat-config-pill-value">{currentLabel}</span>
-            <span className="codicon codicon-chevron-down" aria-hidden="true" />
           </button>
           {open ? renderChatConfigValueMenu(option) : null}
         </div>
@@ -9247,17 +9238,17 @@ function App() {
               ) : null}
               <div className="chat-composer-input-row">
                 <button
-                  ref={chatQuickReplyButtonRef}
+                  ref={chatPromptButtonRef}
                   type="button"
-                  className="chat-composer-quick-trigger"
+                  className="chat-composer-skill-trigger"
                   onPointerDown={event => event.preventDefault()}
-                  onClick={openChatQuickReplyMenu}
-                  title="Quick replies"
-                  aria-label="Quick replies"
-                  aria-haspopup="menu"
-                  aria-expanded={chatQuickReplyMenuOpen}
+                  onClick={openChatPromptMenu}
+                  title="Skills"
+                  aria-label="Open skills"
+                  aria-haspopup="listbox"
+                  aria-expanded={chatPromptMenuOpen}
                 >
-                  <span className="chat-quick-trigger-label">A</span>
+                  <span className="codicon codicon-terminal" aria-hidden="true" />
                 </button>
                 <div className="chat-composer-input-shell">
                   <textarea
@@ -9379,20 +9370,9 @@ function App() {
                   </button>
                 </div>
               </div>
-              {chatQuickReplyMenuOpen ? (
-                <div ref={chatQuickReplyMenuRef} className="chat-quick-reply-menu" role="menu" aria-label="Quick replies">
-                  {CHAT_QUICK_REPLY_OPTIONS.map(option => (
-                    <button
-                      key={option}
-                      type="button"
-                      className="chat-quick-reply-item"
-                      role="menuitem"
-                      onPointerDown={event => event.preventDefault()}
-                      onClick={() => handleChatQuickReplySelect(option)}
-                    >
-                      {option}
-                    </button>
-                  ))}
+              {chatFileMentionMenuOpen ? (
+                <div ref={chatFileMentionMenuRef} className="chat-file-mention-menu" role="menu" aria-label="File mentions">
+                  <div className="chat-file-mention-empty">File mentions coming soon</div>
                 </div>
               ) : null}
               {chatSlashMenuVisible ? (
@@ -9423,22 +9403,23 @@ function App() {
                 <div className="chat-composer-tools">
                   <button
                     type="button"
-                    ref={chatPromptButtonRef}
-                    className="chat-tool-button chat-skill-button"
-                    onClick={openChatPromptMenu}
-                    title="Skills"
-                    aria-label="Open skills"
-                    aria-haspopup="listbox"
-                    aria-expanded={chatPromptMenuOpen}
+                    ref={chatFileMentionButtonRef}
+                    className="chat-tool-button chat-mention-button"
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={openChatFileMentionMenu}
+                    title="Mention files"
+                    aria-label="Mention files"
+                    aria-haspopup="menu"
+                    aria-expanded={chatFileMentionMenuOpen}
                   >
-                    <span className="codicon codicon-wand" />
+                    <span className="chat-mention-symbol">@</span>
                   </button>
                   <button
                     type="button"
                     className="chat-tool-button chat-photo-button"
                     onClick={() => {
                       setChatPromptMenuOpen(false);
-                      setChatQuickReplyMenuOpen(false);
+                      setChatFileMentionMenuOpen(false);
                       setChatConfigMenuOptionId('');
                       setChatConfigOverflowOpen(false);
                       chatFileInputRef.current?.click();
@@ -9479,6 +9460,7 @@ function App() {
                             title="More config options"
                             onClick={() => {
                               setChatPromptMenuOpen(false);
+                              setChatFileMentionMenuOpen(false);
                               setChatConfigMenuOptionId('');
                               setChatConfigOverflowOpen(prev => !prev);
                             }}

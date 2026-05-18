@@ -4078,7 +4078,7 @@ body,
   min-width: 0;
 }
 
-.chat-composer-quick-trigger {
+.chat-composer-skill-trigger {
   width: 22px;
   height: 30px;
   flex: 0 0 auto;
@@ -4086,9 +4086,6 @@ body,
   border-radius: 8px;
   background: transparent;
   color: color-mix(in srgb, var(--accent) 84%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 700;
   line-height: 1;
   display: inline-flex;
   align-items: center;
@@ -4096,15 +4093,13 @@ body,
   cursor: pointer;
 }
 
-.chat-composer-quick-trigger:hover,
-.chat-composer-quick-trigger[aria-expanded='true'] {
+.chat-composer-skill-trigger:hover,
+.chat-composer-skill-trigger[aria-expanded='true'] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.chat-quick-trigger-label {
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
+.chat-composer-skill-trigger .codicon {
+  font-size: 15px;
 }
 
 .chat-composer-input-shell {
@@ -4135,14 +4130,14 @@ body,
   outline: none;
 }
 
-.chat-quick-reply-menu {
+.chat-file-mention-menu {
   position: absolute;
   left: 8px;
+  right: 8px;
   bottom: calc(100% + 8px);
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px;
+  flex-direction: column;
+  padding: 8px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--panel);
@@ -4150,30 +4145,15 @@ body,
   z-index: 37;
 }
 
-.chat-quick-reply-item {
-  min-width: 44px;
-  height: 30px;
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-1) 88%, var(--accent));
-  color: var(--text);
-  cursor: pointer;
+.chat-file-mention-empty {
+  min-height: 32px;
+  border-radius: 8px;
+  color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
-  display: inline-flex;
+  line-height: 1.3;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 9px;
-}
-
-.chat-quick-reply-item:hover {
-  border-color: color-mix(in srgb, var(--accent) 44%, var(--border));
-  background: color-mix(in srgb, var(--surface-1) 78%, var(--accent));
-}
-
-.chat-quick-reply-item:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
-  outline-offset: 2px;
+  padding: 0 8px;
 }
 
 .chat-slash-menu {
@@ -4296,8 +4276,15 @@ body,
   justify-content: center;
 }
 
-.chat-skill-button {
+.chat-mention-button {
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.chat-mention-symbol {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .chat-photo-button {

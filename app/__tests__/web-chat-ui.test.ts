@@ -424,21 +424,26 @@ describe('web chat integration', () => {
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('const CHAT_CONFIG_INLINE_LIMIT = 3;');
-    expect(mainTsx).toContain("const CHAT_QUICK_REPLY_OPTIONS = ['确认', '接受'];");
-    expect(mainTsx).not.toContain("const CHAT_QUICK_REPLY_OPTIONS = ['A', 'B', 'C', '确认', '接受'];");
+    expect(mainTsx).not.toContain('CHAT_QUICK_REPLY_OPTIONS');
     expect(mainTsx).toContain('const [chatPromptMenuOpen, setChatPromptMenuOpen] = useState(false);');
-    expect(mainTsx).toContain('const [chatQuickReplyMenuOpen, setChatQuickReplyMenuOpen] = useState(false);');
+    expect(mainTsx).not.toContain('chatQuickReplyMenuOpen');
+    expect(mainTsx).toContain('const [chatFileMentionMenuOpen, setChatFileMentionMenuOpen] = useState(false);');
     expect(mainTsx).toContain("const [chatConfigMenuOptionId, setChatConfigMenuOptionId] = useState('');");
     expect(mainTsx).toContain('selectedChatConfigOptions.length <= CHAT_CONFIG_INLINE_LIMIT');
     expect(mainTsx).toContain('prioritized.slice(0, CHAT_CONFIG_INLINE_LIMIT)');
     expect(mainTsx).toContain('className="chat-composer-frame"');
     expect(mainTsx).toContain('className="chat-composer-input-row"');
-    expect(mainTsx).toContain('className="chat-composer-quick-trigger"');
-    expect(mainTsx).toContain('title="Quick replies"');
-    expect(mainTsx).toContain('aria-label="Quick replies"');
-    expect(mainTsx).toContain('className="chat-quick-reply-menu"');
-    expect(mainTsx).toContain('const handleChatQuickReplySelect = (option: string) => {');
-    expect(mainTsx).toContain('onClick={() => handleChatQuickReplySelect(option)}');
+    expect(mainTsx).toContain('className="chat-composer-skill-trigger"');
+    expect(mainTsx).toContain('title="Skills"');
+    expect(mainTsx).toContain('aria-label="Open skills"');
+    expect(mainTsx).toContain('codicon-terminal');
+    expect(mainTsx).not.toContain('className="chat-composer-quick-trigger"');
+    expect(mainTsx).not.toContain('title="Quick replies"');
+    expect(mainTsx).not.toContain('aria-label="Quick replies"');
+    expect(mainTsx).not.toContain('className="chat-quick-reply-menu"');
+    expect(mainTsx).not.toContain('className="chat-quick-reply-item"');
+    expect(mainTsx).not.toContain('openChatQuickReplyMenu');
+    expect(mainTsx).not.toContain('handleChatQuickReplySelect');
     expect(mainTsx).not.toContain('chatComposerText.length === 0 ? (');
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
@@ -448,9 +453,16 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
     expect(mainTsx).toContain('codicon-debug-stop');
     expect(mainTsx).toContain('className="chat-composer-tools"');
-    expect(mainTsx).toContain('className="chat-tool-button chat-skill-button"');
-    expect(mainTsx).toContain('title="Skills"');
-    expect(mainTsx).toContain('codicon-wand');
+    expect(mainTsx).toContain('className="chat-tool-button chat-mention-button"');
+    expect(mainTsx).toContain('title="Mention files"');
+    expect(mainTsx).toContain('aria-label="Mention files"');
+    expect(mainTsx).toContain('className="chat-mention-symbol"');
+    expect(mainTsx).toContain('className="chat-file-mention-menu"');
+    expect(mainTsx).toContain('className="chat-file-mention-empty"');
+    expect(mainTsx).toContain('File mentions coming soon');
+    expect(mainTsx).toContain('const openChatFileMentionMenu = useCallback(() => {');
+    expect(mainTsx).not.toContain('className="chat-tool-button chat-skill-button"');
+    expect(mainTsx).not.toContain('codicon-wand');
     expect(mainTsx).not.toContain('codicon-symbol-keyword');
     expect(mainTsx).toContain('className="chat-tool-button chat-photo-button"');
     expect(mainTsx).toContain('codicon-device-camera');
@@ -494,35 +506,51 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain("import { insertChatSlashCommandText } from './chat/chatSlashInsertion';");
     expect(mainTsx).toContain('const inserted = insertChatSlashCommandText(');
 
-    const quickReplyMenuOpenStart = mainTsx.indexOf('const openChatQuickReplyMenu = useCallback(() => {');
-    const quickReplyMenuOpenEnd = mainTsx.indexOf('const getChatDraftGeneration = useCallback', quickReplyMenuOpenStart);
-    expect(quickReplyMenuOpenStart).toBeGreaterThanOrEqual(0);
-    expect(quickReplyMenuOpenEnd).toBeGreaterThan(quickReplyMenuOpenStart);
-    const quickReplyMenuOpenBody = mainTsx.slice(quickReplyMenuOpenStart, quickReplyMenuOpenEnd);
-    expect(quickReplyMenuOpenBody).not.toContain('chatComposerTextareaRef.current?.blur();');
-    expect(quickReplyMenuOpenBody).not.toContain('target.focus();');
+    const skillTriggerClassStart = mainTsx.indexOf('className="chat-composer-skill-trigger"');
+    const skillTriggerStart = mainTsx.lastIndexOf('<button', skillTriggerClassStart);
+    const skillTriggerEnd = mainTsx.indexOf('className="chat-composer-input-shell"', skillTriggerStart);
+    expect(skillTriggerStart).toBeGreaterThanOrEqual(0);
+    expect(skillTriggerEnd).toBeGreaterThan(skillTriggerStart);
+    const skillTriggerBlock = mainTsx.slice(skillTriggerStart, skillTriggerEnd);
+    expect(skillTriggerBlock).toContain('ref={chatPromptButtonRef}');
+    expect(skillTriggerBlock).toContain('onPointerDown={event => event.preventDefault()}');
+    expect(skillTriggerBlock).toContain('onClick={openChatPromptMenu}');
 
-    const quickReplySelectStart = mainTsx.indexOf('const handleChatQuickReplySelect = (option: string) => {');
-    const quickReplySelectEnd = mainTsx.indexOf('const applyChatSessionConfigOptions = (', quickReplySelectStart);
-    expect(quickReplySelectStart).toBeGreaterThanOrEqual(0);
-    expect(quickReplySelectEnd).toBeGreaterThan(quickReplySelectStart);
-    const quickReplySelectBody = mainTsx.slice(quickReplySelectStart, quickReplySelectEnd);
-    expect(quickReplySelectBody).not.toContain('chatComposerTextareaRef.current?.blur();');
+    const promptMenuOpenStart = mainTsx.indexOf('const openChatPromptMenu = useCallback(() => {');
+    const promptMenuOpenEnd = mainTsx.indexOf('const openChatFileMentionMenu = useCallback(() => {', promptMenuOpenStart);
+    expect(promptMenuOpenStart).toBeGreaterThanOrEqual(0);
+    expect(promptMenuOpenEnd).toBeGreaterThan(promptMenuOpenStart);
+    const promptMenuOpenBody = mainTsx.slice(promptMenuOpenStart, promptMenuOpenEnd);
+    expect(promptMenuOpenBody).toContain('setChatFileMentionMenuOpen(false);');
+    expect(promptMenuOpenBody).toContain('chatComposerTextareaRef.current?.focus();');
+    expect(promptMenuOpenBody).not.toContain('chatComposerTextareaRef.current?.blur();');
 
-    const quickReplyTriggerStart = mainTsx.indexOf('className="chat-composer-quick-trigger"');
-    const quickReplyTriggerEnd = mainTsx.indexOf('className="chat-composer-input-shell"', quickReplyTriggerStart);
-    expect(quickReplyTriggerStart).toBeGreaterThanOrEqual(0);
-    expect(quickReplyTriggerEnd).toBeGreaterThan(quickReplyTriggerStart);
-    const quickReplyTriggerBlock = mainTsx.slice(quickReplyTriggerStart, quickReplyTriggerEnd);
-    expect(quickReplyTriggerBlock).toContain('onPointerDown={event => event.preventDefault()}');
+    const fileMentionMenuOpenStart = mainTsx.indexOf('const openChatFileMentionMenu = useCallback(() => {');
+    const fileMentionMenuOpenEnd = mainTsx.indexOf('const getChatDraftGeneration = useCallback', fileMentionMenuOpenStart);
+    expect(fileMentionMenuOpenStart).toBeGreaterThanOrEqual(0);
+    expect(fileMentionMenuOpenEnd).toBeGreaterThan(fileMentionMenuOpenStart);
+    const fileMentionMenuOpenBody = mainTsx.slice(fileMentionMenuOpenStart, fileMentionMenuOpenEnd);
+    expect(fileMentionMenuOpenBody).toContain('setChatPromptMenuOpen(false);');
+    expect(fileMentionMenuOpenBody).toContain('setChatConfigMenuOptionId(\'\');');
+    expect(fileMentionMenuOpenBody).toContain('setChatConfigOverflowOpen(false);');
+    expect(fileMentionMenuOpenBody).toContain('setChatFileMentionMenuOpen(value => !value);');
+    expect(fileMentionMenuOpenBody).not.toContain('updateChatComposerText');
 
-    const quickReplyItemStart = mainTsx.indexOf('className="chat-quick-reply-item"');
-    const quickReplyItemEnd = mainTsx.indexOf('onClick={() => handleChatQuickReplySelect(option)}', quickReplyItemStart);
-    expect(quickReplyItemStart).toBeGreaterThanOrEqual(0);
-    expect(quickReplyItemEnd).toBeGreaterThan(quickReplyItemStart);
-    const quickReplyItemBlock = mainTsx.slice(quickReplyItemStart, quickReplyItemEnd);
-    expect(quickReplyItemBlock).toContain('onPointerDown={event => event.preventDefault()}');
-    expect(quickReplyItemBlock).not.toContain('onMouseDown={event => event.preventDefault()}');
+    const toolsStart = mainTsx.indexOf('className="chat-composer-tools"');
+    const toolsEnd = mainTsx.indexOf('className="chat-config-options-wrap"', toolsStart);
+    expect(toolsStart).toBeGreaterThanOrEqual(0);
+    expect(toolsEnd).toBeGreaterThan(toolsStart);
+    const toolsBlock = mainTsx.slice(toolsStart, toolsEnd);
+    expect(toolsBlock.indexOf('chat-mention-button')).toBeGreaterThanOrEqual(0);
+    expect(toolsBlock.indexOf('chat-photo-button')).toBeGreaterThan(toolsBlock.indexOf('chat-mention-button'));
+    expect(toolsBlock.indexOf('chat-stop-button')).toBeGreaterThan(toolsBlock.indexOf('chat-photo-button'));
+
+    const configPillStart = mainTsx.indexOf('const renderChatConfigPill = (option: RegistrySessionConfigOption) => {');
+    const configPillEnd = mainTsx.indexOf('if (tab === \'chat\')', configPillStart);
+    expect(configPillStart).toBeGreaterThanOrEqual(0);
+    expect(configPillEnd).toBeGreaterThan(configPillStart);
+    const configPillBlock = mainTsx.slice(configPillStart, configPillEnd);
+    expect(configPillBlock).not.toContain('codicon-chevron-down');
 
     const configChangeStart = mainTsx.indexOf('const handleChatConfigOptionChange = async');
     const configChangeEnd = mainTsx.indexOf('const handleChatFileChange = async', configChangeStart);
@@ -543,6 +571,7 @@ describe('web chat integration', () => {
     expect(slashApplyBody).toContain('input?.selectionStart ?? chatComposerText.length');
     expect(slashApplyBody).toContain('updateChatComposerText(inserted.text);');
     expect(slashApplyBody).toContain('input.setSelectionRange(inserted.selectionStart, inserted.selectionEnd);');
+    expect(slashApplyBody).toContain('setChatFileMentionMenuOpen(false);');
     expect(slashApplyBody).not.toContain('updateChatComposerText(next);');
 
     expect(stylesCss).toMatch(
@@ -562,15 +591,16 @@ describe('web chat integration', () => {
     expect(stylesCss).toMatch(
       /\.chat-composer-input-row \{[\s\S]*gap: 5px;[\s\S]*min-height: 32px;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('.chat-composer-quick-trigger {');
+    expect(stylesCss).toContain('.chat-composer-skill-trigger {');
     expect(stylesCss).toMatch(
-      /\.chat-composer-quick-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
+      /\.chat-composer-skill-trigger \{[\s\S]*width: 22px;[\s\S]*height: 30px;[\s\S]*display: inline-flex;[\s\S]*align-items: center;[\s\S]*justify-content: center;[\s\S]*\}/,
     );
-    expect(stylesCss).toContain('.chat-quick-reply-menu {');
-    expect(stylesCss).toContain('.chat-quick-reply-item {');
-    expect(stylesCss).toMatch(
-      /\.chat-quick-reply-item \{[\s\S]*min-width: 44px;[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
-    );
+    expect(stylesCss).not.toContain('.chat-composer-quick-trigger {');
+    expect(stylesCss).not.toContain('.chat-quick-trigger-label {');
+    expect(stylesCss).not.toContain('.chat-quick-reply-menu {');
+    expect(stylesCss).not.toContain('.chat-quick-reply-item {');
+    expect(stylesCss).toContain('.chat-file-mention-menu {');
+    expect(stylesCss).toContain('.chat-file-mention-empty {');
     expect(stylesCss).toContain('.chat-option-reply-line {');
     expect(stylesCss).toContain('.chat-option-reply-inline-button {');
     expect(stylesCss).toContain('.chat-option-reply-static {');
@@ -622,8 +652,10 @@ describe('web chat integration', () => {
       /\.chat-tool-button \{[\s\S]*border: none;[\s\S]*background: transparent;/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-skill-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
+      /\.chat-mention-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
     );
+    expect(stylesCss).toContain('.chat-mention-symbol {');
+    expect(stylesCss).not.toContain('.chat-skill-button {');
     expect(stylesCss).toMatch(
       /\.chat-photo-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
     );
