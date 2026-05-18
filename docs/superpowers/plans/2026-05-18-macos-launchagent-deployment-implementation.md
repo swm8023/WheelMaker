@@ -1,6 +1,6 @@
 # macOS LaunchAgent Deployment Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add a macOS Machine A deployment path using current-user LaunchAgents while preserving the existing Windows service deployment.
 
@@ -30,7 +30,7 @@
 - Modify: `app/package.json`
 - Test: `app/__tests__/web-export-release-script.test.ts`
 
-- [ ] **Step 1: Write the failing Jest test**
+- [x] **Step 1: Write the failing Jest test**
 
 Create `app/__tests__/web-export-release-script.test.ts`:
 
@@ -69,13 +69,13 @@ describe('web release exporter', () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `cd app && npm test -- web-export-release-script.test.ts --runInBand`
 
 Expected: FAIL because `app/scripts/export_web_release.js` does not exist and `package.json` still calls PowerShell.
 
-- [ ] **Step 3: Implement the Node exporter and package script**
+- [x] **Step 3: Implement the Node exporter and package script**
 
 Create `app/scripts/export_web_release.js` with recursive copy logic:
 
@@ -126,7 +126,7 @@ Change `build:web:release` in `app/package.json` to:
 "build:web:release": "npm run build:web && node scripts/export_web_release.js"
 ```
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run: `cd app && npm test -- web-export-release-script.test.ts --runInBand`
 
@@ -138,7 +138,7 @@ Expected: PASS.
 - Create: `scripts/refresh_server.sh`
 - Create: `scripts/test_refresh_server_sh.ps1`
 
-- [ ] **Step 1: Write the failing source test**
+- [x] **Step 1: Write the failing source test**
 
 Create `scripts/test_refresh_server_sh.ps1`:
 
@@ -176,13 +176,13 @@ Assert-Contains "~/Library/LaunchAgents"
 Write-Host "refresh_server.sh source checks passed"
 ```
 
-- [ ] **Step 2: Run the script test and verify RED**
+- [x] **Step 2: Run the script test and verify RED**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_refresh_server_sh.ps1`
 
 Expected: FAIL because `scripts/refresh_server.sh` does not exist.
 
-- [ ] **Step 3: Implement `scripts/refresh_server.sh`**
+- [x] **Step 3: Implement `scripts/refresh_server.sh`**
 
 Create a macOS-only Bash script that:
 
@@ -197,13 +197,13 @@ Create a macOS-only Bash script that:
 - Publishes Web assets by running `npm run build:web:release` unless `--skip-web-publish` is set.
 - Skips updater plist/control when `--skip-updater-install` is set, so the updater can safely invoke the script.
 
-- [ ] **Step 4: Mark the script executable**
+- [x] **Step 4: Mark the script executable**
 
 Run: `git update-index --chmod=+x scripts/refresh_server.sh`
 
 Expected: exit 0.
 
-- [ ] **Step 5: Run the script source test and verify GREEN**
+- [x] **Step 5: Run the script source test and verify GREEN**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_refresh_server_sh.ps1`
 
@@ -215,7 +215,7 @@ Expected: PASS.
 - Modify: `server/cmd/wheelmaker-updater/updater.go`
 - Modify: `server/cmd/wheelmaker-updater/updater_test.go`
 
-- [ ] **Step 1: Write failing updater tests**
+- [x] **Step 1: Write failing updater tests**
 
 Add tests to `updater_test.go`:
 
@@ -305,13 +305,13 @@ func TestRequiredCommandsForOS(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run updater tests and verify RED**
+- [x] **Step 2: Run updater tests and verify RED**
 
 Run: `cd server && go test ./cmd/wheelmaker-updater`
 
 Expected: FAIL because `runtimeGOOS` and darwin shell selection do not exist.
 
-- [ ] **Step 3: Implement platform-specific updater invocation**
+- [x] **Step 3: Implement platform-specific updater invocation**
 
 In `updater.go`:
 
@@ -325,7 +325,7 @@ In `updater.go`:
 - Append `-SkipUpdate` on Windows and `--skip-update --skip-web-publish` on Darwin for plain manual signal mode.
 - Keep the existing extra `npm run build:web:release` step only when `refreshPublishesWeb` is false and `skipUpdate` is false.
 
-- [ ] **Step 4: Run updater tests and verify GREEN**
+- [x] **Step 4: Run updater tests and verify GREEN**
 
 Run: `cd server && go test ./cmd/wheelmaker-updater`
 
@@ -337,7 +337,7 @@ Expected: PASS.
 - Modify: `server/cmd/wheelmaker-monitor/monitor.go`
 - Modify: `server/cmd/wheelmaker-monitor/monitor_test.go`
 
-- [ ] **Step 1: Write failing monitor helper tests**
+- [x] **Step 1: Write failing monitor helper tests**
 
 Add tests:
 
@@ -379,13 +379,13 @@ func TestParseLaunchAgentServiceInfo(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run monitor tests and verify RED**
+- [x] **Step 2: Run monitor tests and verify RED**
 
 Run: `cd server && go test ./cmd/wheelmaker-monitor`
 
 Expected: FAIL because launch agent helper functions do not exist.
 
-- [ ] **Step 3: Implement LaunchAgent helpers and macOS branches**
+- [x] **Step 3: Implement LaunchAgent helpers and macOS branches**
 
 In `monitor.go`:
 
@@ -408,7 +408,7 @@ In `monitor.go`:
 - Make `StartService`, `StopService`, and `RestartService` control hub/updater LaunchAgents on darwin.
 - Make `RestartMonitor` kickstart `com.wheelmaker.monitor` on darwin when its plist exists.
 
-- [ ] **Step 4: Run monitor tests and verify GREEN**
+- [x] **Step 4: Run monitor tests and verify GREEN**
 
 Run: `cd server && go test ./cmd/wheelmaker-monitor`
 
@@ -419,7 +419,7 @@ Expected: PASS.
 **Files:**
 - Modify: `README.md`
 
-- [ ] **Step 1: Add README source checks**
+- [x] **Step 1: Add README source checks**
 
 No separate test file is needed. Use `rg` after editing:
 
@@ -427,7 +427,7 @@ Run: `rg -n "macOS|LaunchAgent|refresh_server.sh|127.0.0.1:9630|127.0.0.1:9631|~
 
 Expected before edit: FAIL to find the new macOS deployment section.
 
-- [ ] **Step 2: Document the macOS path**
+- [x] **Step 2: Document the macOS path**
 
 Add a macOS deployment section near the Windows deployment section covering:
 
@@ -445,7 +445,7 @@ Add a macOS deployment section near the Windows deployment section covering:
   - `/ws` -> `127.0.0.1:9630`
   - `/monitor/` -> `127.0.0.1:9631`
 
-- [ ] **Step 3: Run README check**
+- [x] **Step 3: Run README check**
 
 Run: `rg -n "macOS|LaunchAgent|refresh_server.sh|127.0.0.1:9630|127.0.0.1:9631|~/Library/LaunchAgents" README.md`
 
@@ -456,7 +456,7 @@ Expected: matches in the macOS section.
 **Files:**
 - All files changed by prior tasks.
 
-- [ ] **Step 1: Run script source checks**
+- [x] **Step 1: Run script source checks**
 
 Run:
 
@@ -468,13 +468,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_update_publish_
 
 Expected: all PASS.
 
-- [ ] **Step 2: Run server tests**
+- [x] **Step 2: Run server tests**
 
 Run: `cd server && go test ./...`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run darwin cross-builds**
+- [x] **Step 3: Run darwin cross-builds**
 
 Run:
 
@@ -490,13 +490,13 @@ Remove-Item Env:\GOARCH
 
 Expected: all builds exit 0.
 
-- [ ] **Step 4: Run focused app tests**
+- [x] **Step 4: Run focused app tests**
 
 Run: `cd app && npm test -- web-export-release-script.test.ts --runInBand`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run app typecheck and full tests**
+- [x] **Step 5: Run app typecheck and full tests**
 
 Run:
 
@@ -508,13 +508,13 @@ npm test -- --runInBand
 
 Expected: PASS.
 
-- [ ] **Step 6: Run Web release build**
+- [x] **Step 6: Run Web release build**
 
 Run: `cd app && npm run build:web:release`
 
 Expected: PASS and prints `Exported web release to ...\.wheelmaker\web`.
 
-- [ ] **Step 7: Commit implementation**
+- [x] **Step 7: Commit implementation**
 
 Run:
 
@@ -524,4 +524,5 @@ git commit -m "feat: add macos launchagent deployment"
 ```
 
 Expected: commit succeeds.
+
 
