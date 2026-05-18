@@ -3453,10 +3453,12 @@ body,
   font-size: 12px;
   line-height: 1;
   color: color-mix(in srgb, var(--text) 76%, var(--accent));
+  contain: paint;
 }
 
 .chat-prompt-status-dots span {
   display: inline-block;
+  will-change: opacity;
   animation: chat-prompt-dots-wave 1.2s infinite ease-in-out;
 }
 
@@ -3473,11 +3475,9 @@ body,
   80%,
   100% {
     opacity: 0.28;
-    transform: translateY(0);
   }
   40% {
     opacity: 1;
-    transform: translateY(-1px);
   }
 }
 

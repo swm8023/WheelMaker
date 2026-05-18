@@ -48,4 +48,19 @@ describe('web drag scroll behavior', () => {
     expect(shouldHandleChatVirtualWindowScroll(true)).toBe(false);
     expect(shouldHandleChatVirtualWindowScroll(false)).toBe(true);
   });
+
+  test('keeps responding prompt animation from changing chat scroll overflow', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const styles = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+    const animationStart = styles.indexOf('@keyframes chat-prompt-dots-wave');
+    const animationEnd = styles.indexOf('.chat-prompt-status-done', animationStart);
+    const promptDotsAnimation = styles.slice(animationStart, animationEnd);
+
+    expect(animationStart).toBeGreaterThanOrEqual(0);
+    expect(animationEnd).toBeGreaterThan(animationStart);
+    expect(promptDotsAnimation).not.toContain('transform:');
+    expect(styles).toMatch(
+      /\.chat-prompt-status-dots \{[\s\S]*contain: paint;[\s\S]*\}/,
+    );
+  });
 });
