@@ -197,6 +197,15 @@ func runUpdateRound(ctx context.Context, cfg UpdaterConfig, runner commandRunner
 		return err
 	}
 
+	if !skipUpdate {
+		appDir := filepath.Join(cfg.RepoDir, "app")
+		logger.Info("[updater] publish web release begin")
+		if _, err := runner.CombinedOutput(ctx, appDir, "npm", "run", "build:web:release"); err != nil {
+			return err
+		}
+		logger.Info("[updater] publish web release complete")
+	}
+
 	logger.Info("[updater] run refresh script complete")
 	return nil
 }

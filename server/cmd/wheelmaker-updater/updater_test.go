@@ -64,8 +64,12 @@ func TestNextRunAfterNow(t *testing.T) {
 func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 	repoDir := t.TempDir()
 	scriptsDir := filepath.Join(repoDir, "scripts")
+	appDir := filepath.Join(repoDir, "app")
 	if err := os.MkdirAll(scriptsDir, 0o755); err != nil {
 		t.Fatalf("mkdir scripts: %v", err)
+	}
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatalf("mkdir app: %v", err)
 	}
 	refreshPath := filepath.Join(scriptsDir, "refresh_server.ps1")
 	if err := os.WriteFile(refreshPath, []byte(""), 0o644); err != nil {
@@ -81,10 +85,11 @@ func TestRunUpdateRound_RunsRefreshScript(t *testing.T) {
 
 	var got []string
 	for _, c := range f.calls {
-		got = append(got, c.name+" "+strings.Join(c.args, " "))
+		got = append(got, c.dir+"|"+c.name+" "+strings.Join(c.args, " "))
 	}
 	want := []string{
-		"powershell -NoProfile -ExecutionPolicy Bypass -File " + refreshPath + " -InstallDir C:/Users/test/.wheelmaker/bin -SkipUpdaterInstall -SkipServiceConfig",
+		repoDir + "|powershell -NoProfile -ExecutionPolicy Bypass -File " + refreshPath + " -InstallDir C:/Users/test/.wheelmaker/bin -SkipUpdaterInstall -SkipServiceConfig",
+		appDir + "|npm run build:web:release",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("commands mismatch\n got: %#v\nwant: %#v", got, want)
