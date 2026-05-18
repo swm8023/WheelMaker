@@ -75,8 +75,8 @@ describe('web chat turn rendering', () => {
     expect(main).toContain('const [chatCancellingRuntimeKey, setChatCancellingRuntimeKey] = useState');
     expect(main).toContain('const cancelSelectedChatPrompt = async () => {');
     expect(main).toContain('service.cancelProjectSession(selectedKey.projectId, selectedKey.sessionId)');
-    expect(main).toContain('className="chat-send-control"');
-    expect(main).toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
+    expect(main).toContain('className="chat-composer-tools"');
+    expect(main).toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(main).toContain('disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}');
   });
 

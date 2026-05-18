@@ -439,7 +439,7 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('if (chatComposerText.length > 0) {');
     expect(mainTsx).toContain('className="chat-composer-toolbar"');
     expect(mainTsx).toContain('className="chat-send-control"');
-    expect(mainTsx).toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
+    expect(mainTsx).not.toContain('className={`chat-cancel-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).toContain('title={selectedChatPromptRunning ? \'Cancel prompt\' : \'No prompt running\'}');
     expect(mainTsx).toContain('aria-label="Cancel prompt"');
     expect(mainTsx).toContain('codicon-debug-stop');
@@ -452,6 +452,7 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('codicon-device-camera');
     expect(mainTsx).not.toContain('codicon-file-media');
     expect(mainTsx).toContain('chatFileInputRef.current?.click();');
+    expect(mainTsx).toContain('className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? \' active\' : \'\'}`}');
     expect(mainTsx).not.toContain('chat-voice-button');
     expect(mainTsx).not.toContain("setError('Voice input is not available yet.');");
     expect(mainTsx).toContain('extractChatOptionReplies(text)');
@@ -574,6 +575,9 @@ describe('web chat integration', () => {
     expect(stylesCss).toContain('.chat-confirmation-reply-check {');
     expect(stylesCss).toContain('.chat-confirmation-reply-text {');
     expect(stylesCss).toMatch(
+      /\.chat-confirmation-reply-action \{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);[\s\S]*padding: 4px 8px;[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
       /\.chat-option-reply-inline-button \{[\s\S]*border-color: color-mix\(in srgb, var\(--accent\) 22%, var\(--border\)\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 88%, var\(--accent\)\);/,
     );
     expect(stylesCss).toMatch(
@@ -596,11 +600,7 @@ describe('web chat integration', () => {
       /\.chat-send-button \{[\s\S]*width: 32px;[\s\S]*height: 32px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-send-control {');
-    expect(stylesCss).toContain('.chat-cancel-button {');
-    expect(stylesCss).toMatch(
-      /\.chat-cancel-button \{[\s\S]*position: absolute;[\s\S]*right: -5px;[\s\S]*bottom: -6px;[\s\S]*width: 18px;[\s\S]*height: 18px;[\s\S]*\}/,
-    );
-    expect(stylesCss).toContain(".chat-cancel-button.active {");
+    expect(stylesCss).not.toContain('.chat-cancel-button {');
     expect(stylesCss).toMatch(
       /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
     );
@@ -615,13 +615,19 @@ describe('web chat integration', () => {
       /\.chat-tool-button \{[\s\S]*width: 24px;[\s\S]*height: 24px;[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
-      /\.chat-tool-button \{[\s\S]*border: 1px solid color-mix\(in srgb, var\(--border\) 78%, transparent\);[\s\S]*background: color-mix\(in srgb, var\(--surface-1\) 72%, transparent\);/,
+      /\.chat-tool-button \{[\s\S]*border: none;[\s\S]*background: transparent;/,
     );
     expect(stylesCss).toMatch(
       /\.chat-skill-button \{[\s\S]*color: color-mix\(in srgb, var\(--accent\) 72%, var\(--text\)\);[\s\S]*\}/,
     );
     expect(stylesCss).toMatch(
       /\.chat-photo-button \{[\s\S]*color: color-mix\(in srgb, #4db6ac 72%, var\(--text\)\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-stop-button \{[\s\S]*color: color-mix\(in srgb, var\(--muted\) 82%, var\(--text\)\);[\s\S]*\}/,
+    );
+    expect(stylesCss).toMatch(
+      /\.chat-stop-button\.active \{[\s\S]*color: #f85149;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-config-pill {');
     expect(stylesCss).toContain('.chat-config-value-menu {');
@@ -926,13 +932,8 @@ describe('web chat integration', () => {
     const selectedSessionRowBlock = stylesCss.match(/\.wide-session-row\.selected \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(selectedSessionRowBlock).toContain('background: color-mix(in srgb, var(--accent) 18%, var(--panel-2));');
     expect(selectedSessionRowBlock).not.toContain('box-shadow: inset 3px 0 0 var(--accent);');
-    expect(stylesCss).toMatch(
-      /\.project-session-row-wrap:hover \.wide-session-row::after,[\s\S]*\.project-session-row-wrap:focus-within \.wide-session-row::after,[\s\S]*\.project-session-row-wrap\.actions-open \.wide-session-row::after \{[\s\S]*background: linear-gradient\([\s\S]*\}/,
-    );
+    expect(stylesCss).not.toContain('.wide-session-row::after');
     expect(stylesCss).not.toContain('.project-session-row-wrap.actions-open .wide-session-row {');
-    expect(stylesCss).toMatch(
-      /\.project-session-row-wrap\.actions-open \.wide-session-row::after \{[^}]*width: min\(236px, 80%\);[^}]*\}/,
-    );
     expect(stylesCss).toMatch(
       /\.project-session-action-strip \{[^}]*top: 50%;[^}]*height: 30px;[^}]*transform: translateY\(-50%\);[^}]*width: min\(188px, calc\(100% - 4px\)\);[^}]*\}/,
     );

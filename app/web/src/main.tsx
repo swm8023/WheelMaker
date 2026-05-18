@@ -9208,20 +9208,6 @@ function App() {
                   >
                     <span className="codicon codicon-send" />
                   </button>
-                  <button
-                    type="button"
-                    className={`chat-cancel-button${selectedChatPromptRunning ? ' active' : ''}`}
-                    onPointerDown={event => event.preventDefault()}
-                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
-                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
-                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
-                    aria-label="Cancel prompt"
-                  >
-                    <span
-                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
-                      aria-hidden="true"
-                    />
-                  </button>
                 </div>
               </div>
               {chatQuickReplyMenuOpen ? (
@@ -9292,6 +9278,20 @@ function App() {
                     aria-label="Attach image"
                   >
                     <span className="codicon codicon-device-camera" />
+                  </button>
+                  <button
+                    type="button"
+                    className={`chat-tool-button chat-stop-button${selectedChatPromptRunning ? ' active' : ''}`}
+                    onPointerDown={event => event.preventDefault()}
+                    onClick={() => cancelSelectedChatPrompt().catch(() => undefined)}
+                    disabled={!selectedChatPromptRunning || selectedChatPromptCancelling}
+                    title={selectedChatPromptRunning ? 'Cancel prompt' : 'No prompt running'}
+                    aria-label="Cancel prompt"
+                  >
+                    <span
+                      className={`codicon ${selectedChatPromptCancelling ? 'codicon-loading codicon-modifier-spin' : 'codicon-debug-stop'}`}
+                      aria-hidden="true"
+                    />
                   </button>
                 </div>
                 {selectedChatConfigOptions.length > 0 ? (
