@@ -30,9 +30,9 @@ func parseWorkerProcessesFromPS(out []byte, exeName, markerFlag string) ([]daemo
 		if convErr != nil || pid <= 0 {
 			continue
 		}
-		comm := strings.TrimSpace(fields[1])
 		args := strings.Join(fields[2:], " ")
-		if base != "" && filepath.Base(comm) != base {
+		argv0 := fields[2]
+		if base != "" && filepath.Base(argv0) != base {
 			continue
 		}
 		if !strings.Contains(args, markerFlag) {
