@@ -4219,13 +4219,6 @@ function App() {
   expandedDirsRef.current = expandedDirs;
   selectedFileRef.current = selectedFile;
 
-  useEffect(() => {
-    knownProjectRevRef.current = currentProject?.projectRev ?? '';
-    knownGitRevRef.current = currentProject?.git?.gitRev ?? '';
-    if (currentProject?.git?.worktreeRev) {
-      knownWorktreeRevRef.current = currentProject.git.worktreeRev;
-    }
-  }, [currentProject]);
   const worktreeActive = selectedDiffSource === 'worktree';
 
   const isExpanded = (path: string) => expandedDirs.includes(path);
@@ -4274,6 +4267,12 @@ function App() {
       dirHashRef.current = {};
       fileHashRef.current = {};
       fileCacheRef.current = {};
+    }
+    const previousProjectId = projectIdRef.current;
+    if (hydrated.projectId !== previousProjectId) {
+      knownProjectRevRef.current = '';
+      knownGitRevRef.current = '';
+      knownWorktreeRevRef.current = '';
     }
     expandedDirsRef.current = hydrated.expandedDirs;
     selectedFileRef.current = hydrated.selectedFile;
@@ -4636,9 +4635,9 @@ function App() {
     readSelectedFile(selectedFile).catch(() => undefined);
   }, [projectId, selectedFile]);
 
-  const loadGit = async (preferredRefs?: string[]) => {
+  const loadGit = async (preferredRefs?: string[]): Promise<boolean> => {
     const targetProjectId = projectIdRef.current || projectId;
-    if (!targetProjectId) return;
+    if (!targetProjectId) return false;
     setGitLoading(true);
     setGitError('');
     try {
@@ -4665,6 +4664,10 @@ function App() {
       const working = buildWorkingTreeFiles(statusData);
       setWorkingTreeFiles(working);
       knownWorktreeRevRef.current = statusData.worktreeRev ?? '';
+      const loadedProject = currentProjectRef.current;
+      if (loadedProject?.projectId === targetProjectId && loadedProject.git?.gitRev) {
+        knownGitRevRef.current = loadedProject.git.gitRev;
+      }
       setCommits(commitData);
       setGitLoadedProjectId(targetProjectId);
       const firstCommit = commitData[0]?.sha ?? '';
@@ -4693,8 +4696,10 @@ function App() {
           setSelectedDiffSource('commit');
         }
       }
+      return true;
     } catch (err) {
       setGitError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setGitLoading(false);
     }
@@ -6580,9 +6585,9 @@ function App() {
     }
     try {
       const sync = await service.syncCheck({
-        knownProjectRev: latestProject?.projectRev ?? '',
-        knownGitRev: latestProject?.git?.gitRev ?? '',
-        knownWorktreeRev: latestProject?.git?.worktreeRev ?? '',
+        knownProjectRev: knownProjectRevRef.current,
+        knownGitRev: knownGitRevRef.current,
+        knownWorktreeRev: knownWorktreeRevRef.current,
       });
       const needsProjectOrFsRefresh = sync.staleDomains.some(
         domain => domain === 'fs' || domain === 'project',
@@ -6601,14 +6606,17 @@ function App() {
       if (latestSelectedFile && needsProjectOrFsRefresh) {
         await readSelectedFile(latestSelectedFile);
       }
-      if (
-        sync.staleDomains.some(
-          domain =>
-            domain === 'git' || domain === 'worktree' || domain === 'project',
-        )
-      ) {
-        await loadGit();
+      const needsGitRefresh = sync.staleDomains.some(
+        domain =>
+          domain === 'git' || domain === 'worktree' || domain === 'project',
+      );
+      if (needsGitRefresh) {
+        const gitLoaded = await loadGit();
+        if (gitLoaded) {
+          knownGitRevRef.current = sync.gitRev ?? '';
+        }
       }
+      knownProjectRevRef.current = sync.projectRev ?? '';
       if (!silent) {
         setHasPendingProjectUpdates(false);
       }

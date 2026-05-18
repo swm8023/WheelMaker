@@ -1397,6 +1397,7 @@ func (r *Reporter) replyGitStatus(conn *websocket.Conn, req envelope) {
 		return
 	}
 	staged, unstaged, untracked := parsePorcelainStatus(raw)
+	normalizedStatus := normalizeGitStatus(raw)
 	_ = r.writeJSON(conn, "->", envelope{
 		RequestID: req.RequestID,
 		Type:      "response",
@@ -1404,7 +1405,7 @@ func (r *Reporter) replyGitStatus(conn *websocket.Conn, req envelope) {
 		ProjectID: req.ProjectID,
 		Payload: rp.MustRaw(map[string]any{
 			"dirty":       len(staged)+len(unstaged)+len(untracked) > 0,
-			"worktreeRev": hashBytes([]byte(raw)),
+			"worktreeRev": hashBytes([]byte(normalizedStatus)),
 			"staged":      staged,
 			"unstaged":    unstaged,
 			"untracked":   untracked,

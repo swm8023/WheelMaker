@@ -676,6 +676,9 @@ func TestReporterFSHashNegotiationAndGitStatus(t *testing.T) {
 	if statusResp.Payload["dirty"] != true {
 		t.Fatalf("expected dirty git.status payload: %#v", statusResp.Payload)
 	}
+	if got, want := statusResp.Payload["worktreeRev"], collectGitState(root).WorktreeRev; got != want {
+		t.Fatalf("git.status worktreeRev=%v, want reported normalized rev %s", got, want)
+	}
 	unstaged, _ := statusResp.Payload["unstaged"].([]any)
 	if len(unstaged) == 0 {
 		t.Fatalf("expected unstaged entries: %#v", statusResp.Payload)
