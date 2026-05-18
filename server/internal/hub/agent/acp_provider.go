@@ -45,7 +45,7 @@ var (
 		NPMPackage:             "@agentclientprotocol/claude-agent-acp",
 		SkillProjectDirs:       []string{".claude/skills"},
 		SkillProjectParentDirs: []string{".claude/skills"},
-		SkillUserDirs:          []string{"~/.claude/skills", "~/.agents/skills"},
+		SkillUserDirs:          []string{"~/.claude/skills"},
 	}
 	CopilotACPProviderPreset = ACPProviderPreset{
 		Name:                   "copilot",

@@ -2752,3 +2752,19 @@ func TestCodexPreset_IncludesAgentsUserSkillsDir(t *testing.T) {
 		t.Fatalf("codex preset user dirs missing ~/.agents/skills: %v", CodexACPProviderPreset.SkillUserDirs)
 	}
 }
+
+func TestClaudePreset_UsesClaudeUserSkillsDirOnly(t *testing.T) {
+	hasClaudeDir := false
+	for _, dir := range ClaudeACPProviderPreset.SkillUserDirs {
+		normalized := strings.TrimSpace(dir)
+		if strings.EqualFold(normalized, "~/.claude/skills") {
+			hasClaudeDir = true
+		}
+		if strings.EqualFold(normalized, "~/.agents/skills") {
+			t.Fatalf("claude preset should not scan ~/.agents/skills: %v", ClaudeACPProviderPreset.SkillUserDirs)
+		}
+	}
+	if !hasClaudeDir {
+		t.Fatalf("claude preset user dirs missing ~/.claude/skills: %v", ClaudeACPProviderPreset.SkillUserDirs)
+	}
+}
