@@ -74,6 +74,7 @@ import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat
 import {
   resolveChatListSelection,
   resolveSelectedChatVisibilityRecovery,
+  shouldApplyLoadedChatSelection,
   shouldApplyPreservedChatLoad,
 } from './chat/chatSelectionGuard';
 import { RegistryWorkspaceService } from './services/registryWorkspaceService';
@@ -5191,17 +5192,25 @@ function App() {
         }
       }
       const nextSelectedKey = chatSessionKeyFromParts(activeProjectId, resultSessionId);
-      applySelectedChatKey(nextSelectedKey);
-      activateChatRuntime(resultRuntimeKey, {selected: true, running: result.session?.running === true});
-      workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
-      setVisibleChatMessagesForRuntimeKey(
-        resultRuntimeKey,
-        nextMessages,
-        resolveChatSessionReadWindowUpdate({
-          useIncremental,
-          followsLatest: chatAutoScrollFollowRef.current,
-        }),
+      const canApplyLoadedSelection = shouldApplyLoadedChatSelection(
+        selectedChatKeyRef.current,
+        nextSelectedKey,
       );
+      if (canApplyLoadedSelection) {
+        applySelectedChatKey(nextSelectedKey);
+        activateChatRuntime(resultRuntimeKey, {selected: true, running: result.session?.running === true});
+        workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
+        setVisibleChatMessagesForRuntimeKey(
+          resultRuntimeKey,
+          nextMessages,
+          resolveChatSessionReadWindowUpdate({
+            useIncremental,
+            followsLatest: chatAutoScrollFollowRef.current,
+          }),
+        );
+      } else {
+        activateChatRuntime(resultRuntimeKey, {running: result.session?.running === true});
+      }
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       const knownSession =
         resultSession ??
@@ -5209,14 +5218,17 @@ function App() {
         (shouldUpdateCurrentProjectSessions(activeProjectId, projectIdRef.current)
           ? chatSessions.find(item => item.sessionId === resultSessionId)
           : undefined);
-      if ((knownSession?.lastDoneTurnIndex ?? 0) > (knownSession?.lastReadTurnIndex ?? 0)) {
+      if (
+        canApplyLoadedSelection &&
+        (knownSession?.lastDoneTurnIndex ?? 0) > (knownSession?.lastReadTurnIndex ?? 0)
+      ) {
         markChatSessionRead(
           activeProjectId,
           resultSessionId,
           knownSession?.lastDoneTurnIndex ?? 0,
         ).catch(() => undefined);
       }
-      return true;
+      return canApplyLoadedSelection;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return false;

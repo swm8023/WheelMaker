@@ -42,5 +42,14 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('resolveChatListSelection({');
     expect(mainTsx).toContain('workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);');
     expect(mainTsx).toContain('loadChatSession(currentSelection, activeProjectId, {');
+    expect(mainTsx).toContain('shouldApplyLoadedChatSelection(');
+    const loadChatSessionStart = mainTsx.indexOf('const loadChatSession = async (');
+    const loadChatSessionEnd = mainTsx.indexOf('const refreshSessionTurns = async (', loadChatSessionStart);
+    const loadChatSessionBlock = mainTsx.slice(loadChatSessionStart, loadChatSessionEnd);
+    expect(loadChatSessionBlock).toContain(
+      'const canApplyLoadedSelection = shouldApplyLoadedChatSelection(',
+    );
+    expect(loadChatSessionBlock).toContain('if (canApplyLoadedSelection) {');
+    expect(loadChatSessionBlock).toContain('return canApplyLoadedSelection;');
   });
 });

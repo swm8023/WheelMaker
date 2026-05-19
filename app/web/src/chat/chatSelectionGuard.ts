@@ -19,6 +19,18 @@ export function shouldApplyPreservedChatLoad(
   return !snapshot || encodeChatSessionKey(currentKey) === snapshot;
 }
 
+export function shouldApplyLoadedChatSelection(
+  currentKey: ChatSessionKey | null | undefined,
+  loadedKey: ChatSessionKey | null | undefined,
+): boolean {
+  const loaded = encodeChatSessionKey(loadedKey);
+  if (!loaded) {
+    return false;
+  }
+  const current = encodeChatSessionKey(currentKey);
+  return !current || current === loaded;
+}
+
 export function resolveChatListSelection(input: {
   activeProjectId: string;
   allowMissingSelection?: boolean;

@@ -1,6 +1,7 @@
 import {
   resolveChatListSelection,
   resolveSelectedChatVisibilityRecovery,
+  shouldApplyLoadedChatSelection,
   shouldApplyPreservedChatLoad,
 } from '../web/src/chat/chatSelectionGuard';
 import { chatSessionKeyFromParts, encodeChatSessionKey } from '../web/src/chat/chatSessionKey';
@@ -13,6 +14,16 @@ describe('web chat selection guards', () => {
     expect(shouldApplyPreservedChatLoad(selected, staleSnapshot)).toBe(false);
     expect(shouldApplyPreservedChatLoad(selected, encodeChatSessionKey(selected))).toBe(true);
     expect(shouldApplyPreservedChatLoad(selected, '')).toBe(true);
+  });
+
+  test('loaded session reads cannot steal selection from another live chat', () => {
+    const current = chatSessionKeyFromParts('project-a', 'session-a');
+    const loaded = chatSessionKeyFromParts('project-a', 'session-b');
+
+    expect(shouldApplyLoadedChatSelection(current, loaded)).toBe(false);
+    expect(shouldApplyLoadedChatSelection(loaded, loaded)).toBe(true);
+    expect(shouldApplyLoadedChatSelection(null, loaded)).toBe(true);
+    expect(shouldApplyLoadedChatSelection(current, null)).toBe(false);
   });
 
   test('list loading prefers the live selected session over a stale preferred session', () => {
