@@ -15,6 +15,17 @@ function Assert-Contains {
   }
 }
 
+function Assert-NotContains {
+  param(
+    [Parameter(Mandatory = $true)][string]$Text,
+    [Parameter(Mandatory = $true)][string]$Needle
+  )
+
+  if ($Text.Contains($Needle)) {
+    throw "deploy.bat should not contain text: $Needle"
+  }
+}
+
 function Assert-Ordered {
   param(
     [Parameter(Mandatory = $true)][string]$Text,
@@ -38,11 +49,10 @@ function Assert-Ordered {
 
 Assert-Contains -Text $deployBat -Needle "update + build + stop + deploy + start + publish web"
 Assert-Contains -Text $deployBat -Needle 'pushd "%~dp0app"'
-Assert-Contains -Text $deployBat -Needle "call npm ci --include=dev"
 Assert-Contains -Text $deployBat -Needle "npm run build:web:release"
 Assert-Contains -Text $deployBat -Needle "[FAILED] web publish exited with code"
-Assert-Ordered -Text $deployBat -First "scripts\refresh_server.ps1" -Second "call npm ci --include=dev"
-Assert-Ordered -Text $deployBat -First "call npm ci --include=dev" -Second "npm run build:web:release"
+Assert-NotContains -Text $deployBat -Needle "call npm ci --include=dev"
+Assert-NotContains -Text $deployBat -Needle "syncing app Web dependencies"
 Assert-Ordered -Text $deployBat -First "scripts\refresh_server.ps1" -Second "npm run build:web:release"
 
 Write-Host "deploy.bat web publish checks passed"

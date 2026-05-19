@@ -16,6 +16,13 @@ function Assert-Contains {
   }
 }
 
+function Assert-NotContains {
+  param([string]$Needle)
+  if ($text.Contains($Needle)) {
+    throw "refresh_server.sh should not contain text: $Needle"
+  }
+}
+
 Assert-Contains "com.wheelmaker.hub"
 Assert-Contains "com.wheelmaker.monitor"
 Assert-Contains "com.wheelmaker.updater"
@@ -31,5 +38,8 @@ Assert-Contains "--skip-web-publish"
 Assert-Contains "Node.js 22.11.0+"
 Assert-Contains "~/Library/LaunchAgents"
 Assert-Contains "~/.config/systemd/user"
+Assert-Contains "git stash push -u -m"
+Assert-Contains "wheelmaker deploy auto-stash before pull"
+Assert-NotContains "skip git pull and continue"
 
 Write-Host "refresh_server.sh source checks passed"

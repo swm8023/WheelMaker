@@ -16,11 +16,21 @@ function Assert-Contains {
   }
 }
 
+function Assert-NotContains {
+  param([string]$Needle)
+  if ($text.Contains($Needle)) {
+    throw "refresh_server.ps1 should not contain text: $Needle"
+  }
+}
+
 Assert-Contains "function Ensure-AppDependencies"
 Assert-Contains "npm ci --include=dev"
 Assert-Contains "Ensure-AppDependencies"
 Assert-Contains "Pull-Latest"
 Assert-Contains "Ensure-AcpDependencies"
+Assert-Contains "git stash push -u -m"
+Assert-Contains "wheelmaker deploy auto-stash before pull"
+Assert-NotContains "skip git pull and continue"
 
 $pullIndex = $text.IndexOf("Pull-Latest", [StringComparison]::Ordinal)
 $appDepsIndex = $text.LastIndexOf("Ensure-AppDependencies", [StringComparison]::Ordinal)

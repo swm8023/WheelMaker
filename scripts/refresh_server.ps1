@@ -130,30 +130,30 @@ function Get-GitCurrentBranch {
   } finally { Pop-Location }
 }
 
-function Assert-CleanGitWorktree {
+function Save-DirtyGitWorktreeForPull {
   Push-Location $script:RepoRoot
   try {
     $status = @(& git status --porcelain)
     if ($LASTEXITCODE -ne 0) { throw ("git status failed (exit={0})" -f $LASTEXITCODE) }
-    if (@($status | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
-      throw "git worktree has local changes; commit, stash, or revert them before running refresh_server.ps1"
+    if (@($status | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -eq 0) {
+      return
     }
+
+    $stashMessage = "wheelmaker deploy auto-stash before pull {0}" -f (Get-Date -Format "yyyyMMdd_HHmmss")
+    Write-Warn ("git worktree has local changes; stashing before pull: {0}" -f $stashMessage)
+    if ($WhatIf) {
+      Write-Host ("[whatif] git stash push -u -m `"{0}`"" -f $stashMessage)
+      return
+    }
+    Invoke-Checked -FilePath "git" -Arguments @("stash", "push", "-u", "-m", $stashMessage) -FailureMessage "git stash failed"
   } finally { Pop-Location }
 }
 
 function Pull-Latest {
   if ($SkipGitPull) { Write-Step "skip git pull"; return }
   Assert-Command -Name "git" -Hint "Install Git and ensure git.exe is available."
-  try {
-    Assert-CleanGitWorktree
-  } catch {
-    if ($_.Exception.Message -match "git worktree has local changes") {
-      Write-Warn "git worktree has local changes; skip git pull and continue"
-      return
-    }
-    throw
-  }
   $branch = Get-GitCurrentBranch
+  Save-DirtyGitWorktreeForPull
   Write-Step ("git pull --ff-only origin {0}" -f $branch)
   if ($WhatIf) { Write-Host ("[whatif] git pull --ff-only origin {0}" -f $branch); return }
   Push-Location $script:RepoRoot

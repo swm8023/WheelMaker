@@ -259,16 +259,17 @@ pull_latest() {
   fi
   require_command git "Install Git."
   pushd "$REPO_ROOT" >/dev/null
-  local status
-  status="$(git status --porcelain)"
-  if [[ -n "$status" ]]; then
-    warn "git worktree has local changes; skip git pull and continue"
-    popd >/dev/null
-    return
-  fi
   local branch
   branch="$(git branch --show-current)"
   [[ -n "$branch" ]] || die "repository is in detached HEAD state; cannot pull latest automatically"
+  local status
+  status="$(git status --porcelain)"
+  if [[ -n "$status" ]]; then
+    local stash_message
+    stash_message="wheelmaker deploy auto-stash before pull $(date -u +%Y%m%dT%H%M%SZ)"
+    warn "git worktree has local changes; stashing before pull: ${stash_message}"
+    git stash push -u -m "$stash_message"
+  fi
   step "git pull --ff-only origin ${branch}"
   git pull --ff-only origin "$branch"
   popd >/dev/null

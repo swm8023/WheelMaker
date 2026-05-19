@@ -49,9 +49,6 @@ echo.
 echo [INFO] publishing Web UI...
 pushd "%~dp0app"
 if errorlevel 1 goto :web_publish_failed
-echo [INFO] syncing app Web dependencies...
-call npm ci --include=dev
-if errorlevel 1 goto :web_publish_failed
 call npm run build:web:release
 if errorlevel 1 goto :web_publish_failed
 popd
