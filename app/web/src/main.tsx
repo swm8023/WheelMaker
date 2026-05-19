@@ -427,8 +427,25 @@ function nearestFloatingSlot(
 }
 
 
+const AGENT_TAG_VARIANT_INDEX: Record<string, number> = {
+  codex: 0,
+  copilot: 1,
+  claude: 2,
+  codexapp: 3,
+  opencode: 4,
+  codebuddy: 5,
+  myflicker: 6,
+};
+
 function tagVariantClass(prefix: string, value: string): string {
   const normalized = value.trim().toLowerCase();
+  if (prefix === 'wide-session-agent' || prefix === 'token-stats-pill-agent') {
+    const explicitIndex = AGENT_TAG_VARIANT_INDEX[normalized];
+    if (typeof explicitIndex === 'number') {
+      return `${prefix}-${explicitIndex}`;
+    }
+  }
+
   let hash = 0;
   for (let index = 0; index < normalized.length; index += 1) {
     hash = (hash * 31 + normalized.charCodeAt(index)) >>> 0;

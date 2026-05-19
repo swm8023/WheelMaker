@@ -62,6 +62,25 @@ describe('agent package update settings UI source structure', () => {
     expect(stylesCss).toContain('.agent-package-action-btn');
   });
 
+  test('uses explicit agent tag variants and roomier capsules', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
+
+    expect(mainTsx).toContain('const AGENT_TAG_VARIANT_INDEX');
+    expect(mainTsx).toContain("claude: 2");
+    expect(mainTsx).toContain("codexapp: 3");
+    expect(mainTsx).toContain('if (prefix === \'wide-session-agent\' || prefix === \'token-stats-pill-agent\')');
+
+    const agentTagBlock = stylesCss.match(/\.wide-session-agent-tag \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(agentTagBlock).toContain('display: inline-flex;');
+    expect(agentTagBlock).toContain('min-height: 20px;');
+    expect(agentTagBlock).toContain('max-width: 96px;');
+    expect(agentTagBlock).toContain('padding: 2px 8px;');
+    expect(agentTagBlock).toContain('font-size: 9.5px;');
+    expect(agentTagBlock).toContain('line-height: 1.35;');
+  });
+
   test('adds desktop Update and Token Stats shortcuts below refresh and above settings only', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
