@@ -43,9 +43,14 @@ describe('web chat turn rendering', () => {
     expect(virtualList).toContain('estimateSize: index => resolveChatVirtualItemEstimate({');
     expect(virtualList).toContain('writeChatVirtualMeasuredHeight(chatVirtualHeightCache, {');
     expect(virtualList).toContain('resolveChatVirtualAnchor({');
+    expect(virtualList).toContain('const measurements: ChatVirtualMeasurement[] = instance.getVirtualItems();');
+    expect(virtualList).not.toContain('instance.measurementsCache.length > 0');
     expect(virtualList).toContain('resolveChatVirtualAnchorScrollTop({');
     expect(virtualList).toContain('preserveAnchorDuringMeasureRef.current = true;');
     expect(virtualList).toContain('selectChatVirtualPremeasureItems({');
+    expect(virtualList).toContain('virtualizer.resizeItem(index, measuredHeight);');
+    expect(virtualList).not.toContain('scheduleVirtualMeasureRef');
+    expect(virtualList).not.toContain('scheduleAnchorRestoreRef');
     expect(virtualList).toContain('useAnimationFrameWithResizeObserver: true,');
     expect(virtualList).toContain('virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>');
     expect(virtualList).toContain('shouldAdjustChatVirtualItemSizeChange({');

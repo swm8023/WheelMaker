@@ -43,10 +43,7 @@ export function ChatVirtualTurnList({
   const listRef = React.useRef<HTMLDivElement | null>(null);
   const anchorRef = React.useRef<ChatVirtualAnchor | null>(null);
   const anchorRestoreFrameRef = React.useRef(0);
-  const virtualMeasureFrameRef = React.useRef(0);
   const preserveAnchorDuringMeasureRef = React.useRef(false);
-  const scheduleAnchorRestoreRef = React.useRef<() => void>(() => undefined);
-  const scheduleVirtualMeasureRef = React.useRef<() => void>(() => undefined);
   const [widthBucket, setWidthBucket] = React.useState(0);
   const normalizedRuntimeKey = runtimeKey || 'default';
 
@@ -82,10 +79,7 @@ export function ChatVirtualTurnList({
       if (nearBottom) {
         return;
       }
-      const measurements: ChatVirtualMeasurement[] =
-        instance.measurementsCache.length > 0
-          ? instance.measurementsCache
-          : instance.getVirtualItems();
+      const measurements: ChatVirtualMeasurement[] = instance.getVirtualItems();
       const anchor = resolveChatVirtualAnchor({
         measurements,
         scrollTop: container.scrollTop,
@@ -113,13 +107,13 @@ export function ChatVirtualTurnList({
       const measuredHeight = measureVirtualElement(element, entry, instance);
       const index = Number(element.getAttribute('data-index') ?? -1);
       const item = displayIndex.items[index];
-      if (item && writeChatVirtualMeasuredHeight(chatVirtualHeightCache, {
-        itemKey: item.key,
-        measuredHeight,
-        runtimeKey: normalizedRuntimeKey,
-        widthBucket,
-      })) {
-        scheduleAnchorRestoreRef.current();
+      if (item) {
+        writeChatVirtualMeasuredHeight(chatVirtualHeightCache, {
+          itemKey: item.key,
+          measuredHeight,
+          runtimeKey: normalizedRuntimeKey,
+          widthBucket,
+        });
       }
       return measuredHeight;
     },
@@ -170,28 +164,10 @@ export function ChatVirtualTurnList({
       preserveAnchorDuringMeasureRef.current = false;
     });
   }, [restoreAnchor]);
-  scheduleAnchorRestoreRef.current = scheduleAnchorRestore;
-
-  const scheduleVirtualMeasure = React.useCallback(() => {
-    if (virtualMeasureFrameRef.current) {
-      return;
-    }
-    virtualMeasureFrameRef.current = window.requestAnimationFrame(() => {
-      virtualMeasureFrameRef.current = 0;
-      captureAnchorFromInstance(virtualizer);
-      preserveAnchorDuringMeasureRef.current = true;
-      virtualizer.measure();
-      scheduleAnchorRestore();
-    });
-  }, [captureAnchorFromInstance, scheduleAnchorRestore, virtualizer]);
-  scheduleVirtualMeasureRef.current = scheduleVirtualMeasure;
 
   React.useEffect(() => () => {
     if (anchorRestoreFrameRef.current) {
       window.cancelAnimationFrame(anchorRestoreFrameRef.current);
-    }
-    if (virtualMeasureFrameRef.current) {
-      window.cancelAnimationFrame(virtualMeasureFrameRef.current);
     }
   }, []);
 
@@ -218,17 +194,18 @@ export function ChatVirtualTurnList({
     windowSize: overscan,
   });
 
-  const measurePreheatedItem = (item: ChatDisplayIndexItem, node: HTMLDivElement | null) => {
-    if (!node) {
+  const measurePreheatedItem = (item: ChatDisplayIndexItem, index: number, node: HTMLDivElement | null) => {
+    if (!node || index < 0) {
       return;
     }
+    const measuredHeight = node.getBoundingClientRect().height;
     if (writeChatVirtualMeasuredHeight(chatVirtualHeightCache, {
       itemKey: item.key,
-      measuredHeight: node.getBoundingClientRect().height,
+      measuredHeight,
       runtimeKey: normalizedRuntimeKey,
       widthBucket,
     })) {
-      scheduleVirtualMeasureRef.current();
+      virtualizer.resizeItem(index, measuredHeight);
     }
   };
 
@@ -260,7 +237,7 @@ export function ChatVirtualTurnList({
             return (
               <div
                 key={`premeasure:${displayItem.key}`}
-                ref={node => measurePreheatedItem(displayItem, node)}
+                ref={node => measurePreheatedItem(displayItem, index, node)}
                 className="chat-virtual-premeasure-row"
                 style={{
                   paddingBottom: `${rowGap}px`,
