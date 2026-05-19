@@ -7846,19 +7846,23 @@ function App() {
                         <div className="agent-package-main">
                           <div className="agent-package-title-line">
                             <span className="settings-metadata-title" title={pkg.displayName}>{pkg.displayName}</span>
-                            <span className={`agent-package-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
                           </div>
-                          <div className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</div>
-                          <div className="settings-metadata-line settings-metadata-line-tags">
-                            {pkg.agentTypes.map(agent => (
-                              <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
-                                {agent}
+                          <div className="agent-package-name-line">
+                            <span className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</span>
+                            {pkg.agentTypes.length > 0 ? (
+                              <span className="agent-package-agent-tags">
+                                {pkg.agentTypes.map(agent => (
+                                  <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
+                                    {agent}
+                                  </span>
+                                ))}
                               </span>
-                            ))}
+                            ) : null}
                           </div>
                           <div className="agent-package-version-line">
                             <span>Installed: {pkg.installedVersion || '-'}</span>
                             <span>Latest: {pkg.latestVersion || '-'}</span>
+                            <span className={`agent-package-status agent-package-version-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
                           </div>
                           {pkg.error ? (
                             <div className="settings-metadata-error">{pkg.error}</div>

@@ -59,10 +59,23 @@ describe('agent package update settings UI source structure', () => {
 
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.agent-package-row');
+    expect(stylesCss).toContain('.agent-package-name-line');
+    expect(stylesCss).toContain('.agent-package-agent-tags');
+    expect(stylesCss).toContain('.agent-package-version-status');
     expect(stylesCss).toContain('.agent-package-action-btn');
   });
 
-  test('uses explicit agent tag variants and compact softer capsules', () => {
+  test('places agent tags beside package names and status beside versions', () => {
+    const projectRoot = path.join(__dirname, '..');
+    const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+
+    expect(mainTsx).toContain('className="agent-package-name-line"');
+    expect(mainTsx).toContain('className="agent-package-agent-tags"');
+    expect(mainTsx).toContain('className={`agent-package-status agent-package-version-status status-${pkg.status}`}');
+    expect(mainTsx).not.toContain('className={`agent-package-status status-${pkg.status}`}');
+  });
+
+  test('uses explicit agent tag variants and softly sized capsules', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
@@ -74,13 +87,13 @@ describe('agent package update settings UI source structure', () => {
 
     const agentTagBlock = stylesCss.match(/\.wide-session-agent-tag \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(agentTagBlock).toContain('display: inline-flex;');
-    expect(agentTagBlock).toContain('max-width: 68px;');
-    expect(agentTagBlock).toContain('padding: 0 5px;');
+    expect(agentTagBlock).toContain('min-height: 18px;');
+    expect(agentTagBlock).toContain('max-width: 80px;');
+    expect(agentTagBlock).toContain('padding: 1px 6px;');
     expect(agentTagBlock).toContain('font-size: 8.5px;');
     expect(agentTagBlock).toContain('font-weight: 600;');
     expect(agentTagBlock).toContain('background: color-mix(in srgb, var(--agent-accent) 6%, transparent);');
     expect(agentTagBlock).toContain('text-transform: none;');
-    expect(agentTagBlock).not.toContain('min-height: 20px;');
   });
 
   test('adds desktop Update and Token Stats shortcuts below refresh and above settings only', () => {
