@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/swm8023/wheelmaker/internal/shared"
 )
@@ -125,5 +128,57 @@ func TestRedirectProcessStdioToDevNull(t *testing.T) {
 	}
 	if os.Stderr != oldStderr {
 		t.Fatalf("stderr not restored")
+	}
+}
+
+func TestWorkerContextCancelsWhenStopFileAppears(t *testing.T) {
+	stopFile := filepath.Join(t.TempDir(), "worker.stop")
+	ctx, cancel := workerContextWithStopFile(context.Background(), stopFile, 5*time.Millisecond)
+	defer cancel()
+
+	if err := os.WriteFile(stopFile, []byte("stop"), 0o644); err != nil {
+		t.Fatalf("write stop file: %v", err)
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("worker context did not cancel after stop file appeared")
+	}
+}
+
+func TestShutdownWorkersRequestsStopFileBeforeKillFallback(t *testing.T) {
+	oldList := listWorkerProcessesForDaemon
+	oldKill := killProcessForDaemon
+	oldPoll := workerStopPollInterval
+	t.Cleanup(func() {
+		listWorkerProcessesForDaemon = oldList
+		killProcessForDaemon = oldKill
+		workerStopPollInterval = oldPoll
+	})
+
+	listCalls := 0
+	listWorkerProcessesForDaemon = func(_, _ string) ([]daemonProcess, error) {
+		listCalls++
+		if listCalls == 1 {
+			return []daemonProcess{{PID: 101}}, nil
+		}
+		return nil, nil
+	}
+	killed := []int{}
+	killProcessForDaemon = func(pid int) error {
+		killed = append(killed, pid)
+		return nil
+	}
+	workerStopPollInterval = 5 * time.Millisecond
+
+	stopFile := filepath.Join(t.TempDir(), "hub.stop")
+	shutdownWorkers("wheelmaker", []*workerSpec{{name: "hub", markerFlag: hubWorkerArg, stopFile: stopFile}})
+
+	if _, err := os.Stat(stopFile); err != nil {
+		t.Fatalf("expected stop file to be written: %v", err)
+	}
+	if len(killed) != 0 {
+		t.Fatalf("killProcess called after graceful stop succeeded: %v", killed)
 	}
 }

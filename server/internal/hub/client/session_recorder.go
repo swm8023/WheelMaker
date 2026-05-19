@@ -131,6 +131,51 @@ func (r *SessionRecorder) Close() {
 	r.writeMu.Unlock()
 }
 
+func (r *SessionRecorder) FlushActivePromptStates(ctx context.Context, stopReason string) error {
+	if r == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stopReason = strings.TrimSpace(stopReason)
+	if stopReason == "" {
+		stopReason = "interrupted"
+	}
+	updatedAt := time.Now().UTC()
+
+	r.writeMu.Lock()
+	defer r.writeMu.Unlock()
+
+	sessionIDs := make([]string, 0, len(r.promptState))
+	for sessionID, state := range r.promptState {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" || state == nil || len(state.turns) == 0 {
+			continue
+		}
+		sessionIDs = append(sessionIDs, sessionID)
+	}
+	sort.Strings(sessionIDs)
+
+	errs := make([]string, 0)
+	for _, sessionID := range sessionIDs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		state := r.promptState[sessionID]
+		if state == nil || len(state.turns) == 0 {
+			continue
+		}
+		if err := r.finishPromptStateLocked(ctx, sessionID, state, stopReason, "", updatedAt, false); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", sessionID, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("flush active prompt states: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
 func (r *SessionRecorder) ResetPromptState() {
 	if r == nil {
 		return

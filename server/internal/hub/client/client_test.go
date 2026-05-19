@@ -2310,6 +2310,69 @@ func TestStartingNextPromptSynthesizesInterruptedPromptDone(t *testing.T) {
 	}
 }
 
+func TestClientClosePersistsUnfinishedSessionViewPrompt(t *testing.T) {
+	ctx := context.Background()
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "client.sqlite3")
+	historyRoot := filepath.Join(tmp, "session")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	c := New(store, "proj1", t.TempDir())
+	c.SetSessionHistoryRoot(historyRoot)
+	c.SetSessionViewSink(c)
+
+	if err := c.RecordEvent(ctx, sessionViewCreatedEvent("sess-close", "Shutdown Persist")); err != nil {
+		t.Fatalf("RecordEvent created: %v", err)
+	}
+	started := sessionViewPromptEvent("sess-close", "still running", nil)
+	started.UpdatedAt = time.Date(2026, 5, 20, 6, 45, 0, 0, time.UTC)
+	if err := c.RecordEvent(ctx, started); err != nil {
+		t.Fatalf("RecordEvent prompt: %v", err)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	reopened, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore reopen: %v", err)
+	}
+	defer reopened.Close()
+	rec, err := reopened.LoadSession(ctx, "proj1", "sess-close")
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if rec == nil {
+		t.Fatal("session record missing after close")
+	}
+	latest := sessionSyncLatestPersistedTurnIndex(rec.SessionSyncJSON)
+	if latest != 2 {
+		t.Fatalf("latest persisted turn index = %d, want 2", latest)
+	}
+
+	turns, err := newFileSessionTurnStore(historyRoot).ReadTurns(ctx, "proj1", "sess-close", 0, latest)
+	if err != nil {
+		t.Fatalf("ReadTurns: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("turns len = %d, want 2", len(turns))
+	}
+	var firstTurn acp.IMTurnMessage
+	if err := json.Unmarshal([]byte(turns[0].Content), &firstTurn); err != nil {
+		t.Fatalf("unmarshal first turn: %v", err)
+	}
+	if got := strings.TrimSpace(firstTurn.Method); got != acp.IMMethodPromptRequest {
+		t.Fatalf("turns[0] method = %q, want %q", got, acp.IMMethodPromptRequest)
+	}
+	if got := decodePromptDoneStopReason(t, turns[1].Content); got != "interrupted" {
+		t.Fatalf("turns[1] stopReason = %q, want interrupted", got)
+	}
+}
+
 func newSessionViewTestClient(t *testing.T) *Client {
 	t.Helper()
 	store, err := NewStore(filepath.Join(t.TempDir(), "client.sqlite3"))

@@ -110,6 +110,8 @@ func runHubWorker() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, stopWorker := workerContextWithStopFile(ctx, os.Getenv(workerStopFileEnv), workerStopPollInterval)
+	defer stopWorker()
 
 	h := hub.New(cfg, dbPath)
 	if err := h.Start(ctx); err != nil {
@@ -159,6 +161,8 @@ func runRegistryWorker() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, stopWorker := workerContextWithStopFile(ctx, os.Getenv(workerStopFileEnv), workerStopPollInterval)
+	defer stopWorker()
 	registryScopedLogger.Info("worker start addr=%s", addr)
 	s := registry.New(registry.Config{
 		Addr:  addr,
