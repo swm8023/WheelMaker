@@ -73,6 +73,8 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).not.toContain('Updated: {agentCard.updatedAt}');
 
     expect(stylesCss).toContain('.agent-package-hub-list');
+    expect(stylesCss).toContain('.update-hub-header .wide-project-hub-tag');
+    expect(stylesCss).toContain('font-size: 12.5px;');
     expect(stylesCss).toContain('.wheelmaker-update-panel');
     expect(stylesCss).toContain('.wheelmaker-update-version-line');
     expect(stylesCss).toContain('.wheelmaker-update-ref-tag');
