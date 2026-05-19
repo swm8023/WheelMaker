@@ -26,6 +26,10 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);');
     expect(mainTsx).toContain('useIncremental ? checkpointTurnIndex : 0,');
     expect(mainTsx).toContain('applySessionReadResult(');
+    expect(mainTsx).toContain('readProjectSessionWithStaleCacheRepair(');
+    expect(mainTsx).toContain('isStaleSessionReadResult(');
+    expect(mainTsx).toContain('clearProjectSessionCache(activeProjectId, sessionId);');
+    expect(mainTsx).toContain('service.readProjectSession(activeProjectId, sessionId, 0);');
     expect(mainTsx).toContain("const chatVisibleRuntimeKeyRef = useRef('');");
     expect(mainTsx).toContain("const chatSelectedLoadAttemptRuntimeKeyRef = useRef('');");
     expect(mainTsx).toContain('resolveSelectedChatVisibilityRecovery({');

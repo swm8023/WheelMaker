@@ -9,6 +9,7 @@ jest.mock('../web/src/services/shikiRenderer', () => ({
 }));
 
 import { WorkspaceStore } from '../web/src/services/workspaceStore';
+import { reconcilePersistedChatSessionCache } from '../web/src/services/workspacePersistence';
 
 function createFakePersistence(globalPatch: Record<string, unknown> = {}) {
   const globalState = {
@@ -96,6 +97,31 @@ describe('global selected chat session persistence', () => {
 });
 
 describe('chat session index persistence', () => {
+  test('resets persisted turn cache when session summary latest is behind local cursor', () => {
+    const repaired = reconcilePersistedChatSessionCache(
+      {
+        sessionId: 's1',
+        title: 'Session',
+        preview: '',
+        updatedAt: '2026-05-19T12:48:22.000Z',
+        messageCount: 728,
+        latestTurnIndex: 728,
+      },
+      { turnIndex: 1000 },
+      [1, 2, 3].map(index => ({
+        turnIndex: index,
+        content: JSON.stringify({method: 'agent_message_chunk', param: {text: `turn-${index}`}}),
+        finished: true,
+      })),
+    );
+
+    expect(repaired).toEqual({
+      cursor: { turnIndex: 0 },
+      stale: true,
+      turns: [],
+    });
+  });
+
   test('preserves config options and commands when patching with a summary that omits them', () => {
     const persistence = createFakeChatPersistence();
     const store = new WorkspaceStore(persistence as any);

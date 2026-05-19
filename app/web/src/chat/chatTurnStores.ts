@@ -43,6 +43,21 @@ export function createEmptyChatTurnStore(): ChatTurnStoreState {
   return {finished: [], live: [], cursor: {turnIndex: 0}};
 }
 
+export function resetChatTurnStore(state: ChatTurnStoreState): ChatTurnStoreState {
+  state.finished = [];
+  state.live = [];
+  state.cursor = {turnIndex: 0};
+  return state;
+}
+
+export function isStaleSessionReadResult(afterTurnIndex: number, latestTurnIndex: number): boolean {
+  const after = Math.max(0, Math.trunc(afterTurnIndex ?? 0));
+  const latest = Number.isFinite(latestTurnIndex)
+    ? Math.max(0, Math.trunc(latestTurnIndex))
+    : 0;
+  return after > 0 && latest < after;
+}
+
 export function getFinishedCursor(turns: RegistrySessionTurn[]): SessionReadCursor {
   const finished = new Set<number>();
   for (const raw of turns) {
@@ -143,6 +158,9 @@ export function applySessionReadResult(
   latestTurnIndex: number,
 ): ChatTurnStoreState {
   const after = Math.max(0, Math.trunc(afterTurnIndex ?? 0));
+  if (isStaleSessionReadResult(after, latestTurnIndex)) {
+    return resetChatTurnStore(state);
+  }
   const latest = Math.max(after, Math.trunc(latestTurnIndex ?? after));
   const normalized = sortTurns(
     turns

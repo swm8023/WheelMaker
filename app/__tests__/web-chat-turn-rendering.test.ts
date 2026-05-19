@@ -153,7 +153,7 @@ describe('web chat turn rendering', () => {
     const main = readMain();
 
     expect(main).toContain('resolveChatSessionReadWindowUpdate({');
-    expect(main).toContain('useIncremental,');
+    expect(main).toContain('useIncremental: appliedAfterTurnIndex > 0,');
     expect(main).toContain('followsLatest: chatAutoScrollFollowRef.current,');
     expect(main).toContain('const resettingToLatest = options?.resetToLatest === true;');
     expect(main).toContain('if (resettingToLatest && encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {');

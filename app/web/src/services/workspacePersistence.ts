@@ -230,6 +230,80 @@ function sanitizePersistedTurns(input: unknown): RegistrySessionTurn[] {
   return Array.from(byIndex.values()).sort((a, b) => a.turnIndex - b.turnIndex);
 }
 
+function persistedFinishedPrefixTurnIndex(turns: RegistrySessionTurn[]): number {
+  const finished = new Set<number>();
+  for (const turn of turns) {
+    if (turn.finished === true && turn.turnIndex > 0) {
+      finished.add(Math.trunc(turn.turnIndex));
+    }
+  }
+  let turnIndex = 0;
+  while (finished.has(turnIndex + 1)) {
+    turnIndex += 1;
+  }
+  return turnIndex;
+}
+
+function persistedTurnPrefix(turns: RegistrySessionTurn[], cursor: PersistedChatCursor): RegistrySessionTurn[] {
+  const maxTurnIndex = Math.max(0, Math.trunc(cursor.turnIndex ?? 0));
+  const byIndex = new Map<number, RegistrySessionTurn>();
+  for (const turn of sanitizePersistedTurns(turns)) {
+    if (turn.finished === true) {
+      byIndex.set(turn.turnIndex, turn);
+    }
+  }
+  const out: RegistrySessionTurn[] = [];
+  for (let turnIndex = 1; turnIndex <= maxTurnIndex; turnIndex += 1) {
+    const turn = byIndex.get(turnIndex);
+    if (!turn) break;
+    out.push({...turn});
+  }
+  return out;
+}
+
+function sessionLatestTurnIndex(session: RegistryChatSession): number | null {
+  if (!Number.isFinite(session.latestTurnIndex)) {
+    return null;
+  }
+  return Math.max(0, Math.trunc(Number(session.latestTurnIndex)));
+}
+
+function samePersistedTurns(left: RegistrySessionTurn[], right: RegistrySessionTurn[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (
+      a.turnIndex !== b.turnIndex ||
+      a.content !== b.content ||
+      a.finished !== b.finished
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+export function reconcilePersistedChatSessionCache(
+  session: RegistryChatSession,
+  cursor: Partial<PersistedChatCursor> | undefined,
+  turns: RegistrySessionTurn[],
+): {cursor: PersistedChatCursor; turns: RegistrySessionTurn[]; stale: boolean} {
+  const safeCursor = sanitizeChatCursor(cursor);
+  const sanitizedTurns = sanitizePersistedTurns(turns);
+  const latest = sessionLatestTurnIndex(session);
+  if (latest != null && latest < safeCursor.turnIndex) {
+    return {cursor: defaultChatCursor(), turns: [], stale: true};
+  }
+  const actualPrefix = persistedFinishedPrefixTurnIndex(sanitizedTurns);
+  const repairedCursor = {turnIndex: Math.min(safeCursor.turnIndex, actualPrefix)};
+  return {
+    cursor: repairedCursor,
+    turns: persistedTurnPrefix(sanitizedTurns, repairedCursor),
+    stale: false,
+  };
+}
+
 function sanitizeProjectState(input: Partial<PersistedProjectState> | undefined): PersistedProjectState {
   const base = defaultProjectState();
   if (!input) return base;
@@ -592,9 +666,12 @@ export class WorkspacePersistenceRepository {
       return;
     }
 
-    this.restoreChatSessions(chatIndexRows, chatContentRows);
+    const repairedChatCache = this.restoreChatSessions(chatIndexRows, chatContentRows);
     this.restoreDiffCache(diffRows);
     this.restoreFileCache(fileRows);
+    if (repairedChatCache) {
+      await this.saveAllStateToDb();
+    }
   }
 
   private fromDbRows(globalRows: RawKVRow[], projectRows: RawProjectStateRow[]): PersistedWorkspaceState {
@@ -631,9 +708,10 @@ export class WorkspacePersistenceRepository {
     }
   }
 
-  private restoreChatSessions(indexRows: RawChatSessionIndexRow[], contentRows: RawChatSessionContentRow[]): void {
+  private restoreChatSessions(indexRows: RawChatSessionIndexRow[], contentRows: RawChatSessionContentRow[]): boolean {
     this.chatSessionIndex.clear();
     this.chatSessionContent.clear();
+    let repaired = false;
 
     for (const row of indexRows) {
       const session = tryParse<RegistryChatSession>(row.sessionJson, {
@@ -656,6 +734,26 @@ export class WorkspacePersistenceRepository {
         turns: sanitizePersistedTurns(turns),
       });
     }
+
+    for (const [key, entry] of this.chatSessionIndex.entries()) {
+      const existingContent = this.chatSessionContent.get(key) ?? {turns: []};
+      const nextCache = reconcilePersistedChatSessionCache(entry.session, entry.cursor, existingContent.turns);
+      if (
+        nextCache.cursor.turnIndex !== entry.cursor.turnIndex ||
+        !samePersistedTurns(existingContent.turns, nextCache.turns)
+      ) {
+        repaired = true;
+      }
+      this.chatSessionIndex.set(key, {
+        session: entry.session,
+        cursor: nextCache.cursor,
+      });
+      this.chatSessionContent.set(key, {
+        turns: nextCache.turns,
+      });
+    }
+
+    return repaired;
   }
 
   private hasIncompatibleChatContentRows(rows: RawChatSessionContentRow[]): boolean {
@@ -911,11 +1009,21 @@ export class WorkspacePersistenceRepository {
       if (!sessionId) continue;
       const key = chatSessionKey(projectId, sessionId);
       keepKeys.add(key);
+      const existingContent = this.chatSessionContent.get(key) ?? {turns: []};
+      const nextCache = reconcilePersistedChatSessionCache(
+        sessionEntry.session,
+        sessionEntry.cursor,
+        existingContent.turns,
+      );
       const entry: PersistedChatSessionEntry = {
         session: sessionEntry.session,
-        cursor: sanitizeChatCursor(sessionEntry.cursor),
+        cursor: nextCache.cursor,
       };
       this.chatSessionIndex.set(key, entry);
+      const contentChanged = !samePersistedTurns(existingContent.turns, nextCache.turns);
+      if (contentChanged) {
+        this.chatSessionContent.set(key, {turns: nextCache.turns});
+      }
       void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_INDEX, {
         k: key,
         projectId,
@@ -924,6 +1032,15 @@ export class WorkspacePersistenceRepository {
         cursorJson: serialize(entry.cursor),
         updatedAt: now,
       })).catch(() => undefined);
+      if (contentChanged) {
+        void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
+          k: key,
+          projectId,
+          sessionId,
+          turnsJson: serialize(nextCache.turns),
+          updatedAt: now,
+        })).catch(() => undefined);
+      }
     }
 
     const deleteKeys: string[] = [];
@@ -948,11 +1065,17 @@ export class WorkspacePersistenceRepository {
     if (!projectId || !sessionId) return;
     const key = chatSessionKey(projectId, sessionId);
     const now = Date.now();
+    const existingContent = this.chatSessionContent.get(key) ?? {turns: []};
+    const nextCache = reconcilePersistedChatSessionCache(session, cursor, existingContent.turns);
     const entry: PersistedChatSessionEntry = {
       session,
-      cursor: sanitizeChatCursor(cursor),
+      cursor: nextCache.cursor,
     };
     this.chatSessionIndex.set(key, entry);
+    const contentChanged = !samePersistedTurns(existingContent.turns, nextCache.turns);
+    if (contentChanged) {
+      this.chatSessionContent.set(key, {turns: nextCache.turns});
+    }
     void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_INDEX, {
       k: key,
       projectId,
@@ -961,6 +1084,15 @@ export class WorkspacePersistenceRepository {
       cursorJson: serialize(entry.cursor),
       updatedAt: now,
     })).catch(() => undefined);
+    if (contentChanged) {
+      void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
+        k: key,
+        projectId,
+        sessionId,
+        turnsJson: serialize(nextCache.turns),
+        updatedAt: now,
+      })).catch(() => undefined);
+    }
   }
 
   patchProjectChatSessionContent(
@@ -971,10 +1103,35 @@ export class WorkspacePersistenceRepository {
     if (!projectId || !sessionId) return;
     const key = chatSessionKey(projectId, sessionId);
     const now = Date.now();
+    const sanitizedTurns = sanitizePersistedTurns(turns);
+    const proposedCursor = {turnIndex: persistedFinishedPrefixTurnIndex(sanitizedTurns)};
+    const existingIndex = this.chatSessionIndex.get(key);
+    const repairedCache = existingIndex
+      ? reconcilePersistedChatSessionCache(existingIndex.session, proposedCursor, sanitizedTurns)
+      : {
+          cursor: proposedCursor,
+          turns: persistedTurnPrefix(sanitizedTurns, proposedCursor),
+          stale: false,
+        };
     const payload: PersistedChatSessionContent = {
-      turns: sanitizePersistedTurns(turns),
+      turns: repairedCache.turns,
     };
     this.chatSessionContent.set(key, payload);
+    if (existingIndex && existingIndex.cursor.turnIndex !== repairedCache.cursor.turnIndex) {
+      const nextIndex = {
+        session: existingIndex.session,
+        cursor: repairedCache.cursor,
+      };
+      this.chatSessionIndex.set(key, nextIndex);
+      void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_INDEX, {
+        k: key,
+        projectId,
+        sessionId,
+        sessionJson: serialize(nextIndex.session),
+        cursorJson: serialize(nextIndex.cursor),
+        updatedAt: now,
+      })).catch(() => undefined);
+    }
     void this.ready().then(() => this.db.putRow(TABLE_CHAT_SESSION_CONTENT, {
       k: key,
       projectId,

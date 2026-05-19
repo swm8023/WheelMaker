@@ -42,6 +42,7 @@ import {
   buildMergedRawTurns,
   createEmptyChatTurnStore,
   hydrateFinishedStore,
+  isStaleSessionReadResult,
   mergeRealtimeTurn,
   shouldReadRepairForIncomingTurn,
   type ChatTurnStoreState,
@@ -5553,6 +5554,21 @@ function App() {
     }
   };
 
+  const readProjectSessionWithStaleCacheRepair = async (
+    activeProjectId: string,
+    sessionId: string,
+    afterTurnIndex: number,
+  ): Promise<{result: Awaited<ReturnType<typeof service.readProjectSession>>; appliedAfterTurnIndex: number}> => {
+    const checkpoint = Math.max(0, Math.trunc(afterTurnIndex));
+    const result = await service.readProjectSession(activeProjectId, sessionId, checkpoint);
+    if (!isStaleSessionReadResult(checkpoint, result.latestTurnIndex)) {
+      return {result, appliedAfterTurnIndex: checkpoint};
+    }
+    clearProjectSessionCache(activeProjectId, sessionId);
+    const repairedResult = await service.readProjectSession(activeProjectId, sessionId, 0);
+    return {result: repairedResult, appliedAfterTurnIndex: 0};
+  };
+
   const loadChatSession = async (
     sessionId: string,
     activeProjectId = projectIdRef.current,
@@ -5586,11 +5602,12 @@ function App() {
         existingMessages.length === 0 &&
         checkpointTurnIndex > 0;
       const useIncremental = requestedIncremental && !fallbackToFullRead;
-      const result = await service.readProjectSession(
+      const readResult = await readProjectSessionWithStaleCacheRepair(
         activeProjectId,
         sessionId,
         useIncremental ? checkpointTurnIndex : 0,
       );
+      const {result, appliedAfterTurnIndex} = readResult;
       const selectionSnapshot = options?.selectionSnapshot ?? '';
       if (
         options?.preserveUserSelection &&
@@ -5603,7 +5620,7 @@ function App() {
       const resultTurnState = ensureChatTurnStore(resultRuntimeKey);
       applySessionReadResult(
         resultTurnState,
-        useIncremental ? checkpointTurnIndex : 0,
+        appliedAfterTurnIndex,
         result.turns,
         result.latestTurnIndex,
       );
@@ -5633,7 +5650,7 @@ function App() {
           resultRuntimeKey,
           nextMessages,
           resolveChatSessionReadWindowUpdate({
-            useIncremental,
+            useIncremental: appliedAfterTurnIndex > 0,
             followsLatest: chatAutoScrollFollowRef.current,
           }),
         );
@@ -5676,7 +5693,11 @@ function App() {
     try {
       const turnState = ensureChatTurnStore(runtimeKey);
       const checkpointTurnIndex = turnState.cursor.turnIndex;
-      const result = await service.readProjectSession(activeProjectId, sessionId, checkpointTurnIndex);
+      const {result, appliedAfterTurnIndex} = await readProjectSessionWithStaleCacheRepair(
+        activeProjectId,
+        sessionId,
+        checkpointTurnIndex,
+      );
       if (!shouldApplyPreservedChatLoad(selectedChatKeyRef.current, selectionSnapshot)) {
         return false;
       }
@@ -5685,7 +5706,7 @@ function App() {
       const resultTurnState = ensureChatTurnStore(resultRuntimeKey);
       applySessionReadResult(
         resultTurnState,
-        checkpointTurnIndex,
+        appliedAfterTurnIndex,
         result.turns,
         result.latestTurnIndex,
       );

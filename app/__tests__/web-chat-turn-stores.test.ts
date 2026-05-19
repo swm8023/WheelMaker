@@ -66,4 +66,15 @@ describe('raw chat turn stores', () => {
 
     expect(() => applySessionReadResult(state, 3, [turn(4, false), turn(5, true)], 5)).toThrow(/unfinished tail/);
   });
+
+  test('stale read response resets local turns when server latest is behind cursor', () => {
+    const state = hydrateFinishedStore([turn(1), turn(2), turn(3)]);
+    mergeRealtimeTurn(state, turn(4, false, 'dirty live'));
+
+    applySessionReadResult(state, 3, [], 2);
+
+    expect(state.finished).toEqual([]);
+    expect(state.live).toEqual([]);
+    expect(state.cursor).toEqual({turnIndex: 0});
+  });
 });
