@@ -107,10 +107,10 @@ describe('agent package update settings UI source structure', () => {
 
     const agentTagBlock = stylesCss.match(/\.wide-session-agent-tag \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(agentTagBlock).toContain('display: inline-flex;');
-    expect(agentTagBlock).toContain('min-height: 18px;');
+    expect(agentTagBlock).toContain('min-height: 20px;');
     expect(agentTagBlock).toContain('max-width: 80px;');
-    expect(agentTagBlock).toContain('padding: 1px 6px;');
-    expect(agentTagBlock).toContain('font-size: 8.5px;');
+    expect(agentTagBlock).toContain('padding: 1px 7px;');
+    expect(agentTagBlock).toContain('font-size: 10.5px;');
     expect(agentTagBlock).toContain('font-weight: 600;');
     expect(agentTagBlock).toContain('background: color-mix(in srgb, var(--agent-accent) 6%, transparent);');
     expect(agentTagBlock).toContain('text-transform: none;');
