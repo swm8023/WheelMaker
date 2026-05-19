@@ -3384,7 +3384,7 @@ body,
   overflow-x: hidden;
   overflow-y: scroll;
   scrollbar-gutter: stable;
-  padding: 18px 18px var(--chat-history-bottom-buffer);
+  padding: 18px 18px 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -3397,6 +3397,11 @@ body,
 
 .chat-virtual-row {
   box-sizing: border-box;
+  width: 100%;
+}
+
+.chat-virtual-footer {
+  flex: 0 0 auto;
   width: 100%;
 }
 

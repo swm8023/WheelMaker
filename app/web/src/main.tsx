@@ -50,7 +50,7 @@ import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
 import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
 import {createChatActiveRuntimeSet} from './chat/chatActiveRuntimeSet';
-import {ChatVirtualTurnList} from './chat/ChatVirtualTurnList';
+import {ChatVirtualTurnList, type ChatVirtualTurnListHandle} from './chat/ChatVirtualTurnList';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import {
   extractChatConfirmationReply,
@@ -64,10 +64,8 @@ import { insertChatSlashCommandText } from './chat/chatSlashInsertion';
 import {
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
-  resolveChatBottomScrollTop,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
-  shouldHandleChatVirtualWindowScroll,
 } from './chat/chatScrollIntent';
 import { resolvePromptDoneStatus, resolvePromptTurnStatus, type ChatPromptStatus } from './chat/chatPromptStatus';
 import { mergeChatSessionList, shouldUpdateCurrentProjectSessions } from './chat/chatIndexState';
@@ -350,11 +348,6 @@ function buildChatDraftKey(activeProjectId: string, sessionId: string): string {
   const projectKey = activeProjectId.trim() || CHAT_DRAFT_KEY_PROJECT_FALLBACK;
   const sessionKey = sessionId.trim() || CHAT_NEW_DRAFT_SESSION_KEY;
   return `${projectKey}:${sessionKey}`;
-}
-
-function isChatScrolledNearBottom(container: HTMLElement): boolean {
-  const distance = container.scrollHeight - container.clientHeight - container.scrollTop;
-  return Math.max(0, distance) <= CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function floatingControlSlotRatio(slot: PersistedFloatingControlSlot): number {
@@ -2278,10 +2271,10 @@ function App() {
   const gitSelectedBranchesRef = useRef<string[]>([]);
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatVirtualListRef = useRef<ChatVirtualTurnListHandle | null>(null);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
   const chatUserScrollLockUntilRef = useRef(0);
-  const chatProgrammaticScrollRef = useRef(false);
   const chatComposerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const chatPromptButtonRef = useRef<HTMLButtonElement | null>(null);
   const chatFileMentionButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -2572,62 +2565,49 @@ function App() {
     input.style.overflowY = input.scrollHeight > 180 ? 'auto' : 'hidden';
   }, []);
 
-  const updateChatFollowModeFromScroll = useCallback(
-    (container = chatScrollRef.current) => {
-      if (!container) {
-        return;
-      }
-      if (!shouldHandleChatVirtualWindowScroll(chatProgrammaticScrollRef.current)) {
-        return;
-      }
-      const nearBottom = isChatScrolledNearBottom(container);
-      const followsLatest = nearBottom;
-      chatAutoScrollFollowRef.current = followsLatest;
-      setChatShowScrollToBottom(!followsLatest);
-    },
-    [],
-  );
-
   const markChatUserScrollIntent = useCallback(() => {
     chatUserScrollLockUntilRef.current = nextChatUserScrollLockUntil();
   }, []);
 
-  const scrollChatToBottom = useCallback((force = false) => {
-    const canScroll = () => shouldAutoScrollChatToBottom({
+  const shouldAutoscrollChat = useCallback((force = false) => (
+    shouldAutoScrollChatToBottom({
       force,
       followsLatest: chatAutoScrollFollowRef.current,
       pointerScrolling: chatPointerScrollingRef.current,
       userScrollLocked: isChatUserScrollLocked(chatUserScrollLockUntilRef.current),
-    });
-    if (!canScroll()) {
+    })
+  ), []);
+
+  const handleChatAtBottomChange = useCallback((atBottom: boolean) => {
+    chatAutoScrollFollowRef.current = atBottom;
+    setChatShowScrollToBottom(!atBottom);
+  }, []);
+
+  const scrollChatToBottom = useCallback((force = false) => {
+    if (!shouldAutoscrollChat(force)) {
       return;
     }
-    const finishProgrammaticScroll = () => {
-      window.setTimeout(() => {
-        chatProgrammaticScrollRef.current = false;
-      }, 0);
-    };
     window.requestAnimationFrame(() => {
-      const container = chatScrollRef.current;
-      if (!container) {
-        finishProgrammaticScroll();
+      if (!shouldAutoscrollChat(force)) {
         return;
       }
-      if (!canScroll()) {
-        finishProgrammaticScroll();
-        return;
-      }
-      const nextScrollTop = resolveChatBottomScrollTop({
-        scrollHeight: container.scrollHeight,
-        clientHeight: container.clientHeight,
-      });
-      chatProgrammaticScrollRef.current = true;
-      container.scrollTop = nextScrollTop;
+      chatVirtualListRef.current?.scrollToBottom('auto');
       chatAutoScrollFollowRef.current = true;
       setChatShowScrollToBottom(false);
-      finishProgrammaticScroll();
     });
-  }, []);
+  }, [shouldAutoscrollChat]);
+
+  const autoscrollChatToBottom = useCallback(() => {
+    if (!shouldAutoscrollChat(false)) {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      if (!shouldAutoscrollChat(false)) {
+        return;
+      }
+      chatVirtualListRef.current?.autoscrollToBottom();
+    });
+  }, [shouldAutoscrollChat]);
 
   const forceChatScrollToBottom = useCallback(() => {
     const runtimeKey = encodeChatSessionKey(selectedChatKeyRef.current);
@@ -3196,8 +3176,8 @@ function App() {
       return;
     }
     resizeChatComposerTextarea();
-    scrollChatToBottom();
-  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, scrollChatToBottom]);
+    autoscrollChatToBottom();
+  }, [tab, selectedChatId, chatMessages, chatPendingPromptsByKey, chatLoading, chatKeyboardInset, resizeChatComposerTextarea, autoscrollChatToBottom]);
 
   useEffect(() => {
     gitSelectedBranchesRef.current = gitSelectedBranches;
@@ -9065,16 +9045,13 @@ function App() {
             <div
               ref={chatScrollRef}
               className="scroll-panel chat-block"
-              onScroll={event => {
-                updateChatFollowModeFromScroll(event.currentTarget);
-              }}
               onWheel={event => { if (event.deltaY < 0) { markChatUserScrollIntent(); } }}
               onPointerDown={() => { chatPointerScrollingRef.current = true; }}
-              onPointerUp={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
-              onPointerCancel={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
+              onPointerUp={() => { chatPointerScrollingRef.current = false; }}
+              onPointerCancel={() => { chatPointerScrollingRef.current = false; }}
               onTouchStart={() => { chatPointerScrollingRef.current = true; }}
-              onTouchEnd={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
-              onTouchCancel={() => { chatPointerScrollingRef.current = false; updateChatFollowModeFromScroll(); }}
+              onTouchEnd={() => { chatPointerScrollingRef.current = false; }}
+              onTouchCancel={() => { chatPointerScrollingRef.current = false; }}
             >
               {chatLoading ? (
                 <div className="muted block">Loading chat...</div>
@@ -9089,9 +9066,13 @@ function App() {
               ) : null}
               {chatDisplayIndex.items.length > 0 ? (
                 <ChatVirtualTurnList
+                  ref={chatVirtualListRef}
                   scrollRef={chatScrollRef}
                   displayIndex={chatDisplayIndex}
                   runtimeKey={selectedChatEncodedKey}
+                  atBottomThreshold={CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD}
+                  onAtBottomChange={handleChatAtBottomChange}
+                  shouldAutoscroll={shouldAutoscrollChat}
                   renderItem={renderChatVirtualItem}
                 />
               ) : null}

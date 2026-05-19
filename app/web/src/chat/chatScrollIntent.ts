@@ -20,17 +20,6 @@ export function shouldAutoScrollChatToBottom(input: {
   return input.force || (input.followsLatest && !input.pointerScrolling && !input.userScrollLocked);
 }
 
-export function shouldHandleChatVirtualWindowScroll(programmaticScroll: boolean): boolean {
-  return !programmaticScroll;
-}
-
-export function resolveChatBottomScrollTop(input: {
-  scrollHeight: number;
-  clientHeight: number;
-}): number {
-  return Math.max(0, input.scrollHeight - input.clientHeight);
-}
-
 export type ChatSessionReadWindowUpdate = {
   resetToLatest?: true;
   followLatest?: boolean;

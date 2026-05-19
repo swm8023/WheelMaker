@@ -4,10 +4,8 @@ import {
   CHAT_USER_SCROLL_LOCK_MS,
   isChatUserScrollLocked,
   nextChatUserScrollLockUntil,
-  resolveChatBottomScrollTop,
   resolveChatSessionReadWindowUpdate,
   shouldAutoScrollChatToBottom,
-  shouldHandleChatVirtualWindowScroll,
 } from '../web/src/chat/chatScrollIntent';
 
 describe('web drag scroll behavior', () => {
@@ -46,12 +44,7 @@ describe('web drag scroll behavior', () => {
     ).toBe(true);
   });
 
-  test('ignores programmatic chat scrolls for virtual window expansion', () => {
-    expect(shouldHandleChatVirtualWindowScroll(true)).toBe(false);
-    expect(shouldHandleChatVirtualWindowScroll(false)).toBe(true);
-  });
-
-  test('delegates virtual row measurement to Virtuoso instead of manual resize retries', () => {
+  test('delegates virtual row measurement and bottom scrolling to Virtuoso', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
     const virtualList = fs.readFileSync(
@@ -59,9 +52,12 @@ describe('web drag scroll behavior', () => {
       'utf8',
     );
 
-    expect(resolveChatBottomScrollTop({scrollHeight: 1200, clientHeight: 500})).toBe(700);
-    expect(resolveChatBottomScrollTop({scrollHeight: 300, clientHeight: 500})).toBe(0);
     expect(virtualList).toContain("from 'react-virtuoso';");
+    expect(virtualList).toContain('type VirtuosoHandle');
+    expect(virtualList).toContain('totalListHeightChanged={handleTotalListHeightChanged}');
+    expect(mainTsx).toContain("chatVirtualListRef.current?.scrollToBottom('auto');");
+    expect(mainTsx).toContain('chatVirtualListRef.current?.autoscrollToBottom();');
+    expect(mainTsx).not.toContain('container.scrollTop = nextScrollTop;');
     expect(mainTsx).not.toContain("container.querySelector<HTMLElement>('.chat-virtual-list') ?? container");
     expect(mainTsx).not.toContain('scrollChatToBottom(false);');
     expect(mainTsx).not.toContain('run(CHAT_BOTTOM_SCROLL_RETRY_FRAMES);');
