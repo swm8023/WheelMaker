@@ -867,6 +867,10 @@ body,
   transition: top 0ms linear, transform 140ms ease, opacity 180ms ease, box-shadow 180ms ease;
 }
 
+.floating-control-stack[data-drag-state='gesture-open'] {
+  transition: top 140ms ease, transform 120ms ease, opacity 180ms ease, box-shadow 180ms ease;
+}
+
 .floating-nav-group,
 .drawer-toggle-bubble {
   border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
@@ -950,6 +954,96 @@ body,
 .drawer-toggle-bubble[data-active='true'] {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.gesture-nav-control {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  pointer-events: auto;
+}
+
+.gesture-nav-button {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 48px;
+  height: 48px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel) 34%, transparent);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(1px);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 17px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.gesture-nav-button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel) 64%, transparent);
+}
+
+.gesture-nav-drawer-button {
+  z-index: 3;
+}
+
+.gesture-nav-drawer-button:active {
+  transform: scale(0.97);
+}
+
+.gesture-nav-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--panel) 92%, transparent);
+  background: var(--accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+}
+
+.gesture-nav-badge .codicon {
+  font-size: 10px;
+}
+
+.gesture-nav-option {
+  z-index: 2;
+  color: var(--muted);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+
+.gesture-nav-option-chat {
+  transform: translate3d(0, -56px, 0);
+}
+
+.gesture-nav-option-file {
+  transform: translate3d(-56px, 0, 0);
+}
+
+.gesture-nav-option-git {
+  transform: translate3d(0, 56px, 0);
+}
+
+.gesture-nav-option[data-active='true'],
+.gesture-nav-option[data-candidate='true'] {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.gesture-nav-option[data-candidate='true'] {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent), 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .breadcrumb-title {
