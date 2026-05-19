@@ -75,6 +75,12 @@ describe('agent package update settings UI source structure', () => {
     expect(stylesCss).toContain('.agent-package-hub-list');
     expect(stylesCss).toContain('.update-hub-header .wide-project-hub-tag');
     expect(stylesCss).toContain('font-size: 12.5px;');
+    const settingsDetailPageBlock = stylesCss.match(/\.settings-detail-page \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(settingsDetailPageBlock).toContain('flex: 1 1 auto;');
+    expect(settingsDetailPageBlock).toContain('overflow: hidden;');
+    const settingsDetailBodyBlock = stylesCss.match(/\.settings-detail-body \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(settingsDetailBodyBlock).toContain('overflow-y: auto;');
+    expect(settingsDetailBodyBlock).toContain('scrollbar-gutter: stable;');
     expect(stylesCss).toContain('.wheelmaker-update-panel');
     expect(stylesCss).toContain('.wheelmaker-update-version-line');
     expect(stylesCss).toContain('.wheelmaker-update-ref-tag');
