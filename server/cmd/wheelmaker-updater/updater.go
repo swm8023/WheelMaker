@@ -233,7 +233,7 @@ func refreshInvocationForOS(cfg UpdaterConfig, skipUpdate bool, goos string) (re
 			args:                args,
 			refreshPublishesWeb: false,
 		}, nil
-	case "darwin":
+	case "darwin", "linux":
 		refreshScript := filepath.Join(cfg.RepoDir, "scripts", "refresh_server.sh")
 		args := []string{
 			refreshScript,
@@ -291,6 +291,8 @@ func requiredCommandsForOS(goos string) []string {
 		return []string{"powershell"}
 	case "darwin":
 		return []string{"bash", "git", "go", "node", "npm", "npx", "launchctl"}
+	case "linux":
+		return []string{"bash", "git", "go", "node", "npm", "npx", "systemctl"}
 	default:
 		return nil
 	}

@@ -193,6 +193,26 @@ function Ensure-AcpDependencies {
   Invoke-Checked -FilePath "npm" -Arguments (@("install", "-g") + $missing) -FailureMessage "npm install failed"
 }
 
+function Ensure-AppDependencies {
+  if ($SkipDeps) { Write-Step "skip app dependency sync (-SkipDeps)"; return }
+  Assert-Command -Name "npm" -Hint "Install Node.js 22+."
+
+  $appRoot = Join-Path $script:RepoRoot "app"
+  $packageJson = Join-Path $appRoot "package.json"
+  $packageLock = Join-Path $appRoot "package-lock.json"
+  if (-not (Test-Path $packageJson)) { throw ("app package.json not found: {0}" -f $packageJson) }
+  if (-not (Test-Path $packageLock)) { throw ("app package-lock.json not found: {0}" -f $packageLock) }
+
+  Write-Step "sync app Web dependencies"
+  if ($WhatIf) { Write-Host "[whatif] npm ci --include=dev"; return }
+  Push-Location $appRoot
+  try {
+    Invoke-Checked -FilePath "npm" -Arguments @("ci", "--include=dev") -FailureMessage "npm ci failed"
+  } finally {
+    Pop-Location
+  }
+}
+
 function Read-ConfigJson {
   param([Parameter(Mandatory = $true)][string]$Path)
   try { return (Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json) }
@@ -789,6 +809,7 @@ Assert-ServiceAdminAccess
 Write-Step ("repo root: {0}" -f $script:RepoRoot)
 Pull-Latest
 Ensure-AcpDependencies
+Ensure-AppDependencies
 Build-Binary -Out $script:OutputBinary -Pkg "./cmd/wheelmaker/" -Label "wheelmaker"
 Build-Binary -Out $script:MonitorOutputBinary -Pkg "./cmd/wheelmaker-monitor/" -Label "wheelmaker-monitor"
 if (-not $SkipUpdaterInstall) {

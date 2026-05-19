@@ -16,13 +16,20 @@ function Assert-Contains {
   }
 }
 
+function Assert-NotContains {
+  param([string]$Needle)
+  if ($text.Contains($Needle)) {
+    throw "deploy.sh should not contain text: $Needle"
+  }
+}
+
 Assert-Contains "WheelMaker All-in-One Deploy"
 Assert-Contains "scripts/refresh_server.sh"
-Assert-Contains "app/node_modules/.bin/webpack"
-Assert-Contains "(cd app && npm ci --include=dev)"
+Assert-Contains "supports macOS and Linux"
 Assert-Contains 'bash "scripts/refresh_server.sh" "$@"'
 Assert-Contains "publish web"
-Assert-Contains "deploy.sh is macOS-only"
 Assert-Contains "deploy.bat on Windows"
+Assert-NotContains "deploy.sh is macOS-only"
+Assert-NotContains "app/node_modules/.bin/webpack"
 
 Write-Host "deploy.sh source checks passed"

@@ -9,24 +9,23 @@ cat <<'BANNER'
 ============================================
 
   update + build + stop + deploy + start + publish web
+  supports macOS and Linux
 
 ============================================
 BANNER
 
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "[FAILED] deploy.sh is macOS-only. Use deploy.bat on Windows." >&2
-  exit 1
-fi
-
-if [[ ! -x "app/node_modules/.bin/webpack" ]]; then
-  cat >&2 <<'MESSAGE'
-[FAILED] app web dependencies are not installed.
-
-Run this once, then rerun deploy.sh:
-  (cd app && npm ci --include=dev)
-MESSAGE
-  exit 1
-fi
+case "$(uname -s)" in
+  Darwin|Linux)
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    echo "[FAILED] deploy.sh supports macOS and Linux. Use deploy.bat on Windows." >&2
+    exit 1
+    ;;
+  *)
+    echo "[FAILED] deploy.sh supports macOS and Linux only." >&2
+    exit 1
+    ;;
+esac
 
 if [[ ! -x "scripts/refresh_server.sh" ]]; then
   chmod +x "scripts/refresh_server.sh"

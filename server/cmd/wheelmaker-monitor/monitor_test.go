@@ -69,6 +69,28 @@ func TestParseLaunchAgentServiceInfo(t *testing.T) {
 	}
 }
 
+func TestSystemdUserUnitName(t *testing.T) {
+	got := systemdUserUnitName(launchAgentHubLabel)
+	if got != "com.wheelmaker.hub.service" {
+		t.Fatalf("unit name=%q", got)
+	}
+}
+
+func TestParseSystemdUserServiceInfo(t *testing.T) {
+	running := parseSystemdUserServiceInfo(launchAgentHubLabel, []byte("LoadState=loaded\nActiveState=active\nUnitFileState=enabled\n"))
+	if !running.Installed || running.Status != "Running" || running.StartType != "systemd-user" {
+		t.Fatalf("running info=%#v", running)
+	}
+	stopped := parseSystemdUserServiceInfo(launchAgentHubLabel, []byte("LoadState=loaded\nActiveState=inactive\nUnitFileState=enabled\n"))
+	if !stopped.Installed || stopped.Status != "Stopped" {
+		t.Fatalf("stopped info=%#v", stopped)
+	}
+	missing := parseSystemdUserServiceInfo(launchAgentHubLabel, []byte("LoadState=not-found\nActiveState=inactive\nUnitFileState=disabled\n"))
+	if missing.Installed || missing.Status != "NotInstalled" {
+		t.Fatalf("missing info=%#v", missing)
+	}
+}
+
 func TestParseUnixWheelmakerProcessesExcludesUpdaterAndShell(t *testing.T) {
 	out := []byte(`123 Mon May 18 20:01:02 2026 /Users/me/.wheelmaker/bin/wheelmaker -d
 124 Mon May 18 20:01:03 2026 /Users/me/.wheelmaker/bin/wheelmaker --hub-worker

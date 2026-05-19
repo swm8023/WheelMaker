@@ -307,6 +307,9 @@ func listManagedServices() ([]ServiceInfo, error) {
 	if monitorGOOS == "darwin" {
 		return listLaunchAgentServices()
 	}
+	if monitorGOOS == "linux" {
+		return listSystemdUserServices()
+	}
 	if monitorGOOS != "windows" {
 		return nil, nil
 	}
@@ -403,6 +406,55 @@ func getLaunchAgentServiceInfo(label string) (ServiceInfo, error) {
 		return parseLaunchAgentServiceInfo(label, installed, nil), nil
 	}
 	return parseLaunchAgentServiceInfo(label, true, out), nil
+}
+
+func systemdUserUnitName(label string) string {
+	return label + ".service"
+}
+
+func systemdUserUnitPath(home string, label string) string {
+	return filepath.Join(home, ".config", "systemd", "user", systemdUserUnitName(label))
+}
+
+func parseSystemdUserServiceInfo(label string, output []byte) ServiceInfo {
+	values := map[string]string{}
+	for _, line := range strings.Split(string(output), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+	}
+	loadState := strings.ToLower(values["LoadState"])
+	if loadState == "" || loadState == "not-found" {
+		return ServiceInfo{Name: label, Installed: false, Status: "NotInstalled", StartType: "-"}
+	}
+	status := "Stopped"
+	if strings.EqualFold(values["ActiveState"], "active") {
+		status = "Running"
+	}
+	return ServiceInfo{Name: label, Installed: true, Status: status, StartType: "systemd-user"}
+}
+
+func listSystemdUserServices() ([]ServiceInfo, error) {
+	infos := make([]ServiceInfo, 0, len(allLaunchAgentLabels()))
+	for _, label := range allLaunchAgentLabels() {
+		info, err := getSystemdUserServiceInfo(label)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func getSystemdUserServiceInfo(label string) (ServiceInfo, error) {
+	unit := systemdUserUnitName(label)
+	out, err := exec.Command("systemctl", "--user", "show", unit, "--property=LoadState", "--property=ActiveState", "--property=UnitFileState", "--no-pager").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return ServiceInfo{}, fmt.Errorf("query systemd user unit %s: %w", unit, err)
+	}
+	return parseSystemdUserServiceInfo(label, out), nil
 }
 
 func listWheelmakerProcesses() ([]ProcessInfo, error) {
@@ -1235,6 +1287,15 @@ func (m *Monitor) RestartService() error {
 			return err
 		}
 	}
+	if monitorGOOS == "linux" {
+		err := restartManagedSystemdUserServices()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
 	if monitorGOOS == "windows" {
 		err := restartManagedRuntimeServices()
 		if err == nil {
@@ -1255,6 +1316,15 @@ func (m *Monitor) RestartService() error {
 func (m *Monitor) StopService() error {
 	if monitorGOOS == "darwin" {
 		err := stopManagedLaunchAgents()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
+	if monitorGOOS == "linux" {
+		err := stopManagedSystemdUserServices()
 		if err == nil {
 			return nil
 		}
@@ -1319,6 +1389,15 @@ func (m *Monitor) StartService() error {
 			return err
 		}
 	}
+	if monitorGOOS == "linux" {
+		err := startManagedSystemdUserServices()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, errServiceNotInstalled) {
+			return err
+		}
+	}
 	if monitorGOOS == "windows" {
 		err := startManagedRuntimeServices()
 		if err == nil {
@@ -1365,6 +1444,20 @@ func (m *Monitor) RestartMonitor() error {
 			cmd := exec.Command("launchctl", "kickstart", "-k", launchAgentTarget(launchAgentMonitorLabel))
 			if err := cmd.Start(); err != nil {
 				return fmt.Errorf("schedule monitor LaunchAgent restart: %w", err)
+			}
+			go func() {
+				time.Sleep(120 * time.Millisecond)
+				os.Exit(0)
+			}()
+			return nil
+		}
+	}
+	if monitorGOOS == "linux" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr == nil && fileExists(systemdUserUnitPath(home, launchAgentMonitorLabel)) {
+			cmd := exec.Command("systemctl", "--user", "restart", systemdUserUnitName(launchAgentMonitorLabel))
+			if err := cmd.Start(); err != nil {
+				return fmt.Errorf("schedule monitor systemd user restart: %w", err)
 			}
 			go func() {
 				time.Sleep(120 * time.Millisecond)
@@ -1541,6 +1634,61 @@ func runLaunchAgentAction(label string, action string) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported LaunchAgent action: %s", action)
+	}
+}
+
+func startManagedSystemdUserServices() error {
+	return runManagedSystemdUserAction("start")
+}
+
+func stopManagedSystemdUserServices() error {
+	return runManagedSystemdUserAction("stop")
+}
+
+func restartManagedSystemdUserServices() error {
+	return runManagedSystemdUserAction("restart")
+}
+
+func runManagedSystemdUserAction(action string) error {
+	performed := false
+	errs := make([]string, 0)
+	for _, label := range managedLaunchAgentLabels() {
+		err := runSystemdUserAction(label, action)
+		if err == nil {
+			performed = true
+			continue
+		}
+		if errors.Is(err, errServiceNotInstalled) {
+			continue
+		}
+		errs = append(errs, fmt.Sprintf("%s: %v", label, err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s systemd user unit failed: %s", action, strings.Join(errs, "; "))
+	}
+	if !performed {
+		return errServiceNotInstalled
+	}
+	return nil
+}
+
+func runSystemdUserAction(label string, action string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	if !fileExists(systemdUserUnitPath(home, label)) {
+		return errServiceNotInstalled
+	}
+	unit := systemdUserUnitName(label)
+	switch action {
+	case "start", "stop", "restart":
+		if out, err := exec.Command("systemctl", "--user", action, unit).CombinedOutput(); err != nil {
+			return fmt.Errorf("systemctl --user %s %s: %w (%s)", action, unit, err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported systemd user action: %s", action)
 	}
 }
 

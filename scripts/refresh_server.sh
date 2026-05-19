@@ -45,7 +45,8 @@ Options:
   --skip-service-config
   --skip-web-publish
 
-LaunchAgent plists are written to ~/Library/LaunchAgents.
+LaunchAgent plists are written to ~/Library/LaunchAgents on macOS.
+systemd user units are written to ~/.config/systemd/user on Linux.
 USAGE
 }
 
@@ -131,7 +132,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$(uname -s)" == "Darwin" ]] || die "refresh_server.sh is macOS-only"
+UNAME_S="$(uname -s)"
+case "$UNAME_S" in
+  Darwin)
+    TARGET_GOOS="darwin"
+    SERVICE_BACKEND="launchd"
+    ;;
+  Linux)
+    TARGET_GOOS="linux"
+    SERVICE_BACKEND="systemd"
+    ;;
+  *)
+    die "refresh_server.sh supports macOS and Linux only (got ${UNAME_S})"
+    ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -z "$REPO_ROOT" ]]; then
@@ -146,10 +160,11 @@ WHEELMAKER_HOME="${HOME}/.wheelmaker"
 BUILD_CACHE_ROOT="${WHEELMAKER_HOME}/cache"
 GO_BUILD_CACHE="${BUILD_CACHE_ROOT}/go-build"
 GO_ARCH="$(go env GOARCH 2>/dev/null || uname -m)"
-BUILD_OUTPUT_ROOT="${WHEELMAKER_HOME}/build/darwin_${GO_ARCH}"
+BUILD_OUTPUT_ROOT="${WHEELMAKER_HOME}/build/${TARGET_GOOS}_${GO_ARCH}"
 CONFIG_PATH="${WHEELMAKER_HOME}/config.json"
 CONFIG_EXAMPLE_PATH="${SERVER_ROOT}/config.example.json"
 PLIST_DIR="${HOME}/Library/LaunchAgents"
+SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 LOG_DIR="${WHEELMAKER_HOME}/log"
 USER_ID="$(id -u)"
 LAUNCH_DOMAIN="gui/${USER_ID}"
@@ -178,7 +193,11 @@ check_dependencies() {
   require_command node "Install Node.js 22.11.0+."
   require_command npm "Install Node.js 22.11.0+ with npm."
   require_command npx "Install npm/npx."
-  require_command launchctl "launchctl should be available on macOS."
+  if [[ "$TARGET_GOOS" == "darwin" ]]; then
+    require_command launchctl "launchctl should be available on macOS."
+  else
+    require_command systemctl "Install systemd with user service support."
+  fi
   node -e "const [maj,min]=process.versions.node.split('.').map(Number); process.exit(maj > 22 || (maj === 22 && min >= 11) ? 0 : 1)" \
     || die "Node.js 22.11.0+ is required"
 }
@@ -192,9 +211,26 @@ xml_escape() {
   printf '%s' "$value"
 }
 
+systemd_quote() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
+}
+
 plist_path() {
   local label="$1"
   printf '%s/%s.plist' "$PLIST_DIR" "$label"
+}
+
+systemd_unit_name() {
+  local label="$1"
+  printf '%s.service' "$label"
+}
+
+systemd_unit_path() {
+  local label="$1"
+  printf '%s/%s' "$SYSTEMD_USER_DIR" "$(systemd_unit_name "$label")"
 }
 
 launch_target() {
@@ -238,6 +274,20 @@ pull_latest() {
   popd >/dev/null
 }
 
+ensure_app_dependencies() {
+  if [[ "$SKIP_DEPS" -eq 1 ]]; then
+    step "skip app dependency sync"
+    return
+  fi
+  [[ -f "${APP_ROOT}/package.json" ]] || die "app package.json not found: ${APP_ROOT}/package.json"
+  [[ -f "${APP_ROOT}/package-lock.json" ]] || die "app package-lock.json not found: ${APP_ROOT}/package-lock.json"
+  require_command npm "Install Node.js 22.11.0+ with npm."
+  step "sync app Web dependencies"
+  pushd "$APP_ROOT" >/dev/null
+  npm ci --include=dev
+  popd >/dev/null
+}
+
 ensure_config() {
   if [[ -f "$CONFIG_PATH" ]]; then
     step "config already exists: ${CONFIG_PATH}"
@@ -263,7 +313,7 @@ build_binary() {
   step "build ${label}: ${out}"
   mkdir -p "$(dirname "$out")" "$GO_BUILD_CACHE"
   pushd "$SERVER_ROOT" >/dev/null
-  GOCACHE="$GO_BUILD_CACHE" GOOS=darwin GOARCH="$GO_ARCH" go build -o "$out" "$pkg"
+  GOCACHE="$GO_BUILD_CACHE" GOOS="$TARGET_GOOS" GOARCH="$GO_ARCH" go build -o "$out" "$pkg"
   popd >/dev/null
 }
 
@@ -383,6 +433,46 @@ write_updater_plist() {
 EOF
 }
 
+write_systemd_unit() {
+  local label="$1"
+  local binary="$2"
+  local args="$3"
+  local unit
+  unit="$(systemd_unit_path "$label")"
+  cat > "$unit" <<EOF
+[Unit]
+Description=WheelMaker ${label}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$(systemd_quote "$REPO_ROOT")
+Environment=$(systemd_quote "PATH=$PATH")
+Environment=$(systemd_quote "HOME=$HOME")
+ExecStart=$(systemd_quote "$binary") ${args}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+}
+
+write_hub_systemd_unit() {
+  write_systemd_unit "$HUB_LABEL" "$HUB_BINARY" "-d"
+}
+
+write_monitor_systemd_unit() {
+  write_systemd_unit "$MONITOR_LABEL" "$MONITOR_BINARY" ""
+}
+
+write_updater_systemd_unit() {
+  local args
+  args="--repo $(systemd_quote "$REPO_ROOT") --install-dir $(systemd_quote "$INSTALL_DIR") --time $(systemd_quote "$UPDATER_DAILY_TIME")"
+  write_systemd_unit "$UPDATER_LABEL" "$UPDATER_BINARY" "$args"
+}
+
 configure_launch_agents() {
   if [[ "$SKIP_SERVICE_CONFIG" -eq 1 ]]; then
     step "skip LaunchAgent configuration"
@@ -399,14 +489,60 @@ configure_launch_agents() {
   fi
 }
 
+configure_systemd_units() {
+  if [[ "$SKIP_SERVICE_CONFIG" -eq 1 ]]; then
+    step "skip systemd user unit configuration"
+    return
+  fi
+  step "write systemd user units"
+  mkdir -p "$SYSTEMD_USER_DIR" "$LOG_DIR"
+  write_hub_systemd_unit
+  write_monitor_systemd_unit
+  if [[ "$SKIP_UPDATER_INSTALL" -eq 0 ]]; then
+    write_updater_systemd_unit
+  else
+    step "skip updater systemd user unit configuration"
+  fi
+  step "systemctl --user daemon-reload"
+  systemctl --user daemon-reload
+  while IFS= read -r label; do
+    [[ -n "$label" ]] || continue
+    step "systemctl --user enable $(systemd_unit_name "$label")"
+    systemctl --user enable "$(systemd_unit_name "$label")"
+  done < <(all_labels)
+}
+
+configure_runtime_services() {
+  if [[ "$SERVICE_BACKEND" == "systemd" ]]; then
+    configure_systemd_units
+  else
+    configure_launch_agents
+  fi
+}
+
 stop_label() {
   local label="$1"
+  if [[ "$SERVICE_BACKEND" == "systemd" ]]; then
+    step "systemctl --user stop $(systemd_unit_name "$label")"
+    systemctl --user stop "$(systemd_unit_name "$label")" >/dev/null 2>&1 || true
+    return
+  fi
   step "launchctl bootout ${label}"
   launchctl bootout "$(launch_target "$label")" >/dev/null 2>&1 || true
 }
 
 start_label() {
   local label="$1"
+  if [[ "$SERVICE_BACKEND" == "systemd" ]]; then
+    local unit
+    unit="$(systemd_unit_name "$label")"
+    [[ -f "$(systemd_unit_path "$label")" ]] || die "systemd user unit not found: $(systemd_unit_path "$label")"
+    step "systemctl --user enable ${unit}"
+    systemctl --user enable "$unit"
+    step "systemctl --user restart ${unit}"
+    systemctl --user restart "$unit"
+    return
+  fi
   local plist
   plist="$(plist_path "$label")"
   [[ -f "$plist" ]] || die "LaunchAgent plist not found: ${plist}"
@@ -439,6 +575,18 @@ restart_agents() {
 status_agents() {
   while IFS= read -r label; do
     [[ -n "$label" ]] || continue
+    if [[ "$SERVICE_BACKEND" == "systemd" ]]; then
+      local unit
+      unit="$(systemd_unit_name "$label")"
+      if systemctl --user is-active --quiet "$unit"; then
+        echo "${label}: active"
+      elif [[ -f "$(systemd_unit_path "$label")" ]]; then
+        echo "${label}: installed, not active"
+      else
+        echo "${label}: not installed"
+      fi
+      continue
+    fi
     if launchctl print "$(launch_target "$label")" >/dev/null 2>&1; then
       echo "${label}: loaded"
     elif [[ -f "$(plist_path "$label")" ]]; then
@@ -453,21 +601,41 @@ uninstall_agents() {
   local failed=0
   while IFS= read -r label; do
     [[ -n "$label" ]] || continue
-    stop_label "$label" || failed=1
-    local plist
-    plist="$(plist_path "$label")"
-    if [[ -f "$plist" ]]; then
-      step "remove ${plist}"
-      rm -f "$plist" || failed=1
+    if [[ "$SERVICE_BACKEND" == "systemd" ]]; then
+      local unit
+      unit="$(systemd_unit_name "$label")"
+      step "systemctl --user stop ${unit}"
+      systemctl --user stop "$unit" >/dev/null 2>&1 || true
+      step "systemctl --user disable ${unit}"
+      systemctl --user disable "$unit" >/dev/null 2>&1 || true
+      local unit_path
+      unit_path="$(systemd_unit_path "$label")"
+      if [[ -f "$unit_path" ]]; then
+        step "remove ${unit_path}"
+        rm -f "$unit_path" || failed=1
+      fi
+    else
+      stop_label "$label" || failed=1
+      local plist
+      plist="$(plist_path "$label")"
+      if [[ -f "$plist" ]]; then
+        step "remove ${plist}"
+        rm -f "$plist" || failed=1
+      fi
     fi
   done < <(all_labels)
-  [[ "$failed" -eq 0 ]] || die "one or more LaunchAgent uninstall operations failed"
+  if [[ "$SERVICE_BACKEND" == "systemd" ]]; then
+    step "systemctl --user daemon-reload"
+    systemctl --user daemon-reload || failed=1
+  fi
+  [[ "$failed" -eq 0 ]] || die "one or more runtime service uninstall operations failed"
 }
 
 refresh() {
   [[ -d "$SERVER_ROOT" ]] || die "server directory not found: ${SERVER_ROOT}"
   check_dependencies
   pull_latest
+  ensure_app_dependencies
 
   local output_hub="${BUILD_OUTPUT_ROOT}/wheelmaker"
   local output_monitor="${BUILD_OUTPUT_ROOT}/wheelmaker-monitor"
@@ -502,7 +670,7 @@ refresh() {
     config_created=0
   fi
 
-  configure_launch_agents
+  configure_runtime_services
   publish_web
 
   if [[ "$config_created" -eq 0 && "$SKIP_RESTART" -eq 0 ]]; then

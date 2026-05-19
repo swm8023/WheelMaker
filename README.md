@@ -76,9 +76,9 @@ The refresh flow will:
 
 If `config.json` is created for the first time, the script stops before restart so you can fill it in and run the same command again.
 
-### macOS Machine A deployment
+### macOS / Linux Machine A deployment
 
-WheelMaker can also run as a complete Machine A on macOS using current-user LaunchAgents. This path runs after login as the active user, so agent CLIs can keep using the same `$HOME`, npm global packages, PATH, and Keychain-backed login state.
+WheelMaker can also run as a complete Machine A on macOS or Linux. macOS uses current-user LaunchAgents; Linux uses current-user systemd units. This path runs after login as the active user, so agent CLIs can keep using the same `$HOME`, npm global packages, PATH, and user-scoped auth state.
 
 Requirements:
 
@@ -86,7 +86,7 @@ Requirements:
 - **Node.js 22.11+**
 - `git`
 - `npm` and `npx`
-- `launchctl`
+- `launchctl` on macOS, or `systemctl --user` on Linux
 - the agent CLIs you plan to use, already installed and logged in for the current user
 
 One-shot refresh from the repository root:
@@ -95,15 +95,16 @@ One-shot refresh from the repository root:
 bash deploy.sh
 ```
 
-The macOS refresh flow will:
+The refresh flow will:
 
 - pull with `git pull --ff-only` when the worktree is clean
-- build the current Mac architecture binaries
+- run `npm ci --include=dev` after updating so new app package dependencies are installed before Web publish
+- build the current machine architecture binaries
 - install `wheelmaker`, `wheelmaker-monitor`, and `wheelmaker-updater` to `~/.wheelmaker/bin`
 - preserve or initialize `~/.wheelmaker/config.json`
 - publish the Web UI to `~/.wheelmaker/web`
-- generate LaunchAgent plist files under `~/Library/LaunchAgents`
-- start these LaunchAgents:
+- generate LaunchAgent plist files under `~/Library/LaunchAgents` on macOS, or systemd user units under `~/.config/systemd/user` on Linux
+- start these runtime jobs:
   - `com.wheelmaker.hub`
   - `com.wheelmaker.monitor`
   - `com.wheelmaker.updater`
@@ -128,9 +129,9 @@ bash scripts/refresh_server.sh restart
 bash scripts/refresh_server.sh uninstall
 ```
 
-`uninstall` removes the LaunchAgent registrations and plist files, but keeps `~/.wheelmaker/config.json`, logs, SQLite state, and Web assets.
+`uninstall` removes the LaunchAgent or systemd user-service registrations and service files, but keeps `~/.wheelmaker/config.json`, logs, SQLite state, and Web assets.
 
-The macOS deploy script does not install or configure Nginx, Caddy, certificates, or public ports. Point your own reverse proxy at the same contract used by Windows:
+The shell deploy script does not install or configure Nginx, Caddy, certificates, or public ports. Point your own reverse proxy at the same contract used by Windows:
 
 | External path | Local target |
 | --- | --- |
