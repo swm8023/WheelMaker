@@ -1,10 +1,10 @@
 export type GestureNavigationTab = 'chat' | 'file' | 'git';
 
-export type GesturePressIntent = 'pressing' | 'expand' | 'neutral' | 'drag';
+export type GesturePressIntent = 'pressing' | 'expand' | 'neutral';
 
 export const GESTURE_LONG_PRESS_MS = 350;
 export const GESTURE_LONG_PRESS_CANCEL_PX = 12;
-export const GESTURE_DRAG_START_PX = 28;
+export const GESTURE_MOVE_LONG_PRESS_MS = 2000;
 export const GESTURE_SELECTION_PX = 42;
 
 export function resolveGesturePressIntent({
@@ -14,13 +14,20 @@ export function resolveGesturePressIntent({
   distancePx: number;
   elapsedMs: number;
 }): GesturePressIntent {
-  if (distancePx > GESTURE_DRAG_START_PX) {
-    return 'drag';
-  }
   if (distancePx < GESTURE_LONG_PRESS_CANCEL_PX) {
     return elapsedMs >= GESTURE_LONG_PRESS_MS ? 'expand' : 'pressing';
   }
   return 'neutral';
+}
+
+export function shouldStartGestureMove({
+  elapsedMs,
+  candidate,
+}: {
+  elapsedMs: number;
+  candidate: GestureNavigationTab | null;
+}): boolean {
+  return elapsedMs >= GESTURE_MOVE_LONG_PRESS_MS && candidate === null;
 }
 
 export function resolveGestureDirectionCandidate({

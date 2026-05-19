@@ -228,25 +228,6 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   if (!scrollParent) {
     return (
       <div className="chat-virtuoso-list" data-scroll-parent-pending={true}>
-        {displayIndex.items.map((displayItem, index) => {
-          const size = heightEstimates[index] ?? defaultItemHeight;
-          return (
-            <div
-              key={displayItem.key}
-              className="chat-virtuoso-row"
-              style={{paddingBottom: `${virtuosoContext.rowGap}px`}}
-            >
-              {renderItem(displayItem, {
-                end: size,
-                index,
-                key: displayItem.key,
-                lane: 0,
-                size,
-                start: 0,
-              })}
-            </div>
-          );
-        })}
         <div
           aria-hidden="true"
           className="chat-virtuoso-footer"

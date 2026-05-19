@@ -44,9 +44,12 @@ describe('chat virtuoso mount fallback', () => {
     mockVirtuosoProps.length = 0;
   });
 
-  test('renders chat rows while the custom scroll parent ref is not attached yet', async () => {
+  test('does not render chat rows while the custom scroll parent ref is not attached yet', async () => {
     const scrollRef = {current: null};
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+    const renderItem = jest.fn((item: ChatDisplayIndexItem) => (
+      <span>{item.key}</span>
+    ));
 
     await ReactTestRenderer.act(() => {
       renderer = ReactTestRenderer.create(
@@ -54,15 +57,14 @@ describe('chat virtuoso mount fallback', () => {
           scrollRef={scrollRef}
           displayIndex={{items: [turnItem(1), turnItem(2)]}}
           runtimeKey="project-a/session-a"
-          renderItem={item => (
-            <span>{item.key}</span>
-          )}
+          renderItem={renderItem}
         />,
       );
     });
 
     const rows = renderer!.root.findAllByProps({className: 'chat-virtuoso-row'});
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(0);
+    expect(renderItem).not.toHaveBeenCalled();
     expect(renderer!.toJSON()).toEqual(
       expect.objectContaining({
         props: expect.objectContaining({

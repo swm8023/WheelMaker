@@ -1,12 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  GESTURE_DRAG_START_PX,
   GESTURE_LONG_PRESS_CANCEL_PX,
   GESTURE_LONG_PRESS_MS,
+  GESTURE_MOVE_LONG_PRESS_MS,
   GESTURE_SELECTION_PX,
   resolveGestureDirectionCandidate,
   resolveGesturePressIntent,
+  shouldStartGestureMove,
 } from '../web/src/services/gestureNavigation';
 
 function projectRoot(): string {
@@ -46,7 +47,7 @@ describe('gesture navigation', () => {
     );
   });
 
-  test('resolves pre-expansion press movement without confusing small jitter with drag', () => {
+  test('resolves pre-expansion press movement without distance-triggered drag', () => {
     expect(resolveGesturePressIntent({
       elapsedMs: GESTURE_LONG_PRESS_MS - 1,
       distancePx: GESTURE_LONG_PRESS_CANCEL_PX - 1,
@@ -61,8 +62,23 @@ describe('gesture navigation', () => {
     })).toBe('neutral');
     expect(resolveGesturePressIntent({
       elapsedMs: GESTURE_LONG_PRESS_MS - 1,
-      distancePx: GESTURE_DRAG_START_PX + 1,
-    })).toBe('drag');
+      distancePx: GESTURE_SELECTION_PX + 1,
+    })).toBe('neutral');
+  });
+
+  test('only enters gesture movement after a two second hold without a navigation candidate', () => {
+    expect(shouldStartGestureMove({
+      elapsedMs: GESTURE_MOVE_LONG_PRESS_MS - 1,
+      candidate: null,
+    })).toBe(false);
+    expect(shouldStartGestureMove({
+      elapsedMs: GESTURE_MOVE_LONG_PRESS_MS,
+      candidate: null,
+    })).toBe(true);
+    expect(shouldStartGestureMove({
+      elapsedMs: GESTURE_MOVE_LONG_PRESS_MS,
+      candidate: 'chat',
+    })).toBe(false);
   });
 
   test('resolves gesture direction candidates from fixed mobile directions', () => {
@@ -99,6 +115,7 @@ describe('gesture navigation', () => {
     expect(main).toContain("codicon-source-control");
     expect(main).toContain('handleFloatingDrawerToggle');
     expect(main).toContain('handleFloatingNavSelect');
+    expect(main).toContain('GESTURE_MOVE_LONG_PRESS_MS');
   });
 
   test('styles gesture navigation as circular drawer-centered controls', () => {

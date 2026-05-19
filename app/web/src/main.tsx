@@ -82,8 +82,10 @@ import { RegistryWorkspaceService } from './services/registryWorkspaceService';
 import { sortProjectsByPin, togglePinnedProjectId } from './services/projectNavigation';
 import {
   GESTURE_LONG_PRESS_MS,
+  GESTURE_MOVE_LONG_PRESS_MS,
   resolveGestureDirectionCandidate,
   resolveGesturePressIntent,
+  shouldStartGestureMove,
   type GestureNavigationTab,
 } from './services/gestureNavigation';
 import { resolveLayoutMode } from './services/responsiveLayout';
@@ -233,6 +235,8 @@ type GestureNavigationState = {
   pointerId: number;
   originX: number;
   originY: number;
+  currentX: number;
+  currentY: number;
   startedAt: number;
   candidate: GestureNavigationTab | null;
 };
@@ -2260,6 +2264,7 @@ function App() {
   const [gestureNavState, setGestureNavState] = useState<GestureNavigationState | null>(null);
   const gestureNavStateRef = useRef<GestureNavigationState | null>(null);
   const gestureLongPressTimerRef = useRef<number | null>(null);
+  const gestureMoveLongPressTimerRef = useRef<number | null>(null);
   const [floatingControlStackHeight, setFloatingControlStackHeight] = useState(184);
   const floatingLongPressTimerRef = useRef<number | null>(null);
   const floatingCooldownTimerRef = useRef<number | null>(null);
@@ -3476,12 +3481,17 @@ function App() {
       window.clearTimeout(gestureLongPressTimerRef.current);
       gestureLongPressTimerRef.current = null;
     }
+    if (gestureMoveLongPressTimerRef.current !== null) {
+      window.clearTimeout(gestureMoveLongPressTimerRef.current);
+      gestureMoveLongPressTimerRef.current = null;
+    }
     if (floatingCooldownTimerRef.current !== null) {
       window.clearTimeout(floatingCooldownTimerRef.current);
       floatingCooldownTimerRef.current = null;
     }
     floatingIgnoreLostCaptureRef.current = false;
     setFloatingDragState(null);
+    gestureNavStateRef.current = null;
     setGestureNavState(null);
     setFloatingKeyboardOffset(0);
   }, [isWide]);
@@ -3495,6 +3505,10 @@ function App() {
       if (gestureLongPressTimerRef.current !== null) {
         window.clearTimeout(gestureLongPressTimerRef.current);
         gestureLongPressTimerRef.current = null;
+      }
+      if (gestureMoveLongPressTimerRef.current !== null) {
+        window.clearTimeout(gestureMoveLongPressTimerRef.current);
+        gestureMoveLongPressTimerRef.current = null;
       }
       if (floatingCooldownTimerRef.current !== null) {
         window.clearTimeout(floatingCooldownTimerRef.current);
@@ -3875,6 +3889,12 @@ function App() {
       gestureLongPressTimerRef.current = null;
     }
   }, []);
+  const clearGestureMoveLongPressTimer = useCallback(() => {
+    if (gestureMoveLongPressTimerRef.current !== null) {
+      window.clearTimeout(gestureMoveLongPressTimerRef.current);
+      gestureMoveLongPressTimerRef.current = null;
+    }
+  }, []);
   const clearFloatingCooldownTimer = useCallback(() => {
     if (floatingCooldownTimerRef.current !== null) {
       window.clearTimeout(floatingCooldownTimerRef.current);
@@ -4068,27 +4088,66 @@ function App() {
         return;
       }
       clearGestureLongPressTimer();
+      clearGestureMoveLongPressTimer();
       floatingIgnoreLostCaptureRef.current = false;
       event.currentTarget.setPointerCapture(event.pointerId);
+      const startedAt = Date.now();
       const nextState: GestureNavigationState = {
         phase: 'pressing',
         pointerId: event.pointerId,
         originX: event.clientX,
         originY: event.clientY,
-        startedAt: Date.now(),
+        currentX: event.clientX,
+        currentY: event.clientY,
+        startedAt,
         candidate: null,
       };
+      gestureNavStateRef.current = nextState;
       setGestureNavState(nextState);
       gestureLongPressTimerRef.current = window.setTimeout(() => {
-        setGestureNavState(current =>
-          current && current.pointerId === event.pointerId && current.phase === 'pressing'
-            ? {...current, phase: 'expanded'}
-            : current,
-        );
+        setGestureNavState(current => {
+          const next =
+            current && current.pointerId === event.pointerId && current.phase === 'pressing'
+              ? {...current, phase: 'expanded' as const}
+              : current;
+          gestureNavStateRef.current = next;
+          return next;
+        });
         gestureLongPressTimerRef.current = null;
       }, GESTURE_LONG_PRESS_MS);
+      gestureMoveLongPressTimerRef.current = window.setTimeout(() => {
+        const current = gestureNavStateRef.current;
+        gestureMoveLongPressTimerRef.current = null;
+        if (!current || current.pointerId !== event.pointerId) {
+          return;
+        }
+        if (!shouldStartGestureMove({
+          elapsedMs: Date.now() - current.startedAt,
+          candidate: current.candidate,
+        })) {
+          return;
+        }
+        clearGestureLongPressTimer();
+        gestureNavStateRef.current = null;
+        setGestureNavState(null);
+        setFloatingDragState({
+          active: true,
+          pressing: false,
+          pointerId: current.pointerId,
+          originY: current.currentY,
+          startTop: floatingControlTop,
+          currentTop: floatingControlTop,
+          cooldownUntil: 0,
+        });
+      }, GESTURE_MOVE_LONG_PRESS_MS);
     },
-    [clearGestureLongPressTimer, isWide],
+    [
+      clearGestureLongPressTimer,
+      clearGestureMoveLongPressTimer,
+      floatingControlTop,
+      isWide,
+      setFloatingDragState,
+    ],
   );
   const handleGestureNavigationButtonPointerDown = useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -4111,33 +4170,32 @@ function App() {
       const deltaX = event.clientX - current.originX;
       const deltaY = event.clientY - current.originY;
       const distancePx = Math.hypot(deltaX, deltaY);
+      const nextCurrent = {
+        ...current,
+        currentX: event.clientX,
+        currentY: event.clientY,
+      };
       if (current.phase !== 'expanded') {
         const intent = resolveGesturePressIntent({
           distancePx,
           elapsedMs: Date.now() - current.startedAt,
         });
-        if (intent === 'drag') {
-          clearGestureLongPressTimer();
-          setGestureNavState(null);
-          setFloatingDragState({
-            active: true,
-            pressing: false,
-            pointerId: current.pointerId,
-            originY: current.originY,
-            startTop: floatingControlTop,
-            currentTop: clampFloatingTop(
-              floatingControlTop + deltaY,
-              floatingBounds.minTop,
-              floatingBounds.maxTop,
-            ),
-            cooldownUntil: 0,
-          });
-          event.preventDefault();
-          return;
-        }
         if (intent === 'neutral' && current.phase !== 'neutral') {
           clearGestureLongPressTimer();
-          setGestureNavState({...current, phase: 'neutral'});
+          const nextState = {...nextCurrent, phase: 'neutral' as const};
+          gestureNavStateRef.current = nextState;
+          setGestureNavState(nextState);
+          return;
+        }
+        if (intent === 'expand') {
+          const nextState = {...nextCurrent, phase: 'expanded' as const};
+          gestureNavStateRef.current = nextState;
+          setGestureNavState(nextState);
+          return;
+        }
+        if (current.currentX !== event.clientX || current.currentY !== event.clientY) {
+          gestureNavStateRef.current = nextCurrent;
+          setGestureNavState(nextCurrent);
         }
         return;
       }
@@ -4147,17 +4205,19 @@ function App() {
       );
       const candidate =
         directCandidate ?? resolveGestureDirectionCandidate({deltaX, deltaY});
-      if (candidate !== current.candidate) {
-        setGestureNavState({...current, candidate});
+      if (
+        candidate !== current.candidate ||
+        current.currentX !== event.clientX ||
+        current.currentY !== event.clientY
+      ) {
+        const nextState = {...nextCurrent, candidate};
+        gestureNavStateRef.current = nextState;
+        setGestureNavState(nextState);
       }
     },
     [
       clearGestureLongPressTimer,
-      floatingBounds.maxTop,
-      floatingBounds.minTop,
-      floatingControlTop,
       handleFloatingPointerMove,
-      setFloatingDragState,
     ],
   );
   const finishGestureNavigation = useCallback(
@@ -4167,6 +4227,8 @@ function App() {
         return;
       }
       clearGestureLongPressTimer();
+      clearGestureMoveLongPressTimer();
+      gestureNavStateRef.current = null;
       setGestureNavState(null);
       if (current.phase === 'pressing') {
         return;
@@ -4178,7 +4240,12 @@ function App() {
       floatingClickCooldownUntilRef.current = cooldownUntil;
       clearFloatingCooldownState(cooldownUntil);
     },
-    [clearFloatingCooldownState, clearGestureLongPressTimer, handleFloatingNavSelect],
+    [
+      clearFloatingCooldownState,
+      clearGestureLongPressTimer,
+      clearGestureMoveLongPressTimer,
+      handleFloatingNavSelect,
+    ],
   );
   const cancelGestureNavigation = useCallback(
     (pointerId?: number) => {
@@ -4187,22 +4254,26 @@ function App() {
         return;
       }
       clearGestureLongPressTimer();
+      clearGestureMoveLongPressTimer();
+      gestureNavStateRef.current = null;
       setGestureNavState(null);
       const cooldownUntil = Date.now() + 120;
       floatingClickCooldownUntilRef.current = cooldownUntil;
       clearFloatingCooldownState(cooldownUntil);
     },
-    [clearFloatingCooldownState, clearGestureLongPressTimer],
+    [clearFloatingCooldownState, clearGestureLongPressTimer, clearGestureMoveLongPressTimer],
   );
   const handleGestureNavigationOptionClick = useCallback(
     (nextTab: GestureNavigationTab, event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
       event.stopPropagation();
       clearGestureLongPressTimer();
+      clearGestureMoveLongPressTimer();
+      gestureNavStateRef.current = null;
       setGestureNavState(null);
       handleFloatingNavSelect(nextTab);
     },
-    [clearGestureLongPressTimer, handleFloatingNavSelect],
+    [clearGestureLongPressTimer, clearGestureMoveLongPressTimer, handleFloatingNavSelect],
   );
   useEffect(() => {
     if (!gestureNavigationExpanded) {
