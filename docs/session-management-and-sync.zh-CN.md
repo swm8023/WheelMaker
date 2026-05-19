@@ -177,10 +177,10 @@ type Cursor = { turnIndex: number };
 - cursor 是本地已连续缓存 finished turn 的最大 `turnIndex`；如果本地缓存出现缺口，cursor 必须回退到缺口前。
 - IndexedDB 保存 raw `turnsJson` 和 `cursorJson`；旧 `messagesJson` 或旧 schema/version 检测失败时，不做兼容迁移，除 token / 认证凭据外清空本地持久缓存并重建表，再由 `session.read` 重新补。
 - finished prefix 变更后 5 秒 debounce 持久化；切换 session、切后台、断连前需要 flush。
-- app/web 维护 Active Turn Runtime Set，默认 N=5。set 内 session 接收 `session.message`、执行 gap read repair、维护 raw source store；set 外 session 的 `session.message` 不写 cache、不补读，只等待 `session.updated`/list/read summary 刷新状态。
-- 用户打开一个不在 active set 内的 session 时，先 hydrate 本地 finished prefix，再无条件调用 `session.read(after=Finished Cursor)`。
-- 用户切回已经在 active set 内的 session 时，不无条件 read，直接用内存 raw store 重建显示视图。
-- 收到 active set 内的实时 `session.message` 后，校验顶层 `sessionId` 和 `turn` shape，然后 upsert raw turn。
+- app/web 不维护有容量上限的运行集合。收到 `session.message` 的 session、被 hydrate 的 session、被 read 的 session、以及用户选择的 session 都进入内存 runtime store，直到页面生命周期结束或显式清除/reload。
+- 用户打开 session 时，先 hydrate 本地 finished prefix；如果内存缺失或需要恢复可见内容，再调用 `session.read(after=Finished Cursor)`。
+- 用户切回内存中已有 raw store 的 session 时，直接用内存 raw store 重建显示视图；必要的补读由 read repair / 可见恢复逻辑触发。
+- 收到已知项目的实时 `session.message` 后，校验顶层 `sessionId` 和 `turn` shape，然后 upsert raw turn；未知 session 同时触发 project session list refresh，但不丢弃该条消息。
 - 只有连续的 `finished=true` turn 推进 Finished Cursor。
 - 如果 incoming `turnIndex > cursor.turnIndex + 1`，说明漏收，客户端用当前 cursor 调 `session.read` 补读；因此 `cursor=10` 收到 `12/false` 会 read，收到 `11/false` 不 read，之后收到 `12/true` 仍会因为 `12 > 10+1` read。
 - 同一 session 最多一个 read in flight；等待期间新 gap 只设置 dirty flag，当前 read 返回后如仍不连续再读一次。

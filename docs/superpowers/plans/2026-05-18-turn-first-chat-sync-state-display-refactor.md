@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Refactor chat sync so server/app use raw turns, active sessions sync correctly, session status comes from server summary, and React renders bounded virtualized chat rows over full in-memory active session turns.
+**Goal:** Refactor chat sync so server/app use raw turns, in-memory runtime sessions sync correctly, session status comes from server summary, and React renders bounded virtualized chat rows over full selected-session turns.
 
-**Architecture:** Server exposes raw `RegistrySessionTurn` in both realtime and read paths, with top-level `sessionId` and read summary. App stores raw turns in source stores and IndexedDB, keeps a default-5 Active Turn Runtime Set, performs serialized read repair from Finished Cursor, builds a lightweight Display Index for the selected session, and decodes raw turns only for mounted virtualized rendering/copy/status.
+**Architecture:** Server exposes raw `RegistrySessionTurn` in both realtime and read paths, with top-level `sessionId` and read summary. App stores raw turns in source stores and IndexedDB, keeps unbounded in-memory runtime stores for sessions that receive messages, hydrate, read, or become selected, performs serialized read repair from Finished Cursor, builds a lightweight Display Index for the selected session, and decodes raw turns only for mounted virtualized rendering/copy/status.
 
 **Tech Stack:** Go server, WMT2 file store, TypeScript React app/web, `react-virtuoso`, IndexedDB workspace cache, Jest, Go tests.
 
@@ -43,18 +43,18 @@ App persistence:
 App sync:
 
 - Create `app/web/src/chat/chatTurnStores.ts`: raw Finished Store / Live Turn Buffer / cursor / read repair helpers.
-- Create `app/web/src/chat/chatActiveRuntimeSet.ts`: default-5 active runtime set, activation, eviction, reconnect read trigger.
+- Maintain in-memory runtime stores in `main.tsx` or a focused future `chatRuntimeStore.ts`: no capacity limit, no session-count eviction, reconnect read trigger from current store keys.
 - Create `app/web/src/chat/chatReadRepair.ts`: serialized per-session read repair orchestration.
 - Create `app/web/src/chat/chatDurablePersist.ts`: dirty tracking, 5s debounce, flush boundaries.
 - Create `app/__tests__/web-chat-turn-stores.test.ts`.
 - Modify `app/web/src/chatSync.ts`: keep compatibility exports if needed, delegate to raw turn helpers or remove obsolete decoded-store semantics.
-- Modify `app/web/src/main.tsx`: orchestrate selected session and event flow only; do not directly own active set internals, read repair, or durable persist.
+- Modify `app/web/src/main.tsx`: orchestrate selected session and event flow only; do not directly own runtime store internals, read repair, or durable persist.
 
 App status/display:
 
 - Modify `app/web/src/chatSessionState.ts`: list state only from summary.
 - Delete/retire `app/web/src/chat/chatTurnWindow.ts`: replace manual raw turn range rendering with Display Index plus `ChatVirtuosoTurnList`.
-- Modify `app/web/src/chat/chatCopyRange.ts`: decode full active source range, reject `session/gap`.
+- Modify `app/web/src/chat/chatCopyRange.ts`: decode full selected source range, reject `session/gap`.
 - Modify render branches in `app/web/src/main.tsx`: render `ChatVirtuosoTurnList` and delegate mounted-item decoding/rendering to chat display modules.
 - Modify related Jest tests.
 
@@ -346,25 +346,24 @@ npm test -- --runInBand __tests__/web-chat-turn-stores.test.ts
 
 Expected: PASS.
 
-## Task 6: Active Turn Runtime Set
+## Task 6: In-Memory Runtime Stores
 
 **Files:**
 
-- Create: `app/web/src/chat/chatActiveRuntimeSet.ts`
-- Create: `app/__tests__/web-chat-active-runtime-set.test.ts`
 - Modify: `app/web/src/main.tsx`
+- Optional future extraction: `app/web/src/chat/chatRuntimeStore.ts`
+- Create: `app/__tests__/web-chat-runtime-memory-store.test.ts`
 
-- [ ] **Step 1: Replace legacy refs with a runtime-set module**
+- [ ] **Step 1: Replace legacy refs with raw runtime stores**
 
-Remove active use of these refs from `main.tsx`:
+Remove remaining use of these legacy refs from `main.tsx`:
 
 ```ts
 chatSyncIndexRef
 chatSyncSubIndexRef
-chatMessageStoreRef
 ```
 
-Move equivalent raw runtime state inside `chatActiveRuntimeSet.ts`:
+Keep equivalent raw runtime state in in-memory stores, with a future extraction boundary if needed:
 
 ```ts
 chatFinishedTurnStoreRef
@@ -372,27 +371,25 @@ chatLiveTurnBufferRef
 chatFinishedCursorRef
 chatReadInFlightRef
 chatRepairPendingRef
-chatActiveRuntimeKeysRef
-chatRuntimeAccessedAtRef
 ```
 
-`main.tsx` may hold one runtime-set object/ref, but must not directly manipulate the internal maps above.
+`main.tsx` may temporarily own the refs, but the model must not include a bounded runtime set.
 
-- [ ] **Step 2: Implement active set default 5**
+- [ ] **Step 2: Implement unbounded runtime membership**
 
-Selected session always enters active set. New and resumed sessions enter active set and become selected.
+Sessions enter the in-memory runtime store when they receive `session.message`, hydrate from cache, read from the server, or become selected. New and resumed sessions create runtime state and become selected.
 
-- [ ] **Step 3: Implement eviction**
+- [ ] **Step 3: Remove session-count eviction**
 
-Evict non-selected, non-running, least-recently-used first. If needed, evict least-recently-used non-selected running session.
+Do not evict runtime stores because of a fixed session-count capacity. Stores remain until page lifecycle end or explicit clear/reload.
 
-- [ ] **Step 4: Flush before eviction**
+- [ ] **Step 4: Persist dirty prefixes**
 
-If evicted session is dirty, flush Durable Cache first. Failure does not block eviction.
+Dirty finished prefixes still persist through the 5 second Durable Cache debounce and required lifecycle flushes.
 
-- [ ] **Step 5: Activate flow**
+- [ ] **Step 5: First runtime entry flow**
 
-When a session first enters active set:
+When a session first enters the in-memory runtime store:
 
 1. hydrate raw durable turns and cursor
 2. set full Finished Store in memory
@@ -400,9 +397,9 @@ When a session first enters active set:
 4. if selected, rebuild Display Index and mount Virtualized Chat View immediately
 5. unconditionally call `session.read(after=Finished Cursor)`
 
-- [ ] **Step 6: Already-active selection flow**
+- [ ] **Step 6: Already in-memory selection flow**
 
-Selecting an already-active session must not unconditionally read. Rebuild selected Virtualized Chat View from memory.
+Selecting an already in-memory session must not unconditionally read. Rebuild selected Virtualized Chat View from memory.
 
 ## Task 7: Realtime and Read Repair Integration
 
@@ -412,18 +409,19 @@ Selecting an already-active session must not unconditionally read. Rebuild selec
 - Modify: `app/web/src/main.tsx`
 - Modify focused chat sync tests.
 
-- [ ] **Step 1: Outside active set behavior**
+- [ ] **Step 1: Message consumption behavior**
 
-For `session.message` outside active set:
+For `session.message` in a known project:
 
-- do not parse `turn.content`
-- do not write stores/cache
-- do not trigger read repair
-- refresh project session list if session is unknown
+- write the raw turn into the in-memory runtime store
+- update the Finished Cursor from contiguous finished turns
+- schedule durable persist when the finished prefix changes
+- trigger read repair on gaps
+- refresh project session list if the session is unknown
 
-- [ ] **Step 2: Active set behavior**
+- [ ] **Step 2: Selected-session behavior**
 
-For active set `session.message`:
+For selected-session `session.message`:
 
 - merge raw turn
 - update cursor
@@ -441,7 +439,7 @@ Apply read response as authoritative over `[after+1, responseLast]`; split finis
 
 - [ ] **Step 5: Reconnect**
 
-After reconnect, read only active set sessions after their Finished Cursor.
+After reconnect, read sessions already present in the in-memory runtime stores plus the selected session after their Finished Cursor. Do not read every session list row.
 
 ## Task 8: 5 Second Durable Persist
 
@@ -461,11 +459,11 @@ Schedule IndexedDB persist 5 seconds after dirty mark. Reschedule on further dir
 
 - [ ] **Step 3: Required flush**
 
-Flush dirty sessions on LRU eviction, page hidden/beforeunload, reload/archive/delete, and selected `prompt_done`.
+Flush dirty sessions on page hidden/beforeunload, reload/archive/delete, and selected `prompt_done`.
 
 - [ ] **Step 4: Failure handling**
 
-Do not block UI or eviction on flush failure.
+Do not block UI on flush failure.
 
 ## Task 9: Session Summary Source of Truth
 
@@ -489,7 +487,7 @@ Allow list state updates from `session.list`, `session.updated`, `session.read.s
 
 - [ ] **Step 4: markRead only selected prompt_done**
 
-Decode selected raw turn; if method is `prompt_done`, call `session.markRead(turn.turnIndex)`. Non-selected active sessions do not mark read.
+Decode selected raw turn; if method is `prompt_done`, call `session.markRead(turn.turnIndex)`. Non-selected in-memory runtime sessions do not mark read.
 
 - [ ] **Step 5: Run tests**
 
@@ -632,7 +630,7 @@ Expected: PASS.
 - Modify: `app/__tests__/web-chat-copy-range.test.ts`
 - Modify: `app/web/src/main.tsx`
 
-- [ ] **Step 1: Decode copy range from full active source store**
+- [ ] **Step 1: Decode copy range from full selected source store**
 
 Copy uses full active raw source store, not only current Virtualized Chat View.
 
@@ -664,7 +662,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Update normative protocol**
 
-Document raw turn wire, active set, no compatibility migration, 5s persist, and window strategy.
+Document raw turn wire, unbounded in-memory runtime stores, no compatibility migration, 5s persist, and window strategy.
 
 - [ ] **Step 2: Search stale terms**
 
@@ -734,16 +732,16 @@ Implementation is complete only when:
 - Old wire/cache formats are not treated as compatible.
 - Incompatible local persistent cache clears everything except token/auth credentials and recreates IndexedDB tables.
 - `react-virtuoso` is added to `app/package.json` and locked in `app/package-lock.json`; no second virtualizer dependency is present.
-- `main.tsx` is reduced to orchestration; wire parsing, active runtime set, read repair, durable persist, display index, and virtualizer mechanics live in dedicated modules.
-- Active Turn Runtime Set default capacity is 5.
-- Set outside `session.message` does not parse content or mutate turn cache.
-- First activation reads after Finished Cursor; already-active selection does not unconditionally read.
+- `main.tsx` is reduced to orchestration; wire parsing, runtime store, read repair, durable persist, display index, and virtualizer mechanics live in dedicated modules.
+- In-memory runtime stores are unbounded; there is no session-count capacity or eviction.
+- Every known-project `session.message` writes the raw turn to the runtime store; unknown sessions also trigger project session list refresh.
+- First runtime-store entry reads after Finished Cursor; already in-memory selection does not unconditionally read.
 - Read repair is serialized and uses only Finished Cursor.
 - Durable cache stores raw finished prefix in `turnsJson` and persists with 5s debounce plus required flushes.
 - Session list state comes only from Session Summary.
 - Selected React view is bounded by `react-virtuoso`, not by a manual raw turn range.
 - Display Index is lightweight and does not store full decoded messages or markdown render output.
-- Display Index covers the full selected active session after hide/show filters.
+- Display Index covers the full selected session after hide/show filters.
 - Scrollbar is driven by logical Display Index height, not mounted DOM node count.
 - Exact item height is measured lazily for mounted visible + overscan items only.
 - Scrolling up/down never triggers server read.

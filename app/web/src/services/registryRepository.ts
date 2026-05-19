@@ -12,9 +12,11 @@ import type {
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryGitStatus,
+  RegistryHub,
   RegistryNpmCommandResponse,
   RegistryProject,
   RegistryProjectAgentProfile,
+  RegistryProjectListResponse,
   RegistryResumableSession,
   RegistrySessionConfigOption,
   RegistrySessionConfigOptionValue,
@@ -207,13 +209,13 @@ export class RegistryRepository {
     });
   }
 
-  async listProjects(): Promise<RegistryProject[]> {
+  async listProjectSnapshot(): Promise<RegistryProjectListResponse> {
     const resp = await this.client.request({
       method: 'project.list',
       payload: {},
     });
-    const payload = (resp.payload ?? {}) as { projects?: RegistryProject[] };
-    return (payload.projects ?? [])
+    const payload = (resp.payload ?? {}) as { projects?: RegistryProject[]; hubs?: RegistryHub[] };
+    const projects = (payload.projects ?? [])
       .filter(project => !!project.projectId)
       .map(project => ({
         ...project,
@@ -245,6 +247,21 @@ export class RegistryRepository {
           : undefined,
         hubId: project.hubId || project.projectId.split(':', 1)[0] || '',
       }));
+    const seenHubIds = new Set<string>();
+    const hubs = (payload.hubs ?? [])
+      .map(hub => ({hubId: typeof hub?.hubId === 'string' ? hub.hubId.trim() : ''}))
+      .filter((hub): hub is RegistryHub => {
+        if (!hub.hubId || seenHubIds.has(hub.hubId)) {
+          return false;
+        }
+        seenHubIds.add(hub.hubId);
+        return true;
+      });
+    return {projects, hubs};
+  }
+
+  async listProjects(): Promise<RegistryProject[]> {
+    return (await this.listProjectSnapshot()).projects;
   }
 
   async syncCheck(projectId: string, payload: RegistrySyncCheckPayload): Promise<RegistrySyncCheckResponse> {
@@ -692,14 +709,6 @@ export class RegistryRepository {
         hubId,
         packageName,
       },
-    });
-    return (resp.payload ?? {}) as RegistryNpmCommandResponse;
-  }
-
-  async queryNpmPackageTask(hubId: string): Promise<RegistryNpmCommandResponse> {
-    const resp = await this.client.request({
-      method: 'cmd.npm',
-      payload: {action: 'query', hubId},
     });
     return (resp.payload ?? {}) as RegistryNpmCommandResponse;
   }

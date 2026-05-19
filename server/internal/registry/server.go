@@ -584,6 +584,7 @@ func (s *Server) handleProjectList(peer *peerConn, state *connectionState, in en
 	items := s.snapshotProjects(state.scopeHubID)
 	_ = s.writeResponse(peer, in.RequestID, in.Method, "", map[string]any{
 		"projects": items,
+		"hubs":     s.snapshotProjectListHubs(state.scopeHubID),
 	})
 }
 
@@ -788,6 +789,7 @@ func (s *Server) executeBatchRequest(state *connectionState, in envelope) envelo
 			Method: in.Method,
 			Payload: rp.MustRaw(map[string]any{
 				"projects": s.snapshotProjects(state.scopeHubID),
+				"hubs":     s.snapshotProjectListHubs(state.scopeHubID),
 			}),
 		}
 	case "project.syncCheck":
@@ -901,6 +903,23 @@ func (s *Server) snapshotProjects(scopeHubID string) []rp.ProjectListItem {
 	}
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].ProjectID < items[j].ProjectID
+	})
+	return items
+}
+
+func (s *Server) snapshotProjectListHubs(scopeHubID string) []rp.HubListItem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := make([]rp.HubListItem, 0, len(s.hubPeers))
+	for hubID := range s.hubPeers {
+		if scopeHubID != "" && hubID != scopeHubID {
+			continue
+		}
+		items = append(items, rp.HubListItem{HubID: hubID})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].HubID < items[j].HubID
 	})
 	return items
 }

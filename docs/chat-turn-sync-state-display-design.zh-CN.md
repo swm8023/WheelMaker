@@ -10,7 +10,7 @@
 
 - session 列表中的进行中、完成、失败未查看状态必须正确。
 - 当前 session 的 streaming turn 必须稳定更新，同一 turn 原地覆盖，不产生重复或断裂。
-- 当前 active session 可以全量加载 turns 到内存，简化同步模型。
+- 进入内存 runtime store 的 session 可以全量加载 turns 到内存，简化同步模型。
 - React/DOM 不能全量渲染历史，只挂载 `react-virtuoso` 的 visible + overscan items。
 - 上滑/下滑只调整窗口，不触发 server read。
 - 用户在底部时，新 turn 自动跟随；用户上翻后，新 turn 不强制跳底。
@@ -27,7 +27,7 @@
 
 ## 2. 核心原则
 
-服务端提供权威 raw turn 流与 **Session Summary**。客户端维护 active session 的 raw turn source store、durable finished prefix、串行 read repair 和派生显示视图。
+服务端提供权威 raw turn 流与 **Session Summary**。客户端维护内存 runtime store 中 session 的 raw turn source store、durable finished prefix、串行 read repair 和派生显示视图。
 
 关键边界：
 
@@ -205,14 +205,14 @@ type RegistryChatMessage = {
 
 ### 5.2 Finished Store
 
-- active runtime set 内每个 session 保留全量 finished raw turns。
+- 每个进入内存的 session 保留全量 finished raw turns。
 - Finished Store 可短期包含 cursor 之后的 finished turns，例如 `1,2,4`。
 - Finished Cursor 只取连续 finished prefix，因此 `1,2,4` 的 cursor 是 2。
 - 同 index finished turn 覆盖 live turn。
 
 ### 5.3 Live Turn Buffer
 
-- 保存 active session 的 unfinished raw turn。
+- 保存内存中 session 的 unfinished raw turn。
 - 正常情况下每个 session 最多一个 live tail。
 - Live turn 可以参与 selected session 的显示。
 - Live turn 不能推进 Finished Cursor，不能写 Durable Turn Cache。
@@ -226,28 +226,18 @@ type RegistryChatMessage = {
 - 普通 realtime `finished:false` 不覆盖已有 `finished:true`。
 - `session.read` 返回的 covered range 是权威范围，可以覆盖该范围内的旧 raw turns。
 
-## 6. Active Turn Runtime Set
+## 6. In-Memory Runtime Store
 
-客户端只对 active set 内 session 做完整 turn 同步。
+客户端不再维护有容量上限的运行集合。任何收到 `session.message`、被 hydrate、被 read、或被用户选择的 session 都进入内存 runtime store，并保留到页面生命周期结束或用户显式清除/reload。
 
 规则：
 
-- 默认容量 `N = 5`，未来可配置。
-- selected session 永远在 active set 内，且永不淘汰。
-- 新建 session / resume imported session 自动进入 active set，并成为 selected。
-- set 内 session 完整消费 `session.message`、维护 Finished Store / Live Turn Buffer / Finished Cursor、触发 Read Repair、写 Durable Cache。
+- 不按 session 数淘汰内存中的 Finished Store / Live Turn Buffer / Finished Cursor。
+- 收到已知项目的 `session.message` 后，无论该 session 是否 selected，都完整消费消息、维护 raw source store、触发 gap Read Repair、并写 Durable Cache。
+- 如果收到未知 session 的 `session.message`，客户端先触发该 project 的 session list refresh，同时仍将该消息写入内存 runtime store，避免丢失 realtime turn。
 - selected session 在完整同步之外，额外维护 Display Index、virtualized view、Tail Lock、selected prompt_done markRead。
-- set 外 session 收到 `session.message` 时，不 parse `turn.content`，不写 source store，不写 Durable Cache，不触发 read repair。
-- set 外未知 session message 只触发 project session list refresh。
-
-LRU 淘汰：
-
-1. selected session 不淘汰。
-2. running session 优先保留。
-3. 优先淘汰非 selected、非 running、最久未访问 session。
-4. 如果 active set 内除 selected 外全是 running，容量压力下仍可淘汰最久未访问的非 selected session。
-5. 淘汰只影响客户端内存同步，不影响服务端 session。
-6. 淘汰 dirty session 前必须 flush Durable Cache；flush 失败不阻止淘汰，下次激活用 server read 修复。
+- 重连后需要补读的 session 从内存 runtime store keys 推导，并额外加入当前 selected session。
+- Dirty finished prefix 仍通过 5 秒 debounce 写 Durable Cache；不再存在容量淘汰前 flush。
 
 ## 7. Read 触发与 Cursor
 
@@ -266,9 +256,9 @@ afterTurnIndex = Finished Cursor
 
 触发时机：
 
-1. **首次进入 active set**：hydrate local durable cache 后，无条件 `session.read(after=Finished Cursor)`。
-2. **active set 内实时 gap**：如果收到 `incoming.turnIndex > Finished Cursor + 1`，触发 read。
-3. **重连后**：对 active set 内 session 执行 `session.read(after=Finished Cursor)`；set 外 session 不 read。
+1. **首次进入内存 runtime store**：hydrate local durable cache 后，按可见恢复/选择流程调用 `session.read(after=Finished Cursor)`。
+2. **内存 session 实时 gap**：如果收到 `incoming.turnIndex > Finished Cursor + 1`，触发 read。
+3. **重连后**：对内存 runtime store keys 中的 session 执行 `session.read(after=Finished Cursor)`，并额外包含当前 selected session。
 4. **显式刷新 / reload**：普通 refresh 用当前 Finished Cursor；reload 清 cursor 后从 0 read。
 
 例子：
@@ -365,7 +355,7 @@ wm_chat_session_content
 
 ### 9.2 Persist
 
-active set 内 finished cursor 更新后：
+内存 runtime store 中的 finished cursor 更新后：
 
 - 内存 Finished Store / Finished Cursor 立即更新。
 - UI 立即更新。
@@ -373,7 +363,6 @@ active set 内 finished cursor 更新后：
 
 必须 flush：
 
-- LRU 淘汰 dirty session 前。
 - 页面 hidden / beforeunload。
 - reload / archive / delete 前。
 - selected session 收到 `prompt_done` 后。
@@ -381,8 +370,7 @@ active set 内 finished cursor 更新后：
 flush 失败：
 
 - 不阻止 UI。
-- 不阻止 LRU 淘汰。
-- 下次激活该 session 时用旧 cursor 调 server read 修复。
+- 下次该 session 进入 read/repair 流程时用旧 cursor 调 server read 修复。
 
 ## 10. Session 状态同步
 
@@ -413,12 +401,11 @@ Session list 状态只由服务端 Session Summary 更新：
 `prompt_done`：
 
 - 只有 selected session decode 出 `prompt_done` 后调用 `session.markRead(promptDoneTurn.turnIndex)`。
-- 非 selected active session 不 markRead。
-- set 外 session 不 parse content，也不 markRead。
+- 非 selected session 即使收到并写入内存，也不 markRead。
 
 ## 11. Display Index 与虚拟列表策略
 
-第一阶段 full selected active session raw turns 已在内存，滚动策略只控制 React/DOM 渲染和可见 projection。不能为了滚动条或高度计算提前 decode、markdown render 或挂载全量 turns。
+第一阶段 full selected session raw turns 已在内存，滚动策略只控制 React/DOM 渲染和可见 projection。不能为了滚动条或高度计算提前 decode、markdown render 或挂载全量 turns。
 
 本迭代使用 `react-virtuoso` 封装 `ChatVirtuosoTurnList`。不再维护手写 raw turn range 作为主要滚动状态；raw `turnIndex` 仍作为 Display Item metadata、copy range、gap/cursor 判断和 scroll-to-item 定位边界。
 
@@ -471,7 +458,7 @@ type ChatDisplayItem = {
 
 - Source stores 仍只保存 raw turns。
 - React/DOM 只挂载 Virtuoso 当前 visible + overscan 的 items。
-- `Display Index` 覆盖 selected active session 的完整 source turns，但每个 item 必须轻量。
+- `Display Index` 覆盖 selected session 的完整 source turns，但每个 item 必须轻量。
 - `content` 全量 JSON parse 只允许用于 shallow envelope：识别 `method`、`param.type`、`status`、是否 copyable、是否隐藏等。
 - Markdown、代码块、复杂组件 props、复制文本等重 decode 只能发生在 visible + overscan items。
 
@@ -551,7 +538,7 @@ type ScrollAnchor = {
 
 ### 11.5 初始定位
 
-打开 selected session 或切换到已 active session：
+打开 selected session 或切换到已在内存中的 session：
 
 1. 计算 latest source turn index。
 2. 构建完整轻量 `Display Index`。
@@ -571,7 +558,7 @@ type ScrollAnchor = {
 1. 不移动手写 raw turn range。
 2. `react-virtuoso` 根据 scroll offset 计算 visible + overscan items。
 3. mounted item 才 decode/render/measure。
-4. 不触发 server read，因为 active session 已全量在内存。
+4. 不触发 server read，因为该 session 的 source turns 已全量在内存。
 5. 不裁剪 `Display Index`；DOM bounded 由 Virtuoso 保证。
 
 ### 11.7 下滑
@@ -607,7 +594,7 @@ type ScrollAnchor = {
 
 ### 11.9 Copy
 
-`prompt_done` copy 使用 active session 的 full source store，不受当前 window 限制：
+`prompt_done` copy 使用该 session 的 full source store，不受当前 window 限制：
 
 1. 从 `prompt_done.turnIndex` 向前找最近 `prompt_request`。
 2. 要求 raw range 在 Finished Store 中连续。
@@ -621,7 +608,7 @@ type ScrollAnchor = {
 - `registry.ts`：只定义 wire types，包括 `RegistrySessionTurn`、`session.message` payload、`session.read` response、Session Summary。
 - `chatWire.ts`：做 raw turn shape 校验和旧 payload 拒绝，不 decode 业务内容。
 - `chatTurnStores.ts`：维护 Finished Store、Live Turn Buffer、Finished Cursor、read response reconcile、gap repair 判定。
-- `chatActiveRuntimeSet.ts`：维护默认 N=5 的 Active Turn Runtime Set，处理 session 激活、淘汰、重连后 read trigger。
+- `main.tsx` / 后续可抽出的 runtime store 模块：维护无容量上限的内存 turn stores，并基于 store keys 处理重连后 read trigger。
 - `workspacePersistence.ts` / `workspaceStore.ts`：只负责 raw `turnsJson`、`cursorJson`、schema/version 检查、除 token 外的全量本地缓存清理、重建表、5 秒 debounce persist 和 flush。
 - `chatDisplayIndex.ts`：从 raw source store 派生轻量 Display Index，只做浅分类和 metadata，不保存完整 decoded message。
 - `ChatVirtuosoTurnList.tsx`：封装 `react-virtuoso`，拥有 visible + overscan、内部高度测量、tail lock、scroll-to-bottom；`main.tsx` 不直接操作 Virtuoso API。

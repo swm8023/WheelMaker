@@ -19,7 +19,7 @@ describe('web reconnect fallback behavior', () => {
     );
     expect(mainTsx).toContain('if (!connected && !keepWorkspaceVisible) {');
     expect(mainTsx).toContain('const syncChatSessionsAfterReconnect = async (');
-    expect(mainTsx).toContain('chatActiveRuntimeSetRef.current.keys()');
+    expect(mainTsx).toContain('runtimeKeysFromChatStores()');
     expect(mainTsx).toContain('runtimeKeys.add(selectedRuntimeKey);');
     expect(mainTsx).toContain('syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);');
     expect(mainTsx).toContain('await refreshChatIndex();');

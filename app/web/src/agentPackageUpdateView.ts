@@ -1,12 +1,11 @@
-import type {RegistryNpmPackageStatus, RegistryProject} from './types/registry';
+import type {RegistryHub, RegistryNpmPackageStatus} from './types/registry';
 
 export const AGENT_PACKAGE_SCAN_TIMEOUT_MS = 65000;
 
-export function deriveAgentPackageHubIds(projects: RegistryProject[]): string[] {
+export function deriveRegistryHubIds(hubs: RegistryHub[]): string[] {
   const hubIds = new Set<string>();
-  projects.forEach(project => {
-    if (project.online === false) return;
-    const hubId = (project.hubId || project.projectId.split(':', 1)[0] || '').trim();
+  hubs.forEach(hub => {
+    const hubId = (hub.hubId || '').trim();
     if (hubId) hubIds.add(hubId);
   });
   return Array.from(hubIds).sort((a, b) => {
@@ -18,6 +17,8 @@ export function deriveAgentPackageHubIds(projects: RegistryProject[]): string[] 
 
 export function packageStatusLabel(status: RegistryNpmPackageStatus | string): string {
   switch (status) {
+    case 'checking_latest':
+      return 'Checking latest';
     case 'not_installed':
       return 'Not installed';
     case 'up_to_date':

@@ -21,7 +21,7 @@ describe('web chat read-on-demand behavior', () => {
     expect(mainTsx).toContain('forceFull?: boolean;');
     expect(mainTsx).toContain('const useIncremental = requestedIncremental && !fallbackToFullRead;');
     expect(mainTsx).toContain('const syncChatSessionsAfterReconnect = async (');
-    expect(mainTsx).toContain('chatActiveRuntimeSetRef.current.keys()');
+    expect(mainTsx).toContain('runtimeKeysFromChatStores()');
     expect(mainTsx).toContain('runtimeKeys.add(selectedRuntimeKey);');
     expect(mainTsx).toContain('syncChatSessionsAfterReconnect(preferredSelectedChatKey).catch(() => undefined);');
     expect(mainTsx).toContain('useIncremental ? checkpointTurnIndex : 0,');

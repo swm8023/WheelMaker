@@ -1,4 +1,4 @@
-import type {RegistryFsEntry, RegistryProject} from '../types/registry';
+import type {RegistryFsEntry, RegistryHub, RegistryProject} from '../types/registry';
 import type {RegistryWorkspaceService} from './registryWorkspaceService';
 import type {HydratedProjectState, WorkspaceStore} from './workspaceStore';
 
@@ -12,6 +12,7 @@ function sortEntries(entries: RegistryFsEntry[]): RegistryFsEntry[] {
 
 export type ProjectLoadResult = {
   projects: RegistryProject[];
+  hubs: RegistryHub[];
   rootEntries: RegistryFsEntry[];
   hydrated: HydratedProjectState;
 };
@@ -35,6 +36,7 @@ export class WorkspaceController {
       : baseSession;
     return {
       projects: session.projects,
+      hubs: session.hubs,
       rootEntries: session.fileEntries,
       hydrated: this.store.hydrateProject(session.selectedProjectId, session.fileEntries),
     };
@@ -44,6 +46,7 @@ export class WorkspaceController {
     const session = await this.service.selectProject(projectId);
     return {
       projects: session.projects,
+      hubs: session.hubs,
       rootEntries: session.fileEntries,
       hydrated: this.store.hydrateProject(session.selectedProjectId, session.fileEntries),
     };
@@ -53,6 +56,7 @@ export class WorkspaceController {
     const session = await this.service.selectProjectLightweight(projectId);
     return {
       projects: session.projects,
+      hubs: session.hubs,
       rootEntries: [],
       hydrated: this.store.hydrateCachedProject(session.selectedProjectId),
     };

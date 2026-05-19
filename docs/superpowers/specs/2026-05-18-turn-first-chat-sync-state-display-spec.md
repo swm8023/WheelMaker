@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make chat synchronization, streaming updates, session status, durable cache, and chat window rendering deterministic while keeping the first implementation simple: active sessions load full raw turns into memory, React renders only a bounded visible window, and IndexedDB stores a raw finished-prefix blob.
+Make chat synchronization, streaming updates, session status, durable cache, and chat window rendering deterministic while keeping the first implementation simple: sessions in the in-memory runtime store load full raw turns into memory, React renders only a bounded visible window, and IndexedDB stores a raw finished-prefix blob.
 
 This is a review spec. It intentionally does not claim the current implementation satisfies every requirement.
 
@@ -13,8 +13,8 @@ In scope:
 - Raw turn wire format for `session.message` and `session.read`.
 - Server `session.read` continuity and hot gap projection.
 - At most one unfinished tail turn per session.
-- Active Turn Runtime Set with default capacity 5.
-- Full in-memory raw turn stores for active sessions.
+- Unbounded in-memory runtime stores for sessions that receive messages, hydrate, read, or become selected.
+- Full in-memory raw turn stores for sessions in the in-memory runtime store.
 - Single Finished Cursor per session.
 - Durable raw turn cache as a whole-session blob.
 - Serialized Read Repair.
@@ -176,7 +176,7 @@ The app MUST keep source stores as raw `RegistrySessionTurn`, not decoded messag
 
 ### CLT-002 Store Split
 
-Each active session MUST maintain:
+Each in-memory runtime session MUST maintain:
 
 - Finished Store for full in-memory `finished:true` raw turns.
 - Live Turn Buffer for unfinished raw turns.
@@ -184,33 +184,29 @@ Each active session MUST maintain:
 - Read in-flight flag.
 - Repair pending flag.
 
-### CLT-003 Active Runtime Set
+### CLT-003 In-Memory Runtime Stores
 
-The app MUST maintain an Active Turn Runtime Set with default capacity `5`. The capacity SHOULD be configurable later.
+The app MUST keep unbounded in-memory runtime stores for sessions that receive `session.message`, hydrate from Durable Turn Cache, read from the server, or become selected. The app MUST NOT evict a session runtime because of a session-count limit.
 
-### CLT-004 Selected Membership
+### CLT-004 Selected Runtime
 
-The selected session MUST always be in the Active Turn Runtime Set and MUST NOT be evicted.
+The selected session MUST use the same in-memory runtime stores as every other session and MUST additionally drive Display Index, virtualized rendering, Tail Lock, and selected `prompt_done` markRead.
 
 ### CLT-005 New and Resumed Sessions
 
-New sessions and imported/resumed sessions MUST enter the Active Turn Runtime Set and become selected.
+New sessions and imported/resumed sessions MUST create in-memory runtime state and become selected.
 
-### CLT-006 Active Set Consumption
+### CLT-006 Message Consumption
 
-Sessions in the Active Turn Runtime Set MUST fully consume `session.message`, update source stores, maintain Finished Cursor, run Read Repair, and write Durable Turn Cache.
+For known projects, every `session.message` MUST update source stores, maintain Finished Cursor, run Read Repair when needed, and write Durable Turn Cache when the finished prefix changes.
 
-### CLT-007 Outside Active Set
+### CLT-007 Unknown Session Message
 
-Sessions outside the Active Turn Runtime Set MUST NOT parse `turn.content`, update source stores, write Durable Turn Cache, or trigger Read Repair from `session.message`. Unknown outside-set session messages MAY trigger project session list refresh.
+An unknown session message for a known project MUST trigger project session list refresh and MUST still be written to the in-memory runtime store.
 
-### CLT-008 Eviction
+### CLT-008 Dirty Persist
 
-On capacity pressure, eviction MUST prefer non-selected, non-running, least-recently-used sessions. If all non-selected sessions are running, the least-recently-used non-selected session MAY be evicted.
-
-### CLT-009 Flush Before Eviction
-
-Dirty session cache MUST be flushed before eviction. Flush failure MUST NOT block eviction.
+Dirty finished prefixes MUST be persisted by the Durable Persist Queue debounce/flush mechanism. There is no session-count eviction flush path.
 
 ### CLT-010 Single Cursor
 
@@ -268,11 +264,11 @@ Finished Store / Finished Cursor changes MUST update memory immediately and sche
 
 ### DB-007 Required Flush Boundaries
 
-The app MUST flush dirty durable cache before LRU eviction, page hide/unload, reload/archive/delete, and selected `prompt_done`.
+The app MUST flush dirty durable cache before page hide/unload, reload/archive/delete, and selected `prompt_done`.
 
 ### DB-008 Flush Failure
 
-IndexedDB flush failure MUST NOT block UI or LRU eviction. The next activation MUST recover by `session.read(after=oldCursor)`.
+IndexedDB flush failure MUST NOT block UI. The next read/selection MUST recover by `session.read(after=oldCursor)`.
 
 ## Read Repair Requirements
 
@@ -282,15 +278,15 @@ Read Repair MUST use the current Finished Cursor as `afterTurnIndex`.
 
 ### RR-002 Activation Read
 
-When a session first enters the Active Turn Runtime Set, the app MUST hydrate durable cache and then unconditionally call `session.read(after=Finished Cursor)`.
+When a session first enters the in-memory runtime store, the app MUST hydrate durable cache and then unconditionally call `session.read(after=Finished Cursor)`.
 
 ### RR-003 No Repeat Activation Read
 
-Selecting a session already in the Active Turn Runtime Set MUST NOT unconditionally call read again. It uses the in-memory source stores and any existing repair state.
+Selecting a session already in the in-memory runtime store MUST NOT unconditionally call read again. It uses the in-memory source stores and any existing repair state.
 
 ### RR-004 Realtime Gap Trigger
 
-For active set sessions, if a realtime turn arrives with `turnIndex > Finished Cursor + 1`, the app MUST trigger Read Repair, regardless of `finished`.
+For in-memory runtime sessions, if a realtime turn arrives with `turnIndex > Finished Cursor + 1`, the app MUST trigger Read Repair, regardless of `finished`.
 
 ### RR-005 Contiguous Live No Read
 
@@ -302,7 +298,7 @@ Live Turn Buffer MUST NOT advance the read cursor or bridge a gap. If `Finished 
 
 ### RR-007 Reconnect
 
-After reconnect, the app MUST call `session.read(after=Finished Cursor)` for active set sessions. It MUST NOT read turns for sessions outside the active set.
+After reconnect, the app MUST call `session.read(after=Finished Cursor)` for sessions already in the in-memory runtime store and for the selected session. It MUST NOT read every session from the session list.
 
 ### RR-008 Single In-Flight Repair
 
@@ -364,7 +360,7 @@ When the selected visible session decodes a raw turn as `prompt_done`, the clien
 
 ### STAT-009 Background No markRead
 
-When a non-selected active session receives `prompt_done`, the client MUST NOT call `session.markRead`. Sessions outside the active set do not parse message content and therefore cannot mark read from realtime messages.
+When a non-selected in-memory runtime session receives `prompt_done`, the client MUST NOT call `session.markRead`. Sessions outside the selected display path do not mark read from realtime messages.
 
 ## Display Requirements
 
@@ -374,7 +370,7 @@ The displayed chat turn list MUST be derived from source stores through Display 
 
 ### UI-002 Full Source, Bounded React
 
-Active sessions MAY keep full raw turns in memory, but mounted React chat row components and DOM MUST contain only virtualizer visible + overscan items.
+Runtime sessions MAY keep full raw turns in memory, but mounted React chat row components and DOM MUST contain only virtualizer visible + overscan items.
 
 ### UI-003 Merge Sources
 
@@ -386,7 +382,7 @@ The app MUST NOT use a manual raw turn range as the primary scroll/render state.
 
 ### UI-005 No Scroll Read
 
-Scrolling up or down MUST NOT trigger `session.read`; active sessions already have full source turns in memory.
+Scrolling up or down MUST NOT trigger `session.read`; the selected session already has full source turns in memory.
 
 ### UI-006 Tail Initial Position
 
@@ -418,7 +414,7 @@ Hiding tool/thought turns MUST NOT affect raw turn cursor/copy semantics, and hi
 
 ### UI-013 Full Display Index
 
-The selected session Display Index MUST cover the full selected active session source turns after hide/show filters. It MUST remain lightweight enough to keep in memory.
+The selected session Display Index MUST cover the full selected session source turns after hide/show filters. It MUST remain lightweight enough to keep in memory.
 
 ### UI-014 DOM Bound
 
@@ -430,7 +426,7 @@ DOM node count MUST be bounded by virtualizer visible + overscan items, not by t
 
 ### UI-016 Copy Raw Range
 
-`prompt_done` copy range MUST be found by raw Turn Index boundaries from `prompt_done` back to nearest preceding `prompt_request` using full active source store, not only the current window.
+`prompt_done` copy range MUST be found by raw Turn Index boundaries from `prompt_done` back to nearest preceding `prompt_request` using the full selected source store, not only the current window.
 
 ### UI-017 Copy Type Filter
 
@@ -446,7 +442,7 @@ The displayed chat list MUST use `react-virtuoso` through a local wrapper compon
 
 ### UI-019A Main Orchestration Boundary
 
-`main.tsx` MUST NOT directly own wire parsing, active runtime set internals, read repair state machine, durable persist debounce, Display Index construction, or Virtuoso list mechanics. These responsibilities MUST live in focused chat/persistence modules with `main.tsx` acting as the selected-session and event-flow orchestrator.
+`main.tsx` MUST NOT directly own wire parsing, runtime store internals, read repair state machine, durable persist debounce, Display Index construction, or Virtuoso list mechanics. These responsibilities MUST live in focused chat/persistence modules with `main.tsx` acting as the selected-session and event-flow orchestrator.
 
 ### UI-020 Display Index
 
@@ -510,10 +506,10 @@ The implementation is accepted when these scenarios pass:
 4. Incompatible old IndexedDB/local persistent cache is cleared and tables are recreated, preserving only token/auth credentials.
 5. Server read returns `session/gap` for a missing WMT2 durable slot and does not mutate WMT2.
 6. Server read returns at most one unfinished tail, and it is last.
-7. Client active set default capacity is 5, selected is never evicted, and evicted dirty sessions flush first.
-8. Set outside `session.message` does not parse `turn.content`, write cache, or trigger read.
-9. First activation hydrates durable cache and unconditionally reads after Finished Cursor.
-10. Selecting an already-active session does not unconditionally read again.
+7. Client keeps unbounded in-memory runtime stores for sessions that receive messages, hydrate, read, or become selected; it does not evict by session-count capacity.
+8. Unknown `session.message` for a known project triggers project session list refresh and still writes the in-memory runtime store.
+9. First runtime-store entry hydrates durable cache and unconditionally reads after Finished Cursor.
+10. Selecting an already in-memory session does not unconditionally read again.
 11. Client cache `1,2,4` hydrates to Finished Cursor `2` and durable prefix `1,2`.
 12. Realtime `turnIndex=12 finished:false` with cursor `10` triggers read after `10`.
 13. Realtime `turnIndex=11 finished:false` with cursor `10` does not trigger read by itself.
@@ -522,7 +518,7 @@ The implementation is accepted when these scenarios pass:
 16. Durable persist is debounced at 5 seconds and required flush boundaries write dirty cache.
 17. `session.message` does not patch session list title/preview/running/done/read.
 18. Realtime `prompt_done` for selected session calls markRead but does not locally set list completed.
-19. Realtime `prompt_done` for background active session does not call markRead.
+19. Realtime `prompt_done` for background in-memory runtime session does not call markRead.
 20. Session list visual state changes only after Session Summary merge.
 21. Initial selected chat builds a full lightweight Display Index but mounts only the tail virtualized view.
 22. Scrolling up/down is handled by `react-virtuoso` without server read or manual raw turn range movement.
@@ -538,6 +534,6 @@ The implementation is accepted when these scenarios pass:
 32. While at bottom, streaming chunks and new turns keep the viewport tail-locked.
 33. While scrolled up, streaming chunks and new turns do not force the viewport to jump to bottom.
 34. Confirmation/choice affordances and prompt/tool/gap render items still display correctly after virtualizer unmount/remount.
-35. `main.tsx` delegates wire parsing, active runtime set, read repair, durable persist, Display Index, and virtualizer mechanics to focused modules.
+35. `main.tsx` delegates wire parsing, runtime store, read repair, durable persist, Display Index, and virtualizer mechanics to focused modules.
 36. Full app/web typecheck and focused tests pass.
 37. Server Go tests pass.

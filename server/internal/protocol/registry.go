@@ -144,6 +144,10 @@ type ProjectListItem struct {
 	Git           ProjectGitState       `json:"git"`
 }
 
+type HubListItem struct {
+	HubID string `json:"hubId"`
+}
+
 type MonitorHubRefPayload struct {
 	HubID string `json:"hubId"`
 }

@@ -125,6 +125,17 @@ func TestRegistryReportProjectsThenListProjects(t *testing.T) {
 	if !ok || len(projects) != 2 {
 		t.Fatalf("projects=%v, want 2 items", listResp.Payload["projects"])
 	}
+	hubs, ok := listResp.Payload["hubs"].([]any)
+	if !ok || len(hubs) != 1 {
+		t.Fatalf("hubs=%v, want 1 item", listResp.Payload["hubs"])
+	}
+	firstHub, _ := hubs[0].(map[string]any)
+	if firstHub["hubId"] != "hub-a" {
+		t.Fatalf("hub=%v, want hub-a", firstHub)
+	}
+	if _, ok := firstHub["online"]; ok {
+		t.Fatalf("hub should not expose online state: %v", firstHub)
+	}
 	first, _ := projects[0].(map[string]any)
 	if _, ok := first["projectId"].(string); !ok {
 		t.Fatalf("projectId missing: %v", first)

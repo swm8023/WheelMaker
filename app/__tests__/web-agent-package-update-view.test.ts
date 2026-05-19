@@ -1,20 +1,20 @@
-import {deriveAgentPackageHubIds, packageStatusLabel, wheelMakerUpdateStatusLabel, withAgentPackageTimeout} from '../web/src/agentPackageUpdateView';
-import type {RegistryProject} from '../web/src/types/registry';
+import {deriveRegistryHubIds, packageStatusLabel, wheelMakerUpdateStatusLabel, withAgentPackageTimeout} from '../web/src/agentPackageUpdateView';
+import type {RegistryHub} from '../web/src/types/registry';
 
 describe('agent package update view helpers', () => {
-  test('derives unique online hub ids in stable sorted order', () => {
-    const projects: RegistryProject[] = [
-      {projectId: 'hub-b:server', name: 'server', online: true, path: '', hubId: 'hub-b'},
-      {projectId: 'hub-a:app', name: 'app', online: true, path: '', hubId: 'hub-a'},
-      {projectId: 'hub-b:docs', name: 'docs', online: true, path: '', hubId: 'hub-b'},
-      {projectId: 'hub-c:old', name: 'old', online: false, path: '', hubId: 'hub-c'},
-      {projectId: 'hub-d:legacy', name: 'legacy', online: true, path: ''},
+  test('derives unique hub ids from project.list hubs in stable sorted order', () => {
+    const hubs: RegistryHub[] = [
+      {hubId: 'hub-b'},
+      {hubId: 'hub-a'},
+      {hubId: 'hub-b'},
+      {hubId: ' '},
     ];
 
-    expect(deriveAgentPackageHubIds(projects)).toEqual(['hub-a', 'hub-b', 'hub-d']);
+    expect(deriveRegistryHubIds(hubs)).toEqual(['hub-a', 'hub-b']);
   });
 
   test('maps package status values to concise labels', () => {
+    expect(packageStatusLabel('checking_latest')).toBe('Checking latest');
     expect(packageStatusLabel('not_installed')).toBe('Not installed');
     expect(packageStatusLabel('up_to_date')).toBe('Up to date');
     expect(packageStatusLabel('update_available')).toBe('Update available');

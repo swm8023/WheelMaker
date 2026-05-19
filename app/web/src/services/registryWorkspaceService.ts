@@ -9,8 +9,10 @@ import type {
   RegistryGitCommitFile,
   RegistryGitFileDiff,
   RegistryGitStatus,
+  RegistryHub,
   RegistryNpmCommandResponse,
   RegistryProject,
+  RegistryProjectListResponse,
   RegistrySessionConfigOption,
   RegistrySessionMessage,
   RegistrySessionReadResponse,
@@ -25,6 +27,7 @@ import type {
 
 export type WorkspaceSession = {
   projects: RegistryProject[];
+  hubs: RegistryHub[];
   selectedProjectId: string;
   fileEntries: RegistryFsEntry[];
 };
@@ -45,14 +48,14 @@ export class RegistryWorkspaceService {
       await repository.initialize(wsUrl, token);
       const previousRepository = this.repository;
       this.bindRepository(repository);
-      const projects = await this.listProjectsWithRetry(repository);
-      if (projects.length === 0) {
+      const snapshot = await this.listProjectSnapshotWithRetry(repository);
+      if (snapshot.projects.length === 0) {
         throw new Error('No projects available. Please ensure at least one project is online and retry.');
       }
-      const {selectedProjectId, fileEntries} = await this.selectFirstReachableProject(repository, projects);
+      const {selectedProjectId, fileEntries} = await this.selectFirstReachableProject(repository, snapshot.projects);
       previousRepository?.close();
       this.repository = repository;
-      this.session = {projects, selectedProjectId, fileEntries};
+      this.session = {...snapshot, selectedProjectId, fileEntries};
       return this.session;
     } catch (error) {
       this.unbindRepository();
@@ -78,7 +81,7 @@ export class RegistryWorkspaceService {
     this.unsubscribeRepositoryClose = null;
   }
 
-  private async listProjectsWithRetry(repository: RegistryRepository): Promise<RegistryProject[]> {
+  private async listProjectSnapshotWithRetry(repository: RegistryRepository): Promise<RegistryProjectListResponse> {
     const retryDelaysMs = [0, 400, 900];
     for (let i = 0; i < retryDelaysMs.length; i += 1) {
       if (retryDelaysMs[i] > 0) {
@@ -86,10 +89,10 @@ export class RegistryWorkspaceService {
           setTimeout(resolve, retryDelaysMs[i]);
         });
       }
-      const projects = await repository.listProjects();
-      if (projects.length > 0) return projects;
+      const snapshot = await repository.listProjectSnapshot();
+      if (snapshot.projects.length > 0) return snapshot;
     }
-    return [];
+    return {projects: [], hubs: []};
   }
 
   private async selectFirstReachableProject(
@@ -236,14 +239,18 @@ export class RegistryWorkspaceService {
   }
 
   async listProjects(): Promise<RegistryProject[]> {
+    return (await this.listProjectSnapshot()).projects;
+  }
+
+  async listProjectSnapshot(): Promise<RegistryProjectListResponse> {
     if (!this.repository) {
-      return this.session?.projects ?? [];
+      return {projects: this.session?.projects ?? [], hubs: this.session?.hubs ?? []};
     }
-    const projects = await this.repository.listProjects();
+    const snapshot = await this.repository.listProjectSnapshot();
     if (this.session) {
-      this.session = {...this.session, projects};
+      this.session = {...this.session, projects: snapshot.projects, hubs: snapshot.hubs};
     }
-    return projects;
+    return snapshot;
   }
 
   async listSessions(): Promise<RegistrySessionSummary[]> {
@@ -434,13 +441,6 @@ export class RegistryWorkspaceService {
       throw new Error('session is not ready');
     }
     return this.repository.uninstallNpmPackage(hubId, packageName);
-  }
-
-  async queryNpmPackageTask(hubId: string): Promise<RegistryNpmCommandResponse> {
-    if (!this.repository) {
-      throw new Error('session is not ready');
-    }
-    return this.repository.queryNpmPackageTask(hubId);
   }
 
   async queryWheelMakerUpdate(hubId: string): Promise<RegistryWheelMakerUpdateResponse> {

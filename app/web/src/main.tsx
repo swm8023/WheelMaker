@@ -51,7 +51,6 @@ import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
 import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
 import {useChatLayoutMetrics} from './chat/chatLayoutMetrics';
-import {createChatActiveRuntimeSet} from './chat/chatActiveRuntimeSet';
 import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
 import {RegistryDebugPanel} from './debug/RegistryDebugPanel';
@@ -100,7 +99,7 @@ import {
 } from './tokenStatsView';
 import {
   AGENT_PACKAGE_SCAN_TIMEOUT_MS,
-  deriveAgentPackageHubIds,
+  deriveRegistryHubIds,
   packageStatusLabel,
   wheelMakerUpdateStatusLabel,
   withAgentPackageTimeout,
@@ -151,8 +150,9 @@ import type {
   RegistryGitCommitFile,
   RegistryGitStatus,
   RegistryNpmHubSnapshot,
+  RegistryNpmOperation,
   RegistryNpmPackage,
-  RegistryNpmTask,
+  RegistryHub,
   RegistryProject,
   RegistryTokenScanResult,
   RegistryWheelMakerUpdateResponse,
@@ -217,7 +217,7 @@ type AgentPackageHubView = {
   error: string;
   updatedAt: string;
   hub: RegistryNpmHubSnapshot | null;
-  task: RegistryNpmTask | null;
+  operation: RegistryNpmOperation | null;
 };
 type ChatComposerDraft = {
   text: string;
@@ -2404,11 +2404,13 @@ function App() {
   const [agentPackagesLoading, setAgentPackagesLoading] = useState(false);
   const [agentPackagesError, setAgentPackagesError] = useState('');
   const [agentPackageActionPendingKey, setAgentPackageActionPendingKey] = useState('');
+  const agentPackageScanPollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
 
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [workspaceProjectMenuOpen, setWorkspaceProjectMenuOpen] = useState(false);
 
   const [projects, setProjects] = useState<RegistryProject[]>([]);
+  const [registryHubs, setRegistryHubs] = useState<RegistryHub[]>([]);
   const [projectId, setProjectId] = useState('');
   const projectIdRef = useRef('');
   const projectsRef = useRef<RegistryProject[]>([]);
@@ -2487,10 +2489,6 @@ function App() {
     const state = chatTurnStoreRef.current[runtimeKey];
     workspaceStore.rememberChatSessionTurns(key.projectId, key.sessionId, state?.finished ?? []);
   }, 5000));
-  const chatActiveRuntimeSetRef = useRef(createChatActiveRuntimeSet({
-    capacity: 5,
-    flushSession: runtimeKey => chatDurablePersistQueueRef.current.flush(runtimeKey),
-  }));
   const chatMessagesRef = useRef<RegistryChatMessage[]>([]);
   const notifiedChatMessageIdsRef = useRef<Set<string>>(new Set());
   const chatIndexFullRefreshInFlightRef = useRef(false);
@@ -2718,6 +2716,13 @@ function App() {
     sessionId: string,
   ): string => encodeChatSessionKey(chatSessionKeyFromParts(activeProjectId, sessionId));
 
+  const runtimeKeysFromChatStores = (): string[] =>
+    Array.from(new Set([
+      ...Object.keys(chatTurnStoreRef.current),
+      ...Object.keys(chatMessageStoreRef.current),
+      ...Object.keys(chatFinishedCursorRef.current),
+    ]));
+
   const ensureChatTurnStore = (runtimeKey: string): ChatTurnStoreState => {
     const existing = chatTurnStoreRef.current[runtimeKey];
     if (existing) return existing;
@@ -2743,21 +2748,7 @@ function App() {
   };
 
   const markChatSessionTurnsDirty = (runtimeKey: string): void => {
-    chatActiveRuntimeSetRef.current.markDirty(runtimeKey);
     chatDurablePersistQueueRef.current.markDirty(runtimeKey);
-  };
-
-  const activateChatRuntime = (
-    runtimeKey: string,
-    options: {selected?: boolean; running?: boolean} = {},
-  ): void => {
-    chatActiveRuntimeSetRef.current.activate(runtimeKey, options).then(result => {
-      for (const evictedKey of result.evicted) {
-        delete chatTurnStoreRef.current[evictedKey];
-        delete chatMessageStoreRef.current[evictedKey];
-        delete chatFinishedCursorRef.current[evictedKey];
-      }
-    }).catch(() => undefined);
   };
 
   const setVisibleChatMessagesForRuntimeKey = useCallback((
@@ -5430,7 +5421,6 @@ function App() {
     }
     applySelectedChatKey(chatSessionKeyFromParts(activeProjectId, currentSelection));
     const runtimeKey = buildChatRuntimeKey(activeProjectId, currentSelection);
-    activateChatRuntime(runtimeKey, {selected: true});
     if (sessionRows.some(item => item.sessionId === currentSelection)) {
       const cachedMessages = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       setVisibleChatMessagesForRuntimeKey(runtimeKey, cachedMessages, {resetToLatest: true});
@@ -5644,7 +5634,6 @@ function App() {
       );
       if (canApplyLoadedSelection) {
         applySelectedChatKey(nextSelectedKey);
-        activateChatRuntime(resultRuntimeKey, {selected: true, running: result.session?.running === true});
         workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
         setVisibleChatMessagesForRuntimeKey(
           resultRuntimeKey,
@@ -5654,8 +5643,6 @@ function App() {
             followsLatest: chatAutoScrollFollowRef.current,
           }),
         );
-      } else {
-        activateChatRuntime(resultRuntimeKey, {running: result.session?.running === true});
       }
       persistChatSessionContent(resultSessionId, activeProjectId, result.session);
       const knownSession =
@@ -5750,8 +5737,8 @@ function App() {
   ) => {
     const selectedRuntimeKey =
       encodeChatSessionKey(preferredSelectedChatKey) ||
-      chatActiveRuntimeSetRef.current.selectedKey();
-    const runtimeKeys = new Set(chatActiveRuntimeSetRef.current.keys());
+      encodeChatSessionKey(selectedChatKeyRef.current);
+    const runtimeKeys = new Set(runtimeKeysFromChatStores());
     if (selectedRuntimeKey) {
       runtimeKeys.add(selectedRuntimeKey);
     }
@@ -5799,9 +5786,6 @@ function App() {
         };
       }
       workspaceStore.replaceChatSessions(activeProjectId, nextSessions, cursorBySessionId);
-      for (const session of nextSessions.filter(item => item.running === true).slice(0, 5)) {
-        activateChatRuntime(buildChatRuntimeKey(activeProjectId, session.sessionId), {running: true});
-      }
 
       const persistedSelection = workspaceStore.migrateSelectedChatSessionKey(activeProjectId);
       const selectionResolution = resolveChatListSelection({
@@ -5826,10 +5810,6 @@ function App() {
       workspaceStore.rememberSelectedChatSessionKey(nextSelectedKey);
       const cachedSelection = hydrateChatSessionContentFromCache(currentSelection, activeProjectId);
       const runtimeKey = buildChatRuntimeKey(activeProjectId, currentSelection);
-      activateChatRuntime(runtimeKey, {
-        selected: true,
-        running: nextSessions.find(session => session.sessionId === currentSelection)?.running === true,
-      });
       setVisibleChatMessagesForRuntimeKey(
         runtimeKey,
         cachedSelection.length > 0
@@ -5874,7 +5854,6 @@ function App() {
     });
 
     if (selectedVisibilityRecovery === 'restore-cache') {
-      activateChatRuntime(runtimeKey, {selected: true});
       setVisibleChatMessagesForRuntimeKey(runtimeKey, cachedMessages, {resetToLatest: true});
       return;
     }
@@ -6460,6 +6439,7 @@ function App() {
         );
       const preferredSelectedChatId = preferredSelectedChatKey?.sessionId ?? '';
       setProjects(result.projects);
+      setRegistryHubs(result.hubs);
       setHasPendingProjectUpdates(false);
       captureSelectedFileScrollPosition();
       dirHashRef.current = {};
@@ -6731,8 +6711,18 @@ function App() {
     return `${hubId}:${packageName}`;
   }, []);
 
+  const refreshProjectHubSnapshot = useCallback(async (): Promise<string[]> => {
+    const snapshot = await service.listProjectSnapshot();
+    if (snapshot.projects.length > 0) {
+      setProjects(snapshot.projects);
+    }
+    setRegistryHubs(snapshot.hubs);
+    return deriveRegistryHubIds(snapshot.hubs);
+  }, []);
+
   const updateHubCards = useMemo(() => {
     const hubIds = new Set<string>([
+      ...deriveRegistryHubIds(registryHubs),
       ...Object.keys(wheelMakerUpdateHubs),
       ...Object.keys(agentPackageHubs),
     ]);
@@ -6745,7 +6735,7 @@ function App() {
       wheelMaker: wheelMakerUpdateHubs[hubId] ?? null,
       agentPackage: agentPackageHubs[hubId] ?? null,
     }));
-  }, [agentPackageHubs, wheelMakerUpdateHubs]);
+  }, [agentPackageHubs, registryHubs, wheelMakerUpdateHubs]);
 
   const agentPackageHubCards = useMemo(() => {
     return Object.values(agentPackageHubs).sort((left, right) => {
@@ -6755,8 +6745,8 @@ function App() {
     });
   }, [agentPackageHubs]);
 
-  const agentPackageAnyTaskRunning = useMemo(
-    () => agentPackageHubCards.some(card => card.task?.running),
+  const agentPackageAnyOperationRunning = useMemo(
+    () => agentPackageHubCards.some(card => card.operation?.running),
     [agentPackageHubCards],
   );
 
@@ -6797,14 +6787,10 @@ function App() {
     setWheelMakerUpdatesLoading(true);
     setWheelMakerUpdatesError('');
     try {
-      const latestProjects = await service.listProjects();
-      if (latestProjects.length > 0) {
-        setProjects(latestProjects);
-      }
-      const hubIds = deriveAgentPackageHubIds(latestProjects);
+      const hubIds = await refreshProjectHubSnapshot();
       if (hubIds.length === 0) {
         setWheelMakerUpdateHubs({});
-        setWheelMakerUpdatesError('No online hubs available.');
+        setWheelMakerUpdatesError('No hubs available.');
         return;
       }
       setWheelMakerUpdateHubs(prev => {
@@ -6855,20 +6841,20 @@ function App() {
     } finally {
       setWheelMakerUpdatesLoading(false);
     }
-  }, []);
+  }, [refreshProjectHubSnapshot]);
 
   const refreshAgentPackages = useCallback(async () => {
+    if (agentPackageScanPollTimerRef.current) {
+      window.clearTimeout(agentPackageScanPollTimerRef.current);
+      agentPackageScanPollTimerRef.current = null;
+    }
     setAgentPackagesLoading(true);
     setAgentPackagesError('');
     try {
-      const latestProjects = await service.listProjects();
-      if (latestProjects.length > 0) {
-        setProjects(latestProjects);
-      }
-      const hubIds = deriveAgentPackageHubIds(latestProjects);
+      const hubIds = await refreshProjectHubSnapshot();
       if (hubIds.length === 0) {
         setAgentPackageHubs({});
-        setAgentPackagesError('No online hubs available.');
+        setAgentPackagesError('No hubs available.');
         return;
       }
       setAgentPackageHubs(prev => {
@@ -6880,7 +6866,7 @@ function App() {
             error: '',
             updatedAt: prev[hubId]?.updatedAt || '',
             hub: prev[hubId]?.hub ?? null,
-            task: prev[hubId]?.task ?? null,
+            operation: prev[hubId]?.operation ?? null,
           };
         });
         return next;
@@ -6908,13 +6894,12 @@ function App() {
               error: entry.error || '',
               updatedAt: prev[entry.hubId]?.updatedAt || '',
               hub: prev[entry.hubId]?.hub ?? null,
-              task: prev[entry.hubId]?.task ?? null,
+              operation: prev[entry.hubId]?.operation ?? null,
             };
             return;
           }
           const hub = entry.result.hub ?? {
             hubId: entry.hubId,
-            online: true,
             nodeVersion: '',
             npmVersion: '',
             npmPrefix: '',
@@ -6928,18 +6913,24 @@ function App() {
             error: entry.result.ok ? '' : hub.error || 'Scan failed.',
             updatedAt: entry.result.updatedAt || '',
             hub,
-            task: entry.result.task ?? prev[entry.hubId]?.task ?? null,
+            operation: entry.result.operation ?? prev[entry.hubId]?.operation ?? null,
           };
         });
         return next;
       });
+      if (responses.some(entry => !('error' in entry) && entry.result.operation?.running)) {
+        agentPackageScanPollTimerRef.current = window.setTimeout(() => {
+          agentPackageScanPollTimerRef.current = null;
+          refreshAgentPackages().catch(() => undefined);
+        }, 1000);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setAgentPackagesError(message);
     } finally {
       setAgentPackagesLoading(false);
     }
-  }, []);
+  }, [refreshProjectHubSnapshot]);
 
   useEffect(() => {
     if (settingsDetailView !== 'update') {
@@ -6948,26 +6939,6 @@ function App() {
     refreshWheelMakerUpdates().catch(() => undefined);
     refreshAgentPackages().catch(() => undefined);
   }, [settingsDetailView, refreshAgentPackages, refreshWheelMakerUpdates]);
-
-  const pollAgentPackageTask = useCallback(async (hubId: string) => {
-    for (;;) {
-      await new Promise(resolve => {
-        window.setTimeout(resolve, 1000);
-      });
-      const result = await service.queryNpmPackageTask(hubId);
-      setAgentPackageHubs(prev => ({
-        ...prev,
-        [hubId]: {
-          ...(prev[hubId] ?? {hubId, loading: false, error: '', updatedAt: '', hub: null, task: null}),
-          task: result.task ?? null,
-        },
-      }));
-      if (!result.task?.running) {
-        break;
-      }
-    }
-    await refreshAgentPackages();
-  }, [refreshAgentPackages]);
 
   const requestAgentPackageAction = useCallback((
     action: 'install' | 'update' | 'uninstall',
@@ -7035,13 +7006,13 @@ function App() {
       setAgentPackageHubs(prev => ({
         ...prev,
         [target.hubId]: {
-          ...(prev[target.hubId] ?? {hubId: target.hubId, loading: false, error: '', updatedAt: '', hub: null, task: null}),
-          task: result.task ?? null,
+          ...(prev[target.hubId] ?? {hubId: target.hubId, loading: false, error: '', updatedAt: '', hub: null, operation: null}),
+          operation: result.operation ?? null,
         },
       }));
       setConfirmTarget(null);
       setConfirmError('');
-      await pollAgentPackageTask(target.hubId);
+      await refreshAgentPackages();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setConfirmError(message);
@@ -7050,7 +7021,7 @@ function App() {
     } finally {
       setAgentPackageActionPendingKey('');
     }
-  }, [agentPackageActionKey, pollAgentPackageTask]);
+  }, [agentPackageActionKey, refreshAgentPackages]);
 
   const formatDatabaseDump = (dump: Awaited<ReturnType<typeof workspaceStore.dumpDatabase>>): string => {
     return JSON.stringify(
@@ -7150,6 +7121,7 @@ function App() {
       const result = await workspaceController.switchProjectLightweight(nextProjectId);
       projectsRef.current = result.projects;
       setProjects(result.projects);
+      setRegistryHubs(result.hubs);
       setHasPendingProjectUpdates(false);
       workspaceStore.rememberGlobalState({
         selectedProjectId: nextProjectId,
@@ -7219,7 +7191,6 @@ function App() {
     setTab('chat');
     applySelectedChatKey(nextSelectedKey);
     const runtimeKey = encodeChatSessionKey(nextSelectedKey);
-    activateChatRuntime(runtimeKey, {selected: true});
     setChatMessages([]);
     setVisibleChatMessagesForRuntimeKey(
       runtimeKey,
@@ -7661,14 +7632,6 @@ function App() {
         };
         if (payload.session?.sessionId) {
           const runtimeKey = buildChatRuntimeKey(eventProjectId, payload.session.sessionId);
-          if (payload.session.running === true || encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey) {
-            activateChatRuntime(runtimeKey, {
-              selected: encodeChatSessionKey(selectedChatKeyRef.current) === runtimeKey,
-              running: payload.session.running === true,
-            });
-          } else {
-            chatActiveRuntimeSetRef.current.setRunning(runtimeKey, false);
-          }
           if (payload.session.running === false) {
             setChatCancellingRuntimeKey(current => (current === runtimeKey ? '' : current));
           }
@@ -7703,10 +7666,6 @@ function App() {
         const knownSession = knownProjectSessions.some(session => session.sessionId === sessionId);
         if (!knownSession && !isSelectedSession) {
           refreshChatProjectSessions(eventProjectId).catch(() => undefined);
-          return;
-        }
-        if (!isSelectedSession && !chatActiveRuntimeSetRef.current.isActive(runtimeKey)) {
-          return;
         }
         const existingSession = knownProjectSessions.find(item => item.sessionId === sessionId);
         maybeNotifyChatMessage(message, existingSession, eventProjectId);
@@ -8440,13 +8399,13 @@ function App() {
       'Update',
       <>
         {(wheelMakerUpdatesLoading || agentPackagesLoading) && updateHubCards.length === 0 ? (
-          <div className="muted block">Scanning online hubs...</div>
+          <div className="muted block">Scanning hubs...</div>
         ) : null}
         {wheelMakerUpdatesError || agentPackagesError ? (
           <div className="muted block settings-metadata-error">{wheelMakerUpdatesError || agentPackagesError}</div>
         ) : null}
         {!wheelMakerUpdatesLoading && !agentPackagesLoading && updateHubCards.length === 0 && !wheelMakerUpdatesError && !agentPackagesError ? (
-          <div className="muted block">No online hubs available.</div>
+          <div className="muted block">No hubs available.</div>
         ) : null}
         <div className="settings-metadata-list agent-package-hub-list">
           {updateHubCards.map(card => {
@@ -8455,7 +8414,7 @@ function App() {
             const wheelMakerStatus = wheelMakerData?.status || (wheelMaker?.loading ? 'checking' : 'unknown');
             const agentCard = card.agentPackage;
             const hub = agentCard?.hub;
-            const task = agentCard?.task;
+            const operation = agentCard?.operation;
             const wheelMakerPending = wheelMakerUpdatePendingHubId === card.hubId;
             const showWheelMakerUpdateAction =
               wheelMakerPending ||
@@ -8521,19 +8480,19 @@ function App() {
                 {agentCard?.error || hub?.error ? (
                   <div className="settings-metadata-line settings-metadata-error">{agentCard?.error || hub?.error}</div>
                 ) : null}
-                {task ? (
-                  <div className={`agent-package-task ${task.status === 'failed' ? 'failed' : ''}`}>
-                    <span>{packageStatusLabel(task.status)}</span>
-                    <span>{task.packageName}</span>
-                    {task.message ? <span>{task.message}</span> : null}
-                    {task.errorSummary ? <span>{task.errorSummary}</span> : null}
+                {operation ? (
+                  <div className={`agent-package-task ${operation.status === 'failed' ? 'failed' : ''}`}>
+                    <span>{packageStatusLabel(operation.status)}</span>
+                    {operation.packageName ? <span>{operation.packageName}</span> : null}
+                    {operation.message ? <span>{operation.message}</span> : null}
+                    {operation.errorSummary ? <span>{operation.errorSummary}</span> : null}
                   </div>
                 ) : null}
                 <div className="agent-package-row-list">
                   {(hub?.packages ?? []).map(pkg => {
                     const action = agentPackageActionForPackage(pkg);
                     const pendingKey = agentPackageActionKey(card.hubId, pkg.packageName);
-                    const pending = agentPackageActionPendingKey === pendingKey || task?.running === true;
+                    const pending = agentPackageActionPendingKey === pendingKey || operation?.running === true;
                     return (
                       <div key={`${card.hubId}:${pkg.packageName}`} className="agent-package-row">
                         <div className="agent-package-title-line">
@@ -8555,7 +8514,7 @@ function App() {
                           <button
                             type="button"
                             className={`agent-package-action-btn ${action === 'uninstall' ? 'danger' : ''}`}
-                            disabled={pending || agentPackageAnyTaskRunning}
+                            disabled={pending || agentPackageAnyOperationRunning}
                             onClick={() => requestAgentPackageAction(action, card.hubId, pkg)}
                           >
                             {pending ? 'Running...' : agentPackageActionLabel(action)}

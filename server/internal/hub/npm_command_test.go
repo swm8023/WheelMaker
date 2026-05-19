@@ -100,11 +100,30 @@ func TestNPMCommandScanReturnsRuntimeAndDeprecatedPackageRows(t *testing.T) {
 	if !body.OK || body.Hub.HubID != "hub-a" {
 		t.Fatalf("response=%#v", body)
 	}
+	if body.Operation == nil || body.Operation.Action != "scan_latest" || !body.Operation.Running {
+		t.Fatalf("operation=%#v, want running scan_latest", body.Operation)
+	}
 	if runner.hasCall("node", "--version") || runner.hasCall("npm", "--version") || runner.hasCall("npm", "prefix", "-g") {
 		t.Fatalf("scan should not call hidden metadata commands: %#v", runner.calls)
 	}
 
 	codex := findNPMTestPackage(t, body.Hub.Packages, "@openai/codex")
+	if codex.Status != "checking_latest" || codex.InstalledVersion != "0.129.0" || codex.LatestVersion != "" {
+		t.Fatalf("codex package before latest=%#v", codex)
+	}
+	if codex.CanInstall || codex.CanUpdate || codex.CanUninstall {
+		t.Fatalf("codex action flags should be disabled while latest is checking: %#v", codex)
+	}
+
+	waitForNPMTestOperation(t, cmd)
+	resp, cmdErr = cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
+		"action": "scan",
+		"hubId":  "hub-a",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("Handle second scan error: %#v", cmdErr)
+	}
+	codex = findNPMTestPackage(t, resp.(npmCommandResponse).Hub.Packages, "@openai/codex")
 	if codex.Status != "update_available" || codex.InstalledVersion != "0.129.0" || codex.LatestVersion != "0.130.0" {
 		t.Fatalf("codex package=%#v", codex)
 	}
@@ -161,8 +180,20 @@ func TestNPMCommandScanMarksMissingPackageViewFailureAsCheckingFailed(t *testing
 		t.Fatalf("Handle scan error: %#v", cmdErr)
 	}
 	pkg := findNPMTestPackage(t, resp.(npmCommandResponse).Hub.Packages, "@openai/codex")
-	if pkg.Status != "checking_failed" || !pkg.CanInstall || pkg.Error == "" {
-		t.Fatalf("pkg=%#v, want checking_failed installable package with error", pkg)
+	if pkg.Status != "checking_latest" || pkg.CanInstall || pkg.CanUpdate || pkg.Error != "" {
+		t.Fatalf("pkg=%#v, want checking_latest package without actions while latest query runs", pkg)
+	}
+	waitForNPMTestOperation(t, cmd)
+	resp, cmdErr = cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
+		"action": "scan",
+		"hubId":  "hub-a",
+	}))
+	if cmdErr != nil {
+		t.Fatalf("Handle second scan error: %#v", cmdErr)
+	}
+	pkg = findNPMTestPackage(t, resp.(npmCommandResponse).Hub.Packages, "@openai/codex")
+	if pkg.Status != "latest_unknown" || pkg.CanInstall || pkg.CanUpdate || pkg.Error == "" {
+		t.Fatalf("pkg=%#v, want latest_unknown package without actions after latest failure", pkg)
 	}
 }
 
@@ -180,10 +211,10 @@ func TestNPMCommandAcceptsRuntimeInstallAndDeprecatedUninstall(t *testing.T) {
 		t.Fatalf("install error: %#v", installErr)
 	}
 	installBody := installResp.(npmCommandResponse)
-	if installBody.Task == nil || installBody.Task.Action != "install" || installBody.Task.PackageName != "@openai/codex" {
-		t.Fatalf("install task=%#v", installBody.Task)
+	if installBody.Operation == nil || installBody.Operation.Action != "install" || installBody.Operation.PackageName != "@openai/codex" {
+		t.Fatalf("install operation=%#v", installBody.Operation)
 	}
-	waitForNPMTestTask(t, cmd)
+	waitForNPMTestOperation(t, cmd)
 	if !runner.hasCall("npm", "install", "-g", "@openai/codex@latest") {
 		t.Fatalf("install call not found: %#v", runner.calls)
 	}
@@ -197,10 +228,10 @@ func TestNPMCommandAcceptsRuntimeInstallAndDeprecatedUninstall(t *testing.T) {
 		t.Fatalf("uninstall error: %#v", uninstallErr)
 	}
 	uninstallBody := uninstallResp.(npmCommandResponse)
-	if uninstallBody.Task == nil || uninstallBody.Task.Action != "uninstall" || uninstallBody.Task.PackageName != "@zed-industries/claude-agent-acp" {
-		t.Fatalf("uninstall task=%#v", uninstallBody.Task)
+	if uninstallBody.Operation == nil || uninstallBody.Operation.Action != "uninstall" || uninstallBody.Operation.PackageName != "@zed-industries/claude-agent-acp" {
+		t.Fatalf("uninstall operation=%#v", uninstallBody.Operation)
 	}
-	waitForNPMTestTask(t, cmd)
+	waitForNPMTestOperation(t, cmd)
 	if !runner.hasCall("npm", "uninstall", "-g", "@zed-industries/claude-agent-acp") {
 		t.Fatalf("uninstall call not found: %#v", runner.calls)
 	}
@@ -261,20 +292,17 @@ func TestNPMCommandRejectsUnsupportedPackagePolicy(t *testing.T) {
 	}
 }
 
-func TestNPMCommandRejectsConcurrentTasksAndQueryCanReturnNoHistory(t *testing.T) {
+func TestNPMCommandRejectsConcurrentOperationsAndQueryIsUnsupported(t *testing.T) {
 	runner := newFakeNPMRunner()
 	block := runner.block("npm", []string{"install", "-g", "@openai/codex@latest"})
 	cmd := newNPMCommandWithRunner(runner)
 
-	queryResp, queryErr := cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
+	_, queryErr := cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
 		"action": "query",
 		"hubId":  "hub-a",
 	}))
-	if queryErr != nil {
-		t.Fatalf("query error: %#v", queryErr)
-	}
-	if queryResp.(npmCommandResponse).Task != nil {
-		t.Fatalf("query task=%#v, want nil", queryResp.(npmCommandResponse).Task)
+	if queryErr == nil || queryErr.Code != rp.CodeInvalidArgument {
+		t.Fatalf("queryErr=%#v, want INVALID_ARGUMENT", queryErr)
 	}
 
 	_, installErr := cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
@@ -294,7 +322,7 @@ func TestNPMCommandRejectsConcurrentTasksAndQueryCanReturnNoHistory(t *testing.T
 		t.Fatalf("conflictErr=%#v, want CONFLICT", conflictErr)
 	}
 	close(block)
-	waitForNPMTestTask(t, cmd)
+	waitForNPMTestOperation(t, cmd)
 }
 
 func TestNPMCommandFailedTaskSummarizesLastStderrSegment(t *testing.T) {
@@ -315,18 +343,18 @@ func TestNPMCommandFailedTaskSummarizesLastStderrSegment(t *testing.T) {
 	if installErr != nil {
 		t.Fatalf("install error: %#v", installErr)
 	}
-	task := waitForNPMTestTask(t, cmd)
-	if task.Status != "failed" || task.ExitCode == nil || *task.ExitCode != 7 {
-		t.Fatalf("task=%#v, want failed exit 7", task)
+	operation := waitForNPMTestOperation(t, cmd)
+	if operation.Status != "failed" || operation.ExitCode == nil || *operation.ExitCode != 7 {
+		t.Fatalf("operation=%#v, want failed exit 7", operation)
 	}
-	if !strings.Contains(task.ErrorSummary, "exit code 7") {
-		t.Fatalf("summary=%q, want exit code", task.ErrorSummary)
+	if !strings.Contains(operation.ErrorSummary, "exit code 7") {
+		t.Fatalf("summary=%q, want exit code", operation.ErrorSummary)
 	}
-	if strings.Contains(task.ErrorSummary, "first failure") {
-		t.Fatalf("summary=%q should use last non-empty stderr segment", task.ErrorSummary)
+	if strings.Contains(operation.ErrorSummary, "first failure") {
+		t.Fatalf("summary=%q should use last non-empty stderr segment", operation.ErrorSummary)
 	}
-	if len(task.ErrorSummary) > len("exit code 7: ")+500 {
-		t.Fatalf("summary length=%d, want truncated to 500 char segment", len(task.ErrorSummary))
+	if len(operation.ErrorSummary) > len("exit code 7: ")+500 {
+		t.Fatalf("summary length=%d, want truncated to 500 char segment", len(operation.ErrorSummary))
 	}
 }
 
@@ -350,23 +378,23 @@ func findNPMTestPackage(t *testing.T, packages []npmPackageStatus, name string) 
 	return npmPackageStatus{}
 }
 
-func waitForNPMTestTask(t *testing.T, cmd *NPMCommand) *npmTaskSnapshot {
+func waitForNPMTestOperation(t *testing.T, cmd *NPMCommand) *npmOperationSnapshot {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		resp, cmdErr := cmd.Handle(context.Background(), rawNPMCommandPayload(t, map[string]any{
-			"action": "query",
+			"action": "scan",
 			"hubId":  "hub-a",
 		}))
 		if cmdErr != nil {
-			t.Fatalf("query task: %#v", cmdErr)
+			t.Fatalf("scan operation: %#v", cmdErr)
 		}
-		task := resp.(npmCommandResponse).Task
-		if task != nil && !task.Running {
-			return task
+		operation := resp.(npmCommandResponse).Operation
+		if operation != nil && !operation.Running {
+			return operation
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("task did not finish")
+	t.Fatal("operation did not finish")
 	return nil
 }

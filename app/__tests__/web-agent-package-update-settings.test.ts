@@ -55,12 +55,13 @@ describe('agent package update settings UI source structure', () => {
     expect(mainTsx).toContain('formatWheelMakerDateTime');
     expect(mainTsx).toContain('wheelMakerData?.git?.latestCommittedAt');
     expect(mainTsx).toContain('refreshAgentPackages');
-    expect(mainTsx).toContain('deriveAgentPackageHubIds');
+    expect(mainTsx).toContain('deriveRegistryHubIds');
     expect(mainTsx).toContain('withAgentPackageTimeout(');
     expect(mainTsx).toContain('service.scanNpmPackages');
     expect(mainTsx).toContain('service.installNpmPackage');
     expect(mainTsx).toContain('service.uninstallNpmPackage');
-    expect(mainTsx).toContain('service.queryNpmPackageTask');
+    expect(mainTsx).not.toContain('service.queryNpmPackageTask');
+    expect(mainTsx).not.toContain('pollAgentPackageTask');
     expect(mainTsx).toContain("kind: 'npmPackage'");
     expect(mainTsx).toContain('requestAgentPackageAction');
     expect(mainTsx).toContain('handleAgentPackageConfirmedAction');

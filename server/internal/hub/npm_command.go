@@ -60,8 +60,9 @@ type NPMCommand struct {
 	runner npmCommandRunner
 	now    func() time.Time
 
-	mu   sync.Mutex
-	task *npmTaskSnapshot
+	mu          sync.Mutex
+	operation   *npmOperationSnapshot
+	latestCache map[string]npmLatestCacheEntry
 }
 
 func NewNPMCommand() *NPMCommand {
@@ -77,6 +78,7 @@ func newNPMCommandWithRunner(runner npmCommandRunner) *NPMCommand {
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
+		latestCache: map[string]npmLatestCacheEntry{},
 	}
 }
 
@@ -88,16 +90,15 @@ type npmCommandPayload struct {
 }
 
 type npmCommandResponse struct {
-	OK        bool             `json:"ok"`
-	Accepted  bool             `json:"accepted,omitempty"`
-	UpdatedAt string           `json:"updatedAt,omitempty"`
-	Hub       npmHubSnapshot   `json:"hub,omitempty"`
-	Task      *npmTaskSnapshot `json:"task"`
+	OK        bool                  `json:"ok"`
+	Accepted  bool                  `json:"accepted,omitempty"`
+	UpdatedAt string                `json:"updatedAt,omitempty"`
+	Hub       npmHubSnapshot        `json:"hub,omitempty"`
+	Operation *npmOperationSnapshot `json:"operation"`
 }
 
 type npmHubSnapshot struct {
 	HubID       string             `json:"hubId"`
-	Online      bool               `json:"online"`
 	NodeVersion string             `json:"nodeVersion"`
 	NPMVersion  string             `json:"npmVersion"`
 	NPMPrefix   string             `json:"npmPrefix"`
@@ -121,7 +122,7 @@ type npmPackageStatus struct {
 	CanUninstall     bool     `json:"canUninstall"`
 }
 
-type npmTaskSnapshot struct {
+type npmOperationSnapshot struct {
 	Running      bool   `json:"running"`
 	Action       string `json:"action"`
 	PackageName  string `json:"packageName"`
@@ -185,8 +186,6 @@ func (c *NPMCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *npm
 	switch payload.Action {
 	case "scan":
 		return c.scan(ctx, payload.HubID), nil
-	case "query":
-		return npmCommandResponse{OK: true, Task: c.currentTaskSnapshot()}, nil
 	case "install":
 		return c.startInstall(payload)
 	case "uninstall":
@@ -197,28 +196,35 @@ func (c *NPMCommand) Handle(ctx context.Context, raw json.RawMessage) (any, *npm
 }
 
 func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse {
-	updatedAt := c.now().Format(time.RFC3339)
+	now := c.now()
+	updatedAt := now.Format(time.RFC3339)
 	hub := npmHubSnapshot{
 		HubID:    hubID,
-		Online:   true,
 		Packages: []npmPackageStatus{},
 	}
 
 	listResult := c.runner.Run(ctx, "npm", "list", "-g", "--depth=0", "--json")
 	if commandFailed(listResult) {
 		hub.Error = "npm list failed: " + npmResultSummary(listResult)
-		return npmCommandResponse{OK: false, UpdatedAt: updatedAt, Hub: hub, Task: c.currentTaskSnapshot()}
+		return npmCommandResponse{OK: false, UpdatedAt: updatedAt, Hub: hub, Operation: c.currentOperationSnapshot()}
 	}
 	installed, err := parseNPMListDependencies(listResult.Stdout)
 	if err != nil {
 		hub.Error = "npm list failed: " + err.Error()
-		return npmCommandResponse{OK: false, UpdatedAt: updatedAt, Hub: hub, Task: c.currentTaskSnapshot()}
+		return npmCommandResponse{OK: false, UpdatedAt: updatedAt, Hub: hub, Operation: c.currentOperationSnapshot()}
 	}
 
-	latest := c.lookupLatestVersions(ctx)
+	latest, missingLatest := c.latestResultsForScan(now)
+	operation := c.currentOperationSnapshot()
+	if len(missingLatest) > 0 && (operation == nil || !operation.Running) {
+		started, cmdErr := c.acceptOperation("scan_latest", "", "")
+		if cmdErr == nil {
+			operation = cloneNPMOperation(started)
+			go c.runLatestOperation(started, missingLatest)
+		}
+	}
 	for _, policy := range runtimeNPMPackages {
 		installedVersion := installed[policy.PackageName]
-		latestResult := latest[policy.PackageName]
 		row := npmPackageStatus{
 			PackageName:      policy.PackageName,
 			DisplayName:      policy.DisplayName,
@@ -226,11 +232,16 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 			Kind:             policy.Kind,
 			Installed:        installedVersion != "",
 			InstalledVersion: installedVersion,
-			LatestVersion:    latestResult.version,
-			Error:            latestResult.errorSummary,
 			CanUninstall:     false,
 		}
-		row.Status, row.CanInstall, row.CanUpdate = runtimePackageStatus(row.Installed, row.InstalledVersion, row.LatestVersion, row.Error)
+		latestResult, hasLatest := latest[policy.PackageName]
+		if hasLatest {
+			row.LatestVersion = latestResult.version
+			row.Error = latestResult.errorSummary
+			row.Status, row.CanInstall, row.CanUpdate = runtimePackageStatus(row.Installed, row.InstalledVersion, row.LatestVersion, row.Error)
+		} else {
+			row.Status = "checking_latest"
+		}
 		hub.Packages = append(hub.Packages, row)
 	}
 	for _, policy := range deprecatedNPMPackages {
@@ -249,7 +260,7 @@ func (c *NPMCommand) scan(ctx context.Context, hubID string) npmCommandResponse 
 			CanUninstall:     true,
 		})
 	}
-	return npmCommandResponse{OK: true, UpdatedAt: updatedAt, Hub: hub, Task: c.currentTaskSnapshot()}
+	return npmCommandResponse{OK: true, UpdatedAt: updatedAt, Hub: hub, Operation: operation}
 }
 
 type npmLatestResult struct {
@@ -257,28 +268,98 @@ type npmLatestResult struct {
 	errorSummary string
 }
 
-func (c *NPMCommand) lookupLatestVersions(ctx context.Context) map[string]npmLatestResult {
-	out := make(map[string]npmLatestResult, len(runtimeNPMPackages))
+type npmLatestCacheEntry struct {
+	result    npmLatestResult
+	fetchedAt time.Time
+}
+
+const (
+	npmLatestSuccessTTL = time.Hour
+	npmLatestFailureTTL = 5 * time.Minute
+)
+
+func (c *NPMCommand) lookupLatestVersions(ctx context.Context, packageNames []string) map[string]npmLatestResult {
+	out := make(map[string]npmLatestResult, len(packageNames))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for _, policy := range runtimeNPMPackages {
-		policy := policy
+	for _, packageName := range packageNames {
+		packageName := packageName
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result := c.runner.Run(ctx, "npm", "view", policy.PackageName, "version")
+			result := c.runner.Run(ctx, "npm", "view", packageName, "version")
 			next := npmLatestResult{version: firstNonEmptyLine(result.Stdout)}
 			if commandFailed(result) || next.version == "" {
 				next.version = ""
 				next.errorSummary = npmResultSummary(result)
 			}
 			mu.Lock()
-			out[policy.PackageName] = next
+			out[packageName] = next
 			mu.Unlock()
 		}()
 	}
 	wg.Wait()
 	return out
+}
+
+func (c *NPMCommand) latestResultsForScan(now time.Time) (map[string]npmLatestResult, []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	out := make(map[string]npmLatestResult, len(runtimeNPMPackages))
+	var missing []string
+	for _, policy := range runtimeNPMPackages {
+		entry, ok := c.latestCache[policy.PackageName]
+		if !ok || !npmLatestCacheValid(entry, now) {
+			missing = append(missing, policy.PackageName)
+			continue
+		}
+		out[policy.PackageName] = entry.result
+	}
+	return out, missing
+}
+
+func npmLatestCacheValid(entry npmLatestCacheEntry, now time.Time) bool {
+	if entry.fetchedAt.IsZero() {
+		return false
+	}
+	ttl := npmLatestFailureTTL
+	if entry.result.version != "" && entry.result.errorSummary == "" {
+		ttl = npmLatestSuccessTTL
+	}
+	return now.Sub(entry.fetchedAt) < ttl
+}
+
+func (c *NPMCommand) runLatestOperation(operation *npmOperationSnapshot, packageNames []string) {
+	results := c.lookupLatestVersions(context.Background(), packageNames)
+	finished := c.now()
+	finishedAt := finished.Format(time.RFC3339)
+	var failed []string
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, packageName := range packageNames {
+		result := results[packageName]
+		c.latestCache[packageName] = npmLatestCacheEntry{
+			result:    result,
+			fetchedAt: finished,
+		}
+		if result.errorSummary != "" {
+			failed = append(failed, packageName)
+		}
+	}
+	if c.operation != operation {
+		return
+	}
+	operation.Running = false
+	operation.FinishedAt = finishedAt
+	if len(failed) > 0 {
+		operation.Status = "failed"
+		operation.ErrorSummary = fmt.Sprintf("latest version check failed for %s", strings.Join(failed, ", "))
+		return
+	}
+	operation.Status = "succeeded"
+	operation.Message = "Latest package versions refreshed."
 }
 
 func (c *NPMCommand) startInstall(payload npmCommandPayload) (any, *npmCommandError) {
@@ -295,12 +376,12 @@ func (c *NPMCommand) startInstall(payload npmCommandPayload) (any, *npmCommandEr
 	if !runtimePackageAllowed(payload.PackageName) {
 		return nil, &npmCommandError{Code: rp.CodeForbidden, Message: "package is not installable"}
 	}
-	task, cmdErr := c.acceptTask("install", payload.PackageName, version)
+	operation, cmdErr := c.acceptOperation("install", payload.PackageName, version)
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
-	go c.runTask(task, "npm", "install", "-g", payload.PackageName+"@"+version)
-	return npmCommandResponse{OK: true, Accepted: true, Task: cloneNPMTask(task)}, nil
+	go c.runCommandOperation(operation, "npm", "install", "-g", payload.PackageName+"@"+version)
+	return npmCommandResponse{OK: true, Accepted: true, Operation: cloneNPMOperation(operation)}, nil
 }
 
 func (c *NPMCommand) startUninstall(payload npmCommandPayload) (any, *npmCommandError) {
@@ -310,62 +391,66 @@ func (c *NPMCommand) startUninstall(payload npmCommandPayload) (any, *npmCommand
 	if !deprecatedPackageAllowed(payload.PackageName) {
 		return nil, &npmCommandError{Code: rp.CodeForbidden, Message: "package is not uninstallable"}
 	}
-	task, cmdErr := c.acceptTask("uninstall", payload.PackageName, "")
+	operation, cmdErr := c.acceptOperation("uninstall", payload.PackageName, "")
 	if cmdErr != nil {
 		return nil, cmdErr
 	}
-	go c.runTask(task, "npm", "uninstall", "-g", payload.PackageName)
-	return npmCommandResponse{OK: true, Accepted: true, Task: cloneNPMTask(task)}, nil
+	go c.runCommandOperation(operation, "npm", "uninstall", "-g", payload.PackageName)
+	return npmCommandResponse{OK: true, Accepted: true, Operation: cloneNPMOperation(operation)}, nil
 }
 
-func (c *NPMCommand) acceptTask(action string, packageName string, version string) (*npmTaskSnapshot, *npmCommandError) {
+func (c *NPMCommand) acceptOperation(action string, packageName string, version string) (*npmOperationSnapshot, *npmCommandError) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.task != nil && c.task.Running {
-		return nil, &npmCommandError{Code: rp.CodeConflict, Message: "npm task already running"}
+	if c.operation != nil && c.operation.Running {
+		return nil, &npmCommandError{Code: rp.CodeConflict, Message: "npm operation already running"}
 	}
-	task := &npmTaskSnapshot{
+	status := "running"
+	if action == "scan_latest" {
+		status = "checking_latest"
+	}
+	operation := &npmOperationSnapshot{
 		Running:     true,
 		Action:      action,
 		PackageName: packageName,
 		Version:     version,
-		Status:      "running",
+		Status:      status,
 		StartedAt:   c.now().Format(time.RFC3339),
 	}
-	c.task = task
-	return task, nil
+	c.operation = operation
+	return operation, nil
 }
 
-func (c *NPMCommand) runTask(task *npmTaskSnapshot, name string, args ...string) {
+func (c *NPMCommand) runCommandOperation(operation *npmOperationSnapshot, name string, args ...string) {
 	result := c.runner.Run(context.Background(), name, args...)
 	exitCode := result.ExitCode
 	finishedAt := c.now().Format(time.RFC3339)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.task != task {
+	if c.operation != operation {
 		return
 	}
-	task.Running = false
-	task.FinishedAt = finishedAt
-	task.ExitCode = &exitCode
+	operation.Running = false
+	operation.FinishedAt = finishedAt
+	operation.ExitCode = &exitCode
 	if commandFailed(result) {
-		task.Status = "failed"
-		task.ErrorSummary = formatNPMTaskErrorSummary(exitCode, result.Stdout, result.Stderr)
+		operation.Status = "failed"
+		operation.ErrorSummary = formatNPMTaskErrorSummary(exitCode, result.Stdout, result.Stderr)
 		return
 	}
-	task.Status = "succeeded"
-	if task.Action == "uninstall" {
-		task.Message = fmt.Sprintf("Uninstalled %s. Restart WheelMaker or start a new agent session for the change to take effect.", task.PackageName)
+	operation.Status = "succeeded"
+	if operation.Action == "uninstall" {
+		operation.Message = fmt.Sprintf("Uninstalled %s. Restart WheelMaker or start a new agent session for the change to take effect.", operation.PackageName)
 	} else {
-		task.Message = fmt.Sprintf("Installed %s@%s. Restart WheelMaker or start a new agent session for the change to take effect.", task.PackageName, task.Version)
+		operation.Message = fmt.Sprintf("Installed %s@%s. Restart WheelMaker or start a new agent session for the change to take effect.", operation.PackageName, operation.Version)
 	}
 }
 
-func (c *NPMCommand) currentTaskSnapshot() *npmTaskSnapshot {
+func (c *NPMCommand) currentOperationSnapshot() *npmOperationSnapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return cloneNPMTask(c.task)
+	return cloneNPMOperation(c.operation)
 }
 
 func parseNPMListDependencies(raw string) (map[string]string, error) {
@@ -389,10 +474,7 @@ func parseNPMListDependencies(raw string) (map[string]string, error) {
 
 func runtimePackageStatus(installed bool, installedVersion string, latestVersion string, latestError string) (string, bool, bool) {
 	if latestError != "" {
-		if installed {
-			return "latest_unknown", false, false
-		}
-		return "checking_failed", true, false
+		return "latest_unknown", false, false
 	}
 	if !installed {
 		return "not_installed", true, false
@@ -481,13 +563,13 @@ func truncateRunes(value string, limit int) string {
 	return string(runes[:limit])
 }
 
-func cloneNPMTask(task *npmTaskSnapshot) *npmTaskSnapshot {
-	if task == nil {
+func cloneNPMOperation(operation *npmOperationSnapshot) *npmOperationSnapshot {
+	if operation == nil {
 		return nil
 	}
-	cp := *task
-	if task.ExitCode != nil {
-		exitCode := *task.ExitCode
+	cp := *operation
+	if operation.ExitCode != nil {
+		exitCode := *operation.ExitCode
 		cp.ExitCode = &exitCode
 	}
 	return &cp

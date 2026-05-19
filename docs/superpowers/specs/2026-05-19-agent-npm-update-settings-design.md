@@ -24,7 +24,7 @@ The current `codex` and `claude` providers default to `npx --yes <package>`. The
 - Move `Token Stats` and `CC Switch` from `Chat` to `More`.
 - Add desktop-only activity bar shortcuts for `Update` and `Token Stats`.
 - Add registry support for hub-level `cmd.npm` forwarding by `hubId`.
-- Add hub-side `cmd.npm` actions for scan, install, uninstall, and query.
+- Add hub-side `cmd.npm` actions for scan, install, and uninstall.
 - Hard-code supported and deprecated package allowlists in server code.
 - Change `codex` and `claude` provider launch to use global binaries.
 - Align macOS deployment ACP npm dependency checks with Windows.
@@ -56,7 +56,7 @@ The method is available to `client` role through an explicit allowlist. Registry
 
 ```json
 {
-  "action": "scan|install|uninstall|query",
+  "action": "scan|install|uninstall",
   "hubId": "dev-hub",
   "packageName": "@openai/codex",
   "version": "latest"
@@ -66,7 +66,6 @@ The method is available to `client` role through an explicit allowlist. Registry
 Rules:
 
 - `scan` requires `action` and `hubId`.
-- `query` requires `action` and `hubId`.
 - `install` requires `action`, `hubId`, `packageName`, and optional `version`.
 - `uninstall` requires `action`, `hubId`, and `packageName`.
 - `version` only allows empty or `latest` in the first version.
@@ -82,7 +81,6 @@ Rules:
   "updatedAt": "2026-05-19T10:00:00Z",
   "hub": {
     "hubId": "dev-hub",
-    "online": true,
     "nodeVersion": "",
     "npmVersion": "",
     "npmPrefix": "",
@@ -96,30 +94,42 @@ Rules:
         "kind": "runtime",
         "installed": true,
         "installedVersion": "0.129.0",
-        "latestVersion": "0.130.0",
-        "status": "update_available",
+        "latestVersion": "",
+        "status": "checking_latest",
         "error": "",
-        "canInstall": true,
-        "canUpdate": true,
+        "canInstall": false,
+        "canUpdate": false,
         "canUninstall": false
       }
     ]
   },
-  "task": null
+  "operation": {
+    "running": true,
+    "action": "scan_latest",
+    "packageName": "",
+    "version": "",
+    "status": "checking_latest",
+    "startedAt": "2026-05-19T10:00:00Z",
+    "finishedAt": "",
+    "exitCode": null,
+    "errorSummary": ""
+  }
 }
 ```
 
 If `npm list -g --depth=0 --json` fails, the hub scan returns `ok: false` or a hub-level `error`, and `packages` is empty.
 
+If latest version cache is missing or expired, `scan` starts a hub-local `scan_latest` operation and returns immediately. Packages whose latest version is not ready use `status: "checking_latest"` and expose no install/update action. The App keeps polling with `scan` until `operation.running` is false.
+
 ### Install And Uninstall Responses
 
-`install` and `uninstall` return immediately after the hub accepts the background task:
+`install` and `uninstall` return immediately after the hub accepts the background operation:
 
 ```json
 {
   "ok": true,
   "accepted": true,
-  "task": {
+  "operation": {
     "running": true,
     "action": "install",
     "packageName": "@openai/codex",
@@ -133,42 +143,11 @@ If `npm list -g --depth=0 --json` fails, the hub scan returns `ok: false` or a h
 }
 ```
 
-If a hub already has a running npm task, it returns `CONFLICT` with a message such as `npm task already running`.
-
-### Query Response
-
-`query` returns the current or most recent hub-local npm task:
-
-```json
-{
-  "ok": true,
-  "task": {
-    "running": false,
-    "action": "install",
-    "packageName": "@openai/codex",
-    "version": "latest",
-    "status": "succeeded",
-    "startedAt": "2026-05-19T10:00:00Z",
-    "finishedAt": "2026-05-19T10:00:18Z",
-    "exitCode": 0,
-    "errorSummary": "",
-    "message": "Installed @openai/codex@latest. Restart WheelMaker or start a new agent session for the change to take effect."
-  }
-}
-```
-
-If there is no task history:
-
-```json
-{
-  "ok": true,
-  "task": null
-}
-```
+If a hub already has a running npm operation, it returns `CONFLICT` with a message such as `npm operation already running`.
 
 ## Hub NPM Command
 
-Hub owns the actual npm logic and keeps task state in memory only. The retained task state is the current running task or the most recent completed task. Hub restart clears this memory.
+Hub owns the actual npm logic and keeps operation state in memory only. The retained operation state is the current running operation or the most recent completed operation. Hub restart clears this memory.
 
 ### Scan
 
@@ -179,9 +158,9 @@ Commands:
 - `npm list -g --depth=0 --json`
 - `npm view <package> version` for runtime allowlist packages
 
-`npm view` calls run concurrently for all runtime allowlist packages. Deprecated packages do not query latest versions.
+`npm list` runs on every scan. `npm view` calls run concurrently for runtime allowlist packages only when the latest cache is missing or expired. Successful latest values are valid for 1 hour; failed latest lookups are short cached. Deprecated packages do not query latest versions.
 
-The hub does not add short per-command timeouts. The request layer gives `cmd.npm` scan a 60 second timeout in the App and registry path. `install`, `uninstall`, and `query` remain short request-response operations because install and uninstall return after task acceptance.
+The hub does not add short per-command timeouts. The request layer gives `cmd.npm` scan a 60 second timeout in the App and registry path. `install` and `uninstall` remain short request-response operations because they return after operation acceptance.
 
 ### Install And Update
 
@@ -203,15 +182,15 @@ npm uninstall -g <package>
 
 The hub validates that the package is in the deprecated allowlist. It does not need to pre-check whether the package is installed. UI only shows `Uninstall` when scan reported the deprecated package as installed.
 
-### Task Concurrency
+### Operation Concurrency
 
-Each hub allows one npm task at a time. Concurrent `install` or `uninstall` requests on the same hub return `CONFLICT`.
+Each hub allows one npm operation at a time. Concurrent `scan_latest`, `install`, or `uninstall` requests on the same hub return `CONFLICT`.
 
-The App disables write buttons while any visible hub task is running as a UX guard. Registry does not enforce cross-hub task locking.
+The App disables write buttons while any visible hub operation is running as a UX guard. Registry does not enforce cross-hub operation locking.
 
 ### Error Summary
 
-Failed tasks surface an error summary instead of full npm logs:
+Failed operations surface an error summary instead of full npm logs:
 
 - include exit code
 - use the last non-empty stderr segment, truncated to 500 characters
@@ -287,19 +266,18 @@ Settings sections become:
 
 The `Update` detail page:
 
-- loads online hubs from `project.list`
-- derives unique hub IDs from online projects
+- loads hub IDs from `project.list.hubs`
 - sorts hub groups by stable `hubId` order
 - sends one `cmd.npm` scan request per hub
 - renders package rows with display name, package name, agent tags, installed version, latest version, status, and action button
 - includes a `Refresh` action
-- does not auto-refresh on a timer
+- auto-refreshes with scan polling while a hub npm operation is running
 
-Opening the page scans all online hubs. Manual refresh scans all online hubs. When an install or uninstall task completes, the App refreshes all online hubs again.
+Opening the page scans all hubs reported by `project.list.hubs`. Manual refresh scans all reported hubs. While `scan_latest`, install, or uninstall is running, the App keeps polling with `scan`.
 
 Install, update, and uninstall actions use the existing styled confirmation modal. Confirmation copy includes hub ID, package name, installed version when known, and target action. It does not use `window.confirm`.
 
-Accepted write actions poll `cmd.npm` with `action=query` for the target hub until the task finishes. The UI shows only success/failure state and error summary, not full stdout/stderr.
+Accepted write actions poll `cmd.npm` with `action=scan` for the target hub until the operation finishes. The UI shows only success/failure state and error summary, not full stdout/stderr.
 
 Successful install or update shows that restarting WheelMaker or starting a new agent session is required for changes to take effect. The page does not provide a restart button.
 
@@ -404,9 +382,9 @@ Reporter and hub command tests:
 
 Repository and service tests:
 
-- `cmd.npm` scan/install/uninstall/query payloads are shaped correctly.
+- `cmd.npm` scan/install/uninstall payloads are shaped correctly.
 - scan uses a 60 second request timeout.
-- install/uninstall/query use short request paths.
+- install/uninstall use short request paths.
 
 Settings source-structure tests:
 
@@ -430,12 +408,12 @@ Desktop activity bar tests:
 
 Update page behavior tests:
 
-- online hubs are derived from `project.list` and sorted by hub ID.
+- hubs are read from `project.list.hubs` and sorted by hub ID.
 - scan requests are sent per hub.
 - package rows show install/update/uninstall actions according to policy.
 - confirmation modal is used for install/update/uninstall.
-- accepted tasks trigger query polling.
-- task completion triggers all-hub rescan.
+- accepted operations trigger scan polling.
+- operation completion leaves the latest scan result rendered.
 - error summaries render without full logs.
 
 ## Acceptance Criteria

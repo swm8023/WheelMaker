@@ -168,6 +168,7 @@ export interface RegistryTokenScanResult {
 }
 
 export type RegistryNpmPackageStatus =
+  | 'checking_latest'
   | 'not_installed'
   | 'up_to_date'
   | 'update_available'
@@ -198,7 +199,6 @@ export interface RegistryNpmPackage {
 
 export interface RegistryNpmHubSnapshot {
   hubId: string;
-  online: boolean;
   nodeVersion: string;
   npmVersion: string;
   npmPrefix: string;
@@ -207,9 +207,9 @@ export interface RegistryNpmHubSnapshot {
   packages: RegistryNpmPackage[];
 }
 
-export interface RegistryNpmTask {
+export interface RegistryNpmOperation {
   running: boolean;
-  action: 'install' | 'uninstall' | string;
+  action: 'scan_latest' | 'install' | 'uninstall' | string;
   packageName: string;
   version: string;
   status: RegistryNpmPackageStatus;
@@ -225,7 +225,7 @@ export interface RegistryNpmCommandResponse {
   accepted?: boolean;
   updatedAt?: string;
   hub?: RegistryNpmHubSnapshot;
-  task: RegistryNpmTask | null;
+  operation: RegistryNpmOperation | null;
 }
 
 export type RegistryWheelMakerUpdateStatus =
@@ -315,6 +315,15 @@ export interface RegistryProjectGitState {
 export interface RegistryProjectAgentProfile {
   name: string;
   skills?: string[];
+}
+
+export interface RegistryHub {
+  hubId: string;
+}
+
+export interface RegistryProjectListResponse {
+  projects: RegistryProject[];
+  hubs: RegistryHub[];
 }
 
 export interface RegistryProject {
