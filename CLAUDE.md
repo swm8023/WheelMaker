@@ -17,7 +17,7 @@ WheelMaker/
 - 禁止扫描 dist 产物目录（例如检索时使用 rg --glob '!**/dist/**'）
 - Web 构建产物直接输出到 `~/.wheelmaker/web`，不再经过 `app/dist`
 - 禁止无意义的 `strings.TrimSpace`：仅允许在明确的输入边界归一化场景使用，禁止在内部链路重复清洗
-- 当用户要求“更新发布工程”或同义表达时，调用根目录 `update-publish.bat`，通过 `WheelMakerUpdater` 异步执行完整更新发布；不要调用需要管理员交互的 `deploy.bat`
+- 当用户要求“更新发布工程”或同义表达时，Windows 调用根目录 `update-publish.bat`，macOS/Linux 调用根目录 `update-publish.sh`，通过 `WheelMakerUpdater` 异步执行完整更新发布；不要调用需要管理员交互/服务重建的 `deploy.bat` 或 `deploy.sh`
 
 ## Completion Gate (Highest Priority)
 Before the final user-facing completion message in any implementation task, execute this exact tail sequence:

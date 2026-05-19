@@ -95,6 +95,12 @@ One-shot refresh from the repository root:
 bash deploy.sh
 ```
 
+After the initial service setup, request an updater-driven update and Web publish without recreating service files:
+
+```bash
+bash update-publish.sh
+```
+
 The refresh flow will:
 
 - pull with `git pull --ff-only` when the worktree is clean
