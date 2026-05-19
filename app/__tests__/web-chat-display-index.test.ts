@@ -58,6 +58,54 @@ describe('chat display index', () => {
     ]);
   });
 
+  test('uses turn type and layout width when estimating dynamic chat heights', () => {
+    const assistantText = [
+      'This is a long assistant response that should wrap differently depending on the chat column width.',
+      '',
+      'A second paragraph keeps markdown-style block spacing in the estimate.',
+    ].join('\n');
+    const wide = buildChatDisplayIndex([message(1, 'agent_message_chunk', assistantText)], {
+      layoutMetrics: {contentWidth: 900},
+    });
+    const narrow = buildChatDisplayIndex([message(1, 'agent_message_chunk', assistantText)], {
+      layoutMetrics: {contentWidth: 320},
+    });
+
+    expect(narrow.items[0].estimatedHeight).toBeGreaterThan(wide.items[0].estimatedHeight);
+  });
+
+  test('keeps tool calls compact when visible and removes them when hidden', () => {
+    const source = [
+      message(1, 'prompt_request', 'hello'),
+      message(2, 'tool_call', 'x'.repeat(2000)),
+      message(3, 'agent_message_chunk', 'answer'),
+    ];
+    const visible = buildChatDisplayIndex(source, {hideToolCalls: false});
+    const hidden = buildChatDisplayIndex(source, {hideToolCalls: true});
+
+    expect(visible.items.map(item => item.turnIndex)).toEqual([1, 2, 3]);
+    expect(hidden.items.map(item => item.turnIndex)).toEqual([1, 3]);
+    expect(visible.items[1].estimatedHeight).toBeLessThan(48);
+  });
+
+  test('accounts for prompt status and explicit user newlines', () => {
+    const compactPrompt = message(1, 'prompt_request', 'one line');
+    compactPrompt.param = {contentBlocks: [{type: 'text', text: 'one line'}]};
+    const multilinePrompt = message(2, 'prompt_request', 'line one\nline two\nline three');
+    multilinePrompt.param = {contentBlocks: [{type: 'text', text: 'line one\nline two\nline three'}]};
+
+    const compact = buildChatDisplayIndex([compactPrompt], {
+      layoutMetrics: {contentWidth: 360},
+      promptStatus: () => null,
+    });
+    const multiline = buildChatDisplayIndex([multilinePrompt], {
+      layoutMetrics: {contentWidth: 360},
+      promptStatus: () => 'responding',
+    });
+
+    expect(multiline.items[0].estimatedHeight).toBeGreaterThan(compact.items[0].estimatedHeight);
+  });
+
   test('does not keep a manual virtual range implementation', () => {
     const source = fs.readFileSync(
       path.join(__dirname, '..', 'web', 'src', 'chat', 'chatDisplayIndex.ts'),

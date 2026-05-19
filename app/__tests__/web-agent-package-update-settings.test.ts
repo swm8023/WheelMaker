@@ -65,14 +65,34 @@ describe('agent package update settings UI source structure', () => {
     expect(stylesCss).toContain('.agent-package-action-btn');
   });
 
-  test('places agent tags beside package names and status beside versions', () => {
+  test('places agent tags beside display names and lets versions span under the action button', () => {
     const projectRoot = path.join(__dirname, '..');
     const mainTsx = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'main.tsx'), 'utf8');
+    const stylesCss = fs.readFileSync(path.join(projectRoot, 'web', 'src', 'styles.css'), 'utf8');
 
     expect(mainTsx).toContain('className="agent-package-name-line"');
     expect(mainTsx).toContain('className="agent-package-agent-tags"');
     expect(mainTsx).toContain('className={`agent-package-status agent-package-version-status status-${pkg.status}`}');
     expect(mainTsx).not.toContain('className={`agent-package-status status-${pkg.status}`}');
+
+    const titleLineStart = mainTsx.indexOf('className="agent-package-title-line"');
+    const nameLineStart = mainTsx.indexOf('className="agent-package-name-line"', titleLineStart);
+    expect(titleLineStart).toBeGreaterThanOrEqual(0);
+    expect(nameLineStart).toBeGreaterThan(titleLineStart);
+    const titleLineBlock = mainTsx.slice(titleLineStart, nameLineStart);
+    expect(titleLineBlock).toContain('className="agent-package-agent-tags"');
+    expect(titleLineBlock).toContain("tagVariantClass('wide-session-agent', agent)");
+
+    const nameLineEnd = mainTsx.indexOf('className="agent-package-version-line"', nameLineStart);
+    const nameLineBlock = mainTsx.slice(nameLineStart, nameLineEnd);
+    expect(nameLineBlock).not.toContain('className="agent-package-agent-tags"');
+
+    const actionButtonBlock = stylesCss.match(/\.agent-package-action-btn \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(actionButtonBlock).toContain('grid-column: 2;');
+    expect(actionButtonBlock).toContain('grid-row: 1 / 3;');
+
+    const versionLineBlock = stylesCss.match(/\.agent-package-version-line \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(versionLineBlock).toContain('grid-column: 1 / -1;');
   });
 
   test('uses explicit agent tag variants and softly sized capsules', () => {

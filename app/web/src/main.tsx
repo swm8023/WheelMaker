@@ -49,6 +49,7 @@ import {
 import {createChatDurablePersistQueue} from './chat/chatDurablePersist';
 import {createChatReadRepairQueue} from './chat/chatReadRepair';
 import {buildChatDisplayIndex} from './chat/chatDisplayIndex';
+import {useChatLayoutMetrics} from './chat/chatLayoutMetrics';
 import {createChatActiveRuntimeSet} from './chat/chatActiveRuntimeSet';
 import {ChatVirtuosoTurnList, type ChatVirtuosoTurnListHandle} from './chat/ChatVirtuosoTurnList';
 import { buildPromptDoneCopyRange } from './chat/chatCopyRange';
@@ -2343,6 +2344,7 @@ function App() {
   const chatFileInputRef = useRef<HTMLInputElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatVirtuosoListRef = useRef<ChatVirtuosoTurnListHandle | null>(null);
+  const chatLayoutMetrics = useChatLayoutMetrics(chatScrollRef);
   const chatAutoScrollFollowRef = useRef(true);
   const chatPointerScrollingRef = useRef(false);
   const chatUserScrollLockUntilRef = useRef(0);
@@ -2476,11 +2478,16 @@ function App() {
     : undefined;
 
   const chatDisplayIndex = useMemo(() => buildChatDisplayIndex(chatMessages, {
-    shouldRender: message => {
-      const promptStatus = isPromptStartMessage(message)
-        ? resolvePromptTurnStatus(selectedFullChatMessages, message)
+    hideToolCalls,
+    layoutMetrics: chatLayoutMetrics,
+    promptStatus: message => isPromptStartMessage(message)
+      ? resolvePromptTurnStatus(selectedFullChatMessages, message)
+      : null,
+    shouldRender: (message, promptStatus) => {
+      const resolvedPromptStatus = isPromptStartMessage(message)
+        ? promptStatus
         : null;
-      return shouldRenderChatTurn(message, hideToolCalls, promptStatus);
+      return shouldRenderChatTurn(message, hideToolCalls, resolvedPromptStatus);
     },
     pendingKey: selectedPendingPrompt
       ? `${selectedChatEncodedKey}:pending:${selectedPendingPrompt.createdAt}`
@@ -2488,6 +2495,7 @@ function App() {
     pendingEstimatedHeight: 120,
   }), [
     chatMessages,
+    chatLayoutMetrics,
     hideToolCalls,
     selectedChatEncodedKey,
     selectedFullChatMessages,
@@ -7843,30 +7851,20 @@ function App() {
                     const pending = agentPackageActionPendingKey === pendingKey || task?.running === true;
                     return (
                       <div key={`${card.hubId}:${pkg.packageName}`} className="agent-package-row">
-                        <div className="agent-package-main">
-                          <div className="agent-package-title-line">
-                            <span className="settings-metadata-title" title={pkg.displayName}>{pkg.displayName}</span>
-                          </div>
-                          <div className="agent-package-name-line">
-                            <span className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</span>
-                            {pkg.agentTypes.length > 0 ? (
-                              <span className="agent-package-agent-tags">
-                                {pkg.agentTypes.map(agent => (
-                                  <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
-                                    {agent}
-                                  </span>
-                                ))}
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="agent-package-version-line">
-                            <span>Installed: {pkg.installedVersion || '-'}</span>
-                            <span>Latest: {pkg.latestVersion || '-'}</span>
-                            <span className={`agent-package-status agent-package-version-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
-                          </div>
-                          {pkg.error ? (
-                            <div className="settings-metadata-error">{pkg.error}</div>
+                        <div className="agent-package-title-line">
+                          <span className="settings-metadata-title" title={pkg.displayName}>{pkg.displayName}</span>
+                          {pkg.agentTypes.length > 0 ? (
+                            <span className="agent-package-agent-tags">
+                              {pkg.agentTypes.map(agent => (
+                                <span key={`${pkg.packageName}:${agent}`} className={`wide-session-agent-tag ${tagVariantClass('wide-session-agent', agent)}`}>
+                                  {agent}
+                                </span>
+                              ))}
+                            </span>
                           ) : null}
+                        </div>
+                        <div className="agent-package-name-line">
+                          <span className="agent-package-name" title={pkg.packageName}>{pkg.packageName}</span>
                         </div>
                         {action ? (
                           <button
@@ -7877,6 +7875,14 @@ function App() {
                           >
                             {pending ? 'Running...' : agentPackageActionLabel(action)}
                           </button>
+                        ) : null}
+                        <div className="agent-package-version-line">
+                          <span>Installed: {pkg.installedVersion || '-'}</span>
+                          <span>Latest: {pkg.latestVersion || '-'}</span>
+                          <span className={`agent-package-status agent-package-version-status status-${pkg.status}`}>{packageStatusLabel(pkg.status)}</span>
+                        </div>
+                        {pkg.error ? (
+                          <div className="settings-metadata-error">{pkg.error}</div>
                         ) : null}
                       </div>
                     );
