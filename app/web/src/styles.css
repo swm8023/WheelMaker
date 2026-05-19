@@ -1716,12 +1716,12 @@ body,
 .registry-debug-body {
   min-height: 0;
   flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: minmax(420px, 0.95fr) minmax(300px, 1.05fr);
+  display: flex;
   background: var(--panel);
 }
 
 .registry-debug-list-pane,
+.registry-debug-detail-shell,
 .registry-debug-detail-pane {
   min-width: 0;
   min-height: 0;
@@ -1730,16 +1730,21 @@ body,
 }
 
 .registry-debug-list-pane {
+  flex: 0 0 auto;
   position: relative;
-  border-right: 1px solid var(--border);
+}
+
+.registry-debug-body.detail-collapsed .registry-debug-list-pane {
+  flex: 1 1 auto;
+  width: auto !important;
 }
 
 .registry-debug-list-header {
   height: 28px;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 86px 42px 86px minmax(120px, 1fr) 44px minmax(90px, 0.8fr) minmax(120px, 0.9fr);
-  gap: 6px;
+  grid-template-columns: 58px 28px 54px minmax(60px, 1fr) 30px minmax(42px, 0.7fr) minmax(52px, 0.8fr);
+  gap: 4px;
   align-items: center;
   padding: 0 8px;
   border-bottom: 1px solid var(--border);
@@ -1762,8 +1767,8 @@ body,
   background: transparent;
   color: var(--text);
   display: grid;
-  grid-template-columns: 86px 42px 86px minmax(120px, 1fr) 44px minmax(90px, 0.8fr) minmax(120px, 0.9fr);
-  gap: 6px;
+  grid-template-columns: 58px 28px 54px minmax(60px, 1fr) 30px minmax(42px, 0.7fr) minmax(52px, 0.8fr);
+  gap: 4px;
   align-items: center;
   padding: 0 8px;
   font: inherit;
@@ -1821,7 +1826,29 @@ body,
   font-size: 11px;
 }
 
+.registry-debug-splitter {
+  flex: 0 0 7px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--panel) 85%, var(--panel-3));
+  cursor: col-resize;
+}
+
+.registry-debug-splitter:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+}
+
+.registry-debug-detail-shell {
+  flex: 1 1 auto;
+}
+
+.registry-debug-detail-collapsed {
+  display: none;
+}
+
 .registry-debug-detail-pane {
+  flex: 1 1 auto;
   background: var(--panel-3);
 }
 

@@ -13,11 +13,17 @@ describe('web registry debug panel ui', () => {
     expect(panelTsx).toContain('className="registry-debug-panel"');
     expect(panelTsx).toContain('className="registry-debug-list-pane"');
     expect(panelTsx).toContain('className="registry-debug-detail-pane"');
+    expect(panelTsx).toContain('className="registry-debug-splitter"');
     expect(panelTsx).toContain('Include multi-session records');
     expect(panelTsx).toContain('Jump to latest');
     expect(panelTsx).toContain('Clear');
     expect(panelTsx).toContain('Copy');
     expect(panelTsx).toContain('JSON.stringify(selectedEnvelopeOrLifecycle, null, 2)');
+    expect(panelTsx).toContain('selectedScope');
+    expect(panelTsx).toContain('onSelectedScopeChange');
+    expect(panelTsx).toContain('sessionLabels');
+    expect(panelTsx).toContain('registry-debug-detail-collapsed');
+    expect(panelTsx).not.toContain('followOutput');
     expect(panelTsx).not.toContain('payload summary');
     expect(panelTsx).not.toContain('registry-debug-payload-summary');
   });
@@ -28,9 +34,13 @@ describe('web registry debug panel ui', () => {
     expect(mainTsx).toContain("import {RegistryDebugPanel} from './debug/RegistryDebugPanel';");
     expect(mainTsx).toContain('const [registryDebugRecords, setRegistryDebugRecords] = useState(');
     expect(mainTsx).toContain('const [selectedRegistryDebugRecordId, setSelectedRegistryDebugRecordId] = useState<number | null>(null);');
+    expect(mainTsx).toContain('const [selectedRegistryDebugScope, setSelectedRegistryDebugScope] = useState');
+    expect(mainTsx).toContain('const registryDebugSessionLabels = useMemo');
     expect(mainTsx).toContain('const registryDebugPanel = isWide && registryDebug && registryDebugPanelOpen ? (');
     expect(mainTsx).toContain('<RegistryDebugPanel');
     expect(mainTsx).toContain('records={registryDebugRecords}');
+    expect(mainTsx).toContain('selectedScope={selectedRegistryDebugScope}');
+    expect(mainTsx).toContain('sessionLabels={registryDebugSessionLabels}');
     expect(mainTsx).toContain('onClear={() => registryDebugStore.clear()}');
   });
 
@@ -40,6 +50,8 @@ describe('web registry debug panel ui', () => {
     expect(stylesCss).toContain('.registry-debug-panel');
     expect(stylesCss).toContain('.registry-debug-list-pane');
     expect(stylesCss).toContain('.registry-debug-detail-pane');
+    expect(stylesCss).toContain('.registry-debug-splitter');
+    expect(stylesCss).toContain('.registry-debug-detail-collapsed');
     expect(stylesCss).toContain('.registry-debug-resize-handle');
   });
 });

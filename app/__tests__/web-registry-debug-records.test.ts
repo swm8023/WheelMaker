@@ -3,6 +3,7 @@ import {
   extractRegistryDebugSessionIds,
   filterRegistryDebugRecords,
   formatRegistryDebugTime,
+  resolveRegistryDebugScope,
 } from '../web/src/debug/registryDebug';
 
 describe('registry debug records', () => {
@@ -35,6 +36,18 @@ describe('registry debug records', () => {
     const timestamp = new Date(2026, 4, 19, 1, 2, 3, 4).getTime();
 
     expect(formatRegistryDebugTime(timestamp)).toBe('01:02:03.004');
+  });
+
+  test('resolves method families into debug scopes', () => {
+    expect(resolveRegistryDebugScope('session.send', 'request')).toBe('session.*');
+    expect(resolveRegistryDebugScope('fs.read', 'response')).toBe('fs.*');
+    expect(resolveRegistryDebugScope('git.status', 'event')).toBe('git.*');
+    expect(resolveRegistryDebugScope('project.list', 'request')).toBe('project.*');
+    expect(resolveRegistryDebugScope('token.scan', 'response')).toBe('token.*');
+    expect(resolveRegistryDebugScope('ping', 'request')).toBe('ping');
+    expect(resolveRegistryDebugScope(undefined, 'connect_open')).toBe('lifecycle');
+    expect(resolveRegistryDebugScope(undefined, 'parse_error')).toBe('parse_error');
+    expect(resolveRegistryDebugScope(undefined, 'event')).toBe('unknown');
   });
 
   test('records, correlates, filters, and clears debug entries', () => {
@@ -81,6 +94,7 @@ describe('registry debug records', () => {
     expect(records[0]).toMatchObject({
       direction: 'out',
       phase: 'request',
+      scope: 'session.*',
       method: 'session.send',
       requestId: 7,
       projectId: 'project-a',
@@ -90,6 +104,7 @@ describe('registry debug records', () => {
     expect(records[1]).toMatchObject({
       direction: 'in',
       phase: 'response',
+      scope: 'session.*',
       method: 'session.send',
       requestId: 7,
       projectId: 'project-a',
@@ -98,20 +113,56 @@ describe('registry debug records', () => {
     });
     expect(records[2]).toMatchObject({
       phase: 'event',
+      scope: 'session.*',
       sessionIds: ['sess-a', 'sess-b'],
       multiSession: true,
     });
 
-    expect(filterRegistryDebugRecords(records, 'sess-a', false).map(record => record.id)).toEqual([
-      records[0].id,
-      records[1].id,
+    store.recordOutbound({
+      envelope: {
+        requestId: 8,
+        type: 'request',
+        method: 'fs.read',
+        projectId: 'project-a',
+        payload: {path: 'README.md'},
+      },
+      raw: '{"requestId":8}',
+      timestamp: 1250,
+    });
+    const recordsWithFs = store.getRecords();
+    expect(recordsWithFs[3]).toMatchObject({
+      scope: 'fs.*',
+      method: 'fs.read',
+      sessionIds: [],
+    });
+
+    expect(filterRegistryDebugRecords(recordsWithFs, {
+      selectedScope: 'session.*',
+      selectedSessionId: 'sess-a',
+      includeMultiSessionRecords: false,
+    }).map(record => record.id)).toEqual([
+      recordsWithFs[0].id,
+      recordsWithFs[1].id,
     ]);
-    expect(filterRegistryDebugRecords(records, 'sess-a', true).map(record => record.id)).toEqual([
-      records[0].id,
-      records[1].id,
-      records[2].id,
+    expect(filterRegistryDebugRecords(recordsWithFs, {
+      selectedScope: 'session.*',
+      selectedSessionId: 'sess-a',
+      includeMultiSessionRecords: true,
+    }).map(record => record.id)).toEqual([
+      recordsWithFs[0].id,
+      recordsWithFs[1].id,
+      recordsWithFs[2].id,
     ]);
-    expect(filterRegistryDebugRecords(records, 'All', false)).toHaveLength(3);
+    expect(filterRegistryDebugRecords(recordsWithFs, {
+      selectedScope: 'fs.*',
+      selectedSessionId: 'All',
+      includeMultiSessionRecords: false,
+    }).map(record => record.id)).toEqual([recordsWithFs[3].id]);
+    expect(filterRegistryDebugRecords(recordsWithFs, {
+      selectedScope: 'All',
+      selectedSessionId: 'All',
+      includeMultiSessionRecords: false,
+    })).toHaveLength(4);
 
     store.clear();
     expect(store.getRecords()).toEqual([]);

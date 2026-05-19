@@ -2247,6 +2247,7 @@ function App() {
   );
   const [registryDebugRecords, setRegistryDebugRecords] = useState(registryDebugStore.getRecords());
   const [selectedRegistryDebugRecordId, setSelectedRegistryDebugRecordId] = useState<number | null>(null);
+  const [selectedRegistryDebugScope, setSelectedRegistryDebugScope] = useState('All');
   const [selectedRegistryDebugSessionId, setSelectedRegistryDebugSessionId] = useState('All');
   const [registryDebugIncludeMultiSessionRecords, setRegistryDebugIncludeMultiSessionRecords] = useState(false);
   const [gestureNavigation, setGestureNavigation] = useState(
@@ -2499,6 +2500,18 @@ function App() {
   const chatSessionsRef = useRef<RegistryChatSession[]>([]);
   const [projectSessionsByProjectId, setProjectSessionsByProjectId] = useState<Record<string, RegistryChatSession[]>>({});
   const projectSessionsByProjectIdRef = useRef<Record<string, RegistryChatSession[]>>({});
+  const registryDebugSessionLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const projectItem of projects) {
+      const projectName = projectItem.name || projectItem.projectId;
+      const projectSessions = projectSessionsByProjectId[projectItem.projectId] ?? [];
+      for (const session of projectSessions) {
+        const sessionTitle = resolveChatSessionTitle(session.title ?? '', false) || session.sessionId;
+        labels[session.sessionId] = `${projectName} / ${sessionTitle}`;
+      }
+    }
+    return labels;
+  }, [projectSessionsByProjectId, projects]);
   const [wideProjectVisibleCounts, setWideProjectVisibleCounts] = useState<Record<string, number>>({});
   const [wideProjectActionMenu, setWideProjectActionMenu] = useState<WideProjectActionMenuState | null>(null);
   const [mobileProjectActionMenu, setMobileProjectActionMenu] = useState<MobileProjectActionMenuState | null>(null);
@@ -3717,6 +3730,7 @@ function App() {
     } else {
       setRegistryDebugPanelOpen(false);
       setSelectedRegistryDebugRecordId(null);
+      setSelectedRegistryDebugScope('All');
       setSelectedRegistryDebugSessionId('All');
       setRegistryDebugIncludeMultiSessionRecords(false);
     }
@@ -11315,8 +11329,11 @@ function App() {
       records={registryDebugRecords}
       selectedRecordId={selectedRegistryDebugRecordId}
       onSelectedRecordIdChange={setSelectedRegistryDebugRecordId}
+      selectedScope={selectedRegistryDebugScope}
+      onSelectedScopeChange={setSelectedRegistryDebugScope}
       selectedSessionId={selectedRegistryDebugSessionId}
       onSelectedSessionIdChange={setSelectedRegistryDebugSessionId}
+      sessionLabels={registryDebugSessionLabels}
       includeMultiSessionRecords={registryDebugIncludeMultiSessionRecords}
       onIncludeMultiSessionRecordsChange={setRegistryDebugIncludeMultiSessionRecords}
       onClear={() => registryDebugStore.clear()}

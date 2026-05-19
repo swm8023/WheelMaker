@@ -26,14 +26,25 @@ type RegistryDebugPanelInteraction =
       originX: number;
       originY: number;
       startFrame: RegistryDebugPanelFrame;
+    }
+  | {
+      kind: 'list-resize';
+      pointerId: number;
+      originX: number;
+      originY: number;
+      startListPaneWidth: number;
+      panelWidth: number;
     };
 
 export type RegistryDebugPanelProps = {
   records: RegistryDebugRecord[];
   selectedRecordId: number | null;
   onSelectedRecordIdChange: (recordId: number | null) => void;
+  selectedScope: string;
+  onSelectedScopeChange: (scope: string) => void;
   selectedSessionId: string;
   onSelectedSessionIdChange: (sessionId: string) => void;
+  sessionLabels: Record<string, string>;
   includeMultiSessionRecords: boolean;
   onIncludeMultiSessionRecordsChange: (include: boolean) => void;
   onClear: () => void;
@@ -43,6 +54,10 @@ export type RegistryDebugPanelProps = {
 const PANEL_MIN_WIDTH = 620;
 const PANEL_MIN_HEIGHT = 360;
 const PANEL_MARGIN = 16;
+const LIST_PANE_DEFAULT_WIDTH = 520;
+const LIST_PANE_MIN_WIDTH = 340;
+const DETAIL_PANE_MIN_WIDTH = 260;
+const SPLITTER_WIDTH = 7;
 
 function defaultPanelFrame(): RegistryDebugPanelFrame {
   const viewportWidth = window.innerWidth || 1280;
@@ -82,10 +97,18 @@ function clampPanelFrame(frame: RegistryDebugPanelFrame): RegistryDebugPanelFram
   };
 }
 
+function clampListPaneWidth(width: number, panelWidth: number): number {
+  const maxWidth = Math.max(
+    LIST_PANE_MIN_WIDTH,
+    panelWidth - DETAIL_PANE_MIN_WIDTH - SPLITTER_WIDTH,
+  );
+  return Math.min(Math.max(LIST_PANE_MIN_WIDTH, Math.round(width)), maxWidth);
+}
+
 function recordLabel(record: RegistryDebugRecord): string {
   const method = record.method || record.phase;
   const request = typeof record.requestId === 'number' ? `#${record.requestId}` : '';
-  return [record.timeText, record.direction, method, request].filter(Boolean).join(' ');
+  return [record.timeText, record.direction, record.scope, record.phase, method, request].filter(Boolean).join(' ');
 }
 
 function selectedRecordValue(record: RegistryDebugRecord | undefined): unknown {
@@ -105,12 +128,30 @@ function selectedRecordValue(record: RegistryDebugRecord | undefined): unknown {
   };
 }
 
+function resolveSessionOptionLabel(
+  sessionId: string,
+  records: RegistryDebugRecord[],
+  sessionLabels: Record<string, string>,
+): string {
+  const knownLabel = sessionLabels[sessionId];
+  if (knownLabel) {
+    return knownLabel;
+  }
+  const projectId = records.find(record => (
+    record.sessionIds.includes(sessionId) && !!record.projectId
+  ))?.projectId;
+  return projectId ? `${projectId} / ${sessionId}` : sessionId;
+}
+
 export function RegistryDebugPanel({
   records,
   selectedRecordId,
   onSelectedRecordIdChange,
+  selectedScope,
+  onSelectedScopeChange,
   selectedSessionId,
   onSelectedSessionIdChange,
+  sessionLabels,
   includeMultiSessionRecords,
   onIncludeMultiSessionRecordsChange,
   onClear,
@@ -119,15 +160,37 @@ export function RegistryDebugPanel({
   const virtuosoRef = React.useRef<VirtuosoHandle | null>(null);
   const interactionRef = React.useRef<RegistryDebugPanelInteraction | null>(null);
   const [panelFrame, setPanelFrame] = React.useState<RegistryDebugPanelFrame>(() => defaultPanelFrame());
-  const [atBottom, setAtBottom] = React.useState(true);
+  const [listPaneWidth, setListPaneWidth] = React.useState(LIST_PANE_DEFAULT_WIDTH);
+  const [detailCollapsed, setDetailCollapsed] = React.useState(false);
 
-  const sessionIds = React.useMemo(
-    () => Array.from(new Set(records.flatMap(record => record.sessionIds))).sort(),
+  const scopeOptions = React.useMemo(
+    () => Array.from(new Set(records.map(record => record.scope))).sort(),
     [records],
   );
+  const scopeFilteredRecords = React.useMemo(
+    () => selectedScope === 'All'
+      ? records
+      : records.filter(record => record.scope === selectedScope),
+    [records, selectedScope],
+  );
+  const sessionIds = React.useMemo(
+    () => Array.from(new Set(scopeFilteredRecords.flatMap(record => record.sessionIds))).sort(),
+    [scopeFilteredRecords],
+  );
+  const sessionOptionLabels = React.useMemo(
+    () => Object.fromEntries(sessionIds.map(sessionId => [
+      sessionId,
+      resolveSessionOptionLabel(sessionId, scopeFilteredRecords, sessionLabels),
+    ])),
+    [scopeFilteredRecords, sessionIds, sessionLabels],
+  );
   const filteredRecords = React.useMemo(
-    () => filterRegistryDebugRecords(records, selectedSessionId, includeMultiSessionRecords),
-    [includeMultiSessionRecords, records, selectedSessionId],
+    () => filterRegistryDebugRecords(records, {
+      selectedScope,
+      selectedSessionId,
+      includeMultiSessionRecords,
+    }),
+    [includeMultiSessionRecords, records, selectedScope, selectedSessionId],
   );
   const selectedRecord = React.useMemo(
     () => filteredRecords.find(record => record.id === selectedRecordId),
@@ -141,6 +204,17 @@ export function RegistryDebugPanel({
     () => JSON.stringify(selectedEnvelopeOrLifecycle, null, 2),
     [selectedEnvelopeOrLifecycle],
   );
+
+  React.useEffect(() => {
+    setListPaneWidth(current => clampListPaneWidth(current, panelFrame.width));
+  }, [panelFrame.width]);
+
+  React.useEffect(() => {
+    if (selectedScope === 'All' || scopeOptions.includes(selectedScope)) {
+      return;
+    }
+    onSelectedScopeChange('All');
+  }, [onSelectedScopeChange, scopeOptions, selectedScope]);
 
   React.useEffect(() => {
     if (selectedSessionId === 'All' || sessionIds.includes(selectedSessionId)) {
@@ -193,6 +267,23 @@ export function RegistryDebugPanel({
     [panelFrame],
   );
 
+  const beginListPaneResize = React.useCallback(
+    (event: React.PointerEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      interactionRef.current = {
+        kind: 'list-resize',
+        pointerId: event.pointerId,
+        originX: event.clientX,
+        originY: event.clientY,
+        startListPaneWidth: listPaneWidth,
+        panelWidth: panelFrame.width,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [listPaneWidth, panelFrame.width],
+  );
+
   const movePanelPointer = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
     const interaction = interactionRef.current;
     if (!interaction || interaction.pointerId !== event.pointerId) {
@@ -207,6 +298,13 @@ export function RegistryDebugPanel({
         left: interaction.startFrame.left + deltaX,
         top: interaction.startFrame.top + deltaY,
       }));
+      return;
+    }
+    if (interaction.kind === 'list-resize') {
+      setListPaneWidth(clampListPaneWidth(
+        interaction.startListPaneWidth + deltaX,
+        interaction.panelWidth,
+      ));
       return;
     }
     setPanelFrame(clampPanelFrame({
@@ -241,7 +339,6 @@ export function RegistryDebugPanel({
       align: 'end',
       behavior: 'auto',
     });
-    setAtBottom(true);
   }, [filteredRecords.length]);
 
   const copySelectedJson = React.useCallback(() => {
@@ -276,6 +373,15 @@ export function RegistryDebugPanel({
           <span className="registry-debug-count">{records.length}</span>
         </div>
         <div className="registry-debug-actions">
+          <button
+            type="button"
+            className="registry-debug-icon-action"
+            onClick={() => setDetailCollapsed(current => !current)}
+            aria-label={detailCollapsed ? 'Show detail pane' : 'Hide detail pane'}
+            title={detailCollapsed ? 'Show detail' : 'Hide detail'}
+          >
+            <span className={`codicon ${detailCollapsed ? 'codicon-chevron-left' : 'codicon-chevron-right'}`} />
+          </button>
           <button type="button" className="registry-debug-action" onClick={onClear}>
             Clear
           </button>
@@ -286,6 +392,19 @@ export function RegistryDebugPanel({
       </div>
       <div className="registry-debug-toolbar">
         <label className="registry-debug-select-label">
+          <span>Scope</span>
+          <select
+            className="registry-debug-select"
+            value={selectedScope}
+            onChange={event => onSelectedScopeChange(event.target.value)}
+          >
+            <option value="All">All</option>
+            {scopeOptions.map(scope => (
+              <option key={scope} value={scope}>{scope}</option>
+            ))}
+          </select>
+        </label>
+        <label className="registry-debug-select-label">
           <span>Session</span>
           <select
             className="registry-debug-select"
@@ -294,7 +413,7 @@ export function RegistryDebugPanel({
           >
             <option value="All">All</option>
             {sessionIds.map(sessionId => (
-              <option key={sessionId} value={sessionId}>{sessionId}</option>
+              <option key={sessionId} value={sessionId}>{sessionOptionLabels[sessionId]}</option>
             ))}
           </select>
         </label>
@@ -307,12 +426,15 @@ export function RegistryDebugPanel({
           <span>Include multi-session records</span>
         </label>
       </div>
-      <div className="registry-debug-body">
-        <div className="registry-debug-list-pane">
+      <div className={`registry-debug-body${detailCollapsed ? ' detail-collapsed' : ''}`}>
+        <div
+          className="registry-debug-list-pane"
+          style={detailCollapsed ? undefined : {width: listPaneWidth}}
+        >
           <div className="registry-debug-list-header">
             <span>Time</span>
             <span>Dir</span>
-            <span>Phase</span>
+            <span>Scope</span>
             <span>Method</span>
             <span>Req</span>
             <span>Project</span>
@@ -323,8 +445,6 @@ export function RegistryDebugPanel({
               ref={virtuosoRef}
               data={filteredRecords}
               computeItemKey={(index, record) => record.id}
-              followOutput={() => (atBottom ? 'auto' : false)}
-              atBottomStateChange={setAtBottom}
               itemContent={(index, record) => (
                 <button
                   type="button"
@@ -334,7 +454,7 @@ export function RegistryDebugPanel({
                 >
                   <span className="registry-debug-cell time">{record.timeText}</span>
                   <span className={`registry-debug-cell direction ${record.direction}`}>{record.direction}</span>
-                  <span className="registry-debug-cell phase">{record.phase}</span>
+                  <span className="registry-debug-cell scope">{record.scope}</span>
                   <span className="registry-debug-cell method">{record.method || '-'}</span>
                   <span className="registry-debug-cell request">{typeof record.requestId === 'number' ? record.requestId : '-'}</span>
                   <span className="registry-debug-cell project">{record.projectId || '-'}</span>
@@ -343,29 +463,43 @@ export function RegistryDebugPanel({
               )}
             />
           </div>
-          {!atBottom && filteredRecords.length > 0 ? (
+          {filteredRecords.length > 0 ? (
             <button type="button" className="registry-debug-jump" onClick={jumpToLatest}>
               Jump to latest
             </button>
           ) : null}
         </div>
-        <div className="registry-debug-detail-pane">
-          <div className="registry-debug-detail-header">
-            <span>{selectedRecord ? recordLabel(selectedRecord) : 'No record selected'}</span>
-            <button
-              type="button"
-              className="registry-debug-action"
-              onClick={copySelectedJson}
-              disabled={!selectedRecord}
-            >
-              Copy
-            </button>
+        {!detailCollapsed ? (
+          <button
+            type="button"
+            className="registry-debug-splitter"
+            aria-label="Resize debug list pane"
+            title="Resize list"
+            onPointerDown={beginListPaneResize}
+            onPointerMove={movePanelPointer}
+            onPointerUp={finishPanelPointer}
+            onPointerCancel={finishPanelPointer}
+          />
+        ) : null}
+        <div className={`registry-debug-detail-shell${detailCollapsed ? ' registry-debug-detail-collapsed' : ''}`}>
+          <div className="registry-debug-detail-pane">
+            <div className="registry-debug-detail-header">
+              <span>{selectedRecord ? recordLabel(selectedRecord) : 'No record selected'}</span>
+              <button
+                type="button"
+                className="registry-debug-action"
+                onClick={copySelectedJson}
+                disabled={!selectedRecord}
+              >
+                Copy
+              </button>
+            </div>
+            {selectedRecord ? (
+              <pre className="registry-debug-json">{selectedJson}</pre>
+            ) : (
+              <div className="registry-debug-empty">No record selected.</div>
+            )}
           </div>
-          {selectedRecord ? (
-            <pre className="registry-debug-json">{selectedJson}</pre>
-          ) : (
-            <div className="registry-debug-empty">No record selected.</div>
-          )}
         </div>
       </div>
       <button

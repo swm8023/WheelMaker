@@ -1,6 +1,7 @@
 import type {RegistryEnvelope} from '../types/registry';
 
 export type RegistryDebugDirection = 'out' | 'in' | 'lifecycle';
+export type RegistryDebugScope = string;
 
 export type RegistryDebugPhase =
   | 'request'
@@ -27,6 +28,7 @@ export type RegistryDebugRecord = {
   timeText: string;
   direction: RegistryDebugDirection;
   phase: RegistryDebugPhase;
+  scope: RegistryDebugScope;
   method?: string;
   requestId?: number;
   projectId?: string;
@@ -69,6 +71,11 @@ export type RegistryDebugInboundInput = Extract<RegistryDebugCaptureEvent, {kind
 export type RegistryDebugParseErrorInput = Extract<RegistryDebugCaptureEvent, {kind: 'parse_error'}>;
 export type RegistryDebugLifecycleInput = Extract<RegistryDebugCaptureEvent, {kind: 'lifecycle'}>;
 export type RegistryDebugSubscriber = (records: RegistryDebugRecord[]) => void;
+export type RegistryDebugFilter = {
+  selectedScope: string;
+  selectedSessionId: string;
+  includeMultiSessionRecords: boolean;
+};
 
 type CorrelatedRequest = {
   method?: string;
@@ -161,23 +168,42 @@ function resolveInboundPhase(type: RegistryEnvelope['type']): Extract<RegistryDe
   return 'response';
 }
 
+export function resolveRegistryDebugScope(
+  method: string | undefined,
+  phase: RegistryDebugPhase,
+): RegistryDebugScope {
+  if (method) {
+    const dotIndex = method.indexOf('.');
+    return dotIndex > 0 ? `${method.slice(0, dotIndex)}.*` : method;
+  }
+  if (phase.startsWith('connect_')) {
+    return 'lifecycle';
+  }
+  if (phase === 'parse_error') {
+    return 'parse_error';
+  }
+  return 'unknown';
+}
+
 function cloneRecords(records: RegistryDebugRecord[]): RegistryDebugRecord[] {
   return records.slice();
 }
 
 export function filterRegistryDebugRecords(
   records: RegistryDebugRecord[],
-  selectedSessionId: string,
-  includeMultiSessionRecords: boolean,
+  filter: RegistryDebugFilter,
 ): RegistryDebugRecord[] {
-  if (!selectedSessionId || selectedSessionId === 'All') {
-    return records;
+  const scopeFilteredRecords = !filter.selectedScope || filter.selectedScope === 'All'
+    ? records
+    : records.filter(record => record.scope === filter.selectedScope);
+  if (!filter.selectedSessionId || filter.selectedSessionId === 'All') {
+    return scopeFilteredRecords;
   }
-  return records.filter(record => {
-    if (!record.sessionIds.includes(selectedSessionId)) {
+  return scopeFilteredRecords.filter(record => {
+    if (!record.sessionIds.includes(filter.selectedSessionId)) {
       return false;
     }
-    if (record.multiSession && !includeMultiSessionRecords) {
+    if (record.multiSession && !filter.includeMultiSessionRecords) {
       return false;
     }
     return true;
@@ -198,11 +224,12 @@ export function createRegistryDebugStore(now: () => number = () => Date.now()): 
     }
   };
 
-  const appendRecord = (record: Omit<RegistryDebugRecord, 'id'>) => {
+  const appendRecord = (record: Omit<RegistryDebugRecord, 'id' | 'scope'>) => {
     records = [
       ...records,
       {
         id: nextId,
+        scope: resolveRegistryDebugScope(record.method, record.phase),
         ...record,
       },
     ];
