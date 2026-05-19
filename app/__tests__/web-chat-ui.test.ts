@@ -255,6 +255,12 @@ describe('web chat integration', () => {
     expect(mainTsx).toContain('className="mobile-settings-back"');
     expect(mainTsx).toContain('<div className="mobile-settings-title">Settings</div>');
     expect(mainTsx).toContain('className="mobile-settings-group"');
+    const chatSettingsStart = mainTsx.indexOf("renderSettingsSection('Chat'");
+    const latestTitleSettingStart = mainTsx.indexOf('<span>Use Latest Prompt Title</span>', chatSettingsStart);
+    const hideToolCallsSettingStart = mainTsx.indexOf('<span>Hide Tool Calls</span>', chatSettingsStart);
+    expect(chatSettingsStart).toBeGreaterThanOrEqual(0);
+    expect(latestTitleSettingStart).toBeGreaterThan(chatSettingsStart);
+    expect(hideToolCallsSettingStart).toBeGreaterThan(latestTitleSettingStart);
     expect(mainTsx).not.toContain('className="sidebar-footer"');
     expect(mainTsx).toContain('className="floating-control-stack"');
     expect(mainTsx).toContain('className="floating-nav-group"');
@@ -431,8 +437,9 @@ describe('web chat integration', () => {
     expect(mainTsx).not.toContain('selectedChatSession?.title ||');
     expect(mainTsx).toContain("() => selectedChatDisplayTitle || 'No Selected Session'");
     expect(mainTsx).toContain('checked={useLatestPromptTitle}');
-    expect(mainTsx).toContain('onChange={event => setUseLatestPromptTitle(event.target.checked)}');
-    expect(mainTsx).toContain('className="chat-title-option"');
+    expect(mainTsx).toContain('onChange={e => setUseLatestPromptTitle(e.target.checked)}');
+    expect(mainTsx).toContain('<span>Use Latest Prompt Title</span>');
+    expect(mainTsx).not.toContain('className="chat-title-option"');
     expect(mainTsx).toContain('renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)');
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, fileBreadcrumbLabel)');
     expect(mainTsx).toContain('renderBreadcrumbTitle(breadcrumbProjectName, gitBreadcrumbLabel)');
@@ -670,8 +677,8 @@ describe('web chat integration', () => {
       /\.chat-send-button \.codicon \{[\s\S]*font-size: 15px;[\s\S]*\}/,
     );
     expect(stylesCss).toContain('.chat-scroll-bottom-button {');
-    expect(stylesCss).toContain('.chat-title-tools {');
-    expect(stylesCss).toContain('.chat-title-option {');
+    expect(stylesCss).not.toContain('.chat-title-tools {');
+    expect(stylesCss).not.toContain('.chat-title-option {');
     expect(stylesCss).toContain('.chat-composer-toolbar {');
     expect(stylesCss).toMatch(
       /\.chat-composer-toolbar \{[\s\S]*min-height: 24px;[\s\S]*\}/,

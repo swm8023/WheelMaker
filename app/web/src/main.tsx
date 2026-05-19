@@ -7653,6 +7653,14 @@ function App() {
         {renderSettingsSection('Chat', (
         <>
         <label className="settings-row sidebar-setting-row">
+          <span>Use Latest Prompt Title</span>
+          <input
+            type="checkbox"
+            checked={useLatestPromptTitle}
+            onChange={e => setUseLatestPromptTitle(e.target.checked)}
+          />
+        </label>
+        <label className="settings-row sidebar-setting-row">
           <span>Hide Tool Calls</span>
           <input
             type="checkbox"
@@ -9071,7 +9079,7 @@ function App() {
     if (tab === 'chat') {
       return (
         <div className="content">
-          <div className="block-title with-tools">
+          <div className="block-title">
             {isWide ? (
               <span className="title-text">
                 CHAT - {selectedChatDisplayTitle || 'New Session'}
@@ -9079,16 +9087,6 @@ function App() {
             ) : (
               renderBreadcrumbTitle(chatBreadcrumbProjectName, chatBreadcrumbLabel)
             )}
-            <div className="view-tools chat-title-tools">
-              <label className="chat-title-option" title="Use latest prompt as title">
-                <input
-                  type="checkbox"
-                  checked={useLatestPromptTitle}
-                  onChange={event => setUseLatestPromptTitle(event.target.checked)}
-                />
-                <span>Latest title</span>
-              </label>
-            </div>
           </div>
           <div
             className="chat-main"
