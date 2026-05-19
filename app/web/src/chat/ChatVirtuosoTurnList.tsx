@@ -121,8 +121,29 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   const [scrollParent, setScrollParent] = React.useState<HTMLElement | null>(null);
 
   React.useLayoutEffect(() => {
-    const nextScrollParent = scrollRef.current;
-    setScrollParent(current => current === nextScrollParent ? current : nextScrollParent);
+    let cancelled = false;
+    let frameId = 0;
+    let attempts = 0;
+
+    const syncScrollParent = () => {
+      if (cancelled) {
+        return;
+      }
+      const nextScrollParent = scrollRef.current;
+      setScrollParent(current => current === nextScrollParent ? current : nextScrollParent);
+      if (!nextScrollParent && attempts < 3) {
+        attempts += 1;
+        frameId = window.requestAnimationFrame(syncScrollParent);
+      }
+    };
+
+    syncScrollParent();
+    return () => {
+      cancelled = true;
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
   }, [runtimeKey, scrollRef]);
 
   React.useLayoutEffect(() => {
@@ -212,7 +233,34 @@ export const ChatVirtuosoTurnList = React.forwardRef<
   }), [requestScrollToLastDisplayItem, scrollToLastDisplayItem]);
 
   if (!scrollParent) {
-    return <div className="chat-virtuoso-list" />;
+    return (
+      <div className="chat-virtuoso-list" data-scroll-parent-pending={true}>
+        {displayIndex.items.map((displayItem, index) => {
+          const size = heightEstimates[index] ?? defaultItemHeight;
+          return (
+            <div
+              key={displayItem.key}
+              className="chat-virtuoso-row"
+              style={{paddingBottom: `${virtuosoContext.rowGap}px`}}
+            >
+              {renderItem(displayItem, {
+                end: size,
+                index,
+                key: displayItem.key,
+                lane: 0,
+                size,
+                start: 0,
+              })}
+            </div>
+          );
+        })}
+        <div
+          aria-hidden="true"
+          className="chat-virtuoso-footer"
+          style={{height: `${virtuosoContext.bottomBuffer}px`}}
+        />
+      </div>
+    );
   }
 
   return (
